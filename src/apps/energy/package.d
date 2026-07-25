@@ -14,6 +14,7 @@ import apps.energy.accounts;
 import apps.energy.allocator;
 import apps.energy.appliance;
 import apps.energy.control;
+import apps.energy.forecast;
 import apps.energy.link;
 import apps.energy.manager;
 import apps.energy.meter;
@@ -69,6 +70,9 @@ nothrow @nogc:
         energy_device = create_energy_device();
         create_vehicles_device();
         registry = defaultAllocator.allocT!ControlRegistry();
+
+        planner.supply_forecast = defaultAllocator.allocT!NoSupplyForecast();
+        planner.demand_forecast = defaultAllocator.allocT!ConstantLoadDemandForecast();
 
         g_app.console.register_collection!Appliance();
         g_app.console.register_collection!EnergyLink();

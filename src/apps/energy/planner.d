@@ -13,6 +13,7 @@ import apps.energy.appliance;
 import apps.energy.battery_store;
 import apps.energy.model : read_in_unit;
 import apps.energy.control;
+import apps.energy.forecast;
 import apps.energy.meter;
 import apps.energy.policy;
 import apps.energy.topology;
@@ -33,7 +34,11 @@ nothrow @nogc:
 
     Duration cadence = dur!"minutes"(5);
     Duration slack_threshold = dur!"hours"(4);
+    Duration forecast_window = dur!"hours"(12);
     float reserve_safety_factor = 1.25f;
+
+    SupplyForecast supply_forecast;
+    DemandForecast demand_forecast;
 
     SysTime last_tick;
 
@@ -52,6 +57,12 @@ nothrow @nogc:
         {
             IslandBudget b = compute_island_budget(island, registry, now, slack_threshold,
                                                    reserve_safety_factor, &graph);
+            if (supply_forecast !is null)
+                b.forecast_supply_kwh = supply_forecast.expected_kwh(island, now, forecast_window);
+            if (demand_forecast !is null)
+                b.forecast_demand_kwh = demand_forecast.expected_kwh(island, now, forecast_window);
+            if (b.forecast_supply_kwh == b.forecast_supply_kwh && b.forecast_demand_kwh == b.forecast_demand_kwh)
+                b.forecast_net_kwh = b.forecast_demand_kwh - b.forecast_supply_kwh;
             island_budgets.insert(island.id[].makeString(defaultAllocator()), b);
             publish_island_budget(energy_device, island, b, now);
         }
@@ -87,6 +98,9 @@ nothrow @nogc:
     float demand_opportunistic_kwh = 0;
     float reserve_kwh = 0;
     float pressure = float.nan;
+    float forecast_supply_kwh = float.nan;
+    float forecast_demand_kwh = float.nan;
+    float forecast_net_kwh = float.nan;
 }
 
 
@@ -311,6 +325,9 @@ void publish_island_budget(Device energy_device, Island* island, ref const Islan
     set_num("reserve_kwh", b.reserve_kwh);
     if (b.pressure == b.pressure)
         set_num("pressure", b.pressure);
+    set_num("forecast_supply_kwh", b.forecast_supply_kwh);
+    set_num("forecast_demand_kwh", b.forecast_demand_kwh);
+    set_num("forecast_net_kwh", b.forecast_net_kwh);
 }
 
 
