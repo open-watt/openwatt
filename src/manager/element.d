@@ -1012,6 +1012,11 @@ __gshared Array!SampleUpdate g_pending_updates;
 // updates reference write-path temporaries, so deferred they travel as their boxed value
 void submit(ref SampleUpdate update, bool batch)
 {
+    // no subscribers means deliver() would walk an empty list; producers wrap whole frames in
+    // commit scopes, so unwatched elements must not pay a queue slot per write
+    if (!update.element._subs)
+        return;
+
     if (g_commit_depth)
     {
         if (!batch)

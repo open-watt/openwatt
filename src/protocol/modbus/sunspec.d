@@ -1603,6 +1603,7 @@ private:
 
     void decode_block(ref Stripe st, ushort first, ushort last, ubyte[] data, SysTime ts, bool is_full)
     {
+        CommitScope frame = open_commit();
         foreach (ref f; st.fields)
         {
             if (!is_full && f.freq != Frequency.realtime)

@@ -552,6 +552,9 @@ private:
 
         ubyte[] data = response.data[1 .. 1 + response_bytes];
 
+        // TODO: one response only makes its register range atomic; a device-wide frame spans many
+        // in-flight requests, which needs a commit scope the poll cycle can hold across async completions
+        CommitScope frame = open_commit();
         foreach (ref e; elements)
         {
             // require the element's full span; snooped third-party reads may cover it only partially

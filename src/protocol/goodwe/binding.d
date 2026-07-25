@@ -276,6 +276,7 @@ private:
             log.debug_("sample response after ", (response_time - request.request_time).as!"msecs", "ms - '", _client.name, "' fn: ", request.function_code);
 
         // update all elements whose data is contained in this response
+        CommitScope frame = open_commit();
         foreach (ref e; elements)
         {
             if (e.control != request.control_code || e.fn != request.function_code)

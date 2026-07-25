@@ -190,6 +190,8 @@ private:
             return;
 
         ref can = p.hdr!CANFrame;
+
+        CommitScope frame = open_commit();
         foreach (ref e; elements)
         {
             if (e.id != can.id)
