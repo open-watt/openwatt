@@ -296,6 +296,14 @@ IslandTotals compute_island_totals(Island* island, ref TopologyGraph graph, ref 
 // places and only support bus balance and cross-checks. An implicit terminal
 // represents equipment declared by a boundary until the real equipment is
 // modelled. Keep this selection aligned with topology.rebuild_productions.
+//
+// TODO(MET-5, docs/SOURCE_SURVEY.draft.md): this whole convention is slated to
+//      collapse into a single boundary-injection survey. PV contributions are
+//      currently collected frame-mixed (a real pv terminal reads generation
+//      NEGATIVE, a dangling MPPT boundary reads it POSITIVE) and summed raw;
+//      the spec replaces add_island_battery, the rebuild_productions collection
+//      and rogue source attribution with one signed-injection pass. Implement
+//      per that spec rather than patching signs here.
 void add_island_battery(ref IslandTotals t, Island* island, ref DailySnapshot daily)
 {
     foreach (bus; island.members[])
