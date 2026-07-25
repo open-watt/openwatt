@@ -182,6 +182,70 @@ nothrow @nogc:
 }
 
 
+// ---------------------------------------------------------------------------
+// Battery capacity estimator
+//
+// Persistent running mean per VIN; each charging session feeds (delta_energy,
+// delta_soc) samples in and the global estimate updates. Vehicle Component
+// gets `battery.full_capacity` (kWh) and `battery.capacity_confidence` (0..1)
+// written each time a new sample lands.
+//
+// Algorithm sanity bounds:
+//   - Only accept estimates in [40, 150] kWh (sanity range for current EVs)
+//   - Caller is expected to filter the SOC window (15..85%) to avoid the BMS
+//     buffer regions where SOC reporting is nonlinear
+// ---------------------------------------------------------------------------
+
+struct CapacityEstimate
+{
+    float sum_weighted = 0;   // Σ(estimate_kwh × weight)
+    float weight_total = 0;   // Σ(weight)
+    uint  sample_count = 0;
+    float mean_kwh() const pure nothrow @nogc @safe
+        => weight_total > 0 ? sum_weighted / weight_total : float.nan;
+}
+
+__gshared Map!(String, CapacityEstimate) g_capacity_estimates;
+
+
+// Fold a new capacity estimate into the running mean for this VIN and update
+// the Vehicle Component's battery.full_capacity and battery.capacity_confidence
+// elements. Weight should be larger for more-trusted samples (typically the
+// SOC delta in percent — a 20% window is far more precise than 5%).
+//
+// Rejects estimates outside the [40, 150] kWh sanity range (probably charger
+// disconnect or a measurement glitch).
+void add_capacity_sample(const(char)[] vin, float estimate_kwh, float weight)
+{
+    if (!(estimate_kwh >= 40.0f && estimate_kwh <= 150.0f) || !(weight > 0))
+        return;
+
+    String key = vin.makeString(defaultAllocator());
+    CapacityEstimate* ce = key in g_capacity_estimates;
+    if (!ce)
+    {
+        g_capacity_estimates[key] = CapacityEstimate.init;
+        ce = key in g_capacity_estimates;
+    }
+    ce.sum_weighted += estimate_kwh * weight;
+    ce.weight_total += weight;
+    ++ce.sample_count;
+
+    // Simple confidence proxy: ramps linearly from 0 to 1 over the first
+    // 10 samples. A future refinement could use stddev / relative spread.
+    float confidence = ce.sample_count >= 10 ? 1.0f : ce.sample_count / 10.0f;
+
+    if (g_vehicles_device !is null)
+    {
+        if (Component v = g_vehicles_device.find_component(vin))
+        {
+            v.set_element("battery.full_capacity", ce.mean_kwh);
+            v.set_element("battery.capacity_confidence", confidence);
+        }
+    }
+}
+
+
 unittest
 {
     auto m3 = decode_vin("5YJ3E1EA5KF000001");
