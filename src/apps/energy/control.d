@@ -49,6 +49,14 @@ enum ControlUnit : ubyte
     nameplate_fraction,
 }
 
+enum AutonomousMode : ubyte
+{
+    unknown,
+    track_meter,
+    schedule,
+    weather,
+}
+
 
 struct Control
 {
@@ -65,17 +73,22 @@ nothrow @nogc:
     Element* kind_e;
     Element* direction_e;
     Element* unit_e;
+    Element* autonomous_mode_e;
 
     Element* setpoint_e;
+    Element* measured_e;
+    Element* autonomous_reference_e;
 
     Element* min_e;
     Element* max_e;
     Element* step_e;
     Element* nameplate_power_e;
+    Element* ramp_rate_e;
 
     Element* min_on_time_e;
     Element* min_off_time_e;
     Element* min_dwell_e;
+    Element* command_latency_e;
 
     Element* max_cycles_per_hour_e;
     Element* can_disable_e;
@@ -126,10 +139,21 @@ nothrow @nogc:
         return ControlUnit.unknown;
     }
 
+    AutonomousMode autonomous_mode() const
+    {
+        if (autonomous_mode_e && autonomous_mode_e.value.isString)
+        {
+            if (const(AutonomousMode)* p = enum_from_key!AutonomousMode(autonomous_mode_e.value.asString))
+                return *p;
+        }
+        return AutonomousMode.unknown;
+    }
+
     float min()             const => read_float(min_e);
     float max()             const => read_float(max_e);
     float step()            const => read_float(step_e);
     float nameplate_power() const => read_float(nameplate_power_e);
+    float ramp_rate()       const => read_float(ramp_rate_e);
 
     VarQuantity min_q()       const => read_quantity(min_e);
     VarQuantity max_q()       const => read_quantity(max_e);
@@ -138,6 +162,7 @@ nothrow @nogc:
     Duration min_on_time()      const => read_duration(min_on_time_e);
     Duration min_off_time()     const => read_duration(min_off_time_e);
     Duration min_dwell()        const => read_duration(min_dwell_e);
+    Duration command_latency()  const => read_duration(command_latency_e);
 
     int max_cycles_per_hour() const
     {
@@ -367,18 +392,23 @@ private:
         ctl.kind_e              = pc.find_element("kind");
         ctl.direction_e         = pc.find_element("direction");
         ctl.unit_e              = pc.find_element("unit");
+        ctl.autonomous_mode_e   = pc.find_element("autonomous_mode");
 
         ctl.setpoint_e              = pc.find_element("setpoint");
         ctl.enable_e              = pc.find_element("enable");
+        ctl.measured_e            = pc.find_element("measured");
+        ctl.autonomous_reference_e = pc.find_element("autonomous_reference");
 
         ctl.min_e               = pc.find_element("min");
         ctl.max_e               = pc.find_element("max");
         ctl.step_e              = pc.find_element("step");
         ctl.nameplate_power_e   = pc.find_element("nameplate_power");
+        ctl.ramp_rate_e         = pc.find_element("ramp_rate");
 
         ctl.min_on_time_e       = pc.find_element("min_on_time");
         ctl.min_off_time_e      = pc.find_element("min_off_time");
         ctl.min_dwell_e         = pc.find_element("min_dwell");
+        ctl.command_latency_e   = pc.find_element("command_latency");
 
         ctl.max_cycles_per_hour_e = pc.find_element("max_cycles_per_hour");
         ctl.can_disable_e         = pc.find_element("can_disable");
@@ -392,6 +422,7 @@ private:
         ctl.min_on_time_e       = sw.find_element("min_on_time");
         ctl.min_off_time_e      = sw.find_element("min_off_time");
         ctl.min_dwell_e         = sw.find_element("min_dwell");
+        ctl.command_latency_e   = sw.find_element("command_latency");
 
         ctl.max_cycles_per_hour_e = sw.find_element("max_cycles_per_hour");
         ctl.can_disable_e         = sw.find_element("can_disable");
