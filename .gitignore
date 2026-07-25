@@ -45,6 +45,7 @@ bin
 obj
 Win32
 
+db
 charge_car
 platforms/esp32s3/sdkconfig
 platforms/esp32s3/build/
