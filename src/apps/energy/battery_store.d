@@ -1,7 +1,7 @@
 module apps.energy.battery_store;
 
 import urt.array;
-import urt.si.unit : ScaledUnit, AmpereHour, Percent;
+import urt.si.unit : ScaledUnit, AmpereHour, Ampere, Watt, Percent;
 
 import apps.energy.model : absf, read_in_unit;
 
@@ -38,8 +38,13 @@ struct BatteryStoreContribution
 struct BatteryStoreReading
 {
     float soc = float.nan;
+    float soh = float.nan;
     float remain_capacity = float.nan;
     float full_capacity = float.nan;
+    float max_charge_current = float.nan;
+    float max_discharge_current = float.nan;
+    float max_charge_power = float.nan;
+    float max_discharge_power = float.nan;
 }
 
 struct BatteryStore
@@ -219,10 +224,20 @@ struct ContributionTotals
     float soc_plain = 0;
     uint soc_count;
     uint soc_weight_count;
+    float soh_sum = 0;
+    uint soh_count;
     float remain_sum = 0;
     uint remain_count;
     float full_sum = 0;
     uint full_count;
+    float max_charge_current_sum = 0;
+    uint max_charge_current_count;
+    float max_discharge_current_sum = 0;
+    uint max_discharge_current_count;
+    float max_charge_power_sum = 0;
+    uint max_charge_power_count;
+    float max_discharge_power_sum = 0;
+    uint max_discharge_power_count;
 }
 
 void collect_battery_store_contributions_impl(Component c, const(char)[] circuit,
@@ -271,6 +286,11 @@ void add_reading(ref ContributionTotals totals, ref const BatteryStoreReading r,
         totals.soc_plain += r.soc;
         ++totals.soc_count;
     }
+    if (r.soh == r.soh)
+    {
+        totals.soh_sum += r.soh;
+        ++totals.soh_count;
+    }
     if (r.remain_capacity == r.remain_capacity)
     {
         totals.remain_sum += r.remain_capacity;
@@ -280,6 +300,26 @@ void add_reading(ref ContributionTotals totals, ref const BatteryStoreReading r,
     {
         totals.full_sum += r.full_capacity;
         ++totals.full_count;
+    }
+    if (r.max_charge_current == r.max_charge_current)
+    {
+        totals.max_charge_current_sum += r.max_charge_current;
+        ++totals.max_charge_current_count;
+    }
+    if (r.max_discharge_current == r.max_discharge_current)
+    {
+        totals.max_discharge_current_sum += r.max_discharge_current;
+        ++totals.max_discharge_current_count;
+    }
+    if (r.max_charge_power == r.max_charge_power)
+    {
+        totals.max_charge_power_sum += r.max_charge_power;
+        ++totals.max_charge_power_count;
+    }
+    if (r.max_discharge_power == r.max_discharge_power)
+    {
+        totals.max_discharge_power_sum += r.max_discharge_power;
+        ++totals.max_discharge_power_count;
     }
 }
 
@@ -300,23 +340,38 @@ void finalise_member_totals(ref BatteryStoreReading reading, ref const Contribut
     reading.soc = (totals.soc_weight > 0 && totals.soc_weight_count == totals.soc_count)
         ? totals.soc_weighted / totals.soc_weight
         : totals.soc_count ? totals.soc_plain / totals.soc_count : float.nan;
+    reading.soh = avg(totals.soh_sum, totals.soh_count);
     reading.remain_capacity = sum_or_nan(totals.remain_sum, totals.remain_count);
     reading.full_capacity = sum_or_nan(totals.full_sum, totals.full_count);
+    reading.max_charge_current = sum_or_nan(totals.max_charge_current_sum, totals.max_charge_current_count);
+    reading.max_discharge_current = sum_or_nan(totals.max_discharge_current_sum, totals.max_discharge_current_count);
+    reading.max_charge_power = sum_or_nan(totals.max_charge_power_sum, totals.max_charge_power_count);
+    reading.max_discharge_power = sum_or_nan(totals.max_discharge_power_sum, totals.max_discharge_power_count);
 }
 
 void finalise_view_totals(ref BatteryStoreReading reading, ref const ContributionTotals totals)
 {
     reading.soc = avg_soc(totals);
+    reading.soh = avg(totals.soh_sum, totals.soh_count);
     reading.remain_capacity = avg(totals.remain_sum, totals.remain_count);
     reading.full_capacity = avg(totals.full_sum, totals.full_count);
+    reading.max_charge_current = avg(totals.max_charge_current_sum, totals.max_charge_current_count);
+    reading.max_discharge_current = avg(totals.max_discharge_current_sum, totals.max_discharge_current_count);
+    reading.max_charge_power = avg(totals.max_charge_power_sum, totals.max_charge_power_count);
+    reading.max_discharge_power = avg(totals.max_discharge_power_sum, totals.max_discharge_power_count);
 }
 
 BatteryStoreReading read_store(Component c)
 {
     BatteryStoreReading r;
     r.soc = read_num(c, "soc");
+    r.soh = read_num(c, "soh");
     r.remain_capacity = read_scaled(c, "remain_capacity", AmpereHour);
     r.full_capacity = read_scaled(c, "full_capacity", AmpereHour);
+    r.max_charge_current = read_scaled(c, "max_charge_current", ScaledUnit(Ampere));
+    r.max_discharge_current = read_scaled(c, "max_discharge_current", ScaledUnit(Ampere));
+    r.max_charge_power = read_scaled(c, "max_charge_power", ScaledUnit(Watt));
+    r.max_discharge_power = read_scaled(c, "max_discharge_power", ScaledUnit(Watt));
     return r;
 }
 
