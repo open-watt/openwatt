@@ -131,29 +131,16 @@ nothrow @nogc:
         if (!src || !src.running)
             return CompletionStatus.continue_;
 
-        const(char)[] missing_param;
-        const(char)[] get_substitute(size_t, const(char)[] param)
-        {
-            if (auto value = param in _params)
-                return (*value)[];
-            if (missing_param is null)
-                missing_param = param;
-            return null;
-        }
-
         foreach (s; mqtt_subscriptions(*_profile_data))
         {
-            bool unclosed_token;
-            missing_param = null;
-            String sub = String(s.substitute_parameters(&get_substitute, unclosed_token));
-            if (missing_param !is null)
+            const(char)[] missing;
+            String sub = substitute_profile_params(s, missing);
+            if (!sub)
             {
-                log.warning(name, ": MQTT subscription '", s, "' uses profile parameter '", missing_param, "', but it is not set");
-                continue;
-            }
-            if (unclosed_token || !sub)
-            {
-                log.warning(name, ": invalid MQTT subscription '", s, "'");
+                if (missing !is null)
+                    log.warning(name, ": MQTT subscription '", s, "' uses profile parameter '", missing, "', but it is not set");
+                else
+                    log.warning(name, ": invalid MQTT subscription '", s, "'");
                 continue;
             }
             subscribe_filter(sub.move);
@@ -187,51 +174,13 @@ protected:
             return FormatId.invalid;
         SampleDesc sample_desc = desc_by_index(mqtt.desc);
 
-        const(char)[] missing_param;
-        const(char)[] get_substitute(size_t, const(char)[] param)
-        {
-            if (auto value = param in _params)
-                return (*value)[];
-            if (missing_param is null)
-                missing_param = param;
-            return null;
-        }
-
-        String read_topic, write_topic;
-        const(char)[] raw = mqtt.get_read_topic(*_profile_data);
-        if (raw.length > 0)
-        {
-            bool unclosed_token;
-            missing_param = null;
-            read_topic = String(raw.substitute_parameters(&get_substitute, unclosed_token));
-            if (missing_param !is null)
-            {
-                log.warning(name, ": MQTT read topic '", raw, "' uses profile parameter '", missing_param, "', but it is not set");
-                return FormatId.invalid;
-            }
-            if (unclosed_token)
-            {
-                log.warning(name, ": unclosed placeholder token in MQTT read topic '", raw, "'");
-                return FormatId.invalid;
-            }
-        }
-        raw = mqtt.get_write_topic(*_profile_data);
-        if (raw.length > 0)
-        {
-            bool unclosed_token;
-            missing_param = null;
-            write_topic = String(raw.substitute_parameters(&get_substitute, unclosed_token));
-            if (missing_param !is null)
-            {
-                log.warning(name, ": MQTT write topic '", raw, "' uses profile parameter '", missing_param, "', but it is not set");
-                return FormatId.invalid;
-            }
-            if (unclosed_token)
-            {
-                log.warning(name, ": unclosed placeholder token in MQTT write topic '", raw, "'");
-                return FormatId.invalid;
-            }
-        }
+        bool bad;
+        String read_topic = resolve_topic(mqtt.get_read_topic(*_profile_data), "read", bad);
+        if (bad)
+            return FormatId.invalid;
+        String write_topic = resolve_topic(mqtt.get_write_topic(*_profile_data), "write", bad);
+        if (bad)
+            return FormatId.invalid;
 
         SampleElement* se = &_elements.pushBack();
         se.element = e;
@@ -302,6 +251,24 @@ private:
         _subscribed = false;
     }
 
+
+    String resolve_topic(const(char)[] raw, const(char)[] which, out bool bad)
+    {
+        if (raw.length == 0)
+            return String.init;
+
+        const(char)[] missing;
+        String topic = substitute_profile_params(raw, missing);
+        if (!topic)
+        {
+            bad = true;
+            if (missing !is null)
+                log.warning(name, ": MQTT ", which, " topic '", raw, "' uses profile parameter '", missing, "', but it is not set");
+            else
+                log.warning(name, ": unclosed placeholder token in MQTT ", which, " topic '", raw, "'");
+        }
+        return topic.move;
+    }
 
     void on_publish(const(char)[] sender, const(char)[] topic, const(ubyte)[] payload, MonoTime timestamp)
     {

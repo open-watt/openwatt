@@ -107,6 +107,28 @@ nothrow @nogc:
         return null;
     }
 
+    // resolve {param} tokens against the profile parameters; a null result means either a
+    // missing parameter, which `missing` names, or a malformed token, which leaves it null
+    final String substitute_profile_params(const(char)[] text, out const(char)[] missing)
+    {
+        const(char)[] missing_param;
+        const(char)[] get_substitute(size_t, const(char)[] param)
+        {
+            if (auto value = param in _params)
+                return (*value)[];
+            if (missing_param is null)
+                missing_param = param;
+            return null;
+        }
+
+        bool unclosed;
+        String result = String(text.substitute_parameters(&get_substitute, unclosed));
+        missing = missing_param;
+        if (missing_param !is null || unclosed)
+            return String.init;
+        return result.move;
+    }
+
     override bool validate() const pure
         => !_profile_name.empty && !_device.empty;
 
