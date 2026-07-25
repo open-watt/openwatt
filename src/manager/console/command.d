@@ -5,6 +5,7 @@ import manager.console;
 import manager.console.builtin_commands;
 import manager.console.session;
 import manager.expression : NamedArgument, ScriptCommand, Script, Expression, EvalContext, parse_commands;
+import manager.call : CallState;
 
 import urt.array;
 import urt.map;
@@ -32,7 +33,7 @@ enum CommandCompletionState : ubyte
     timeout,            ///< Command was aborted for some reason
 }
 
-class CommandState
+class CommandState : CallState
 {
 nothrow @nogc:
 

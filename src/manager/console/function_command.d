@@ -2,10 +2,6 @@ module manager.console.function_command;
 
 import urt.array;
 import urt.mem;
-import urt.meta;
-import urt.meta.nullable;
-import urt.meta.tuple;
-import urt.traits;
 import urt.string;
 import urt.string.format;
 import urt.variant;
@@ -16,31 +12,8 @@ import manager.console.argument;
 public import manager.console.command;
 public import manager.console.session;
 public import manager.expression : NamedArgument;
-import manager.value;
-
-
-// UDA to attach custom tab completion to a command function
-struct TabComplete
-{
-    Array!String function(bool is_value, const(char)[] name, const(char)[] value) nothrow @nogc suggest;
-}
-
-
-// uses GC
-char[] transform_command_name(const(char)[] name)
-{
-    assert(__ctfe, "Should only be used at compile time");
-
-    name = name.length > 0 && name[0] == '_' ? name[1 .. $] : name;
-    char[] result = name.dup;
-    foreach (i, c; result)
-    {
-        if (c == '_')
-            result[i] = '-';
-    }
-    return result;
-}
-enum TransformCommandName(const(char)[] name) = transform_command_name(name);
+public import manager.call : TabComplete;
+import manager.call;
 
 nothrow @nogc:
 
@@ -59,123 +32,41 @@ class FunctionCommand : Command
 {
 nothrow @nogc:
 
-    alias GenericCall = const(char)[] function(Session, out CommandState, const Variant[], const NamedArgument[], void*) nothrow @nogc;
-
     static FunctionCommand create(alias fun, Instance)(ref Console console, Instance i, const(char)[] commandName = null)
     {
-        static assert(is(Parameters!fun[0] == Session), "First parameter must be manager.console.session.Session for command hander function");
-
-        enum FunctionName = transform_command_name(__traits(identifier, fun));
-
-        static const(char)[] function_adapter(Session session, out CommandState state, const Variant[] arguments, const NamedArgument[] parameters, void* _instance)
-        {
-            const(char)[] error;
-            auto _args = make_arg_tuple!fun(arguments, parameters, error, session._console.appInstance);
-            if (error)
-            {
-                session.write_line(error);
-                return null;
-            }
-            static if (is(__traits(parent, fun)))
-            {
-                static if (is(ReturnType!fun == void))
-                {
-                    __traits(getMember, cast(__traits(parent, fun))_instance, __traits(identifier, fun))(session, _args.expand);
-                    return null;
-                }
-                else static if (is(ReturnType!fun : CommandState))
-                {
-                    state = __traits(getMember, cast(__traits(parent, fun))_instance, __traits(identifier, fun))(session, _args.expand);
-                    return null;
-                }
-                else
-                {
-                    auto r = __traits(getMember, cast(__traits(parent, fun))_instance, __traits(identifier, fun))(session, _args.expand);
-                    return tconcat(r);
-                }
-            }
-            else
-            {
-                static if (is(ReturnType!fun == void))
-                {
-                    fun(session, _args.expand);
-                    return null;
-                }
-                else static if (is(ReturnType!fun : CommandState))
-                {
-                    state = fun(session, _args.expand);
-                    return null;
-                }
-                else
-                {
-                    auto r = fun(session, _args.expand);
-                    return tconcat(r);
-                }
-            }
-        }
-
-        FunctionCommand fnCmd = console._allocator.allocT!FunctionCommand(console, commandName ? commandName.makeString(defaultAllocator) : StringLit!FunctionName, cast(void*)i, &function_adapter);
-
-        alias ParamNames = STATIC_MAP!(TransformCommandName, parameter_identifier_tuple!fun[1 .. $]);
-        alias Params = STATIC_MAP!(Unqual, Parameters!fun[1 .. $]);
-
-        static foreach (j; 0 .. ParamNames.length)
-        {
-            static if (ParamNames[j] != "args" && ParamNames[j] != "named-args")
-            {{
-                static if (is(Params[j] == Nullable!T, T))
-                {
-                    enum bool ParamIsNullable = true;
-                    alias ArgTy = T;
-                }
-                else
-                {
-                    enum bool ParamIsNullable = false;
-                    alias ArgTy = Params[j];
-                }
-                version (ExcludeHelpText)
-                    fnCmd._args ~= FunctionArgument(StringLit!(ParamNames[j]));
-                else
-                    fnCmd._args ~= FunctionArgument(StringLit!(ParamNames[j]), StringLit!(ParamIsNullable ? "?" ~ ArgTy.stringof : ArgTy.stringof));
-                static if (is(typeof(&suggest_completion!ArgTy)))
-                    fnCmd._args[$-1].suggest = &suggest_completion!ArgTy;
-            }}
-        }
-
-        // Check for TabComplete UDA on the function
-        static foreach (attr; __traits(getAttributes, fun))
-        {
-            static if (is(typeof(attr) == TabComplete))
-                fnCmd._custom_suggest = attr.suggest;
-        }
-
-        return fnCmd;
+        enum FunctionName = transform_function_name(__traits(identifier, fun));
+        Function function_ = Function.create_contextual!(fun, Instance, suggest_completion)(i);
+        return console._allocator.allocT!FunctionCommand(
+            console,
+            commandName ? commandName.makeString(defaultAllocator) : StringLit!FunctionName,
+            function_);
     }
 
 
-    this(ref Console console, String scopeName, void* _instance, GenericCall _fn)
+    this(ref Console console, String scopeName, Function function_)
     {
         super(console, scopeName);
-        this._instance = _instance;
-        this._fn = _fn;
+        _function = function_;
     }
 
     override CommandState execute(Session session, Scope*, const Variant[] _args, const NamedArgument[] namedArgs, out Variant result)
     {
-        CommandState state;
-        const(char)[] r = _fn(session, state, _args, namedArgs, _instance);
-
-        // TODO: when a function returns a token, it might be fed into the calling context?
-        assert(!(state && r), "Shouldn't return a latent state AND a result...");
-
-        if (state)
+        CallContext context = CallContext(session);
+        CallResult call = _function.call(context, _args, namedArgs);
+        if (call.error)
         {
+            session.write_line(call.error);
+            return null;
+        }
+        if (call.state)
+        {
+            CommandState state = cast(CommandState)call.state;
+            assert(state, "a console function returned a non-command call state");
             state.command = this;
             return state;
         }
-
-        if (r)
-            session.write_line(r);
+        if (call.has_value)
+            session.write_line(call.value);
         return null;
     }
 
@@ -239,16 +130,15 @@ nothrow @nogc:
     override const(char)[] help(const(char)[] args) const
     {
         auto buf = MutableString!0(Concat, "Usage: ", name[]);
-        foreach (ref a; _args)
+        foreach (ref a; _function.info.parameters)
         {
+            if (a.flags & (ParameterFlags.positional_rest | ParameterFlags.named_rest))
+                continue;
             buf ~= "\n  ";
             const(char)[] tn = a.type_name[];
-            bool optional = tn[0] == '?';
+            bool optional = (a.flags & ParameterFlags.optional) != 0;
             if (optional)
-            {
                 buf ~= '[';
-                tn = tn[1 .. $];
-            }
             buf.append(a.name[], "=<", tn, '>');
             if (optional) buf ~= ']';
         }
@@ -256,18 +146,17 @@ nothrow @nogc:
     }
 
 private:
-    void* _instance;
-    GenericCall _fn;
-    Array!FunctionArgument _args;
-    Array!String function(bool, const(char)[], const(char)[]) nothrow @nogc _custom_suggest;
+    Function _function;
 
     Array!String suggest_args(const(char)[] arg_prefix)
     {
         Array!String suggestions;
-        if (_custom_suggest !is null)
-            suggestions = _custom_suggest(false, arg_prefix, null);
-        foreach (ref arg; _args)
+        if (_function.info.custom_suggest)
+            suggestions = _function.info.custom_suggest(false, arg_prefix, null);
+        foreach (ref arg; _function.info.parameters)
         {
+            if (arg.flags & (ParameterFlags.positional_rest | ParameterFlags.named_rest))
+                continue;
             if (arg.name[].startsWith(arg_prefix))
                 suggestions ~= String(MutableString!0(Concat, arg.name, '=')); // TODO: MOVE construct!
         }
@@ -276,14 +165,14 @@ private:
 
     Array!String suggest_values(const(char)[] argument, const(char)[] value)
     {
-        if (_custom_suggest !is null)
+        if (_function.info.custom_suggest)
         {
-            Array!String suggestions = _custom_suggest(true, argument, value);
+            Array!String suggestions = _function.info.custom_suggest(true, argument, value);
             if (suggestions.length > 0)
                 return suggestions;
         }
 
-        foreach (ref arg; _args)
+        foreach (ref arg; _function.info.parameters)
         {
             if (arg.name[] == argument[])
             {
@@ -294,95 +183,4 @@ private:
         }
         return Array!String();
     }
-}
-
-
-private:
-
-struct FunctionArgument
-{
-    String name;
-    version (ExcludeHelpText) {} else
-        String type_name = StringLit!"";  // prefixed with '?' if the param is Nullable
-    Array!String function(const(char)[]) nothrow @nogc suggest;
-}
-
-auto make_arg_tuple(alias F)(const Variant[] args, const NamedArgument[] parameters, out const(char)[] error, Application app)
-    if (is_some_function!F)
-{
-    import urt.meta;
-
-    alias Params = STATIC_MAP!(Unqual, Parameters!F[1 .. $]);
-    alias ParamNames = STATIC_MAP!(TransformCommandName, parameter_identifier_tuple!F[1 .. $]);
-
-    Tuple!Params params;
-    error = null;
-    bool[Params.length] got_arg;
-    bool has_named_args = false;
-
-    static foreach (i, P; Params)
-    {
-        static if (ParamNames[i] == "named-args")
-            has_named_args = true;
-    }
-
-    outer: foreach (ref param; parameters)
-    {
-        param_switch: switch (param.name)
-        {
-            static foreach (i, P; Params)
-            {
-                static if (ParamNames[i] != "args" && ParamNames[i] != "named-args")
-                {
-                    case ParamNames[i]:
-                        static if (is(const(Variant) : typeof(params[i])))
-                            params[i] = param.value;
-                        else
-                        {
-                            error = from_variant(param.value, params[i]);
-                            if (error)
-                            {
-                                error = tconcat("Argument '", param.name, "' error: ", error);
-                                break outer;
-                            }
-                        }
-                        got_arg[i] = true;
-                        break param_switch;
-                }
-            }
-            default:
-                if (!has_named_args)
-                {
-                    error = tconcat("Unknown parameter '", param.name, "'");
-                    break outer;
-                }
-        }
-    }
-
-    static foreach (i, P; Params)
-    {
-        {
-            static if (ParamNames[i] == "args")
-            {
-                static assert(is(const(Variant)[] : P), "`args` parameter must be of type const(Variant)[]");
-                params[i] = args;
-            }
-            else static if (ParamNames[i] == "named-args")
-            {
-                static assert(is(const(NamedArgument)[] : P), "`named_args` parameter must be of type const(NamedArgument)[]");
-                params[i] = parameters;
-            }
-            else static if (!is(P : Nullable!U, U))
-            {
-                if (!got_arg[i])
-                {
-                    error = tconcat("Missing argument: ", ParamNames[i]);
-                    goto done;
-                }
-            }
-        }
-    }
-
-done:
-    return params;
 }
