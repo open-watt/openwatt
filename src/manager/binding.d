@@ -79,10 +79,9 @@ protected:
     Profile* _profile_data;
     Map!(String, String) _params;
 
-    abstract const(char)[] profile_dir() const pure;
     abstract const(char)[] profile_name() const pure;
     abstract const(char)[] model_name() const pure;
-    abstract void add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte index);
+    abstract FormatId add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte index);
 
     override StringResult set_unknown_property(scope const(char)[] property, ref const Variant value)
     {
@@ -109,7 +108,7 @@ protected:
             return false;
         }
 
-        Profile* profile = g_app.acquire_profile(tconcat(profile_dir(), pname, ".conf"));
+        Profile* profile = g_app.acquire_profile(pname);
         if (!profile)
         {
             writeWarning(name, ": failed to load profile '", pname, "'");
@@ -165,7 +164,7 @@ protected:
     override CompletionStatus shutdown()
     {
         // release, don't free: the registry retains the parse (element descs and
-        // samplers on surviving devices borrow its strings), and the next startup
+        // expressions on surviving devices borrow its strings), and the next startup
         // re-acquires the live copy and re-materialises subclass element state
         if (_profile_data)
         {

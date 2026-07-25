@@ -16,6 +16,7 @@ import manager.plugin;
 import protocol.tesla.iface;
 import protocol.tesla.master;
 import protocol.tesla.binding;
+import protocol.tesla.twc;
 
 import router.iface;
 
@@ -32,6 +33,8 @@ nothrow @nogc:
     override void init()
     {
         register_packet_codec!TWCFrame();
+        g_app.register_enum!(TeslaTWCMaster.ChargerState)();
+        g_app.register_enum!TWCState();
 
         g_app.console.register_collection!TeslaInterface();
         g_app.console.register_collection!TeslaTWCBinding();

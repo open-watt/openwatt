@@ -340,8 +340,8 @@ private:
             }
             name = name[1..$];
 
-            if (auto pe = name in g_app.enum_templates)
-                e = *pe;
+            import manager.sample : find_enum_info;
+            e = find_enum_info(name);
         }
         else
         {
@@ -570,7 +570,7 @@ private:
 
         json.append('\"', prefix, '.', elem.id[], "\":{\"value\":");
 
-        ref const Variant v = elem.value();
+        Variant v = elem.value();
         if (v.isQuantity)
         {
             auto quantity = v.asQuantity!double();

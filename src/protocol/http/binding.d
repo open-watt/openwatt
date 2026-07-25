@@ -20,10 +20,12 @@ import manager.device;
 import manager.element;
 import manager.expression;
 import manager.profile;
-import manager.sampler;
+import manager.sample;
+import manager.series;
 
 import protocol.http.client;
 import protocol.http.message : HTTPMessage, HTTPMethod, HTTPParam;
+import protocol.http : get_http_request, http_section_kind, HTTPElementDesc, HTTPRequestDesc;
 
 //version = DebugHTTPClientBinding;
 
@@ -33,6 +35,7 @@ nothrow @nogc:
 struct HTTPSampleElement
 {
     Element* element;
+    SampleDesc desc;
     ushort http_index;
     ushort sample_time_ms;
     MonoTime last_sample;
@@ -41,8 +44,6 @@ struct HTTPSampleElement
 
 struct RequestState
 {
-    // TODO: success_expr needs to be freed!!
-
     String resolved_path;
     String resolved_body_template;
     Expression* success_expr;
@@ -55,6 +56,7 @@ struct RequestState
     bool write_dirty; // an element with a write: binding to this request changed
     bool is_batch;    // plural {keys}/{values} found in path or body template
     bool has_substitutions; // any {key}/{value}/{keys}/{values} present
+    bool has_constant; // a constant/configuration element needs a one-shot fetch
     ushort[4] sub_offsets = ushort.max;
 
 pure nothrow @nogc:
@@ -148,29 +150,34 @@ nothrow @nogc:
         {
             foreach (ref se; _elements[])
             {
-                ref const ElementDesc_HTTP http = _profile_data.get_http(se.http_index);
+                ref const HTTPElementDesc http = _profile_data.get_section!HTTPElementDesc(http_section_kind, se.http_index);
                 if (http.write_request_index != ushort.max)
-                    se.element.remove_subscriber(&on_element_change);
+                    se.element.unsubscribe(&on_element_change);
             }
         }
         _elements.clear();
+        foreach (ref rs; _request_states[])
+        {
+            if (rs.success_expr)
+                free_expression(rs.success_expr);
+        }
         _request_states.clear();
+        _in_flight_head = 0;
+        _in_flight_count = 0;
         return super.shutdown();
     }
 
 protected:
-    final override const(char)[] profile_dir() const pure
-        => "conf/rest_profiles/";
     final override const(char)[] profile_name() const pure
         => _profile_name[];
     final override const(char)[] model_name() const pure
         => _model_name[];
 
-    final override void add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte)
+    final override FormatId add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte)
     {
-        if (desc.type != ElementType.http)
-            return;
-        ref const ElementDesc_HTTP http = _profile_data.get_http(desc.element);
+        if (desc.kind != http_section_kind)
+            return FormatId.invalid;
+        ref const HTTPElementDesc http = _profile_data.get_section!HTTPElementDesc(http_section_kind, desc.element);
 
         const(char)[][32] names = void, values = void;
         size_t n = 0;
@@ -182,13 +189,20 @@ protected:
             values[n] = kvp.value[];
             ++n;
         }
-        add_element(e, desc, http, names[0 .. n], values[0 .. n]);
+        return add_element(e, desc, http, names[0 .. n], values[0 .. n]);
     }
 
-    final void add_element(Element* element, ref const ElementDesc desc, ref const ElementDesc_HTTP http_desc, const(char)[][] param_names, const(char)[][] param_values)
+    final FormatId add_element(Element* element, ref const ElementDesc desc,
+                               ref const HTTPElementDesc http_desc,
+                               const(char)[][] param_names, const(char)[][] param_values)
     {
+        if (http_desc.desc == ushort.max)
+            return FormatId.invalid;
+        SampleDesc sample_desc = desc_by_index(http_desc.desc);
+
         HTTPSampleElement* e = &_elements.pushBack();
         e.element = element;
+        e.desc = sample_desc;
         e.http_index = cast(ushort)desc.element;
 
         switch (desc.update_frequency)
@@ -208,21 +222,22 @@ protected:
         if (http_desc.write_request_index != ushort.max)
         {
             build_request_state(http_desc.write_request_index, ushort.max, param_names, param_values);
-            element.add_subscriber(&on_element_change);
+            element.subscribe(&on_element_change);
         }
+        return sample_desc.format;
     }
 
-    void on_element_change(ref Element e, ref const Variant val, SysTime ts, ref const Variant prev, SysTime prev_ts)
+    void on_element_change(ref const SampleUpdate update)
     {
         if (_self_write)
             return; // don't write back values we just read from the response
 
         foreach (ref se; _elements[])
         {
-            if (se.element !is &e)
+            if (se.element !is update.element)
                 continue;
 
-            ref const ElementDesc_HTTP http = _profile_data.get_http(se.http_index);
+            ref const HTTPElementDesc http = _profile_data.get_section!HTTPElementDesc(http_section_kind, se.http_index);
             if (http.write_request_index == ushort.max)
                 continue;
 
@@ -258,7 +273,11 @@ protected:
             }
 
             if (rs.min_sample_ms == ushort.max)
+            {
+                if (rs.has_constant && rs.last_request == MonoTime.init)
+                    send_request(rs, now, false);
                 continue;
+            }
 
             long elapsed_ms = (now - rs.last_request).as!"msecs";
             if (elapsed_ms < rs.min_sample_ms && rs.last_request != MonoTime.init)
@@ -292,44 +311,62 @@ private:
 
     void build_request_state(ushort req_idx, ushort sample_ms, const(char)[][] param_names, const(char)[][] param_values)
     {
-        // check if it already exists
         foreach (ref rs; _request_states)
         {
             if (rs.request_index == req_idx)
             {
                 if (sample_ms > 0 && sample_ms < rs.min_sample_ms)
                     rs.min_sample_ms = sample_ms;
+                else if (sample_ms == 0)
+                    rs.has_constant = true;
                 return;
             }
         }
 
-        ref const RequestDesc req = _profile_data.get_request(req_idx);
+        ref const HTTPRequestDesc req = get_http_request(*_profile_data, req_idx);
 
         RequestState* rs = &_request_states.pushBack();
         rs.request_index = req_idx;
         rs.min_sample_ms = sample_ms > 0 ? sample_ms : ushort.max;
+        rs.has_constant = sample_ms == 0;
 
-        bool sub_failed, unclosed_token;
+        bool unclosed_token;
         bool has_singular, has_plural;
         int is_body = 0;
+        const(char)[] missing_param;
+        const(char)[] missing_use;
+        const(char)[] current_use;
 
-        const(char)[] get_substitute(size_t, const(char)[] param)
+        bool find_substitute(const(char)[] param, out const(char)[] value)
         {
             foreach (i, v; param_names)
             {
                 if (v[] != param[])
                     continue;
-                return param_values[i];
+                value = param_values[i];
+                return true;
             }
-            sub_failed = true;
+            return false;
+        }
+
+        const(char)[] get_substitute(size_t, const(char)[] param)
+        {
+            const(char)[] value;
+            if (find_substitute(param, value))
+                return value;
+            if (missing_param is null)
+            {
+                missing_param = param;
+                missing_use = current_use;
+            }
             return null;
         }
 
         const(char)[] get_sub_with_kv(size_t offset, const(char)[] param)
         {
-            const(char)[] sub = get_substitute(offset, param);
-            if (!sub_failed)
-                return sub;
+            const(char)[] value;
+            if (find_substitute(param, value))
+                return value;
             int is_val = 0;
             if (param[] == "key")
                 has_singular = true;
@@ -341,14 +378,17 @@ private:
                 has_plural = true, is_val = 2;
             else
             {
-                log.warning("no parameter '", param, "' for substitution");
+                if (missing_param is null)
+                {
+                    missing_param = param;
+                    missing_use = current_use;
+                }
                 return null;
             }
             ref ushort sub_offset = rs.sub_offsets[is_val | is_body];
             if (sub_offset != ushort.max)
                 return null;
             sub_offset = cast(ushort)offset;
-            sub_failed = false;
             return null;
         }
 
@@ -360,16 +400,24 @@ private:
             return subbed;
         }
 
+        current_use = "path";
         rs.resolved_path = String(do_sub(req.get_path(*_profile_data), &get_sub_with_kv));
         is_body = 1;
+        current_use = "body template";
         rs.resolved_body_template = String(do_sub(req.get_body_template(*_profile_data), &get_sub_with_kv));
+        current_use = "root path";
         rs.resolved_root_path = String(do_sub(req.get_root_path(*_profile_data), &get_substitute));
+        current_use = "parse template";
         rs.resolved_parse_template = String(do_sub(req.get_parse_template(*_profile_data), &get_substitute));
+        current_use = "success expression";
         auto success_expr = substitute_parameters(req.get_success_expr(*_profile_data), &get_substitute, unclosed_token);
 
-        if (sub_failed || unclosed_token)
+        if (missing_param !is null || unclosed_token)
         {
-            if (unclosed_token)
+            if (missing_param !is null)
+                log.warning(name, ": HTTP request '", req.get_name(*_profile_data), "' ", missing_use,
+                    " uses profile parameter '", missing_param, "', but it is not set");
+            else
                 log.warning("un-closed placeholder token in request '", req.get_name(*_profile_data), '\'');
             _request_states.popBack();
         }
@@ -406,7 +454,7 @@ private:
             // per-element request
             foreach (i, ref se; _elements[])
             {
-                ref const ElementDesc_HTTP http = _profile_data.get_http(se.http_index);
+                ref const HTTPElementDesc http = _profile_data.get_section!HTTPElementDesc(http_section_kind, se.http_index);
                 ushort match_idx = is_write ? http.write_request_index : http.request_index;
                 if (match_idx != rs.request_index)
                     continue;
@@ -426,7 +474,7 @@ private:
 
     void send_batch(ref RequestState rs, MonoTime now, bool is_write, HTTPSampleElement[] elements)
     {
-        ref const RequestDesc req = _profile_data.get_request(rs.request_index);
+        ref const HTTPRequestDesc req = get_http_request(*_profile_data, rs.request_index);
 
         const(char)[] path_tmpl = rs.resolved_path ? rs.resolved_path[] : req.get_path(*_profile_data);
         const(char)[] body_tmpl = rs.resolved_body_template ? rs.resolved_body_template[] : req.get_body_template(*_profile_data);
@@ -441,7 +489,7 @@ private:
         else if (rs.path_val_offset < ushort.max)
             merged_path = path_tmpl[0 .. rs.path_val_offset];
 
-        if (req.format_type == RequestDesc.FormatType.form)
+        if (req.format_type == HTTPRequestDesc.FormatType.form)
         {
             if (rs.body_key_offset < ushort.max)
                 form_buf = body_tmpl[0 .. rs.body_key_offset];
@@ -451,7 +499,7 @@ private:
 
         foreach (ref se; elements)
         {
-            ref const ElementDesc_HTTP http = _profile_data.get_http(se.http_index);
+            ref const HTTPElementDesc http = _profile_data.get_section!HTTPElementDesc(http_section_kind, se.http_index);
             ushort match_idx = is_write ? http.write_request_index : http.request_index;
             if (match_idx != rs.request_index)
                 continue;
@@ -494,9 +542,9 @@ private:
             url_append(merged_path, rs.path_key_offset, rs.path_val_offset, path_tmpl);
 
             // body aggregation
-            if (req.format_type == RequestDesc.FormatType.form)
+            if (req.format_type == HTTPRequestDesc.FormatType.form)
                 url_append(form_buf, rs.body_key_offset, rs.body_val_offset, body_tmpl);
-            else if (req.format_type == RequestDesc.FormatType.json)
+            else if (req.format_type == HTTPRequestDesc.FormatType.json)
             {
                 if (rs.body_key_offset < ushort.max || rs.body_val_offset < ushort.max)
                 {
@@ -542,7 +590,7 @@ private:
 
         const(char)[] body;
         Array!char body_buf;
-        if (req.format_type == RequestDesc.FormatType.form)
+        if (req.format_type == HTTPRequestDesc.FormatType.form)
         {
             if (rs.body_val_offset < ushort.max)
                 form_buf ~= body_tmpl[rs.body_val_offset .. $];
@@ -550,7 +598,7 @@ private:
                 form_buf ~= body_tmpl[rs.body_key_offset .. $];
             body = form_buf[];
         }
-        else if (req.format_type == RequestDesc.FormatType.json)
+        else if (req.format_type == HTTPRequestDesc.FormatType.json)
         {
             if (!merged_body.isNull)
             {
@@ -564,22 +612,24 @@ private:
             }
         }
 
-        rs.in_flight = true;
-        rs.last_request = now;
-        submit_request(rs.request_index, req.method, path, body, req.format_type);
+        if (submit_request(rs.request_index, req.method, path, body, req.format_type))
+        {
+            rs.in_flight = true;
+            rs.last_request = now;
+        }
     }
 
-    void submit_request(ushort req_idx, HTTPMethod method, const(char)[] path, const(char)[] body = null, RequestDesc.FormatType fmt = RequestDesc.FormatType.none)
+    bool submit_request(ushort req_idx, HTTPMethod method, const(char)[] path, const(char)[] body = null, HTTPRequestDesc.FormatType fmt = HTTPRequestDesc.FormatType.none)
     {
         if (_in_flight_count >= _in_flight_queue.length)
-            return;
+            return false;
 
         HTTPParam[1] ct_header;
         if (body.length > 0)
         {
-            if (fmt == RequestDesc.FormatType.json)
+            if (fmt == HTTPRequestDesc.FormatType.json)
                 ct_header[0] = HTTPParam(StringLit!"Content-Type", StringLit!"application/json");
-            else if (fmt == RequestDesc.FormatType.form)
+            else if (fmt == HTTPRequestDesc.FormatType.form)
                 ct_header[0] = HTTPParam(StringLit!"Content-Type", StringLit!"application/x-www-form-urlencoded");
             else
                 ct_header[0] = HTTPParam(StringLit!"Content-Type", StringLit!"text/plain");
@@ -597,6 +647,7 @@ private:
         ubyte tail = cast(ubyte)((_in_flight_head + _in_flight_count) % _in_flight_queue.length);
         _in_flight_queue[tail] = req_idx;
         ++_in_flight_count;
+        return true;
     }
 
     static bool element_is_due(ref const HTTPSampleElement se, MonoTime now)
@@ -616,9 +667,19 @@ private:
 
     const(char)[] format_element_value(ref const HTTPSampleElement se)
     {
-        ref const ElementDesc_HTTP http = _profile_data.get_http(se.http_index);
         const Variant v = se.element.value;
-        return format_value(v, http.value_desc);
+        const(DataFormat)* fmt = se.desc.fmt;
+        if (fmt.is_text)
+            return v.isString ? v.asString : null;
+        if (!fmt.is_scalar)
+            return null;
+
+        Scalar scalar;
+        if (!unbox_scalar(v, *fmt, scalar))
+            return null;
+        char[] buffer = cast(char[])talloc(256);
+        ptrdiff_t length = format_record(scalar.raw[0 .. fmt.stride], se.desc, buffer);
+        return length >= 0 ? buffer[0 .. length] : null;
     }
 
     int on_response(ref const HTTPMessage response)
@@ -668,19 +729,19 @@ private:
             }
             else if (location[0] == '/')
             {
-                // Relative path --same host, URI update
+                // Relative path - same host, URI update
                 // TODO: cache redirect and retry with new path
-                log.warning("URI redirect to '", location, "' --not yet implemented");
+                log.warning("URI redirect to '", location, "' - not yet implemented");
             }
             else
             {
-                // Absolute URL --need to compare scheme and host against
+                // Absolute URL - need to compare scheme and host against
                 // client's current connection to classify as:
                 //   1. protocol upgrade/downgrade (scheme differs)
                 //   2. cross-host redirect (host differs)
                 //   3. URI update (same scheme+host, different path)
                 // TODO: parse Location URL, compare to client, handle case 3
-                log.warning("redirect to '", location, "' --not yet implemented");
+                log.warning("redirect to '", location, "' - not yet implemented");
             }
             return 0;
         }
@@ -694,16 +755,16 @@ private:
         if (response.content.length == 0 || rs is null)
             return 0;
 
-        ref const RequestDesc req = _profile_data.get_request(req_idx);
+        ref const HTTPRequestDesc req = get_http_request(*_profile_data, req_idx);
 
-        if (req.parse_mode == RequestDesc.ParseMode.none)
+        if (req.parse_mode == HTTPRequestDesc.ParseMode.none)
             return 0;
 
-        if (req.parse_mode == RequestDesc.ParseMode.regex)
+        if (req.parse_mode == HTTPRequestDesc.ParseMode.regex)
         {
             foreach (ref se; _elements[])
             {
-                ref const ElementDesc_HTTP http = _profile_data.get_http(se.http_index);
+                ref const HTTPElementDesc http = _profile_data.get_section!HTTPElementDesc(http_section_kind, se.http_index);
                 if (http.request_index != req_idx)
                     continue;
 
@@ -717,9 +778,11 @@ private:
                     continue;
 
                 const(char)[] capture = rmatch.num_captures > 0 ? rmatch.captures[0] : rmatch.full;
-                se.element.value(sample_value(capture, http.value_desc), response.timestamp);
-                se.last_sample = getTime();
-                se.sampled = true;
+                if (apply_text_value(se.element, capture, se.desc, response.timestamp))
+                {
+                    se.last_sample = getTime();
+                    se.sampled = true;
+                }
             }
             return 0;
         }
@@ -752,7 +815,7 @@ private:
 
         foreach (ref se; _elements[])
         {
-            ref const ElementDesc_HTTP http = _profile_data.get_http(se.http_index);
+            ref const HTTPElementDesc http = _profile_data.get_section!HTTPElementDesc(http_section_kind, se.http_index);
             if (http.request_index != req_idx)
                 continue;
 
@@ -779,7 +842,8 @@ private:
             if (val is null)
                 continue;
 
-            apply_value(se.element, *val, http.value_desc, response.timestamp);
+            if (!apply_value(se.element, *val, se.desc, response.timestamp))
+                continue;
             se.last_sample = getTime();
             se.sampled = true;
 
@@ -824,10 +888,8 @@ private:
         if (current is null)
             return null;
 
-        // Walk suffix (if any)
         if (!suffix.empty)
         {
-            // Strip leading dot from suffix
             if (suffix[0] == '.')
                 suffix = suffix[1 .. $];
             if (!suffix.empty)
@@ -860,7 +922,8 @@ bool evaluate_success(ref Variant json, Expression* expr)
     EvalContext ctx;
     ctx.locals = &locals;
     Variant result = expr.evaluate(ctx);
-    assert(result.isBool, "success expression must evaluate to a bool");
+    if (!result.isBool)
+        return false; // a success expression that yields a non-bool is a profile error; treat as failure
     return result.asBool;
 }
 
@@ -957,132 +1020,62 @@ void deep_merge(ref Variant target, ref Variant source)
         target = source;
 }
 
-void apply_value(Element* element, ref Variant val, ref const TextValueDesc desc, SysTime timestamp)
+bool apply_text_value(Element* element, const(char)[] token, ref const SampleDesc desc, SysTime timestamp)
 {
-    import urt.inet;
-    import router.iface.mac : MACAddress;
+    const(DataFormat)* fmt = desc.fmt;
+    if (fmt.is_text)
+    {
+        if (element.format == desc.format)
+            element.write_sample(token, timestamp);
+        else
+            element.value(token, timestamp);
+        return true;
+    }
 
+    ubyte[64] record = void;
+    if (fmt.stride > record.length || !parse_record(token, desc, record[0 .. fmt.stride]))
+        return false;
+    if (element.format == desc.format)
+        element.write_record(record[0 .. fmt.stride], timestamp);
+    else
+        element.value(box_record(record.ptr, *fmt), timestamp);
+    return true;
+}
+
+bool apply_value(Element* element, ref const Variant val, ref const SampleDesc desc, SysTime timestamp)
+{
     if (val.isNull)
     {
         // clear the element value; is this the correct thing to do?
         element.value(Variant(), timestamp);
-        return;
+        return true;
     }
 
-    // push strings through `sample_value`
     if (val.isString)
+        return apply_text_value(element, val.asString(), desc, timestamp);
+
+    const(DataFormat)* fmt = desc.fmt;
+    char[128] token_buffer = void;
+    const(char)[] token;
+    if (val.isBool && fmt.type != ValueType.bool_)
+        token = val.asBool ? "1" : "0";
+    else
     {
-        val = sample_value(val.asString(), desc);
-        element.value(val, timestamp);
-        return;
+        ptrdiff_t length = write_json(val, token_buffer[], true);
+        if (length <= 0)
+            return false;
+        token = token_buffer[0 .. length];
     }
-
-    final switch (desc.type) with (TextType)
-    {
-        case bool_:
-            bool b = false;
-            if (val.isBool)
-                b = val.asBool;
-            else if (val.isNumber)
-                b = val.asInt != 0;
-            element.value(Variant(b), timestamp);
-            break;
-
-        case num:
-            import urt.si.quantity;
-
-            if (val.isBool)
-                element.value(Variant(val.asBool ? 1 : 0), timestamp);
-            else if (!val.isNumber)
-                return; // is there anything more we can do?
-            else if (val.isQuantity)
-            {
-                // confirm compatible quantities
-                VarQuantity q = val.asQuantity();
-                if (q.unit.unit != desc.unit.unit)
-                    return;
-                q.adjust_scale(desc.unit);
-                if (desc.pre_scale != 1)
-                    q *= desc.pre_scale;
-                element.value(Variant(q), timestamp);
-            }
-            else if (desc.pre_scale != 1)
-            {
-                double raw = val.asDouble;
-                element.value(Variant(VarQuantity(raw * desc.pre_scale, desc.unit)), timestamp);
-            }
-            else if (desc.unit.pack)
-            {
-                Variant t = val;
-                t.set_unit(desc.unit);
-                element.value(t, timestamp);
-            }
-            else
-                goto set_value;
-            break;
-
-        case str:
-            assert(false, "TODO: should have been caught by the isString case above; do we want to do stringification?");
-            break;
-
-        case enum_:
-        case bf:
-            assert(desc.enum_info, "What case is there an enum without an enum type specified?");
-
-            if (val.is_enum)
-                goto set_value;
-            else if (val.isUlong)
-                element.value(Variant(val.asUlong, desc.enum_info), timestamp);
-            else if (val.isLong)
-                element.value(Variant(val.asLong, desc.enum_info), timestamp);
-            else if (val.isBool)
-                element.value(Variant(val.asBool ? 1 : 0, desc.enum_info), timestamp);
-            else if (val.isDouble)
-            {
-                double d = val.asDouble;
-                long l = cast(long)d;
-                if (l == d)
-                    element.value(Variant(l, desc.enum_info), timestamp);
-            }
-            else
-                assert(false, "TODO: what other kind of thing can arrive here?");
-            break;
-
-        case dt:
-            if (!val.isUser!DateTime && !val.isUser!SysTime)
-                return;
-            goto set_value;
-
-        case macaddr:
-            if (!val.isUser!MACAddress)
-                return;
-            goto set_value;
-
-        case inetaddr:
-            if (!val.isUser!InetAddress)
-                return;
-            goto set_value;
-
-        case ipaddr:
-            if (!val.isUser!IPAddr)
-                return;
-            goto set_value;
-
-        case ip6addr:
-            if (!val.isUser!IPv6Addr)
-                return;
-            goto set_value;
-
-        set_value:
-            element.value(val, timestamp);
-            break;
-    }
+    return apply_text_value(element, token, desc, timestamp);
 }
 
 
 unittest
 {
     import urt.format.json : parse_json;
+    import urt.meta.enuminfo : enum_info, VoidEnumInfo;
+    import urt.si.unit : Ampere, ScaledUnit;
+    import manager.sample.spec : compile_spec, stream_le_context;
 
     // walk_json_path
 
@@ -1121,7 +1114,7 @@ unittest
     assert(*a.getMember("x") == 1);
     assert(*a.getMember("y") == 2);
 
-    // object merge: overlapping scalar --source wins
+    // object merge: overlapping scalar - source wins
     Variant c = parse_json(`{"x": 1}`);
     Variant d = parse_json(`{"x": 99}`);
     deep_merge(c, d);
@@ -1142,7 +1135,7 @@ unittest
     deep_merge(g, h);
     assert(g == 42);
 
-    // array append -- the API use case: {"paths": ["a"]} + {"paths": ["b"]} -> {"paths": ["a", "b"]}
+    // array append - the API use case: {"paths": ["a"]} + {"paths": ["b"]} -> {"paths": ["a", "b"]}
     Variant p1 = parse_json(`{"paths": ["inv.battery.voltage"]}`);
     Variant p2 = parse_json(`{"paths": ["inv.battery.current"]}`);
     deep_merge(p1, p2);
@@ -1153,6 +1146,45 @@ unittest
     assert((*paths)[0] == Variant("inv.battery.voltage"));
     assert((*paths)[1] == Variant("inv.battery.current"));
 
+    // JSON tokens use the same typed descriptor path in both directions.
+    SampleDesc amps;
+    assert(compile_spec("f64:100mA", stream_le_context, ScaledUnit(), 1, null, null, amps));
+    Element current;
+    current.format = amps.format;
+    Variant raw_current = Variant(123);
+    assert(apply_value(&current, raw_current, amps, getSysTime()));
+    double current_amps = current.scaled_value(ScaledUnit(Ampere));
+    assert(current_amps > 12.299 && current_amps < 12.301);
+
+    Scalar current_record;
+    assert(unbox_scalar(current.value, *amps.fmt, current_record));
+    char[32] current_text = void;
+    ptrdiff_t current_length = format_record(current_record.raw[0 .. amps.fmt.stride], amps, current_text[]);
+    assert(current_length > 0);
+    Scalar current_round_trip;
+    assert(parse_record(current_text[0 .. current_length], amps, current_round_trip.raw[0 .. amps.fmt.stride]));
+    assert(current_round_trip.raw == current_record.raw);
+
+    enum TestMode : ubyte { off, on, automatic }
+    const(VoidEnumInfo)* mode_info = enum_info!TestMode.make_void();
+    const(VoidEnumInfo)* resolve_mode(const(char)[] name) nothrow @nogc
+        => name == "TestMode" ? mode_info : null;
+    SampleDesc mode_desc;
+    assert(compile_spec("enum8:TestMode", stream_le_context, ScaledUnit(), 1, null, &resolve_mode, mode_desc));
+    Element mode;
+    mode.format = mode_desc.format;
+    Variant raw_mode = Variant(2);
+    assert(apply_value(&mode, raw_mode, mode_desc, getSysTime()));
+    assert(mode.value.is_enum && mode.value.asLong == 2);
+
+    SampleDesc text_desc;
+    assert(compile_spec("str", stream_le_context, ScaledUnit(), 1, null, null, text_desc));
+    Element text;
+    text.format = text_desc.format;
+    Variant raw_text = Variant("native");
+    assert(apply_value(&text, raw_text, text_desc, getSysTime()));
+    assert(text.value == "native");
+
     // evaluate_success
 
     Variant ok_json = parse_json(`{"result": "OK", "count": 5}`);
@@ -1160,7 +1192,7 @@ unittest
 
     try
     {
-        // null expression --defaults to true
+        // null expression - defaults to true
         assert(evaluate_success(ok_json, null));
 
         // string equality via $var
@@ -1182,7 +1214,7 @@ unittest
     catch (Exception)
         assert(false, "parse failed");
 
-    // non-object JSON --locals empty
+    // non-object JSON - locals empty
     Variant scalar = parse_json(`42`);
     assert(evaluate_success(scalar, null));
 }

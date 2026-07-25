@@ -48,6 +48,7 @@ int main(string[] args)
     // parse command line arguments
     bool interactive_mode = false;
     const(char)[] config_path = "conf/startup.conf";
+    const(char)[] profile_path;
     for (size_t i = 1; i < args.length; ++i)
     {
         if (args[i] == "--interactive" || args[i] == "-i")
@@ -56,6 +57,11 @@ int main(string[] args)
         {
             if (i + 1 < args.length)
                 config_path = args[++i];
+        }
+        else if (args[i] == "--profile-path")
+        {
+            if (i + 1 < args.length)
+                profile_path = args[++i];
         }
     }
 
@@ -82,6 +88,11 @@ int main(string[] args)
     }
 
     create_application();
+    if (profile_path && !g_app.override_profile_path(profile_path))
+    {
+        log_error("system", "Invalid profile path override: ", profile_path);
+        return -1;
+    }
 
     version (SoftwareWatchdogFeed)
     {

@@ -1524,4 +1524,5 @@ from the outlet meter.
 
 ## See Also
 
-- [Profile File Format](PROFILE_FILE_FORMAT.md) - Profile file syntax and structure
+- [Profile File Format](PROFILE_FILE_FORMAT.md) - Profile syntax and native descriptors
+- [Profile catalogue](../conf/profiles/README.md) - Catalogue policy and contribution guidance

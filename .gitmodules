@@ -1,3 +1,6 @@
 [submodule "third_party/urt"]
 	path = third_party/urt
 	url = git@github.com:open-watt/urt.git
+[submodule "conf/profiles"]
+	path = conf/profiles
+	url = git@github.com:open-watt/profiles.git

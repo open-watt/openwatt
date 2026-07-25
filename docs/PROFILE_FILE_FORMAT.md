@@ -12,8 +12,6 @@ Device profiles define how to read data from hardware devices and map it to stan
 
 ### Modbus (RTU/TCP)
 
-**File Location**: `conf/modbus_profiles/*.conf`
-
 **Source Section**: `registers:`
 
 **Element Syntax**:
@@ -31,8 +29,6 @@ reg: 41000, f32le/RW, kWh,  desc: EnergySum, kWh, medium, "Total net energy"
 ```
 
 ### REST/HTTP
-
-**File Location**: `conf/rest_profiles/*.conf`
 
 **Source Sections**:
 ```
@@ -61,8 +57,6 @@ device-template:
 
 ### GoodWe AA55 Protocol
 
-**File Location**: `conf/goodwe_profiles/*.conf`
-
 **Source Section**: `elements:`
 
 **Element Syntax**:
@@ -77,8 +71,6 @@ aa55: 6, 26, u8, %,        desc: data_soc, , high, "State of Charge"
 ```
 
 ### Zigbee
-
-**File Location**: `conf/zigbee_profiles/*.conf`
 
 **Source Section**: `elements:`
 

@@ -287,29 +287,37 @@ struct ElementDesc {
     CacheString display_units;
     Access access;
     Frequency update_frequency;
-    ElementType type();      // bits 13-15 of _element_index
-    size_t element();        // bits 0-12 -- index into protocol-specific array
+    uint kind();             // registered protocol section kind
+    size_t element();        // index into that section's storage block
 }
 
-struct ElementDesc_Modbus  { ushort reg; RegisterType reg_type; ValueDesc value_desc; }
-struct ElementDesc_CAN     { uint message_id; ubyte offset; ValueDesc value_desc; }
-struct ElementDesc_Zigbee  { ushort cluster_id; ushort attribute_id; ushort manufacturer_code; ValueDesc value_desc; }
-struct ElementDesc_MQTT    { ushort read_topic; ushort write_topic; TextValueDesc value_desc; }
-struct ElementDesc_HTTP    { ushort request_index; ushort write_request_index; bool identifier_quoted; TextValueDesc value_desc; }
-struct ElementDesc_AA55    { ubyte function_code; ubyte offset; ValueDesc value_desc; }
+// Protocol-owned descriptors live beside their bindings. Each stores a minted
+// SampleDesc index plus only the addressing/framing fields that protocol needs.
+struct ElementDesc_CAN  { uint message_id; ubyte offset; ubyte length; ushort desc; }
+struct ElementDesc_MQTT { ushort read_topic; ushort write_topic; ushort desc; }
 ```
+
+Protocol modules implement `ProfileSections`, register names such as `reg`, `can`,
+`zb`, `ble`, `aa55`, and `mqtt`, and parse their own descriptors. `Profile` stores
+opaque section blocks and exposes them through `get_section!T(kind, index)`. HTTP is
+the remaining legacy parser arm and still uses `get_http()` / `get_request()`.
 
 ### 2.6 Profile Locations
 
 ```
-conf/modbus_profiles/     # Eastron meters, SolarEdge, SmartEVSE, Pace BMS, GoodWe, etc.
-conf/can_profiles/        # Pylon BMS
-conf/zigbee_profiles/     # Generic Zigbee (multi-model with fingerprints)
-conf/mqtt_profiles/       # OpenBeken smart plugs
-conf/rest_profiles/       # SmartEVSE REST API
-conf/goodwe_profiles/     # GoodWe AA55 protocol
-conf/ha_profiles/         # ESPHome/Home Assistant
+conf/profiles/                  # Git submodule; default recursive search root
+    modbus_profiles/            # Eastron, Pace, GoodWe, etc.
+    can_profiles/               # Pylon BMS
+    zigbee_profiles/            # Generic Zigbee profiles
+    mqtt_profiles/              # OpenBeken and other topic maps
+    rest_profiles/              # HTTP/REST profiles
+    goodwe_profiles/            # GoodWe AA55 protocol
+    ha_profiles/                # ESPHome/Home Assistant
 ```
+
+Directories are organisational. Runtime lookup is recursive by `.conf` basename, so
+basenames must be globally unique. `/system/profile-path` and `--profile-path` can
+replace the default root.
 
 ---
 
@@ -329,7 +337,6 @@ The binding's lifecycle does the work:
 // src/manager/binding.d (abridged)
 abstract class ProfileBinding : ProtocolBinding {
 nothrow @nogc:
-    abstract const(char)[] profile_dir() const pure;     // e.g. "conf/modbus_profiles/"
     abstract const(char)[] profile_name() const pure;
     abstract const(char)[] model_name() const pure;
     abstract void add_handler(Device device, Element* e,
@@ -337,17 +344,15 @@ nothrow @nogc:
 
     bool materialise()
     {
-        // 1. Load and parse profile file
-        void[] file = load_file(tconcat(profile_dir(), profile_name(), ".conf"), g_app.allocator);
-        _profile_data = parse_profile(cast(char[])file, g_app.allocator);
+        // Resolve the basename recursively and acquire the shared parsed profile.
+        _profile_data = g_app.acquire_profile(profile_name());
+        if (!_profile_data)
+            return false;
 
-        // 2. Validate required parameters were set on the binding
-        // (parameters declared in the profile come in as Property setters via
-        //  set_unknown_property; stored in _params Map and substituted into
-        //  templated identifiers/topics/paths)
+        // Reject supplied parameter names the profile did not declare. Declared
+        // parameters may remain unset until an active topic/path actually uses them.
 
-        // 3. Build device hierarchy from profile template;
-        //    add_handler is called for each element-map
+        // Build the device hierarchy; add_handler sees each element-map descriptor.
         Device device = create_device_from_profile(
             *_profile_data, model_name(), _device[], null, &add_handler);
         return device !is null;
@@ -360,13 +365,12 @@ The subclass's `add_handler` is the wiring hook — for each `element-map` in th
 ```d
 override void add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte index)
 {
-    ref const ElementDesc_Modbus mb = _profile_data.get_modbus(desc.element);
-    // initialise element value
-    ubyte[256] tmp = void;
-    tmp[0 .. mb.value_desc.data_length] = 0;
-    e.value = sample_value(tmp.ptr, mb.value_desc);
-    // append to internal SampleElement array
-    _elements ~= SampleElement(/* register, regKind, desc, ... */);
+    if (desc.kind != modbus_reg_section_kind && desc.kind != modbus_mb_section_kind)
+        return;
+    ref const ElementDesc_Modbus mb =
+        _profile_data.get_section!ElementDesc_Modbus(desc.kind, desc.element);
+    SampleDesc sample_desc = desc_by_index(mb.desc);
+    _elements ~= SampleElement(/* register, regKind, sample_desc, ... */);
 }
 ```
 
@@ -376,50 +380,34 @@ override void add_handler(Device device, Element* e, ref const ElementDesc desc,
 
 ---
 
-## Part 4: Value Descriptors
+## Part 4: Native Sample Descriptors
 
-Two descriptor types handle the conversion from raw protocol data to typed `Variant` values.
-
-### ValueDesc -- Binary data (Modbus, CAN, Zigbee, GoodWe)
+All profile-driven protocols compile the same descriptor language into `SampleDesc`.
 
 ```d
-struct ValueDesc {
-    DataType _type;      // encodes byte count, signedness, endianness, data kind
-    union {
-        struct { ScaledUnit _unit; float _pre_scale; }
-        DateFormat _date_format;
-        const(VoidEnumInfo)* _enum_info;
-        CustomSample _custom_sample;
-    }
+struct SampleDesc {
+    WireLayout wire;             // byte/word ordering and field layout
+    float pre_scale = 1;         // conversion before observation
+    ushort format;               // interned DataFormat index
+    ushort encoding;             // optional named byte-image codec
 }
 ```
 
-**DataType flags** (uint):
-- Bits 0-2: byte count minus 1 (0=1byte, 1=2bytes, 3=4bytes, 7=8bytes)
-- Bit 3: `signed` (on `string_`: encodes space-padding)
-- Bit 4: `word_reverse` (swap 16-bit words)
-- Bit 5: `little_endian`
-- Bit 6: `big_endian`
-- Bit 7: `enumeration`
-- Bit 8: `array`
-- Bits 12-15: DataKind (`integer`, `bitfield`, `date_time`, `floating`, `low_byte`, `high_byte`, `string_`)
+`compile_spec()` in `manager.sample.spec` combines the textual type with a protocol
+`LayoutContext`. Protocol defaults therefore carry byte order; profiles state only
+deviations. `DataFormat` describes the native record type, unit, enum, string, or user
+type mounted on the Element series.
 
-**Decoding:** `Variant sample_value(const void* data, ref const ValueDesc desc)`
+The shared gateway in `manager.sample` supplies:
 
-### TextValueDesc -- Text data (MQTT, HTTP)
+- `sample_record()` / `emit_record()` for binary protocol data;
+- `parse_record()` / `format_record()` for textual protocol data;
+- `desc_by_index()` for protocol descriptors holding a minted `ushort` index;
+- `intern_constraint()` for reusable validation constraints.
 
-```d
-struct TextValueDesc {
-    TextType type;   // bool_, num, str, enum_, bf, dt, inetaddr, ipaddr, ip6addr
-    ScaledUnit unit;
-    float pre_scale = 1;
-    const(VoidEnumInfo)* enum_info;
-}
-```
-
-**Decoding:** `Variant sample_value(const(char)[] data, ref const TextValueDesc desc)`
-**Formatting:** `const(char)[] format_value(ref const Variant val, ref const TextValueDesc desc)` -- inverse (Variant to string for write-back)
-**Applying:** `void apply_value(Element*, ref Variant, ref const TextValueDesc, SysTime)` -- type-aware assignment with unit handling (HTTP binding)
+Bindings observe native records directly when their mounted format matches, and box to
+`Variant` only at compatibility boundaries. The retired `ValueDesc`, `TextValueDesc`,
+and `manager.sampler` layer no longer exists.
 
 ---
 
@@ -441,7 +429,6 @@ protected:
 abstract class ProfileBinding : ProtocolBinding {
     // load profile, create_device_from_profile(), iterate element-map entries
     // through add_handler()
-    abstract const(char)[] profile_dir() const pure;
     abstract const(char)[] profile_name() const pure;
     abstract const(char)[] model_name() const pure;
     abstract void add_handler(Device device, Element* e,
@@ -451,21 +438,22 @@ abstract class ProfileBinding : ProtocolBinding {
 
 All bindings are `nothrow @nogc`. They are registered as collections (e.g. `g_app.console.register_collection!ModbusBinding()`) and updated by `Collection!ProtocolBinding().update_all()` in `manager.package.update()`.
 
-Helpers like `ValueDesc`, `TextValueDesc`, `sample_value()`, `format_value()`, and `apply_value()` live in `src/manager/sampler.d`. That module holds the shared descriptor/codec utilities; the binding class hierarchy is in `src/manager/binding.d`.
+`src/manager/sample/spec.d` compiles profile type strings, `src/manager/sample/package.d` is the
+binary/text record gateway, and `src/manager/binding.d` holds the binding hierarchy.
 
 ### Binding Taxonomy
 
-| Protocol | Class | Base | Model | Descriptor | Write | Profile Dir |
+| Protocol | Class | Base | Model | Descriptor | Write | Catalogue Dir |
 |----------|-------|------|-------|------------|-------|-------------|
-| **Modbus** | `ModbusBinding` | `ProfileBinding` | Active polling | `ValueDesc` | Server mode | `modbus_profiles/` |
-| **SunSpec** | `SunspecBinding` | `ProfileBinding` | Active polling | `ValueDesc` | No | `modbus_profiles/` |
-| **CAN** | `CANBinding` | `ProfileBinding` | Event-driven | `ValueDesc` | No | `can_profiles/` |
-| **Zigbee** | (`ZigbeeController`) | `ActiveObject + Subscriber` | Event-driven | `ValueDesc` | Yes | `zigbee_profiles/` |
-| **BLE** | `BLEClientBinding` | `ProfileBinding` | Hybrid (notify + poll) | `ValueDesc` | Characteristic write | `ble_profiles/` |
-| **HTTP** | `HTTPClientBinding` | `ProfileBinding` | Active polling | `TextValueDesc` | Yes | `rest_profiles/` |
-| **MQTT** | `MQTTBinding` | `ProfileBinding` | Event-driven | `TextValueDesc` | Yes | `mqtt_profiles/` |
+| **Modbus** | `ModbusBinding` | `ProfileBinding` | Active polling | `SampleDesc` | Server mode | `modbus_profiles/` |
+| **SunSpec** | `SunspecBinding` | `ProfileBinding` | Active polling | `SampleDesc` | No | `modbus_profiles/` |
+| **CAN** | `CANBinding` | `ProfileBinding` | Event-driven | `SampleDesc` | No | `can_profiles/` |
+| **Zigbee** | (`ZigbeeController`) | `ActiveObject + Subscriber` | Event-driven | `SampleDesc` | Yes | `zigbee_profiles/` |
+| **BLE** | `BLEClientBinding` | `ProfileBinding` | Hybrid (notify + poll) | `SampleDesc` | Characteristic write | `ble_profiles/` |
+| **HTTP** | `HTTPClientBinding` | `ProfileBinding` | Active polling | `SampleDesc` | Yes | `rest_profiles/` |
+| **MQTT** | `MQTTBinding` | `ProfileBinding` | Event-driven | `SampleDesc` | Yes | `mqtt_profiles/` |
 | **ESPHome** | `ESPHomeBinding` | `ProfileBinding` | Event-driven | Direct (typed proto) | Yes | `ha_profiles/` |
-| **GoodWe** | `GoodWeBinding` | `ProfileBinding` | Active polling | `ValueDesc` | No | `goodwe_profiles/` |
+| **GoodWe** | `GoodWeBinding` | `ProfileBinding` | Active polling | `SampleDesc` | No | `goodwe_profiles/` |
 | **TWC** | `TeslaTWCBinding` | `ProtocolBinding` | Active push | Direct | Yes | (hardcoded) |
 
 Zigbee is the one exception that doesn't subclass `ProtocolBinding` — it uses `ZigbeeController` directly because device discovery is event-driven (devices join and identify themselves), and the controller creates devices via `create_device_from_profile()` inline when nodes are interviewed.
@@ -475,7 +463,10 @@ Zigbee is the one exception that doesn't subclass `ProtocolBinding` — it uses 
 | File | Role |
 |------|------|
 | `src/manager/binding.d` | **ProtocolBinding** + **ProfileBinding** base classes |
-| `src/manager/sampler.d` | **ValueDesc**, **TextValueDesc**, `sample_value()`, `format_value()`, `apply_value()` -- descriptor/codec utilities |
+| `src/manager/sample/spec.d` | Shared profile descriptor grammar and `compile_spec()` |
+| `src/manager/sample/package.d` | `SampleDesc`, record decoding/encoding, constraints, descriptor registry |
+| `src/manager/sample/wire.d` | Protocol-independent wire layout operations |
+| `src/manager/sample/codec.d` | Named non-canonical wire encodings |
 | `src/protocol/modbus/binding.d` | **ModbusBinding**, **SunspecBinding** -- register batching, active polling |
 | `src/protocol/modbus/client.d` | **ModbusClient** -- request/response via interface |
 | `src/protocol/can/binding.d` | **CANBinding** -- event-driven packet handler |
@@ -504,7 +495,8 @@ struct SampleElement {
     ushort sampleTimeMs;     // timing gate
     PCP pcp; bool dei;       // packet priority
     Element* element;
-    ValueDesc desc;
+    ubyte length;
+    SampleDesc desc;
 }
 ```
 
@@ -527,7 +519,7 @@ on_demand-> ushort.max (never)
    - gap exceeds **MaxGapSize=16**
 4. Promote batch PCP to highest element PCP; clear DEI if any non-droppable
 5. Mark batch elements in-flight, send via `client.sendRequest()`
-6. Response handler: decode with `sample_value()`, call `element.value()`
+6. Response handler: decode with `sample_record()`, then call `element.observe_record()`
 7. Error handler: clear in-flight flags
 
 **Snoop mode:** if client is snooping, passively processes observed traffic without sending requests.
@@ -542,14 +534,15 @@ struct SampleElement {
     SysTime last_update;
     uint id;            // CAN message ID
     ubyte offset;       // byte offset in CAN data (0-7)
+    ubyte length;
     Element* element;
-    ValueDesc desc;
+    SampleDesc desc;
 }
 ```
 
 **How it works:**
 - Constructor subscribes: `iface.subscribe(&packet_handler, PacketFilter(type: PacketType.unknown, direction: incoming))`
-- `packet_handler`: for each incoming CAN packet, iterates elements matching `can.id`, then: `e.element.value(sample_value(data + offset, desc), creation_time)`
+- `packet_handler`: for each incoming CAN packet, iterates elements matching `can.id`, decodes the bounded wire slice with `sample_record()`, then calls `observe_record()`
 - No `update()` override, no frequency gating -- every matching message updates immediately
 
 ---
@@ -561,7 +554,7 @@ Zigbee doesn't use a `ProtocolBinding` subclass. `ZigbeeController` handles samp
 **SampleElement:**
 ```d
 struct SampleElement {
-    Element* element;  ValueDesc desc;
+    Element* element;  SampleDesc desc;
     EUI64 eui;  ubyte endpoint;  ushort cluster;  ushort attribute;  ushort manufacturer;
 }
 ```
@@ -572,8 +565,8 @@ Stored in `Map!(ulong[2], SampleElement)` keyed by `make_sample_key(eui, endpoin
 1. Device sends `ZCLCommand.report_attributes` (0x0a) -- unsolicited
 2. `handle_aps_frame()` parses: `[u16 attr_id][u8 data_type][value...]`
 3. Looks up SampleElement by composite key
-4. Decodes via `get_zcl_value()`, adjusts with `adjust_value()` per ValueDesc
-5. `e.element.value(v, timestamp, this)`
+4. Removes ZCL/Tuya framing, then decodes with `sample_record()`
+5. Calls `e.element.observe_record(..., timestamp, null, this)`
 
 **Also handles:** Tuya datapoints (cluster 0xEF00), IAS zone status (cluster 0x0500 synthetic attributes).
 
@@ -681,14 +674,14 @@ Three kinds of placeholders, never mixed:
    - If `parse:` template has `{key}`: expand `{key}` with identifier, walk resulting path
    - Else if identifier is quoted: flat object key lookup
    - Else: dot-walk path (supports `a.b.c` and `arr[0]`)
-5. Convert JSON value to Element value via `apply_value()`
+5. Convert the JSON value through the element's `SampleDesc` and observe the native record
 
 **`parse: regex`:**
 1. For each element bound to this request:
    - Element identifier is the regex pattern
    - `regex_match(response_content, pattern)`
    - Extract first capture group, or full match if no captures
-   - Parse with `sample_value(text, TextValueDesc)`
+   - Parse with `parse_record(text, SampleDesc)`
 
 **`parse: none`:**
 - Response discarded, no element updates
@@ -795,7 +788,7 @@ elements:
 struct SampleElement {
     MonoTime last_update;
     Element* element;
-    TextValueDesc desc;
+    SampleDesc desc;
     String read_topic;
     String write_topic;
 }
@@ -803,8 +796,8 @@ struct SampleElement {
 
 **How it works:**
 - Constructor subscribes topics: `broker.subscribe(topic, &on_publish)` for each subscription in profile
-- `on_publish(sender, topic, payload, timestamp)`: matches topic to `read_topic` -> `sample_value(payload_str, desc)` -> `element.value(value, timestamp, this)`
-- Write-back: `on_change()` -> `format_value(val, desc)` -> `broker.publish(write_topic, text)`
+- `on_publish(sender, topic, payload, timestamp)`: matches `read_topic`, parses with `parse_record()`, then calls `observe_record()`
+- Write-back: `on_change()` converts or reads the native record, formats it with `format_record()`, then publishes it
 - Purely reactive -- no `update()` override
 - Topic wildcards: `+` (single-level), `#` (multi-level)
 - Parameters: `{device_id}` in topics substituted at device creation from named arguments (defined via `parameters:` section in profile)
@@ -840,17 +833,17 @@ struct SampleElement {
 - **Event-driven** (CAN, MQTT, BLE): subscribe to the data source in `startup()`, react in callbacks
 - **Direct push** (TWC): read state from a protocol controller in `update()`
 
-### 2. Choose Value Descriptor
-- **Binary data** (raw bytes): use `ValueDesc` + `sample_value(void*, ValueDesc)`
-- **Text data** (JSON, strings): use `TextValueDesc` + `sample_value(char[], TextValueDesc)`
-- **Direct values** (already typed): set `element.value()` with unit-typed Variants
+### 2. Choose the Wire Context
+- **Binary data**: compile to `SampleDesc` with the protocol's `LayoutContext`, then use `sample_record()` / `emit_record()`.
+- **Text data**: compile to the same `SampleDesc`, then use `parse_record()` / `format_record()`.
+- **Direct typed values**: call the element's typed observation path; use boxed `value()` only at compatibility boundaries.
 
 ### 3. Create SampleElement Struct
 ```d
 struct SampleElement {
     Element* element;          // always needed
     // + protocol-specific identifier (register, topic, handle, message_id, ...)
-    // + value descriptor (ValueDesc or TextValueDesc)
+    SampleDesc desc;
     // + timing/state fields (last_update, flags, sample_time_ms, ...)
 }
 ```
@@ -891,19 +884,16 @@ nothrow @nogc:
         // active polling: check timing, submit requests
     }
 
-    final override const(char)[] profile_dir() const pure => "conf/my_profiles/";
     final override const(char)[] profile_name() const pure => _profile_name[];
     final override const(char)[] model_name()   const pure => _model_name[];
 
     final override void add_handler(Device device, Element* e,
                                     ref const ElementDesc desc, ubyte index) {
-        ref const ElementDesc_MyProto p = _profile_data.get_my(desc.element);
-        // initialise element value to typed zero
-        ubyte[256] tmp = void;
-        tmp[0 .. p.value_desc.data_length] = 0;
-        e.value = sample_value(tmp.ptr, p.value_desc);
-        // push SampleElement with protocol-specific info
-        _elements ~= SampleElement(/* ... */);
+        if (desc.kind != my_section_kind)
+            return;
+        ref const ElementDesc_MyProto p =
+            _profile_data.get_section!ElementDesc_MyProto(desc.kind, desc.element);
+        _elements ~= SampleElement(e, desc_by_index(p.desc) /* ... */);
         // optional: element.add_subscriber(this) for write-back
     }
 
@@ -924,11 +914,10 @@ private:
 If no profile is needed (the TWC case), subclass `ProtocolBinding` directly and build the device tree inline by overriding `materialise()`.
 
 ### 5. Add Profile Support (skip for direct-push bindings)
-- Add `ElementDesc_MyProto` struct to `src/manager/profile.d`
-- Add `ElementType.myproto` to the enum
-- Add a parsing case in `parse_profile()`
-- Add `myproto_elements[]` to `Profile` struct
-- Create `conf/myproto_profiles/`
+- Define `ElementDesc_MyProto` beside the protocol binding; include a minted `ushort desc` plus protocol addressing fields.
+- Have the protocol module implement `ProfileSections` and register its section name with `register_profile_section()` during `init()`.
+- Implement `element_size()`, `count_element()`, and `parse_element()`; use `ProfileBuilder.compile_value()` for the shared descriptor grammar.
+- Add the profile to an organisational directory below the `conf/profiles` catalogue submodule. The basename, not the directory, is its runtime identity.
 
 ### 6. Register the Collection
 In your protocol module's `init()`:
@@ -954,7 +943,7 @@ Add to `src/manager/plugin.d` module list.
 - WinRT: `submit_read()`, `submit_write()`, `poll_gatt()` functional
 
 ### Operating Model
-Hybrid: **react** to notifications/indications (like CAN) + **poll** read-only characteristics that don't notify. Profiles in `conf/ble_profiles/` map `service_uuid + char_uuid` to elements with `ValueDesc` for decoding raw bytes. UUIDs are 128-bit but many BLE profiles use 16-bit short UUIDs (0x2A19 = battery level).
+Hybrid: **react** to notifications/indications (like CAN) + **poll** read-only characteristics that don't notify. Profiles in `conf/profiles/ble_profiles/` map `service_uuid + char_uuid` to elements with `SampleDesc` for decoding raw bytes. UUIDs are 128-bit but many BLE profiles use 16-bit short UUIDs (0x2A19 = battery level).
 
 ### BLE Characteristic Model
 ```d
