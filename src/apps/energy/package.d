@@ -64,6 +64,7 @@ nothrow @nogc:
         g_app.register_enum!BusType();
         g_app.register_enum!Coverage();
         g_app.register_enum!PolicyTier();
+        g_app.register_enum!PolicyShape();
 
         manager = defaultAllocator.allocT!EnergyManager();
         energy_device = create_energy_device();

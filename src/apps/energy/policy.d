@@ -34,6 +34,12 @@ enum PolicyTier : ubyte
     opportunistic,
 }
 
+enum PolicyShape : ubyte
+{
+    urgent,
+    window,
+}
+
 enum GoalKind : ubyte
 {
     none,
@@ -60,7 +66,8 @@ class Policy : ActiveObject
     alias Properties = AliasSeq!(Prop!("target", target),
                                  Prop!("tier", tier),
                                  Prop!("goal", goal),
-                                 Prop!("deadline", deadline));
+                                 Prop!("deadline", deadline),
+                                 Prop!("shape", shape));
 nothrow @nogc:
 
     enum type_name = "policy";
@@ -127,6 +134,15 @@ nothrow @nogc:
         mark_set!(typeof(this), "deadline")();
     }
 
+    PolicyShape shape() const pure { return _shape; }
+    void shape(PolicyShape value)
+    {
+        if (_shape == value)
+            return;
+        _shape = value;
+        mark_set!(typeof(this), "shape")();
+    }
+
     ref const(Goal) parsed_goal() const pure { return _goal; }
     Appliance target_appliance() pure { return _target_appliance.get; }
 
@@ -159,6 +175,7 @@ private:
     String _goal_text;
     Goal _goal;
     TimeOfDay _deadline;
+    PolicyShape _shape = PolicyShape.urgent;
 }
 
 
