@@ -912,9 +912,11 @@ controlled.
 On/off control devices.
 
 `Switch` is itself a control surface: the `switch` element is both the
-observable state and the actuator. When a `Switch` is associated with a
+observable state and the on/off actuator. When a `Switch` is associated with a
 [`Port`](#port), the energy app can use it as a discrete control component
-(implicit `kind=discrete`, `setpoint=switch`). There is no need to nest a
+(implicit `kind=discrete`); its `switch` element is the control's on/off surface
+(the `enable` in [PowerControl](#powercontrol) terms), and a discrete control
+has no scalar `setpoint`. There is no need to nest a
 `PowerControl` under a Switch; instead, optional control-metadata elements (the
 subset that makes sense for a binary actuator) can be added directly on the
 Switch. See [PowerControl](#powercontrol) for the full set; the subset
@@ -928,7 +930,7 @@ port it controls. Fixed, opaque switch-load devices may expose a single
 `connection: Port`.
 
 ### Required
-- `switch: boolean/enum` - Switch state (on/off, 0/1). Also the setpoint.
+- `switch: boolean/enum` - Switch state (on/off, 0/1). Also the on/off actuator (the control's `enable` surface). A discrete control has no scalar setpoint.
 
 ### Optional (device-level)
 - `type: enum` - Switch type - light, power, outlet (power outlet), fan, etc
@@ -1045,21 +1047,27 @@ One device may expose multiple `PowerControl` components (e.g. a hybrid inverter
 publishes separate charge and discharge surfaces).
 
 When a [`Switch`](#switch) is associated with a `Port`, the energy app can use
-that switch as an implicit discrete control surface (`kind=discrete`,
-`setpoint=switch`). A subset of the elements documented below - the ones that
-make sense for a binary actuator - can be added directly on the Switch instead
-of nesting a separate `PowerControl` sub-component. The `Switch` does not
+that switch as an implicit discrete control surface (`kind=discrete`); the
+Switch's `switch` element is the on/off surface (`enable`), and a discrete
+control has no scalar `setpoint`. A subset of the elements documented below - the
+ones that make sense for a binary actuator - can be added directly on the Switch
+instead of nesting a separate `PowerControl` sub-component. The `Switch` does not
 replace the `Port`; it only describes control.
 
 ### Required
 - `kind: enum` - Control type:
   - `autonomous` - device runs its own policy; no setpoint accepted
-  - `discrete` - on/off (relay, contactor, smart plug)
+  - `discrete` - on/off (relay, contactor, smart plug); actuated via `enable`
   - `continuous` - smoothly adjustable within `[min, max]` at `step` resolution
   - `staged` - finite ordered set of setpoint values (e.g. multi-tap heater)
-- `setpoint: writable` - The actuator. For `discrete`, a boolean or 0/1 enum.
-  For `continuous`/`staged`, a number in the unit specified by `unit`. Absent
-  on `kind=autonomous`.
+- `setpoint: writable` - The scalar actuator: a number in the unit specified by
+  `unit`. Present for `continuous`/`staged`; absent for `discrete` and
+  `autonomous`. A boolean setpoint is invalid - on/off lives on `enable`.
+- `enable: boolean` - Separate on/off surface, distinct from `setpoint`. Required
+  for `discrete` (or presented via an associated `Switch`). Optional for
+  `continuous`/`staged`: when present the energy app switches the device through
+  it; when absent, a continuous control is turned off by driving `setpoint` to 0
+  (only possible when `min == 0` / `can_disable`).
 
 ### Optional
 - `direction: enum` - `consume` (load), `produce` (source), `bidirectional`. Default: `consume`.
