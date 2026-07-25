@@ -36,10 +36,7 @@ nothrow @nogc:
     {
         enum FunctionName = transform_function_name(__traits(identifier, fun));
         Function function_ = Function.create_contextual!(fun, Instance, suggest_completion)(i);
-        return console._allocator.allocT!FunctionCommand(
-            console,
-            commandName ? commandName.makeString(defaultAllocator) : StringLit!FunctionName,
-            function_);
+        return console._allocator.allocT!FunctionCommand(console, commandName ? commandName.makeString(defaultAllocator) : StringLit!FunctionName, function_);
     }
 
 
