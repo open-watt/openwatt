@@ -332,7 +332,7 @@ float link_headroom_amps(Link* link) pure
     float current = link_current_amps(link);
     if (current != current)
         return float.nan;
-    return cast(float)link.capacity_amps - current;
+    return link.capacity_amps - current;
 }
 
 Component battery_store_source(Port* p) pure
@@ -356,7 +356,7 @@ nothrow @nogc:
     Bus* b;
     Port* port_a;
     Port* port_b;
-    uint capacity_amps;
+    float capacity_amps = 0;
     bool closed;
     // port_a is an appliance's shared hub port, carrying the aggregate of every
     // leg rather than this link's flow; only port_b measures this link.
@@ -374,7 +374,7 @@ nothrow @nogc:
     Component meter;
     ubyte phase;
     MeterSign sign;
-    uint capacity_amps;
+    float capacity_amps = 0;
     bool closed = true;
 }
 
@@ -390,7 +390,7 @@ nothrow @nogc:
     float headroom_watts = float.nan;
     float voltage = float.nan;
     float limiting_current_amps = float.nan;
-    uint limiting_capacity_amps;
+    float limiting_capacity_amps = 0;
     bool complete;
 }
 
@@ -667,7 +667,7 @@ nothrow @nogc:
     }
 
     Link* add_link(Appliance owner, Bus* a, Bus* b, Port* port_a, Port* port_b,
-                   uint capacity_amps, bool closed = true, const(char)[] label = null,
+                   float capacity_amps, bool closed = true, const(char)[] label = null,
                    const(char)[] kind = null, const(char)[] id = null)
     {
         Link* l = defaultAllocator.allocT!Link();
@@ -1066,7 +1066,7 @@ private:
             }
             Port* pa = add_port(null, ba, PortRole.parent, FlowDomain.bidirectional, meter, link.meter_phase, link.meter_sign, "parent", link.name[]);
             Port* pb = add_port(null, bb, child_role, FlowDomain.bidirectional, null, 0, MeterSign.normal, "child", link.name[]);
-            Link* l = add_link(null, ba, bb, pa, pb, link.capacity, link.closed, link.name[], link.kind);
+            Link* l = add_link(null, ba, bb, pa, pb, link.capacity.value, link.closed, link.name[], link.kind);
             PortGroup* g = add_group(link.name[], PortGroupKind.switchgear, null, l);
             add_to_group(g, pa);
             add_to_group(g, pb);
@@ -1337,11 +1337,11 @@ private:
         return MeterSign.normal;
     }
 
-    uint read_port_capacity(Component c)
+    float read_port_capacity(Component c)
     {
         if (Element* e = c.find_element("capacity"))
             if (e.value.isNumber)
-                return cast(uint)e.value.asFloat;
+                return e.value.asFloat;
         return 0;
     }
 

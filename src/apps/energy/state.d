@@ -280,7 +280,7 @@ private void publish_topology_layout(Device energy, ref TopologyGraph graph)
         energy.set_element(tconcat(base, "child_port"), (link.port_b ? link.port_b.id[] : "").makeString(defaultAllocator()));
         const(char)[] kind = link.kind.length ? link.kind : link.owner ? "appliance" : "link";
         energy.set_element(tconcat(base, "kind"), kind.makeString(defaultAllocator()));
-        energy.set_element(tconcat(base, "capacity"), cast(int)link.capacity_amps);
+        energy.set_element(tconcat(base, "capacity"), link.capacity_amps);
     }
 }
 
@@ -873,7 +873,7 @@ private void publish_circuit_branch(Device energy, uint generation, ref Topology
         (link.kind.length ? link.kind : link.owner ? "appliance" : "link").makeString(defaultAllocator()));
     energy.set_element(tconcat(base, "parent"), (link.a ? link.a.id[] : "").makeString(defaultAllocator()));
     energy.set_element(tconcat(base, "child"), (link.b ? link.b.id[] : "").makeString(defaultAllocator()));
-    energy.set_element(tconcat(base, "capacity"), cast(int)link.capacity_amps);
+    energy.set_element(tconcat(base, "capacity"), link.capacity_amps);
     energy.set_element(tconcat(base, "conducting"), link.closed);
     energy.set_element(tconcat(base, "parent_terminal"), graph.attribution.terminal_index(graph, link.port_a));
     energy.set_element(tconcat(base, "child_terminal"), graph.attribution.terminal_index(graph, link.port_b));
@@ -934,8 +934,7 @@ private void publish_control_path(Device energy, ref TopologyGraph graph, Applia
         (path.limiting_link ? path.limiting_link.id[] : "").makeString(defaultAllocator()));
     energy.set_element(tconcat(base, "limiting_kind"),
         (path.limiting_link ? path.limiting_link.kind : "").makeString(defaultAllocator()));
-    energy.set_element(tconcat(base, "limiting_capacity_amps"),
-        cast(int)path.limiting_capacity_amps);
+    energy.set_element(tconcat(base, "limiting_capacity_amps"), path.limiting_capacity_amps);
     energy.set_element(tconcat(base, "limiting_current_amps"),
         path.limiting_current_amps);
 }
