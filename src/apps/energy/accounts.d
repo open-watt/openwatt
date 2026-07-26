@@ -243,47 +243,53 @@ void update_island_accounts(ref IslandAccountPublisher publisher, Island* island
     publisher.grid_today_export.publish(cast(float)t.grid_export_today_kwh, ts);
 }
 
+// Every account is a projection of the one boundary reduction: each solved
+// boundary edge contributes once, classified by metadata, oriented by shape.
 IslandTotals compute_island_totals(Island* island, ref TopologyGraph graph, ref DailySnapshot daily)
 {
     IslandTotals t;
+    float generator_power = 0;
 
-    // The root is deliberately anchored to the utility bus for on-grid islands.
-    if (island.root && island.root.contains_grid && island.root.balance.has(MeterField.power))
+    foreach (ref f; graph.boundary_flows[])
     {
-        t.grid_power = island.root.balance.active[0].value;
-        // When utility inlets are modelled, other grid-bus counters belong to
-        // local consumers or generators rather than the utility exchange.
-        bool inlets = bus_has_grid_inlet(island.root);
-        foreach (p; island.root.ports[])
+        Bus* b = boundary_bus(f.port);
+        if (b is null || !island_contains(island, b))
+            continue;
+        float net = f.power_into_graph - f.power_out_of_graph;
+        final switch (f.kind)
         {
-            if (!p.meter)
-                continue;
-            if (inlets)
-            {
-                if (!is_grid_inlet_port(p))
-                    continue;
-            }
-            // A class terminal measures its equipment, not the utility exchange.
-            else if (class_terminal(p) || p.role == PortRole.pv || p.role == PortRole.battery)
-                continue;
-            t.grid_import_today_kwh += today_delta_value(daily, p.meter.find_element("import"),
-                                                         p.meter_data.total_import_active[0]);
-            t.grid_export_today_kwh += today_delta_value(daily, p.meter.find_element("export"),
-                                                         p.meter_data.total_export_active[0]);
+            case BoundaryKind.grid:
+                t.grid_power += net;
+                break;
+            case BoundaryKind.solar:
+                t.solar_power += net;
+                break;
+            case BoundaryKind.generator:
+                generator_power += net;
+                break;
+            case BoundaryKind.battery:
+                t.battery_power += net;
+                break;
+            case BoundaryKind.load:
+                break;
+            case BoundaryKind.unclassified:
+                t.rogue_generation_power += f.power_into_graph;
+                t.rogue_load_power += f.power_out_of_graph;
+                break;
         }
     }
 
-    foreach (ref production; graph.productions[])
-        if (production_belongs_to_island(production, graph, island) &&
-            production.data.has(MeterField.power))
-            t.solar_power += production.data.active[0].value;
+    add_boundary_energy(t, island, graph, daily);
+
+    // Solar daily counters still reconcile through productions: an inferred
+    // boundary (implicit pv terminal) has no counter of its own, but its bus's
+    // interior mppt meters count the same energy.
     add_production_today(t, graph, island, daily);
 
-    add_island_battery(t, island, daily);
     add_island_rogue(t, island);
 
     // Keep grid separate so load = generation + grid before the zero clamp.
-    t.generation_power = t.solar_power + t.battery_power + t.rogue_generation_power;
+    t.generation_power = t.solar_power + generator_power + t.battery_power + t.rogue_generation_power;
 
     t.load_power = t.generation_power + t.grid_power;
     if (t.load_power < 0)
@@ -292,51 +298,29 @@ IslandTotals compute_island_totals(Island* island, ref TopologyGraph graph, ref 
     return t;
 }
 
-// Terminals measure equipment and define its account. Boundary ports measure
-// places and only support bus balance and cross-checks. An implicit terminal
-// represents equipment declared by a boundary until the real equipment is
-// modelled. Keep this selection aligned with topology.rebuild_productions.
-//
-// TODO(MET-5, docs/SOURCE_SURVEY.draft.md): replace this account-specific
-//      selection with the generic boundary-edge model. Retain all declared
-//      ports, solve point-meter observations once, and account exactly the
-//      connected port of a one-port group or a dangling port of a multi-port
-//      group. Keep Port power in its Bus -> Port frame; boundary orientation is
-//      a separate accounting transform. Implement the spec rather than patching
-//      PV signs here.
-void add_island_battery(ref IslandTotals t, Island* island, ref DailySnapshot daily)
+void add_boundary_energy(ref IslandTotals t, Island* island, ref TopologyGraph graph, ref DailySnapshot daily)
 {
-    foreach (bus; island.members[])
+    foreach (p; graph.boundaries[])
     {
-        bool implicit_terminal;
-        foreach (p; bus.ports[])
-            if (p.role == PortRole.battery && p.implicit)
-                implicit_terminal = true;
-
-        foreach (p; bus.ports[])
+        Bus* b = boundary_bus(p);
+        if (b is null || !island_contains(island, b))
+            continue;
+        BoundaryEnergy e = boundary_energy(p);
+        final switch (boundary_kind(p))
         {
-            if (p.role != PortRole.battery)
-                continue;
-            if (class_terminal(p))
-            {
-                if (p.meter_data.has(MeterField.power))
-                    t.battery_power += -p.meter_data.active[0].value;
-                if (p.meter)
-                {
-                    t.battery_charge_today_kwh += today_delta_value(daily, p.meter.find_element("import"),
-                                                                    p.meter_data.total_import_active[0]);
-                    t.battery_discharge_today_kwh += today_delta_value(daily, p.meter.find_element("export"),
-                                                                       p.meter_data.total_export_active[0]);
-                }
-            }
-            else if (implicit_terminal && p.meter)
-            {
-                // The implicit bank is visible only in the boundary's opposite frame.
-                t.battery_charge_today_kwh += today_delta_value(daily, p.meter.find_element("export"),
-                                                                p.meter_data.total_export_active[0]);
-                t.battery_discharge_today_kwh += today_delta_value(daily, p.meter.find_element("import"),
-                                                                   p.meter_data.total_import_active[0]);
-            }
+            case BoundaryKind.grid:
+                t.grid_import_today_kwh += today_delta_value(daily, e.into_key, e.into_total);
+                t.grid_export_today_kwh += today_delta_value(daily, e.out_key, e.out_total);
+                break;
+            case BoundaryKind.battery:
+                t.battery_discharge_today_kwh += today_delta_value(daily, e.into_key, e.into_total);
+                t.battery_charge_today_kwh += today_delta_value(daily, e.out_key, e.out_total);
+                break;
+            case BoundaryKind.solar:
+            case BoundaryKind.generator:
+            case BoundaryKind.load:
+            case BoundaryKind.unclassified:
+                break;
         }
     }
 }
@@ -408,6 +392,15 @@ void add_production_today(ref IslandTotals t, ref TopologyGraph graph, Island* i
     }
 }
 
+bool island_contains(Island* island, Bus* bus)
+{
+    foreach (b; island.members[])
+        if (b is bus)
+            return true;
+    return false;
+}
+
+// Production contributions carry circuit names, not bus pointers.
 bool circuit_in_island(Island* island, const(char)[] circuit)
 {
     foreach (b; island.members[])
