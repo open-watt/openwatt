@@ -20,10 +20,12 @@ size_t ota_partition_size()
     return p ? p.size : 0;
 }
 
-int ota_begin(size_t image_size, ref uint handle)
+int ota_begin(size_t, ref uint handle)
 {
+    // Whole-partition erase blocks the main-thread IP stack for several seconds.
+    enum size_t OTA_WITH_SEQUENTIAL_WRITES = 0xffff_fffe;
     auto p = esp_ota_get_next_update_partition(null);
-    return p ? esp_ota_begin(p, image_size, handle) : -1;
+    return p ? esp_ota_begin(p, OTA_WITH_SEQUENTIAL_WRITES, handle) : -1;
 }
 
 int ota_write(uint handle, const(ubyte)[] data)
