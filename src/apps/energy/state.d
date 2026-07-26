@@ -58,6 +58,7 @@ nothrow @nogc:
     Array!TopologyBusPublishCache topology_buses;
     Array!TopologyPortPublishCache topology_ports;
     Array!TopologyLinkPublishCache topology_links;
+    Array!GroupLossPublishCache group_losses;
     Array!BoundaryPublishEntry boundaries;
 
     void publish(Device energy, ref TopologyGraph graph, ref Islands islands, bool rebuild_layout)
@@ -82,6 +83,7 @@ nothrow @nogc:
             && topology_buses.length == graph.bus_list.length
             && topology_ports.length == graph.ports.length
             && topology_links.length == graph.links.length
+            && group_losses.length == graph.groups.length
             && boundaries.length == graph.boundaries.length;
     }
 
@@ -131,6 +133,10 @@ nothrow @nogc:
             topology_links ~= c;
         }
 
+        group_losses.resize(graph.groups.length);
+        foreach (i, g; graph.groups[])
+            group_losses[i].bind(energy, g);
+
         boundaries.resize(graph.boundaries.length);
         foreach (i, p; graph.boundaries[])
             boundaries[i].bind(energy, p);
@@ -179,6 +185,8 @@ nothrow @nogc:
             topology_ports[i].publish(port, graph.generation);
         foreach (i, link; graph.links[])
             topology_links[i].publish(link, graph.generation);
+        foreach (i, g; graph.groups[])
+            group_losses[i].publish(g);
     }
 }
 
@@ -415,6 +423,40 @@ nothrow @nogc:
             last = s;
             seen = true;
         }
+    }
+}
+
+// Appliance loss is self-consumption/conversion loss; on switchgear the same
+// sum is a two-sides-disagree wiring/calibration alarm.
+private struct GroupLossPublishCache
+{
+nothrow @nogc:
+    FloatPublishCell loss;
+    BoolPublishCell mismatch;
+
+    void bind(Device energy, PortGroup* g)
+    {
+        loss = FloatPublishCell();
+        mismatch = BoolPublishCell();
+        if (g.kind == PortGroupKind.appliance)
+        {
+            if (g.owner !is null && g.ports.length >= 2)
+                loss.bind(energy, tconcat("appliance.", g.owner.name[], "."), "loss_power");
+        }
+        else if (g.link !is null && g.link.id.length != 0)
+        {
+            const(char)[] base = tconcat("topology.link.", g.link.id[], ".");
+            loss.bind(energy, base, "loss_power");
+            mismatch.bind(energy, base, "mismatch");
+        }
+    }
+
+    void publish(PortGroup* g)
+    {
+        if (loss.element)
+            loss.publish(g.loss_power);
+        if (mismatch.element)
+            mismatch.publish(g.mismatch);
     }
 }
 
