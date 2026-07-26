@@ -96,6 +96,8 @@ nothrow @nogc:
     Appliance owner;
     Link* link;
     Array!(Port*) ports;
+    float loss_power = float.nan;
+    bool mismatch;
     bool closed = true;
 }
 
@@ -125,6 +127,106 @@ bool ports_connected(PortGroup* g, Port* a, Port* b)
         case PortGroupKind.transfer:
             assert(false, "TODO: transfer switch connectivity needs a declaration surface");
     }
+}
+
+enum BoundaryKind : ubyte
+{
+    unclassified,
+    grid,
+    generator,
+    solar,
+    battery,
+    load,
+}
+
+const(char)[] boundary_kind_name(BoundaryKind k) pure
+{
+    final switch (k)
+    {
+        case BoundaryKind.unclassified: return "unclassified";
+        case BoundaryKind.grid:         return "grid";
+        case BoundaryKind.generator:    return "generator";
+        case BoundaryKind.solar:        return "solar";
+        case BoundaryKind.battery:      return "battery";
+        case BoundaryKind.load:         return "load";
+    }
+}
+
+// Classification is metadata stamped on a boundary, independent of sign:
+// declared role first, then owner kind, then sink default, never flow alone.
+BoundaryKind boundary_kind(Port* p) pure
+{
+    switch (p.role)
+    {
+        case PortRole.pv:      return BoundaryKind.solar;
+        case PortRole.battery: return BoundaryKind.battery;
+        case PortRole.grid:    return BoundaryKind.grid;
+        case PortRole.car:
+        case PortRole.outlet:  return BoundaryKind.load;
+        default: break;
+    }
+    if (p.owner !is null)
+    {
+        const(char)[] kind = p.owner.kind;
+        if (kind == "pv" || kind == "solar")
+            return BoundaryKind.solar;
+        if (kind == "battery")
+            return BoundaryKind.battery;
+        if (kind == "generator")
+            return BoundaryKind.generator;
+        if (kind == "grid")
+            return BoundaryKind.grid;
+        if (p.flow == FlowDomain.consume)
+            return BoundaryKind.load;
+        return BoundaryKind.unclassified;
+    }
+    if (p.group !is null && p.group.kind == PortGroupKind.sink)
+        return BoundaryKind.load;
+    return BoundaryKind.unclassified;
+}
+
+// Transient solved/accounting view of one boundary edge; not topology state.
+struct BoundaryFlow
+{
+    Port* port;
+    BoundaryKind kind;
+    float power_into_graph = 0;
+    float power_out_of_graph = 0;
+}
+
+// Corrected cumulative counters for one boundary, with the Element keys that
+// accounts use for reset-safe daily deltas. Counter direction follows
+// boundary shape: a dangling port's import counts into the graph.
+struct BoundaryEnergy
+{
+    Element* into_key;
+    Element* out_key;
+    double into_total = double.nan;
+    double out_total = double.nan;
+}
+
+BoundaryEnergy boundary_energy(Port* p)
+{
+    BoundaryEnergy e;
+    if (p is null || p.meter is null)
+        return e;
+    Element* import_e = p.meter.find_element("import");
+    Element* export_e = p.meter.find_element("export");
+    if (p.bus is null)
+    {
+        e.into_key = import_e;
+        e.out_key = export_e;
+        e.into_total = p.meter_data.total_import_active[0];
+        e.out_total = p.meter_data.total_export_active[0];
+    }
+    else
+    {
+        e.into_key = export_e;
+        e.out_key = import_e;
+        e.into_total = p.meter_data.total_export_active[0];
+        e.out_total = p.meter_data.total_import_active[0];
+    }
+    return e;
 }
 
 // The island a dangling boundary belongs to: the bus reached through its
@@ -447,6 +549,8 @@ nothrow @nogc:
     Array!(Port*) ports;
     Array!(Link*) links;
     Array!(PortGroup*) groups;
+    Array!(Port*) boundaries;
+    Array!BoundaryFlow boundary_flows;
     Array!(Element*) shape_elements;
     bool shape_dirty;
     CircuitAttribution attribution;
@@ -466,6 +570,8 @@ nothrow @nogc:
         production_contributions.clear();
         productions.clear();
         production_strings.clear();
+        boundaries.clear();
+        boundary_flows.clear();
         foreach (g; groups[])
             defaultAllocator.freeT(g);
         foreach (p; ports[])
@@ -740,8 +846,17 @@ nothrow @nogc:
         }
 
         synthesise_implicit_terminals();
+        rebuild_boundaries();
 
         refresh();
+    }
+
+    void rebuild_boundaries()
+    {
+        boundaries.clear();
+        foreach (p; ports[])
+            if (is_boundary(p))
+                boundaries ~= p;
     }
 
     // A boundary role declares equipment on the facing bus. Represent missing
@@ -779,9 +894,79 @@ nothrow @nogc:
         ++sample_generation;
         refresh_meters();
         infer_graph();
+        reduce_group_losses();
+        reduce_boundary_flows();
         attribution.compute(this);
         rebuild_stores();
         rebuild_productions();
+    }
+
+    // A fully-solved group's port sum is its self-consumption/conversion loss;
+    // for switchgear, which conserves, a sum beyond meter noise is a mismatch.
+    void reduce_group_losses()
+    {
+        foreach (g; groups[])
+        {
+            g.loss_power = float.nan;
+            g.mismatch = false;
+            if (g.ports.length < 2)
+                continue;
+            if ((g.kind == PortGroupKind.switchgear || g.kind == PortGroupKind.sink) &&
+                !(g.link ? g.link.closed : g.closed))
+                continue;
+
+            float sum = 0;
+            float scale = 0;
+            bool complete = true;
+            foreach (p; g.ports[])
+            {
+                if (!p.meter_data.has(MeterField.power))
+                {
+                    complete = false;
+                    break;
+                }
+                float power = p.meter_data.active[0].value;
+                sum += power;
+                if (absf(power) > scale)
+                    scale = absf(power);
+            }
+            if (!complete)
+                continue;
+
+            g.loss_power = sum;
+            if (g.kind != PortGroupKind.appliance)
+            {
+                float noise_floor_w = scale * 0.02f > 50 ? scale * 0.02f : 50;
+                g.mismatch = absf(sum) > noise_floor_w;
+            }
+        }
+    }
+
+    // Boundary orientation is an accounting transform; Port.power always keeps
+    // the Bus -> Port frame (for a dangling port, the external bus).
+    void reduce_boundary_flows()
+    {
+        boundary_flows.clear();
+        foreach (p; boundaries[])
+        {
+            if (!p.meter_data.has(MeterField.power))
+                continue;
+            BoundaryFlow f;
+            f.port = p;
+            f.kind = boundary_kind(p);
+            float power = p.meter_data.active[0].value;
+            if (p.bus is null)
+            {
+                f.power_into_graph = power > 0 ? power : 0;
+                f.power_out_of_graph = power < 0 ? -power : 0;
+            }
+            else
+            {
+                f.power_into_graph = power < 0 ? -power : 0;
+                f.power_out_of_graph = power > 0 ? power : 0;
+            }
+            boundary_flows ~= f;
+        }
     }
 
 private:
@@ -1764,6 +1949,28 @@ unittest
         assert(absf(sink_down.meter_data.active[0].value + 600) <= 0.01f);
         assert(sink_down.meter_data.source(MeterField.power) == Provenance.inferred_subtraction);
         assert(is_boundary(sink_down) && boundary_bus(sink_down) is site);
+
+        g2.reduce_group_losses();
+        assert(absf(outlets.loss_power) <= 0.01f);
+        assert(!outlets.mismatch);
+
+        g2.rebuild_boundaries();
+        assert(g2.boundaries.length == 3);
+        assert(g2.boundaries[].findFirst(sink_up) == g2.boundaries.length);
+
+        g2.reduce_boundary_flows();
+        float into = 0, out_of = 0;
+        foreach (ref f; g2.boundary_flows[])
+        {
+            into += f.power_into_graph;
+            out_of += f.power_out_of_graph;
+            if (f.port is main_p)
+                assert(absf(f.power_into_graph - 1000) <= 0.01f && f.power_out_of_graph == 0);
+            if (f.port is sink_down)
+                assert(f.power_into_graph == 0 && absf(f.power_out_of_graph - 600) <= 0.01f &&
+                       f.kind == BoundaryKind.load);
+        }
+        assert(absf(into - out_of) <= 0.01f);
         g2.clear();
     }
 }

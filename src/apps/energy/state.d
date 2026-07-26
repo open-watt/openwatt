@@ -257,7 +257,7 @@ private void publish_topology_layout(Device energy, ref TopologyGraph graph)
         const(char)[] port_id = port.path.length ? port.path[] : port_role_name(port.role);
         const(char)[] base = tconcat("topology.appliance.", port.owner.name[], ".", port_id, ".");
         energy.set_element(tconcat(base, "owner"), port.owner.name[].makeString(defaultAllocator()));
-        energy.set_element(tconcat(base, "bus"), port.bus.id[].makeString(defaultAllocator()));
+        energy.set_element(tconcat(base, "bus"), (port.bus ? port.bus.id[] : "").makeString(defaultAllocator()));
         energy.set_element(tconcat(base, "port_role"), port_role_name(port.role).makeString(defaultAllocator()));
         energy.set_element(tconcat(base, "port"), port_id.makeString(defaultAllocator()));
         energy.set_element(tconcat(base, "flow"), flow_domain_name(port.flow).makeString(defaultAllocator()));
@@ -995,7 +995,7 @@ private void publish_port(Device energy, Port* port)
     energy.set_element(tconcat(base, "id"), port.id[].makeString(defaultAllocator()));
     energy.set_element(tconcat(base, "owner"), (port.owner ? port.owner.name[] : "").makeString(defaultAllocator()));
     energy.set_element(tconcat(base, "label"), port.label.makeString(defaultAllocator()));
-    energy.set_element(tconcat(base, "bus"), port.bus.id[].makeString(defaultAllocator()));
+    energy.set_element(tconcat(base, "bus"), (port.bus ? port.bus.id[] : "").makeString(defaultAllocator()));
     energy.set_element(tconcat(base, "port"), port_name.makeString(defaultAllocator()));
     energy.set_element(tconcat(base, "port_role"), port_role_name(port.role).makeString(defaultAllocator()));
     energy.set_element(tconcat(base, "flow"), flow_domain_name(port.flow).makeString(defaultAllocator()));
