@@ -25,6 +25,7 @@ enum PacketType : ushort
     tesla_twc   = 9,
     ble         = 10,
     cpc         = 11,
+    i2c         = 12,
     count
 }
 static assert(PacketType.count <= 16, "PacketType must fit in 4 bits");

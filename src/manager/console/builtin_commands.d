@@ -3,13 +3,18 @@ module manager.console.builtin_commands;
 import urt.array;
 import urt.file : load_file;
 import urt.mem;
+import urt.result : StringResult;
 import urt.string;
 import urt.string.format : tconcat;
+import urt.time;
 import urt.variant;
 
+import manager;
 import manager.console;
 import manager.console.command;
 import manager.expression : NamedArgument, Script, is_truthy, make_script;
+import manager.signal;
+import manager.value : from_variant;
 
 nothrow @nogc:
 
@@ -473,6 +478,180 @@ private:
     bool _cancelled = false;
 }
 
+class WaitCommand : Command
+{
+nothrow @nogc:
+
+    this(ref Console console)
+    {
+        super(console, StringLit!"wait");
+    }
+
+    override CommandState execute(Session session, Scope*, const Variant[] args, const NamedArgument[] named_args, out Variant result)
+    {
+        const(char)[] signal;
+        Duration timeout;
+        foreach (ref argument; named_args)
+        {
+            if (argument.name == "on")
+            {
+                if (!argument.value.isString)
+                {
+                    session.write_output("Error: :wait on= must be a signal URI", true);
+                    return null;
+                }
+                signal = argument.value.asString;
+            }
+            else if (argument.name == "timeout")
+            {
+                if (const(char)[] error = from_variant(argument.value, timeout))
+                {
+                    session.write_output(tconcat("Error: ", error), true);
+                    return null;
+                }
+            }
+            else
+            {
+                session.write_output(tconcat("Error: unknown :wait argument: ", argument.name), true);
+                return null;
+            }
+        }
+
+        if (args.length != 0 || signal.length == 0 || timeout < Duration.zero)
+        {
+            session.write_output("Usage: :wait on=<signal-uri> [timeout=<duration>]", true);
+            return null;
+        }
+
+        WaitCommandState state = _console._allocator.allocT!WaitCommandState(session, signal, timeout);
+        StringResult started = state.start();
+        if (!started)
+        {
+            session.write_output(tconcat("Error: ", started.message), true);
+            _console._allocator.freeT(state);
+            return null;
+        }
+        return state;
+    }
+
+    version (ExcludeHelpText) {} else
+    override const(char)[] help(const(char)[]) const
+        => "Wait for a registered signal while the main loop continues to run.\n"
+         ~ "The optional timeout is implemented through the time signal provider.\n"
+         ~ "Usage: :wait on=<signal-uri> [timeout=<duration>]";
+}
+
+
+private class WaitCommandState : CommandState
+{
+nothrow @nogc:
+
+    this(Session session, const(char)[] signal, Duration timeout)
+    {
+        super(session, null);
+        _signal_uri = signal.makeString(g_app.allocator);
+        _timeout = timeout;
+    }
+
+    StringResult start()
+    {
+        SignalUri uri;
+        StringResult parsed = parse_signal_uri(_signal_uri[], uri);
+        if (!parsed)
+            return parsed;
+        ISignalProvider provider = g_app.find_signal_provider(uri.scheme);
+        if (!provider)
+            return StringResult(tconcat("unknown signal provider: ", uri.scheme));
+        StringResult subscribed = provider.subscribe(uri, &on_signal, _signal);
+        if (!subscribed)
+            return subscribed;
+
+        if (_timeout > Duration.zero)
+        {
+            const(char)[] timeout_uri = tconcat("every:", _timeout, "?repeat=false");
+            parsed = parse_signal_uri(timeout_uri, uri);
+            if (!parsed)
+            {
+                cleanup();
+                return parsed;
+            }
+            provider = g_app.find_signal_provider(uri.scheme);
+            if (!provider)
+            {
+                cleanup();
+                return StringResult("time signal provider is unavailable");
+            }
+            subscribed = provider.subscribe(uri, &on_timeout, _timeout_signal);
+            if (!subscribed)
+            {
+                cleanup();
+                return subscribed;
+            }
+        }
+        return StringResult.success;
+    }
+
+    override CommandCompletionState update()
+    {
+        if (_cancelled)
+        {
+            cleanup();
+            return CommandCompletionState.cancelled;
+        }
+        if (_timed_out)
+        {
+            cleanup();
+            result = Variant(false);
+            return CommandCompletionState.timeout;
+        }
+        if (_fired)
+        {
+            cleanup();
+            result = Variant(true);
+            return CommandCompletionState.finished;
+        }
+        return CommandCompletionState.in_progress;
+    }
+
+    override void request_cancel()
+    {
+        _cancelled = true;
+    }
+
+private:
+    String _signal_uri;
+    Duration _timeout;
+    SignalSub _signal;
+    SignalSub _timeout_signal;
+    bool _fired;
+    bool _timed_out;
+    bool _cancelled;
+
+    void on_signal(MonoTime, ref const SignalEvent)
+    {
+        _fired = true;
+    }
+
+    void on_timeout(MonoTime, ref const SignalEvent)
+    {
+        _timed_out = true;
+    }
+
+    void cleanup()
+    {
+        if (_signal)
+        {
+            _signal.provider.unsubscribe(_signal);
+            _signal = null;
+        }
+        if (_timeout_signal)
+        {
+            _timeout_signal.provider.unsubscribe(_timeout_signal);
+            _timeout_signal = null;
+        }
+    }
+}
+
 
 private Script find_script(const Variant[] args, const NamedArgument[] namedArgs, const(char)[] name)
 {
@@ -503,4 +682,5 @@ void RegisterBuiltinCommands(ref Console console)
     console.add_command(s, console._allocator.allocT!RunCommand(console));
     console.add_command(s, console._allocator.allocT!IfCommand(console));
     console.add_command(s, console._allocator.allocT!WhileCommand(console));
+    console.add_command(s, console._allocator.allocT!WaitCommand(console));
 }
