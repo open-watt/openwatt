@@ -1186,9 +1186,7 @@ private:
 
     void set_const_element(Component c, string template_, string id, Variant value)
     {
-        Element* e = ensure_element(c, id);
-        if (!e.format.valid)
-            e.format = register_value_format(value);
+        Element* e = c.find_or_create_element(id, register_value_format(value));
         if (e.value.isNull)
         {
             e.value = value;
@@ -1317,7 +1315,7 @@ private:
             return;
         }
 
-        Element* e = ensure_element(target, fd.id);
+        Element* e = target.find_or_create_element(fd.id, desc.format);
         e.access = fd.access;
         populate_element_metadata(e, target.template_[], fd.id);
         if (fd.freq != Frequency.constant && fd.freq != Frequency.configuration && element_already_sampled(e, out_fields))
@@ -1326,9 +1324,6 @@ private:
                 log.tracef("materialise: skip duplicate sampler for {0}.{1}", target.id[], fd.id);
             return;
         }
-
-        if (!e.format.valid)
-            e.format = desc.format;
 
         if (!sentinel_now)
         {
@@ -1467,9 +1462,7 @@ private:
 
     void set_type_element(Component c, string template_, string type_value)
     {
-        Element* te = ensure_element(c, "type");
-        if (!te.format.valid)
-            te.format = register_value_format(type_value);
+        Element* te = c.find_or_create_element("type", register_value_format(type_value));
         if (te.value.isNull)
         {
             te.value = Variant(type_value);
@@ -1521,19 +1514,6 @@ private:
             parent.template_ = cd.template_.makeString(defaultAllocator());
         return parent;
     }
-
-    Element* ensure_element(Component c, string id)
-    {
-        foreach (Element* existing; c.elements)
-            if (existing.id[] == id)
-                return existing;
-        Element* e = g_app.allocator.allocT!Element();
-        e.parent = c;
-        e.id = id.makeString(defaultAllocator());
-        c.elements ~= e;
-        return e;
-    }
-
 
     void response_handler(ref const ModbusPDU req, ref ModbusPDU resp, MonoTime, MonoTime response_time)
     {
