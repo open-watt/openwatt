@@ -64,6 +64,7 @@ nothrow @nogc:
     String path;
     const(char)[] label;
     Bus* bus;
+    PortGroup* group;
     PortRole role;
     FlowDomain flow;
     Component component;
@@ -73,6 +74,73 @@ nothrow @nogc:
     MeterData meter_data;
     bool root;
     bool implicit;
+}
+
+enum PortGroupKind : ubyte
+{
+    appliance,
+    switchgear,
+    transfer,
+    handover,
+    sink,
+}
+
+// The thing whose declared terminals these are; transient per topology build.
+struct PortGroup
+{
+nothrow @nogc:
+    this(this) @disable;
+
+    String id;
+    PortGroupKind kind;
+    Appliance owner;
+    Link* link;
+    Array!(Port*) ports;
+    bool closed = true;
+}
+
+// The connected port of a one-port group, or any dangling port, is a boundary
+// edge of the modeled graph; interior ports support balance and cross-checks.
+bool is_boundary(Port* p) pure
+{
+    if (p is null || p.group is null)
+        return false;
+    return p.group.ports.length == 1 || p.bus is null;
+}
+
+// Appliances are unconditional energy junctions; switchgear connectivity
+// follows live contact state.
+bool ports_connected(PortGroup* g, Port* a, Port* b)
+{
+    if (g is null || a is b || a.group !is g || b.group !is g)
+        return false;
+    final switch (g.kind)
+    {
+        case PortGroupKind.appliance:
+        case PortGroupKind.handover:
+            return true;
+        case PortGroupKind.switchgear:
+        case PortGroupKind.sink:
+            return g.link ? g.link.closed : g.closed;
+        case PortGroupKind.transfer:
+            assert(false, "TODO: transfer switch connectivity needs a declaration surface");
+    }
+}
+
+// The island a dangling boundary belongs to: the bus reached through its
+// group's active internal connections, or null when isolated.
+Bus* boundary_bus(Port* p)
+{
+    if (p is null)
+        return null;
+    if (p.bus !is null)
+        return p.bus;
+    if (p.group is null)
+        return null;
+    foreach (q; p.group.ports[])
+        if (q.bus !is null && ports_connected(p.group, p, q))
+            return q.bus;
+    return null;
 }
 
 // Terminals represent equipment and source accounts; boundary ports represent
@@ -378,6 +446,7 @@ nothrow @nogc:
     Array!(Bus*) bus_list;
     Array!(Port*) ports;
     Array!(Link*) links;
+    Array!(PortGroup*) groups;
     Array!(Element*) shape_elements;
     bool shape_dirty;
     CircuitAttribution attribution;
@@ -397,12 +466,15 @@ nothrow @nogc:
         production_contributions.clear();
         productions.clear();
         production_strings.clear();
+        foreach (g; groups[])
+            defaultAllocator.freeT(g);
         foreach (p; ports[])
             defaultAllocator.freeT(p);
         foreach (l; links[])
             defaultAllocator.freeT(l);
         foreach (b; bus_list[])
             defaultAllocator.freeT(b);
+        groups.clear();
         ports.clear();
         links.clear();
         bus_list.clear();
@@ -456,9 +528,27 @@ nothrow @nogc:
         p.meter_data.reset_to_missing();
         if (meter)
             p.meter_data = get_port_meter_data(meter, phase, sign);
-        bus.ports ~= p;
+        if (bus)
+            bus.ports ~= p;
         ports ~= p;
         return p;
+    }
+
+    PortGroup* add_group(const(char)[] id, PortGroupKind kind, Appliance owner = null, Link* link = null)
+    {
+        PortGroup* g = defaultAllocator.allocT!PortGroup();
+        g.id = id.makeString(defaultAllocator());
+        g.kind = kind;
+        g.owner = owner;
+        g.link = link;
+        groups ~= g;
+        return g;
+    }
+
+    void add_to_group(PortGroup* g, Port* p)
+    {
+        p.group = g;
+        g.ports ~= p;
     }
 
     const(char)[] make_port_id(Appliance owner, Bus* bus, PortRole role, const(char)[] path, const(char)[] label)
@@ -521,7 +611,7 @@ nothrow @nogc:
         Port* fallback;
         foreach (p; ports[])
         {
-            if (p.owner !is a)
+            if (p.owner !is a || p.bus is null)
                 continue;
             if (fallback is null)
                 fallback = p;
@@ -628,7 +718,7 @@ nothrow @nogc:
         {
             Array!DevicePort device_ports;
             collect_device_ports(a, device_ports);
-            if (device_ports.length != 0)
+            if (any_connected(device_ports))
             {
                 apply_appliance_meter(a, device_ports);
                 warn_unmatched_bindings(a, device_ports);
@@ -681,6 +771,7 @@ nothrow @nogc:
             return;
         Port* p = add_port(null, b, role, flow, null, 0, MeterSign.normal, null, b.id[]);
         p.implicit = true;
+        add_to_group(add_group(p.id[], PortGroupKind.handover), p);
     }
 
     void refresh()
@@ -790,26 +881,57 @@ private:
             }
             Port* pa = add_port(null, ba, PortRole.parent, FlowDomain.bidirectional, meter, link.meter_phase, link.meter_sign, "parent", link.name[]);
             Port* pb = add_port(null, bb, child_role, FlowDomain.bidirectional, null, 0, MeterSign.normal, "child", link.name[]);
-            add_link(null, ba, bb, pa, pb, link.capacity, link.closed, link.name[], link.kind);
+            Link* l = add_link(null, ba, bb, pa, pb, link.capacity, link.closed, link.name[], link.kind);
+            PortGroup* g = add_group(link.name[], PortGroupKind.switchgear, null, l);
+            add_to_group(g, pa);
+            add_to_group(g, pb);
         }
         else
         {
+            // A parent-only link dangles toward unenumerated attachments; its
+            // far endpoint is the boundary (the sink).
             Bus* b = ensure_bus(left.length ? left : "unassigned");
-            add_port(null, b, PortRole.connection, flow_for(link.kind), meter, link.meter_phase, link.meter_sign, "connection", link.name[]);
+            Port* pa = add_port(null, b, PortRole.connection, flow_for(link.kind), meter, link.meter_phase, link.meter_sign, "connection", link.name[]);
+            PortRole dangling_role = link.role.length ? port_role_from_name(link.role) : PortRole.child;
+            Port* pb = add_port(null, null, dangling_role, flow_for_role(dangling_role), null, 0, MeterSign.normal, "child", link.name[]);
+            PortGroup* g = add_group(link.name[], PortGroupKind.sink);
+            g.closed = link.closed;
+            add_to_group(g, pa);
+            add_to_group(g, pb);
         }
+    }
+
+    FlowDomain flow_for_role(PortRole role) pure
+    {
+        if (role == PortRole.pv)
+            return FlowDomain.supply;
+        if (role == PortRole.battery || role == PortRole.grid || role == PortRole.backup)
+            return FlowDomain.bidirectional;
+        return FlowDomain.consume;
     }
 
     void add_device_ports(Appliance a, ref Array!DevicePort specs)
     {
+        size_t connected;
+        foreach (ref spec; specs[])
+            if (spec.circuit.length != 0)
+                ++connected;
+
+        PortGroup* group = add_group(a.name[], PortGroupKind.appliance, a);
         Array!(Port*) added;
+        Array!(DevicePort*) added_specs;
         foreach (ref spec; specs[])
         {
-            Bus* b = ensure_bus(spec.circuit);
+            Bus* b = spec.circuit.length ? ensure_bus(spec.circuit) : null;
             Port* p = add_port(a, b, spec.role, spec.flow, spec.meter, spec.phase, spec.sign, spec.path[], null, spec.component);
-            p.root = a.root && (spec.flow != FlowDomain.consume || specs.length == 1);
+            add_to_group(group, p);
+            if (b is null)
+                continue;
+            p.root = a.root && (spec.flow != FlowDomain.consume || connected == 1);
             if (p.root)
                 b.explicit_root = true;
             added ~= p;
+            added_specs ~= &spec;
         }
 
         if (added.length >= 2)
@@ -817,7 +939,7 @@ private:
             Port* first = added[0];
             foreach (i; 1 .. added.length)
             {
-                DevicePort* spec = &specs[i];
+                DevicePort* spec = added_specs[i];
                 Link* l = add_link(a, first.bus, added[i].bus, first, added[i], spec.capacity_amps, spec.closed, null, "appliance");
                 // With 3+ ports the star shares `first` across every leg, so its
                 // meter is the appliance aggregate, not this leg's flow.
@@ -860,14 +982,21 @@ private:
             spec.sign = read_meter_sign(c);
             spec.capacity_amps = read_port_capacity(c);
             spec.closed = read_port_closed(c);
-            if (spec.circuit.length != 0)
-                into ~= spec;
+            into ~= spec;
         }
         foreach (child; c.components[])
         {
             const(char)[] child_path = path.length ? tconcat(path, ".", child.id[]) : child.id[];
             collect_device_ports(a, child, child_path, into);
         }
+    }
+
+    bool any_connected(ref Array!DevicePort specs) pure
+    {
+        foreach (ref spec; specs[])
+            if (spec.circuit.length != 0)
+                return true;
+        return false;
     }
 
     void collect_bound_ports(Appliance a, ref Array!DevicePort into)
@@ -917,8 +1046,13 @@ private:
             return;
 
         DevicePort* target;
+        DevicePort* first_connected;
         foreach (ref spec; specs[])
         {
+            if (spec.circuit.length == 0)
+                continue;
+            if (first_connected is null)
+                first_connected = &spec;
             if (spec.role == PortRole.grid || spec.role == PortRole.connection || spec.role == PortRole.parent)
             {
                 target = &spec;
@@ -927,8 +1061,8 @@ private:
             if (target is null && spec.flow == FlowDomain.consume)
                 target = &spec;
         }
-        if (target is null && specs.length != 0)
-            target = &specs[0];
+        if (target is null)
+            target = first_connected;
         if (target !is null)
         {
             target.meter = a.meter_ref;
@@ -1037,7 +1171,7 @@ private:
     Port* last_port_for(Appliance a)
     {
         for (size_t i = ports.length; i-- > 0; )
-            if (ports[i].owner is a)
+            if (ports[i].owner is a && ports[i].bus !is null)
                 return ports[i];
         return null;
     }
@@ -1082,7 +1216,7 @@ private:
     void infer_graph()
     {
         // Infer only a single dark port, alternating with link mirroring.
-        foreach (_; 0 .. bus_list.length + links.length + 1)
+        foreach (_; 0 .. bus_list.length + links.length + groups.length + 1)
         {
             bool changed = infer_link_endpoints();
             foreach (b; bus_list[])
@@ -1095,12 +1229,50 @@ private:
                     changed = true;
                     break;
                 }
+            foreach (g; groups[])
+                if (infer_group_single_unknown(g))
+                {
+                    changed = true;
+                    break;
+                }
             if (!changed)
                 break;
         }
 
         foreach (b; bus_list[])
             aggregate_bus(b);
+    }
+
+    // Zero-loss group conservation: sum of all declared port powers is zero,
+    // solvable when exactly one port (connected or dangling) is unknown.
+    bool infer_group_single_unknown(PortGroup* g)
+    {
+        if (g.ports.length < 2)
+            return false;
+        if ((g.kind == PortGroupKind.switchgear || g.kind == PortGroupKind.sink) &&
+            !(g.link ? g.link.closed : g.closed))
+            return false;
+
+        Port* dark;
+        float sum = 0;
+        foreach (p; g.ports[])
+        {
+            if (p.meter_data.has(MeterField.power))
+                sum += p.meter_data.active[0].value;
+            else
+            {
+                if (dark !is null)
+                    return false;
+                dark = p;
+            }
+        }
+        if (dark is null)
+            return false;
+
+        dark.meter_data.reset_to_missing();
+        dark.meter_data.write_value(MeterField.power, 0, -sum);
+        dark.meter_data.mark(MeterField.power, 0, Provenance.inferred_subtraction);
+        return true;
     }
 
     void rebuild_stores()
@@ -1338,11 +1510,12 @@ private:
     }
 
     // Only a two-port appliance conserves power across one unambiguous link.
+    // Dangling ports do not carry inferred flow yet, so they do not disqualify.
     bool is_passthrough(Appliance a)
     {
         size_t n;
         foreach (p; ports[])
-            if (p.owner is a)
+            if (p.owner is a && p.bus !is null)
                 ++n;
         return n == 2;
     }
@@ -1501,4 +1674,96 @@ private:
     }
 
 
+}
+
+unittest
+{
+    TopologyGraph graph;
+
+    // one-port appliance on a bus: the connected port is the boundary
+    Bus* house = graph.ensure_bus("house");
+    PortGroup* dish = graph.add_group("dishwasher", PortGroupKind.appliance);
+    Port* dish_p = graph.add_port(null, house, PortRole.connection, FlowDomain.consume, null, 0);
+    graph.add_to_group(dish, dish_p);
+    assert(is_boundary(dish_p));
+
+    // two-port sink group: connected upstream interior, dangling downstream boundary
+    Port* up = graph.add_port(null, house, PortRole.connection, FlowDomain.consume, null, 0, MeterSign.normal, "connection", "gpo");
+    Port* down = graph.add_port(null, null, PortRole.child, FlowDomain.consume, null, 0, MeterSign.normal, "child", "gpo");
+    PortGroup* gpo = graph.add_group("gpo", PortGroupKind.sink);
+    graph.add_to_group(gpo, up);
+    graph.add_to_group(gpo, down);
+    assert(up.bus is house && house.ports[].findFirst(up) < house.ports.length);
+    assert(down.bus is null && house.ports[].findFirst(down) == house.ports.length);
+    assert(!is_boundary(up));
+    assert(is_boundary(down));
+    assert(ports_connected(gpo, up, down));
+    assert(boundary_bus(down) is house);
+    gpo.closed = false;
+    assert(!ports_connected(gpo, up, down));
+    assert(boundary_bus(down) is null);
+    gpo.closed = true;
+
+    // multi-port appliance: connected ports interior, dangling MPPT boundary
+    Bus* battery = graph.ensure_bus("battery");
+    PortGroup* inverter = graph.add_group("inverter", PortGroupKind.appliance);
+    Port* grid_p = graph.add_port(null, house, PortRole.grid, FlowDomain.bidirectional, null, 0, MeterSign.normal, "grid");
+    Port* batt_p = graph.add_port(null, battery, PortRole.battery, FlowDomain.bidirectional, null, 0, MeterSign.normal, "battery");
+    Port* mppt = graph.add_port(null, null, PortRole.pv, FlowDomain.supply, null, 0, MeterSign.normal, "pv.mppt1");
+    graph.add_to_group(inverter, grid_p);
+    graph.add_to_group(inverter, batt_p);
+    graph.add_to_group(inverter, mppt);
+    assert(!is_boundary(grid_p));
+    assert(!is_boundary(batt_p));
+    assert(is_boundary(mppt));
+    assert(ports_connected(inverter, grid_p, batt_p));
+    assert(boundary_bus(mppt) is house || boundary_bus(mppt) is battery);
+
+    // switchgear with both ends connected: neither endpoint is a boundary
+    Bus* outlet = graph.ensure_bus("outlet");
+    Port* bra = graph.add_port(null, house, PortRole.parent, FlowDomain.bidirectional, null, 0, MeterSign.normal, "parent", "breaker");
+    Port* brb = graph.add_port(null, outlet, PortRole.child, FlowDomain.bidirectional, null, 0, MeterSign.normal, "child", "breaker");
+    Link* brl = graph.add_link(null, house, outlet, bra, brb, 20, true, "breaker");
+    PortGroup* breaker = graph.add_group("breaker", PortGroupKind.switchgear, null, brl);
+    graph.add_to_group(breaker, bra);
+    graph.add_to_group(breaker, brb);
+    assert(!is_boundary(bra));
+    assert(!is_boundary(brb));
+    assert(ports_connected(breaker, bra, brb));
+    brl.closed = false;
+    assert(!ports_connected(breaker, bra, brb));
+    brl.closed = true;
+
+    graph.clear();
+    assert(graph.ports.length == 0 && graph.groups.length == 0 && graph.bus_list.length == 0);
+
+    // sink absorption: the bus residual solves the connected port, group
+    // conservation pushes it out the dangling boundary
+    {
+        TopologyGraph g2;
+        Bus* site = g2.ensure_bus("site");
+
+        Port* main_p = g2.add_port(null, site, PortRole.connection, FlowDomain.bidirectional, null, 0, MeterSign.normal, "main");
+        main_p.meter_data.write_value(MeterField.power, 0, -1000);
+        main_p.meter_data.mark(MeterField.power, 0, Provenance.measured);
+        g2.add_to_group(g2.add_group("main", PortGroupKind.handover), main_p);
+
+        Port* dish_p2 = g2.add_port(null, site, PortRole.connection, FlowDomain.consume, null, 0, MeterSign.normal, "dish");
+        dish_p2.meter_data.write_value(MeterField.power, 0, 400);
+        dish_p2.meter_data.mark(MeterField.power, 0, Provenance.measured);
+        g2.add_to_group(g2.add_group("dish", PortGroupKind.appliance), dish_p2);
+
+        Port* sink_up = g2.add_port(null, site, PortRole.connection, FlowDomain.consume, null, 0, MeterSign.normal, "connection", "outlets");
+        Port* sink_down = g2.add_port(null, null, PortRole.child, FlowDomain.consume, null, 0, MeterSign.normal, "child", "outlets");
+        PortGroup* outlets = g2.add_group("outlets", PortGroupKind.sink);
+        g2.add_to_group(outlets, sink_up);
+        g2.add_to_group(outlets, sink_down);
+
+        g2.infer_graph();
+        assert(absf(sink_up.meter_data.active[0].value - 600) <= 0.01f);
+        assert(absf(sink_down.meter_data.active[0].value + 600) <= 0.01f);
+        assert(sink_down.meter_data.source(MeterField.power) == Provenance.inferred_subtraction);
+        assert(is_boundary(sink_down) && boundary_bus(sink_down) is site);
+        g2.clear();
+    }
 }

@@ -742,7 +742,7 @@ nothrow @nogc:
         Port* primary_port(Appliance a)
         {
             foreach (p; this.manager.graph.ports[])
-                if (p.owner is a)
+                if (p.owner is a && p.bus !is null)
                     return p;
             return null;
         }

@@ -113,7 +113,7 @@ private:
         Port* car_port;
         foreach (p; graph.ports[])
         {
-            if (p.owner is car)
+            if (p.owner is car && p.bus !is null)
             {
                 car_port = p;
                 break;
@@ -128,7 +128,8 @@ private:
                 continue;
             foreach (p2; graph.ports[])
             {
-                if (p2.owner is p.owner && p2 !is p && p2.meter_data.has(MeterField.total_import_active))
+                if (p2.owner is p.owner && p2 !is p && p2.bus !is null &&
+                    p2.meter_data.has(MeterField.total_import_active))
                     return p2.meter_data.total_import_active[0];
             }
         }

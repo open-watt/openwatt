@@ -296,6 +296,14 @@ IslandTotals compute_island_totals(Island* island, ref TopologyGraph graph, ref 
 // places and only support bus balance and cross-checks. An implicit terminal
 // represents equipment declared by a boundary until the real equipment is
 // modelled. Keep this selection aligned with topology.rebuild_productions.
+//
+// TODO(MET-5, docs/SOURCE_SURVEY.draft.md): replace this account-specific
+//      selection with the generic boundary-edge model. Retain all declared
+//      ports, solve point-meter observations once, and account exactly the
+//      connected port of a one-port group or a dangling port of a multi-port
+//      group. Keep Port power in its Bus -> Port frame; boundary orientation is
+//      a separate accounting transform. Implement the spec rather than patching
+//      PV signs here.
 void add_island_battery(ref IslandTotals t, Island* island, ref DailySnapshot daily)
 {
     foreach (bus; island.members[])

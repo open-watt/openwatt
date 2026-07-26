@@ -360,7 +360,7 @@ float appliance_draw_watts(ref TopologyGraph graph, Appliance target)
     if (target is null)
         return float.nan;
     foreach (p; graph.ports[])
-        if (p.owner is target && p.meter_data.has(MeterField.power))
+        if (p.owner is target && p.bus !is null && p.meter_data.has(MeterField.power))
             return absf(p.meter_data.active[0].value);
     return float.nan;
 }
