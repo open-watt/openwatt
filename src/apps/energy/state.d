@@ -237,7 +237,7 @@ private void publish_topology_layout(Device energy, ref TopologyGraph graph)
         energy.set_element(tconcat(base, "label"), link.label.makeString(defaultAllocator()));
         energy.set_element(tconcat(base, "owner"), (link.owner ? link.owner.name[] : "").makeString(defaultAllocator()));
         energy.set_element(tconcat(base, "parent"), link.a.id[].makeString(defaultAllocator()));
-        energy.set_element(tconcat(base, "child"), link.b.id[].makeString(defaultAllocator()));
+        energy.set_element(tconcat(base, "child"), (link.b ? link.b.id[] : "").makeString(defaultAllocator()));
         energy.set_element(tconcat(base, "parent_port"), (link.port_a ? link.port_a.id[] : "").makeString(defaultAllocator()));
         energy.set_element(tconcat(base, "child_port"), (link.port_b ? link.port_b.id[] : "").makeString(defaultAllocator()));
         const(char)[] kind = link.kind.length ? link.kind : link.owner ? "appliance" : "link";
@@ -726,6 +726,8 @@ private struct TopologyPortPublishCache
 {
 nothrow @nogc:
     Element* generation;
+    FloatPublishCell soc;
+    Component soc_source;
 
     MeterPublishCache meter;
 
@@ -734,14 +736,38 @@ nothrow @nogc:
         const(char)[] base = tconcat("topology.port.", port.id[], ".");
         generation = elem!int(energy, base, "generation");
 
+        // The device's own gauge at this port; the reconciled store value
+        // lives on the battery boundary entry.
+        soc = FloatPublishCell();
+        soc_source = port_soc_source(port);
+        if (soc_source !is null)
+            soc.bind(energy, base, "soc");
+
         meter.bind(energy, base);
     }
 
     void publish(Port* port, uint gen)
     {
         generation.value = cast(int)gen;
+        if (soc.element)
+            soc.publish(read_battery_soc(soc_source));
         meter.publish(port.meter_data);
     }
+}
+
+// A port carries soc only when the component behind it can answer: mirrors
+// read_battery_soc's resolution, gating on element presence rather than the
+// current value so an offline device keeps its field.
+private Component port_soc_source(Port* port)
+{
+    Component c = battery_store_source(port);
+    if (c is null)
+        return null;
+    if (c.find_element("soc"))
+        return c;
+    if (c.template_[] == "Battery")
+        return null;
+    return c.find_first_component_by_template_recursive("Battery") ? c : null;
 }
 
 private struct TopologyLinkPublishCache
