@@ -88,8 +88,17 @@ protected:
 
     override CompletionStatus shutdown()
     {
-        // TODO: need to unlink these things...
-        return CompletionStatus.complete;
+        foreach (ref request; _pending_requests)
+        {
+            if (!request.cancel_requested)
+            {
+                request.command.request_cancel();
+                request.cancel_requested = true;
+            }
+        }
+        update_pending_requests();
+        return _pending_requests.empty
+            ? CompletionStatus.complete : CompletionStatus.continue_;
     }
 
     override void update()
@@ -106,9 +115,10 @@ private:
     struct PendingRequest
     {
         HTTPVersion ver;
-        Stream stream;
+        ObjectRef!Stream stream;
         StringSession session;
         CommandState command;
+        bool cancel_requested;
     }
     Array!PendingRequest _pending_requests;
 
@@ -210,10 +220,9 @@ private:
             return 0;
         }
 
-        // TODO: if it's a persistent session; we need a reference to the session to produce a response.
-        //       if it's an ephemeral session, we need to take the stream from the session so we can produce a deferred response...?
-        assert(false, "TODO: TEST THIS PATH, I'M NOT SURE THE HTTP REQUEST HANDLER CAN HANDLE HANDLE RELAYED RESPONSE?");
-        _pending_requests ~= PendingRequest(request.http_version, stream, session, cmd);
+        _pending_requests ~=
+            PendingRequest(request.http_version, ObjectRef!Stream(stream),
+                           session, cmd);
         return 0;
     }
 
@@ -841,14 +850,26 @@ private:
         {
             ref PendingRequest req = _pending_requests[i];
 
-            if (req.command.update() == CommandCompletionState.in_progress)
+            Stream stream = req.stream.get;
+            if ((!stream || !stream.running) && !req.cancel_requested)
+            {
+                req.command.request_cancel();
+                req.cancel_requested = true;
+            }
+
+            CommandCompletionState state = req.command.update();
+            if (state < CommandCompletionState.finished)
             {
                 ++i;
                 continue;
             }
 
-            MutableString!0 output = req.session.takeOutput();
-            send_cli_response(req.ver, req.stream, output[], req.command.result);
+            if (stream && stream.running)
+            {
+                MutableString!0 output = req.session.takeOutput();
+                send_cli_response(req.ver, stream, output[],
+                                  req.command.result);
+            }
 
             defaultAllocator().freeT(req.session);
             _pending_requests.remove(i);
