@@ -170,8 +170,8 @@ protected:
 
         wifi_set_event_callback(_wifi, &wifi_event_dispatch);
         wifi_set_rx_callback(_wifi, &wifi_rx_dispatch);
-        _active_radios[0] = this;
-        wifi_set_wake_callback(&wifi_wake_dispatch);
+        _active_radios[_wifi.port] = this;
+        wifi_set_ready_callback(&wifi_ready_dispatch);
 
         if (!update_drv_mode())
         {
@@ -207,13 +207,13 @@ protected:
     {
         super.update();
 
-        if (_wifi.is_open)
+        version (Espressif)
         {
-            wifi_poll(_wifi);
-            ubyte hw_ch = wifi_get_channel(_wifi);
-            if (hw_ch != 0)
-                set_active_channel(hw_ch);
+            if (atomicExchange!(MemoryOrder.acq_rel)(&_wifi_pump_retry, 0u) != 0)
+                service_wifi();
         }
+        else
+            service_wifi();
 
         flush_pending_mode_update();
     }
@@ -283,6 +283,7 @@ private:
 
     __gshared BuiltinWiFi[num_wifi] _active_radios;
     shared uint _wifi_pump_pending;
+    shared uint _wifi_pump_retry;
 
     Result update_drv_mode()
     {
@@ -321,19 +322,20 @@ private:
         {
             wifi_set_rx_callback(_wifi, null);
             wifi_set_event_callback(_wifi, null);
-            wifi_set_wake_callback(null);
+            wifi_set_ready_callback(null);
             _active_radios[_wifi.port] = null;
             wifi_close(_wifi);
         }
         atomicStore!(MemoryOrder.release)(_wifi_pump_pending, 0u);
+        atomicStore!(MemoryOrder.release)(_wifi_pump_retry, 0u);
         _mode_update_pending = false;
         _mode_update_warned = false;
     }
 
-    static void wifi_wake_dispatch() nothrow @nogc
+    static void wifi_ready_dispatch() nothrow @nogc
     {
         if (auto radio = _active_radios[0])
-            radio.request_wifi_pump();
+            radio.request_wifi_pump_from_ready();
     }
 
     void request_wifi_pump()
@@ -343,19 +345,63 @@ private:
         if (!cas(&_wifi_pump_pending, 0u, 1u))
             return;
         if (!g_app.post_event(&wifi_pump_event, getTime(), EventPriority.control))
+        {
             atomicStore!(MemoryOrder.release)(_wifi_pump_pending, 0u);
+            atomicStore!(MemoryOrder.release)(_wifi_pump_retry, 1u);
+        }
+    }
+
+    void request_wifi_pump_from_ready()
+    {
+        if (!_wifi.is_open || g_app is null)
+            return;
+        if (!cas(&_wifi_pump_pending, 0u, 1u))
+            return;
+
+        bool queued;
+        g_app.post_event_from_isr(&wifi_pump_event, EventPriority.control, queued);
+        if (!queued)
+        {
+            atomicStore!(MemoryOrder.release)(_wifi_pump_pending, 0u);
+            atomicStore!(MemoryOrder.release)(_wifi_pump_retry, 1u);
+        }
     }
 
     void wifi_pump_event(MonoTime when)
     {
+        atomicStore!(MemoryOrder.release)(_wifi_pump_retry, 0u);
         atomicStore!(MemoryOrder.release)(_wifi_pump_pending, 0u);
-        if (_wifi.is_open)
+        service_wifi();
+    }
+
+    void service_wifi()
+    {
+        if (!_wifi.is_open)
+            return;
+
+        bool pending = wifi_service(_wifi);
+        uint event_dropped = wifi_take_event_drops(_wifi);
+        if (event_dropped != 0)
         {
-            wifi_poll(_wifi);
-            ubyte hw_ch = wifi_get_channel(_wifi);
-            if (hw_ch != 0)
-                set_active_channel(hw_ch);
+            log.error("WiFi deferred event queue dropped ", event_dropped, " event", event_dropped == 1 ? "" : "s");
+            restart();
+            return;
         }
+        uint ethernet_dropped = wifi_take_rx_drops(_wifi);
+        uint monitor_dropped = wifi_take_raw_rx_drops(_wifi);
+        ulong dropped = cast(ulong)ethernet_dropped + monitor_dropped;
+        if (dropped != 0)
+        {
+            _status.rx_dropped += dropped;
+            mark_set!(typeof(this), "rx-dropped")();
+            log.warning("WiFi deferred RX queues dropped ", ethernet_dropped, " Ethernet and ", monitor_dropped, " monitor frames");
+        }
+
+        ubyte hw_ch = wifi_get_channel(_wifi);
+        if (hw_ch != 0)
+            set_active_channel(hw_ch);
+        if (pending)
+            request_wifi_pump();
     }
 
     static void wifi_event_dispatch(Wifi wifi, WifiEvent event, const(void)* data) nothrow @nogc
@@ -421,6 +467,8 @@ private:
     {
         final switch (event)
         {
+            case WifiEvent.sta_started:         break;
+            case WifiEvent.sta_stopped:         break;
             case WifiEvent.sta_connected:       ++sta_connected_seq; break;
             case WifiEvent.sta_disconnected:    ++sta_disconnected_seq; break;
             case WifiEvent.ap_started:          ++ap_started_seq; break;

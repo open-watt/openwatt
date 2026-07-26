@@ -719,6 +719,47 @@ nothrow @nogc:
         return true;
     }
 
+    bool post_event_from_isr(EventHandler handler, EventPriority priority = EventPriority.control)
+    {
+        bool queued;
+        return post_event_from_isr(handler, priority, queued);
+    }
+
+    bool post_event_from_isr(EventHandler handler, EventPriority priority, out bool queued)
+    {
+        import urt.atomic : atomicFetchAdd, atomicFetchSub, MemoryOrder;
+
+        final switch (priority)
+        {
+            case EventPriority.control:
+                atomicFetchAdd!(MemoryOrder.relaxed)(_priority_events_posted, 1);
+                queued = _priority_events.enqueue(PendingEvent(handler, MonoTime.init));
+                if (!queued)
+                {
+                    atomicFetchSub!(MemoryOrder.relaxed)(_priority_events_posted, 1);
+                    atomicFetchAdd!(MemoryOrder.relaxed)(_priority_event_overflows, 1);
+                }
+                break;
+            case EventPriority.bulk:
+                atomicFetchAdd!(MemoryOrder.relaxed)(_bulk_events_posted, 1);
+                queued = _bulk_events.enqueue(PendingEvent(handler, MonoTime.init));
+                if (!queued)
+                {
+                    atomicFetchSub!(MemoryOrder.relaxed)(_bulk_events_posted, 1);
+                    atomicFetchAdd!(MemoryOrder.relaxed)(_bulk_event_overflows, 1);
+                }
+                break;
+        }
+
+        bool higher_priority_task_woken = _wake_event.set_from_isr();
+        return higher_priority_task_woken;
+    }
+
+    bool wake_from_isr()
+    {
+        return _wake_event.set_from_isr();
+    }
+
     void wait_for_wake(MonoTime deadline)
     {
         MonoTime now = getTime();
@@ -777,6 +818,8 @@ nothrow @nogc:
             {
                 atomicFetchAdd!(MemoryOrder.relaxed)(_priority_events_processed, 1);
                 MonoTime event_start = getTime();
+                if (e.when == MonoTime.init)
+                    e.when = event_start;
                 e.handler(e.when);
                 Duration d = getTime() - event_start;
                 Duration age = event_start - e.when;
@@ -800,6 +843,8 @@ nothrow @nogc:
             {
                 atomicFetchAdd!(MemoryOrder.relaxed)(_bulk_events_processed, 1);
                 MonoTime event_start = getTime();
+                if (e.when == MonoTime.init)
+                    e.when = event_start;
                 e.handler(e.when);
                 Duration d = getTime() - event_start;
                 Duration age = event_start - e.when;

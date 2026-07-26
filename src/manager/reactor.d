@@ -26,6 +26,12 @@ else version (linux)
     enum bool has_reactor_io = true;
     alias OsFile = int;
 }
+else version (FreeRTOS)
+{
+    import urt.internal.sys.freertos;
+
+    enum bool has_reactor_io = false;
+}
 else
 {
     import urt.sync.event;
@@ -119,6 +125,12 @@ nothrow @nogc:
             }
             return true;
         }
+        else version (FreeRTOS)
+        {
+            _waiter = xTaskGetCurrentTaskHandle();
+            atomicStore!(MemoryOrder.relaxed)(_signalled, false);
+            return _waiter !is null;
+        }
         else
             return _event.init();
     }
@@ -188,6 +200,11 @@ nothrow @nogc:
                 _epoll = -1;
             }
         }
+        else version (FreeRTOS)
+        {
+            _waiter = null;
+            atomicStore!(MemoryOrder.relaxed)(_signalled, false);
+        }
         else
             _event.destroy();
     }
@@ -207,8 +224,30 @@ nothrow @nogc:
                 write(_wake_fd, &one, one.sizeof);
             }
         }
+        else version (FreeRTOS)
+        {
+            if (cas(&_signalled, false, true))
+                xTaskNotifyGive(_waiter);
+        }
         else
             _event.set();
+    }
+
+    bool set_from_isr()
+    {
+        version (FreeRTOS)
+        {
+            if (!cas(&_signalled, false, true))
+                return false;
+            BaseType_t higher_priority_task_woken = pdFALSE;
+            vTaskNotifyGiveFromISR(_waiter, &higher_priority_task_woken);
+            return higher_priority_task_woken != pdFALSE;
+        }
+        else
+        {
+            set();
+            return false;
+        }
     }
 
     void reset()
@@ -223,6 +262,11 @@ nothrow @nogc:
             atomicStore!(MemoryOrder.release)(_signalled, false);
             ulong count = void;
             read(_wake_fd, &count, count.sizeof);
+        }
+        else version (FreeRTOS)
+        {
+            atomicStore!(MemoryOrder.release)(_signalled, false);
+            ulTaskNotifyTake(pdTRUE, 0);
         }
         else
             _event.reset();
@@ -273,6 +317,19 @@ nothrow @nogc:
             if (n > 0)
                 dispatch(evs.ptr, n);
             return n > 0 || atomicLoad!(MemoryOrder.acquire)(_signalled);
+        }
+        else version (FreeRTOS)
+        {
+            if (atomicLoad!(MemoryOrder.acquire)(_signalled))
+                return true;
+            if (timeout <= Duration.zero)
+                return false;
+
+            long ms = wait_ms(timeout);
+            if (ms >= portMAX_DELAY)
+                ms = portMAX_DELAY - 1;
+            ulTaskNotifyTake(pdTRUE, cast(TickType_t)ms);
+            return atomicLoad!(MemoryOrder.acquire)(_signalled);
         }
         else
         {
@@ -561,6 +618,8 @@ private:
         void delegate() nothrow @nogc _pool_drain;
         bool _pool_pending;
     }
+    else version (FreeRTOS)
+        TaskHandle_t _waiter;
     else
         Event _event;
 
