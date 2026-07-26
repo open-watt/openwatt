@@ -185,6 +185,7 @@ struct TcpPcb
     // — we slide both via Array.remove on consume)
     Array!ubyte send_buf;
     Array!ubyte recv_buf;
+    MonoTime recv_time;
 
     // Flags
     bool fin_sent;          // we've sent FIN (snd_nxt includes its sequence)
@@ -494,6 +495,31 @@ size_t tcp_recv_data(TcpPcb* pcb, ubyte[] buf)
     return n;
 }
 
+void tcp_consume_data(ref IPStack stack, TcpPcb* pcb, size_t bytes)
+{
+    if (bytes > pcb.recv_buf.length)
+        bytes = pcb.recv_buf.length;
+    if (bytes == 0)
+        return;
+
+    uint old_window = pcb.rcv_wnd;
+    pcb.recv_buf.remove(0, bytes);
+    pcb.rcv_wnd = cast(uint)(TcpRecvBufSize - pcb.recv_buf.length);
+    pcb.readable_event = pcb.recv_buf.length != 0;
+    if (pcb.recv_buf.length == 0)
+        pcb.recv_time = MonoTime.init;
+
+    if (pcb.rcv_wnd > old_window &&
+        (pcb.state == TcpState.established ||
+         pcb.state == TcpState.fin_wait_1 ||
+         pcb.state == TcpState.fin_wait_2 ||
+         pcb.state == TcpState.close_wait))
+    {
+        send_segment_at(stack, pcb, TcpFlag.ack, pcb.snd_nxt, null);
+        pcb.ack_pending = false;
+    }
+}
+
 bool tcp_accept(TcpPcb* listener, out TcpPcb* accepted)
 {
     if (!listener.is_listener || listener.accept_queue.length == 0)
@@ -526,16 +552,13 @@ void tcp_shutdown_write(ref IPStack stack, TcpPcb* pcb)
 
 private void tcp_app_deliver(TcpPcb* pcb, const(ubyte)[] bytes, MonoTime rx_time)
 {
-    version (UseInternalIPStack)
-    {
-        if (pcb.conn_owner !is null)
-        {
-            pcb.conn_owner.deliver(bytes, rx_time);
-            return;
-        }
-    }
+    if (pcb.recv_buf.length == 0)
+        pcb.recv_time = rx_time;
     pcb.recv_buf ~= bytes;
     pcb.readable_event = true;
+    version (UseInternalIPStack)
+        if (pcb.conn_owner !is null)
+            pcb.conn_owner.queue_service();
 }
 
 

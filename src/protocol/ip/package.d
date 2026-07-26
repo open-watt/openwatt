@@ -13,6 +13,7 @@ import manager.console;
 import manager.console.session : Session;
 import manager.plugin;
 import manager.reactor;
+import manager : EventPriority, g_app;
 
 import protocol.ip.address;
 import protocol.ip.pool;
@@ -24,7 +25,7 @@ import protocol.ip.udp_stream;
 version (UseInternalIPStack)
 {
     import protocol.ip.udp;
-    import protocol.ip.tcp : TcpPcb, TcpState, tcp_assign_id, tcp_send_data, tcp_close, free_pcb,
+    import protocol.ip.tcp : TcpPcb, TcpState, tcp_assign_id, tcp_send_data, tcp_consume_data, tcp_close, free_pcb,
         native_tcp_connect = tcp_connect, native_tcp_listen = tcp_listen;
 
     public import protocol.ip.stack : IPStack;
@@ -574,6 +575,9 @@ nothrow @nogc:
     void recv_handler(TCPRecvHandler handler)
     {
         _on_recv = handler;
+        version (UseInternalIPStack)
+            if (handler && _pcb && _pcb.recv_buf.length != 0)
+                queue_service();
     }
 
     void event_handler(TCPEventHandler handler)
@@ -835,12 +839,11 @@ private:
     version (UseInternalIPStack)
     {
         TcpPcb* _pcb;
+        bool _service_pending;
 
         bool reclaimable() const
-            => true;
+            => !_service_pending;
 
-        // RX is pushed inline via deliver(); the pump only observes control-state
-        // transitions (connect completion, peer close, reset) and drains TX.
         void pump()
         {
             if (_closing || _pcb is null)
@@ -856,10 +859,16 @@ private:
                 case Phase.open:
                     if (_pcb.error_event || _pcb.state == TcpState.closed)
                         fail(IPEvent.error);
-                    else if (_pcb.fin_seen)
-                        fail(IPEvent.closed);
                     else
-                        flush_tx();
+                    {
+                        drain_rx();
+                        if (_closing || _pcb is null)
+                            break;
+                        if (_pcb.fin_seen && _pcb.recv_buf.length == 0)
+                            fail(IPEvent.closed);
+                        else
+                            flush_tx();
+                    }
                     break;
                 case Phase.dead:
                     break;
@@ -874,12 +883,32 @@ private:
                 _on_event(&this, IPEvent.connected);
         }
 
-        package(protocol.ip) void deliver(const(ubyte)[] data, MonoTime rx_time)
+        package(protocol.ip) void queue_service()
         {
-            if (_phase == Phase.connecting && _pcb && _pcb.state == TcpState.established)
-                mark_connected();
-            if (_on_recv)
-                _on_recv(&this, data, rx_time);
+            if (_service_pending || _closing || g_app is null)
+                return;
+            _service_pending = true;
+            if (!g_app.post_event(&service_event, getTime(), EventPriority.control))
+                _service_pending = false;
+        }
+
+        void service_event(MonoTime)
+        {
+            _service_pending = false;
+            pump();
+        }
+
+        void drain_rx()
+        {
+            if (_pcb is null || _pcb.recv_buf.length == 0 || _on_recv is null)
+                return;
+
+            TcpPcb* pcb = _pcb;
+            size_t bytes = pcb.recv_buf.length;
+            MonoTime rx_time = pcb.recv_time;
+            _on_recv(&this, pcb.recv_buf[0 .. bytes], rx_time);
+            if (_pcb is pcb)
+                tcp_consume_data(*_stack_ptr, pcb, bytes);
         }
 
         void flush_tx()

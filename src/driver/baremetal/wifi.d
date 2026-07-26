@@ -27,6 +27,9 @@ class BuiltinWiFi : WiFiInterface
 {
 nothrow @nogc:
 
+    version (Espressif) enum bool supports_apsta = true;
+    else enum bool supports_apsta = false;
+
     enum type_name = "wifi";
     enum path = "/interface/wifi";
 
@@ -45,6 +48,7 @@ nothrow @nogc:
         return wifi_get_mac(_wifi, vif, mac);
     }
 
+    bool sta_started;
     uint sta_connected_seq;
     uint sta_disconnected_seq;
     uint ap_started_seq;
@@ -107,7 +111,7 @@ nothrow @nogc:
             return "only one AP per radio";
         if (sta_count > 1)
             return "only one STA per radio";
-        if (sta_count > 0 && ap_count > 0)
+        if (!supports_apsta && sta_count > 0 && ap_count > 0)
             return "concurrent AP+STA is not supported by this BL808 WiFi firmware";
         return null;
     }
@@ -130,7 +134,7 @@ protected:
         // second VIF in both STA-first and AP-first order.
         if (_num_ap > 1 || _num_client > 1)
             return false;
-        if (_num_ap > 0 && _num_client > 0)
+        if (!supports_apsta && _num_ap > 0 && _num_client > 0)
             return false;
         return super.validate();
     }
@@ -141,7 +145,7 @@ protected:
             return "only one AP per radio";
         if (_num_client > 1)
             return "only one STA per radio";
-        if (_num_ap > 0 && _num_client > 0)
+        if (!supports_apsta && _num_ap > 0 && _num_client > 0)
             return "concurrent AP+STA is not supported by this BL808 WiFi firmware";
         return super.status_message();
     }
@@ -328,6 +332,7 @@ private:
         }
         atomicStore!(MemoryOrder.release)(_wifi_pump_pending, 0u);
         atomicStore!(MemoryOrder.release)(_wifi_pump_retry, 0u);
+        sta_started = false;
         _mode_update_pending = false;
         _mode_update_warned = false;
     }
@@ -467,8 +472,8 @@ private:
     {
         final switch (event)
         {
-            case WifiEvent.sta_started:         break;
-            case WifiEvent.sta_stopped:         break;
+            case WifiEvent.sta_started:         sta_started = true; break;
+            case WifiEvent.sta_stopped:         sta_started = false; break;
             case WifiEvent.sta_connected:       ++sta_connected_seq; break;
             case WifiEvent.sta_disconnected:    ++sta_disconnected_seq; break;
             case WifiEvent.ap_started:          ++ap_started_seq; break;
@@ -568,6 +573,17 @@ protected:
         if (!radio)
             return CompletionStatus.error;
 
+        if (radio.mode_update_pending)
+        {
+            _status_detail = "Waiting for STA mode";
+            return CompletionStatus.continue_;
+        }
+        if (!radio.sta_started)
+        {
+            _status_detail = "Waiting for STA start";
+            return CompletionStatus.continue_;
+        }
+
         if (_connect_initiated)
         {
             if (radio.sta_connected_seq != _connect_sta_connected_seq)
@@ -635,7 +651,8 @@ protected:
         if (_connect_initiated && radio)
             wifi_sta_disconnect(radio.wifi);
         _connect_initiated = false;
-        _status_detail = null;
+        if (_state != State.failure)
+            _status_detail = null;
         return super.shutdown();
     }
 
@@ -786,7 +803,7 @@ protected:
                 ap_cfg.auth = urt.driver.wifi.WifiAuth.wpa3_enterprise;
                 break;
         }
-        ap_cfg.channel = radio.active_channel != 0 ? radio.active_channel : radio.channel;
+        ap_cfg.channel = radio.channel != 0 ? radio.channel : radio.active_channel;
         ap_cfg.max_clients = max_clients;
         ap_cfg.hidden = hidden;
 
