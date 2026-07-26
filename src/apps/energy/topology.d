@@ -1384,13 +1384,14 @@ private:
 
     void infer_graph()
     {
-        // One assignment per pass lets a solved value reach the far side of
-        // its group before that neighborhood independently infers other ends.
+        // Infer only a single dark port, alternating with link mirroring.
         foreach (_; 0 .. bus_list.length + links.length + groups.length + 1)
         {
-            bool changed;
+            bool changed = infer_link_endpoints();
             foreach (b; bus_list[])
                 aggregate_bus(b);
+            // One assignment per pass lets its mirrored value reach the far bus
+            // before that bus independently infers the other end.
             foreach (b; bus_list[])
                 if (infer_single_dark_port(b))
                 {
@@ -1440,18 +1441,6 @@ private:
         dark.meter_data.reset_to_missing();
         dark.meter_data.write_value(MeterField.power, 0, -sum);
         dark.meter_data.mark(MeterField.power, 0, Provenance.inferred_subtraction);
-
-        // A closed contact is one electrical node, so voltage carries across;
-        // appliance ports may sit on different domains and never share it.
-        if (g.ports.length == 2 && g.kind != PortGroupKind.appliance)
-        {
-            Port* known = g.ports[0] is dark ? g.ports[1] : g.ports[0];
-            if (known.meter_data.has(MeterField.voltage))
-            {
-                dark.meter_data.voltage[0] = known.meter_data.voltage[0];
-                dark.meter_data.mark(MeterField.voltage, 0, Provenance.inferred_subtraction);
-            }
-        }
         return true;
     }
 
@@ -1580,6 +1569,55 @@ private:
             return "pv";
         size_t dot = path.findLast('.');
         return dot < path.length ? path[0 .. dot] : path;
+    }
+
+    bool infer_link_endpoints()
+    {
+        bool changed;
+        foreach (link; links[])
+        {
+            if (!link.closed)
+                continue;
+            if (link.owner !is null && !is_passthrough(link.owner))
+                continue;
+            if (copy_inferred_meter_data(link.port_b, link.port_a))
+                changed = true;
+            if (copy_inferred_meter_data(link.port_a, link.port_b))
+                changed = true;
+        }
+        return changed;
+    }
+
+    // Only a two-port appliance conserves power across one unambiguous link.
+    // Dangling ports do not carry inferred flow yet, so they do not disqualify.
+    bool is_passthrough(Appliance a)
+    {
+        size_t n;
+        foreach (p; ports[])
+            if (p.owner is a && p.bus !is null)
+                ++n;
+        return n == 2;
+    }
+
+    bool copy_inferred_meter_data(Port* dst, Port* src)
+    {
+        if (dst is null || src is null)
+            return false;
+        if (dst.meter_data.has(MeterField.power) || !src.meter_data.has(MeterField.power))
+            return false;
+
+        dst.meter_data = src.meter_data;
+        apply_meter_sign(dst.meter_data, MeterSign.inverted);
+        mark_meter_data(dst.meter_data, Provenance.inferred_subtraction);
+        return true;
+    }
+
+    void mark_meter_data(ref MeterData data, Provenance provenance) pure
+    {
+        foreach (i; 0 .. num_fields)
+            foreach (phase; 0 .. 4)
+                if (data.provenance[i][phase] != Provenance.missing)
+                    data.provenance[i][phase] = provenance;
     }
 
     bool infer_single_dark_port(Bus* b)

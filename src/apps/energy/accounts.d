@@ -253,7 +253,7 @@ IslandTotals compute_island_totals(Island* island, ref TopologyGraph graph, ref 
     foreach (ref f; graph.boundary_flows[])
     {
         Bus* b = boundary_bus(f.port);
-        if (b is null || !island_contains(island, b))
+        if (b is null || !circuit_in_island(island, b.id[]))
             continue;
         float net = f.power_into_graph - f.power_out_of_graph;
         final switch (f.kind)
@@ -303,7 +303,7 @@ void add_boundary_energy(ref IslandTotals t, Island* island, ref TopologyGraph g
     foreach (p; graph.boundaries[])
     {
         Bus* b = boundary_bus(p);
-        if (b is null || !island_contains(island, b))
+        if (b is null || !circuit_in_island(island, b.id[]))
             continue;
         BoundaryEnergy e = boundary_energy(p);
         final switch (boundary_kind(p))
@@ -392,15 +392,6 @@ void add_production_today(ref IslandTotals t, ref TopologyGraph graph, Island* i
     }
 }
 
-bool island_contains(Island* island, Bus* bus)
-{
-    foreach (b; island.members[])
-        if (b is bus)
-            return true;
-    return false;
-}
-
-// Production contributions carry circuit names, not bus pointers.
 bool circuit_in_island(Island* island, const(char)[] circuit)
 {
     foreach (b; island.members[])
