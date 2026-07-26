@@ -29,7 +29,7 @@ import router.iface.packet;
 import router.iface.priority_queue;
 import router.stream;
 
-//version = DebugModbusMessageFlow;
+version = DebugModbusMessageFlow;
 
 alias modbus_crc = calculate_crc!(Algorithm.crc16_modbus);
 alias modbus_crc_2 = calculate_crc_2!(Algorithm.crc16_modbus);

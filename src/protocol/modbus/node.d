@@ -387,7 +387,13 @@ private:
             version (TrackLateResponses)
                 record_abandoned(req);
             if (req.error_handler)
-                req.error_handler(ModbusErrorType.Failed, req.request, req.request_time);
+            {
+                ModbusErrorType error =
+                    state == MessageState.timeout ||
+                    state == MessageState.expired
+                    ? ModbusErrorType.Timeout : ModbusErrorType.Failed;
+                req.error_handler(error, req.request, req.request_time);
+            }
             _pending.remove(i);
             break;
         }
