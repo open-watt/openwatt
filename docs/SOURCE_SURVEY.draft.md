@@ -47,6 +47,13 @@ a multi-unknown residual per port.
 
 ## 3. Contact-state zero seeding
 
+Review sharpened the scope: appliance ports carry contact state too
+(read_port_closed), but ports_connected treats appliances as unconditional
+junctions and group inference ignores per-port state, so an open contactor
+would still exchange inferred energy. An open port is a known zero, not an
+unknown; seed it as such here. Latent today: nothing in-tree publishes
+closed=false on an appliance port.
+
 Open switchgear should seed explicit zero through-flow on its ports instead
 of leaving them dark. Deferred because it changes bus coverage classification
 (dark/bounded becomes measured), which is account-visible; land it together
@@ -101,6 +108,11 @@ Also publish per-group loss/self-consumption (`PortGroup.loss_power`,
 each sample; only the publishers are missing.
 
 ## 6. Link loss providers
+
+Until a provider supplies loss, single-unknown group inference manufactures
+a zero-loss value for conversion appliances; the error is bounded by device
+loss and the value is marked inferred, but accounts built on it inherit the
+approximation.
 
 Every link/switchgear constraint already carries a loss term, default zero.
 Providers may later supply it, keyed by declared link identity so learned
