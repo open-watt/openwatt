@@ -499,7 +499,7 @@ private void collect_component(Bus* root, ref Array!(Bus*) into)
             if (!l.closed)
                 continue;
             Bus* other = l.a is b ? l.b : l.a;
-            if (into[].findFirst(other) < into.length)
+            if (other is null || into[].findFirst(other) < into.length)
                 continue;
             into ~= other;
             queue ~= other;
@@ -689,7 +689,7 @@ nothrow @nogc:
         l.capacity_amps = capacity_amps;
         l.closed = closed;
         a.links ~= l;
-        if (b !is a)
+        if (b !is null && b !is a)
             b.links ~= l;
         links ~= l;
         return l;
@@ -1087,13 +1087,14 @@ private:
         else
         {
             // A parent-only link dangles toward unenumerated attachments; its
-            // far endpoint is the boundary (the sink).
+            // far endpoint is the boundary (the sink). It is still a real link
+            // (capacity, contact state, meter), so it publishes like one.
             Bus* b = ensure_bus(left.length ? left : "unassigned");
             Port* pa = add_port(null, b, PortRole.connection, flow_for(link.kind), meter, link.meter_phase, link.meter_sign, "connection", link.name[]);
             PortRole dangling_role = link.role.length ? port_role_from_name(link.role) : PortRole.child;
             Port* pb = add_port(null, null, dangling_role, flow_for_role(dangling_role), null, 0, MeterSign.normal, "child", link.name[]);
-            PortGroup* g = add_group(link.name[], PortGroupKind.sink);
-            g.closed = link.closed;
+            Link* l = add_link(null, b, null, pa, pb, link.capacity.value, link.closed, link.name[], link.kind);
+            PortGroup* g = add_group(link.name[], PortGroupKind.sink, null, l);
             add_to_group(g, pa);
             add_to_group(g, pb);
         }

@@ -993,7 +993,7 @@ nothrow @nogc:
                     continue;
                 ++emitted;
                 bool last = emitted == total;
-                if (link.closed && visited[].findFirst(link.b) >= visited.length)
+                if (link.b !is null && link.closed && visited[].findFirst(link.b) >= visited.length)
                     add_bus_tree(link.b, link, child_prefix, last ? "└─ " : "├─ ", visited);
                 else
                     add_link_row(link, child_prefix.text, last ? "└─ " : "├─ ");
