@@ -107,7 +107,7 @@ nothrow @nogc:
             last_topology_rebuild = getTime();
         log_slow_phase("manager.update", getTime() - t);
         t = getTime();
-        topology_publisher.publish(energy_device, manager.graph, rebuild_topology);
+        topology_publisher.publish(energy_device, manager.graph, manager.islands, rebuild_topology);
         log_slow_phase("publish_topology", getTime() - t);
         t = getTime();
         registry.resync_all(manager.graph);

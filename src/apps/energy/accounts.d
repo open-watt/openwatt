@@ -107,6 +107,8 @@ struct IslandTotals
     float generation_power = 0;
     float load_power = 0;
 
+    float local_fraction = float.nan;
+
     double solar_today_kwh = 0;
     double battery_charge_today_kwh = 0;
     double battery_discharge_today_kwh = 0;
@@ -128,6 +130,7 @@ nothrow @nogc:
     AccountFloatCell rogue_load_power;
     AccountFloatCell generation_power;
     AccountFloatCell load_power;
+    AccountFloatCell local_fraction;
     AccountFloatCell solar_today_energy;
     AccountFloatCell battery_today_charge;
     AccountFloatCell battery_today_discharge;
@@ -146,6 +149,7 @@ nothrow @nogc:
         rogue_load_power.bind(account_element!float(energy_device, island_id, "account.rogue.load.power"));
         generation_power.bind(account_element!float(energy_device, island_id, "account.generation.power"));
         load_power.bind(account_element!float(energy_device, island_id, "account.load.total.power"));
+        local_fraction.bind(account_element!float(energy_device, island_id, "account.local_fraction"));
         solar_today_energy.bind(account_element!float(energy_device, island_id, "account.solar.today.energy"));
         battery_today_charge.bind(account_element!float(energy_device, island_id, "account.battery.today.charge"));
         battery_today_discharge.bind(account_element!float(energy_device, island_id, "account.battery.today.discharge"));
@@ -235,6 +239,7 @@ void update_island_accounts(ref IslandAccountPublisher publisher, Island* island
     publisher.rogue_load_power.publish(t.rogue_load_power, ts);
     publisher.generation_power.publish(t.generation_power, ts);
     publisher.load_power.publish(t.load_power, ts);
+    publisher.local_fraction.publish(t.local_fraction, ts);
 
     publisher.solar_today_energy.publish(cast(float)t.solar_today_kwh, ts);
     publisher.battery_today_charge.publish(cast(float)t.battery_charge_today_kwh, ts);
@@ -253,7 +258,7 @@ IslandTotals compute_island_totals(Island* island, ref TopologyGraph graph, ref 
     foreach (ref f; graph.boundary_flows[])
     {
         Bus* b = boundary_bus(f.port);
-        if (b is null || !circuit_in_island(island, b.id[]))
+        if (b is null || !island_contains(island, b))
             continue;
         float net = f.power_into_graph - f.power_out_of_graph;
         final switch (f.kind)
@@ -295,6 +300,14 @@ IslandTotals compute_island_totals(Island* island, ref TopologyGraph graph, ref 
     if (t.load_power < 0)
         t.load_power = 0;
 
+    // Battery discharge counts as local regardless of what charged it; when
+    // exporting, consumption is fully locally served.
+    if (t.load_power > 0)
+    {
+        float f = t.generation_power / t.load_power;
+        t.local_fraction = f < 0 ? 0 : (f > 1 ? 1 : f);
+    }
+
     return t;
 }
 
@@ -303,7 +316,7 @@ void add_boundary_energy(ref IslandTotals t, Island* island, ref TopologyGraph g
     foreach (p; graph.boundaries[])
     {
         Bus* b = boundary_bus(p);
-        if (b is null || !circuit_in_island(island, b.id[]))
+        if (b is null || !island_contains(island, b))
             continue;
         BoundaryEnergy e = boundary_energy(p);
         final switch (boundary_kind(p))
@@ -392,6 +405,15 @@ void add_production_today(ref IslandTotals t, ref TopologyGraph graph, Island* i
     }
 }
 
+bool island_contains(Island* island, Bus* bus)
+{
+    foreach (b; island.members[])
+        if (b is bus)
+            return true;
+    return false;
+}
+
+// Production contributions carry circuit names, not bus pointers.
 bool circuit_in_island(Island* island, const(char)[] circuit)
 {
     foreach (b; island.members[])
