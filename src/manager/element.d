@@ -54,6 +54,8 @@ nothrow @nogc:
 // A commit scope defers subscriber delivery: writes between begin_commit and end_commit apply
 // to their elements immediately through the normal write paths, and their updates deliver when
 // the outermost scope closes, so subscribers only ever run against a fully applied frame.
+// Writes made by subscribers during the flush queue into a follow-up wave, so cascades
+// (links, computations) also deliver whole frames.
 // Batch record/time slices written inside a scope are borrowed until the scope closes;
 // single-sample writes travel as their boxed value.
 void begin_commit()
@@ -66,11 +68,7 @@ void end_commit()
     assert(g_commit_depth != 0, "unbalanced end_commit");
     if (--g_commit_depth != 0)
         return;
-    if (g_pending_updates.empty)
-        return;
-    Array!SampleUpdate updates = g_pending_updates.move;
-    foreach (ref update; updates)
-        deliver(update);
+    flush_pending();
 }
 
 struct CommitScope
@@ -1025,7 +1023,22 @@ void submit(ref SampleUpdate update, bool batch)
         g_pending_updates ~= update;
         return;
     }
+    ++g_commit_depth;
     deliver(update);
+    --g_commit_depth;
+    flush_pending();
+}
+
+void flush_pending()
+{
+    while (!g_pending_updates.empty)
+    {
+        Array!SampleUpdate updates = g_pending_updates.move;
+        ++g_commit_depth;
+        foreach (ref update; updates)
+            deliver(update);
+        --g_commit_depth;
+    }
 }
 
 void deliver(ref SampleUpdate update)
