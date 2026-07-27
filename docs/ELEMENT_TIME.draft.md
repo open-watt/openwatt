@@ -38,6 +38,17 @@ Ordering authority belongs to the clock that is actually monotonic:
 - Genuine staleness/duplicate discrimination belongs to tick-domain series
   clocks (`ClockDomain`), where ordering is well defined.
 
+## Known defect in this branch's model
+
+`last_arrival` is a MonoTime, so two writes can share a tick: burst writes on a
+coarse clock (embedded timers, and Windows' ~15ms default granularity) read the
+same value. `ElementLink.resolve()` then treats both endpoints as equally recent
+and skips initial sync, leaving them divergent until the next write. A clock
+value is the wrong ordering authority; use a strictly increasing per-write
+sequence number instead (a global `ulong` counter bumped in `prepare_after`),
+with the monotime kept only if something wants the actual arrival instant.
+Reported by review on PR #439.
+
 ## Related follow-ups (not on this branch)
 
 - **Clock changes for tick series**: on a UTC adjustment, the series-local mono
