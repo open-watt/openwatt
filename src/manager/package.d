@@ -218,6 +218,11 @@ nothrow @nogc:
             walk(c, rel, 0, false);
     }
 
+    // an element AT a prefix proves that prefix is not a component: the pair is the
+    // component-to-element mismatch link_add refuses when both sides resolve up front
+    bool mismatched(const(char)[] path) const pure
+        => path == a_prefix[] || path == b_prefix[];
+
     void element_created(const(char)[] path, Element* e)
     {
         // nested links (`dev.a` <-> `dev.a.b`) put a path under both prefixes
@@ -1383,8 +1388,19 @@ nothrow @nogc:
         }
 
         // after the undecided pass so a link decided by this element also processes it
-        foreach (cl; component_links)
+        for (size_t i = 0; i < component_links.length; )
+        {
+            ComponentLink* cl = component_links[i];
+            if (cl.mismatched(path))
+            {
+                writeWarning("Cannot link component to element: '", path, "' is an element; dropping link '",
+                             cl.a_prefix, "' <-> '", cl.b_prefix, "'");
+                destroy_component_link(cl);
+                continue;
+            }
             cl.element_created(path, e);
+            ++i;
+        }
 
         // any device's pending refs may resolve to the new element via a leading-dot global path
         request_rebind();
@@ -1413,6 +1429,14 @@ nothrow @nogc:
     {
         link.unlink();
         links.removeFirstSwapLast(link);
+        allocator.freeT(link);
+    }
+
+    void destroy_component_link(ComponentLink* link)
+    {
+        foreach (child; link.children.values)
+            destroy_link(child);
+        component_links.removeFirstSwapLast(link);
         allocator.freeT(link);
     }
 
