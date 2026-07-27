@@ -8,6 +8,7 @@ import urt.meta.nullable;
 import urt.string;
 import urt.time;
 
+import manager;
 import manager.collection;
 import manager.console;
 import manager.plugin;
@@ -153,15 +154,20 @@ nothrow @nogc:
 
     final const(char)[] device() const pure
         => _device[];
-    final void device(const(char)[] value)
+    final const(char)[] device(const(char)[] value)
     {
+        if (!value.empty && (value.length != 5 || value[0 .. 4] != "twai" || value[4] < '0' || value[4] > '9' || value[4] - '0' >= num_can))
+            return "invalid CAN device";
+
         _device = value.makeString(defaultAllocator);
+        _can_port = value.empty ? -1 : cast(byte)(value[4] - '0');
         if (!value.empty)
         {
             _stream = null;
             _protocol = CANInterfaceProtocol.unknown;
         }
         mark_set!(typeof(this), [ "device", "stream", "protocol" ])();
+        return null;
     }
 
     final uint baud_rate() const pure
@@ -214,6 +220,10 @@ protected:
         {
             static if (num_can > 0)
             {
+                import urt.atomic : atomicStore, MemoryOrder;
+
+                atomicStore!(MemoryOrder.relaxed)(_native_rx_pending, 0u);
+                atomicStore!(MemoryOrder.relaxed)(_native_rx_retry, 0u);
                 can_init();
                 CanConfig cfg;
                 cfg.bitrate = _baud_rate;
@@ -222,9 +232,18 @@ protected:
                     cfg.tx_gpio = _tx_gpio;
                     cfg.rx_gpio = _rx_gpio;
                 }
-                auto result = can_open(_can, 0, cfg);
+                ubyte port = cast(ubyte)_can_port;
+                if (_native_interfaces[port] !is null && _native_interfaces[port] !is this)
+                {
+                    can_deinit();
+                    writeError("CAN controller is already in use");
+                    return CompletionStatus.error;
+                }
+                _native_interfaces[port] = this;
+                auto result = can_open(_can, port, cfg, &native_rx_ready);
                 if (!result)
                 {
+                    _native_interfaces[port] = null;
                     can_deinit();
                     writeError("CAN init failed for '", name, "'");
                     return CompletionStatus.error;
@@ -246,7 +265,15 @@ protected:
         _resyncing = false;
         if (_can.is_open)
         {
+            ubyte port = _can.port;
+            can_set_rx_callback(_can, null);
             can_close(_can);
+            import urt.atomic : atomicStore, MemoryOrder;
+            atomicStore!(MemoryOrder.release)(_native_rx_pending, 0u);
+            atomicStore!(MemoryOrder.release)(_native_rx_retry, 0u);
+            static if (num_can > 0)
+                if (port < num_can && _native_interfaces[port] is this)
+                    _native_interfaces[port] = null;
             can_deinit();
         }
         return CompletionStatus.complete;
@@ -256,8 +283,10 @@ protected:
     {
         if (_can.is_open)
         {
+            import urt.atomic : cas;
+            if (cas(&_native_rx_retry, 1u, 0u))
+                native_rx_event(getTime());
             super.update();
-            poll_native();
             return;
         }
 
@@ -482,6 +511,7 @@ private:
     ObjectRef!Stream _stream;
     CANInterfaceProtocol _protocol;
     String _device;
+    byte _can_port = -1;
     uint _baud_rate = 500_000;
     ubyte[LargestProtocolFrame] _tail;
     ushort _tail_bytes;
@@ -494,10 +524,75 @@ private:
     }
 
     Can _can;
+    shared uint _native_rx_pending;
+    shared uint _native_rx_retry;
 
-    void poll_native()
+    static if (num_can > 0)
     {
-        MonoTime now = getTime();
+        __gshared CANInterface[num_can] _native_interfaces;
+
+        // Queued RX events bind this stable trampoline rather than an interface instance, so an
+        // interface destroyed while its event is still queued is simply absent from the sweep.
+        static struct RxSweep
+        {
+            void event(MonoTime when) nothrow @nogc
+            {
+                import urt.atomic : atomicLoad, MemoryOrder;
+                foreach (iface; _native_interfaces)
+                    if (iface !is null && atomicLoad!(MemoryOrder.acquire)(iface._native_rx_pending) != 0)
+                        iface.native_rx_event(when);
+            }
+        }
+        __gshared RxSweep _rx_sweep;
+    }
+
+    static bool native_rx_ready(Can can, CanCallbackContext context)
+    {
+        static if (num_can == 0)
+            return false;
+        else
+        {
+            if (can.port >= num_can || g_app is null)
+                return false;
+            CANInterface instance = _native_interfaces[can.port];
+            if (instance is null)
+                return false;
+
+            import urt.atomic : atomicStore, cas, MemoryOrder;
+            if (!cas(&instance._native_rx_pending, 0u, 1u))
+                return false;
+
+            bool queued;
+            bool higher_priority_task_woken;
+            final switch (context)
+            {
+                case CanCallbackContext.task:
+                    queued = g_app.post_event(&_rx_sweep.event, getTime(), EventPriority.bulk);
+                    break;
+                case CanCallbackContext.interrupt:
+                    higher_priority_task_woken = g_app.post_event_from_isr(&_rx_sweep.event, EventPriority.bulk, queued);
+                    break;
+            }
+            if (!queued)
+            {
+                atomicStore!(MemoryOrder.release)(instance._native_rx_pending, 0u);
+                atomicStore!(MemoryOrder.release)(instance._native_rx_retry, 1u);
+            }
+            return higher_priority_task_woken;
+        }
+    }
+
+    void native_rx_event(MonoTime when)
+    {
+        import urt.atomic : atomicStore, MemoryOrder;
+        atomicStore!(MemoryOrder.release)(_native_rx_pending, 0u);
+        atomicStore!(MemoryOrder.release)(_native_rx_retry, 0u);
+        if (_can.is_open && running)
+            drain_native(when);
+    }
+
+    void drain_native(MonoTime now)
+    {
         CanFrame hw = void;
 
         while (can_receive(_can, hw))
@@ -508,6 +603,14 @@ private:
             can.extended = hw.extended;
             can.remote_transmission_request = hw.rtr;
             incoming_packet(packet);
+        }
+
+        uint dropped = can_take_rx_drops(_can);
+        if (dropped != 0)
+        {
+            _status.rx_dropped += dropped;
+            mark_set!(typeof(this), "rx-dropped")();
+            log.warning("deferred RX queue dropped ", dropped, " frame", dropped == 1 ? "" : "s");
         }
     }
 }

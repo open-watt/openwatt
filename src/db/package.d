@@ -34,6 +34,9 @@ alias log = Log!"db";
 
 alias QueryCallback = void delegate(uint ticket, scope const(Sample)[] samples) nothrow @nogc;
 
+version (Embedded) enum bool db_threads_supported = false;
+else               enum bool db_threads_supported = ThreadsSupported;
+
 // Channel depths. Generously sized for desktop; tune down for tiny targets.
 private enum uint ingest_capacity = 4096;
 private enum uint query_capacity = 256;
@@ -166,7 +169,7 @@ nothrow @nogc:
         version (linux)
             _engine.max_open = record_open_cap();
 
-        static if (ThreadsSupported)
+        static if (db_threads_supported)
         {
             if (_wake.init())
             {
@@ -181,7 +184,7 @@ nothrow @nogc:
 
     override void deinit()
     {
-        static if (ThreadsSupported)
+        static if (db_threads_supported)
         {
             if (_threaded)
             {
@@ -233,7 +236,7 @@ private:
     MonoTime _last_churn_warn;
 
     bool _threaded;
-    static if (ThreadsSupported)
+    static if (db_threads_supported)
     {
         Thread _thread;
         Event _wake;
@@ -242,19 +245,19 @@ private:
 
     void wake()
     {
-        static if (ThreadsSupported)
+        static if (db_threads_supported)
             if (_threaded)
                 _wake.set();
     }
 
     void wake_if_work()
     {
-        static if (ThreadsSupported)
+        static if (db_threads_supported)
             if (!_ingest.empty || !_requests.empty)
                 _wake.set();
     }
 
-    static if (ThreadsSupported)
+    static if (db_threads_supported)
     void worker_main()
     {
         for (;;)

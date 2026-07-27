@@ -48,3 +48,6 @@ CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 # Custom partition table: two 3MB OTA slots + ~10MB storage
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# Roll back an OTA image that cannot survive its validation window.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y

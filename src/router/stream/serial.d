@@ -355,8 +355,31 @@ nothrow @nogc:
                 cfg.rs485.de_gpio = cast(ubyte)_de_gpio;
             }
 
-            if (!uart_open(_uart, cast(ubyte)_uart_port, cfg))
+            Result opened;
+            version (Espressif)
+            {
+                import urt.atomic : atomicStore, MemoryOrder;
+
+                atomicStore!(MemoryOrder.relaxed)(_rx_event_pending, 0u);
+                atomicStore!(MemoryOrder.relaxed)(_rx_event_retry, 0u);
+                ubyte port = cast(ubyte)_uart_port;
+                if (_active_uarts[port] !is null && _active_uarts[port] !is this)
+                {
+                    log.error("UART controller is already in use");
+                    return CompletionStatus.error;
+                }
+                _active_uarts[port] = this;
+                opened = uart_open(_uart, port, cfg, 0, &uart_rx_ready);
+            }
+            else
+                opened = uart_open(_uart, cast(ubyte)_uart_port, cfg);
+
+            if (!opened)
+            {
+                version (Espressif)
+                    _active_uarts[cast(ubyte)_uart_port] = null;
                 return CompletionStatus.error;
+            }
         }
 
         version (ReactorRx)
@@ -661,7 +684,18 @@ nothrow @nogc:
         }
         else version (Embedded)
         {
-            uart_close(_uart);
+            version (Espressif)
+            {
+                ubyte port = _uart.port;
+                uart_close(_uart);
+                if (port < num_uarts && _active_uarts[port] is this)
+                    _active_uarts[port] = null;
+                import urt.atomic : atomicStore, MemoryOrder;
+                atomicStore!(MemoryOrder.release)(_rx_event_pending, 0u);
+                atomicStore!(MemoryOrder.release)(_rx_event_retry, 0u);
+            }
+            else
+                uart_close(_uart);
         }
         return CompletionStatus.complete;
     }
@@ -675,28 +709,34 @@ nothrow @nogc:
         }
         else version (Posix)
         {
-            poll_os_rx();
+            drain_rx(getTime());
         }
         else version (Embedded)
         {
-            uart_poll(_uart);
-            if (uart_check_errors(_uart) != UartError.none)
-                restart();
+            version (Espressif)
+            {
+                import urt.atomic : atomicExchange, MemoryOrder;
+                // Normal RX is reactor-dispatched; only a rejected event post reaches this path.
+                if (atomicExchange!(MemoryOrder.acq_rel)(&_rx_event_retry, 0u) != 0)
+                    uart_rx_event(getTime());
+            }
             else
-                poll_os_rx();
+            {
+                uart_poll(_uart);
+                if (uart_check_errors(_uart) != UartError.none)
+                    restart();
+                else
+                    drain_rx(getTime());
+            }
         }
 
         super.update();
     }
 
-    // On linux and windows the reactor delivers rx via incoming(); every other
-    // platform drains the device here in update() and pushes the same way.
-    // Both routes converge on the base Stream _rx_buffer / rx_handler, so read()
-    // and pending() use the base (buffer-backed) implementations.
+    // All receive routes converge on the base Stream _rx_buffer / rx_handler, so read() and pending() use the base buffer-backed implementations.
     version (ReactorRx) {} else
-    private void poll_os_rx()
+    private void drain_rx(MonoTime now)
     {
-        MonoTime now = getTime();
         ubyte[512] buf = void;
         while (true)
         {
@@ -720,6 +760,67 @@ nothrow @nogc:
                     return;
             }
             incoming(buf[0 .. n], now);
+        }
+    }
+
+    version (Espressif)
+    {
+        static bool uart_rx_ready(Uart uart, size_t, UartCallbackContext context)
+        {
+            if (uart.port >= num_uarts || g_app is null)
+                return false;
+            SerialStream instance = _active_uarts[uart.port];
+            if (instance is null)
+                return false;
+
+            import urt.atomic : atomicStore, cas, MemoryOrder;
+            if (!cas(&instance._rx_event_pending, 0u, 1u))
+                return false;
+
+            if (context == UartCallbackContext.interrupt)
+            {
+                bool queued;
+                bool wake = g_app.post_event_from_isr(&_rx_sweep.event, EventPriority.bulk, queued);
+                if (!queued)
+                {
+                    atomicStore!(MemoryOrder.release)(instance._rx_event_pending, 0u);
+                    atomicStore!(MemoryOrder.release)(instance._rx_event_retry, 1u);
+                }
+                return wake;
+            }
+
+            if (!g_app.post_event(&_rx_sweep.event, getTime(), EventPriority.bulk))
+            {
+                atomicStore!(MemoryOrder.release)(instance._rx_event_pending, 0u);
+                atomicStore!(MemoryOrder.release)(instance._rx_event_retry, 1u);
+            }
+            return false;
+        }
+
+        // Queued RX events bind this stable trampoline rather than a stream instance, so a stream
+        // destroyed while its event is still queued is simply absent from the sweep.
+        static struct RxSweep
+        {
+            void event(MonoTime when) nothrow @nogc
+            {
+                import urt.atomic : atomicLoad, MemoryOrder;
+                foreach (stream; _active_uarts)
+                    if (stream !is null && atomicLoad!(MemoryOrder.acquire)(stream._rx_event_pending) != 0)
+                        stream.uart_rx_event(when);
+            }
+        }
+        __gshared RxSweep _rx_sweep;
+
+        void uart_rx_event(MonoTime when)
+        {
+            import urt.atomic : atomicStore, MemoryOrder;
+            atomicStore!(MemoryOrder.release)(_rx_event_pending, 0u);
+            atomicStore!(MemoryOrder.release)(_rx_event_retry, 0u);
+            if (!_uart.is_open || !running)
+                return;
+            if (uart_check_errors(_uart) != UartError.none)
+                return restart();
+            drain_rx(when);
         }
     }
 
@@ -954,6 +1055,12 @@ private:
     {
         Uart _uart;
         byte _uart_port = -1;
+        version (Espressif)
+        {
+            shared uint _rx_event_pending;
+            shared uint _rx_event_retry;
+            __gshared SerialStream[num_uarts] _active_uarts;
+        }
     }
 
     String _device;

@@ -75,10 +75,11 @@ mixin template DeclareModule(string name)
 //
 void register_modules(Application app)
 {
-    import manager.log, manager.cron, manager.record, manager.sync;
+    import manager.log, manager.cron, manager.object_signal, manager.record, manager.sync;
     import db;
     register_module!(manager.log)(app);
     register_module!(manager.cron)(app);
+    register_module!(manager.object_signal)(app);
     register_module!(db)(app);
     register_module!(manager.record)(app);
     register_module!(manager.sync)(app);
@@ -120,6 +121,7 @@ void register_modules(Application app)
         import router.iface;
         register_module!(router.iface)(app);
         register_module!(router.iface.bridge)(app);
+        register_module!(router.iface.i2c)(app);
         register_module!(router.iface.wifi)(app);
 
         import driver.ethernet, driver.wifi;
@@ -129,6 +131,9 @@ void register_modules(Application app)
 
     static if (has_all)
     {
+        import driver.rtc.pcf85063;
+        register_module!(driver.rtc.pcf85063)(app);
+
         import protocol;
         register_module!(protocol.ble)(app);
 

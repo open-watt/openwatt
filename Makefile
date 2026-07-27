@@ -95,7 +95,18 @@ ifeq ($(PLATFORM),esp32)
 else ifeq ($(PLATFORM),esp32-s2)
     DFLAGS := $(DFLAGS) -J platforms/esp32s2
 else ifeq ($(PLATFORM),esp32-s3)
-    DFLAGS := $(DFLAGS) -J platforms/esp32s3
+    ifdef BOARD
+        ESP32_S3_CONFIG_DIR := platforms/esp32s3/boards/$(BOARD)
+        ifeq ($(wildcard $(ESP32_S3_CONFIG_DIR)/system.conf),)
+            $(error Unknown ESP32-S3 BOARD='$(BOARD)': missing $(ESP32_S3_CONFIG_DIR)/system.conf)
+        endif
+        DFLAGS := $(DFLAGS) -J $(ESP32_S3_CONFIG_DIR)
+        # the board's system.conf is baked into the D object; keep per-board artifacts apart
+        OBJDIR    := obj/$(BUILDNAME)_$(BOARD)_$(CONFIG)
+        TARGETDIR := bin/$(BUILDNAME)_$(BOARD)_$(CONFIG)
+    else
+        DFLAGS := $(DFLAGS) -J platforms/esp32s3
+    endif
 else ifeq ($(PLATFORM),esp32-c2)
     DFLAGS := $(DFLAGS) -J platforms/esp32c2
 else ifeq ($(PLATFORM),esp32-c3)
@@ -396,7 +407,7 @@ endif
 	@echo "  python -m esptool --chip $(ESP_IDF_TARGET) -p COM5 -b 460800 write_flash \\"
 	@echo "    0x0 $(TARGETDIR)/bootloader.bin \\"
 	@echo "    0x8000 $(TARGETDIR)/partition-table.bin \\"
-	@echo "    0xf000 $(TARGETDIR)/ota_data_initial.bin \\"
+	@echo "    0x10000 $(TARGETDIR)/ota_data_initial.bin \\"
 	@echo "    0x20000 $(TARGETDIR)/openwatt.bin"
 
 esp-flash:

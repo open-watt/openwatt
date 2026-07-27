@@ -42,6 +42,11 @@ nothrow @nogc:
 
     override void init()
     {
+        import urt.atomic : atomicStore, MemoryOrder;
+
+        _ble_module = this;
+        atomicStore!(MemoryOrder.relaxed)(_service_pending, 0u);
+        atomicStore!(MemoryOrder.relaxed)(_service_retry, 0u);
         register_packet_codec!BLEFrame();
         register_frame_handler(PacketType.ble, &on_ble_frame);
 
@@ -112,15 +117,41 @@ nothrow @nogc:
 
     override void update()
     {
+        import urt.atomic : cas;
+
+        // Normal BLE delivery is reactor-dispatched; this recovers a rejected event post.
+        if (cas(&_service_retry, 1u, 0u))
+            service_radios(getTime());
         Collection!BLEClient().update_all();
         expire_devices();
     }
 
     void request_service()
     {
-        import urt.atomic : cas;
+        import urt.atomic : atomicStore, cas, MemoryOrder;
         if (cas(&_service_pending, 0u, 1u))
-            g_app.post_event(&service_radios, getTime(), EventPriority.bulk);
+        {
+            if (!g_app.post_event(&service_radios, getTime(), EventPriority.bulk))
+            {
+                atomicStore!(MemoryOrder.release)(_service_pending, 0u);
+                atomicStore!(MemoryOrder.release)(_service_retry, 1u);
+            }
+        }
+    }
+
+    void request_service_from_ready()
+    {
+        import urt.atomic : atomicStore, cas, MemoryOrder;
+        if (g_app is null || !cas(&_service_pending, 0u, 1u))
+            return;
+
+        bool queued;
+        g_app.post_event_from_isr(&service_radios, EventPriority.bulk, queued);
+        if (!queued)
+        {
+            atomicStore!(MemoryOrder.release)(_service_pending, 0u);
+            atomicStore!(MemoryOrder.release)(_service_retry, 1u);
+        }
     }
 
     void on_ble_frame(ref Packet p, BaseInterface iface)
@@ -283,6 +314,15 @@ private:
 
 // HACK: not a member of BLEModule to avoid weird compile error!
 __gshared shared(uint) _service_pending;
+__gshared shared(uint) _service_retry;
+__gshared BLEModule _ble_module;
+
+void request_ble_service_from_ready()
+{
+    BLEModule module_ = _ble_module;
+    if (module_ !is null)
+        module_.request_service_from_ready();
+}
 
 private:
 
