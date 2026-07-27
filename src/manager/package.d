@@ -88,7 +88,21 @@ nothrow @nogc:
             to = a.elem;
         }
         else if (a.elem.last_update == b.elem.last_update)
-            return;
+        {
+            // ties still defer to computed authority: frames commonly stamp both endpoints alike
+            if (alias_link || a.elem.last_update == SysTime.init)
+                return;
+            bool a_dep = a.elem.sampling_mode == SamplingMode.dependent;
+            if (a_dep == (b.elem.sampling_mode == SamplingMode.dependent))
+                return;
+            if (!a_dep)
+            {
+                from = b.elem;
+                to = a.elem;
+            }
+            if (from.value == to.value)
+                return;
+        }
         if (!can_write(to))
         {
             // the computed side is authoritative even when its value is older

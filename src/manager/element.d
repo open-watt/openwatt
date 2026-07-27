@@ -738,6 +738,24 @@ private:
         debug assert(update.count != 0);
         debug assert(data_format.is_scalar || data_format.is_wide,
                      "managed records require typed sample handling");
+
+        // stale samples are never applied: latest reflects the newest observation and
+        // series time stays monotonic; a batch keeps only its fresh tail
+        uint count = update.count;
+        uint stale = 0;
+        while (stale < count && update.time(stale) < record_update)
+            ++stale;
+        if (stale == count)
+            return;
+        if (stale)
+        {
+            update.records = update.records[stale * data_format.stride .. $];
+            if (update.times.length)
+                update.times = update.times[stale .. $];
+            else
+                update.ticks = update.ticks[stale .. $];
+        }
+
         prepare_before(update);
         apply(update);
         prepare_after(update);
@@ -770,6 +788,8 @@ private:
     void write_text_sample(String v, SysTime t, Subscriber who)
     {
         debug assert(data_format.is_text);
+        if (t < record_update)
+            return;
         TextRecord* slot = cast(TextRecord*)_latest.raw.ptr;
         if (held_repeat(slot.view == v[], t))
             return;
@@ -785,6 +805,8 @@ private:
     void write_text_sample(const(char)[] v, SysTime t, Subscriber who)
     {
         debug assert(data_format.is_text);
+        if (t < record_update)
+            return;
         TextRecord* slot = cast(TextRecord*)_latest.raw.ptr;
         if (held_repeat(slot.view == v, t))
             return;
@@ -1244,6 +1266,21 @@ unittest
     assert(n.record_count == 0 && n.bucket_count == 0);
     assert(n.latest_record.f64_ == 9.0);
     assert(n.last_update == from_unix_time_ns(500));
+
+    // stale samples are rejected outright; a batch keeps only its fresh tail
+    Element st;
+    st.format = register_format(f64_held);
+    st.ensure_history();
+    st.write_sample(5.0, from_unix_time_ns(10_000));
+    st.write_sample(6.0, from_unix_time_ns(9_000));
+    assert(st.latest_record.f64_ == 5.0 && st.last_update == from_unix_time_ns(10_000));
+    assert(st.record_count == 1);
+    double[2] stale_batch = [7.0, 8.0];
+    SysTime[2] stale_times = [from_unix_time_ns(9_500), from_unix_time_ns(11_000)];
+    st.write_samples(stale_batch[], stale_times[]);
+    assert(st.latest_record.f64_ == 8.0 && st.last_update == from_unix_time_ns(11_000));
+    assert(st.record_count == 2);
+    st.teardown();
 
     // held series: equal observations advance last_update but record nothing
     Element e;
