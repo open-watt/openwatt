@@ -915,9 +915,6 @@ private:
     {
         if (a.meter_ref is null)
             return;
-        foreach (ref spec; specs[])
-            if (spec.meter !is null)
-                return;
 
         DevicePort* target;
         foreach (ref spec; specs[])
@@ -935,8 +932,8 @@ private:
         if (target !is null)
         {
             target.meter = a.meter_ref;
-            if (a.meter_sign_set)
-                target.sign = a.meter_sign;
+            target.sign = a.meter_sign_set ? a.meter_sign : MeterSign.normal;
+            target.phase = 0;
         }
     }
 
