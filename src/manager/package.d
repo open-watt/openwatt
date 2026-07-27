@@ -81,22 +81,25 @@ nothrow @nogc:
     {
         a.elem.subscribe(&element_updated);
         b.elem.subscribe(&element_updated);
-        if (a.elem.last_update > b.elem.last_update)
+        Element* from = a.elem, to = b.elem;
+        if (b.elem.last_update > a.elem.last_update)
         {
-            if (can_write(b.elem))
-            {
-                Variant value = a.elem.value;
-                b.elem.value(value, a.elem.last_update);
-            }
+            from = b.elem;
+            to = a.elem;
         }
-        else if (b.elem.last_update > a.elem.last_update)
+        else if (a.elem.last_update == b.elem.last_update)
+            return;
+        if (!can_write(to))
         {
-            if (can_write(a.elem))
-            {
-                Variant value = b.elem.value;
-                a.elem.value(value, b.elem.last_update);
-            }
+            // the computed side is authoritative even when its value is older
+            Element* t = from;
+            from = to;
+            to = t;
+            if (!can_write(to) || from.last_update == SysTime.init)
+                return;
         }
+        Variant value = from.value;
+        to.value(value, from.last_update);
     }
 
     void unlink()
@@ -120,7 +123,10 @@ nothrow @nogc:
             dest = b.elem;
         else if (update.element is b.elem)
             dest = a.elem;
-        if (dest && can_write(dest))
+        // the timestamp guard breaks propagation cycles: deferred delivery outlives
+        // `propagating`, but a value that lapped a link mesh arrives carrying the
+        // timestamp it already stamped on this destination
+        if (dest && can_write(dest) && dest.last_update < update.timestamp)
             dest.value(update.value, update.timestamp, &element_updated);
         propagating = false;
     }
@@ -200,9 +206,10 @@ nothrow @nogc:
 
     void element_created(const(char)[] path)
     {
+        // nested links (`dev.a` <-> `dev.a.b`) put a path under both prefixes
         if (under_prefix(path, a_prefix[]))
             ensure_child(path[a_prefix.length + 1 .. $]);
-        else if (under_prefix(path, b_prefix[]))
+        if (under_prefix(path, b_prefix[]))
             ensure_child(path[b_prefix.length + 1 .. $]);
     }
 
