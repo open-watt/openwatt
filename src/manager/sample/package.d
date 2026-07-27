@@ -304,24 +304,32 @@ bool parse_record(const(char)[] token, ref const SampleDesc desc, void[] record)
 
         case u8, s8, u16, s16, u32, s32, u64, s64:
         {
+            const(VoidEnumInfo)* ei = fmt.desc == DataFormat.Desc.enum_ ? fmt.enum_info : null;
+
+            if (ei)
+            {
+                Variant ev = ei.value_for(token);
+                if (ev.isNull)
+                    ev = ei.value_for_display(token);
+                if (!ev.isNull)
+                {
+                    store_int(record.ptr, fmt.type, cast(ulong)ev.asLong);
+                    return true;
+                }
+            }
+
             size_t taken;
             int e;
             uint base;
             long v = parse_int_with_exponent_and_base(token, e, base, &taken);
             if (taken != token.length)
             {
-                const(VoidEnumInfo)* ei = fmt.desc == DataFormat.Desc.enum_ ? fmt.enum_info : null;
-                if (!ei)
+                if (!ei || !ei.bitfield)
                     return false;
-                if (ei.bitfield)
-                {
-                    bool ok;
-                    v = ei.parse_flags(token, ok);
-                    if (!ok)
-                        return false;
-                }
-                else
-                    v = ei.value_for(token).asLong;
+                bool ok;
+                v = ei.parse_flags(token, ok);
+                if (!ok)
+                    return false;
             }
             else
             {
@@ -491,6 +499,10 @@ unittest
     assert(m == Mode.eco);
     char[16] txt;
     assert(format_record((cast(const(void)*)&m)[0 .. 2], mode, txt) == 1 && txt[0] == '1');
+
+    ushort keep = m;
+    assert(!parse_record("nonsense", mode, (cast(void*)&m)[0 .. 2]));
+    assert(m == keep);
 
     // dt48 encoding: byte-image path, reading-order canonical
     const(Encoding)* dt48 = find_encoding("yymmddhhmmss");
