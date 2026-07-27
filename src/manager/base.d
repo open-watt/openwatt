@@ -597,6 +597,12 @@ nothrow @nogc:
         if (is_remote)
             return;
 
+        if (_state == State.init_failed)
+        {
+            set_state(State.validate);
+            return;
+        }
+
         if (_state & _valid)
         {
             State new_state = cast(State)((_state & ~_start) | _stop);

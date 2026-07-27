@@ -69,6 +69,7 @@ enum CollectionType : ubyte
     link,
     automation,
     device, // NOT BaseObjects: the device type's table is g_app.devices, sharing the CID space
+    rtc,
     count
 }
 

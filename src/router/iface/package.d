@@ -27,6 +27,7 @@ public import router.status;
 public static import router.iface.bridge;
 public static import router.iface.ethernet;
 public static import router.iface.group;
+public static import router.iface.i2c;
 public static import router.iface.vlan;
 public static import router.iface.wifi;
 

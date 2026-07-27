@@ -60,7 +60,15 @@ nothrow @nogc:
     override void service()
     {
         if (_ble.is_open)
-            ble_poll(_ble);
+        {
+            bool pending = ble_service(_ble);
+            account_driver_drops();
+            if (pending)
+            {
+                import protocol.ble : BLEModule;
+                get_module!BLEModule.request_service();
+            }
+        }
         drain_emu_responses();
         super.service();
     }
@@ -90,7 +98,7 @@ protected:
         ble_set_read_callback(_ble, &read_dispatch);
         ble_set_write_callback(_ble, &write_dispatch);
         ble_set_notify_callback(_ble, &notify_dispatch);
-        ble_set_wake_callback(_ble, &wake_dispatch);
+        ble_set_ready_callback(_ble, &ready_dispatch);
 
         _active_radios[_port] = this;
 
@@ -105,6 +113,7 @@ protected:
     {
         if (_ble.is_open)
         {
+            ble_set_ready_callback(_ble, null);
             _active_radios[_ble.port] = null;
             ble_close(_ble);
         }
@@ -172,6 +181,24 @@ private:
     Map!(MACAddress, BLEAdv) _adv_handles;
     Map!(MACAddress, BLEAddrType) _addr_types; // LE address type by device, learnt from adverts
     Array!(Packet*) _emu_responses;
+
+    void account_driver_drops()
+    {
+        uint dropped = ble_take_rx_drops(_ble);
+        if (dropped != 0)
+        {
+            _status.rx_dropped += dropped;
+            mark_set!(typeof(this), "rx-dropped")();
+            log.warning("BLE deferred RX queues dropped ", dropped, " frame", dropped == 1 ? "" : "s");
+        }
+
+        uint event_drops = ble_take_event_drops(_ble);
+        if (event_drops != 0)
+        {
+            log.error("BLE deferred queues dropped ", event_drops, " control or completion event", event_drops == 1 ? "" : "s", "; restarting");
+            restart();
+        }
+    }
 
     BLEConn session_conn(const BLESession* session) const pure
         => BLEConn(cast(ubyte)session.transport);
@@ -667,10 +694,10 @@ private:
                 iface.on_notification(conn, handle, data);
     }
 
-    static void wake_dispatch()
+    static void ready_dispatch()
     {
-        import protocol.ble : BLEModule;
-        get_module!BLEModule.request_service();
+        import protocol.ble : request_ble_service_from_ready;
+        request_ble_service_from_ready();
     }
 
     void on_scan_report(ref const BLEAdvReport report)

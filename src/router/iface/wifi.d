@@ -239,16 +239,22 @@ nothrow @nogc:
         => _ssid[];
     final void ssid(const(char)[] value)
     {
+        if (_ssid[] == value)
+            return;
         _ssid = value.makeString(defaultAllocator);
         mark_set!(typeof(this), "ssid")();
+        restart();
     }
 
     final inout(Secret) secret() inout pure
         => _secret;
     final void secret(Secret value)
     {
+        if (_secret.get is value)
+            return;
         _secret = value;
         mark_set!(typeof(this), "secret")();
+        restart();
     }
 
     final void on_radio_rx(const(ubyte)[] data, MonoTime ts)
