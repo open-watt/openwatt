@@ -544,7 +544,18 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
                 case map:
                     if (!is_new_element)
                         break;
-                    e.format = create_element_handler(device, e, el.get_element_desc(profile), el.index);
+                    foreach (ai; profile.element_aliases(el.element_index))
+                    {
+                        ref const(ElementDesc) alias_desc = profile.element_desc(ai);
+                        e.access = cast(manager.element.Access)alias_desc.access;
+                        if (!(el.explicit & ElementTemplate.Explicit.units) && alias_desc.display_units.length)
+                            e.display_unit = alias_desc.display_units;
+                        if (!(el.explicit & ElementTemplate.Explicit.frequency))
+                            e.sampling_mode = alias_desc.update_frequency.freq_to_element_mode;
+                        e.format = create_element_handler(device, e, alias_desc, el.index);
+                        if (e.format.valid)
+                            break;
+                    }
                     if (!e.format.valid)
                     {
                         g_app.allocator.freeT(e);

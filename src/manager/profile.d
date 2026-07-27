@@ -272,8 +272,15 @@ pure nothrow @nogc:
         alias_
     }
 
+    enum Explicit : ubyte
+    {
+        units     = 1,
+        frequency = 2
+    }
+
     Type type;
     ubyte index;
+    ubyte explicit;
 
     Access access = Access.read;
     Frequency update_frequency = Frequency.medium;
@@ -305,6 +312,12 @@ pure nothrow @nogc:
     {
         assert(type == Type.map, "ElementTemplate is not of type `map`");
         return profile.elements[_value];
+    }
+
+    ushort element_index() const pure
+    {
+        assert(type == Type.map, "ElementTemplate is not of type `map`");
+        return _value;
     }
 
 private:
@@ -492,6 +505,72 @@ nothrow @nogc:
     {
         assert(index < component._num_elements, "Component index out of range");
         return element_templates[indirections[component._elements + index]];
+    }
+
+    ref inout(ElementDesc) element_desc(size_t index) inout pure
+        => elements[index];
+
+    auto element_aliases(ushort index) const pure
+    {
+        static struct Range
+        {
+        nothrow @nogc pure:
+            const(Profile)* profile;
+            ushort self;
+            size_t id_entry;
+            size_t pos;
+            bool at_self = true;
+            bool exhausted;
+
+            bool empty() const => exhausted;
+            ushort front() const => at_self ? self : profile.lookup_table[pos].index;
+
+            void popFront()
+            {
+                if (at_self)
+                    at_self = false;
+                else
+                    ++pos;
+                advance();
+            }
+
+            void advance()
+            {
+                if (id_entry == size_t.max)
+                {
+                    exhausted = true;
+                    return;
+                }
+                ushort hash = profile.lookup_table[id_entry].hash;
+                ushort id = profile.lookup_table[id_entry].id;
+                for (; pos < profile.lookup_table.length; ++pos)
+                {
+                    if (profile.lookup_table[pos].index == self || profile.lookup_table[pos].hash != hash)
+                        continue;
+                    if (profile.lookup_strings)
+                    {
+                        if (profile.lookup_table[pos].id.cache_string(profile.lookup_strings) !=
+                            id.cache_string(profile.lookup_strings))
+                            continue;
+                    }
+                    else if (profile.lookup_table[pos].id != id)
+                        continue;
+                    return;
+                }
+                exhausted = true;
+            }
+        }
+
+        size_t entry = size_t.max;
+        foreach (i, ref l; lookup_table)
+        {
+            if (l.index == index)
+            {
+                entry = i;
+                break;
+            }
+        }
+        return Range(&this, index, entry);
     }
 
     ptrdiff_t find_element(const(char)[] id) const pure
@@ -1484,6 +1563,8 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
                             }
 
                             e.display_units = display_units ? addString(display_units) : elem_desc ? elem_desc.display_units : CacheString();
+                            if (display_units)
+                                e.explicit |= ElementTemplate.Explicit.units;
                             e._description = description ? desc_cache.add_string(description) : elem_desc ? elem_desc._description : 0;
 
                             // TODO: should we be able to specify this at the element template level?
@@ -1494,6 +1575,7 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
                             e.update_frequency = Frequency.medium;
                             if (!freq.empty)
                             {
+                                e.explicit |= ElementTemplate.Explicit.frequency;
                                 if (freq.ieq("realtime")) e.update_frequency = Frequency.realtime;
                                 else if (freq.ieq("high")) e.update_frequency = Frequency.high;
                                 else if (freq.ieq("medium")) e.update_frequency = Frequency.medium;
