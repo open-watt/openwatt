@@ -938,7 +938,7 @@ private:
         computation.kind = ComputationKind.alias_;
         computation.device = device;
         computation.target = target;
-        computation.link = g_app.create_link(target, null, &source, null);
+        computation.link = g_app.create_link(target, null, &source, null, true);
         computation.bound = true;
         device.computations ~= computation;
     }

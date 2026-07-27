@@ -358,7 +358,7 @@ package:
             if (!source)
                 continue;
             attach_computation(c.target, source.format);
-            c.link = g_app.create_link(c.target, null, source, null);
+            c.link = g_app.create_link(c.target, null, source, null, true);
             c.bound = true;
             ++newly_bound;
         }

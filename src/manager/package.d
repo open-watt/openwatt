@@ -83,13 +83,19 @@ nothrow @nogc:
         b.elem.subscribe(&element_updated);
         if (a.elem.last_update > b.elem.last_update)
         {
-            Variant value = a.elem.value;
-            b.elem.value(value, a.elem.last_update);
+            if (can_write(b.elem))
+            {
+                Variant value = a.elem.value;
+                b.elem.value(value, a.elem.last_update);
+            }
         }
         else if (b.elem.last_update > a.elem.last_update)
         {
-            Variant value = b.elem.value;
-            a.elem.value(value, b.elem.last_update);
+            if (can_write(a.elem))
+            {
+                Variant value = b.elem.value;
+                a.elem.value(value, b.elem.last_update);
+            }
         }
     }
 
@@ -114,10 +120,15 @@ nothrow @nogc:
             dest = b.elem;
         else if (update.element is b.elem)
             dest = a.elem;
-        if (dest)
+        if (dest && can_write(dest))
             dest.value(update.value, update.timestamp, &element_updated);
         propagating = false;
     }
+
+    // computed elements propagate out but never accept writes in, except from
+    // the alias link that is itself the element's computation
+    bool can_write(const Element* dest) const pure
+        => alias_link || dest.sampling_mode != SamplingMode.dependent;
 
 private:
     private struct Endpoint
@@ -164,6 +175,96 @@ private:
     Endpoint a;
     Endpoint b;
     bool propagating;
+    bool alias_link;
+}
+
+// Links two component subtrees by path prefix: one speculative ElementLink per relative
+// element path (union of both sides), dangling sides bind through the normal path machinery.
+struct ComponentLink
+{
+nothrow @nogc:
+
+    String a_prefix;
+    String b_prefix;
+    Map!(String, ElementLink*) children;
+
+    void populate()
+    {
+        auto commit = open_commit();
+        char[256] rel = void;
+        if (Component c = resolve_global_component(a_prefix[]))
+            walk(c, rel, 0);
+        if (Component c = resolve_global_component(b_prefix[]))
+            walk(c, rel, 0);
+    }
+
+    void element_created(const(char)[] path)
+    {
+        if (under_prefix(path, a_prefix[]))
+            ensure_child(path[a_prefix.length + 1 .. $]);
+        else if (under_prefix(path, b_prefix[]))
+            ensure_child(path[b_prefix.length + 1 .. $]);
+    }
+
+private:
+
+    static bool under_prefix(const(char)[] path, const(char)[] prefix) pure
+        => path.length > prefix.length + 1 && path[0 .. prefix.length] == prefix[] && path[prefix.length] == '.';
+
+    void walk(Component c, ref char[256] buf, size_t len)
+    {
+        foreach (Element* e; c.elements)
+        {
+            size_t l = append_id(buf, len, e.id[]);
+            if (l <= buf.length)
+                ensure_child(buf[0 .. l]);
+        }
+        foreach (Component sub; c.components)
+        {
+            size_t l = append_id(buf, len, sub.id[]);
+            if (l <= buf.length)
+                walk(sub, buf, l);
+        }
+    }
+
+    static size_t append_id(ref char[256] buf, size_t len, const(char)[] id)
+    {
+        if (len)
+        {
+            if (len < buf.length)
+                buf[len] = '.';
+            ++len;
+        }
+        if (len + id.length <= buf.length)
+            buf[len .. len + id.length] = id[];
+        return len + id.length;
+    }
+
+    void ensure_child(const(char)[] rel)
+    {
+        if (rel in children)
+            return;
+        char[256] fa = void, fb = void;
+        const(char)[] a_path = make_full(fa, a_prefix[], rel);
+        const(char)[] b_path = make_full(fb, b_prefix[], rel);
+        if (!a_path || !b_path)
+            return;
+        Element* ae = resolve_global_element(a_path);
+        Element* be = resolve_global_element(b_path);
+        ElementLink* link = g_app.create_link(ae, a_path, be, b_path);
+        children.insert(rel.makeString(g_app.allocator), link);
+    }
+
+    static const(char)[] make_full(ref char[256] buf, const(char)[] prefix, const(char)[] rel)
+    {
+        size_t len = prefix.length + 1 + rel.length;
+        if (len > buf.length)
+            return null;
+        buf[0 .. prefix.length] = prefix[];
+        buf[prefix.length] = '.';
+        buf[prefix.length + 1 .. len] = rel[];
+        return buf[0 .. len];
+    }
 }
 
 __gshared Application g_app = null;
@@ -249,6 +350,7 @@ nothrow @nogc:
         => _profile_path;
 
     Array!(ElementLink*) links;
+    Array!(ComponentLink*) component_links;
 
     Map!(String, RegisteredType) types;
 
@@ -1168,11 +1270,12 @@ nothrow @nogc:
 
     // element link API
 
-    ElementLink* create_link(Element* a, const(char)[] a_path, Element* b, const(char)[] b_path)
+    ElementLink* create_link(Element* a, const(char)[] a_path, Element* b, const(char)[] b_path, bool alias_link = false)
     {
         assert((a || a_path) && (b || b_path), "Must specify `a` and `b`");
 
         ElementLink* link = allocator.allocT!ElementLink();
+        link.alias_link = alias_link;
 
         if (a)
             link.a.set_element(a);
@@ -1188,6 +1291,16 @@ nothrow @nogc:
             link.resolve();
 
         links ~= link;
+        return link;
+    }
+
+    ComponentLink* create_component_link(const(char)[] a, const(char)[] b)
+    {
+        ComponentLink* link = allocator.allocT!ComponentLink();
+        link.a_prefix = a.makeString(allocator);
+        link.b_prefix = b.makeString(allocator);
+        component_links ~= link;
+        link.populate();
         return link;
     }
 
@@ -1216,6 +1329,9 @@ nothrow @nogc:
             if (link.resolved)
                 link.resolve();
         }
+
+        foreach (cl; component_links)
+            cl.element_created(path);
 
         // any device's pending refs may resolve to the new element via a leading-dot global path
         request_rebind();
@@ -1251,9 +1367,26 @@ nothrow @nogc:
 
     void link_add(Session session, const(char)[] source, const(char)[] target)
     {
-        Element* a = resolve_global_element(source);
-        Element* b = resolve_global_element(target);
-        create_link(a, source, b, target);
+        Element* ae = resolve_global_element(source);
+        Element* be = resolve_global_element(target);
+        Component ac = ae ? null : resolve_global_component(source);
+        Component bc = be ? null : resolve_global_component(target);
+
+        if (ac && be)
+        {
+            session.write_line("Cannot link component '", source, "' to element '", target, "'");
+            return;
+        }
+        if (ae && bc)
+        {
+            session.write_line("Cannot link element '", source, "' to component '", target, "'");
+            return;
+        }
+
+        if (ac || bc)
+            create_component_link(source, target);
+        else
+            create_link(ae, source, be, target);
     }
 
     void link_print(Session session)
@@ -1278,6 +1411,14 @@ nothrow @nogc:
             }
             const(char)[] status = link.resolved ? "linked" : "pending";
             session.write_line(a, " <-> ", b, "  [", status, "]");
+        }
+
+        foreach (cl; component_links)
+        {
+            size_t bound, pending;
+            foreach (l; cl.children.values)
+                l.resolved ? ++bound : ++pending;
+            session.write_line(cl.a_prefix, " <-> ", cl.b_prefix, "  [component: ", bound, " linked, ", pending, " pending]");
         }
     }
 
@@ -1403,6 +1544,21 @@ Element* resolve_global_element(const(char)[] path) nothrow @nogc
         return null;
     if (Device* d = device_id in g_app.devices)
         return (*d).find_element(rest);
+    return null;
+}
+
+Component resolve_global_component(const(char)[] path) nothrow @nogc
+{
+    const(char)[] rest = path;
+    const(char)[] device_id = rest.split!'.';
+    if (device_id.empty)
+        return null;
+    if (Device* d = device_id in g_app.devices)
+    {
+        if (rest.empty)
+            return *d;
+        return (*d).find_component(rest);
+    }
     return null;
 }
 
