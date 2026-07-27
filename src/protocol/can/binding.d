@@ -132,7 +132,8 @@ protected:
     {
         import protocol.can : can_section_kind;
 
-        assert(desc.kind == can_section_kind);
+        if (desc.kind != can_section_kind)
+            return FormatId.invalid;
         ref const ElementDesc_CAN can = _profile_data.get_section!ElementDesc_CAN(can_section_kind, desc.element);
         if (can.desc == 0xFFFF)
             return FormatId.invalid; // spelling didn't compile; the profile load already warned

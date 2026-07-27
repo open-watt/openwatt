@@ -132,7 +132,8 @@ protected:
     {
         import protocol.ble : ble_section_kind;
 
-        assert(desc.kind == ble_section_kind);
+        if (desc.kind != ble_section_kind)
+            return FormatId.invalid;
         ref const ElementDesc_BLE ble = _profile_data.get_section!ElementDesc_BLE(ble_section_kind, desc.element);
         if (ble.desc == 0xFFFF)
             return FormatId.invalid;

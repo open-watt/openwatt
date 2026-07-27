@@ -191,7 +191,8 @@ protected:
 
         import protocol.goodwe : aa55_section_kind;
 
-        assert(desc.kind == aa55_section_kind);
+        if (desc.kind != aa55_section_kind)
+            return FormatId.invalid;
         ref const ElementDesc_AA55 aa55 = _profile_data.get_section!ElementDesc_AA55(aa55_section_kind, desc.element);
         if (aa55.desc == 0xFFFF)
             return FormatId.invalid;

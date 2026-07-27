@@ -932,7 +932,8 @@ private:
                 Device device = create_device_from_profile(*_zigbee_profile, fingerprint[], id, null, (Device device, Element* e, ref const ElementDesc desc, ubyte endpoint) {
                     import protocol.zigbee : zb_section_kind;
 
-                    assert(desc.kind == zb_section_kind);
+                    if (desc.kind != zb_section_kind)
+                        return FormatId.invalid;
                     ref const ElementDesc_Zigbee zb = _zigbee_profile.get_section!ElementDesc_Zigbee(zb_section_kind, desc.element);
                     if (zb.desc == ushort.max)
                         return FormatId.invalid;
