@@ -171,7 +171,11 @@ nothrow @nogc:
     String desc;
     String display_unit;
 
+    // wall stamps are observation metadata: derivations vary and UTC adjusts at
+    // runtime, so writes apply in arrival order and last_update follows the applied
+    // record; last_arrival is the monotonic sequencing authority
     SysTime last_update;
+    MonoTime last_arrival;
 
     package EID _eid;
 
@@ -356,8 +360,8 @@ nothrow @nogc:
     private void prepare_after(ref SampleUpdate update)
     {
         SysTime t = record_update;
-        if (t > last_update)
-            last_update = t;
+        last_update = t;
+        last_arrival = getTime();
         update.timestamp = t;
         if (!_subs)
             return;
@@ -371,6 +375,7 @@ nothrow @nogc:
             return;
         SysTime previous_timestamp = last_update;
         last_update = timestamp;
+        last_arrival = getTime();
         if (!_subs)
             return;
 
@@ -723,6 +728,7 @@ private:
             _last_update = t;
         if (t > last_update)
             last_update = t;
+        last_arrival = getTime();
         return true;
     }
 
@@ -738,24 +744,6 @@ private:
         debug assert(update.count != 0);
         debug assert(data_format.is_scalar || data_format.is_wide,
                      "managed records require typed sample handling");
-
-        // stale samples are never applied: latest reflects the newest observation and
-        // series time stays monotonic; a batch keeps only its fresh tail
-        uint count = update.count;
-        uint stale = 0;
-        while (stale < count && update.time(stale) < record_update)
-            ++stale;
-        if (stale == count)
-            return;
-        if (stale)
-        {
-            update.records = update.records[stale * data_format.stride .. $];
-            if (update.times.length)
-                update.times = update.times[stale .. $];
-            else
-                update.ticks = update.ticks[stale .. $];
-        }
-
         prepare_before(update);
         apply(update);
         prepare_after(update);
@@ -788,8 +776,6 @@ private:
     void write_text_sample(String v, SysTime t, Subscriber who)
     {
         debug assert(data_format.is_text);
-        if (t < record_update)
-            return;
         TextRecord* slot = cast(TextRecord*)_latest.raw.ptr;
         if (held_repeat(slot.view == v[], t))
             return;
@@ -805,8 +791,6 @@ private:
     void write_text_sample(const(char)[] v, SysTime t, Subscriber who)
     {
         debug assert(data_format.is_text);
-        if (t < record_update)
-            return;
         TextRecord* slot = cast(TextRecord*)_latest.raw.ptr;
         if (held_repeat(slot.view == v, t))
             return;
@@ -1267,18 +1251,16 @@ unittest
     assert(n.latest_record.f64_ == 9.0);
     assert(n.last_update == from_unix_time_ns(500));
 
-    // stale samples are rejected outright; a batch keeps only its fresh tail
+    // arrival order rules: an older-stamped write still applies, and value and
+    // last_update always describe the same observation
     Element st;
     st.format = register_format(f64_held);
     st.ensure_history();
     st.write_sample(5.0, from_unix_time_ns(10_000));
+    MonoTime first_arrival = st.last_arrival;
     st.write_sample(6.0, from_unix_time_ns(9_000));
-    assert(st.latest_record.f64_ == 5.0 && st.last_update == from_unix_time_ns(10_000));
-    assert(st.record_count == 1);
-    double[2] stale_batch = [7.0, 8.0];
-    SysTime[2] stale_times = [from_unix_time_ns(9_500), from_unix_time_ns(11_000)];
-    st.write_samples(stale_batch[], stale_times[]);
-    assert(st.latest_record.f64_ == 8.0 && st.last_update == from_unix_time_ns(11_000));
+    assert(st.latest_record.f64_ == 6.0 && st.last_update == from_unix_time_ns(9_000));
+    assert(st.last_arrival >= first_arrival);
     assert(st.record_count == 2);
     st.teardown();
 

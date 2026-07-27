@@ -81,16 +81,17 @@ nothrow @nogc:
     {
         a.elem.subscribe(&element_updated);
         b.elem.subscribe(&element_updated);
+        // arrival recency, not wall stamps: wall derivations vary and UTC adjusts at runtime
         Element* from = a.elem, to = b.elem;
-        if (b.elem.last_update > a.elem.last_update)
+        if (b.elem.last_arrival > a.elem.last_arrival)
         {
             from = b.elem;
             to = a.elem;
         }
-        else if (a.elem.last_update == b.elem.last_update)
+        else if (a.elem.last_arrival == b.elem.last_arrival)
         {
-            // ties still defer to computed authority: frames commonly stamp both endpoints alike
-            if (alias_link || a.elem.last_update == SysTime.init)
+            // both unwritten, or a tie: defer to computed authority
+            if (alias_link)
                 return;
             bool a_dep = a.elem.sampling_mode == SamplingMode.dependent;
             if (a_dep == (b.elem.sampling_mode == SamplingMode.dependent))
@@ -100,18 +101,18 @@ nothrow @nogc:
                 from = b.elem;
                 to = a.elem;
             }
-            if (from.value == to.value)
-                return;
         }
         if (!can_write(to))
         {
-            // the computed side is authoritative even when its value is older
+            // the computed side is authoritative even when it wrote earlier
             Element* t = from;
             from = to;
             to = t;
-            if (!can_write(to) || from.last_update == SysTime.init)
+            if (!can_write(to))
                 return;
         }
+        if (!from.last_arrival || from.value == to.value)
+            return;
         Variant value = from.value;
         to.value(value, from.last_update);
     }
@@ -137,13 +138,11 @@ nothrow @nogc:
             dest = b.elem;
         else if (update.element is b.elem)
             dest = a.elem;
-        // deliver unless the destination already holds this exact update; this breaks
-        // propagation cycles (deferred delivery outlives `propagating`, but a value
-        // that lapped a link mesh arrives equal) without eating legitimate
-        // same-timestamp value changes
+        // deliver unless the destination already holds this exact update: propagation
+        // converges in arrival order, and a value that lapped a link mesh arrives
+        // identical, which breaks cycles
         if (dest && can_write(dest) &&
-            (dest.last_update < update.timestamp ||
-             (dest.last_update == update.timestamp && dest.value != update.value)))
+            (dest.last_update != update.timestamp || dest.value != update.value))
             dest.value(update.value, update.timestamp, &element_updated);
         propagating = false;
     }
@@ -2535,4 +2534,32 @@ Variant reactive_shift(Variant[] args, bool add)
     an *= an; bn *= bn;
     double r = sqrt(add ? an + bn : an - bn);
     return Variant(VarQuantity(r, ScaledUnit(unit)));
+}
+
+
+unittest
+{
+    import urt.time : from_unix_time_ns;
+
+    static immutable DataFormat f64_held = DataFormat(ValueType.f64, SeriesKind.held);
+
+    // initial sync must replace a newer ordinary value with an older authoritative one,
+    // which the element's stale-sample filter would reject at the source's stamp
+    Element plain, computed;
+    plain.format = register_format(f64_held);
+    computed.format = register_format(f64_held);
+    plain.write_sample(1.0, from_unix_time_ns(10_000));
+    computed.write_sample(2.0, from_unix_time_ns(5_000));
+    computed.sampling_mode = SamplingMode.dependent;
+
+    ElementLink link;
+    link.a.set_element(&plain);
+    link.b.set_element(&computed);
+    link.resolve();
+    assert(plain.value.asDouble == 2.0);
+    assert(computed.value.asDouble == 2.0);
+
+    link.unlink();
+    plain.teardown();
+    computed.teardown();
 }
