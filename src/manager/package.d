@@ -123,10 +123,13 @@ nothrow @nogc:
             dest = b.elem;
         else if (update.element is b.elem)
             dest = a.elem;
-        // the timestamp guard breaks propagation cycles: deferred delivery outlives
-        // `propagating`, but a value that lapped a link mesh arrives carrying the
-        // timestamp it already stamped on this destination
-        if (dest && can_write(dest) && dest.last_update < update.timestamp)
+        // deliver unless the destination already holds this exact update; this breaks
+        // propagation cycles (deferred delivery outlives `propagating`, but a value
+        // that lapped a link mesh arrives equal) without eating legitimate
+        // same-timestamp value changes
+        if (dest && can_write(dest) &&
+            (dest.last_update < update.timestamp ||
+             (dest.last_update == update.timestamp && dest.value != update.value)))
             dest.value(update.value, update.timestamp, &element_updated);
         propagating = false;
     }
@@ -182,6 +185,17 @@ private:
     Endpoint b;
     bool propagating;
     bool alias_link;
+
+    void attach(Element* e, bool is_a)
+    {
+        Endpoint* ep = is_a ? &a : &b;
+        if (!ep.dangling)
+            return;
+        ep.release();
+        ep.set_element(e);
+        if (resolved)
+            resolve();
+    }
 }
 
 // Links two component subtrees by path prefix: one speculative ElementLink per relative
@@ -199,18 +213,18 @@ nothrow @nogc:
         auto commit = open_commit();
         char[256] rel = void;
         if (Component c = resolve_global_component(a_prefix[]))
-            walk(c, rel, 0);
+            walk(c, rel, 0, true);
         if (Component c = resolve_global_component(b_prefix[]))
-            walk(c, rel, 0);
+            walk(c, rel, 0, false);
     }
 
-    void element_created(const(char)[] path)
+    void element_created(const(char)[] path, Element* e)
     {
         // nested links (`dev.a` <-> `dev.a.b`) put a path under both prefixes
         if (under_prefix(path, a_prefix[]))
-            ensure_child(path[a_prefix.length + 1 .. $]);
+            ensure_child(path[a_prefix.length + 1 .. $], e, true);
         if (under_prefix(path, b_prefix[]))
-            ensure_child(path[b_prefix.length + 1 .. $]);
+            ensure_child(path[b_prefix.length + 1 .. $], e, false);
     }
 
 private:
@@ -218,19 +232,19 @@ private:
     static bool under_prefix(const(char)[] path, const(char)[] prefix) pure
         => path.length > prefix.length + 1 && path[0 .. prefix.length] == prefix[] && path[prefix.length] == '.';
 
-    void walk(Component c, ref char[256] buf, size_t len)
+    void walk(Component c, ref char[256] buf, size_t len, bool is_a)
     {
         foreach (Element* e; c.elements)
         {
             size_t l = append_id(buf, len, e.id[]);
             if (l <= buf.length)
-                ensure_child(buf[0 .. l]);
+                ensure_child(buf[0 .. l], e, is_a);
         }
         foreach (Component sub; c.components)
         {
             size_t l = append_id(buf, len, sub.id[]);
             if (l <= buf.length)
-                walk(sub, buf, l);
+                walk(sub, buf, l, is_a);
         }
     }
 
@@ -247,17 +261,23 @@ private:
         return len + id.length;
     }
 
-    void ensure_child(const(char)[] rel)
+    // the concrete element is threaded through rather than resolved by path: during
+    // device materialisation elements notify before the device is registered, so
+    // global path resolution cannot see them
+    void ensure_child(const(char)[] rel, Element* e, bool is_a)
     {
-        if (rel in children)
+        if (ElementLink** l = rel in children)
+        {
+            (*l).attach(e, is_a);
             return;
+        }
         char[256] fa = void, fb = void;
         const(char)[] a_path = make_full(fa, a_prefix[], rel);
         const(char)[] b_path = make_full(fb, b_prefix[], rel);
         if (!a_path || !b_path)
             return;
-        Element* ae = resolve_global_element(a_path);
-        Element* be = resolve_global_element(b_path);
+        Element* ae = is_a ? e : resolve_global_element(a_path);
+        Element* be = is_a ? resolve_global_element(b_path) : e;
         ElementLink* link = g_app.create_link(ae, a_path, be, b_path);
         children.insert(rel.makeString(g_app.allocator), link);
     }
@@ -358,6 +378,16 @@ nothrow @nogc:
 
     Array!(ElementLink*) links;
     Array!(ComponentLink*) component_links;
+
+    // a link whose paths both failed to resolve: element or component intent is
+    // decided by the first element that appears at (element) or under (component)
+    // either path
+    struct UndecidedLink
+    {
+        String a;
+        String b;
+    }
+    Array!UndecidedLink undecided_links;
 
     Map!(String, RegisteredType) types;
 
@@ -1337,8 +1367,24 @@ nothrow @nogc:
                 link.resolve();
         }
 
+        for (size_t i = 0; i < undecided_links.length; )
+        {
+            ref UndecidedLink u = undecided_links[i];
+            if (path[] == u.a[] || path[] == u.b[])
+                create_link(path[] == u.a[] ? e : null, u.a[], path[] == u.b[] ? e : null, u.b[]);
+            else if (ComponentLink.under_prefix(path, u.a[]) || ComponentLink.under_prefix(path, u.b[]))
+                create_component_link(u.a[], u.b[]);
+            else
+            {
+                ++i;
+                continue;
+            }
+            undecided_links.removeSwapLast(i);
+        }
+
+        // after the undecided pass so a link decided by this element also processes it
         foreach (cl; component_links)
-            cl.element_created(path);
+            cl.element_created(path, e);
 
         // any device's pending refs may resolve to the new element via a leading-dot global path
         request_rebind();
@@ -1392,8 +1438,10 @@ nothrow @nogc:
 
         if (ac || bc)
             create_component_link(source, target);
-        else
+        else if (ae || be)
             create_link(ae, source, be, target);
+        else
+            undecided_links ~= UndecidedLink(source.makeString(allocator), target.makeString(allocator));
     }
 
     void link_print(Session session)
@@ -1427,6 +1475,9 @@ nothrow @nogc:
                 l.resolved ? ++bound : ++pending;
             session.write_line(cl.a_prefix, " <-> ", cl.b_prefix, "  [component: ", bound, " linked, ", pending, " pending]");
         }
+
+        foreach (ref u; undecided_links)
+            session.write_line(u.a, " <-> ", u.b, "  [undecided]");
     }
 
 
