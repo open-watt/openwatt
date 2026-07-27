@@ -344,8 +344,7 @@ nothrow @nogc:
                     if (result != 0)
                         return -1;
 
-                    if (message.is_request)
-                        message.timestamp = getSysTime();
+                    message.timestamp = getSysTime();
 
                     // message complete
                     current_leftover = cast(const(ubyte)[])msg;
