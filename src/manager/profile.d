@@ -807,8 +807,12 @@ unittest
 
         static immutable string conf_text =
             "enum: Mode\n" ~
-            "\toff: 0\n" ~
-            "\teco: 1\n" ~
+            "\toff: 0, \"Off\"\n" ~
+            "\teco: 1, \"Eco Mode\"\n" ~
+            "\t_2400: 2, \"2400\"\n" ~
+            "bitfield: Features\n" ~
+            "\tfast: 1, \"2400\"\n" ~
+            "\tquiet: 2, \"Quiet\"\n" ~
             "\n" ~
             "troot: alpha, beta\n" ~
             "\n" ~
@@ -817,11 +821,12 @@ unittest
             "\ttsec: 2, enum8, Mode\tdesc: mode\n" ~
             "\ttsec: 3, u16:0.1V\tdesc: singleTokenVolts\n" ~
             "\ttsec: 4, str8, W\tdesc: name\n" ~
-            "\ttsec: 5, str8/W\tdesc: legacyName\n";
+            "\ttsec: 5, str8/W\tdesc: legacyName\n" ~
+            "\ttsec: 6, enum8, Features\tdesc: features\n";
         Profile* prof = parse_profile(conf_text, "tprof");
         assert(prof !is null);
 
-        import manager.sample : desc_by_index;
+        import manager.sample : desc_by_index, parse_record;
 
         // "0.1V" folds into the unit's decimal scale: records stay u16, exact, in deciVolts
         ref const TDesc cv = prof.get_section!TDesc(tsec, 0);
@@ -837,6 +842,31 @@ unittest
         assert(desc_by_index(md.desc).fmt.enum_info is prof.find_enum_template("Mode"));
         assert(find_enum_info("tprof.Mode") is prof.find_enum_template("Mode"));
 
+        const(VoidEnumInfo)* mode_info = prof.find_enum_template("Mode");
+        assert(mode_info.has_display_names);
+        assert(mode_info.value_for("eco").asLong == 1);
+        assert(mode_info.value_for("_2400").asLong == 2);
+        assert(mode_info.value_for("Eco Mode").isNull);
+        assert(mode_info.value_for_display("Eco Mode").asLong == 1);
+        assert(mode_info.value_for_display("2400").asLong == 2);
+        assert(mode_info.value_for_display("eco").isNull);
+
+        SampleDesc mode_desc = desc_by_index(md.desc);
+        ubyte m;
+        assert(parse_record("eco", mode_desc, (cast(void*)&m)[0 .. 1]) && m == 1);
+        assert(parse_record("Eco Mode", mode_desc, (cast(void*)&m)[0 .. 1]) && m == 1);
+        assert(parse_record("2400", mode_desc, (cast(void*)&m)[0 .. 1]) && m == 2);
+        assert(parse_record("1", mode_desc, (cast(void*)&m)[0 .. 1]) && m == 1);
+        m = 9;
+        assert(!parse_record("nope", mode_desc, (cast(void*)&m)[0 .. 1]));
+        assert(m == 9);
+
+        ref const TDesc fd = prof.get_section!TDesc(tsec, 5);
+        SampleDesc feature_desc = desc_by_index(fd.desc);
+        assert(feature_desc.fmt.enum_info.bitfield);
+        assert(parse_record("2400", feature_desc, (cast(void*)&m)[0 .. 1]) && m == 1);
+        assert(parse_record("fast", feature_desc, (cast(void*)&m)[0 .. 1]) && m == 1);
+
         // the one-token spelling produces the same desc as the two-column form
         ref const TDesc st = prof.get_section!TDesc(tsec, 2);
         assert(st.desc == cv.desc);
@@ -847,7 +877,7 @@ unittest
         assert(prof.get_section!TDesc(tsec, 4).desc == nm.desc);
         assert(prof.elements[4].access == Access.write);
 
-        assert(prof.elements.length == 5);
+        assert(prof.elements.length == 6);
         assert(prof.elements[0].kind == tsec && prof.elements[1].element == 1);
 
         const(void)[] root_data = prof.get_root_section(troot);
@@ -1645,12 +1675,14 @@ VoidEnumInfo* parse_enum(ConfItem conf, bool is_bitfield = false)
     size_t count = conf.sub_items.length;
 
     auto keys = Array!(const(char)[])(Reserve, count);
+    auto displays = Array!(const(char)[])(Reserve, count);
     auto t_vals = Array!long(Reserve, count);
     long min, max;
     foreach (i, ref item; conf.sub_items)
     {
         keys ~= item.name.unQuote;
         const(char)[] val = item.value.split!',';
+        displays ~= item.value.split!','.unQuote;
 
         size_t taken;
         ref long v = t_vals.pushBack(val.parse_int_with_base(&taken));
@@ -1685,24 +1717,24 @@ VoidEnumInfo* parse_enum(ConfItem conf, bool is_bitfield = false)
         auto b_values = cast(byte[])talloc(1 * count);
         foreach (i, v; t_vals)
             b_values[i] = cast(byte)v;
-        info = make_enum_info(enum_name, keys[], b_values[]);
+        info = make_enum_info(enum_name, keys[], b_values[], displays[]);
     }
     else if (min >= short.min && max <= short.max)
     {
         auto s_values = cast(short[])talloc(2 * count);
         foreach (i, v; t_vals)
             s_values[i] = cast(short)v;
-        info = make_enum_info(enum_name, keys[], s_values[]);
+        info = make_enum_info(enum_name, keys[], s_values[], displays[]);
     }
     else if (min >= int.min && max <= int.max)
     {
         auto i_values = cast(int[])talloc(4 * count);
         foreach (i, v; t_vals)
             i_values[i] = cast(int)v;
-        info = make_enum_info(enum_name, keys[], i_values[]);
+        info = make_enum_info(enum_name, keys[], i_values[], displays[]);
     }
     else
-        info = make_enum_info(enum_name, keys[], t_vals[]);
+        info = make_enum_info(enum_name, keys[], t_vals[], displays[]);
     info.bitfield = is_bitfield;
     return info;
 }
