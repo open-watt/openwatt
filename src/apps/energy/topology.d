@@ -64,6 +64,7 @@ nothrow @nogc:
     String path;
     const(char)[] label;
     Bus* bus;
+    PortGroup* group;
     PortRole role;
     FlowDomain flow;
     Component component;
@@ -75,19 +76,217 @@ nothrow @nogc:
     bool implicit;
 }
 
-// Terminals represent equipment and source accounts; boundary ports represent
-// places and support only balance and cross-checks.
-bool class_terminal(Port* p) pure
+enum PortGroupKind : ubyte
 {
-    if (p.implicit)
-        return true;
-    if (p.owner is null)
+    appliance,
+    switchgear,
+    transfer,
+    handover,
+    sink,
+}
+
+const(char)[] port_group_kind_name(PortGroupKind k) pure
+{
+    final switch (k)
+    {
+        case PortGroupKind.appliance:  return "appliance";
+        case PortGroupKind.switchgear: return "switchgear";
+        case PortGroupKind.transfer:   return "transfer";
+        case PortGroupKind.handover:   return "handover";
+        case PortGroupKind.sink:       return "sink";
+    }
+}
+
+// The thing whose declared terminals these are; transient per topology build.
+struct PortGroup
+{
+nothrow @nogc:
+    this(this) @disable;
+
+    String id;
+    PortGroupKind kind;
+    Appliance owner;
+    Link* link;
+    Array!(Port*) ports;
+    float loss_power = float.nan;
+    bool mismatch;
+    bool closed = true;
+}
+
+// The connected port of a one-port group, or any dangling port, is a boundary
+// edge of the modeled graph; interior ports support balance and cross-checks.
+// A bus named grid is the conceptual external domain, so non-appliance ports
+// on it are upstream handover boundaries.
+bool is_boundary(Port* p) pure
+{
+    if (p is null || p.group is null)
         return false;
-    if (p.role == PortRole.battery)
-        return p.owner.kind == "battery";
-    if (p.role == PortRole.pv)
-        return p.owner.kind == "pv" || p.owner.kind == "solar";
-    return false;
+    if (p.group.ports.length == 1 || p.bus is null)
+        return true;
+    return p.bus.contains_grid && p.group.kind != PortGroupKind.appliance;
+}
+
+// External boundaries face away from the modeled graph: their Bus in the
+// Bus -> Port frame is the unmodeled world, flipping account orientation.
+bool external_boundary(Port* p) pure
+{
+    if (p.bus is null)
+        return true;
+    return p.bus.contains_grid && p.group !is null && p.group.kind != PortGroupKind.appliance;
+}
+
+// Appliances are unconditional energy junctions; switchgear connectivity
+// follows live contact state.
+bool ports_connected(PortGroup* g, Port* a, Port* b)
+{
+    if (g is null || a is b || a.group !is g || b.group !is g)
+        return false;
+    final switch (g.kind)
+    {
+        case PortGroupKind.appliance:
+        case PortGroupKind.handover:
+            return true;
+        case PortGroupKind.switchgear:
+        case PortGroupKind.sink:
+            return g.link ? g.link.closed : g.closed;
+        case PortGroupKind.transfer:
+            assert(false, "TODO: transfer switch connectivity needs a declaration surface");
+    }
+}
+
+enum BoundaryKind : ubyte
+{
+    unclassified,
+    grid,
+    generator,
+    solar,
+    battery,
+    load,
+}
+
+const(char)[] boundary_kind_name(BoundaryKind k) pure
+{
+    final switch (k)
+    {
+        case BoundaryKind.unclassified: return "unclassified";
+        case BoundaryKind.grid:         return "grid";
+        case BoundaryKind.generator:    return "generator";
+        case BoundaryKind.solar:        return "solar";
+        case BoundaryKind.battery:      return "battery";
+        case BoundaryKind.load:         return "load";
+    }
+}
+
+// Classification is metadata stamped on a boundary, independent of sign:
+// declared role first, then owner kind, then sink default, never flow alone.
+BoundaryKind boundary_kind(Port* p) pure
+{
+    switch (p.role)
+    {
+        case PortRole.pv:      return BoundaryKind.solar;
+        case PortRole.battery: return BoundaryKind.battery;
+        case PortRole.grid:    return BoundaryKind.grid;
+        case PortRole.car:
+        case PortRole.outlet:  return BoundaryKind.load;
+        default: break;
+    }
+    if (p.owner !is null)
+    {
+        const(char)[] kind = p.owner.kind;
+        if (kind == "pv" || kind == "solar")
+            return BoundaryKind.solar;
+        if (kind == "battery")
+            return BoundaryKind.battery;
+        if (kind == "generator")
+            return BoundaryKind.generator;
+        if (kind == "grid")
+            return BoundaryKind.grid;
+        if (p.flow == FlowDomain.consume)
+            return BoundaryKind.load;
+        return BoundaryKind.unclassified;
+    }
+    if (p.bus !is null && p.bus.contains_grid)
+        return BoundaryKind.grid;
+    if (p.group !is null && p.group.kind == PortGroupKind.sink)
+        return BoundaryKind.load;
+    return BoundaryKind.unclassified;
+}
+
+// Transient solved/accounting view of one boundary edge; not topology state.
+struct BoundaryFlow
+{
+    Port* port;
+    BoundaryKind kind;
+    float power_into_graph = 0;
+    float power_out_of_graph = 0;
+}
+
+// Corrected cumulative counters for one boundary, with the Element keys that
+// accounts use for reset-safe daily deltas. Counter direction follows
+// boundary shape: a dangling port's import counts into the graph.
+struct BoundaryEnergy
+{
+    Element* into_key;
+    Element* out_key;
+    double into_total = double.nan;
+    double out_total = double.nan;
+}
+
+BoundaryEnergy boundary_energy(Port* p)
+{
+    BoundaryEnergy e;
+    if (p is null || p.meter is null)
+        return e;
+    Element* import_e = p.meter.find_element("import");
+    Element* export_e = p.meter.find_element("export");
+    if (external_boundary(p))
+    {
+        e.into_key = import_e;
+        e.out_key = export_e;
+        e.into_total = p.meter_data.total_import_active[0];
+        e.out_total = p.meter_data.total_export_active[0];
+    }
+    else
+    {
+        e.into_key = export_e;
+        e.out_key = import_e;
+        e.into_total = p.meter_data.total_export_active[0];
+        e.out_total = p.meter_data.total_import_active[0];
+    }
+    return e;
+}
+
+// Stable presentation key for a boundary: the group's declared name when it
+// carries a single boundary, qualified by port path when it carries several.
+const(char)[] boundary_key(Port* p)
+{
+    if (p is null)
+        return "";
+    if (p.group is null)
+        return p.id[];
+    size_t n;
+    foreach (q; p.group.ports[])
+        if (is_boundary(q))
+            ++n;
+    if (n <= 1)
+        return p.group.id[];
+    return tconcat(p.group.id[], ".", p.path.length ? p.path[] : port_role_name(p.role));
+}
+
+// The island a dangling boundary belongs to: the bus reached through its
+// group's active internal connections, or null when isolated.
+Bus* boundary_bus(Port* p)
+{
+    if (p is null)
+        return null;
+    if (p.bus !is null)
+        return p.bus;
+    if (p.group is null)
+        return null;
+    foreach (q; p.group.ports[])
+        if (q.bus !is null && ports_connected(p.group, p, q))
+            return q.bus;
+    return null;
 }
 
 float meter_current_amps(ref const MeterData data) pure
@@ -101,28 +300,6 @@ float meter_current_amps(ref const MeterData data) pure
             return absf(data.active[0].value / volts);
     }
     return float.nan;
-}
-
-// Utility ingress is an unowned link into the grid bus, distinct from local
-// consumers and generators on that bus.
-bool is_grid_inlet_port(Port* p) pure
-{
-    if (p is null || p.bus is null || !p.bus.contains_grid)
-        return false;
-    foreach (l; p.bus.links[])
-        if (l.owner is null && l.a is p.bus && l.b !is null && l.port_a is p)
-            return true;
-    return false;
-}
-
-bool bus_has_grid_inlet(Bus* b) pure
-{
-    if (b is null)
-        return false;
-    foreach (p; b.ports[])
-        if (is_grid_inlet_port(p))
-            return true;
-    return false;
 }
 
 // A shared hub meter is an appliance aggregate, not a reading for one link.
@@ -162,7 +339,7 @@ float link_headroom_amps(Link* link) pure
     float current = link_current_amps(link);
     if (current != current)
         return float.nan;
-    return cast(float)link.capacity_amps - current;
+    return link.capacity_amps - current;
 }
 
 Component battery_store_source(Port* p) pure
@@ -186,7 +363,7 @@ nothrow @nogc:
     Bus* b;
     Port* port_a;
     Port* port_b;
-    uint capacity_amps;
+    float capacity_amps = 0;
     bool closed;
     // port_a is an appliance's shared hub port, carrying the aggregate of every
     // leg rather than this link's flow; only port_b measures this link.
@@ -204,7 +381,7 @@ nothrow @nogc:
     Component meter;
     ubyte phase;
     MeterSign sign;
-    uint capacity_amps;
+    float capacity_amps = 0;
     bool closed = true;
 }
 
@@ -220,7 +397,7 @@ nothrow @nogc:
     float headroom_watts = float.nan;
     float voltage = float.nan;
     float limiting_current_amps = float.nan;
-    uint limiting_capacity_amps;
+    float limiting_capacity_amps = 0;
     bool complete;
 }
 
@@ -322,7 +499,7 @@ private void collect_component(Bus* root, ref Array!(Bus*) into)
             if (!l.closed)
                 continue;
             Bus* other = l.a is b ? l.b : l.a;
-            if (into[].findFirst(other) < into.length)
+            if (other is null || into[].findFirst(other) < into.length)
                 continue;
             into ~= other;
             queue ~= other;
@@ -378,6 +555,9 @@ nothrow @nogc:
     Array!(Bus*) bus_list;
     Array!(Port*) ports;
     Array!(Link*) links;
+    Array!(PortGroup*) groups;
+    Array!(Port*) boundaries;
+    Array!BoundaryFlow boundary_flows;
     Array!(Element*) shape_elements;
     bool shape_dirty;
     CircuitAttribution attribution;
@@ -397,12 +577,17 @@ nothrow @nogc:
         production_contributions.clear();
         productions.clear();
         production_strings.clear();
+        boundaries.clear();
+        boundary_flows.clear();
+        foreach (g; groups[])
+            defaultAllocator.freeT(g);
         foreach (p; ports[])
             defaultAllocator.freeT(p);
         foreach (l; links[])
             defaultAllocator.freeT(l);
         foreach (b; bus_list[])
             defaultAllocator.freeT(b);
+        groups.clear();
         ports.clear();
         links.clear();
         bus_list.clear();
@@ -456,9 +641,27 @@ nothrow @nogc:
         p.meter_data.reset_to_missing();
         if (meter)
             p.meter_data = get_port_meter_data(meter, phase, sign);
-        bus.ports ~= p;
+        if (bus)
+            bus.ports ~= p;
         ports ~= p;
         return p;
+    }
+
+    PortGroup* add_group(const(char)[] id, PortGroupKind kind, Appliance owner = null, Link* link = null)
+    {
+        PortGroup* g = defaultAllocator.allocT!PortGroup();
+        g.id = id.makeString(defaultAllocator());
+        g.kind = kind;
+        g.owner = owner;
+        g.link = link;
+        groups ~= g;
+        return g;
+    }
+
+    void add_to_group(PortGroup* g, Port* p)
+    {
+        p.group = g;
+        g.ports ~= p;
     }
 
     const(char)[] make_port_id(Appliance owner, Bus* bus, PortRole role, const(char)[] path, const(char)[] label)
@@ -471,7 +674,7 @@ nothrow @nogc:
     }
 
     Link* add_link(Appliance owner, Bus* a, Bus* b, Port* port_a, Port* port_b,
-                   uint capacity_amps, bool closed = true, const(char)[] label = null,
+                   float capacity_amps, bool closed = true, const(char)[] label = null,
                    const(char)[] kind = null, const(char)[] id = null)
     {
         Link* l = defaultAllocator.allocT!Link();
@@ -486,7 +689,7 @@ nothrow @nogc:
         l.capacity_amps = capacity_amps;
         l.closed = closed;
         a.links ~= l;
-        if (b !is a)
+        if (b !is null && b !is a)
             b.links ~= l;
         links ~= l;
         return l;
@@ -521,7 +724,7 @@ nothrow @nogc:
         Port* fallback;
         foreach (p; ports[])
         {
-            if (p.owner !is a)
+            if (p.owner !is a || p.bus is null)
                 continue;
             if (fallback is null)
                 fallback = p;
@@ -628,13 +831,16 @@ nothrow @nogc:
         {
             Array!DevicePort device_ports;
             collect_device_ports(a, device_ports);
-            if (device_ports.length != 0)
+            if (any_connected(device_ports))
             {
                 apply_appliance_meter(a, device_ports);
                 warn_unmatched_bindings(a, device_ports);
                 add_device_ports(a, device_ports);
                 continue;
             }
+
+            if (device_ports.length != 0 && a.port_bindings.length != 0)
+                log.warning("appliance '", a.name[], "': no port binding matched a device port; falling back to virtual ports");
 
             Array!DevicePort virtual_ports;
             collect_bound_ports(a, virtual_ports);
@@ -650,8 +856,17 @@ nothrow @nogc:
         }
 
         synthesise_implicit_terminals();
+        rebuild_boundaries();
 
         refresh();
+    }
+
+    void rebuild_boundaries()
+    {
+        boundaries.clear();
+        foreach (p; ports[])
+            if (is_boundary(p))
+                boundaries ~= p;
     }
 
     // A boundary role declares equipment on the facing bus. Represent missing
@@ -666,6 +881,8 @@ nothrow @nogc:
         }
     }
 
+    // A boundary role declaration stands in for unmodeled equipment; modeled
+    // equipment of the same class on the bus displaces the stand-in.
     void synthesise_class_terminal(Bus* b, PortRole role, FlowDomain flow)
     {
         bool declared;
@@ -673,7 +890,11 @@ nothrow @nogc:
         {
             if (p.role != role)
                 continue;
-            if (class_terminal(p))
+            if (p.implicit)
+                return;
+            const(char)[] kind = p.owner ? p.owner.kind : null;
+            if (role == PortRole.battery ? kind == "battery"
+                                         : kind == "pv" || kind == "solar")
                 return;
             declared = true;
         }
@@ -681,6 +902,7 @@ nothrow @nogc:
             return;
         Port* p = add_port(null, b, role, flow, null, 0, MeterSign.normal, null, b.id[]);
         p.implicit = true;
+        add_to_group(add_group(p.id[], PortGroupKind.handover), p);
     }
 
     void refresh()
@@ -688,9 +910,79 @@ nothrow @nogc:
         ++sample_generation;
         refresh_meters();
         infer_graph();
+        reduce_group_losses();
+        reduce_boundary_flows();
         attribution.compute(this);
         rebuild_stores();
         rebuild_productions();
+    }
+
+    // A fully-solved group's port sum is its self-consumption/conversion loss;
+    // for switchgear, which conserves, a sum beyond meter noise is a mismatch.
+    void reduce_group_losses()
+    {
+        foreach (g; groups[])
+        {
+            g.loss_power = float.nan;
+            g.mismatch = false;
+            if (g.ports.length < 2)
+                continue;
+            if ((g.kind == PortGroupKind.switchgear || g.kind == PortGroupKind.sink) &&
+                !(g.link ? g.link.closed : g.closed))
+                continue;
+
+            float sum = 0;
+            float scale = 0;
+            bool complete = true;
+            foreach (p; g.ports[])
+            {
+                if (!p.meter_data.has(MeterField.power))
+                {
+                    complete = false;
+                    break;
+                }
+                float power = p.meter_data.active[0].value;
+                sum += power;
+                if (absf(power) > scale)
+                    scale = absf(power);
+            }
+            if (!complete)
+                continue;
+
+            g.loss_power = sum;
+            if (g.kind != PortGroupKind.appliance)
+            {
+                float noise_floor_w = scale * 0.02f > 50 ? scale * 0.02f : 50;
+                g.mismatch = absf(sum) > noise_floor_w;
+            }
+        }
+    }
+
+    // Boundary orientation is an accounting transform; Port.power always keeps
+    // the Bus -> Port frame (for a dangling port, the external bus).
+    void reduce_boundary_flows()
+    {
+        boundary_flows.clear();
+        foreach (p; boundaries[])
+        {
+            if (!p.meter_data.has(MeterField.power))
+                continue;
+            BoundaryFlow f;
+            f.port = p;
+            f.kind = boundary_kind(p);
+            float power = p.meter_data.active[0].value;
+            if (external_boundary(p))
+            {
+                f.power_into_graph = power > 0 ? power : 0;
+                f.power_out_of_graph = power < 0 ? -power : 0;
+            }
+            else
+            {
+                f.power_into_graph = power < 0 ? -power : 0;
+                f.power_out_of_graph = power > 0 ? power : 0;
+            }
+            boundary_flows ~= f;
+        }
     }
 
 private:
@@ -790,26 +1082,58 @@ private:
             }
             Port* pa = add_port(null, ba, PortRole.parent, FlowDomain.bidirectional, meter, link.meter_phase, link.meter_sign, "parent", link.name[]);
             Port* pb = add_port(null, bb, child_role, FlowDomain.bidirectional, null, 0, MeterSign.normal, "child", link.name[]);
-            add_link(null, ba, bb, pa, pb, link.capacity, link.closed, link.name[], link.kind);
+            Link* l = add_link(null, ba, bb, pa, pb, link.capacity.value, link.closed, link.name[], link.kind);
+            PortGroup* g = add_group(link.name[], PortGroupKind.switchgear, null, l);
+            add_to_group(g, pa);
+            add_to_group(g, pb);
         }
         else
         {
+            // A parent-only link dangles toward unenumerated attachments; its
+            // far endpoint is the boundary (the sink). It is still a real link
+            // (capacity, contact state, meter), so it publishes like one.
             Bus* b = ensure_bus(left.length ? left : "unassigned");
-            add_port(null, b, PortRole.connection, flow_for(link.kind), meter, link.meter_phase, link.meter_sign, "connection", link.name[]);
+            Port* pa = add_port(null, b, PortRole.connection, flow_for(link.kind), meter, link.meter_phase, link.meter_sign, "connection", link.name[]);
+            PortRole dangling_role = link.role.length ? port_role_from_name(link.role) : PortRole.child;
+            Port* pb = add_port(null, null, dangling_role, flow_for_role(dangling_role), null, 0, MeterSign.normal, "child", link.name[]);
+            Link* l = add_link(null, b, null, pa, pb, link.capacity.value, link.closed, link.name[], link.kind);
+            PortGroup* g = add_group(link.name[], PortGroupKind.sink, null, l);
+            add_to_group(g, pa);
+            add_to_group(g, pb);
         }
+    }
+
+    FlowDomain flow_for_role(PortRole role) pure
+    {
+        if (role == PortRole.pv)
+            return FlowDomain.supply;
+        if (role == PortRole.battery || role == PortRole.grid || role == PortRole.backup)
+            return FlowDomain.bidirectional;
+        return FlowDomain.consume;
     }
 
     void add_device_ports(Appliance a, ref Array!DevicePort specs)
     {
+        size_t connected;
+        foreach (ref spec; specs[])
+            if (spec.circuit.length != 0)
+                ++connected;
+
+        PortGroup* group = add_group(a.name[], PortGroupKind.appliance, a);
         Array!(Port*) added;
+        Array!(DevicePort*) added_specs;
         foreach (ref spec; specs[])
         {
-            Bus* b = ensure_bus(spec.circuit);
+            Bus* b = spec.circuit.length ? ensure_bus(spec.circuit) : null;
             Port* p = add_port(a, b, spec.role, spec.flow, spec.meter, spec.phase, spec.sign, spec.path[], null, spec.component);
-            p.root = a.root && (spec.flow != FlowDomain.consume || specs.length == 1);
+            add_to_group(group, p);
+            if (b is null)
+                continue;
+            p.root = a.root && (spec.flow != FlowDomain.consume || connected == 1);
             if (p.root)
                 b.explicit_root = true;
             added ~= p;
+            added_specs ~= &spec;
         }
 
         if (added.length >= 2)
@@ -817,7 +1141,7 @@ private:
             Port* first = added[0];
             foreach (i; 1 .. added.length)
             {
-                DevicePort* spec = &specs[i];
+                DevicePort* spec = added_specs[i];
                 Link* l = add_link(a, first.bus, added[i].bus, first, added[i], spec.capacity_amps, spec.closed, null, "appliance");
                 // With 3+ ports the star shares `first` across every leg, so its
                 // meter is the appliance aggregate, not this leg's flow.
@@ -860,14 +1184,21 @@ private:
             spec.sign = read_meter_sign(c);
             spec.capacity_amps = read_port_capacity(c);
             spec.closed = read_port_closed(c);
-            if (spec.circuit.length != 0)
-                into ~= spec;
+            into ~= spec;
         }
         foreach (child; c.components[])
         {
             const(char)[] child_path = path.length ? tconcat(path, ".", child.id[]) : child.id[];
             collect_device_ports(a, child, child_path, into);
         }
+    }
+
+    bool any_connected(ref Array!DevicePort specs) pure
+    {
+        foreach (ref spec; specs[])
+            if (spec.circuit.length != 0)
+                return true;
+        return false;
     }
 
     void collect_bound_ports(Appliance a, ref Array!DevicePort into)
@@ -917,8 +1248,13 @@ private:
             return;
 
         DevicePort* target;
+        DevicePort* first_connected;
         foreach (ref spec; specs[])
         {
+            if (spec.circuit.length == 0)
+                continue;
+            if (first_connected is null)
+                first_connected = &spec;
             if (spec.role == PortRole.grid || spec.role == PortRole.connection || spec.role == PortRole.parent)
             {
                 target = &spec;
@@ -927,8 +1263,8 @@ private:
             if (target is null && spec.flow == FlowDomain.consume)
                 target = &spec;
         }
-        if (target is null && specs.length != 0)
-            target = &specs[0];
+        if (target is null)
+            target = first_connected;
         if (target !is null)
         {
             target.meter = a.meter_ref;
@@ -1018,11 +1354,11 @@ private:
         return MeterSign.normal;
     }
 
-    uint read_port_capacity(Component c)
+    float read_port_capacity(Component c)
     {
         if (Element* e = c.find_element("capacity"))
             if (e.value.isNumber)
-                return cast(uint)e.value.asFloat;
+                return e.value.asFloat;
         return 0;
     }
 
@@ -1037,7 +1373,7 @@ private:
     Port* last_port_for(Appliance a)
     {
         for (size_t i = ports.length; i-- > 0; )
-            if (ports[i].owner is a)
+            if (ports[i].owner is a && ports[i].bus !is null)
                 return ports[i];
         return null;
     }
@@ -1081,16 +1417,21 @@ private:
 
     void infer_graph()
     {
-        // Infer only a single dark port, alternating with link mirroring.
-        foreach (_; 0 .. bus_list.length + links.length + 1)
+        // One assignment per pass lets a solved value reach the far side of
+        // its group before that neighborhood independently infers other ends.
+        foreach (_; 0 .. bus_list.length + links.length + groups.length + 1)
         {
-            bool changed = infer_link_endpoints();
+            bool changed;
             foreach (b; bus_list[])
                 aggregate_bus(b);
-            // One assignment per pass lets its mirrored value reach the far bus
-            // before that bus independently infers the other end.
             foreach (b; bus_list[])
                 if (infer_single_dark_port(b))
+                {
+                    changed = true;
+                    break;
+                }
+            foreach (g; groups[])
+                if (infer_group_single_unknown(g))
                 {
                     changed = true;
                     break;
@@ -1101,6 +1442,50 @@ private:
 
         foreach (b; bus_list[])
             aggregate_bus(b);
+    }
+
+    // Zero-loss group conservation: sum of all declared port powers is zero,
+    // solvable when exactly one port (connected or dangling) is unknown.
+    bool infer_group_single_unknown(PortGroup* g)
+    {
+        if (g.ports.length < 2)
+            return false;
+        if ((g.kind == PortGroupKind.switchgear || g.kind == PortGroupKind.sink) &&
+            !(g.link ? g.link.closed : g.closed))
+            return false;
+
+        Port* dark;
+        float sum = 0;
+        foreach (p; g.ports[])
+        {
+            if (p.meter_data.has(MeterField.power))
+                sum += p.meter_data.active[0].value;
+            else
+            {
+                if (dark !is null)
+                    return false;
+                dark = p;
+            }
+        }
+        if (dark is null)
+            return false;
+
+        dark.meter_data.reset_to_missing();
+        dark.meter_data.write_value(MeterField.power, 0, -sum);
+        dark.meter_data.mark(MeterField.power, 0, Provenance.inferred_subtraction);
+
+        // A closed contact is one electrical node, so voltage carries across;
+        // appliance ports may sit on different domains and never share it.
+        if (g.ports.length == 2 && g.kind != PortGroupKind.appliance)
+        {
+            Port* known = g.ports[0] is dark ? g.ports[1] : g.ports[0];
+            if (known.meter_data.has(MeterField.voltage))
+            {
+                dark.meter_data.voltage[0] = known.meter_data.voltage[0];
+                dark.meter_data.mark(MeterField.voltage, 0, Provenance.inferred_subtraction);
+            }
+        }
+        return true;
     }
 
     void rebuild_stores()
@@ -1130,6 +1515,9 @@ private:
         return BatteryStoreContributionKind.view;
     }
 
+    // Productions are a presentation/reconciliation projection over pv
+    // observations; boundary geometry, not selection rules, decides which
+    // ports carry them.
     void rebuild_productions()
     {
         production_contributions.clear();
@@ -1137,30 +1525,36 @@ private:
         production_strings.clear();
         foreach (p; ports[])
         {
-            if (p.bus is null || p.role != PortRole.pv || p.implicit)
+            if (p.role != PortRole.pv || p.implicit)
                 continue;
-
-            // A real PV terminal displaces a boundary declaration.
-            if (!class_terminal(p) && bus_has_real_class_terminal(p.bus, PortRole.pv))
+            if (p.meter is null && !is_boundary(p))
                 continue;
 
             const(char)[] owner_name = p.owner ? p.owner.name[] : p.label;
             if (owner_name.length == 0)
                 continue;
 
+            Bus* b = boundary_bus(p);
             const(char)[] group = production_group(p);
             ProductionContribution member;
             member.owner = retain_production_string(owner_name);
             member.group = retain_production_string(group);
             member.port = retain_production_string(p.path.length ? p.path[] : port_role_name(p.role));
-            member.circuit = retain_production_string(p.bus.id[]);
+            member.circuit = retain_production_string(b ? b.id[] : "");
             member.kind = ProductionContributionKind.member;
             member.component = p.component;
             member.meter = p.meter_data;
-            if (p.owner is null && member.meter.has(MeterField.power) && member.meter.active[0].value < 0)
+            if (member.meter.has(MeterField.power))
             {
-                // A net-metered child cannot prove generation while net-consuming.
-                member.meter.write_value(MeterField.power, 0, 0);
+                // Present in the generation-positive frame: a connected
+                // boundary generates negative in its Bus -> Port frame.
+                if (is_boundary(p) && !external_boundary(p))
+                    member.meter.write_value(MeterField.power, 0, -member.meter.active[0].value);
+                else if (p.owner is null && !is_boundary(p) && member.meter.active[0].value < 0)
+                {
+                    // A net-metered child cannot prove generation while net-consuming.
+                    member.meter.write_value(MeterField.power, 0, 0);
+                }
             }
             production_contributions ~= member;
 
@@ -1168,106 +1562,7 @@ private:
                 add_production_aggregate_once(p.owner, group);
         }
 
-        foreach (a; Collection!Appliance().values)
-            add_unbound_device_productions(a);
         reconcile_productions(production_contributions, productions);
-    }
-
-    void add_unbound_device_productions(Appliance owner)
-    {
-        if (owner is null || owner.device_ref is null)
-            return;
-
-        Array!DevicePort production_ports;
-        collect_device_production_ports(owner, owner.device_ref, null, production_ports);
-        foreach (ref spec; production_ports[])
-        {
-            if (production_contribution_exists(owner, spec.path[]))
-                continue;
-            if (spec.circuit.length == 0)
-                spec.circuit = primary_owner_circuit(owner);
-            if (spec.circuit.length == 0)
-                continue;
-
-            add_production_member(owner, spec);
-            add_production_aggregate_once(owner, production_group(spec.path[]));
-        }
-    }
-
-    void collect_device_production_ports(Appliance owner, Component c, const(char)[] path,
-                                         ref Array!DevicePort into)
-    {
-        if (c.template_[] == "Port")
-        {
-            PortRole role = read_port_role(c);
-            if (role == PortRole.pv)
-            {
-                DevicePort spec;
-                spec.component = c;
-                spec.path = path.makeString(defaultAllocator());
-                spec.role = role;
-                spec.flow = read_flow_domain(c);
-                spec.circuit = read_port_circuit(owner, c, path);
-                spec.meter = c.get_first_component_by_template("EnergyMeter");
-                spec.phase = read_port_phase(c);
-                spec.capacity_amps = read_port_capacity(c);
-                spec.closed = read_port_closed(c);
-                if (spec.meter !is null)
-                    into ~= spec;
-            }
-        }
-        foreach (child; c.components[])
-        {
-            const(char)[] child_path = path.length ? tconcat(path, ".", child.id[]) : child.id[];
-            collect_device_production_ports(owner, child, child_path, into);
-        }
-    }
-
-    bool bus_has_real_class_terminal(Bus* b, PortRole role) pure
-    {
-        foreach (p; b.ports[])
-            if (p.role == role && !p.implicit && class_terminal(p))
-                return true;
-        return false;
-    }
-
-    bool production_contribution_exists(Appliance owner, const(char)[] port) pure
-    {
-        if (owner is null)
-            return false;
-        foreach (ref c; production_contributions[])
-            if (c.owner == owner.name[] && c.port == port)
-                return true;
-        return false;
-    }
-
-    const(char)[] primary_owner_circuit(Appliance owner) pure
-    {
-        foreach (p; ports[])
-        {
-            if (p.owner !is owner || p.bus is null)
-                continue;
-            if (p.role == PortRole.grid || p.role == PortRole.connection)
-                return p.bus.id[];
-        }
-        foreach (p; ports[])
-            if (p.owner is owner && p.bus !is null)
-                return p.bus.id[];
-        return null;
-    }
-
-    void add_production_member(Appliance owner, ref DevicePort spec)
-    {
-        const(char)[] group = production_group(spec.path[]);
-        ProductionContribution member;
-        member.owner = retain_production_string(owner.name[]);
-        member.group = retain_production_string(group);
-        member.port = retain_production_string(spec.path[]);
-        member.circuit = retain_production_string(spec.circuit);
-        member.kind = ProductionContributionKind.member;
-        member.component = spec.component;
-        member.meter = get_port_meter_data(spec.meter, spec.phase, spec.sign);
-        production_contributions ~= member;
     }
 
     void add_production_aggregate_once(Appliance owner, const(char)[] group)
@@ -1318,54 +1613,6 @@ private:
             return "pv";
         size_t dot = path.findLast('.');
         return dot < path.length ? path[0 .. dot] : path;
-    }
-
-    bool infer_link_endpoints()
-    {
-        bool changed;
-        foreach (link; links[])
-        {
-            if (!link.closed)
-                continue;
-            if (link.owner !is null && !is_passthrough(link.owner))
-                continue;
-            if (copy_inferred_meter_data(link.port_b, link.port_a))
-                changed = true;
-            if (copy_inferred_meter_data(link.port_a, link.port_b))
-                changed = true;
-        }
-        return changed;
-    }
-
-    // Only a two-port appliance conserves power across one unambiguous link.
-    bool is_passthrough(Appliance a)
-    {
-        size_t n;
-        foreach (p; ports[])
-            if (p.owner is a)
-                ++n;
-        return n == 2;
-    }
-
-    bool copy_inferred_meter_data(Port* dst, Port* src)
-    {
-        if (dst is null || src is null)
-            return false;
-        if (dst.meter_data.has(MeterField.power) || !src.meter_data.has(MeterField.power))
-            return false;
-
-        dst.meter_data = src.meter_data;
-        apply_meter_sign(dst.meter_data, MeterSign.inverted);
-        mark_meter_data(dst.meter_data, Provenance.inferred_subtraction);
-        return true;
-    }
-
-    void mark_meter_data(ref MeterData data, Provenance provenance) pure
-    {
-        foreach (i; 0 .. num_fields)
-            foreach (phase; 0 .. 4)
-                if (data.provenance[i][phase] != Provenance.missing)
-                    data.provenance[i][phase] = provenance;
     }
 
     bool infer_single_dark_port(Bus* b)
@@ -1501,4 +1748,118 @@ private:
     }
 
 
+}
+
+unittest
+{
+    TopologyGraph graph;
+
+    // one-port appliance on a bus: the connected port is the boundary
+    Bus* house = graph.ensure_bus("house");
+    PortGroup* dish = graph.add_group("dishwasher", PortGroupKind.appliance);
+    Port* dish_p = graph.add_port(null, house, PortRole.connection, FlowDomain.consume, null, 0);
+    graph.add_to_group(dish, dish_p);
+    assert(is_boundary(dish_p));
+
+    // two-port sink group: connected upstream interior, dangling downstream boundary
+    Port* up = graph.add_port(null, house, PortRole.connection, FlowDomain.consume, null, 0, MeterSign.normal, "connection", "gpo");
+    Port* down = graph.add_port(null, null, PortRole.child, FlowDomain.consume, null, 0, MeterSign.normal, "child", "gpo");
+    PortGroup* gpo = graph.add_group("gpo", PortGroupKind.sink);
+    graph.add_to_group(gpo, up);
+    graph.add_to_group(gpo, down);
+    assert(up.bus is house && house.ports[].findFirst(up) < house.ports.length);
+    assert(down.bus is null && house.ports[].findFirst(down) == house.ports.length);
+    assert(!is_boundary(up));
+    assert(is_boundary(down));
+    assert(ports_connected(gpo, up, down));
+    assert(boundary_bus(down) is house);
+    gpo.closed = false;
+    assert(!ports_connected(gpo, up, down));
+    assert(boundary_bus(down) is null);
+    gpo.closed = true;
+
+    // multi-port appliance: connected ports interior, dangling MPPT boundary
+    Bus* battery = graph.ensure_bus("battery");
+    PortGroup* inverter = graph.add_group("inverter", PortGroupKind.appliance);
+    Port* grid_p = graph.add_port(null, house, PortRole.grid, FlowDomain.bidirectional, null, 0, MeterSign.normal, "grid");
+    Port* batt_p = graph.add_port(null, battery, PortRole.battery, FlowDomain.bidirectional, null, 0, MeterSign.normal, "battery");
+    Port* mppt = graph.add_port(null, null, PortRole.pv, FlowDomain.supply, null, 0, MeterSign.normal, "pv.mppt1");
+    graph.add_to_group(inverter, grid_p);
+    graph.add_to_group(inverter, batt_p);
+    graph.add_to_group(inverter, mppt);
+    assert(!is_boundary(grid_p));
+    assert(!is_boundary(batt_p));
+    assert(is_boundary(mppt));
+    assert(ports_connected(inverter, grid_p, batt_p));
+    assert(boundary_bus(mppt) is house || boundary_bus(mppt) is battery);
+
+    // switchgear with both ends connected: neither endpoint is a boundary
+    Bus* outlet = graph.ensure_bus("outlet");
+    Port* bra = graph.add_port(null, house, PortRole.parent, FlowDomain.bidirectional, null, 0, MeterSign.normal, "parent", "breaker");
+    Port* brb = graph.add_port(null, outlet, PortRole.child, FlowDomain.bidirectional, null, 0, MeterSign.normal, "child", "breaker");
+    Link* brl = graph.add_link(null, house, outlet, bra, brb, 20, true, "breaker");
+    PortGroup* breaker = graph.add_group("breaker", PortGroupKind.switchgear, null, brl);
+    graph.add_to_group(breaker, bra);
+    graph.add_to_group(breaker, brb);
+    assert(!is_boundary(bra));
+    assert(!is_boundary(brb));
+    assert(ports_connected(breaker, bra, brb));
+    brl.closed = false;
+    assert(!ports_connected(breaker, bra, brb));
+    brl.closed = true;
+
+    graph.clear();
+    assert(graph.ports.length == 0 && graph.groups.length == 0 && graph.bus_list.length == 0);
+
+    // sink absorption: the bus residual solves the connected port, group
+    // conservation pushes it out the dangling boundary
+    {
+        TopologyGraph g2;
+        Bus* site = g2.ensure_bus("site");
+
+        Port* main_p = g2.add_port(null, site, PortRole.connection, FlowDomain.bidirectional, null, 0, MeterSign.normal, "main");
+        main_p.meter_data.write_value(MeterField.power, 0, -1000);
+        main_p.meter_data.mark(MeterField.power, 0, Provenance.measured);
+        g2.add_to_group(g2.add_group("main", PortGroupKind.handover), main_p);
+
+        Port* dish_p2 = g2.add_port(null, site, PortRole.connection, FlowDomain.consume, null, 0, MeterSign.normal, "dish");
+        dish_p2.meter_data.write_value(MeterField.power, 0, 400);
+        dish_p2.meter_data.mark(MeterField.power, 0, Provenance.measured);
+        g2.add_to_group(g2.add_group("dish", PortGroupKind.appliance), dish_p2);
+
+        Port* sink_up = g2.add_port(null, site, PortRole.connection, FlowDomain.consume, null, 0, MeterSign.normal, "connection", "outlets");
+        Port* sink_down = g2.add_port(null, null, PortRole.child, FlowDomain.consume, null, 0, MeterSign.normal, "child", "outlets");
+        PortGroup* outlets = g2.add_group("outlets", PortGroupKind.sink);
+        g2.add_to_group(outlets, sink_up);
+        g2.add_to_group(outlets, sink_down);
+
+        g2.infer_graph();
+        assert(absf(sink_up.meter_data.active[0].value - 600) <= 0.01f);
+        assert(absf(sink_down.meter_data.active[0].value + 600) <= 0.01f);
+        assert(sink_down.meter_data.source(MeterField.power) == Provenance.inferred_subtraction);
+        assert(is_boundary(sink_down) && boundary_bus(sink_down) is site);
+
+        g2.reduce_group_losses();
+        assert(absf(outlets.loss_power) <= 0.01f);
+        assert(!outlets.mismatch);
+
+        g2.rebuild_boundaries();
+        assert(g2.boundaries.length == 3);
+        assert(g2.boundaries[].findFirst(sink_up) == g2.boundaries.length);
+
+        g2.reduce_boundary_flows();
+        float into = 0, out_of = 0;
+        foreach (ref f; g2.boundary_flows[])
+        {
+            into += f.power_into_graph;
+            out_of += f.power_out_of_graph;
+            if (f.port is main_p)
+                assert(absf(f.power_into_graph - 1000) <= 0.01f && f.power_out_of_graph == 0);
+            if (f.port is sink_down)
+                assert(f.power_into_graph == 0 && absf(f.power_out_of_graph - 600) <= 0.01f &&
+                       f.kind == BoundaryKind.load);
+        }
+        assert(absf(into - out_of) <= 0.01f);
+        g2.clear();
+    }
 }

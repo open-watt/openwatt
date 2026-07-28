@@ -107,7 +107,7 @@ nothrow @nogc:
             last_topology_rebuild = getTime();
         log_slow_phase("manager.update", getTime() - t);
         t = getTime();
-        topology_publisher.publish(energy_device, manager.graph, rebuild_topology);
+        topology_publisher.publish(energy_device, manager.graph, manager.islands, rebuild_topology);
         log_slow_phase("publish_topology", getTime() - t);
         t = getTime();
         registry.resync_all(manager.graph);
@@ -742,7 +742,7 @@ nothrow @nogc:
         Port* primary_port(Appliance a)
         {
             foreach (p; this.manager.graph.ports[])
-                if (p.owner is a)
+                if (p.owner is a && p.bus !is null)
                     return p;
             return null;
         }
@@ -993,7 +993,7 @@ nothrow @nogc:
                     continue;
                 ++emitted;
                 bool last = emitted == total;
-                if (link.closed && visited[].findFirst(link.b) >= visited.length)
+                if (link.b !is null && link.closed && visited[].findFirst(link.b) >= visited.length)
                     add_bus_tree(link.b, link, child_prefix, last ? "└─ " : "├─ ", visited);
                 else
                     add_link_row(link, child_prefix.text, last ? "└─ " : "├─ ");

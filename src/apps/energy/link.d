@@ -5,6 +5,7 @@ import urt.meta : AliasSeq;
 import urt.string;
 
 import apps.energy : EnergyAppModule;
+import apps.energy.meter : MeterAmps;
 import apps.energy.model;
 import apps.energy.reference;
 
@@ -100,12 +101,12 @@ nothrow @nogc:
         restart();
     }
 
-    uint capacity() const pure { return _capacity; }
-    void capacity(uint value)
+    MeterAmps capacity() const pure { return MeterAmps(_capacity); }
+    void capacity(MeterAmps value)
     {
-        if (_capacity == value)
+        if (_capacity == value.value)
             return;
-        _capacity = value;
+        _capacity = value.value;
         mark_set!(typeof(this), [ "capacity", "kind" ])();
         restart();
     }
@@ -192,7 +193,7 @@ private:
     String _child_circuit;
     String _circuit;
     String _role;
-    uint _capacity;
+    float _capacity = 0;
     bool _closed;
     ubyte _meter_phase;
     MeterSign _meter_sign;

@@ -6,7 +6,7 @@ import urt.log;
 import urt.mem;
 import urt.mem.temp : tconcat;
 import urt.string;
-import urt.time : Duration, getTime;
+import urt.time : Duration, getTime, getSysTime, SysTime;
 
 import apps.energy.appliance;
 import apps.energy.attribution;
@@ -16,6 +16,7 @@ import apps.energy.production;
 import apps.energy.topology;
 
 import manager;
+import manager.collection;
 import manager.component;
 import manager.device;
 import manager.element;
@@ -49,24 +50,18 @@ nothrow @nogc:
 
     Element* circuit_generation;
     Element* circuit_buses_count;
-    Element* circuit_terminals_count;
-    Element* circuit_branches_count;
     Element* circuit_islands_count;
     Element* circuit_grid_island;
     Element* topology_generation;
-    Element* productions_count;
-    Element* production_contributions_count;
 
     Array!CircuitBusPublishCache circuit_buses;
-    Array!CircuitTerminalPublishCache circuit_terminals;
     Array!TopologyBusPublishCache topology_buses;
     Array!TopologyPortPublishCache topology_ports;
-    Array!TopologyAppliancePublishCache topology_appliances;
     Array!TopologyLinkPublishCache topology_links;
-    Array!ProductionPublishCache productions;
-    Array!ProductionContributionPublishCache production_contributions;
+    Array!GroupLossPublishCache group_losses;
+    Array!BoundaryPublishEntry boundaries;
 
-    void publish(Device energy, ref TopologyGraph graph, bool rebuild_layout)
+    void publish(Device energy, ref TopologyGraph graph, ref Islands islands, bool rebuild_layout)
     {
         auto t = getTime();
         if (rebuild_layout || !bound || !shape_matches(graph))
@@ -76,19 +71,20 @@ nothrow @nogc:
             t = getTime();
         }
         publish_values(graph);
+        SysTime now = getSysTime();
+        foreach (i, p; graph.boundaries[])
+            boundaries[i].publish(p, graph, islands, now);
         log_slow_topology_publish("values", getTime() - t);
     }
 
     bool shape_matches(ref TopologyGraph graph) const pure
     {
         return circuit_buses.length == graph.bus_list.length
-            && circuit_terminals.length == graph.ports.length
             && topology_buses.length == graph.bus_list.length
             && topology_ports.length == graph.ports.length
-            && topology_appliances.length == graph.ports.length
             && topology_links.length == graph.links.length
-            && productions.length == graph.productions.length
-            && production_contributions.length == graph.production_contributions.length;
+            && group_losses.length == graph.groups.length
+            && boundaries.length == graph.boundaries.length;
     }
 
     void bind(Device energy, ref TopologyGraph graph)
@@ -101,14 +97,9 @@ nothrow @nogc:
         FormatId int_format = register_value_format!int();
         circuit_generation = energy.find_or_create_element("circuit.generation", int_format);
         circuit_buses_count = energy.find_or_create_element("circuit.buses", int_format);
-        circuit_terminals_count = energy.find_or_create_element("circuit.terminals", int_format);
-        circuit_branches_count = energy.find_or_create_element("circuit.branches", int_format);
         circuit_islands_count = energy.find_or_create_element("circuit.islands", int_format);
         circuit_grid_island = energy.find_or_create_element("circuit.grid_island", int_format);
         topology_generation = energy.find_or_create_element("topology.generation", int_format);
-        productions_count = energy.find_or_create_element("circuit.productions", int_format);
-        production_contributions_count = energy.find_or_create_element(
-            "circuit.production_contributions", int_format);
 
         circuit_buses.clear();
         foreach (bus; graph.bus_list[])
@@ -116,14 +107,6 @@ nothrow @nogc:
             CircuitBusPublishCache c;
             c.bind(energy, bus);
             circuit_buses ~= c;
-        }
-
-        circuit_terminals.clear();
-        foreach (port; graph.ports[])
-        {
-            CircuitTerminalPublishCache c;
-            c.bind(energy, port);
-            circuit_terminals ~= c;
         }
 
         topology_buses.clear();
@@ -142,14 +125,6 @@ nothrow @nogc:
             topology_ports ~= c;
         }
 
-        topology_appliances.clear();
-        foreach (port; graph.ports[])
-        {
-            TopologyAppliancePublishCache c;
-            c.bind(energy, port);
-            topology_appliances ~= c;
-        }
-
         topology_links.clear();
         foreach (link; graph.links[])
         {
@@ -158,55 +133,65 @@ nothrow @nogc:
             topology_links ~= c;
         }
 
-        productions.clear();
-        foreach (ref production; graph.productions[])
-        {
-            ProductionPublishCache c;
-            c.bind(energy, production);
-            productions ~= c;
-        }
+        group_losses.resize(graph.groups.length);
+        foreach (i, g; graph.groups[])
+            group_losses[i].bind(energy, g);
 
-        production_contributions.clear();
-        foreach (i, ref contribution; graph.production_contributions[])
+        boundaries.resize(graph.boundaries.length);
+        foreach (i, p; graph.boundaries[])
         {
-            ProductionContributionPublishCache c;
-            c.bind(energy, cast(uint)i);
-            production_contributions ~= c;
+            foreach (q; graph.boundaries[0 .. i])
+                if (boundary_key(q)[] == boundary_key(p)[])
+                    writeWarning("energy: boundary key '", boundary_key(p), "' is not unique; an appliance and a link share the name and their publishes will collide");
+            boundaries[i].bind(energy, p);
         }
+        publish_appliance_index_list(energy, graph);
         log_slow_topology_publish("cache_bind", getTime() - t);
 
         bound = true;
+    }
+
+    void publish_appliance_index_list(Device energy, ref TopologyGraph graph)
+    {
+        foreach (a; Collection!Appliance().values)
+        {
+            const(char)[] base = tconcat("appliance.", a.name[], ".");
+            energy.set_element(tconcat(base, "kind"), (a.kind.length ? a.kind : "").makeString(defaultAllocator()));
+            Port* anchor = graph.anchor_port_for_appliance(a);
+            energy.set_element(tconcat(base, "circuit"),
+                               (anchor && anchor.bus ? anchor.bus.id[] : "").makeString(defaultAllocator()));
+            const(char)[] key;
+            foreach (p; graph.boundaries[])
+                if (p.owner is a)
+                {
+                    key = boundary_key(p);
+                    break;
+                }
+            energy.set_element(tconcat(base, "boundary"), key.makeString(defaultAllocator()));
+            energy.set_element(tconcat(base, "device"), a.device.makeString(defaultAllocator()));
+            energy.set_element(tconcat(base, "vin"), a.vin.makeString(defaultAllocator()));
+            energy.set_element(tconcat(base, "connected"), anchor !is null);
+        }
     }
 
     void publish_values(ref TopologyGraph graph)
     {
         circuit_generation.value = cast(int)graph.attribution.generation;
         circuit_buses_count.value = cast(int)graph.bus_list.length;
-        circuit_terminals_count.value = cast(int)graph.ports.length;
-        circuit_branches_count.value = cast(int)graph.links.length;
         circuit_islands_count.value = graph.attribution.island_count;
         circuit_grid_island.value = graph.attribution.grid_island;
         topology_generation.value = cast(int)graph.generation;
-        productions_count.value = cast(int)graph.productions.length;
-        production_contributions_count.value = cast(int)graph.production_contributions.length;
 
         foreach (i, bus; graph.bus_list[])
             circuit_buses[i].publish(bus, graph.attribution.buses[i], graph.attribution.generation);
-        foreach (i, port; graph.ports[])
-            circuit_terminals[i].publish(port, graph.attribution.terminals[i], graph.attribution.generation);
         foreach (i, bus; graph.bus_list[])
             topology_buses[i].publish(bus, graph.generation);
         foreach (i, port; graph.ports[])
-        {
             topology_ports[i].publish(port, graph.generation);
-            topology_appliances[i].publish(port, graph.generation);
-        }
         foreach (i, link; graph.links[])
             topology_links[i].publish(link, graph.generation);
-        foreach (i, ref production; graph.productions[])
-            productions[i].publish(production, graph.generation);
-        foreach (i, ref contribution; graph.production_contributions[])
-            production_contributions[i].publish(contribution, graph.generation);
+        foreach (i, g; graph.groups[])
+            group_losses[i].publish(g);
     }
 }
 
@@ -221,10 +206,8 @@ private void log_slow_topology_publish(const(char)[] phase, Duration d)
 private void publish_topology_layout(Device energy, ref TopologyGraph graph)
 {
     publish_circuit(energy, graph);
-    publish_productions(energy, graph.generation,
-                        graph.productions, graph.production_contributions);
 
-    energy.set_element("topology.schema_version", 1);
+    energy.set_element("topology.schema_version", 2);
     energy.set_element("topology.generation", cast(int)graph.generation);
 
     foreach (bus; graph.bus_list[])
@@ -246,23 +229,7 @@ private void publish_topology_layout(Device energy, ref TopologyGraph graph)
     {
         if (port.owner is null || !is_first_owner_port(graph, port))
             continue;
-        publish_appliance_index(energy, graph, port.owner);
         publish_control_path(energy, graph, port.owner);
-    }
-
-    foreach (port; graph.ports[])
-    {
-        if (port.owner is null)
-            continue;
-        const(char)[] port_id = port.path.length ? port.path[] : port_role_name(port.role);
-        const(char)[] base = tconcat("topology.appliance.", port.owner.name[], ".", port_id, ".");
-        energy.set_element(tconcat(base, "owner"), port.owner.name[].makeString(defaultAllocator()));
-        energy.set_element(tconcat(base, "bus"), port.bus.id[].makeString(defaultAllocator()));
-        energy.set_element(tconcat(base, "port_role"), port_role_name(port.role).makeString(defaultAllocator()));
-        energy.set_element(tconcat(base, "port"), port_id.makeString(defaultAllocator()));
-        energy.set_element(tconcat(base, "flow"), flow_domain_name(port.flow).makeString(defaultAllocator()));
-        energy.set_element(tconcat(base, "meter_sign"), meter_sign_name(port.meter_sign).makeString(defaultAllocator()));
-        energy.set_element(tconcat(base, "root"), port.root);
     }
 
     foreach (link; graph.links[])
@@ -275,12 +242,12 @@ private void publish_topology_layout(Device energy, ref TopologyGraph graph)
         energy.set_element(tconcat(base, "label"), link.label.makeString(defaultAllocator()));
         energy.set_element(tconcat(base, "owner"), (link.owner ? link.owner.name[] : "").makeString(defaultAllocator()));
         energy.set_element(tconcat(base, "parent"), link.a.id[].makeString(defaultAllocator()));
-        energy.set_element(tconcat(base, "child"), link.b.id[].makeString(defaultAllocator()));
+        energy.set_element(tconcat(base, "child"), (link.b ? link.b.id[] : "").makeString(defaultAllocator()));
         energy.set_element(tconcat(base, "parent_port"), (link.port_a ? link.port_a.id[] : "").makeString(defaultAllocator()));
         energy.set_element(tconcat(base, "child_port"), (link.port_b ? link.port_b.id[] : "").makeString(defaultAllocator()));
         const(char)[] kind = link.kind.length ? link.kind : link.owner ? "appliance" : "link";
         energy.set_element(tconcat(base, "kind"), kind.makeString(defaultAllocator()));
-        energy.set_element(tconcat(base, "capacity"), cast(int)link.capacity_amps);
+        energy.set_element(tconcat(base, "capacity"), link.capacity_amps);
     }
 }
 
@@ -464,6 +431,181 @@ nothrow @nogc:
     }
 }
 
+// Appliance loss is self-consumption/conversion loss; on switchgear the same
+// sum is a two-sides-disagree wiring/calibration alarm.
+private struct GroupLossPublishCache
+{
+nothrow @nogc:
+    FloatPublishCell loss;
+    BoolPublishCell mismatch;
+
+    void bind(Device energy, PortGroup* g)
+    {
+        loss = FloatPublishCell();
+        mismatch = BoolPublishCell();
+        if (g.kind == PortGroupKind.appliance)
+        {
+            if (g.owner !is null && g.ports.length >= 2)
+                loss.bind(energy, tconcat("appliance.", g.owner.name[], "."), "loss_power");
+        }
+        else if (g.link !is null && g.link.id.length != 0)
+        {
+            const(char)[] base = tconcat("topology.link.", g.link.id[], ".");
+            loss.bind(energy, base, "loss_power");
+            mismatch.bind(energy, base, "mismatch");
+        }
+    }
+
+    void publish(PortGroup* g)
+    {
+        if (loss.element)
+            loss.publish(g.loss_power);
+        if (mismatch.element)
+            mismatch.publish(g.mismatch);
+    }
+}
+
+private struct BoundaryPublishEntry
+{
+nothrow @nogc:
+    Element* circuit_e;
+    Element* island_e;
+    Element* provenance_e;
+    FloatPublishCell power_in;
+    FloatPublishCell power_out;
+    FloatPublishCell energy_in;
+    FloatPublishCell energy_out;
+    FloatPublishCell soc;
+    BoolPublishCell mismatch;
+    String last_circuit;
+    String last_island;
+    Provenance last_prov;
+    bool prov_seen;
+
+    void bind(Device energy, Port* p)
+    {
+        const(char)[] base = tconcat("boundary.", boundary_key(p), ".");
+        energy.set_element(tconcat(base, "kind"),
+                           boundary_kind_name(boundary_kind(p)).makeString(defaultAllocator()));
+        energy.set_element(tconcat(base, "owner"),
+                           (p.owner ? p.owner.name[] : "").makeString(defaultAllocator()));
+        energy.set_element(tconcat(base, "origin"),
+                           (p.group ? port_group_kind_name(p.group.kind) : "").makeString(defaultAllocator()));
+        energy.set_element(tconcat(base, "port"), p.id[].makeString(defaultAllocator()));
+        FormatId string_format = register_value_format!String();
+        circuit_e = energy.find_or_create_element(tconcat(base, "circuit"), string_format);
+        island_e = energy.find_or_create_element(tconcat(base, "island"), string_format);
+        provenance_e = energy.find_or_create_element(tconcat(base, "provenance"), string_format);
+        power_in.bind(energy, base, "power_in");
+        power_out.bind(energy, base, "power_out");
+        energy_in.bind(energy, base, "energy_in");
+        energy_out.bind(energy, base, "energy_out");
+        soc = FloatPublishCell();
+        if (boundary_kind(p) == BoundaryKind.battery)
+            soc.bind(energy, base, "soc");
+        mismatch = BoolPublishCell();
+        if (boundary_kind(p) == BoundaryKind.solar && p.owner !is null)
+            mismatch.bind(energy, base, "mismatch");
+        last_circuit = String();
+        last_island = String();
+        prov_seen = false;
+    }
+
+    void publish(Port* p, ref TopologyGraph graph, ref Islands islands, SysTime ts)
+    {
+        float pw_in = float.nan, pw_out = float.nan;
+        bool have = p.meter_data.has(MeterField.power);
+        if (have)
+        {
+            float power = p.meter_data.active[0].value;
+            if (external_boundary(p))
+            {
+                pw_in = power > 0 ? power : 0;
+                pw_out = power < 0 ? -power : 0;
+            }
+            else
+            {
+                pw_in = power < 0 ? -power : 0;
+                pw_out = power > 0 ? power : 0;
+            }
+        }
+        power_in.publish(pw_in);
+        power_out.publish(pw_out);
+
+        BoundaryEnergy e = boundary_energy(p);
+        if (e.into_total == e.into_total)
+            energy_in.publish(cast(float)e.into_total);
+        if (e.out_total == e.out_total)
+            energy_out.publish(cast(float)e.out_total);
+
+        Bus* b = boundary_bus(p);
+        publish_string(circuit_e, last_circuit, b ? b.id[] : "", ts);
+        publish_string(island_e, last_island, island_id_of(b, islands), ts);
+
+        // The reconciled store value, not this port's own view of it.
+        if (soc.element)
+        {
+            float value = float.nan;
+            if (b)
+                foreach (ref store; graph.battery_stores[])
+                    if (store.circuit == b.id[])
+                    {
+                        value = store.reading.soc;
+                        break;
+                    }
+            soc.publish(value);
+        }
+
+        Provenance prov = have ? p.meter_data.source(MeterField.power) : Provenance.missing;
+        if (!prov_seen || prov != last_prov)
+        {
+            provenance_e.value(provenance_name(prov).makeString(defaultAllocator()), ts);
+            last_prov = prov;
+            prov_seen = true;
+        }
+
+        // Aggregate-vs-member disagreement from the production reconciliation.
+        if (mismatch.element)
+        {
+            bool flag = false;
+            foreach (ref prod; graph.productions[])
+                if (prod.owner == p.owner.name[] && prod.group == production_group_of(p))
+                {
+                    flag = prod.mismatch;
+                    break;
+                }
+            mismatch.publish(flag);
+        }
+    }
+
+    const(char)[] island_id_of(Bus* b, ref Islands islands)
+    {
+        if (b is null)
+            return "";
+        foreach (island; islands[])
+            foreach (m; island.members[])
+                if (m is b)
+                    return island.id[];
+        return "";
+    }
+
+    void publish_string(Element* e, ref String last, const(char)[] value, SysTime ts)
+    {
+        if (last[] == value)
+            return;
+        last = value.makeString(defaultAllocator());
+        e.value(last, ts);
+    }
+
+    const(char)[] production_group_of(Port* p)
+    {
+        if (p.path.length == 0)
+            return "pv";
+        size_t dot = p.path[].findLast('.');
+        return dot < p.path.length ? p.path[0 .. dot] : p.path[];
+    }
+}
+
 private struct CircuitBusPublishCache
 {
 nothrow @nogc:
@@ -538,44 +680,6 @@ nothrow @nogc:
     }
 }
 
-private struct CircuitTerminalPublishCache
-{
-nothrow @nogc:
-    Element* generation;
-    FloatPublishCell consumed_power;
-    FloatPublishCell supplied_power;
-    FloatPublishCell local_power;
-    FloatPublishCell grid_power;
-    FloatPublishCell local_fraction;
-    FloatPublishCell soc;
-    MeterPublishCache meter;
-
-    void bind(Device energy, Port* port)
-    {
-        const(char)[] base = tconcat("circuit.terminal.", port.id[], ".");
-        generation = elem!int(energy, base, "generation");
-        consumed_power.bind(energy, base, "consumed_power");
-        supplied_power.bind(energy, base, "supplied_power");
-        local_power.bind(energy, base, "local_power");
-        grid_power.bind(energy, base, "grid_power");
-        local_fraction.bind(energy, base, "local_fraction");
-        soc.bind(energy, base, "soc");
-        meter.bind(energy, base);
-    }
-
-    void publish(Port* port, ref const TerminalAttribution attr, uint gen)
-    {
-        generation.value = cast(int)gen;
-        consumed_power.publish(attr.consumed_power);
-        supplied_power.publish(attr.supplied_power);
-        local_power.publish(attr.local_power);
-        grid_power.publish(attr.grid_power);
-        local_fraction.publish(attr.local_fraction);
-        soc.publish(read_battery_soc(battery_store_source(port)));
-        meter.publish(port.meter_data);
-    }
-}
-
 private struct TopologyBusPublishCache
 {
 nothrow @nogc:
@@ -627,6 +731,8 @@ private struct TopologyPortPublishCache
 {
 nothrow @nogc:
     Element* generation;
+    FloatPublishCell soc;
+    Component soc_source;
 
     MeterPublishCache meter;
 
@@ -635,41 +741,38 @@ nothrow @nogc:
         const(char)[] base = tconcat("topology.port.", port.id[], ".");
         generation = elem!int(energy, base, "generation");
 
+        // The device's own gauge at this port; the reconciled store value
+        // lives on the battery boundary entry.
+        soc = FloatPublishCell();
+        soc_source = port_soc_source(port);
+        if (soc_source !is null)
+            soc.bind(energy, base, "soc");
+
         meter.bind(energy, base);
     }
 
     void publish(Port* port, uint gen)
     {
         generation.value = cast(int)gen;
+        if (soc.element)
+            soc.publish(read_battery_soc(soc_source));
         meter.publish(port.meter_data);
     }
 }
 
-private struct TopologyAppliancePublishCache
+// A port carries soc only when the component behind it can answer: mirrors
+// read_battery_soc's resolution, gating on element presence rather than the
+// current value so an offline device keeps its field.
+private Component port_soc_source(Port* port)
 {
-nothrow @nogc:
-    Element* generation;
-
-    MeterPublishCache meter;
-
-    void bind(Device energy, Port* port)
-    {
-        if (port.owner is null)
-            return;
-        const(char)[] port_id = port.path.length ? port.path[] : port_role_name(port.role);
-        const(char)[] base = tconcat("topology.appliance.", port.owner.name[], ".", port_id, ".");
-        generation = elem!int(energy, base, "generation");
-
-        meter.bind(energy, base);
-    }
-
-    void publish(Port* port, uint gen)
-    {
-        if (generation is null)
-            return;
-        generation.value = cast(int)gen;
-        meter.publish(port.meter_data);
-    }
+    Component c = battery_store_source(port);
+    if (c is null)
+        return null;
+    if (c.find_element("soc"))
+        return c;
+    if (c.template_[] == "Battery")
+        return null;
+    return c.find_first_component_by_template_recursive("Battery") ? c : null;
 }
 
 private struct TopologyLinkPublishCache
@@ -677,6 +780,8 @@ private struct TopologyLinkPublishCache
 nothrow @nogc:
     Element* generation;
     Element* closed;
+    FloatPublishCell current;
+    FloatPublishCell utilisation;
     MeterPublishCache meter;
 
     void bind(Device energy, Link* link)
@@ -686,6 +791,8 @@ nothrow @nogc:
         const(char)[] base = tconcat("topology.link.", link.id[], ".");
         generation = elem!int(energy, base, "generation");
         closed = elem!bool(energy, base, "closed");
+        current.bind(energy, base, "current");
+        utilisation.bind(energy, base, "utilisation");
         meter.bind(energy, base);
     }
 
@@ -695,68 +802,11 @@ nothrow @nogc:
             return;
         generation.value = cast(int)gen;
         closed.value = link.closed;
+        float amps = link_current_amps(link);
+        current.publish(amps);
+        utilisation.publish(link.capacity_amps > 0 ? amps / link.capacity_amps : float.nan);
         if (Port* measuring = link_measuring_port(link))
             meter.publish(measuring.meter_data);
-    }
-}
-
-private struct ProductionPublishCache
-{
-nothrow @nogc:
-    Element* generation;
-    Element* aggregate_power;
-    Element* member_power;
-    Element* aggregate_count;
-    Element* member_count;
-    Element* calculated;
-    Element* mismatch;
-    MeterPublishCache meter;
-
-    void bind(Device energy, ref const Production production)
-    {
-        const(char)[] base = tconcat("circuit.production.", production.owner, ".", production.group, ".");
-        generation = elem!int(energy, base, "generation");
-        aggregate_power = elem!float(energy, base, "aggregate_power");
-        member_power = elem!float(energy, base, "member_power");
-        aggregate_count = elem!int(energy, base, "aggregate_count");
-        member_count = elem!int(energy, base, "member_count");
-        calculated = elem!bool(energy, base, "calculated");
-        mismatch = elem!bool(energy, base, "mismatch");
-        meter.bind(energy, base);
-    }
-
-    void publish(ref const Production production, uint gen)
-    {
-        generation.value = cast(int)gen;
-        aggregate_power.value = production.aggregate_power;
-        member_power.value = production.member_power;
-        aggregate_count.value = cast(int)production.aggregate_count;
-        member_count.value = cast(int)production.member_count;
-        calculated.value = production.calculated;
-        mismatch.value = production.mismatch;
-        meter.publish(production.data);
-    }
-}
-
-private struct ProductionContributionPublishCache
-{
-nothrow @nogc:
-    Element* generation;
-
-    MeterPublishCache meter;
-
-    void bind(Device energy, uint index)
-    {
-        const(char)[] base = tconcat("circuit.production_contribution.", index, ".");
-        generation = elem!int(energy, base, "generation");
-
-        meter.bind(energy, base);
-    }
-
-    void publish(ref const ProductionContribution contribution, uint gen)
-    {
-        generation.value = cast(int)gen;
-        meter.publish(contribution.meter);
     }
 }
 
@@ -768,20 +818,14 @@ private Element* elem(T)(Device energy, const(char)[] base, const(char)[] name)
 
 void publish_circuit(Device energy, ref TopologyGraph graph)
 {
-    energy.set_element("circuit.schema_version", 1);
+    energy.set_element("circuit.schema_version", 2);
     energy.set_element("circuit.generation", cast(int)graph.attribution.generation);
     energy.set_element("circuit.buses", cast(int)graph.bus_list.length);
-    energy.set_element("circuit.terminals", cast(int)graph.ports.length);
-    energy.set_element("circuit.branches", cast(int)graph.links.length);
     energy.set_element("circuit.islands", graph.attribution.island_count);
     energy.set_element("circuit.grid_island", graph.attribution.grid_island);
 
     foreach (i, bus; graph.bus_list[])
         publish_circuit_bus(energy, graph.attribution.generation, bus, graph.attribution.buses[i]);
-    foreach (i, port; graph.ports[])
-        publish_circuit_terminal(energy, graph.attribution.generation, port, graph.attribution.terminals[i]);
-    foreach (link; graph.links[])
-        publish_circuit_branch(energy, graph.attribution.generation, graph, link);
 }
 
 private const(char)[] circuit_domain_name(FlowDomain f) pure
@@ -793,18 +837,6 @@ private const(char)[] circuit_domain_name(FlowDomain f) pure
         case FlowDomain.supply:        return "source";
         case FlowDomain.bidirectional: return "bidirectional";
     }
-}
-
-void publish_productions(Device energy, uint generation, ref Array!Production productions,
-                         ref Array!ProductionContribution contributions)
-{
-    energy.set_element("circuit.productions", cast(int)productions.length);
-    energy.set_element("circuit.production_contributions", cast(int)contributions.length);
-
-    foreach (ref production; productions[])
-        publish_production(energy, generation, production);
-    foreach (i, ref contribution; contributions[])
-        publish_production_contribution(energy, generation, cast(uint)i, contribution);
 }
 
 private void publish_circuit_bus(Device energy, uint generation, apps.energy.topology.Bus* bus,
@@ -836,80 +868,6 @@ private void publish_circuit_bus(Device energy, uint generation, apps.energy.top
     publish_meter(energy, base, bus.balance);
 }
 
-private void publish_circuit_terminal(Device energy, uint generation, Port* port,
-                                      ref const TerminalAttribution attr)
-{
-    const(char)[] base = tconcat("circuit.terminal.", port.id[], ".");
-    energy.set_element(tconcat(base, "generation"), cast(int)generation);
-    energy.set_element(tconcat(base, "id"), port.id[].makeString(defaultAllocator()));
-    energy.set_element(tconcat(base, "owner"), (port.owner ? port.owner.name[] : "").makeString(defaultAllocator()));
-    energy.set_element(tconcat(base, "owner_kind"), (port.owner ? port.owner.kind[] : "").makeString(defaultAllocator()));
-    energy.set_element(tconcat(base, "owner_device"), (port.owner ? port.owner.device[] : "").makeString(defaultAllocator()));
-    energy.set_element(tconcat(base, "port"),
-        (port.path.length ? port.path[] : port_role_name(port.role)).makeString(defaultAllocator()));
-    energy.set_element(tconcat(base, "label"), port.label.makeString(defaultAllocator()));
-    energy.set_element(tconcat(base, "circuit"), (port.bus ? port.bus.id[] : "").makeString(defaultAllocator()));
-    energy.set_element(tconcat(base, "role"), port_role_name(port.role).makeString(defaultAllocator()));
-    energy.set_element(tconcat(base, "domain"), circuit_domain_name(port.flow).makeString(defaultAllocator()));
-    energy.set_element(tconcat(base, "consumed_power"), attr.consumed_power);
-    energy.set_element(tconcat(base, "supplied_power"), attr.supplied_power);
-    energy.set_element(tconcat(base, "local_power"), attr.local_power);
-    energy.set_element(tconcat(base, "grid_power"), attr.grid_power);
-    energy.set_element(tconcat(base, "local_fraction"), attr.local_fraction);
-    energy.set_element(tconcat(base, "soc"), read_battery_soc(battery_store_source(port)));
-    energy.set_element(tconcat(base, "root"), port.root);
-    energy.set_element(tconcat(base, "implicit"), port.implicit);
-    publish_meter(energy, base, port.meter_data);
-}
-
-private void publish_circuit_branch(Device energy, uint generation, ref TopologyGraph graph, Link* link)
-{
-    const(char)[] base = tconcat("circuit.branch.", link.id[], ".");
-    energy.set_element(tconcat(base, "generation"), cast(int)generation);
-    energy.set_element(tconcat(base, "id"), link.id[].makeString(defaultAllocator()));
-    energy.set_element(tconcat(base, "owner"), (link.owner ? link.owner.name[] : "").makeString(defaultAllocator()));
-    energy.set_element(tconcat(base, "label"), link.label.makeString(defaultAllocator()));
-    energy.set_element(tconcat(base, "kind"),
-        (link.kind.length ? link.kind : link.owner ? "appliance" : "link").makeString(defaultAllocator()));
-    energy.set_element(tconcat(base, "parent"), (link.a ? link.a.id[] : "").makeString(defaultAllocator()));
-    energy.set_element(tconcat(base, "child"), (link.b ? link.b.id[] : "").makeString(defaultAllocator()));
-    energy.set_element(tconcat(base, "capacity"), cast(int)link.capacity_amps);
-    energy.set_element(tconcat(base, "conducting"), link.closed);
-    energy.set_element(tconcat(base, "parent_terminal"), graph.attribution.terminal_index(graph, link.port_a));
-    energy.set_element(tconcat(base, "child_terminal"), graph.attribution.terminal_index(graph, link.port_b));
-}
-
-private void publish_production(Device energy, uint generation, ref const Production production)
-{
-    const(char)[] base = tconcat("circuit.production.", production.owner, ".", production.group, ".");
-    energy.set_element(tconcat(base, "generation"), cast(int)generation);
-    energy.set_element(tconcat(base, "owner"), production.owner.makeString(defaultAllocator()));
-    energy.set_element(tconcat(base, "group"), production.group.makeString(defaultAllocator()));
-    energy.set_element(tconcat(base, "aggregate_power"), production.aggregate_power);
-    energy.set_element(tconcat(base, "member_power"), production.member_power);
-    energy.set_element(tconcat(base, "aggregate_count"), cast(int)production.aggregate_count);
-    energy.set_element(tconcat(base, "member_count"), cast(int)production.member_count);
-    energy.set_element(tconcat(base, "calculated"), production.calculated);
-    energy.set_element(tconcat(base, "mismatch"), production.mismatch);
-    publish_meter(energy, base, production.data);
-}
-
-private void publish_production_contribution(Device energy, uint generation, uint index,
-                                             ref const ProductionContribution contribution)
-{
-    const(char)[] base = tconcat("circuit.production_contribution.", index, ".");
-    energy.set_element(tconcat(base, "generation"), cast(int)generation);
-    energy.set_element(tconcat(base, "owner"), contribution.owner.makeString(defaultAllocator()));
-    energy.set_element(tconcat(base, "group"), contribution.group.makeString(defaultAllocator()));
-    energy.set_element(tconcat(base, "port"), contribution.port.makeString(defaultAllocator()));
-    energy.set_element(tconcat(base, "circuit"), contribution.circuit.makeString(defaultAllocator()));
-    energy.set_element(tconcat(base, "kind"),
-        production_contribution_kind_name(contribution.kind).makeString(defaultAllocator()));
-    energy.set_element(tconcat(base, "component"),
-        (contribution.component ? contribution.component.id[] : "").makeString(defaultAllocator()));
-    publish_meter(energy, base, contribution.meter);
-}
-
 private void publish_control_path(Device energy, ref TopologyGraph graph, Appliance owner)
 {
     ControlPath path;
@@ -934,8 +892,7 @@ private void publish_control_path(Device energy, ref TopologyGraph graph, Applia
         (path.limiting_link ? path.limiting_link.id[] : "").makeString(defaultAllocator()));
     energy.set_element(tconcat(base, "limiting_kind"),
         (path.limiting_link ? path.limiting_link.kind : "").makeString(defaultAllocator()));
-    energy.set_element(tconcat(base, "limiting_capacity_amps"),
-        cast(int)path.limiting_capacity_amps);
+    energy.set_element(tconcat(base, "limiting_capacity_amps"), path.limiting_capacity_amps);
     energy.set_element(tconcat(base, "limiting_current_amps"),
         path.limiting_current_amps);
 }
@@ -964,30 +921,6 @@ private bool is_first_owner_port(ref TopologyGraph graph, Port* port)
     return true;
 }
 
-private void publish_appliance_index(Device energy, ref TopologyGraph graph, Appliance owner)
-{
-    const(char)[] base = tconcat("topology.appliance_index.", owner.name[], ".");
-    uint port_count;
-    bool explicit_root;
-    foreach (port; graph.ports[])
-    {
-        if (port.owner !is owner)
-            continue;
-        ++port_count;
-        explicit_root = explicit_root || port.root;
-    }
-
-    energy.set_element(tconcat(base, "generation"), cast(int)graph.generation);
-    energy.set_element(tconcat(base, "id"), owner.name[].makeString(defaultAllocator()));
-    energy.set_element(tconcat(base, "kind"), owner.kind.makeString(defaultAllocator()));
-    energy.set_element(tconcat(base, "root"), explicit_root || owner.root);
-    energy.set_element(tconcat(base, "device"), owner.device.makeString(defaultAllocator()));
-    energy.set_element(tconcat(base, "meter"), owner.meter.makeString(defaultAllocator()));
-    energy.set_element(tconcat(base, "state"), owner.state.makeString(defaultAllocator()));
-    energy.set_element(tconcat(base, "vin"), owner.vin.makeString(defaultAllocator()));
-    energy.set_element(tconcat(base, "ports"), cast(int)port_count);
-}
-
 private void publish_port(Device energy, Port* port)
 {
     const(char)[] base = tconcat("topology.port.", port.id[], ".");
@@ -995,7 +928,7 @@ private void publish_port(Device energy, Port* port)
     energy.set_element(tconcat(base, "id"), port.id[].makeString(defaultAllocator()));
     energy.set_element(tconcat(base, "owner"), (port.owner ? port.owner.name[] : "").makeString(defaultAllocator()));
     energy.set_element(tconcat(base, "label"), port.label.makeString(defaultAllocator()));
-    energy.set_element(tconcat(base, "bus"), port.bus.id[].makeString(defaultAllocator()));
+    energy.set_element(tconcat(base, "bus"), (port.bus ? port.bus.id[] : "").makeString(defaultAllocator()));
     energy.set_element(tconcat(base, "port"), port_name.makeString(defaultAllocator()));
     energy.set_element(tconcat(base, "port_role"), port_role_name(port.role).makeString(defaultAllocator()));
     energy.set_element(tconcat(base, "flow"), flow_domain_name(port.flow).makeString(defaultAllocator()));

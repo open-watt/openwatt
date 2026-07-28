@@ -61,20 +61,12 @@ nothrow @nogc:
             a = TerminalAttribution.init;
 
         Map!(Bus*, int) bus_index;
-        Map!(Port*, bool) branch_terminal;
         foreach (i, b; graph.bus_list[])
             bus_index.insert(b, cast(int)i);
-        foreach (link; graph.links[])
-        {
-            if (link.port_a)
-                branch_terminal.insert(link.port_a, true);
-            if (link.port_b)
-                branch_terminal.insert(link.port_b, true);
-        }
 
         partition_islands(graph, bus_index);
         build_grid_spanning_tree(graph, bus_index);
-        attribute_source_mix(graph, bus_index, branch_terminal);
+        attribute_source_mix(graph, bus_index);
     }
 
     int terminal_index(ref TopologyGraph graph, Port* p)
@@ -172,8 +164,7 @@ private:
         }
     }
 
-    void attribute_source_mix(ref TopologyGraph graph, ref Map!(Bus*, int) bus_index,
-                              ref Map!(Port*, bool) branch_terminal)
+    void attribute_source_mix(ref TopologyGraph graph, ref Map!(Bus*, int) bus_index)
     {
         size_t nb = graph.bus_list.length;
         Array!float local;
@@ -185,10 +176,10 @@ private:
         next_local.resize(nb);
         next_grid.resize(nb);
 
-        seed_source_mix(graph, branch_terminal, local, grid);
+        seed_source_mix(graph, bus_index, local, grid);
         foreach (_; 0 .. nb + graph.links.length + 1)
         {
-            seed_source_mix(graph, branch_terminal, next_local, next_grid);
+            seed_source_mix(graph, bus_index, next_local, next_grid);
 
             foreach (link; graph.links[])
             {
@@ -287,28 +278,36 @@ private:
         }
     }
 
-    void seed_source_mix(ref TopologyGraph graph, ref Map!(Port*, bool) branch_terminal,
+    // Seeds are the solved boundary in-flows: grid-kind seeds grid, everything
+    // else seeds local (diffuse/unclassified supply is local by nature; battery
+    // discharge is local regardless of what charged it). Residuals never seed:
+    // error is not energy. A grid bus no grid boundary reported on falls back
+    // to the load-shortfall heuristic.
+    void seed_source_mix(ref TopologyGraph graph, ref Map!(Bus*, int) bus_index,
                          ref Array!float local, ref Array!float grid)
     {
-        foreach (i, b; graph.bus_list[])
+        foreach (i; 0 .. local.length)
         {
-            local[][i] = local_terminal_source(b, branch_terminal);
-            grid[][i] = b.contains_grid ? grid_terminal_source(b, local[][i]) : 0;
+            local[][i] = 0;
+            grid[][i] = float.nan;
         }
-    }
-
-    float local_terminal_source(Bus* bus, ref Map!(Port*, bool) branch_terminal)
-    {
-        float source = 0;
-        foreach (p; bus.ports[])
+        foreach (ref f; graph.boundary_flows[])
         {
-            if (p in branch_terminal || !p.meter_data.has(MeterField.power))
+            int* bi = boundary_bus(f.port) in bus_index;
+            if (bi is null)
                 continue;
-            float power = p.meter_data.active[0].value;
-            if (power == power && power < 0)
-                source += -power;
+            if (f.kind == BoundaryKind.grid)
+            {
+                if (grid[][cast(size_t)*bi] != grid[][cast(size_t)*bi])
+                    grid[][cast(size_t)*bi] = 0;
+                grid[][cast(size_t)*bi] += f.power_into_graph;
+            }
+            else
+                local[][cast(size_t)*bi] += f.power_into_graph;
         }
-        return source;
+        foreach (i, b; graph.bus_list[])
+            if (grid[][i] != grid[][i])
+                grid[][i] = b.contains_grid ? grid_terminal_source(b, local[][i]) : 0;
     }
 
     float terminal_load(Bus* bus)
@@ -374,4 +373,52 @@ float bus_local_fraction(float local, float grid, bool contains_grid)
     if (total > 0)
         return local / total;
     return contains_grid ? 0 : float.nan;
+}
+
+unittest
+{
+    // grid import and a local pv boundary blend by classification, not sign:
+    // 1000 W import + 500 W pv serving 1500 W load = one-third local
+    TopologyGraph g;
+    Bus* gridb = g.ensure_bus("grid");
+    Bus* house = g.ensure_bus("house");
+
+    Port* gp = g.add_port(null, gridb, PortRole.parent, FlowDomain.bidirectional, null, 0, MeterSign.normal, "parent", "main");
+    gp.meter_data.write_value(MeterField.power, 0, 1000);
+    gp.meter_data.mark(MeterField.power, 0, Provenance.measured);
+    Port* hp = g.add_port(null, house, PortRole.child, FlowDomain.bidirectional, null, 0, MeterSign.normal, "child", "main");
+    hp.meter_data.write_value(MeterField.power, 0, -1000);
+    hp.meter_data.mark(MeterField.power, 0, Provenance.measured);
+    Link* ml = g.add_link(null, gridb, house, gp, hp, 63, true, "main");
+    PortGroup* main_g = g.add_group("main", PortGroupKind.switchgear, null, ml);
+    g.add_to_group(main_g, gp);
+    g.add_to_group(main_g, hp);
+
+    Port* pv = g.add_port(null, house, PortRole.pv, FlowDomain.supply, null, 0, MeterSign.normal, "pv");
+    pv.meter_data.write_value(MeterField.power, 0, -500);
+    pv.meter_data.mark(MeterField.power, 0, Provenance.measured);
+    g.add_to_group(g.add_group("pv", PortGroupKind.appliance), pv);
+
+    Port* load = g.add_port(null, house, PortRole.connection, FlowDomain.consume, null, 0, MeterSign.normal, "heater");
+    load.meter_data.write_value(MeterField.power, 0, 1500);
+    load.meter_data.mark(MeterField.power, 0, Provenance.measured);
+    g.add_to_group(g.add_group("heater", PortGroupKind.appliance), load);
+
+    g.rebuild_boundaries();
+    g.reduce_boundary_flows();
+    g.attribution.compute(g);
+
+    size_t gi = g.bus_list[].findFirst(gridb);
+    size_t hi = g.bus_list[].findFirst(house);
+    assert(g.attribution.buses[gi].local_fraction == 0);
+    assert(absf(g.attribution.buses[hi].local_source_power - 500) <= 0.01f);
+    assert(absf(g.attribution.buses[hi].grid_source_power - 1000) <= 0.01f);
+    assert(absf(g.attribution.buses[hi].local_fraction - 1.0f / 3) <= 0.001f);
+
+    size_t li = g.ports[].findFirst(load);
+    assert(absf(g.attribution.terminals[li].consumed_power - 1500) <= 0.01f);
+    assert(absf(g.attribution.terminals[li].local_power - 500) <= 0.01f);
+    assert(absf(g.attribution.terminals[li].grid_power - 1000) <= 0.01f);
+
+    g.clear();
 }
