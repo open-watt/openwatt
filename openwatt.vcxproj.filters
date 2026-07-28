@@ -1592,6 +1592,9 @@
     <None Include="src\protocol\esphome\api.proto">
       <Filter>src\protocol\esphome</Filter>
     </None>
+    <None Include="src\protocol\tesla\commands.proto">
+      <Filter>src\protocol\tesla</Filter>
+    </None>
     <None Include="third_party\urt\src\urt\driver\bl808\start.S">
       <Filter>third_party\urt\driver\bl808</Filter>
     </None>
