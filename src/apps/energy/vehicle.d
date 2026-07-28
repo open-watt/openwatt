@@ -182,6 +182,45 @@ nothrow @nogc:
 }
 
 
+struct CapacityEstimate
+{
+    float sum_weighted;
+    float weight_total;
+    uint sample_count;
+
+    float mean_kwh() const pure nothrow @nogc
+        => weight_total > 0 ? sum_weighted / weight_total : float.nan;
+}
+
+__gshared Map!(String, CapacityEstimate) g_capacity_estimates;
+
+void add_capacity_sample(const(char)[] vin, float estimate_kwh, float weight)
+{
+    if (!(estimate_kwh >= 40.0f && estimate_kwh <= 150.0f) || !(weight > 0))
+        return;
+
+    CapacityEstimate* estimate = vin in g_capacity_estimates;
+    if (!estimate)
+    {
+        String key = vin.makeString(defaultAllocator());
+        estimate = &g_capacity_estimates.replace(key.move, CapacityEstimate.init);
+    }
+    estimate.sum_weighted += estimate_kwh * weight;
+    estimate.weight_total += weight;
+    ++estimate.sample_count;
+
+    if (g_vehicles_device !is null)
+    {
+        if (Component vehicle = g_vehicles_device.find_component(vin))
+        {
+            float confidence = estimate.sample_count >= 10 ? 1.0f : estimate.sample_count / 10.0f;
+            vehicle.set_element("battery.full_capacity", estimate.mean_kwh);
+            vehicle.set_element("battery.capacity_confidence", confidence);
+        }
+    }
+}
+
+
 unittest
 {
     auto m3 = decode_vin("5YJ3E1EA5KF000001");
@@ -262,6 +301,10 @@ Component vehicle_for(const(char)[] vin)
     Component control = g_app.allocator.allocT!Component(StringLit!"control");
     control.template_ = StringLit!"PowerControl";
     vehicle.add_component(control);
+
+    Component hvac = g_app.allocator.allocT!Component(StringLit!"hvac");
+    hvac.template_ = StringLit!"HVAC";
+    vehicle.add_component(hvac);
 
     vehicle.set_element("info.type", StringLit!"vehicle");
     vehicle.set_element("info.serial_number", vin.makeString(defaultAllocator()));

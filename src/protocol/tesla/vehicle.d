@@ -1,7 +1,7 @@
 module protocol.tesla.vehicle;
 
 import urt.array;
-import urt.crypto.aes : aes_gcm_encrypt;
+import urt.crypto.aes : aes_gcm_decrypt, aes_gcm_encrypt;
 import urt.crypto.random : crypto_random_bytes;
 import urt.digest.hmac;
 import urt.digest.sha;
@@ -31,10 +31,14 @@ import router.iface;
 import router.iface.mac;
 import router.iface.packet;
 
+import tools.protobuf;
+
 //version = DebugTeslaScanner;
 version = DebugTeslaSession;
 
 nothrow @nogc:
+
+mixin LoadProtobuf!"protocol/tesla/commands.proto";
 
 
 // Tesla's custom GATT service for vehicle BLE control.
@@ -86,7 +90,7 @@ Array!ubyte build_add_key_request(const(ubyte)[] pubkey_xy)
     enum ubyte ROLE_OWNER = 2;
     // KEY_FORM_FACTOR_CLOUD_KEY = 9 (vcsec.KeyFormFactor)
     enum ubyte FORM_FACTOR_CLOUD_KEY = 9;
-    // SIGNATURE_TYPE_PRESENT_KEY = 2 (vcsec.SignatureType — bootstrap, no crypto)
+    // SIGNATURE_TYPE_PRESENT_KEY = 2 (vcsec.SignatureType - bootstrap, no crypto)
     enum ubyte SIG_TYPE_PRESENT_KEY = 2;
 
     // The vehicle expects SEC1 uncompressed encoding: 0x04 || X || Y, 65 bytes total.
@@ -109,7 +113,7 @@ Array!ubyte build_add_key_request(const(ubyte)[] pubkey_xy)
     enum size_t WHITELIST_OP_LEN = 1 + 1 + PERM_CHANGE_LEN + 1 + 1 + KEY_METADATA_LEN;
 
     // UnsignedMessage { WhitelistOperation (16, message) }
-    // tag for field 16 wire 2 = (16 << 3) | 2 = 130 → varint encoding = 0x82 0x01 (2 bytes)
+    // tag for field 16 wire 2 = (16 << 3) | 2 = 130, varint encoding = 0x82 0x01 (2 bytes)
     enum size_t UNSIGNED_MSG_LEN = 2 + 1 + WHITELIST_OP_LEN;  // tag(2B) + len(1B) + body
 
     // SignedMessage { protobufMessageAsBytes (2, bytes), signatureType (3, varint) }
@@ -205,6 +209,42 @@ enum TeslaDomain : ubyte
     infotainment     = 3,
 }
 
+enum VehicleCommandKind : ubyte
+{
+    unknown,
+    get_charge_state,
+    get_climate_state,
+    charging_start,
+    charging_stop,
+    set_charging_amps,
+    climate_power,
+    climate_temperature,
+    schedule_charging,
+}
+
+const(char)[] command_name(VehicleCommandKind kind) pure
+{
+    final switch (kind)
+    {
+        case VehicleCommandKind.unknown:             return "command";
+        case VehicleCommandKind.get_charge_state:    return "get-charge";
+        case VehicleCommandKind.get_climate_state:   return "get-climate";
+        case VehicleCommandKind.charging_start:      return "charge-start";
+        case VehicleCommandKind.charging_stop:       return "charge-stop";
+        case VehicleCommandKind.set_charging_amps:   return "set-amps";
+        case VehicleCommandKind.climate_power:       return "climate";
+        case VehicleCommandKind.climate_temperature: return "set-temperature";
+        case VehicleCommandKind.schedule_charging:   return "schedule-charging";
+    }
+}
+
+enum RoutableFlag : uint
+{
+    encrypt_response = 1,
+}
+
+enum uint encrypt_response_mask = 1u << cast(uint)RoutableFlag.encrypt_response;
+
 // Append a TLV record (tag | len | value) to buf. Caller must add records in
 // ascending tag order; metadata is serialised this way to make HMAC inputs
 // canonical. The terminator 0xFF byte is appended separately by the caller.
@@ -229,12 +269,12 @@ Array!ubyte build_session_info_request(TeslaDomain domain, const(ubyte)[] pubkey
     assert(routing_address.length == 16);
     assert(uuid.length == 16);
 
-    // Destination { domain (1, varint enum): vehicle_security }  → 2 bytes
-    // Destination { routing_address (2, bytes): 16 } → 1 + 1 + 16 = 18 bytes
+    // Destination { domain (1, varint enum): vehicle_security } is 2 bytes.
+    // Destination { routing_address (2, bytes): 16 } is 1 + 1 + 16 = 18 bytes.
     enum size_t TO_DEST_LEN = 1 + 1;
     enum size_t FROM_DEST_LEN = 1 + 1 + 16;
 
-    // SessionInfoRequest { public_key (1, bytes): 65 } → 1 + 1 + 65 = 67 bytes
+    // SessionInfoRequest { public_key (1, bytes): 65 } is 1 + 1 + 65 = 67 bytes.
     enum size_t SIR_LEN = 1 + 1 + 65;
 
     // RoutableMessage fields we write (in field order):
@@ -274,7 +314,7 @@ Array!ubyte build_session_info_request(TeslaDomain domain, const(ubyte)[] pubkey
     out_[off .. off + 65] = pubkey[];
     off += 65;
 
-    // uuid: 16 bytes (field 51 wire 2 → 2-byte tag varint 0x9A 0x03)
+    // uuid: 16 bytes (field 51 wire 2 uses 2-byte tag varint 0x9A 0x03)
     out_[off++] = 0x9A;
     out_[off++] = 0x03;
     out_[off++] = 16;
@@ -333,6 +373,45 @@ Array!ubyte build_signed_command_metadata(TeslaDomain domain, const(char)[] vin,
     return meta;
 }
 
+Array!ubyte build_response_metadata(TeslaDomain domain, const(char)[] vin,
+                                    uint counter, uint flags,
+                                    const(ubyte)[] request_tag, uint fault)
+{
+    assert(request_tag.length == 16);
+
+    Array!ubyte meta;
+    ubyte[1] sig_type = [cast(ubyte)SigType.aes_gcm_response];
+    append_tlv(meta, SigTag.signature_type, sig_type[]);
+    ubyte[1] dom = [cast(ubyte)domain];
+    append_tlv(meta, SigTag.domain, dom[]);
+    append_tlv(meta, SigTag.personalization, cast(const(ubyte)[])vin);
+
+    ubyte[4] ctr_be = [
+        cast(ubyte)(counter >> 24), cast(ubyte)(counter >> 16),
+        cast(ubyte)(counter >> 8), cast(ubyte)counter
+    ];
+    append_tlv(meta, SigTag.counter, ctr_be[]);
+
+    ubyte[4] flg_be = [
+        cast(ubyte)(flags >> 24), cast(ubyte)(flags >> 16),
+        cast(ubyte)(flags >> 8), cast(ubyte)flags
+    ];
+    append_tlv(meta, SigTag.flags, flg_be[]);
+
+    ubyte[17] request_hash = void;
+    request_hash[0] = cast(ubyte)SigType.aes_gcm_personalized;
+    request_hash[1 .. $] = request_tag[];
+    append_tlv(meta, SigTag.request_hash, request_hash[]);
+
+    ubyte[4] fault_be = [
+        cast(ubyte)(fault >> 24), cast(ubyte)(fault >> 16),
+        cast(ubyte)(fault >> 8), cast(ubyte)fault
+    ];
+    append_tlv(meta, SigTag.fault, fault_be[]);
+    meta ~= cast(ubyte)SigTag.end;
+    return meta;
+}
+
 
 // Build an AES-GCM-PERSONALIZED signed RoutableMessage envelope around a
 // pre-encrypted ciphertext + tag. Caller has already computed the AAD via
@@ -357,7 +436,7 @@ Array!ubyte build_signed_routable_message(TeslaDomain domain,
     assert(routing_address.length == 16);
     assert(uuid.length == 16);
 
-    // Destination { domain } — 2 bytes, Destination { routing_address } — 18 bytes
+    // Destination { domain } is 2 bytes; Destination { routing_address } is 18 bytes.
     enum size_t TO_DEST_LEN = 2;
     enum size_t FROM_DEST_LEN = 1 + 1 + 16;
 
@@ -481,73 +560,86 @@ Array!ubyte build_signed_routable_message(TeslaDomain domain,
 
 // ---- CarServer.Action plaintext encoders (sent through INFOTAINMENT) ----
 
+private Array!ubyte encode_action(ref const TeslaAction action)
+{
+    Array!ubyte buf;
+    buf.resize(buffer_len(action));
+    size_t written = proto_serialise(buf[], action);
+    assert(written == buf.length);
+    return buf;
+}
+
 // CarServer.Action{ VehicleAction{ getVehicleData{ getChargeState{} } } }
 Array!ubyte build_action_get_charge_state()
 {
-    // GetChargeState {} = 0 bytes
-    // GetVehicleData { getChargeState (2, message): 0 } = 2 bytes (tag 0x12 + len 0)
-    // VehicleAction { getVehicleData (1, message): 2 } = 4 bytes (tag 0x0A + len 2 + body)
-    // Action { vehicleAction (2, message): 4 } = 6 bytes (tag 0x12 + len 4 + body)
-    static immutable ubyte[6] action = [0x12, 0x04, 0x0A, 0x02, 0x12, 0x00];
-    Array!ubyte buf;
-    buf.resize(6);
-    buf[][] = action[];
-    return buf;
+    TeslaAction action;
+    action.vehicle_action.ensure()
+          .get_vehicle_data.ensure()
+          .get_charge_state.ensure();
+    return encode_action(action);
+}
+
+// CarServer.Action{ VehicleAction{ getVehicleData{ getClimateState{} } } }
+Array!ubyte build_action_get_climate_state()
+{
+    TeslaAction action;
+    action.vehicle_action.ensure()
+          .get_vehicle_data.ensure()
+          .get_climate_state.ensure();
+    return encode_action(action);
 }
 
 // CarServer.Action{ VehicleAction{ chargingStartStopAction{ start | stop } } }
 Array!ubyte build_action_charging_start_stop(bool start)
 {
-    // ChargingStartStopAction { start (2) | stop (5) : Void {} } = 2 bytes (tag + len 0)
-    //   tag for field 2 wire 2 = 0x12; tag for field 5 wire 2 = 0x2A
-    // VehicleAction { chargingStartStopAction (6, message): 2 } = 4 bytes (tag 0x32 + len 2 + body)
-    //   tag for field 6 wire 2 = 0x32
-    // Action { vehicleAction (2, message): 4 } = 6 bytes (tag 0x12 + len 4 + body)
-    ubyte[6] action;
-    action[0] = 0x12;
-    action[1] = 0x04;
-    action[2] = 0x32;
-    action[3] = 0x02;
-    action[4] = start ? 0x12 : 0x2A;
-    action[5] = 0x00;
-    Array!ubyte buf;
-    buf.resize(6);
-    buf[][] = action[];
-    return buf;
+    TeslaAction action;
+    ref TeslaChargingStartStopAction command =
+        action.vehicle_action.ensure().charging_start_stop.ensure();
+    if (start)
+        command.start.ensure();
+    else
+        command.stop.ensure();
+    return encode_action(action);
 }
 
 // CarServer.Action{ VehicleAction{ setChargingAmpsAction{ charging_amps: N } } }
 Array!ubyte build_action_set_charging_amps(int amps)
 {
-    import tools.protobuf : put_varint, varint_len;
+    TeslaAction action;
+    action.vehicle_action.ensure()
+          .set_charging_amps.ensure()
+          .charging_amps.set(amps);
+    return encode_action(action);
+}
 
-    // SetChargingAmpsAction { charging_amps (1, varint int32): N }
-    //   amps encoded as varint (negative values would be 10 bytes; clamp non-negative range)
-    size_t amps_varint = varint_len(cast(ulong)amps);
-    size_t scaa_len = 1 + amps_varint;  // tag 0x08 + varint
+Array!ubyte build_action_climate_power(bool enabled)
+{
+    TeslaAction action;
+    action.vehicle_action.ensure()
+          .hvac_auto.ensure()
+          .power_on.set(enabled);
+    return encode_action(action);
+}
 
-    // VehicleAction { setChargingAmpsAction (43, message): scaa_len }
-    //   tag for field 43 wire 2 = (43 << 3) | 2 = 346 → varint 0xDA 0x02
-    size_t va_len = 2 + 1 + scaa_len;  // tag(2B) + len + body
+Array!ubyte build_action_climate_temperature(float driver_celsius, float passenger_celsius)
+{
+    TeslaAction action;
+    ref TeslaHvacTemperatureAdjustmentAction command =
+        action.vehicle_action.ensure().hvac_temperature.ensure();
+    command.level.ensure().maximum.ensure();
+    command.driver_temp_celsius.set(driver_celsius);
+    command.passenger_temp_celsius.set(passenger_celsius);
+    return encode_action(action);
+}
 
-    // Action { vehicleAction (2, message): va_len }
-    size_t action_len = 1 + 1 + va_len;  // tag 0x12 + len + body
-
-    Array!ubyte buf;
-    buf.resize(action_len);
-    ubyte[] out_ = buf[];
-    size_t off = 0;
-
-    out_[off++] = 0x12;
-    out_[off++] = cast(ubyte)va_len;
-    out_[off++] = 0xDA;
-    out_[off++] = 0x02;
-    out_[off++] = cast(ubyte)scaa_len;
-    out_[off++] = 0x08;
-    off += put_varint(out_[off .. $], cast(ulong)amps);
-
-    assert(off == action_len);
-    return buf;
+Array!ubyte build_action_schedule_charging(bool enabled, int minutes_after_midnight)
+{
+    TeslaAction action;
+    ref TeslaScheduledChargingAction command =
+        action.vehicle_action.ensure().scheduled_charging.ensure();
+    command.enabled.set(enabled);
+    command.charging_time.set(minutes_after_midnight);
+    return encode_action(action);
 }
 
 
@@ -580,7 +672,26 @@ struct ChargeState
     int minutes_to_full_charge;
 }
 
-// Decode a CarServer.Response → VehicleData → ChargeState into our flat struct.
+struct ClimateState
+{
+    bool valid;
+    bool has_inside_temperature;
+    float inside_temperature;
+    bool has_outside_temperature;
+    float outside_temperature;
+    bool has_driver_temperature;
+    float driver_temperature;
+    bool has_passenger_temperature;
+    float passenger_temperature;
+    bool has_fan_speed;
+    int fan_speed;
+    bool has_climate_on;
+    bool climate_on;
+    bool has_preconditioning;
+    bool preconditioning;
+}
+
+// Decode a CarServer.Response through VehicleData into our flat ChargeState.
 bool decode_carserver_charge_state(const(ubyte)[] response_bytes, ref ChargeState s)
 {
     import tools.protobuf : get_varint;
@@ -607,7 +718,7 @@ bool decode_carserver_charge_state(const(ubyte)[] response_bytes, ref ChargeStat
 
         switch (field)
         {
-            case 1:  // charging_state (message — ChargingState oneof)
+            case 1:  // charging_state (ChargingState oneof message)
                 if (wire != 2) goto Lskip;
                 ulong sl;
                 n = get_varint(cs_bytes[off .. $], sl);
@@ -644,6 +755,56 @@ bool decode_carserver_charge_state(const(ubyte)[] response_bytes, ref ChargeStat
                 break;
         }
         if (off > cs_bytes.length) return false;
+    }
+    return true;
+}
+
+bool decode_carserver_climate_state(const(ubyte)[] response_bytes, ref ClimateState s)
+{
+    import tools.protobuf : get_varint;
+
+    const(ubyte)[] vehicle_data;
+    if (!find_subfield(response_bytes, 2, vehicle_data))
+        return false;
+    const(ubyte)[] climate_bytes;
+    if (!find_subfield(vehicle_data, 4, climate_bytes))
+        return false;
+    s.valid = true;
+
+    size_t off;
+    while (off < climate_bytes.length)
+    {
+        ulong tag;
+        size_t n = get_varint(climate_bytes[off .. $], tag);
+        if (n == 0)
+            return false;
+        off += n;
+        uint field = cast(uint)(tag >> 3);
+        uint wire = cast(uint)(tag & 7);
+
+        switch (field)
+        {
+            case 101: s.has_inside_temperature =
+                read_fixed32f_field(climate_bytes, off, wire, s.inside_temperature); break;
+            case 102: s.has_outside_temperature =
+                read_fixed32f_field(climate_bytes, off, wire, s.outside_temperature); break;
+            case 103: s.has_driver_temperature =
+                read_fixed32f_field(climate_bytes, off, wire, s.driver_temperature); break;
+            case 104: s.has_passenger_temperature =
+                read_fixed32f_field(climate_bytes, off, wire, s.passenger_temperature); break;
+            case 109: s.has_fan_speed =
+                read_varint_field(climate_bytes, off, wire, s.fan_speed); break;
+            case 110: s.has_climate_on =
+                read_bool_field(climate_bytes, off, wire, s.climate_on); break;
+            case 128: s.has_preconditioning =
+                read_bool_field(climate_bytes, off, wire, s.preconditioning); break;
+            default:
+                if (!skip_field(climate_bytes, off, wire))
+                    return false;
+                break;
+        }
+        if (off > climate_bytes.length)
+            return false;
     }
     return true;
 }
@@ -687,6 +848,15 @@ private bool read_varint_field(const(ubyte)[] buf, ref size_t off, uint wire, re
     return true;
 }
 
+private bool read_bool_field(const(ubyte)[] buf, ref size_t off, uint wire, ref bool dst)
+{
+    int value;
+    if (!read_varint_field(buf, off, wire, value))
+        return false;
+    dst = value != 0;
+    return true;
+}
+
 private bool read_fixed32f_field(const(ubyte)[] buf, ref size_t off, uint wire, ref float dst)
 {
     if (wire != 5 || off + 4 > buf.length) return false;
@@ -698,24 +868,32 @@ private bool read_fixed32f_field(const(ubyte)[] buf, ref size_t off, uint wire, 
 
 
 // Outputs from decoding an inbound RoutableMessage that we care about.
-// All slices point into the input buffer — copy out before the buffer goes away.
+// All slices point into the input buffer; copy them before the buffer goes away.
 struct RoutableResponse
 {
     const(ubyte)[] session_info;       // payload oneof field 15, if present
     const(ubyte)[] protobuf_message;   // payload oneof field 10, if present
     const(ubyte)[] session_info_tag;   // signature_data.session_info_tag.tag, if present
     const(ubyte)[] request_uuid;       // field 50
+    const(ubyte)[] response_nonce;     // signature_data.AES_GCM_Response_data.nonce
+    const(ubyte)[] response_tag;       // signature_data.AES_GCM_Response_data.tag
+    TeslaDomain from_domain;
+    uint response_counter;
+    uint flags;
+    bool has_from_domain;
+    bool has_response_signature;
     bool has_status;
-    uint signed_message_fault;          // MessageStatus.signed_message_fault (field 2 varint)
+    uint signed_message_fault;         // MessageStatus.signed_message_fault (field 2 varint)
 }
 
 // Decode a RoutableMessage looking for the fields trust verification needs.
 // Returns true on a syntactically valid parse (even if our fields of interest
-// are absent — the caller decides what's missing).
+// are absent; the caller decides what's missing).
 bool decode_routable_response(const(ubyte)[] buf, ref RoutableResponse r)
 {
     import tools.protobuf : get_varint;
 
+    r = RoutableResponse.init;
     size_t off = 0;
     while (off < buf.length)
     {
@@ -730,6 +908,17 @@ bool decode_routable_response(const(ubyte)[] buf, ref RoutableResponse r)
         // For each known field, decode; for everything else, skip.
         switch (field)
         {
+            case 7:  // from_destination
+                if (wire != 2) return false;
+                ulong destination_len;
+                n = get_varint(buf[off .. $], destination_len);
+                if (n == 0 || off + n + destination_len > buf.length) return false;
+                off += n;
+                if (!decode_destination(buf[off .. off + cast(size_t)destination_len], r))
+                    return false;
+                off += cast(size_t)destination_len;
+                break;
+
             case 10:  // payload.protobuf_message_as_bytes
             case 15:  // payload.session_info
             case 50:  // request_uuid
@@ -769,11 +958,48 @@ bool decode_routable_response(const(ubyte)[] buf, ref RoutableResponse r)
                 off += cast(size_t)dlen;
                 break;
 
+            case 52:  // flags
+                if (wire != 0) return false;
+                ulong flags;
+                n = get_varint(buf[off .. $], flags);
+                if (n == 0 || flags > uint.max) return false;
+                r.flags = cast(uint)flags;
+                off += n;
+                break;
+
             default:
                 if (!skip_field(buf, off, wire))
                     return false;
                 break;
         }
+    }
+    return true;
+}
+
+private bool decode_destination(const(ubyte)[] buf, ref RoutableResponse r)
+{
+    import tools.protobuf : get_varint;
+
+    size_t off;
+    while (off < buf.length)
+    {
+        ulong tag;
+        size_t n = get_varint(buf[off .. $], tag);
+        if (n == 0) return false;
+        off += n;
+        uint field = cast(uint)(tag >> 3);
+        uint wire = cast(uint)(tag & 7);
+        if (field == 1 && wire == 0)
+        {
+            ulong domain;
+            n = get_varint(buf[off .. $], domain);
+            if (n == 0 || domain > ubyte.max) return false;
+            r.from_domain = cast(TeslaDomain)domain;
+            r.has_from_domain = true;
+            off += n;
+        }
+        else if (!skip_field(buf, off, wire))
+            return false;
     }
     return true;
 }
@@ -817,42 +1043,163 @@ private bool decode_signature_data(const(ubyte)[] buf, ref RoutableResponse r)
         off += n;
         uint field = cast(uint)(tag >> 3);
         uint wire = cast(uint)(tag & 7);
-        // Only session_info_tag (field 6, HMAC_Signature_Data) matters here.
-        if (field == 6 && wire == 2)
+        if ((field == 6 || field == 9) && wire == 2)
         {
             ulong slen;
             n = get_varint(buf[off .. $], slen);
             if (n == 0 || off + n + slen > buf.length) return false;
             off += n;
-            // HMAC_Signature_Data { tag (1, bytes) }
             const(ubyte)[] inner = buf[off .. off + cast(size_t)slen];
             off += cast(size_t)slen;
-            size_t io = 0;
-            while (io < inner.length)
+            if (field == 6)
             {
-                ulong itag;
-                size_t m = get_varint(inner[io .. $], itag);
-                if (m == 0) return false;
-                io += m;
-                uint ifield = cast(uint)(itag >> 3);
-                uint iwire = cast(uint)(itag & 7);
-                if (ifield == 1 && iwire == 2)
-                {
-                    ulong tlen;
-                    m = get_varint(inner[io .. $], tlen);
-                    if (m == 0 || io + m + tlen > inner.length) return false;
-                    io += m;
-                    r.session_info_tag = inner[io .. io + cast(size_t)tlen];
-                    io += cast(size_t)tlen;
-                }
-                else if (!skip_field(inner, io, iwire))
+                if (!decode_hmac_signature(inner, r))
                     return false;
             }
+            else if (!decode_response_signature(inner, r))
+                return false;
         }
         else if (!skip_field(buf, off, wire))
             return false;
     }
     return true;
+}
+
+private bool decode_hmac_signature(const(ubyte)[] buf, ref RoutableResponse r)
+{
+    import tools.protobuf : get_varint;
+
+    size_t off;
+    while (off < buf.length)
+    {
+        ulong tag;
+        size_t n = get_varint(buf[off .. $], tag);
+        if (n == 0) return false;
+        off += n;
+        uint field = cast(uint)(tag >> 3);
+        uint wire = cast(uint)(tag & 7);
+        if (field == 1 && wire == 2)
+        {
+            ulong len;
+            n = get_varint(buf[off .. $], len);
+            if (n == 0 || off + n + len > buf.length) return false;
+            off += n;
+            r.session_info_tag = buf[off .. off + cast(size_t)len];
+            off += cast(size_t)len;
+        }
+        else if (!skip_field(buf, off, wire))
+            return false;
+    }
+    return true;
+}
+
+private bool decode_response_signature(const(ubyte)[] buf, ref RoutableResponse r)
+{
+    import tools.protobuf : get_varint;
+
+    size_t off;
+    while (off < buf.length)
+    {
+        ulong tag;
+        size_t n = get_varint(buf[off .. $], tag);
+        if (n == 0) return false;
+        off += n;
+        uint field = cast(uint)(tag >> 3);
+        uint wire = cast(uint)(tag & 7);
+
+        if ((field == 1 || field == 3) && wire == 2)
+        {
+            ulong len;
+            n = get_varint(buf[off .. $], len);
+            if (n == 0 || off + n + len > buf.length) return false;
+            off += n;
+            if (field == 1)
+                r.response_nonce = buf[off .. off + cast(size_t)len];
+            else
+                r.response_tag = buf[off .. off + cast(size_t)len];
+            off += cast(size_t)len;
+        }
+        else if (field == 2 && wire == 0)
+        {
+            ulong counter;
+            n = get_varint(buf[off .. $], counter);
+            if (n == 0 || counter > uint.max) return false;
+            r.response_counter = cast(uint)counter;
+            off += n;
+        }
+        else if (!skip_field(buf, off, wire))
+            return false;
+    }
+    r.has_response_signature = true;
+    return true;
+}
+
+bool decrypt_routable_response(ref const RoutableResponse response,
+                               const(ubyte)[] key, const(char)[] vin,
+                               const(ubyte)[] request_tag,
+                               ref Array!ubyte plaintext)
+{
+    if (!response.has_response_signature || !response.has_from_domain
+        || response.response_nonce.length != 12 || response.response_tag.length != 16
+        || request_tag.length != 16)
+        return false;
+
+    Array!ubyte metadata = build_response_metadata(response.from_domain, vin,
+                                                   response.response_counter, response.flags,
+                                                   request_tag, response.signed_message_fault);
+    SHA256Context sha;
+    sha_init(sha);
+    sha_update(sha, metadata[]);
+    ubyte[32] aad = sha_finalise(sha);
+
+    plaintext.resize(response.protobuf_message.length);
+    Result result = aes_gcm_decrypt(key, response.response_nonce, aad[],
+                                    response.protobuf_message, response.response_tag,
+                                    plaintext[]);
+    if (result.failed)
+    {
+        plaintext.clear();
+        return false;
+    }
+    return true;
+}
+
+struct ResponseReplayWindow
+{
+nothrow @nogc:
+
+    bool accept(uint counter)
+    {
+        if (!_initialised)
+        {
+            _highest = counter;
+            _seen = 1;
+            _initialised = true;
+            return true;
+        }
+
+        if (counter > _highest)
+        {
+            uint shift = counter - _highest;
+            _seen = shift >= 64 ? 1 : (_seen << shift) | 1;
+            _highest = counter;
+            return true;
+        }
+
+        uint age = _highest - counter;
+        if (age >= 64)
+            return false;
+        ulong bit = ulong(1) << age;
+        if (_seen & bit)
+            return false;
+        _seen |= bit;
+        return true;
+    }
+
+private:
+    uint _highest;
+    ulong _seen;
+    bool _initialised;
 }
 
 private bool skip_field(const(ubyte)[] buf, ref size_t off, uint wire)
@@ -972,7 +1319,7 @@ bool decode_session_info(const(ubyte)[] buf, ref SessionInfo info)
 
 
 // ---------------------------------------------------------------------------
-// TeslaVehicleScanner — the "server-like" protocol object.
+// TeslaVehicleScanner - the "server-like" protocol object.
 //
 // One per install (typically). User-configured (Collection-managed). Owns the
 // shared identity Secret and the BLE interface used to scan for vehicles.
@@ -1033,6 +1380,8 @@ nothrow @nogc:
     }
     void vins(const(char)[][] value...)
     {
+        import apps.energy.vehicle : vehicle_for;
+
         _vins.clear();
         foreach (v; value)
         {
@@ -1042,9 +1391,10 @@ nothrow @nogc:
             ubyte[8] hash;
             tesla_vin_hash(t[], hash);
 
-            _vins ~= VinEntry(String(t.move), hash);
+            Component component = vehicle_for(t[]);
             version (DebugTeslaScanner)
                 log.trace("registered VIN '", t[], "' -> hash [ ", cast(void[])hash[], " ]");
+            _vins ~= VinEntry(String(t.move), hash, component);
         }
     }
 
@@ -1066,7 +1416,7 @@ protected:
         if (!_subscribed)
         {
             PacketFilter filter;
-            filter.type = PacketType.ble_ll;
+            filter.type = PacketType.ble;
             _iface.subscribe(&incoming_packet, filter);
             _iface.subscribe(&iface_state_change);
             _subscribed = true;
@@ -1096,7 +1446,7 @@ protected:
 
     override void update()
     {
-        // TODO: periodic housekeeping — out-of-range timeouts, retry backoff.
+        // TODO: periodic housekeeping for out-of-range timeouts and retry backoff.
     }
 
 package:
@@ -1132,52 +1482,47 @@ private:
 
     void incoming_packet(ref const Packet p, BaseInterface, PacketDirection, void*)
     {
-        if (p.type != PacketType.ble_ll)
+        if (p.type != PacketType.ble)
             return;
-        ref ll = p.hdr!BLELLFrame;
-        switch (ll.pdu_type)
+        ref f = p.hdr!BLEFrame;
+        if (f.kind != BLEFrameKind.advert)
+            return;
+        switch (f.adv_type)
         {
-            case BLELLType.adv_ind:
-            case BLELLType.adv_nonconn_ind:
-            case BLELLType.adv_scan_ind:
-            case BLELLType.adv_direct_ind:
-            case BLELLType.scan_rsp:
+            case BLEAdvPDU.adv_ind:
+            case BLEAdvPDU.adv_nonconn_ind:
+            case BLEAdvPDU.adv_scan_ind:
+            case BLEAdvPDU.adv_direct_ind:
+            case BLEAdvPDU.scan_rsp:
                 break;
             default:
                 return;
         }
 
         version (DebugTeslaScanner)
-            log.trace("BLE adv pdu ", ll.pdu_type, " from ", ll.src);
+            log.trace("BLE adv pdu ", f.adv_type, " from ", f.src);
 
         if (_vins.empty)
         {
             version (DebugTeslaScanner)
-                log.trace("adv from ", ll.src, " ignored: no VINs registered");
+                log.trace("adv from ", f.src, " ignored: no VINs registered");
             return;
         }
 
-        // BLEModule already parsed the AD payload and updated devices map by
-        // the time this packet fans out, reuse the parsed local name rather
-        // than re-walking AD records here.
-        BLEAdvEntry** ppe = ll.src in get_module!BLEModule.devices;
-        if (!ppe || !*ppe || (*ppe).name.length != TESLA_LOCAL_NAME_LEN)
+        const(char)[] local_name = advert_local_name(cast(const(ubyte)[])p.data);
+        if (local_name.length != TESLA_LOCAL_NAME_LEN)
         {
             version (DebugTeslaScanner)
-            {
-                if (!ppe || !*ppe)
-                    log.trace("adv from ", ll.src, ": no parsed BLE device entry yet");
-                else
-                    log.trace("adv from ", ll.src, " local name '", (*ppe).name[], "' len ", (*ppe).name.length, " != Tesla name len ", TESLA_LOCAL_NAME_LEN);
-            }
+                log.trace("adv from ", f.src, " local name '", local_name, "' len ", local_name.length,
+                          " != Tesla name len ", TESLA_LOCAL_NAME_LEN);
             return;
         }
 
         ubyte[8] hash;
-        if (!parse_tesla_local_name((*ppe).name[], hash))
+        if (!parse_tesla_local_name(local_name, hash))
         {
             version (DebugTeslaScanner)
-                log.trace("adv from ", ll.src, " name '", (*ppe).name[], "' is not a Tesla 'S<hex>C' name");
+                log.trace("adv from ", f.src, " name '", local_name, "' is not a Tesla 'S<hex>C' name");
             return;
         }
 
@@ -1190,13 +1535,13 @@ private:
             if (Collection!TeslaVehicleSession().get(e.vin[]) !is null)
                 return;
 
-            log.info("Tesla vehicle '", e.vin[], "' seen at ", ll.src, ", spawning session");
-            spawn_session(e.vin[], ll.src);
+            log.info("Tesla vehicle '", e.vin[], "' seen at ", f.src, ", spawning session");
+            spawn_session(e.vin[], f.src);
             return;
         }
 
         version (DebugTeslaScanner)
-            log.trace("adv from ", ll.src, " is a Tesla, hash [ ", cast(void[])hash[], " ] matches no registered VIN");
+            log.trace("adv from ", f.src, " is a Tesla, hash [ ", cast(void[])hash[], " ] matches no registered VIN");
     }
 
     void iface_state_change(ActiveObject, StateSignal signal)
@@ -1204,16 +1549,33 @@ private:
         if (signal == StateSignal.offline)
             restart();
     }
+
+    const(char)[] advert_local_name(const(ubyte)[] payload) pure
+    {
+        size_t offset;
+        while (offset + 1 < payload.length)
+        {
+            ubyte length = payload[offset++];
+            if (length == 0 || offset + length > payload.length)
+                break;
+
+            ubyte type = payload[offset];
+            if (type == ADType.complete_local_name || type == ADType.shortened_local_name)
+                return cast(const(char)[])payload[offset + 1 .. offset + length];
+            offset += length;
+        }
+        return null;
+    }
 }
 
 
 // ---------------------------------------------------------------------------
-// TeslaVehicleSession — the per-active-vehicle runtime.
+// TeslaVehicleSession - the per-active-vehicle runtime.
 //
 // Collection-managed but server-spawned (ObjectFlags.dynamic|temporary).
 // Created by TeslaVehicleScanner when a known VIN appears in BLE range, destroyed
 // when the vehicle leaves range or the corresponding Car appliance is
-// removed. NAME IS THE VIN — direct lookup via
+// removed. NAME IS THE VIN, allowing direct lookup via
 // Collection!TeslaVehicleSession().get_by_name(vin).
 //
 // Owns:
@@ -1251,7 +1613,7 @@ nothrow @nogc:
         super(collection_type_info!TeslaVehicleSession, id, flags);
     }
 
-    // VIN is the object name — no separate property needed.
+    // VIN is the object name; no separate property is needed.
     const(char)[] vin() const pure
         => name[];
 
@@ -1281,22 +1643,48 @@ nothrow @nogc:
     // Latest decoded ChargeState (populated by response to refresh_charge_state).
     // The `valid` field is true once any response has been parsed.
     ref const(ChargeState) charge_state() const pure => _charge_state;
+    ref const(ClimateState) climate_state() const pure => _climate_state;
 
     // Ask the vehicle for current ChargeState. The response arrives asynchronously
     // via on_notification and updates the cached charge_state(). Returns false
     // if the session isn't ready or the BLE write fails.
     bool refresh_charge_state()
-        => send_signed_action(TeslaDomain.infotainment, build_action_get_charge_state()[]);
+        => send_signed_action(TeslaDomain.infotainment, build_action_get_charge_state()[],
+                              VehicleCommandKind.get_charge_state);
+
+    bool refresh_climate_state()
+        => send_signed_action(TeslaDomain.infotainment, build_action_get_climate_state()[],
+                              VehicleCommandKind.get_climate_state);
 
     // Start / stop charging via INFOTAINMENT domain.
     bool charging_start()
-        => send_signed_action(TeslaDomain.infotainment, build_action_charging_start_stop(true)[]);
+        => send_signed_action(TeslaDomain.infotainment, build_action_charging_start_stop(true)[],
+                              VehicleCommandKind.charging_start);
     bool charging_stop()
-        => send_signed_action(TeslaDomain.infotainment, build_action_charging_start_stop(false)[]);
+        => send_signed_action(TeslaDomain.infotainment, build_action_charging_start_stop(false)[],
+                              VehicleCommandKind.charging_stop);
 
     // Set the AC charge current limit (per phase). Tesla supports integer amps.
     bool set_charging_amps(int amps)
-        => send_signed_action(TeslaDomain.infotainment, build_action_set_charging_amps(amps)[]);
+        => send_signed_action(TeslaDomain.infotainment, build_action_set_charging_amps(amps)[],
+                              VehicleCommandKind.set_charging_amps);
+
+    bool climate_power(bool enabled)
+        => send_signed_action(TeslaDomain.infotainment, build_action_climate_power(enabled)[],
+                              VehicleCommandKind.climate_power);
+
+    bool climate_temperature(float celsius)
+        => send_signed_action(TeslaDomain.infotainment,
+                              build_action_climate_temperature(celsius, celsius)[],
+                              VehicleCommandKind.climate_temperature);
+
+    bool schedule_charging(bool enabled, TimeOfDay start)
+    {
+        int minutes_after_midnight = cast(int)start.hour * 60 + start.minute;
+        return send_signed_action(TeslaDomain.infotainment,
+                                  build_action_schedule_charging(enabled, minutes_after_midnight)[],
+                                  VehicleCommandKind.schedule_charging);
+    }
 
 protected:
     override bool validate() const
@@ -1367,15 +1755,18 @@ protected:
         _routing_address[] = 0;
         _request_uuid[] = 0;
         _counter = 0;
+        _pending_commands[] = PendingCommand.init;
         _charge_state = ChargeState.init;
+        _climate_state = ClimateState.init;
         _cap = CapacitySamplerState.init;
         _last_poll_time = MonoTime.init;
+        _last_climate_poll_time = MonoTime.init;
 
         foreach (ref e; _scanner._vins[])
         {
             if (e.vin[] == name[] && e.component !is null)
             {
-                e.component.find_or_create_element("connected").value(false);
+                e.component.set_element("connected", false);
                 break;
             }
         }
@@ -1391,8 +1782,8 @@ protected:
 
     override void update()
     {
-        if (advance() != CompletionStatus.complete)
-            restart();
+        if (advance() == CompletionStatus.error)
+            reset();
     }
 
 private:
@@ -1400,7 +1791,7 @@ private:
     // and from update() once live (Running). Returns continue_ while still working
     // through a Starting sub-state, complete once the trusted session is live
     // (State.ready), and error when the link stalls or a step fails -- the caller
-    // then reconnects (startup() backs off and retries; update() calls restart()).
+    // then reconnects (startup() backs off and retries; update() calls reset()).
     CompletionStatus advance()
     {
         // Link-health watchdog: the vehicle broadcasts status ~1/sec, so sustained
@@ -1472,6 +1863,11 @@ private:
                     _last_poll_time = getTime();
                     refresh_charge_state();
                 }
+                else if (getTime() - _last_climate_poll_time >= climate_poll_interval)
+                {
+                    _last_climate_poll_time = getTime();
+                    refresh_climate_state();
+                }
                 return CompletionStatus.complete;
 
             case State.failed:
@@ -1484,6 +1880,7 @@ private:
     enum Duration link_timeout = 45.seconds;       // no-traffic window before forcing a reconnect (must exceed poll_idle)
     enum Duration poll_charging  = 2.seconds;   // active-charging cadence
     enum Duration poll_idle      = 30.seconds;  // connected but not charging
+    enum Duration climate_poll_interval = 60.seconds;
 
     TeslaVehicleScanner _scanner;       // back-ref to spawning server (for identity + iface)
     MACAddress _peer;            // vehicle BLE address; the session owns its client lifecycle
@@ -1500,6 +1897,7 @@ private:
     ubyte[16] _request_uuid;      // last SessionInfoRequest uuid; also used as HMAC challenge
     MonoTime _last_request_time;
     MonoTime _last_poll_time;
+    MonoTime _last_climate_poll_time;
     bool _routing_seeded;
 
     // Charging-state-aware poll cadence: ramp up while actively charging so the
@@ -1520,8 +1918,23 @@ private:
     uint _counter;               // anti-replay counter (incremented per signed command)
     MonoTime _epoch_start;       // local time we observed clock_time=0 of the epoch
 
+    enum max_pending_commands = 8;
+    enum Duration pending_command_timeout = 15.seconds;
+
+    struct PendingCommand
+    {
+        bool active;
+        VehicleCommandKind kind;
+        ubyte[16] uuid;
+        ubyte[16] request_tag;
+        MonoTime sent_at;
+        ResponseReplayWindow response_window;
+    }
+    PendingCommand[max_pending_commands] _pending_commands;
+
     // ---- Cached vehicle state ----
     ChargeState _charge_state;
+    ClimateState _climate_state;
 
     // ---- Capacity-estimator ephemeral state (per-charging-session) ----
     struct CapacitySamplerState
@@ -1660,7 +2073,38 @@ private:
 
         if (_state == State.ready)
         {
-            handle_command_response(r);
+            PendingCommand* pending;
+            Array!ubyte plaintext;
+
+            if (r.has_response_signature)
+            {
+                pending = find_pending_command(r.request_uuid);
+                if (pending is null)
+                {
+                    log.warning("encrypted vehicle response has no matching request for VIN '", name[], "'");
+                    return;
+                }
+                if (!decrypt_routable_response(r, _aes_key[], name[],
+                                               pending.request_tag[], plaintext))
+                {
+                    log.error("vehicle response authentication failed for VIN '", name[], "'");
+                    return;
+                }
+                if (!pending.response_window.accept(r.response_counter))
+                {
+                    log.warning("replayed vehicle response counter ", r.response_counter,
+                                " for VIN '", name[], "'");
+                    return;
+                }
+                r.protobuf_message = plaintext[];
+            }
+            else if (r.request_uuid.length == 16)
+                pending = find_pending_command(r.request_uuid);
+
+            handle_command_response(r, pending is null
+                ? VehicleCommandKind.unknown : pending.kind);
+            if (pending !is null)
+                *pending = PendingCommand.init;
             return;
         }
     }
@@ -1732,25 +2176,98 @@ private:
         }
     }
 
-    void handle_command_response(ref const RoutableResponse r)
+    void handle_command_response(ref const RoutableResponse r, VehicleCommandKind kind)
     {
         if (r.has_status && r.signed_message_fault != 0)
         {
-            log.warning("vehicle command error ", r.signed_message_fault, " for VIN '", name[], "'");
+            log.warning("vehicle ", command_name(kind), " protocol error ",
+                        r.signed_message_fault, " for VIN '", name[], "'");
             return;
         }
         if (r.protobuf_message.length == 0)
             return;
 
+        TeslaCommandResponse response;
+        if (proto_deserialise(r.protobuf_message, response) == r.protobuf_message.length
+            && response.action_status.present)
+        {
+            ref status = response.action_status.value;
+            if (status.result.present && status.result.value != 0)
+            {
+                if (status.result_reason.present
+                    && status.result_reason.value.plain_text.present)
+                    log.warning("vehicle rejected ", command_name(kind), " for VIN '",
+                                name[], "': ",
+                                status.result_reason.value.plain_text.value[]);
+                else
+                    log.warning("vehicle rejected ", command_name(kind), " for VIN '",
+                                name[], "' with result ", status.result.value);
+            }
+            else
+                log.info("vehicle accepted ", command_name(kind), " for VIN '", name[], "'");
+            return;
+        }
+
         // Try to decode as a CarServer.Response with charge state.
         ChargeState cs;
         if (decode_carserver_charge_state(r.protobuf_message, cs) && cs.valid)
         {
+            log.debug_("charge state for VIN '", name[], "': state=", cs.charging_state,
+                       " soc=", cs.battery_level, " usable_soc=", cs.usable_battery_level,
+                       " amps=", cs.charger_actual_current, " voltage=", cs.charger_voltage,
+                       " power_kw=", cs.charger_power, " energy_added_kwh=", cs.charge_energy_added,
+                       " setpoint=", cs.charging_amps, " max=", cs.charge_current_request_max,
+                       " minutes_to_full=", cs.minutes_to_full_charge);
             _charge_state = cs;
             publish_charge_state(cs);
             return;
         }
+
+        ClimateState climate;
+        if (decode_carserver_climate_state(r.protobuf_message, climate) && climate.valid)
+        {
+            _climate_state = climate;
+            publish_climate_state(climate);
+            return;
+        }
         // Otherwise it's a command ack with no payload of interest.
+    }
+
+    PendingCommand* reserve_pending_command(const(ubyte)[] uuid,
+                                            const(ubyte)[] request_tag,
+                                            VehicleCommandKind kind)
+    {
+        assert(uuid.length == 16);
+        assert(request_tag.length == 16);
+
+        MonoTime now = getTime();
+        PendingCommand* free_slot;
+        foreach (ref pending; _pending_commands)
+        {
+            if (pending.active && now - pending.sent_at > pending_command_timeout)
+                pending = PendingCommand.init;
+            if (!pending.active && free_slot is null)
+                free_slot = &pending;
+        }
+        if (free_slot is null)
+            return null;
+
+        free_slot.active = true;
+        free_slot.kind = kind;
+        free_slot.uuid[] = uuid[];
+        free_slot.request_tag[] = request_tag[];
+        free_slot.sent_at = now;
+        return free_slot;
+    }
+
+    PendingCommand* find_pending_command(const(ubyte)[] uuid)
+    {
+        if (uuid.length != 16)
+            return null;
+        foreach (ref pending; _pending_commands)
+            if (pending.active && pending.uuid[] == uuid)
+                return &pending;
+        return null;
     }
 
     // Push the decoded ChargeState into the Vehicle Component published in
@@ -1771,13 +2288,13 @@ private:
             return;
 
         SysTime now = getSysTime();
-        v.find_or_create_element("connected").value(true, now);
-        v.find_or_create_element("last_seen").value(now, now);
+        v.set_element("connected", true, now);
+        v.set_element("last_seen", now, now);
 
         if (cs.has_battery_level)
-            v.find_or_create_element("battery.soc").value(cs.battery_level, now);
+            v.set_element("battery.soc", cs.battery_level, now);
         if (cs.has_usable_battery_level)
-            v.find_or_create_element("battery.usable_soc").value(cs.usable_battery_level, now);
+            v.set_element("battery.usable_soc", cs.usable_battery_level, now);
 
         if (cs.has_charging_state)
         {
@@ -1787,30 +2304,69 @@ private:
                 "charging", "complete", "stopped", "calibrating"
             ];
             uint idx = cs.charging_state >= 0 && cs.charging_state < names.length ? cs.charging_state : 0;
-            v.find_or_create_element("charging_state").value(names[idx], now);
+            v.set_element("charging_state", names[idx], now);
         }
         if (cs.has_minutes_to_full_charge)
-            v.find_or_create_element("minutes_to_full").value(cs.minutes_to_full_charge, now);
+            v.set_element("minutes_to_full", cs.minutes_to_full_charge, now);
 
         if (cs.has_charger_voltage)
-            v.find_or_create_element("meter.voltage").value(cs.charger_voltage, now);
+            v.set_element("meter.voltage", cs.charger_voltage, now);
         if (cs.has_charger_actual_current)
-            v.find_or_create_element("meter.current").value(cs.charger_actual_current, now);
+            v.set_element("meter.current", cs.charger_actual_current, now);
         if (cs.has_charger_power)
-            v.find_or_create_element("meter.power").value(cs.charger_power * 1000, now);  // kW → W
+            v.set_element("meter.power", cs.charger_power * 1000, now);
         if (cs.has_charge_energy_added)
-            v.find_or_create_element("meter.import").value(cs.charge_energy_added, now);
+            v.set_element("meter.import", cs.charge_energy_added, now);
 
         if (cs.has_charge_current_request_max)
-            v.find_or_create_element("control.max").value(cs.charge_current_request_max, now);
+            v.set_element("control.max", cs.charge_current_request_max, now);
         if (cs.has_charging_amps)
-            v.find_or_create_element("control.setpoint").value(cs.charging_amps, now);
+            v.set_element("control.setpoint", cs.charging_amps, now);
 
         // Feed the capacity estimator with this sample. The estimator filters
         // for the linear-BMS region (15..85%) and emits a new running-mean
         // capacity when each 5%-SOC window completes.
         if (cs.has_battery_level && cs.has_charge_energy_added)
             capacity_sample(cs.battery_level, cs.charge_energy_added);
+    }
+
+    void publish_climate_state(ref const ClimateState climate)
+    {
+        Component v;
+        foreach (ref e; _scanner._vins[])
+        {
+            if (e.vin[] == name[])
+            {
+                v = e.component;
+                break;
+            }
+        }
+        if (v is null)
+            return;
+
+        SysTime now = getSysTime();
+        v.set_element("connected", true, now);
+        v.set_element("last_seen", now, now);
+        if (climate.has_inside_temperature)
+            v.set_element("hvac.temperature", climate.inside_temperature, now);
+        if (climate.has_outside_temperature)
+            v.set_element("hvac.outside_temperature", climate.outside_temperature, now);
+        if (climate.has_driver_temperature)
+            v.set_element("hvac.target_temperature", climate.driver_temperature, now);
+        if (climate.has_passenger_temperature)
+            v.set_element("hvac.passenger_target_temperature",
+                          climate.passenger_temperature, now);
+        if (climate.has_fan_speed)
+            v.set_element("hvac.fan_speed", climate.fan_speed, now);
+        if (climate.has_climate_on)
+        {
+            v.set_element("hvac.state", climate.climate_on
+                ? StringLit!"on" : StringLit!"off", now);
+            v.set_element("hvac.mode", climate.climate_on
+                ? StringLit!"auto" : StringLit!"off", now);
+        }
+        if (climate.has_preconditioning)
+            v.set_element("hvac.preconditioning", climate.preconditioning, now);
     }
 
     // Battery capacity estimator: each time SOC crosses a 5% threshold inside
@@ -1822,7 +2378,7 @@ private:
         import apps.energy.vehicle : add_capacity_sample;
 
         // Tesla resets charge_energy_added at the start of each session. When
-        // we see it decrease, a new session began — drop our anchor and let
+        // we see it decrease, a new session began. Drop our anchor and let
         // the next valid SOC re-anchor.
         if (_cap.anchored && energy_added < _cap.energy_anchor)
             _cap.anchored = false;
@@ -1840,7 +2396,7 @@ private:
             return;
         }
 
-        // Out of the linear region — close this window without emitting,
+        // Out of the linear region: close this window without emitting,
         // re-anchor whenever we're back inside.
         if (soc > 85)
         {
@@ -1866,7 +2422,8 @@ private:
 
     // Send a signed AES-GCM-PERSONALIZED command. Plaintext is the encoded
     // CarServer.Action protobuf (or VCSEC.UnsignedMessage for VEHICLE_SECURITY).
-    bool send_signed_action(TeslaDomain domain, const(ubyte)[] plaintext)
+    bool send_signed_action(TeslaDomain domain, const(ubyte)[] plaintext,
+                            VehicleCommandKind kind)
     {
         if (_state != State.ready)
         {
@@ -1888,7 +2445,7 @@ private:
         if (elapsed < 0) elapsed = 0;
         uint expires_at = cast(uint)elapsed + 5;  // 5-second TTL
 
-        enum uint flags = 0;  // FLAG_ENCRYPT_RESPONSE deferred for now
+        enum uint flags = encrypt_response_mask;
 
         Array!ubyte meta = build_signed_command_metadata(domain, name[], _epoch[],
                                                          expires_at, _counter, flags);
@@ -1923,7 +2480,18 @@ private:
         Array!ubyte msg = build_signed_routable_message(domain, ciphertext[], signer_sec1[],
                                                         _epoch[], nonce[], _counter, expires_at,
                                                         tag[], _routing_address[], uuid[], flags);
-        return write_tesla_frame(msg[]);
+        PendingCommand* pending = reserve_pending_command(uuid[], tag[], kind);
+        if (pending is null)
+        {
+            log.warning("too many vehicle commands awaiting responses for VIN '", name[], "'");
+            return false;
+        }
+        if (!write_tesla_frame(msg[]))
+        {
+            *pending = PendingCommand.init;
+            return false;
+        }
+        return true;
     }
 
     // Verify the HMAC tag the vehicle attached to its SessionInfo response.
@@ -1986,7 +2554,40 @@ private:
 // Test vectors from teslamotors/vehicle-command protocol.md.
 unittest
 {
+    static assert(encrypt_response_mask == 2);
+
     import urt.encoding : HexDecode;
+
+    assert(build_action_get_charge_state()[] == HexDecode!"12040a021200");
+    assert(build_action_get_climate_state()[] == HexDecode!"12040a021a00");
+    assert(build_action_charging_start_stop(true)[] == HexDecode!"120432021200");
+    assert(build_action_charging_start_stop(false)[] == HexDecode!"120432022a00");
+    assert(build_action_set_charging_amps(16)[] == HexDecode!"1205da02020810");
+    assert(build_action_climate_power(true)[] == HexDecode!"120452020801");
+    assert(build_action_climate_power(false)[] == HexDecode!"120452020800");
+    assert(build_action_climate_temperature(21, 21)[] ==
+        HexDecode!"1210720e2a021a00350000a8413d0000a841");
+    assert(build_action_schedule_charging(true, 120)[] ==
+        HexDecode!"1207ca020408011078");
+
+    TeslaCommandResponse accepted;
+    static immutable ubyte[] accepted_response = HexDecode!"0a020800";
+    assert(proto_deserialise(accepted_response, accepted) == accepted_response.length);
+    assert(accepted.action_status.present);
+    assert(accepted.action_status.value.result.present);
+    assert(accepted.action_status.value.result.value == 0);
+
+    TeslaCommandResponse rejected_command;
+    static immutable ubyte[] rejected_response = HexDecode!"0a08080112040a026e6f";
+    assert(proto_deserialise(rejected_response, rejected_command) == rejected_response.length);
+    assert(rejected_command.action_status.value.result.value == 1);
+    assert(rejected_command.action_status.value.result_reason.value.plain_text.value[] == "no");
+
+    ClimateState climate;
+    static immutable ubyte[] climate_response = HexDecode!"120b2209ad060000ac41f00601";
+    assert(decode_carserver_climate_state(climate_response, climate));
+    assert(climate.has_inside_temperature && climate.inside_temperature == 21.5f);
+    assert(climate.has_climate_on && climate.climate_on);
 
     // ---- Advert local name <-> VIN hash ----
     // From protocol.md: VIN "5YJS0000000000000" -> local name "S1a87a5a75f3df858C"
@@ -2036,7 +2637,7 @@ unittest
 
 
     // ---- Full session info HMAC tag ----
-    // SESSION_INFO bytes (the `session_info` payload field bytes) — from protocol.md.
+    // SESSION_INFO bytes (the `session_info` payload field bytes) from protocol.md.
     //   08 06                          counter = 6
     //   12 41 <65 bytes>               publicKey (SEC1)
     //   1a 10 <16 bytes>               epoch
@@ -2103,4 +2704,97 @@ unittest
     assert(enc.succeeded);
     assert(hvac_ct == hvac_expected_ct);
     assert(hvac_tag == hvac_expected_tag);
+
+
+    // ---- Encrypted response metadata, decoder, authentication, and replay ----
+    static immutable ubyte[16] request_tag = HexDecode!"000102030405060708090a0b0c0d0e0f";
+    Array!ubyte response_meta = build_response_metadata(
+        TeslaDomain.infotainment, "5YJ30123456789ABC",
+        0x01020304, encrypt_response_mask,
+        request_tag[], 28);
+    static immutable ubyte[] expected_response_meta = HexDecode!(
+        "000109010103021135594a3330313233343536373839414243"
+        ~ "050401020304070400000002081105000102030405060708090a0b0c0d0e0f"
+        ~ "09040000001cff");
+    assert(response_meta[] == expected_response_meta);
+
+    static immutable ubyte[12] response_nonce = HexDecode!"101112131415161718191a1b";
+    static immutable ubyte[16] response_uuid = HexDecode!"202122232425262728292a2b2c2d2e2f";
+    static immutable ubyte[] response_plaintext = HexDecode!"12040a021200";
+    enum uint response_counter = 23;
+    enum uint response_flags = encrypt_response_mask;
+
+    response_meta = build_response_metadata(
+        TeslaDomain.infotainment, "5YJ30123456789ABC",
+        response_counter, response_flags, request_tag[], 0);
+    sha_init(sha_ctx);
+    sha_update(sha_ctx, response_meta[]);
+    ubyte[32] response_aad = sha_finalise(sha_ctx);
+
+    Array!ubyte response_ciphertext;
+    response_ciphertext.resize(response_plaintext.length);
+    ubyte[16] response_tag = void;
+    enc = aes_gcm_encrypt(K[], response_nonce[], response_aad[],
+                          response_plaintext, response_ciphertext[], response_tag[]);
+    assert(enc.succeeded);
+
+    Array!ubyte response_message;
+    response_message ~= cast(ubyte)0x3A; // from_destination
+    response_message ~= cast(ubyte)0x02;
+    response_message ~= cast(ubyte)0x08;
+    response_message ~= cast(ubyte)TeslaDomain.infotainment;
+    response_message ~= cast(ubyte)0x52; // protobuf_message_as_bytes
+    response_message ~= cast(ubyte)response_ciphertext.length;
+    response_message ~= response_ciphertext[];
+    response_message ~= cast(ubyte)0x6A; // signature_data
+    response_message ~= cast(ubyte)0x24;
+    response_message ~= cast(ubyte)0x4A; // AES_GCM_Response_data
+    response_message ~= cast(ubyte)0x22;
+    response_message ~= cast(ubyte)0x0A; // nonce
+    response_message ~= cast(ubyte)response_nonce.length;
+    response_message ~= response_nonce[];
+    response_message ~= cast(ubyte)0x10; // counter
+    response_message ~= cast(ubyte)response_counter;
+    response_message ~= cast(ubyte)0x1A; // tag
+    response_message ~= cast(ubyte)response_tag.length;
+    response_message ~= response_tag[];
+    response_message ~= cast(ubyte)0x92; // request_uuid, field 50
+    response_message ~= cast(ubyte)0x03;
+    response_message ~= cast(ubyte)response_uuid.length;
+    response_message ~= response_uuid[];
+    response_message ~= cast(ubyte)0xA0; // flags, field 52
+    response_message ~= cast(ubyte)0x03;
+    response_message ~= cast(ubyte)response_flags;
+
+    RoutableResponse response;
+    assert(decode_routable_response(response_message[], response));
+    assert(response.has_from_domain);
+    assert(response.from_domain == TeslaDomain.infotainment);
+    assert(response.has_response_signature);
+    assert(response.response_counter == response_counter);
+    assert(response.flags == response_flags);
+    assert(response.request_uuid == response_uuid[]);
+    assert(response.response_nonce == response_nonce[]);
+    assert(response.response_tag == response_tag[]);
+
+    Array!ubyte decrypted;
+    assert(decrypt_routable_response(response, K[], "5YJ30123456789ABC",
+                                     request_tag[], decrypted));
+    assert(decrypted[] == response_plaintext);
+
+    ubyte[16] bad_response_tag = response_tag;
+    bad_response_tag[0] ^= 1;
+    RoutableResponse tampered = response;
+    tampered.response_tag = bad_response_tag[];
+    Array!ubyte rejected;
+    assert(!decrypt_routable_response(tampered, K[], "5YJ30123456789ABC",
+                                      request_tag[], rejected));
+
+    ResponseReplayWindow replay;
+    assert(replay.accept(100));
+    assert(replay.accept(102));
+    assert(replay.accept(101));
+    assert(!replay.accept(101));
+    assert(!replay.accept(102));
+    assert(!replay.accept(37));
 }

@@ -44,9 +44,13 @@ nothrow @nogc:
         g_app.console.register_command!twc_add("/protocol/tesla/twc", this, "add");
         g_app.console.register_command!twc_set("/protocol/tesla/twc", this, "set");
         g_app.console.register_command!vehicle_get_charge("/protocol/tesla/session", this, "get-charge");
+        g_app.console.register_command!vehicle_get_climate("/protocol/tesla/session", this, "get-climate");
         g_app.console.register_command!vehicle_charge_start("/protocol/tesla/session", this, "charge-start");
         g_app.console.register_command!vehicle_charge_stop("/protocol/tesla/session", this, "charge-stop");
         g_app.console.register_command!vehicle_set_amps("/protocol/tesla/session", this, "set-amps");
+        g_app.console.register_command!vehicle_climate("/protocol/tesla/session", this, "climate");
+        g_app.console.register_command!vehicle_set_temperature("/protocol/tesla/session", this, "set-temperature");
+        g_app.console.register_command!vehicle_schedule_charging("/protocol/tesla/session", this, "schedule-charging");
     }
 
     override void update()
@@ -167,6 +171,69 @@ nothrow @nogc:
             session.write_line("failed to send set_charging_amps");
         else
             session.writef("set_charging_amps({0}A) sent\n", amps);
+    }
+
+    void vehicle_get_climate(Session session, TeslaVehicleSession vehicle)
+    {
+        if (!vehicle.refresh_climate_state())
+        {
+            session.write_line("failed to send climate state request");
+            return;
+        }
+        ref const climate = vehicle.climate_state;
+        if (!climate.valid)
+        {
+            session.write_line("request sent - no cached climate state yet, response pending");
+            return;
+        }
+        if (climate.has_inside_temperature)
+            session.writef("inside_temperature: {0}C\n", climate.inside_temperature);
+        if (climate.has_outside_temperature)
+            session.writef("outside_temperature: {0}C\n", climate.outside_temperature);
+        if (climate.has_driver_temperature)
+            session.writef("driver_temperature: {0}C\n", climate.driver_temperature);
+        if (climate.has_passenger_temperature)
+            session.writef("passenger_temperature: {0}C\n", climate.passenger_temperature);
+        if (climate.has_fan_speed)
+            session.writef("fan_speed: {0}\n", climate.fan_speed);
+        if (climate.has_climate_on)
+            session.writef("climate_on: {0}\n", climate.climate_on);
+        if (climate.has_preconditioning)
+            session.writef("preconditioning: {0}\n", climate.preconditioning);
+        session.write_line("(refresh requested - values above are last cached)");
+    }
+
+    void vehicle_climate(Session session, TeslaVehicleSession vehicle, bool enabled)
+    {
+        if (!vehicle.climate_power(enabled))
+            session.write_line("failed to send climate command");
+        else
+            session.write_line(enabled ? "climate on sent" : "climate off sent");
+    }
+
+    void vehicle_set_temperature(Session session, TeslaVehicleSession vehicle, float celsius)
+    {
+        if (!vehicle.climate_temperature(celsius))
+            session.write_line("failed to send climate temperature");
+        else
+            session.writef("climate temperature {0}C sent\n", celsius);
+    }
+
+    void vehicle_schedule_charging(Session session, TeslaVehicleSession vehicle,
+                                   bool enabled, Nullable!TimeOfDay start)
+    {
+        if (enabled && !start)
+        {
+            session.write_line("start is required when enabling the charging schedule");
+            return;
+        }
+        TimeOfDay start_time = start ? start.value : TimeOfDay.init;
+        if (!vehicle.schedule_charging(enabled, start_time))
+            session.write_line("failed to send charging schedule");
+        else if (enabled)
+            session.writef("daily charging schedule for {0} sent\n", start_time);
+        else
+            session.write_line("charging schedule disable sent");
     }
 
 }
