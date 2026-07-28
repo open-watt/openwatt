@@ -158,6 +158,14 @@ nothrow @nogc:
     {
         if (!value.empty && (value.length != 5 || value[0 .. 4] != "twai" || value[4] < '0' || value[4] > '9' || value[4] - '0' >= num_can))
             return "invalid CAN device";
+        bool changed = _device[] != value;
+        if (!value.empty)
+            changed |= _stream !is null || _protocol != CANInterfaceProtocol.unknown;
+        if (!changed)
+        {
+            mark_assigned!(typeof(this), [ "device", "stream", "protocol" ])();
+            return null;
+        }
 
         _device = value.makeString(defaultAllocator);
         _can_port = value.empty ? -1 : cast(byte)(value[4] - '0');
@@ -167,6 +175,7 @@ nothrow @nogc:
             _protocol = CANInterfaceProtocol.unknown;
         }
         mark_set!(typeof(this), [ "device", "stream", "protocol" ])();
+        restart();
         return null;
     }
 
@@ -174,8 +183,14 @@ nothrow @nogc:
         => _baud_rate;
     final void baud_rate(uint value)
     {
+        if (_baud_rate == value)
+        {
+            mark_assigned!(typeof(this), "baud-rate")();
+            return;
+        }
         _baud_rate = value;
         mark_set!(typeof(this), "baud-rate")();
+        restart();
     }
 
     version(HasGPIO)
@@ -184,16 +199,28 @@ nothrow @nogc:
             => _tx_gpio;
         final void tx_gpio(ubyte value)
         {
+            if (_tx_gpio == value)
+            {
+                mark_assigned!(typeof(this), "tx-gpio")();
+                return;
+            }
             _tx_gpio = value;
             mark_set!(typeof(this), "tx-gpio")();
+            restart();
         }
 
         final ubyte rx_gpio() const pure
             => _rx_gpio;
         final void rx_gpio(ubyte value)
         {
+            if (_rx_gpio == value)
+            {
+                mark_assigned!(typeof(this), "rx-gpio")();
+                return;
+            }
             _rx_gpio = value;
             mark_set!(typeof(this), "rx-gpio")();
+            restart();
         }
     }
 
