@@ -50,6 +50,11 @@ nothrow @nogc:
         super(collection_type_info!Secret, id, flags);
     }
 
+    ~this()
+    {
+        clear_key();
+    }
+
     // Properties...
 
     SecretKind kind() const pure
@@ -58,6 +63,8 @@ nothrow @nogc:
     {
         if (_kind == value)
             return;
+        if (_kind == SecretKind.ec_p256)
+            clear_key();
         _kind = value;
         maybe_load_key();
     }
@@ -69,7 +76,10 @@ nothrow @nogc:
         if (value == _key_file)
             return;
         _key_file = value.move;
-        maybe_load_key();
+        if (_key_file.empty)
+            clear_key();
+        else
+            maybe_load_key();
     }
 
     const(char)[] password() const pure
@@ -299,9 +309,7 @@ private:
         if (_kind != SecretKind.ec_p256 || _key_file.empty)
             return;
 
-        if (_keypair.valid)
-            free_keypair(_keypair);
-        _pubkey_cached = false;
+        clear_key();
 
         void[] file = load_file(_key_file[], defaultAllocator());
         if (file)
@@ -352,10 +360,24 @@ private:
 
         ubyte[32] d = void;
         r = export_private_scalar(_keypair, d);
-        if (r.succeeded)
-            _privkey_d[] = d[];
+        if (r.failed)
+        {
+            log.error("failed to export private key scalar");
+            free_keypair(_keypair);
+            return;
+        }
+        _privkey_d[] = d[];
 
         _pubkey_cached = true;
+    }
+
+    void clear_key()
+    {
+        if (_keypair.valid)
+            free_keypair(_keypair);
+        _privkey_d[] = 0;
+        _pubkey_xy[] = 0;
+        _pubkey_cached = false;
     }
 }
 
