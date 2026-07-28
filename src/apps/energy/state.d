@@ -202,7 +202,7 @@ private void publish_topology_layout(Device energy, ref TopologyGraph graph)
 {
     publish_circuit(energy, graph);
 
-    energy.set_element("topology.schema_version", 1);
+    energy.set_element("topology.schema_version", 2);
     energy.set_element("topology.generation", cast(int)graph.generation);
 
     foreach (bus; graph.bus_list[])
@@ -813,7 +813,7 @@ private Element* elem(T)(Device energy, const(char)[] base, const(char)[] name)
 
 void publish_circuit(Device energy, ref TopologyGraph graph)
 {
-    energy.set_element("circuit.schema_version", 1);
+    energy.set_element("circuit.schema_version", 2);
     energy.set_element("circuit.generation", cast(int)graph.attribution.generation);
     energy.set_element("circuit.buses", cast(int)graph.bus_list.length);
     energy.set_element("circuit.islands", graph.attribution.island_count);
