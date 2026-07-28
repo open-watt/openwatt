@@ -604,6 +604,16 @@ nothrow @nogc:
         }
     }
 
+    final void reset()
+    {
+        assert(_state == State.running, "Only a running object can be reset!");
+
+        if (is_remote)
+            return;
+
+        set_state(State.failure);
+    }
+
     final override void destroy()
     {
         assert(!(_state & _destroyed), "destroy() called twice - bookkeeping bug");

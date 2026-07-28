@@ -197,6 +197,8 @@ protected:
             return CompletionStatus.continue_;
         if (_connected)
             return CompletionStatus.complete;
+        if (_connect_failed)
+            return CompletionStatus.error;
 
         // send connect_ind to the interface
         Packet p;
@@ -220,6 +222,7 @@ protected:
     override CompletionStatus shutdown()
     {
         att_reset();
+        _connect_failed = false;
 
         if (_connect_handle >= 0)
         {
@@ -282,6 +285,7 @@ private:
     int _connect_handle = -1;
     bool _subscribed;
     bool _connected;
+    bool _connect_failed;
     Array!NotifyHandler _notify_handlers;
     Array!DiscoveryDoneDelegate _discovery_handlers;
 
@@ -300,20 +304,35 @@ private:
     {
         if (state < MessageState.complete)
             return;
+        if (handle < 0)
+            return;
+
+        EventHandler handler = state == MessageState.complete
+            ? &on_connect_succeeded
+            : &on_connect_failed;
+        if (!g_app.post_event(handler, getTime(), EventPriority.control))
+            log.error("failed to queue connection completion for ", _peer);
+    }
+
+    void on_connect_succeeded(MonoTime)
+    {
+        if (_connect_handle < 0)
+            return;
 
         _connect_handle = -1;
+        _connected = true;
+        log.info("connected to ", _peer);
+        att_start(_iface.mtu);
+    }
 
-        if (state == MessageState.complete)
-        {
-            _connected = true;
-            log.info("connected to ", _peer);
-            att_start(_iface.mtu);
-        }
-        else
-        {
-            log.error("connection to ", _peer, " failed");
-            restart();
-        }
+    void on_connect_failed(MonoTime)
+    {
+        if (_connect_handle < 0)
+            return;
+
+        _connect_handle = -1;
+        _connect_failed = true;
+        log.error("connection to ", _peer, " failed");
     }
 
     void log_read_response(const(ubyte)[] value, ATTError error)
@@ -522,7 +541,7 @@ private:
         _user_ops.clear();
 
         log.error("ATT failure on connection to ", _peer);
-        restart();
+        reset();
     }
 
     const(GattChar)* find_char_by_handle(ushort value_handle) const
