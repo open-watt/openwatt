@@ -72,6 +72,7 @@ enum CollectionType : ubyte
     rtc,
     log_sink,
     console_session,
+    smartevse,
     count
 }
 
