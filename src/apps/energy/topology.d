@@ -839,6 +839,9 @@ nothrow @nogc:
                 continue;
             }
 
+            if (device_ports.length != 0 && a.port_bindings.length != 0)
+                log.warning("appliance '", a.name[], "': no port binding matched a device port; falling back to virtual ports");
+
             Array!DevicePort virtual_ports;
             collect_bound_ports(a, virtual_ports);
             if (virtual_ports.length == 0)

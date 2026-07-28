@@ -139,7 +139,12 @@ nothrow @nogc:
 
         boundaries.resize(graph.boundaries.length);
         foreach (i, p; graph.boundaries[])
+        {
+            foreach (q; graph.boundaries[0 .. i])
+                if (boundary_key(q)[] == boundary_key(p)[])
+                    writeWarning("energy: boundary key '", boundary_key(p), "' is not unique; an appliance and a link share the name and their publishes will collide");
             boundaries[i].bind(energy, p);
+        }
         publish_appliance_index_list(energy, graph);
         log_slow_topology_publish("cache_bind", getTime() - t);
 
@@ -508,7 +513,7 @@ nothrow @nogc:
 
     void publish(Port* p, ref TopologyGraph graph, ref Islands islands, SysTime ts)
     {
-        float pw_in = 0, pw_out = 0;
+        float pw_in = float.nan, pw_out = float.nan;
         bool have = p.meter_data.has(MeterField.power);
         if (have)
         {
