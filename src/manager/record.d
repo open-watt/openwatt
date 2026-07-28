@@ -270,21 +270,48 @@ nothrow @nogc:
     final void dir(const(char)[] value)
     {
         if (_dir[] == value)
+        {
+            mark_assigned!(typeof(this), "dir")();
             return;
+        }
         _dir = value.makeString(g_app.allocator);
         mark_set!(typeof(this), "dir")();
-        restart();
+
+        // A restart would drop every cursor, and a cursor reopened at index 0
+        // re-ships the standing RAM history.
+        if (running)
+        {
+            import urt.file : create_directory;
+            create_directory(_dir[]);
+            foreach (rs; _streams.values)
+                rs.container.close_();
+        }
     }
 
     final const(char)[] filter() const pure
         => _filter[];
-    final void filter(const(char)[] value)
+    final void filter(const(char)[][] value...)
     {
-        if (_filter[] == value)
+        MutableString!0 joined;
+        foreach (i, pattern; value)
+        {
+            if (i)
+                joined ~= ',';
+            joined ~= pattern;
+        }
+        if (_filter[] == joined[])
+        {
+            mark_assigned!(typeof(this), "filter")();
             return;
-        _filter = value.makeString(g_app.allocator);
+        }
+        _filter = joined[].makeString(g_app.allocator);
         mark_set!(typeof(this), "filter")();
-        restart();
+
+        if (running)
+        {
+            drop_unmatched();
+            scan();
+        }
     }
 
     // API
@@ -315,17 +342,15 @@ protected:
         create_directory(_dir[]); // best effort; the db warns if writes later fail
         scan();
         _last_scan = getTime();
+        if (_filter.empty)
+            log.info("recorder '", name, "': no filter, recording nothing");
         return CompletionStatus.complete;
     }
 
     override CompletionStatus shutdown()
     {
         foreach (rs; _streams.values)
-        {
-            rs.close();
-            database().close_series(rs.series);
-            defaultAllocator().freeT(rs);
-        }
+            release(rs);
         _streams.clear();
         return CompletionStatus.complete;
     }
@@ -348,14 +373,45 @@ protected:
 
 private:
     String _dir = StringLit!"records";
-    String _filter = StringLit!"*";
+    String _filter;
 
     Map!(const(char)[], RecordStream*) _streams; // keyed by the stream's own path string
     MonoTime _last_scan;
 
+    // a leading '!' excludes, and an exclusion vetoes regardless of where it sits in the list
+    bool matches(const(char)[] path)
+    {
+        import urt.string : wildcard_match;
+
+        bool included = false;
+        const(char)[] rest = _filter[];
+        while (!rest.empty)
+        {
+            const(char)[] tok = rest.split!',';
+            if (tok.empty)
+                continue;
+            if (tok[0] == '!')
+            {
+                if (wildcard_match(tok[1 .. $], path))
+                    return false;
+            }
+            else if (!included && wildcard_match(tok, path))
+                included = true;
+        }
+        return included;
+    }
+
     void scan()
     {
-        Array!(Element*) elements = g_app.find_elements(_filter[]);
+        Array!(Element*) elements;
+        const(char)[] rest = _filter[];
+        while (!rest.empty)
+        {
+            const(char)[] tok = rest.split!',';
+            if (!tok.empty && tok[0] != '!')
+                g_app.find_elements(tok, elements);
+        }
+
         char[256] buf = void;
         foreach (e; elements[])
         {
@@ -363,9 +419,30 @@ private:
             if (len <= 0 || len > buf.length)
                 continue;
             const(char)[] path = buf[0 .. len];
-            if (path !in _streams)
+            if (path !in _streams && matches(path))
                 attach(e, path);
         }
+    }
+
+    void drop_unmatched()
+    {
+        Array!(RecordStream*) dropped;
+        foreach (rs; _streams.values)
+            if (!matches(rs.path[]))
+                dropped ~= rs;
+        foreach (rs; dropped[])
+        {
+            _streams.remove(rs.path[]);
+            release(rs);
+        }
+    }
+
+    void release(RecordStream* rs)
+    {
+        rs.flush(); // ship what is still pending before the container closes
+        rs.close();
+        database().close_series(rs.series);
+        defaultAllocator().freeT(rs);
     }
 
     void attach(Element* e, const(char)[] path)
@@ -751,7 +828,7 @@ nothrow @nogc:
         uint h = height ? height.value : 16;
 
         auto cmd = defaultAllocator().allocT!RecordGraphCommand(session, w, h, opt);
-        cmd.fetch.begin(this, path, t0, t1, w * 2, QueryMode.graph, false);
+        cmd.fetch.begin(this, path, t0, t1, w * 2, QueryMode.graph, true);
         return cmd;
     }
 
@@ -762,7 +839,7 @@ nothrow @nogc:
         uint max_points = max ? max.value : 24;
 
         auto cmd = defaultAllocator().allocT!RecordQueryCommand(session, path);
-        cmd.fetch.begin(this, (&path)[0 .. 1], now > span ? now - span : 0, now, max_points, QueryMode.raw, false);
+        cmd.fetch.begin(this, (&path)[0 .. 1], now > span ? now - span : 0, now, max_points, QueryMode.raw, true);
         return cmd;
     }
 }
