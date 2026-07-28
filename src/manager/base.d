@@ -427,28 +427,27 @@ protected:
 
     void mark_set(T, string[] props)() nothrow @nogc
     {
-        enum mask = () {
-            ulong m = 0;
-            static foreach (p; props)
-            {{
-                enum i = prop_index!(T, p);
-                static assert(i >= 0, "Invalid property name '" ~ p ~ "' in mark_set!() for type " ~ T.stringof);
-                m |= ulong(1) << i;
-            }}
-            return m;
-        }();
+        enum mask = prop_mask!(T, props);
         _props_set |= mask;
         _mark_dirty(mask);
     }
-
     void mark_set(T, string prop)() nothrow @nogc
     {
-        mark_set!(T, [ prop ])();
+        return mark_set!(T, [ prop ])();
+    }
+
+    void mark_assigned(T, string[] props)() nothrow @nogc
+    {
+        _props_set |= prop_mask!(T, props);
+    }
+    void mark_assigned(T, string prop)() nothrow @nogc
+    {
+        return mark_assigned!(T, [ prop ])();
     }
 
     final void mark_dirty(size_t prop_index) nothrow @nogc
     {
-        _mark_dirty(ulong(1) << prop_index);
+        return _mark_dirty(ulong(1) << prop_index);
     }
 
     final void _mark_dirty(ulong mask) nothrow @nogc
@@ -461,11 +460,6 @@ protected:
         }
     }
 
-    // Property-delta subscriber. Attaches a slot to this object's dirty fan-out
-    // chain: _mark_dirty then ORs every property change into the slot's
-    // props_dirty, and the owner drains/clears it at its own cadence. Sync peers
-    // are one kind of owner; the Linux kernel mirror is another. `owner` is an
-    // opaque identity; the caller keeps the returned slot index for drain/detach.
     public final ushort attach_delta_slot(Object owner) nothrow @nogc
     {
         ushort slot = sync_state_alloc(owner);
@@ -984,6 +978,16 @@ template prop_index(T, string prop)
     }
 }
 
+enum prop_mask(T, string[] props) = () {
+    ulong m = 0;
+    static foreach (p; props)
+    {{
+        enum i = prop_index!(T, p);
+        static assert(i >= 0, "Invalid property name '" ~ p ~ "' for type " ~ T.stringof);
+        m |= ulong(1) << i;
+    }}
+    return m;
+}();
 
 const(Property*)[] all_properties(Type)()
 {
