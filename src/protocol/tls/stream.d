@@ -66,7 +66,7 @@ else version (Windows)
     pragma(lib, "Secur32");
 }
 
-version = DebugTLS;
+//version = DebugTLS;
 
 nothrow @nogc:
 
