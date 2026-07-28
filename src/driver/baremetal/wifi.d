@@ -538,6 +538,15 @@ nothrow @nogc:
 
     // Properties
 
+    override MACAddress bssid() const
+        => _bssid;
+
+    override int rssi() const
+        => _rssi;
+
+    override ubyte signal_quality() const
+        => _signal_quality;
+
     override const(char)[] status_message() const pure
     {
         if (_status_detail.length > 0)
@@ -548,6 +557,16 @@ nothrow @nogc:
         if (auto reason = r.would_accept(this))
             return reason;
         return super.status_message();
+    }
+
+    override void heartbeat(MonoTime now)
+    {
+        super.heartbeat(now);
+
+        if (auto radio = cast(BuiltinWiFi)this.radio)
+            refresh_link_info(radio);
+        else
+            clear_link_info();
     }
 
 protected:
@@ -573,7 +592,9 @@ protected:
             _status_detail = detail.length != 0 ? detail : "Disconnected";
             _next_connect_time = getTime() + 2.seconds;
             log.warning("disconnected from '", ssid, "': ", _status_detail);
+            clear_link_info();
             restart();
+            return;
         }
     }
 
@@ -665,6 +686,7 @@ protected:
         if (_connect_initiated && radio)
             wifi_sta_disconnect(radio.wifi);
         _connect_initiated = false;
+        clear_link_info();
         if (_state != State.failure)
             _status_detail = null;
         return super.shutdown();
@@ -684,11 +706,55 @@ protected:
 private:
 
     const(char)[] _status_detail;
+    MACAddress _bssid;
+    int _rssi;
+    ubyte _signal_quality;
     bool _connect_initiated;
     uint _connect_sta_connected_seq;
     uint _connect_sta_disconnected_seq;
     uint _last_sta_disconnected_seq;
     MonoTime _next_connect_time;
+
+    void refresh_link_info(BuiltinWiFi radio)
+    {
+        WifiStaLinkInfo info;
+        if (!wifi_get_sta_link_info(radio.wifi, info))
+        {
+            clear_link_info();
+            return;
+        }
+
+        MACAddress bssid = MACAddress(info.bssid);
+        int rssi = info.rssi;
+        ubyte quality = rssi_to_quality(rssi);
+        if (_bssid == bssid && _rssi == rssi && _signal_quality == quality)
+            return;
+
+        _bssid = bssid;
+        _rssi = rssi;
+        _signal_quality = quality;
+        mark_set!(typeof(this), [ "bssid", "rssi", "signal-quality" ])();
+    }
+
+    void clear_link_info()
+    {
+        if (_bssid == MACAddress.init && _rssi == 0 && _signal_quality == 0)
+            return;
+
+        _bssid = MACAddress.init;
+        _rssi = 0;
+        _signal_quality = 0;
+        mark_set!(typeof(this), [ "bssid", "rssi", "signal-quality" ])();
+    }
+
+    static ubyte rssi_to_quality(int value) pure
+    {
+        if (value >= -50)
+            return 100;
+        if (value <= -100)
+            return 0;
+        return cast(ubyte)(2 * (value + 100));
+    }
 }
 
 
