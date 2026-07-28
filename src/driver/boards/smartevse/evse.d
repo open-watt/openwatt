@@ -25,22 +25,44 @@ module driver.boards.smartevse.evse;
 
 version (SmartEVSE):
 
-#include "ch32v003fun.h"
-#include "ch32.h"
+import urt.driver.gpio;
 
-#define CIRCULARBUFFER 256     // Must be a power of 2
+nothrow @nogc:
+extern(C):
+
+alias uint8_t = ubyte;
+alias uint16_t = ushort;
+alias uint32_t = uint;
+alias int8_t = byte;
+alias int16_t = short;
+alias int32_t = int;
+alias SmartEVSECaptureCallback = extern(C) bool function(uint16_t, uint16_t, uint16_t) nothrow @nogc;
+
+enum NUM_ADC_SAMPLES = 32;
+enum CIRCULARBUFFER = 256;     // Must be a power of 2
+enum uint32_t PWM_5 = 50;
+enum uint32_t PWM_95 = 950;
+enum uint32_t PWM_100 = 1000;
+
+enum uint32_t PP_IN = 34;
+enum uint32_t CP_IN = 39;
+enum uint32_t TEMP = 36;
+enum uint32_t SSR1 = 32;
+enum uint32_t SSR2 = 27;
+enum uint32_t RCMFAULT = 13;
+enum uint32_t CP_OUT = 19;
+enum uint32_t CPOFF = 15;
+
+enum uint8_t DISABLE = 0;
+enum uint8_t ENABLE = 1;
 
 // USART Circular buffers
-typedef struct {
-    char buffer[CIRCULARBUFFER];
-    volatile uint16_t head;
-    volatile uint16_t tail;
-} CircularBuffer;
-
-// used in modbus.c
-extern CircularBuffer ModbusTx;                 // USART2 Transmit buffer (modbus)
-
-extern uint8_t State;
+struct CircularBuffer
+{
+    char[CIRCULARBUFFER] buffer;
+    uint16_t head;
+    uint16_t tail;
+}
 
 uint8_t LockCable = 0;
 
@@ -48,191 +70,97 @@ uint32_t elapsedtime, elapsedmax=0;
 
 // the following variables are used in interrupts
 //
-volatile uint16_t ADC_CP[NUM_ADC_SAMPLES];      // CP pin samples
-volatile uint16_t ADC_PP[NUM_ADC_SAMPLES];      // PP pin samples
-volatile uint16_t ADC_Temp[NUM_ADC_SAMPLES];    // Temperature samples
-volatile uint8_t ADCidx = 0;                    // index in sample buffers
-volatile uint16_t MainsCycleTime = 0;           // mains cycle time (20ms for 50Hz) Convert to Hz : 10000 / (MainsCycleTime/100))
-volatile uint8_t PowerPanicFlag = 0;
+__gshared uint16_t[NUM_ADC_SAMPLES] ADC_CP;      // CP pin samples
+__gshared uint16_t[NUM_ADC_SAMPLES] ADC_PP;      // PP pin samples
+__gshared uint16_t[NUM_ADC_SAMPLES] ADC_Temp;    // Temperature samples
+__gshared uint8_t ADCidx = 0;                    // index in sample buffers
+__gshared uint16_t MainsCycleTime = 0;           // mains cycle time (20ms for 50Hz) Convert to Hz : 10000 / (MainsCycleTime/100))
+__gshared uint8_t PowerPanicFlag = 0;
+uint8_t PowerPanicEnabled = 0;
+uint8_t RCmonEnabled = 0;
+uint8_t ModemPowered = 0;
 
-uint8_t RxBuffer2[256];                         // USART2 Receive buffer
+uint8_t[256] RxBuffer2;                         // USART2 Receive buffer
 
-volatile uint8_t RxRdy1 = 0;
-volatile uint8_t RxIdx2 = 0;
-volatile uint8_t ModbusRxLen = 0;
-//volatile uint32_t ModbusTimer = 0;
-volatile uint8_t DmaBusy = 0;
+uint8_t RxRdy1 = 0;
+uint8_t RxIdx2 = 0;
+uint8_t ModbusRxLen = 0;
+//uint32_t ModbusTimer = 0;
+__gshared uint8_t DmaBusy = 0;
 
 // Circular buffers for USART1 and TX of USART2
-CircularBuffer RxBuffer = {{0}, 0, 0};          // USART1 Receive buffer ESP->WCH
-CircularBuffer TxBuffer = {{0}, 0, 0};          // USART1 Transmit ringbuffer WCH->ESP (DMA)
-CircularBuffer ModbusTx = {{0}, 0, 0};          // USART2 Transmit buffer (modbus)
+CircularBuffer RxBuffer;                        // USART1 Receive buffer ESP.WCH
+CircularBuffer TxBuffer;                        // USART1 Transmit ringbuffer WCH.ESP (DMA)
+CircularBuffer ModbusTx;                        // USART2 Transmit buffer (modbus)
+
+int ow_smartevse_pwm_init(int pin);
+void ow_smartevse_pwm_set(uint32_t duty);
+int ow_smartevse_capture_init(int cp_output_pin, SmartEVSECaptureCallback callback);
+void ow_smartevse_capture_set_alarm(uint32_t microseconds, int auto_reload);
+void ow_smartevse_capture_shutdown(int cp_output_pin);
 
 
 // -------------------------- Interrupt Handlers ---------------------------------
 
-void ADC1_2_IRQHandler(void) __attribute__((interrupt));
-void ADC1_2_IRQHandler()
+bool ADC1_2_IRQHandler(uint16_t cp, uint16_t pp, uint16_t temperature)
 {
-    if(ADC1->STATR & ADC_FLAG_JEOC) {
-        ADC1->STATR &= ~ADC_FLAG_JEOC;          // Clear Flag
-
-        ADC_CP[ADCidx] = ADC1->IDATAR1;
-        ADC_PP[ADCidx] = ADC1->IDATAR2;
-        ADC_Temp[ADCidx++] = ADC1->IDATAR3;
-        if (ADCidx == NUM_ADC_SAMPLES) ADCidx = 0;
-
-        //printf("@MSG: ADC ISR! in=%d\r\n", ADC_CP[0]);
-    }
+    ADC_CP[ADCidx] = cast(uint16_t)(cast(uint32_t)cp * 3300 / 4095);
+    ADC_PP[ADCidx] = cast(uint16_t)(cast(uint32_t)pp * 2200 / 4095);
+    ADC_Temp[ADCidx++] = cast(uint16_t)(cast(uint32_t)temperature * 2200 / 4095);
+    if (ADCidx == NUM_ADC_SAMPLES) ADCidx = 0;
+    return false;
 }
 
 
-void DMA1_Channel4_IRQHandler(void) __attribute__((interrupt));
 void DMA1_Channel4_IRQHandler()
 {
-    if (DMA1->INTFR & DMA_TCIF4) {              // Check if transfer is complete
-        DMA1->INTFCR |= DMA_CTCIF4;             // Clear transfer complete flag
+    DmaBusy = 0;                                // Flag DMA ready for more data
 
-        DMA1_Channel4->CFGR &= ~DMA_CFG4_EN;    // Disable DMA channel
-        DmaBusy = 0;                            // Flag DMA ready for more data
-
-        if (TxBuffer.head != TxBuffer.tail) {   // Check if more data needs to be sent
-            uart_start_dma_transfer();
-        }
+    if (TxBuffer.head != TxBuffer.tail) {       // Check if more data needs to be sent
+        uart_start_dma_transfer();
     }
 }
 
 
-void TIM2_IRQHandler(void) __attribute__((interrupt));
 void TIM2_IRQHandler()
 {
-    if (TIM2->INTFR & TIM_UIF) {            // Check if update interrupt flag is set
-        TIM2->INTFR &= ~TIM_UIF;            // Clear update interrupt flag
-
-        if (RxIdx2) {
-                                            // Copy data in Uart receive buffer to modbus receive buffer
-            memcpy(ModbusRx, RxBuffer2, RxIdx2);
-            ModbusRxLen = RxIdx2;           // Flag to main loop that we received modbus data
-            RxIdx2 = 0;
-        }
-        TIM2->CTLR1 &= ~TIM_CEN;            // Disable Timer 2
-                                            // Will be re-enabled after we receive modbus data
+    if (RxIdx2) {
+        ModbusRxLen = RxIdx2;               // Flag to main loop that we received modbus data
+        RxIdx2 = 0;
     }
-
 }
 
 
-void TIM4_IRQHandler(void) __attribute__((interrupt));
 void TIM4_IRQHandler()
 {
-    TIM4->CNT = 0;                          // Reset Counter
-
-    if(TIM4->INTFR & TIM_FLAG_CC3) {        // Capture flag
-        TIM4->INTFR &= ~TIM_FLAG_CC3;
-        MainsCycleTime = TIM4->CH3CVR;      // Store the Cycle time of the Mains
-    }
-
-    if(TIM4->INTFR & TIM_FLAG_CC3OF) {      // Overcapture flag
-        TIM4->INTFR &= ~TIM_FLAG_CC3OF;
-    }
-    if(TIM4->INTFR & TIM_FLAG_Update) {     // Update flag
-        TIM4->INTFR &= ~TIM_FLAG_Update;
-
-        // Counter CNT counted to 65536 = 65 mS and overflowed.
-        // At 50Hz line frequency we normally expect 3 cycles in 65mS (1 cycle = 20mS)
-        // So we most likely lost power. As there is still power left in the PSU and 10mF cap,
-        // we shutdown the ESP32 and QCA modem, and unlock the charging cable (if locked)
-
-        PowerPanicFlag = 1;
-    }
+    // Counter counted to 65 mS and overflowed.
+    // At 50Hz line frequency we normally expect 3 cycles in 65mS (1 cycle = 20mS)
+    // So we most likely lost power. As there is still power left in the PSU and 10mF cap,
+    // we shutdown the ESP32 and QCA modem, and unlock the charging cable (if locked)
+    PowerPanicFlag = 1;
 }
 
 // Residual current monitor fault trigger.
 //
-void EXTI9_5_IRQHandler(void) __attribute__((interrupt));
 void EXTI9_5_IRQHandler()
 {
-    printf("@MSG: EXTI 9 Interrupt\n");
-    delay(1);
-    // check again, to prevent voltage spikes from tripping the RCM detection
-    if (funDigitalRead(RCMFAULT) == FUN_HIGH ) {
-        if (State) setState(STATE_B1);
-        setErrorFlags(RCM_TRIPPED);
-    }
-
-    EXTI->INTFR = 0x1ffffff;                        // clear interrupt flag register
+    // The ActiveObject performs the second level check on the application
+    // thread before forwarding the RCM fault to the control state machine.
 }
 
 // Serial comm interrupt handler between WCH and ESP
 // FUNCONF_UART_PRINTF_BAUD bps
-void USART1_IRQHandler(void) __attribute__((interrupt));
 void USART1_IRQHandler()
 {
-    uint8_t data;
-
-    // Receive interrupt
-    if (USART1->STATR & USART_FLAG_RXNE) {
-        data = (uint8_t)USART1->DATAR;                  // read data
-
-        if (!buffer_enqueue(&RxBuffer, data)) {         // Store the data in the RxBuffer
-            // TODO: handle buffer full
-        }
-        if (data == '\n') RxRdy1 = 1;                   // flag data ready
-    }
-
-    // Transmit interrupt
-  /*  if (USART1->STATR & USART_FLAG_TXE) {
-        // get data from the queue
-        if (buffer_dequeue(&TxBuffer, &data)) {
-            // Send the next byte
-            USART1->DATAR = data;
-        } else {
-            // Disable the TXE interrupt if no more data
-            USART1->CTLR1 &= ~USART_CTLR1_TXEIE;
-        }
-    }
-   */
-    USART1->STATR &= ~USART_FLAG_ORE;                   // Clear possible overrun flag
+    // OpenWatt's SerialStream owns the UART ISR and forwards complete data.
 }
 
 
 // Serial comm interrupt handler RS485, also handle modbus t1.5 and t3.5 timeouts
 // 9600 bps
-void USART2_IRQHandler(void) __attribute__((interrupt));
 void USART2_IRQHandler()
 {
-    char data;
-
-    // Receive interrupt
-    if (USART2->STATR & USART_FLAG_RXNE) {
-
-        if (TIM2->CNT > 1500) RxIdx2 = 0;               // if time between characters is more then 1.5ms, we'll flush the buffer.
-
-        TIM2->CNT = 0;                                  // Reset modbus t3.5 timer
-        TIM2->CTLR1 |= TIM_CEN;                         // (re)Enable Update interrupt, called when no reception for 3.5ms
-
-        if(RxIdx2 == 255) RxIdx2--;                     // Do not wrap around when buffer is full.
-        data = (uint8_t)USART2->DATAR;                  // read data
-        RxBuffer2[RxIdx2++] = data;
-
-    }
-
-    // Transmission complete interrupt
-    if (USART2->STATR & USART_FLAG_TC) {
-
-        USART2->STATR &= ~USART_FLAG_TC;                // clear Transmission complete flag
-        funDigitalWrite(RS485_DIR, FUN_LOW);            // switch RS485 transceiver back to receive
-    }
-    // Transmit interrupt
-    else if (USART2->STATR & USART_FLAG_TXE) {
-        if (buffer_dequeue(&ModbusTx, &data)) {
-            USART2->DATAR = data;                       // Send the next byte
-        } else {
-            USART2->CTLR1 &= ~USART_CTLR1_TXEIE;        // Disable the TXE interrupt if no more data
-        }
-    }
-
-    USART2->STATR &= ~USART_FLAG_ORE;                   // Clear possible overrun flag
+    // OpenWatt's SerialStream owns the UART ISR and Modbus framing timeout.
 }
 
 
@@ -240,29 +168,29 @@ void USART2_IRQHandler()
 /*
 // Function to check if the buffer is full
 uint8_t buffer_full(CircularBuffer *cb) {
-    //return (((cb->head + 1) % sizeof(cb->buffer)) == cb->tail);
-    return (((cb->head + 1) & 0xff ) == cb->tail);
+    //return (((cb.head + 1) % sizeof(cb.buffer)) == cb.tail);
+    return (((cb.head + 1) & 0xff ) == cb.tail);
 }
 */
 
 // Function to add an element to the buffer
 uint8_t buffer_enqueue(CircularBuffer *cb, char data) {
-    if ( ((cb->head + 1) & (CIRCULARBUFFER - 1) ) == cb->tail ) {
+    if ( ((cb.head + 1) & (CIRCULARBUFFER - 1) ) == cb.tail ) {
         return 0; // Buffer is full
     }
-    cb->buffer[cb->head] = data;
-    cb->head = (cb->head + 1) & (CIRCULARBUFFER - 1);
+    cb.buffer[cb.head] = data;
+    cb.head = (cb.head + 1) & (CIRCULARBUFFER - 1);
     return 1;
 }
 
 
 // Function to remove an element from the buffer
 uint8_t buffer_dequeue(CircularBuffer *cb, char *data) {
-    if (cb->head == cb->tail) {
+    if (cb.head == cb.tail) {
         return 0; // Buffer is empty
     }
-    *data = cb->buffer[cb->tail];
-    cb->tail = (cb->tail + 1) & (CIRCULARBUFFER - 1);
+    *data = cb.buffer[cb.tail];
+    cb.tail = (cb.tail + 1) & (CIRCULARBUFFER - 1);
     return 1;
 }
 
@@ -270,9 +198,9 @@ uint8_t buffer_dequeue(CircularBuffer *cb, char *data) {
 void PowerPanicCtrl(uint8_t enable)
 {
     if (enable) {
-        TIM4->CTLR1 |= TIM_CEN |TIM_ARPE;               // Enable TIM1 / PowerPanic
+        PowerPanicEnabled = 1;
     } else {
-        TIM4->CTLR1 &= ~(TIM_CEN |TIM_ARPE);            // Disable TIM1 / PowerPanic
+        PowerPanicEnabled = 0;
     }
 }
 
@@ -280,29 +208,22 @@ void PowerPanicCtrl(uint8_t enable)
 void RCmonCtrl(uint8_t enable)
 {
     if (enable) {
-        EXTI->INTENR |= EXTI_Line9;                     // Enable EXT9
+        RCmonEnabled = 1;
     } else {
-        EXTI->INTENR &= ~EXTI_Line9;                    // Disable EXT9
+        RCmonEnabled = 0;
     }
 }
 
 void ModemPower(uint8_t enable)
 {
-    if (enable) {
-        funDigitalWrite(VCC_EN, FUN_HIGH);              // Modem power ON
-    } else {
-        funDigitalWrite(VCC_EN, FUN_LOW);               // Modem power OFF
-    }
+    ModemPowered = enable;
 }
 
 
 // test RCMON
 // enable test signal to RCM14-03 sensor. Should trigger the fault output
-void testRCMON(void) {
-    setErrorFlags(RCM_TEST);
-    funDigitalWrite(RCMTEST, FUN_LOW);
-    delay(1000);                                        // we take this long so you can actually see the red led on the RCM14
-    funDigitalWrite(RCMTEST, FUN_HIGH);
+void testRCMON() {
+    // SmartEVSE v3.0 exposes only the RCM fault output to this ESP32.
 }
 
 
@@ -311,294 +232,73 @@ void testRCMON(void) {
 
 
 
-void GPIOInit(void)
+void GPIOInit()
 {
-    // Enable APB1 peripheral clocks
-    RCC->APB1PCENR |= RCC_APB1Periph_USART2 | RCC_APB1Periph_TIM2 | RCC_APB1Periph_TIM3 | RCC_APB1Periph_TIM4;
-    // Enable APB2 peripheral clocks
-    RCC->APB2PCENR |= RCC_APB2Periph_USART1 | RCC_APB2Periph_AFIO | RCC_APB2Periph_GPIOA | RCC_APB2Periph_GPIOB | RCC_APB2Periph_TIM1 | RCC_APB2Periph_ADC1;
-    // Enable DMA clock
-    RCC->AHBPCENR |= RCC_AHBPeriph_DMA1;
-
-
-    // Port A
-    funPinMode(PP_IN, GPIO_CFGLR_IN_ANALOG);
-    funPinMode(CP_IN, GPIO_CFGLR_IN_ANALOG);
-    funPinMode(RS485_TX, GPIO_CFGLR_OUT_10Mhz_AF_PP);
-    funPinMode(RS485_RX, GPIO_CFGLR_IN_FLOAT);
-    funPinMode(TEMP, GPIO_CFGLR_IN_ANALOG);
-    funPinMode(CP_OUT, GPIO_CFGLR_OUT_10Mhz_AF_PP);
-    funPinMode(USART_RX, GPIO_CFGLR_OUT_10Mhz_AF_PP);       // Output to ESP
-    funPinMode(USART_TX, GPIO_CFGLR_IN_FLOAT);              // Input from ESP
-    funPinMode(VCC_EN, GPIO_CFGLR_OUT_2Mhz_PP);
-    funPinMode(CPOFF, GPIO_CFGLR_OUT_2Mhz_PP);
-    funPinMode(LEDR, GPIO_CFGLR_OUT_10Mhz_AF_PP);
-    funPinMode(LEDG, GPIO_CFGLR_OUT_10Mhz_AF_PP);
-    funPinMode(SWDIO, GPIO_CFGLR_OUT_2Mhz_OD);
-
-    // Port B
-    funPinMode(LEDB, GPIO_CFGLR_OUT_10Mhz_AF_PP);
-    funPinMode(RS485_DIR, GPIO_CFGLR_OUT_10Mhz_PP);
-    funPinMode(RCMTEST, GPIO_CFGLR_OUT_2Mhz_PP);
-    funPinMode(SSR1, GPIO_CFGLR_OUT_2Mhz_PP);
-    funPinMode(SSR2, GPIO_CFGLR_OUT_2Mhz_PP);
-    funPinMode(ACTA, GPIO_CFGLR_OUT_2Mhz_PP);
-    funPinMode(ACTB, GPIO_CFGLR_OUT_2Mhz_PP);
-    funPinMode(ZC, GPIO_CFGLR_IN_FLOAT);
-    funPinMode(RCMFAULT, GPIO_CFGLR_IN_PUPD);            // pull up
-    funPinMode(SW_IN, GPIO_CFGLR_IN_PUPD);                // pull up
-    funPinMode(LOCK_IN, GPIO_CFGLR_IN_FLOAT);
-    GPIOB->OUTDR |= 0x0220;                             // Enable pull up on PB5 and PB9
-
+    gpio_input_init(PP_IN);
+    gpio_input_init(CP_IN);
+    gpio_input_init(TEMP);
+    gpio_output_init(CP_OUT, true);
+    gpio_output_init(CPOFF, true);
+    gpio_output_init(SSR1, false);
+    gpio_output_init(SSR2, false);
+    gpio_input_init(RCMFAULT, Pull.up);
 }
 
 
-void UsartInit(void)
+void UsartInit()
 {
-    RCC->APB2PRSTR |= RCC_APB2Periph_USART1;
-    RCC->APB2PRSTR &= ~RCC_APB2Periph_USART1;
-
-    USART1->BRR = FUNCONF_SYSTEM_CORE_CLOCK / FUNCONF_UART_PRINTF_BAUD;             // USART1 Serial comm between ESP32 and WCH @ FUNCONF_UART_PRINTF_BAUDbps
-    // Enable Uart1, TX, RX and Receive interrupt
-    USART1->CTLR1 = USART_CTLR1_UE  | USART_CTLR1_TE | USART_CTLR1_RE | USART_CTLR1_RXNEIE;// | USART_CTLR1_TXEIE;
-
-    // Enable Uart1 DMA transmitter
-    USART1->CTLR3 |= USART_CTLR3_DMAT;
-
-    // Enable interrupts for USART1
-    NVIC_EnableIRQ(USART1_IRQn);
-
-    RCC->APB1PRSTR |= RCC_APB1Periph_USART2;
-    RCC->APB1PRSTR &= ~RCC_APB1Periph_USART2;
-
-    USART2->BRR = FUNCONF_SYSTEM_CORE_CLOCK / 9600 / 2;           // USART2 9600bps RS485
-    // Enable Uart2, TX, RX, Receive and Transmission Complete interrupt
-    USART2->CTLR1 = USART_CTLR1_UE  | USART_CTLR1_TE | USART_CTLR1_RE | USART_CTLR1_RXNEIE | USART_CTLR1_TCIE;
-
-    // Enable interrupts for USART2
-    NVIC_EnableIRQ(USART2_IRQn);
-
+    // OpenWatt owns the ESP32 UARTs through SerialStream instances.
 }
 
 
-void DMAInit(void)
+void DMAInit()
 {
-    // DMA controller has no peripheral reset bits
-
-    // Memory increment and read from memory. Enable transfer complete interrupt
-    DMA1_Channel4->CFGR = DMA_CFG4_MINC | DMA_CFG4_DIR |DMA_CFG4_TCIE;
-
-    // Set peripheral address (USART1 data register)
-    DMA1_Channel4->PADDR = (uint32_t)&USART1->DATAR;
-
-    // Enable DMA1 Channel4 interrupt
-    NVIC_EnableIRQ(DMA1_Channel4_IRQn);
-
+    // OpenWatt's ESP32 UART bridge owns DMA and completion delivery.
 }
 
 
-void TIM1Init( void )
+void TIM1Init()
 {
-    // Reset TIM1 to init all regs
-    RCC->APB2PRSTR |= RCC_APB2Periph_TIM1;
-    RCC->APB2PRSTR &= ~RCC_APB2Periph_TIM1;
-
-    // Prescaler (96Mhz/(95+1) = 1Mhz)
-    TIM1->PSC = (FUNCONF_SYSTEM_CORE_CLOCK / 1000000) - 1;
-    // Set period (Auto Reload)
-    TIM1->ATRLR = 1000-1;
-    // Reload immediately
-    TIM1->SWEVGR |= TIM_UG;
-
-    // CH1 Mode is output, PWM mode 2, Preload enable
-    TIM1->CHCTLR1 |= TIM_OC1M_2 | TIM_OC1M_1 | TIM_OC1M_0 | TIM_OC1PE;
-    // CH4 Mode is output (no actual output on pin!), PWM mode 2, Preload enable
-    TIM1->CHCTLR2 |= TIM_OC4M_2 | TIM_OC4M_1 | TIM_OC4M_0 | TIM_OC4PE;
-    // Set TRGO signal to trigger on compare reg4
-    TIM1->CTLR2 = TIM_MMS_0 | TIM_MMS_1| TIM_MMS_2;
-
-    // Set the CP Duty Cycle value to 10% initially
-    TIM1->CH1CVR = 100;
-    // CH sets the ADC sample start at 5% (and 96%)
-    TIM1->CH4CVR = PWM_5;
-
-    // CH1 positive pol, output enabled
-    TIM1->CCER |= TIM_CC1E | TIM_CC1P;
-    // CH4 positive pol, output disabled
-    TIM1->CCER |= (TIM_CC4E & 0) | TIM_CC4P;
-
-    // Enable TIM1 outputs
-    TIM1->BDTR |= TIM_MOE;
-    // Enable TIM1
-    TIM1->CTLR1 |= TIM_CEN |TIM_ARPE;
-
+    // The ESP32 GPTimer starts in State A, sampling once per millisecond.
+    ow_smartevse_capture_set_alarm(PWM_100, 1);
 }
 
 
 // Timer used for Modbus timeout
-void TIM2Init( void )
+void TIM2Init()
 {
-    // Reset TIM2 to init all regs
-    RCC->APB1PRSTR |= RCC_APB1Periph_TIM2;
-    RCC->APB1PRSTR &= ~RCC_APB1Periph_TIM2;
-
-    // Prescaler (96Mhz/(95+1) = 1Mhz)
-    TIM2->PSC = (FUNCONF_SYSTEM_CORE_CLOCK / 1000000) - 1;
-    // Set period (Auto Reload) to 3500us = 3.5ms
-    TIM2->ATRLR = 3500-1;
-    // Reload immediately
-    TIM2->SWEVGR |= TIM_UG;
-
-    // Update interrupt enable
-    TIM2->DMAINTENR |= TIM_UIE;
-
-    TIM2->CTLR1 |= TIM_ARPE | TIM_URS;
-
-    // Clear Counter and interrupt flags before enabling Interrupts
-    TIM2->CNT = 0;
-    TIM2->INTFR = 0;
-    NVIC_EnableIRQ(TIM2_IRQn);
-
-    // Enable TIM2
-    TIM2->CTLR1 |= TIM_CEN;
-
+    // Modbus RTU framing timeouts are owned by OpenWatt's ModbusInterface.
 }
 
 
-void TIM3Init( void )
+void TIM3Init()
 {
-    // Reset TIM3 to init all regs
-    RCC->APB1PRSTR |= RCC_APB1Periph_TIM3;
-    RCC->APB1PRSTR &= ~RCC_APB1Periph_TIM3;
-
-    // Prescaler (96Mhz/(95+1) = 1Mhz)
-    TIM3->PSC = (FUNCONF_SYSTEM_CORE_CLOCK / 1000000) - 1;
-    // Set period (Auto Reload) to 3906 Hz
-    TIM3->ATRLR = 256-1;
-    // Reload immediately
-    TIM3->SWEVGR |= TIM_UG;
-
-    // CH1 Mode is output, PWM mode 2, Preload enable
-    TIM3->CHCTLR1 |= TIM_OC1M_2 | TIM_OC1M_1 | TIM_OC1M_0 | TIM_OC1PE;
-    // CH2 Mode is output, PWM mode 2, Preload enable
-    TIM3->CHCTLR1 |= TIM_OC2M_2 | TIM_OC2M_1 | TIM_OC2M_0 | TIM_OC2PE;
-    // CH3 Mode is output, PWM mode 2, Preload enable
-    TIM3->CHCTLR2 |= TIM_OC3M_2 | TIM_OC3M_1 | TIM_OC3M_0 | TIM_OC3PE;
-
-    // Set the Capture Compare Register (Duty Cycle) value
-    TIM3->CH1CVR = 0;       // Red Channel off
-    TIM3->CH2CVR = 0;       // Green Channel off
-    TIM3->CH3CVR = 0;       // Blue Channel off
-
-    // CH1, CH2, CH3 positive pol, output enabled
-    TIM3->CCER |= TIM_CC1E | TIM_CC1P | TIM_CC2E | TIM_CC2P | TIM_CC3E | TIM_CC3P;
-
-    // Enable TIM1
-    TIM3->CTLR1 |= TIM_CEN |TIM_ARPE;
-
+    // RGB indication is a separate OpenWatt board concern.
 }
 
 // Timer 4 is set up to monitor the ZC(CH3) input.
 // On each mains cycle the Timer 4 interrupt handler is called
 // It's also called when the counter overflows (loss of mains)
-void TIM4Init( void )
+void TIM4Init()
 {
-    // Reset TIM4 to init all regs
-    RCC->APB1PRSTR |= RCC_APB1Periph_TIM4;
-    RCC->APB1PRSTR &= ~RCC_APB1Periph_TIM4;
-
-    // Prescaler (96Mhz/(95+1) = 1Mhz)
-    TIM4->PSC = (FUNCONF_SYSTEM_CORE_CLOCK / 1000000) - 1;
-    // Set period to 65 mS
-    TIM4->ATRLR = 65535;
-    // Reload immediately
-    TIM4->SWEVGR |= TIM_UG;
-
-    // CH3 Mode is input on TI3
-    TIM4->CHCTLR2 |= TIM_CC3S_0;
-
-    // capture on rising edge (TIM_CC3P = 0)
-    // capture enable TIM_CC3E = 1
-    TIM4->CCER |= TIM_CC3E;
-
-    // CC3IE interrupt enable
-    // Trigger interrupt enable (external valid edge detected)
-    // Update interrupt enable (counter overflow)
-    TIM4->DMAINTENR |= TIM_CC3IE | (TIM_TIE & 0) | TIM_UIE;
-
-    // Clear Counter and interrupt flags before enabling Interrupts
-    TIM4->CNT = 0;
-    TIM4->INTFR = 0;
-    NVIC_EnableIRQ(TIM4_IRQn);
-
-    // Enable TIM4
-    TIM4->CTLR1 |= TIM_CEN |TIM_ARPE;
-
+    // SmartEVSE v3.0 does not route the mains zero-cross signal to the ESP32.
 }
 
 
 // External interrupt on the PB9 / RCMFAULT input
 //
-void EXTInit( void )
+void EXTInit()
 {
-    AFIO->EXTICR[2] |= 1<<4;                        // EXTICR3 register. EXTI9 Port B
-    EXTI->INTENR |= EXTI_Line9;                     // Enable EXT9
-    EXTI->RTENR |= EXTI_Line9;                      // Rising Edge on RB9
-    EXTI->INTFR = 0x1ffffff;                        // clear interrupt flag register
-
-    NVIC_EnableIRQ(EXTI9_5_IRQn);                   // enable interrupt
-
+    // RCMFAULT is checked by the ActiveObject on each 10 ms control event.
 }
 
 
 /*
  * initialize ADC
  */
-void ADCInit( void )
+void ADCInit()
 {
-    // ADCCLK = 12 MHz => RCC_ADCPRE = 3. Divide 96MHz by 8
-    RCC->CFGR0 |= RCC_PCLK2_Div8; // (0x3 << 14);
-
-    // Reset the ADC to init all regs
-    RCC->APB2PRSTR |= RCC_APB2Periph_ADC1;
-    RCC->APB2PRSTR &= ~RCC_APB2Periph_ADC1;
-
-    // Set up 3 conversions 1st PA1(CP), 2nd PA0(PP), 3rd PA4(Temp)
-    // JL[21:20]= 10-> 3 conversions
-    // JSQ2: PA1(CP), JSQ3: PA0(PP), JSQ4: PA4(Temp)
-    ADC1->ISQR |= ADC_JL_1 | ADC_JSQ2_0 | ADC_JSQ4_2;
-    //ADC1->ISQR |= ADC_JL_1 | ADC_JSQ2_0 | ADC_JSQ3_2;
-
-    // set sampling time for all channels to 6=>71.5 cycles
-    // 0:7 => 1.5/7.5/13.5/28.5/41.5/55.5/71.5/239.5 cycles
-    // @ 12Mhz each conversion takes 5,95 uS
-    ADC1->SAMPTR2 |= ADC_SampleTime_71Cycles5 << (3*ADC_Channel_4) |
-                     ADC_SampleTime_71Cycles5 << (3*ADC_Channel_1) |
-                     ADC_SampleTime_71Cycles5 << (3*ADC_Channel_0);
-
-    // Enable Scan mode to convert all selected channels
-    // Enable the INPUT signal buffer
-    ADC1->CTLR1 |= ADC_SCAN | ADC_OutputBuffer_Enable;
-
-    // turn on ADC
-    ADC1->CTLR2 |= ADC_ADON;
-
-    // Reset calibration
-    ADC1->CTLR2 |= ADC_RSTCAL;
-    while(ADC1->CTLR2 & ADC_RSTCAL);
-    // Calibrate
-    ADC1->CTLR2 |= ADC_CAL;
-    while(ADC1->CTLR2 & ADC_CAL);
-
-    // turn on ADC and set rule group to TRGO event triggering
-    ADC1->CTLR2 = ADC_ADON | ADC_JEXTTRIG;
-    // should be ready for conversion now
-
-    // Enable Interrupt on Injected channels
-    ADC1->STATR = 0;
-    ADC1->CTLR1 |= ADC_JEOCIE;
-    NVIC_EnableIRQ(ADC_IRQn);
-
+    // ADC1 channels 3, 6 and 0 are configured by the ESP-IDF capture bridge.
 }
 
 // ------------------------------------- END of INIT functions -------------------------------------
@@ -610,7 +310,7 @@ int8_t TemperatureSensor() {
     uint32_t TempAvg = 0;
     uint8_t n;
     int8_t Temperature;
-    static int8_t Old_Temperature = 255;
+    static int8_t Old_Temperature = -128;
 
     for(n=0; n<NUM_ADC_SAMPLES; n++) TempAvg += ADC_Temp[n];
     TempAvg = TempAvg / NUM_ADC_SAMPLES ;
@@ -618,13 +318,10 @@ int8_t TemperatureSensor() {
 
     // The MCP9700A temperature sensor outputs 500mV at 0C, and has a 10mV/C change in output voltage.
     // 750mV is 25C, 400mV = -10C
-    // 3.3V / 4096(12bit ADC) = ~ 800uV/step. Convert measurement to mV*10 by multiplying by 8
-    // Subtract 500mV offset, and finally divide by 100 to convert to C.
-    Temperature = (int16_t)((TempAvg *8)- 5000)/100;
-    if (Temperature != Old_Temperature) {
-        printf("@Temp:%u\n", Temperature); //send data to ESP32
+    // The ESP32 bridge stores calibrated millivolts.
+    Temperature = cast(int8_t)((cast(int32_t)TempAvg - 500) / 10);
+    if (Temperature != Old_Temperature)
         Old_Temperature = Temperature;
-    }
     return Temperature;
 }
 
@@ -638,12 +335,10 @@ uint8_t ProximityPin() {
     for(n=0; n<NUM_ADC_SAMPLES; n++) PPAvg += ADC_PP[n];
     PPAvg = PPAvg / NUM_ADC_SAMPLES ;
 
-
-    printf("@MSG: PP pin: %u \n", (uint16_t)PPAvg);
     MaxCap = 13;                                                   // No resistor, Max cable current = 13A
-    if ((PPAvg > 1300) && (PPAvg < 1800)) MaxCap = 16;             // Max cable current = 16A  680R -> should be around 1.3V
-    if ((PPAvg > 600) && (PPAvg < 900)) MaxCap = 32;               // Max cable current = 32A  220R -> should be around 0.6V
-    if ((PPAvg > 200) && (PPAvg < 500)) MaxCap = 63;               // Max cable current = 63A  100R -> should be around 0.3V
+    if ((PPAvg > 1300) && (PPAvg < 1800)) MaxCap = 16;             // Max cable current = 16A  680R . should be around 1.3V
+    if ((PPAvg > 600) && (PPAvg < 900)) MaxCap = 32;               // Max cable current = 32A  220R . should be around 0.6V
+    if ((PPAvg > 200) && (PPAvg < 500)) MaxCap = 63;               // Max cable current = 63A  100R . should be around 0.3V
 
     return MaxCap;
 }
@@ -663,27 +358,12 @@ int buffer_write(CircularBuffer *cb, char *data, uint16_t size)
 }
 
 // Called by _write, putchar and DMA ISR
-void uart_start_dma_transfer(void)
+void uart_start_dma_transfer()
 {
-    if (DmaBusy == 0 && (DMA1_Channel4->CFGR & DMA_CFG4_EN) == 0 && TxBuffer.head != TxBuffer.tail) {
-
-        // Prevent calls from the DMA ISR and regular calls to this function from interfering with each other.
-        // This flag can not be moved to the end of this function!
+    if (DmaBusy == 0 && TxBuffer.head != TxBuffer.tail) {
         DmaBusy = 1;
-
-        // Set memory address
-        DMA1_Channel4->MADDR = (uint32_t)(&TxBuffer.buffer[TxBuffer.tail]);
-        if (TxBuffer.head > TxBuffer.tail) {
-            // Linear segment, no wrap-around
-            DMA1_Channel4->CNTR = TxBuffer.head - TxBuffer.tail;        // Set number of bytes to transfer
-        } else {
-            // Wrap-around segment
-            DMA1_Channel4->CNTR = CIRCULARBUFFER - TxBuffer.tail;       // Set number of bytes to transfer
-        }
-
-        TxBuffer.tail = (TxBuffer.tail + DMA1_Channel4->CNTR) & (CIRCULARBUFFER-1);   // Update tail for next potential transfer
-        DMA1_Channel4->CFGR |= DMA_CFG4_EN;                             // Enable DMA channel
-
+        TxBuffer.tail = TxBuffer.head;
+        DmaBusy = 0;
     }
 }
 
@@ -693,12 +373,7 @@ void uart_start_dma_transfer(void)
 //
 int _write(int fd, const char *buffer, int size)
 {
-    NVIC_DisableIRQ(DMA1_Channel4_IRQn);                // Disable DMA interrupt during buffer write
-
-    int ret = buffer_write(&TxBuffer, (char *) buffer, size);
-
-    NVIC_EnableIRQ(DMA1_Channel4_IRQn);                 // Re-enable interrupt before starting DMA
-
+    int ret = buffer_write(&TxBuffer, cast(char*)buffer, cast(uint16_t)size);
     if (ret) uart_start_dma_transfer();
     return ret;
 }
@@ -707,12 +382,7 @@ int _write(int fd, const char *buffer, int size)
 //
 int putchar(int c)
 {
-    NVIC_DisableIRQ(DMA1_Channel4_IRQn);
-    
-    int ret = buffer_enqueue(&TxBuffer, c);
-    
-    NVIC_EnableIRQ(DMA1_Channel4_IRQn);
-    
+    int ret = buffer_enqueue(&TxBuffer, cast(char)c);
     if (ret) uart_start_dma_transfer();
     return ret;
 }
@@ -727,34 +397,19 @@ uint8_t ReadESPdata(char *buf) {
 }
 
 
-void setup(void) {
-    SystemInit();
-//  NVIC_PriorityGroupConfig(NVIC_PriorityGroup_2);
-//  SystemCoreClockUpdate();
-
-    SysTick->CTLR = 1;                              // Enable SysTick counter HCLK/8, count up
-
+int setup(SmartEVSECaptureCallback callback) {
     GPIOInit();
     UsartInit();                                    // Usart1 = FUNCONF_UART_PRINTF_BAUD bps. Usart2 = Modbus 9600bps 8N1
     DMAInit();                                      // DMA transfer for Uart1 TX
 
-    // Note that printf will only actually send data to the uart, when it detects a newline, or after a timeout
-    //
+    gpio_output_set(CPOFF, true);                   // CP disabled
+    gpio_output_set(SSR1, false);                   // Contactor 1 OFF
+    gpio_output_set(SSR2, false);                   // Contactor 2 OFF
 
-    printf("@MSG: SmartEVSE mainboard startup\n");
-    printf("@MSG: SystemClk:%d\n",FUNCONF_SYSTEM_CORE_CLOCK);
-    //printf("@MSG: ChipID:%08x\n", DBGMCU_GetCHIPID() );
-    //printf("@MSG: UID:%08x%04x\n", *( uint32_t * )0x1FFFF7E8 , (*( uint32_t * )0x1FFFF7EC)>>16 );
-
-    funDigitalWrite(VCC_EN, FUN_LOW);               // Modem power control OFF
-    funDigitalWrite(CPOFF, FUN_LOW);                // CP enabled
-    funDigitalWrite(RS485_DIR, FUN_LOW);
-    funDigitalWrite(RCMTEST, FUN_HIGH);             // RCM_TEST signal OFF (small current draw ~2mA)
-    funDigitalWrite(SSR1, FUN_LOW);                 // Contactor 1 OFF
-    funDigitalWrite(SSR2, FUN_LOW);                 // Contactor 2 OFF
-    funDigitalWrite(ACTA, FUN_HIGH);                // Actuator output R at 12V
-    funDigitalWrite(ACTB, FUN_HIGH);                // Actuator output W at 12V
-    funDigitalWrite(SWDIO, FUN_HIGH);               // SWDIO High (pull up) unused
+    if (ow_smartevse_pwm_init(cast(int)CP_OUT) != 0)
+        return -1;
+    if (ow_smartevse_capture_init(cast(int)CP_OUT, callback) != 0)
+        return -1;
 
     EXTInit();                                      // Interrupt on RCMFAULT pin
     ADCInit();                                      // CP, PP and Temp inputs
@@ -766,21 +421,343 @@ void setup(void) {
     ModemPower(1);
     RCmonCtrl(DISABLE);
     PowerPanicCtrl(DISABLE);
+    return 0;
 }
 
 
 // Delay in milliseconds
 // We don't reset SysTick counter, but instead set the SysTick compare register
 void delay(uint32_t ms) {
-    uint32_t i;
-
-    // Clear Status register
-    SysTick->SR &= ~(1 << 0);
-    // SystemCoreClock / 8000 = 1 mS (12000 cycles @ 96Mhz)
-    i = (uint32_t)ms * (FUNCONF_SYSTEM_CORE_CLOCK / 8000);
-    // Set compare register to current counter value + delay
-    SysTick->CMP = SysTick->CNT + i;
-    // Wait (blocking) for flag to be set
-    while((SysTick->SR & 0x01) == 0);
+    // Blocking delays are not used by the OpenWatt port. The ActiveObject
+    // schedules any delayed continuation on the application timer queue.
 }
-#endif
+
+void hardware_shutdown()
+{
+    ow_smartevse_capture_shutdown(cast(int)CP_OUT);
+    gpio_output_set(SSR1, false);
+    gpio_output_set(SSR2, false);
+    gpio_output_set(CPOFF, true);
+}
+
+
+// SmartEVSE-3/src/main.cpp control section. Function order and state-machine
+// flow follow the pinned upstream source; product/UI/load-balancing decisions
+// are supplied by the hard control functions in this section.
+
+enum uint8_t STATE_A = 0;
+enum uint8_t STATE_B = 1;
+enum uint8_t STATE_C = 2;
+enum uint8_t STATE_B1 = 9;
+enum uint8_t STATE_C1 = 10;
+
+enum uint8_t PILOT_12V = 12;
+enum uint8_t PILOT_9V = 9;
+enum uint8_t PILOT_6V = 6;
+enum uint8_t PILOT_3V = 3;
+enum uint8_t PILOT_DIODE = 1;
+enum uint8_t PILOT_NOK = 0;
+enum uint8_t PILOT_SHORT = 255;
+
+enum uint16_t MIN_CURRENT = 6;
+enum uint16_t MAX_CURRENT = 800;
+
+uint8_t State = STATE_A;
+uint16_t ChargeCurrent = MIN_CURRENT * 10;
+uint32_t CurrentPWM = 1024;
+bool Contactor1;
+bool Contactor2;
+bool AccessStatus;
+bool RCMFault;
+uint8_t MaxCapacity = 13;
+uint8_t MinCurrent = MIN_CURRENT;
+uint8_t MaxCurrent = 80;
+uint8_t ChargeDelay;
+uint8_t C1Timer;
+uint8_t PilotDisconnectTime;
+bool PilotDisconnected;
+
+
+uint16_t GetCurrent() {
+    uint32_t DutyCycle = CurrentPWM;
+
+    if (DutyCycle < 102) {
+        return 0; //PWM off or ISO15118 modem enabled
+    } else if (DutyCycle < 870) {
+        return cast(uint16_t)((DutyCycle * 1000 / 1024) * 6 / 10 + 1);
+    } else if (DutyCycle <= 983) {
+        return cast(uint16_t)(((DutyCycle * 1000 / 1024)- 640) * 25 / 10 + 3);
+    } else {
+        return 0; //constant +12V
+    }
+}
+
+
+// Write duty cycle to pin
+// Value in range 0 (0% duty) to 1024 (100% duty) for ESP32, 1000 (100% duty) for CH32
+void SetCPDuty(uint32_t DutyCycle){
+    ow_smartevse_pwm_set(DutyCycle);                                       // update PWM signal
+    CurrentPWM = DutyCycle;
+}
+
+// Set Charge Current
+// Current in Amps * 10 (160 = 16A)
+void SetCurrent(uint16_t current) {
+    uint32_t DutyCycle;
+
+    if ((current >= (MIN_CURRENT * 10)) && (current <= 510)) DutyCycle = current * 10 / 6;
+                                                                            // calculate DutyCycle from current
+    else if ((current > 510) && (current <= 800)) DutyCycle = (current * 10 / 25) + 640;
+    else DutyCycle = 100;                                                   // invalid, use 6A
+    DutyCycle = DutyCycle * 1024 / 1000;                                    // conversion to 1024 = 100%
+    SetCPDuty(DutyCycle);
+}
+
+
+void setStatePowerUnavailable() {
+    if (State == STATE_A)
+       return;
+    //State changes between A,B,C,D are caused by EV or by the user
+    //State changes between x1 and x2 are created by the EVSE
+    //State changes between x1 and x2 indicate availability (x2) of unavailability (x1) of power supply to the EV
+    if (State == STATE_C) setState(STATE_C1);                       // If we are charging, tell EV to stop charging
+    else if (State != STATE_C1 && State != STATE_B1) setState(STATE_B1);    // If we are not in State C1 or B1, switch to State B1
+}
+
+
+//this replaces old CP_OFF and CP_ON and PILOT_CONNECTED and PILOT_DISCONNECTED macros
+//setPilot(true) switches the PILOT ON (CONNECT), setPilot(false) switches it OFF
+void setPilot(bool On) {
+    if (On) {
+        gpio_output_set(CPOFF, false);
+    } else
+        gpio_output_set(CPOFF, true);
+}
+
+
+void setState(uint8_t NewState) {
+    switch (NewState) {
+        case STATE_B1:
+            if (!ChargeDelay) ChargeDelay = 3;
+            if (State != STATE_B1 && !PilotDisconnected && AccessStatus) {
+                setPilot(false);
+                PilotDisconnected = true;
+                PilotDisconnectTime = 5;
+            }
+            goto case STATE_A;
+
+        case STATE_A:
+            gpio_output_set(SSR1, false);
+            gpio_output_set(SSR2, false);
+            Contactor1 = false;
+            Contactor2 = false;
+            SetCPDuty(1024);
+            ow_smartevse_capture_set_alarm(PWM_100, 1);
+
+            if (NewState == STATE_A) {
+                ChargeDelay = 0;
+                setPilot(true);
+            }
+            break;
+
+        case STATE_B:
+            setPilot(true);
+            gpio_output_set(SSR1, false);
+            gpio_output_set(SSR2, false);
+            Contactor1 = false;
+            Contactor2 = false;
+            ow_smartevse_capture_set_alarm(PWM_95, 0);
+            break;
+
+        case STATE_C:
+            gpio_output_set(SSR1, true);
+            gpio_output_set(SSR2, true);
+            Contactor1 = true;
+            Contactor2 = true;
+            break;
+
+        case STATE_C1:
+            SetCPDuty(1024);
+            ow_smartevse_capture_set_alarm(PWM_100, 1);
+            C1Timer = 6;
+            ChargeDelay = 15;
+            break;
+
+        default:
+            break;
+    }
+
+    State = NewState;
+}
+
+
+void setAccess(uint8_t Access) {
+    AccessStatus = Access != 0;
+    if (!AccessStatus) {
+        if (State == STATE_C) setState(STATE_C1);
+        else if (State != STATE_C1 && State == STATE_B) setState(STATE_B1);
+    }
+}
+
+
+// Determine the state of the Pilot signal
+//
+uint8_t Pilot() {
+
+    uint32_t sample, Min = 3300, Max = 0;
+    uint32_t voltage;
+    uint8_t n;
+
+    // calculate Min/Max of last 25 CP measurements
+    for (n=0 ; n<25 ;n++) {
+        sample = ADC_CP[n];
+        voltage = sample;
+        if (voltage < Min) Min = voltage;                                   // store lowest value
+        if (voltage > Max) Max = voltage;                                   // store highest value
+    }
+
+    // test Min/Max against fixed levels
+    if (Min >= 3055 ) return PILOT_12V;                                     // Pilot at 12V (min 11.0V)
+    if ((Min >= 2735) && (Max < 3055)) return PILOT_9V;                     // Pilot at 9V
+    if ((Min >= 2400) && (Max < 2735)) return PILOT_6V;                     // Pilot at 6V
+    if ((Min >= 2000) && (Max < 2400)) return PILOT_3V;                     // Pilot at 3V
+    if ((Min >= 1600) && (Max < 2000)) return PILOT_SHORT;                  // Pilot short or open
+    if ((Min > 100) && (Max < 300)) return PILOT_DIODE;                     // Diode Check OK
+    return PILOT_NOK;                                                       // Pilot NOT ok
+}
+
+
+// Is there at least 6A available for a new EVSE?
+// The first hard-function port has no load-balancing participants.
+char IsCurrentAvailable() {
+    return AccessStatus && !RCMFault;
+}
+
+
+void Timer1S_singlerun() {
+    if (ChargeDelay)
+        --ChargeDelay;
+    if (PilotDisconnectTime && --PilotDisconnectTime == 0) {
+        setPilot(true);
+        PilotDisconnected = false;
+    }
+    if (State == STATE_C1 && C1Timer && --C1Timer == 0) {
+        gpio_output_set(SSR1, false);
+        gpio_output_set(SSR2, false);
+        Contactor1 = false;
+        Contactor2 = false;
+        setState(STATE_B1);
+    }
+}
+
+
+void Timer10ms_singlerun() {
+    static uint8_t DiodeCheck = 0;
+    static uint16_t StateTimer = 0;                                         // When switching from State B to C, make sure pilot is at 6v for 100ms
+    uint8_t pilot = Pilot();
+
+    // ############### EVSE State A #################
+
+    if (State == STATE_A || State == STATE_B1) {
+        // When the pilot line is disconnected, wait for PilotDisconnectTime, then reconnect
+        if (PilotDisconnected) {
+            if (PilotDisconnectTime == 0) {
+                setPilot(true);
+                PilotDisconnected = false;
+            }
+        } else if (pilot == PILOT_12V) {
+            if (State != STATE_A) setState(STATE_A);
+            ChargeDelay = 0;
+        } else if (pilot == PILOT_9V && !RCMFault
+            && ChargeDelay == 0 && AccessStatus)
+        {
+            DiodeCheck = 0;
+
+            MaxCapacity = ProximityPin();
+            if (MaxCurrent > MaxCapacity) ChargeCurrent = MaxCapacity * 10;
+            else ChargeCurrent = MinCurrent * 10;
+
+            if (IsCurrentAvailable()) {
+                SetCurrent(ChargeCurrent);
+                setState(STATE_B);
+            }
+        } else if (pilot == PILOT_9V && State != STATE_B1 && AccessStatus) {
+            setState(STATE_B1);
+        }
+    }
+
+    // ############### EVSE State B #################
+
+    if (State == STATE_B) {
+
+        if (pilot == PILOT_12V) {
+            setState(STATE_A);
+
+        } else if (pilot == PILOT_6V && ++StateTimer > 50) {
+            if (DiodeCheck == 1 && !RCMFault && ChargeDelay == 0 && AccessStatus) {
+                if (IsCurrentAvailable()) {
+                    DiodeCheck = 0;
+                    setState(STATE_C);
+                }
+            }
+
+        // PILOT_9V
+        } else if (pilot == PILOT_9V) {
+            StateTimer = 0;
+        }
+        if (pilot == PILOT_DIODE) {
+            DiodeCheck = 1;
+            ow_smartevse_capture_set_alarm(PWM_5, 0);
+        }
+    }
+
+    // ############### EVSE State C1 #################
+
+    if (State == STATE_C1)
+    {
+        if (pilot == PILOT_12V)
+        {
+            setState(STATE_A);
+        }
+        else if (pilot == PILOT_9V)
+        {
+            setState(STATE_B1);
+        }
+    }
+
+    // ############### EVSE State C #################
+
+    if (State == STATE_C) {
+
+        if (pilot == PILOT_12V) {
+            setState(STATE_A);
+        } else if (pilot == PILOT_9V) {
+            setState(STATE_B);
+            DiodeCheck = 0;
+        } else if (pilot == PILOT_SHORT) {
+            if (++StateTimer > 50) {
+                StateTimer = 0;
+                setState(STATE_B);
+                DiodeCheck = 0;
+            }
+
+        } else StateTimer = 0;
+    }
+
+    // Residual current monitor active, and DC current > 6mA ?
+    if (RCmonEnabled && RCMFault) {
+        if (State) setState(STATE_B1);
+    }
+}
+
+
+uint8_t CurrentState()
+{
+    return State;
+}
+
+
+void setRCMFault(bool fault)
+{
+    RCMFault = fault;
+}
