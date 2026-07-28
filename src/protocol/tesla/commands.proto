@@ -1,0 +1,70 @@
+syntax = "proto3";
+
+message TeslaVoid {
+}
+
+message TeslaGetChargeState {
+}
+
+message TeslaGetClimateState {
+}
+
+message TeslaGetVehicleData {
+    optional TeslaGetChargeState get_charge_state = 2;
+    optional TeslaGetClimateState get_climate_state = 3;
+}
+
+message TeslaChargingStartStopAction {
+    optional TeslaVoid start = 2;
+    optional TeslaVoid stop = 5;
+}
+
+message TeslaHvacAutoAction {
+    optional bool power_on = 1;
+    optional bool manual_override = 2;
+}
+
+message TeslaTemperatureLevel {
+    optional TeslaVoid maximum = 3;
+}
+
+message TeslaHvacTemperatureAdjustmentAction {
+    optional TeslaTemperatureLevel level = 5;
+    optional float driver_temp_celsius = 6;
+    optional float passenger_temp_celsius = 7;
+}
+
+message TeslaScheduledChargingAction {
+    optional bool enabled = 1;
+    optional int32 charging_time = 2;
+}
+
+message TeslaSetChargingAmpsAction {
+    optional int32 charging_amps = 1;
+}
+
+message TeslaVehicleAction {
+    optional TeslaGetVehicleData get_vehicle_data = 1;
+    optional TeslaChargingStartStopAction charging_start_stop = 6;
+    optional TeslaHvacAutoAction hvac_auto = 10;
+    optional TeslaHvacTemperatureAdjustmentAction hvac_temperature = 14;
+    optional TeslaScheduledChargingAction scheduled_charging = 41;
+    optional TeslaSetChargingAmpsAction set_charging_amps = 43;
+}
+
+message TeslaAction {
+    optional TeslaVehicleAction vehicle_action = 2;
+}
+
+message TeslaResultReason {
+    optional string plain_text = 1;
+}
+
+message TeslaActionStatus {
+    optional uint32 result = 1;
+    optional TeslaResultReason result_reason = 2;
+}
+
+message TeslaCommandResponse {
+    optional TeslaActionStatus action_status = 1;
+}

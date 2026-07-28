@@ -40,18 +40,55 @@ struct FieldInfo
     ushort ty;
 }
 
+struct ProtoOptional(T)
+{
+    bool present;
+    T value;
+
+    ref T ensure() return
+    {
+        present = true;
+        return value;
+    }
+
+    static if (!is(T == struct))
+    {
+        void set(T value)
+        {
+            present = true;
+            this.value = value;
+        }
+    }
+
+    void clear()
+    {
+        present = false;
+        value = T.init;
+    }
+}
+
 
 size_t buffer_len(T)(ref const T msg) pure nothrow @nogc
 {
-    static assert(is(typeof(T.syntax)) && is(typeof(T.id)), "T must be a protobuf message struct");
+    static assert(is(typeof(T.syntax)), "T must be a protobuf message struct");
     enum pack = T.syntax == 3;
 
     size_t len = 0;
     static foreach (i; 0 .. msg.tupleof.length)
     {{
         enum info = __traits(getAttributes, msg.tupleof[i])[0];
-        // TODO: there are options to pack or not pack per item... (i think?)
-        len += 1 + encode_len!(pack, info.wire)(msg.tupleof[i]);
+        alias Field = typeof(msg.tupleof[i]);
+        enum tag = (ulong(info.id) << 3) | (info.wire & 7);
+        static if (is(Field == ProtoOptional!U, U))
+        {
+            if (msg.tupleof[i].present)
+                len += varint_len(tag) + encode_len!(pack, info.wire)(msg.tupleof[i].value);
+        }
+        else
+        {
+            // TODO: there are options to pack or not pack per item... (i think?)
+            len += varint_len(tag) + encode_len!(pack, info.wire)(msg.tupleof[i]);
+        }
     }}
     return len;
 }
@@ -66,8 +103,20 @@ size_t proto_serialise(T)(ubyte[] buffer, ref const T msg) pure nothrow @nogc
     {{
         enum info = __traits(getAttributes, msg.tupleof[i])[0];
         ulong tag = (ulong(info.id) << 3) | (info.wire & 7);
-        offset += put_varint(buffer[offset .. $], tag);
-        offset += buffer[offset .. $].encode_value!(pack, info.wire)(msg.tupleof[i]);
+        alias Field = typeof(msg.tupleof[i]);
+        static if (is(Field == ProtoOptional!U, U))
+        {
+            if (msg.tupleof[i].present)
+            {
+                offset += put_varint(buffer[offset .. $], tag);
+                offset += buffer[offset .. $].encode_value!(pack, info.wire)(msg.tupleof[i].value);
+            }
+        }
+        else
+        {
+            offset += put_varint(buffer[offset .. $], tag);
+            offset += buffer[offset .. $].encode_value!(pack, info.wire)(msg.tupleof[i]);
+        }
     }}
     return offset;
 }
@@ -90,7 +139,14 @@ ptrdiff_t proto_deserialise(T)(const(ubyte)[] buffer, out T msg) nothrow @nogc
                 case info.id:
                     if ((info.wire & 7) != (tag & 7))
                         goto default; // wire type mismatch, skip this field
-                    ptrdiff_t taken = decode_value!(pack, info.wire)(buffer[offset..$], msg.tupleof[i]);
+                    alias Field = typeof(msg.tupleof[i]);
+                    static if (is(Field == ProtoOptional!U, U))
+                    {
+                        msg.tupleof[i].present = true;
+                        ptrdiff_t taken = decode_value!(pack, info.wire)(buffer[offset..$], msg.tupleof[i].value);
+                    }
+                    else
+                        ptrdiff_t taken = decode_value!(pack, info.wire)(buffer[offset..$], msg.tupleof[i]);
                     if (taken < 0)
                         return -1; // error
                     offset += taken;

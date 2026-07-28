@@ -69,7 +69,7 @@ struct ProtoField
     bool repeated;
     bool optional;
     ubyte reserved;
-    ubyte id;
+    uint id;
     ubyte wire_type;
     ushort logical_type;
 }
@@ -307,7 +307,8 @@ ProtoOption parse_option(ref string data, bool statement)
     if (statement)
     {
         data.seek_next_token();
-        if (!data.startsWith("option"))
+        if (!data.startsWith("option") || data.length == 6
+            || (!data[6].is_whitespace && data[6] != '('))
             throw new WrongItem("Expected 'option'");
         data = data[6..$];
     }
@@ -355,7 +356,7 @@ ProtoField parse_field(ref string data)
         r.type = data.take_identifier();
         r.name = data.take_identifier();
         data.expect('=');
-        r.id = cast(ubyte)data.take_int();
+        r.id = cast(uint)data.take_int();
         if (data.check('['))
         {
             bool first = true;
@@ -654,12 +655,18 @@ enum string[] type_names = [
 string make_type_for(ref const ProtoField field)
 {
     ubyte logical_type = field.logical_type & 0xF;
+    string type_name;
     if (logical_type == LogicalType.enum_)
-        return field.type;
+        type_name = field.type;
     else if (logical_type == LogicalType.message)
-        return field.type;
-    string type_name = type_names[logical_type];
-    if (field.repeated)
-        return logical_type == LogicalType.bytes ? "Array!(Array!ubyte)" : "Array!" ~ type_name;
+        type_name = field.type;
+    else
+    {
+        type_name = type_names[logical_type];
+        if (field.repeated)
+            type_name = logical_type == LogicalType.bytes ? "Array!(Array!ubyte)" : "Array!" ~ type_name;
+    }
+    if (field.optional)
+        type_name = "ProtoOptional!(" ~ type_name ~ ")";
     return type_name;
 }
