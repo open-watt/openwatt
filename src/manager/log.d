@@ -7,6 +7,7 @@ import urt.mem.temp : tconcat;
 import urt.meta.nullable;
 import urt.string;
 import urt.string.ansi : visible_width;
+import urt.time;
 import urt.variant;
 
 import manager;
@@ -18,16 +19,93 @@ import manager.console.session;
 import manager.plugin;
 
 
+struct RetainedLogMessage
+{
+    Array!(char, 0) data;
+    SysTime timestamp;
+    uint tag_length;
+    uint object_name_length;
+    uint message_length;
+    uint hostname_length;
+    Severity severity;
+nothrow @nogc:
+
+    void assign(scope ref const LogMessage msg)
+    {
+        tag_length = cast(uint)msg.tag.length;
+        object_name_length = cast(uint)msg.object_name.length;
+        message_length = cast(uint)msg.message.length;
+        hostname_length = cast(uint)msg.hostname.length;
+        severity = msg.severity;
+        timestamp = msg.timestamp;
+
+        data.clear();
+        data.reserve(tag_length + object_name_length + message_length + hostname_length);
+        data ~= msg.tag;
+        data ~= msg.object_name;
+        data ~= msg.message;
+        data ~= msg.hostname;
+    }
+
+    LogMessage message()
+    {
+        size_t tag_end = tag_length;
+        size_t object_end = tag_end + object_name_length;
+        size_t message_end = object_end + message_length;
+        size_t hostname_end = message_end + hostname_length;
+        assert(hostname_end == data.length);
+
+        return LogMessage(severity,
+                          data[0 .. tag_end],
+                          data[tag_end .. object_end],
+                          data[object_end .. message_end],
+                          data[message_end .. hostname_end],
+                          timestamp);
+    }
+}
+
+struct LogConsumerHandle
+{
+    int index = -1;
+nothrow @nogc:
+
+    bool valid() const pure
+        => index >= 0 && index < LogModule.max_consumers;
+}
+
+private struct StoredLogMessage
+{
+    RetainedLogMessage message;
+    StoredLogMessage* previous;
+    StoredLogMessage* next;
+    void* source;
+    uint pending;
+    bool historical;
+}
+
+private struct LogHistoryCursor
+{
+private:
+    void* record;
+}
+
+private struct LogConsumerSlot
+{
+    LogFilter filter;
+    StoredLogMessage* cursor;
+    StoredLogMessage* current;
+    bool active;
+}
+
+
 class LogModule : Module
 {
     mixin DeclareModule!"log";
 nothrow @nogc:
 
-    // Ring buffer for log history
-    enum log_history_size = 1024;
-    Array!(char, 0)[log_history_size] log_history;
-    uint log_write_pos;
-    uint log_count;
+    enum max_consumers = 16;
+    enum delivery_queue_size = 128;
+    enum max_history_messages = 1024;
 
     override void init()
     {
@@ -45,33 +123,399 @@ nothrow @nogc:
 
         g_app.console.register_commands("/log", commands);
         g_app.console.register_command!log_print("/log", this, "print");
+        g_app.console.register_command!history_get("/log/history", this, "get");
+        g_app.console.register_command!history_set("/log/history", this, "set");
+        g_app.console.register_command!history_clear("/log/history", this, "clear");
 
-        register_log_sink(&history_sink, cast(void*)this);
+        resize_history(_history_limit);
+        _ingress_sink = register_log_sink(&ingress, cast(void*)this, LogFilter(Severity.trace));
+        recalc_ingress_filter();
     }
 
-    final void push_log(const(char)[] formatted_line)
+    override void update()
     {
-        log_history[log_write_pos].clear();
-        log_history[log_write_pos] ~= formatted_line;
-        log_write_pos = (log_write_pos + 1) % log_history_size;
-        if (log_count < log_history_size)
-            ++log_count;
+        trim_history();
     }
 
-    final const(char)[] get_log_line(uint index)
+    override void deinit()
     {
-        if (index >= log_count)
-            return null;
-        uint start = log_count < log_history_size ? 0 : log_write_pos;
-        uint actual = (start + index) % log_history_size;
-        return log_history[actual][];
+        if (_ingress_sink.valid)
+        {
+            unregister_log_sink(_ingress_sink);
+            _ingress_sink = LogSinkHandle.init;
+        }
+        while (_records_head)
+        {
+            StoredLogMessage* next = _records_head.next;
+            defaultAllocator().freeT(_records_head);
+            _records_head = next;
+        }
+        _records_tail = null;
+        _history_head = null;
+        _history_count = 0;
+        _delivery_count = 0;
+        foreach (ref consumer; _consumers)
+            consumer = LogConsumerSlot.init;
     }
 
-    static void history_sink(void* context, scope ref const LogMessage msg) nothrow @nogc
+    LogConsumerHandle register_consumer(LogFilter filter)
     {
-        auto self = cast(LogModule)context;
-        self.push_log(format_log_line(msg));
+        foreach (i, ref consumer; _consumers)
+        {
+            if (consumer.active)
+                continue;
+
+            consumer.filter = filter;
+            consumer.active = true;
+            recalc_ingress_filter();
+            return LogConsumerHandle(cast(int)i);
+        }
+        return LogConsumerHandle.init;
     }
+
+    void unregister_consumer(LogConsumerHandle handle)
+    {
+        if (!handle.valid || !_consumers[handle.index].active)
+            return;
+
+        uint bit = uint(1) << handle.index;
+        StoredLogMessage* record = _records_head;
+        while (record)
+        {
+            StoredLogMessage* next = record.next;
+            if (record.pending & bit)
+            {
+                record.pending &= ~bit;
+                if (!record.pending)
+                {
+                    record.source = null;
+                    --_delivery_count;
+                    release(record);
+                }
+            }
+            record = next;
+        }
+        _consumers[handle.index] = LogConsumerSlot.init;
+        recalc_ingress_filter();
+    }
+
+    void set_consumer_filter(LogConsumerHandle handle, LogFilter filter)
+    {
+        if (!handle.valid || !_consumers[handle.index].active)
+            return;
+        _consumers[handle.index].filter = filter;
+        recalc_ingress_filter();
+    }
+
+    bool next_message(LogConsumerHandle handle, out LogMessage msg, out void* source)
+    {
+        if (!handle.valid || !_consumers[handle.index].active)
+            return false;
+
+        ref consumer = _consumers[handle.index];
+        StoredLogMessage* record = consumer.current;
+        uint bit = uint(1) << handle.index;
+        if (!record)
+        {
+            record = consumer.cursor;
+            while (record && !(record.pending & bit))
+                record = record.next;
+            consumer.cursor = record;
+        }
+        if (!record)
+            return false;
+
+        consumer.current = record;
+        msg = record.message.message();
+        source = record.source;
+        return true;
+    }
+
+    bool next_message(LogConsumerHandle handle, out LogMessage msg)
+    {
+        void* source;
+        return next_message(handle, msg, source);
+    }
+
+    void source(void* value)
+    {
+        _source = value;
+    }
+
+    void set_max_severity(Severity severity)
+    {
+        _global_max_severity = severity;
+        recalc_ingress_filter();
+    }
+
+    void acknowledge(LogConsumerHandle handle)
+    {
+        if (!handle.valid || !_consumers[handle.index].active)
+            return;
+
+        ref consumer = _consumers[handle.index];
+        StoredLogMessage* record = consumer.current;
+        if (!record)
+            return;
+
+        uint bit = uint(1) << handle.index;
+        assert(record.pending & bit);
+        StoredLogMessage* next = record.next;
+        record.pending &= ~bit;
+        consumer.current = null;
+        consumer.cursor = next;
+        if (!record.pending)
+        {
+            record.source = null;
+            --_delivery_count;
+            release(record);
+        }
+    }
+
+    bool history_enabled() const pure
+        => _history_limit > 0;
+
+    uint history_count() const pure
+        => _history_count;
+
+    private bool next_history(ref LogHistoryCursor cursor, out LogMessage msg)
+    {
+        StoredLogMessage* record = cursor.record
+            ? (cast(StoredLogMessage*)cursor.record).next : _history_head;
+        while (record && !record.historical)
+            record = record.next;
+        if (!record)
+            return false;
+        cursor.record = record;
+        msg = record.message.message();
+        return true;
+    }
+
+    void history_get(Session session)
+    {
+        session.write_line("max-messages=", _history_limit,
+                           " max-age=", _history_max_age,
+                           " max-severity=", severity_names[_history_max_severity],
+                           " tag=", _history_tag,
+                           " retained=", _history_count,
+                           " delivery-queued=", _delivery_count,
+                           " delivery-dropped=", _delivery_dropped);
+    }
+
+    void history_set(Session, Nullable!uint max_messages, Nullable!Duration max_age,
+                     Nullable!Severity max_severity, Nullable!(const(char)[]) tag)
+    {
+        if (max_messages)
+            resize_history(max_messages.value < max_history_messages
+                ? max_messages.value : max_history_messages);
+        if (max_age)
+            _history_max_age = max_age.value;
+        if (max_severity)
+            _history_max_severity = max_severity.value;
+        if (tag)
+            _history_tag = tag.value.makeString(defaultAllocator());
+
+        trim_history();
+        recalc_ingress_filter();
+    }
+
+    void history_clear(Session)
+    {
+        clear_history();
+    }
+
+private:
+    LogConsumerSlot[max_consumers] _consumers;
+    StoredLogMessage* _records_head;
+    StoredLogMessage* _records_tail;
+    StoredLogMessage* _history_head;
+    LogSinkHandle _ingress_sink;
+    String _history_tag;
+    Duration _history_max_age;
+    void* _source;
+    uint _delivery_count;
+    uint _delivery_dropped;
+    uint _history_count;
+    uint _history_limit = max_history_messages;
+    Severity _history_max_severity = Severity.info;
+    Severity _global_max_severity = Severity.trace;
+
+    static void ingress(void* context, scope ref const LogMessage msg)
+    {
+        (cast(LogModule)context).enqueue(msg);
+    }
+
+    void enqueue(scope ref const LogMessage msg)
+    {
+        uint pending;
+        foreach (i, ref consumer; _consumers)
+        {
+            if (!consumer.active)
+                continue;
+            if (!matches_filter(msg, consumer.filter))
+                continue;
+            pending |= uint(1) << i;
+        }
+        if (pending && _delivery_count == delivery_queue_size)
+        {
+            pending = 0;
+            ++_delivery_dropped;
+        }
+
+        bool historical = _history_limit && matches_history(msg);
+        if (!pending && !historical)
+            return;
+
+        StoredLogMessage* record = defaultAllocator().allocT!StoredLogMessage();
+        record.message.assign(msg);
+        record.source = pending ? _source : null;
+        record.pending = pending;
+        record.historical = historical;
+        record.previous = _records_tail;
+        if (_records_tail)
+            _records_tail.next = record;
+        else
+            _records_head = record;
+        _records_tail = record;
+
+        if (pending)
+        {
+            ++_delivery_count;
+            foreach (i, ref consumer; _consumers)
+            {
+                uint bit = uint(1) << i;
+                if ((pending & bit) && !consumer.current && !consumer.cursor)
+                    consumer.cursor = record;
+            }
+        }
+        if (historical)
+        {
+            if (!_history_head)
+                _history_head = record;
+            ++_history_count;
+            trim_history();
+        }
+    }
+
+    void release(StoredLogMessage* record)
+    {
+        if (record.pending || record.historical)
+            return;
+
+        foreach (ref consumer; _consumers)
+        {
+            if (consumer.cursor is record)
+                consumer.cursor = record.next;
+            if (consumer.current is record)
+                consumer.current = null;
+        }
+        if (record.previous)
+            record.previous.next = record.next;
+        else
+            _records_head = record.next;
+        if (record.next)
+            record.next.previous = record.previous;
+        else
+            _records_tail = record.previous;
+        defaultAllocator().freeT(record);
+    }
+
+    void recalc_ingress_filter()
+    {
+        Severity max_severity = Severity.emergency;
+        bool enabled;
+        if (_history_limit)
+        {
+            enabled = true;
+            max_severity = _history_max_severity;
+        }
+        foreach (ref consumer; _consumers)
+        {
+            if (!consumer.active)
+                continue;
+            enabled = true;
+            if (consumer.filter.max_severity > max_severity)
+                max_severity = consumer.filter.max_severity;
+        }
+        if (_ingress_sink.valid)
+        {
+            if (max_severity > _global_max_severity)
+                max_severity = _global_max_severity;
+            set_sink_filter(_ingress_sink, LogFilter(max_severity));
+            set_sink_enabled(_ingress_sink, enabled);
+        }
+    }
+
+    bool matches_history(scope ref const LogMessage msg)
+    {
+        if (msg.severity > _history_max_severity)
+            return false;
+        return _history_tag.length == 0 || msg.tag.startsWith(_history_tag[]);
+    }
+
+    void trim_history()
+    {
+        while (_history_count > _history_limit)
+            drop_oldest_history();
+
+        bool expire = _history_max_age > Duration.zero;
+        SysTime cutoff;
+        if (expire)
+            cutoff = getSysTime() - _history_max_age;
+
+        StoredLogMessage* record = _history_head;
+        while (record)
+        {
+            StoredLogMessage* next = next_historical(record.next);
+            LogMessage msg = record.message.message();
+            if (!matches_history(msg) || (expire && msg.timestamp < cutoff))
+                drop_history(record);
+            record = next;
+        }
+    }
+
+    void drop_oldest_history()
+    {
+        assert(_history_head && _history_head.historical);
+        drop_history(_history_head);
+    }
+
+    void drop_history(StoredLogMessage* record)
+    {
+        assert(record && record.historical);
+        if (_history_head is record)
+            _history_head = next_historical(record.next);
+        record.historical = false;
+        --_history_count;
+        release(record);
+    }
+
+    StoredLogMessage* next_historical(StoredLogMessage* record)
+    {
+        while (record && !record.historical)
+            record = record.next;
+        return record;
+    }
+
+    void resize_history(uint limit)
+    {
+        _history_limit = limit;
+        trim_history();
+    }
+
+    void clear_history()
+    {
+        while (_history_count)
+            drop_oldest_history();
+        _history_head = null;
+    }
+}
+
+private bool matches_filter(scope ref const LogMessage msg, scope ref const LogFilter filter) nothrow @nogc
+{
+    if (msg.severity > filter.max_severity)
+        return false;
+    return filter.tag_prefix.length == 0 || msg.tag.startsWith(filter.tag_prefix);
 }
 
 
@@ -103,15 +547,62 @@ const(char)[] format_log_line(scope ref const LogMessage msg)
         return tconcat(sev.badge, ' ', sev.color, msg.message, reset);
 }
 
+const(char)[] format_log_text(scope ref const LogMessage msg)
+{
+    const(char)[] severity = severity_names[msg.severity];
+    if (msg.tag.length > 0)
+    {
+        if (msg.object_name.length > 0)
+            return tconcat('[', severity, "] ", msg.tag, " '", msg.object_name, "': ", msg.message);
+        return tconcat('[', severity, "] ", msg.tag, ": ", msg.message);
+    }
+    return tconcat('[', severity, "] ", msg.message);
+}
 
-CommandState log_print(Session session, Nullable!Severity level, Nullable!(const(char)[]) tag, Nullable!(const(char)[]) match)
+const(char)[] format_log_for_session(scope ref const LogMessage msg, ClientFeatures features)
+{
+    if (features & ClientFeatures.fullcolour)
+        return format_log_line(msg);
+    return format_log_text(msg);
+}
+
+
+@TabComplete(&log_print_suggest)
+CommandState log_print(Session session, Nullable!Severity level, Nullable!(const(char)[]) tag,
+                       Nullable!(const(char)[]) match, Nullable!uint max, const(Variant)[] args)
 {
     LogFilter filter;
     filter.max_severity = level ? level.value : Severity.trace;
     if (tag)
         filter.tag_prefix = tag.value;
 
-    return defaultAllocator().allocT!LogFollowState(session, filter, match ? match.value : null);
+    bool stream;
+    foreach (arg; args)
+    {
+        const(char)[] option = arg.asString();
+        if (option == "--stream")
+            stream = true;
+        else
+        {
+            session.write_line("Unknown option '", option, "'");
+            return null;
+        }
+    }
+
+    uint limit = max ? max.value : LogFollowState.default_max_messages;
+    if (limit == 0)
+        limit = 1;
+    if (limit > LogFollowState.max_messages)
+        limit = LogFollowState.max_messages;
+    return defaultAllocator().allocT!LogFollowState(session, filter, match ? match.value : null, limit, stream);
+}
+
+Array!String log_print_suggest(bool is_value, const(char)[] name, const(char)[])
+{
+    Array!String result;
+    if (!is_value && "--stream".startsWith(name))
+        result ~= "--stream".makeString(defaultAllocator);
+    return result;
 }
 
 
@@ -147,25 +638,104 @@ class LogFollowState : LiveViewState
 {
 nothrow @nogc:
 
-    this(Session session, LogFilter filter, const(char)[] match)
+    enum default_max_messages = 256;
+    enum max_messages = 1024;
+
+    this(Session session, LogFilter filter, const(char)[] match, uint limit, bool stream)
     {
         super(session, null, LiveViewMode.auto_);
+        assert(limit > 0 && limit <= max_messages);
         _log_module = get_module!LogModule;
-        _match = match;
+        _tag = filter.tag_prefix.makeString(defaultAllocator());
+        _match = match.makeString(defaultAllocator());
+        filter.tag_prefix = _tag[];
         _filter = filter;
+        _limit = limit;
+        _stream = stream;
         _follow = true;
+
+        if (_log_module.history_enabled)
+        {
+            LogHistoryCursor cursor;
+            LogMessage msg;
+            while (_log_module.next_history(cursor, msg))
+            {
+                if (matches(msg))
+                    push(msg);
+            }
+        }
+        if (_stream)
+        {
+            foreach (i; 0 .. _count)
+            {
+                LogMessage msg;
+                if (get_message(i, msg))
+                    write_stream_message(msg);
+            }
+            _stream_ready = true;
+        }
+        _consumer = _log_module.register_consumer(filter);
+    }
+
+    ~this()
+    {
+        close_consumer();
+    }
+
+    override CommandCompletionState update()
+    {
+        if (_stream)
+        {
+            if (_stream_cancelled)
+            {
+                close_consumer();
+                return CommandCompletionState.cancelled;
+            }
+
+            char[64] input = void;
+            ptrdiff_t count = session.read_input(input[]);
+            if (count > 0)
+            {
+                foreach (c; input[0 .. count])
+                {
+                    if (c == 'q' || c == '\x03')
+                    {
+                        close_consumer();
+                        return CommandCompletionState.finished;
+                    }
+                }
+            }
+
+            poll();
+            return CommandCompletionState.in_progress;
+        }
+
+        CommandCompletionState state = super.update();
+        if (state >= CommandCompletionState.finished)
+            close_consumer();
+        return state;
+    }
+
+    override void request_cancel()
+    {
+        if (_stream)
+            _stream_cancelled = true;
+        else
+            super.request_cancel();
     }
 
     override uint content_height()
     {
-        rebuild_filtered_indices();
         uint w = session.width();
         if (w == 0)
             w = 80;
         uint total = 0;
-        foreach (idx; _filtered[])
+        foreach (i; 0 .. _count)
         {
-            const(char)[] line = _log_module.get_log_line(idx);
+            LogMessage msg;
+            if (!get_message(i, msg))
+                continue;
+            const(char)[] line = format_log_for_session(msg, session.features);
             uint visible = cast(uint)visible_width(line);
             total += visible == 0 ? 1 : (visible + w - 1) / w;
         }
@@ -180,9 +750,15 @@ nothrow @nogc:
         uint phys = 0;
         uint src = 0;
         uint sub_offset = 0;
-        while (src < _filtered.length && phys < offset)
+        while (src < _count && phys < offset)
         {
-            const(char)[] line = _log_module.get_log_line(_filtered[src]);
+            LogMessage msg;
+            if (!get_message(src, msg))
+            {
+                ++src;
+                continue;
+            }
+            const(char)[] line = format_log_for_session(msg, session.features);
             uint visible = cast(uint)visible_width(line);
             uint rows = visible == 0 ? 1 : (visible + width - 1) / width;
             if (phys + rows > offset)
@@ -196,11 +772,15 @@ nothrow @nogc:
         }
 
         uint drawn = 0;
-        while (drawn < count && src < _filtered.length)
+        while (drawn < count && src < _count)
         {
-            const(char)[] line = _log_module.get_log_line(_filtered[src]);
-            if (!line)
-                line = "";
+            LogMessage msg;
+            if (!get_message(src, msg))
+            {
+                ++src;
+                continue;
+            }
+            const(char)[] line = format_log_for_session(msg, session.features);
 
             uint visible = cast(uint)visible_width(line);
             uint rows = visible == 0 ? 1 : (visible + width - 1) / width;
@@ -244,41 +824,95 @@ nothrow @nogc:
 
     override const(char)[] status_text()
     {
-        if (_filtered.length != _log_module.log_count)
-            return tconcat(_filtered.length, "/", _log_module.log_count, " entries (filtered)");
-        return tconcat(_log_module.log_count, " log entries");
+        if (_dropped)
+            return tconcat(_count, " log entries, ", _dropped, " older entries dropped");
+        return tconcat(_count, " log entries");
+    }
+
+protected:
+    override void poll()
+    {
+        LogMessage msg;
+        while (_log_module.next_message(_consumer, msg))
+        {
+            if (matches(msg))
+                push(msg);
+            _log_module.acknowledge(_consumer);
+        }
     }
 
 private:
     LogModule _log_module;
-    const(char)[] _match;
+    LogConsumerHandle _consumer;
+    Array!RetainedLogMessage _messages;
+    String _tag;
+    String _match;
     LogFilter _filter;
-    Array!uint _filtered;
-    uint _last_log_count;
+    uint _head;
+    uint _count;
+    uint _dropped;
+    uint _limit;
+    bool _stream;
+    bool _stream_ready;
+    bool _stream_cancelled;
 
-    void rebuild_filtered_indices()
+    bool matches(scope ref const LogMessage msg)
     {
-        uint current = _log_module.log_count;
-        if (current == _last_log_count)
-            return;
+        if (!matches_filter(msg, _filter))
+            return false;
+        if (_match.length == 0)
+            return true;
 
-        _filtered.clear();
-        foreach (i; 0 .. current)
+        import urt.string : contains_i;
+        return msg.message.contains_i(_match[]) ||
+               msg.tag.contains_i(_match[]) ||
+               msg.object_name.contains_i(_match[]) ||
+               severity_names[msg.severity].contains_i(_match[]);
+    }
+
+    void push(scope ref const LogMessage msg)
+    {
+        uint slot;
+        if (_count == _limit)
         {
-            const(char)[] line = _log_module.get_log_line(i);
-            if (line is null)
-                continue;
-
-            if (_match.length > 0)
-            {
-                import urt.string : contains_i;
-                if (!line.contains_i(_match))
-                    continue;
-            }
-
-            _filtered ~= i;
+            slot = _head;
+            _messages[slot].data.clear();
+            _head = (_head + 1) % _limit;
+            ++_dropped;
         }
-        _last_log_count = current;
+        else
+        {
+            _messages ~= RetainedLogMessage.init;
+            slot = _count;
+            ++_count;
+        }
+        _messages[slot].assign(msg);
+        if (_stream_ready)
+            write_stream_message(msg);
+        else if (!_stream)
+            request_redraw();
+    }
+
+    bool get_message(uint index, out LogMessage msg)
+    {
+        if (index >= _count)
+            return false;
+        msg = _messages[(_head + index) % _limit].message();
+        return true;
+    }
+
+    void write_stream_message(scope ref const LogMessage msg)
+    {
+        session.write_output(format_log_for_session(msg, session.features), false);
+        session.write_output("\r\n", false);
+    }
+
+    void close_consumer()
+    {
+        if (!_consumer.valid)
+            return;
+        _log_module.unregister_consumer(_consumer);
+        _consumer = LogConsumerHandle.init;
     }
 }
 
@@ -334,4 +968,112 @@ nothrow @nogc:
             return null;
         }
     }
+}
+
+
+unittest
+{
+    char[5] source = "hello";
+    LogMessage input = LogMessage(Severity.warning, "test", "object", source[], "host", SysTime(123));
+
+    RetainedLogMessage retained;
+    retained.assign(input);
+    source[] = "xxxxx";
+
+    LogMessage restored = retained.message();
+    assert(restored.severity == Severity.warning);
+    assert(restored.tag == "test");
+    assert(restored.object_name == "object");
+    assert(restored.message == "hello");
+    assert(restored.hostname == "host");
+    assert(restored.timestamp == SysTime(123));
+
+    const(char)[] plain = format_log_for_session(restored, ClientFeatures.vt100);
+    assert(plain == "[Warning] test 'object': hello");
+
+    const(char)[] decorated = format_log_for_session(restored, ClientFeatures.xterm);
+    assert(decorated.contains("\x1b["));
+
+    auto module_ = defaultAllocator().allocT!LogModule(null);
+    scope (exit)
+    {
+        module_.deinit();
+        defaultAllocator().freeT(module_);
+    }
+    module_.resize_history(2);
+
+    LogFilter all;
+    all.max_severity = Severity.trace;
+    LogConsumerHandle first = module_.register_consumer(all);
+    LogConsumerHandle second = module_.register_consumer(all);
+    assert(first.valid && second.valid);
+
+    char[6] queued_text = "queued";
+    LogMessage queued = LogMessage(Severity.info, "queue", null, queued_text[], "host", SysTime(456));
+    module_.enqueue(queued);
+    queued_text[] = "xxxxxx";
+    assert(module_._delivery_count == 1);
+    assert(module_.history_count == 1);
+
+    LogMessage delivered;
+    assert(module_.next_message(first, delivered));
+    assert(delivered.message == "queued");
+    module_.acknowledge(first);
+    assert(module_._delivery_count == 1);
+
+    assert(module_.next_message(second, delivered));
+    assert(delivered.message == "queued");
+    module_.acknowledge(second);
+    assert(module_._delivery_count == 0);
+
+    queued.message = "release";
+    module_.enqueue(queued);
+    assert(module_.next_message(first, delivered));
+    module_.unregister_consumer(second);
+    assert(module_._delivery_count == 1);
+    module_.acknowledge(first);
+    assert(module_._delivery_count == 0);
+
+    module_.resize_history(1);
+    assert(module_.history_count == 1);
+    LogHistoryCursor cursor;
+    assert(module_.next_history(cursor, delivered));
+    assert(delivered.message == "release");
+
+    module_.unregister_consumer(first);
+    queued.message = "history-only";
+    module_.enqueue(queued);
+    assert(module_._delivery_count == 0);
+    cursor = LogHistoryCursor.init;
+    assert(module_.next_history(cursor, delivered));
+    assert(delivered.message == "history-only");
+
+    module_.resize_history(2);
+    queued.severity = Severity.error;
+    queued.message = "history-error";
+    module_.enqueue(queued);
+    assert(module_.history_count == 2);
+    module_._history_max_severity = Severity.warning;
+    module_.trim_history();
+    assert(module_.history_count == 1);
+    cursor = LogHistoryCursor.init;
+    assert(module_.next_history(cursor, delivered));
+    assert(delivered.message == "history-error");
+
+    module_.clear_history();
+    assert(module_._records_head is null);
+
+    module_.resize_history(0);
+    queued.severity = Severity.info;
+    first = module_.register_consumer(all);
+    foreach (i; 0 .. LogModule.delivery_queue_size + 1)
+    {
+        queued.timestamp = SysTime(i);
+        module_.enqueue(queued);
+    }
+    assert(module_._delivery_count == LogModule.delivery_queue_size);
+    assert(module_._delivery_dropped == 1);
+    module_.unregister_consumer(first);
+    assert(module_._delivery_count == 0);
+    assert(module_._records_head is null);
 }
