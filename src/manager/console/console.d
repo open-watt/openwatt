@@ -11,12 +11,15 @@ import urt.time : MonoTime;
 import urt.util;
 
 import manager : g_app;
+import manager.base : ObjectFlags;
 import manager.collection;
 import manager.console.builtin_commands;
 import manager.console.command;
 import manager.console.function_command;
 import manager.console.session;
 import manager.expression;
+
+import router.stream : Stream;
 
 nothrow @nogc:
 
@@ -150,33 +153,34 @@ nothrow @nogc:
         }
     }
 
-    void update()
-    {
-        foreach (session; _sessions)
-            if (session.is_attached)
-                session.update();
-    }
-
     const(char)[] identifier() => _identifier[];
     const(char)[] get_prompt() nothrow @nogc => _prompt[];
 
     String set_prompt(String prompt)
         => _prompt.swap(prompt);
 
-    SessionType createSession(SessionType, Args...)(auto ref Args args)
+    SessionType createSession(SessionType)(Stream stream = null)
         if (is(SessionType : Session))
         {
-            SessionType session = _allocator.allocT!SessionType(this, forward!args);
-            session.set_prompt(_prompt[]);
-            _sessions ~= session;
+            auto sessions = Collection!Session();
+            const(char)[] name = sessions.generate_name("session");
+            CID id = sessions.allocate_id(name);
+            if (!id)
+                return null;
+
+            enum flags = cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary);
+            SessionType session = defaultAllocator().allocT!SessionType(id, flags, this);
+            if (stream)
+                session.stream(stream);
+            sessions.add(session);
+            session.do_update();
             return session;
         }
 
     void destroy_session(Session session)
     {
         assert(session._console is &this, "Session does not belong to this console instance.");
-        _sessions.removeFirstSwapLast(session);
-        _allocator.freeT(session);
+        session.request_destroy();
     }
 
     // TODO: don't like this API, it should be a method of Session...
@@ -541,8 +545,6 @@ package:
 
     Array!Scope _scopes;
     Array!Command _commands;
-    Array!Session _sessions;
-
     Command[12] _coll_cmds;      // shared collection-op commands (lazy-init); see collection_commands.d
 
     debug bool _frozen = false;

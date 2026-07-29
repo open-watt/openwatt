@@ -99,6 +99,19 @@ protected:
             _remote = addr.address;
             break;
         }
+
+        Socket socket;
+        r = create_socket(_remote.family, SocketType.datagram, Protocol.udp, socket);
+        if (!r)
+            return CompletionStatus.error;
+        socket.set_socket_option(SocketOption.non_blocking, true);
+        r = socket.bind(_local);
+        if (!r)
+        {
+            socket.close();
+            return CompletionStatus.error;
+        }
+        _socket = socket;
         return CompletionStatus.complete;
     }
 
@@ -133,7 +146,11 @@ protected:
         size_t bytes;
         Result r = _socket.sendto(&_remote, &bytes, data);
         if (!r)
-            assert(0);
+        {
+            if (r.socket_result() == SocketResult.would_block)
+                return 0;
+            return -1;
+        }
         add_tx_bytes(bytes);
         if (_logging)
         {

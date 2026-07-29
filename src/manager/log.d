@@ -11,12 +11,17 @@ import urt.time;
 import urt.variant;
 
 import manager;
+import manager.base;
+import manager.collection;
 import manager.console;
 import manager.console.command;
 import manager.console.function_command;
 import manager.console.live_view;
 import manager.console.session;
 import manager.plugin;
+import manager.syslog;
+
+import router.stream;
 
 
 struct RetainedLogMessage
@@ -126,6 +131,9 @@ nothrow @nogc:
         g_app.console.register_command!history_get("/log/history", this, "get");
         g_app.console.register_command!history_set("/log/history", this, "set");
         g_app.console.register_command!history_clear("/log/history", this, "clear");
+        g_app.register_enum!LogFormat();
+        g_app.register_enum!LogLineEnding();
+        g_app.console.register_collection!LogSink();
 
         resize_history(_history_limit);
         _ingress_sink = register_log_sink(&ingress, cast(void*)this, LogFilter(Severity.trace));
@@ -134,6 +142,7 @@ nothrow @nogc:
 
     override void update()
     {
+        Collection!LogSink().update_all();
         trim_history();
     }
 
@@ -520,6 +529,237 @@ private bool matches_filter(scope ref const LogMessage msg, scope ref const LogF
 
 
 nothrow @nogc:
+
+
+enum default_log_sink_name = "default";
+
+
+enum LogFormat : ubyte
+{
+    text,
+    syslog,
+}
+
+enum LogLineEnding : ubyte
+{
+    lf,
+    crlf,
+}
+
+
+class LogSink : ActiveObject
+{
+    alias Properties = AliasSeq!(Prop!("stream", stream),
+                                 Prop!("format", format),
+                                 Prop!("line-ending", line_ending),
+                                 Prop!("max-severity", max_severity),
+                                 Prop!("tag", tag));
+nothrow @nogc:
+
+    enum type_name = "log-sink";
+    enum path = "/log/sink";
+    enum collection_id = CollectionType.log_sink;
+
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
+    {
+        super(collection_type_info!LogSink, id, flags);
+    }
+
+    final inout(Stream) stream() inout pure
+        => _stream;
+    final void stream(Stream value)
+    {
+        if (_stream is value)
+            return;
+        unsubscribe();
+        _stream = value;
+        mark_set!(typeof(this), "stream")();
+        restart();
+    }
+
+    final LogFormat format() const pure
+        => _format;
+    final void format(LogFormat value)
+    {
+        if (_format == value)
+            return;
+        _format = value;
+        mark_set!(typeof(this), "format")();
+    }
+
+    final LogLineEnding line_ending() const pure
+        => _line_ending;
+    final void line_ending(LogLineEnding value)
+    {
+        if (_line_ending == value)
+            return;
+        _line_ending = value;
+        mark_set!(typeof(this), "line-ending")();
+    }
+
+    final Severity max_severity() const pure
+        => _max_severity;
+    final void max_severity(Severity value)
+    {
+        if (_max_severity == value)
+            return;
+        _max_severity = value;
+        mark_set!(typeof(this), "max-severity")();
+        update_filter();
+    }
+
+    final ref const(String) tag() const pure
+        => _tag;
+    final void tag(String value)
+    {
+        if (_tag == value)
+            return;
+        _tag = value.move;
+        mark_set!(typeof(this), "tag")();
+        update_filter();
+    }
+
+    override bool validate() const pure
+        => _stream !is null;
+
+    override CompletionStatus startup()
+    {
+        Stream s = _stream;
+        if (!s || !s.running)
+            return CompletionStatus.continue_;
+
+        s.subscribe(&stream_state_change);
+        _subscribed = true;
+        _consumer = get_module!LogModule.register_consumer(filter());
+        if (!_consumer.valid)
+        {
+            unsubscribe();
+            return CompletionStatus.error;
+        }
+        retire_bootstrap_log_sink();
+        return CompletionStatus.complete;
+    }
+
+    override CompletionStatus shutdown()
+    {
+        if (_consumer.valid)
+        {
+            get_module!LogModule.unregister_consumer(_consumer);
+            _consumer = LogConsumerHandle.init;
+        }
+        unsubscribe();
+        _line.clear();
+        _write_pos = 0;
+        return CompletionStatus.complete;
+    }
+
+    override void update()
+    {
+        Stream s = _stream;
+        if (!s || !s.running)
+            return;
+
+        LogModule log_module = get_module!LogModule;
+        while (true)
+        {
+            if (_line.length == 0)
+            {
+                LogMessage msg;
+                if (!log_module.next_message(_consumer, msg))
+                    return;
+                format_message(msg);
+            }
+
+            ptrdiff_t written = s.write(_line[_write_pos .. $]);
+            if (written < 0)
+            {
+                restart();
+                return;
+            }
+            if (written == 0)
+                return;
+            _write_pos += cast(uint)written;
+            if (_write_pos < _line.length)
+                return;
+            _line.clear();
+            _write_pos = 0;
+            log_module.acknowledge(_consumer);
+        }
+    }
+
+private:
+    ObjectRef!Stream _stream;
+    LogConsumerHandle _consumer;
+    String _tag;
+    Array!(char, 0) _line;
+    uint _write_pos;
+    LogFormat _format;
+    LogLineEnding _line_ending;
+    Severity _max_severity = Severity.info;
+    bool _subscribed;
+
+    LogFilter filter() const
+    {
+        LogFilter f;
+        f.max_severity = _max_severity;
+        f.tag_prefix = _tag[];
+        return f;
+    }
+
+    void update_filter()
+    {
+        if (_consumer.valid)
+            get_module!LogModule.set_consumer_filter(_consumer, filter());
+    }
+
+    void format_message(scope ref const LogMessage msg)
+    {
+        _line.clear();
+        final switch (_format)
+        {
+            case LogFormat.text:
+                _line ~= format_log_text(msg);
+                break;
+            case LogFormat.syslog:
+                _line ~= format_syslog(msg);
+                break;
+        }
+        if (_format != LogFormat.syslog)
+            _line ~= _line_ending == LogLineEnding.crlf ? "\r\n" : "\n";
+    }
+
+    void stream_state_change(ActiveObject, StateSignal signal)
+    {
+        if (signal == StateSignal.offline)
+            restart();
+    }
+
+    void unsubscribe()
+    {
+        if (_subscribed)
+        {
+            _stream.unsubscribe(&stream_state_change);
+            _subscribed = false;
+        }
+    }
+}
+
+
+__gshared LogSinkHandle _bootstrap_log_sink;
+
+void set_bootstrap_log_sink(LogSinkHandle handle)
+{
+    _bootstrap_log_sink = handle;
+}
+
+void retire_bootstrap_log_sink()
+{
+    if (_bootstrap_log_sink.valid)
+    {
+        unregister_log_sink(_bootstrap_log_sink);
+        _bootstrap_log_sink = LogSinkHandle.init;
+    }
+}
 
 
 const(char)[] format_log_line(scope ref const LogMessage msg)

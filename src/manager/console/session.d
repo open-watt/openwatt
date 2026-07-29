@@ -1,8 +1,5 @@
 module manager.console.session;
 
-import manager.console;
-import manager.features;
-
 import urt.array;
 import urt.lifetime;
 import urt.log;
@@ -15,7 +12,19 @@ import urt.file;
 import urt.result;
 import urt.variant;
 
+import manager;
+import manager.base;
+import manager.collection;
+import manager.console;
+import manager.features;
+import manager.plugin;
+
+import router.stream;
+
 nothrow @nogc:
+
+
+enum default_console_session_name = "default";
 
 
 enum ClientFeatures : ushort
@@ -42,6 +51,36 @@ enum ClientFeatures : ushort
     windows = crlf | cursor | format | textattrs | basiccolour | resize | utf8,
 }
 
+
+enum TerminalProfile : ubyte
+{
+    dumb,
+    nvt,
+    vt100,
+    ansi,
+    xterm,
+    windows,
+}
+
+
+ClientFeatures terminal_features(TerminalProfile profile) pure
+{
+    final switch (profile)
+    {
+        case TerminalProfile.dumb:
+        case TerminalProfile.nvt:
+            return ClientFeatures.nvt;
+        case TerminalProfile.vt100:
+            return cast(ClientFeatures)(ClientFeatures.vt100 | ClientFeatures.crlf);
+        case TerminalProfile.ansi:
+            return cast(ClientFeatures)(ClientFeatures.ansi | ClientFeatures.crlf);
+        case TerminalProfile.xterm:
+            return cast(ClientFeatures)(ClientFeatures.xterm | ClientFeatures.crlf);
+        case TerminalProfile.windows:
+            return ClientFeatures.windows;
+    }
+}
+
 // Out-of-band terminal events delivered via TerminalChannel
 enum TerminalEvents : ubyte
 {
@@ -62,65 +101,178 @@ struct TerminalChannel
     TerminalEvents pending_events;
 }
 
-class Session
+class Session : ActiveObject
 {
-    import router.stream;
-    import manager.base : ObjectFlags, StateSignal, ActiveObject;
+    alias Properties = AliasSeq!(Prop!("stream", stream),
+                                 Prop!("profile", profile),
+                                 Prop!("history", history),
+                                 Prop!("initial-command", initial_command));
 nothrow @nogc:
 
-    this(ref Console console, Stream stream = null)
+    enum type_name = "console-session";
+    enum path = "/console/session";
+    enum collection_id = CollectionType.console_session;
+    enum syncable = false;
+
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
+        this(id, flags, g_app.console);
+    }
+
+    this(CID id, ObjectFlags flags, ref Console console)
+    {
+        super(collection_type_info!Session, id, flags);
         _console = &console;
-        _stream = stream;
-        if (stream)
-        {
-            stream.subscribe(&stream_state_change);
-            _stream_subscribed = true;
-        }
         _prompt_suffix = "> ";
         _cur_scope = console.root;
+        set_prompt(console.get_prompt());
+    }
+
+    final inout(Stream) stream() inout pure
+        => _stream;
+    final void stream(Stream value)
+    {
+        if (_stream.get is value)
+            return;
+        unsubscribe_stream();
+        _stream = value;
+        mark_set!(typeof(this), "stream")();
+        restart();
+    }
+
+    final TerminalProfile profile() const pure
+        => _profile;
+    final void profile(TerminalProfile value)
+    {
+        _profile = value;
+        _profile_set = true;
+        _features = terminal_features(value);
+        _features_override = true;
+        mark_set!(typeof(this), "profile")();
+    }
+
+    final ref const(String) history() const pure
+        => _history_path;
+    final void history(String value)
+    {
+        if (_history_path == value)
+            return;
+        _history_path = value.move;
+        mark_set!(typeof(this), "history")();
+        restart();
+    }
+
+    final ref const(String) initial_command() const pure
+        => _initial_command;
+    final void initial_command(String value)
+    {
+        if (_initial_command == value)
+            return;
+        _initial_command = value.move;
+        mark_set!(typeof(this), "initial-command")();
+        restart();
+    }
+
+    final bool attached() const pure
+        => _started && !_close_requested && !_destroy_requested;
+
+    final bool is_attached() const pure
+        => attached();
+
+    override bool validate() const pure
+        => (_stream !is null && _profile_set) || (_flags & ObjectFlags.dynamic);
+
+    override CompletionStatus startup()
+    {
+        Stream s = _stream;
+        if (s)
+        {
+            if (!s.running)
+                return CompletionStatus.continue_;
+
+            s.subscribe(&stream_state_change);
+            _stream_subscribed = true;
+        }
+
+        _close_requested = false;
+        _destroy_requested = false;
+        _closing = false;
+        _started = true;
+        _show_prompt = false;
+
         static if (has_all)
         {
             import protocol.telnet.stream : TelnetStream;
-            _nvt_input = cast(TelnetStream)stream !is null;
+            _nvt_input = cast(TelnetStream)s !is null;
         }
         rebuild_prompt();
 
-        if (_stream)
+        if (s)
         {
-            auto term = _stream.terminal_channel();
+            auto term = s.terminal_channel();
             if (term)
             {
-                _features = term.features;
+                if (!_profile_set)
+                    _features = term.features;
                 _width = cast(ushort)term.width;
                 _height = cast(ushort)term.height;
             }
         }
+
+        if (!_history_path.empty)
+            load_history(_history_path[]);
+        if (!_initial_command.empty)
+        {
+            Array!char command;
+            command ~= _initial_command[];
+            if (!_console.execute_script(this, command.move))
+                return CompletionStatus.error;
+        }
+        if (!(_flags & ObjectFlags.dynamic))
+            show_prompt(true);
+        return CompletionStatus.complete;
     }
 
-    ~this()
+    override CompletionStatus shutdown()
     {
-        close_history();
+        unsubscribe_stream();
+
         if (_current_command)
         {
             _current_command.request_cancel();
+            if (_current_command.update() < CommandCompletionState.finished)
+                return CompletionStatus.continue_;
             allocator.freeT(_current_command);
             _current_command = null;
         }
-        if (_stream_subscribed)
-        {
-            _stream.unsubscribe(&stream_state_change);
-            _stream_subscribed = false;
-        }
-        if (_stream && (_stream.flags & ObjectFlags.dynamic))
-            _stream.destroy();
-        _stream = null;
-        _console = null;
+
+        close_history();
+        _buffer.clear();
+        _position = 0;
+        _suggestion_pending = false;
+        _history.clear();
+        _history_cursor = 0;
+        _history_head.clear();
+        _cur_scope = _console.root;
+        _executing_context = null;
+        _session_locals.clear();
+        _return_value = Variant();
+        _returning = false;
+        _closing = false;
+        _started = false;
+
+        Stream s = _stream;
+        if ((_flags & ObjectFlags.dynamic) && s &&
+            (s.flags & ObjectFlags.dynamic) && !(s.flags & ObjectFlags.disabled))
+            s.destroy();
+
+        return CompletionStatus.complete;
     }
 
-    void update()
+    override void update()
     {
-        if (_stream)
+        Stream s = _stream;
+        if (s)
         {
             enum BufLen = 512;
             char[BufLen] recvbuf = void;
@@ -128,10 +280,10 @@ nothrow @nogc:
             ptrdiff_t r;
             do
             {
-                r = _stream.read(recvbuf[]);
+                r = s.read(recvbuf[]);
                 if (r < 0)
                 {
-                    close_session();
+                    restart();
                     return;
                 }
                 if (r > 0)
@@ -162,8 +314,8 @@ nothrow @nogc:
 
                 if (_closing)
                 {
-                    _console = null;
                     _closing = false;
+                    finish_close();
                     return;
                 }
 
@@ -172,9 +324,6 @@ nothrow @nogc:
             }
         }
     }
-
-    final bool is_attached() pure
-        => _console != null;
 
     final bool is_idle() const pure
         => _current_command is null;
@@ -197,11 +346,16 @@ nothrow @nogc:
             }
         }
 
-        _console = null;
+        finish_close();
     }
 
-    final inout(Stream) stream() inout pure
-        => _stream;
+    final void request_destroy()
+    {
+        if (_destroy_requested)
+            return;
+        _destroy_requested = true;
+        destroy();
+    }
 
     final ushort width() const pure
         => _width;
@@ -469,6 +623,7 @@ nothrow @nogc:
     final void set_features(ClientFeatures f, ushort w = 0, ushort h = 0)
     {
         _features = f;
+        _features_override = true;
         if (w) _width = w;
         if (h) _height = h;
     }
@@ -715,17 +870,25 @@ protected:
     }
 
 private:
-    Stream _stream;
+    ObjectRef!Stream _stream;
+    String _history_path;
+    String _initial_command;
 
     ClientFeatures _features;
     ushort _width = 80;
     ushort _height = 24;
+    TerminalProfile _profile;
 
     bool _show_prompt = false;
     bool _suggestion_pending = false;
+    bool _started = false;
     bool _closing = false;
+    bool _close_requested = false;
+    bool _destroy_requested = false;
     bool _nvt_input = false;
     bool _stream_subscribed = false;
+    bool _features_override = false;
+    bool _profile_set = false;
 
     const(char)[] _prompt_suffix;
     MutableString!0 _prompt;
@@ -743,10 +906,26 @@ private:
     {
         if (signal == StateSignal.online)
             return;
-        _stream.unsubscribe(&stream_state_change);
-        _stream_subscribed = false;
-        _stream = null;
-        close_session();
+        unsubscribe_stream();
+        restart();
+    }
+
+    void unsubscribe_stream()
+    {
+        if (_stream_subscribed)
+        {
+            _stream.unsubscribe(&stream_state_change);
+            _stream_subscribed = false;
+        }
+    }
+
+    void finish_close()
+    {
+        _close_requested = true;
+        if (_flags & (ObjectFlags.dynamic | ObjectFlags.temporary))
+            request_destroy();
+        else
+            disabled(true);
     }
 
     void poll_terminal_events()
@@ -764,7 +943,8 @@ private:
         }
         if (term.pending_events & TerminalEvents.features_changed)
         {
-            _features = term.features;
+            if (!_features_override)
+                _features = term.features;
             term.pending_events &= ~TerminalEvents.features_changed;
             if (_show_prompt && (_features & ClientFeatures.escape))
                 send_prompt_and_buffer(true);
@@ -1031,9 +1211,9 @@ class StringSession : Session
 {
 nothrow @nogc:
 
-    this(ref Console console)
+    this(CID id, ObjectFlags flags, ref Console console)
     {
-        super(console);
+        super(id, flags, console);
     }
 
     const(char[]) getOutput() const pure
@@ -1061,5 +1241,94 @@ nothrow @nogc:
 
 private:
     MutableString!0 _output;
+}
+
+
+class ConsoleSessionModule : Module
+{
+    mixin DeclareModule!"console.session";
+nothrow @nogc:
+
+    override void init()
+    {
+        g_app.register_enum!TerminalProfile();
+        g_app.console.register_collection!Session();
+    }
+
+    override void update()
+    {
+        Collection!Session().update_all();
+    }
+}
+
+
+version (unittest):
+
+private class SessionTestStream : Stream
+{
+nothrow @nogc:
+
+    enum type_name = "session-test-stream";
+
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
+    {
+        super(collection_type_info!SessionTestStream, id, flags);
+    }
+
+    override ptrdiff_t read(void[])
+        => 0;
+
+    override ptrdiff_t write(const(void[])[] data...)
+    {
+        size_t written;
+        foreach (d; data)
+        {
+            _output ~= cast(const(ubyte)[])d;
+            written += d.length;
+        }
+        return written;
+    }
+
+    const(ubyte)[] output() const pure
+        => _output[];
+
+private:
+    Array!ubyte _output;
+}
+
+
+unittest
+{
+    import urt.mem.allocator : Mallocator, defaultAllocator;
+
+    Console* console = Mallocator.instance.allocT!Console(null, StringLit!"test.session", Mallocator.instance);
+
+    SessionTestStream stream = Collection!SessionTestStream().create("session-test-stream");
+    assert(stream && stream.running);
+
+    auto sessions = Collection!Session();
+    CID id = sessions.allocate_id("configured-session-test");
+    Session session = defaultAllocator().allocT!Session(id, ObjectFlags.none, *console);
+    session.stream(stream);
+    session.profile(TerminalProfile.dumb);
+    session.initial_command(StringLit!":put started");
+    sessions.add(session);
+    session.do_update();
+
+    assert(session.running);
+    assert(session.attached());
+    assert(cast(const(char)[])stream.output == "started\r\n");
+
+    session.destroy();
+    sessions.update_all();
+
+    StringSession temporary = console.createSession!StringSession();
+    Variant result;
+    console.execute(temporary, ":exit", result);
+    console.destroy_session(temporary);
+    sessions.update_all();
+
+    stream.destroy();
+    Collection!Stream().update_all();
 }
 

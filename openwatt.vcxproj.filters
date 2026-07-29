@@ -474,6 +474,9 @@
     <DCompile Include="src\router\stream\serial.d">
       <Filter>src\router\stream</Filter>
     </DCompile>
+    <DCompile Include="src\router\stream\usb_serial.d">
+      <Filter>src\router\stream</Filter>
+    </DCompile>
     <DCompile Include="src\protocol\ip\client.d">
       <Filter>src\protocol\ip</Filter>
     </DCompile>

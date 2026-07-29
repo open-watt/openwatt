@@ -39,11 +39,16 @@ if(NOT DEFINED OPENWATT_OBJ)
     set(OPENWATT_OBJ "${CMAKE_CURRENT_SOURCE_DIR}/../../../bin/${OW_BUILDNAME}_debug/openwatt")
 endif()
 
-# -u main pulls the D object in even though nothing in IDF references it.
+# Keep the D object inside the main component's whole archive. Linking it as a
+# trailing object prevents its references from pulling earlier IDF archives.
+set_source_files_properties("${OPENWATT_OBJ}" PROPERTIES
+    EXTERNAL_OBJECT TRUE
+    GENERATED TRUE)
+target_sources(${COMPONENT_LIB} PRIVATE "${OPENWATT_OBJ}")
+
 # -Wl,--no-check-sections suppresses bogus warnings about TLS sections that are
 # only reached via relocations rather than direct loads.
-target_link_libraries(${COMPONENT_LIB} INTERFACE
-    "-u main" "-Wl,--no-check-sections" "${OPENWATT_OBJ}")
+target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--no-check-sections")
 
 if(USE_LWIP)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE OW_USE_LWIP)

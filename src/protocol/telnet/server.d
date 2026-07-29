@@ -3,7 +3,6 @@ module protocol.telnet.server;
 import urt.array;
 import urt.inet;
 import urt.lifetime;
-import urt.mem.allocator;
 import urt.string;
 
 import manager;
@@ -30,10 +29,9 @@ nothrow @nogc:
 
     const String name;
 
-    this(NoGCAllocator allocator, String name, Console* console, BaseInterface iface, ushort port)
+    this(String name, Console* console, BaseInterface iface, ushort port)
     {
         this.name = name.move;
-        m_allocator = allocator;
         _console = console;
 
         const(char)[] server_name = Collection!TCPServer().generate_name(this.name[]);
@@ -47,9 +45,14 @@ nothrow @nogc:
     {
         m_server.destroy();
 
-        foreach (s; m_sessions)
-            m_allocator.freeT(s);
-        m_sessions.clear();
+        while (!m_sessions.empty)
+        {
+            Session session = m_sessions[$ - 1];
+            m_sessions.popBack();
+            session.unsubscribe(&session_state_change);
+            if (!(session.flags & ObjectFlags.disabled))
+                _console.destroy_session(session);
+        }
     }
 
     /// Add a listening port to the server.
@@ -67,28 +70,7 @@ nothrow @nogc:
         return false;
     }
 
-    final void update()
-    {
-        for (size_t i; i < m_sessions.length; )
-        {
-            Session s = m_sessions[i];
-
-            if (s.is_attached)
-                s.update();
-
-            if (!s.is_attached)
-            {
-                m_allocator.freeT(s);
-                m_sessions.removeSwapLast(i);
-            }
-            else
-                ++i;
-        }
-    }
-
 package:
-    NoGCAllocator m_allocator;
-
     Console* _console;
     TCPServer m_server;
 
@@ -109,6 +91,17 @@ package:
         session.show_prompt(true);
         session.load_history(".telnet_history");
 
+        session.subscribe(&session_state_change);
         m_sessions ~= session;
+    }
+
+    void session_state_change(ActiveObject object, StateSignal signal)
+    {
+        if (signal != StateSignal.destroyed)
+            return;
+
+        Session session = cast(Session)object;
+        session.unsubscribe(&session_state_change);
+        m_sessions.removeFirstSwapLast(session);
     }
 }
