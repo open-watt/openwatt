@@ -1,10 +1,8 @@
 module manager.sync.peer;
 
 import urt.array;
-import urt.lifetime;
 import urt.log;
 import urt.mem.allocator;
-import urt.mem.temp : tconcat;
 import urt.meta : AliasSeq;
 import urt.string;
 import urt.time;
@@ -12,10 +10,10 @@ import urt.time;
 import manager;
 import manager.base;
 import manager.collection;
+import manager.log;
 import manager.syslog;
 import manager.sync;
 import manager.sync.encoder;
-import manager.system : hostname;
 
 import router.iface;
 import router.iface.packet;
@@ -196,11 +194,11 @@ nothrow @nogc:
         filter.tag_prefix = _log_tag[];
 
         if (_log_active)
-            set_sink_filter(_log_sink, filter);
+            get_module!LogModule.set_consumer_filter(_log_consumer, filter);
         else
         {
-            _log_sink = register_log_sink(&log_sink_out, cast(void*)this, filter);
-            _log_active = _log_sink.valid;
+            _log_consumer = get_module!LogModule.register_consumer(filter);
+            _log_active = _log_consumer.valid;
             if (!_log_active)
                 log.warning("no free log sink slot for peer '", name[], "'");
         }
@@ -208,26 +206,18 @@ nothrow @nogc:
 
     void flush_logs()
     {
-        if (!_log_count && !_log_dropped)
+        if (!_log_active)
             return;
 
         SyncEncoder enc = encoder_for(_encoder);
-        while (_log_count)
+        LogMessage msg;
+        void* source;
+        while (get_module!LogModule.next_message(_log_consumer, msg, source))
         {
-            enc.encode_log(this, _log_ring[_log_head][]);
-            _log_head = (_log_head + 1) % log_ring_size;
-            --_log_count;
-        }
-        if (_log_dropped)
-        {
-            LogMessage drop;
-            drop.severity = Severity.warning;
-            drop.tag = "sync";
-            drop.hostname = hostname[];
-            drop.timestamp = get_sys_time();
-            drop.message = tconcat(_log_dropped, " log messages dropped to peer")[];
-            enc.encode_log(this, format_syslog(drop));
-            _log_dropped = 0;
+            if (source !is cast(void*)this &&
+                !enc.encode_log(this, format_syslog(msg)))
+                break;
+            get_module!LogModule.acknowledge(_log_consumer);
         }
     }
 
@@ -270,9 +260,6 @@ protected:
         // Peer-derived tap state dies with the stream; the desire to receive
         // (_want_*) persists so a reconnect re-subscribes.
         clear_log_sink();
-        _log_head = 0;
-        _log_count = 0;
-        _log_dropped = 0;
         return CompletionStatus.complete;
     }
 
@@ -291,16 +278,9 @@ package:
     MonoTime _time_t1;
     MonoTime _next_time_poll;
 
-    // Outbound tap: the remote subscribed to our logs; our fan-out sink queues
-    // matching lines here for flush_logs to drain each tick.
-    enum uint log_ring_size = 256;
-    LogSinkHandle _log_sink;
-    bool          _log_active;
-    String        _log_tag;              // owned; backs _log_sink's filter tag_prefix
-    Array!(char, 0)[log_ring_size] _log_ring;
-    uint _log_head;
-    uint _log_count;
-    uint _log_dropped;
+    LogConsumerHandle _log_consumer;
+    bool _log_active;
+    String _log_tag;
 
     // Inbound tap: we subscribed to the remote's logs. Persists across reconnect.
     bool     _want_logs;
@@ -311,36 +291,12 @@ private:
     ObjectRef!BaseInterface _transport;
     bool                    _transport_subscribed;
 
-    static void log_sink_out(void* ctx, scope ref const LogMessage msg) nothrow @nogc
-    {
-        auto peer = cast(SyncPeer)ctx;
-        // Split-horizon: don't echo a re-injected log back out the peer it
-        // arrived on. msg.hostname is the original emitter (possibly upstream of
-        // this peer in a relay chain), so the guard keys on arrival identity.
-        if (peer is g_log_reinject_source)
-            return;
-        peer.enqueue_log(format_syslog(msg));
-    }
-
-    void enqueue_log(const(char)[] line)
-    {
-        if (_log_count >= log_ring_size)
-        {
-            ++_log_dropped;
-            return;
-        }
-        uint slot = (_log_head + _log_count) % log_ring_size;
-        _log_ring[slot].clear();
-        _log_ring[slot] ~= line;
-        ++_log_count;
-    }
-
     void clear_log_sink()
     {
         if (!_log_active)
             return;
-        unregister_log_sink(_log_sink);
-        _log_sink = LogSinkHandle.init;
+        get_module!LogModule.unregister_consumer(_log_consumer);
+        _log_consumer = LogConsumerHandle.init;
         _log_active = false;
     }
 

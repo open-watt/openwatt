@@ -271,12 +271,13 @@ nothrow @nogc:
         send_frame(peer);
     }
 
-    override void encode_log(SyncPeer peer, const(char)[] line)
+    override bool encode_log(SyncPeer peer, const(char)[] line)
     {
         begin_frame("log");
         _buf.append(",\"msg\":");
         write_str(line);
         send_frame(peer);
+        return !_last_drop;
     }
 
     override void encode_enum(SyncPeer peer, const(char)[] type_name, ref const Variant members, uint seq)

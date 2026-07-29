@@ -66,6 +66,7 @@ import manager.console.command : CommandState, CommandCompletionState;
 import manager.console.session;
 import manager.plugin;
 import manager.features;
+import manager.log;
 import manager.syslog;
 import manager.system : hostname;
 import manager.sync.encoder;
@@ -776,13 +777,11 @@ nothrow @nogc:
             log.warning("sync: malformed log frame from '", from.name[], "'");
             return;
         }
-        // Re-inject into local logging. Split-horizon: mark the arrival peer so
-        // the fan-out's tap back toward `from` skips it. Keying on `from` (not
-        // msg.hostname) is what makes relays correct - msg.hostname is the
-        // original emitter, possibly several hops upstream of `from`.
-        g_log_reinject_source = from;
+        // Arrival identity, not hostname, prevents a relayed record echoing to
+        // the peer it came from.
+        get_module!LogModule.source(cast(void*)from);
         write_log(msg);
-        g_log_reinject_source = null;
+        get_module!LogModule.source(null);
     }
 
     // Inbound: commands, errors, enums, subscriptions
@@ -1336,8 +1335,6 @@ nothrow @nogc:
 
 
 private:
-
-package __gshared SyncPeer g_log_reinject_source;
 
 // /sync/log-sub peer=<name> [severity=<sev>] [tag=<prefix>]
 CommandState sync_log_sub(Session session, const(char)[] peer, Nullable!Severity severity, Nullable!(const(char)[]) tag)

@@ -6,12 +6,14 @@ import urt.mem.allocator;
 import urt.string;
 import urt.system;
 import urt.time;
+import urt.variant : Variant;
 
 import driver.system : system_reboot;
 
+import manager : get_module;
 import manager.console.session;
 import manager.console.function_command : TabComplete;
-import urt.variant : Variant;
+import manager.log;
 
 nothrow @nogc:
 
@@ -21,12 +23,7 @@ __gshared String hostname = StringLit!("OpenWatt"); // TODO: we need to make thi
 
 void log_level(Session session, Severity severity)
 {
-    // TODO: should this be deleted?
-    //       this command is a global log filter, but i reckon we should move filtering to the clients
-    foreach (i; 0 .. 16)
-    {
-        set_sink_filter(LogSinkHandle(i), LogFilter(severity));
-    }
+    get_module!LogModule.set_max_severity(severity);
 }
 
 void set_hostname(Session session, const(char)[] hostname)
