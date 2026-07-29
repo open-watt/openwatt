@@ -741,8 +741,7 @@ private:
             {
                 // connect attempt failed
                 log.error("connection failed");
-                _queue.complete(cast(ubyte)_pending_connect_tag, MessageState.failed);
-                clear_pending_connect();
+                complete_pending_connect(MessageState.failed);
                 return;
             }
 
@@ -754,10 +753,7 @@ private:
 
                 // dropped while the GATT cache was still warming
                 if (_pending_connect_tag >= 0 && session.peer == _pending_connect_peer)
-                {
-                    _queue.complete(cast(ubyte)_pending_connect_tag, MessageState.failed);
-                    clear_pending_connect();
-                }
+                    complete_pending_connect(MessageState.failed);
 
                 // notify subscribers via disconnect frame
                 Packet p;
@@ -780,6 +776,13 @@ private:
         _pending_connect_peer = MACAddress.init;
     }
 
+    void complete_pending_connect(MessageState state)
+    {
+        ubyte tag = cast(ubyte)_pending_connect_tag;
+        clear_pending_connect();
+        _queue.complete(tag, state);
+    }
+
     void on_discover_complete(BLEConn conn, const(BLEGattChar)[] chars, BLEError error)
     {
         auto session = find_session_by_transport(conn.id);
@@ -792,10 +795,7 @@ private:
         {
             log.error("GATT discovery failed");
             if (pending)
-            {
-                _queue.complete(cast(ubyte)_pending_connect_tag, MessageState.failed);
-                clear_pending_connect();
-            }
+                complete_pending_connect(MessageState.failed);
             session.active = false;
             return;
         }
@@ -821,10 +821,7 @@ private:
         }
 
         if (pending)
-        {
-            _queue.complete(cast(ubyte)_pending_connect_tag, MessageState.complete);
-            clear_pending_connect();
-        }
+            complete_pending_connect(MessageState.complete);
     }
 
     void on_read_complete(BLEConn conn, ushort handle, const(ubyte)[] data, BLEError error)
