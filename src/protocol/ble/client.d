@@ -178,6 +178,23 @@ nothrow @nogc:
         }
     }
 
+    override const(char)[] status_message() const
+    {
+        if (!_iface || !_iface.running)
+            return "Waiting for BLE interface";
+        if (_connect_handle >= 0)
+            return "Connecting to peer";
+
+        switch (_att_phase)
+        {
+            case ATTPhase.mtu:          return "Negotiating GATT MTU";
+            case ATTPhase.services:     return "Discovering GATT services";
+            case ATTPhase.chars:        return "Discovering GATT characteristics";
+            case ATTPhase.descriptors:  return "Discovering GATT descriptors";
+            default:                    return super.status_message();
+        }
+    }
+
 protected:
 
     override bool validate() const
@@ -193,10 +210,37 @@ protected:
             _iface.subscribe(&iface_state_change);
             _subscribed = true;
         }
+        if (_connect_result >= MessageState.complete)
+        {
+            MessageState r = _connect_result;
+            _connect_result = MessageState.queued;
+            _connect_handle = -1;
+            if (r != MessageState.complete)
+            {
+                log.error("connection to ", _peer, " failed");
+                _fail_reason = "Could not connect to peer";
+                return CompletionStatus.error;
+            }
+            _connected = true;
+            log.info("connected to ", _peer);
+            att_start(_iface.mtu);
+        }
+
+        if (_att_phase == ATTPhase.failed)
+        {
+            _fail_reason = "GATT exchange failed";
+            return CompletionStatus.error;
+        }
         if (_connect_handle >= 0)
             return CompletionStatus.continue_;
         if (_connected)
-            return CompletionStatus.complete;
+        {
+            // discovery is part of bring-up; a failed GATT exchange must back off
+            if (_att_phase == ATTPhase.ready)
+                return CompletionStatus.complete;
+            att_update(getTime());
+            return CompletionStatus.continue_;
+        }
 
         // send connect_ind to the interface
         Packet p;
@@ -211,6 +255,7 @@ protected:
         if (_connect_handle < 0)
         {
             log.error("failed to submit connect request");
+            _fail_reason = "Could not submit connect request";
             return CompletionStatus.error;
         }
 
@@ -226,6 +271,7 @@ protected:
             _iface.abort(_connect_handle);
             _connect_handle = -1;
         }
+        _connect_result = MessageState.queued; // after the abort; its completion records a result
 
         if (_connected)
         {
@@ -251,6 +297,9 @@ protected:
 
     override void update()
     {
+        // retry immediately; a persistent fault fails the next startup and backs off there
+        if (_att_phase == ATTPhase.failed)
+            return restart();
         att_update(getTime());
     }
 
@@ -280,6 +329,7 @@ private:
     MACAddress _peer;
     MACAddress _local_mac;
     int _connect_handle = -1;
+    MessageState _connect_result;   // queued = no result yet
     bool _subscribed;
     bool _connected;
     Array!NotifyHandler _notify_handlers;
@@ -296,24 +346,13 @@ private:
         return _local_mac;
     }
 
+    // may fire inline from forward() or inside the driver's completion sweep; just
+    // record the result, startup() consumes it
     void on_connect_complete(int handle, MessageState state)
     {
-        if (state < MessageState.complete)
+        if (state < MessageState.complete || handle < 0)
             return;
-
-        _connect_handle = -1;
-
-        if (state == MessageState.complete)
-        {
-            _connected = true;
-            log.info("connected to ", _peer);
-            att_start(_iface.mtu);
-        }
-        else
-        {
-            log.error("connection to ", _peer, " failed");
-            restart();
-        }
+        _connect_result = state;
     }
 
     void log_read_response(const(ubyte)[] value, ATTError error)
@@ -522,7 +561,7 @@ private:
         _user_ops.clear();
 
         log.error("ATT failure on connection to ", _peer);
-        restart();
+        // callers are receive handlers; the state machine reacts to ATTPhase.failed
     }
 
     const(GattChar)* find_char_by_handle(ushort value_handle) const

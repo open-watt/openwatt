@@ -567,7 +567,7 @@ nothrow @nogc:
                 return "Destroyed";
             case State.init_failed:
             case State.failure:
-                return "Failed";
+                return _fail_reason ? _fail_reason : "Failed";
             case State.validate:
                 return "Invalid";
             case State.starting:
@@ -696,6 +696,9 @@ protected:
 
     State _state = State.validate;
 
+    // set before returning error from startup(); shown through backoff; must be immortal (string literal)
+    const(char)[] _fail_reason;
+
     final void set_state(State new_state)
     {
         assert(_state != State.destroyed, "Cannot change state of a destroyed object!");
@@ -741,6 +744,7 @@ protected:
 
             case State.starting:
                 _last_init_attempt = getTime();
+                _fail_reason = null;
                 goto do_update;
 
             case State.validate:
