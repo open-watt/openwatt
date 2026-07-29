@@ -70,3 +70,62 @@ add name=gw_meter interface=goodwe_meter address=2 profile=gm1000
 ```
 
 Configuring the remote server will populate the runtime with a `Device` representing the data sampled from the meter, which can be used by local program logic. This bridge configuration solves the problem where a modbus appliance (the meter) on a single hardware bus can not receive requests from multiple masters.
+
+## CLI Command Reference
+
+This section is the growing, command-by-command reference for the CLI. The
+scopes listed here are documented completely. Additional scopes will be added
+as the reference expands.
+
+### `/log`
+
+Log calls submit severity, timestamp, hostname, tag, object name, and message as
+separate fields. The log router retains each submitted record in a 128-record
+delivery queue until every matching registered consumer acknowledges it. The
+last acknowledgement makes the record deletable; the history policy may retain
+that same structured record beyond delivery.
+
+| Command | Syntax | Description |
+| --- | --- | --- |
+| `emergency` | `/log/emergency <message>` | Emits an emergency message with the `console` tag. |
+| `alert` | `/log/alert <message>` | Emits an alert message with the `console` tag. |
+| `critical` | `/log/critical <message>` | Emits a critical message with the `console` tag. |
+| `error` | `/log/error <message>` | Emits an error message with the `console` tag. |
+| `warning` | `/log/warning <message>` | Emits a warning message with the `console` tag. |
+| `notice` | `/log/notice <message>` | Emits a notice message with the `console` tag. |
+| `info` | `/log/info <message>` | Emits an informational message with the `console` tag. |
+| `debug` | `/log/debug <message>` | Emits a debug message with the `console` tag. |
+| `trace` | `/log/trace <message>` | Emits a trace message with the `console` tag. |
+| `print` | `/log/print [--stream] [level=<severity>] [tag=<prefix>] [match=<text>] [max=<count>]` | Opens a live log consumer. Defaults to `level=trace` and `max=256`; `max` is capped at 1024. |
+
+`/log/print` is a temporary log consumer. When history is enabled it first
+copies matching retained records into its private view, then follows new
+records. With history disabled it starts empty and accumulates records from the
+moment the command begins. Its bounded records are released when the command
+finishes. Formatting happens only while rendering for the attached terminal,
+so retained data never contains terminal escape sequences or preformatted
+text.
+
+By default the command presents a scrollable live view. `--stream` instead
+prints each matching record once as it arrives. It emits no cursor movement,
+screen clearing, or status footer, making it suitable as the initial command
+for a serial console session. Press `q` or Ctrl+C to stop either mode and return
+to the console.
+
+### `/log/history`
+
+In-memory history is the log router's structured retention policy. Matching
+records are marked for history retention at ingress; history is not a consumer,
+does not require acknowledgement, and never holds delivery open. Eviction or
+expiry removes the history retention mark. The record is then deleted if all
+deliveries are complete, or after its last outstanding delivery otherwise.
+
+| Command | Syntax | Description |
+| --- | --- | --- |
+| `get` | `/log/history/get` | Prints the retention policy, retained count, and immediate delivery-queue statistics. |
+| `set` | `/log/history/set [max-messages=<count>] [max-age=<duration>] [max-severity=<severity>] [tag=<prefix>]` | Changes only the supplied policy fields. `max-messages` is capped at 1024; zero disables and clears history. `max-age=0s` removes the age limit. |
+| `clear` | `/log/history/clear` | Drops retained history without changing its policy. |
+
+The default policy is `max-messages=1024`, no age limit,
+`max-severity=info`, and no tag restriction. Tightening the severity, tag, age,
+or count policy immediately evicts records that no longer match.
