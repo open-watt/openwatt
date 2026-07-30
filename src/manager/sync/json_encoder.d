@@ -59,7 +59,7 @@ nothrow @nogc:
 
     override void encode_bind(SyncPeer peer, BaseObject obj, uint seq)
     {
-        uint h = peer.handle_of(obj);
+        SyncHandle h = peer.handle_of(obj);
         debug assert(h != SyncPeer.invalid_handle, "bind without prior add_name");
         begin_frame("bind");
         _buf.append(",\"target\":", h);
@@ -343,14 +343,14 @@ nothrow @nogc:
         {
             case "add_name":
                 sync.inbound_add_name(peer,
-                    cast(uint)json.getMember("h").asLong(),
+                    cast(SyncHandle)json.getMember("h").asLong(),
                     json.getMember("name").asString(),
                     json.getMember("type").asString());
                 break;
 
             case "bind":
             {
-                CID target = peer.cid_of(cast(uint)json.getMember("target").asLong());
+                CID target = peer.cid_of(cast(SyncHandle)json.getMember("target").asLong());
                 const(char)[] type = json.getMember("type").asString();
                 uint seq = cast(uint)json.getMember("seq").asLong();
                 sync.inbound_bind(peer, target, type, seq);
@@ -360,7 +360,7 @@ nothrow @nogc:
 
             case "unbind":
                 sync.inbound_unbind(peer,
-                    peer.cid_of(cast(uint)json.getMember("target").asLong()),
+                    peer.cid_of(cast(SyncHandle)json.getMember("target").asLong()),
                     cast(uint)json.getMember("seq").asLong());
                 break;
 
@@ -381,7 +381,7 @@ nothrow @nogc:
 
             case "destroy":
                 sync.inbound_destroy(peer,
-                    peer.cid_of(cast(uint)json.getMember("target").asLong()),
+                    peer.cid_of(cast(SyncHandle)json.getMember("target").asLong()),
                     cast(uint)json.getMember("seq").asLong());
                 break;
 
@@ -395,14 +395,14 @@ nothrow @nogc:
                     break;
                 }
                 sync.inbound_state(peer,
-                    peer.cid_of(cast(uint)json.getMember("target").asLong()),
+                    peer.cid_of(cast(SyncHandle)json.getMember("target").asLong()),
                     *sig);
                 break;
             }
 
             case "set":
             {
-                CID target = peer.cid_of(cast(uint)json.getMember("target").asLong());
+                CID target = peer.cid_of(cast(SyncHandle)json.getMember("target").asLong());
                 const(char)[] prop = json.getMember("prop").asString();
                 uint seq = cast(uint)json.getMember("seq").asLong();
                 Variant* val = json.getMember("value");
@@ -417,7 +417,7 @@ nothrow @nogc:
 
             case "reset":
                 sync.inbound_reset(peer,
-                    peer.cid_of(cast(uint)json.getMember("target").asLong()),
+                    peer.cid_of(cast(SyncHandle)json.getMember("target").asLong()),
                     json.getMember("prop").asString(),
                     cast(uint)json.getMember("seq").asLong());
                 break;

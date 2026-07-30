@@ -61,6 +61,7 @@ import db;
 import manager;
 import manager.base;
 import manager.collection;
+import manager.id : EID;
 import manager.console;
 import manager.console.command : CommandState, CommandCompletionState;
 import manager.console.session;
@@ -350,7 +351,7 @@ nothrow @nogc:
 
     // Inbound: registry
 
-    void inbound_add_name(SyncPeer from, uint handle, const(char)[] name, const(char)[] type)
+    void inbound_add_name(SyncPeer from, SyncHandle handle, const(char)[] name, const(char)[] type)
     {
         // Reserves local identity for the peer's announced name and binds their
         // session handle to it. No proxy yet - bind is what materialises one.
@@ -367,7 +368,7 @@ nothrow @nogc:
         }
         ubyte type_idx = cast(ubyte)rt.type_info.collection_id;
         CID local = item_table(type_idx).reserve(name, type_idx);
-        from.adopt(handle, local);
+        from.adopt(handle, EID(local));
     }
 
     // Inbound: mirror lifecycle
