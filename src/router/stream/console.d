@@ -31,8 +31,23 @@ else version (Posix)
 nothrow @nogc:
 
 
+enum ConsoleInput : ubyte
+{
+    none,
+    stdin,
+}
+
+enum ConsoleOutput : ubyte
+{
+    stdout,
+    stderr,
+}
+
+
 class ConsoleStream : Stream
 {
+    alias Properties = AliasSeq!(Prop!("input", input),
+                                 Prop!("output", output));
 nothrow @nogc:
 
     enum type_name = "console";
@@ -43,11 +58,35 @@ nothrow @nogc:
         super(collection_type_info!ConsoleStream, id, flags);
     }
 
+    final ConsoleInput input() const pure
+        => _input;
+    final void input(ConsoleInput value)
+    {
+        if (_input == value)
+            return;
+        _input = value;
+        mark_set!(typeof(this), "input");
+        restart();
+    }
+
+    final ConsoleOutput output() const pure
+        => _output;
+    final void output(ConsoleOutput value)
+    {
+        if (_output == value)
+            return;
+        _output = value;
+        mark_set!(typeof(this), "output");
+        restart();
+    }
+
     override TerminalChannel* terminal_channel()
-        => &_terminal;
+        => _input == ConsoleInput.stdin ? &_terminal : null;
 
     override ptrdiff_t read(void[] buffer)
     {
+        if (_input == ConsoleInput.none)
+            return 0;
         version (Windows)
             auto bytes = read_console_input(buffer);
         else version (Posix)
@@ -66,7 +105,8 @@ nothrow @nogc:
             auto bytes = 0;
         else
             static assert(false, "Unsupported platform");
-        version (Embedded) {} else
+        version (Embedded) {}
+        else
         {
             if (bytes > 0)
                 add_rx_bytes(bytes);
@@ -84,12 +124,16 @@ nothrow @nogc:
                 return -1;
             add_tx_bytes(n);
             total += n;
+            if (n < d.length)
+                return total;
         }
         return total;
     }
 
     override ptrdiff_t pending()
     {
+        if (_input == ConsoleInput.none)
+            return 0;
         version (Windows)
         {
             DWORD num_events = 0;
@@ -108,19 +152,30 @@ nothrow @nogc:
 
     override CompletionStatus startup()
     {
-        setup_terminal();
-        _terminal.pending_events |= TerminalEvents.features_changed | TerminalEvents.resized;
+        version (Windows)
+        {
+            _h_stdout = GetStdHandle(STD_OUTPUT_HANDLE);
+            _h_stderr = GetStdHandle(STD_ERROR_HANDLE);
+        }
+        if (_input == ConsoleInput.stdin)
+        {
+            setup_terminal();
+            _terminal.pending_events |= TerminalEvents.features_changed | TerminalEvents.resized;
+        }
         return CompletionStatus.complete;
     }
 
     override CompletionStatus shutdown()
     {
-        restore_terminal();
+        if (_input == ConsoleInput.stdin)
+            restore_terminal();
         return CompletionStatus.complete;
     }
 
 private:
     TerminalChannel _terminal;
+    ConsoleInput _input = ConsoleInput.stdin;
+    ConsoleOutput _output = ConsoleOutput.stdout;
     bool _terminal_restored;
 
     version (Windows)
@@ -135,15 +190,17 @@ private:
     else version (Posix)
     {
         termios _original_termios;
+        int _original_input_flags = -1;
+        bool _termios_configured;
     }
 
     void setup_terminal()
     {
+        _terminal_restored = false;
+
         version (Windows)
         {
             _h_stdin = GetStdHandle(STD_INPUT_HANDLE);
-            _h_stdout = GetStdHandle(STD_OUTPUT_HANDLE);
-            _h_stderr = GetStdHandle(STD_ERROR_HANDLE);
 
             _terminal.features = cast(ClientFeatures)(ClientFeatures.crlf | ClientFeatures.ansi);
 
@@ -166,16 +223,19 @@ private:
         }
         else version (Posix)
         {
-            tcgetattr(STDIN_FILENO, &_original_termios);
+            _termios_configured = false;
+            if (tcgetattr(STDIN_FILENO, &_original_termios) == 0)
+            {
+                termios raw = _original_termios;
+                raw.c_lflag &= ~(ICANON | ECHO);
+                raw.c_cc[VMIN] = 0;
+                raw.c_cc[VTIME] = 0;
+                _termios_configured = tcsetattr(STDIN_FILENO, TCSANOW, &raw) == 0;
+            }
 
-            termios raw = _original_termios;
-            raw.c_lflag &= ~(ICANON | ECHO);
-            raw.c_cc[VMIN] = 0;
-            raw.c_cc[VTIME] = 0;
-            tcsetattr(STDIN_FILENO, TCSANOW, &raw);
-
-            int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
-            fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK);
+            _original_input_flags = fcntl(STDIN_FILENO, F_GETFL, 0);
+            if (_original_input_flags >= 0)
+                fcntl(STDIN_FILENO, F_SETFL, _original_input_flags | O_NONBLOCK);
 
             _terminal.features = cast(ClientFeatures)(ClientFeatures.crlf | ClientFeatures.ansi);
         }
@@ -194,7 +254,10 @@ private:
         }
         else version (Posix)
         {
-            tcsetattr(STDIN_FILENO, TCSANOW, &_original_termios);
+            if (_termios_configured)
+                tcsetattr(STDIN_FILENO, TCSANOW, &_original_termios);
+            if (_original_input_flags >= 0)
+                fcntl(STDIN_FILENO, F_SETFL, _original_input_flags);
         }
 
         _terminal_restored = true;
@@ -207,12 +270,19 @@ private:
 
         version (Windows)
         {
-            DWORD written;
-            WriteConsoleA(_h_stdout, text.ptr, cast(DWORD)text.length, &written, null);
+            DWORD written, mode;
+            HANDLE output = _output == ConsoleOutput.stderr ? _h_stderr : _h_stdout;
+            if (GetConsoleMode(output, &mode))
+            {
+                if (!WriteConsoleA(output, text.ptr, cast(DWORD)text.length, &written, null))
+                    return -1;
+            }
+            else if (!WriteFile(output, text.ptr, cast(DWORD)text.length, &written, null))
+                return -1;
             return cast(ptrdiff_t)written;
         }
         else version (Posix)
-            return urt.internal.sys.posix.write(STDOUT_FILENO, text.ptr, text.length);
+            return urt.internal.sys.posix.write(_output == ConsoleOutput.stderr ? STDERR_FILENO : STDOUT_FILENO, text.ptr, text.length);
         else
             return urt.io.write(text);
     }
@@ -329,6 +399,8 @@ nothrow @nogc:
 
     override void init()
     {
+        g_app.register_enum!ConsoleInput();
+        g_app.register_enum!ConsoleOutput();
         g_app.console.register_collection!ConsoleStream();
     }
 }

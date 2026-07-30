@@ -673,7 +673,7 @@ private:
             CommandCompletionState state = cmd.command.update();
             if (state >= CommandCompletionState.finished)
             {
-                g_app.allocator.freeT(cmd.session);
+                g_app.console.destroy_session(cmd.session);
                 _running_commands.remove(i);
             }
             else
@@ -686,7 +686,7 @@ private:
         log.info("executing action: ", _script.source);
 
         Variant result;
-        Session session = g_app.allocator.allocT!Session(g_app.console);
+        Session session = g_app.console.createSession!Session();
         session.set_local("value", ev.value);   // $value = the datum that fired (element snapshot; null for time)
 
         CommandState command = g_app.console.execute(session, _script, result);
@@ -694,6 +694,6 @@ private:
         if (command)
             _running_commands ~= RunningCommand(session, command);
         else
-            g_app.allocator.freeT(session);
+            g_app.console.destroy_session(session);
     }
 }

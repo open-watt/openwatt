@@ -4,8 +4,8 @@
 # Enable C++ exception unwinding (required for D exception mechanism)
 CONFIG_COMPILER_CXX_EXCEPTIONS=y
 
-# Console over UART (P4 uses UART0 by default)
-CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+# Console over native USB Serial/JTAG
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 
 # No ESP-IDF logging -- OpenWatt has its own log system
 CONFIG_LOG_DEFAULT_LEVEL_NONE=y

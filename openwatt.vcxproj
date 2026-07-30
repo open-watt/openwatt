@@ -267,6 +267,7 @@
     <DCompile Include="src\router\stream\memory.d" />
     <DCompile Include="src\router\stream\package.d" />
     <DCompile Include="src\router\stream\serial.d" />
+    <DCompile Include="src\router\stream\usb_serial.d" />
     <DCompile Include="src\tools\protobuf\package.d" />
     <DCompile Include="src\tools\protobuf\parse.d" />
     <DCompile Include="third_party\urt\src\object.d" />

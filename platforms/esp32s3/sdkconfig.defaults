@@ -4,7 +4,7 @@
 # Enable C++ exception unwinding (required for D exception mechanism)
 CONFIG_COMPILER_CXX_EXCEPTIONS=y
 
-# Console over native USB Serial/JTAG (the USB port, not UART pins)
+# Console over native USB Serial/JTAG (the USB programming port).
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 
 # No ESP-IDF logging -- OpenWatt has its own log system

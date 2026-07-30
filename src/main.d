@@ -10,13 +10,11 @@ import urt.time;
 
 import manager;
 import manager.collection;
-import manager.console.session;
-import manager.log : format_log_line;
+import manager.console.session : Session, default_console_session_name;
+import manager.log : default_log_sink_name, format_log_text,
+                     retire_bootstrap_log_sink, set_bootstrap_log_sink;
 
 import driver.watchdog;
-
-import router.stream : Stream;
-import router.stream.console : ConsoleStream;
 
 import driver.system : reboot_pending;
 
@@ -65,13 +63,28 @@ int main(string[] args)
         }
     }
 
-    // route log output
-    if (!interactive_mode)
-        register_log_sink(&default_log_sink, null);
-    else
+    version (Embedded) {}
+    else if (interactive_mode)
     {
-        // if stderr is piped away from the console output: register the sink so logs are captured
-        bool stderr_redirected = false;
+        version (Posix)
+        {
+            import urt.internal.sys.posix : isatty, STDIN_FILENO;
+            if (!isatty(STDIN_FILENO))
+                interactive_mode = false;
+        }
+        version (Windows)
+        {
+            import urt.internal.sys.windows : GetStdHandle, GetConsoleMode, STD_INPUT_HANDLE, DWORD;
+            DWORD mode;
+            if (GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), &mode) == 0)
+                interactive_mode = false;
+        }
+    }
+
+    bool stderr_redirected;
+    version (Embedded) {}
+    else if (interactive_mode)
+    {
         version (Posix)
         {
             import urt.internal.sys.posix : isatty, STDERR_FILENO;
@@ -83,9 +96,14 @@ int main(string[] args)
             DWORD mode;
             stderr_redirected = GetConsoleMode(GetStdHandle(STD_ERROR_HANDLE), &mode) == 0;
         }
-        if (stderr_redirected)
-            register_log_sink(&stderr_log_sink, null);
     }
+
+    // This sink exists before the command system does. The startup commands
+    // replace it with managed streams and sinks as soon as they can.
+    version (Embedded)
+        set_bootstrap_log_sink(register_log_sink(&default_log_sink, null));
+    else if (!interactive_mode || stderr_redirected)
+        set_bootstrap_log_sink(register_log_sink(&stderr_log_sink, null));
 
     create_application();
     if (profile_path && !g_app.override_profile_path(profile_path))
@@ -105,34 +123,14 @@ int main(string[] args)
 
     watchdog_init(5.seconds);
 
-    ConsoleStream console_stream;
-    version (Embedded) {}
-    else if (interactive_mode)
-    {
-        version (Posix)
-        {
-            import urt.internal.sys.posix : isatty, STDIN_FILENO;
-            if (!isatty(STDIN_FILENO))
-                interactive_mode = false;
-        }
-        version (Windows)
-        {
-            import urt.internal.sys.windows : GetStdHandle, GetConsoleMode, STD_INPUT_HANDLE, DWORD;
-            DWORD mode;
-            if (GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), &mode) == 0)
-                interactive_mode = false;
-        }
-
-        if (interactive_mode)
-            console_stream = Collection!ConsoleStream().create("console-io");
-    }
-
-    Session session = g_app.console.createSession!Session(console_stream);
+    Session startup_session = g_app.console.createSession!Session();
 
     // Config layering:
-    //   1. system.conf  - system defaults (string-imported on embedded, disk on desktop)
-    //   2. startup.conf - regular configuration (--config overrides path)
-    //   3. user.conf    - personal overrides (not committed)
+    //   1. process defaults - generated CLI commands
+    //   2. system.conf      - platform defaults
+    //   3. startup.conf     - regular configuration (--config overrides path)
+    //   4. user.conf        - personal overrides
+    //   5. process session  - generated CLI commands
 
     version (ImportSystemConf)
         static immutable system_conf = import("system.conf");
@@ -141,9 +139,22 @@ int main(string[] args)
 
     // combine all layers
     Array!char combined_config;
+    bool loaded_configuration;
+
+    version (Embedded) {}
+    else
+    {
+        append_process_defaults(combined_config, !interactive_mode || stderr_redirected);
+        if (interactive_mode)
+            append_interactive_session_defaults(combined_config);
+    }
 
     static if (system_conf.length > 0)
+    {
         combined_config ~= system_conf;
+        combined_config ~= '\n';
+        loaded_configuration = true;
+    }
     else
     {
         char[] sys_conf = cast(char[])load_file("conf/system.conf");
@@ -152,6 +163,7 @@ int main(string[] args)
             combined_config ~= sys_conf;
             combined_config ~= '\n';
             defaultAllocator().free(sys_conf);
+            loaded_configuration = true;
         }
     }
 
@@ -161,6 +173,7 @@ int main(string[] args)
         combined_config ~= conf;
         combined_config ~= '\n';
         defaultAllocator().free(conf);
+        loaded_configuration = true;
     }
 
     char[] user_conf = cast(char[])load_file("conf/user.conf");
@@ -171,21 +184,27 @@ int main(string[] args)
         combined_config ~= user_conf;
         combined_config ~= '\n';
         defaultAllocator().free(user_conf);
+        loaded_configuration = true;
+    }
+
+    version (Embedded) {}
+    else if (interactive_mode)
+        activate_interactive_session(combined_config);
+
+    if (!loaded_configuration)
+    {
+        log_error("system", "No configuration loaded (tried system.conf, ", config_path, ", user.conf)");
+        if (!interactive_mode)
+            return -1;
     }
 
     bool startup_pending = false;
     if (combined_config.length > 0)
     {
         import urt.lifetime : move;
-        if (!g_app.console.execute_script(session, combined_config.move))
+        if (!g_app.console.execute_script(startup_session, combined_config.move))
             return -1;
-        startup_pending = !session.is_idle();
-    }
-    else
-    {
-        log_error("system", "No configuration loaded (tried system.conf, ", config_path, ", user.conf)");
-        if (!interactive_mode)
-            return -1;
+        startup_pending = !startup_session.is_idle();
     }
 
     // stop the computer from sleeping while this application is running...
@@ -194,7 +213,22 @@ int main(string[] args)
     version (Embedded)
         log_info("system", "Entering main loop");
 
-    while (true)
+    ObjectRef!Session interactive_session;
+    bool keep_running = true;
+    int exit_code;
+
+    if (!startup_pending)
+    {
+        finish_startup(startup_session, interactive_mode, interactive_session);
+        if (interactive_mode && !interactive_session)
+        {
+            log_error("system", "Interactive console session failed to start");
+            keep_running = false;
+            exit_code = -1;
+        }
+    }
+
+    while (keep_running)
     {
         // handle any expired timers (heartbeat-driven update() lives in here).
         MonoTime next_deadline = g_app.process_due();
@@ -202,36 +236,20 @@ int main(string[] args)
         if (reboot_pending())
             break;
 
-        if (startup_pending && session.is_idle())
+        if (startup_pending && startup_session.is_idle())
         {
             startup_pending = false;
-
-            version (Embedded)
+            finish_startup(startup_session, interactive_mode, interactive_session);
+            if (interactive_mode && !interactive_session)
             {
-                import manager : get_module;
-                import router.stream : StreamModule;
-
-                if (auto stream = Collection!Stream().get("console"))
-                {
-                    session = g_app.console.createSession!Session(stream);
-                    session.set_features(ClientFeatures.ansi);
-                    session.show_prompt(true);
-                    session.load_history(".telnet_history");
-                }
-                else
-                    log_error("system", "No 'console' stream - serial console unavailable");
-            }
-            else if (interactive_mode)
-            {
-                session.show_prompt(true);
-                session.load_history(".history");
+                log_error("system", "Interactive console session failed to start");
+                exit_code = -1;
+                break;
             }
         }
-        else if (!startup_pending && interactive_mode && !session.is_attached())
+        else if (!startup_pending && interactive_mode &&
+                 (!interactive_session || !interactive_session.attached()))
             break;
-
-        if (session && session.is_attached())
-            session.update();
 
         // sleep until either the next timer deadline or an event fires.
         g_app.wait_for_wake(next_deadline);
@@ -251,22 +269,61 @@ int main(string[] args)
         }
     }
 
-    return 0;
+    return exit_code;
 }
 
 
 private:
 
+void append_process_defaults(ref Array!char config, bool log_enabled)
+{
+    config ~= "/stream/console/add name=stderr input=none output=stderr\n";
+    config ~= "/log/sink/add name=";
+    config ~= default_log_sink_name;
+    config ~= " stream=stderr format=text max-severity=info";
+    if (!log_enabled)
+        config ~= " disabled=true";
+    config ~= '\n';
+}
+
+void append_interactive_session_defaults(ref Array!char config)
+{
+    config ~= "/stream/console/add name=stdio input=stdin output=stdout\n";
+    config ~= "/console/session/add name=";
+    config ~= default_console_session_name;
+    version (Windows)
+        config ~= " stream=stdio profile=windows history=.history disabled=true\n";
+    else
+        config ~= " stream=stdio profile=ansi history=.history disabled=true\n";
+}
+
+void activate_interactive_session(ref Array!char config)
+{
+    config ~= "/console/session/set ";
+    config ~= default_console_session_name;
+    config ~= " disabled=false\n";
+}
+
+void finish_startup(ref Session startup_session, bool interactive_mode, ref ObjectRef!Session interactive_session)
+{
+    g_app.console.destroy_session(startup_session);
+    startup_session = null;
+    retire_bootstrap_log_sink();
+
+    if (interactive_mode)
+        interactive_session = Collection!Session().get(default_console_session_name);
+}
+
 void default_log_sink(void*, scope ref const LogMessage msg) nothrow @nogc
 {
     import urt.io;
-    writeln(format_log_line(msg));
+    writeln(format_log_text(msg));
     flush();
 }
 
 void stderr_log_sink(void*, scope ref const LogMessage msg) nothrow @nogc
 {
-    auto line = format_log_line(msg);
+    auto line = format_log_text(msg);
     version (Embedded)
     {}
     else

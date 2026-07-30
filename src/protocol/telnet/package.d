@@ -36,12 +36,6 @@ nothrow @nogc:
         g_app.console.register_command!telnet("/tools", this);
     }
 
-    override void update()
-    {
-        foreach (server; servers.values)
-            server.update();
-    }
-
     void add_server(Session session, const(char)[] name, ushort port)
     {
         auto mod_if = get_module!InterfaceModule;
@@ -55,7 +49,7 @@ nothrow @nogc:
 
         String n = name.makeString(defaultAllocator());
 
-        TelnetServer server = defaultAllocator().allocT!TelnetServer(defaultAllocator(), n.move, &g_app.console, null, port);
+        TelnetServer server = defaultAllocator().allocT!TelnetServer(n.move, &g_app.console, null, port);
         servers[server.name[]] = server;
     }
 }

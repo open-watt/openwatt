@@ -206,7 +206,7 @@ private:
         {
             MutableString!0 output = session.takeOutput();
             send_cli_response(request.http_version, stream, output[], result);
-            defaultAllocator().freeT(session);
+            g_app.console.destroy_session(session);
             return 0;
         }
 
@@ -850,7 +850,7 @@ private:
             MutableString!0 output = req.session.takeOutput();
             send_cli_response(req.ver, req.stream, output[], req.command.result);
 
-            defaultAllocator().freeT(req.session);
+            g_app.console.destroy_session(req.session);
             _pending_requests.remove(i);
         }
     }

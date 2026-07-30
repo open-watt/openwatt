@@ -112,11 +112,30 @@ void register_modules(Application app)
         import router.stream;
         register_module!(router.stream)(app);
         register_module!(router.stream.bridge)(app);
-        register_module!(router.stream.console)(app);
+        version (Embedded) {}
+        else
+            register_module!(router.stream.console)(app);
         register_module!(router.stream.duplex)(app);
         register_module!(router.stream.file)(app);
         register_module!(router.stream.memory)(app);
         register_module!(router.stream.serial)(app);
+        version (ESP32_C3)
+            register_module!(router.stream.usb_serial)(app);
+        else version (ESP32_C5)
+            register_module!(router.stream.usb_serial)(app);
+        else version (ESP32_C6)
+            register_module!(router.stream.usb_serial)(app);
+        else version (ESP32_H2)
+            register_module!(router.stream.usb_serial)(app);
+        else version (ESP32_P4)
+            register_module!(router.stream.usb_serial)(app);
+        else version (ESP32_S2)
+            register_module!(router.stream.usb_serial)(app);
+        else version (ESP32_S3)
+            register_module!(router.stream.usb_serial)(app);
+
+        import manager.console.session;
+        register_module!(manager.console.session)(app);
 
         import router.iface;
         register_module!(router.iface)(app);

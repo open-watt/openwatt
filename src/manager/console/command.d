@@ -1,6 +1,7 @@
 module manager.console.command;
 
 import manager;
+import manager.collection;
 import manager.console;
 import manager.console.builtin_commands;
 import manager.console.session;
@@ -403,8 +404,12 @@ version (unittest):
 // Output includes both `:put` writes and the auto-echo of the final result Variant (matching the prompt loop).
 private void run_script(ref Console console, const(char)[] script_text, out MutableString!0 output, out Variant result)
 {
-    auto s = console._allocator.allocT!StringSession(console);
-    scope(exit) console._allocator.freeT(s);
+    auto s = console.createSession!StringSession();
+    scope(exit)
+    {
+        console.destroy_session(s);
+        Collection!Session().update_all();
+    }
 
     // Drive the command to completion, in case it's latent.
     CommandState cmd = console.execute(s, script_text, result);
@@ -497,8 +502,12 @@ unittest
     assert(out_[] == "9\n");
 
     // Session locals persist across separate Console.execute calls on the same session.
-    auto s = console._allocator.allocT!StringSession(*console);
-    scope(exit) console._allocator.freeT(s);
+    auto s = console.createSession!StringSession();
+    scope(exit)
+    {
+        console.destroy_session(s);
+        Collection!Session().update_all();
+    }
     console.execute(s, ":set x=42", r);
     console.execute(s, ":put $x", r);
     assert(s.getOutput() == "42\n");
