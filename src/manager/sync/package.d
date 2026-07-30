@@ -67,7 +67,7 @@ import manager.element : Access, add_feed_listener, Element, ElementLifecycleEve
                          register_element_lifecycle_handler, remove_feed_listener, SamplingMode, sweep_dirty;
 import manager.id : EID;
 import manager.path : Address, match_path, pattern_matches, walk_elements;
-import manager.series : Constraint, DataFormat, FormatId, register_format, Scalar, SeriesKind,
+import manager.series : Constraint, DataFormat, FormatId, RecordBlock, register_format, Scalar, SeriesKind,
                         unbox_scalar, valid, ValueType;
 import manager.console;
 import manager.console.command : CommandState, CommandCompletionState;
@@ -916,7 +916,7 @@ nothrow @nogc:
         log.info("sync: hello from '", from.name[], "' host='", host, "' ver=", ver, " caps=", caps);
     }
 
-    void inbound_model_sub(SyncPeer from, uint seq, const(char[])[] patterns, bool once)
+    void inbound_model_sub(SyncPeer from, uint seq, const(char[])[] patterns, bool once, ulong from_ms = 0, ulong to_ms = 0)
     {
         SyncEncoder enc = encoder_for(from._encoder);
         foreach (pat; patterns)
@@ -959,6 +959,8 @@ nothrow @nogc:
                     if (arm)
                         track_live(from, e);
                     send_element(from, enc, e, path);
+                    if (from_ms)
+                        send_backfill(from, enc, e, from_ms, to_ms);
                 });
             }
         }
@@ -1708,6 +1710,45 @@ nothrow @nogc:
             enc.encode_type_format(to, ft, *fmt);
         h = to.introduce(node);
         enc.encode_add(to, h, tconcat("device:", path), "element", ft, e);
+    }
+
+    // Backfill behind the add: the add already carried the latest value, history streams
+    // as val blocks after it so a UI paints instantly and fills the chart. Served
+    // synchronously within the burst; nothing can interleave, so a live sub's feed takes
+    // over gap-free where the backfill ends. Serves the in-RAM retained series; deep
+    // (db-resident) recall stays on history_req until cursor-paced draining lands.
+    void send_backfill(SyncPeer to, SyncEncoder enc, Element* e, ulong from_ms, ulong to_ms)
+    {
+        import urt.time : from_unix_time_ns;
+
+        if (!e.has_history)
+            return;
+        SyncHandle h = to.handle_of(e.ensure_eid());
+        if (h == SyncPeer.invalid_handle)
+            return;
+        ulong idx = e.index_for_time(from_unix_time_ns(from_ms * 1_000_000));
+        if (idx == ulong.max)
+            return;
+        SysTime to_t = to_ms ? from_unix_time_ns(to_ms * 1_000_000) : SysTime();
+        for (;;)
+        {
+            RecordBlock blk = e.read_records(idx, 256);
+            if (!blk.count)
+                break;
+            if (to_ms)
+            {
+                uint full = blk.count;
+                while (blk.count && blk.time(blk.count - 1) > to_t)
+                    --blk.count;
+                if (blk.count)
+                    enc.encode_val_block(to, h, blk);
+                if (blk.count < full)
+                    break;
+            }
+            else
+                enc.encode_val_block(to, h, blk);
+            idx = blk.first_index + blk.count;
+        }
     }
 
     // arms a node for the live feed; several patterns may match one node, within one sub or

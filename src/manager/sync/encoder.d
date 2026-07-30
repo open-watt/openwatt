@@ -26,7 +26,7 @@ import manager.collection : CID;
 import manager.element : Element;
 import manager.expression : NamedArgument;
 import manager.record : Sample;
-import manager.series : DataFormat, ValueType;
+import manager.series : DataFormat, RecordBlock, ValueType;
 import manager.sync.peer;
 
 
@@ -210,13 +210,12 @@ nothrow @nogc:
     abstract void encode_type_enum(SyncPeer peer, const(char)[] name, const(VoidEnumInfo)* info);
 
     // e is null for container nodes (class "device"); ft cites a session format id
-    abstract void encode_add(SyncPeer peer, SyncHandle h, const(char)[] path, const(char)[] node_class,
-                             uint ft, Element* e);
+    abstract void encode_add(SyncPeer peer, SyncHandle h, const(char)[] path, const(char)[] node_class, uint ft, Element* e);
 
     abstract void encode_val(SyncPeer peer, SyncHandle h, Element* e);
+    abstract void encode_val_block(SyncPeer peer, SyncHandle h, ref const RecordBlock blk);
 
     abstract void encode_res(SyncPeer peer, uint seq);
-    // ack carrying the authority's applied value (set acks)
     abstract void encode_res(SyncPeer peer, uint seq, ref const Variant value);
     abstract void encode_err(SyncPeer peer, uint seq, const(char)[] code, const(char)[] text);
 

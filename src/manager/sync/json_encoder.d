@@ -21,7 +21,7 @@ import manager.base;
 import manager.collection;
 import manager.element : Element;
 import manager.record : Sample;
-import manager.series : Constraint, DataFormat, Scalar, SeriesKind, ValueType;
+import manager.series : Constraint, DataFormat, RecordBlock, Scalar, SeriesKind, ValueType;
 import manager.sync;
 import manager.sync.encoder;
 import manager.sync.peer;
@@ -466,6 +466,28 @@ nothrow @nogc:
         send_frame(peer);
     }
 
+    override void encode_val_block(SyncPeer peer, SyncHandle h, ref const RecordBlock blk)
+    {
+        import urt.time : unix_time_ns;
+
+        begin_frame("val");
+        _buf.append(",\"h\":", h);
+        if (blk.lost)
+            _buf.append(",\"lost\":", blk.lost);
+        _buf ~= ",\"s\":[";
+        foreach (i; 0 .. blk.count)
+        {
+            if (i)
+                _buf ~= ',';
+            _buf.append('[', unix_time_ns(blk.time(i)) / 1_000_000, ',');
+            Variant v = blk.box(i);
+            write_variant(v);
+            _buf ~= ']';
+        }
+        _buf ~= ']';
+        send_frame(peer);
+    }
+
     override void encode_res(SyncPeer peer, uint seq)
     {
         begin_frame("res");
@@ -616,14 +638,12 @@ nothrow @nogc:
                     for (size_t i = 0; i < pats.length(); ++i)
                         patterns ~= (*pats)[i].asString();
                     Variant* once = json.getMember("once");
-                    sync.inbound_model_sub(peer,
-                        cast(uint)json.getMember("seq").asLong(),
-                        patterns[],
-                        once && once.asBool());
+                    Variant* from = json.getMember("from");
+                    Variant* to = json.getMember("to");
+                    sync.inbound_model_sub(peer, json.getMember("seq").asUint(), patterns[], once && once.asBool(), from ? from.asUlong() : 0, to ? to.asUlong() : 0);
                     break;
                 }
-                sync.inbound_sub(peer,
-                    json.getMember("pattern").asString().makeString(defaultAllocator));
+                sync.inbound_sub(peer, json.getMember("pattern").asString().makeString(defaultAllocator));
                 break;
             }
 
