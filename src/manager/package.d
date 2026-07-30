@@ -472,6 +472,8 @@ nothrow @nogc:
             console.register_command!alloc_leaks_cmd("/system/alloc", this, "leaks");
         }
 
+        register_type(&device_type_info, "/device");
+
         console.register_command!device_add("/device", this, "add");
         console.register_command!device_print("/device", this, "print");
         console.register_command!element_set("/element", this, "set");

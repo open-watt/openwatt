@@ -351,6 +351,11 @@ nothrow @nogc:
             log.warning("sync: add_name from '", from.name[], "' with unknown type '", type, "'");
             return;
         }
+        if (rt.type_info.is_abstract)
+        {
+            log.warning("sync: add_name from '", from.name[], "' for abstract type '", type, "'");
+            return;
+        }
         ubyte type_idx = cast(ubyte)rt.type_info.collection_id;
         CID local = item_table(type_idx).reserve(name, type_idx);
         from.adopt(handle, local);
