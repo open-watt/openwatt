@@ -50,7 +50,7 @@ import urt.lifetime;
 import urt.log;
 import urt.map;
 import urt.mem.allocator;
-import urt.meta.enuminfo : VoidEnumInfo;
+import urt.meta.enuminfo : enum_from_key, make_enum_info, VoidEnumInfo;
 import urt.meta.nullable;
 import urt.string;
 import urt.time;
@@ -61,8 +61,11 @@ import db;
 import manager;
 import manager.base;
 import manager.collection;
+import manager.device : Device;
+import manager.element : Access, Element, SamplingMode;
 import manager.id : EID;
-import manager.path : pattern_matches;
+import manager.path : Address, match_path, pattern_matches, walk_elements;
+import manager.series : DataFormat, FormatId, register_format, SeriesKind, valid, ValueType;
 import manager.console;
 import manager.console.command : CommandState, CommandCompletionState;
 import manager.console.session;
@@ -158,6 +161,7 @@ nothrow @nogc:
             g_app.console.register_collection!WebSocketSyncServer();
 
         g_app.console.register_command!sync_log_sub("/sync", this, "log-sub");
+        g_app.console.register_command!sync_model_sub("/sync", this, "model-sub");
 
         set_log_hostname(hostname[]);
 
@@ -277,6 +281,11 @@ nothrow @nogc:
         p._subscriptions.clear();
         p._introduced.clear();
         p._adopted.clear();
+        p._remote_caps = 0;
+        p._ft_sent.clear();
+        p._next_ft = 0;
+        p._enums_sent.clear();
+        p._ft_recv.clear();
 
         // Drop pending forwards where this peer was the origin; we can't route
         // a response back to a gone peer.
@@ -845,6 +854,193 @@ nothrow @nogc:
         }
     }
 
+    // Inbound: model plane
+
+    void inbound_hello(SyncPeer from, uint ver, const(char)[] host, ubyte caps, uint max_frame)
+    {
+        from._remote_caps = caps;
+        log.info("sync: hello from '", from.name[], "' host='", host, "' ver=", ver, " caps=", caps);
+    }
+
+    void inbound_model_sub(SyncPeer from, uint seq, const(char[])[] patterns, bool once)
+    {
+        SyncEncoder enc = encoder_for(from._encoder);
+        if (!once)
+        {
+            enc.encode_err(from, seq, "unsupported", "live model subscriptions not yet supported");
+            return;
+        }
+        foreach (pat; patterns)
+        {
+            Address a = Address.parse(pat);
+            if (!a.valid)
+            {
+                enc.encode_err(from, seq, "bad_value", "bad pattern");
+                return;
+            }
+            if (!wildcard_match(a.ns, "device"))
+                continue;   // only the device namespace is served so far
+            foreach (dev; g_app.devices.values)
+            {
+                if (dev.remote || !dev.cid)
+                    continue;
+                if (match_path(a.subject, dev.id[]))
+                    introduce_device(from, enc, dev);
+                walk_elements(dev, a.subject, (Element* e, const(char)[] path) {
+                    send_element(from, enc, e, path);
+                });
+            }
+        }
+        enc.encode_res(from, seq);
+    }
+
+    void inbound_type_format(SyncPeer from, uint ft, ref const WireFormat wf)
+    {
+        import urt.si.unit : ScaledUnit;
+        import manager.sample : find_enum_info;
+
+        if (ft in from._ft_recv)
+        {
+            log.warning("sync: peer '", from.name[], "' re-interned ft ", ft);
+            return;
+        }
+        ValueType vt;
+        if (!value_type_from_name(wf.type, vt))
+        {
+            log.warning("sync: type frame with unknown value type '", wf.type, "'");
+            return;
+        }
+        const(SeriesKind)* kind = enum_from_key!SeriesKind(wf.series);
+        if (!kind)
+        {
+            log.warning("sync: type frame with unknown series kind '", wf.series, "'");
+            return;
+        }
+
+        DataFormat f;
+        if (wf.enum_name.length)
+        {
+            const(VoidEnumInfo)* ei = find_enum_info(wf.enum_name);
+            if (!ei)
+            {
+                log.warning("sync: format cites unknown enum '", wf.enum_name, "'");
+                return;
+            }
+            f = DataFormat(vt, *kind, ei);
+        }
+        else if (wf.unit.length)
+        {
+            ScaledUnit su;
+            float pre_scale;
+            if (su.parse_unit(wf.unit, pre_scale) <= 0)
+            {
+                log.warning("sync: format with unparsable unit '", wf.unit, "'");
+                return;
+            }
+            f = DataFormat(vt, *kind, su);
+        }
+        else
+            f = DataFormat(vt, *kind);
+        f.count = wf.count;
+        f.rate = wf.rate;
+        from._ft_recv.insert(ft, register_format(f));
+    }
+
+    void inbound_type_enum(SyncPeer from, const(char)[] name, ref Variant members)
+    {
+        import manager.sample : register_enum_info;
+
+        if (!members.isObject)
+        {
+            log.warning("sync: enum type frame without members");
+            return;
+        }
+        Array!(const(char)[]) keys;
+        Array!long values;
+        foreach (k, ref v; members)
+        {
+            keys ~= k;
+            values ~= v.asLong();
+        }
+        register_enum_info(name, make_enum_info(name, keys[], values[]));
+    }
+
+    void inbound_model_add(SyncPeer from, SyncHandle handle, const(char)[] path, const(char)[] node_class,
+                           uint ft, const(char)[] access, const(char)[] mode, Variant* v, ulong t_ms)
+    {
+        import urt.time : from_unix_time_ns;
+
+        Address a = Address.parse(path);
+        if (!a.valid || a.ns[] != "device")
+        {
+            log.warning("sync: add with unsupported path '", path, "'");
+            return;
+        }
+        const(char)[] rest = a.subject;
+        const(char)[] dev_id = rest.split!'.';
+
+        Device dev = find_or_create_remote_device(dev_id);
+        if (!dev)
+            return;
+
+        if (node_class[] == "device")
+        {
+            from.adopt(handle, EID(dev.cid));
+            return;
+        }
+        if (node_class[] != "element" || rest.empty)
+        {
+            log.warning("sync: add with unsupported class '", node_class, "' at '", path, "'");
+            return;
+        }
+        FormatId* pf = ft in from._ft_recv;
+        if (!pf)
+        {
+            log.warning("sync: add cites unknown ft ", ft);
+            return;
+        }
+        Element* e = dev.find_or_create_element(rest, *pf);
+        if (!e)
+            return;
+        if (access.length)
+        {
+            if (const(Access)* acc = enum_from_key!Access(access))
+                e.access = *acc;
+        }
+        if (mode.length)
+        {
+            if (const(SamplingMode)* m = enum_from_key!SamplingMode(mode))
+                e.sampling_mode = *m;
+        }
+        if (v && !v.isNull)
+            e.value(*v, t_ms ? from_unix_time_ns(t_ms * 1_000_000) : getSysTime());
+        from.adopt(handle, e.ensure_eid());
+    }
+
+    void inbound_val(SyncPeer from, SyncHandle handle, ref Variant value, ulong t_ms)
+    {
+        import urt.time : from_unix_time_ns;
+
+        EID node = from.node_of(handle);
+        Element* e = g_app.devices.resolve(node);
+        if (!e)
+        {
+            log.warning("sync: val for unknown handle ", handle);
+            return;
+        }
+        e.value(value, t_ms ? from_unix_time_ns(t_ms * 1_000_000) : getSysTime());
+    }
+
+    void inbound_res(SyncPeer from, uint seq)
+    {
+        log.info("sync: model burst complete from '", from.name[], "' seq=", seq);
+    }
+
+    void inbound_err(SyncPeer from, uint seq, const(char)[] code, const(char)[] text)
+    {
+        log.warning("sync: err from '", from.name[], "' seq=", seq, " code=", code, ": ", text);
+    }
+
     void inbound_history_req(SyncPeer from, const(char)[] path, ulong from_ms, ulong to_ms, uint max_points, uint seq)
     {
         import urt.time : getSysTime, unixTimeNs;
@@ -1289,6 +1485,79 @@ nothrow @nogc:
         return result;
     }
 
+    // Model-plane introduction: schema pushed before first cite, node bound to a
+    // session handle, current value riding the add frame.
+
+    void introduce_device(SyncPeer to, SyncEncoder enc, Device dev)
+    {
+        import urt.mem.temp : tconcat;
+
+        EID node = EID(dev.cid);
+        if (to.handle_of(node) != SyncPeer.invalid_handle)
+            return;
+        SyncHandle h = to.introduce(node);
+        enc.encode_add(to, h, tconcat("device:", dev.id[]), "device", 0, null);
+    }
+
+    void send_element(SyncPeer to, SyncEncoder enc, Element* e, const(char)[] path)
+    {
+        import urt.mem.temp : tconcat;
+        import manager.owsig : container_serialisable;
+        import manager.sample : enum_info_name;
+
+        if (!e.format.valid)
+            return;
+        const(DataFormat)* fmt = e.data_format;
+        if (!container_serialisable(*fmt))
+        {
+            log.debug_("sync: skipping unserialisable element ", path);
+            return;
+        }
+        EID node = e.ensure_eid();
+        if (!node)
+            return;
+        SyncHandle h = to.handle_of(node);
+        if (h != SyncPeer.invalid_handle)
+        {
+            enc.encode_val(to, h, e);
+            return;
+        }
+        if (fmt.desc == DataFormat.Desc.enum_)
+        {
+            const(char)[] ename = enum_info_name(fmt.enum_info);
+            if (!ename)
+            {
+                log.warning("sync: element ", path, " cites an unregistered enum - skipped");
+                return;
+            }
+            if (!to.enum_seen(fmt.enum_info))
+                enc.encode_type_enum(to, ename, fmt.enum_info);
+        }
+        bool first;
+        uint ft = to.ft_of(e.format, first);
+        if (first)
+            enc.encode_type_format(to, ft, *fmt);
+        h = to.introduce(node);
+        enc.encode_add(to, h, tconcat("device:", path), "element", ft, e);
+    }
+
+    Device find_or_create_remote_device(const(char)[] id)
+    {
+        if (Device* d = id in g_app.devices)
+        {
+            if (!(*d).remote)
+            {
+                log.warning("sync: remote device '", id, "' collides with a local device - ignored");
+                return null;
+            }
+            return *d;
+        }
+        Device dev = g_app.allocator.allocT!Device(id.makeString(g_app.allocator));
+        dev.remote = true;
+        g_app.devices.insert(dev.id[], dev);
+        return dev;
+    }
+
     // Helpers
 
     uint alloc_seq()
@@ -1301,6 +1570,14 @@ nothrow @nogc:
 
 
 private:
+
+// /sync/model-sub peer=<peer> pattern=<address> - one-shot model read (sub {once})
+void sync_model_sub(Session session, SyncPeer peer, const(char)[] pattern)
+{
+    SyncModule mod = get_module!SyncModule;
+    const(char)[][1] patterns = [pattern];
+    encoder_for(peer._encoder).encode_model_sub(peer, mod.alloc_seq(), patterns[], true);
+}
 
 // /sync/log-sub peer=<name> [severity=<sev>] [tag=<prefix>]
 CommandState sync_log_sub(Session session, const(char)[] peer, Nullable!Severity severity, Nullable!(const(char)[]) tag)

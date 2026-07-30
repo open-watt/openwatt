@@ -2,8 +2,10 @@ module manager.sync.peer;
 
 import urt.array;
 import urt.log;
+import urt.map;
 import urt.mem.allocator;
 import urt.meta : AliasSeq;
+import urt.meta.enuminfo : VoidEnumInfo;
 import urt.string;
 import urt.time;
 
@@ -12,6 +14,7 @@ import manager.base;
 import manager.collection;
 import manager.id : EID;
 import manager.log;
+import manager.series : FormatId;
 import manager.syslog;
 import manager.sync;
 import manager.sync.encoder;
@@ -26,6 +29,20 @@ alias log = Log!"sync";
 
 // wide enough for a sibling transport's raw EIDs; foreign sessions allocate small dense values
 alias SyncHandle = ulong;
+
+// verb families served; negotiated by hello, build-time on each end
+enum SyncCaps : ubyte
+{
+    objects = 1 << 0,   // legacy object mirror
+    model   = 1 << 1,   // data-model space (add/val/sub)
+    history = 1 << 2,
+    console = 1 << 3,
+    logs    = 1 << 4,
+    time    = 1 << 5,
+}
+
+enum ubyte local_sync_caps = SyncCaps.objects | SyncCaps.model | SyncCaps.history |
+                             SyncCaps.console | SyncCaps.logs | SyncCaps.time;
 
 
 class SyncPeer : ActiveObject
@@ -165,6 +182,34 @@ nothrow @nogc:
     CID cid_of(SyncHandle handle)
         => node_of(handle).container;
 
+    // Session schema interning: formats and named types push once per session,
+    // always before the frame that first cites them. Interning is peer policy
+    // (a sibling peer answers "always seen" and emits no type frames).
+
+    // session ft for a local format; first=true when the definition must be pushed first
+    uint ft_of(FormatId f, out bool first)
+    {
+        size_t i = f;
+        while (_ft_sent.length <= i)
+            _ft_sent ~= ushort(0);
+        if (_ft_sent[i] == 0)
+        {
+            first = true;
+            _ft_sent[][i] = cast(ushort)++_next_ft;
+        }
+        return _ft_sent[i] - 1;
+    }
+
+    // true if this enum dictionary was already pushed; records it either way
+    bool enum_seen(const(VoidEnumInfo)* info)
+    {
+        foreach (e; _enums_sent[])
+            if (e is info)
+                return true;
+        _enums_sent ~= info;
+        return false;
+    }
+
     void forget(BaseObject obj)
     {
         EID node = EID(obj.id);
@@ -255,6 +300,7 @@ protected:
 
         subscribe_transport();
 
+        encoder_for(_encoder).encode_hello(this);
         get_module!SyncModule.attach_peer(this);
 
         if (_want_logs)
@@ -283,6 +329,12 @@ package:
     Array!EID        _introduced;        // handle table: nodes we announced (slot = handle >> 1)
     Array!EID        _adopted;           // handle table: local ids for names the peer announced
     SyncEncoderKind  _encoder;
+
+    ubyte            _remote_caps;       // hello negotiation; 0 = no hello received
+    Array!ushort     _ft_sent;           // FormatId -> session ft + 1; 0 = unsent
+    uint             _next_ft;
+    Array!(const(VoidEnumInfo)*) _enums_sent;
+    Map!(uint, FormatId) _ft_recv;       // peer's session ft -> local format
 
     bool     _time_authority;
     bool     _time_subordinate;
