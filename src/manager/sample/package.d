@@ -101,6 +101,14 @@ const(VoidEnumInfo)* find_enum_info(const(char)[] name)
     return null;
 }
 
+const(char)[] enum_info_name(const(VoidEnumInfo)* info)
+{
+    foreach (ref kvp; g_enums)
+        if (kvp.value is info)
+            return kvp.key[];
+    return null;
+}
+
 // binary wire -> one typed record; false when the desc can't represent the bytes
 bool sample_record(const(void)[] wire, ref const SampleDesc desc, void[] record)
 {

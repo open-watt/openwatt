@@ -236,6 +236,7 @@ nothrow @nogc:
     }
 
     CID cid;                            // unset until DeviceTable.insert stamps it
+    bool remote;                        // materialized from a sync peer; never announced back
     IndexTable!(Element*) element_ids;
 
     Array!Computation computations;
