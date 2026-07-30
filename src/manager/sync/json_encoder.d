@@ -59,7 +59,7 @@ nothrow @nogc:
 
     override void encode_bind(SyncPeer peer, BaseObject obj, uint seq)
     {
-        uint h = peer.handle_of(obj);
+        SyncHandle h = peer.handle_of(obj);
         debug assert(h != SyncPeer.invalid_handle, "bind without prior add_name");
         begin_frame("bind");
         _buf.append(",\"target\":", h);
@@ -139,8 +139,7 @@ nothrow @nogc:
         send_frame(peer);
     }
 
-    override void encode_set(SyncPeer peer, CID target, const(char)[] prop_name,
-                             ref const Variant value, uint seq)
+    override void encode_set(SyncPeer peer, CID target, const(char)[] prop_name, ref const Variant value, uint seq)
     {
         begin_frame("set");
         _buf.append(",\"target\":", peer.handle_of(target));
@@ -342,32 +341,27 @@ nothrow @nogc:
         switch (kind_str)
         {
             case "add_name":
-                sync.inbound_add_name(peer,
-                    cast(uint)json.getMember("h").asLong(),
-                    json.getMember("name").asString(),
-                    json.getMember("type").asString());
+                sync.inbound_add_name(peer, json.getMember("h").as!SyncHandle, json.getMember("name").asString(), json.getMember("type").asString());
                 break;
 
             case "bind":
             {
-                CID target = peer.cid_of(cast(uint)json.getMember("target").asLong());
+                CID target = peer.cid_of(json.getMember("target").as!SyncHandle);
                 const(char)[] type = json.getMember("type").asString();
-                uint seq = cast(uint)json.getMember("seq").asLong();
+                uint seq = json.getMember("seq").asUint();
                 sync.inbound_bind(peer, target, type, seq);
                 dispatch_props(peer, target, json);
                 break;
             }
 
             case "unbind":
-                sync.inbound_unbind(peer,
-                    peer.cid_of(cast(uint)json.getMember("target").asLong()),
-                    cast(uint)json.getMember("seq").asLong());
+                sync.inbound_unbind(peer, peer.cid_of(json.getMember("target").as!SyncHandle), json.getMember("seq").asUint());
                 break;
 
             case "create":
             {
                 const(char)[] type = json.getMember("type").asString();
-                uint seq = cast(uint)json.getMember("seq").asLong();
+                uint seq = json.getMember("seq").asUint();
 
                 Array!NamedArgument props;
                 Variant* pv = json.getMember("props");
@@ -380,9 +374,7 @@ nothrow @nogc:
             }
 
             case "destroy":
-                sync.inbound_destroy(peer,
-                    peer.cid_of(cast(uint)json.getMember("target").asLong()),
-                    cast(uint)json.getMember("seq").asLong());
+                sync.inbound_destroy(peer, peer.cid_of(json.getMember("target").as!SyncHandle), json.getMember("seq").asUint());
                 break;
 
             case "state":
@@ -394,15 +386,13 @@ nothrow @nogc:
                     log.warning("sync/json: unknown state signal: ", sig_str);
                     break;
                 }
-                sync.inbound_state(peer,
-                    peer.cid_of(cast(uint)json.getMember("target").asLong()),
-                    *sig);
+                sync.inbound_state(peer, peer.cid_of(json.getMember("target").as!SyncHandle), *sig);
                 break;
             }
 
             case "set":
             {
-                CID target = peer.cid_of(cast(uint)json.getMember("target").asLong());
+                CID target = peer.cid_of(cast(SyncHandle)json.getMember("target").asLong());
                 const(char)[] prop = json.getMember("prop").asString();
                 uint seq = cast(uint)json.getMember("seq").asLong();
                 Variant* val = json.getMember("value");
@@ -416,26 +406,19 @@ nothrow @nogc:
             }
 
             case "reset":
-                sync.inbound_reset(peer,
-                    peer.cid_of(cast(uint)json.getMember("target").asLong()),
-                    json.getMember("prop").asString(),
-                    cast(uint)json.getMember("seq").asLong());
+                sync.inbound_reset(peer, peer.cid_of(json.getMember("target").as!SyncHandle), json.getMember("prop").asString(), json.getMember("seq").asUint());
                 break;
 
             case "cmd":
-                sync.inbound_cmd(peer,
-                    cast(uint)json.getMember("seq").asLong(),
-                    json.getMember("text").asString());
+                sync.inbound_cmd(peer, json.getMember("seq").asUint(), json.getMember("text").asString());
                 break;
 
             case "result":
             {
-                uint seq = cast(uint)json.getMember("seq").asLong();
+                uint seq = json.getMember("seq").asUint();
                 Variant* val = json.getMember("value");
                 Variant empty;
-                sync.inbound_result(peer, seq,
-                    val ? *val : empty,
-                    json.getMember("text").asString());
+                sync.inbound_result(peer, seq, val ? *val : empty, json.getMember("text").asString());
                 break;
             }
 
@@ -466,10 +449,10 @@ nothrow @nogc:
                 Variant* max = json.getMember("max");
                 sync.inbound_history_req(peer,
                     json.getMember("path").asString(),
-                    from ? cast(ulong)from.asLong() : 0,
-                    to ? cast(ulong)to.asLong() : 0,
-                    max ? cast(uint)max.asLong() : 0,
-                    cast(uint)json.getMember("seq").asLong());
+                    from ? from.asUlong() : 0,
+                    to ? to.asUlong() : 0,
+                    max ? max.asUint() : 0,
+                    json.getMember("seq").asUint());
                 break;
             }
 
@@ -481,12 +464,10 @@ nothrow @nogc:
 
             case "enum":
             {
-                uint seq = cast(uint)json.getMember("seq").asLong();
+                uint seq = json.getMember("seq").asUint();
                 Variant* members = json.getMember("members");
                 Variant empty;
-                sync.inbound_enum(peer,
-                    json.getMember("type").asString(),
-                    members ? *members : empty, seq);
+                sync.inbound_enum(peer, json.getMember("type").asString(), members ? *members : empty, seq);
                 break;
             }
 
@@ -538,21 +519,15 @@ nothrow @nogc:
             }
 
             case "time_req":
-                sync.inbound_time_req(peer, cast(uint)json.getMember("seq").asLong());
+                sync.inbound_time_req(peer, json.getMember("seq").asUint());
                 break;
 
             case "time_resp":
-                sync.inbound_time_resp(peer,
-                    cast(uint)json.getMember("seq").asLong(),
-                    cast(ulong)json.getMember("recv").asLong(),
-                    cast(ulong)json.getMember("xmit").asLong(),
-                    cast(uint)json.getMember("ver").asLong());
+                sync.inbound_time_resp(peer, json.getMember("seq").asUint(), json.getMember("recv").asUlong(), json.getMember("xmit").asUlong(), json.getMember("ver").asUint());
                 break;
 
             case "time_push":
-                sync.inbound_time_push(peer,
-                    cast(uint)json.getMember("ver").asLong(),
-                    json.getMember("delta").asLong());
+                sync.inbound_time_push(peer, json.getMember("ver").asUint(), json.getMember("delta").asLong());
                 break;
 
             default:
