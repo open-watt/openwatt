@@ -284,8 +284,7 @@ void TIM4Init()
 //
 void EXTInit()
 {
-    // The GPIO interlock owns the level interrupt and opens the contactors
-    // before forwarding its latched status to the ActiveObject.
+    // hardware_open() configures the RCM GPIO interrupt.
 }
 
 
@@ -406,8 +405,6 @@ int setup() {
     hardware_config.proximity_adc_channel = 6;
     hardware_config.temperature_adc_channel = 0;
     hardware_config.residual_current_gpio = RCMFAULT;
-    hardware_config.contactor1_gpio = SSR1;
-    hardware_config.contactor2_gpio = SSR2;
     if (!hardware_open(Hardware, hardware_config))
         return -1;
 

@@ -37,9 +37,9 @@
  * - Module-owned hardware lifetime and safe offline electrical outputs.
  * - Exclusive ActiveObject ownership, automatic charging on connection and
  *   explicit start/stop control.
- * - RCM input monitoring. A cache-safe level interrupt first clears SSR1 and
- *   SSR2 directly in GPIO registers, then latches a DRAM flag. The ActiveObject
- *   enters an error state and can acknowledge it only after the input clears.
+ * - RCM input monitoring. A cache-safe rising-edge callback first clears SSR1
+ *   and SSR2, then latches a DRAM flag. The ActiveObject enters an error state
+ *   and can acknowledge it only after the input clears.
  *
  * Intentional architecture deviations:
  * - OpenWatt scheduled events replace the upstream FreeRTOS 10 ms, 100 ms and
@@ -75,7 +75,7 @@
  *   under normal load and during flash erase/write.
  *
  * TODO - RCM and fail-safe behavior:
- * - Measure the cache-safe level-triggered RCM interrupt latency on hardware.
+ * - Measure the cache-safe RCM interrupt latency on hardware.
  * - A software interrupt cannot protect against disabled interrupts, a wedged
  *   CPU or arbitrary memory corruption. A guarantee under those failures
  *   requires an external hardware interlock from RCM fault to contactor drive.
@@ -137,6 +137,8 @@ module driver.boards.smartevse;
 version (SmartEVSE):
 
 import urt.meta : AliasSeq;
+import urt.atomic : MemoryOrder, atomicLoad, atomicStore;
+import urt.attribute : critical;
 import urt.driver.gpio;
 import urt.si.quantity : Quantity;
 import urt.si.unit : Ampere, ScaledUnit;
@@ -431,11 +433,12 @@ protected:
 
         _hardware_owner = this;
         _active_hardware_owner = this;
+        residual_current_set_callback(Hardware, &rcm_fault_ready);
 
         apply_current();
         setContactor2Mode(cast(ubyte)_contactor2_mode);
         RCmonCtrl(ENABLE);
-        if (residual_current_fault_latched(Hardware) ||
+        if (atomicLoad!(MemoryOrder.acquire)(_rcm_fault_pending) != 0 ||
             gpio_input_read(RCMFAULT))
         {
             _rcm_fault = true;
@@ -486,6 +489,7 @@ protected:
         }
         _active_hardware_owner = null;
         hardware_offline();
+        residual_current_set_callback(Hardware, null);
         _hardware_owner = _hardware_module;
         if (!_rcm_fault)
             sync_status();
@@ -576,8 +580,7 @@ private:
         if (!_rcm_fault)
             return "no RCM fault is latched";
 
-        if (!residual_current_clear(Hardware))
-            return "RCM input is still active";
+        atomicStore!(MemoryOrder.release)(_rcm_fault_pending, 0);
         setRCMFault(false);
         _rcm_fault = false;
         mark_set!(typeof(this), "rcm-fault")();
@@ -596,17 +599,11 @@ private:
         if (!running)
             return;
 
-        if ((residual_current_fault_latched(Hardware) ||
+        if ((atomicLoad!(MemoryOrder.acquire)(_rcm_fault_pending) != 0 ||
              gpio_input_read(RCMFAULT))
             && !_rcm_fault)
         {
-            setRCMFault(true);
-            _rcm_fault = true;
-            mark_set!(typeof(this), "rcm-fault")();
-            setState(STATE_ERROR);
-            sync_status();
-            log.error("RCM fault latched");
-            restart();
+            handle_rcm_fault();
             return;
         }
 
@@ -618,6 +615,19 @@ private:
         if (next <= now)
             next = now + msecs(10);
         arm_control_tick(next);
+    }
+
+    void handle_rcm_fault()
+    {
+        if (_rcm_fault)
+            return;
+        setRCMFault(true);
+        _rcm_fault = true;
+        mark_set!(typeof(this), "rcm-fault")();
+        setState(STATE_ERROR);
+        sync_status();
+        log.error("RCM fault latched");
+        restart();
     }
 
     void sync_status()
@@ -756,7 +766,16 @@ nothrow @nogc:
 
 private:
 
+@critical bool rcm_fault_ready(GpioInterrupt, GpioCallbackContext)
+{
+    gpio_output_set(SSR1, false);
+    gpio_output_set(SSR2, false);
+    atomicStore!(MemoryOrder.release)(_rcm_fault_pending, 1);
+    return false;
+}
+
 __gshared Object _hardware_owner;
 __gshared SmartEVSEModule _hardware_module;
 __gshared SmartEVSE _active_hardware_owner;
 __gshared bool _hardware_ready;
+shared uint _rcm_fault_pending;
