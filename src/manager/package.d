@@ -1394,6 +1394,8 @@ nothrow @nogc:
 
     void notify_element_created(Element* e)
     {
+        signal_element_lifecycle(e, ElementLifecycleEvent.created);
+
         char[256] buf = void;
         ptrdiff_t len = e.full_path(buf);
         if (len <= 0 || len > buf.length)

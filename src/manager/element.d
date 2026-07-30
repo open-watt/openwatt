@@ -20,6 +20,19 @@ nothrow @nogc:
 
 alias Subscriber = void delegate(ref const SampleUpdate update) nothrow @nogc;
 
+enum ElementLifecycleEvent : ubyte
+{
+    created,
+    destroyed,
+}
+
+alias ElementLifecycleHandler = void delegate(Element* e, ElementLifecycleEvent event) nothrow @nogc;
+
+void register_element_lifecycle_handler(ElementLifecycleHandler handler)
+{
+    _on_element_lifecycle ~= handler;
+}
+
 struct SampleUpdate
 {
 nothrow @nogc:
@@ -995,6 +1008,12 @@ package:
 
 __gshared Array!(Element*) g_dirty_elements;
 
+void signal_element_lifecycle(Element* e, ElementLifecycleEvent event)
+{
+    foreach (h; _on_element_lifecycle[])
+        h(e, event);
+}
+
 void sweep_dirty(scope void delegate(ref Element) nothrow @nogc visit)
 {
     foreach (e; g_dirty_elements)
@@ -1005,6 +1024,7 @@ void sweep_dirty(scope void delegate(ref Element) nothrow @nogc visit)
 
 private:
 
+__gshared Array!ElementLifecycleHandler _on_element_lifecycle;
 __gshared uint g_commit_depth;
 __gshared Array!SampleUpdate g_pending_updates;
 
@@ -1446,4 +1466,26 @@ unittest
     assert(rc(evictee) == 0);
 
     // TODO: regular-series test returns once regular write_records() and rate-aware tick() are built
+}
+
+unittest
+{
+    static struct Watcher
+    {
+        Element* seen;
+        ElementLifecycleEvent seen_event;
+        void handler(Element* el, ElementLifecycleEvent event) nothrow @nogc
+        {
+            seen = el;
+            seen_event = event;
+        }
+    }
+    Element e;
+    Watcher w;
+    register_element_lifecycle_handler(&w.handler);
+    signal_element_lifecycle(&e, ElementLifecycleEvent.created);
+    assert(w.seen is &e && w.seen_event == ElementLifecycleEvent.created);
+    signal_element_lifecycle(&e, ElementLifecycleEvent.destroyed);
+    assert(w.seen_event == ElementLifecycleEvent.destroyed);
+    _on_element_lifecycle.popBack();
 }
