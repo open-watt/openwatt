@@ -26,7 +26,7 @@ import manager.collection : CID;
 import manager.element : Element;
 import manager.expression : NamedArgument;
 import manager.record : Sample;
-import manager.series : DataFormat, ValueType;
+import manager.series : DataFormat, RecordBlock, ValueType;
 import manager.sync.peer;
 
 
@@ -214,6 +214,10 @@ nothrow @nogc:
                              uint ft, Element* e);
 
     abstract void encode_val(SyncPeer peer, SyncHandle h, Element* e);
+
+    // backfill/history batch: one val frame carrying a block of samples; blk.lost reports
+    // eviction between the reader's position and the block rather than hiding it
+    abstract void encode_val_block(SyncPeer peer, SyncHandle h, ref const RecordBlock blk);
 
     abstract void encode_res(SyncPeer peer, uint seq);
     // ack carrying the authority's applied value (set acks)
