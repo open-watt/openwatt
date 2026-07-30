@@ -9,7 +9,7 @@ import urt.time;
 import urt.variant;
 
 import manager;
-import manager.collection : CID, CollectionType, make_cid;
+import manager.collection : CID, CollectionType, CollectionTypeInfo, make_cid;
 import manager.component;
 import manager.element;
 import manager.expression;
@@ -21,6 +21,10 @@ nothrow @nogc:
 
 alias CreateElementHandler = FormatId delegate(Device device, Element* e, ref const ElementDesc desc,
                                                ubyte index) nothrow @nogc;
+
+// null create: devices are not BaseObjects; their table is g_app.devices, not g_item_tables
+__gshared const CollectionTypeInfo device_type_info =
+    CollectionTypeInfo(StringLit!"device", StringLit!"/device", CollectionType.device, null, null, null, false);
 
 struct DeviceTable
 {

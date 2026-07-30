@@ -474,6 +474,7 @@ nothrow @nogc:
 
         console.register_command!device_add("/device", this, "add");
         console.register_command!device_print("/device", this, "print");
+        register_type(&device_type_info, "/device");
         console.register_command!element_set("/element", this, "set");
         console.register_command!link_add("/element/link", this, "add");
         console.register_command!link_print("/element/link", this, "print");
