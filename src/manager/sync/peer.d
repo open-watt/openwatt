@@ -254,6 +254,9 @@ protected:
 
     override CompletionStatus shutdown()
     {
+        if (get_module!SyncModule.cancel_inbound_cmds(this))
+            return CompletionStatus.continue_;
+
         get_module!SyncModule.detach_peer(this);
         detach_transport();
 

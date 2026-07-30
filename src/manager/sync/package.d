@@ -237,13 +237,14 @@ nothrow @nogc:
         for (size_t i = 0; i < pending_inbound_cmds.length; )
         {
             ref PendingInboundCmd req = pending_inbound_cmds[i];
-            if (req.command.update() == CommandCompletionState.in_progress)
+            if (req.command.update() < CommandCompletionState.finished)
             {
                 ++i;
                 continue;
             }
             encoder_for(req.peer._encoder)
                 .encode_result(req.peer, req.seq, req.command.result, req.session.takeOutput()[]);
+            req.session.allocator.freeT(req.command);
             g_app.console.destroy_session(req.session);
             pending_inbound_cmds.remove(i);
         }
@@ -294,6 +295,23 @@ nothrow @nogc:
         });
     }
 
+    // Peer teardown: request cancellation of the peer's in-flight inbound commands;
+    // the update() drain reaps them (delivering results while the transport lasts).
+    // True while any remain, so the peer's shutdown() can wait on it.
+    bool cancel_inbound_cmds(SyncPeer p)
+    {
+        bool waiting = false;
+        foreach (ref cmd; pending_inbound_cmds)
+        {
+            if (cmd.peer is p)
+            {
+                cmd.command.request_cancel();
+                waiting = true;
+            }
+        }
+        return waiting;
+    }
+
     void detach_peer(SyncPeer p)
     {
         // Destroy proxies we held on this peer's behalf.
@@ -317,17 +335,8 @@ nothrow @nogc:
         foreach (k; doomed[])
             pending_forwards.remove(k);
 
-        // Drop in-flight inbound commands from this peer - no one to reply to.
-        for (size_t i = 0; i < pending_inbound_cmds.length; )
-        {
-            if (pending_inbound_cmds[i].peer is p)
-            {
-                g_app.console.destroy_session(pending_inbound_cmds[i].session);
-                pending_inbound_cmds.remove(i);
-            }
-            else
-                ++i;
-        }
+        debug foreach (ref cmd; pending_inbound_cmds)
+            assert(cmd.peer !is p, "detach with in-flight inbound commands; shutdown must drain them first");
 
         foreach (i, existing; peers[])
         {
