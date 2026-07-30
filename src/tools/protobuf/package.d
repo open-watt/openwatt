@@ -40,18 +40,53 @@ struct FieldInfo
     ushort ty;
 }
 
+enum uint max_field_id = 536_870_911;
+
+struct ProtoOptional(T)
+{
+    bool present;
+    T value;
+
+    ref T ensure() return
+    {
+        present = true;
+        return value;
+    }
+
+    static if (!is(T == struct))
+    {
+        void set(T value)
+        {
+            present = true;
+            this.value = value;
+        }
+    }
+
+    void clear()
+    {
+        present = false;
+        value = T.init;
+    }
+}
 
 size_t buffer_len(T)(ref const T msg) pure nothrow @nogc
 {
-    static assert(is(typeof(T.syntax)) && is(typeof(T.id)), "T must be a protobuf message struct");
+    static assert(is(typeof(T.syntax)), "T must be a protobuf message struct");
     enum pack = T.syntax == 3;
 
     size_t len = 0;
     static foreach (i; 0 .. msg.tupleof.length)
     {{
         enum info = __traits(getAttributes, msg.tupleof[i])[0];
-        // TODO: there are options to pack or not pack per item... (i think?)
-        len += 1 + encode_len!(pack, info.wire)(msg.tupleof[i]);
+        alias Field = typeof(msg.tupleof[i]);
+        enum tag = (ulong(info.id) << 3) | (info.wire & 7);
+        static if (is(Field == ProtoOptional!U, U))
+        {
+            if (msg.tupleof[i].present)
+                len += varint_len(tag) + encode_len!(pack, info.wire)(msg.tupleof[i].value);
+        }
+        else
+            len += varint_len(tag) + encode_len!(pack, info.wire)(msg.tupleof[i]);
     }}
     return len;
 }
@@ -66,8 +101,20 @@ size_t proto_serialise(T)(ubyte[] buffer, ref const T msg) pure nothrow @nogc
     {{
         enum info = __traits(getAttributes, msg.tupleof[i])[0];
         ulong tag = (ulong(info.id) << 3) | (info.wire & 7);
-        offset += put_varint(buffer[offset .. $], tag);
-        offset += buffer[offset .. $].encode_value!(pack, info.wire)(msg.tupleof[i]);
+        alias Field = typeof(msg.tupleof[i]);
+        static if (is(Field == ProtoOptional!U, U))
+        {
+            if (msg.tupleof[i].present)
+            {
+                offset += put_varint(buffer[offset .. $], tag);
+                offset += buffer[offset .. $].encode_value!(pack, info.wire)(msg.tupleof[i].value);
+            }
+        }
+        else
+        {
+            offset += put_varint(buffer[offset .. $], tag);
+            offset += buffer[offset .. $].encode_value!(pack, info.wire)(msg.tupleof[i]);
+        }
     }}
     return offset;
 }
@@ -82,7 +129,10 @@ ptrdiff_t proto_deserialise(T)(const(ubyte)[] buffer, out T msg) nothrow @nogc
     {
         ulong tag;
         offset += buffer[offset..$].get_varint(tag);
-        member: switch (cast(uint)(tag >> 3))
+        ulong field_id = tag >> 3;
+        if (field_id == 0 || field_id > max_field_id)
+            return -1;
+        member: switch (cast(uint)field_id)
         {
             static foreach (i; 0 .. msg.tupleof.length)
             {{
@@ -90,14 +140,20 @@ ptrdiff_t proto_deserialise(T)(const(ubyte)[] buffer, out T msg) nothrow @nogc
                 case info.id:
                     if ((info.wire & 7) != (tag & 7))
                         goto default; // wire type mismatch, skip this field
-                    ptrdiff_t taken = decode_value!(pack, info.wire)(buffer[offset..$], msg.tupleof[i]);
+                    alias Field = typeof(msg.tupleof[i]);
+                    static if (is(Field == ProtoOptional!U, U))
+                    {
+                        msg.tupleof[i].present = true;
+                        ptrdiff_t taken = decode_value!(pack, info.wire)(buffer[offset..$], msg.tupleof[i].value);
+                    }
+                    else
+                        ptrdiff_t taken = decode_value!(pack, info.wire)(buffer[offset..$], msg.tupleof[i]);
                     if (taken < 0)
-                        return -1; // error
+                        return -1;
                     offset += taken;
                     break member;
             }}
             default:
-                // unknown field in the bitstream, skip it...
                 switch (tag & 7)
                 {
                     case WireType.varint:
@@ -114,7 +170,7 @@ ptrdiff_t proto_deserialise(T)(const(ubyte)[] buffer, out T msg) nothrow @nogc
                         offset += 4;
                         break;
                     default:
-                        return -1; // error: unknown wire type
+                        return -1;
                 }
                 break;
         }
@@ -176,7 +232,7 @@ size_t encode_len(bool pack, ubyte ty, T)(auto ref const T value) pure nothrow @
             static if (ty == WireType.zigzag)
                 return varint_len((value << 1) ^ (value >> 63));
             else static if (ty == WireType.fixed64)
-                return 4;
+                return 8;
             else
                 return varint_len(value);
         }
@@ -343,7 +399,10 @@ ptrdiff_t decode_value(bool pack, ubyte ty, T)(const(ubyte)[] buffer, ref T valu
     }
 
     static if (is(T == Array!ubyte))
-        value.extend(len)[] = block[];
+    {
+        value.clear();
+        value.extend(block.length)[] = block[];
+    }
     else static if (is(T == Array!U, U))
     {
         static if (pack)
@@ -378,7 +437,7 @@ ptrdiff_t decode_value(bool pack, ubyte ty, T)(const(ubyte)[] buffer, ref T valu
         {
             static if (ty == WireType.zigzag)
                 value = cast(T)(long(val >> 1) ^ -long(val & 1));
-            else static if (ty == WireType.fixed64)
+            else
                 value = cast(T)cast(long)val;
         }
         else
@@ -438,4 +497,167 @@ size_t get_varint(const(ubyte)[] buffer, out ulong i) pure nothrow @nogc
             return offset;
         shift += 7;
     }
+}
+
+version (unittest)
+{
+    private struct LargeTagMessage
+    {
+        enum syntax = 3;
+        @FieldInfo(16, WireType.varint, 0) uint value;
+    }
+
+    private struct MaxTagMessage
+    {
+        enum syntax = 3;
+        @FieldInfo(max_field_id, WireType.varint, 0) uint value;
+    }
+
+    private struct OptionalIntMessage
+    {
+        enum syntax = 3;
+        @FieldInfo(2, WireType.varint, 0) ProtoOptional!int value;
+    }
+
+    private struct OptionalBytesMessage
+    {
+        enum syntax = 3;
+        @FieldInfo(3, WireType.length_delimited, 0) ProtoOptional!(Array!ubyte) value;
+    }
+
+    private struct NestedMessage
+    {
+        enum syntax = 3;
+        this(this) @disable;
+        @FieldInfo(1, WireType.varint, 0) uint value;
+    }
+
+    private struct OptionalMessage
+    {
+        enum syntax = 3;
+        @FieldInfo(4, WireType.length_delimited, 0) ProtoOptional!NestedMessage value;
+    }
+
+    private struct BytesMessage
+    {
+        enum syntax = 3;
+        @FieldInfo(1, WireType.length_delimited, 0) Array!ubyte value;
+    }
+
+    private struct Int64Message
+    {
+        enum syntax = 3;
+        @FieldInfo(1, WireType.varint, 0) long value;
+    }
+
+    private struct SFixed64Message
+    {
+        enum syntax = 3;
+        @FieldInfo(1, WireType.fixed64, 0) long value;
+    }
+}
+
+unittest
+{
+    LargeTagMessage large_tag;
+    large_tag.value = 150;
+    ubyte[4] large_tag_wire;
+    assert(buffer_len(large_tag) == large_tag_wire.length);
+    assert(proto_serialise(large_tag_wire[], large_tag) == large_tag_wire.length);
+    ubyte[4] expected_large_tag_wire = [0x80, 0x01, 0x96, 0x01];
+    assert(large_tag_wire == expected_large_tag_wire);
+
+    MaxTagMessage max_tag;
+    max_tag.value = 1;
+    ubyte[6] max_tag_wire;
+    assert(buffer_len(max_tag) == max_tag_wire.length);
+    assert(proto_serialise(max_tag_wire[], max_tag) == max_tag_wire.length);
+    ubyte[6] expected_max_tag_wire = [0xF8, 0xFF, 0xFF, 0xFF, 0x0F, 0x01];
+    assert(max_tag_wire == expected_max_tag_wire);
+
+    ubyte[2] zero_tag_wire = [0x00, 0x01];
+    LargeTagMessage invalid_tag;
+    assert(proto_deserialise(zero_tag_wire[], invalid_tag) == -1);
+    ubyte[6] oversized_tag_wire = [0x80, 0x80, 0x80, 0x80, 0x10, 0x01];
+    assert(proto_deserialise(oversized_tag_wire[], invalid_tag) == -1);
+
+    OptionalIntMessage optional;
+    ubyte[2] optional_wire;
+    assert(buffer_len(optional) == 0);
+    assert(proto_serialise(optional_wire[], optional) == 0);
+    optional.value.set(0);
+    assert(buffer_len(optional) == optional_wire.length);
+    assert(proto_serialise(optional_wire[], optional) == optional_wire.length);
+    ubyte[2] expected_optional_wire = [0x10, 0x00];
+    assert(optional_wire == expected_optional_wire);
+
+    OptionalIntMessage decoded_optional;
+    assert(proto_deserialise(optional_wire[], decoded_optional) == optional_wire.length);
+    assert(decoded_optional.value.present);
+    assert(decoded_optional.value.value == 0);
+    decoded_optional.value.clear();
+    assert(!decoded_optional.value.present);
+    assert(decoded_optional.value.value == 0);
+
+    OptionalBytesMessage optional_bytes;
+    ubyte[2] optional_bytes_value = [0xAA, 0xBB];
+    optional_bytes.value.ensure().extend(2)[] = optional_bytes_value[];
+    ubyte[4] optional_bytes_wire;
+    assert(buffer_len(optional_bytes) == optional_bytes_wire.length);
+    assert(proto_serialise(optional_bytes_wire[], optional_bytes) == optional_bytes_wire.length);
+    ubyte[4] expected_optional_bytes_wire = [0x1A, 0x02, 0xAA, 0xBB];
+    assert(optional_bytes_wire == expected_optional_bytes_wire);
+    OptionalBytesMessage decoded_optional_bytes;
+    assert(proto_deserialise(optional_bytes_wire[], decoded_optional_bytes) == optional_bytes_wire.length);
+    assert(decoded_optional_bytes.value.present);
+    assert(decoded_optional_bytes.value.value[] == optional_bytes_value[]);
+
+    OptionalMessage optional_message;
+    optional_message.value.ensure().value = 7;
+    ubyte[4] optional_message_wire;
+    assert(buffer_len(optional_message) == optional_message_wire.length);
+    assert(proto_serialise(optional_message_wire[], optional_message) == optional_message_wire.length);
+    ubyte[4] expected_optional_message_wire = [0x22, 0x02, 0x08, 0x07];
+    assert(optional_message_wire == expected_optional_message_wire);
+    OptionalMessage decoded_optional_message;
+    assert(proto_deserialise(optional_message_wire[], decoded_optional_message) == optional_message_wire.length);
+    assert(decoded_optional_message.value.present);
+    assert(decoded_optional_message.value.value.value == 7);
+    decoded_optional_message.value.clear();
+    assert(!decoded_optional_message.value.present);
+    assert(decoded_optional_message.value.value.value == 0);
+
+    ubyte[8] bytes_wire = [0x0A, 0x03, 0x01, 0x02, 0x03, 0x0A, 0x01, 0x09];
+    BytesMessage decoded_bytes;
+    assert(proto_deserialise(bytes_wire[], decoded_bytes) == bytes_wire.length);
+    ubyte[1] expected_bytes = [0x09];
+    assert(decoded_bytes.value[] == expected_bytes[]);
+
+    Int64Message int64_message;
+    int64_message.value = -2;
+    ubyte[11] int64_wire;
+    assert(buffer_len(int64_message) == int64_wire.length);
+    assert(proto_serialise(int64_wire[], int64_message) == int64_wire.length);
+    ubyte[11] expected_int64_wire = [
+        0x08, 0xFE, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xFF, 0xFF, 0x01
+    ];
+    assert(int64_wire == expected_int64_wire);
+    Int64Message decoded_int64;
+    assert(proto_deserialise(int64_wire[], decoded_int64) == int64_wire.length);
+    assert(decoded_int64.value == -2);
+
+    SFixed64Message sfixed64_message;
+    sfixed64_message.value = -2;
+    ubyte[9] sfixed64_wire;
+    assert(buffer_len(sfixed64_message) == sfixed64_wire.length);
+    assert(proto_serialise(sfixed64_wire[], sfixed64_message) == sfixed64_wire.length);
+    ubyte[9] expected_sfixed64_wire = [
+        0x09, 0xFE, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xFF, 0xFF, 0xFF
+    ];
+    assert(sfixed64_wire == expected_sfixed64_wire);
+    SFixed64Message decoded_sfixed64;
+    assert(proto_deserialise(sfixed64_wire[], decoded_sfixed64) == sfixed64_wire.length);
+    assert(decoded_sfixed64.value == -2);
 }

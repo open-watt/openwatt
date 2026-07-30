@@ -5,10 +5,7 @@ import urt.array;
 import urt.string;
 import urt.conv;
 
-
-// this is all designed to run as CTFE
-// we should confirm there are no relics from this code in any output binary...
-
+// This parser is designed to run as CTFE.
 
 alias ImportHandler = string delegate(string filename);
 
@@ -69,7 +66,7 @@ struct ProtoField
     bool repeated;
     bool optional;
     ubyte reserved;
-    ubyte id;
+    uint id;
     ubyte wire_type;
     ushort logical_type;
 }
@@ -104,9 +101,6 @@ ProtoSpec load_proto(const(char)[] path, const(char)[] filename) nothrow
     assert(file, "Failed to load proto file: " ~ path ~ filename);
     scope(exit) { defaultAllocator.free(file); }
     return parse_proto(cast(string)file, null);
-//    return (cast(string)file, (string import_file) {
-//        return cast(string)load_file(path ~ import_file, defaultAllocator);
-//    });
 }
 
 ProtoSpec parse_proto(string data, ImportHandler import_handler) nothrow
@@ -115,13 +109,8 @@ ProtoSpec parse_proto(string data, ImportHandler import_handler) nothrow
     try
         parse(proto, data, import_handler);
     catch (Exception e)
-    {
-        // parse error!
-        // TODO: complain
         assert(false, "Failed to parse proto: " ~ e.msg);
-    }
 
-    // now in a second pass, we'll hook up the type names
     foreach (ref msg; proto.messages)
     {
     outer: foreach (ref f; msg.fields)
@@ -142,7 +131,7 @@ ProtoSpec parse_proto(string data, ImportHandler import_handler) nothrow
             if (e.name == f.type)
             {
                 f.wire_type = WireType.varint;
-                f.logical_type = LogicalType.enum_;// | (i << 4);
+                f.logical_type = LogicalType.enum_;
                 continue outer;
             }
         }
@@ -258,8 +247,9 @@ ProtoMessage parse_message(ref string data)
     data.expect('{');
     while (!data.check('}'))
     {
-        try r.opts ~= data.parse_option(true);
-        catch (WrongItem e)
+        if (data.starts_with_keyword("option", true))
+            r.opts ~= data.parse_option(true);
+        else
             r.fields ~= data.parse_field();
     }
     return r;
@@ -307,7 +297,7 @@ ProtoOption parse_option(ref string data, bool statement)
     if (statement)
     {
         data.seek_next_token();
-        if (!data.startsWith("option"))
+        if (!data.starts_with_keyword("option", true))
             throw new WrongItem("Expected 'option'");
         data = data[6..$];
     }
@@ -355,7 +345,10 @@ ProtoField parse_field(ref string data)
         r.type = data.take_identifier();
         r.name = data.take_identifier();
         data.expect('=');
-        r.id = cast(ubyte)data.take_int();
+        long id = data.take_int();
+        if (!valid_field_id(id))
+            throw new Exception("Invalid field number");
+        r.id = cast(uint)id;
         if (data.check('['))
         {
             bool first = true;
@@ -373,6 +366,9 @@ ProtoField parse_field(ref string data)
     return r;
 }
 
+private bool valid_field_id(long id) pure nothrow @nogc
+    => id >= 1 && id <= max_field_id && (id < 19_000 || id > 19_999);
+
 ProtoValue parse_value(ref string data)
 {
     data.seek_next_token();
@@ -380,7 +376,6 @@ ProtoValue parse_value(ref string data)
         throw new Exception("Unexpected end of input");
     if (data[0] == '+' || data[0] == '-' || data[0].is_numeric)
     {
-        // number
         size_t i = 0;
         if (data[0] == '+' || data[0] == '-')
             ++i;
@@ -443,6 +438,17 @@ void seek_next_token(ref string data)
         else
             break;
     }
+}
+
+private bool starts_with_keyword(string data, string keyword, bool allow_parenthesis = false)
+{
+    data.seek_next_token();
+    if (!data.startsWith(keyword))
+        return false;
+    if (data.length == keyword.length)
+        return true;
+    char next = data[keyword.length];
+    return next.is_whitespace || (allow_parenthesis && next == '(');
 }
 
 void expect_whitespace(ref string data)
@@ -532,9 +538,6 @@ string take_identifier(ref string data)
     }
     return data.takeFront(i);
 }
-
-
-// synthesise D enums and structs...
 
 string generate_enum(ref const ProtoEnum e)
 {
@@ -654,12 +657,43 @@ enum string[] type_names = [
 string make_type_for(ref const ProtoField field)
 {
     ubyte logical_type = field.logical_type & 0xF;
+    string type_name;
     if (logical_type == LogicalType.enum_)
-        return field.type;
+        type_name = field.type;
     else if (logical_type == LogicalType.message)
-        return field.type;
-    string type_name = type_names[logical_type];
-    if (field.repeated)
-        return logical_type == LogicalType.bytes ? "Array!(Array!ubyte)" : "Array!" ~ type_name;
+        type_name = field.type;
+    else
+    {
+        type_name = type_names[logical_type];
+        if (field.repeated)
+            type_name = logical_type == LogicalType.bytes ? "Array!(Array!ubyte)" : "Array!" ~ type_name;
+    }
+    if (field.optional)
+        type_name = "ProtoOptional!(" ~ type_name ~ ")";
     return type_name;
+}
+
+version (unittest)
+{
+    static assert("option (id) = 1;".starts_with_keyword("option", true));
+    static assert(!"optional int64 count = 16;".starts_with_keyword("option", true));
+
+    static assert(() {
+        string data = "optional int64 count = 16;";
+        ProtoField field = data.parse_field();
+        field.logical_type = LogicalType.int64;
+        return field.optional
+            && field.id == 16
+            && field.make_type_for() == "ProtoOptional!(long)";
+    }());
+
+    static assert(!valid_field_id(0));
+    static assert(!valid_field_id(-1));
+    static assert(!valid_field_id(19_000));
+    static assert(!valid_field_id(19_999));
+    static assert(!valid_field_id(536_870_912));
+    static assert(valid_field_id(1));
+    static assert(valid_field_id(18_999));
+    static assert(valid_field_id(20_000));
+    static assert(valid_field_id(536_870_911));
 }
