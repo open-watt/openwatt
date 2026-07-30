@@ -27,6 +27,8 @@ version (SmartEVSE):
 
 import urt.driver.gpio;
 
+import driver.boards.smartevse.hardware;
+
 nothrow @nogc:
 extern(C):
 
@@ -36,14 +38,15 @@ alias uint32_t = uint;
 alias int8_t = byte;
 alias int16_t = short;
 alias int32_t = int;
-alias SmartEVSECaptureCallback = extern(C) bool function(uint16_t, uint16_t, uint16_t) nothrow @nogc;
 
-enum NUM_ADC_SAMPLES = 32;
+enum NUM_ADC_SAMPLES = control_pilot_samples;
 enum CIRCULARBUFFER = 256;     // Must be a power of 2
 enum uint32_t PWM_5 = 50;
 enum uint32_t PWM_95 = 950;
 enum uint32_t PWM_100 = 1000;
 
+version (SmartEVSE_v30)
+{
 enum uint32_t PP_IN = 34;
 enum uint32_t CP_IN = 39;
 enum uint32_t TEMP = 36;
@@ -52,9 +55,19 @@ enum uint32_t SSR2 = 27;
 enum uint32_t RCMFAULT = 13;
 enum uint32_t CP_OUT = 19;
 enum uint32_t CPOFF = 15;
+}
+else
+    static assert(false, "SmartEVSE hardware version is not selected");
 
 enum uint8_t DISABLE = 0;
 enum uint8_t ENABLE = 1;
+enum uint8_t CONTACTOR2_ALWAYS_FOLLOW = 0;
+enum uint8_t CONTACTOR2_ALWAYS_OPEN = 1;
+
+enum int8_t DEFAULT_MAX_TEMPERATURE = 65;
+enum int8_t MIN_MAX_TEMPERATURE = 40;
+enum int8_t MAX_MAX_TEMPERATURE = 75;
+enum int8_t TEMPERATURE_HYSTERESIS = 10;
 
 // USART Circular buffers
 struct CircularBuffer
@@ -68,12 +81,7 @@ uint8_t LockCable = 0;
 
 uint32_t elapsedtime, elapsedmax=0;
 
-// the following variables are used in interrupts
-//
-__gshared uint16_t[NUM_ADC_SAMPLES] ADC_CP;      // CP pin samples
-__gshared uint16_t[NUM_ADC_SAMPLES] ADC_PP;      // PP pin samples
-__gshared uint16_t[NUM_ADC_SAMPLES] ADC_Temp;    // Temperature samples
-__gshared uint8_t ADCidx = 0;                    // index in sample buffers
+uint16_t[NUM_ADC_SAMPLES] ADC_CP;                 // CP snapshot from the realtime ADC sampler
 __gshared uint16_t MainsCycleTime = 0;           // mains cycle time (20ms for 50Hz) Convert to Hz : 10000 / (MainsCycleTime/100))
 __gshared uint8_t PowerPanicFlag = 0;
 uint8_t PowerPanicEnabled = 0;
@@ -93,23 +101,10 @@ CircularBuffer RxBuffer;                        // USART1 Receive buffer ESP.WCH
 CircularBuffer TxBuffer;                        // USART1 Transmit ringbuffer WCH.ESP (DMA)
 CircularBuffer ModbusTx;                        // USART2 Transmit buffer (modbus)
 
-int ow_smartevse_pwm_init(int pin);
-void ow_smartevse_pwm_set(uint32_t duty);
-int ow_smartevse_capture_init(int cp_output_pin, SmartEVSECaptureCallback callback);
-void ow_smartevse_capture_set_alarm(uint32_t microseconds, int auto_reload);
-void ow_smartevse_capture_shutdown(int cp_output_pin);
+SmartEVSEHardware Hardware;
 
 
 // -------------------------- Interrupt Handlers ---------------------------------
-
-bool ADC1_2_IRQHandler(uint16_t cp, uint16_t pp, uint16_t temperature)
-{
-    ADC_CP[ADCidx] = cast(uint16_t)(cast(uint32_t)cp * 3300 / 4095);
-    ADC_PP[ADCidx] = cast(uint16_t)(cast(uint32_t)pp * 2200 / 4095);
-    ADC_Temp[ADCidx++] = cast(uint16_t)(cast(uint32_t)temperature * 2200 / 4095);
-    if (ADCidx == NUM_ADC_SAMPLES) ADCidx = 0;
-    return false;
-}
 
 
 void DMA1_Channel4_IRQHandler()
@@ -259,8 +254,8 @@ void DMAInit()
 
 void TIM1Init()
 {
-    // The ESP32 GPTimer starts in State A, sampling once per millisecond.
-    ow_smartevse_capture_set_alarm(PWM_100, 1);
+    // State A samples once per millisecond.
+    pilot_sample_periodically(Hardware, PWM_100);
 }
 
 
@@ -289,7 +284,8 @@ void TIM4Init()
 //
 void EXTInit()
 {
-    // RCMFAULT is checked by the ActiveObject on each 10 ms control event.
+    // The GPIO interlock owns the level interrupt and opens the contactors
+    // before forwarding its latched status to the ActiveObject.
 }
 
 
@@ -307,19 +303,17 @@ void ADCInit()
 // Range -50 - +125 C
 //
 int8_t TemperatureSensor() {
-    uint32_t TempAvg = 0;
-    uint8_t n;
+    uint32_t voltage;
     int8_t Temperature;
     static int8_t Old_Temperature = -128;
 
-    for(n=0; n<NUM_ADC_SAMPLES; n++) TempAvg += ADC_Temp[n];
-    TempAvg = TempAvg / NUM_ADC_SAMPLES ;
+    voltage = temperature_mv(Hardware);
+    TemperatureVoltageMV = voltage;
 
 
     // The MCP9700A temperature sensor outputs 500mV at 0C, and has a 10mV/C change in output voltage.
     // 750mV is 25C, 400mV = -10C
-    // The ESP32 bridge stores calibrated millivolts.
-    Temperature = cast(int8_t)((cast(int32_t)TempAvg - 500) / 10);
+    Temperature = cast(int8_t)((cast(int32_t)voltage - 500) / 10);
     if (Temperature != Old_Temperature)
         Old_Temperature = Temperature;
     return Temperature;
@@ -329,16 +323,16 @@ int8_t TemperatureSensor() {
 // Read the Proximity Pin data, and determine the maximum current the cable can handle.
 //
 uint8_t ProximityPin() {
-    uint32_t PPAvg = 0;
-    uint8_t n, MaxCap;
+    uint32_t voltage;
+    uint8_t MaxCap;
 
-    for(n=0; n<NUM_ADC_SAMPLES; n++) PPAvg += ADC_PP[n];
-    PPAvg = PPAvg / NUM_ADC_SAMPLES ;
+    voltage = proximity_mv(Hardware);
+    PPVoltageMV = voltage;
 
     MaxCap = 13;                                                   // No resistor, Max cable current = 13A
-    if ((PPAvg > 1300) && (PPAvg < 1800)) MaxCap = 16;             // Max cable current = 16A  680R . should be around 1.3V
-    if ((PPAvg > 600) && (PPAvg < 900)) MaxCap = 32;               // Max cable current = 32A  220R . should be around 0.6V
-    if ((PPAvg > 200) && (PPAvg < 500)) MaxCap = 63;               // Max cable current = 63A  100R . should be around 0.3V
+    if ((voltage > 1200) && (voltage < 1400)) MaxCap = 16;         // Max cable current = 16A  680R -> should be around 1.3V
+    if ((voltage > 500) && (voltage < 700)) MaxCap = 32;           // Max cable current = 32A  220R -> should be around 0.6V
+    if ((voltage > 200) && (voltage < 400)) MaxCap = 63;           // Max cable current = 63A  100R -> should be around 0.3V
 
     return MaxCap;
 }
@@ -397,7 +391,7 @@ uint8_t ReadESPdata(char *buf) {
 }
 
 
-int setup(SmartEVSECaptureCallback callback) {
+int setup() {
     GPIOInit();
     UsartInit();                                    // Usart1 = FUNCONF_UART_PRINTF_BAUD bps. Usart2 = Modbus 9600bps 8N1
     DMAInit();                                      // DMA transfer for Uart1 TX
@@ -406,9 +400,15 @@ int setup(SmartEVSECaptureCallback callback) {
     gpio_output_set(SSR1, false);                   // Contactor 1 OFF
     gpio_output_set(SSR2, false);                   // Contactor 2 OFF
 
-    if (ow_smartevse_pwm_init(cast(int)CP_OUT) != 0)
-        return -1;
-    if (ow_smartevse_capture_init(cast(int)CP_OUT, callback) != 0)
+    SmartEVSEHardwareConfig hardware_config;
+    hardware_config.pilot_output_gpio = CP_OUT;
+    hardware_config.pilot_adc_channel = 3;
+    hardware_config.proximity_adc_channel = 6;
+    hardware_config.temperature_adc_channel = 0;
+    hardware_config.residual_current_gpio = RCMFAULT;
+    hardware_config.contactor1_gpio = SSR1;
+    hardware_config.contactor2_gpio = SSR2;
+    if (!hardware_open(Hardware, hardware_config))
         return -1;
 
     EXTInit();                                      // Interrupt on RCMFAULT pin
@@ -434,10 +434,31 @@ void delay(uint32_t ms) {
 
 void hardware_shutdown()
 {
-    ow_smartevse_capture_shutdown(cast(int)CP_OUT);
+    hardware_close(Hardware);
     gpio_output_set(SSR1, false);
     gpio_output_set(SSR2, false);
     gpio_output_set(CPOFF, true);
+}
+
+void hardware_offline()
+{
+    AccessStatus = false;
+    RCmonCtrl(DISABLE);
+    gpio_output_set(SSR1, false);
+    gpio_output_set(SSR2, false);
+    Contactor1 = false;
+    Contactor2 = false;
+    State = STATE_A;
+    ChargeDelay = 0;
+    C1Timer = 0;
+    PilotDisconnectTime = 0;
+    PilotDisconnected = false;
+    ActivationMode = 0;
+    ActivationTimer = 0;
+    SetCPDuty(1024);
+    pilot_sample_periodically(Hardware, PWM_100);
+    setPilot(false);
+    // The module-owned display path will render "Offline" here once ported.
 }
 
 
@@ -448,8 +469,11 @@ void hardware_shutdown()
 enum uint8_t STATE_A = 0;
 enum uint8_t STATE_B = 1;
 enum uint8_t STATE_C = 2;
+enum uint8_t STATE_ACTSTART = 8;
 enum uint8_t STATE_B1 = 9;
 enum uint8_t STATE_C1 = 10;
+// OpenWatt extension: upstream represents faults separately from EVSE State.
+enum uint8_t STATE_ERROR = 15;
 
 enum uint8_t PILOT_12V = 12;
 enum uint8_t PILOT_9V = 9;
@@ -469,13 +493,21 @@ bool Contactor1;
 bool Contactor2;
 bool AccessStatus;
 bool RCMFault;
+bool TemperatureFault;
+uint8_t Contactor2Mode = CONTACTOR2_ALWAYS_FOLLOW;
 uint8_t MaxCapacity = 13;
 uint8_t MinCurrent = MIN_CURRENT;
 uint8_t MaxCurrent = 80;
 uint8_t ChargeDelay;
 uint8_t C1Timer;
 uint8_t PilotDisconnectTime;
+uint8_t ActivationMode;
+uint8_t ActivationTimer;
 bool PilotDisconnected;
+uint32_t PilotMinMV;
+uint32_t PilotMaxMV;
+uint32_t PPVoltageMV;
+uint32_t TemperatureVoltageMV;
 
 
 uint16_t GetCurrent() {
@@ -496,7 +528,7 @@ uint16_t GetCurrent() {
 // Write duty cycle to pin
 // Value in range 0 (0% duty) to 1024 (100% duty) for ESP32, 1000 (100% duty) for CH32
 void SetCPDuty(uint32_t DutyCycle){
-    ow_smartevse_pwm_set(DutyCycle);                                       // update PWM signal
+    pilot_set_duty(Hardware, DutyCycle);                                   // update PWM signal
     CurrentPWM = DutyCycle;
 }
 
@@ -515,7 +547,7 @@ void SetCurrent(uint16_t current) {
 
 
 void setStatePowerUnavailable() {
-    if (State == STATE_A)
+    if (State == STATE_A || State == STATE_ERROR)
        return;
     //State changes between A,B,C,D are caused by EV or by the user
     //State changes between x1 and x2 are created by the EVSE
@@ -552,7 +584,7 @@ void setState(uint8_t NewState) {
             Contactor1 = false;
             Contactor2 = false;
             SetCPDuty(1024);
-            ow_smartevse_capture_set_alarm(PWM_100, 1);
+            pilot_sample_periodically(Hardware, PWM_100);
 
             if (NewState == STATE_A) {
                 ChargeDelay = 0;
@@ -566,21 +598,32 @@ void setState(uint8_t NewState) {
             gpio_output_set(SSR2, false);
             Contactor1 = false;
             Contactor2 = false;
-            ow_smartevse_capture_set_alarm(PWM_95, 0);
+            pilot_sample_after_rising_edge(Hardware, PWM_95);
             break;
 
         case STATE_C:
+            ActivationMode = 255;
             gpio_output_set(SSR1, true);
-            gpio_output_set(SSR2, true);
             Contactor1 = true;
-            Contactor2 = true;
+            Contactor2 = Contactor2Mode == CONTACTOR2_ALWAYS_FOLLOW;
+            gpio_output_set(SSR2, Contactor2);
             break;
 
         case STATE_C1:
             SetCPDuty(1024);
-            ow_smartevse_capture_set_alarm(PWM_100, 1);
+            pilot_sample_periodically(Hardware, PWM_100);
             C1Timer = 6;
             ChargeDelay = 15;
+            break;
+
+        case STATE_ERROR:
+            gpio_output_set(SSR1, false);
+            gpio_output_set(SSR2, false);
+            Contactor1 = false;
+            Contactor2 = false;
+            SetCPDuty(1024);
+            pilot_sample_periodically(Hardware, PWM_100);
+            setPilot(false);
             break;
 
         default:
@@ -608,13 +651,22 @@ uint8_t Pilot() {
     uint32_t voltage;
     uint8_t n;
 
+    if (pilot_snapshot(Hardware, ADC_CP[])
+        < NUM_ADC_SAMPLES) {
+        PilotMinMV = 0;
+        PilotMaxMV = 0;
+        return PILOT_NOK;
+    }
+
     // calculate Min/Max of last 25 CP measurements
-    for (n=0 ; n<25 ;n++) {
+    for (n=0 ; n<NUM_ADC_SAMPLES ;n++) {
         sample = ADC_CP[n];
-        voltage = sample;
+        voltage = pilot_sample_mv(Hardware, sample);
         if (voltage < Min) Min = voltage;                                   // store lowest value
         if (voltage > Max) Max = voltage;                                   // store highest value
     }
+    PilotMinMV = Min;
+    PilotMaxMV = Max;
 
     // test Min/Max against fixed levels
     if (Min >= 3055 ) return PILOT_12V;                                     // Pilot at 12V (min 11.0V)
@@ -630,11 +682,15 @@ uint8_t Pilot() {
 // Is there at least 6A available for a new EVSE?
 // The first hard-function port has no load-balancing participants.
 char IsCurrentAvailable() {
-    return AccessStatus && !RCMFault;
+    return AccessStatus && !RCMFault && !TemperatureFault;
 }
 
 
 void Timer1S_singlerun() {
+    if (ActivationMode && ActivationMode != 255)
+        --ActivationMode;
+    if (ActivationTimer)
+        --ActivationTimer;
     if (ChargeDelay)
         --ChargeDelay;
     if (PilotDisconnectTime && --PilotDisconnectTime == 0) {
@@ -653,7 +709,10 @@ void Timer1S_singlerun() {
 
 void Timer10ms_singlerun() {
     static uint8_t DiodeCheck = 0;
-    static uint16_t StateTimer = 0;                                         // When switching from State B to C, make sure pilot is at 6v for 100ms
+    static uint16_t StateTimer = 0;                                         // Require 500ms of 6V before switching from State B to C
+    if (State == STATE_ERROR)
+        return;
+
     uint8_t pilot = Pilot();
 
     // ############### EVSE State A #################
@@ -668,18 +727,18 @@ void Timer10ms_singlerun() {
         } else if (pilot == PILOT_12V) {
             if (State != STATE_A) setState(STATE_A);
             ChargeDelay = 0;
-        } else if (pilot == PILOT_9V && !RCMFault
+        } else if (pilot == PILOT_9V && !RCMFault && !TemperatureFault
             && ChargeDelay == 0 && AccessStatus)
         {
             DiodeCheck = 0;
 
             MaxCapacity = ProximityPin();
-            if (MaxCurrent > MaxCapacity) ChargeCurrent = MaxCapacity * 10;
-            else ChargeCurrent = MinCurrent * 10;
+            if (ChargeCurrent > MaxCapacity * 10) ChargeCurrent = MaxCapacity * 10;
 
             if (IsCurrentAvailable()) {
                 SetCurrent(ChargeCurrent);
                 setState(STATE_B);
+                ActivationMode = 30;
             }
         } else if (pilot == PILOT_9V && State != STATE_B1 && AccessStatus) {
             setState(STATE_B1);
@@ -694,7 +753,9 @@ void Timer10ms_singlerun() {
             setState(STATE_A);
 
         } else if (pilot == PILOT_6V && ++StateTimer > 50) {
-            if (DiodeCheck == 1 && !RCMFault && ChargeDelay == 0 && AccessStatus) {
+            if (DiodeCheck == 1 && !RCMFault && !TemperatureFault
+                && ChargeDelay == 0 && AccessStatus)
+            {
                 if (IsCurrentAvailable()) {
                     DiodeCheck = 0;
                     setState(STATE_C);
@@ -704,10 +765,15 @@ void Timer10ms_singlerun() {
         // PILOT_9V
         } else if (pilot == PILOT_9V) {
             StateTimer = 0;
+            if (ActivationMode == 0) {
+                setState(STATE_ACTSTART);
+                ActivationTimer = 3;
+                SetCPDuty(0);
+            }
         }
         if (pilot == PILOT_DIODE) {
             DiodeCheck = 1;
-            ow_smartevse_capture_set_alarm(PWM_5, 0);
+            pilot_sample_after_rising_edge(Hardware, PWM_5);
         }
     }
 
@@ -723,6 +789,12 @@ void Timer10ms_singlerun() {
         {
             setState(STATE_B1);
         }
+    }
+
+    if (State == STATE_ACTSTART && ActivationTimer == 0) {
+        SetCurrent(ChargeCurrent);
+        setState(STATE_B);
+        ActivationMode = 255;
     }
 
     // ############### EVSE State C #################
@@ -746,7 +818,7 @@ void Timer10ms_singlerun() {
 
     // Residual current monitor active, and DC current > 6mA ?
     if (RCmonEnabled && RCMFault) {
-        if (State) setState(STATE_B1);
+        setState(STATE_ERROR);
     }
 }
 
@@ -760,4 +832,18 @@ uint8_t CurrentState()
 void setRCMFault(bool fault)
 {
     RCMFault = fault;
+}
+
+
+void setTemperatureFault(bool fault)
+{
+    TemperatureFault = fault;
+}
+
+
+void setContactor2Mode(uint8_t mode)
+{
+    Contactor2Mode = mode;
+    Contactor2 = State == STATE_C && mode == CONTACTOR2_ALWAYS_FOLLOW;
+    gpio_output_set(SSR2, Contactor2);
 }

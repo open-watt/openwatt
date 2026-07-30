@@ -6,7 +6,7 @@ HEADLESS ?= 1
 TINY ?= 1
 
 ifneq ($(VERSIONS),)
-    VERSIONS := $(VERSIONS),SmartEVSE
+    VERSIONS := $(VERSIONS),SmartEVSE,SmartEVSE_v30
 else
-    VERSIONS := SmartEVSE
+    VERSIONS := SmartEVSE,SmartEVSE_v30
 endif
