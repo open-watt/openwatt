@@ -43,6 +43,23 @@ private enum uint query_capacity = 256;
 private enum uint done_capacity = 256;
 private enum uint notice_capacity = 64;
 
+private struct DbQueues
+{
+nothrow @nogc:
+
+    SPSCRing!(IngestMsg, ingest_capacity) ingest;
+    SPSCRing!(QueryReq, query_capacity) requests;
+    SPSCRing!(QueryDone, done_capacity) done;
+    SPSCRing!(DbNotice, notice_capacity) notices;
+
+    void init()
+    {
+        ingest.init();
+        requests.init();
+        done.init();
+        notices.init();
+    }
+}
 
 private bool spsc_send(T, uint N)(ref SPSCRing!(T, N) ring, ref T item)
 {
@@ -78,7 +95,7 @@ nothrow @nogc:
         m.series = id;
         m.filename = cast(const(char)*)mem.ptr;
         m.filename_len = filename.length;
-        if (!spsc_send(_ingest, m))
+        if (!spsc_send(_queues.ingest, m))
         {
             defaultAllocator().free(mem);
             --_next_series;
@@ -94,7 +111,7 @@ nothrow @nogc:
         IngestMsg m;
         m.kind = IngestKind.close_series;
         m.series = id;
-        spsc_send(_ingest, m); // best effort; engine reaps everything at shutdown
+        spsc_send(_queues.ingest, m); // best effort; engine reaps everything at shutdown
     }
 
     final bool push(SeriesId id, ulong time, double value)
@@ -106,7 +123,7 @@ nothrow @nogc:
         m.series = id;
         m.time = time;
         m.value = value;
-        return spsc_send(_ingest, m);
+        return spsc_send(_queues.ingest, m);
     }
 
     final bool push_block(SeriesId id, scope const(Sample)[] samples)
@@ -123,7 +140,7 @@ nothrow @nogc:
         m.series = id;
         m.samples = cast(const(Sample)*)mem.ptr;
         m.count = samples.length;
-        if (!spsc_send(_ingest, m))
+        if (!spsc_send(_queues.ingest, m))
         {
             defaultAllocator().free(mem);
             return false;
@@ -139,7 +156,7 @@ nothrow @nogc:
         if (ticket == 0)
             ticket = ++_next_ticket; // 0 is reserved for "no ticket"
         QueryReq q = QueryReq(ticket, id, from, to, max_points, mode);
-        if (!spsc_send(_requests, q))
+        if (!spsc_send(_queues.requests, q))
             return 0;
         _pending.insert(ticket, cb);
         wake();
@@ -164,6 +181,11 @@ nothrow @nogc:
 
     override void init()
     {
+        void[] mem = defaultAllocator().alloc(DbQueues.sizeof, DbQueues.alignof);
+        assert(mem.ptr);
+        _queues = cast(DbQueues*)mem.ptr;
+        (*_queues).init();
+
         g_db = this;
         _engine.on_notice = &enqueue_notice;
         version (linux)
@@ -205,6 +227,8 @@ nothrow @nogc:
         _pending.clear(); // consumers are gone: drop callbacks, just reclaim buffers
         drain_done();
         drain_notices();
+        defaultAllocator().free((cast(void*)_queues)[0 .. DbQueues.sizeof]);
+        _queues = null;
         g_db = null;
     }
 
@@ -221,11 +245,7 @@ nothrow @nogc:
 
 private:
     DbEngine _engine;
-
-    SPSCRing!(IngestMsg, ingest_capacity) _ingest;   // frontend -> worker
-    SPSCRing!(QueryReq, query_capacity) _requests;   // frontend -> worker
-    SPSCRing!(QueryDone, done_capacity) _done;       // worker -> frontend
-    SPSCRing!(DbNotice, notice_capacity) _notices;   // worker -> frontend
+    DbQueues* _queues;
 
     Map!(uint, QueryCallback) _pending; // ticket -> callback, awaiting completion
     SeriesId _next_series;
@@ -253,7 +273,7 @@ private:
     void wake_if_work()
     {
         static if (db_threads_supported)
-            if (!_ingest.empty || !_requests.empty)
+            if (!_queues.ingest.empty || !_queues.requests.empty)
                 _wake.set();
     }
 
@@ -281,7 +301,7 @@ private:
         IngestMsg[64] ibuf = void;
         for (;;)
         {
-            size_t n = _ingest.pop(ibuf[]);
+            size_t n = _queues.ingest.pop(ibuf[]);
             if (!n)
                 break;
             did = true;
@@ -293,7 +313,7 @@ private:
         QueryReq[16] qbuf = void;
         for (;;)
         {
-            size_t n = _requests.pop(qbuf[]);
+            size_t n = _queues.requests.pop(qbuf[]);
             if (!n)
                 break;
             did = true;
@@ -344,7 +364,7 @@ private:
                 done.data = buf;
             }
         }
-        if (!spsc_send(_done, done) && done.data)
+        if (!spsc_send(_queues.done, done) && done.data)
             defaultAllocator().free(cast(void[])done.data[0 .. done.count]);
     }
 
@@ -358,7 +378,7 @@ private:
             return;
         (cast(char[])mem)[] = text[];
         DbNotice n = DbNotice(cast(const(char)*)mem.ptr, cast(uint)text.length);
-        if (!spsc_send(_notices, n))
+        if (!spsc_send(_queues.notices, n))
             defaultAllocator().free(mem);
     }
 
@@ -368,7 +388,7 @@ private:
         QueryDone[32] buf = void;
         for (;;)
         {
-            size_t n = _done.pop(buf[]);
+            size_t n = _queues.done.pop(buf[]);
             if (!n)
                 break;
             foreach (ref d; buf[0 .. n])
@@ -389,7 +409,7 @@ private:
         DbNotice[16] buf = void;
         for (;;)
         {
-            size_t n = _notices.pop(buf[]);
+            size_t n = _queues.notices.pop(buf[]);
             if (!n)
                 break;
             foreach (ref nt; buf[0 .. n])
