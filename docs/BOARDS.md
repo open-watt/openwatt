@@ -22,7 +22,8 @@ A board lives at `platforms/<family>/boards/<name>/` and contains:
 
 - `board.mk`, required. It declares `BOARD_PLATFORM`, `BOARD_FLASH_SIZE`, and
   `BOARD_PSRAM_SIZE`. Product defaults such as `FEATURES`, `HEADLESS`, `TINY`,
-  and `VERSIONS` also belong here. Use `?=` for values users may override.
+  `VERSIONS`, and `IDF_LOG_LEVEL` also belong here. Use `?=` for values users
+  may override.
 - `system.conf`, required. It replaces the platform's baked-in startup script.
 - `sdkconfig.defaults`, required for Espressif boards. ESP-IDF applies it after
   the platform defaults, so board values override the reference development
@@ -40,6 +41,12 @@ flash.
 ESP-IDF output and generated `sdkconfig` files live below the board-specific
 OpenWatt object directory. Building two boards therefore cannot reuse one
 another's generated configuration.
+
+`IDF_LOG_LEVEL` controls compile-time ESP-IDF diagnostics: `none` removes the
+capture bridge and IDF log strings, while `error` and `warn` retain and route
+those records through OpenWatt's log system. It defaults to `none`; a board may
+select a more useful bring-up level. Changing it requires a fresh ESP-IDF
+object directory or `make clean`, because it changes IDF preprocessor output.
 
 ## Espressif reference profiles
 

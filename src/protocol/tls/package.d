@@ -6,29 +6,33 @@ public import protocol.tls.stream;
 import manager;
 import manager.collection;
 import manager.console;
+import manager.features;
 import manager.plugin;
 
 nothrow @nogc:
 
 
-class TLSModule : Module
+static if (has_tls)
 {
-    mixin DeclareModule!"tls";
-nothrow @nogc:
-
-    override void init()
+    class TLSModule : Module
     {
-        g_app.register_enum!CertType();
-        g_app.register_enum!CertStatus();
+        mixin DeclareModule!"tls";
+    nothrow @nogc:
 
-        g_app.console.register_collection!Certificate();
-        g_app.console.register_collection!TLSStream();
-        g_app.console.register_collection!TLSServer();
-    }
+        override void init()
+        {
+            g_app.register_enum!CertType();
+            g_app.register_enum!CertStatus();
 
-    override void update()
-    {
-        Collection!Certificate().update_all();
-        Collection!TLSServer().update_all();
+            g_app.console.register_collection!Certificate();
+            g_app.console.register_collection!TLSStream();
+            g_app.console.register_collection!TLSServer();
+        }
+
+        override void update()
+        {
+            Collection!Certificate().update_all();
+            Collection!TLSServer().update_all();
+        }
     }
 }

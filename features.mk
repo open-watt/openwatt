@@ -16,6 +16,8 @@
 #                     switch-ip - switch + protocol/ip + protocol/dhcp.
 #                               Used by small WiFi/AP targets that need L3
 #                               service but not the full control plane.
+#                     switch-http - switch-ip + HTTP server/client, without TLS.
+#                     switch-https - switch-http + TLS.
 #                     full   - + protocol + apps + devices + tools.
 #                               Current default; standalone instance.
 #                     minimal (DEFERRED -- needs manager/ decoupling from
@@ -55,8 +57,8 @@ HEADLESS ?= 0
 
 # -- Validate ------------------------------------------------------------
 
-ifeq ($(filter $(FEATURES),switch switch-ip full),)
-    $(error Unknown FEATURES='$(FEATURES)'; valid: switch | switch-ip | full)
+ifeq ($(filter $(FEATURES),switch switch-ip switch-http switch-https full),)
+    $(error Unknown FEATURES='$(FEATURES)'; valid: switch | switch-ip | switch-http | switch-https | full)
 endif
 
 # -- Source-tree subset per preset ---------------------------------------
@@ -69,6 +71,8 @@ FEATURE_DIRS_minimal := manager db driver
 # along here until the iface/control split is teased apart (Phase 2).
 FEATURE_DIRS_switch  := manager db driver router protocol/modbus
 FEATURE_DIRS_switch-ip := $(FEATURE_DIRS_switch) protocol/ip protocol/dhcp
+FEATURE_DIRS_switch-http := $(FEATURE_DIRS_switch-ip) protocol/http protocol/tls
+FEATURE_DIRS_switch-https := $(FEATURE_DIRS_switch-http)
 FEATURE_DIRS_full    := manager db driver router protocol apps devices tools
 
 FEATURE_DIRS := $(FEATURE_DIRS_$(FEATURES))
@@ -88,6 +92,13 @@ ifeq ($(FEATURES),switch-ip)
     FEATURE_DFLAGS += $(VERSION_FLAG)NoAll
     FEATURE_DFLAGS += $(VERSION_FLAG)NoHTTP
     FEATURE_DFLAGS += $(VERSION_FLAG)NoTLS
+endif
+ifeq ($(FEATURES),switch-http)
+    FEATURE_DFLAGS += $(VERSION_FLAG)NoAll
+    FEATURE_DFLAGS += $(VERSION_FLAG)NoTLS
+endif
+ifeq ($(FEATURES),switch-https)
+    FEATURE_DFLAGS += $(VERSION_FLAG)NoAll
 endif
 # minimal (deferred) would additionally emit -version=NoSwitch.
 
