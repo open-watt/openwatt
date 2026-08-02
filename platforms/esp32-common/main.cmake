@@ -29,6 +29,7 @@ endif()
 
 idf_component_register(SRCS "${ESP32_SYS_DIR}/main.c"
                             "${ESP32_SYS_DIR}/ow_shim.c"
+                            "${ESP32_SYS_DIR}/idf_log.c"
                             "${URT_INTERNAL_DIR}/mbedtls.c"
                        INCLUDE_DIRS ""
                        PRIV_REQUIRES ${MAIN_PRIV_REQUIRES}

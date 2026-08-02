@@ -834,39 +834,12 @@ nothrow @nogc:
     }
 
     bool post_event(EventHandler handler, MonoTime when, EventPriority priority = EventPriority.control)
-    {
-        import urt.atomic : atomicFetchAdd, atomicFetchSub, MemoryOrder;
-        import urt.log : writeError, writeWarning;
+        => enqueue_event(handler, when, priority, true);
 
-        bool ok;
-        final switch (priority)
-        {
-            case EventPriority.control:
-                atomicFetchAdd!(MemoryOrder.relaxed)(_priority_events_posted, 1);
-                ok = _event_queues.priority.enqueue(PendingEvent(handler, when));
-                if (!ok)
-                {
-                    atomicFetchSub!(MemoryOrder.relaxed)(_priority_events_posted, 1);
-                    atomicFetchAdd!(MemoryOrder.relaxed)(_priority_event_overflows, 1);
-                    writeError("priority event queue overflow handler=", cast(size_t)handler.funcptr, " ctx=", cast(size_t)handler.ptr);
-                }
-                break;
-            case EventPriority.bulk:
-                atomicFetchAdd!(MemoryOrder.relaxed)(_bulk_events_posted, 1);
-                ok = _event_queues.bulk.enqueue(PendingEvent(handler, when));
-                if (!ok)
-                {
-                    atomicFetchSub!(MemoryOrder.relaxed)(_bulk_events_posted, 1);
-                    atomicFetchAdd!(MemoryOrder.relaxed)(_bulk_event_overflows, 1);
-                    writeWarning("bulk event queue overflow handler=", cast(size_t)handler.funcptr, " ctx=", cast(size_t)handler.ptr);
-                }
-                break;
-        }
-        if (!ok)
-            return false;
-        _wake_event.set();
-        return true;
-    }
+    // Foreign producer callbacks use this form when entering the logger on an
+    // overflow would recurse into the producer that is being marshalled.
+    bool try_post_event(EventHandler handler, MonoTime when, EventPriority priority = EventPriority.control)
+        => enqueue_event(handler, when, priority, false);
 
     bool post_event_from_isr(EventHandler handler, EventPriority priority = EventPriority.control)
     {
@@ -1575,6 +1548,43 @@ nothrow @nogc:
             priority.init();
             bulk.init();
         }
+    }
+
+    bool enqueue_event(EventHandler handler, MonoTime when, EventPriority priority, bool report_overflow)
+    {
+        import urt.atomic : atomicFetchAdd, atomicFetchSub, MemoryOrder;
+        import urt.log : writeError, writeWarning;
+
+        bool ok;
+        final switch (priority)
+        {
+            case EventPriority.control:
+                atomicFetchAdd!(MemoryOrder.relaxed)(_priority_events_posted, 1);
+                ok = _event_queues.priority.enqueue(PendingEvent(handler, when));
+                if (!ok)
+                {
+                    atomicFetchSub!(MemoryOrder.relaxed)(_priority_events_posted, 1);
+                    atomicFetchAdd!(MemoryOrder.relaxed)(_priority_event_overflows, 1);
+                    if (report_overflow)
+                        writeError("priority event queue overflow handler=", cast(size_t)handler.funcptr, " ctx=", cast(size_t)handler.ptr);
+                }
+                break;
+            case EventPriority.bulk:
+                atomicFetchAdd!(MemoryOrder.relaxed)(_bulk_events_posted, 1);
+                ok = _event_queues.bulk.enqueue(PendingEvent(handler, when));
+                if (!ok)
+                {
+                    atomicFetchSub!(MemoryOrder.relaxed)(_bulk_events_posted, 1);
+                    atomicFetchAdd!(MemoryOrder.relaxed)(_bulk_event_overflows, 1);
+                    if (report_overflow)
+                        writeWarning("bulk event queue overflow handler=", cast(size_t)handler.funcptr, " ctx=", cast(size_t)handler.ptr);
+                }
+                break;
+        }
+        if (!ok)
+            return false;
+        _wake_event.set();
+        return true;
     }
 
     // Zero-ref profiles are retained: element descs and expressions
