@@ -312,6 +312,9 @@
     <DCompile Include="src\driver\boards\smartevse.d">
       <Filter>src\driver\boards</Filter>
     </DCompile>
+    <DCompile Include="src\driver\esp32\idf_log_bridge.d">
+      <Filter>src\driver\esp32</Filter>
+    </DCompile>
     <DCompile Include="src\driver\esp32\system.d">
       <Filter>src\driver\esp32</Filter>
     </DCompile>
