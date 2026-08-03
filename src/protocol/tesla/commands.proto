@@ -1,0 +1,224 @@
+syntax = "proto3";
+
+message TeslaVoid {
+}
+
+message TeslaGetChargeState {
+}
+
+message TeslaGetClimateState {
+}
+
+message TeslaGetDriveState {
+}
+
+message TeslaGetLocationState {
+}
+
+message TeslaGetClosuresState {
+}
+
+message TeslaGetTirePressureState {
+}
+
+message TeslaChargingState {
+    optional TeslaVoid unknown = 1;
+    optional TeslaVoid disconnected = 2;
+    optional TeslaVoid no_power = 3;
+    optional TeslaVoid starting = 4;
+    optional TeslaVoid charging = 5;
+    optional TeslaVoid complete = 6;
+    optional TeslaVoid stopped = 7;
+    optional TeslaVoid calibrating = 8;
+}
+
+message TeslaShiftState {
+    optional TeslaVoid invalid = 1;
+    optional TeslaVoid park = 2;
+    optional TeslaVoid reverse = 3;
+    optional TeslaVoid neutral = 4;
+    optional TeslaVoid drive = 5;
+    optional TeslaVoid unavailable = 6;
+}
+
+message TeslaClimateKeeperMode {
+    optional TeslaVoid unknown = 1;
+    optional TeslaVoid off = 2;
+    optional TeslaVoid on = 3;
+    optional TeslaVoid dog = 4;
+    optional TeslaVoid party = 5;
+}
+
+message TeslaDefrostMode {
+    optional TeslaVoid off = 1;
+    optional TeslaVoid normal = 2;
+    optional TeslaVoid maximum = 3;
+}
+
+enum TeslaSteeringWheelHeatLevel {
+    TeslaSteeringWheelHeatUnknown = 0;
+    TeslaSteeringWheelHeatOff = 1;
+    TeslaSteeringWheelHeatLow = 2;
+    TeslaSteeringWheelHeatHigh = 3;
+}
+
+message TeslaChargeState {
+    optional TeslaChargingState charging_state = 1;
+    optional int32 charge_limit_soc = 104;
+    optional int32 battery_level = 114;
+    optional int32 usable_battery_level = 115;
+    optional float charge_energy_added = 116;
+    optional int32 charger_voltage = 119;
+    optional int32 charger_actual_current = 121;
+    optional int32 charger_power = 122;
+    optional int32 minutes_to_full_charge = 123;
+    optional bool charge_port_open = 127;
+    optional bool scheduled_charging_pending = 130;
+    optional int32 charge_current_request = 137;
+    optional int32 charge_current_request_max = 138;
+    optional int32 charging_amps = 149;
+    optional uint32 scheduled_charging_start_time_minutes = 150;
+}
+
+message TeslaClimateState {
+    optional TeslaClimateKeeperMode climate_keeper_mode = 30;
+    optional TeslaDefrostMode defrost_mode = 35;
+    optional float inside_temperature = 101;
+    optional float outside_temperature = 102;
+    optional float driver_temperature = 103;
+    optional float passenger_temperature = 104;
+    optional int32 fan_speed = 109;
+    optional bool climate_on = 110;
+    optional float min_temperature = 111;
+    optional float max_temperature = 112;
+    optional int32 seat_front_left_heating = 113;
+    optional int32 seat_front_right_heating = 114;
+    optional int32 seat_rear_left_heating = 115;
+    optional int32 seat_rear_right_heating = 116;
+    optional int32 seat_rear_center_heating = 117;
+    optional int32 seat_rear_right_back_heating = 118;
+    optional int32 seat_rear_left_back_heating = 119;
+    optional int32 seat_third_row_right_heating = 120;
+    optional int32 seat_third_row_left_heating = 121;
+    optional bool battery_heater = 122;
+    optional bool steering_wheel_heater = 125;
+    optional bool preconditioning = 128;
+    optional int32 seat_front_left_cooling = 139;
+    optional int32 seat_front_right_cooling = 140;
+    optional TeslaSteeringWheelHeatLevel steering_wheel_heat_level = 148;
+}
+
+message TeslaDriveState {
+    optional TeslaShiftState gear = 1;
+    optional uint32 speed = 102;
+    optional int32 power = 103;
+    optional int32 odometer_hundredths_mile = 105;
+    optional float speed_float = 106;
+}
+
+message TeslaLocationState {
+    optional float latitude = 101;
+    optional float longitude = 102;
+    optional uint32 heading = 103;
+    optional float accuracy = 118;
+}
+
+message TeslaClosuresState {
+    optional bool driver_front_open = 101;
+    optional bool driver_rear_open = 102;
+    optional bool passenger_front_open = 103;
+    optional bool passenger_rear_open = 104;
+    optional bool frunk_open = 105;
+    optional bool trunk_open = 106;
+    optional bool locked = 113;
+    optional bool user_present = 114;
+}
+
+message TeslaTirePressureState {
+    optional float front_left_pressure = 2;
+    optional float front_right_pressure = 3;
+    optional float rear_left_pressure = 4;
+    optional float rear_right_pressure = 5;
+    optional bool front_left_hard_warning = 10;
+    optional bool front_right_hard_warning = 11;
+    optional bool rear_left_hard_warning = 12;
+    optional bool rear_right_hard_warning = 13;
+    optional bool front_left_soft_warning = 14;
+    optional bool front_right_soft_warning = 15;
+    optional bool rear_left_soft_warning = 16;
+    optional bool rear_right_soft_warning = 17;
+}
+
+message TeslaVehicleData {
+    optional TeslaChargeState charge_state = 3;
+    optional TeslaClimateState climate_state = 4;
+    optional TeslaDriveState drive_state = 5;
+    optional TeslaLocationState location_state = 8;
+    optional TeslaClosuresState closures_state = 9;
+    optional TeslaTirePressureState tire_pressure_state = 19;
+}
+
+message TeslaGetVehicleData {
+    optional TeslaGetChargeState get_charge_state = 2;
+    optional TeslaGetClimateState get_climate_state = 3;
+    optional TeslaGetDriveState get_drive_state = 4;
+    optional TeslaGetLocationState get_location_state = 7;
+    optional TeslaGetClosuresState get_closures_state = 8;
+    optional TeslaGetTirePressureState get_tire_pressure_state = 14;
+}
+
+message TeslaChargingStartStopAction {
+    optional TeslaVoid start = 2;
+    optional TeslaVoid stop = 5;
+}
+
+message TeslaHvacAutoAction {
+    optional bool power_on = 1;
+    optional bool manual_override = 2;
+}
+
+message TeslaTemperatureLevel {
+    optional TeslaVoid maximum = 3;
+}
+
+message TeslaHvacTemperatureAdjustmentAction {
+    optional TeslaTemperatureLevel level = 5;
+    optional float driver_temp_celsius = 6;
+    optional float passenger_temp_celsius = 7;
+}
+
+message TeslaScheduledChargingAction {
+    optional bool enabled = 1;
+    optional int32 charging_time = 2;
+}
+
+message TeslaSetChargingAmpsAction {
+    optional int32 charging_amps = 1;
+}
+
+message TeslaVehicleAction {
+    optional TeslaGetVehicleData get_vehicle_data = 1;
+    optional TeslaChargingStartStopAction charging_start_stop = 6;
+    optional TeslaHvacAutoAction hvac_auto = 10;
+    optional TeslaHvacTemperatureAdjustmentAction hvac_temperature = 14;
+    optional TeslaScheduledChargingAction scheduled_charging = 41;
+    optional TeslaSetChargingAmpsAction set_charging_amps = 43;
+}
+
+message TeslaAction {
+    optional TeslaVehicleAction vehicle_action = 2;
+}
+
+message TeslaResultReason {
+    optional string plain_text = 1;
+}
+
+message TeslaActionStatus {
+    optional uint32 result = 1;
+    optional TeslaResultReason result_reason = 2;
+}
+
+message TeslaCommandResponse {
+    optional TeslaActionStatus action_status = 1;
+    optional TeslaVehicleData vehicle_data = 2;
+}

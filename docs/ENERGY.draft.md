@@ -74,11 +74,15 @@ Appliances with no device and no meter are valid: they are intent anchors. `cabi
 
 ### Cars
 
-Cars are appliances that move. A car with a `vin` attaches to a circuit named by its VIN. An EVSE that can identify the plugged-in car (e.g. Tesla Wall Connector) reports the same VIN as its `car` port's circuit — so the pairing is an ordinary circuit join, and it reshapes automatically on plug/unplug:
+Cars are appliances that move. A vehicle source creates a root Device and a
+dynamic Appliance for each VIN, both named by that VIN. A car then attaches to a
+circuit named by its VIN. An EVSE that can identify the plugged-in car (e.g.
+Tesla Wall Connector) reports the same VIN as its `car` port's circuit, so the
+pairing is an ordinary circuit join and reshapes automatically on plug/unplug:
 
 ```
-/apps/energy/appliance add name=evie kind=car vin=LRW3F7EKXMC392131
-/apps/energy/appliance add name=zephyr kind=car vin=5YJ3F7EC8LF488644
+# Tesla BLE owns the identified cars. Do not add them as static Appliances.
+/protocol/tesla/vehicle-scanner/add name=tesla iface=ble1 secret=tesla vins=LRW3F7EKXMC392131,5YJ3F7EC8LF488644
 /apps/energy/appliance add name=mg_zs kind=car connection=mg_zs    # EVSE can't read this VIN; bound manually
 ```
 
@@ -152,9 +156,9 @@ Policies are layered intent that the allocator services every tick. Each policy 
 
 ```
 /apps/energy/policy
-add name=evie_reserve    target=evie   tier=floor         goal="soc(20)"
-add name=evie_ready      target=evie   tier=important     goal="soc(40)" deadline=11:00 shape=window
-add name=evie_topup      target=evie   tier=opportunistic goal="soc(90)"
+add name=car_reserve    target=LRW3F7EKXMC392131 tier=floor         goal="soc(20)"
+add name=car_ready      target=LRW3F7EKXMC392131 tier=important     goal="soc(40)" deadline=11:00 shape=window
+add name=car_topup      target=LRW3F7EKXMC392131 tier=opportunistic goal="soc(90)"
 add name=cabin_ev_surplus target=cabin_evse tier=opportunistic goal="soc(100)"
 ```
 

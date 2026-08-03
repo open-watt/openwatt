@@ -15,8 +15,14 @@ Quick reference for standard component templates and their expected elements.
 | `Inverter` | Solar/battery/hybrid inverter | - |
 | `EVSE` | EV charger | `state` |
 | `Vehicle` | Connected vehicle | - |
+| `VehicleCharging` | Vehicle charge state and controls | - |
+| `VehicleAccess` | Vehicle access state and controls | - |
+| `VehicleClosures` | Vehicle doors, boots, and charge-port state | - |
+| `VehicleDrive` | Vehicle propulsion state and controls | - |
+| `VehicleTyres` | Per-wheel tyre pressure and warnings | - |
 | `Port` | Energy topology connection point | `role`, `flow` |
 | `HVAC` | Climate control system | - |
+| `MediaPlayback` | Audio/video playback state and durable controls | - |
 | `WaterHeater` | Hot water tank | `temperature` |
 | `Switch` | On/off control | `switch` |
 | `Shutter` | Window/door shutter control | `position` |
@@ -82,6 +88,8 @@ Device identification and metadata.
 - `hardware_version: string` - Hardware version
 - `app_ver: string` - Application version (Zigbee)
 - `zcl_ver: string` - ZCL version (Zigbee)
+- `manufacture_location: string` - Plant / region where the unit was built
+- `model_year: int` - Model year (vehicles, white goods, etc. that publish one)
 
 ---
 
@@ -833,18 +841,90 @@ config can otherwise bind `car=<vehicle-circuit>`.
 
 ## Vehicle
 
-Vehicle information (typically EV connected to charger).
+Connected vehicle. Every vehicle is a root Device and a dynamic energy
+Appliance with the same VIN id. The VIN is the canonical cross-source
+identifier shared by Tesla BLE, OVMS, BlueLink, and other vehicle sources.
+The scanner or other source that knows a VIN materialises both objects; users
+do not create a second hand-authored Appliance for it.
+Removing the source stops live sessions but does not delete the Device,
+Appliance, or recorded series. Once observed, that dataset belongs to the
+installation rather than to the binding that first discovered it.
 
-`Vehicle` is state metadata, not topology. For an EVSE, place `Vehicle` under
-the EVSE's `car: Port`. For a separately modelled car appliance, expose a
-`battery` or `connection` port for the vehicle/storage circuit and put
-`Vehicle` state under that port or beside it as metadata.
+Vehicle is mostly a composition of standard primitives — DeviceInfo, Battery,
+EnergyMeter, PowerControl, HVAC, MediaPlayback — with vehicle-specific state and
+controls.
+Sources populate the fields and make a control writable only when they support
+the corresponding operation. Protocol data is mapped directly into this tree;
+no vendor-shaped component subtree is retained alongside it.
 
-### Optional
-- `vin: string` - Vehicle identification number
-- `soc: %` - State of charge (0-100%)
+### Presence
+- `connected: boolean` - Active data session present
+- `last_seen: systime` - When data last arrived (stale detection)
+
+### Range
 - `range: km` - Remaining range
-- `battery_capacity: kWh` - Battery capacity
+
+### Charging
+- `charging_state: enum` - disconnected, no_power, starting, charging, complete, stopped, calibrating
+- `minutes_to_full: count` - ETA to full at current rate
+- `charging.enabled: boolean` (writable) - Start or stop charging
+- `charging.target_soc: %` (writable) - Charge limit
+- `charging.scheduled: boolean` (writable) - Enable the configured charging schedule
+- `charging.schedule_time: minute-of-day` (writable) - Scheduled charge start
+- `charging.port_open: boolean` - Charge-port door state
+
+(Current setpoint and the vehicle's max-accept limit live on the `control`
+sub-component as `setpoint` and `max` — see [PowerControl](#powercontrol).
+`max` is dynamic, not a static config value: the vehicle reports its instantaneous
+willingness-to-accept which the energy app reads when choosing a new setpoint.)
+
+### Sub-components
+- `info: DeviceInfo` - `type="vehicle"`, `serial_number=<VIN>`, optional
+  `manufacturer_name`, `model_name`, `software_version`, and `name` (friendly
+  display name overriding the VIN in UIs). A configured vehicle may set it with
+  `/element/set element=<VIN>.info.name value=<name>` without changing its VIN id.
+- `status: DeviceStatus` (optional) - `time` (vehicle clock), `network` (BLE
+  link status if reported)
+- `battery: Battery` - At minimum populates `soc`; vehicle-specific extension is
+  `full_capacity` in kWh (semantically energy capacity, not chemistry Ah) and
+  `usable_soc` (%) excluding the reserve buffer
+- `meter: EnergyMeter` (type: `single-phase` or `three-phase` for typical
+  home/destination charging, `dc` for Supercharger / CCS DC fast charging) -
+  `voltage`, `current`, `power`, `import` =
+  current-session energy delivered, `absolute` = lifetime energy delivered to this VIN
+- `control: PowerControl` - Energy-app charge-rate actuator. Charge-only vehicles:
+  `kind=continuous, direction=consume, unit=A, min=6, max=<max_amps>, step=1`.
+  V2G-capable vehicles: `direction=bidirectional` with the setpoint range extended
+  into negative values to represent discharge current (export to grid/load).
+- `charging: VehicleCharging` - Charge enablement and schedules. Its controls
+  are distinct from the energy-app `control: PowerControl` current/rate actuator.
+- `hvac: HVAC` - Climate state and preconditioning. `power` is the direct
+  on/off command; `target_temperature`, `mode`, and `fan_speed` are the
+  available climate controls. `min_temperature`, `max_temperature`, `defrost`,
+  `preconditioning`, and optional vehicle comfort extensions make useful
+  automation inputs without imposing a particular vehicle's seat layout.
+- `media: MediaPlayback` - Vehicle entertainment-system playback state. It is
+  optional: a source may expose no media data, or may expose several separately
+  named playback components for independent zones.
+- `access: VehicleAccess` - `locked: boolean` and `user_present: boolean`.
+  `locked` is writable only when the source safely supports lock/unlock.
+- `closures: VehicleClosures` - `driver_front`, `passenger_front`,
+  `driver_rear`, `passenger_rear`, `trunk`, `frunk`, `charge_port`, and optional
+  windows/sunroof. Each is an enum such as `open`, `closed`, `ajar`, `opening`,
+  or `closing`; sources may add a safe desired-state control where supported.
+- `drive: VehicleDrive` - `gear`, `speed` (km/h), `power` (W), and `odometer`
+  (km). Remote start is a security-sensitive momentary command, not a writable
+  state field.
+- `location: Location` - `latitude`, `longitude`, `heading`, and `accuracy`.
+  Location is optional and privacy-sensitive.
+- `tyres: VehicleTyres` - `front_left`, `front_right`, `rear_left`, and
+  `rear_right`, each with `pressure` (bar) and `warning`.
+- `config: Configuration` - Static fields (model, capacity override)
+
+`VehicleCharging`, `VehicleAccess`, and `VehicleDrive` deliberately express
+the operation rather than a vendor command name. A Tesla, ICE car, and EV from
+another source can therefore share the same surface even when their underlying
+protocol commands differ.
 
 ---
 
@@ -870,9 +950,59 @@ measure/control the electrical connection.
 - `mode: enum` - Operating mode (off, heat, cool, auto, fan_only, dry)
 - `fan_speed: enum/%` - Fan speed (low, medium, high, auto, or 0-100%)
 
+### Vehicle comfort extension
+
+Vehicles may nest occupant-contact conditioning below `HVAC`. These controls
+are intentionally not a separate energy actuator: they are comfort setpoints
+whose vehicle-level electrical cost is already represented by the vehicle's
+meter and HVAC state.
+
+- `battery.heating: boolean` - Battery thermal conditioning state, when the
+  vehicle exposes it.
+- `steering_wheel.heating_level: enum/integer` - Source-native heat level.
+  Tesla exposes an enum with `unknown`, `off`, `low`, and `high`; older sources
+  may expose only `steering_wheel.heater: boolean`.
+- `seats.<position>.heating_level: integer` and
+  `seats.<position>.cooling_level: integer` - Source-native ordinal where zero
+  is off and positive values select progressively stronger conditioning.
+  Positions are physical:
+  `front_left`, `front_right`, `rear_left`, `rear_center`, `rear_right`,
+  `rear_left_back`, `rear_right_back`, `third_row_left`, and
+  `third_row_right`.
+
+These raw levels preserve exactly what the vehicle reported in history. A
+future normalized percentage control can be derived alongside them once the
+command path can quantize levels and report acceptance. For now they are
+read-only. Absent seats and unsupported heating/cooling elements are omitted;
+bindings materialise them only after the source reports the corresponding
+optional capability field.
+
 ### Topology and Related Components
 - `connection: Port` - Electrical supply/load terminal.
 - `control: PowerControl` (optional) - Energy-app actuator; typically `kind=discrete` for single-stage units, `kind=staged` for multi-stage
+
+---
+
+## MediaPlayback
+
+Audio or video playback state, applicable to vehicle infotainment, speakers,
+TVs, and media endpoints. It describes the current programme and durable
+settings, not a particular provider's queue or protocol.
+
+### Optional
+- `state: enum` - `off`, `idle`, `buffering`, `playing`, `paused`, or `error`.
+- `source: string/enum` - Active input or provider, such as radio, Bluetooth,
+  streaming, USB, or HDMI.
+- `title`, `artist`, `album`, `station: string` - Current programme metadata.
+- `position: s`, `duration: s` - Playback progress when meaningful.
+- `volume: %` (writable) - Persistent volume level.
+- `muted: boolean` (writable) - Persistent mute state.
+
+Changing programme, play/pause, next/previous, seeking, and selecting a source
+are momentary actions, not writable state elements. They belong in a future
+general action surface, once commands can report their result and safety policy
+consistently. Sources may make `source` writable only when choosing it is a
+durable, idempotent setting.
 
 ---
 

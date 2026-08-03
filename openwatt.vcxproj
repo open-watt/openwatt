@@ -234,6 +234,10 @@
     <DCompile Include="src\protocol\tesla\master.d" />
     <DCompile Include="src\protocol\tesla\package.d" />
     <DCompile Include="src\protocol\tesla\twc.d" />
+    <DCompile Include="src\protocol\tesla\vehicle_codec.d" />
+    <DCompile Include="src\protocol\tesla\vehicle_crypto.d" />
+    <DCompile Include="src\protocol\tesla\vehicle_scanner.d" />
+    <DCompile Include="src\protocol\tesla\vehicle_session.d" />
     <DCompile Include="src\protocol\tls\certificate.d" />
     <DCompile Include="src\protocol\tls\package.d" />
     <DCompile Include="src\protocol\tls\stream.d" />
@@ -1274,6 +1278,8 @@
     <None Include="docs\OVERVIEW.md" />
     <None Include="Makefile" />
     <None Include="src\protocol\esphome\api.proto" />
+    <None Include="src\protocol\tesla\commands.proto" />
+    <None Include="src\protocol\tesla\messages.proto" />
     <None Include="third_party\urt\src\urt\driver\bk7231\start.S">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
