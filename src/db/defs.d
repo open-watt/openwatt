@@ -21,7 +21,7 @@ enum SeriesId invalid_series = 0;
 struct Sample
 {
     ulong time;   // unix ns
-    double value;
+    double value = 0;
 }
 
 
@@ -43,7 +43,7 @@ struct IngestMsg
         struct // sample
         {
             ulong time;
-            double value;
+            double value = 0;
         }
         struct // block: a run of in-order samples (heap copy, freed after consume)
         {
