@@ -1,0 +1,107 @@
+syntax = "proto3";
+
+// Tesla vehicle BLE envelope: the RoutableMessage transport from
+// universal_message.proto, its signature metadata from signatures.proto, and
+// the VCSEC key-enrolment messages.
+//
+// Fields are declared in ascending tag order because the serialiser emits them
+// in declaration order, and the vehicle expects canonical ascending output.
+
+message TeslaDestination {
+    optional uint32 domain = 1;
+    optional bytes routing_address = 2;
+}
+
+message TeslaKeyIdentity {
+    optional bytes public_key = 1;
+}
+
+message TeslaAesGcmPersonalizedData {
+    optional bytes epoch = 1;
+    optional bytes nonce = 2;
+    optional uint32 counter = 3;
+    optional fixed32 expires_at = 4;
+    optional bytes tag = 5;
+}
+
+message TeslaAesGcmResponseData {
+    optional bytes nonce = 1;
+    optional uint32 counter = 2;
+    optional bytes tag = 3;
+}
+
+message TeslaHmacSignatureData {
+    optional bytes tag = 1;
+}
+
+message TeslaSignatureData {
+    optional TeslaKeyIdentity signer_identity = 1;
+    optional TeslaAesGcmPersonalizedData aes_gcm_personalized = 5;
+    optional TeslaHmacSignatureData session_info_tag = 6;
+    optional TeslaAesGcmResponseData aes_gcm_response = 9;
+}
+
+message TeslaMessageStatus {
+    optional uint32 operation_status = 1;
+    optional uint32 signed_message_fault = 2;
+}
+
+message TeslaSessionInfoRequest {
+    optional bytes public_key = 1;
+}
+
+message TeslaRoutableMessage {
+    optional TeslaDestination to_destination = 6;
+    optional TeslaDestination from_destination = 7;
+    optional bytes protobuf_message_as_bytes = 10;
+    optional TeslaMessageStatus signed_message_status = 12;
+    optional TeslaSignatureData signature_data = 13;
+    optional TeslaSessionInfoRequest session_info_request = 14;
+    optional bytes session_info = 15;
+    optional bytes request_uuid = 50;
+    optional bytes uuid = 51;
+    optional uint32 flags = 52;
+}
+
+message TeslaSessionInfo {
+    optional uint32 counter = 1;
+    optional bytes public_key = 2;
+    optional bytes epoch = 3;
+    optional fixed32 clock_time = 4;
+    optional uint32 status = 5;
+    optional uint32 handle = 6;
+}
+
+
+// --- VCSEC key enrolment ---
+
+message TeslaPublicKey {
+    optional bytes public_key_raw = 1;
+}
+
+message TeslaKeyMetadata {
+    optional uint32 key_form_factor = 1;
+}
+
+message TeslaPermissionChange {
+    optional TeslaPublicKey key = 1;
+    optional uint32 key_role = 4;
+}
+
+message TeslaWhitelistOperation {
+    optional TeslaPermissionChange add_key_to_whitelist_and_add_permissions = 5;
+    optional TeslaKeyMetadata metadata_for_key = 6;
+}
+
+message TeslaUnsignedMessage {
+    optional TeslaWhitelistOperation whitelist_operation = 16;
+}
+
+message TeslaVcsecSignedMessage {
+    optional bytes protobuf_message_as_bytes = 2;
+    optional uint32 signature_type = 3;
+}
+
+message TeslaToVcsecMessage {
+    optional TeslaVcsecSignedMessage signed_message = 1;
+}

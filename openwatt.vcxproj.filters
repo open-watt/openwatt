@@ -711,6 +711,18 @@
     <DCompile Include="src\protocol\tesla\twc.d">
       <Filter>src\protocol\tesla</Filter>
     </DCompile>
+    <DCompile Include="src\protocol\tesla\vehicle_codec.d">
+      <Filter>src\protocol\tesla</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\tesla\vehicle_crypto.d">
+      <Filter>src\protocol\tesla</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\tesla\vehicle_scanner.d">
+      <Filter>src\protocol\tesla</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\tesla\vehicle_session.d">
+      <Filter>src\protocol\tesla</Filter>
+    </DCompile>
     <DCompile Include="src\manager\syslog.d">
       <Filter>src\manager</Filter>
     </DCompile>
@@ -1591,6 +1603,12 @@
     <None Include="Makefile" />
     <None Include="src\protocol\esphome\api.proto">
       <Filter>src\protocol\esphome</Filter>
+    </None>
+    <None Include="src\protocol\tesla\commands.proto">
+      <Filter>src\protocol\tesla</Filter>
+    </None>
+    <None Include="src\protocol\tesla\messages.proto">
+      <Filter>src\protocol\tesla</Filter>
     </None>
     <None Include="third_party\urt\src\urt\driver\bl808\start.S">
       <Filter>third_party\urt\driver\bl808</Filter>

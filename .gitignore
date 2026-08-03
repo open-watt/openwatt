@@ -36,6 +36,7 @@
 
 # User config (personal overrides, not committed)
 conf/user.conf
+conf/tesla.pem
 user.conf
 
 # folders

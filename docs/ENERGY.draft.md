@@ -82,7 +82,7 @@ pairing is an ordinary circuit join and reshapes automatically on plug/unplug:
 
 ```
 # Tesla BLE owns the identified cars. Do not add them as static Appliances.
-/protocol/tesla/vehicle-scanner/add name=tesla iface=ble1 identity=tesla vins=LRW3F7EKXMC392131,5YJ3F7EC8LF488644
+/protocol/tesla/vehicle-scanner/add name=tesla iface=ble1 secret=tesla vins=LRW3F7EKXMC392131,5YJ3F7EC8LF488644
 /apps/energy/appliance add name=mg_zs kind=car connection=mg_zs    # EVSE can't read this VIN; bound manually
 ```
 
