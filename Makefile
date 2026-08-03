@@ -368,7 +368,7 @@ endif
 # Platform packaging: ESP-IDF firmware
 # =======================================================================
 
-.PHONY: esp-idf-build esp-flash esp-monitor
+.PHONY: esp-idf-build esp-flash esp-monitor esp-check-isr
 
 ESP_IDF_PATH ?= $(lastword $(sort $(wildcard $(HOME)/.espressif/*/esp-idf)))
 ifeq ($(PLATFORM),esp32)
@@ -457,6 +457,22 @@ ifdef ESP_PROJECT_DIR
         ESP_FLASH_SIZE := $(BOARD_FLASH_SIZE)
         ESP_PSRAM_SIZE := $(BOARD_PSRAM_SIZE)
     endif
+
+    IDF_LOG_LEVEL ?= none
+    ifeq ($(filter $(IDF_LOG_LEVEL),none error warn),)
+        $(error Unknown IDF_LOG_LEVEL='$(IDF_LOG_LEVEL)'; valid: none | error | warn)
+    endif
+    ESP_IDF_LOG_SDKCONFIG := $(abspath platforms/esp32-common/sdkconfig.idf-log-$(IDF_LOG_LEVEL).defaults)
+    ifeq ($(wildcard $(ESP_IDF_LOG_SDKCONFIG)),)
+        $(error Missing ESP-IDF log policy $(ESP_IDF_LOG_SDKCONFIG))
+    endif
+    ESP_SDKCONFIG_DEFAULTS := $(ESP_SDKCONFIG_DEFAULTS);$(ESP_IDF_LOG_SDKCONFIG)
+    ifeq ($(IDF_LOG_LEVEL),none)
+        DFLAGS := $(DFLAGS) $(VERSION_FLAG)NoIDFLog
+        ESP_IDF_LOG_ENABLED := 0
+    else
+        ESP_IDF_LOG_ENABLED := 1
+    endif
 endif
 
 ifeq ($(XTENSA_TWO_STAGE),1)
@@ -480,6 +496,7 @@ endif
 		idf.py -B "$(ESP_BUILD_DIR)" -DIDF_TARGET=$(ESP_IDF_TARGET) \
 			-DSDKCONFIG="$(ESP_SDKCONFIG)" -DSDKCONFIG_DEFAULTS="$(ESP_SDKCONFIG_DEFAULTS)" \
 			-DOPENWATT_OBJ=$(abspath $(ESP_LINK_OBJ)) \
+			-DIDF_LOG_ENABLED=$(ESP_IDF_LOG_ENABLED) \
 			-DUSE_LWIP=$(if $(filter 1,$(USE_INTERNAL_IP_STACK)),0,1) build'
 	cp "$(ESP_BUILD_DIR)/openwatt.bin" "$(TARGETDIR)/openwatt.bin"
 	cp "$(ESP_BUILD_DIR)/bootloader/bootloader.bin" "$(TARGETDIR)/bootloader.bin"
@@ -493,6 +510,13 @@ endif
 	@echo ""
 	@echo "Flash with:"
 	@echo "  make esp-flash PLATFORM=$(PLATFORM)$(if $(BOARD), BOARD=$(BOARD)) ESPPORT=<port>"
+
+# @critical code must not call into flash-mapped sections; the call would fault
+# whenever it runs with the instruction cache disabled.
+ESP_OBJDUMP := $(if $(filter xtensa,$(ARCH)),$(ESPRESSIF_XTENSA_BIN)/xtensa-esp-elf-objdump,$(ESPRESSIF_RISCV32_BIN)/riscv32-esp-elf-objdump)
+
+esp-check-isr:
+	@python3 test/check_isr_safety.py "$(ESP_BUILD_DIR)/openwatt.elf" --objdump "$(ESP_OBJDUMP)"
 
 esp-flash: esp-idf-build
 	. "$(ESP_IDF_PATH)/export.sh" > /dev/null 2>&1 && \
