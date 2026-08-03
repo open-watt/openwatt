@@ -65,9 +65,9 @@ nothrow @nogc:
         g_app.register_enum!Coverage();
         g_app.register_enum!PolicyTier();
 
+        init_vehicle_formats();
         manager = defaultAllocator.allocT!EnergyManager();
         energy_device = create_energy_device();
-        create_vehicles_device();
         registry = defaultAllocator.allocT!ControlRegistry();
 
         g_app.console.register_collection!Appliance();

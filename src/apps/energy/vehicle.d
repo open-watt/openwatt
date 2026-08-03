@@ -2,12 +2,17 @@ module apps.energy.vehicle;
 
 import urt.format.json;
 import urt.lifetime;
-import urt.log;
+import urt.log : writeError;
 import urt.map;
 import urt.mem;
+import urt.meta : Alias;
 import urt.string;
+import urt.time : SysTime;
+
+import apps.energy.appliance;
 
 import manager;
+import manager.collection;
 import manager.component;
 import manager.device;
 import manager.element;
@@ -136,9 +141,7 @@ nothrow @nogc:
         if (!results || !results.isArray)
             return 0;
 
-        Component v;
-        if (g_vehicles_device !is null)
-            v = g_vehicles_device.find_component(vin[]);
+        Device* v = vin[] in g_app.devices;
         if (v is null)
             return 0;
 
@@ -174,10 +177,46 @@ nothrow @nogc:
                 case "Electrification Level":  elem_path = "info.electrification"; break;
                 default: continue;
             }
-            v.set_element(elem_path, value.makeString(defaultAllocator()));
+            (*v).set_element(elem_path, value.makeString(defaultAllocator()));
         }
 
         return 0;
+    }
+}
+
+
+struct CapacityEstimate
+{
+    float sum_weighted;
+    float weight_total;
+    uint sample_count;
+
+    float mean_kwh() const pure nothrow @nogc
+        => weight_total > 0 ? sum_weighted / weight_total : float.nan;
+}
+
+__gshared Map!(String, CapacityEstimate) g_capacity_estimates;
+
+void add_capacity_sample(const(char)[] vin, float estimate_kwh, float weight)
+{
+    if (!(estimate_kwh >= 40.0f && estimate_kwh <= 150.0f) || !(weight > 0))
+        return;
+
+    CapacityEstimate* estimate = vin in g_capacity_estimates;
+    if (!estimate)
+    {
+        String key = vin.makeString(defaultAllocator());
+        estimate = &g_capacity_estimates.replace(key.move, CapacityEstimate.init);
+    }
+    estimate.sum_weighted += estimate_kwh * weight;
+    estimate.weight_total += weight;
+    ++estimate.sample_count;
+
+    if (Device* vehicle = vin in g_app.devices)
+    {
+        float confidence = estimate.sample_count >= 10 ? 1.0f : estimate.sample_count / 10.0f;
+        (*vehicle).set_element("battery.full_capacity", estimate.mean_kwh);
+        (*vehicle).set_element("battery.capacity_confidence", confidence);
     }
 }
 
@@ -216,79 +255,259 @@ unittest
 }
 
 
-// All vehicle sources converge on one VIN-keyed device.
-__gshared Device g_vehicles_device;
-
-
-Device create_vehicles_device()
+Component vehicle_for(const(char)[] vin)
 {
-    assert(g_vehicles_device is null, "vehicles device already created");
-    g_vehicles_device = g_app.allocator.allocT!Device("vehicles".makeString(g_app.allocator));
-    g_vehicles_device.hidden = true;
-    g_app.devices.insert(g_vehicles_device.id[], g_vehicles_device);
-    g_vehicles_device.notify(ComponentEvent.tree_changed);
-    g_vehicles_device.notify(ComponentEvent.online);
-    return g_vehicles_device;
+    Device* existing = vin in g_app.devices;
+    Device vehicle;
+    bool is_new = existing is null;
+    if (is_new)
+    {
+        vehicle = g_app.allocator.allocT!Device(vin.makeString(g_app.allocator));
+        g_app.devices.insert(vehicle.id[], vehicle);
+    }
+    else
+        vehicle = *existing;
+
+    vehicle.template_ = StringLit!"Vehicle";
+    materialise_vehicle(vehicle, vin, is_new);
+    return vehicle;
 }
 
 
-Component vehicle_for(const(char)[] vin)
+Appliance vehicle_appliance_for(const(char)[] vin)
 {
-    assert(g_vehicles_device !is null, "vehicles device not initialised");
+    Component vehicle = vehicle_for(vin);
 
-    if (Component existing = g_vehicles_device.find_component(vin))
-        return existing;
+    auto appliances = Collection!Appliance();
+    Appliance appliance = appliances.get(vin);
+    if (!appliance)
+    {
+        // TODO: remove this compatibility lookup after all configured car
+        // appliances have migrated to VIN IDs. The display name belongs in
+        // Vehicle.info.name; the Collection object name is its stable identity.
+        foreach (Appliance candidate; appliances.values)
+        {
+            if (candidate.vin == vin)
+            {
+                appliance = candidate;
+                Element* friendly_name = vehicle.find_element("info.name");
+                if (friendly_name && friendly_name.record_update() == SysTime())
+                    friendly_name.value(candidate.name[]);
+                break;
+            }
+        }
+    }
+    if (!appliance)
+    {
+        appliance = appliances.alloc(vin, ObjectFlags.dynamic);
+        if (!appliance)
+        {
+            writeError("could not create vehicle appliance for VIN '", vin, "'");
+            return null;
+        }
+        appliances.add(appliance);
+    }
 
-    Component vehicle = g_app.allocator.allocT!Component(vin.makeString(defaultAllocator()));
-    vehicle.template_ = StringLit!"Vehicle";
-    g_vehicles_device.add_component(vehicle);
+    appliance.vin(vin);
+    if (const(char)[] error = appliance.device(vin))
+        writeError("could not bind vehicle appliance for VIN '", vin, "': ", error);
+    return appliance;
+}
 
-    Component info = g_app.allocator.allocT!Component(StringLit!"info");
-    info.template_ = StringLit!"DeviceInfo";
-    vehicle.add_component(info);
 
-    Component status = g_app.allocator.allocT!Component(StringLit!"status");
-    status.template_ = StringLit!"DeviceStatus";
-    vehicle.add_component(status);
+private Component ensure_component(Component parent, const(char)[] id, const(char)[] template_)
+{
+    if (Component component = parent.find_component(id))
+        return component;
 
-    Component battery = g_app.allocator.allocT!Component(StringLit!"battery");
-    battery.template_ = StringLit!"Battery";
-    vehicle.add_component(battery);
+    Component component = g_app.allocator.allocT!Component(id.makeString(defaultAllocator()));
+    component.template_ = template_.makeString(defaultAllocator());
+    parent.add_component(component);
+    return component;
+}
 
-    Component meter = g_app.allocator.allocT!Component(StringLit!"meter");
-    meter.template_ = StringLit!"EnergyMeter";
-    vehicle.add_component(meter);
+private Element* define_element(Component vehicle, const(char)[] path, FormatId format,
+                                Access access = Access.read)
+{
+    Element* element = vehicle.find_element(path);
+    if (!element)
+    {
+        element = vehicle.find_or_create_element(path, format);
+        element.access = access;
+    }
+    else if (element.access == Access.none)
+        element.access = access;
+    return element;
+}
 
-    Component control = g_app.allocator.allocT!Component(StringLit!"control");
-    control.template_ = StringLit!"PowerControl";
-    vehicle.add_component(control);
+private enum VehicleElementType : ubyte
+{
+    string_,
+    int_,
+    bool_,
+    float_,
+    time,
+}
 
-    vehicle.set_element("info.type", StringLit!"vehicle");
-    vehicle.set_element("info.serial_number", vin.makeString(defaultAllocator()));
+private __gshared FormatId[VehicleElementType.max + 1] vehicle_element_formats;
+
+void init_vehicle_formats()
+{
+    vehicle_element_formats[VehicleElementType.string_] = register_value_format!String();
+    vehicle_element_formats[VehicleElementType.int_] = register_value_format!int();
+    vehicle_element_formats[VehicleElementType.bool_] = register_value_format!bool();
+    vehicle_element_formats[VehicleElementType.float_] = register_value_format!float();
+    vehicle_element_formats[VehicleElementType.time] = register_value_format!SysTime();
+}
+
+private static immutable vehicle_components = make_table!([
+    "info", "DeviceInfo",
+    "status", "DeviceStatus",
+    "battery", "Battery",
+    "meter", "EnergyMeter",
+    "control", "PowerControl",
+    "charging", "VehicleCharging",
+    "hvac", "HVAC",
+    "access", "VehicleAccess",
+    "closures", "VehicleClosures",
+    "drive", "VehicleDrive",
+    "location", "Location",
+    "tyres", "VehicleTyres",
+]);
+
+private static immutable vehicle_elements = make_table!([
+    "info.name",
+    "info.type",
+    "info.serial_number",
+    "info.manufacturer_name",
+    "info.manufacturer_id",
+    "info.model_name",
+    "info.manufacture_location",
+    "info.model_year",
+    "info.software_version",
+    "connected",
+    "last_seen",
+    "charging_state",
+    "minutes_to_full",
+    "charging.enabled",
+    "charging.target_soc",
+    "charging.scheduled",
+    "charging.schedule_time",
+    "charging.port_open",
+    "battery.soc",
+    "battery.usable_soc",
+    "battery.full_capacity",
+    "battery.capacity_confidence",
+    "meter.voltage",
+    "meter.current",
+    "meter.power",
+    "meter.import",
+    "meter.type",
+    "control.kind",
+    "control.direction",
+    "control.unit",
+    "control.min",
+    "control.max",
+    "control.step",
+    "control.setpoint",
+    "hvac.power",
+    "hvac.state",
+    "hvac.mode",
+    "hvac.temperature",
+    "hvac.outside_temperature",
+    "hvac.target_temperature",
+    "hvac.passenger_target_temperature",
+    "hvac.min_temperature",
+    "hvac.max_temperature",
+    "hvac.fan_speed",
+    "hvac.preconditioning",
+    "hvac.defrost",
+    "hvac.climate_keeper_mode",
+    "hvac.battery.heating",
+    "access.locked",
+    "access.user_present",
+    "closures.driver_front",
+    "closures.passenger_front",
+    "closures.driver_rear",
+    "closures.passenger_rear",
+    "closures.trunk",
+    "closures.frunk",
+    "closures.charge_port",
+    "drive.gear",
+    "drive.speed",
+    "drive.power",
+    "drive.odometer",
+    "location.latitude",
+    "location.longitude",
+    "location.heading",
+    "location.accuracy",
+    "tyres.front_left.pressure",
+    "tyres.front_right.pressure",
+    "tyres.rear_left.pressure",
+    "tyres.rear_right.pressure",
+    "tyres.front_left.warning",
+    "tyres.front_right.warning",
+    "tyres.rear_left.warning",
+    "tyres.rear_right.warning",
+]);
+
+private enum element_id(string id) = Alias!(vehicle_elements.find_first(id));
+
+private alias Type = VehicleElementType;
+
+private static immutable VehicleElementType[vehicle_elements.length] vehicle_element_types =
+[
+    Type.string_, Type.string_, Type.string_, Type.string_, Type.string_, Type.string_,
+    Type.string_, Type.int_, Type.string_, Type.bool_, Type.time, Type.string_, Type.int_,
+    Type.bool_, Type.int_, Type.bool_, Type.int_, Type.bool_, Type.int_, Type.int_,
+    Type.float_, Type.float_, Type.int_, Type.int_, Type.int_, Type.float_, Type.string_,
+    Type.string_, Type.string_, Type.string_, Type.int_, Type.int_, Type.int_, Type.int_,
+    Type.bool_, Type.string_, Type.string_, Type.float_, Type.float_, Type.float_,
+    Type.float_, Type.float_, Type.float_, Type.int_, Type.bool_, Type.string_,
+    Type.string_, Type.bool_, Type.bool_, Type.bool_, Type.string_, Type.string_,
+    Type.string_, Type.string_, Type.string_, Type.string_, Type.string_, Type.string_,
+    Type.float_, Type.int_, Type.float_, Type.float_, Type.float_, Type.float_, Type.float_,
+    Type.float_, Type.float_, Type.float_, Type.float_, Type.bool_, Type.bool_, Type.bool_,
+    Type.bool_,
+];
+
+static assert(VehicleElementType.sizeof == 1);
+static assert(vehicle_components.length % 2 == 0);
+static assert(vehicle_elements.length == vehicle_element_types.length);
+
+private void materialise_vehicle(Device vehicle, const(char)[] vin, bool is_new)
+{
+    foreach (i; 0 .. vehicle_components.length / 2)
+        ensure_component(vehicle, vehicle_components[i * 2][], vehicle_components[i * 2 + 1][]);
+
+    foreach (i; 0 .. vehicle_elements.length)
+        define_element(vehicle, vehicle_elements[i][], vehicle_element_formats[vehicle_element_types[i]]);
+
+    if (!is_new)
+        return;
+
+    vehicle.set_element(vehicle_elements[element_id!"info.type"][], StringLit!"vehicle");
+    vehicle.set_element(vehicle_elements[element_id!"info.serial_number"][], vin.makeString(defaultAllocator()));
+    vehicle.set_element(vehicle_elements[element_id!"control.kind"][], StringLit!"continuous");
+    vehicle.set_element(vehicle_elements[element_id!"control.direction"][], StringLit!"consume");
+    vehicle.set_element(vehicle_elements[element_id!"control.unit"][], StringLit!"A");
+    vehicle.set_element(vehicle_elements[element_id!"control.min"][], 6);
+    vehicle.set_element(vehicle_elements[element_id!"control.step"][], 1);
+    vehicle.set_element(vehicle_elements[element_id!"meter.type"][], StringLit!"single-phase");
 
     VINInfo vi = decode_vin(vin);
     if (vi.manufacturer_name)
-        vehicle.set_element("info.manufacturer_name", vi.manufacturer_name);
+        vehicle.set_element(vehicle_elements[element_id!"info.manufacturer_name"][], vi.manufacturer_name);
     if (vi.manufacturer_id)
-        vehicle.set_element("info.manufacturer_id", vi.manufacturer_id);
+        vehicle.set_element(vehicle_elements[element_id!"info.manufacturer_id"][], vi.manufacturer_id);
     if (vi.model_name)
-        vehicle.set_element("info.model_name", vi.model_name);
+        vehicle.set_element(vehicle_elements[element_id!"info.model_name"][], vi.model_name);
     if (vi.manufacture_location)
-        vehicle.set_element("info.manufacture_location", vi.manufacture_location);
+        vehicle.set_element(vehicle_elements[element_id!"info.manufacture_location"][], vi.manufacture_location);
     if (vi.model_year != 0)
-        vehicle.set_element("info.model_year", vi.model_year);
+        vehicle.set_element(vehicle_elements[element_id!"info.model_year"][], vi.model_year);
 
-    vehicle.set_element("control.kind", StringLit!"continuous");
-    vehicle.set_element("control.direction", StringLit!"consume");
-    vehicle.set_element("control.unit", StringLit!"A");
-    vehicle.set_element("control.min", 6);
-    vehicle.set_element("control.step", 1);
-
-    vehicle.set_element("meter.type", StringLit!"single-phase");
-
-    g_vehicles_device.notify(ComponentEvent.tree_changed);
-
+    vehicle.notify(ComponentEvent.tree_changed);
+    vehicle.notify(ComponentEvent.online);
     enrich_from_nhtsa(vin);
-
-    return vehicle;
 }
