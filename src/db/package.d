@@ -20,6 +20,7 @@ import urt.sync.spsc;
 import urt.thread;
 import urt.time;
 
+import manager.features : is_tiny;
 import manager.plugin;
 
 import db.defs;
@@ -37,11 +38,10 @@ alias QueryCallback = void delegate(uint ticket, scope const(Sample)[] samples) 
 version (Embedded) enum bool db_threads_supported = false;
 else               enum bool db_threads_supported = ThreadsSupported;
 
-// Channel depths. Generously sized for desktop; tune down for tiny targets.
-private enum uint ingest_capacity = 4096;
-private enum uint query_capacity = 256;
-private enum uint done_capacity = 256;
-private enum uint notice_capacity = 64;
+private enum uint ingest_capacity = is_tiny ? 64 : 4096;
+private enum uint query_capacity  = is_tiny ? 8 : 256;
+private enum uint done_capacity   = is_tiny ? 8 : 256;
+private enum uint notice_capacity = is_tiny ? 8 : 64;
 
 
 private bool spsc_send(T, uint N)(ref SPSCRing!(T, N) ring, ref T item)
@@ -78,7 +78,7 @@ nothrow @nogc:
         m.series = id;
         m.filename = cast(const(char)*)mem.ptr;
         m.filename_len = filename.length;
-        if (!spsc_send(_ingest, m))
+        if (!spsc_send(g_ingest, m))
         {
             defaultAllocator().free(mem);
             --_next_series;
@@ -94,7 +94,7 @@ nothrow @nogc:
         IngestMsg m;
         m.kind = IngestKind.close_series;
         m.series = id;
-        spsc_send(_ingest, m); // best effort; engine reaps everything at shutdown
+        spsc_send(g_ingest, m); // best effort; engine reaps everything at shutdown
     }
 
     final bool push(SeriesId id, ulong time, double value)
@@ -106,7 +106,7 @@ nothrow @nogc:
         m.series = id;
         m.time = time;
         m.value = value;
-        return spsc_send(_ingest, m);
+        return spsc_send(g_ingest, m);
     }
 
     final bool push_block(SeriesId id, scope const(Sample)[] samples)
@@ -123,7 +123,7 @@ nothrow @nogc:
         m.series = id;
         m.samples = cast(const(Sample)*)mem.ptr;
         m.count = samples.length;
-        if (!spsc_send(_ingest, m))
+        if (!spsc_send(g_ingest, m))
         {
             defaultAllocator().free(mem);
             return false;
@@ -139,7 +139,7 @@ nothrow @nogc:
         if (ticket == 0)
             ticket = ++_next_ticket; // 0 is reserved for "no ticket"
         QueryReq q = QueryReq(ticket, id, from, to, max_points, mode);
-        if (!spsc_send(_requests, q))
+        if (!spsc_send(g_requests, q))
             return 0;
         _pending.insert(ticket, cb);
         wake();
@@ -222,11 +222,6 @@ nothrow @nogc:
 private:
     DbEngine _engine;
 
-    SPSCRing!(IngestMsg, ingest_capacity) _ingest;   // frontend -> worker
-    SPSCRing!(QueryReq, query_capacity) _requests;   // frontend -> worker
-    SPSCRing!(QueryDone, done_capacity) _done;       // worker -> frontend
-    SPSCRing!(DbNotice, notice_capacity) _notices;   // worker -> frontend
-
     Map!(uint, QueryCallback) _pending; // ticket -> callback, awaiting completion
     SeriesId _next_series;
     uint _next_ticket;
@@ -253,7 +248,7 @@ private:
     void wake_if_work()
     {
         static if (db_threads_supported)
-            if (!_ingest.empty || !_requests.empty)
+            if (!g_ingest.empty || !g_requests.empty)
                 _wake.set();
     }
 
@@ -281,7 +276,7 @@ private:
         IngestMsg[64] ibuf = void;
         for (;;)
         {
-            size_t n = _ingest.pop(ibuf[]);
+            size_t n = g_ingest.pop(ibuf[]);
             if (!n)
                 break;
             did = true;
@@ -293,7 +288,7 @@ private:
         QueryReq[16] qbuf = void;
         for (;;)
         {
-            size_t n = _requests.pop(qbuf[]);
+            size_t n = g_requests.pop(qbuf[]);
             if (!n)
                 break;
             did = true;
@@ -344,11 +339,11 @@ private:
                 done.data = buf;
             }
         }
-        if (!spsc_send(_done, done) && done.data)
+        if (!spsc_send(g_done, done) && done.data)
             defaultAllocator().free(cast(void[])done.data[0 .. done.count]);
     }
 
-    // worker side (producer of _notices)
+    // worker side (producer of g_notices)
     void enqueue_notice(const(char)[] text)
     {
         if (!text.length)
@@ -358,17 +353,17 @@ private:
             return;
         (cast(char[])mem)[] = text[];
         DbNotice n = DbNotice(cast(const(char)*)mem.ptr, cast(uint)text.length);
-        if (!spsc_send(_notices, n))
+        if (!spsc_send(g_notices, n))
             defaultAllocator().free(mem);
     }
 
-    // main side (consumer of _done / _notices)
+    // main side (consumer of g_done / g_notices)
     void drain_done()
     {
         QueryDone[32] buf = void;
         for (;;)
         {
-            size_t n = _done.pop(buf[]);
+            size_t n = g_done.pop(buf[]);
             if (!n)
                 break;
             foreach (ref d; buf[0 .. n])
@@ -389,7 +384,7 @@ private:
         DbNotice[16] buf = void;
         for (;;)
         {
-            size_t n = _notices.pop(buf[]);
+            size_t n = g_notices.pop(buf[]);
             if (!n)
                 break;
             foreach (ref nt; buf[0 .. n])
@@ -481,6 +476,11 @@ unittest
 private:
 
 __gshared DbModule g_db;
+
+__gshared SPSCRing!(IngestMsg, ingest_capacity) g_ingest;  // frontend -> worker
+__gshared SPSCRing!(QueryReq, query_capacity) g_requests;  // frontend -> worker
+__gshared SPSCRing!(QueryDone, done_capacity) g_done;      // worker -> frontend
+__gshared SPSCRing!(DbNotice, notice_capacity) g_notices;  // worker -> frontend
 
 version (linux)
 {

@@ -136,6 +136,14 @@ nothrow @nogc:
         mark_set!(typeof(this), "max-l2mtu")();
         retransmits(10);
         ack_timeout(500);
+
+        _buf = defaultAllocator.allocT!Buffers();
+    }
+
+    ~this()
+    {
+        if (_buf)
+            defaultAllocator.freeT(_buf);
     }
 
     // Properties...
@@ -183,10 +191,10 @@ nothrow @nogc:
         => _protocol_version;
 
     final const(char)[] secondary_version() const pure
-        => _secondary_version[0 .. _secondary_version_len];
+        => _buf.secondary_version[0 .. _secondary_version_len];
 
     final const(char)[] app_version() const pure
-        => _app_version[0 .. _app_version_len];
+        => _buf.app_version[0 .. _app_version_len];
 
     // runtime wire trace: hexdump every emitted/received frame at trace level. off by default; toggled live
     // on the running instance so an incident can be captured without a rebuild.
@@ -224,7 +232,7 @@ protected:
     }
 
     override bool validate() const pure
-        => _stream !is null;
+        => _stream !is null && _buf !is null;
 
     override const(char)[] status_message() const
     {
@@ -294,7 +302,7 @@ protected:
                                 "); backing off (give-up ", _handshake_attempts, ")");
                     return CompletionStatus.error;
                 }
-                emit_frame(0, uframe_control(UFrameType.poll_final), _ucmd_buffer[0 .. _ucmd_len]);
+                emit_frame(0, uframe_control(UFrameType.poll_final), _buf.ucmd[0 .. _ucmd_len]);
                 _ucmd_sent = now;
             }
             return CompletionStatus.continue_;
@@ -557,15 +565,12 @@ private:
     SystemProperty _ucmd_prop;
     MonoTime _ucmd_sent;
     MonoTime _phase_start;
-    ubyte[16] _ucmd_buffer;
 
     ushort _rx_capability;
     ubyte _protocol_version;
     uint _capabilities;
     ubyte _secondary_version_len;
     ubyte _app_version_len;
-    char[16] _secondary_version;
-    char[32] _app_version;
 
     ushort _ack_timeout_ms;
     ubyte _max_retransmits;
@@ -579,7 +584,7 @@ private:
     Message* _free_messages;
 
     size_t _rx_offset;
-    ubyte[4096] _rx_buffer;
+    Buffers* _buf;
 
     void stream_state_change(ActiveObject, StateSignal signal)
     {
@@ -699,13 +704,13 @@ private:
             case Phase.reboot_mode:
                 ubyte[4] mode = 0; // reboot into the application, not the bootloader
                 _ucmd_prop = SystemProperty.bootloader_reboot_mode;
-                _ucmd_len = cast(ubyte)build_property_cmd(_ucmd_buffer, SystemCommand.prop_value_set, seq, _ucmd_prop, mode);
+                _ucmd_len = cast(ubyte)build_property_cmd(_buf.ucmd, SystemCommand.prop_value_set, seq, _ucmd_prop, mode);
                 break;
             case Phase.reset:
-                _ucmd_buffer[0] = SystemCommand.reset;
-                _ucmd_buffer[1] = seq;
-                _ucmd_buffer[2] = 0;
-                _ucmd_buffer[3] = 0;
+                _buf.ucmd[0] = SystemCommand.reset;
+                _buf.ucmd[1] = seq;
+                _buf.ucmd[2] = 0;
+                _buf.ucmd[3] = 0;
                 _ucmd_len = 4;
                 _ucmd_prop = SystemProperty.last_status;
                 break;
@@ -724,7 +729,7 @@ private:
             case Phase.app_version:
                 _ucmd_prop = SystemProperty.secondary_app_version;
             build_get:
-                _ucmd_len = cast(ubyte)build_property_cmd(_ucmd_buffer, SystemCommand.prop_value_get, seq, _ucmd_prop, null);
+                _ucmd_len = cast(ubyte)build_property_cmd(_buf.ucmd, SystemCommand.prop_value_get, seq, _ucmd_prop, null);
                 break;
             case Phase.wait_reset_reason:
             case Phase.done:
@@ -735,7 +740,7 @@ private:
         _ucmd_retries = 0;
         _ucmd_active = true;
         _ucmd_sent = getTime();
-        emit_frame(0, uframe_control(UFrameType.poll_final), _ucmd_buffer[0 .. _ucmd_len]);
+        emit_frame(0, uframe_control(UFrameType.poll_final), _buf.ucmd[0 .. _ucmd_len]);
     }
 
     void handshake_reply(const(ubyte)[] value)
@@ -786,8 +791,8 @@ private:
                     const(char)[] v = tconcat(value[0 .. 4][0 .. 4].littleEndianToNative!uint, ".",
                                               value[4 .. 8][0 .. 4].littleEndianToNative!uint, ".",
                                               value[8 .. 12][0 .. 4].littleEndianToNative!uint);
-                    _secondary_version_len = cast(ubyte)(v.length < _secondary_version.length ? v.length : _secondary_version.length);
-                    _secondary_version[0 .. _secondary_version_len] = v[0 .. _secondary_version_len];
+                    _secondary_version_len = cast(ubyte)(v.length < _buf.secondary_version.length ? v.length : _buf.secondary_version.length);
+                    _buf.secondary_version[0 .. _secondary_version_len] = v[0 .. _secondary_version_len];
                     mark_set!(typeof(this), "secondary-version")();
                 }
                 _phase = Phase.app_version;
@@ -796,9 +801,9 @@ private:
                 size_t len = value.length;
                 while (len && value[len - 1] == 0)
                     --len;
-                if (len > _app_version.length)
-                    len = _app_version.length;
-                _app_version[0 .. len] = cast(const(char)[])value[0 .. len];
+                if (len > _buf.app_version.length)
+                    len = _buf.app_version.length;
+                _buf.app_version[0 .. len] = cast(const(char)[])value[0 .. len];
                 _app_version_len = cast(ubyte)len;
                 mark_set!(typeof(this), "app-version")();
                 _phase = Phase.done;
@@ -854,15 +859,15 @@ private:
         const(ubyte)[] input = cast(const(ubyte)[])data;
         while (input.length)
         {
-            size_t space = _rx_buffer.length - _rx_offset;
+            size_t space = _buf.rx.length - _rx_offset;
             if (space == 0)
             {
                 add_rx_drop();
                 _rx_offset = 0;
-                space = _rx_buffer.length;
+                space = _buf.rx.length;
             }
             size_t take = input.length < space ? input.length : space;
-            _rx_buffer[_rx_offset .. _rx_offset + take] = input[0 .. take];
+            _buf.rx[_rx_offset .. _rx_offset + take] = input[0 .. take];
             _rx_offset += take;
             input = input[take .. $];
             parse_buffer(rx_time);
@@ -876,7 +881,7 @@ private:
         size_t start = 0;
         while (_rx_offset - start >= cpc_header_size)
         {
-            const(ubyte)[] buf = _rx_buffer[start .. _rx_offset];
+            const(ubyte)[] buf = _buf.rx[start .. _rx_offset];
             if (buf[0] != cpc_flag ||
                 buf[0 .. 5].cpc_crc() != buf[5 .. 7][0 .. 2].littleEndianToNative!ushort)
             {
@@ -890,7 +895,7 @@ private:
                 continue;
             }
             size_t frame_len = cpc_header_size + length;
-            if (frame_len > _rx_buffer.length)
+            if (frame_len > _buf.rx.length)
             {
                 add_rx_drop();
                 start += cpc_header_size;
@@ -926,7 +931,7 @@ private:
         if (start > 0 && _rx_offset > 0)
         {
             import urt.mem : memmove;
-            memmove(_rx_buffer.ptr, _rx_buffer.ptr + start, _rx_offset);
+            memmove(_buf.rx.ptr, _buf.rx.ptr + start, _rx_offset);
         }
     }
 
@@ -1687,6 +1692,15 @@ enum status_reset_last = 120;  // watchdog
 
 enum capability_security = 1 << 0;
 enum capability_uart_flow_control = 1 << 3;
+
+// Heap-allocated: anything embedded in a class lands in its init image, which is emitted whole.
+struct Buffers
+{
+    ubyte[16] ucmd = void;
+    char[16] secondary_version = 0;
+    char[32] app_version = 0;
+    ubyte[4096] rx = void;
+}
 
 struct Message
 {

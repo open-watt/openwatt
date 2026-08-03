@@ -409,8 +409,8 @@ nothrow @nogc:
         g_app = this;
 
         bool reactor_ok = _wake_event.init();
-        _priority_events.init();
-        _bulk_events.init();
+        g_priority_events.init();
+        g_bulk_events.init();
 
         import urt.time : subscribe_clock_change;
         subscribe_clock_change(&notify_wallclock_change);
@@ -838,7 +838,7 @@ nothrow @nogc:
         {
             case EventPriority.control:
                 atomicFetchAdd!(MemoryOrder.relaxed)(_priority_events_posted, 1);
-                ok = _priority_events.enqueue(PendingEvent(handler, when));
+                ok = g_priority_events.enqueue(PendingEvent(handler, when));
                 if (!ok)
                 {
                     atomicFetchSub!(MemoryOrder.relaxed)(_priority_events_posted, 1);
@@ -848,7 +848,7 @@ nothrow @nogc:
                 break;
             case EventPriority.bulk:
                 atomicFetchAdd!(MemoryOrder.relaxed)(_bulk_events_posted, 1);
-                ok = _bulk_events.enqueue(PendingEvent(handler, when));
+                ok = g_bulk_events.enqueue(PendingEvent(handler, when));
                 if (!ok)
                 {
                     atomicFetchSub!(MemoryOrder.relaxed)(_bulk_events_posted, 1);
@@ -877,7 +877,7 @@ nothrow @nogc:
         {
             case EventPriority.control:
                 atomicFetchAdd!(MemoryOrder.relaxed)(_priority_events_posted, 1);
-                queued = _priority_events.enqueue(PendingEvent(handler, MonoTime.init));
+                queued = g_priority_events.enqueue(PendingEvent(handler, MonoTime.init));
                 if (!queued)
                 {
                     atomicFetchSub!(MemoryOrder.relaxed)(_priority_events_posted, 1);
@@ -886,7 +886,7 @@ nothrow @nogc:
                 break;
             case EventPriority.bulk:
                 atomicFetchAdd!(MemoryOrder.relaxed)(_bulk_events_posted, 1);
-                queued = _bulk_events.enqueue(PendingEvent(handler, MonoTime.init));
+                queued = g_bulk_events.enqueue(PendingEvent(handler, MonoTime.init));
                 if (!queued)
                 {
                     atomicFetchSub!(MemoryOrder.relaxed)(_bulk_events_posted, 1);
@@ -958,7 +958,7 @@ nothrow @nogc:
         {
             ++passes;
             bool any_priority = false;
-            while (_priority_events.dequeue(e))
+            while (g_priority_events.dequeue(e))
             {
                 atomicFetchAdd!(MemoryOrder.relaxed)(_priority_events_processed, 1);
                 MonoTime event_start = getTime();
@@ -983,7 +983,7 @@ nothrow @nogc:
 
             MonoTime slice_end = getTime() + bulk_slice;
             bool any_bulk = false;
-            while (_bulk_events.dequeue(e))
+            while (g_bulk_events.dequeue(e))
             {
                 atomicFetchAdd!(MemoryOrder.relaxed)(_bulk_events_processed, 1);
                 MonoTime event_start = getTime();
@@ -1552,12 +1552,6 @@ nothrow @nogc:
 
 private:
 
-    struct PendingEvent
-    {
-        EventHandler handler;
-        MonoTime     when;
-    }
-
     // Zero-ref profiles are retained: element descs and expressions
     // on surviving devices borrow the profile's string caches, so freeing needs
     // device-side ownership first. TODO: free when the last borrower dies.
@@ -1586,8 +1580,6 @@ private:
 
     Reactor _wake_event;
 
-    MpscQueue!(PendingEvent, 32)  _priority_events;
-    MpscQueue!(PendingEvent, 256) _bulk_events;
     shared uint _priority_events_posted;
     shared uint _bulk_events_posted;
     shared uint _priority_events_processed;
@@ -1941,6 +1933,15 @@ Array!String device_print_suggest(bool is_value, const(char)[] name, const(char)
 
 
 private:
+
+struct PendingEvent
+{
+    EventHandler handler;
+    MonoTime     when;
+}
+
+__gshared MpscQueue!(PendingEvent, 32)  g_priority_events;
+__gshared MpscQueue!(PendingEvent, 256) g_bulk_events;
 
 enum MaxProfilePath = 1024;
 
