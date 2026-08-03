@@ -45,19 +45,7 @@ enum uint32_t PWM_5 = 50;
 enum uint32_t PWM_95 = 950;
 enum uint32_t PWM_100 = 1000;
 
-version (SmartEVSE_v30)
-{
-enum uint32_t PP_IN = 34;
-enum uint32_t CP_IN = 39;
-enum uint32_t TEMP = 36;
-enum uint32_t SSR1 = 32;
-enum uint32_t SSR2 = 27;
-enum uint32_t RCMFAULT = 13;
-enum uint32_t CP_OUT = 19;
-enum uint32_t CPOFF = 15;
-}
-else
-    static assert(false, "SmartEVSE hardware version is not selected");
+public import driver.boards.smartevse.pins;
 
 enum uint8_t DISABLE = 0;
 enum uint8_t ENABLE = 1;
@@ -284,7 +272,8 @@ void TIM4Init()
 //
 void EXTInit()
 {
-    // hardware_open() configures the RCM GPIO interrupt.
+    // hardware_open() arms the RCM reflex: the fault edge drops both
+    // contactors from NMI context and latches for the control loop to poll.
 }
 
 
@@ -413,7 +402,6 @@ int setup() {
     hardware_config.pilot_adc_channel = 3;
     hardware_config.proximity_adc_channel = 6;
     hardware_config.temperature_adc_channel = 0;
-    hardware_config.residual_current_gpio = RCMFAULT;
     if (!hardware_open(Hardware, hardware_config))
         return -1;
 
