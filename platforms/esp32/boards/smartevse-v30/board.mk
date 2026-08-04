@@ -6,6 +6,7 @@ BOARD_PSRAM_SIZE := 0MB
 FEATURES ?= switch
 HEADLESS ?= 1
 TINY ?= 1
+IDF_LOG_LEVEL ?= warn
 
 ifneq ($(VERSIONS),)
     VERSIONS := $(VERSIONS),SmartEVSE,SmartEVSE_v30

@@ -84,7 +84,8 @@ void register_modules(Application app)
     register_module!(manager.record)(app);
     register_module!(manager.sync)(app);
 
-    version (ESP8266) {}
+    version (NoIDFLog) {}
+    else version (ESP8266) {}
     else version (Espressif)
     {
         import driver.esp32.idf_log_bridge;
@@ -210,12 +211,42 @@ void register_modules(Application app)
         import apps.ota;
         register_module!(apps.ota)(app);
     }
-    else static if (has_ip)
+    else
     {
-        import protocol.ip;
-        import protocol.dhcp;
-        register_module!(protocol.ip)(app);
-        register_module!(protocol.dhcp)(app);
+        static if (has_ip)
+        {
+            import protocol.ip;
+            import protocol.dhcp;
+            register_module!(protocol.ip)(app);
+            register_module!(protocol.dhcp)(app);
+        }
+
+        static if (has_http)
+        {
+            import protocol.http;
+            register_module!(protocol.http)(app);
+        }
+
+        static if (has_tls)
+        {
+            import protocol.tls;
+            register_module!(protocol.tls)(app);
+        }
+
+        static if (has_ota)
+        {
+            import apps.automation;
+            register_module!(apps.automation)(app);
+
+            import apps.ota;
+            register_module!(apps.ota)(app);
+        }
+
+        static if (has_api)
+        {
+            import apps.api;
+            register_module!(apps.api)(app);
+        }
     }
 }
 
