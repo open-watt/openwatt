@@ -61,8 +61,10 @@ import db;
 import manager;
 import manager.base;
 import manager.collection;
+import manager.component : Component;
 import manager.device : Device;
-import manager.element : Access, Element, SamplingMode;
+import manager.element : Access, add_feed_listener, Element, ElementLifecycleEvent,
+                         register_element_lifecycle_handler, remove_feed_listener, SamplingMode, sweep_dirty;
 import manager.id : EID;
 import manager.path : Address, match_path, pattern_matches, walk_elements;
 import manager.series : DataFormat, FormatId, register_format, SeriesKind, valid, ValueType;
@@ -167,6 +169,7 @@ nothrow @nogc:
 
         register_object_lifecycle_handler(&on_object_lifecycle);
         register_object_state_handler(&on_object_state);
+        register_element_lifecycle_handler(&on_element_lifecycle);
         subscribe_clock_change(&on_clock_step);
     }
 
@@ -185,6 +188,56 @@ nothrow @nogc:
         {
             encoder_for(p._encoder).tick_dirty(p);
             p.flush_logs();
+        }
+
+        // Live model feeds: drain the per-tick dirty sweep into per-peer pending
+        // sets, then flush coalesced latest values.
+        bool feeds = false;
+        foreach (p; peers[])
+        {
+            if (!p._model_subs.empty)
+            {
+                feeds = true;
+                break;
+            }
+        }
+        if (feeds)
+        {
+            sweep_dirty((ref Element e) {
+                EID node = e.ensure_eid();
+                if (!node)
+                    return;
+                foreach (p; peers[])
+                {
+                    if (p._model_subs.empty || (node.raw in p._live_nodes) is null)
+                        continue;
+                    bool queued = false;
+                    foreach (pe; p._pending_vals[])
+                    {
+                        if (pe == node)
+                        {
+                            queued = true;
+                            break;
+                        }
+                    }
+                    if (!queued)
+                        p._pending_vals ~= node;
+                }
+            });
+            foreach (p; peers[])
+            {
+                if (p._pending_vals.empty)
+                    continue;
+                SyncEncoder enc = encoder_for(p._encoder);
+                foreach (node; p._pending_vals[])
+                {
+                    Element* e = g_app.devices.resolve(node);
+                    SyncHandle h = p.handle_of(node);
+                    if (e && h != SyncPeer.invalid_handle)
+                        enc.encode_val(p, h, e);
+                }
+                p._pending_vals.clear();
+            }
         }
 
         poll_time_authorities();
@@ -286,6 +339,11 @@ nothrow @nogc:
         p._next_ft = 0;
         p._enums_sent.clear();
         p._ft_recv.clear();
+        foreach (ref pat; p._model_subs[])
+            remove_feed_listener();
+        p._model_subs.clear();
+        p._live_nodes.clear();
+        p._pending_vals.clear();
 
         // Drop pending forwards where this peer was the origin; we can't route
         // a response back to a gone peer.
@@ -865,11 +923,6 @@ nothrow @nogc:
     void inbound_model_sub(SyncPeer from, uint seq, const(char[])[] patterns, bool once)
     {
         SyncEncoder enc = encoder_for(from._encoder);
-        if (!once)
-        {
-            enc.encode_err(from, seq, "unsupported", "live model subscriptions not yet supported");
-            return;
-        }
         foreach (pat; patterns)
         {
             Address a = Address.parse(pat);
@@ -878,6 +931,26 @@ nothrow @nogc:
                 enc.encode_err(from, seq, "bad_value", "bad pattern");
                 return;
             }
+
+            // arm the pattern for the live feed; a re-sub of an armed pattern just re-serves
+            bool arm = !once;
+            if (arm)
+            {
+                foreach (ref p; from._model_subs[])
+                {
+                    if (p[] == pat)
+                    {
+                        arm = false;
+                        break;
+                    }
+                }
+                if (arm)
+                {
+                    from._model_subs ~= pat.makeString(defaultAllocator);
+                    add_feed_listener();
+                }
+            }
+
             if (!wildcard_match(a.ns, "device"))
                 continue;   // only the device namespace is served so far
             foreach (dev; g_app.devices.values)
@@ -887,11 +960,33 @@ nothrow @nogc:
                 if (match_path(a.subject, dev.id[]))
                     introduce_device(from, enc, dev);
                 walk_elements(dev, a.subject, (Element* e, const(char)[] path) {
+                    if (arm)
+                        track_live(from, e);
                     send_element(from, enc, e, path);
                 });
             }
         }
         enc.encode_res(from, seq);
+    }
+
+    void inbound_model_unsub(SyncPeer from, const(char[])[] patterns)
+    {
+        bool removed = false;
+        foreach (pat; patterns)
+        {
+            foreach (i, ref p; from._model_subs[])
+            {
+                if (p[] == pat)
+                {
+                    from._model_subs.remove(i);
+                    remove_feed_listener();
+                    removed = true;
+                    break;
+                }
+            }
+        }
+        if (removed)
+            rebuild_live_nodes(from);
     }
 
     void inbound_type_format(SyncPeer from, uint ft, ref const WireFormat wf)
@@ -1541,6 +1636,74 @@ nothrow @nogc:
         enc.encode_add(to, h, tconcat("device:", path), "element", ft, e);
     }
 
+    // arms a node for the live feed; several patterns may match one node, within one sub or
+    // across successive ones, so arming is idempotent
+    void track_live(SyncPeer to, Element* e)
+    {
+        EID node = e.ensure_eid();
+        if (!node)
+            return;
+        if ((node.raw in to._live_nodes) is null)
+            to._live_nodes.insert(node.raw, true);
+    }
+
+    void rebuild_live_nodes(SyncPeer from)
+    {
+        from._live_nodes.clear();
+        foreach (ref pat; from._model_subs[])
+        {
+            Address a = Address.parse(pat[]);
+            if (!a.valid || !wildcard_match(a.ns, "device"))
+                continue;
+            foreach (dev; g_app.devices.values)
+            {
+                if (dev.remote || !dev.cid)
+                    continue;
+                walk_elements(dev, a.subject, (Element* e, const(char)[] path) {
+                    EID node = e.ensure_eid();
+                    if (node && (node.raw in from._live_nodes) is null)
+                        from._live_nodes.insert(node.raw, true);
+                });
+            }
+        }
+    }
+
+    // Creation notification: a node appearing later that matches an armed pattern
+    // receives its add when it appears - no dedicated verb.
+    void on_element_lifecycle(Element* e, ElementLifecycleEvent event)
+    {
+        if (event != ElementLifecycleEvent.created)
+            return;
+
+        Component c = e.parent;
+        while (c && !c.is_device)
+            c = c.parent;
+        if (!c)
+            return;
+        Device dev = cast(Device)cast(void*)c;    // extern(C++) has no dynamic cast; is_device checked above
+        if (dev.remote)
+            return;
+
+        char[256] buf = void;
+        ptrdiff_t len = e.full_path(buf);
+        if (len <= 0 || len > buf.length)
+            return;
+        const(char)[] path = buf[0 .. len];
+
+        foreach (p; peers[])
+        {
+            foreach (ref pat; p._model_subs[])
+            {
+                Address a = Address.parse(pat[]);
+                if (!a.valid || !wildcard_match(a.ns, "device") || !match_path(a.subject, path))
+                    continue;
+                track_live(p, e);
+                send_element(p, encoder_for(p._encoder), e, path);
+                break;
+            }
+        }
+    }
+
     Device find_or_create_remote_device(const(char)[] id)
     {
         if (Device* d = id in g_app.devices)
@@ -1571,12 +1734,12 @@ nothrow @nogc:
 
 private:
 
-// /sync/model-sub peer=<peer> pattern=<address> - one-shot model read (sub {once})
-void sync_model_sub(Session session, SyncPeer peer, const(char)[] pattern)
+// /sync/model-sub peer=<peer> pattern=<address> [once=no] - model read; once=no arms a live feed
+void sync_model_sub(Session session, SyncPeer peer, const(char)[] pattern, Nullable!bool once)
 {
     SyncModule mod = get_module!SyncModule;
     const(char)[][1] patterns = [pattern];
-    encoder_for(peer._encoder).encode_model_sub(peer, mod.alloc_seq(), patterns[], true);
+    encoder_for(peer._encoder).encode_model_sub(peer, mod.alloc_seq(), patterns[], !once || once.value);
 }
 
 // /sync/log-sub peer=<name> [severity=<sev>] [tag=<prefix>]

@@ -419,6 +419,9 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
         if (name)
             device.name = name.makeString(g_app.allocator);
         is_new_device = true;
+        // identity claims at birth: element lifecycle handlers fired during materialization
+        // need the device's CID to allocate EIDs
+        g_app.devices.insert(device.id[], device);
     }
 
     Component find_or_create_component(Component parent, ref ComponentTemplate ct)
@@ -610,9 +613,6 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
             continue;
         find_or_create_component(device, ct);
     }
-
-    if (is_new_device)
-        g_app.devices.insert(device.id[], device);
 
     apply_default_retention(device);
 
