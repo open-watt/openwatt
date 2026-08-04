@@ -7,9 +7,11 @@ FEATURES ?= switch
 HEADLESS ?= 1
 TINY ?= 1
 IDF_LOG_LEVEL ?= warn
+PRESERVE_NVS ?= 1
+BOARD_OTA_FILENAME := firmware.bin
 
 ifneq ($(VERSIONS),)
-    VERSIONS := $(VERSIONS),SmartEVSE,SmartEVSE_v30
+    VERSIONS := $(VERSIONS),SmartEVSE,SmartEVSE_v30,NoECSecret
 else
-    VERSIONS := SmartEVSE,SmartEVSE_v30
+    VERSIONS := SmartEVSE,SmartEVSE_v30,NoECSecret
 endif

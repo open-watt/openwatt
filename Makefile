@@ -498,14 +498,17 @@ endif
 			-DSDKCONFIG="$(ESP_SDKCONFIG)" -DSDKCONFIG_DEFAULTS="$(ESP_SDKCONFIG_DEFAULTS)" \
 			-DOPENWATT_OBJ=$(abspath $(ESP_LINK_OBJ)) \
 			-DIDF_LOG_ENABLED=$(ESP_IDF_LOG_ENABLED) \
+			-DPRESERVE_NVS=$(if $(filter 1,$(PRESERVE_NVS)),1,0) \
 			-DUSE_LWIP=$(if $(filter 1,$(USE_INTERNAL_IP_STACK)),0,1) build'
 	cp "$(ESP_BUILD_DIR)/openwatt.bin" "$(TARGETDIR)/openwatt.bin"
+	$(if $(BOARD_OTA_FILENAME),cp "$(ESP_BUILD_DIR)/openwatt.bin" "$(TARGETDIR)/$(BOARD_OTA_FILENAME)")
 	cp "$(ESP_BUILD_DIR)/bootloader/bootloader.bin" "$(TARGETDIR)/bootloader.bin"
 	cp "$(ESP_BUILD_DIR)/partition_table/partition-table.bin" "$(TARGETDIR)/partition-table.bin"
 	cp -f "$(ESP_BUILD_DIR)/ota_data_initial.bin" "$(TARGETDIR)/ota_data_initial.bin" 2>/dev/null || true
 	@echo ""
 	@echo "=== Firmware ready: $(TARGETDIR)/ ==="
 	@echo "  openwatt.bin       $$(du -h $(TARGETDIR)/openwatt.bin | cut -f1)"
+	$(if $(BOARD_OTA_FILENAME),@echo "  $(BOARD_OTA_FILENAME)       app-only OTA image")
 	@echo "  bootloader.bin     $$(du -h $(TARGETDIR)/bootloader.bin | cut -f1)"
 	@echo "  partition-table.bin"
 	@echo ""

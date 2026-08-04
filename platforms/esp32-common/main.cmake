@@ -39,6 +39,10 @@ idf_component_register(SRCS ${ESP32_SYS_SOURCES}
                        PRIV_REQUIRES ${MAIN_PRIV_REQUIRES}
                        WHOLE_ARCHIVE)
 
+if(PRESERVE_NVS)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE OW_PRESERVE_NVS)
+endif()
+
 # Makefile typically passes OPENWATT_OBJ via -D; fall back to the debug path
 # under bin/<buildname>_debug/ for direct idf.py invocations.
 if(NOT DEFINED OPENWATT_OBJ)
