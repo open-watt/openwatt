@@ -39,6 +39,8 @@
  * - Module-owned hardware lifetime and safe offline electrical outputs.
  * - Exclusive ActiveObject ownership, automatic charging on connection and
  *   explicit start/stop control.
+ * - Event-driven Device binding for charge current, start/stop, installation
+ *   limits, EVSE state, protection state and board diagnostics.
  * - RCM input monitoring. A cache-safe rising-edge callback first clears SSR1
  *   and SSR2, then latches a DRAM flag. The ActiveObject enters an error state
  *   and can acknowledge it only after the input clears.
@@ -113,8 +115,6 @@
  * - SmartEVSE v3.1 and v4 as separate explicit BOARD targets.
  *
  * TODO - OpenWatt integration:
- * - Bind EVSE state, requested/available current, faults, temperature,
- *   contactor policy and session start/stop into the Device data model.
  * - Define selective build components so the board can include IP, HTTP, TLS,
  *   API, sync and OTA without pulling unrelated modules.
  * - Build and size the actual UART-test and network/OTA feature sets
@@ -138,6 +138,7 @@ module driver.boards.smartevse;
 
 version (SmartEVSE):
 
+import urt.array : Array;
 import urt.meta : AliasSeq;
 import urt.atomic : MemoryOrder, atomicLoad, atomicStore;
 import urt.attribute : critical;
@@ -152,6 +153,7 @@ import manager.collection : CID, Collection, CollectionType, collection_type_inf
 import manager.console.session : Session;
 import manager.plugin : DeclareModule, Module;
 
+import driver.boards.smartevse.binding : SmartEVSEBinding;
 import driver.boards.smartevse.hardware;
 
 public import driver.boards.smartevse.evse;
@@ -160,6 +162,35 @@ nothrow @nogc:
 
 
 alias DeciAmps = Quantity!(ushort, ScaledUnit(Ampere, -1));
+
+struct SmartEVSEChange
+{
+    enum uint current             = 1 << 0;
+    enum uint max_current         = 1 << 1;
+    enum uint pp_max_current      = 1 << 2;
+    enum uint stopped             = 1 << 3;
+    enum uint state               = 1 << 4;
+    enum uint pilot               = 1 << 5;
+    enum uint pwm                 = 1 << 6;
+    enum uint effective_current   = 1 << 7;
+    enum uint pilot_min_mv        = 1 << 8;
+    enum uint pilot_max_mv        = 1 << 9;
+    enum uint pp_mv               = 1 << 10;
+    enum uint temperature_mv      = 1 << 11;
+    enum uint temperature         = 1 << 12;
+    enum uint max_temperature     = 1 << 13;
+    enum uint temperature_fault   = 1 << 14;
+    enum uint rcm_input           = 1 << 15;
+    enum uint rcm_fault           = 1 << 16;
+    enum uint activation_wait     = 1 << 17;
+    enum uint activation_pulse    = 1 << 18;
+    enum uint contactor2_mode     = 1 << 19;
+    enum uint contactor1          = 1 << 20;
+    enum uint contactor2          = 1 << 21;
+    enum uint all                 = (1 << 22) - 1;
+}
+
+alias SmartEVSEChangeHandler = void delegate(SmartEVSE evse, uint changes) nothrow @nogc;
 
 enum SmartEVSEState : ubyte
 {
@@ -234,6 +265,18 @@ nothrow @nogc:
         super(collection_type_info!SmartEVSE, id, flags);
     }
 
+    void subscribe_changes(SmartEVSEChangeHandler handler)
+    {
+        foreach (existing; _change_handlers)
+            assert(existing !is handler, "SmartEVSE change handler already subscribed");
+        _change_handlers ~= handler;
+    }
+
+    void unsubscribe_changes(SmartEVSEChangeHandler handler) pure
+    {
+        _change_handlers.removeFirstSwapLast(handler);
+    }
+
     DeciAmps current() const pure
         => _current;
 
@@ -245,7 +288,7 @@ nothrow @nogc:
         mark_set!(typeof(this), "current")();
 
         apply_current();
-        sync_status();
+        sync_status(SmartEVSEChange.current);
     }
 
     DeciAmps max_current() const pure
@@ -259,7 +302,7 @@ nothrow @nogc:
         mark_set!(typeof(this), "max-current")();
 
         apply_current();
-        sync_status();
+        sync_status(SmartEVSEChange.max_current);
     }
 
     DeciAmps pp_max_current() const pure
@@ -318,6 +361,7 @@ nothrow @nogc:
             return;
         _max_temperature = value;
         mark_set!(typeof(this), "max-temperature")();
+        notify_changes(SmartEVSEChange.max_temperature);
         restart();
     }
 
@@ -348,7 +392,7 @@ nothrow @nogc:
         _contactor2_mode = value;
         mark_set!(typeof(this), "contactor2-mode")();
         setContactor2Mode(cast(ubyte)value);
-        sync_status();
+        sync_status(SmartEVSEChange.contactor2_mode);
         return null;
     }
 
@@ -373,7 +417,7 @@ nothrow @nogc:
             mark_set!(typeof(this), "stopped")();
         }
         setAccess(1);
-        sync_status();
+        sync_status(SmartEVSEChange.stopped);
         return null;
     }
 
@@ -388,22 +432,25 @@ nothrow @nogc:
             mark_set!(typeof(this), "stopped")();
         }
         setAccess(0);
-        sync_status();
+        sync_status(SmartEVSEChange.stopped);
         return null;
     }
 
     void heartbeat(MonoTime)
     {
+        uint changes;
         Timer1S_singlerun();
-        sync_pp_max_current();
+        if (sync_pp_max_current())
+            changes |= SmartEVSEChange.pp_max_current;
         short next_temperature = TemperatureSensor();
         if (_temperature != next_temperature)
         {
             _temperature = next_temperature;
             mark_set!(typeof(this), "temperature")();
+            changes |= SmartEVSEChange.temperature;
         }
-        update_temperature_protection();
-        sync_status();
+        changes |= update_temperature_protection();
+        sync_status(changes);
     }
 
 protected:
@@ -445,22 +492,25 @@ protected:
             mark_set!(typeof(this), "rcm-fault")();
             setRCMFault(true);
             setState(STATE_ERROR);
-            sync_status();
+            sync_status(SmartEVSEChange.rcm_fault);
             log.error("RCM fault active during SmartEVSE startup");
             return CompletionStatus.error;
         }
 
         setRCMFault(false);
-        sync_pp_max_current();
+        uint changes;
+        if (sync_pp_max_current())
+            changes |= SmartEVSEChange.pp_max_current;
         if (_stopped)
         {
             _stopped = false;
             mark_set!(typeof(this), "stopped")();
+            changes |= SmartEVSEChange.stopped;
         }
         setState(STATE_A);
         setAccess(1);
         arm_control_tick(getTime() + msecs(10));
-        sync_status();
+        sync_status(changes);
         return CompletionStatus.complete;
     }
 
@@ -477,21 +527,23 @@ protected:
 
         setAccess(0);
         RCmonCtrl(DISABLE);
+        uint changes;
         if (_stopped)
         {
             _stopped = false;
             mark_set!(typeof(this), "stopped")();
+            changes |= SmartEVSEChange.stopped;
         }
         if (_rcm_fault)
         {
             setState(STATE_ERROR);
-            sync_status();
+            sync_status(changes);
         }
         _active_hardware_owner = null;
         hardware_offline();
         _hardware_owner = _hardware_module;
         if (!_rcm_fault)
-            sync_status();
+            sync_status(changes);
         return CompletionStatus.complete;
     }
 
@@ -502,6 +554,7 @@ private:
     bool _contactor2;
     bool _temperature_fault;
     bool _rcm_fault;
+    bool _rcm_input;
     bool _tick_armed;
     DeciAmps _current = DeciAmps(MIN_CURRENT * 10);
     DeciAmps _max_current = DeciAmps(MAX_CURRENT);
@@ -519,6 +572,7 @@ private:
     SmartEVSEState _state = SmartEVSEState.a;
     SmartEVSEPilot _pilot = SmartEVSEPilot.invalid;
     SmartEVSEContactor2Mode _contactor2_mode = SmartEVSEContactor2Mode.always_follow;
+    Array!SmartEVSEChangeHandler _change_handlers;
 
     void arm_control_tick(MonoTime when)
     {
@@ -540,19 +594,20 @@ private:
             SetCurrent(ChargeCurrent);
     }
 
-    void sync_pp_max_current()
+    bool sync_pp_max_current()
     {
         MaxCapacity = ProximityPin();
         DeciAmps next = DeciAmps(cast(ushort)(MaxCapacity * 10));
         if (_pp_max_current == next)
-            return;
+            return false;
 
         _pp_max_current = next;
         mark_set!(typeof(this), "pp-max-current")();
         apply_current();
+        return true;
     }
 
-    void update_temperature_protection()
+    uint update_temperature_protection()
     {
         if (!_temperature_fault && _temperature > _max_temperature)
         {
@@ -561,6 +616,7 @@ private:
             setTemperatureFault(true);
             setStatePowerUnavailable();
             log.error("SmartEVSE over-temperature fault");
+            return SmartEVSEChange.temperature_fault;
         }
         else if (_temperature_fault
               && _temperature < _max_temperature - TEMPERATURE_HYSTERESIS)
@@ -569,7 +625,9 @@ private:
             mark_set!(typeof(this), "temperature-fault")();
             setTemperatureFault(false);
             log.info("SmartEVSE temperature recovered");
+            return SmartEVSEChange.temperature_fault;
         }
+        return 0;
     }
 
     const(char)[] reset_fault()
@@ -584,11 +642,14 @@ private:
         setRCMFault(false);
         _rcm_fault = false;
         mark_set!(typeof(this), "rcm-fault")();
+        uint changes = SmartEVSEChange.rcm_input | SmartEVSEChange.rcm_fault;
         if (_state != SmartEVSEState.a)
         {
             _state = SmartEVSEState.a;
             mark_set!(typeof(this), "state")();
+            changes |= SmartEVSEChange.state;
         }
+        notify_changes(changes);
         restart();
         return null;
     }
@@ -624,18 +685,19 @@ private:
         _rcm_fault = true;
         mark_set!(typeof(this), "rcm-fault")();
         setState(STATE_ERROR);
-        sync_status();
+        sync_status(SmartEVSEChange.rcm_fault);
         log.error("RCM fault latched");
         restart();
     }
 
-    void sync_status()
+    void sync_status(uint changes = 0)
     {
         SmartEVSEState next_state = cast(SmartEVSEState)CurrentState();
         if (_state != next_state)
         {
             _state = next_state;
             mark_set!(typeof(this), "state")();
+            changes |= SmartEVSEChange.state;
         }
 
         SmartEVSEPilot next_pilot = cast(SmartEVSEPilot)Pilot();
@@ -643,58 +705,91 @@ private:
         {
             _pilot = next_pilot;
             mark_set!(typeof(this), "pilot")();
+            changes |= SmartEVSEChange.pilot;
         }
 
         if (_current_pwm != CurrentPWM)
         {
             _current_pwm = CurrentPWM;
             mark_set!(typeof(this), "pwm")();
+            changes |= SmartEVSEChange.pwm;
         }
         DeciAmps next_effective_current = DeciAmps(GetCurrent());
         if (_effective_current != next_effective_current)
         {
             _effective_current = next_effective_current;
             mark_set!(typeof(this), "effective-current")();
+            changes |= SmartEVSEChange.effective_current;
         }
         if (_pilot_min_mv != PilotMinMV)
         {
             _pilot_min_mv = PilotMinMV;
             mark_set!(typeof(this), "pilot-min-mv")();
+            changes |= SmartEVSEChange.pilot_min_mv;
         }
         if (_pilot_max_mv != PilotMaxMV)
         {
             _pilot_max_mv = PilotMaxMV;
             mark_set!(typeof(this), "pilot-max-mv")();
+            changes |= SmartEVSEChange.pilot_max_mv;
         }
         if (_pp_mv != PPVoltageMV)
         {
             _pp_mv = PPVoltageMV;
             mark_set!(typeof(this), "pp-mv")();
+            changes |= SmartEVSEChange.pp_mv;
         }
         if (_temperature_mv != TemperatureVoltageMV)
         {
             _temperature_mv = TemperatureVoltageMV;
             mark_set!(typeof(this), "temperature-mv")();
+            changes |= SmartEVSEChange.temperature_mv;
+        }
+        bool next_rcm_input = gpio_input_read(RCMFAULT);
+        if (_rcm_input != next_rcm_input)
+        {
+            _rcm_input = next_rcm_input;
+            mark_set!(typeof(this), "rcm-input")();
+            changes |= SmartEVSEChange.rcm_input;
         }
         if (_activation_wait != ActivationMode)
         {
             _activation_wait = ActivationMode;
             mark_set!(typeof(this), "activation-wait")();
+            changes |= SmartEVSEChange.activation_wait;
         }
         if (_activation_pulse != ActivationTimer)
         {
             _activation_pulse = ActivationTimer;
             mark_set!(typeof(this), "activation-pulse")();
+            changes |= SmartEVSEChange.activation_pulse;
         }
         if (_contactor1 != Contactor1)
         {
             _contactor1 = Contactor1;
             mark_set!(typeof(this), "contactor1")();
+            changes |= SmartEVSEChange.contactor1;
         }
         if (_contactor2 != Contactor2)
         {
             _contactor2 = Contactor2;
             mark_set!(typeof(this), "contactor2")();
+            changes |= SmartEVSEChange.contactor2;
+        }
+
+        notify_changes(changes);
+    }
+
+    void notify_changes(uint changes)
+    {
+        if (!changes)
+            return;
+        for (size_t i = 0; i < _change_handlers.length; )
+        {
+            SmartEVSEChangeHandler handler = _change_handlers[i];
+            handler(this, changes);
+            if (i < _change_handlers.length && _change_handlers[i] is handler)
+                ++i;
         }
     }
 }
@@ -712,6 +807,7 @@ nothrow @nogc:
         g_app.register_enum!SmartEVSEContactor2Mode();
         g_app.register_enum!SmartEVSEADCCalibration();
         g_app.console.register_collection!SmartEVSE();
+        g_app.console.register_collection!SmartEVSEBinding();
         g_app.console.register_command!cmd_start(
             "/driver/boards/smartevse", this, "start");
         g_app.console.register_command!cmd_stop(
@@ -747,6 +843,7 @@ nothrow @nogc:
     override void update()
     {
         Collection!SmartEVSE().update_all();
+        Collection!SmartEVSEBinding().update_all();
     }
 
     void cmd_start(Session session, SmartEVSE evse)
