@@ -683,12 +683,22 @@ nothrow @nogc:
             }
 
             case "unsub":
+            {
+                Variant* pats = json.getMember("patterns");
+                if (pats && pats.isArray)
+                {
+                    Array!(const(char)[]) patterns;
+                    for (size_t i = 0; i < pats.length(); ++i)
+                        patterns ~= (*pats)[i].asString();
+                    sync.inbound_model_unsub(peer, patterns[]);
+                    break;
+                }
                 sync.inbound_unsub(peer, json.getMember("pattern").asString());
                 break;
+            }
 
             case "enum_req":
-                sync.inbound_enum_req(peer, json.getMember("type").asString(),
-                    cast(uint)json.getMember("seq").asLong());
+                sync.inbound_enum_req(peer, json.getMember("type").asString(), json.getMember("seq").asUint());
                 break;
 
             case "history_req":

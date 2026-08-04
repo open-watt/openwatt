@@ -33,6 +33,30 @@ void register_element_lifecycle_handler(ElementLifecycleHandler handler)
     _on_element_lifecycle ~= handler;
 }
 
+// Live model feeds: while any listener is registered, every element write enlists in
+// the per-tick dirty sweep; otherwise only cursor-bearing elements do.
+void add_feed_listener()
+{
+    ++g_feed_listeners;
+}
+
+void remove_feed_listener()
+{
+    debug assert(g_feed_listeners, "unbalanced remove_feed_listener");
+    --g_feed_listeners;
+}
+
+void sweep_dirty(scope void delegate(ref Element) nothrow @nogc visit)
+{
+    // writes during a visit re-enlist into a fresh list for the next sweep
+    Array!(Element*) list = g_dirty_elements.move;
+    foreach (e; list)
+    {
+        e._flags &= ~Element.Flags.dirty_listed;
+        visit(*e);
+    }
+}
+
 struct SampleUpdate
 {
 nothrow @nogc:
@@ -707,7 +731,8 @@ public:
 private:
     enum Flags : ubyte
     {
-        gap_open = 1 << 0,
+        gap_open     = 1 << 0,
+        dirty_listed = 1 << 1,
     }
 
     Scalar _latest;
@@ -995,11 +1020,16 @@ private:
 
     void mark_dirty()
     {
-        if (!_history || !_history.cursor_mask)
+        bool cursors = _history && _history.cursor_mask;
+        if (!cursors && !g_feed_listeners)
             return;
-        if (!_dirty)
+        if (!(_flags & Flags.dirty_listed))
+        {
             g_dirty_elements ~= &this;
-        _dirty = _history.cursor_mask;
+            _flags |= Flags.dirty_listed;
+        }
+        if (cursors)
+            _dirty = _history.cursor_mask;
     }
 }
 
@@ -1014,17 +1044,12 @@ void signal_element_lifecycle(Element* e, ElementLifecycleEvent event)
         h(e, event);
 }
 
-void sweep_dirty(scope void delegate(ref Element) nothrow @nogc visit)
-{
-    foreach (e; g_dirty_elements)
-        visit(*e);
-    g_dirty_elements.clear();
-}
 
 
 private:
 
 __gshared Array!ElementLifecycleHandler _on_element_lifecycle;
+__gshared uint g_feed_listeners;
 __gshared uint g_commit_depth;
 __gshared Array!SampleUpdate g_pending_updates;
 
