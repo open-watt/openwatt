@@ -14,8 +14,9 @@
 URT_DIR    := third_party/urt
 URT_SRCDIR := $(URT_DIR)/src
 
-# Discover a board's standard board.mk before platform resolution. The board
-# supplies a platform default and build defaults; an explicit PLATFORM wins.
+# Discover a board's standard board.mk before platform resolution. BOARD
+# describes fitted hardware; PLATFORM describes the SoC/toolchain. An explicit
+# PLATFORM wins over the board's default.
 ifdef BOARD
     BOARD_MAKEFILES := $(wildcard platforms/*/boards/$(BOARD)/board.mk)
     ifeq ($(BOARD_MAKEFILES),)
@@ -29,7 +30,17 @@ ifdef BOARD
     ifeq ($(BOARD_PLATFORM),)
         $(error BOARD='$(BOARD)' must declare BOARD_PLATFORM in $(BOARD_MAKEFILES))
     endif
+    ifeq ($(BOARD_FLASH_SIZE),)
+        $(error BOARD='$(BOARD)' must declare BOARD_FLASH_SIZE in $(BOARD_MAKEFILES))
+    endif
+    ifeq ($(BOARD_PSRAM_SIZE),)
+        $(error BOARD='$(BOARD)' must declare BOARD_PSRAM_SIZE in $(BOARD_MAKEFILES))
+    endif
     PLATFORM ?= $(BOARD_PLATFORM)
+endif
+
+ifeq ($(PLATFORM),esp32-s2)
+    TINY ?= 0
 endif
 
 include $(URT_DIR)/platforms.mk
@@ -363,30 +374,90 @@ ESP_IDF_PATH ?= $(lastword $(sort $(wildcard $(HOME)/.espressif/*/esp-idf)))
 ifeq ($(PLATFORM),esp32)
     ESP_PROJECT_DIR := platforms/esp32
     ESP_IDF_TARGET  := esp32
+    ESP_REFERENCE_BOARD := ESP32-DevKitC V4 (ESP32-WROOM-32E)
+    ESP_FLASH_SIZE := 4MB
+    ESP_PSRAM_SIZE := 0MB
 else ifeq ($(PLATFORM),esp32-s2)
     ESP_PROJECT_DIR := platforms/esp32s2
     ESP_IDF_TARGET  := esp32s2
+    ESP_REFERENCE_BOARD := ESP32-S2-DevKitC-1-N8R2
+    ESP_FLASH_SIZE := 8MB
+    ESP_PSRAM_SIZE := 2MB
 else ifeq ($(PLATFORM),esp32-s3)
     ESP_PROJECT_DIR := platforms/esp32s3
     ESP_IDF_TARGET  := esp32s3
+    ESP_REFERENCE_BOARD := ESP32-S3-DevKitC-1-N16R8
+    ESP_FLASH_SIZE := 16MB
+    ESP_PSRAM_SIZE := 8MB
 else ifeq ($(PLATFORM),esp32-c2)
     ESP_PROJECT_DIR := platforms/esp32c2
     ESP_IDF_TARGET  := esp32c2
+    ESP_REFERENCE_BOARD := ESP8684-DevKitC-02 (4 MB variant)
+    ESP_FLASH_SIZE := 4MB
+    ESP_PSRAM_SIZE := 0MB
 else ifeq ($(PLATFORM),esp32-c3)
     ESP_PROJECT_DIR := platforms/esp32c3
     ESP_IDF_TARGET  := esp32c3
+    ESP_REFERENCE_BOARD := ESP32-C3-DevKitM-1
+    ESP_FLASH_SIZE := 4MB
+    ESP_PSRAM_SIZE := 0MB
 else ifeq ($(PLATFORM),esp32-c5)
     ESP_PROJECT_DIR := platforms/esp32c5
     ESP_IDF_TARGET  := esp32c5
+    ESP_REFERENCE_BOARD := ESP32-C5-DevKitC-1 (N4 module)
+    ESP_FLASH_SIZE := 4MB
+    ESP_PSRAM_SIZE := 0MB
 else ifeq ($(PLATFORM),esp32-c6)
     ESP_PROJECT_DIR := platforms/esp32c6
     ESP_IDF_TARGET  := esp32c6
+    ESP_REFERENCE_BOARD := ESP32-C6-DevKitC-1
+    ESP_FLASH_SIZE := 8MB
+    ESP_PSRAM_SIZE := 0MB
 else ifeq ($(PLATFORM),esp32-h2)
     ESP_PROJECT_DIR := platforms/esp32h2
     ESP_IDF_TARGET  := esp32h2
+    ESP_REFERENCE_BOARD := ESP32-H2-DevKitM-1-N4
+    ESP_FLASH_SIZE := 4MB
+    ESP_PSRAM_SIZE := 0MB
 else ifeq ($(PLATFORM),esp32-p4)
     ESP_PROJECT_DIR := platforms/esp32p4
     ESP_IDF_TARGET  := esp32p4
+    ESP_REFERENCE_BOARD := ESP32-P4-Function-EV-Board
+    ESP_FLASH_SIZE := 16MB
+    ESP_PSRAM_SIZE := 32MB
+endif
+
+ifdef ESP_PROJECT_DIR
+    esp_config_has_line = $(shell tr -d '\r' < "$(1)" | grep -Fxc '$(2)')
+    ESP_BUILD_DIR := $(abspath $(OBJDIR)/esp-idf)
+    ESP_SDKCONFIG := $(ESP_BUILD_DIR)/sdkconfig
+    ESP_SDKCONFIG_DEFAULTS := $(abspath $(ESP_PROJECT_DIR)/sdkconfig.defaults)
+    ifeq ($(CONFIG),release)
+        ESP_RELEASE_SDKCONFIG := platforms/esp32-common/sdkconfig.release.defaults
+        ESP_SDKCONFIG_DEFAULTS := $(ESP_SDKCONFIG_DEFAULTS);$(abspath $(ESP_RELEASE_SDKCONFIG))
+    endif
+    ifdef BOARD_CONFIG_DIR
+        ESP_BOARD_SDKCONFIG := $(wildcard $(BOARD_CONFIG_DIR)/sdkconfig.defaults)
+        ifeq ($(ESP_BOARD_SDKCONFIG),)
+            $(error Espressif BOARD='$(BOARD)' is missing $(BOARD_CONFIG_DIR)/sdkconfig.defaults)
+        endif
+        ifeq ($(call esp_config_has_line,$(ESP_BOARD_SDKCONFIG),CONFIG_ESPTOOLPY_FLASHSIZE_$(BOARD_FLASH_SIZE)=y),0)
+            $(error BOARD_FLASH_SIZE=$(BOARD_FLASH_SIZE) disagrees with $(ESP_BOARD_SDKCONFIG))
+        endif
+        ifeq ($(BOARD_PSRAM_SIZE),0MB)
+            ifeq ($(call esp_config_has_line,$(ESP_BOARD_SDKCONFIG),CONFIG_SPIRAM=n),0)
+                $(error BOARD_PSRAM_SIZE=0MB requires CONFIG_SPIRAM=n in $(ESP_BOARD_SDKCONFIG))
+            endif
+        else
+            ifeq ($(call esp_config_has_line,$(ESP_BOARD_SDKCONFIG),CONFIG_SPIRAM=y),0)
+                $(error BOARD_PSRAM_SIZE=$(BOARD_PSRAM_SIZE) requires CONFIG_SPIRAM=y in $(ESP_BOARD_SDKCONFIG))
+            endif
+        endif
+        ESP_SDKCONFIG_DEFAULTS := $(ESP_SDKCONFIG_DEFAULTS);$(abspath $(ESP_BOARD_SDKCONFIG))
+        ESP_REFERENCE_BOARD := $(BOARD)
+        ESP_FLASH_SIZE := $(BOARD_FLASH_SIZE)
+        ESP_PSRAM_SIZE := $(BOARD_PSRAM_SIZE)
+    endif
 endif
 
 ifeq ($(XTENSA_TWO_STAGE),1)
@@ -404,36 +475,35 @@ ifndef ESP_PROJECT_DIR
 	@exit 1
 endif
 	@echo "Building ESP-IDF firmware ($(ESP_IDF_TARGET))..."
+	@echo "Hardware: $(ESP_REFERENCE_BOARD), flash $(ESP_FLASH_SIZE), PSRAM $(ESP_PSRAM_SIZE)"
 	bash -c '. "$(ESP_IDF_PATH)/export.sh" > /dev/null 2>&1 && \
 		cd "$(ESP_PROJECT_DIR)" && \
-		if [ ! -f build/CMakeCache.txt ]; then idf.py set-target $(ESP_IDF_TARGET); fi && \
-		idf.py -DOPENWATT_OBJ=$(abspath $(ESP_LINK_OBJ)) -DUSE_LWIP=$(if $(filter 1,$(USE_INTERNAL_IP_STACK)),0,1) build'
-	cp "$(ESP_PROJECT_DIR)/build/openwatt.bin" "$(TARGETDIR)/openwatt.bin"
-	cp "$(ESP_PROJECT_DIR)/build/bootloader/bootloader.bin" "$(TARGETDIR)/bootloader.bin"
-	cp "$(ESP_PROJECT_DIR)/build/partition_table/partition-table.bin" "$(TARGETDIR)/partition-table.bin"
-	cp -f "$(ESP_PROJECT_DIR)/build/ota_data_initial.bin" "$(TARGETDIR)/ota_data_initial.bin" 2>/dev/null || true
+		idf.py -B "$(ESP_BUILD_DIR)" -DIDF_TARGET=$(ESP_IDF_TARGET) \
+			-DSDKCONFIG="$(ESP_SDKCONFIG)" -DSDKCONFIG_DEFAULTS="$(ESP_SDKCONFIG_DEFAULTS)" \
+			-DOPENWATT_OBJ=$(abspath $(ESP_LINK_OBJ)) \
+			-DUSE_LWIP=$(if $(filter 1,$(USE_INTERNAL_IP_STACK)),0,1) build'
+	cp "$(ESP_BUILD_DIR)/openwatt.bin" "$(TARGETDIR)/openwatt.bin"
+	cp "$(ESP_BUILD_DIR)/bootloader/bootloader.bin" "$(TARGETDIR)/bootloader.bin"
+	cp "$(ESP_BUILD_DIR)/partition_table/partition-table.bin" "$(TARGETDIR)/partition-table.bin"
+	cp -f "$(ESP_BUILD_DIR)/ota_data_initial.bin" "$(TARGETDIR)/ota_data_initial.bin" 2>/dev/null || true
 	@echo ""
 	@echo "=== Firmware ready: $(TARGETDIR)/ ==="
 	@echo "  openwatt.bin       $$(du -h $(TARGETDIR)/openwatt.bin | cut -f1)"
 	@echo "  bootloader.bin     $$(du -h $(TARGETDIR)/bootloader.bin | cut -f1)"
 	@echo "  partition-table.bin"
 	@echo ""
-	@echo "Flash from Windows:"
-	@echo "  python -m esptool --chip $(ESP_IDF_TARGET) -p COM5 -b 460800 write_flash \\"
-	@echo "    0x0 $(TARGETDIR)/bootloader.bin \\"
-	@echo "    0x8000 $(TARGETDIR)/partition-table.bin \\"
-	@echo "    0x10000 $(TARGETDIR)/ota_data_initial.bin \\"
-	@echo "    0x20000 $(TARGETDIR)/openwatt.bin"
+	@echo "Flash with:"
+	@echo "  make esp-flash PLATFORM=$(PLATFORM)$(if $(BOARD), BOARD=$(BOARD)) ESPPORT=<port>"
 
-esp-flash:
+esp-flash: esp-idf-build
 	. "$(ESP_IDF_PATH)/export.sh" > /dev/null 2>&1 && \
 		cd "$(ESP_PROJECT_DIR)" && \
-		idf.py flash
+		idf.py -B "$(ESP_BUILD_DIR)" flash
 
 esp-monitor:
 	. "$(ESP_IDF_PATH)/export.sh" > /dev/null 2>&1 && \
 		cd "$(ESP_PROJECT_DIR)" && \
-		idf.py monitor
+		idf.py -B "$(ESP_BUILD_DIR)" monitor
 
 # =======================================================================
 # Clean

@@ -30,12 +30,15 @@ struct SmartEVSEHardware
     AdcInput temperature_input;
     AdcSampler pilot_sampler;
     GpioInterrupt residual_current_interrupt;
-    ushort[control_pilot_samples] pilot_ring;
+    ushort[control_pilot_samples] pilot_ring = void;
     uint pilot_sample_count;
 }
 
 Result hardware_open(ref SmartEVSEHardware hardware, ref const SmartEVSEHardwareConfig config)
 {
+    hardware.pilot_ring[] = 0;
+    hardware.pilot_sample_count = 0;
+
     GpioInterruptConfig interrupt_config;
     PwmConfig pwm_config;
     AdcConfig adc_config;

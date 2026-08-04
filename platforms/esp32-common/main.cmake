@@ -53,6 +53,11 @@ target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--no-check-sections")
 
 if(USE_LWIP)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE OW_USE_LWIP)
+else()
+    foreach(SYSCALL _write_r _read_r _close_r _fcntl_r)
+        target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=${SYSCALL}")
+    endforeach()
+    target_compile_definitions(mbedx509 PRIVATE MBEDTLS_TEST_SW_INET_PTON)
 endif()
 
 message(STATUS "Linking OpenWatt D object: ${OPENWATT_OBJ}")

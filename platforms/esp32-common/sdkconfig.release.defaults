@@ -1,0 +1,2 @@
+# Optimise ESP-IDF components for flash size in release images.
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
