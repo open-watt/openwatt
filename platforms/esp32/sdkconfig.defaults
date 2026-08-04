@@ -26,6 +26,11 @@ CONFIG_ESP_TASK_WDT_INIT=n
 # Single-core mode (saves IRAM, simplifies FreeRTOS)
 CONFIG_FREERTOS_UNICORE=y
 
+# SmartEVSE CP and RCM interrupt paths must remain live during flash operations.
+CONFIG_GPIO_CTRL_FUNC_IN_IRAM=y
+CONFIG_GPTIMER_CTRL_FUNC_IN_IRAM=y
+CONFIG_GPTIMER_ISR_CACHE_SAFE=y
+
 # Heap: use all available SRAM regions
 CONFIG_HEAP_POISONING_DISABLED=y
 

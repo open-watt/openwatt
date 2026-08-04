@@ -557,6 +557,10 @@ nothrow @nogc:
     // give a helpful status string, e.g. "Ready", "Disabled", "Error: <message>"
     const(char)[] status_message() const pure
     {
+        const(char)[] detail = status_detail();
+        if (detail)
+            return detail;
+
         switch (_state)
         {
             case State.disabled:
@@ -673,6 +677,10 @@ nothrow @nogc:
     }
 
 protected:
+
+    const(char)[] status_detail() const pure
+        => null;
+
     enum ubyte _disabled   = 1 << 0;
     enum ubyte _destroyed  = 1 << 1;
     enum ubyte _start      = 1 << 2;

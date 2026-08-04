@@ -95,6 +95,12 @@ void register_modules(Application app)
 
     static if (has_switch)
     {
+        version (SmartEVSE)
+        {
+            import driver.boards.smartevse;
+            register_module!(driver.boards.smartevse)(app);
+        }
+
         version (linux)
         {
             import driver.linux.fdwatch;
@@ -156,12 +162,6 @@ void register_modules(Application app)
 
     static if (has_all)
     {
-        version (Espressif)
-        {
-            import driver.boards.smartevse;
-            register_module!(driver.boards.smartevse)(app);
-        }
-
         import driver.rtc.pcf85063;
         register_module!(driver.rtc.pcf85063)(app);
 
