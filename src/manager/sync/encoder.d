@@ -61,6 +61,9 @@ struct WireFormat
     const(char)[] series;
     const(char)[] unit;
     const(char)[] enum_name;
+    Variant min;
+    Variant max;
+    Variant step;
     uint rate;
     ubyte count = 1;
 }
@@ -213,6 +216,8 @@ nothrow @nogc:
     abstract void encode_val(SyncPeer peer, SyncHandle h, Element* e);
 
     abstract void encode_res(SyncPeer peer, uint seq);
+    // ack carrying the authority's applied value (set acks)
+    abstract void encode_res(SyncPeer peer, uint seq, ref const Variant value);
     abstract void encode_err(SyncPeer peer, uint seq, const(char)[] code, const(char)[] text);
 
     // Inbound entry point
