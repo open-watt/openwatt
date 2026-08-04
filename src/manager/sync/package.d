@@ -234,7 +234,27 @@ nothrow @nogc:
                 {
                     Element* e = g_app.devices.resolve(node);
                     SyncHandle h = p.handle_of(node);
-                    if (e && h != SyncPeer.invalid_handle)
+                    if (!e || h == SyncPeer.invalid_handle)
+                        continue;
+                    if (e.data_format.kind == SeriesKind.point)
+                    {
+                        // events deliver every occurrence (mode `all`); the cursor clamps
+                        // past eviction and reports lost
+                        ulong* next = node.raw in p._live_nodes;
+                        if (!next || !e.has_history)
+                            continue;
+                        auto c = e.open_series_cursor(*next);
+                        for (;;)
+                        {
+                            RecordBlock blk = c.next(256);
+                            if (!blk.count)
+                                break;
+                            enc.encode_val_block(p, h, blk);
+                        }
+                        *next = c.position;
+                        e.close_series_cursor(c);
+                    }
+                    else
                         enc.encode_val(p, h, e);
                 }
                 p._pending_vals.clear();
@@ -957,7 +977,7 @@ nothrow @nogc:
                 continue;   // only the device namespace is served so far
             foreach (dev; g_app.devices.values)
             {
-                if (dev.remote || !dev.cid)
+                if (!dev.cid || authored_by(from, dev))
                     continue;
                 if (match_path(a.subject, dev.id[]))
                     introduce_device(from, enc, dev);
@@ -1127,6 +1147,12 @@ nothrow @nogc:
         Element* e = dev.find_or_create_element(rest, *pf);
         if (!e)
             return;
+        if (e.data_format.kind == SeriesKind.point && !e.has_history)
+        {
+            // a mirror event log retains the same window the authority's default gives
+            e.retention(256, 16_384);
+            e.retention(3600.seconds);
+        }
         if (access.length)
         {
             if (const(Access)* acc = enum_from_key!Access(access))
@@ -1764,20 +1790,32 @@ nothrow @nogc:
         }
     }
 
+    // true when this peer announced the device; its mirror is never served back to it,
+    // but is served to other peers (hub fan-out)
+    bool authored_by(SyncPeer p, Device dev)
+    {
+        SyncHandle h = p.handle_of(EID(dev.cid));
+        return h != SyncPeer.invalid_handle && (h & 1);
+    }
+
     // arms a node for the live feed; several patterns may match one node, within one sub or
-    // across successive ones, so arming is idempotent
+    // across successive ones, and re-arming must not rewind the cursor or records arriving
+    // between the two arms would never be sent
     void track_live(SyncPeer to, Element* e)
     {
         EID node = e.ensure_eid();
         if (!node)
             return;
         if ((node.raw in to._live_nodes) is null)
-            to._live_nodes.insert(node.raw, true);
+            to._live_nodes.insert(node.raw, e.record_count);
     }
 
+    // Recomputes the armed set from the surviving patterns, so a node stays armed while any
+    // pattern still matches it and no arm count has to be maintained. Survivors keep their
+    // cursor: re-seeding record_count would skip everything recorded but not yet sent.
     void rebuild_live_nodes(SyncPeer from)
     {
-        from._live_nodes.clear();
+        Map!(ulong, bool) matched;
         foreach (ref pat; from._model_subs[])
         {
             Address a = Address.parse(pat[]);
@@ -1785,15 +1823,27 @@ nothrow @nogc:
                 continue;
             foreach (dev; g_app.devices.values)
             {
-                if (dev.remote || !dev.cid)
+                if (!dev.cid || authored_by(from, dev))
                     continue;
                 walk_elements(dev, a.subject, (Element* e, const(char)[] path) {
                     EID node = e.ensure_eid();
-                    if (node && (node.raw in from._live_nodes) is null)
-                        from._live_nodes.insert(node.raw, true);
+                    if (!node)
+                        return;
+                    matched.insert(node.raw, true);
+                    if ((node.raw in from._live_nodes) is null)
+                        from._live_nodes.insert(node.raw, e.record_count);
                 });
             }
         }
+
+        Array!ulong doomed;
+        foreach (k; from._live_nodes.keys)
+        {
+            if (!matched.exists(k))
+                doomed ~= k;
+        }
+        foreach (k; doomed[])
+            from._live_nodes.remove(k);
     }
 
     // Creation notification: a node appearing later that matches an armed pattern
@@ -1809,7 +1859,7 @@ nothrow @nogc:
         if (!c)
             return;
         Device dev = cast(Device)cast(void*)c;    // extern(C++) has no dynamic cast; is_device checked above
-        if (dev.remote)
+        if (!dev.cid)
             return;
 
         char[256] buf = void;
@@ -1820,6 +1870,8 @@ nothrow @nogc:
 
         foreach (p; peers[])
         {
+            if (authored_by(p, dev))
+                continue;
             foreach (ref pat; p._model_subs[])
             {
                 Address a = Address.parse(pat[]);

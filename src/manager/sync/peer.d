@@ -337,7 +337,7 @@ package:
     Map!(uint, FormatId) _ft_recv;       // peer's session ft -> local format
 
     Array!String     _model_subs;        // armed live model patterns
-    Map!(ulong, bool) _live_nodes;       // EID.raw of nodes matched by an armed pattern
+    Map!(ulong, ulong) _live_nodes;      // EID.raw of armed nodes -> next unsent record index (point series)
     Array!EID        _pending_vals;      // dirty matched nodes awaiting this tick's flush
 
     bool     _time_authority;
