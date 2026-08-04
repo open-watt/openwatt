@@ -45,19 +45,7 @@ enum uint32_t PWM_5 = 50;
 enum uint32_t PWM_95 = 950;
 enum uint32_t PWM_100 = 1000;
 
-version (SmartEVSE_v30)
-{
-enum uint32_t PP_IN = 34;
-enum uint32_t CP_IN = 39;
-enum uint32_t TEMP = 36;
-enum uint32_t SSR1 = 32;
-enum uint32_t SSR2 = 27;
-enum uint32_t RCMFAULT = 13;
-enum uint32_t CP_OUT = 19;
-enum uint32_t CPOFF = 15;
-}
-else
-    static assert(false, "SmartEVSE hardware version is not selected");
+public import driver.boards.smartevse.pins;
 
 enum uint8_t DISABLE = 0;
 enum uint8_t ENABLE = 1;
@@ -72,36 +60,36 @@ enum int8_t TEMPERATURE_HYSTERESIS = 10;
 // USART Circular buffers
 struct CircularBuffer
 {
-    char[CIRCULARBUFFER] buffer;
+    char[CIRCULARBUFFER] buffer = void;
     uint16_t head;
     uint16_t tail;
 }
 
-uint8_t LockCable = 0;
+__gshared uint8_t LockCable = 0;
 
-uint32_t elapsedtime, elapsedmax=0;
+__gshared uint32_t elapsedtime, elapsedmax=0;
 
-uint16_t[NUM_ADC_SAMPLES] ADC_CP;                 // CP snapshot from the realtime ADC sampler
+__gshared uint16_t[NUM_ADC_SAMPLES] ADC_CP = void; // CP snapshot from the realtime ADC sampler
 __gshared uint16_t MainsCycleTime = 0;           // mains cycle time (20ms for 50Hz) Convert to Hz : 10000 / (MainsCycleTime/100))
 __gshared uint8_t PowerPanicFlag = 0;
-uint8_t PowerPanicEnabled = 0;
-uint8_t RCmonEnabled = 0;
-uint8_t ModemPowered = 0;
+__gshared uint8_t PowerPanicEnabled = 0;
+__gshared uint8_t RCmonEnabled = 0;
+__gshared uint8_t ModemPowered = 0;
 
-uint8_t[256] RxBuffer2;                         // USART2 Receive buffer
+__gshared uint8_t[256] RxBuffer2 = void;          // USART2 Receive buffer
 
-uint8_t RxRdy1 = 0;
-uint8_t RxIdx2 = 0;
-uint8_t ModbusRxLen = 0;
+__gshared uint8_t RxRdy1 = 0;
+__gshared uint8_t RxIdx2 = 0;
+__gshared uint8_t ModbusRxLen = 0;
 //uint32_t ModbusTimer = 0;
 __gshared uint8_t DmaBusy = 0;
 
 // Circular buffers for USART1 and TX of USART2
-CircularBuffer RxBuffer;                        // USART1 Receive buffer ESP.WCH
-CircularBuffer TxBuffer;                        // USART1 Transmit ringbuffer WCH.ESP (DMA)
-CircularBuffer ModbusTx;                        // USART2 Transmit buffer (modbus)
+__gshared CircularBuffer RxBuffer;                // USART1 Receive buffer ESP.WCH
+__gshared CircularBuffer TxBuffer;                // USART1 Transmit ringbuffer WCH.ESP (DMA)
+__gshared CircularBuffer ModbusTx;                // USART2 Transmit buffer (modbus)
 
-SmartEVSEHardware Hardware;
+__gshared SmartEVSEHardware Hardware = void;
 
 
 // -------------------------- Interrupt Handlers ---------------------------------
@@ -284,7 +272,8 @@ void TIM4Init()
 //
 void EXTInit()
 {
-    // hardware_open() configures the RCM GPIO interrupt.
+    // hardware_open() arms the RCM reflex: the fault edge drops both
+    // contactors from NMI context and latches for the control loop to poll.
 }
 
 
@@ -304,7 +293,7 @@ void ADCInit()
 int8_t TemperatureSensor() {
     uint32_t voltage;
     int8_t Temperature;
-    static int8_t Old_Temperature = -128;
+    __gshared static int8_t Old_Temperature = -128;
 
     voltage = temperature_mv(Hardware);
     TemperatureVoltageMV = voltage;
@@ -391,6 +380,15 @@ uint8_t ReadESPdata(char *buf) {
 
 
 int setup() {
+    ADC_CP[] = 0;
+    RxBuffer2[] = 0;
+    RxBuffer.buffer[] = 0;
+    TxBuffer.buffer[] = 0;
+    ModbusTx.buffer[] = 0;
+    RxBuffer.head = RxBuffer.tail = 0;
+    TxBuffer.head = TxBuffer.tail = 0;
+    ModbusTx.head = ModbusTx.tail = 0;
+
     GPIOInit();
     UsartInit();                                    // Usart1 = FUNCONF_UART_PRINTF_BAUD bps. Usart2 = Modbus 9600bps 8N1
     DMAInit();                                      // DMA transfer for Uart1 TX
@@ -404,7 +402,6 @@ int setup() {
     hardware_config.pilot_adc_channel = 3;
     hardware_config.proximity_adc_channel = 6;
     hardware_config.temperature_adc_channel = 0;
-    hardware_config.residual_current_gpio = RCMFAULT;
     if (!hardware_open(Hardware, hardware_config))
         return -1;
 
@@ -483,28 +480,28 @@ enum uint8_t PILOT_SHORT = 255;
 enum uint16_t MIN_CURRENT = 6;
 enum uint16_t MAX_CURRENT = 800;
 
-uint8_t State = STATE_A;
-uint16_t ChargeCurrent = MIN_CURRENT * 10;
-uint32_t CurrentPWM = 1024;
-bool Contactor1;
-bool Contactor2;
-bool AccessStatus;
-bool RCMFault;
-bool TemperatureFault;
-uint8_t Contactor2Mode = CONTACTOR2_ALWAYS_FOLLOW;
-uint8_t MaxCapacity = 13;
-uint8_t MinCurrent = MIN_CURRENT;
-uint8_t MaxCurrent = 80;
-uint8_t ChargeDelay;
-uint8_t C1Timer;
-uint8_t PilotDisconnectTime;
-uint8_t ActivationMode;
-uint8_t ActivationTimer;
-bool PilotDisconnected;
-uint32_t PilotMinMV;
-uint32_t PilotMaxMV;
-uint32_t PPVoltageMV;
-uint32_t TemperatureVoltageMV;
+__gshared uint8_t State = STATE_A;
+__gshared uint16_t ChargeCurrent = MIN_CURRENT * 10;
+__gshared uint32_t CurrentPWM = 1024;
+__gshared bool Contactor1;
+__gshared bool Contactor2;
+__gshared bool AccessStatus;
+__gshared bool RCMFault;
+__gshared bool TemperatureFault;
+__gshared uint8_t Contactor2Mode = CONTACTOR2_ALWAYS_FOLLOW;
+__gshared uint8_t MaxCapacity = 13;
+__gshared uint8_t MinCurrent = MIN_CURRENT;
+__gshared uint8_t MaxCurrent = 80;
+__gshared uint8_t ChargeDelay;
+__gshared uint8_t C1Timer;
+__gshared uint8_t PilotDisconnectTime;
+__gshared uint8_t ActivationMode;
+__gshared uint8_t ActivationTimer;
+__gshared bool PilotDisconnected;
+__gshared uint32_t PilotMinMV;
+__gshared uint32_t PilotMaxMV;
+__gshared uint32_t PPVoltageMV;
+__gshared uint32_t TemperatureVoltageMV;
 
 
 uint16_t GetCurrent() {
@@ -705,8 +702,8 @@ void Timer1S_singlerun() {
 
 
 void Timer10ms_singlerun() {
-    static uint8_t DiodeCheck = 0;
-    static uint16_t StateTimer = 0;                                         // Require 500ms of 6V before switching from State B to C
+    __gshared static uint8_t DiodeCheck = 0;
+    __gshared static uint16_t StateTimer = 0;                               // Require 500ms of 6V before switching from State B to C
     if (State == STATE_ERROR)
         return;
 
