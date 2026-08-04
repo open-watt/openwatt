@@ -1,5 +1,9 @@
 module protocol.tls.certificate;
 
+version (NoTLS) {}
+else
+{
+
 import urt.array;
 import urt.crypto.pem;
 import urt.crypto.pki;
@@ -1594,3 +1598,4 @@ Array!char base64url(const(ubyte)[] data)
     return result;
 }
 
+}
