@@ -128,6 +128,7 @@
     <DCompile Include="src\manager\log.d" />
     <DCompile Include="src\manager\owsig.d" />
     <DCompile Include="src\manager\package.d" />
+    <DCompile Include="src\manager\path.d" />
     <DCompile Include="src\manager\plugin.d" />
     <DCompile Include="src\manager\profile.d" />
     <DCompile Include="src\manager\reactor.d" />

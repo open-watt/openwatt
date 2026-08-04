@@ -62,6 +62,7 @@ import manager;
 import manager.base;
 import manager.collection;
 import manager.id : EID;
+import manager.path : pattern_matches;
 import manager.console;
 import manager.console.command : CommandState, CommandCompletionState;
 import manager.console.session;
@@ -86,56 +87,6 @@ enum uint max_history_points = 2000;
 enum Duration time_poll_interval    = seconds(17 * 60);
 enum Duration time_retry_interval   = seconds(30);
 enum Duration time_response_timeout = seconds(4);
-
-
-// Subscription pattern forms:
-//   "[=]<type>:<name>"    - type/name match; both halves accept wildcards.
-//                           Without '=' the type half matches any ancestor.
-//     "modbus:goodwe_ems"  - any modbus (incl. subtypes) named goodwe_ems
-//     "=modbus:goodwe_ems" - only objects whose concrete type is exactly "modbus"
-//     "interface:*"        - everything derived from "interface"
-//     "*:*"                - everything
-bool pattern_matches(const(char)[] pattern, BaseObject obj) nothrow @nogc
-{
-    import urt.string : wildcard_match;
-
-    if (pattern.length == 0)
-        return false;
-
-    bool strict = false;
-    if (pattern[0] == '=')
-    {
-        strict = true;
-        pattern = pattern[1 .. $];
-    }
-
-    ptrdiff_t colon = -1;
-    foreach (i, c; pattern)
-        if (c == ':')
-        {
-            colon = cast(ptrdiff_t)i;
-            break;
-        }
-    if (colon < 0)
-        return false;
-
-    const(char)[] type_pat = pattern[0 .. colon];
-    const(char)[] name_pat = pattern[colon + 1 .. $];
-
-    if (!wildcard_match(name_pat, obj.name[]))
-        return false;
-
-    if (strict)
-        return wildcard_match(type_pat, obj.type);
-
-    for (const(CollectionTypeInfo)* ti = obj._typeInfo; ti !is null;
-         ti = ti.get_super ? ti.get_super() : null)
-    {
-        if (wildcard_match(type_pat, ti.type[]))
-            return true;
-    }
-    return false;
-}
 
 
 enum PendingKind : ubyte

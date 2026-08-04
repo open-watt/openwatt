@@ -18,6 +18,7 @@ import manager.component;
 import manager.console;
 import manager.device;
 import manager.element;
+import manager.path : walk_elements;
 import manager.plugin;
 
 import protocol.http.message;
@@ -449,23 +450,12 @@ private:
 
         bool first = true;
 
-        MutableString!0 prefix;
-        prefix.reserve(256);
-
         foreach (i, path; paths[])
         {
-            const(char)[] device_id = path.split!'.';
-
-            if (device_id == "*")
-            {
-                foreach (dev; g_app.devices.values)
-                    collect_with_wildcard(dev, path, response_json, first, prefix);
-            }
-            else
-            {
-                if (Device* dev = device_id in g_app.devices)
-                    collect_elements_from_component(*dev, path, response_json, first, prefix);
-            }
+            foreach (dev; g_app.devices.values)
+                walk_elements(dev, path, (Element* e, const(char)[] p) {
+                    append_element(response_json, first, p, e);
+                }, true);
         }
 
         response_json ~= '}';
@@ -477,89 +467,7 @@ private:
         return 0;
     }
 
-    void collect_elements_from_component(Component comp, const(char)[] path, ref Array!char json, ref bool first, ref MutableString!0 prefix)
-    {
-        import urt.mem.temp;
-
-        if (path.empty)
-            return;
-        const(char)[] next = path.split!'.';
-
-        if (next == "*")
-        {
-            collect_with_wildcard(comp, path, json, first, prefix);
-        }
-        else
-        {
-            size_t prefix_len = prefix.length;
-            scope(exit) prefix.erase(prefix_len, prefix.length - prefix_len);
-
-            if (prefix_len == 0)
-                prefix = comp.id[];
-            else
-                prefix.append('.', comp.id[]);
-
-            if (path.empty)
-            {
-                if (Element* elem = comp.find_element(next))
-                    append_element(json, first, prefix[], elem);
-            }
-            else
-            {
-                Component child = comp.find_component(next);
-                if (!child)
-                    return;
-
-                collect_elements_from_component(child, path, json, first, prefix);
-            }
-        }
-    }
-
-    void collect_with_wildcard(Component comp, const(char)[] path, ref Array!char json, ref bool first, ref MutableString!0 prefix)
-    {
-        import urt.mem.temp;
-
-        size_t prefix_len = prefix.length;
-        scope(exit) prefix.erase(prefix_len, prefix.length - prefix_len);
-
-        if (prefix_len == 0)
-            prefix = comp.id[];
-        else
-            prefix.append('.', comp.id[]);
-
-        if (path.empty)
-        {
-            foreach (ref Element* elem; comp.elements)
-                append_element(json, first, prefix[], elem);
-        }
-        else
-        {
-            const(char)[] path_copy = path;
-            const(char)[] next = path_copy.split!'.';
-
-            if (next == "*")
-            {
-                foreach (Component child; comp.components)
-                    collect_with_wildcard(child, path_copy, json, first, prefix);
-            }
-            else if (path_copy.empty)
-            {
-                if (Element* elem = comp.find_element(next))
-                    append_element(json, first, prefix[], elem);
-            }
-            else foreach (Component child; comp.components)
-            {
-                if (child.id[] == next)
-                    collect_elements_from_component(child, path_copy, json, first, prefix);
-            }
-        }
-
-        // recurse the tree
-        foreach (Component child; comp.components)
-            collect_with_wildcard(child, path, json, first, prefix);
-    }
-
-    void append_element(ref Array!char json, ref bool first, const(char)[] prefix, Element* elem)
+    void append_element(ref Array!char json, ref bool first, const(char)[] path, Element* elem)
     {
         import urt.si.quantity;
         import urt.si.unit;
@@ -568,7 +476,7 @@ private:
             json ~= ',';
         first = false;
 
-        json.append('\"', prefix, '.', elem.id[], "\":{\"value\":");
+        json.append('\"', path, "\":{\"value\":");
 
         Variant v = elem.value();
         if (v.isQuantity)

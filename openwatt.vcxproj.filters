@@ -417,6 +417,9 @@
     <DCompile Include="src\manager\package.d">
       <Filter>src\manager</Filter>
     </DCompile>
+    <DCompile Include="src\manager\path.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
     <DCompile Include="src\manager\plugin.d">
       <Filter>src\manager</Filter>
     </DCompile>
