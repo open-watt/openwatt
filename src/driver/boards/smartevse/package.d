@@ -19,8 +19,10 @@
  * - OpenWatt supplies current allocation, networking and remote management.
  *
  * Implemented:
- * - CP PWM and edge-relative sampling. The 1 kHz ISR is entirely C/IRAM,
- *   samples CP only, and hands D a locked 25-sample snapshot.
+ * - CP PWM and edge-relative sampling, composed from urt primitives via the
+ *   link fabric: CP_OUT rising edge reloads a counter, the counter alarm runs
+ *   a board @isr_safe handler that reads CP through the critical ADC path
+ *   into a seqlock ring; pilot_snapshot hands D an oldest-first copy.
  * - ESP32 line-fitting ADC calibration for CP, PP and temperature, using
  *   factory eFuse values when present and upstream's 1100 mV fallback.
  *   Upstream's legacy esp_adc_cal_characterize calls are translated to the
@@ -216,6 +218,7 @@ class SmartEVSE : ActiveObject
                                  Prop!("temperature-fault", temperature_fault, "status", "d"),
                                  Prop!("rcm-input", rcm_input, "status", "d"),
                                  Prop!("rcm-fault", rcm_fault, "status", "d"),
+                                 Prop!("rcm-monitor", rcm_monitor),
                                  Prop!("activation-wait", activation_wait, "status", "d"),
                                  Prop!("activation-pulse", activation_pulse, "status", "d"),
                                  Prop!("contactor2-mode", contactor2_mode),
@@ -328,6 +331,18 @@ nothrow @nogc:
     bool rcm_fault() const pure
         => _rcm_fault;
 
+    bool rcm_monitor() const pure
+        => _rcm_monitor;
+
+    void rcm_monitor(bool value)
+    {
+        if (_rcm_monitor == value)
+            return;
+        _rcm_monitor = value;
+        mark_set!(typeof(this), "rcm-monitor")();
+        restart();
+    }
+
     ubyte activation_wait() const pure
         => _activation_wait;
 
@@ -433,13 +448,11 @@ protected:
 
         _hardware_owner = this;
         _active_hardware_owner = this;
-        residual_current_set_callback(Hardware, &rcm_fault_ready);
 
         apply_current();
         setContactor2Mode(cast(ubyte)_contactor2_mode);
-        RCmonCtrl(ENABLE);
-        if (atomicLoad!(MemoryOrder.acquire)(_rcm_fault_pending) != 0 ||
-            gpio_input_read(RCMFAULT))
+        RCmonCtrl(_rcm_monitor ? ENABLE : DISABLE);
+        if (_rcm_monitor && (rcm_fault_signalled() || gpio_input_read(RCMFAULT)))
         {
             _rcm_fault = true;
             mark_set!(typeof(this), "rcm-fault")();
@@ -489,7 +502,6 @@ protected:
         }
         _active_hardware_owner = null;
         hardware_offline();
-        residual_current_set_callback(Hardware, null);
         _hardware_owner = _hardware_module;
         if (!_rcm_fault)
             sync_status();
@@ -503,6 +515,7 @@ private:
     bool _contactor2;
     bool _temperature_fault;
     bool _rcm_fault;
+    bool _rcm_monitor;
     bool _tick_armed;
     DeciAmps _current = DeciAmps(MIN_CURRENT * 10);
     DeciAmps _max_current = DeciAmps(MAX_CURRENT);
@@ -575,11 +588,12 @@ private:
 
     const(char)[] reset_fault()
     {
-        if (gpio_input_read(RCMFAULT))
+        if (_rcm_monitor && gpio_input_read(RCMFAULT))
             return "RCM input is still active";
         if (!_rcm_fault)
             return "no RCM fault is latched";
 
+        residual_current_fired(Hardware);
         atomicStore!(MemoryOrder.release)(_rcm_fault_pending, 0);
         setRCMFault(false);
         _rcm_fault = false;
@@ -599,8 +613,8 @@ private:
         if (!running)
             return;
 
-        if ((atomicLoad!(MemoryOrder.acquire)(_rcm_fault_pending) != 0 ||
-             gpio_input_read(RCMFAULT))
+        if (_rcm_monitor
+            && (rcm_fault_signalled() || gpio_input_read(RCMFAULT))
             && !_rcm_fault)
         {
             handle_rcm_fault();
@@ -766,12 +780,13 @@ nothrow @nogc:
 
 private:
 
-@critical bool rcm_fault_ready(GpioInterrupt, GpioCallbackContext)
+// The reflex already dropped both contactors from NMI context; this only
+// carries the trip into the software latch the control flow tests.
+bool rcm_fault_signalled()
 {
-    gpio_output_set(SSR1, false);
-    gpio_output_set(SSR2, false);
-    atomicStore!(MemoryOrder.release)(_rcm_fault_pending, 1);
-    return false;
+    if (residual_current_fired(Hardware))
+        atomicStore!(MemoryOrder.release)(_rcm_fault_pending, 1);
+    return atomicLoad!(MemoryOrder.acquire)(_rcm_fault_pending) != 0;
 }
 
 __gshared Object _hardware_owner;
