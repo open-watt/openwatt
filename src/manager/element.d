@@ -348,16 +348,21 @@ nothrow @nogc:
         return ElementCursor(handle, c.position, c.bit);
     }
 
-    private bool update_typed_series(ref const Variant v, SysTime timestamp, Subscriber who)
+    // checked write for external writers (console, sync set, property setters); null = stored
+    const(char)[] try_set(ref const Variant v, SysTime timestamp = getSysTime(), Subscriber who = null)
+    {
+        assert(format.valid, "element has no data format");
+        return update_typed_series(v, timestamp, who);
+    }
+
+    private const(char)[] update_typed_series(ref const Variant v, SysTime timestamp, Subscriber who)
     {
         if (data_format.is_text)
         {
-            if (v.isString)
-            {
-                store_sample(v.asString(), timestamp, who);
-                return true;
-            }
-            return false;
+            if (!v.isString)
+                return "incompatible value";
+            store_sample(v.asString(), timestamp, who);
+            return null;
         }
         if (data_format.is_wide)
         {
@@ -367,18 +372,16 @@ nothrow @nogc:
                 if (b.length == data_format.stride)
                 {
                     store_record(b, timestamp, who);
-                    return true;
+                    return null;
                 }
             }
-            return false;
+            return "incompatible value";
         }
         Scalar s;
-        if (unbox_scalar(v, *data_format, s))
-        {
-            store_record(s.raw[0 .. data_format.stride], timestamp, who);
-            return true;
-        }
-        return false;
+        if (const(char)[] error = unbox_scalar_checked(v, *data_format, s))
+            return error;
+        store_record(s.raw[0 .. data_format.stride], timestamp, who);
+        return null;
     }
 
     // boxed value/previous only serve subscriber payloads; unwatched elements never box
@@ -1198,6 +1201,25 @@ unittest
     assert(widened.latest_record.u == 42);
     widened.value(ulong.max, from_unix_time_ns(2_000_000));
     assert(widened.latest_record.u == 42);
+
+    // try_set reports refusals and stores nothing; in-range values store
+    __gshared Constraint volt_range;
+    volt_range.min = Scalar.of(1.0);
+    volt_range.max = Scalar.of(5.0);
+    volt_range.has = Constraint.Has.min | Constraint.Has.max;
+    DataFormat constrained_fmt = DataFormat(ValueType.f64, SeriesKind.held);
+    constrained_fmt.constraint = &volt_range;
+    Element ce;
+    ce.format = register_format(constrained_fmt);
+    Variant too_big = Variant(9.0);
+    assert(ce.try_set(too_big) == "above maximum");
+    assert(ce.last_update == SysTime());
+    Variant in_range = Variant(3.0);
+    assert(ce.try_set(in_range) is null);
+    assert(ce.latest_record.f64_ == 3.0);
+    Variant wrong_type = Variant("volts");
+    assert(ce.try_set(wrong_type) == "incompatible value");
+    assert(ce.latest_record.f64_ == 3.0);
 }
 
 

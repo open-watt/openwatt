@@ -21,7 +21,7 @@ import manager.base;
 import manager.collection;
 import manager.element : Element;
 import manager.record : Sample;
-import manager.series : DataFormat, SeriesKind;
+import manager.series : Constraint, DataFormat, Scalar, SeriesKind, ValueType;
 import manager.sync;
 import manager.sync.encoder;
 import manager.sync.peer;
@@ -385,6 +385,25 @@ nothrow @nogc:
             _buf ~= ",\"enum\":";
             write_str(enum_info_name(fmt.enum_info));
         }
+        if (fmt.constraint && fmt.is_scalar)
+        {
+            ref const Constraint c = *fmt.constraint;
+            if (c.has & Constraint.Has.min)
+            {
+                _buf ~= ",\"min\":";
+                append_scalar(c.min, fmt.type);
+            }
+            if (c.has & Constraint.Has.max)
+            {
+                _buf ~= ",\"max\":";
+                append_scalar(c.max, fmt.type);
+            }
+            if (c.has & Constraint.Has.step)
+            {
+                _buf ~= ",\"step\":";
+                append_scalar(c.step, fmt.type);
+            }
+        }
         _buf ~= '}';
         send_frame(peer);
     }
@@ -453,6 +472,15 @@ nothrow @nogc:
     {
         begin_frame("res");
         _buf.append(",\"seq\":", seq);
+        send_frame(peer);
+    }
+
+    override void encode_res(SyncPeer peer, uint seq, ref const Variant value)
+    {
+        begin_frame("res");
+        _buf.append(",\"seq\":", seq);
+        _buf ~= ",\"value\":";
+        write_variant(value);
         send_frame(peer);
     }
 
@@ -547,16 +575,28 @@ nothrow @nogc:
 
             case "set":
             {
-                CID target = peer.cid_of(cast(SyncHandle)json.getMember("target").asLong());
-                const(char)[] prop = json.getMember("prop").asString();
                 uint seq = cast(uint)json.getMember("seq").asLong();
                 Variant* val = json.getMember("value");
-                if (!val)
+                if (json.getMember("prop"))
                 {
-                    log.warning("sync/json: set missing 'value'");
+                    // legacy object-mirror property set
+                    CID target = peer.cid_of(cast(SyncHandle)json.getMember("target").asLong());
+                    const(char)[] prop = json.getMember("prop").asString();
+                    if (!val)
+                    {
+                        log.warning("sync/json: set missing 'value'");
+                        break;
+                    }
+                    sync.inbound_set(peer, target, prop, *val, seq);
                     break;
                 }
-                sync.inbound_set(peer, target, prop, *val, seq);
+                Variant* hv = json.getMember("h");
+                Variant* pathv = json.getMember("path");
+                Variant* resetv = json.getMember("reset");
+                sync.inbound_model_set(peer, seq,
+                    hv ? cast(SyncHandle)hv.asLong() : SyncPeer.invalid_handle,
+                    pathv ? pathv.asString() : null,
+                    val, resetv && resetv.asBool());
                 break;
             }
 
@@ -648,6 +688,12 @@ nothrow @nogc:
                     wf.unit = u ? u.asString() : null;
                     Variant* en = fmt.getMember("enum");
                     wf.enum_name = en ? en.asString() : null;
+                    if (Variant* mn = fmt.getMember("min"))
+                        wf.min = *mn;
+                    if (Variant* mx = fmt.getMember("max"))
+                        wf.max = *mx;
+                    if (Variant* st = fmt.getMember("step"))
+                        wf.step = *st;
                     sync.inbound_type_format(peer,
                         cast(uint)json.getMember("ft").asLong(), wf);
                     break;
@@ -930,6 +976,27 @@ private:
     {
         size_t n = v.write_json(null);
         v.write_json(_buf.extend(n));
+    }
+
+    // constraint scalars are typed by their format; read stride bytes like compare_scalar does
+    void append_scalar(ref const Scalar s, ValueType t)
+    {
+        final switch (t) with (ValueType)
+        {
+            case bool_: _buf ~= *cast(const(bool)*)s.raw.ptr ? "true" : "false";    break;
+            case u8:    _buf.append(*cast(const(ubyte)*)s.raw.ptr);                 break;
+            case s8:    _buf.append(*cast(const(byte)*)s.raw.ptr);                  break;
+            case u16:   _buf.append(*cast(const(ushort)*)s.raw.ptr);                break;
+            case s16:   _buf.append(*cast(const(short)*)s.raw.ptr);                 break;
+            case u32:   _buf.append(*cast(const(uint)*)s.raw.ptr);                  break;
+            case s32:   _buf.append(*cast(const(int)*)s.raw.ptr);                   break;
+            case u64:   _buf.append(*cast(const(ulong)*)s.raw.ptr);                 break;
+            case s64:   _buf.append(*cast(const(long)*)s.raw.ptr);                  break;
+            case f32:   _buf.append(*cast(const(float)*)s.raw.ptr);                 break;
+            case f64:   _buf.append(*cast(const(double)*)s.raw.ptr);                break;
+            case char_:
+            case user:  assert(false, "constraint on non-numeric type");
+        }
     }
 
     // Emit all SET props, including read-only ones - proxies can't

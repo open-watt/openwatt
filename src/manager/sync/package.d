@@ -67,7 +67,8 @@ import manager.element : Access, add_feed_listener, Element, ElementLifecycleEve
                          register_element_lifecycle_handler, remove_feed_listener, SamplingMode, sweep_dirty;
 import manager.id : EID;
 import manager.path : Address, match_path, pattern_matches, walk_elements;
-import manager.series : DataFormat, FormatId, register_format, SeriesKind, valid, ValueType;
+import manager.series : Constraint, DataFormat, FormatId, register_format, Scalar, SeriesKind,
+                        unbox_scalar, valid, ValueType;
 import manager.console;
 import manager.console.command : CommandState, CommandCompletionState;
 import manager.console.session;
@@ -1038,6 +1039,32 @@ nothrow @nogc:
             f = DataFormat(vt, *kind);
         f.count = wf.count;
         f.rate = wf.rate;
+
+        if (f.is_scalar && (!wf.min.isNull || !wf.max.isNull || !wf.step.isNull))
+        {
+            import manager.sample : register_constraint;
+
+            Constraint c;
+            void take(ref const Variant v, ref Scalar slot, Constraint.Has bit)
+            {
+                if (v.isNull)
+                    return;
+                Scalar s;
+                if (unbox_scalar(v, f, s))
+                {
+                    slot = s;
+                    c.has |= bit;
+                }
+                else
+                    log.warning("sync: format constraint value out of range for its own type");
+            }
+            take(wf.min, c.min, Constraint.Has.min);
+            take(wf.max, c.max, Constraint.Has.max);
+            take(wf.step, c.step, Constraint.Has.step);
+            if (c.has)
+                f.constraint = register_constraint(c);
+        }
+
         from._ft_recv.insert(ft, register_format(f));
     }
 
@@ -1110,6 +1137,65 @@ nothrow @nogc:
         if (v && !v.isNull)
             e.value(*v, t_ms ? from_unix_time_ns(t_ms * 1_000_000) : getSysTime());
         from.adopt(handle, e.ensure_eid());
+    }
+
+    // Element write. `res {seq, value}` carries the applied value; any further
+    // consequence flows back through the ordinary feed.
+    void inbound_model_set(SyncPeer from, uint seq, SyncHandle handle, const(char)[] path,
+                           Variant* value, bool reset)
+    {
+        SyncEncoder enc = encoder_for(from._encoder);
+        Element* e;
+        if (path.length)
+        {
+            Address a = Address.parse(path);
+            if (!a.valid || a.ns[] != "device")
+            {
+                enc.encode_err(from, seq, "unknown_path", path);
+                return;
+            }
+            e = g_app.find_element(a.subject);
+        }
+        else
+            e = g_app.devices.resolve(from.node_of(handle));
+        if (!e)
+        {
+            enc.encode_err(from, seq, path.length ? "unknown_path" : "unknown_handle", path);
+            return;
+        }
+        if (reset)
+        {
+            enc.encode_err(from, seq, "unsupported", "elements have no reset");
+            return;
+        }
+
+        Component c = e.parent;
+        while (c && !c.is_device)
+            c = c.parent;
+        Device dev = cast(Device)cast(void*)c;    // extern(C++) has no dynamic cast; is_device checked above
+        if (dev && dev.remote)
+        {
+            // routing a mirror write to its authority is not built yet
+            enc.encode_err(from, seq, "not_authoritative", "element belongs to a remote device");
+            return;
+        }
+        if (!(e.access & Access.write))
+        {
+            enc.encode_err(from, seq, "access_denied", "read-only element");
+            return;
+        }
+        if (!value || value.isNull)
+        {
+            enc.encode_err(from, seq, "bad_value", "set requires a value");
+            return;
+        }
+        if (const(char)[] error = e.try_set(*value))
+        {
+            enc.encode_err(from, seq, "bad_value", error);
+            return;
+        }
+        Variant applied = e.value;
+        enc.encode_res(from, seq, applied);
     }
 
     void inbound_val(SyncPeer from, SyncHandle handle, ref Variant value, ulong t_ms)

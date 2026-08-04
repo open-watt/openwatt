@@ -633,10 +633,14 @@ Variant box_record(const(void)* record, ref const DataFormat fmt)
 
 // inverse of box_record; false when the format can't represent the value
 bool unbox_scalar(ref const Variant v, ref const DataFormat fmt, out Scalar s)
+    => unbox_scalar_checked(v, fmt, s) is null;
+
+// as unbox_scalar, but reports WHY a value is refused; null = accepted
+const(char)[] unbox_scalar_checked(ref const Variant v, ref const DataFormat fmt, out Scalar s)
 {
     if (!unbox_scalar_value(v, fmt, s))
-        return false;
-    return !fmt.constraint || !fmt.constraint.check(s, fmt);
+        return "incompatible value";
+    return fmt.constraint ? fmt.constraint.check(s, fmt) : null;
 }
 
 private FormatId register_variant_format(ref const Variant value)
@@ -795,8 +799,12 @@ unittest
     u16.constraint = &range;
     Variant inside = Variant(ushort(15));
     Variant outside = Variant(ushort(21));
+    Variant under = Variant(ushort(5));
     assert(unbox_scalar(inside, u16, sc));
     assert(!unbox_scalar(outside, u16, sc));
+    assert(unbox_scalar_checked(outside, u16, sc) == "above maximum");
+    assert(unbox_scalar_checked(under, u16, sc) == "below minimum");
+    assert(unbox_scalar_checked(negative, u16, sc) == "incompatible value");
 
     import urt.si.unit : Ampere, Volt;
     DataFormat amps = DataFormat(ValueType.u16, SeriesKind.held, ScaledUnit(Ampere));
