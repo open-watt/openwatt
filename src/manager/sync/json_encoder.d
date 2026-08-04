@@ -442,12 +442,16 @@ nothrow @nogc:
                 _buf.append(",\"access\":\"", enum_key_from_value!Access(e.access), '\"');
             if (e.sampling_mode != SamplingMode.manual)
                 _buf.append(",\"mode\":\"", enum_key_from_value!SamplingMode(e.sampling_mode), '\"');
-            Variant v = e.value;
-            if (!v.isNull)
+            if (e.data_format.kind != SeriesKind.point)
             {
-                _buf ~= ",\"v\":";
-                write_variant(v);
-                _buf.append(",\"t\":", unix_time_ns(e.last_update) / 1_000_000);
+                // events retain no value; occurrences replay via `from`
+                Variant v = e.value;
+                if (!v.isNull)
+                {
+                    _buf ~= ",\"v\":";
+                    write_variant(v);
+                    _buf.append(",\"t\":", unix_time_ns(e.last_update) / 1_000_000);
+                }
             }
         }
         send_frame(peer);
