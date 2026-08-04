@@ -593,7 +593,7 @@ private:
             bool higher_priority_task_woken;
             final switch (context)
             {
-                case CanCallbackContext.task:
+                case CanCallbackContext.thread:
                     queued = g_app.post_event(&_rx_sweep.event, getTime(), EventPriority.bulk);
                     break;
                 case CanCallbackContext.interrupt:
