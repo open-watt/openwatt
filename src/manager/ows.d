@@ -1,6 +1,6 @@
-module manager.owsig;
+module manager.ows;
 
-// owsig v0: raw-image series container. The file is a doubly-linked block list: each block
+// ows v0: raw-image series container. The file is a doubly-linked block list: each block
 // header carries next/prev file offsets and its index/timestamp span; the first block of a
 // format run additionally carries a BlockFormatHeader (and, later, name-binding data for
 // enum/user/codec identity) behind it, and followers point at that anchor via format_block,
@@ -255,7 +255,7 @@ nothrow @nogc:
         h.last_tick = blk.tick(count - 1);
         h.payload_bytes = raw_bytes;
         h.flags = irregular ? BlockHeader.Flags.irregular : 0;
-        h.codec = owsig_codec_raw;
+        h.codec = ows_codec_raw;
         h.heap_bytes = heap_bytes;
 
         _wbuf.resize(h.header_bytes + raw_bytes);
@@ -335,7 +335,7 @@ nothrow @nogc:
         bool irregular = (e.hdr.flags & BlockHeader.Flags.irregular) != 0;
 
         size_t bytes;
-        if (e.hdr.codec == owsig_codec_raw)
+        if (e.hdr.codec == ows_codec_raw)
         {
             if (read_at(_file, _buf[], e.offset + e.hdr.header_bytes, bytes) != Result.success || bytes < raw_bytes)
                 return false;
@@ -418,7 +418,7 @@ unittest
             e.mark_gap(); // second block
     }
 
-    enum path = "owsig_unittest.tmp";
+    enum path = "ows_unittest.tmp";
     delete_file(path);
 
     {
@@ -508,7 +508,7 @@ unittest
     t.write_sample("a somewhat longer beta value", from_unix_time_ns(2_000_000));
     t.write_sample("alpha", from_unix_time_ns(3_000_000));
 
-    enum tpath = "owsig_text_unittest.tmp";
+    enum tpath = "ows_text_unittest.tmp";
     delete_file(tpath);
     {
         SeriesContainer c;

@@ -1,7 +1,7 @@
 module manager.series;
 
 // The series contract: the typed record format shared by every host of observed data.
-// Element is the first host; the recorder's owsig containers and waveform/byte/packet taps
+// Element is the first host; the recorder's ows containers and waveform/byte/packet taps
 // host the same formats without becoming elements.
 // Event! payloads and device-function params/results will describe themselves with the
 // same DataFormat vocabulary, boxed through Variant only at the console/API edges.
@@ -446,13 +446,13 @@ nothrow @nogc:
 }
 
 // One codec vocabulary, three residencies: a packed image is the same bytes whether it lives
-// behind a RAM bucket, in an owsig block, or in flight. The raw image layout is
-// [offsets plane?][record plane][heap], identical to the owsig payload. Codecs register with
+// behind a RAM bucket, in an ows block, or in flight. The raw image layout is
+// [offsets plane?][record plane][heap], identical to the ows payload. Codecs register with
 // a selection predicate; the first match packs and RAW is the mandatory fallback (a codec
 // that doesn't beat raw is ignored). Ids 0/1 are reserved (raw, zlib); registered ids are
 // process-local: TODO bind them by NAME before any ships.
-enum ubyte owsig_codec_raw = 0;
-enum ubyte owsig_codec_zlib = 1;
+enum ubyte ows_codec_raw = 0;
+enum ubyte ows_codec_zlib = 1;
 enum ubyte first_registered_codec = 2;
 
 struct SeriesCodec

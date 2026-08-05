@@ -169,12 +169,12 @@ captured series to ~400.
 Delivery is already built: the sync/websocket protocol carries
 `history_req` / `history` frames (`inbound_history_req` in
 [../src/manager/sync/package.d](../src/manager/sync/package.d)), answered
-synchronously from RAM buckets plus the `.owsig` container. Console
+synchronously from RAM buckets plus the `.ows` container. Console
 `/record/query` and `/record/graph` serve from the same local path.
 
 Remaining:
 
-- **Container retention/rotation**: `.owsig` files grow without bound.
+- **Container retention/rotation**: `.ows` files grow without bound.
   Needs a size/age budget per series or per recorder. This is now the only
   thing between the current state and leaving recording on indefinitely.
 - **Class-specific retention**: the short class (budget, allocations) wants

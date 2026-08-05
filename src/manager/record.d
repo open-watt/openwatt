@@ -2,7 +2,7 @@ module manager.record;
 
 // Element history recording. A Recorder walks the device tree and attaches a
 // RecordStream to every element whose data-model path matches its filter. The
-// Element's typed SeriesStore is the live source and an owsig container extends
+// Element's typed SeriesStore is the live source and an ows container extends
 // that history on disk.
 // Graph queries convert numeric records to doubles and normalise quantities to
 // base SI scale. The container itself retains the element's typed records.
@@ -27,7 +27,7 @@ import manager.console.graph;
 import manager.console.live_view;
 import manager.device;
 import manager.element;
-import manager.owsig;
+import manager.ows;
 import manager.plugin;
 
 nothrow @nogc:
@@ -74,7 +74,7 @@ nothrow @nogc:
             cursor = e.open_series_cursor(0, true);
         if (!cursor.pending)
             return;
-        if (!container.is_open && !container.open_(owner.make_filename(path[], ".owsig")[]))
+        if (!container.is_open && !container.open_(owner.make_filename(path[], ".ows")[]))
             return; // disk trouble; records stay pinned, retry next flush
 
         while (cursor.pending)
@@ -253,7 +253,7 @@ private:
 }
 
 
-// Serves whatever coverage exists: RAM buckets, extended backwards by the owsig
+// Serves whatever coverage exists: RAM buckets, extended backwards by the ows
 // container when they don't reach `from`. Partial coverage is answered as partial.
 void query_local(ref RecordStream rs, ulong from, ulong to, uint max_points, QueryMode mode, ref Array!Sample result)
 {
@@ -647,7 +647,7 @@ private:
         // the element self-captures; the first flush ships its standing history
     }
 
-    String make_filename(const(char)[] path, const(char)[] ext = ".owsig")
+    String make_filename(const(char)[] path, const(char)[] ext = ".ows")
     {
         MutableString!0 fn;
         fn.append(_dir[], '/');
