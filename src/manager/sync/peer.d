@@ -2,15 +2,19 @@ module manager.sync.peer;
 
 import urt.array;
 import urt.log;
+import urt.map;
 import urt.mem.allocator;
 import urt.meta : AliasSeq;
+import urt.meta.enuminfo : VoidEnumInfo;
 import urt.string;
 import urt.time;
 
 import manager;
 import manager.base;
 import manager.collection;
+import manager.id : EID;
 import manager.log;
+import manager.series : FormatId;
 import manager.syslog;
 import manager.sync;
 import manager.sync.encoder;
@@ -22,6 +26,22 @@ nothrow @nogc:
 
 
 alias log = Log!"sync";
+
+// wide enough for a sibling transport's raw EIDs; foreign sessions allocate small dense values
+alias SyncHandle = ulong;
+
+// verb families served; negotiated by hello, build-time on each end
+enum SyncCaps : ubyte
+{
+    objects = 1 << 0,   // legacy object mirror
+    model   = 1 << 1,   // data-model space (add/val/sub)
+    history = 1 << 2,
+    console = 1 << 3,
+    logs    = 1 << 4,
+    time    = 1 << 5,
+}
+
+enum ubyte local_sync_caps = SyncCaps.objects | SyncCaps.model | SyncCaps.history | SyncCaps.console | SyncCaps.logs | SyncCaps.time;
 
 
 class SyncPeer : ActiveObject
@@ -89,35 +109,41 @@ nothrow @nogc:
     }
 
     // Session name/handle binding. Local ids never travel: each side announces its
-    // objects by name (add_name) and allocates the session handle for the objects it
+    // nodes by name (add_name) and allocates the session handle for the nodes it
     // introduces. A wire handle's low bit says who allocated it relative to the frame
     // it appears in: 0 = the frame's sender, 1 = the receiver, so the same handle value
     // flips its low bit crossing the wire. Handles are never reused; a slot whose
-    // object dies resolves invalid forever, and a session (attach..detach) resets the
+    // node dies resolves invalid forever, and a session (attach..detach) resets the
     // whole space.
+    // The tables hold EIDs: element index 0 denotes the container itself, so one
+    // handle space covers objects, devices and elements. SyncHandle is 64-bit because
+    // sibling transports use raw EIDs as handles; foreign handles stay small dense ints.
 
-    enum uint invalid_handle = uint.max;
+    enum SyncHandle invalid_handle = SyncHandle.max;
 
-    uint introduce(BaseObject obj)
+    SyncHandle introduce(BaseObject obj)
+        => introduce(EID(obj.id));
+
+    SyncHandle introduce(EID node)
     {
-        foreach (i, o; _introduced[])
-            if (o is obj)
-                return cast(uint)i << 1;
-        uint idx = cast(uint)_introduced.length;
-        _introduced ~= obj;
+        foreach (i, n; _introduced[])
+            if (n == node)
+                return SyncHandle(i) << 1;
+        SyncHandle idx = _introduced.length;
+        _introduced ~= node;
         return idx << 1;
     }
 
-    void adopt(uint handle, CID local)
+    void adopt(SyncHandle handle, EID local)
     {
         if (handle & 1)
         {
             log.warning("peer '", name[], "' announced a receiver-side handle ", handle);
             return;
         }
-        uint idx = handle >> 1;
+        size_t idx = cast(size_t)(handle >> 1);
         while (_adopted.length <= idx)
-            _adopted ~= CID.invalid;
+            _adopted ~= EID.invalid;
         if (_adopted[idx] && _adopted[idx] != local)
         {
             log.warning("peer '", name[], "' re-announced handle ", handle, " for a different name");
@@ -126,42 +152,70 @@ nothrow @nogc:
         _adopted[][idx] = local;
     }
 
-    uint handle_of(BaseObject obj)
+    SyncHandle handle_of(BaseObject obj)
+        => handle_of(EID(obj.id));
+
+    SyncHandle handle_of(CID cid)
+        => handle_of(EID(cid));
+
+    SyncHandle handle_of(EID node)
     {
-        foreach (i, o; _introduced[])
-            if (o is obj)
-                return cast(uint)i << 1;
-        foreach (i, c; _adopted[])
-            if (c == obj.id)
-                return (cast(uint)i << 1) | 1;
+        foreach (i, n; _adopted[])
+            if (n == node)
+                return (SyncHandle(i) << 1) | 1;
+        foreach (i, n; _introduced[])
+            if (n == node)
+                return SyncHandle(i) << 1;
         return invalid_handle;
     }
 
-    uint handle_of(CID cid)
+    EID node_of(SyncHandle handle)
     {
-        foreach (i, c; _adopted[])
-            if (c == cid)
-                return (cast(uint)i << 1) | 1;
-        foreach (i, o; _introduced[])
-            if (o && o.id == cid)
-                return cast(uint)i << 1;
-        return invalid_handle;
-    }
-
-    CID cid_of(uint handle)
-    {
-        uint idx = handle >> 1;
+        size_t idx = cast(size_t)(handle >> 1);
         if (handle & 1)
-            return idx < _introduced.length && _introduced[idx] ? _introduced[idx].id : CID.invalid;
-        return idx < _adopted.length ? _adopted[idx] : CID.invalid;
+            return idx < _introduced.length ? _introduced[idx] : EID.invalid;
+        return idx < _adopted.length ? _adopted[idx] : EID.invalid;
+    }
+
+    // legacy object-mirror accessor; dissolves with the mirror verbs
+    CID cid_of(SyncHandle handle)
+        => node_of(handle).container;
+
+    // Session schema interning: formats and named types push once per session,
+    // always before the frame that first cites them. Interning is peer policy
+    // (a sibling peer answers "always seen" and emits no type frames).
+
+    // session ft for a local format; first=true when the definition must be pushed first
+    uint ft_of(FormatId f, out bool first)
+    {
+        size_t i = f;
+        while (_ft_sent.length <= i)
+            _ft_sent ~= ushort(0);
+        if (_ft_sent[i] == 0)
+        {
+            first = true;
+            _ft_sent[][i] = cast(ushort)++_next_ft;
+        }
+        return _ft_sent[i] - 1;
+    }
+
+    // true if this enum dictionary was already pushed; records it either way
+    bool enum_seen(const(VoidEnumInfo)* info)
+    {
+        foreach (e; _enums_sent[])
+            if (e is info)
+                return true;
+        _enums_sent ~= info;
+        return false;
     }
 
     void forget(BaseObject obj)
     {
-        foreach (ref o; _introduced[])
-            if (o is obj)
+        EID node = EID(obj.id);
+        foreach (ref n; _introduced[])
+            if (n == node)
             {
-                o = null;
+                n = EID.invalid;
                 return;
             }
     }
@@ -245,6 +299,7 @@ protected:
 
         subscribe_transport();
 
+        encoder_for(_encoder).encode_hello(this);
         get_module!SyncModule.attach_peer(this);
 
         if (_want_logs)
@@ -254,6 +309,9 @@ protected:
 
     override CompletionStatus shutdown()
     {
+        if (get_module!SyncModule.cancel_inbound_cmds(this))
+            return CompletionStatus.continue_;
+
         get_module!SyncModule.detach_peer(this);
         detach_transport();
 
@@ -267,9 +325,19 @@ package:
     Array!String     _subscriptions;
     Array!BaseObject _bound;             // objects we've sent bind{...} to this peer
     Array!BaseObject _authoritative;     // proxies we hold on this peer's behalf
-    Array!BaseObject _introduced;        // handle table: objects we announced (slot = handle >> 1)
-    Array!CID        _adopted;           // handle table: local ids for names the peer announced
+    Array!EID        _introduced;        // handle table: nodes we announced (slot = handle >> 1)
+    Array!EID        _adopted;           // handle table: local ids for names the peer announced
     SyncEncoderKind  _encoder;
+
+    ubyte            _remote_caps;       // hello negotiation; 0 = no hello received
+    Array!ushort     _ft_sent;           // FormatId -> session ft + 1; 0 = unsent
+    uint             _next_ft;
+    Array!(const(VoidEnumInfo)*) _enums_sent;
+    Map!(uint, FormatId) _ft_recv;       // peer's session ft -> local format
+
+    Array!String     _model_subs;        // armed live model patterns
+    Map!(ulong, ulong) _live_nodes;      // EID.raw of armed nodes -> next unsent record index (point series)
+    Array!EID        _pending_vals;      // dirty matched nodes awaiting this tick's flush
 
     bool     _time_authority;
     bool     _time_subordinate;

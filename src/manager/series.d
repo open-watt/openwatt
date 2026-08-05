@@ -12,18 +12,21 @@ module manager.series;
 //
 // The value types are machine scalars, char, and `user` (a registered type identified by the
 // format's descriptor slot). count is one for a scalar, N for a fixed vector, or zero for a
-// dynamic record whose length is stored in the record. A string is dynamic char data; a blob
-// is dynamic u8 data with opaque display. Storage rule: a record is memcpy iff its type is trivial - dynamic
-// records hold immutable refcounted handles (String for text), non-pod user types copy
-// and drop through their registry hooks.
+// dynamic record. A string is dynamic char data; a blob is dynamic u8 data with opaque display.
+// Storage rule: every record is raw bytes. A dynamic record is a u16 offset into its bucket's
+// byte heap, where the value lives as a u15 length prefix (top bit reserved) and its bytes,
+// 2-aligned, de-duplicated within the bucket. The record plane stays fixed-stride and the whole
+// image is context-free, so RAM buckets and serialised blocks are byte-identical. Values are
+// capped at MaxStringLen (32K); anything larger is content, not an observation - that's a tap.
+// Non-pod user types copy and drop through their registry hooks.
 
 import urt.array;
-import urt.lifetime : move;
+import urt.mem.alloc;
 import urt.mem.allocator : defaultAllocator;
 import urt.meta.enuminfo : enum_info, VoidEnumInfo;
 import urt.si.quantity : Quantity;
 import urt.si.unit : Nanosecond, ScaledUnit;
-import urt.string : makeString, String;
+import urt.string : String;
 import urt.time;
 import urt.traits : is_boolean, is_some_float, is_some_int, Unqual;
 import urt.typereg : find_type_details, TypeDetails;
@@ -335,7 +338,7 @@ nothrow @nogc:
     ubyte stride() const pure
     {
         if (count == 0)
-            return 8; // dynamic records are TextRecords on all targets
+            return 2; // dynamic records are u16 offsets into the bucket heap
         uint s = type == ValueType.user ? user_type.size : g_type_stride[type];
         s *= count;
         assert(s <= ubyte.max, "record stride exceeds 255 bytes");
@@ -374,70 +377,18 @@ nothrow @nogc:
     }
 }
 
-// text record: a String handle in the low bytes, or <=7 chars embedded with the length in
-// the top byte - a canonical user pointer never has its top byte set, and 32-bit handles
-// leave the high half zeroed
-struct TextRecord
+// a dynamic value in a bucket heap: u15 length prefix (top bit reserved, must be zero),
+// bytes follow, entries 2-aligned so the prefix read is always aligned. The prefix counts
+// BYTES regardless of element type - the format's element stride divides it and the item
+// count derives - so heaps walk blind, without a format in hand.
+uint heap_entry_bytes(size_t length) pure
+    => cast(uint)(ushort.sizeof + length + (length & 1));
+
+const(void)[] heap_view(const(void)* heap, uint offset) pure
 {
-nothrow @nogc:
-
-    version (BigEndian) static assert(false, "embedded text discriminant assumes little-endian");
-
-    enum embed_capacity = 7;
-
-    ubyte[8] raw;
-
-    bool embedded() const pure
-        => raw[7] != 0;
-
-    const(char)[] view() const pure return
-        => embedded ? cast(const(char)[])raw[0 .. raw[7]] : (*cast(const(String)*)raw.ptr)[];
-
-    void set(String s)
-    {
-        if (s.length <= embed_capacity)
-            set(s[]);
-        else
-        {
-            release();
-            *cast(String*)raw.ptr = s.move;
-        }
-    }
-
-    void set(const(char)[] s)
-    {
-        if (s.length <= embed_capacity)
-        {
-            release();
-            raw[0 .. s.length] = cast(const(ubyte)[])s;
-            raw[7] = cast(ubyte)s.length;
-        }
-        else
-        {
-            release();
-            *cast(String*)raw.ptr = s.makeString(defaultAllocator());
-        }
-    }
-
-    // target must be initialised; the ref taken here is owned by whoever memcpys the bits away
-    void copy_from(ref const TextRecord src)
-    {
-        release();
-        if (src.embedded)
-            raw = src.raw;
-        else
-            *cast(String*)raw.ptr = *cast(String*)src.raw.ptr;
-    }
-
-    void release()
-    {
-        if (!embedded)
-            *cast(String*)raw.ptr = null;
-        raw[] = 0;
-    }
+    const(ushort)* p = cast(const(ushort)*)(cast(const(ubyte)*)heap + offset);
+    return (cast(const(void)*)(p + 1))[0 .. *p & 0x7FFF];
 }
-
-static assert(TextRecord.sizeof == 8);
 
 struct RecordBlock
 {
@@ -448,8 +399,10 @@ nothrow @nogc:
     ulong lost;         // records evicted between the reader's position and this block
     const(uint)* ts;    // null if the series is regular
     const(void)* data;
+    const(void)* heap;  // dynamic-record series: the byte heap the records' offsets resolve in
     FormatId format;
     uint count;
+    uint heap_bytes;
 
     const(DataFormat)* data_format() const pure
         => format_info(format);
@@ -466,8 +419,58 @@ nothrow @nogc:
     ref const(T) get(T)(uint i) const pure
         => (cast(const(T)*)data)[i];
 
+    // dynamic records resolve through the heap as opaque bytes - the format is their context,
+    // applied at the boxing edge; the view borrows the block's lifetime
+    const(void)[] dynamic(uint i) const pure
+        => heap_view(heap, (cast(const(ushort)*)data)[i]);
+
+    const(char)[] text(uint i) const pure
+    {
+        debug assert(data_format.is_text);
+        return cast(const(char)[])dynamic(i);
+    }
+
     Variant box(uint i) const
-        => box_record(cast(const(ubyte)*)data + i*data_format.stride, *data_format);
+    {
+        const(DataFormat)* f = data_format;
+        if (f.count == 0)
+        {
+            if (f.type == ValueType.char_)
+                return Variant(cast(const(char)[])dynamic(i));
+            if (f.type == ValueType.u8)
+                return Variant(dynamic(i));
+            assert(false, "TODO: typed dynamic arrays box as Variant arrays");
+        }
+        return box_record(cast(const(ubyte)*)data + i*f.stride, *f);
+    }
+}
+
+// One codec vocabulary, three residencies: a packed image is the same bytes whether it lives
+// behind a RAM bucket, in an owsig block, or in flight. The raw image layout is
+// [offsets plane?][record plane][heap], identical to the owsig payload. Codecs register with
+// a selection predicate; the first match packs and RAW is the mandatory fallback (a codec
+// that doesn't beat raw is ignored). Ids 0/1 are reserved (raw, zlib); registered ids are
+// process-local: TODO bind them by NAME before any ships.
+enum ubyte owsig_codec_raw = 0;
+enum ubyte owsig_codec_zlib = 1;
+enum ubyte first_registered_codec = 2;
+
+struct SeriesCodec
+{
+    const(char)[] name;
+    bool function(ref const DataFormat fmt, ref const RecordBlock blk) nothrow @nogc match;
+    // pack the raw image into dst; bytes written, or -1 to decline (raw applies)
+    ptrdiff_t function(ref const RecordBlock blk, const(void)[] raw, void[] dst) nothrow @nogc pack;
+    // unpack a payload into the raw image; false = corrupt
+    bool function(const(void)[] src, ref const DataFormat fmt, uint count, bool irregular,
+                  uint heap_bytes, void[] dst) nothrow @nogc unpack;
+}
+
+ubyte register_series_codec(ref const SeriesCodec codec)
+{
+    assert(g_num_codecs < g_codecs.length, "too many series codecs");
+    g_codecs[g_num_codecs] = codec;
+    return cast(ubyte)(first_registered_codec + g_num_codecs++);
 }
 
 enum SeriesEvent : ubyte
@@ -487,9 +490,22 @@ struct Bucket
     uint count;
     uint capacity;
     bool follows_gap;  // <- we should steal a bit for this!
-    bool sealed;       // tail retired: shrunk to fit, immutable (packing lands here)
+    bool sealed;       // tail retired: shrunk to fit, immutable
     void* samples;
     uint* offsets;     // null when regular
+    void* heap;        // dynamic-record series: 2-aligned len-prefixed values, dedup'd per bucket
+    uint heap_used;
+    uint heap_capacity;
+
+    // the two-pointer entry: samples/offsets/heap are the raw side, packed the encoded side.
+    // At least one is live. A sealed bucket packs on its last release; with packed present the
+    // raw side is a cache, dropped at refs==0 and reconstituted on demand for late readers.
+    void* packed;
+    uint packed_bytes;
+    ushort refs;        // readers borrowing the raw side; the open tail is implicitly protected
+    ubyte codec;
+    bool pack_declined; // codecs tried and beaten by raw; raw-only permanently, don't retry
+    bool raw_combined;  // reconstituted raw is one allocation spanning all planes; free once
 
 pure nothrow @nogc:
     ulong last_tick() const => first_tick + last_offset;
@@ -515,6 +531,7 @@ nothrow @nogc:
     ushort cursor_mask;
     ushort pin_mask;    // cursors voluntary eviction must not pass; consumption = advancing the cursor
     ulong[16] pin_position;
+    Bucket*[16] cursor_ref; // the bucket each cursor's raw-side borrow guards; ref moves as the cursor does
 
     ulong first_index() const pure
         => buckets.length ? buckets[0].first_index : head;
@@ -561,13 +578,22 @@ nothrow @nogc:
         return lo < buckets.length ? buckets[lo] : null;
     }
 
-    RecordBlock read(FormatId format, ulong from_index, uint max_records)
+    // cursor_bit tracks the reader's raw-side borrow: the cursor's ref moves to the bucket it
+    // reads, so a view stays valid until the next read. Bit-less reads (queries) reconstitute
+    // without a ref; their loose raws drop at the next cursor close (byte budgets own the rest).
+    RecordBlock read(FormatId format, ulong from_index, uint max_records, ubyte cursor_bit = ubyte.max)
     {
         RecordBlock r;
         r.format = format;
         const(DataFormat)* fmt = format_info(format);
         Bucket* b = find_by_index(from_index);
-        if (!b || from_index < b.first_index)
+        if (b && from_index < b.first_index)
+            b = null;
+        if (cursor_bit != ubyte.max)
+            move_ref(cursor_bit, b, format);
+        if (!b)
+            return r;
+        if (!b.samples && !reconstitute(b, format))
             return r;
         uint offset = cast(uint)(from_index - b.first_index);
         uint n = b.count - offset;
@@ -578,7 +604,148 @@ nothrow @nogc:
         r.ts = b.offsets ? b.offsets + offset : null;
         r.t0 = b.offsets ? b.first_tick : b.first_tick + offset;
         r.first_index = from_index;
+        r.heap = b.heap;
+        r.heap_bytes = b.heap_used;
         return r;
+    }
+
+    void move_ref(ubyte bit, Bucket* b, FormatId format)
+    {
+        Bucket* old = cursor_ref[bit];
+        if (old is b)
+            return;
+        cursor_ref[bit] = b;
+        if (b)
+            ++b.refs;
+        if (old)
+            release_ref(old, format);
+    }
+
+    void release_ref(Bucket* b, FormatId format)
+    {
+        debug assert(b.refs);
+        if (--b.refs)
+            return;
+        if (b.packed)
+            drop_raw(b, format_info(format));
+        else
+            try_pack(b, format);
+    }
+
+    // packing only reads the raw side, so it may run on any sealed bucket regardless of
+    // readers (a disk writer can pack what the UX is still rendering); only DROPPING raw
+    // waits for the last borrow to release
+    void try_pack(Bucket* b, FormatId format)
+    {
+        if (b.packed || b.pack_declined || !b.sealed || !b.count || !g_num_codecs)
+            return;
+        const(DataFormat)* fmt = format_info(format);
+        uint offs_bytes = b.offsets ? b.count * cast(uint)uint.sizeof : 0;
+        uint rec_bytes = b.count * fmt.stride;
+        uint total = offs_bytes + rec_bytes + b.heap_used;
+
+        RecordBlock blk;
+        blk.format = format;
+        blk.count = b.count;
+        blk.first_index = b.first_index;
+        blk.t0 = b.first_tick;
+        blk.ts = b.offsets;
+        blk.data = b.samples;
+        blk.heap = b.heap;
+        blk.heap_bytes = b.heap_used;
+
+        foreach (i; 0 .. g_num_codecs)
+        {
+            if (!g_codecs[i].match || !g_codecs[i].match(*fmt, blk))
+                continue;
+            void[] img = alloc(total);
+            ubyte* p = cast(ubyte*)img.ptr;
+            p[0 .. offs_bytes] = (cast(const(ubyte)*)b.offsets)[0 .. offs_bytes];
+            p[offs_bytes .. offs_bytes + rec_bytes] = (cast(const(ubyte)*)b.samples)[0 .. rec_bytes];
+            p[offs_bytes + rec_bytes .. total] = (cast(const(ubyte)*)b.heap)[0 .. b.heap_used];
+            void[] dst = alloc(total);
+            ptrdiff_t packed_size = g_codecs[i].pack(blk, img, dst);
+            free(img);
+            if (packed_size > 0 && packed_size < total)
+            {
+                b.packed = realloc(dst, packed_size).ptr;
+                b.packed_bytes = cast(uint)packed_size;
+                b.codec = cast(ubyte)(first_registered_codec + i);
+                if (!b.refs)
+                    drop_raw(b, fmt);
+            }
+            else
+                free(dst);
+            break;
+        }
+        if (!b.packed)
+            b.pack_declined = true;
+    }
+
+    // repopulate the raw side from packed: one combined allocation in the shared image layout,
+    // shared by every reader positioned in the bucket until the last ref drops it again
+    bool reconstitute(Bucket* b, FormatId format)
+    {
+        if (b.samples)
+            return true;
+        debug assert(b.packed, "bucket has neither raw nor packed side");
+        if (b.codec < first_registered_codec || b.codec >= first_registered_codec + g_num_codecs)
+            return false;
+        const(DataFormat)* fmt = format_info(format);
+        bool irregular = !fmt.regular;
+        uint offs_bytes = irregular ? b.count * cast(uint)uint.sizeof : 0;
+        uint rec_bytes = b.count * fmt.stride;
+        uint total = offs_bytes + rec_bytes + b.heap_used;
+        void[] img = alloc(total);
+        if (!g_codecs[b.codec - first_registered_codec].unpack(b.packed[0 .. b.packed_bytes], *fmt,
+                                                               b.count, irregular, b.heap_used, img))
+        {
+            free(img);
+            debug assert(false, "packed bucket failed to reconstitute");
+            return false;
+        }
+        b.offsets = irregular ? cast(uint*)img.ptr : null;
+        b.samples = img.ptr + offs_bytes;
+        b.heap = b.heap_used ? img.ptr + offs_bytes + rec_bytes : null;
+        b.capacity = b.count;
+        b.heap_capacity = b.heap_used;
+        b.raw_combined = true;
+        return true;
+    }
+
+    // free the raw side; entered with packed present, or from bucket teardown
+    void drop_raw(Bucket* b, const(DataFormat)* fmt)
+    {
+        if (!b.samples)
+            return;
+        if (b.raw_combined)
+        {
+            void* base = b.offsets ? cast(void*)b.offsets : b.samples;
+            uint offs_bytes = b.offsets ? b.count * cast(uint)uint.sizeof : 0;
+            free(base[0 .. offs_bytes + b.count * fmt.stride + b.heap_used]);
+        }
+        else
+        {
+            free(b.samples[0 .. b.capacity * fmt.stride]);
+            if (b.offsets)
+                free((cast(void*)b.offsets)[0 .. b.capacity * uint.sizeof]);
+            if (b.heap)
+                free(b.heap[0 .. b.heap_capacity]);
+        }
+        b.samples = null;
+        b.offsets = null;
+        b.heap = null;
+        b.heap_capacity = 0;
+        b.raw_combined = false;
+    }
+
+    // sweep raws reconstituted by bit-less readers (queries); called from cursor close
+    void drop_loose_raws(FormatId format)
+    {
+        const(DataFormat)* fmt = format_info(format);
+        foreach (b; buckets[])
+            if (b.packed && b.samples && !b.refs)
+                drop_raw(b, fmt);
     }
 }
 
@@ -610,13 +777,7 @@ Variant box_record(const(void)* record, ref const DataFormat fmt)
         case f32:   return box_float(*cast(const(float)*)record, fmt);
         case f64:   return box_float(*cast(const(double)*)record, fmt);
         case char_:
-        {
-            assert(fmt.count == 0, "fixed char vectors box at the Element, not the record");
-            const(TextRecord)* tr = cast(const(TextRecord)*)record;
-            if (tr.embedded)
-                return Variant(tr.view);
-            return Variant(*cast(String*)record);
-        }
+            assert(false, "dynamic records resolve through their heap; box at the host (RecordBlock.box)");
         case user:
         {
             const(TypeDetails)* td = fmt.user_type;
@@ -633,10 +794,14 @@ Variant box_record(const(void)* record, ref const DataFormat fmt)
 
 // inverse of box_record; false when the format can't represent the value
 bool unbox_scalar(ref const Variant v, ref const DataFormat fmt, out Scalar s)
+    => unbox_scalar_checked(v, fmt, s) is null;
+
+// as unbox_scalar, but reports WHY a value is refused; null = accepted
+const(char)[] unbox_scalar_checked(ref const Variant v, ref const DataFormat fmt, out Scalar s)
 {
     if (!unbox_scalar_value(v, fmt, s))
-        return false;
-    return !fmt.constraint || !fmt.constraint.check(s, fmt);
+        return "incompatible value";
+    return fmt.constraint ? fmt.constraint.check(s, fmt) : null;
 }
 
 private FormatId register_variant_format(ref const Variant value)
@@ -760,7 +925,15 @@ unittest
     assert(f.stride == 32 && !f.is_scalar);
     DataFormat s = DataFormat(ValueType.char_, SeriesKind.held);
     s.count = 0;
-    assert(s.stride == 8 && !s.is_scalar && s.is_text);
+    assert(s.stride == 2 && !s.is_scalar && s.is_text);
+
+    // heap entries: len-prefixed, 2-aligned; views resolve through the offset
+    assert(heap_entry_bytes(3) == 6 && heap_entry_bytes(4) == 6 && heap_entry_bytes(0) == 2);
+    ushort[7] mini = [3, 0, 0, 5, 0, 0, 0];
+    (cast(char*)mini.ptr)[2 .. 5] = "abc";
+    (cast(char*)mini.ptr)[8 .. 13] = "hello";
+    assert(cast(const(char)[])heap_view(mini.ptr, 0) == "abc");
+    assert(cast(const(char)[])heap_view(mini.ptr, 6) == "hello");
 
     int v = -5;
     assert(box_record(&v, DataFormat(ValueType.s32, SeriesKind.held)).asLong == -5);
@@ -795,8 +968,12 @@ unittest
     u16.constraint = &range;
     Variant inside = Variant(ushort(15));
     Variant outside = Variant(ushort(21));
+    Variant under = Variant(ushort(5));
     assert(unbox_scalar(inside, u16, sc));
     assert(!unbox_scalar(outside, u16, sc));
+    assert(unbox_scalar_checked(outside, u16, sc) == "above maximum");
+    assert(unbox_scalar_checked(under, u16, sc) == "below minimum");
+    assert(unbox_scalar_checked(negative, u16, sc) == "incompatible value");
 
     import urt.si.unit : Ampere, Volt;
     DataFormat amps = DataFormat(ValueType.u16, SeriesKind.held, ScaledUnit(Ampere));
@@ -820,6 +997,9 @@ unittest
 private:
 
 package immutable ubyte[ValueType.max + 1] g_type_stride = [ 1, 1, 1, 2, 2, 4, 4, 8, 8, 4, 8, 1, 0 ];
+
+package __gshared SeriesCodec[8] g_codecs;
+package __gshared ubyte g_num_codecs;
 
 __gshared Array!(DataFormat*) g_formats;
 

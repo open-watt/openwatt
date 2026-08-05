@@ -17,13 +17,16 @@ module manager.sync.encoder;
 // manager.sync (the SyncModule namespace).
 
 import urt.log;
+import urt.meta.enuminfo : VoidEnumInfo;
 import urt.string;
 import urt.variant;
 
 import manager.base;
 import manager.collection : CID;
+import manager.element : Element;
 import manager.expression : NamedArgument;
 import manager.record : Sample;
+import manager.series : DataFormat, RecordBlock, ValueType;
 import manager.sync.peer;
 
 
@@ -39,6 +42,9 @@ enum SyncEncoderKind : ubyte
     binary,
 }
 
+enum uint model_protocol_version = 1;
+enum uint max_frame_size = 65_536;
+
 // Set at SyncModule.init() once singleton encoders exist.
 __gshared SyncEncoder[SyncEncoderKind.max + 1] g_encoders;
 
@@ -46,6 +52,57 @@ pragma(inline, true)
 SyncEncoder encoder_for(SyncEncoderKind kind) nothrow @nogc
     => g_encoders[kind];
 
+
+// Decoded `type` form-1 payload: strings straight off the wire, resolved to a
+// local DataFormat by the module (enum names resolve against pushed dictionaries).
+struct WireFormat
+{
+    const(char)[] type;
+    const(char)[] series;
+    const(char)[] unit;
+    const(char)[] enum_name;
+    Variant min;
+    Variant max;
+    Variant step;
+    uint rate;
+    ubyte count = 1;
+}
+
+const(char)[] value_type_name(ValueType t) pure
+{
+    final switch (t) with (ValueType)
+    {
+        case bool_: return "bool";
+        case u8:    return "u8";
+        case s8:    return "s8";
+        case u16:   return "u16";
+        case s16:   return "s16";
+        case u32:   return "u32";
+        case s32:   return "s32";
+        case u64:   return "u64";
+        case s64:   return "s64";
+        case f32:   return "f32";
+        case f64:   return "f64";
+        case char_: return "char";
+        case user:  return "user";
+    }
+}
+
+bool value_type_from_name(const(char)[] s, out ValueType t)
+{
+    static foreach (m; __traits(allMembers, ValueType))
+    {
+        if (s[] == value_type_name(__traits(getMember, ValueType, m))[])
+        {
+            t = __traits(getMember, ValueType, m);
+            return true;
+        }
+    }
+    return false;
+}
+
+bool wire_serialisable(ref const DataFormat f) pure
+    => f.clock is null && (f.type != ValueType.user || f.user_type.variant !is null);
 
 // Reset frames carry no value - the contract is that the receiver knows the
 // init value from the type's properties. This assert proves the contract holds
@@ -140,6 +197,29 @@ nothrow @nogc:
     abstract void encode_time_req(SyncPeer peer, uint seq);
     abstract void encode_time_resp(SyncPeer peer, uint seq, ulong recv_ns, ulong xmit_ns, uint ver);
     abstract void encode_time_push(SyncPeer peer, uint ver, long delta_ns);
+
+    // Model plane (data-model space): hello negotiation, push-only schema
+    // interning, node introduction and value feed. Handle resolution and
+    // interning decisions stay on the peer; encoders only serialize.
+
+    abstract void encode_hello(SyncPeer peer);
+
+    abstract void encode_model_sub(SyncPeer peer, uint seq, const(char[])[] patterns, bool once);
+
+    // form 1: intern a format under a session ft id
+    abstract void encode_type_format(SyncPeer peer, uint ft, ref const DataFormat fmt);
+    // form 2: a named type's dictionary, pushed before the first format that cites it
+    abstract void encode_type_enum(SyncPeer peer, const(char)[] name, const(VoidEnumInfo)* info);
+
+    // e is null for container nodes (class "device"); ft cites a session format id
+    abstract void encode_add(SyncPeer peer, SyncHandle h, const(char)[] path, const(char)[] node_class, uint ft, Element* e);
+
+    abstract void encode_val(SyncPeer peer, SyncHandle h, Element* e);
+    abstract void encode_val_block(SyncPeer peer, SyncHandle h, ref const RecordBlock blk);
+
+    abstract void encode_res(SyncPeer peer, uint seq);
+    abstract void encode_res(SyncPeer peer, uint seq, ref const Variant value);
+    abstract void encode_err(SyncPeer peer, uint seq, const(char)[] code, const(char)[] text);
 
     // Inbound entry point
     //

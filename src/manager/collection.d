@@ -78,13 +78,20 @@ enum CollectionType : ubyte
 }
 
 const(char)[] get_id_dstring(CID id) pure
-    => item_table(id.type_index).name_of(id);
+{
+    debug assert(id.type_index != CollectionType.device, "device CIDs resolve via DeviceTable");
+    return item_table(id.type_index).name_of(id);
+}
 
 String get_id(CID id) pure
-    => item_table(id.type_index).name_string(id);
+{
+    debug assert(id.type_index != CollectionType.device, "device CIDs resolve via DeviceTable");
+    return item_table(id.type_index).name_string(id);
+}
 
 BaseObject get_item(CID id) pure
 {
+    debug assert(id.type_index != CollectionType.device, "device CIDs resolve via DeviceTable");
     return item_table(id.type_index).get(id);
 }
 

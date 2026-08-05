@@ -472,6 +472,8 @@ nothrow @nogc:
             console.register_command!alloc_leaks_cmd("/system/alloc", this, "leaks");
         }
 
+        register_type(&device_type_info, "/device");
+
         console.register_command!device_add("/device", this, "add");
         console.register_command!device_print("/device", this, "print");
         console.register_command!element_set("/element", this, "set");
@@ -1393,6 +1395,8 @@ nothrow @nogc:
 
     void notify_element_created(Element* e)
     {
+        signal_element_lifecycle(e, ElementLifecycleEvent.created);
+
         char[256] buf = void;
         ptrdiff_t len = e.full_path(buf);
         if (len <= 0 || len > buf.length)

@@ -9,7 +9,7 @@ import urt.time;
 import urt.variant;
 
 import manager;
-import manager.collection : CID, CollectionType, make_cid;
+import manager.collection : CID, CollectionType, CollectionTypeInfo, make_cid;
 import manager.component;
 import manager.element;
 import manager.expression;
@@ -21,6 +21,9 @@ nothrow @nogc:
 
 alias CreateElementHandler = FormatId delegate(Device device, Element* e, ref const ElementDesc desc,
                                                ubyte index) nothrow @nogc;
+
+// null create: devices are not BaseObjects; their table is g_app.devices, not g_item_tables
+__gshared const CollectionTypeInfo device_type_info = CollectionTypeInfo(StringLit!"device", StringLit!"/device", CollectionType.device, null, null, null, false);
 
 struct DeviceTable
 {
@@ -233,6 +236,7 @@ nothrow @nogc:
     }
 
     CID cid;                            // unset until DeviceTable.insert stamps it
+    bool remote;                        // materialized from a sync peer; never announced back
     IndexTable!(Element*) element_ids;
 
     Array!Computation computations;
@@ -414,6 +418,9 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
         if (name)
             device.name = name.makeString(g_app.allocator);
         is_new_device = true;
+        // identity claims at birth: element lifecycle handlers fired during materialization
+        // need the device's CID to allocate EIDs
+        g_app.devices.insert(device.id[], device);
     }
 
     Component find_or_create_component(Component parent, ref ComponentTemplate ct)
@@ -605,9 +612,6 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
             continue;
         find_or_create_component(device, ct);
     }
-
-    if (is_new_device)
-        g_app.devices.insert(device.id[], device);
 
     apply_default_retention(device);
 

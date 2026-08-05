@@ -13,13 +13,15 @@ import urt.array;
 import urt.format.json;
 import urt.log;
 import urt.mem.allocator;
-import urt.meta.enuminfo : enum_key_from_value, enum_from_key;
+import urt.meta.enuminfo : enum_key_from_value, enum_from_key, VoidEnumInfo;
 import urt.string;
 import urt.variant;
 
 import manager.base;
 import manager.collection;
+import manager.element : Element;
 import manager.record : Sample;
+import manager.series : Constraint, DataFormat, RecordBlock, Scalar, SeriesKind, ValueType;
 import manager.sync;
 import manager.sync.encoder;
 import manager.sync.peer;
@@ -59,7 +61,7 @@ nothrow @nogc:
 
     override void encode_bind(SyncPeer peer, BaseObject obj, uint seq)
     {
-        uint h = peer.handle_of(obj);
+        SyncHandle h = peer.handle_of(obj);
         debug assert(h != SyncPeer.invalid_handle, "bind without prior add_name");
         begin_frame("bind");
         _buf.append(",\"target\":", h);
@@ -139,8 +141,7 @@ nothrow @nogc:
         send_frame(peer);
     }
 
-    override void encode_set(SyncPeer peer, CID target, const(char)[] prop_name,
-                             ref const Variant value, uint seq)
+    override void encode_set(SyncPeer peer, CID target, const(char)[] prop_name, ref const Variant value, uint seq)
     {
         begin_frame("set");
         _buf.append(",\"target\":", peer.handle_of(target));
@@ -321,6 +322,202 @@ nothrow @nogc:
         send_frame(peer);
     }
 
+    // Outbound: model plane
+
+    override void encode_hello(SyncPeer peer)
+    {
+        import manager.system : hostname;
+
+        begin_frame("hello");
+        _buf.append(",\"ver\":", model_protocol_version);
+        _buf.append(",\"host\":");
+        write_str(hostname[]);
+        _buf ~= ",\"caps\":[";
+        bool first = true;
+        foreach (bit; 0 .. 8)
+        {
+            if (!(local_sync_caps & (1 << bit)))
+                continue;
+            if (!first)
+                _buf ~= ',';
+            first = false;
+            _buf.append('\"', enum_key_from_value!SyncCaps(cast(SyncCaps)(1 << bit)), '\"');
+        }
+        _buf ~= "],\"encoders\":[\"json\"]";
+        _buf.append(",\"max_frame\":", max_frame_size);
+        send_frame(peer);
+    }
+
+    override void encode_model_sub(SyncPeer peer, uint seq, const(char[])[] patterns, bool once)
+    {
+        begin_frame("sub");
+        _buf.append(",\"seq\":", seq);
+        _buf ~= ",\"patterns\":[";
+        foreach (i, p; patterns)
+        {
+            if (i)
+                _buf ~= ',';
+            write_str(p);
+        }
+        _buf ~= ']';
+        if (once)
+            _buf ~= ",\"once\":true";
+        send_frame(peer);
+    }
+
+    override void encode_type_format(SyncPeer peer, uint ft, ref const DataFormat fmt)
+    {
+        import manager.sample : enum_info_name;
+
+        begin_frame("type");
+        _buf.append(",\"ft\":", ft);
+        _buf.append(",\"format\":{\"type\":\"", value_type_name(fmt.type), '\"');
+        _buf.append(",\"series\":\"", enum_key_from_value!SeriesKind(fmt.kind), '\"');
+        if (fmt.count != 1)
+            _buf.append(",\"count\":", fmt.count);
+        if (fmt.rate)
+            _buf.append(",\"rate\":", fmt.rate);
+        if (fmt.desc == DataFormat.Desc.quantity)
+            _buf.append(",\"unit\":\"", fmt.unit, '\"');
+        else if (fmt.desc == DataFormat.Desc.enum_)
+        {
+            _buf ~= ",\"enum\":";
+            write_str(enum_info_name(fmt.enum_info));
+        }
+        if (fmt.constraint && fmt.is_scalar)
+        {
+            ref const Constraint c = *fmt.constraint;
+            if (c.has & Constraint.Has.min)
+            {
+                _buf ~= ",\"min\":";
+                append_scalar(c.min, fmt.type);
+            }
+            if (c.has & Constraint.Has.max)
+            {
+                _buf ~= ",\"max\":";
+                append_scalar(c.max, fmt.type);
+            }
+            if (c.has & Constraint.Has.step)
+            {
+                _buf ~= ",\"step\":";
+                append_scalar(c.step, fmt.type);
+            }
+        }
+        _buf ~= '}';
+        send_frame(peer);
+    }
+
+    override void encode_type_enum(SyncPeer peer, const(char)[] name, const(VoidEnumInfo)* info)
+    {
+        begin_frame("type");
+        _buf ~= ",\"name\":";
+        write_str(name);
+        _buf ~= ",\"members\":{";
+        foreach (i; 0 .. info.count)
+        {
+            const(char)[] key = info.key_by_decl_index(i);
+            if (i)
+                _buf ~= ',';
+            write_str(key);
+            _buf.append(':', info.value_for(key).asLong);
+        }
+        _buf ~= '}';
+        send_frame(peer);
+    }
+
+    override void encode_add(SyncPeer peer, SyncHandle h, const(char)[] path, const(char)[] node_class, uint ft, Element* e)
+    {
+        import urt.time : unix_time_ns;
+        import manager.element : Access, SamplingMode;
+
+        begin_frame("add");
+        _buf.append(",\"h\":", h);
+        _buf ~= ",\"path\":";
+        write_str(path);
+        _buf.append(",\"class\":\"", node_class, '\"');
+        if (e)
+        {
+            _buf.append(",\"ft\":", ft);
+            if (e.access != Access.read)
+                _buf.append(",\"access\":\"", enum_key_from_value!Access(e.access), '\"');
+            if (e.sampling_mode != SamplingMode.manual)
+                _buf.append(",\"mode\":\"", enum_key_from_value!SamplingMode(e.sampling_mode), '\"');
+            if (e.data_format.kind != SeriesKind.point)
+            {
+                // events retain no value; occurrences replay via `from`
+                Variant v = e.value;
+                if (!v.isNull)
+                {
+                    _buf ~= ",\"v\":";
+                    write_variant(v);
+                    _buf.append(",\"t\":", unix_time_ns(e.last_update) / 1_000_000);
+                }
+            }
+        }
+        send_frame(peer);
+    }
+
+    override void encode_val(SyncPeer peer, SyncHandle h, Element* e)
+    {
+        import urt.time : unix_time_ns;
+
+        begin_frame("val");
+        _buf.append(",\"h\":", h);
+        _buf.append(",\"s\":[[", unix_time_ns(e.last_update) / 1_000_000, ',');
+        Variant v = e.value;
+        write_variant(v);
+        _buf ~= "]]";
+        send_frame(peer);
+    }
+
+    override void encode_val_block(SyncPeer peer, SyncHandle h, ref const RecordBlock blk)
+    {
+        import urt.time : unix_time_ns;
+
+        begin_frame("val");
+        _buf.append(",\"h\":", h);
+        if (blk.lost)
+            _buf.append(",\"lost\":", blk.lost);
+        _buf ~= ",\"s\":[";
+        foreach (i; 0 .. blk.count)
+        {
+            if (i)
+                _buf ~= ',';
+            _buf.append('[', unix_time_ns(blk.time(i)) / 1_000_000, ',');
+            Variant v = blk.box(i);
+            write_variant(v);
+            _buf ~= ']';
+        }
+        _buf ~= ']';
+        send_frame(peer);
+    }
+
+    override void encode_res(SyncPeer peer, uint seq)
+    {
+        begin_frame("res");
+        _buf.append(",\"seq\":", seq);
+        send_frame(peer);
+    }
+
+    override void encode_res(SyncPeer peer, uint seq, ref const Variant value)
+    {
+        begin_frame("res");
+        _buf.append(",\"seq\":", seq);
+        _buf ~= ",\"value\":";
+        write_variant(value);
+        send_frame(peer);
+    }
+
+    override void encode_err(SyncPeer peer, uint seq, const(char)[] code, const(char)[] text)
+    {
+        begin_frame("err");
+        _buf.append(",\"seq\":", seq);
+        _buf.append(",\"code\":\"", code, '\"');
+        _buf ~= ",\"text\":";
+        write_str(text);
+        send_frame(peer);
+    }
+
     // Inbound
 
     override void decode_and_dispatch(SyncPeer peer, const(ubyte)[] frame)
@@ -342,32 +539,27 @@ nothrow @nogc:
         switch (kind_str)
         {
             case "add_name":
-                sync.inbound_add_name(peer,
-                    cast(uint)json.getMember("h").asLong(),
-                    json.getMember("name").asString(),
-                    json.getMember("type").asString());
+                sync.inbound_add_name(peer, json.getMember("h").as!SyncHandle, json.getMember("name").asString(), json.getMember("type").asString());
                 break;
 
             case "bind":
             {
-                CID target = peer.cid_of(cast(uint)json.getMember("target").asLong());
+                CID target = peer.cid_of(json.getMember("target").as!SyncHandle);
                 const(char)[] type = json.getMember("type").asString();
-                uint seq = cast(uint)json.getMember("seq").asLong();
+                uint seq = json.getMember("seq").asUint();
                 sync.inbound_bind(peer, target, type, seq);
                 dispatch_props(peer, target, json);
                 break;
             }
 
             case "unbind":
-                sync.inbound_unbind(peer,
-                    peer.cid_of(cast(uint)json.getMember("target").asLong()),
-                    cast(uint)json.getMember("seq").asLong());
+                sync.inbound_unbind(peer, peer.cid_of(json.getMember("target").as!SyncHandle), json.getMember("seq").asUint());
                 break;
 
             case "create":
             {
                 const(char)[] type = json.getMember("type").asString();
-                uint seq = cast(uint)json.getMember("seq").asLong();
+                uint seq = json.getMember("seq").asUint();
 
                 Array!NamedArgument props;
                 Variant* pv = json.getMember("props");
@@ -380,9 +572,7 @@ nothrow @nogc:
             }
 
             case "destroy":
-                sync.inbound_destroy(peer,
-                    peer.cid_of(cast(uint)json.getMember("target").asLong()),
-                    cast(uint)json.getMember("seq").asLong());
+                sync.inbound_destroy(peer, peer.cid_of(json.getMember("target").as!SyncHandle), json.getMember("seq").asUint());
                 break;
 
             case "state":
@@ -394,69 +584,187 @@ nothrow @nogc:
                     log.warning("sync/json: unknown state signal: ", sig_str);
                     break;
                 }
-                sync.inbound_state(peer,
-                    peer.cid_of(cast(uint)json.getMember("target").asLong()),
-                    *sig);
+                sync.inbound_state(peer, peer.cid_of(json.getMember("target").as!SyncHandle), *sig);
                 break;
             }
 
             case "set":
             {
-                CID target = peer.cid_of(cast(uint)json.getMember("target").asLong());
-                const(char)[] prop = json.getMember("prop").asString();
-                uint seq = cast(uint)json.getMember("seq").asLong();
+                uint seq = json.getMember("seq").asUint();
                 Variant* val = json.getMember("value");
-                if (!val)
+                if (json.getMember("prop"))
                 {
-                    log.warning("sync/json: set missing 'value'");
+                    // legacy object-mirror property set
+                    CID target = peer.cid_of(json.getMember("target").as!SyncHandle);
+                    const(char)[] prop = json.getMember("prop").asString();
+                    if (!val)
+                    {
+                        log.warning("sync/json: set missing 'value'");
+                        break;
+                    }
+                    sync.inbound_set(peer, target, prop, *val, seq);
                     break;
                 }
-                sync.inbound_set(peer, target, prop, *val, seq);
+                Variant* hv = json.getMember("h");
+                Variant* pathv = json.getMember("path");
+                Variant* resetv = json.getMember("reset");
+                sync.inbound_model_set(peer, seq, hv ? hv.as!SyncHandle : SyncPeer.invalid_handle, pathv ? pathv.asString() : null, val, resetv && resetv.asBool());
                 break;
             }
 
             case "reset":
-                sync.inbound_reset(peer,
-                    peer.cid_of(cast(uint)json.getMember("target").asLong()),
-                    json.getMember("prop").asString(),
-                    cast(uint)json.getMember("seq").asLong());
+                sync.inbound_reset(peer, peer.cid_of(json.getMember("target").as!SyncHandle), json.getMember("prop").asString(), json.getMember("seq").asUint());
                 break;
 
             case "cmd":
-                sync.inbound_cmd(peer,
-                    cast(uint)json.getMember("seq").asLong(),
-                    json.getMember("text").asString());
+                sync.inbound_cmd(peer, json.getMember("seq").asUint(), json.getMember("text").asString());
                 break;
 
             case "result":
             {
-                uint seq = cast(uint)json.getMember("seq").asLong();
+                uint seq = json.getMember("seq").asUint();
                 Variant* val = json.getMember("value");
                 Variant empty;
-                sync.inbound_result(peer, seq,
-                    val ? *val : empty,
-                    json.getMember("text").asString());
+                sync.inbound_result(peer, seq, val ? *val : empty, json.getMember("text").asString());
                 break;
             }
 
             case "error":
-                sync.inbound_error(peer,
-                    cast(uint)json.getMember("seq").asLong(),
-                    json.getMember("text").asString());
+                sync.inbound_error(peer, json.getMember("seq").asUint(), json.getMember("text").asString());
                 break;
 
             case "sub":
-                sync.inbound_sub(peer,
-                    json.getMember("pattern").asString().makeString(defaultAllocator));
+            {
+                Variant* pats = json.getMember("patterns");
+                if (pats && pats.isArray)
+                {
+                    Array!(const(char)[]) patterns;
+                    for (size_t i = 0; i < pats.length(); ++i)
+                        patterns ~= (*pats)[i].asString();
+                    Variant* once = json.getMember("once");
+                    Variant* from = json.getMember("from");
+                    Variant* to = json.getMember("to");
+                    sync.inbound_model_sub(peer, json.getMember("seq").asUint(), patterns[], once && once.asBool(), from ? from.asUlong() : 0, to ? to.asUlong() : 0);
+                    break;
+                }
+                sync.inbound_sub(peer, json.getMember("pattern").asString().makeString(defaultAllocator));
                 break;
+            }
+
+            case "hello":
+            {
+                ubyte caps;
+                Variant* cv = json.getMember("caps");
+                if (cv && cv.isArray)
+                {
+                    for (size_t i = 0; i < cv.length(); ++i)
+                    {
+                        const(SyncCaps)* c = enum_from_key!SyncCaps((*cv)[i].asString());
+                        if (c)
+                            caps |= *c;
+                    }
+                }
+                Variant* mf = json.getMember("max_frame");
+                sync.inbound_hello(peer, json.getMember("ver").asUint(), json.getMember("host").asString(), caps, mf ? mf.asUint() : 0);
+                break;
+            }
+
+            case "type":
+            {
+                Variant* fmt = json.getMember("format");
+                if (fmt && fmt.isObject)
+                {
+                    WireFormat wf;
+                    wf.type = fmt.getMember("type").asString();
+                    wf.series = fmt.getMember("series").asString();
+                    Variant* c = fmt.getMember("count");
+                    wf.count = c ? c.as!ubyte : 1;
+                    Variant* r = fmt.getMember("rate");
+                    wf.rate = r ? r.asUint() : 0;
+                    Variant* u = fmt.getMember("unit");
+                    wf.unit = u ? u.asString() : null;
+                    Variant* en = fmt.getMember("enum");
+                    wf.enum_name = en ? en.asString() : null;
+                    if (Variant* mn = fmt.getMember("min"))
+                        wf.min = *mn;
+                    if (Variant* mx = fmt.getMember("max"))
+                        wf.max = *mx;
+                    if (Variant* st = fmt.getMember("step"))
+                        wf.step = *st;
+                    sync.inbound_type_format(peer, json.getMember("ft").asUint(), wf);
+                    break;
+                }
+                Variant* members = json.getMember("members");
+                Variant empty;
+                sync.inbound_type_enum(peer, json.getMember("name").asString(), members ? *members : empty);
+                break;
+            }
+
+            case "add":
+            {
+                Variant* ft = json.getMember("ft");
+                Variant* acc = json.getMember("access");
+                Variant* mode = json.getMember("mode");
+                Variant* t = json.getMember("t");
+                sync.inbound_model_add(peer,
+                    json.getMember("h").as!SyncHandle,
+                    json.getMember("path").asString(),
+                    json.getMember("class").asString(),
+                    ft ? ft.asUint() : uint.max,
+                    acc ? acc.asString() : null,
+                    mode ? mode.asString() : null,
+                    json.getMember("v"),
+                    t ? t.asUlong() : 0);
+                break;
+            }
+
+            case "val":
+            {
+                Variant* s = json.getMember("s");
+                if (!s || !s.isArray)
+                {
+                    log.warning("sync/json: val missing sample array");
+                    break;
+                }
+                SyncHandle h = json.getMember("h").as!SyncHandle;
+                for (size_t i = 0; i < s.length(); ++i)
+                {
+                    ref Variant pair = (*s)[i];
+                    if (!pair.isArray || pair.length() < 2)
+                        continue;
+                    sync.inbound_val(peer, h, pair[1], pair[0].asUlong());
+                }
+                break;
+            }
+
+            case "res":
+                sync.inbound_res(peer, json.getMember("seq").asUint());
+                break;
+
+            case "err":
+            {
+                Variant* code = json.getMember("code");
+                sync.inbound_err(peer, json.getMember("seq").asUint(), code ? code.asString() : null, json.getMember("text").asString());
+                break;
+            }
 
             case "unsub":
+            {
+                Variant* pats = json.getMember("patterns");
+                if (pats && pats.isArray)
+                {
+                    Array!(const(char)[]) patterns;
+                    for (size_t i = 0; i < pats.length(); ++i)
+                        patterns ~= (*pats)[i].asString();
+                    sync.inbound_model_unsub(peer, patterns[]);
+                    break;
+                }
                 sync.inbound_unsub(peer, json.getMember("pattern").asString());
                 break;
+            }
 
             case "enum_req":
-                sync.inbound_enum_req(peer, json.getMember("type").asString(),
-                    cast(uint)json.getMember("seq").asLong());
+                sync.inbound_enum_req(peer, json.getMember("type").asString(), json.getMember("seq").asUint());
                 break;
 
             case "history_req":
@@ -466,10 +774,10 @@ nothrow @nogc:
                 Variant* max = json.getMember("max");
                 sync.inbound_history_req(peer,
                     json.getMember("path").asString(),
-                    from ? cast(ulong)from.asLong() : 0,
-                    to ? cast(ulong)to.asLong() : 0,
-                    max ? cast(uint)max.asLong() : 0,
-                    cast(uint)json.getMember("seq").asLong());
+                    from ? from.asUlong() : 0,
+                    to ? to.asUlong() : 0,
+                    max ? max.asUint() : 0,
+                    json.getMember("seq").asUint());
                 break;
             }
 
@@ -481,12 +789,10 @@ nothrow @nogc:
 
             case "enum":
             {
-                uint seq = cast(uint)json.getMember("seq").asLong();
+                uint seq = json.getMember("seq").asUint();
                 Variant* members = json.getMember("members");
                 Variant empty;
-                sync.inbound_enum(peer,
-                    json.getMember("type").asString(),
-                    members ? *members : empty, seq);
+                sync.inbound_enum(peer, json.getMember("type").asString(), members ? *members : empty, seq);
                 break;
             }
 
@@ -538,21 +844,15 @@ nothrow @nogc:
             }
 
             case "time_req":
-                sync.inbound_time_req(peer, cast(uint)json.getMember("seq").asLong());
+                sync.inbound_time_req(peer, json.getMember("seq").asUint());
                 break;
 
             case "time_resp":
-                sync.inbound_time_resp(peer,
-                    cast(uint)json.getMember("seq").asLong(),
-                    cast(ulong)json.getMember("recv").asLong(),
-                    cast(ulong)json.getMember("xmit").asLong(),
-                    cast(uint)json.getMember("ver").asLong());
+                sync.inbound_time_resp(peer, json.getMember("seq").asUint(), json.getMember("recv").asUlong(), json.getMember("xmit").asUlong(), json.getMember("ver").asUint());
                 break;
 
             case "time_push":
-                sync.inbound_time_push(peer,
-                    cast(uint)json.getMember("ver").asLong(),
-                    json.getMember("delta").asLong());
+                sync.inbound_time_push(peer, json.getMember("ver").asUint(), json.getMember("delta").asLong());
                 break;
 
             default:
@@ -658,6 +958,27 @@ private:
     {
         size_t n = v.write_json(null);
         v.write_json(_buf.extend(n));
+    }
+
+    // constraint scalars are typed by their format; read stride bytes like compare_scalar does
+    void append_scalar(ref const Scalar s, ValueType t)
+    {
+        final switch (t) with (ValueType)
+        {
+            case bool_: _buf ~= *cast(const(bool)*)s.raw.ptr ? "true" : "false";    break;
+            case u8:    _buf.append(*cast(const(ubyte)*)s.raw.ptr);                 break;
+            case s8:    _buf.append(*cast(const(byte)*)s.raw.ptr);                  break;
+            case u16:   _buf.append(*cast(const(ushort)*)s.raw.ptr);                break;
+            case s16:   _buf.append(*cast(const(short)*)s.raw.ptr);                 break;
+            case u32:   _buf.append(*cast(const(uint)*)s.raw.ptr);                  break;
+            case s32:   _buf.append(*cast(const(int)*)s.raw.ptr);                   break;
+            case u64:   _buf.append(*cast(const(ulong)*)s.raw.ptr);                 break;
+            case s64:   _buf.append(*cast(const(long)*)s.raw.ptr);                  break;
+            case f32:   _buf.append(*cast(const(float)*)s.raw.ptr);                 break;
+            case f64:   _buf.append(*cast(const(double)*)s.raw.ptr);                break;
+            case char_:
+            case user:  assert(false, "constraint on non-numeric type");
+        }
     }
 
     // Emit all SET props, including read-only ones - proxies can't
