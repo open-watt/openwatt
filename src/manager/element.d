@@ -1,5 +1,22 @@
 module manager.element;
 
+// Elements host the typed series (manager.series) and publish changes to subscribers.
+//
+// Readers take one of two forms. A Cursor is an incremental reader: it holds a bit in the
+// element's 16 cursor slots, and the retention hold lives in SeriesStore (pin_mask,
+// pin_position, cursor_ref) indexed by that bit, so a pinned cursor keeps buckets alive
+// until it has consumed them. read_records() is the cursor-less form: random access by
+// index, no pin, subject to eviction between calls.
+//
+// TODO: durable cursor holders keep a raw Element* across frames (the recorder is the only
+// one). That is safe solely because elements are never destroyed today - teardown() has no
+// production caller, Device.~this only clears computations, and ElementLifecycleEvent.destroyed
+// is never signalled, so a removed device leaks its elements rather than freeing them. When
+// element destruction becomes real (device removal, profile reload, dynamic per-VIN sessions),
+// durable holders must key by EID and deref per use, or they dangle. An EID-keyed cursor
+// wrapper existed for exactly this, went unused for lack of a lifecycle to defend against,
+// and was deleted; rebuild it there rather than inferring the pattern anew.
+
 import urt.array;
 import urt.lifetime;
 import urt.log : writeWarning;
@@ -142,7 +159,7 @@ struct Cursor
 {
 nothrow @nogc:
 
-    Element* element;  // transient storage-level form; durable holders use manager.element.ElementCursor (EID)
+    Element* element;
     ulong position;
     ubyte bit;
 
@@ -338,15 +355,6 @@ nothrow @nogc:
             return EID.invalid;
         _eid = d.cid.element(d.element_ids.allocate(&this));
         return _eid;
-    }
-
-    ElementCursor open_cursor(ulong from_index = ulong.max, bool pin = false)
-    {
-        EID handle = ensure_eid();
-        if (!handle)
-            return ElementCursor();
-        Cursor c = open_series_cursor(from_index, pin);
-        return ElementCursor(handle, c.position, c.bit);
     }
 
     // checked write for external writers (console, sync set, property setters); null = stored
@@ -1213,51 +1221,6 @@ void deliver(ref SampleUpdate update)
 }
 
 public:
-
-// the durable cursor: holds an EID, never a pointer - resolves per call and goes quiet
-// when the element dies
-struct ElementCursor
-{
-nothrow @nogc:
-
-    EID eid;
-    ulong position;
-    ubyte bit;
-
-    bool opCast(T : bool)() const pure
-        => eid != EID.invalid;
-
-    bool pending()
-    {
-        Element* e = eid.deref;
-        if (!e)
-            return false;
-        auto c = Cursor(e, position, bit);
-        return c.pending;
-    }
-
-    RecordBlock next(uint max_records)
-    {
-        Element* e = eid.deref;
-        if (!e)
-            return RecordBlock();
-        auto c = Cursor(e, position, bit);
-        RecordBlock r = c.next(max_records);
-        position = c.position;
-        return r;
-    }
-
-    void close()
-    {
-        if (Element* e = eid.deref)
-        {
-            auto c = Cursor(e, position, bit);
-            e.close_series_cursor(c);
-        }
-        eid = EID.invalid;
-    }
-}
-
 
 bool sample_to_double(ref const Variant v, out double value)
 {

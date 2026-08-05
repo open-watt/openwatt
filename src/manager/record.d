@@ -45,8 +45,8 @@ struct RecordStream
 nothrow @nogc:
 
     Recorder owner;
-    Element* element;
-    Cursor cursor;          // typed-series intake: pinned, never lapped (element holder predates EIDs, so this rides along)
+    Element* element;       // TODO: key by EID when element destruction lands (see manager.element header)
+    Cursor cursor;          // typed-series intake: pinned, never lapped
     SeriesContainer container;
     String path;            // data-model path: "device.component.element"
     SeriesId series;        // legacy database query handle
