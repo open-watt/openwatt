@@ -35,17 +35,6 @@ enum SecretKind : ubyte
 
 class Secret : BaseObject
 {
-    static if (has_ec_secret)
-        alias Properties = AliasSeq!(Prop!("kind", kind),
-                                     Prop!("key_file", key_file),
-                                     Prop!("password", password),
-                                     Prop!("algorithm", algorithm),
-                                     Prop!("services", services));
-    else
-        alias Properties = AliasSeq!(Prop!("kind", kind),
-                                     Prop!("password", password),
-                                     Prop!("algorithm", algorithm),
-                                     Prop!("services", services));
 nothrow @nogc:
 
     enum type_name = "secret";
@@ -97,6 +86,18 @@ nothrow @nogc:
         }
         mark_set!(typeof(this), "key_file")();
     }
+
+    static if (has_ec_secret)
+        alias Properties = AliasSeq!(Prop!("kind", kind),
+                                     Prop!("key_file", key_file),
+                                     Prop!("password", password),
+                                     Prop!("algorithm", algorithm),
+                                     Prop!("services", services));
+    else
+        alias Properties = AliasSeq!(Prop!("kind", kind),
+                                     Prop!("password", password),
+                                     Prop!("algorithm", algorithm),
+                                     Prop!("services", services));
 
     const(char)[] password() const pure
     {
