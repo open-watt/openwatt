@@ -62,21 +62,6 @@ package:
     IdAllocator!Device _machine;
 }
 
-Element* deref(ref EID eid)
-{
-    if (!g_app || eid.container.type_index != CollectionType.device)
-        return null;
-    uint slot = eid.container.slot;
-    Device d = g_app.devices._machine.deref(slot);
-    if (!d)
-        return null;
-    ushort index = eid.index;
-    Element* e = d.element_ids.deref(index);
-    if (e && (slot != eid.container.slot || index != eid.index))
-        eid = EID(make_cid(CollectionType.device, slot), index);
-    return e;
-}
-
 enum ComputationKind : ubyte
 {
     expression,

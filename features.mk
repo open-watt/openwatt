@@ -10,7 +10,7 @@
 # Axes (orthogonal, can combine freely):
 #
 #   FEATURES        What's compiled in. Drives binary cost.
-#                     switch  - main + manager + db + driver + router
+#                     switch  - main + manager + driver + router
 #                               (L2 packet fabric; no IP/protocols/apps).
 #                               Suited to a coprocessor data-plane build.
 #                     switch-ip - switch + protocol/ip + protocol/dhcp.
@@ -62,14 +62,14 @@ endif
 # -- Source-tree subset per preset ---------------------------------------
 # main.d at $(SRCDIR) root is always included by the main Makefile.
 
-FEATURE_DIRS_minimal := manager db driver
+FEATURE_DIRS_minimal := manager driver
 # Modbus iface is part of the switching fabric -- every embedded device
 # has a UART so modbus-rtu plumbing belongs with the data plane, not
 # the higher-level control plane. The rest of protocol/modbus rides
 # along here until the iface/control split is teased apart (Phase 2).
-FEATURE_DIRS_switch  := manager db driver router protocol/modbus
+FEATURE_DIRS_switch  := manager driver router protocol/modbus
 FEATURE_DIRS_switch-ip := $(FEATURE_DIRS_switch) protocol/ip protocol/dhcp
-FEATURE_DIRS_full    := manager db driver router protocol apps devices tools
+FEATURE_DIRS_full    := manager driver router protocol apps devices tools
 
 FEATURE_DIRS := $(FEATURE_DIRS_$(FEATURES))
 

@@ -26,20 +26,6 @@ enum ComponentEvent : ubyte
 alias ComponentSubscriber = void delegate(Component component, ComponentEvent event) nothrow @nogc;
 
 
-struct FieldTemplate
-{
-    String name;
-    String unit;
-    ubyte flags; // mandatory, hidden
-    // default value or default value expression (using related values)
-}
-
-struct ComponentTempalte
-{
-    String name;
-    FieldTemplate[] fields;
-}
-
 extern(C++)
 class Component
 {
@@ -205,15 +191,6 @@ nothrow @nogc:
         return null;
     }
 
-    Array!Component find_components_by_template(const char[] template_name)
-    {
-        Array!Component result;
-        foreach (Component c; components)
-            if (c.template_[] == template_name[])
-                result ~= c;
-        return result;
-    }
-
     ptrdiff_t full_path(char[] buf) const nothrow @nogc
     {
         size_t pos;
@@ -239,9 +216,4 @@ private:
     Array!ComponentSubscriber _subscribers;
 }
 
-
-//__gshared Map!(const(char)[], FieldTemplate*) g_component_templates;
-//__gshared immutable FieldTemplate[] templates = [
-//    FieldTemplate("switch");
-//];
 

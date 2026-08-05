@@ -1,5 +1,22 @@
 module manager.element;
 
+// Elements host the typed series (manager.series) and publish changes to subscribers.
+//
+// Readers take one of two forms. A Cursor is an incremental reader: it holds a bit in the
+// element's 16 cursor slots, and the retention hold lives in SeriesStore (pin_mask,
+// pin_position, cursor_ref) indexed by that bit, so a pinned cursor keeps buckets alive
+// until it has consumed them. read_records() is the cursor-less form: random access by
+// index, no pin, subject to eviction between calls.
+//
+// TODO: durable cursor holders keep a raw Element* across frames (the recorder is the only
+// one). That is safe solely because elements are never destroyed today - teardown() has no
+// production caller, Device.~this only clears computations, and ElementLifecycleEvent.destroyed
+// is never signalled, so a removed device leaks its elements rather than freeing them. When
+// element destruction becomes real (device removal, profile reload, dynamic per-VIN sessions),
+// durable holders must key by EID and deref per use, or they dangle. An EID-keyed cursor
+// wrapper existed for exactly this, went unused for lack of a lifecycle to defend against,
+// and was deleted; rebuild it there rather than inferring the pattern anew.
+
 import urt.array;
 import urt.lifetime;
 import urt.log : writeWarning;
@@ -67,7 +84,6 @@ nothrow @nogc:
     const(SysTime)[] times;
     const(ulong)[] ticks;
     Subscriber who;
-    ulong first_index;
     Variant value;
     Variant previous;
     SysTime timestamp;
@@ -142,7 +158,7 @@ struct Cursor
 {
 nothrow @nogc:
 
-    Element* element;  // transient storage-level form; durable holders use manager.element.ElementCursor (EID)
+    Element* element;
     ulong position;
     ubyte bit;
 
@@ -174,8 +190,6 @@ nothrow @nogc:
         position += r.count;
         if (h.pin_mask & (1 << bit))
             h.pin_position[bit] = position;
-        if (!pending)
-            element._dirty &= ~cast(ushort)(1 << bit);
         return r;
     }
 }
@@ -306,16 +320,6 @@ nothrow @nogc:
         }
     }
 
-    void write_records(const(void)[] records, const(SysTime)[] times, Subscriber who = null)
-    {
-        store_records(records, times, who);
-    }
-
-    void write_records(const(void)[] records, const(ulong)[] ticks, Subscriber who = null)
-    {
-        store_records(records, ticks, who);
-    }
-
     void mark_gap(Subscriber who = null)
     {
         mark_series_gap(who);
@@ -338,15 +342,6 @@ nothrow @nogc:
             return EID.invalid;
         _eid = d.cid.element(d.element_ids.allocate(&this));
         return _eid;
-    }
-
-    ElementCursor open_cursor(ulong from_index = ulong.max, bool pin = false)
-    {
-        EID handle = ensure_eid();
-        if (!handle)
-            return ElementCursor();
-        Cursor c = open_series_cursor(from_index, pin);
-        return ElementCursor(handle, c.position, c.bit);
     }
 
     // checked write for external writers (console, sync set, property setters); null = stored
@@ -716,7 +711,6 @@ public:
             _history.cursor_mask &= ~cast(ushort)(1 << c.bit);
             _history.pin_mask &= ~cast(ushort)(1 << c.bit);
         }
-        _dirty &= ~cast(ushort)(1 << c.bit);
         c.element = null;
     }
 
@@ -759,7 +753,6 @@ private:
     SysTime _last_update;
     Subscription* _subs;
     SeriesStore* _history;
-    ushort _dirty;
     ubyte _flags;
 
     enum bucket_capacity = 256; // TODO: scale with rate (target a time span, not a record count)
@@ -818,12 +811,12 @@ private:
         if (update.times.length)
         {
             _last_update = update.times[$-1];
-            update.first_index = append(update.records, update.times);
+            append(update.records, update.times);
         }
         else
         {
             _last_update = data_format.clock.to_wall(update.ticks[$-1]);
-            update.first_index = append(update.records, update.ticks);
+            append(update.records, update.ticks);
         }
     }
 
@@ -848,13 +841,12 @@ private:
             ensure_history();
             _flags |= Flags.latest_only;
         }
-        ulong first_index = append_text(v, unix_time_ns(t) / 1000);
+        append_text(v, unix_time_ns(t) / 1000);
         _last_update = t;
 
         SampleUpdate update;
         update.element = &this;
         update.who = who;
-        update.first_index = first_index;
         update.previous = previous.move;
         update.previous_timestamp = previous_timestamp;
         prepare_after(update);
@@ -1135,16 +1127,13 @@ private:
 
     void mark_dirty()
     {
-        bool cursors = _history && _history.cursor_mask;
-        if (!cursors && !g_feed_listeners)
+        if (!(_history && _history.cursor_mask) && !g_feed_listeners)
             return;
         if (!(_flags & Flags.dirty_listed))
         {
             g_dirty_elements ~= &this;
             _flags |= Flags.dirty_listed;
         }
-        if (cursors)
-            _dirty = _history.cursor_mask;
     }
 }
 
@@ -1213,51 +1202,6 @@ void deliver(ref SampleUpdate update)
 }
 
 public:
-
-// the durable cursor: holds an EID, never a pointer - resolves per call and goes quiet
-// when the element dies
-struct ElementCursor
-{
-nothrow @nogc:
-
-    EID eid;
-    ulong position;
-    ubyte bit;
-
-    bool opCast(T : bool)() const pure
-        => eid != EID.invalid;
-
-    bool pending()
-    {
-        Element* e = eid.deref;
-        if (!e)
-            return false;
-        auto c = Cursor(e, position, bit);
-        return c.pending;
-    }
-
-    RecordBlock next(uint max_records)
-    {
-        Element* e = eid.deref;
-        if (!e)
-            return RecordBlock();
-        auto c = Cursor(e, position, bit);
-        RecordBlock r = c.next(max_records);
-        position = c.position;
-        return r;
-    }
-
-    void close()
-    {
-        if (Element* e = eid.deref)
-        {
-            auto c = Cursor(e, position, bit);
-            e.close_series_cursor(c);
-        }
-        eid = EID.invalid;
-    }
-}
-
 
 bool sample_to_double(ref const Variant v, out double value)
 {
