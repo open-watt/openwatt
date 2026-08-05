@@ -9,11 +9,6 @@ module manager.owsig;
 // so time-seek is a binary search and recall is: load one block's payload, view it in place
 // as a RecordBlock (byte-identical to the RAM image).
 //
-// Codecs are registered with a selection predicate; the first match packs the payload and
-// RAW is the mandatory fallback (a codec that doesn't beat raw is ignored). Codec ids 0/1
-// are reserved (raw, zlib); zlib waits on a deflate encoder in urt. Registered codec ids
-// are process-local: TODO bind them by NAME in the anchor block before any ships.
-//
 // Dynamic-record series (text) serialise as their RAM image: fixed-stride u16 offset records
 // plus a trailing byte heap. put() compacts the heap per block - only entries the block's
 // records reference ship, dedup'd by content, offsets rebased - since a cursor block may
@@ -30,27 +25,6 @@ import manager.series;
 
 nothrow @nogc:
 
-
-enum ubyte owsig_codec_raw = 0;
-enum ubyte owsig_codec_zlib = 1;
-enum ubyte first_registered_codec = 2;
-
-struct SeriesCodec
-{
-    const(char)[] name;
-    bool function(ref const DataFormat fmt, ref const RecordBlock blk) nothrow @nogc match;
-    // pack the raw payload image into dst; bytes written, or -1 to decline (raw applies)
-    ptrdiff_t function(ref const RecordBlock blk, const(void)[] raw, void[] dst) nothrow @nogc pack;
-    // unpack a payload into the raw image; false = corrupt
-    bool function(const(void)[] src, ref const BlockEntry blk, void[] dst) nothrow @nogc unpack;
-}
-
-ubyte register_series_codec(ref const SeriesCodec codec)
-{
-    assert(g_num_codecs < g_codecs.length, "too many series codecs");
-    g_codecs[g_num_codecs] = codec;
-    return cast(ubyte)(first_registered_codec + g_num_codecs++);
-}
 
 bool container_serialisable(ref const DataFormat f)
     => f.clock is null && f.type != ValueType.user;
@@ -349,6 +323,17 @@ nothrow @nogc:
         uint raw_bytes = e.raw_bytes;
         _buf.resize(raw_bytes);
 
+        _fmt = DataFormat(cast(ValueType)e.fmt.type, cast(SeriesKind)e.fmt.kind);
+        if (e.fmt.unit)
+        {
+            ScaledUnit u;
+            (cast(ubyte*)&u)[0 .. ScaledUnit.sizeof] = (cast(const(ubyte)*)&e.fmt.unit)[0 .. ScaledUnit.sizeof];
+            _fmt = DataFormat(cast(ValueType)e.fmt.type, cast(SeriesKind)e.fmt.kind, u);
+        }
+        _fmt.count = e.fmt.count;
+        _fmt.rate = e.fmt.rate;
+        bool irregular = (e.hdr.flags & BlockHeader.Flags.irregular) != 0;
+
         size_t bytes;
         if (e.hdr.codec == owsig_codec_raw)
         {
@@ -363,21 +348,9 @@ nothrow @nogc:
             if (read_at(_file, _pbuf[], e.offset + e.hdr.header_bytes, bytes) != Result.success
                 || bytes < e.hdr.payload_bytes)
                 return false;
-            if (!g_codecs[e.hdr.codec - first_registered_codec].unpack(_pbuf[], e, _buf[]))
+            if (!g_codecs[e.hdr.codec - first_registered_codec].unpack(_pbuf[], _fmt, e.hdr.count, irregular, e.hdr.heap_bytes, _buf[]))
                 return false;
         }
-
-        _fmt = DataFormat(cast(ValueType)e.fmt.type, cast(SeriesKind)e.fmt.kind);
-        if (e.fmt.unit)
-        {
-            ScaledUnit u;
-            (cast(ubyte*)&u)[0 .. ScaledUnit.sizeof] = (cast(const(ubyte)*)&e.fmt.unit)[0 .. ScaledUnit.sizeof];
-            _fmt = DataFormat(cast(ValueType)e.fmt.type, cast(SeriesKind)e.fmt.kind, u);
-        }
-        _fmt.count = e.fmt.count;
-        _fmt.rate = e.fmt.rate;
-
-        bool irregular = (e.hdr.flags & BlockHeader.Flags.irregular) != 0;
         uint offs_bytes = irregular ? e.hdr.count * cast(uint)uint.sizeof : 0;
         blk.format = register_format(_fmt);
         blk.count = e.hdr.count;

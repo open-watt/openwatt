@@ -21,6 +21,7 @@ module manager.series;
 // Non-pod user types copy and drop through their registry hooks.
 
 import urt.array;
+import urt.mem.alloc;
 import urt.mem.allocator : defaultAllocator;
 import urt.meta.enuminfo : enum_info, VoidEnumInfo;
 import urt.si.quantity : Quantity;
@@ -444,6 +445,34 @@ nothrow @nogc:
     }
 }
 
+// One codec vocabulary, three residencies: a packed image is the same bytes whether it lives
+// behind a RAM bucket, in an owsig block, or in flight. The raw image layout is
+// [offsets plane?][record plane][heap], identical to the owsig payload. Codecs register with
+// a selection predicate; the first match packs and RAW is the mandatory fallback (a codec
+// that doesn't beat raw is ignored). Ids 0/1 are reserved (raw, zlib); registered ids are
+// process-local: TODO bind them by NAME before any ships.
+enum ubyte owsig_codec_raw = 0;
+enum ubyte owsig_codec_zlib = 1;
+enum ubyte first_registered_codec = 2;
+
+struct SeriesCodec
+{
+    const(char)[] name;
+    bool function(ref const DataFormat fmt, ref const RecordBlock blk) nothrow @nogc match;
+    // pack the raw image into dst; bytes written, or -1 to decline (raw applies)
+    ptrdiff_t function(ref const RecordBlock blk, const(void)[] raw, void[] dst) nothrow @nogc pack;
+    // unpack a payload into the raw image; false = corrupt
+    bool function(const(void)[] src, ref const DataFormat fmt, uint count, bool irregular,
+                  uint heap_bytes, void[] dst) nothrow @nogc unpack;
+}
+
+ubyte register_series_codec(ref const SeriesCodec codec)
+{
+    assert(g_num_codecs < g_codecs.length, "too many series codecs");
+    g_codecs[g_num_codecs] = codec;
+    return cast(ubyte)(first_registered_codec + g_num_codecs++);
+}
+
 enum SeriesEvent : ubyte
 {
     none,
@@ -461,12 +490,22 @@ struct Bucket
     uint count;
     uint capacity;
     bool follows_gap;  // <- we should steal a bit for this!
-    bool sealed;       // tail retired: shrunk to fit, immutable (packing lands here)
+    bool sealed;       // tail retired: shrunk to fit, immutable
     void* samples;
     uint* offsets;     // null when regular
     void* heap;        // dynamic-record series: 2-aligned len-prefixed values, dedup'd per bucket
     uint heap_used;
     uint heap_capacity;
+
+    // the two-pointer entry: samples/offsets/heap are the raw side, packed the encoded side.
+    // At least one is live. A sealed bucket packs on its last release; with packed present the
+    // raw side is a cache, dropped at refs==0 and reconstituted on demand for late readers.
+    void* packed;
+    uint packed_bytes;
+    ushort refs;        // readers borrowing the raw side; the open tail is implicitly protected
+    ubyte codec;
+    bool pack_declined; // codecs tried and beaten by raw; raw-only permanently, don't retry
+    bool raw_combined;  // reconstituted raw is one allocation spanning all planes; free once
 
 pure nothrow @nogc:
     ulong last_tick() const => first_tick + last_offset;
@@ -492,6 +531,7 @@ nothrow @nogc:
     ushort cursor_mask;
     ushort pin_mask;    // cursors voluntary eviction must not pass; consumption = advancing the cursor
     ulong[16] pin_position;
+    Bucket*[16] cursor_ref; // the bucket each cursor's raw-side borrow guards; ref moves as the cursor does
 
     ulong first_index() const pure
         => buckets.length ? buckets[0].first_index : head;
@@ -538,13 +578,22 @@ nothrow @nogc:
         return lo < buckets.length ? buckets[lo] : null;
     }
 
-    RecordBlock read(FormatId format, ulong from_index, uint max_records)
+    // cursor_bit tracks the reader's raw-side borrow: the cursor's ref moves to the bucket it
+    // reads, so a view stays valid until the next read. Bit-less reads (queries) reconstitute
+    // without a ref; their loose raws drop at the next cursor close (byte budgets own the rest).
+    RecordBlock read(FormatId format, ulong from_index, uint max_records, ubyte cursor_bit = ubyte.max)
     {
         RecordBlock r;
         r.format = format;
         const(DataFormat)* fmt = format_info(format);
         Bucket* b = find_by_index(from_index);
-        if (!b || from_index < b.first_index)
+        if (b && from_index < b.first_index)
+            b = null;
+        if (cursor_bit != ubyte.max)
+            move_ref(cursor_bit, b, format);
+        if (!b)
+            return r;
+        if (!b.samples && !reconstitute(b, format))
             return r;
         uint offset = cast(uint)(from_index - b.first_index);
         uint n = b.count - offset;
@@ -558,6 +607,145 @@ nothrow @nogc:
         r.heap = b.heap;
         r.heap_bytes = b.heap_used;
         return r;
+    }
+
+    void move_ref(ubyte bit, Bucket* b, FormatId format)
+    {
+        Bucket* old = cursor_ref[bit];
+        if (old is b)
+            return;
+        cursor_ref[bit] = b;
+        if (b)
+            ++b.refs;
+        if (old)
+            release_ref(old, format);
+    }
+
+    void release_ref(Bucket* b, FormatId format)
+    {
+        debug assert(b.refs);
+        if (--b.refs)
+            return;
+        if (b.packed)
+            drop_raw(b, format_info(format));
+        else
+            try_pack(b, format);
+    }
+
+    // packing only reads the raw side, so it may run on any sealed bucket regardless of
+    // readers (a disk writer can pack what the UX is still rendering); only DROPPING raw
+    // waits for the last borrow to release
+    void try_pack(Bucket* b, FormatId format)
+    {
+        if (b.packed || b.pack_declined || !b.sealed || !b.count || !g_num_codecs)
+            return;
+        const(DataFormat)* fmt = format_info(format);
+        uint offs_bytes = b.offsets ? b.count * cast(uint)uint.sizeof : 0;
+        uint rec_bytes = b.count * fmt.stride;
+        uint total = offs_bytes + rec_bytes + b.heap_used;
+
+        RecordBlock blk;
+        blk.format = format;
+        blk.count = b.count;
+        blk.first_index = b.first_index;
+        blk.t0 = b.first_tick;
+        blk.ts = b.offsets;
+        blk.data = b.samples;
+        blk.heap = b.heap;
+        blk.heap_bytes = b.heap_used;
+
+        foreach (i; 0 .. g_num_codecs)
+        {
+            if (!g_codecs[i].match || !g_codecs[i].match(*fmt, blk))
+                continue;
+            void[] img = alloc(total);
+            ubyte* p = cast(ubyte*)img.ptr;
+            p[0 .. offs_bytes] = (cast(const(ubyte)*)b.offsets)[0 .. offs_bytes];
+            p[offs_bytes .. offs_bytes + rec_bytes] = (cast(const(ubyte)*)b.samples)[0 .. rec_bytes];
+            p[offs_bytes + rec_bytes .. total] = (cast(const(ubyte)*)b.heap)[0 .. b.heap_used];
+            void[] dst = alloc(total);
+            ptrdiff_t packed_size = g_codecs[i].pack(blk, img, dst);
+            free(img);
+            if (packed_size > 0 && packed_size < total)
+            {
+                b.packed = realloc(dst, packed_size).ptr;
+                b.packed_bytes = cast(uint)packed_size;
+                b.codec = cast(ubyte)(first_registered_codec + i);
+                if (!b.refs)
+                    drop_raw(b, fmt);
+            }
+            else
+                free(dst);
+            break;
+        }
+        if (!b.packed)
+            b.pack_declined = true;
+    }
+
+    // repopulate the raw side from packed: one combined allocation in the shared image layout,
+    // shared by every reader positioned in the bucket until the last ref drops it again
+    bool reconstitute(Bucket* b, FormatId format)
+    {
+        if (b.samples)
+            return true;
+        debug assert(b.packed, "bucket has neither raw nor packed side");
+        if (b.codec < first_registered_codec || b.codec >= first_registered_codec + g_num_codecs)
+            return false;
+        const(DataFormat)* fmt = format_info(format);
+        bool irregular = !fmt.regular;
+        uint offs_bytes = irregular ? b.count * cast(uint)uint.sizeof : 0;
+        uint rec_bytes = b.count * fmt.stride;
+        uint total = offs_bytes + rec_bytes + b.heap_used;
+        void[] img = alloc(total);
+        if (!g_codecs[b.codec - first_registered_codec].unpack(b.packed[0 .. b.packed_bytes], *fmt,
+                                                               b.count, irregular, b.heap_used, img))
+        {
+            free(img);
+            debug assert(false, "packed bucket failed to reconstitute");
+            return false;
+        }
+        b.offsets = irregular ? cast(uint*)img.ptr : null;
+        b.samples = img.ptr + offs_bytes;
+        b.heap = b.heap_used ? img.ptr + offs_bytes + rec_bytes : null;
+        b.capacity = b.count;
+        b.heap_capacity = b.heap_used;
+        b.raw_combined = true;
+        return true;
+    }
+
+    // free the raw side; entered with packed present, or from bucket teardown
+    void drop_raw(Bucket* b, const(DataFormat)* fmt)
+    {
+        if (!b.samples)
+            return;
+        if (b.raw_combined)
+        {
+            void* base = b.offsets ? cast(void*)b.offsets : b.samples;
+            uint offs_bytes = b.offsets ? b.count * cast(uint)uint.sizeof : 0;
+            free(base[0 .. offs_bytes + b.count * fmt.stride + b.heap_used]);
+        }
+        else
+        {
+            free(b.samples[0 .. b.capacity * fmt.stride]);
+            if (b.offsets)
+                free((cast(void*)b.offsets)[0 .. b.capacity * uint.sizeof]);
+            if (b.heap)
+                free(b.heap[0 .. b.heap_capacity]);
+        }
+        b.samples = null;
+        b.offsets = null;
+        b.heap = null;
+        b.heap_capacity = 0;
+        b.raw_combined = false;
+    }
+
+    // sweep raws reconstituted by bit-less readers (queries); called from cursor close
+    void drop_loose_raws(FormatId format)
+    {
+        const(DataFormat)* fmt = format_info(format);
+        foreach (b; buckets[])
+            if (b.packed && b.samples && !b.refs)
+                drop_raw(b, fmt);
     }
 }
 
@@ -809,6 +997,9 @@ unittest
 private:
 
 package immutable ubyte[ValueType.max + 1] g_type_stride = [ 1, 1, 1, 2, 2, 4, 4, 8, 8, 4, 8, 1, 0 ];
+
+package __gshared SeriesCodec[8] g_codecs;
+package __gshared ubyte g_num_codecs;
 
 __gshared Array!(DataFormat*) g_formats;
 

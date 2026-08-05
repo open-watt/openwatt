@@ -169,7 +169,7 @@ nothrow @nogc:
             lost = first - position;
             position = first;
         }
-        RecordBlock r = h.read(element.format, position, max_records);
+        RecordBlock r = h.read(element.format, position, max_records, bit);
         r.lost = lost;
         position += r.count;
         if (h.pin_mask & (1 << bit))
@@ -707,6 +707,12 @@ public:
     {
         if (_history)
         {
+            if (Bucket* rb = _history.cursor_ref[c.bit])
+            {
+                _history.cursor_ref[c.bit] = null;
+                _history.release_ref(rb, format);
+            }
+            _history.drop_loose_raws(format);
             _history.cursor_mask &= ~cast(ushort)(1 << c.bit);
             _history.pin_mask &= ~cast(ushort)(1 << c.bit);
         }
@@ -1069,7 +1075,8 @@ private:
             b.heap = realloc(b.heap[0 .. b.heap_capacity], b.heap_used).ptr;
             b.heap_capacity = b.heap_used;
         }
-        // TODO: pack (columnar codec) lands here
+        // pack now if nothing borrows the raw side; otherwise the last release_ref packs
+        _history.try_pack(b, format);
     }
 
     void evict_over_budget()
@@ -1106,11 +1113,12 @@ private:
 
     void free_bucket(Bucket* b)
     {
-        free(b.samples[0 .. b.capacity * data_format.stride]);
-        if (b.offsets)
-            free((cast(void*)b.offsets)[0 .. b.capacity * uint.sizeof]);
-        if (b.heap)
-            free(b.heap[0 .. b.heap_capacity]);
+        _history.drop_raw(b, data_format);
+        if (b.packed)
+            free(b.packed[0 .. b.packed_bytes]);
+        foreach (bit; 0 .. 16)
+            if (_history.cursor_ref[bit] is b)
+                _history.cursor_ref[bit] = null;    // lapped reader; its borrow dies with the bucket
         free((cast(void*)b)[0 .. Bucket.sizeof]);
     }
 
@@ -1326,6 +1334,50 @@ unittest
     assert(ce.latest_record.f64_ == 3.0);
 }
 
+
+version (unittest)
+{
+    // byte-level RLE test codec: [run u8][value u8]*; enough to exercise pack/reconstitute
+    private __gshared bool g_rle_codec_on;
+
+    private bool rle_match(ref const DataFormat, ref const RecordBlock) nothrow @nogc
+        => g_rle_codec_on;
+
+    private ptrdiff_t rle_pack(ref const RecordBlock, const(void)[] raw, void[] dst) nothrow @nogc
+    {
+        const(ubyte)[] s = cast(const(ubyte)[])raw;
+        ubyte[] d = cast(ubyte[])dst;
+        size_t o;
+        for (size_t i = 0; i < s.length; )
+        {
+            size_t run = 1;
+            while (i + run < s.length && s[i + run] == s[i] && run < 255)
+                ++run;
+            if (o + 2 > d.length)
+                return -1;
+            d[o++] = cast(ubyte)run;
+            d[o++] = s[i];
+            i += run;
+        }
+        return o;
+    }
+
+    private bool rle_unpack(const(void)[] src, ref const DataFormat, uint, bool, uint, void[] dst) nothrow @nogc
+    {
+        const(ubyte)[] s = cast(const(ubyte)[])src;
+        ubyte[] d = cast(ubyte[])dst;
+        size_t o;
+        for (size_t i = 0; i + 2 <= s.length; i += 2)
+        {
+            size_t run = s[i];
+            if (o + run > d.length)
+                return false;
+            d[o .. o + run] = s[i + 1];
+            o += run;
+        }
+        return o == d.length;
+    }
+}
 
 version (unittest)
 private final class CommitReceiver
@@ -1654,6 +1706,93 @@ unittest
     assert(th.record_count == 60);
     free(huge);
     th.teardown();
+
+    // {raw,packed} entries: a sealed bucket packs when its last reader releases (immediately,
+    // when nothing was reading); late cursors reconstitute a shared raw side and drop it again
+    {
+        static bool codec_registered;
+        if (!codec_registered)
+        {
+            codec_registered = true;
+            SeriesCodec rle = SeriesCodec("test-rle", &rle_match, &rle_pack, &rle_unpack);
+            register_series_codec(rle);
+        }
+        g_rle_codec_on = true;
+        scope(exit) g_rle_codec_on = false;
+
+        static immutable DataFormat f64_sampled = DataFormat(ValueType.f64, SeriesKind.sampled);
+        Element z;
+        z.format = register_format(f64_sampled);
+        z.ensure_history();
+        z.write_sample(1.0, from_unix_time_ns(1_000));
+        z.write_sample(1.0, from_unix_time_ns(2_000));
+        z.mark_gap();
+        z.write_sample(1.0, from_unix_time_ns(3_000));
+        assert(z.bucket_count == 2);
+        Bucket* pb = z._history.buckets[0];
+        assert(pb.sealed && pb.packed !is null && pb.samples is null);   // packed at seal, raw dropped
+
+        Cursor zc = z.open_series_cursor(0);
+        RecordBlock zb = zc.next(16);
+        assert(zb.count == 2 && zb.get!double(0) == 1.0 && zb.time(1) == from_unix_time_ns(2_000));
+        assert(pb.samples !is null && pb.refs == 1 && pb.raw_combined);  // reconstituted, borrowed
+        zb = zc.next(16);
+        assert(zb.count == 1);
+        assert(pb.samples is null && pb.refs == 0 && pb.packed !is null); // ref moved on, raw dropped
+        z.close_series_cursor(zc);
+        z.teardown();
+
+        // the heap plane rides the same image: text buckets pack and reconstitute identically
+        Element zt;
+        zt.format = register_format(text_fmt);
+        zt.ensure_history();
+        zt.write_sample("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", from_unix_time_ns(1_000));
+        zt.mark_gap();
+        zt.write_sample("bbbb", from_unix_time_ns(2_000));
+        Bucket* tb0 = zt._history.buckets[0];
+        assert(tb0.packed !is null && tb0.samples is null);
+        Cursor ztc = zt.open_series_cursor(0);
+        RecordBlock ztb = ztc.next(16);
+        assert(ztb.count == 1 && ztb.text(0) == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        zt.close_series_cursor(ztc);
+        zt.teardown();
+
+        // bit-less reads (queries) reconstitute without a borrow; cursor close sweeps the loose raw
+        Element q;
+        q.format = register_format(f64_sampled);
+        q.ensure_history();
+        q.write_sample(2.0, from_unix_time_ns(1_000));
+        q.mark_gap();
+        q.write_sample(2.0, from_unix_time_ns(2_000));
+        Bucket* qb = q._history.buckets[0];
+        assert(qb.packed !is null && qb.samples is null);
+        RecordBlock qr = q.read_records(0, 16);
+        assert(qr.count == 1 && qr.get!double(0) == 2.0);
+        assert(qb.samples !is null && qb.refs == 0);
+        Cursor qc = q.open_series_cursor(ulong.max);
+        q.close_series_cursor(qc);
+        assert(qb.samples is null && qb.packed !is null);
+        q.teardown();
+
+        // packing only reads raw: a bucket sealed under a live borrow packs immediately
+        // (e.g. for the disk writer) and the raw side drops when the reader moves on
+        Element w;
+        w.format = register_format(f64_sampled);
+        w.ensure_history();
+        w.write_sample(3.0, from_unix_time_ns(1_000));
+        Cursor wc = w.open_series_cursor(0);
+        RecordBlock wb = wc.next(16);
+        assert(wb.count == 1);
+        Bucket* wb0 = w._history.buckets[0];
+        assert(wb0.refs == 1);
+        w.mark_gap();
+        w.write_sample(3.0, from_unix_time_ns(2_000));
+        assert(wb0.sealed && wb0.packed !is null && wb0.samples !is null);
+        wb = wc.next(16);
+        assert(wb.count == 1 && wb0.samples is null && wb0.packed !is null);
+        w.close_series_cursor(wc);
+        w.teardown();
+    }
 
     // TODO: regular-series test returns once regular write_records() and rate-aware tick() are built
 }
