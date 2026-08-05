@@ -56,11 +56,15 @@ nothrow @nogc:
 
     Recorder owner;
     Element* element;       // TODO: key by EID when element destruction lands (see manager.element header)
-    Cursor cursor;          // typed-series intake: pinned, never lapped
     SeriesContainer container;
     String path;            // data-model path: "device.component.element"
+    size_t flush_pos;       // buckets below this are on disk
 
     this(this) @disable;
+
+    // the open tail seals once it ages past this, so slow series still reach disk in
+    // bounded time; fast series roll by capacity well before it
+    enum tail_flush_age = 5 * 60_000_000UL;  // usecs
 
     void flush()
     {
@@ -70,31 +74,52 @@ nothrow @nogc:
         if (!container_serialisable(*f))
             return; // stays in RAM; user/domain series wait on name binding and clock anchors
 
-        if (cursor.element is null)
-            cursor = e.open_series_cursor(0, true);
-        if (!cursor.pending)
-            return;
-        if (!container.is_open && !container.open_(owner.make_filename(path[], ".ows")[]))
-            return; // disk trouble; records stay pinned, retry next flush
-
-        while (cursor.pending)
+        SeriesStore* h = e.ensure_history();
+        if (!container.is_open)
         {
-            RecordBlock blk = cursor.next(256);
-            if (blk.count == 0)
-                break;
-            if (!container.put(blk))
-            {
-                cursor.seek(blk.first_index); // rewind just this block; earlier puts are on disk
-                break;
-            }
+            if (!container.open_(owner.make_filename(path[], ".ows")[], *h))
+                return; // disk trouble; sealed buckets stay resident, retry next flush
+            flush_pos = 0;  // adopted buckets carry their offsets; the loop walks past them
         }
+
+        ulong now = unixTimeNs(getSysTime()) / 1000;
+        while (flush_pos < h.buckets.length)
+        {
+            Bucket* b = h.buckets[flush_pos];
+            if (!b.sealed)
+            {
+                if (!b.count || now - b.first_tick < tail_flush_age)
+                    break;
+                h.seal(b);  // the element rolls a fresh bucket on its next write
+            }
+            if (b.count && !b.file_offset && !container.append(b))
+                break; // disk trouble; retry next flush
+            ++flush_pos;
+        }
+    }
+
+    // ship what is pending, then release the store's backing reference and close the file
+    void reset_container()
+    {
+        if (!container.is_open)
+            return;
+        flush();
+        if (element.has_history)
+            element.ensure_history().detach_container();
+        container.close_();
+        flush_pos = 0;
     }
 
     void close()
     {
-        if (cursor.element)
-            element.close_series_cursor(cursor);
-        container.close_();
+        if (container.is_open)
+        {
+            // seal the tail so its records reach disk with the container
+            SeriesStore* h = element.ensure_history();
+            if (h.buckets.length && !h.buckets[$-1].sealed && h.buckets[$-1].count)
+                h.seal(h.buckets[$-1]);
+        }
+        reset_container();
     }
 }
 
@@ -253,68 +278,40 @@ private:
 }
 
 
-// Serves whatever coverage exists: RAM buckets, extended backwards by the ows
-// container when they don't reach `from`. Partial coverage is answered as partial.
+// Serves whatever coverage exists. The series spans its full recorded history - buckets
+// evicted to disk reconstitute through the store - so the walk is one pass, cursor-paced.
+// Partial coverage is answered as partial.
 void query_local(ref RecordStream rs, ulong from, ulong to, uint max_points, QueryMode mode, ref Array!Sample result)
 {
     Element* e = rs.element;
     Array!Sample local;
     ulong idx = e.index_for_time(from_unix_time_ns(from));
-    for (; idx != ulong.max;)
+    if (idx != ulong.max)
     {
-        RecordBlock blk = e.read_records(idx, 256);
-        if (blk.count == 0)
-            break;
-        bool past = false;
-        foreach (i; 0 .. blk.count)
+        Cursor c = e.open_series_cursor(idx);
+        for (;;)
         {
-            ulong t = unixTimeNs(blk.time(i));
-            if (t > to)
-            {
-                past = true;
+            RecordBlock blk = c.next(256);
+            if (blk.count == 0)
                 break;
-            }
-            double v;
-            Variant val = blk.box(i);
-            if (sample_to_double(val, v))
-                local ~= Sample(t, v);
-        }
-        if (past)
-            break;
-        idx += blk.count;
-    }
-
-    if ((local.length == 0 || local[0].time > from) && rs.container.is_open && rs.container.dir.length)
-    {
-        // the container reaches further back than RAM retention
-        Array!Sample merged;
-        ulong ram_start = local.length ? local[0].time : ulong.max;
-        size_t bi = rs.container.find_by_time(from / 1000);
-        if (bi == rs.container.dir.length)
-            --bi;       // everything ends before `from`: the last block holds the seed
-        else if (bi)
-            --bi;       // step back one block for held state
-        outer: for (; bi < rs.container.dir.length; ++bi)
-        {
-            if (rs.container.dir[bi].hdr.first_tick * 1000 > to)
-                break;
-            RecordBlock blk;
-            if (!rs.container.load(bi, blk))
-                break;
+            bool past = false;
             foreach (i; 0 .. blk.count)
             {
                 ulong t = unixTimeNs(blk.time(i));
-                if (t >= ram_start || t > to)
-                    break outer;
+                if (t > to)
+                {
+                    past = true;
+                    break;
+                }
                 double v;
                 Variant val = blk.box(i);
                 if (sample_to_double(val, v))
-                    merged ~= Sample(t, v);
+                    local ~= Sample(t, v);
             }
+            if (past)
+                break;
         }
-        foreach (ref const Sample s; local[])
-            merged ~= s;
-        local = merged.move;
+        e.close_series_cursor(c);   // drops the raws the walk reconstituted
     }
     ulong bucket_width = max_points ? (to - from) / max_points + 1 : 0;
 
@@ -470,14 +467,14 @@ nothrow @nogc:
         _dir = value.makeString(g_app.allocator);
         mark_set!(typeof(this), "dir")();
 
-        // A restart would drop every cursor, and a cursor reopened at index 0
-        // re-ships the standing RAM history.
+        // No restart: each stream detaches its store from the old file and the next
+        // flush reopens (and re-adopts) under the new directory.
         if (running)
         {
             import urt.file : create_directory;
             create_directory(_dir[]);
             foreach (rs; _streams.values)
-                rs.container.close_();
+                rs.reset_container();
         }
     }
 
@@ -632,8 +629,7 @@ private:
 
     void release(RecordStream* rs)
     {
-        rs.flush(); // ship what is still pending before the container closes
-        rs.close();
+        rs.close(); // seals the tail and ships what is still pending
         defaultAllocator().freeT(rs);
     }
 

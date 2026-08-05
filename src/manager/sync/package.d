@@ -1665,8 +1665,9 @@ nothrow @nogc:
     // Backfill behind the add: the add already carried the latest value, history streams
     // as val blocks after it so a UI paints instantly and fills the chart. Served
     // synchronously within the burst; nothing can interleave, so a live sub's feed takes
-    // over gap-free where the backfill ends. Serves the in-RAM retained series; deep
-    // (db-resident) recall stays on history_req until cursor-paced draining lands.
+    // over gap-free where the backfill ends. The series spans its full recorded history
+    // (disk-evicted buckets reconstitute through the store), so from_ms is honoured as
+    // far as history exists.
     void send_backfill(SyncPeer to, SyncEncoder enc, Element* e, ulong from_ms, ulong to_ms)
     {
         import urt.time : from_unix_time_ns;

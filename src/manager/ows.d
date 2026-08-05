@@ -4,21 +4,31 @@ module manager.ows;
 // header carries next/prev file offsets and its index/timestamp span; the first block of a
 // format run additionally carries a BlockFormatHeader (and, later, name-binding data for
 // enum/user/codec identity) behind it, and followers point at that anchor via format_block,
-// so a format change just starts a new run and stable runs skip the repeat noise. The
-// runtime keeps the headers as an in-memory directory with the format resolved per entry,
-// so time-seek is a binary search and recall is: load one block's payload, view it in place
-// as a RecordBlock (byte-identical to the RAM image).
+// so a format change just starts a new run and stable runs skip the repeat noise.
 //
-// Dynamic-record series (text) serialise as their RAM image: fixed-stride u16 offset records
-// plus a trailing byte heap. put() compacts the heap per block - only entries the block's
-// records reference ship, dedup'd by content, offsets rebased - since a cursor block may
-// cover a slice of a bucket whose heap holds more than it references.
+// The container is a block reader/writer over the file, nothing more: indexing lives in the
+// SeriesStore. open_() walks the chain once and adopts every block into the store as a
+// fully-evicted Bucket (headers only, no bytes), so a cursor opened at index 0 walks all of
+// recorded history through the same reconstitute() that serves a packed block. append()
+// writes one sealed bucket's encoded image as one block - the sealed raw image is
+// byte-identical to the ows payload, so a flush is a straight write.
 //
 // Not serialisable yet: user types and enum identity (need name binding), domain-clocked
 // series (need anchor blocks for the clock).
+//
+// TODO *** ADOPTION UNDER LIVE CURSORS IS UNRESOLVED ***
+// open_() rebases standing RAM buckets (and the store's pin positions) behind the adopted
+// history, but external Cursor structs hold their position by VALUE and cannot be reached,
+// so a cursor opened before the container attaches keeps a stale (pre-rebase) position: it
+// will re-read adopted history as if new, and a pinned sync cursor would re-ship it to the
+// peer. The window is the sub-second gap between element creation and the recorder's scan;
+// open_() logs a warning when it fires. Fix candidates: a store-held rebase epoch/offset the
+// cursor applies lazily, or cursors holding store-side positions only.
 
 import urt.array;
 import urt.file;
+import urt.log : writeWarning;
+import urt.mem.alloc;
 import urt.si.unit : ScaledUnit;
 
 import manager.series;
@@ -83,30 +93,21 @@ struct BlockFormatHeader
 }
 static assert(BlockFormatHeader.sizeof == 24);
 
-struct BlockEntry
-{
-nothrow @nogc:
-
-    ulong offset;
-    BlockHeader hdr;
-    BlockFormatHeader fmt;  // resolved for every entry; anchors own it, followers copy their run's
-
-    uint raw_bytes() const pure
-        => cast(uint)(((hdr.flags & BlockHeader.Flags.irregular) ? hdr.count * uint.sizeof : 0) + hdr.count * fmt.stride + hdr.heap_bytes);
-}
-
 struct SeriesContainer
 {
 nothrow @nogc:
 
-    Array!BlockEntry dir;
-
     bool is_open() const pure
         => _open;
 
-    bool open_(const(char)[] path)
+    // Open the file and adopt its history into the store: one fully-evicted Bucket per block,
+    // renumbered contiguously from zero (files written before index continuity may hold
+    // overlapping spans). Standing RAM buckets shift up behind the adopted history and head
+    // resumes after the last record, so the index space is one sequence across restarts.
+    bool open_(const(char)[] path, ref SeriesStore store)
     {
         assert(!_open);
+        assert(store.container is null, "store already has a backing container");
         if (urt.file.open(_file, path, FileOpenMode.ReadWrite) != Result.success)
             return false;
         _open = true;
@@ -124,6 +125,7 @@ nothrow @nogc:
                 return false;
             }
             _end = FileHeader.sizeof;
+            store.container = &this;
             return true;
         }
         if (fh.magic != "OWSG" || fh.version_ != 1)
@@ -132,44 +134,75 @@ nothrow @nogc:
             return false;
         }
 
-        // walk the chain to rebuild the directory, resolving each entry's format run
+        Array!(Bucket*) adopted;
         ulong offset = fh.header_bytes;
         _end = fh.header_bytes;
-        BlockFormatHeader run_fmt;
+        FormatId run_id = FormatId.invalid;
+        ulong next_index = 0;
         while (offset)
         {
-            BlockEntry e;
-            if (read_at(_file, (cast(void*)&e.hdr)[0 .. BlockHeader.sizeof], offset, bytes) != Result.success
-                || bytes < BlockHeader.sizeof)
+            BlockHeader hdr;
+            if (read_at(_file, (cast(void*)&hdr)[0 .. BlockHeader.sizeof], offset, bytes) != Result.success
+                || bytes < BlockHeader.sizeof || hdr.header_bytes < BlockHeader.sizeof)
                 break;
-            e.offset = offset;
-            if (e.hdr.format_block == 0)
+            if (hdr.format_block == 0)
             {
-                if (read_at(_file, (cast(void*)&run_fmt)[0 .. BlockFormatHeader.sizeof],
+                if (read_at(_file, (cast(void*)&_afmt)[0 .. BlockFormatHeader.sizeof],
                             offset + BlockHeader.sizeof, bytes) != Result.success
                     || bytes < BlockFormatHeader.sizeof)
                     break;
                 _fmt_anchor = offset;
-                _afmt = run_fmt;
+                run_id = register_block_format(_afmt);
             }
-            else if (e.hdr.format_block != _fmt_anchor)
+            else if (hdr.format_block != _fmt_anchor)
             {
-                // referenced run isn't the walking one (future compaction); resolve backwards
-                foreach_reverse (ref const BlockEntry p; dir[])
-                {
-                    if (p.offset == e.hdr.format_block)
-                    {
-                        run_fmt = p.fmt;
-                        break;
-                    }
-                }
+                // referenced run isn't the walking one (future compaction); resolve directly
+                if (read_at(_file, (cast(void*)&_afmt)[0 .. BlockFormatHeader.sizeof],
+                            hdr.format_block + BlockHeader.sizeof, bytes) != Result.success
+                    || bytes < BlockFormatHeader.sizeof)
+                    break;
+                _fmt_anchor = hdr.format_block;
+                run_id = register_block_format(_afmt);
             }
-            e.fmt = run_fmt;
-            dir ~= e;
+            if (hdr.count && run_id.valid)
+            {
+                Bucket* b = cast(Bucket*)alloc(Bucket.sizeof).ptr;
+                *b = Bucket.init;
+                b.format = run_id;
+                b.first_index = next_index;
+                b.count = hdr.count;
+                b.first_tick = hdr.first_tick;
+                b.last_offset = cast(uint)(hdr.last_tick - hdr.first_tick);
+                b.heap_used = hdr.heap_bytes;
+                b.codec = hdr.codec;
+                b.packed_bytes = hdr.payload_bytes;
+                b.pack_declined = hdr.codec == ows_codec_raw;
+                b.sealed = true;
+                b.follows_gap = (hdr.flags & BlockHeader.Flags.follows_gap) != 0;
+                b.file_offset = offset + hdr.header_bytes;
+                adopted ~= b;
+                next_index += hdr.count;
+            }
             _tail = offset;
-            _end = offset + e.hdr.header_bytes + e.hdr.payload_bytes;
-            offset = e.hdr.next;
+            _end = offset + hdr.header_bytes + hdr.payload_bytes;
+            offset = hdr.next;
         }
+
+        if (next_index)
+        {
+            if (store.cursor_mask)
+                writeWarning("series container attached under live cursors; their positions predate the rebase");
+            foreach (b; store.buckets[])
+                b.first_index += next_index;
+            foreach (bit; 0 .. 16)
+                if (store.pin_mask & (1 << bit))
+                    store.pin_position[bit] += next_index;
+            store.head += next_index;
+            foreach (b; store.buckets[])
+                adopted ~= b;
+            store.buckets = adopted.move;
+        }
+        store.container = &this;
         return true;
     }
 
@@ -181,56 +214,29 @@ nothrow @nogc:
         _tail = 0;
         _end = 0;
         _fmt_anchor = 0;
-        dir.clear();
     }
 
-    bool put(ref const RecordBlock blk)
+    // append one sealed bucket as one block; on success the bucket carries its file offset
+    // and its codec/packed_bytes describe the payload as written
+    bool append(Bucket* b)
     {
-        ref const DataFormat f = *blk.data_format;
-        debug assert(container_serialisable(f));
-        uint count = blk.count;
-        if (count == 0)
-            return true;
-        bool irregular = blk.ts !is null;
-        uint offs_bytes = irregular ? count * cast(uint)uint.sizeof : 0;
+        debug assert(b.sealed && b.count && !b.file_offset && b.resident);
+        const(DataFormat)* f = format_info(b.format);
+        debug assert(container_serialisable(*f));
 
-        uint heap_bytes = 0;
-        if (f.count == 0)
+        const(void)[] payload;
+        ubyte codec;
+        if (b.packed)
         {
-            // compact the heap: only referenced entries ship, dedup'd, offsets rebased
-            _rbuf.resize(count * ushort.sizeof);
-            _hbuf.clear();
-            ushort[] recs = cast(ushort[])_rbuf[];
-            foreach (i; 0 .. count)
-            {
-                const(void)[] v = blk.dynamic(i);
-                uint off = uint.max;
-                uint pos = 0;
-                while (pos < _hbuf.length)
-                {
-                    const(void)[] e = heap_view(_hbuf.ptr, pos);
-                    if (e == v)
-                    {
-                        off = pos;
-                        break;
-                    }
-                    pos += heap_entry_bytes(e.length);
-                }
-                if (off == uint.max)
-                {
-                    off = cast(uint)_hbuf.length;
-                    _hbuf.resize(off + heap_entry_bytes(v.length));
-                    ushort* p = cast(ushort*)(_hbuf.ptr + off);
-                    *p = cast(ushort)v.length;
-                    (cast(ubyte*)(p + 1))[0 .. v.length] = cast(const(ubyte)[])v[];
-                    if (v.length & 1)
-                        (cast(ubyte*)(p + 1))[v.length] = 0;
-                }
-                recs[i] = cast(ushort)off;
-            }
-            heap_bytes = cast(uint)_hbuf.length;
+            payload = b.packed[0 .. b.packed_bytes];
+            codec = b.codec;
         }
-        uint raw_bytes = offs_bytes + count * f.stride + heap_bytes;
+        else
+        {
+            void* base = b.offsets ? cast(void*)b.offsets : b.samples;
+            payload = base[0 .. b.image_bytes];
+            codec = ows_codec_raw;
+        }
 
         BlockFormatHeader bf;
         bf.rate = f.rate;
@@ -249,151 +255,79 @@ nothrow @nogc:
         h.header_bytes = cast(ushort)(BlockHeader.sizeof + (anchor ? BlockFormatHeader.sizeof : 0));
         h.format_block = anchor ? 0 : _fmt_anchor;
         h.prev = _tail;
-        h.first_index = blk.first_index;
-        h.last_index = blk.first_index + count - 1;
-        h.first_tick = blk.tick(0);
-        h.last_tick = blk.tick(count - 1);
-        h.payload_bytes = raw_bytes;
-        h.flags = irregular ? BlockHeader.Flags.irregular : 0;
-        h.codec = ows_codec_raw;
-        h.heap_bytes = heap_bytes;
+        h.first_index = b.first_index;
+        h.last_index = b.first_index + b.count - 1;
+        h.first_tick = b.first_tick;
+        h.last_tick = b.last_tick;
+        h.payload_bytes = cast(uint)payload.length;
+        h.flags = cast(ubyte)((f.regular ? 0 : BlockHeader.Flags.irregular)
+                            | (b.follows_gap ? BlockHeader.Flags.follows_gap : 0));
+        h.codec = codec;
+        h.heap_bytes = b.heap_used;
 
-        _wbuf.resize(h.header_bytes + raw_bytes);
-        ubyte[] raw = _wbuf[h.header_bytes .. $];
-        if (irregular)
-        {
-            // rebase the offsets plane so first_tick doubles as the block's time base
-            uint[] offs = cast(uint[])raw[0 .. offs_bytes];
-            uint base = blk.ts[0];
-            foreach (i; 0 .. count)
-                offs[i] = blk.ts[i] - base;
-        }
-        if (f.count == 0)
-        {
-            raw[offs_bytes .. offs_bytes + count * ushort.sizeof] = _rbuf[];
-            raw[offs_bytes + count * ushort.sizeof .. $] = _hbuf[];
-        }
-        else
-            raw[offs_bytes .. $] = cast(const(ubyte)[])blk.records();
-
-        foreach (i; 0 .. g_num_codecs)
-        {
-            if (!g_codecs[i].match || !g_codecs[i].match(f, blk))
-                continue;
-            _pbuf.resize(raw_bytes);
-            ptrdiff_t packed = g_codecs[i].pack(blk, raw, _pbuf[]);
-            if (packed > 0 && packed < raw_bytes)
-            {
-                h.codec = cast(ubyte)(first_registered_codec + i);
-                h.payload_bytes = cast(uint)packed;
-                _wbuf.resize(h.header_bytes + packed);
-                _wbuf[h.header_bytes .. $] = _pbuf[0 .. packed];
-            }
-            break;
-        }
-
-        *cast(BlockHeader*)_wbuf.ptr = h;
+        ubyte[BlockHeader.sizeof + BlockFormatHeader.sizeof] hbuf = void;
+        *cast(BlockHeader*)hbuf.ptr = h;
         if (anchor)
-            *cast(BlockFormatHeader*)(_wbuf.ptr + BlockHeader.sizeof) = bf;
+            *cast(BlockFormatHeader*)(hbuf.ptr + BlockHeader.sizeof) = bf;
 
         ulong offset = _end;
         size_t written;
-        if (write_at(_file, _wbuf[], offset, written) != Result.success || written < _wbuf.length)
+        if (write_at(_file, hbuf[0 .. h.header_bytes], offset, written) != Result.success
+            || written < h.header_bytes)
+            return false;
+        if (write_at(_file, payload, offset + h.header_bytes, written) != Result.success
+            || written < payload.length)
             return false;
         if (_tail)
             if (write_at(_file, (cast(const(void)*)&offset)[0 .. 8], _tail, written) != Result.success)
                 return false; // next-link patch failed; block stays unreferenced, its space reused on the next put
-        if (dir.length)
-            dir[$-1].hdr.next = offset;
-        dir ~= BlockEntry(offset, h, bf);
         _tail = offset;
-        _end = offset + _wbuf.length;
+        _end = offset + h.header_bytes + payload.length;
         if (anchor)
         {
             _fmt_anchor = offset;
             _afmt = bf;
         }
+
+        b.file_offset = offset + h.header_bytes;
+        if (!b.packed)
+        {
+            b.packed_bytes = cast(uint)payload.length;
+            b.codec = ows_codec_raw;
+            b.pack_declined = true; // the file is the canonical encoded copy; never re-pack
+        }
         return true;
     }
 
-    // load block i; the returned view and its format are valid until the next load
-    bool load(size_t i, out RecordBlock blk)
+    // fetch a flushed bucket's encoded image; dst is packed_bytes long
+    bool read_payload(ref const Bucket b, void[] dst)
     {
-        ref const BlockEntry e = dir[i];
-        uint raw_bytes = e.raw_bytes;
-        _buf.resize(raw_bytes);
-
-        _fmt = DataFormat(cast(ValueType)e.fmt.type, cast(SeriesKind)e.fmt.kind);
-        if (e.fmt.unit)
-        {
-            ScaledUnit u;
-            (cast(ubyte*)&u)[0 .. ScaledUnit.sizeof] = (cast(const(ubyte)*)&e.fmt.unit)[0 .. ScaledUnit.sizeof];
-            _fmt = DataFormat(cast(ValueType)e.fmt.type, cast(SeriesKind)e.fmt.kind, u);
-        }
-        _fmt.count = e.fmt.count;
-        _fmt.rate = e.fmt.rate;
-        bool irregular = (e.hdr.flags & BlockHeader.Flags.irregular) != 0;
-
+        debug assert(b.file_offset && dst.length == b.packed_bytes);
         size_t bytes;
-        if (e.hdr.codec == ows_codec_raw)
-        {
-            if (read_at(_file, _buf[], e.offset + e.hdr.header_bytes, bytes) != Result.success || bytes < raw_bytes)
-                return false;
-        }
-        else
-        {
-            if (e.hdr.codec < first_registered_codec || e.hdr.codec >= first_registered_codec + g_num_codecs)
-                return false; // unbound codec id (the name table lands with a real codec)
-            _pbuf.resize(e.hdr.payload_bytes);
-            if (read_at(_file, _pbuf[], e.offset + e.hdr.header_bytes, bytes) != Result.success
-                || bytes < e.hdr.payload_bytes)
-                return false;
-            if (!g_codecs[e.hdr.codec - first_registered_codec].unpack(_pbuf[], _fmt, e.hdr.count, irregular, e.hdr.heap_bytes, _buf[]))
-                return false;
-        }
-        uint offs_bytes = irregular ? e.hdr.count * cast(uint)uint.sizeof : 0;
-        blk.format = register_format(_fmt);
-        blk.count = e.hdr.count;
-        blk.first_index = e.hdr.first_index;
-        blk.t0 = e.hdr.first_tick;
-        blk.ts = irregular ? cast(const(uint)*)_buf.ptr : null;
-        blk.data = _buf.ptr + offs_bytes;
-        if (e.hdr.heap_bytes)
-        {
-            blk.heap = _buf.ptr + offs_bytes + e.hdr.count * e.fmt.stride;
-            blk.heap_bytes = e.hdr.heap_bytes;
-        }
-        return true;
-    }
-
-    // first block whose span ends at or after tick; dir.length when none
-    size_t find_by_time(ulong tick) const
-    {
-        size_t lo = 0, hi = dir.length;
-        while (lo < hi)
-        {
-            size_t mid = (lo + hi) / 2;
-            if (dir[mid].hdr.last_tick < tick)
-                lo = mid + 1;
-            else
-                hi = mid;
-        }
-        return lo;
+        return read_at(_file, dst, b.file_offset, bytes) == Result.success && bytes >= dst.length;
     }
 
 private:
     File _file;
-    Array!ubyte _buf;
-    Array!ubyte _wbuf;
-    Array!ubyte _pbuf;
-    Array!ubyte _rbuf;  // dynamic-record put: remapped record plane
-    Array!ubyte _hbuf;  // dynamic-record put: compacted heap
-    DataFormat _fmt;
     BlockFormatHeader _afmt;
     ulong _fmt_anchor;
     ulong _tail;
     ulong _end;
     bool _open;
+
+    static FormatId register_block_format(ref const BlockFormatHeader bf)
+    {
+        DataFormat f = DataFormat(cast(ValueType)bf.type, cast(SeriesKind)bf.kind);
+        if (bf.unit)
+        {
+            ScaledUnit u;
+            (cast(ubyte*)&u)[0 .. ScaledUnit.sizeof] = (cast(const(ubyte)*)&bf.unit)[0 .. ScaledUnit.sizeof];
+            f = DataFormat(cast(ValueType)bf.type, cast(SeriesKind)bf.kind, u);
+        }
+        f.count = bf.count;
+        f.rate = bf.rate;
+        return register_format(f);
+    }
 
     static bool same_format(ref const BlockFormatHeader a, ref const BlockFormatHeader b) pure
         => a.type == b.type && a.kind == b.kind && a.count == b.count
@@ -408,124 +342,151 @@ unittest
 
     static immutable DataFormat f64_held = DataFormat(ValueType.f64, SeriesKind.held);
 
-    Element e;
-    e.format = register_format(f64_held);
-    e.ensure_history();
-    foreach (i; 0 .. 4)
-    {
-        e.write_sample(i * 1.5, from_unix_time_ns((i + 1) * 1_000_000UL));
-        if (i == 1)
-            e.mark_gap(); // second block
-    }
-
     enum path = "ows_unittest.tmp";
     delete_file(path);
 
+    // first life: two sealed buckets flush as two blocks; eviction leaves headers-only
+    // descriptors that reconstitute straight from the file
     {
+        Element e;
+        e.format = register_format(f64_held);
+        SeriesStore* h = e.ensure_history();
         SeriesContainer c;
-        assert(c.open_(path));
-        Cursor cur = e.open_series_cursor(0);
-        while (cur.pending)
+        assert(c.open_(path, *h));
+        assert(h.container is &c);
+
+        foreach (i; 0 .. 4)
         {
-            RecordBlock blk = cur.next(256);
-            if (blk.count == 0)
-                break;
-            assert(c.put(blk));
+            e.write_sample(i * 1.5, from_unix_time_ns((i + 1) * 1_000_000UL));
+            if (i == 1)
+                e.mark_gap(); // second bucket
         }
-        e.close_series_cursor(cur);
-        assert(c.dir.length == 2);
-        c.close_();
-    }
+        assert(h.buckets.length == 2);
+        h.seal(h.buckets[$-1]);
+        foreach (b; h.buckets[])
+            assert(c.append(b));
+        assert(h.buckets[0].file_offset && h.buckets[1].file_offset);
 
-    // reopen: the chain rebuilds the directory; loaded blocks read back as in-memory views
-    {
-        SeriesContainer c;
-        assert(c.open_(path));
-        assert(c.dir.length == 2);
-        assert(c.dir[0].hdr.first_index == 0 && c.dir[1].hdr.last_index == 3);
-
-        // format run: the anchor carries the format header, followers point and stay slim
-        assert(c.dir[0].hdr.format_block == 0);
-        assert(c.dir[0].hdr.header_bytes == BlockHeader.sizeof + BlockFormatHeader.sizeof);
-        assert(c.dir[1].hdr.format_block == c.dir[0].offset);
-        assert(c.dir[1].hdr.header_bytes == BlockHeader.sizeof);
-        assert(c.dir[1].fmt.stride == 8); // follower resolved its run's format
-
-        RecordBlock blk;
-        assert(c.load(0, blk));
+        // evict both to disk; the descriptors stay and the read round-trips
+        foreach (b; h.buckets[])
+        {
+            h.drop_raw(b);
+            if (b.packed)
+            {
+                free(b.packed[0 .. b.packed_bytes]);
+                b.packed = null;
+            }
+        }
+        assert(!h.buckets[0].resident);
+        RecordBlock blk = e.read_records(0, 16);
         assert(blk.count == 2 && blk.get!double(0) == 0.0 && blk.get!double(1) == 1.5);
         assert(blk.time(1) == from_unix_time_ns(2_000_000));
-        assert(c.load(1, blk));
+
+        c.close_();
+        h.container = null;
+        e.teardown();
+    }
+
+    // second life: open adopts the chain as evicted buckets, head resumes, a cursor at 0
+    // walks all of recorded history, and new writes append to the same index space
+    {
+        Element e;
+        e.format = register_format(f64_held);
+        SeriesStore* h = e.ensure_history();
+        SeriesContainer c;
+        assert(c.open_(path, *h));
+        assert(h.buckets.length == 2 && h.head == 4);
+        assert(!h.buckets[0].resident && h.buckets[0].sealed);
+        assert(h.buckets[1].follows_gap);
+
+        e.write_sample(9.0, from_unix_time_ns(5_000_000));
+        assert(e.record_count == 5);
+        assert(h.buckets[$-1].first_index == 4);
+
+        Cursor cur = e.open_series_cursor(0);
+        RecordBlock blk = cur.next(256);
+        assert(blk.count == 2 && blk.get!double(0) == 0.0);
+        blk = cur.next(256);
         assert(blk.count == 2 && blk.get!double(1) == 4.5);
         assert(blk.box(1).asDouble == 4.5);
-
-        // time-seek through the in-memory directory
-        assert(c.find_by_time(2_500) == 1);  // 2.5ms in usec ticks
-
-        // append after reopen: prev/next links patch across sessions
-        e.write_sample(9.0, from_unix_time_ns(5_000_000));
-        Cursor cur = e.open_series_cursor(4);
-        RecordBlock nb = cur.next(256);
-        assert(nb.count == 1 && c.put(nb));
-        e.close_series_cursor(cur);
-        assert(c.dir.length == 3 && c.dir[2].hdr.prev == c.dir[1].offset);
-        assert(c.dir[2].hdr.format_block == c.dir[0].offset); // anchor survives reopen
-        c.close_();
-    }
-
-    {
-        SeriesContainer c;
-        assert(c.open_(path));
-        assert(c.dir.length == 3);
-        RecordBlock blk;
-        assert(c.load(2, blk));
+        blk = cur.next(256);
         assert(blk.count == 1 && blk.get!double(0) == 9.0);
+        assert(!cur.pending);
+        e.close_series_cursor(cur);
+        assert(!h.buckets[0].resident);   // the walk's borrows dropped on close
 
-        // a format change anchors a new run
-        DataFormat s32_fmt = DataFormat(ValueType.s32, SeriesKind.held);
-        int rv = 42;
-        uint[1] rts = 0;
-        RecordBlock rb;
-        rb.format = register_format(s32_fmt);
-        rb.count = 1;
-        rb.first_index = 5;
-        rb.t0 = 6_000_000 / 1000;
-        rb.ts = rts.ptr;
-        rb.data = &rv;
-        assert(c.put(rb));
-        assert(c.dir[3].hdr.format_block == 0);
-        assert(c.load(3, blk) && blk.get!int(0) == 42);
+        // flush the tail: append after reopen patches prev/next across sessions
+        h.seal(h.buckets[$-1]);
+        assert(c.append(h.buckets[$-1]));
+
         c.close_();
+        h.container = null;
+        e.teardown();
     }
 
-    // text: heap-plane round-trip, compacted and dedup'd per block
+    // third life: three blocks now; standing RAM history rebases behind the adopted file
+    {
+        Element e;
+        e.format = register_format(f64_held);
+        e.ensure_history();
+        e.write_sample(21.0, from_unix_time_ns(6_000_000));   // written before the recorder attaches
+        SeriesStore* h = e.ensure_history();
+        assert(h.head == 1);
+
+        SeriesContainer c;
+        assert(c.open_(path, *h));
+        assert(h.head == 6);
+        assert(h.buckets.length == 4 && h.buckets[$-1].first_index == 5);
+
+        Cursor cur = e.open_series_cursor(0);
+        double[6] expect = [0.0, 1.5, 3.0, 4.5, 9.0, 21.0];
+        size_t n;
+        for (;;)
+        {
+            RecordBlock blk = cur.next(256);
+            if (!blk.count)
+                break;
+            foreach (i; 0 .. blk.count)
+                assert(blk.get!double(i) == expect[n++]);
+        }
+        assert(n == 6);
+        e.close_series_cursor(cur);
+
+        c.close_();
+        h.container = null;
+        e.teardown();
+    }
+    delete_file(path);
+
+    // text: the heap plane rides the sealed image; round-trips through flush and adoption
     DataFormat text_fmt = DataFormat(ValueType.char_, SeriesKind.held);
     text_fmt.count = 0;
-    Element t;
-    t.format = register_format(text_fmt);
-    t.ensure_history();
-    t.write_sample("alpha", from_unix_time_ns(1_000_000));
-    t.write_sample("a somewhat longer beta value", from_unix_time_ns(2_000_000));
-    t.write_sample("alpha", from_unix_time_ns(3_000_000));
-
     enum tpath = "ows_text_unittest.tmp";
     delete_file(tpath);
     {
+        Element t;
+        t.format = register_format(text_fmt);
+        SeriesStore* h = t.ensure_history();
         SeriesContainer c;
-        assert(c.open_(tpath));
-        Cursor cur = t.open_series_cursor(0);
-        RecordBlock blk = cur.next(256);
-        assert(blk.count == 3 && c.put(blk));
-        t.close_series_cursor(cur);
-        assert(c.dir[0].hdr.heap_bytes == heap_entry_bytes(5) + heap_entry_bytes(28));
+        assert(c.open_(tpath, *h));
+        t.write_sample("alpha", from_unix_time_ns(1_000_000));
+        t.write_sample("a somewhat longer beta value", from_unix_time_ns(2_000_000));
+        t.write_sample("alpha", from_unix_time_ns(3_000_000));
+        h.seal(h.buckets[$-1]);
+        assert(c.append(h.buckets[0]));
+        assert(h.buckets[0].heap_used == heap_entry_bytes(5) + heap_entry_bytes(28));
         c.close_();
+        h.container = null;
+        t.teardown();
     }
     {
+        Element t;
+        t.format = register_format(text_fmt);
+        SeriesStore* h = t.ensure_history();
         SeriesContainer c;
-        assert(c.open_(tpath));
-        assert(c.dir.length == 1 && c.dir[0].fmt.stride == 2);
-        RecordBlock blk;
-        assert(c.load(0, blk));
+        assert(c.open_(tpath, *h));
+        assert(h.buckets.length == 1 && h.head == 3);
+        RecordBlock blk = t.read_records(0, 16);
         assert(blk.count == 3);
         assert(blk.text(0) == "alpha");
         assert(blk.box(1).asString == "a somewhat longer beta value");
@@ -533,16 +494,50 @@ unittest
         assert((cast(const(ushort)*)blk.data)[0] == (cast(const(ushort)*)blk.data)[2]);
         assert(blk.time(2) == from_unix_time_ns(3_000_000));
         c.close_();
+        h.container = null;
+        t.teardown();
     }
     delete_file(tpath);
-    t.teardown();
 
-    delete_file(path);
-    e.teardown();
+    // a format change starts a new run: the follower re-anchors and both read back typed
+    enum fpath = "ows_format_unittest.tmp";
+    delete_file(fpath);
+    {
+        Element e;
+        e.format = register_format(f64_held);
+        SeriesStore* h = e.ensure_history();
+        SeriesContainer c;
+        assert(c.open_(fpath, *h));
+        e.write_sample(1.0, from_unix_time_ns(1_000_000));
+        h.seal(h.buckets[$-1]);
+        assert(c.append(h.buckets[0]));
+
+        static immutable DataFormat s32_held = DataFormat(ValueType.s32, SeriesKind.held);
+        e.format = register_format(s32_held);
+        e.write_sample(42, from_unix_time_ns(2_000_000));   // format roll: new bucket, new run
+        assert(h.buckets.length == 2 && h.buckets[1].format == e.format);
+        h.seal(h.buckets[$-1]);
+        assert(c.append(h.buckets[1]));
+        c.close_();
+        h.container = null;
+        e.teardown();
+    }
+    {
+        Element e;
+        static immutable DataFormat s32_held = DataFormat(ValueType.s32, SeriesKind.held);
+        e.format = register_format(s32_held);
+        SeriesStore* h = e.ensure_history();
+        SeriesContainer c;
+        assert(c.open_(fpath, *h));
+        assert(h.buckets.length == 2);
+        assert(h.buckets[0].format != h.buckets[1].format);   // per-run formats survive
+        RecordBlock blk = e.read_records(0, 16);
+        assert(blk.count == 1 && blk.get!double(0) == 1.0);   // served in the OLD format
+        blk = e.read_records(1, 16);
+        assert(blk.count == 1 && blk.get!int(0) == 42);
+        c.close_();
+        h.container = null;
+        e.teardown();
+    }
+    delete_file(fpath);
 }
-
-
-private:
-
-__gshared SeriesCodec[8] g_codecs;
-__gshared ubyte g_num_codecs;
