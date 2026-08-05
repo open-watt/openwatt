@@ -52,6 +52,9 @@
     <Filter Include="src\driver\baremetal">
       <UniqueIdentifier>{99e012a6-c993-4c2a-ae7e-aae2a0786162}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\driver\boards">
+      <UniqueIdentifier>{92a553c9-b999-4bd1-9544-b4e0db7d1a8d}</UniqueIdentifier>
+    </Filter>
     <Filter Include="src\driver\esp32">
       <UniqueIdentifier>{2bf6c5e3-4b61-4d2c-9a5f-1e7d6c0ab9a8}</UniqueIdentifier>
     </Filter>
@@ -305,6 +308,12 @@
     </DCompile>
     <DCompile Include="src\driver\ble.d">
       <Filter>src\driver</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\boards\smartevse.d">
+      <Filter>src\driver\boards</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\esp32\idf_log_bridge.d">
+      <Filter>src\driver\esp32</Filter>
     </DCompile>
     <DCompile Include="src\driver\esp32\system.d">
       <Filter>src\driver\esp32</Filter>

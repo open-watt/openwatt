@@ -12,7 +12,8 @@ endif()
 set(ESP32_SYS_DIR    "${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/urt/src/urt/driver/esp32")
 set(URT_INTERNAL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/urt/src/urt/internal")
 
-set(MAIN_PRIV_REQUIRES esp_hal_uart esp_rom esp_event esp_driver_gpio driver nvs_flash mbedtls)
+set(MAIN_PRIV_REQUIRES esp_hal_uart esp_rom esp_event esp_driver_gpio esp_driver_ledc
+                       esp_driver_gptimer esp_adc driver nvs_flash mbedtls)
 list(APPEND MAIN_PRIV_REQUIRES esp_driver_i2c)
 if(NOT OW_NO_WIFI)
     list(APPEND MAIN_PRIV_REQUIRES esp_wifi)
@@ -26,12 +27,21 @@ if(OW_EXTRA_REQUIRES)
     list(APPEND MAIN_PRIV_REQUIRES ${OW_EXTRA_REQUIRES})
 endif()
 
-idf_component_register(SRCS "${ESP32_SYS_DIR}/main.c"
-                            "${ESP32_SYS_DIR}/ow_shim.c"
-                            "${URT_INTERNAL_DIR}/mbedtls.c"
+set(ESP32_SYS_SOURCES "${ESP32_SYS_DIR}/main.c"
+                      "${ESP32_SYS_DIR}/ow_shim.c"
+                      "${URT_INTERNAL_DIR}/mbedtls.c")
+if(IDF_LOG_ENABLED)
+    list(APPEND ESP32_SYS_SOURCES "${ESP32_SYS_DIR}/idf_log.c")
+endif()
+
+idf_component_register(SRCS ${ESP32_SYS_SOURCES}
                        INCLUDE_DIRS ""
                        PRIV_REQUIRES ${MAIN_PRIV_REQUIRES}
                        WHOLE_ARCHIVE)
+
+if(PRESERVE_NVS)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE OW_PRESERVE_NVS)
+endif()
 
 # Makefile typically passes OPENWATT_OBJ via -D; fall back to the debug path
 # under bin/<buildname>_debug/ for direct idf.py invocations.
@@ -52,6 +62,11 @@ target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--no-check-sections")
 
 if(USE_LWIP)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE OW_USE_LWIP)
+else()
+    foreach(SYSCALL _write_r _read_r _close_r _fcntl_r)
+        target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=${SYSCALL}")
+    endforeach()
+    target_compile_definitions(mbedx509 PRIVATE MBEDTLS_TEST_SW_INET_PTON)
 endif()
 
 message(STATUS "Linking OpenWatt D object: ${OPENWATT_OBJ}")
