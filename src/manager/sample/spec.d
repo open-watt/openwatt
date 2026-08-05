@@ -283,7 +283,7 @@ bool compile_spec(const(char)[] spec, ref const LayoutContext ctx, ScaledUnit un
             if (width > 255)
                 return false; // wire_span carries the strN field span in a ubyte
             DataFormat fmt = DataFormat(ValueType.char_, SeriesKind.held);
-            fmt.count = 0; // dynamic: the record is a TextRecord; the field span is wire_span(strN)
+            fmt.count = 0; // dynamic: the record is a heap offset; the field span is wire_span(strN)
             desc = SampleDesc(WireLayout(WireKind.char_, 8, 0, image_flags(), wb), pre_scale, register_format(fmt));
             return true;
         }

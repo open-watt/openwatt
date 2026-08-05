@@ -14,8 +14,13 @@ module manager.owsig;
 // are reserved (raw, zlib); zlib waits on a deflate encoder in urt. Registered codec ids
 // are process-local: TODO bind them by NAME in the anchor block before any ships.
 //
-// Not serialisable yet: text (String handles need a flattening codec), user types and enum
-// identity (need name binding), domain-clocked series (need anchor blocks for the clock).
+// Dynamic-record series (text) serialise as their RAM image: fixed-stride u16 offset records
+// plus a trailing byte heap. put() compacts the heap per block - only entries the block's
+// records reference ship, dedup'd by content, offsets rebased - since a cursor block may
+// cover a slice of a bucket whose heap holds more than it references.
+//
+// Not serialisable yet: user types and enum identity (need name binding), domain-clocked
+// series (need anchor blocks for the clock).
 
 import urt.array;
 import urt.file;
@@ -48,12 +53,12 @@ ubyte register_series_codec(ref const SeriesCodec codec)
 }
 
 bool container_serialisable(ref const DataFormat f)
-    => f.clock is null && !f.is_text && f.type != ValueType.user;
+    => f.clock is null && f.type != ValueType.user;
 
 struct FileHeader
 {
     char[4] magic = "OWSG";
-    ubyte version_ = 0;
+    ubyte version_ = 1;
     ubyte pad;
     ushort header_bytes = FileHeader.sizeof;  // offset of the first block; the header may grow
     ubyte[8] reserved;
@@ -75,6 +80,8 @@ nothrow @nogc:
     ushort header_bytes; // offset from block start to the payload; covers any format header and extensions
     ubyte flags;         // Flags
     ubyte codec;
+    uint heap_bytes;     // dynamic-record series: byte heap trailing the record plane
+    ubyte[4] reserved;
 
     enum Flags : ubyte
     {
@@ -85,7 +92,7 @@ nothrow @nogc:
     uint count() const pure
         => cast(uint)(last_index - first_index + 1);
 }
-static assert(BlockHeader.sizeof == 64);
+static assert(BlockHeader.sizeof == 72);
 
 // follows BlockHeader on format-anchor blocks; name-binding data (enum/user/codec identity)
 // follows the fixed part, all within BlockHeader.header_bytes
@@ -111,8 +118,7 @@ nothrow @nogc:
     BlockFormatHeader fmt;  // resolved for every entry; anchors own it, followers copy their run's
 
     uint raw_bytes() const pure
-        => cast(uint)(((hdr.flags & BlockHeader.Flags.irregular) ? hdr.count * uint.sizeof : 0)
-                      + hdr.count * fmt.stride);
+        => cast(uint)(((hdr.flags & BlockHeader.Flags.irregular) ? hdr.count * uint.sizeof : 0) + hdr.count * fmt.stride + hdr.heap_bytes);
 }
 
 struct SeriesContainer
@@ -146,7 +152,7 @@ nothrow @nogc:
             _end = FileHeader.sizeof;
             return true;
         }
-        if (fh.magic != "OWSG" || fh.version_ != 0)
+        if (fh.magic != "OWSG" || fh.version_ != 1)
         {
             close_();
             return false;
@@ -213,7 +219,44 @@ nothrow @nogc:
             return true;
         bool irregular = blk.ts !is null;
         uint offs_bytes = irregular ? count * cast(uint)uint.sizeof : 0;
-        uint raw_bytes = offs_bytes + count * f.stride;
+
+        uint heap_bytes = 0;
+        if (f.count == 0)
+        {
+            // compact the heap: only referenced entries ship, dedup'd, offsets rebased
+            _rbuf.resize(count * ushort.sizeof);
+            _hbuf.clear();
+            ushort[] recs = cast(ushort[])_rbuf[];
+            foreach (i; 0 .. count)
+            {
+                const(void)[] v = blk.dynamic(i);
+                uint off = uint.max;
+                uint pos = 0;
+                while (pos < _hbuf.length)
+                {
+                    const(void)[] e = heap_view(_hbuf.ptr, pos);
+                    if (e == v)
+                    {
+                        off = pos;
+                        break;
+                    }
+                    pos += heap_entry_bytes(e.length);
+                }
+                if (off == uint.max)
+                {
+                    off = cast(uint)_hbuf.length;
+                    _hbuf.resize(off + heap_entry_bytes(v.length));
+                    ushort* p = cast(ushort*)(_hbuf.ptr + off);
+                    *p = cast(ushort)v.length;
+                    (cast(ubyte*)(p + 1))[0 .. v.length] = cast(const(ubyte)[])v[];
+                    if (v.length & 1)
+                        (cast(ubyte*)(p + 1))[v.length] = 0;
+                }
+                recs[i] = cast(ushort)off;
+            }
+            heap_bytes = cast(uint)_hbuf.length;
+        }
+        uint raw_bytes = offs_bytes + count * f.stride + heap_bytes;
 
         BlockFormatHeader bf;
         bf.rate = f.rate;
@@ -239,6 +282,7 @@ nothrow @nogc:
         h.payload_bytes = raw_bytes;
         h.flags = irregular ? BlockHeader.Flags.irregular : 0;
         h.codec = owsig_codec_raw;
+        h.heap_bytes = heap_bytes;
 
         _wbuf.resize(h.header_bytes + raw_bytes);
         ubyte[] raw = _wbuf[h.header_bytes .. $];
@@ -250,7 +294,13 @@ nothrow @nogc:
             foreach (i; 0 .. count)
                 offs[i] = blk.ts[i] - base;
         }
-        raw[offs_bytes .. $] = cast(const(ubyte)[])blk.records();
+        if (f.count == 0)
+        {
+            raw[offs_bytes .. offs_bytes + count * ushort.sizeof] = _rbuf[];
+            raw[offs_bytes + count * ushort.sizeof .. $] = _hbuf[];
+        }
+        else
+            raw[offs_bytes .. $] = cast(const(ubyte)[])blk.records();
 
         foreach (i; 0 .. g_num_codecs)
         {
@@ -335,6 +385,11 @@ nothrow @nogc:
         blk.t0 = e.hdr.first_tick;
         blk.ts = irregular ? cast(const(uint)*)_buf.ptr : null;
         blk.data = _buf.ptr + offs_bytes;
+        if (e.hdr.heap_bytes)
+        {
+            blk.heap = _buf.ptr + offs_bytes + e.hdr.count * e.fmt.stride;
+            blk.heap_bytes = e.hdr.heap_bytes;
+        }
         return true;
     }
 
@@ -358,6 +413,8 @@ private:
     Array!ubyte _buf;
     Array!ubyte _wbuf;
     Array!ubyte _pbuf;
+    Array!ubyte _rbuf;  // dynamic-record put: remapped record plane
+    Array!ubyte _hbuf;  // dynamic-record put: compacted heap
     DataFormat _fmt;
     BlockFormatHeader _afmt;
     ulong _fmt_anchor;
@@ -467,6 +524,45 @@ unittest
         assert(c.load(3, blk) && blk.get!int(0) == 42);
         c.close_();
     }
+
+    // text: heap-plane round-trip, compacted and dedup'd per block
+    DataFormat text_fmt = DataFormat(ValueType.char_, SeriesKind.held);
+    text_fmt.count = 0;
+    Element t;
+    t.format = register_format(text_fmt);
+    t.ensure_history();
+    t.write_sample("alpha", from_unix_time_ns(1_000_000));
+    t.write_sample("a somewhat longer beta value", from_unix_time_ns(2_000_000));
+    t.write_sample("alpha", from_unix_time_ns(3_000_000));
+
+    enum tpath = "owsig_text_unittest.tmp";
+    delete_file(tpath);
+    {
+        SeriesContainer c;
+        assert(c.open_(tpath));
+        Cursor cur = t.open_series_cursor(0);
+        RecordBlock blk = cur.next(256);
+        assert(blk.count == 3 && c.put(blk));
+        t.close_series_cursor(cur);
+        assert(c.dir[0].hdr.heap_bytes == heap_entry_bytes(5) + heap_entry_bytes(28));
+        c.close_();
+    }
+    {
+        SeriesContainer c;
+        assert(c.open_(tpath));
+        assert(c.dir.length == 1 && c.dir[0].fmt.stride == 2);
+        RecordBlock blk;
+        assert(c.load(0, blk));
+        assert(blk.count == 3);
+        assert(blk.text(0) == "alpha");
+        assert(blk.box(1).asString == "a somewhat longer beta value");
+        assert(blk.text(2) == "alpha");
+        assert((cast(const(ushort)*)blk.data)[0] == (cast(const(ushort)*)blk.data)[2]);
+        assert(blk.time(2) == from_unix_time_ns(3_000_000));
+        c.close_();
+    }
+    delete_file(tpath);
+    t.teardown();
 
     delete_file(path);
     e.teardown();

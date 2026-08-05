@@ -2,6 +2,7 @@ module manager.element;
 
 import urt.array;
 import urt.lifetime;
+import urt.log : writeWarning;
 import urt.mem.alloc;
 import urt.mem.allocator : defaultAllocator;
 import urt.mem.string;
@@ -458,8 +459,10 @@ public:
     {
         if (format.valid && _last_update != SysTime())
         {
-            if (data_format.is_scalar || data_format.is_text)
+            if (data_format.is_scalar)
                 return box_record(_latest.raw.ptr, *data_format);
+            if (data_format.is_text)
+                return Variant(text_value());
             if (data_format.is_wide)
             {
                 const(void)[] tail = tail_record();
@@ -470,11 +473,17 @@ public:
         return Variant();
     }
 
+    // borrows the open bucket's heap: valid until the next write to this element
     const(char)[] text_value() const pure
     {
         if (!format.valid || !data_format.is_text || _last_update == SysTime())
             return null;
-        return (cast(const(TextRecord)*)_latest.raw.ptr).view;
+        if (!_history || !_history.buckets.length)
+            return null;
+        const(Bucket)* b = _history.buckets[$-1];
+        if (!b.count)
+            return null;
+        return cast(const(char)[])heap_view(b.heap, (cast(const(ushort)*)b.samples)[b.count - 1]);
     }
 
     // wide records don't fit the Scalar register: latest IS the tail record of the open bucket
@@ -491,7 +500,7 @@ public:
     void store_sample(T)(T v, SysTime t = getSysTime(), Subscriber who = null)
     {
         static if (is(T == String))
-            write_text_sample(v.move, t, who);
+            write_text_sample(v[], t, who);
         else static if (is(T : const(char)[]))
             write_text_sample(v, t, who);
         else
@@ -615,6 +624,9 @@ public:
 
     SeriesStore* ensure_history()
     {
+        // any caller expressing history interest ends latest-only mode: the current value
+        // stands as record 0 and subsequent writes append (the text write path re-flags itself)
+        _flags &= ~Flags.latest_only;
         if (!_history)
         {
             // zero-fill rather than assign .init: SeriesStore holds an Array, whose opAssign
@@ -713,8 +725,6 @@ public:
 
     void teardown()
     {
-        if (format.valid && data_format.is_text)
-            (cast(TextRecord*)_latest.raw.ptr).release();
         if (_history)
         {
             foreach (b; _history.buckets)
@@ -736,6 +746,7 @@ private:
     {
         gap_open     = 1 << 0,
         dirty_listed = 1 << 1,
+        latest_only  = 1 << 2,  // self-created history holds one overwritten record; cleared when a cursor attaches
     }
 
     Scalar _latest;
@@ -746,6 +757,8 @@ private:
     ubyte _flags;
 
     enum bucket_capacity = 256; // TODO: scale with rate (target a time span, not a record count)
+    enum text_bucket_capacity = 64;     // text series are low-rate; keep resident buckets small
+    enum text_heap_limit = 0x1_0000;    // u16 record offsets address the bucket heap
 
     void check_sample_type(T)(size_t value_count, size_t record_count) const
     {
@@ -808,60 +821,147 @@ private:
         }
     }
 
-    void write_text_sample(String v, SysTime t, Subscriber who)
-    {
-        debug assert(data_format.is_text);
-        TextRecord* slot = cast(TextRecord*)_latest.raw.ptr;
-        if (held_repeat(slot.view == v[], t))
-            return;
-        Variant previous;
-        if (_subs)
-            previous = record_value();
-        SysTime previous_timestamp = last_update;
-        slot.set(v.move);
-        _last_update = t;
-        append_text_record(t, who, previous.move, previous_timestamp);
-    }
-
     void write_text_sample(const(char)[] v, SysTime t, Subscriber who)
     {
         debug assert(data_format.is_text);
-        TextRecord* slot = cast(TextRecord*)_latest.raw.ptr;
-        if (held_repeat(slot.view == v, t))
+        if (v.length > MaxStringLen)
+        {
+            writeWarning("text sample refused (exceeds 32k): element '", id, "'");
+            return;
+        }
+        if (held_repeat(text_value() == v, t))
             return;
         Variant previous;
         if (_subs)
             previous = record_value();
         SysTime previous_timestamp = last_update;
-        slot.set(v);
+
+        if (!_history)
+        {
+            // no history requested: latest-only, a single record overwritten in place
+            ensure_history();
+            _flags |= Flags.latest_only;
+        }
+        ulong first_index = append_text(v, unix_time_ns(t) / 1000);
         _last_update = t;
-        append_text_record(t, who, previous.move, previous_timestamp);
-    }
 
-    void append_text_record(SysTime t, Subscriber who, Variant previous,
-                            SysTime previous_timestamp)
-    {
-        SysTime[1] time = t;
-        const(void)[] record;
-        TextRecord rec;
-        if (_history)
-        {
-            // the ref settled here is owned by the bucket once append memcpys the bits
-            rec.copy_from(*cast(const(TextRecord)*)_latest.raw.ptr);
-            record = rec.raw[0 .. data_format.stride];
-            append(record, time[]);
-        }
-        else
-        {
-            record = _latest.raw[0 .. data_format.stride];
-            append(record, time[]);
-        }
-
-        SampleUpdate update = SampleUpdate(&this, record, time[], null, who);
+        SampleUpdate update;
+        update.element = &this;
+        update.who = who;
+        update.first_index = first_index;
         update.previous = previous.move;
         update.previous_timestamp = previous_timestamp;
         prepare_after(update);
         submit(update, false);
+    }
+
+    ulong append_text(const(char)[] v, ulong tick)
+    {
+        bool follows_gap = (_flags & Flags.gap_open) != 0;
+        _flags &= ~Flags.gap_open;
+
+        SeriesStore* h = _history;
+        Bucket* b = h.buckets.length ? h.buckets[$-1] : null;
+
+        if (_flags & Flags.latest_only)
+        {
+            // overwrite the single record: no observer exists that could see a mutation
+            if (!b)
+            {
+                b = alloc_bucket(1);
+                b.first_index = 0;
+                h.buckets ~= b;
+                h.head = 1;
+            }
+            b.heap_used = 0;
+            uint entry = add_heap_entry(*b, v);
+            (cast(ushort*)b.samples)[0] = cast(ushort)entry;
+            b.first_tick = tick;
+            b.offsets[0] = 0;
+            b.count = 1;
+            b.last_offset = 0;
+            b.follows_gap = follows_gap;
+            mark_dirty();
+            return 0;
+        }
+
+        uint entry = uint.max;
+        if (b)
+        {
+            bool roll = b.count + 1 > b.capacity || follows_gap
+                     || (b.count && tick - b.first_tick > uint.max);
+            if (!roll)
+            {
+                entry = find_heap_entry(*b, v);
+                if (entry == uint.max && b.heap_used + heap_entry_bytes(v.length) > text_heap_limit)
+                    roll = true;
+            }
+            if (roll)
+            {
+                seal(b);
+                b = null;
+                entry = uint.max;
+            }
+        }
+        if (!b)
+        {
+            b = alloc_bucket(text_bucket_capacity);
+            b.first_index = h.head;
+            b.follows_gap = follows_gap;
+            h.buckets ~= b;
+        }
+        if (b.count == 0)
+            b.first_tick = tick;
+        if (entry == uint.max)
+            entry = add_heap_entry(*b, v);
+        (cast(ushort*)b.samples)[b.count] = cast(ushort)entry;
+        b.offsets[b.count] = cast(uint)(tick - b.first_tick);
+        ++b.count;
+        b.last_offset = b.offsets[b.count - 1];
+
+        ulong first_index = h.head;
+        ++h.head;
+        evict_over_budget();
+        mark_dirty();
+        return first_index;
+    }
+
+    // the bucket heap: 2-aligned len-prefixed values, content-matched so repeated values
+    // share one entry; the record plane stays fixed-stride u16 offsets
+    static uint find_heap_entry(ref const Bucket b, const(void)[] v) pure
+    {
+        uint pos = 0;
+        while (pos < b.heap_used)
+        {
+            const(void)[] e = heap_view(b.heap, pos);
+            if (e == v)
+                return pos;
+            pos += heap_entry_bytes(e.length);
+        }
+        return uint.max;
+    }
+
+    static uint add_heap_entry(ref Bucket b, const(void)[] v)
+    {
+        uint need = heap_entry_bytes(v.length);
+        if (b.heap_used + need > b.heap_capacity)
+        {
+            uint cap = b.heap_capacity ? b.heap_capacity : 64;
+            while (cap < b.heap_used + need)
+                cap *= 2;
+            if (cap > text_heap_limit)
+                cap = text_heap_limit;
+            b.heap = b.heap ? realloc(b.heap[0 .. b.heap_capacity], cap).ptr : alloc(cap).ptr;
+            b.heap_capacity = cap;
+        }
+        ushort* p = cast(ushort*)(cast(ubyte*)b.heap + b.heap_used);
+        *p = cast(ushort)v.length;
+        (cast(ubyte*)(p + 1))[0 .. v.length] = cast(const(ubyte)[])v[];
+        if (v.length & 1)
+            (cast(ubyte*)(p + 1))[v.length] = 0;
+        uint offset = b.heap_used;
+        b.heap_used += need;
+        return offset;
     }
 
     ulong append(const(void)[] samples, const(SysTime)[] times)
@@ -964,6 +1064,11 @@ private:
                 b.offsets = cast(uint*)realloc((cast(void*)b.offsets)[0 .. b.capacity * uint.sizeof], b.count * uint.sizeof).ptr;
             b.capacity = b.count;
         }
+        if (b.heap && b.heap_used < b.heap_capacity)
+        {
+            b.heap = realloc(b.heap[0 .. b.heap_capacity], b.heap_used).ptr;
+            b.heap_capacity = b.heap_used;
+        }
         // TODO: pack (columnar codec) lands here
     }
 
@@ -1001,12 +1106,11 @@ private:
 
     void free_bucket(Bucket* b)
     {
-        if (data_format.is_text)
-            foreach (i; 0 .. b.count)
-                (cast(TextRecord*)b.samples)[i].release();
         free(b.samples[0 .. b.capacity * data_format.stride]);
         if (b.offsets)
             free((cast(void*)b.offsets)[0 .. b.capacity * uint.sizeof]);
+        if (b.heap)
+            free(b.heap[0 .. b.heap_capacity]);
         free((cast(void*)b)[0 .. Bucket.sizeof]);
     }
 
@@ -1353,7 +1457,8 @@ unittest
     assert(e.record_count == 7);
     assert(e.latest_record.f64_ == 7.0);
 
-    // text: short strings embed in the record, long strings allocate a String; equal held values reuse it
+    // text: records are u16 heap offsets; repeated values share one dedup'd heap entry
+    enum long_str = "a string much too long for any embedding tricks";
     DataFormat text_fmt = DataFormat(ValueType.char_, SeriesKind.held);
     text_fmt.count = 0;
     Element te;
@@ -1361,39 +1466,42 @@ unittest
     te.ensure_history();
     te.write_sample("run", from_unix_time_ns(500));
     assert(te.record_count == 1);
-    assert((cast(const(TextRecord)*)te.latest_record.raw.ptr).embedded);
+    assert(te.text_value == "run");
     assert(te.value().asString == "run");
 
-    te.write_sample("a string too long to embed anywhere", from_unix_time_ns(1_000));
+    te.write_sample(long_str, from_unix_time_ns(1_000));
     assert(te.record_count == 2);
-    assert(!(cast(const(TextRecord)*)te.latest_record.raw.ptr).embedded);
-    assert(te.value().asString == "a string too long to embed anywhere");
-    const(char)* allocated = (cast(const(String)*)te.latest_record.raw.ptr).ptr;
-    te.write_sample("a string too long to embed anywhere", from_unix_time_ns(2_000));
-    assert(te.record_count == 2);
-    assert((cast(const(String)*)te.latest_record.raw.ptr).ptr is allocated);
+    assert(te.value().asString == long_str);
+    te.write_sample(long_str, from_unix_time_ns(2_000));
+    assert(te.record_count == 2);   // held repeat records nothing
     assert(te.last_update == from_unix_time_ns(2_000));
 
-    // String ingress adopts the handle; retained refs are the typed latest slot
-    // and the bucket record.
+    // a bouncing value reuses its heap entry: 3 records, 2 entries
+    te.write_sample("run", from_unix_time_ns(3_000));
+    assert(te.record_count == 3);
+    const(Bucket)* tb = te._history.buckets[$-1];
+    assert(tb.heap_used == heap_entry_bytes(3) + heap_entry_bytes(long_str.length));
+    assert((cast(const(ushort)*)tb.samples)[0] == (cast(const(ushort)*)tb.samples)[2]);
+
+    // String ingress stores content; the series retains no handles
     String src = "second value arriving as a shared handle".makeString(defaultAllocator());
     static ushort rc(ref const String s) => (cast(const(ushort)*)s.ptr)[-2] & 0x3FFF;
     assert(rc(src) == 0);
-    te.write_sample(src, from_unix_time_ns(3_000));
-    assert(te.record_count == 3);
-    assert(rc(src) == 2);
+    te.write_sample(src, from_unix_time_ns(4_000));
+    assert(te.record_count == 4);
+    assert(rc(src) == 0);
     assert(te.value().asString == src[]);
 
     Cursor tcur = te.open_series_cursor(0);
     RecordBlock tblk = tcur.next(16);
-    assert(tblk.count == 3);
+    assert(tblk.count == 4);
     assert(tblk.box(0).asString == "run");
-    assert(tblk.box(1).asString == "a string too long to embed anywhere");
-    assert(tblk.box(2).asString == src[]);
+    assert(tblk.text(1) == long_str);
+    assert(tblk.box(2).asString == "run");
+    assert(tblk.box(3).asString == src[]);
     te.close_series_cursor(tcur);
 
     te.teardown();
-    assert(rc(src) == 0);
 
     Element text_batch;
     text_batch.format = register_format(text_fmt);
@@ -1499,18 +1607,53 @@ unittest
     k.close_series_cursor(kc);
     k.teardown();
 
-    // eviction releases text records
+    // text without requested history: latest-only, one record overwritten in place
     Element tv;
     tv.format = register_format(text_fmt);
-    tv.retention(1);
-    String evictee = "the first long string, soon evicted".makeString(defaultAllocator());
-    tv.write_sample(evictee, from_unix_time_ns(1_000));
-    assert(rc(evictee) == 2);
-    tv.mark_gap();
-    tv.write_sample("replacement value, also quite long", from_unix_time_ns(2_000));
-    assert(rc(evictee) == 0);
+    tv.write_sample("first", from_unix_time_ns(1_000));
+    assert(tv._history && tv.record_count == 1 && tv.bucket_count == 1);
+    assert(tv.text_value == "first");
+    tv.write_sample("a rather longer second value", from_unix_time_ns(2_000));
+    assert(tv.record_count == 1);   // overwritten, not appended
+    assert(tv.text_value == "a rather longer second value");
+    assert(tv._history.buckets[0].heap_used == heap_entry_bytes(28));
+
+    // raising retention (or any history interest) ends latest-only: the current value
+    // stands as record 0 and subsequent writes append
+    tv.retention(4);
+    tv.write_sample("third", from_unix_time_ns(3_000));
+    assert(tv.record_count == 2 && tv.bucket_count == 2);
+    Cursor tvc = tv.open_series_cursor(0);
+    RecordBlock tvb = tvc.next(16);
+    assert(tvb.count == 1 && tvb.text(0) == "a rather longer second value");
+    tvb = tvc.next(16);
+    assert(tvb.count == 1 && tvb.text(0) == "third");
+    tv.close_series_cursor(tvc);
     tv.teardown();
-    assert(rc(evictee) == 0);
+
+    // heap exhaustion seals the bucket and rolls to a fresh one
+    Element th;
+    th.format = register_format(text_fmt);
+    th.ensure_history();
+    char[1200] big = 'x';
+    foreach (i; 0 .. 60)
+    {
+        big[0] = cast(char)('a' + i);
+        th.write_sample(big[], from_unix_time_ns(1_000 * (i + 1)));
+    }
+    assert(th.record_count == 60 && th.bucket_count == 2);
+    assert(th._history.buckets[0].sealed);
+    assert(th._history.buckets[0].count == 54);   // 54 * 1202-byte entries is all a 64k heap holds
+    assert(th._history.buckets[0].heap_capacity == th._history.buckets[0].heap_used);
+    assert(th.text_value[0] == cast(char)('a' + 59));
+
+    // oversize samples are refused at the gateway
+    char[] huge = cast(char[])alloc(40_000);
+    huge[] = 'x';
+    th.write_sample(cast(const(char)[])huge, from_unix_time_ns(100_000));
+    assert(th.record_count == 60);
+    free(huge);
+    th.teardown();
 
     // TODO: regular-series test returns once regular write_records() and rate-aware tick() are built
 }

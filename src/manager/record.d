@@ -59,7 +59,7 @@ nothrow @nogc:
 
         const(DataFormat)* f = e.data_format;
         if (!container_serialisable(*f))
-            return; // stays in RAM; text/user/domain series wait on their codecs
+            return; // stays in RAM; user/domain series wait on name binding and clock anchors
 
         if (cursor.element is null)
             cursor = e.open_series_cursor(0, true);

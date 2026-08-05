@@ -12,18 +12,20 @@ module manager.series;
 //
 // The value types are machine scalars, char, and `user` (a registered type identified by the
 // format's descriptor slot). count is one for a scalar, N for a fixed vector, or zero for a
-// dynamic record whose length is stored in the record. A string is dynamic char data; a blob
-// is dynamic u8 data with opaque display. Storage rule: a record is memcpy iff its type is trivial - dynamic
-// records hold immutable refcounted handles (String for text), non-pod user types copy
-// and drop through their registry hooks.
+// dynamic record. A string is dynamic char data; a blob is dynamic u8 data with opaque display.
+// Storage rule: every record is raw bytes. A dynamic record is a u16 offset into its bucket's
+// byte heap, where the value lives as a u15 length prefix (top bit reserved) and its bytes,
+// 2-aligned, de-duplicated within the bucket. The record plane stays fixed-stride and the whole
+// image is context-free, so RAM buckets and serialised blocks are byte-identical. Values are
+// capped at MaxStringLen (32K); anything larger is content, not an observation - that's a tap.
+// Non-pod user types copy and drop through their registry hooks.
 
 import urt.array;
-import urt.lifetime : move;
 import urt.mem.allocator : defaultAllocator;
 import urt.meta.enuminfo : enum_info, VoidEnumInfo;
 import urt.si.quantity : Quantity;
 import urt.si.unit : Nanosecond, ScaledUnit;
-import urt.string : makeString, String;
+import urt.string : String;
 import urt.time;
 import urt.traits : is_boolean, is_some_float, is_some_int, Unqual;
 import urt.typereg : find_type_details, TypeDetails;
@@ -335,7 +337,7 @@ nothrow @nogc:
     ubyte stride() const pure
     {
         if (count == 0)
-            return 8; // dynamic records are TextRecords on all targets
+            return 2; // dynamic records are u16 offsets into the bucket heap
         uint s = type == ValueType.user ? user_type.size : g_type_stride[type];
         s *= count;
         assert(s <= ubyte.max, "record stride exceeds 255 bytes");
@@ -374,70 +376,18 @@ nothrow @nogc:
     }
 }
 
-// text record: a String handle in the low bytes, or <=7 chars embedded with the length in
-// the top byte - a canonical user pointer never has its top byte set, and 32-bit handles
-// leave the high half zeroed
-struct TextRecord
+// a dynamic value in a bucket heap: u15 length prefix (top bit reserved, must be zero),
+// bytes follow, entries 2-aligned so the prefix read is always aligned. The prefix counts
+// BYTES regardless of element type - the format's element stride divides it and the item
+// count derives - so heaps walk blind, without a format in hand.
+uint heap_entry_bytes(size_t length) pure
+    => cast(uint)(ushort.sizeof + length + (length & 1));
+
+const(void)[] heap_view(const(void)* heap, uint offset) pure
 {
-nothrow @nogc:
-
-    version (BigEndian) static assert(false, "embedded text discriminant assumes little-endian");
-
-    enum embed_capacity = 7;
-
-    ubyte[8] raw;
-
-    bool embedded() const pure
-        => raw[7] != 0;
-
-    const(char)[] view() const pure return
-        => embedded ? cast(const(char)[])raw[0 .. raw[7]] : (*cast(const(String)*)raw.ptr)[];
-
-    void set(String s)
-    {
-        if (s.length <= embed_capacity)
-            set(s[]);
-        else
-        {
-            release();
-            *cast(String*)raw.ptr = s.move;
-        }
-    }
-
-    void set(const(char)[] s)
-    {
-        if (s.length <= embed_capacity)
-        {
-            release();
-            raw[0 .. s.length] = cast(const(ubyte)[])s;
-            raw[7] = cast(ubyte)s.length;
-        }
-        else
-        {
-            release();
-            *cast(String*)raw.ptr = s.makeString(defaultAllocator());
-        }
-    }
-
-    // target must be initialised; the ref taken here is owned by whoever memcpys the bits away
-    void copy_from(ref const TextRecord src)
-    {
-        release();
-        if (src.embedded)
-            raw = src.raw;
-        else
-            *cast(String*)raw.ptr = *cast(String*)src.raw.ptr;
-    }
-
-    void release()
-    {
-        if (!embedded)
-            *cast(String*)raw.ptr = null;
-        raw[] = 0;
-    }
+    const(ushort)* p = cast(const(ushort)*)(cast(const(ubyte)*)heap + offset);
+    return (cast(const(void)*)(p + 1))[0 .. *p & 0x7FFF];
 }
-
-static assert(TextRecord.sizeof == 8);
 
 struct RecordBlock
 {
@@ -448,8 +398,10 @@ nothrow @nogc:
     ulong lost;         // records evicted between the reader's position and this block
     const(uint)* ts;    // null if the series is regular
     const(void)* data;
+    const(void)* heap;  // dynamic-record series: the byte heap the records' offsets resolve in
     FormatId format;
     uint count;
+    uint heap_bytes;
 
     const(DataFormat)* data_format() const pure
         => format_info(format);
@@ -466,8 +418,30 @@ nothrow @nogc:
     ref const(T) get(T)(uint i) const pure
         => (cast(const(T)*)data)[i];
 
+    // dynamic records resolve through the heap as opaque bytes - the format is their context,
+    // applied at the boxing edge; the view borrows the block's lifetime
+    const(void)[] dynamic(uint i) const pure
+        => heap_view(heap, (cast(const(ushort)*)data)[i]);
+
+    const(char)[] text(uint i) const pure
+    {
+        debug assert(data_format.is_text);
+        return cast(const(char)[])dynamic(i);
+    }
+
     Variant box(uint i) const
-        => box_record(cast(const(ubyte)*)data + i*data_format.stride, *data_format);
+    {
+        const(DataFormat)* f = data_format;
+        if (f.count == 0)
+        {
+            if (f.type == ValueType.char_)
+                return Variant(cast(const(char)[])dynamic(i));
+            if (f.type == ValueType.u8)
+                return Variant(dynamic(i));
+            assert(false, "TODO: typed dynamic arrays box as Variant arrays");
+        }
+        return box_record(cast(const(ubyte)*)data + i*f.stride, *f);
+    }
 }
 
 enum SeriesEvent : ubyte
@@ -490,6 +464,9 @@ struct Bucket
     bool sealed;       // tail retired: shrunk to fit, immutable (packing lands here)
     void* samples;
     uint* offsets;     // null when regular
+    void* heap;        // dynamic-record series: 2-aligned len-prefixed values, dedup'd per bucket
+    uint heap_used;
+    uint heap_capacity;
 
 pure nothrow @nogc:
     ulong last_tick() const => first_tick + last_offset;
@@ -578,6 +555,8 @@ nothrow @nogc:
         r.ts = b.offsets ? b.offsets + offset : null;
         r.t0 = b.offsets ? b.first_tick : b.first_tick + offset;
         r.first_index = from_index;
+        r.heap = b.heap;
+        r.heap_bytes = b.heap_used;
         return r;
     }
 }
@@ -610,13 +589,7 @@ Variant box_record(const(void)* record, ref const DataFormat fmt)
         case f32:   return box_float(*cast(const(float)*)record, fmt);
         case f64:   return box_float(*cast(const(double)*)record, fmt);
         case char_:
-        {
-            assert(fmt.count == 0, "fixed char vectors box at the Element, not the record");
-            const(TextRecord)* tr = cast(const(TextRecord)*)record;
-            if (tr.embedded)
-                return Variant(tr.view);
-            return Variant(*cast(String*)record);
-        }
+            assert(false, "dynamic records resolve through their heap; box at the host (RecordBlock.box)");
         case user:
         {
             const(TypeDetails)* td = fmt.user_type;
@@ -764,7 +737,15 @@ unittest
     assert(f.stride == 32 && !f.is_scalar);
     DataFormat s = DataFormat(ValueType.char_, SeriesKind.held);
     s.count = 0;
-    assert(s.stride == 8 && !s.is_scalar && s.is_text);
+    assert(s.stride == 2 && !s.is_scalar && s.is_text);
+
+    // heap entries: len-prefixed, 2-aligned; views resolve through the offset
+    assert(heap_entry_bytes(3) == 6 && heap_entry_bytes(4) == 6 && heap_entry_bytes(0) == 2);
+    ushort[7] mini = [3, 0, 0, 5, 0, 0, 0];
+    (cast(char*)mini.ptr)[2 .. 5] = "abc";
+    (cast(char*)mini.ptr)[8 .. 13] = "hello";
+    assert(cast(const(char)[])heap_view(mini.ptr, 0) == "abc");
+    assert(cast(const(char)[])heap_view(mini.ptr, 6) == "hello");
 
     int v = -5;
     assert(box_record(&v, DataFormat(ValueType.s32, SeriesKind.held)).asLong == -5);
