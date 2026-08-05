@@ -1699,13 +1699,12 @@ nothrow @nogc:
     void send_element(SyncPeer to, SyncEncoder enc, Element* e, const(char)[] path)
     {
         import urt.mem.temp : tconcat;
-        import manager.owsig : container_serialisable;
         import manager.sample : enum_info_name;
 
         if (!e.format.valid)
             return;
         const(DataFormat)* fmt = e.data_format;
-        if (!container_serialisable(*fmt))
+        if (!wire_serialisable(*fmt))
         {
             log.debug_("sync: skipping unserialisable element ", path);
             return;
