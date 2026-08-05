@@ -30,15 +30,25 @@ import manager.element;
 import manager.owsig;
 import manager.plugin;
 
-import db;
-import db.engine : SampleAggregator, GraphIntervalSampler;
-
-public import db : Sample; // re-export: record streams produce db samples
-
 nothrow @nogc:
 
 
 alias log = Log!"record";
+
+// The query boundary: history is typed, but graphs and the sync history verb consume
+// numbers, so queries normalise to (unix ns, double) and quantities to base SI scale.
+struct Sample
+{
+    ulong time;   // unix ns
+    double value = 0;
+}
+
+enum QueryMode : ubyte
+{
+    raw,    // mean per time bucket, stamped with the bucket's last real time
+    graph,  // time-weighted sample-and-hold per bucket, with the value held at
+            // the left edge seeded as the first point (for line/area charts)
+}
 
 struct RecordStream
 {
@@ -49,7 +59,6 @@ nothrow @nogc:
     Cursor cursor;          // typed-series intake: pinned, never lapped
     SeriesContainer container;
     String path;            // data-model path: "device.component.element"
-    SeriesId series;        // legacy database query handle
 
     this(this) @disable;
 
@@ -89,7 +98,164 @@ nothrow @nogc:
     }
 }
 
-bool query_local(ref RecordStream rs, ulong from, ulong to, uint max_points, QueryMode mode, ref Array!Sample result)
+// Streaming time-bucket aggregator: emits one mean-value sample per bucket,
+// stamped with the bucket's last real timestamp. bucket_width == 0 passes
+// samples through unmodified.
+struct SampleAggregator
+{
+nothrow @nogc:
+
+    Array!Sample* sink;
+    ulong from;
+    ulong bucket_width;
+
+    void put(ref const Sample s)
+    {
+        if (!bucket_width)
+        {
+            *sink ~= s;
+            return;
+        }
+        ulong b = (s.time - from) / bucket_width;
+        if (b != _bucket)
+        {
+            emit();
+            _bucket = b;
+        }
+        _sum += s.value;
+        _last_time = s.time;
+        ++_n;
+    }
+
+    void finish()
+    {
+        emit();
+    }
+
+private:
+    ulong _bucket = ulong.max;
+    double _sum = 0;
+    ulong _last_time;
+    uint _n;
+
+    void emit()
+    {
+        if (!_n)
+            return;
+        *sink ~= Sample(_last_time, _sum / _n);
+        _sum = 0;
+        _n = 0;
+    }
+}
+
+
+// Sample-and-hold interval downsampler for graphs. Each emitted point is the
+// time-weighted mean value over one visible time bucket, which avoids the
+// aliasing/jitter caused by picking or averaging only change events.
+struct GraphIntervalSampler
+{
+nothrow @nogc:
+
+    Array!Sample* sink;
+    ulong from;
+    ulong to;
+    ulong bucket_width;
+
+    void seed(ref const Sample s)
+    {
+        _last_time = from;
+        _last_value = s.value;
+        _has_value = true;
+        _seeded = true;
+    }
+
+    void put(ref const Sample s)
+    {
+        if (!bucket_width)
+        {
+            *sink ~= s;
+            return;
+        }
+
+        ulong t = s.time;
+        if (t < from)
+            return;
+        if (t > to)
+            t = to;
+
+        if (_has_value)
+            accumulate(_last_time, t, _last_value);
+
+        _last_time = t;
+        _last_value = s.value;
+        _has_value = true;
+    }
+
+    void finish()
+    {
+        if (!bucket_width)
+            return;
+        if (_has_value)
+            accumulate(_last_time, to, _last_value);
+        emit();
+    }
+
+private:
+    ulong _bucket = ulong.max;
+    ulong _bucket_time;
+    double _sum;
+    ulong _duration;
+    ulong _last_time;
+    double _last_value;
+    bool _has_value;
+    bool _seeded;
+    bool _emitted;
+
+    void accumulate(ulong start, ulong end, double value)
+    {
+        if (end <= start)
+            return;
+        if (start < from)
+            start = from;
+        if (end > to)
+            end = to;
+
+        while (start < end)
+        {
+            ulong b = (start - from) / bucket_width;
+            if (b != _bucket)
+            {
+                emit();
+                _bucket = b;
+                ulong bucket_start = from + b * bucket_width;
+                _bucket_time = (_seeded || _emitted || start <= bucket_start)
+                    ? bucket_start : start;
+            }
+
+            ulong bucket_end = from + (b + 1) * bucket_width;
+            ulong stop = end < bucket_end ? end : bucket_end;
+            ulong dt = stop - start;
+            _sum += value * cast(double)dt;
+            _duration += dt;
+            start = stop;
+        }
+    }
+
+    void emit()
+    {
+        if (!_duration)
+            return;
+        *sink ~= Sample(_bucket_time, _sum / cast(double)_duration);
+        _sum = 0;
+        _duration = 0;
+        _emitted = true;
+    }
+}
+
+
+// Serves whatever coverage exists: RAM buckets, extended backwards by the owsig
+// container when they don't reach `from`. Partial coverage is answered as partial.
+void query_local(ref RecordStream rs, ulong from, ulong to, uint max_points, QueryMode mode, ref Array!Sample result)
 {
     Element* e = rs.element;
     Array!Sample local;
@@ -150,9 +316,6 @@ bool query_local(ref RecordStream rs, ulong from, ulong to, uint max_points, Que
             merged ~= s;
         local = merged.move;
     }
-    if (local.length == 0 || local[0].time > from)
-        return false; // no numeric coverage back to `from`; let the db serve it
-
     ulong bucket_width = max_points ? (to - from) / max_points + 1 : 0;
 
     if (mode == QueryMode.graph)
@@ -201,7 +364,7 @@ bool query_local(ref RecordStream rs, ulong from, ulong to, uint max_points, Que
             }
             g.finish();
         }
-        return true;
+        return;
     }
 
     SampleAggregator agg;
@@ -217,7 +380,6 @@ bool query_local(ref RecordStream rs, ulong from, ulong to, uint max_points, Que
         agg.put(s);
     }
     agg.finish();
-    return true;
 }
 
 
@@ -237,14 +399,45 @@ unittest
     rn.element = &en;
     Array!Sample result;
     result.clear();
-    assert(rn.query_local(4_000_000, 5_000_000, 0, QueryMode.raw, result));
+    rn.query_local(4_000_000, 5_000_000, 0, QueryMode.raw, result);
     assert(result.length == 2 && result[0].time == 4_000_000 && result[0].value == 30);
     result.clear();
-    assert(!rn.query_local(0, 6_000_000, 0, QueryMode.raw, result)); // no coverage back to 0
+    rn.query_local(0, 6_000_000, 0, QueryMode.raw, result);
+    assert(result.length == 6 && result[0].time == 1_000_000); // partial coverage answers partial
     result.clear();
-    assert(rn.query_local(4_000_000, 6_000_000, 0, QueryMode.graph, result));
+    rn.query_local(4_000_000, 6_000_000, 0, QueryMode.graph, result);
     assert(result[0].time == 4_000_000 && result[0].value == 20);
     en.teardown();
+
+    // bucketed downsample: mean value, stamped with the bucket's last time
+    Array!Sample bucketed;
+    SampleAggregator agg;
+    agg.sink = &bucketed;
+    agg.from = 0;
+    agg.bucket_width = 10;
+    agg.put(Sample(1, 1));
+    agg.put(Sample(5, 3));
+    agg.put(Sample(12, 10));
+    agg.finish();
+    assert(bucketed.length == 2);
+    assert(bucketed[0].time == 5 && bucketed[0].value == 2);
+    assert(bucketed[1].time == 12 && bucketed[1].value == 10);
+
+    // sample-and-hold: time-weighted mean per bucket, seeded at the left edge
+    bucketed.clear();
+    GraphIntervalSampler graph_agg;
+    graph_agg.sink = &bucketed;
+    graph_agg.from = 0;
+    graph_agg.to = 100;
+    graph_agg.bucket_width = 25;
+    Sample seed = Sample(0, 10);
+    graph_agg.seed(seed);
+    graph_agg.put(Sample(40, 20));
+    graph_agg.put(Sample(90, 30));
+    graph_agg.finish();
+    assert(bucketed.length == 4);
+    assert(bucketed[0].time == 0);
+    assert(bucketed[3].time == 75);
 }
 
 
@@ -441,26 +634,20 @@ private:
     {
         rs.flush(); // ship what is still pending before the container closes
         rs.close();
-        database().close_series(rs.series);
         defaultAllocator().freeT(rs);
     }
 
     void attach(Element* e, const(char)[] path)
     {
-        SeriesId series = database().open_series(make_filename(path)[]);
-        if (series == invalid_series)
-            return; // db channel momentarily full; next scan retries
-
         RecordStream* rs = defaultAllocator().allocT!RecordStream();
         rs.owner = this;
         rs.element = e;
         rs.path = path.makeString(defaultAllocator());
-        rs.series = series;
         _streams.insert(rs.path[], rs);
         // the element self-captures; the first flush ships its standing history
     }
 
-    String make_filename(const(char)[] path, const(char)[] ext = ".owr")
+    String make_filename(const(char)[] path, const(char)[] ext = ".owsig")
     {
         MutableString!0 fn;
         fn.append(_dir[], '/');
@@ -482,17 +669,13 @@ struct SeriesFetch
 {
 nothrow @nogc:
 
-    Array!String labels;        // path label per series (owned copy; survives the async gap)
-    Array!uint tokens;          // db query token per series; 0 == nothing outstanding
+    Array!String labels;        // path label per series
     Array!(Array!Sample) data;  // per-series samples
     ulong t0, t1;
     uint max_points;
     QueryMode mode;
-    MonoTime started;
-    uint outstanding;           // queries still awaiting their callback
-    bool active;
 
-    void begin(RecordModule mod, scope const(char)[][] paths, ulong t0, ulong t1, uint max_points, QueryMode mode, bool allow_local)
+    void begin(RecordModule mod, scope const(char)[][] paths, ulong t0, ulong t1, uint max_points, QueryMode mode)
     {
         reset();
         this.t0 = t0;
@@ -504,84 +687,19 @@ nothrow @nogc:
         mod.find_streams(paths, streams);
         uint n = cast(uint)streams.length;
         labels.resize(n);
-        tokens.resize(n);
         data.resize(n);
         foreach (i; 0 .. n)
         {
             RecordStream* rs = streams[i];
             labels[][i] = rs.path[].makeString(defaultAllocator());
-            tokens[][i] = 0;
             data[][i].clear();
-            if (allow_local && query_local(*rs, t0, t1, max_points, mode, data[][i]))
-                continue;
-            data[][i].clear();
-            uint tk = database().query(rs.series, t0, t1, max_points, mode, &on_result);
-            if (tk)
-            {
-                tokens[][i] = tk;
-                ++outstanding;
-            }
+            query_local(*rs, t0, t1, max_points, mode, data[][i]);
         }
-        started = getTime();
-        active = n > 0;
-    }
-
-    // True once every outstanding query has reported (or a timeout fired, so the
-    // caller never hangs on a lost completion). Abandons any stragglers.
-    bool done()
-    {
-        if (!active || outstanding == 0)
-            return true;
-        if (getTime() - started > 5.seconds)
-        {
-            cancel();
-            return true;
-        }
-        return false;
-    }
-
-    void on_result(uint token, scope const(Sample)[] samples)
-    {
-        foreach (i; 0 .. tokens.length)
-        {
-            if (tokens[][i] != token)
-                continue;
-            data[][i].clear();
-            if (samples.length)
-            {
-                data[][i].resize(samples.length);
-                data[][i][][] = samples[];
-            }
-            tokens[][i] = 0;
-            if (outstanding)
-                --outstanding;
-            break;
-        }
-    }
-
-    // Abandon any in-flight queries (owner torn down, or timed out).
-    void cancel()
-    {
-        if (DbModule db = database())
-        {
-            foreach (i; 0 .. tokens.length)
-            {
-                if (tokens[][i])
-                {
-                    db.cancel(tokens[][i]);
-                    tokens[][i] = 0;
-                }
-            }
-        }
-        outstanding = 0;
     }
 
     void reset()
     {
-        cancel();
-        active = false;
         labels.clear();
-        tokens.clear();
         data.clear();
     }
 }
@@ -640,8 +758,8 @@ void render_fetch(ref Array!(MutableString!0) lines, ref SeriesFetch f, uint col
 }
 
 
-// Base for the latent (async) record commands: submit a fetch, poll until the
-// database answers, then render once.
+// Record commands still arrive as CommandState because that is the console's contract,
+// but the fetch is synchronous, so the first update() renders and finishes.
 abstract class RecordFetchCommand : CommandState
 {
 nothrow @nogc:
@@ -660,8 +778,6 @@ nothrow @nogc:
             fetch.reset();
             return CommandCompletionState.cancelled;
         }
-        if (!fetch.done())
-            return CommandCompletionState.in_progress;
         render();
         return CommandCompletionState.finished;
     }
@@ -669,7 +785,6 @@ nothrow @nogc:
     override void request_cancel()
     {
         _cancel = true;
-        fetch.cancel(); // a session teardown may freeT us before update() runs again
     }
 
     abstract void render();
@@ -828,7 +943,7 @@ nothrow @nogc:
         uint h = height ? height.value : 16;
 
         auto cmd = defaultAllocator().allocT!RecordGraphCommand(session, w, h, opt);
-        cmd.fetch.begin(this, path, t0, t1, w * 2, QueryMode.graph, true);
+        cmd.fetch.begin(this, path, t0, t1, w * 2, QueryMode.graph);
         return cmd;
     }
 
@@ -839,7 +954,7 @@ nothrow @nogc:
         uint max_points = max ? max.value : 24;
 
         auto cmd = defaultAllocator().allocT!RecordQueryCommand(session, path);
-        cmd.fetch.begin(this, (&path)[0 .. 1], now > span ? now - span : 0, now, max_points, QueryMode.raw, true);
+        cmd.fetch.begin(this, (&path)[0 .. 1], now > span ? now - span : 0, now, max_points, QueryMode.raw);
         return cmd;
     }
 }
@@ -883,29 +998,12 @@ protected:
 
     override void poll()
     {
-        if (!_fetch.active && (!_last_build || getTime() - _last_build >= 250.msecs))
-            start_fetch();
-        if (_fetch.active && _fetch.done())
-        {
-            build_lines();
-            request_redraw();
-            _fetch.active = false;
-            _last_build = getTime();
-        }
-    }
-
-    override CommandCompletionState update()
-    {
-        CommandCompletionState st = super.update();
-        if (st != CommandCompletionState.in_progress)
-            _fetch.cancel(); // the view is ending: abandon any in-flight query
-        return st;
-    }
-
-    override void request_cancel()
-    {
-        super.request_cancel();
-        _fetch.cancel(); // a session teardown may freeT us before update() runs again
+        if (_last_build && getTime() - _last_build < 250.msecs)
+            return;
+        start_fetch();
+        build_lines();
+        request_redraw();
+        _last_build = getTime();
     }
 
     override bool handle_key(const(char)[] seq)
@@ -968,7 +1066,7 @@ private:
         Array!(const(char)[]) pats;
         foreach (ref p; _paths[])
             pats ~= p[];
-        _fetch.begin(_mod, pats[], t0, t1, _cols * 2, QueryMode.graph, true);
+        _fetch.begin(_mod, pats[], t0, t1, _cols * 2, QueryMode.graph);
     }
 
     void build_lines()

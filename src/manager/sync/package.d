@@ -56,7 +56,6 @@ import urt.string;
 import urt.time;
 import urt.variant;
 
-import db;
 
 import manager;
 import manager.base;
@@ -123,21 +122,6 @@ struct PendingInboundCmd
     CommandState  command;
 }
 
-// Inbound history request awaiting the database's async answer.
-struct PendingHistory
-{
-    SyncPeer     peer;
-    uint         seq;
-    String       path;
-    uint         ticket;
-    MonoTime     started;
-    Array!Sample samples;
-    bool         ready;
-
-    this(this) @disable;
-}
-
-
 class SyncModule : Module
 {
     mixin DeclareModule!"sync";
@@ -147,7 +131,6 @@ nothrow @nogc:
     Map!(CID, SyncPeer)        authority;         // only remote auth; absence = local
     Map!(uint, PendingForward) pending_forwards;
     Array!PendingInboundCmd    pending_inbound_cmds;
-    Array!PendingHistory       pending_history;
     uint                       next_seq;
     uint                       _timebase_version;  // our version as a clock authority
     SyncPeer                   _applying_push;     // peer whose delta push we're applying
@@ -277,32 +260,6 @@ nothrow @nogc:
             req.session.allocator.freeT(req.command);
             g_app.console.destroy_session(req.session);
             pending_inbound_cmds.remove(i);
-        }
-
-        // Drain completed inbound history requests answered by the database.
-        import urt.time : getTime, seconds;
-        for (size_t i = 0; i < pending_history.length; )
-        {
-            ref PendingHistory h = pending_history[i];
-
-            bool alive = false;
-            foreach (p; peers[])
-                if (p is h.peer)
-                {
-                    alive = true;
-                    break;
-                }
-
-            if (alive && !h.ready && getTime() - h.started <= 5.seconds)
-            {
-                ++i;
-                continue;
-            }
-            if (alive && h.ready)
-                encoder_for(h.peer._encoder).encode_history(h.peer, h.seq, h.path[], h.samples[]);
-            else
-                database().cancel(h.ticket); // peer gone or timed out: drop the query
-            pending_history.remove(i);
         }
     }
 
@@ -1263,41 +1220,9 @@ nothrow @nogc:
         else if (max_points > max_history_points)
             max_points = max_history_points;
 
-        // typed series answer synchronously from RAM buckets + owsig container; the db
-        // serves legacy ring-fed streams
         Array!Sample local;
-        if (query_local(*rs, from_ms * 1_000_000, to_ms * 1_000_000, max_points, QueryMode.raw, local))
-        {
-            encoder_for(from._encoder).encode_history(from, seq, path, local[]);
-            return;
-        }
-
-        uint ticket = database().query(rs.series, from_ms * 1_000_000, to_ms * 1_000_000, max_points, QueryMode.raw, &on_history_result);
-        if (!ticket)
-        {
-            encoder_for(from._encoder).encode_error(from, seq, "history unavailable");
-            return;
-        }
-
-        import urt.time : getTime;
-        pending_history ~= PendingHistory(from, seq, path.makeString(defaultAllocator()), ticket, getTime());
-    }
-
-    void on_history_result(uint ticket, scope const(Sample)[] samples)
-    {
-        foreach (ref h; pending_history[])
-        {
-            if (h.ticket != ticket)
-                continue;
-            h.samples.clear();
-            if (samples.length)
-            {
-                h.samples.resize(samples.length);
-                h.samples[][] = samples[];
-            }
-            h.ready = true;
-            break;
-        }
+        query_local(*rs, from_ms * 1_000_000, to_ms * 1_000_000, max_points, QueryMode.raw, local);
+        encoder_for(from._encoder).encode_history(from, seq, path, local[]);
     }
 
     void inbound_enum_req(SyncPeer from, const(char)[] type_name, uint seq)

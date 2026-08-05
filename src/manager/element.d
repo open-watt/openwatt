@@ -84,7 +84,6 @@ nothrow @nogc:
     const(SysTime)[] times;
     const(ulong)[] ticks;
     Subscriber who;
-    ulong first_index;
     Variant value;
     Variant previous;
     SysTime timestamp;
@@ -191,8 +190,6 @@ nothrow @nogc:
         position += r.count;
         if (h.pin_mask & (1 << bit))
             h.pin_position[bit] = position;
-        if (!pending)
-            element._dirty &= ~cast(ushort)(1 << bit);
         return r;
     }
 }
@@ -321,16 +318,6 @@ nothrow @nogc:
                 }
             }
         }
-    }
-
-    void write_records(const(void)[] records, const(SysTime)[] times, Subscriber who = null)
-    {
-        store_records(records, times, who);
-    }
-
-    void write_records(const(void)[] records, const(ulong)[] ticks, Subscriber who = null)
-    {
-        store_records(records, ticks, who);
     }
 
     void mark_gap(Subscriber who = null)
@@ -724,7 +711,6 @@ public:
             _history.cursor_mask &= ~cast(ushort)(1 << c.bit);
             _history.pin_mask &= ~cast(ushort)(1 << c.bit);
         }
-        _dirty &= ~cast(ushort)(1 << c.bit);
         c.element = null;
     }
 
@@ -767,7 +753,6 @@ private:
     SysTime _last_update;
     Subscription* _subs;
     SeriesStore* _history;
-    ushort _dirty;
     ubyte _flags;
 
     enum bucket_capacity = 256; // TODO: scale with rate (target a time span, not a record count)
@@ -826,12 +811,12 @@ private:
         if (update.times.length)
         {
             _last_update = update.times[$-1];
-            update.first_index = append(update.records, update.times);
+            append(update.records, update.times);
         }
         else
         {
             _last_update = data_format.clock.to_wall(update.ticks[$-1]);
-            update.first_index = append(update.records, update.ticks);
+            append(update.records, update.ticks);
         }
     }
 
@@ -856,13 +841,12 @@ private:
             ensure_history();
             _flags |= Flags.latest_only;
         }
-        ulong first_index = append_text(v, unix_time_ns(t) / 1000);
+        append_text(v, unix_time_ns(t) / 1000);
         _last_update = t;
 
         SampleUpdate update;
         update.element = &this;
         update.who = who;
-        update.first_index = first_index;
         update.previous = previous.move;
         update.previous_timestamp = previous_timestamp;
         prepare_after(update);
@@ -1143,16 +1127,13 @@ private:
 
     void mark_dirty()
     {
-        bool cursors = _history && _history.cursor_mask;
-        if (!cursors && !g_feed_listeners)
+        if (!(_history && _history.cursor_mask) && !g_feed_listeners)
             return;
         if (!(_flags & Flags.dirty_listed))
         {
             g_dirty_elements ~= &this;
             _flags |= Flags.dirty_listed;
         }
-        if (cursors)
-            _dirty = _history.cursor_mask;
     }
 }
 
