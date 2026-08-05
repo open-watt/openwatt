@@ -135,7 +135,7 @@
     <DCompile Include="src\manager\features.d" />
     <DCompile Include="src\manager\id.d" />
     <DCompile Include="src\manager\log.d" />
-    <DCompile Include="src\manager\owsig.d" />
+    <DCompile Include="src\manager\ows.d" />
     <DCompile Include="src\manager\package.d" />
     <DCompile Include="src\manager\path.d" />
     <DCompile Include="src\manager\plugin.d" />

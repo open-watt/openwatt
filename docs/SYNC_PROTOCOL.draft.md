@@ -13,7 +13,7 @@ synchronously within the burst, which is gapless because nothing interleaves; cu
 when transports grow backpressure). The `detach_peer` defect below is fixed. Deviations and
 deferrals are recorded in the commit messages on the way past; the notable ones:
 
-- Formats failing `owsig.container_serialisable` (including text) are skipped from the model
+- Formats failing `ows.container_serialisable` (including text) are skipped from the model
   surface with a log, not answered with `err` -- per-node errors inside a glob burst were
   unresolved.
 - Constraint min/max/step do not ride the `type` format block yet; the element write path does
@@ -242,7 +242,7 @@ the format block; their source comment already declares the intent
 
 Formats with no wire representation (user types pending name binding, domain-clocked series
 pending clock anchors) are declined with `err {code:"unserialisable"}` -- shared verdict with
-[`owsig.container_serialisable()`](../src/manager/owsig.d#L50), not a second opinion.
+[`ows.container_serialisable()`](../src/manager/ows.d#L50), not a second opinion.
 
 ### 5. `add` -- `{h, path, class, ft|sig, access?, mode?, v?, t?}`
 

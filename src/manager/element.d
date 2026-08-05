@@ -178,16 +178,12 @@ nothrow @nogc:
     RecordBlock next(uint max_records)
     {
         SeriesStore* h = element._history;
-        ulong first = h.first_index;
-        ulong lost = 0;
-        if (position < first)
-        {
-            lost = first - position;
-            position = first;
-        }
         RecordBlock r = h.read(element.format, position, max_records, bit);
-        r.lost = lost;
-        position += r.count;
+        if (r.count)
+        {
+            r.lost = r.first_index - position;  // records evicted or destroyed below the block
+            position = r.first_index + r.count;
+        }
         if (h.pin_mask & (1 << bit))
             h.pin_position[bit] = position;
         return r;
@@ -476,7 +472,7 @@ public:
         if (!_history || !_history.buckets.length)
             return null;
         const(Bucket)* b = _history.buckets[$-1];
-        if (!b.count)
+        if (!b.count || !b.samples)
             return null;
         return cast(const(char)[])heap_view(b.heap, (cast(const(ushort)*)b.samples)[b.count - 1]);
     }
@@ -487,9 +483,10 @@ public:
         if (!_history || !_history.buckets.length)
             return null;
         const(Bucket)* b = _history.buckets[$-1];
-        if (!b.count)
+        if (!b.count || !b.samples)
             return null;
-        return (cast(const(ubyte)*)b.samples)[(b.count - 1) * data_format.stride .. b.count * data_format.stride];
+        ubyte stride = format_info(b.format).stride;
+        return (cast(const(ubyte)*)b.samples)[(b.count - 1) * stride .. b.count * stride];
     }
 
     void store_sample(T)(T v, SysTime t = getSysTime(), Subscriber who = null)
@@ -705,9 +702,9 @@ public:
             if (Bucket* rb = _history.cursor_ref[c.bit])
             {
                 _history.cursor_ref[c.bit] = null;
-                _history.release_ref(rb, format);
+                _history.release_ref(rb);
             }
-            _history.drop_loose_raws(format);
+            _history.drop_loose_raws();
             _history.cursor_mask &= ~cast(ushort)(1 << c.bit);
             _history.pin_mask &= ~cast(ushort)(1 << c.bit);
         }
@@ -728,7 +725,7 @@ public:
         if (_history)
         {
             foreach (b; _history.buckets)
-                free_bucket(b);
+                _history.free_bucket(b);
             destroy!false(*_history);
             free((cast(void*)_history)[0 .. SeriesStore.sizeof]);
             _history = null;
@@ -871,6 +868,7 @@ private:
                 h.buckets ~= b;
                 h.head = 1;
             }
+            b.format = format;
             b.heap_used = 0;
             uint entry = add_heap_entry(*b, v);
             (cast(ushort*)b.samples)[0] = cast(ushort)entry;
@@ -886,7 +884,8 @@ private:
         uint entry = uint.max;
         if (b)
         {
-            bool roll = b.count + 1 > b.capacity || follows_gap
+            bool format_changed = b.format != format;
+            bool roll = b.count + 1 > b.capacity || follows_gap || format_changed
                      || (b.count && tick - b.first_tick > uint.max);
             if (!roll)
             {
@@ -896,7 +895,9 @@ private:
             }
             if (roll)
             {
-                seal(b);
+                retire_tail(b);
+                if (format_changed)
+                    fire_format_change();
                 b = null;
                 entry = uint.max;
             }
@@ -1038,10 +1039,15 @@ private:
         // roll when the new block's offset from this bucket's base would exceed the uint offset field:
         // a slow stream spanning >~71 min at 1 MHz, or a base discontinuity that would underflow it
         bool overflow = b && b.offsets && b.count && max_tick - b.first_tick > uint.max;
-        if (!b || b.count + n > b.capacity || follows_gap || overflow)
+        bool format_changed = b && b.format != format;
+        if (!b || b.count + n > b.capacity || follows_gap || overflow || format_changed)
         {
             if (b)
-                seal(b);
+            {
+                retire_tail(b);
+                if (format_changed)
+                    fire_format_change();
+            }
             b = alloc_bucket(n > bucket_capacity ? n : bucket_capacity);
             b.first_index = _history.head;
             b.follows_gap = follows_gap;
@@ -1050,27 +1056,33 @@ private:
         return b;
     }
 
-    void seal(Bucket* b)
+    // roll the tail out of the write path: a non-empty tail seals, an empty one is recycled
+    // so sealed buckets always carry records
+    void retire_tail(Bucket* b)
     {
-        if (b.sealed)
-            return;
-        b.sealed = true;
-        if (b.count && b.count < b.capacity)
+        debug assert(_history.buckets.length && _history.buckets[$-1] is b);
+        if (b.count || b.sealed)
+            _history.seal(b);
+        else
         {
-            b.samples = realloc(b.samples[0 .. b.capacity * data_format.stride], b.count * data_format.stride).ptr;
-            if (b.offsets)
-                b.offsets = cast(uint*)realloc((cast(void*)b.offsets)[0 .. b.capacity * uint.sizeof], b.count * uint.sizeof).ptr;
-            b.capacity = b.count;
+            _history.free_bucket(b);
+            _history.buckets.popBack();
         }
-        if (b.heap && b.heap_used < b.heap_capacity)
-        {
-            b.heap = realloc(b.heap[0 .. b.heap_capacity], b.heap_used).ptr;
-            b.heap_capacity = b.heap_used;
-        }
-        // pack now if nothing borrows the raw side; otherwise the last release_ref packs
-        _history.try_pack(b, format);
     }
 
+    void fire_format_change()
+    {
+        SampleUpdate update;
+        update.element = &this;
+        update.event = SeriesEvent.format_change;
+        update.timestamp = _last_update;
+        submit(update, false);
+    }
+
+    // Retention splits by residency: a flushed bucket's eviction drops its bytes and keeps
+    // the descriptor (recoverable through the container), so the policy governs what stays
+    // decoded in RAM. Where there is no backing copy, eviction destroys, exactly as before;
+    // under a container, unflushed sealed buckets are held for the recorder.
     void evict_over_budget()
     {
         SeriesStore* h = _history;
@@ -1081,9 +1093,17 @@ private:
         ulong min_age_ticks = h.min_age ? to_ticks(h.min_age) : 0;
         ulong max_age_ticks = h.max_age ? to_ticks(h.max_age) : 0;
         ulong floor = h.pin_floor;
-        while (h.buckets.length > 1)
+        for (size_t i = 0; i + 1 < h.buckets.length; )
         {
-            Bucket* front = h.buckets[0];
+            Bucket* front = h.buckets[i];
+            bool flushed = front.file_offset != 0;
+            if (flushed && !front.resident)
+            {
+                ++i;
+                continue;
+            }
+            if (!front.sealed)
+                break;
             ulong newest = h.buckets[$-1].last_tick;
             bool forced = (h.max_records && h.head - front.first_index > h.max_records)
                        || (max_age_ticks && newest - front.last_tick > max_age_ticks);
@@ -1091,33 +1111,43 @@ private:
             {
                 if (!h.min_records && !h.min_age)
                     break;
-                if (front.first_index + front.count > floor)
+                if (!flushed && front.first_index + front.count > floor)
                     break;
                 if (h.min_records && h.head - front.first_index - front.count < h.min_records)
                     break;
                 if (min_age_ticks && newest - front.last_tick <= min_age_ticks)
                     break;
             }
-            free_bucket(front);
-            h.buckets.remove(0);
+            if (flushed)
+            {
+                if (front.refs)
+                {
+                    ++i;    // borrowed; the release drops it
+                    continue;
+                }
+                if (front.packed)
+                {
+                    free(front.packed[0 .. front.packed_bytes]);
+                    front.packed = null;
+                }
+                h.drop_raw(front);
+                ++i;
+            }
+            else if (h.container)
+                break;      // the only copy; the recorder flushes it shortly
+            else
+            {
+                h.free_bucket(front);
+                h.buckets.remove(i);
+            }
         }
-    }
-
-    void free_bucket(Bucket* b)
-    {
-        _history.drop_raw(b, data_format);
-        if (b.packed)
-            free(b.packed[0 .. b.packed_bytes]);
-        foreach (bit; 0 .. 16)
-            if (_history.cursor_ref[bit] is b)
-                _history.cursor_ref[bit] = null;    // lapped reader; its borrow dies with the bucket
-        free((cast(void*)b)[0 .. Bucket.sizeof]);
     }
 
     Bucket* alloc_bucket(uint capacity)
     {
         Bucket* b = cast(Bucket*)alloc(Bucket.sizeof).ptr;
         *b = Bucket.init;
+        b.format = format;
         b.capacity = capacity;
         b.samples = alloc(capacity * data_format.stride).ptr;
         if (!data_format.regular)
@@ -1679,7 +1709,7 @@ unittest
         Cursor zc = z.open_series_cursor(0);
         RecordBlock zb = zc.next(16);
         assert(zb.count == 2 && zb.get!double(0) == 1.0 && zb.time(1) == from_unix_time_ns(2_000));
-        assert(pb.samples !is null && pb.refs == 1 && pb.raw_combined);  // reconstituted, borrowed
+        assert(pb.samples !is null && pb.refs == 1);  // reconstituted, borrowed
         zb = zc.next(16);
         assert(zb.count == 1);
         assert(pb.samples is null && pb.refs == 0 && pb.packed !is null); // ref moved on, raw dropped

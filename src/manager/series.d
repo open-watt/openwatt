@@ -1,7 +1,7 @@
 module manager.series;
 
 // The series contract: the typed record format shared by every host of observed data.
-// Element is the first host; the recorder's owsig containers and waveform/byte/packet taps
+// Element is the first host; the recorder's ows containers and waveform/byte/packet taps
 // host the same formats without becoming elements.
 // Event! payloads and device-function params/results will describe themselves with the
 // same DataFormat vocabulary, boxed through Variant only at the console/API edges.
@@ -31,6 +31,8 @@ import urt.time;
 import urt.traits : is_boolean, is_some_float, is_some_int, Unqual;
 import urt.typereg : find_type_details, TypeDetails;
 import urt.variant;
+
+import manager.ows : SeriesContainer;
 
 nothrow @nogc:
 
@@ -446,13 +448,13 @@ nothrow @nogc:
 }
 
 // One codec vocabulary, three residencies: a packed image is the same bytes whether it lives
-// behind a RAM bucket, in an owsig block, or in flight. The raw image layout is
-// [offsets plane?][record plane][heap], identical to the owsig payload. Codecs register with
+// behind a RAM bucket, in an ows block, or in flight. The raw image layout is
+// [offsets plane?][record plane][heap], identical to the ows payload. Codecs register with
 // a selection predicate; the first match packs and RAW is the mandatory fallback (a codec
 // that doesn't beat raw is ignored). Ids 0/1 are reserved (raw, zlib); registered ids are
 // process-local: TODO bind them by NAME before any ships.
-enum ubyte owsig_codec_raw = 0;
-enum ubyte owsig_codec_zlib = 1;
+enum ubyte ows_codec_raw = 0;
+enum ubyte ows_codec_zlib = 1;
 enum ubyte first_registered_codec = 2;
 
 struct SeriesCodec
@@ -486,32 +488,47 @@ struct Bucket
 {
     ulong first_index;
     ulong first_tick;
+    ulong file_offset; // container file offset of the encoded image; 0 = never flushed
     uint last_offset;
     uint count;
-    uint capacity;
+    uint capacity;     // open builder only; == count once sealed
+    FormatId format = FormatId.invalid; // stamped at creation; a format change rolls the bucket
     bool follows_gap;  // <- we should steal a bit for this!
-    bool sealed;       // tail retired: shrunk to fit, immutable
+    bool sealed;       // tail retired: the raw side is one immutable image
+
+    // The residency entry: samples/offsets/heap are the raw side, packed the encoded side,
+    // file_offset the same encoded image on disk. An open bucket is a builder whose planes
+    // grow independently; a sealed bucket's raw side is one allocation in
+    // [offsets | records | heap] order, byte-identical to the ows payload. A sealed bucket
+    // packs on its last release; with another residency present the raw side is a cache,
+    // dropped at refs==0 and reconstituted on demand for late readers. A bucket with no
+    // resident bytes is recoverable through its file_offset.
     void* samples;
     uint* offsets;     // null when regular
     void* heap;        // dynamic-record series: 2-aligned len-prefixed values, dedup'd per bucket
     uint heap_used;
     uint heap_capacity;
-
-    // the two-pointer entry: samples/offsets/heap are the raw side, packed the encoded side.
-    // At least one is live. A sealed bucket packs on its last release; with packed present the
-    // raw side is a cache, dropped at refs==0 and reconstituted on demand for late readers.
     void* packed;
-    uint packed_bytes;
+    uint packed_bytes;  // size of the encoded image, in RAM and/or on disk
     ushort refs;        // readers borrowing the raw side; the open tail is implicitly protected
-    ubyte codec;
-    bool pack_declined; // codecs tried and beaten by raw; raw-only permanently, don't retry
-    bool raw_combined;  // reconstituted raw is one allocation spanning all planes; free once
+    ubyte codec;        // codec of the encoded image; ows_codec_raw = the raw image itself
+    bool pack_declined; // codecs tried and beaten by raw, or the file holds it raw; don't retry
 
 pure nothrow @nogc:
     ulong last_tick() const => first_tick + last_offset;
     SysTime first_time() const => from_unix_time_ns(first_tick * 1000);
     SysTime last_time() const => from_unix_time_ns(last_tick * 1000);
     SysTime get_time(size_t i) const => from_unix_time_ns((first_tick + (offsets ? offsets[i] : i)) * 1000);
+
+    bool resident() const => samples !is null || packed !is null;
+
+    // sealed raw image size; the offsets plane's presence follows the format, not the
+    // (possibly dropped) pointer
+    uint image_bytes() const
+    {
+        const(DataFormat)* f = format_info(format);
+        return (f.regular ? 0 : count * cast(uint)uint.sizeof) + count * f.stride + heap_used;
+    }
 }
 
 struct SeriesStore
@@ -523,6 +540,7 @@ nothrow @nogc:
     // FORCE eviction regardless of pins (stalled or undriven consumers get lapped and the
     // cursor reports records_lost); between floor and ceiling, consumption governs
     Array!(Bucket*) buckets;
+    SeriesContainer* container; // backing store; buckets evicted to disk reconstitute through it
     ulong head;
     ulong min_age;      // usecs (converted to domain ticks at evict time); 0 = none
     ulong max_age;      // usecs; 0 = no ceiling
@@ -581,20 +599,24 @@ nothrow @nogc:
     // cursor_bit tracks the reader's raw-side borrow: the cursor's ref moves to the bucket it
     // reads, so a view stays valid until the next read. Bit-less reads (queries) reconstitute
     // without a ref; their loose raws drop at the next cursor close (byte budgets own the rest).
+    // `format` only labels an empty result; a found bucket speaks for itself. When from_index
+    // falls in an evicted hole the read serves from the next surviving bucket and reports the
+    // skip through r.first_index.
     RecordBlock read(FormatId format, ulong from_index, uint max_records, ubyte cursor_bit = ubyte.max)
     {
         RecordBlock r;
         r.format = format;
-        const(DataFormat)* fmt = format_info(format);
         Bucket* b = find_by_index(from_index);
-        if (b && from_index < b.first_index)
-            b = null;
         if (cursor_bit != ubyte.max)
-            move_ref(cursor_bit, b, format);
+            move_ref(cursor_bit, b);
         if (!b)
             return r;
-        if (!b.samples && !reconstitute(b, format))
+        if (!b.samples && !reconstitute(b))
             return r;
+        if (from_index < b.first_index)
+            from_index = b.first_index;
+        const(DataFormat)* fmt = format_info(b.format);
+        r.format = b.format;
         uint offset = cast(uint)(from_index - b.first_index);
         uint n = b.count - offset;
         if (n > max_records)
@@ -609,7 +631,7 @@ nothrow @nogc:
         return r;
     }
 
-    void move_ref(ubyte bit, Bucket* b, FormatId format)
+    void move_ref(ubyte bit, Bucket* b)
     {
         Bucket* old = cursor_ref[bit];
         if (old is b)
@@ -618,61 +640,77 @@ nothrow @nogc:
         if (b)
             ++b.refs;
         if (old)
-            release_ref(old, format);
+            release_ref(old);
     }
 
-    void release_ref(Bucket* b, FormatId format)
+    void release_ref(Bucket* b)
     {
         debug assert(b.refs);
         if (--b.refs)
             return;
-        if (b.packed)
-            drop_raw(b, format_info(format));
+        if (b.packed || b.file_offset)
+            drop_raw(b);
         else
-            try_pack(b, format);
+            try_pack(b);
+    }
+
+    // retire the open tail: shrink the builder planes into one immutable image in
+    // [offsets | records | heap] order, byte-identical to the ows payload
+    void seal(Bucket* b)
+    {
+        if (b.sealed)
+            return;
+        debug assert(b.count, "empty buckets are recycled, not sealed");
+        const(DataFormat)* fmt = format_info(b.format);
+        uint offs_bytes = b.offsets ? b.count * cast(uint)uint.sizeof : 0;
+        uint rec_bytes = b.count * fmt.stride;
+        uint total = offs_bytes + rec_bytes + b.heap_used;
+        void[] img = alloc(total);
+        ubyte* p = cast(ubyte*)img.ptr;
+        p[0 .. offs_bytes] = (cast(const(ubyte)*)b.offsets)[0 .. offs_bytes];
+        p[offs_bytes .. offs_bytes + rec_bytes] = (cast(const(ubyte)*)b.samples)[0 .. rec_bytes];
+        p[offs_bytes + rec_bytes .. total] = (cast(const(ubyte)*)b.heap)[0 .. b.heap_used];
+        free(b.samples[0 .. b.capacity * fmt.stride]);
+        if (b.offsets)
+            free((cast(void*)b.offsets)[0 .. b.capacity * uint.sizeof]);
+        if (b.heap)
+            free(b.heap[0 .. b.heap_capacity]);
+        b.sealed = true;
+        b.offsets = offs_bytes ? cast(uint*)p : null;
+        b.samples = p + offs_bytes;
+        b.heap = b.heap_used ? p + offs_bytes + rec_bytes : null;
+        b.capacity = b.count;
+        b.heap_capacity = b.heap_used;
+        // pack now if nothing borrows the raw side; otherwise the last release_ref packs
+        try_pack(b);
     }
 
     // packing only reads the raw side, so it may run on any sealed bucket regardless of
     // readers (a disk writer can pack what the UX is still rendering); only DROPPING raw
-    // waits for the last borrow to release
-    void try_pack(Bucket* b, FormatId format)
+    // waits for the last borrow to release. A flushed bucket never re-packs: the file is
+    // the canonical encoded copy and codec/packed_bytes describe it.
+    void try_pack(Bucket* b)
     {
-        if (b.packed || b.pack_declined || !b.sealed || !b.count || !g_num_codecs)
+        if (b.packed || b.pack_declined || b.file_offset || !b.sealed || !b.count || !g_num_codecs)
             return;
-        const(DataFormat)* fmt = format_info(format);
-        uint offs_bytes = b.offsets ? b.count * cast(uint)uint.sizeof : 0;
-        uint rec_bytes = b.count * fmt.stride;
-        uint total = offs_bytes + rec_bytes + b.heap_used;
-
-        RecordBlock blk;
-        blk.format = format;
-        blk.count = b.count;
-        blk.first_index = b.first_index;
-        blk.t0 = b.first_tick;
-        blk.ts = b.offsets;
-        blk.data = b.samples;
-        blk.heap = b.heap;
-        blk.heap_bytes = b.heap_used;
+        const(DataFormat)* fmt = format_info(b.format);
+        RecordBlock blk = block_view(b);
+        void* base = b.offsets ? cast(void*)b.offsets : b.samples;
+        const(void)[] img = base[0 .. b.image_bytes];
 
         foreach (i; 0 .. g_num_codecs)
         {
             if (!g_codecs[i].match || !g_codecs[i].match(*fmt, blk))
                 continue;
-            void[] img = alloc(total);
-            ubyte* p = cast(ubyte*)img.ptr;
-            p[0 .. offs_bytes] = (cast(const(ubyte)*)b.offsets)[0 .. offs_bytes];
-            p[offs_bytes .. offs_bytes + rec_bytes] = (cast(const(ubyte)*)b.samples)[0 .. rec_bytes];
-            p[offs_bytes + rec_bytes .. total] = (cast(const(ubyte)*)b.heap)[0 .. b.heap_used];
-            void[] dst = alloc(total);
+            void[] dst = alloc(img.length);
             ptrdiff_t packed_size = g_codecs[i].pack(blk, img, dst);
-            free(img);
-            if (packed_size > 0 && packed_size < total)
+            if (packed_size > 0 && packed_size < img.length)
             {
                 b.packed = realloc(dst, packed_size).ptr;
                 b.packed_bytes = cast(uint)packed_size;
                 b.codec = cast(ubyte)(first_registered_codec + i);
                 if (!b.refs)
-                    drop_raw(b, fmt);
+                    drop_raw(b);
             }
             else
                 free(dst);
@@ -682,47 +720,71 @@ nothrow @nogc:
             b.pack_declined = true;
     }
 
-    // repopulate the raw side from packed: one combined allocation in the shared image layout,
-    // shared by every reader positioned in the bucket until the last ref drops it again
-    bool reconstitute(Bucket* b, FormatId format)
+    // repopulate the raw side from the packed image, or from the container for a bucket
+    // evicted to disk: one combined allocation in the shared image layout, shared by every
+    // reader positioned in the bucket until the last ref drops it again
+    bool reconstitute(Bucket* b)
     {
         if (b.samples)
             return true;
-        debug assert(b.packed, "bucket has neither raw nor packed side");
-        if (b.codec < first_registered_codec || b.codec >= first_registered_codec + g_num_codecs)
-            return false;
-        const(DataFormat)* fmt = format_info(format);
+        const(DataFormat)* fmt = format_info(b.format);
         bool irregular = !fmt.regular;
         uint offs_bytes = irregular ? b.count * cast(uint)uint.sizeof : 0;
         uint rec_bytes = b.count * fmt.stride;
         uint total = offs_bytes + rec_bytes + b.heap_used;
+
+        const(void)[] encoded = b.packed ? b.packed[0 .. b.packed_bytes] : null;
+        void[] fetched;
+        if (!encoded)
+        {
+            if (!b.file_offset || !container)
+                return false;
+            debug assert(b.packed_bytes, "flushed bucket lost its payload size");
+            fetched = alloc(b.packed_bytes);
+            if (!container.read_payload(*b, fetched))
+            {
+                free(fetched);
+                return false;
+            }
+            if (b.codec == ows_codec_raw)
+            {
+                debug assert(b.packed_bytes == total, "raw payload size disagrees with the headers");
+                mount_raw(b, fetched.ptr, offs_bytes, rec_bytes, irregular);
+                return true;
+            }
+            encoded = fetched;
+        }
+        if (b.codec < first_registered_codec || b.codec >= first_registered_codec + g_num_codecs)
+        {
+            if (fetched)
+                free(fetched);
+            return false;
+        }
         void[] img = alloc(total);
-        if (!g_codecs[b.codec - first_registered_codec].unpack(b.packed[0 .. b.packed_bytes], *fmt,
-                                                               b.count, irregular, b.heap_used, img))
+        bool ok = g_codecs[b.codec - first_registered_codec].unpack(encoded, *fmt, b.count,
+                                                                    irregular, b.heap_used, img);
+        if (fetched)
+            free(fetched);
+        if (!ok)
         {
             free(img);
             debug assert(false, "packed bucket failed to reconstitute");
             return false;
         }
-        b.offsets = irregular ? cast(uint*)img.ptr : null;
-        b.samples = img.ptr + offs_bytes;
-        b.heap = b.heap_used ? img.ptr + offs_bytes + rec_bytes : null;
-        b.capacity = b.count;
-        b.heap_capacity = b.heap_used;
-        b.raw_combined = true;
+        mount_raw(b, img.ptr, offs_bytes, rec_bytes, irregular);
         return true;
     }
 
-    // free the raw side; entered with packed present, or from bucket teardown
-    void drop_raw(Bucket* b, const(DataFormat)* fmt)
+    // free the raw side; entered with another residency present, or from bucket teardown
+    void drop_raw(Bucket* b)
     {
         if (!b.samples)
             return;
-        if (b.raw_combined)
+        const(DataFormat)* fmt = format_info(b.format);
+        if (b.sealed)
         {
             void* base = b.offsets ? cast(void*)b.offsets : b.samples;
-            uint offs_bytes = b.offsets ? b.count * cast(uint)uint.sizeof : 0;
-            free(base[0 .. offs_bytes + b.count * fmt.stride + b.heap_used]);
+            free(base[0 .. b.image_bytes]);
         }
         else
         {
@@ -735,17 +797,78 @@ nothrow @nogc:
         b.samples = null;
         b.offsets = null;
         b.heap = null;
+        b.capacity = 0;
         b.heap_capacity = 0;
-        b.raw_combined = false;
+    }
+
+    void free_bucket(Bucket* b)
+    {
+        drop_raw(b);
+        if (b.packed)
+        {
+            free(b.packed[0 .. b.packed_bytes]);
+            b.packed = null;
+        }
+        foreach (bit; 0 .. 16)
+            if (cursor_ref[bit] is b)
+                cursor_ref[bit] = null;    // lapped reader; its borrow dies with the bucket
+        free((cast(void*)b)[0 .. Bucket.sizeof]);
     }
 
     // sweep raws reconstituted by bit-less readers (queries); called from cursor close
-    void drop_loose_raws(FormatId format)
+    void drop_loose_raws()
     {
-        const(DataFormat)* fmt = format_info(format);
         foreach (b; buckets[])
-            if (b.packed && b.samples && !b.refs)
-                drop_raw(b, fmt);
+            if (b.sealed && b.samples && !b.refs && (b.packed || b.file_offset))
+                drop_raw(b);
+    }
+
+    // the backing store is going away: descriptors whose only residency was the file are
+    // unreachable and drop; survivors forget their file copy and stand alone again
+    void detach_container()
+    {
+        container = null;
+        for (size_t i = 0; i < buckets.length; )
+        {
+            Bucket* b = buckets[i];
+            if (!b.resident && b.file_offset)
+            {
+                free_bucket(b);
+                buckets.remove(i);
+                continue;
+            }
+            b.file_offset = 0;
+            if (!b.packed)
+            {
+                b.packed_bytes = 0;
+                b.codec = 0;
+            }
+            ++i;
+        }
+    }
+
+    RecordBlock block_view(Bucket* b)
+    {
+        RecordBlock blk;
+        blk.format = b.format;
+        blk.count = b.count;
+        blk.first_index = b.first_index;
+        blk.t0 = b.first_tick;
+        blk.ts = b.offsets;
+        blk.data = b.samples;
+        blk.heap = b.heap;
+        blk.heap_bytes = b.heap_used;
+        return blk;
+    }
+
+private:
+    void mount_raw(Bucket* b, void* base, uint offs_bytes, uint rec_bytes, bool irregular)
+    {
+        b.offsets = irregular ? cast(uint*)base : null;
+        b.samples = cast(ubyte*)base + offs_bytes;
+        b.heap = b.heap_used ? cast(ubyte*)base + offs_bytes + rec_bytes : null;
+        b.capacity = b.count;
+        b.heap_capacity = b.heap_used;
     }
 }
 
