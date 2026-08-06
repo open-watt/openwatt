@@ -13,6 +13,8 @@ import urt.time;
 import manager.base : ActiveObject, StateSignal;
 
 import router.iface;
+import router.iface.endpoint;
+import router.iface.ethernet;
 import router.iface.packet;
 
 import protocol.ip : IPv4Header, IPProtocol, TCPConnection, TCPListener;
@@ -90,6 +92,7 @@ enum TcpOptionKind : ubyte
 
 enum size_t TcpDefaultMss     = 536;        // RFC 1122 minimum
 enum size_t TcpEthernetMss    = 1460;       // 1500 - 20 IP - 20 TCP
+enum size_t ether_transport_overhead = 5 + 13;  // ow framing + ether-transport header
 enum size_t TcpSendBufSize    = 8192;
 enum size_t TcpRecvBufSize    = 8192;
 enum size_t TcpAcceptQueueMax = 16;
@@ -153,11 +156,9 @@ struct TcpPcb
     // connection's lifetime amid mixed traffic. Assigned in tcp_assign_id.
     uint id;
 
-    // 4-tuple
-    IPAddr  local_addr;
-    ushort  local_port;
-    IPAddr  remote_addr;
-    ushort  remote_port;
+    // 4-tuple; the address family selects the network layer beneath the connection
+    InetAddress local;
+    InetAddress remote;
 
     TcpState state;
 
@@ -381,20 +382,23 @@ void tcp_listen(TcpPcb* pcb)
     pcb.rcv_wnd      = TcpRecvBufSize;
     tcp_register(pcb);
     version (DebugTCP)
-        log.trace("c", pcb.id, " listen :", pcb.local_port);
+        log.trace("c", pcb.id, " listen :", pcb.local.port);
 }
 
 bool tcp_connect(ref IPStack stack, TcpPcb* pcb)
 {
-    if (pcb.local_port == 0 || pcb.remote_port == 0)
+    if (pcb.local.port == 0 || pcb.remote.port == 0)
         return false;
     refresh_route(stack, pcb);
     if (!pcb.route_egress && !pcb.local_delivery)
         return false;
-    if (pcb.local_addr == IPAddr.any)
-        pcb.local_addr = stack.select_source_v4(pcb.remote_addr);
-    if (pcb.local_addr == IPAddr.any)
-        return false;
+    if (pcb.local.family == AddressFamily.ipv4 && pcb.local.addr_any)
+    {
+        IPAddr src = stack.select_source_v4(pcb.remote._a.ipv4.addr);
+        if (src == IPAddr.any)
+            return false;
+        pcb.local = InetAddress(src, pcb.local.port);
+    }
 
     pcb.snd_iss   = generate_iss();
     pcb.snd_una   = pcb.snd_iss;
@@ -404,7 +408,7 @@ bool tcp_connect(ref IPStack stack, TcpPcb* pcb)
     pcb.state     = TcpState.syn_sent;
     tcp_register(pcb);      // findable before SYN goes out, in case of synchronous loopback delivery
 
-    log.info("c", pcb.id, " connect ", pcb.local_addr, ':', pcb.local_port, " -> ", pcb.remote_addr, ':', pcb.remote_port, " egress=", pcb.route_egress ? pcb.route_egress.name[] : "<null>");
+    log.info("c", pcb.id, " connect ", pcb.local, " -> ", pcb.remote, " egress=", pcb.route_egress ? pcb.route_egress.name[] : "<null>");
 
     send_segment_at(stack, pcb, TcpFlag.syn, pcb.snd_iss, null);
     start_rtt_sample(pcb, pcb.snd_nxt);
@@ -414,7 +418,7 @@ bool tcp_connect(ref IPStack stack, TcpPcb* pcb)
 
 void tcp_close(ref IPStack stack, TcpPcb* pcb)
 {
-    log.info("c", pcb.id, " tcp_close called in state=", pcb.state, " (", pcb.local_port, "->:", pcb.remote_port, ")");
+    log.info("c", pcb.id, " tcp_close called in state=", pcb.state, " (", pcb.local.port, "->:", pcb.remote.port, ")");
 
     final switch (pcb.state) with (TcpState)
     {
@@ -566,6 +570,7 @@ private void tcp_app_deliver(TcpPcb* pcb, const(ubyte)[] bytes, MonoTime rx_time
 // -------------------------------------------------------------------------
 // Ingress
 
+// v4 ingress from the stack dispatch: strip the IP header, then the family-generic path.
 void tcp_input(ref IPStack stack, ref Packet pkt)
 {
     if (pkt.data.length < IPv4Header.sizeof + TcpHeader.sizeof)
@@ -582,6 +587,16 @@ void tcp_input(ref IPStack stack, ref Packet pkt)
         return;
 
     const(ubyte)[] tcp_seg = (cast(const(ubyte)*)pkt.data.ptr)[ip_hdr_len .. ip_total];
+    tcp_segment_input(stack, InetAddress(IPAddr(ip.src), 0), InetAddress(IPAddr(ip.dst), 0), tcp_seg, pkt.creation_time);
+}
+
+// Family-generic ingress: src/dst carry the network-layer addresses (ports zero here;
+// filled in from the TCP header), tcp_seg is the whole TCP segment. The ether tap
+// delivers here directly, and ipv6 ingress will land here too.
+void tcp_segment_input(ref IPStack stack, InetAddress src, InetAddress dst, const(ubyte)[] tcp_seg, MonoTime rx_time)
+{
+    if (tcp_seg.length < TcpHeader.sizeof)
+        return;
     const t = cast(const TcpHeader*)tcp_seg.ptr;
 
     size_t tcp_hdr_len = t.data_offset * 4;
@@ -589,31 +604,31 @@ void tcp_input(ref IPStack stack, ref Packet pkt)
         return;
 
     // Verify TCP checksum (pseudo-header + segment).
-    ushort pseudo = pseudo_header_checksum_v4(IPAddr(ip.src), IPAddr(ip.dst), IPProtocol.tcp, cast(ushort)tcp_seg.length);
+    ushort pseudo = transport_pseudo_checksum(src, dst, IPProtocol.tcp, cast(ushort)tcp_seg.length);
     ushort calc = internet_checksum(tcp_seg, pseudo);
     if (calc != 0)
         return;
 
-    ushort src_port = t.src_port.bigEndianToNative!ushort;
-    ushort dst_port = t.dst_port.bigEndianToNative!ushort;
-    uint   seq      = t.seq.bigEndianToNative!uint;
-    uint   ack      = t.ack.bigEndianToNative!uint;
-    uint   wnd      = t.window.bigEndianToNative!ushort;
-    ubyte  flags    = t.flags;
+    src.port = t.src_port.bigEndianToNative!ushort;
+    dst.port = t.dst_port.bigEndianToNative!ushort;
+    uint   seq   = t.seq.bigEndianToNative!uint;
+    uint   ack   = t.ack.bigEndianToNative!uint;
+    uint   wnd   = t.window.bigEndianToNative!ushort;
+    ubyte  flags = t.flags;
     const(ubyte)[] payload = tcp_seg[tcp_hdr_len .. $];
 
-    TcpPcb* pcb = find_pcb_4tuple(IPAddr(ip.dst), dst_port, IPAddr(ip.src), src_port);
+    TcpPcb* pcb = find_pcb_4tuple(dst, src);
     if (!pcb)
-        pcb = find_listener(IPAddr(ip.dst), dst_port);
+        pcb = find_listener(dst);
 
     if (!pcb)
     {
         if (!(flags & TcpFlag.rst))
-            send_rst_for_unknown(stack, IPAddr(ip.src), src_port, IPAddr(ip.dst), dst_port, seq, ack, flags, payload.length);
+            send_rst_for_unknown(stack, src, dst, seq, ack, flags, payload.length);
         return;
     }
 
-    process_segment(stack, pcb, ip, t, seq, ack, wnd, flags, payload, pkt.creation_time);
+    process_segment(stack, pcb, src, dst, t, seq, ack, wnd, flags, payload, rx_time);
 }
 
 
@@ -761,7 +776,7 @@ void tcp_handle_unreachable(ref IPStack stack, ubyte code, uint code_data,
                             IPAddr local, ushort local_port,
                             IPAddr remote, ushort remote_port)
 {
-    TcpPcb* pcb = find_pcb_4tuple(local, local_port, remote, remote_port);
+    TcpPcb* pcb = find_pcb_4tuple(InetAddress(local, local_port), InetAddress(remote, remote_port));
     if (!pcb)
         return;
 
@@ -799,7 +814,7 @@ void tcp_handle_unreachable(ref IPStack stack, ubyte code, uint code_data,
 
 private:
 
-void process_segment(ref IPStack stack, TcpPcb* pcb, const IPv4Header* ip, const TcpHeader* t,
+void process_segment(ref IPStack stack, TcpPcb* pcb, ref const InetAddress src, ref const InetAddress dst, const TcpHeader* t,
                      uint seq, uint ack, uint wnd, ubyte flags, const(ubyte)[] payload, MonoTime rx_time)
 {
     version (DebugTCPProto)
@@ -814,12 +829,11 @@ void process_segment(ref IPStack stack, TcpPcb* pcb, const IPv4Header* ip, const
             return;
         if (flags & TcpFlag.ack)
         {
-            send_rst_for_unknown(stack, IPAddr(ip.src), t.src_port.bigEndianToNative!ushort,
-                                 IPAddr(ip.dst), t.dst_port.bigEndianToNative!ushort, seq, ack, flags, payload.length);
+            send_rst_for_unknown(stack, src, dst, seq, ack, flags, payload.length);
             return;
         }
         if (flags & TcpFlag.syn)
-            spawn_child_from_listen(stack, pcb, ip, t, seq, wnd);
+            spawn_child_from_listen(stack, pcb, src, dst, t, seq, wnd);
         return;
     }
 
@@ -832,9 +846,7 @@ void process_segment(ref IPStack stack, TcpPcb* pcb, const IPv4Header* ip, const
             if (seq_le(ack, pcb.snd_iss) || seq_gt(ack, pcb.snd_nxt))
             {
                 if (!(flags & TcpFlag.rst))
-                    send_segment_raw(stack, pcb.local_addr, pcb.local_port,
-                                     pcb.remote_addr, pcb.remote_port,
-                                     ack, 0, TcpFlag.rst, 0, null);
+                    send_segment_raw(stack, pcb.local, pcb.remote, ack, 0, TcpFlag.rst, 0, null);
                 return;
             }
             acceptable_ack = true;
@@ -843,7 +855,7 @@ void process_segment(ref IPStack stack, TcpPcb* pcb, const IPv4Header* ip, const
         {
             if (acceptable_ack)
             {
-                log.warning("c", pcb.id, " RST during connect (refused) ", pcb.remote_addr, ':', pcb.remote_port);
+                log.warning("c", pcb.id, " RST during connect (refused) ", pcb.remote);
                 pcb.state = TcpState.closed;
                 pcb.error_event = true;
                 tcp_unregister(pcb);
@@ -895,7 +907,7 @@ void process_segment(ref IPStack stack, TcpPcb* pcb, const IPv4Header* ip, const
         if (pcb.state == TcpState.syn_received && pcb.parent)
         {
             // Refused passive open
-            log.warning("c", pcb.id, " RST during passive open from ", pcb.remote_addr, ':', pcb.remote_port);
+            log.warning("c", pcb.id, " RST during passive open from ", pcb.remote);
             remove_child(pcb.parent, pcb);
             pcb.state = TcpState.closed;
             tcp_unregister(pcb);
@@ -903,7 +915,7 @@ void process_segment(ref IPStack stack, TcpPcb* pcb, const IPv4Header* ip, const
         }
         else
         {
-            log.warning("c", pcb.id, " RST in state=", pcb.state, " from ", pcb.remote_addr, ':', pcb.remote_port);
+            log.warning("c", pcb.id, " RST in state=", pcb.state, " from ", pcb.remote);
             pcb.state = TcpState.closed;
             pcb.error_event = true;
             tcp_unregister(pcb);
@@ -1148,7 +1160,7 @@ void process_segment(ref IPStack stack, TcpPcb* pcb, const IPv4Header* ip, const
             {
                 case established:
                     pcb.state = close_wait;
-                    log.info("c", pcb.id, " peer FIN -> close_wait (", pcb.remote_addr, ':', pcb.remote_port, ")");
+                    log.info("c", pcb.id, " peer FIN -> close_wait (", pcb.remote, ")");
                     break;
                 case fin_wait_1:
                     if (pcb.fin_sent && pcb.snd_una == pcb.snd_nxt)
@@ -1180,7 +1192,7 @@ void process_segment(ref IPStack stack, TcpPcb* pcb, const IPv4Header* ip, const
 }
 
 
-void spawn_child_from_listen(ref IPStack stack, TcpPcb* listener, const IPv4Header* ip, const TcpHeader* t, uint seq, uint wnd)
+void spawn_child_from_listen(ref IPStack stack, TcpPcb* listener, ref const InetAddress src, ref const InetAddress dst, const TcpHeader* t, uint seq, uint wnd)
 {
     if (listener.child_list.length >= TcpAcceptQueueMax * 2)
         return;     // refuse, drop SYN
@@ -1189,11 +1201,9 @@ void spawn_child_from_listen(ref IPStack stack, TcpPcb* listener, const IPv4Head
     listener.child_list ~= child;
     tcp_register(child);                    // assigns id before any logging
 
-    child.local_addr  = IPAddr(ip.dst);
-    child.local_port  = listener.local_port;
-    child.remote_addr = IPAddr(ip.src);
-    child.remote_port = t.src_port.bigEndianToNative!ushort;
-    child.parent      = listener;
+    child.local  = dst;
+    child.remote = src;
+    child.parent = listener;
     child.snd_iss     = generate_iss();
     child.snd_una     = child.snd_iss;
     child.snd_nxt     = child.snd_iss + 1;          // SYN consumes one
@@ -1207,7 +1217,7 @@ void spawn_child_from_listen(ref IPStack stack, TcpPcb* listener, const IPv4Head
     parse_options(t, child);                // peer's MSS may lower send_mss further
 
     version (DebugTCP)
-        log.trace("c", child.id, " accept (SYN) :", child.local_port, "<-", child.remote_addr, ':', child.remote_port);
+        log.trace("c", child.id, " accept (SYN) :", child.local.port, "<-", child.remote);
 
     send_segment_at(stack, child, TcpFlag.syn | TcpFlag.ack, child.snd_iss, null);
     start_rtt_sample(child, child.snd_nxt);
@@ -1274,7 +1284,7 @@ void send_segment_at(ref IPStack stack, TcpPcb* pcb, ubyte flags, uint seq, cons
     version (DebugTCPProto)
         log.trace("c", pcb.id, " >> ", flags_str(flags), " seq=", seq, " ack=", ack_val, " len=", data.length, " wnd=", window);
 
-    send_segment_raw(stack, pcb.local_addr, pcb.local_port, pcb.remote_addr, pcb.remote_port,
+    send_segment_raw(stack, pcb.local, pcb.remote,
                      seq, ack_val, flags, window, data, advertise_mss,
                      pcb.route_egress, pcb.route_next_hop);
 
@@ -1287,42 +1297,29 @@ void send_segment_at(ref IPStack stack, TcpPcb* pcb, ubyte flags, uint seq, cons
 // Build and emit a fully-specified TCP segment. Used both via PCB and for
 // stateless RSTs to unknown 4-tuples. SYN segments include an MSS option;
 // `advertise_mss` is the value to put in the option (caller's responsibility).
-// `egress`/`next_hop` are optional pre-resolved route hints; when non-null we
-// take the fast path through output_v4_routed and skip route lookup.
-void send_segment_raw(ref IPStack stack, IPAddr src_addr, ushort src_port, IPAddr dst_addr, ushort dst_port,
+// `egress`/`next_hop` are optional pre-resolved route hints: for v4 they take the
+// fast path through output_v4_routed; for ether, egress is the station itself.
+void send_segment_raw(ref IPStack stack, ref const InetAddress src, ref const InetAddress dst,
                       uint seq, uint ack_val, ubyte flags, ushort window, const(ubyte)[] data,
                       ushort advertise_mss = 0, BaseInterface egress = null, IPAddr next_hop = IPAddr.any)
 {
     enum size_t max_packet = 1500;      // scratch buffer; segment must already be sized to MSS
+    enum size_t reserve = IPv4Header.sizeof;    // network-header space; enough for any family we emit
+                                                // TODO: ipv6 needs a 40-byte reserve when it lands here
 
     bool include_mss = (flags & TcpFlag.syn) != 0;
     size_t opt_len = include_mss ? 4 : 0;
-    size_t total = IPv4Header.sizeof + TcpHeader.sizeof + opt_len + data.length;
+    size_t tcp_total = TcpHeader.sizeof + opt_len + data.length;
+    size_t total = reserve + tcp_total;
     assert(total <= max_packet, "TCP segment exceeds output buffer; MSS must be set correctly");
     if (total > max_packet)
         return;
 
     ubyte[max_packet] buf = void;
 
-    auto ip = cast(IPv4Header*)buf.ptr;
-    ip.ver_ihl  = 0x45;
-    ip.tos      = 0;
-    ip.total_length = nativeToBigEndian(cast(ushort)total);
-    ushort ip_id = next_ip_id();
-    ip.ident = nativeToBigEndian(ip_id);
-    ip.flags_frag[0] = 0x40;        // DF: required for PMTU Discovery
-    ip.flags_frag[1] = 0;
-    ip.ttl      = 64;
-    ip.protocol = IPProtocol.tcp;
-    ip.checksum[] = 0;
-    ip.src      = src_addr.b;
-    ip.dst      = dst_addr.b;
-    ushort ihc = internet_checksum(buf[0 .. IPv4Header.sizeof]);
-    ip.checksum = nativeToBigEndian(ihc);
-
-    auto t = cast(TcpHeader*)(buf.ptr + IPv4Header.sizeof);
-    t.src_port = nativeToBigEndian(src_port);
-    t.dst_port = nativeToBigEndian(dst_port);
+    auto t = cast(TcpHeader*)(buf.ptr + reserve);
+    t.src_port = nativeToBigEndian(src.port);
+    t.dst_port = nativeToBigEndian(dst.port);
     t.seq = nativeToBigEndian(seq);
     t.ack = nativeToBigEndian(ack_val);
     ushort header_len = cast(ushort)(TcpHeader.sizeof + opt_len);
@@ -1335,31 +1332,74 @@ void send_segment_raw(ref IPStack stack, IPAddr src_addr, ushort src_port, IPAdd
     if (include_mss)
     {
         ushort mss = advertise_mss != 0 ? advertise_mss : cast(ushort)TcpEthernetMss;
-        ubyte* opt = buf.ptr + IPv4Header.sizeof + TcpHeader.sizeof;
+        ubyte* opt = buf.ptr + reserve + TcpHeader.sizeof;
         opt[0] = TcpOptionKind.mss;
         opt[1] = 4;
         opt[2..4] = mss.nativeToBigEndian;
     }
 
     if (data.length > 0)
-        buf[IPv4Header.sizeof + TcpHeader.sizeof + opt_len .. total] = data[];
+        buf[reserve + TcpHeader.sizeof + opt_len .. total] = data[];
 
-    ushort tcp_total = cast(ushort)(TcpHeader.sizeof + opt_len + data.length);
-    ushort pseudo = pseudo_header_checksum_v4(src_addr, dst_addr, IPProtocol.tcp, tcp_total);
-    ushort cc = internet_checksum(buf[IPv4Header.sizeof .. total], pseudo);
+    ushort pseudo = transport_pseudo_checksum(src, dst, IPProtocol.tcp, cast(ushort)tcp_total);
+    ushort cc = internet_checksum(buf[reserve .. total], pseudo);
     t.checksum = nativeToBigEndian(cc);
 
-    Packet pkt;
-    pkt.init!RawFrame(buf[0 .. total]);
-    if (egress)
-        stack.output_v4_routed(pkt, egress, next_hop);
-    else
-        stack.output_v4(pkt);
+    switch (src.family)
+    {
+        case AddressFamily.ipv4:
+        {
+            auto ip = cast(IPv4Header*)buf.ptr;
+            ip.ver_ihl  = 0x45;
+            ip.tos      = 0;
+            ip.total_length = nativeToBigEndian(cast(ushort)total);
+            ushort ip_id = next_ip_id();
+            ip.ident = nativeToBigEndian(ip_id);
+            ip.flags_frag[0] = 0x40;        // DF: required for PMTU Discovery
+            ip.flags_frag[1] = 0;
+            ip.ttl      = 64;
+            ip.protocol = IPProtocol.tcp;
+            ip.checksum[] = 0;
+            ip.src      = src._a.ipv4.addr.b;
+            ip.dst      = dst._a.ipv4.addr.b;
+            ushort ihc = internet_checksum(buf[0 .. IPv4Header.sizeof]);
+            ip.checksum = nativeToBigEndian(ihc);
+
+            Packet pkt;
+            pkt.init!RawFrame(buf[0 .. total]);
+            if (egress)
+                stack.output_v4_routed(pkt, egress, next_hop);
+            else
+                stack.output_v4(pkt);
+            break;
+        }
+
+        case AddressFamily.ether:
+        {
+            EthernetStation station = cast(EthernetStation)egress;
+            if (!station)
+                station = find_ether_station(MACAddress(src._a.ether.addr));
+            if (!station)
+                return;
+
+            Packet pkt;
+            ref h = pkt.init!EtherTransport(buf[reserve .. total]);
+            h.dst = MACAddress(dst._a.ether.addr);
+            h.src = MACAddress(src._a.ether.addr);
+            h.protocol = TransportProto.tcp;
+            station.forward(pkt);
+            break;
+        }
+
+        default:
+            // TODO: ipv6 header build + output_v6 lands here
+            break;
+    }
 }
 
 
 // RFC 793 §3.4: respond to a packet for a non-existent connection.
-void send_rst_for_unknown(ref IPStack stack, IPAddr src_addr, ushort src_port, IPAddr dst_addr, ushort dst_port,
+void send_rst_for_unknown(ref IPStack stack, ref const InetAddress src, ref const InetAddress dst,
                           uint seq, uint ack, ubyte flags, size_t payload_len)
 {
     ubyte rst_flags = TcpFlag.rst;
@@ -1382,7 +1422,7 @@ void send_rst_for_unknown(ref IPStack stack, IPAddr src_addr, ushort src_port, I
     }
 
     // Note: src/dst and addresses swap because we're replying.
-    send_segment_raw(stack, dst_addr, dst_port, src_addr, src_port, rst_seq, rst_ack, rst_flags, 0, null);
+    send_segment_raw(stack, dst, src, rst_seq, rst_ack, rst_flags, 0, null);
 }
 
 
@@ -1727,8 +1767,8 @@ public void tcp_print(Session session)
         t.add_row();
         t.cell(tconcat("c", pcb.id));
         t.cell(tconcat(pcb.state));
-        t.cell(tconcat(pcb.local_addr, ':', pcb.local_port));
-        t.cell(pcb.is_listener ? "*" : tconcat(pcb.remote_addr, ':', pcb.remote_port));
+        t.cell(tconcat(pcb.local));
+        t.cell(pcb.is_listener ? "*" : tconcat(pcb.remote));
         t.cell(tconcat(pcb.send_mss));
         t.cell(tconcat(pcb.snd_wnd));
         t.cell(tconcat(pcb.snd_nxt - pcb.snd_una, '/', cast(uint)pcb.send_buf.length));
@@ -1751,11 +1791,37 @@ public void tcp_print(Session session)
 // a route exists should check `pcb.route_egress !is null` afterwards.
 void refresh_route(ref IPStack stack, TcpPcb* pcb)
 {
+    if (pcb.remote.family == AddressFamily.ether)
+    {
+        // No routing at L2: the egress is the station named by the local address.
+        if (pcb.route_egress)
+            return;
+        EthernetStation station = find_ether_station(MACAddress(pcb.local._a.ether.addr));
+        if (!station)
+            return;
+        set_pcb_egress(pcb, station);
+
+        ushort link_mss = TcpEthernetMss;
+        uint mtu = station.actual_mtu;
+        enum uint ether_tcp_overhead = ether_transport_overhead + TcpHeader.sizeof;
+        if (mtu > ether_tcp_overhead)
+        {
+            uint cap = mtu - ether_tcp_overhead;
+            if (cap < link_mss)
+                link_mss = cast(ushort)cap;
+        }
+        if (pcb.send_mss == 0 || link_mss < pcb.send_mss)
+            pcb.send_mss = link_mss;
+        return;
+    }
+
+    // TODO: ipv6 route lookup plugs in here alongside v4
+
     uint cur_gen = route_generation();
     if (pcb.route_gen == cur_gen && (pcb.route_egress || pcb.local_delivery))
         return;
 
-    RouteResult r = stack.route_lookup_v4_dst(pcb.remote_addr);
+    RouteResult r = stack.route_lookup_v4_dst(pcb.remote._a.ipv4.addr);
     if (r.kind == RouteResult.Kind.local)
     {
         set_pcb_egress(pcb, null);
@@ -1849,27 +1915,29 @@ const(char)[] flags_str(ubyte f) @nogc nothrow
 }
 
 
-TcpPcb* find_pcb_4tuple(IPAddr l_addr, ushort l_port, IPAddr r_addr, ushort r_port)
+TcpPcb* find_pcb_4tuple(ref const InetAddress local, ref const InetAddress remote)
 {
     foreach (p; _pcbs[])
     {
         if (p.is_listener) continue;
-        if (p.local_port  != l_port) continue;
-        if (p.remote_port != r_port) continue;
-        if (p.remote_addr != r_addr) continue;
-        if (p.local_addr != IPAddr.any && p.local_addr != l_addr) continue;
+        if (p.local.family != local.family) continue;
+        if (p.local.port  != local.port) continue;
+        if (p.remote.port != remote.port) continue;
+        if (!p.remote.same_addr(remote)) continue;
+        if (!p.local.addr_any && !p.local.same_addr(local)) continue;
         return p;
     }
     return null;
 }
 
-TcpPcb* find_listener(IPAddr addr, ushort port)
+TcpPcb* find_listener(ref const InetAddress local)
 {
     foreach (p; _pcbs[])
     {
         if (!p.is_listener) continue;
-        if (p.local_port != port) continue;
-        if (p.local_addr != IPAddr.any && p.local_addr != addr) continue;
+        if (p.local.family != local.family) continue;
+        if (p.local.port != local.port) continue;
+        if (!p.local.addr_any && !p.local.same_addr(local)) continue;
         return p;
     }
     return null;
@@ -1918,4 +1986,32 @@ ushort pseudo_header_checksum_v4(IPAddr src, IPAddr dst, ubyte protocol, ushort 
     ph[9]      = protocol;
     ph[10..12] = transport_length.nativeToBigEndian;
     return internet_checksum(ph[]);
+}
+
+
+// Pseudo-header checksum for the segment's address family. Over ether both ends are us,
+// so the pseudo-header is our own definition: [src:6][dst:6][0][protocol][length:2].
+// TODO: udp_output/udp_input converge on this once UdpPcb adopts InetAddress addressing.
+ushort transport_pseudo_checksum(ref const InetAddress src, ref const InetAddress dst, ubyte protocol, ushort transport_length) pure
+{
+    switch (src.family)
+    {
+        case AddressFamily.ipv4:
+            return pseudo_header_checksum_v4(src._a.ipv4.addr, dst._a.ipv4.addr, protocol, transport_length);
+
+        case AddressFamily.ether:
+        {
+            ubyte[16] ph = void;
+            ph[0 .. 6]   = src._a.ether.addr;
+            ph[6 .. 12]  = dst._a.ether.addr;
+            ph[12]       = 0;
+            ph[13]       = protocol;
+            ph[14 .. 16] = transport_length.nativeToBigEndian;
+            return internet_checksum(ph[]);
+        }
+
+        default:
+            // TODO: ipv6 40-byte pseudo-header (RFC 2460)
+            return 0;
+    }
 }

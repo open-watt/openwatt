@@ -68,13 +68,16 @@ nothrow @nogc:
 
 
 alias EtherRecvHandler = void delegate(EtherEndpoint* ep, const(void)[] data, MACAddress src, ushort src_port, MonoTime rx_time) nothrow @nogc;
+alias EtherTcpInput = void function(MACAddress src, MACAddress dst, const(void)[] segment, MonoTime rx_time) nothrow @nogc;
 
 
-// Open an ether-UDP datagram endpoint on an ethernet-framed interface, bound to a local port
-// (0 = ephemeral). Datagrams to the station MAC and broadcast are delivered; multicast
-// groups via join(). A remote restricts delivery to that peer and enables send().
-// The endpoint tracks its interface by reference; it rides out restarts, and re-attaches
-// if the interface is destroyed and later recreated with the same name.
+// TCP-over-ether segments are handed up through this hook; the IP module installs it
+// when the internal TCP machinery is present.
+void set_ether_tcp_input(EtherTcpInput handler)
+{
+    g_ether_tcp_input = handler;
+}
+
 // The station whose mac is `mac`, if any: ether local addresses name their interface.
 EthernetStation find_ether_station(MACAddress mac)
 {
@@ -90,6 +93,28 @@ EthernetStation find_ether_station(MACAddress mac)
     return null;
 }
 
+// One ether_transport subscription per station, demuxing to endpoints and the tcp hook.
+// Endpoints and pcbs bound to the station share it; the module sweep re-subscribes if
+// the station is destroyed and recreated with the same name.
+void ensure_ether_tap(EthernetStation station)
+{
+    foreach (t; _taps[])
+    {
+        if (t._iface.get is station)
+            return;
+    }
+    EtherTap* tap = defaultAllocator().allocT!EtherTap();
+    tap._iface = station;
+    tap.try_subscribe();
+    _taps ~= tap;
+}
+
+
+// Open an ether-UDP datagram endpoint on an ethernet-framed interface, bound to a local port
+// (0 = ephemeral). Datagrams to the station MAC and broadcast are delivered; multicast
+// groups via join(). A remote restricts delivery to that peer and enables send().
+// The endpoint tracks its interface by reference; it rides out restarts, and re-attaches
+// if the interface is destroyed and later recreated with the same name.
 EtherEndpoint* ether_open(EthernetStation iface, ushort port, EtherRecvHandler on_recv,
                           MACAddress remote = MACAddress(), ushort remote_port = 0)
 {
@@ -104,7 +129,7 @@ EtherEndpoint* ether_open(EthernetStation iface, ushort port, EtherRecvHandler o
     ep._remote = remote;
     ep._remote_port = remote_port;
     ep._on_recv = on_recv;
-    ep.try_subscribe();
+    ensure_ether_tap(iface);
     _ether_eps ~= ep;
     return ep;
 }
@@ -195,8 +220,76 @@ private:
     MACAddress _remote;
     ushort _remote_port;
     ushort _local_port;
-    bool _subscribed;
     bool _closing;
+
+    void deliver(ref const Packet p, ref const EtherTransport h, EthernetStation station)
+    {
+        if (_closing)
+            return;
+
+        const(ubyte)[] seg = cast(const(ubyte)[])p.data;
+        if (seg.length < UdpSegHeader.sizeof)
+            return;
+        const u = cast(const(UdpSegHeader)*)seg.ptr;
+        if (u.dst_port.bigEndianToNative!ushort != _local_port)
+            return;
+        ushort len = u.length.bigEndianToNative!ushort;
+        if (len < UdpSegHeader.sizeof || len > seg.length)
+            return;
+
+        if (h.dst != station.mac && !h.dst.is_broadcast && !(h.dst.is_multicast && _groups[].contains(h.dst)))
+            return;
+        ushort src_port = u.src_port.bigEndianToNative!ushort;
+        if (_remote && (h.src != _remote || src_port != _remote_port))
+            return;
+
+        _on_recv(&this, seg[UdpSegHeader.sizeof .. len], h.src, src_port, p.creation_time);
+    }
+}
+
+
+package:
+
+void update_ether_endpoints()
+{
+    for (size_t i = _ether_eps.length; i-- > 0; )
+    {
+        EtherEndpoint* ep = _ether_eps[i];
+        if (ep._closing)
+        {
+            defaultAllocator().freeT(ep);
+            _ether_eps.removeSwapLast(i);
+        }
+    }
+    foreach (tap; _taps[])
+    {
+        if (!tap._subscribed)
+            tap.try_subscribe();
+    }
+}
+
+
+private:
+
+enum encap_overhead = 5 + 13 + UdpSegHeader.sizeof;     // ow framing + ether-transport header + udp header
+
+// standard UDP header; over ether the checksum is unused (transmitted zero, ignored on receive)
+struct UdpSegHeader
+{
+    ubyte[2] src_port;      // big-endian
+    ubyte[2] dst_port;      // big-endian
+    ubyte[2] length;        // big-endian; header + data
+    ubyte[2] checksum;
+}
+static assert(UdpSegHeader.sizeof == 8);
+
+
+struct EtherTap
+{
+nothrow @nogc:
+
+    ObjectRef!EthernetStation _iface;
+    bool _subscribed;
 
     void try_subscribe()
     {
@@ -212,32 +305,31 @@ private:
 
     void on_packet(ref const Packet p, BaseInterface, PacketDirection dir, void*)
     {
-        if (_closing || dir != PacketDirection.incoming)
+        if (dir != PacketDirection.incoming)
             return;
-        EthernetStation i = _iface.get;
-        if (!i)
+        EthernetStation station = _iface.get;
+        if (!station)
             return;
         ref const h = p.hdr!EtherTransport;
-        if (h.protocol != TransportProto.udp)
-            return;
+        switch (h.protocol)
+        {
+            case TransportProto.udp:
+                foreach (ep; _ether_eps[])
+                {
+                    if (ep._iface.get is station)
+                        ep.deliver(p, h, station);
+                }
+                break;
 
-        const(ubyte)[] seg = cast(const(ubyte)[])p.data;
-        if (seg.length < UdpSegHeader.sizeof)
-            return;
-        const u = cast(const(UdpSegHeader)*)seg.ptr;
-        if (u.dst_port.bigEndianToNative!ushort != _local_port)
-            return;
-        ushort len = u.length.bigEndianToNative!ushort;
-        if (len < UdpSegHeader.sizeof || len > seg.length)
-            return;
+            case TransportProto.tcp:
+                // tcp is point-to-point; only segments addressed to this station matter
+                if (g_ether_tcp_input && h.dst == station.mac)
+                    g_ether_tcp_input(h.src, h.dst, p.data, p.creation_time);
+                break;
 
-        if (h.dst != i.mac && !h.dst.is_broadcast && !(h.dst.is_multicast && _groups[].contains(h.dst)))
-            return;
-        ushort src_port = u.src_port.bigEndianToNative!ushort;
-        if (_remote && (h.src != _remote || src_port != _remote_port))
-            return;
-
-        _on_recv(&this, seg[UdpSegHeader.sizeof .. len], h.src, src_port, p.creation_time);
+            default:
+                break;
+        }
     }
 
     void on_iface_state(ActiveObject, StateSignal signal)
@@ -249,48 +341,9 @@ private:
     }
 }
 
-
-package:
-
-void update_ether_endpoints()
-{
-    for (size_t i = _ether_eps.length; i-- > 0; )
-    {
-        EtherEndpoint* ep = _ether_eps[i];
-        if (ep._closing)
-        {
-            if (ep._subscribed)
-            {
-                if (EthernetStation iface = ep._iface.get)
-                {
-                    iface.unsubscribe(&ep.on_packet);
-                    iface.unsubscribe(&ep.on_iface_state);
-                }
-            }
-            defaultAllocator().freeT(ep);
-            _ether_eps.removeSwapLast(i);
-        }
-        else if (!ep._subscribed)
-            ep.try_subscribe();
-    }
-}
-
-
-private:
-
-enum encap_overhead = 5 + 13 + UdpSegHeader.sizeof;     // ow framing + mac-transport header + udp header
-
-// standard UDP header; over MAC the checksum is unused (transmitted zero, ignored on receive)
-struct UdpSegHeader
-{
-    ubyte[2] src_port;      // big-endian
-    ubyte[2] dst_port;      // big-endian
-    ubyte[2] length;        // big-endian; header + data
-    ubyte[2] checksum;
-}
-static assert(UdpSegHeader.sizeof == 8);
-
 __gshared Array!(EtherEndpoint*) _ether_eps;
+__gshared Array!(EtherTap*) _taps;
+__gshared EtherTcpInput g_ether_tcp_input;
 __gshared ushort _next_ephemeral = 49_152;
 
 ushort allocate_ephemeral()

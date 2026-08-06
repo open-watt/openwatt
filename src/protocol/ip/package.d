@@ -266,21 +266,26 @@ TCPConnection* tcp_connect(InetAddress remote, TCPRecvHandler on_recv, TCPEventH
 {
     version (UseInternalIPStack)
     {
-        if (remote.family != AddressFamily.ipv4)
-            return null;     // in-tree stack TCP is v4-only for now...
+        if (remote.family != AddressFamily.ipv4 && remote.family != AddressFamily.ether)
+            return null;     // TODO: ipv6
+        if (remote.family == AddressFamily.ether)
+        {
+            // an ether connection binds to a station address; the local mac names the interface
+            if (!local || local.family != AddressFamily.ether)
+                return null;
+            EthernetStation station = find_ether_station(MACAddress(local._a.ether.addr));
+            if (!station)
+                return null;
+            ensure_ether_tap(station);
+        }
 
         TcpPcb* pcb = defaultAllocator().allocT!TcpPcb();
         tcp_assign_id(pcb);
         pcb.handle = TcpEndpointOwned;     // keep tcp_tick from auto-freeing it
-        if (local && local.family == AddressFamily.ipv4)
-        {
-            pcb.local_addr = local._a.ipv4.addr;
-            pcb.local_port = local._a.ipv4.port;
-        }
-        if (pcb.local_port == 0)
-            pcb.local_port = allocate_tcp_port();
-        pcb.remote_addr = remote._a.ipv4.addr;
-        pcb.remote_port = remote._a.ipv4.port;
+        pcb.local = local && local.family == remote.family ? *local : InetAddress(IPAddr.any, 0);
+        if (pcb.local.port == 0)
+            pcb.local.port = allocate_tcp_port();
+        pcb.remote = remote;
 
         TCPConnection* c = defaultAllocator().allocT!TCPConnection();
         c._pcb = pcb;
@@ -370,20 +375,26 @@ TCPListener* tcp_listen(InetAddress local, TCPAcceptHandler on_accept)
 {
     version (UseInternalIPStack)
     {
-        if (local.family != AddressFamily.ipv4)
-            return null;     // in-tree stack TCP is v4-only
+        if (local.family != AddressFamily.ipv4 && local.family != AddressFamily.ether)
+            return null;     // TODO: ipv6
+        if (local.family == AddressFamily.ether)
+        {
+            EthernetStation station = find_ether_station(MACAddress(local._a.ether.addr));
+            if (!station)
+                return null;
+            ensure_ether_tap(station);
+        }
 
         TcpPcb* pcb = defaultAllocator().allocT!TcpPcb();
         tcp_assign_id(pcb);
         pcb.handle = TcpEndpointOwned;
-        pcb.local_addr = local._a.ipv4.addr;
-        pcb.local_port = local._a.ipv4.port;
-        if (pcb.local_port == 0)
-            pcb.local_port = allocate_tcp_port();
+        pcb.local = local;
+        if (pcb.local.port == 0)
+            pcb.local.port = allocate_tcp_port();
 
         TCPListener* l = defaultAllocator().allocT!TCPListener();
         l._lpcb = pcb;
-        l._local = InetAddress(pcb.local_addr, pcb.local_port);
+        l._local = pcb.local;
         l._on_accept = on_accept;
         pcb.listen_owner = l;
         native_tcp_listen(pcb);     // sets state=listen, registers
@@ -626,7 +637,7 @@ nothrow @nogc:
     version (UseInternalIPStack)
     {
         InetAddress local()
-            => _pcb ? InetAddress(_pcb.local_addr, _pcb.local_port) : InetAddress();
+            => _pcb ? _pcb.local : InetAddress();
 
         ptrdiff_t send(const(void[])[] data...)
         {
@@ -916,7 +927,7 @@ private:
         void mark_connected()
         {
             _phase = Phase.open;
-            _remote = InetAddress(_pcb.remote_addr, _pcb.remote_port);
+            _remote = _pcb.remote;
             if (_on_event)
                 _on_event(&this, IPEvent.connected);
         }
@@ -1733,6 +1744,8 @@ nothrow @nogc:
             // TODO: register additional frame handlers when other L3 carriers land
             //       (PacketType._6lowpan, ppp/IPCP frame type, raw_ip tunnels).
 
+            set_ether_tcp_input(&ether_tcp_input);
+
             import protocol.ip.tcp : tcp_print;
             g_app.console.register_command!tcp_print("/protocol/ip/tcp", this, "print");
             g_app.console.register_command!neighbour_v4_print("/protocol/ip/neighbour", this, "print");
@@ -2038,10 +2051,18 @@ version (UseInternalIPStack)
         TCPConnection* c = defaultAllocator().allocT!TCPConnection();
         c._pcb = pcb;
         c._phase = TCPConnection.Phase.open;
-        c._remote = InetAddress(pcb.remote_addr, pcb.remote_port);
+        c._remote = pcb.remote;
         pcb.conn_owner = c;
         _tcp_conns ~= c;
         return c;
+    }
+
+    // Installed as the ether tap's tcp hook: segments addressed to a station arrive here.
+    void ether_tcp_input(MACAddress src, MACAddress dst, const(void)[] segment, MonoTime rx_time)
+    {
+        import protocol.ip.tcp : tcp_segment_input;
+        if (_stack_ptr)
+            tcp_segment_input(*_stack_ptr, InetAddress(src.b, 0), InetAddress(dst.b, 0), cast(const(ubyte)[])segment, rx_time);
     }
 }
 else version (Windows)
