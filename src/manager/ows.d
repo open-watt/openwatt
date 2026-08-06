@@ -190,13 +190,13 @@ nothrow @nogc:
 
         if (next_index)
         {
-            if (store.cursor_mask)
+            if (store.cursors.length)
                 writeWarning("series container attached under live cursors; their positions predate the rebase");
             foreach (b; store.buckets[])
                 b.first_index += next_index;
-            foreach (bit; 0 .. 16)
-                if (store.pin_mask & (1 << bit))
-                    store.pin_position[bit] += next_index;
+            foreach (ref slot; store.cursors[])
+                if (slot.pinned)
+                    slot.pin_position += next_index;
             store.head += next_index;
             foreach (b; store.buckets[])
                 adopted ~= b;
