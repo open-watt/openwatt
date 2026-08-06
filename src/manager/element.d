@@ -722,6 +722,20 @@ public:
 
     void teardown()
     {
+        // deferred machinery holds raw Element pointers; a dying element must vanish from both
+        if (_flags & Flags.dirty_listed)
+        {
+            g_dirty_elements.removeFirstSwapLast(&this);
+            _flags &= ~Flags.dirty_listed;
+        }
+        for (size_t i = 0; i < g_pending_updates.length; )
+        {
+            if (g_pending_updates[i].element is &this)
+                g_pending_updates.remove(i);
+            else
+                ++i;
+        }
+
         if (_history)
         {
             foreach (b; _history.buckets)
@@ -1767,6 +1781,20 @@ unittest
         w.close_series_cursor(wc);
         w.teardown();
     }
+
+    // teardown mid-commit: the dying element's pending updates and dirty listing must vanish
+    add_feed_listener();
+    Element dying;
+    dying.format = register_format(f64_held);
+    begin_commit();
+    dying.write_sample(1.0, from_unix_time_ns(1_000));
+    assert(g_pending_updates.length == 1);
+    assert(g_dirty_elements[].contains(&dying));
+    dying.teardown();
+    assert(g_pending_updates.empty);
+    assert(!g_dirty_elements[].contains(&dying));
+    end_commit();
+    remove_feed_listener();
 
     // TODO: regular-series test returns once regular write_records() and rate-aware tick() are built
 }
