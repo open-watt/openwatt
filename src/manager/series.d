@@ -531,6 +531,14 @@ pure nothrow @nogc:
     }
 }
 
+struct CursorSlot
+{
+    ulong pin_position;
+    Bucket* borrow;
+    ubyte id;
+    bool pinned;
+}
+
 struct SeriesStore
 {
 nothrow @nogc:
@@ -546,10 +554,7 @@ nothrow @nogc:
     ulong max_age;      // usecs; 0 = no ceiling
     uint min_records;   // 0 = none
     uint max_records;   // 0 = no ceiling
-    ushort cursor_mask;
-    ushort pin_mask;    // cursors voluntary eviction must not pass; consumption = advancing the cursor
-    ulong[16] pin_position;
-    Bucket*[16] cursor_ref; // the bucket each cursor's raw-side borrow guards; ref moves as the cursor does
+    Array!CursorSlot cursors;
 
     ulong first_index() const pure
         => buckets.length ? buckets[0].first_index : head;
@@ -557,10 +562,51 @@ nothrow @nogc:
     ulong pin_floor() const pure
     {
         ulong floor = ulong.max;
-        foreach (bit; 0 .. 16)
-            if ((pin_mask & (1 << bit)) && pin_position[bit] < floor)
-                floor = pin_position[bit];
+        foreach (ref slot; cursors[])
+            if (slot.pinned && slot.pin_position < floor)
+                floor = slot.pin_position;
         return floor;
+    }
+
+    // survives reads and evictions, but not another open: growth reallocates the array
+    CursorSlot* find_cursor(ubyte id) pure
+    {
+        foreach (ref slot; cursors[])
+        {
+            if (slot.id == id)
+                return &slot;
+        }
+        assert(false, "cursor is not open");
+    }
+
+    ubyte open_cursor(ulong position, bool pin)
+    {
+        assert(cursors.length < 16, "out of cursors");
+        ubyte id = 0;
+        scan: for (; id < ubyte.max; ++id)
+        {
+            foreach (ref slot; cursors[])
+            {
+                if (slot.id == id)
+                    continue scan;
+            }
+            break;
+        }
+        cursors ~= CursorSlot(position, null, id, pin);
+        return id;
+    }
+
+    void release_cursor(ubyte id)
+    {
+        foreach (i, ref slot; cursors[])
+        {
+            if (slot.id != id)
+                continue;
+            if (slot.borrow)
+                release_ref(slot.borrow);
+            cursors.remove(i);
+            return;
+        }
     }
 
     // TODO: byte budgets (== records * stride until variable-stride records land) and ring tier
@@ -596,19 +642,19 @@ nothrow @nogc:
         return lo < buckets.length ? buckets[lo] : null;
     }
 
-    // cursor_bit tracks the reader's raw-side borrow: the cursor's ref moves to the bucket it
-    // reads, so a view stays valid until the next read. Bit-less reads (queries) reconstitute
-    // without a ref; their loose raws drop at the next cursor close (byte budgets own the rest).
+    // A cursor's borrow moves to the bucket it reads, so a view stays valid until the next read.
+    // Cursor-less reads (queries) reconstitute without a borrow; their loose raws drop at the
+    // next cursor close (byte budgets own the rest).
     // `format` only labels an empty result; a found bucket speaks for itself. When from_index
     // falls in an evicted hole the read serves from the next surviving bucket and reports the
     // skip through r.first_index.
-    RecordBlock read(FormatId format, ulong from_index, uint max_records, ubyte cursor_bit = ubyte.max)
+    RecordBlock read(FormatId format, ulong from_index, uint max_records, CursorSlot* cursor = null)
     {
         RecordBlock r;
         r.format = format;
         Bucket* b = find_by_index(from_index);
-        if (cursor_bit != ubyte.max)
-            move_ref(cursor_bit, b);
+        if (cursor)
+            move_ref(cursor, b);
         if (!b)
             return r;
         if (!b.samples && !reconstitute(b))
@@ -631,12 +677,12 @@ nothrow @nogc:
         return r;
     }
 
-    void move_ref(ubyte bit, Bucket* b)
+    void move_ref(CursorSlot* cursor, Bucket* b)
     {
-        Bucket* old = cursor_ref[bit];
+        Bucket* old = cursor.borrow;
         if (old is b)
             return;
-        cursor_ref[bit] = b;
+        cursor.borrow = b;
         if (b)
             ++b.refs;
         if (old)
@@ -809,9 +855,9 @@ nothrow @nogc:
             free(b.packed[0 .. b.packed_bytes]);
             b.packed = null;
         }
-        foreach (bit; 0 .. 16)
-            if (cursor_ref[bit] is b)
-                cursor_ref[bit] = null;    // lapped reader; its borrow dies with the bucket
+        foreach (ref slot; cursors[])
+            if (slot.borrow is b)
+                slot.borrow = null;    // lapped reader; its borrow dies with the bucket
         free((cast(void*)b)[0 .. Bucket.sizeof]);
     }
 
