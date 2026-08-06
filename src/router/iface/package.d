@@ -18,6 +18,7 @@ import manager.collection;
 import manager.console;
 import manager.plugin;
 
+import router.iface.endpoint;
 import router.iface.group;
 import router.iface.vlan;
 
@@ -26,6 +27,7 @@ public import router.status;
 
 // package modules...
 public static import router.iface.bridge;
+public static import router.iface.endpoint;
 public static import router.iface.ethernet;
 public static import router.iface.group;
 public static import router.iface.i2c;
@@ -732,6 +734,8 @@ nothrow @nogc:
 
     override void init()
     {
+        register_packet_codec!EtherTransport();
+
         g_app.console.register_collection!InterfaceGroup();
         g_app.console.register_collection!VLANInterface();
     }
@@ -739,6 +743,7 @@ nothrow @nogc:
     override void update()
     {
         Collection!BaseInterface().update_all();
+        update_ether_endpoints();
     }
 
     final String add_interface_name(Session session, const(char)[] name, const(char)[] default_name_prefix)

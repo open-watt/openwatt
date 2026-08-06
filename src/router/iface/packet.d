@@ -26,6 +26,8 @@ enum PacketType : ushort
     ble         = 10,
     cpc         = 11,
     i2c         = 12,
+    // 13 is reserved for the udp packet interface (PR #460)
+    ether_transport = 14,
     count
 }
 static assert(PacketType.count <= 16, "PacketType must fit in 4 bits");

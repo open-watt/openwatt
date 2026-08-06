@@ -317,6 +317,9 @@ private:
     // an unknown unicast also fires who_has; the frame still floods, so delivery never waits on the reply
     MACAddress resolve(ulong address)
     {
+        // mac-transport addresses ARE wire addresses; identity, no resolution needed
+        if (address >> 60 == ulong(PacketType.ether_transport))
+            return MACAddress.from_ul(address);
         if (is_network_multicast_address(address))
             return MACAddress.broadcast;
         if (auto r = address in _neighbours)
