@@ -19,7 +19,6 @@ module manager.sync;
 //     hook (analogous to register_object_lifecycle_handler) when needed.
 //   - inbound_enum doesn't correlate pending enum_req forwards - currently
 //     latent (no outbound enum_req emitter exists yet).
-//   - Binary encoder not implemented (deferred to BL808 D0/M0 shmem work).
 //
 // Soft / wasteful but correct:
 //
@@ -76,6 +75,7 @@ import manager.features;
 import manager.log;
 import manager.syslog;
 import manager.system : hostname;
+import manager.sync.binary_encoder;
 import manager.sync.encoder;
 import manager.sync.json_encoder;
 import manager.sync.peer;
@@ -141,6 +141,8 @@ nothrow @nogc:
 
         g_json_encoder = defaultAllocator.allocT!JsonEncoder(this);
         g_encoders[SyncEncoderKind.json] = g_json_encoder;
+        g_binary_encoder = defaultAllocator.allocT!BinaryEncoder(this);
+        g_encoders[SyncEncoderKind.binary] = g_binary_encoder;
 
         g_app.console.register_collection!SyncPeer();
         static if (has_http)

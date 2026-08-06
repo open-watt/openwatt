@@ -147,6 +147,7 @@
     <DCompile Include="src\manager\signal.d" />
     <DCompile Include="src\manager\sample\spec.d" />
     <DCompile Include="src\manager\sync\encoder.d" />
+    <DCompile Include="src\manager\sync\binary_encoder.d" />
     <DCompile Include="src\manager\sync\json_encoder.d" />
     <DCompile Include="src\manager\sync\package.d" />
     <DCompile Include="src\manager\sync\peer.d" />
