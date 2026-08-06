@@ -151,11 +151,9 @@ SocketResult c_bind(Socket socket, ref const InetAddress address)
 
     if (s.tcp)
     {
-        s.tcp.local_addr = address._a.ipv4.addr;
-        ushort port = address._a.ipv4.port;
-        if (port == 0)
-            port = allocate_ephemeral();
-        s.tcp.local_port = port;
+        s.tcp.local = address;
+        if (s.tcp.local.port == 0)
+            s.tcp.local.port = allocate_ephemeral();
         return SocketResult.success;
     }
     if (!s.udp)
@@ -176,8 +174,10 @@ SocketResult c_listen(Socket socket, uint backlog)
         return SocketResult.invalid_socket;
     if (!s.tcp)
         return SocketResult.invalid_argument;
-    if (s.tcp.local_port == 0)
-        s.tcp.local_port = allocate_ephemeral();
+    if (s.tcp.local.family == AddressFamily.unspecified)
+        s.tcp.local = InetAddress(IPAddr.any, 0);
+    if (s.tcp.local.port == 0)
+        s.tcp.local.port = allocate_ephemeral();
     tcp_listen(s.tcp);
     return SocketResult.success;
 }
@@ -194,15 +194,17 @@ SocketResult c_connect(Socket socket, ref const InetAddress address)
     {
         if (s.tcp.state != TcpState.closed)
             return SocketResult.already_connected;
-        if (s.tcp.local_port == 0)
-            s.tcp.local_port = allocate_ephemeral();
-        s.tcp.remote_addr = address._a.ipv4.addr;
-        s.tcp.remote_port = address._a.ipv4.port;
-        if (s.tcp.local_addr == IPAddr.any)
+        if (s.tcp.local.family == AddressFamily.unspecified)
+            s.tcp.local = InetAddress(IPAddr.any, 0);
+        if (s.tcp.local.port == 0)
+            s.tcp.local.port = allocate_ephemeral();
+        s.tcp.remote = address;
+        if (s.tcp.local.addr_any)
         {
-            s.tcp.local_addr = _stack.select_source_v4(s.tcp.remote_addr);
-            if (s.tcp.local_addr == IPAddr.any)
+            IPAddr src = _stack.select_source_v4(s.tcp.remote._a.ipv4.addr);
+            if (src == IPAddr.any)
                 return SocketResult.network_unreachable;
+            s.tcp.local = InetAddress(src, s.tcp.local.port);
         }
         if (!tcp_connect(*_stack, s.tcp))
             return SocketResult.failure;
@@ -242,7 +244,7 @@ SocketResult c_accept(Socket socket, out Socket connection, InetAddress* remote)
 
     connection = Socket(h);
     if (remote)
-        *remote = InetAddress(child.remote_addr, child.remote_port);
+        *remote = child.remote;
 
     s.tcp.accept_event = (s.tcp.accept_queue.length > 0);
     return SocketResult.success;
@@ -344,7 +346,7 @@ SocketResult c_recvfrom(Socket socket, void[] buffer, MsgFlags flags, InetAddres
         if (bytes_received)
             *bytes_received = n;
         if (from)
-            *from = InetAddress(s.tcp.remote_addr, s.tcp.remote_port);
+            *from = s.tcp.remote;
         if (n == 0)
         {
             // EOF on closed connection vs just-no-data-yet:
@@ -483,9 +485,9 @@ SocketResult c_get_peer_name(Socket socket, out InetAddress addr)
     auto s = lookup(socket);
     if (!s)
         return SocketResult.invalid_socket;
-    if (s.tcp && s.tcp.remote_port != 0)
+    if (s.tcp && s.tcp.remote.port != 0)
     {
-        addr = InetAddress(s.tcp.remote_addr, s.tcp.remote_port);
+        addr = s.tcp.remote;
         return SocketResult.success;
     }
     if (s.udp && s.udp.connected)
@@ -503,7 +505,7 @@ SocketResult c_get_socket_name(Socket socket, out InetAddress addr)
         return SocketResult.invalid_socket;
     if (s.tcp)
     {
-        addr = InetAddress(s.tcp.local_addr, s.tcp.local_port);
+        addr = s.tcp.local;
         return SocketResult.success;
     }
     if (s.udp)
