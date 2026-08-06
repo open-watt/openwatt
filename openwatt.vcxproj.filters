@@ -426,6 +426,9 @@
     <DCompile Include="src\manager\sync\encoder.d">
       <Filter>src\manager\sync</Filter>
     </DCompile>
+    <DCompile Include="src\manager\sync\binary_encoder.d">
+      <Filter>src\manager\sync</Filter>
+    </DCompile>
     <DCompile Include="src\manager\sync\json_encoder.d">
       <Filter>src\manager\sync</Filter>
     </DCompile>
