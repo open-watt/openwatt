@@ -204,10 +204,6 @@ Examples:
 # Logs on a serial stream
 /stream/serial/add name=console device=uart0 baud-rate=115200
 /log/sink/add name=console stream=console format=text line-ending=crlf max-severity=trace
-
-# One RFC 5424 message per UDP datagram
-/stream/udp/add name=syslog remote-host=192.0.2.10 remote-port=514
-/log/sink/add name=syslog stream=syslog format=syslog max-severity=info
 ```
 
 ### `/console/session`
@@ -351,14 +347,28 @@ no transport properties.
 /console/session/add name=default stream=console profile=vt100 initial-command="/log/print --stream"
 ```
 
-### `/stream/udp`
+### `/interface/udp`
 
-A UDP stream sends each Stream write as one UDP datagram. This preserves the
-one-message-per-datagram boundary required by the syslog example above.
+A UDP interface is a raw-packet interface over UDP datagrams: one datagram is
+one packet, in both directions.
+
+A unicast `remote-host` gives a point-to-point link (reception is filtered to
+that peer). A broadcast or multicast remote, or no remote at all, gives a
+multi-drop segment: datagrams are accepted from any peer, each received packet
+carries its source address, and transmitted packets may address a peer
+per-frame (falling back to the configured remote).
+
+A peer may be a MAC address (`02:13:37:AA:BB:64`), in which case datagrams ride raw
+ethernet over the OpenWatt ethertype and no IP configuration is required; builds
+without the IP stack carry these peers only.
+
+The interface self-configures its L2MTU from the peer's datagram payload MTU
+(assuming a 1500-byte link MTU: 1472 for IPv4, 1452 for IPv6, 1474 for ether);
+`l2mtu` may be lowered by the user.
 
 | Property | Values | Default | Description |
 | --- | --- | --- | --- |
 | `local-host` | host or address | wildcard | Local address to bind. |
 | `local-port` | `0` to `65535` | `0` | Local port; zero requests an ephemeral port. |
-| `remote-host` | host or address | resolver default | Datagram destination. |
-| `remote-port` | `1` to `65535` | required | Datagram destination port. |
+| `remote-host` | host, address or MAC | none | Default datagram destination. |
+| `remote-port` | `1` to `65535` | with remote-host | Default destination port. |
