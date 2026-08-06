@@ -206,7 +206,6 @@
     <DCompile Include="src\protocol\ip\tcp.d" />
     <DCompile Include="src\protocol\ip\tcp_stream.d" />
     <DCompile Include="src\protocol\ip\udp.d" />
-    <DCompile Include="src\protocol\ip\udp_stream.d" />
     <DCompile Include="src\protocol\modbus\binding.d" />
     <DCompile Include="src\protocol\modbus\iface.d" />
     <DCompile Include="src\protocol\modbus\message.d" />
@@ -269,6 +268,7 @@
     <DCompile Include="src\router\iface\package.d" />
     <DCompile Include="src\router\iface\packet.d" />
     <DCompile Include="src\router\iface\priority_queue.d" />
+    <DCompile Include="src\router\iface\udp.d" />
     <DCompile Include="src\router\iface\vlan.d" />
     <DCompile Include="src\router\iface\wifi.d" />
     <DCompile Include="src\router\pcap.d" />

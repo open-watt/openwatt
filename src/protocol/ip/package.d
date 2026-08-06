@@ -20,7 +20,6 @@ import protocol.ip.pool;
 import protocol.ip.route;
 import protocol.ip.stack;
 import protocol.ip.tcp_stream;
-import protocol.ip.udp_stream;
 
 version (UseInternalIPStack)
 {
@@ -1749,7 +1748,6 @@ nothrow @nogc:
         g_app.console.register_collection!IPRoute();
         g_app.console.register_collection!TCPStream();
         g_app.console.register_collection!TCPServer();
-        g_app.console.register_collection!UDPStream();
 
         version (KernelMirror)
         {
