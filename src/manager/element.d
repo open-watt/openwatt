@@ -2,11 +2,10 @@ module manager.element;
 
 // Elements host the typed series (manager.series) and publish changes to subscribers.
 //
-// Readers take one of two forms. A Cursor is an incremental reader: it holds a bit in the
-// element's 16 cursor slots, and the retention hold lives in SeriesStore (pin_mask,
-// pin_position, cursor_ref) indexed by that bit, so a pinned cursor keeps buckets alive
-// until it has consumed them. read_records() is the cursor-less form: random access by
-// index, no pin, subject to eviction between calls.
+// Readers take one of two forms. A Cursor is an incremental reader: it holds a stable id into
+// the store's CursorSlot array, where its retention hold lives, so a pinned cursor keeps
+// buckets alive until it has consumed them. read_records() is the cursor-less form: random
+// access by index, no pin, subject to eviction between calls.
 //
 // TODO: durable cursor holders keep a raw Element* across frames (the recorder is the only
 // one). That is safe solely because elements are never destroyed today - teardown() has no
@@ -70,7 +69,7 @@ void sweep_dirty(scope void delegate(ref Element) nothrow @nogc visit)
     Array!(Element*) list = g_dirty_elements.move;
     foreach (e; list)
     {
-        e._flags &= ~Element.Flags.dirty_listed;
+        e._status &= ~Element.Flags.dirty_listed;
         visit(*e);
     }
 }
@@ -160,7 +159,7 @@ nothrow @nogc:
 
     Element* element;
     ulong position;
-    ubyte bit;
+    ubyte id;
 
     bool pending() const
         => element._history && element._history.head > position;
@@ -171,21 +170,23 @@ nothrow @nogc:
         if (pos > h.head)
             pos = h.head;
         position = pos;
-        if (h.pin_mask & (1 << bit))
-            h.pin_position[bit] = pos;
+        CursorSlot* slot = h.find_cursor(id);
+        if (slot.pinned)
+            slot.pin_position = pos;
     }
 
     RecordBlock next(uint max_records)
     {
         SeriesStore* h = element._history;
-        RecordBlock r = h.read(element.format, position, max_records, bit);
+        CursorSlot* slot = h.find_cursor(id);
+        RecordBlock r = h.read(element.format, position, max_records, slot);
         if (r.count)
         {
             r.lost = r.first_index - position;  // records evicted or destroyed below the block
             position = r.first_index + r.count;
         }
-        if (h.pin_mask & (1 << bit))
-            h.pin_position[bit] = position;
+        if (slot.pinned)
+            slot.pin_position = position;
         return r;
     }
 }
@@ -225,8 +226,28 @@ nothrow @nogc:
 
     Component parent;
 
-    Access access;
-    SamplingMode sampling_mode;
+    // access, sampling_mode and Flags share one byte: it sits in the alignment hole before
+    // `format`, so a separate flags byte would cost 8. Hand-packed because DMD's
+    // -preview=bitfields silently drops `|=` and `&=` on bitfield members (LDC honours them).
+    private ubyte _status;
+    private FormatId _format = FormatId.invalid;    // paired with _status to fill one slot
+
+    static assert(Access.max <= 3 && SamplingMode.max <= 7 && Flags.min >= 1 << 5,
+                  "the status byte is full");
+
+    Access access() const pure
+        => cast(Access)(_status & 3);
+    void access(Access value)
+    {
+        _status = cast(ubyte)((_status & ~3) | value);
+    }
+
+    SamplingMode sampling_mode() const pure
+        => cast(SamplingMode)((_status >> 2) & 7);
+    void sampling_mode(SamplingMode value)
+    {
+        _status = cast(ubyte)((_status & ~0x1C) | (value << 2));
+    }
 
     this(this) @disable;
 
@@ -434,7 +455,19 @@ nothrow @nogc:
 
 public:
 
-    FormatId format;
+    FormatId format() const pure
+        => _format;
+
+    // the format decides how _latest is read, so a change has to hand the register over:
+    // a text register holds an owned String, and releasing scalar bytes as one corrupts the heap
+    void format(FormatId value)
+    {
+        if (value == _format)
+            return;
+        release_register();
+        _latest.raw[] = 0;
+        _format = value;
+    }
 
     const(DataFormat)* data_format() const pure
         => format_info(format);
@@ -464,12 +497,16 @@ public:
         return Variant();
     }
 
-    // borrows the open bucket's heap: valid until the next write to this element
+    // Without a store the value is a String held in the record register, and the slice is stable
+    // until the next write to this element. With a store it borrows the open bucket's heap, which
+    // the next write may reallocate.
     const(char)[] text_value() const pure
     {
         if (!format.valid || !data_format.is_text || _last_update == SysTime())
             return null;
-        if (!_history || !_history.buckets.length)
+        if (!_history)
+            return text_register[];
+        if (!_history.buckets.length)
             return null;
         const(Bucket)* b = _history.buckets[$-1];
         if (!b.count || !b.samples)
@@ -477,10 +514,19 @@ public:
         return cast(const(char)[])heap_view(b.heap, (cast(const(ushort)*)b.samples)[b.count - 1]);
     }
 
-    // wide records don't fit the Scalar register: latest IS the tail record of the open bucket
+    // Wide records don't fit the Scalar register. Without a store the register points at one
+    // owned stride-sized buffer, overwritten in place; with a store latest is the open bucket's
+    // tail record.
     const(void)[] tail_record() const pure
     {
-        if (!_history || !_history.buckets.length)
+        if (!format.valid || !data_format.is_wide)
+            return null;
+        if (!_history)
+        {
+            const(void)* held = wide_register();
+            return held ? held[0 .. data_format.stride] : null;
+        }
+        if (!_history.buckets.length)
             return null;
         const(Bucket)* b = _history.buckets[$-1];
         if (!b.count || !b.samples)
@@ -492,7 +538,7 @@ public:
     void store_sample(T)(T v, SysTime t = getSysTime(), Subscriber who = null)
     {
         static if (is(T == String))
-            write_text_sample(v[], t, who);
+            write_text_sample(v[], t, who, v);
         else static if (is(T : const(char)[]))
             write_text_sample(v, t, who);
         else
@@ -576,9 +622,9 @@ public:
 
     void mark_series_gap(Subscriber who = null)
     {
-        if (_flags & Flags.gap_open)
+        if (_status & Flags.gap_open)
             return;
-        _flags |= Flags.gap_open;
+        _status |= Flags.gap_open;
         SampleUpdate update;
         update.element = &this;
         update.who = who;
@@ -616,9 +662,6 @@ public:
 
     SeriesStore* ensure_history()
     {
-        // any caller expressing history interest ends latest-only mode: the current value
-        // stands as record 0 and subsequent writes append (the text write path re-flags itself)
-        _flags &= ~Flags.latest_only;
         if (!_history)
         {
             // zero-fill rather than assign .init: SeriesStore holds an Array, whose opAssign
@@ -626,6 +669,26 @@ public:
             void[] mem = alloc(SeriesStore.sizeof);
             (cast(ubyte[])mem)[] = 0;
             _history = cast(SeriesStore*)mem.ptr;
+
+            // a held register value becomes record 0; the store owns it from here and the
+            // register releases, so only one of the two ever holds the value
+            if (format.valid && _last_update != SysTime())
+            {
+                if (data_format.is_text)
+                {
+                    if (text_register().length)
+                    {
+                        append_text(text_register()[], unix_time_ns(_last_update) / 1000);
+                        release_register();
+                    }
+                }
+                else if (data_format.is_wide && wide_register())
+                {
+                    SysTime[1] held_time = _last_update;
+                    append(wide_register()[0 .. data_format.stride], held_time[]);
+                    release_register();
+                }
+            }
         }
         return _history;
     }
@@ -679,34 +742,16 @@ public:
     Cursor open_series_cursor(ulong from_index = ulong.max, bool pin = false)
     {
         SeriesStore* s = ensure_history();
-        foreach (ubyte bit; 0 .. 16)
-        {
-            if (s.cursor_mask & (1 << bit))
-                continue;
-            s.cursor_mask |= cast(ushort)(1 << bit);
-            ulong position = from_index > s.head ? s.head : from_index;
-            if (pin)
-            {
-                s.pin_mask |= cast(ushort)(1 << bit);
-                s.pin_position[bit] = position;
-            }
-            return Cursor(&this, position, bit);
-        }
-        assert(false, "out of cursors");
+        ulong position = from_index > s.head ? s.head : from_index;
+        return Cursor(&this, position, s.open_cursor(position, pin));
     }
 
     void close_series_cursor(ref Cursor c)
     {
         if (_history)
         {
-            if (Bucket* rb = _history.cursor_ref[c.bit])
-            {
-                _history.cursor_ref[c.bit] = null;
-                _history.release_ref(rb);
-            }
+            _history.release_cursor(c.id);
             _history.drop_loose_raws();
-            _history.cursor_mask &= ~cast(ushort)(1 << c.bit);
-            _history.pin_mask &= ~cast(ushort)(1 << c.bit);
         }
         c.element = null;
     }
@@ -722,6 +767,7 @@ public:
 
     void teardown()
     {
+        release_register();
         if (_history)
         {
             foreach (b; _history.buckets)
@@ -739,18 +785,17 @@ public:
     }
 
 private:
+    // the top three bits of _status; access and sampling_mode own the low five
     enum Flags : ubyte
     {
-        gap_open     = 1 << 0,
-        dirty_listed = 1 << 1,
-        latest_only  = 1 << 2,  // self-created history holds one overwritten record; cleared when a cursor attaches
+        gap_open     = 1 << 5,
+        dirty_listed = 1 << 6,
     }
 
     Scalar _latest;
     SysTime _last_update;
     Subscription* _subs;
     SeriesStore* _history;
-    ubyte _flags;
 
     enum bucket_capacity = 256; // TODO: scale with rate (target a time span, not a record count)
     enum text_bucket_capacity = 64;     // text series are low-rate; keep resident buckets small
@@ -802,8 +847,12 @@ private:
             _latest.raw[0 .. data_format.stride] =
                 (cast(const(ubyte)[])update.records)[$ - data_format.stride .. $];
         }
-        else
-            ensure_history();
+        else if (!_history)
+        {
+            // no history: the newest record overwrites the register buffer in place, so a value
+            // rewritten forever (a display buffer, a key) neither appends nor reallocates
+            set_wide_register((cast(const(ubyte)[])update.records)[$ - data_format.stride .. $]);
+        }
 
         if (update.times.length)
         {
@@ -817,7 +866,9 @@ private:
         }
     }
 
-    void write_text_sample(const(char)[] v, SysTime t, Subscriber who)
+    // `handle` is the caller's String when it has one: with no store the register keeps it
+    // rather than copying, which is what makes a profile literal cost nothing at all
+    void write_text_sample(const(char)[] v, SysTime t, Subscriber who, String handle = String())
     {
         debug assert(data_format.is_text);
         if (v.length > MaxStringLen)
@@ -832,13 +883,14 @@ private:
             previous = record_value();
         SysTime previous_timestamp = last_update;
 
-        if (!_history)
+        if (_history)
+            append_text(v, unix_time_ns(t) / 1000);
+        else
         {
-            // no history requested: latest-only, a single record overwritten in place
-            ensure_history();
-            _flags |= Flags.latest_only;
+            set_text_register(handle ? handle.move : v.makeString(defaultAllocator()));
+            _status &= ~Flags.gap_open;
+            mark_dirty();
         }
-        append_text(v, unix_time_ns(t) / 1000);
         _last_update = t;
 
         SampleUpdate update;
@@ -850,36 +902,51 @@ private:
         submit(update, false);
     }
 
+    // A non-scalar element with no store keeps its latest value in the record register instead:
+    // text as an owned String handle, wide as one stride-sized buffer. The register and the store
+    // are never both live, so there is one value and one write path at any moment.
+    ref inout(String) text_register() inout pure
+        => *cast(inout(String)*)_latest.raw.ptr;
+
+    void set_text_register(String v)
+    {
+        String* p = &text_register();
+        *p = null;
+        moveEmplace(v, *p);
+    }
+
+    ref inout(void)* wide_register() inout pure
+        => *cast(inout(void)**)_latest.raw.ptr;
+
+    void set_wide_register(const(void)[] record)
+    {
+        void** p = cast(void**)_latest.raw.ptr;
+        if (!*p)
+            *p = alloc(record.length).ptr;      // stride is fixed per format; allocated once
+        (cast(ubyte*)*p)[0 .. record.length] = cast(const(ubyte)[])record;
+    }
+
+    void release_register()
+    {
+        if (!format.valid)
+            return;
+        if (data_format.is_text)
+            text_register() = null;
+        else if (data_format.is_wide)
+        {
+            if (void* held = wide_register())
+                free(held[0 .. data_format.stride]);
+            wide_register() = null;
+        }
+    }
+
     ulong append_text(const(char)[] v, ulong tick)
     {
-        bool follows_gap = (_flags & Flags.gap_open) != 0;
-        _flags &= ~Flags.gap_open;
+        bool follows_gap = (_status & Flags.gap_open) != 0;
+        _status &= ~Flags.gap_open;
 
         SeriesStore* h = _history;
         Bucket* b = h.buckets.length ? h.buckets[$-1] : null;
-
-        if (_flags & Flags.latest_only)
-        {
-            // overwrite the single record: no observer exists that could see a mutation
-            if (!b)
-            {
-                b = alloc_bucket(1);
-                b.first_index = 0;
-                h.buckets ~= b;
-                h.head = 1;
-            }
-            b.format = format;
-            b.heap_used = 0;
-            uint entry = add_heap_entry(*b, v);
-            (cast(ushort*)b.samples)[0] = cast(ushort)entry;
-            b.first_tick = tick;
-            b.offsets[0] = 0;
-            b.count = 1;
-            b.last_offset = 0;
-            b.follows_gap = follows_gap;
-            mark_dirty();
-            return 0;
-        }
 
         uint entry = uint.max;
         if (b)
@@ -1003,8 +1070,8 @@ private:
         uint n = cast(uint)(samples.length / stride);
         assert(ts.length == 0 || ts.length == n, "times array must match sample count");
 
-        bool follows_gap = (_flags & Flags.gap_open) != 0;
-        _flags &= ~Flags.gap_open;
+        bool follows_gap = (_status & Flags.gap_open) != 0;
+        _status &= ~Flags.gap_open;
 
         ulong first_index = ulong.max;
         if (_history)
@@ -1157,12 +1224,12 @@ private:
 
     void mark_dirty()
     {
-        if (!(_history && _history.cursor_mask) && !g_feed_listeners)
+        if (!(_history && _history.cursors.length) && !g_feed_listeners)
             return;
-        if (!(_flags & Flags.dirty_listed))
+        if (!(_status & Flags.dirty_listed))
         {
             g_dirty_elements ~= &this;
-            _flags |= Flags.dirty_listed;
+            _status |= Flags.dirty_listed;
         }
     }
 }
@@ -1575,6 +1642,56 @@ unittest
     p.close_series_cursor(pinc);
     p.teardown();
 
+    // concurrent cursors: a reader's id stays bound to it as other slots come and go
+    Element m;
+    m.format = register_format(f64_held);
+    m.retention(1);
+    Cursor pinned = m.open_series_cursor(0, true);
+    Cursor tail = m.open_series_cursor(0);
+    assert(pinned.id != tail.id);
+    foreach (i; 0 .. 4)
+    {
+        m.write_sample(double(i), from_unix_time_ns(1_000 * (i + 1)));
+        m.mark_gap();
+    }
+    assert(m._history.first_index == 0);
+    assert(tail.next(16).get!double(0) == 0.0);
+    assert(tail.next(16).get!double(0) == 1.0);
+    assert(m._history.first_index == 0);     // an unpinned reader moves no floor
+
+    // closing the front slot shifts the survivor down; its id must still find it
+    m.close_series_cursor(pinned);
+    assert(tail.next(16).get!double(0) == 2.0);
+    m.write_sample(9.0, from_unix_time_ns(9_000));
+    assert(m._history.first_index == 4);     // the pin left with its cursor, and the lapped
+                                             // reader's borrow died with its bucket
+    Cursor reused = m.open_series_cursor(0);
+    assert(reused.id == pinned.id);
+    m.close_series_cursor(reused);
+    m.close_series_cursor(tail);
+    m.teardown();
+
+    // two pins: the floor follows the laggard, not the leader
+    Element mp;
+    mp.format = register_format(f64_held);
+    mp.retention(1);
+    Cursor lead = mp.open_series_cursor(0, true);
+    Cursor lag = mp.open_series_cursor(0, true);
+    foreach (i; 0 .. 4)
+    {
+        mp.write_sample(double(i), from_unix_time_ns(1_000 * (i + 1)));
+        mp.mark_gap();
+    }
+    foreach (_; 0 .. 3)
+        lead.next(1);
+    mp.write_sample(4.0, from_unix_time_ns(5_000));
+    assert(mp._history.first_index == 0);
+    mp.close_series_cursor(lag);
+    mp.write_sample(5.0, from_unix_time_ns(6_000));
+    assert(mp._history.first_index == 3);
+    mp.close_series_cursor(lead);
+    mp.teardown();
+
     // ceiling: max_records evicts past a stalled pin; the lapped cursor reports the loss
     Element x;
     x.format = register_format(f64_held);
@@ -1605,7 +1722,9 @@ unittest
     assert(a._history.first_index == 3);
     a.teardown();
 
-    // wide records: fixed vectors don't fit the Scalar register; latest is the open bucket tail
+    // wide records: fixed vectors don't fit the Scalar register. With no history the register
+    // owns one buffer that every write overwrites in place, so a value rewritten forever
+    // (a display buffer, a key) never appends and never reallocates.
     DataFormat key_fmt = DataFormat(ValueType.u8, SeriesKind.held);
     key_fmt.count = 32;
     assert(!key_fmt.is_scalar && !key_fmt.is_text && key_fmt.is_wide && key_fmt.stride == 32);
@@ -1615,47 +1734,104 @@ unittest
     foreach (i, ref byt; key1)
         byt = cast(ubyte)i;
     k.write_record(key1[], from_unix_time_ns(1_000));
-    assert(k.record_count == 1);
+    assert(!k.has_history && k.record_count == 0);
     assert(cast(const(ubyte)[])k.value().asBuffer == key1[]);
     k.write_record(key1[], from_unix_time_ns(2_000));
-    assert(k.record_count == 1 && k.last_update == from_unix_time_ns(2_000));   // held dedup vs the tail
+    assert(k.last_update == from_unix_time_ns(2_000));   // held dedup vs the register
     ubyte[32] key2 = key1;
     key2[0] = 0xFF;
-    k.write_record(key2[], from_unix_time_ns(3_000));
-    assert(k.record_count == 2);
+    const(void)* key_buffer = k.wide_register;
+    foreach (i; 0 .. 64)
+        k.write_record(i & 1 ? key2[] : key1[], from_unix_time_ns(3_000 + i));
+    assert(!k.has_history && k.record_count == 0);       // rewritten 64 times, still no store
+    assert(k.wide_register is key_buffer);               // and still the same buffer
     assert(cast(const(ubyte)[])k.value().asBuffer == key2[]);
     assert(cast(const(ubyte)[])k.tail_record() == key2[]);
+
+    // expressing history interest migrates the held record into record 0, and the store owns
+    // it from there: the register releases its buffer
+    k.retention(4);
+    assert(k.record_count == 1 && k.wide_register is null);
+    assert(cast(const(ubyte)[])k.tail_record() == key2[]);
+    k.write_record(key1[], from_unix_time_ns(4_000));
+    assert(k.record_count == 2);
     Cursor kc = k.open_series_cursor(0);
     RecordBlock kb = kc.next(16);
     assert(kb.count == 2);
-    assert(cast(const(ubyte)[])kb.box(0).asBuffer == key1[]);
-    assert(cast(const(ubyte)[])kb.box(1).asBuffer == key2[]);
+    assert(cast(const(ubyte)[])kb.box(0).asBuffer == key2[]);
+    assert(cast(const(ubyte)[])kb.box(1).asBuffer == key1[]);
     k.close_series_cursor(kc);
     k.teardown();
 
-    // text without requested history: latest-only, one record overwritten in place
+    // text without requested history: the value lives in the record register, no store at all
     Element tv;
     tv.format = register_format(text_fmt);
     tv.write_sample("first", from_unix_time_ns(1_000));
-    assert(tv._history && tv.record_count == 1 && tv.bucket_count == 1);
+    assert(!tv.has_history && tv.record_count == 0);
     assert(tv.text_value == "first");
+    assert(tv.value().asString == "first");
     tv.write_sample("a rather longer second value", from_unix_time_ns(2_000));
-    assert(tv.record_count == 1);   // overwritten, not appended
+    assert(!tv.has_history);
     assert(tv.text_value == "a rather longer second value");
-    assert(tv._history.buckets[0].heap_used == heap_entry_bytes(28));
+    assert(tv.last_update == from_unix_time_ns(2_000));
 
-    // raising retention (or any history interest) ends latest-only: the current value
-    // stands as record 0 and subsequent writes append
+    // held dedup still applies against the register
+    tv.write_sample("a rather longer second value", from_unix_time_ns(2_500));
+    assert(tv.last_update == from_unix_time_ns(2_500));
+
+    // expressing history interest migrates the held value into record 0, and the store owns
+    // it from there: the register drops its reference
     tv.retention(4);
+    assert(tv.record_count == 1 && tv.bucket_count == 1);
+    assert(tv.text_register[].length == 0);
+    assert(tv.text_value == "a rather longer second value");
     tv.write_sample("third", from_unix_time_ns(3_000));
-    assert(tv.record_count == 2 && tv.bucket_count == 2);
+    assert(tv.record_count == 2);
     Cursor tvc = tv.open_series_cursor(0);
     RecordBlock tvb = tvc.next(16);
-    assert(tvb.count == 1 && tvb.text(0) == "a rather longer second value");
-    tvb = tvc.next(16);
-    assert(tvb.count == 1 && tvb.text(0) == "third");
+    assert(tvb.count == 2 && tvb.text(0) == "a rather longer second value" && tvb.text(1) == "third");
     tv.close_series_cursor(tvc);
     tv.teardown();
+
+    // a String handle is kept, not copied: the element takes a reference and releases it
+    Element th_lit;
+    th_lit.format = register_format(text_fmt);
+    String shared_value = "a shared handle".makeString(defaultAllocator());
+    assert(rc(shared_value) == 0);
+    th_lit.write_sample(shared_value, from_unix_time_ns(1_000));
+    assert(!th_lit.has_history);
+    assert(rc(shared_value) == 1);                      // stored by reference, no copy
+    assert(th_lit.text_value.ptr is shared_value.ptr);
+    th_lit.teardown();
+    assert(rc(shared_value) == 0);                      // teardown released it
+
+    // a literal costs no allocation and touches no refcount
+    Element lit;
+    lit.format = register_format(text_fmt);
+    String brand = StringLit!"Fronius";
+    assert(!brand.has_rc);
+    lit.write_sample(brand, from_unix_time_ns(1_000));
+    assert(lit.text_value == "Fronius" && lit.text_value.ptr is brand.ptr);
+    lit.teardown();
+
+    // a register write still enlists in the dirty sweep: no store must not mean no live feed
+    Element text_feed;
+    Element wide_feed;
+    text_feed.format = register_format(text_fmt);
+    wide_feed.format = register_format(key_fmt);
+    uint swept;
+    void count_swept(ref Element) nothrow @nogc { ++swept; }
+    sweep_dirty(&count_swept);      // drain anything earlier tests enlisted
+    swept = 0;
+    add_feed_listener();
+    text_feed.write_sample("online", from_unix_time_ns(1_000));
+    wide_feed.write_record(key1[], from_unix_time_ns(1_000));
+    remove_feed_listener();
+    sweep_dirty(&count_swept);
+    assert(swept == 2);
+    assert(!text_feed.has_history && !wide_feed.has_history);
+    text_feed.teardown();
+    wide_feed.teardown();
 
     // heap exhaustion seals the bucket and rolls to a fresh one
     Element th;
