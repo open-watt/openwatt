@@ -390,7 +390,9 @@ bool tcp_connect(ref IPStack stack, TcpPcb* pcb)
     if (pcb.local.port == 0 || pcb.remote.port == 0)
         return false;
     refresh_route(stack, pcb);
-    if (!pcb.route_egress && !pcb.local_delivery)
+    // ether needs no resolved egress up front: an unbound connect floods its SYN and the
+    // peer's reply pins the source (and with it the egress)
+    if (!pcb.route_egress && !pcb.local_delivery && pcb.remote.family != AddressFamily.ether)
         return false;
     if (pcb.local.family == AddressFamily.ipv4 && pcb.local.addr_any)
     {
@@ -627,6 +629,11 @@ void tcp_segment_input(ref IPStack stack, InetAddress src, InetAddress dst, cons
             send_rst_for_unknown(stack, src, dst, seq, ack, flags, payload.length);
         return;
     }
+
+    // Deferred source bind: an unbound local pins to the address the peer reached us at.
+    // (For ether this also selects the egress: refresh_route resolves it from the mac.)
+    if (!pcb.is_listener && pcb.local.addr_any)
+        pcb.local = dst;
 
     process_segment(stack, pcb, src, dst, t, seq, ack, wnd, flags, payload, rx_time);
 }
@@ -1341,14 +1348,14 @@ void send_segment_raw(ref IPStack stack, ref const InetAddress src, ref const In
     if (data.length > 0)
         buf[reserve + TcpHeader.sizeof + opt_len .. total] = data[];
 
-    ushort pseudo = transport_pseudo_checksum(src, dst, IPProtocol.tcp, cast(ushort)tcp_total);
-    ushort cc = internet_checksum(buf[reserve .. total], pseudo);
-    t.checksum = nativeToBigEndian(cc);
-
     switch (src.family)
     {
         case AddressFamily.ipv4:
         {
+            ushort pseudo = transport_pseudo_checksum(src, dst, IPProtocol.tcp, cast(ushort)tcp_total);
+            ushort cc = internet_checksum(buf[reserve .. total], pseudo);
+            t.checksum = nativeToBigEndian(cc);
+
             auto ip = cast(IPv4Header*)buf.ptr;
             ip.ver_ihl  = 0x45;
             ip.tos      = 0;
@@ -1376,18 +1383,42 @@ void send_segment_raw(ref IPStack stack, ref const InetAddress src, ref const In
 
         case AddressFamily.ether:
         {
-            EthernetStation station = cast(EthernetStation)egress;
-            if (!station)
-                station = find_ether_station(MACAddress(src._a.ether.addr));
-            if (!station)
-                return;
+            MACAddress src_mac = MACAddress(src._a.ether.addr);
+            MACAddress dst_mac = MACAddress(dst._a.ether.addr);
 
-            Packet pkt;
-            ref h = pkt.init!EtherTransport(buf[reserve .. total]);
-            h.dst = MACAddress(dst._a.ether.addr);
-            h.src = MACAddress(src._a.ether.addr);
-            h.protocol = TransportProto.tcp;
-            station.forward(pkt);
+            // an unbound source stamps the egress station's own address; the checksum
+            // covers the pseudo-header, so it is computed per emission
+            void emit(EthernetStation s)
+            {
+                MACAddress use_src = src_mac ? src_mac : s.mac;
+                ushort pseudo = pseudo_header_checksum_ether(use_src, dst_mac, IPProtocol.tcp, cast(ushort)tcp_total);
+                t.checksum[] = 0;
+                ushort cc = internet_checksum(buf[reserve .. total], pseudo);
+                t.checksum = nativeToBigEndian(cc);
+
+                Packet pkt;
+                ref h = pkt.init!EtherTransport(buf[reserve .. total]);
+                h.dst = dst_mac;
+                h.src = use_src;
+                h.protocol = TransportProto.tcp;
+                s.forward(pkt);
+            }
+
+            EthernetStation station = cast(EthernetStation)egress;
+            if (!station && src_mac)
+                station = find_ether_station(src_mac);
+            if (!station)
+                station = ether_neighbour_lookup(dst_mac);
+            if (station)
+                emit(station);
+            else
+            {
+                // unknown egress: flood every segment; ingress learning pins it after
+                foreach_ether_station((EthernetStation s) {
+                    if (s.running)
+                        emit(s);
+                });
+            }
             break;
         }
 
@@ -1793,12 +1824,21 @@ void refresh_route(ref IPStack stack, TcpPcb* pcb)
 {
     if (pcb.remote.family == AddressFamily.ether)
     {
-        // No routing at L2: the egress is the station named by the local address.
+        // No routing at L2: a bound local names the station directly; an unbound local
+        // uses the learned neighbour, and until one is known the send path floods.
         if (pcb.route_egress)
             return;
-        EthernetStation station = find_ether_station(MACAddress(pcb.local._a.ether.addr));
+        EthernetStation station;
+        if (!pcb.local.addr_any)
+            station = find_ether_station(MACAddress(pcb.local._a.ether.addr));
+        else
+            station = ether_neighbour_lookup(MACAddress(pcb.remote._a.ether.addr));
         if (!station)
+        {
+            if (pcb.send_mss == 0)
+                pcb.send_mss = TcpDefaultMss;   // flood path floor; corrected once the egress pins
             return;
+        }
         set_pcb_egress(pcb, station);
 
         ushort link_mss = TcpEthernetMss;
@@ -1988,8 +2028,21 @@ ushort pseudo_header_checksum_v4(IPAddr src, IPAddr dst, ubyte protocol, ushort 
 }
 
 
-// Pseudo-header checksum for the segment's address family. Over ether both ends are us,
-// so the pseudo-header is our own definition: [src:6][dst:6][0][protocol][length:2].
+// Pseudo-header checksum for ether-carried segments. Over ether both ends are us, so
+// the pseudo-header is our own definition: [src:6][dst:6][0][protocol][length:2].
+ushort pseudo_header_checksum_ether(MACAddress src, MACAddress dst, ubyte protocol, ushort transport_length) pure
+{
+    ubyte[16] ph = void;
+    ph[0 .. 6]   = src.b;
+    ph[6 .. 12]  = dst.b;
+    ph[12]       = 0;
+    ph[13]       = protocol;
+    ph[14 .. 16] = transport_length.nativeToBigEndian;
+    return internet_checksum(ph[]);
+}
+
+
+// Pseudo-header checksum for the segment's address family.
 // TODO: udp_output/udp_input converge on this once UdpPcb adopts InetAddress addressing.
 ushort transport_pseudo_checksum(ref const InetAddress src, ref const InetAddress dst, ubyte protocol, ushort transport_length) pure
 {
@@ -1999,15 +2052,7 @@ ushort transport_pseudo_checksum(ref const InetAddress src, ref const InetAddres
             return pseudo_header_checksum_v4(src._a.ipv4.addr, dst._a.ipv4.addr, protocol, transport_length);
 
         case AddressFamily.ether:
-        {
-            ubyte[16] ph = void;
-            ph[0 .. 6]   = src._a.ether.addr;
-            ph[6 .. 12]  = dst._a.ether.addr;
-            ph[12]       = 0;
-            ph[13]       = protocol;
-            ph[14 .. 16] = transport_length.nativeToBigEndian;
-            return internet_checksum(ph[]);
-        }
+            return pseudo_header_checksum_ether(MACAddress(src._a.ether.addr), MACAddress(dst._a.ether.addr), protocol, transport_length);
 
         default:
             // TODO: ipv6 40-byte pseudo-header (RFC 2460)

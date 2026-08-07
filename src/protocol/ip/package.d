@@ -257,6 +257,8 @@ enum IPEvent : ubyte
     error,          // connection reset / fatal error
 }
 
+private static immutable ubyte[6] zero_mac;
+
 alias TCPRecvHandler   = void delegate(TCPConnection* conn, const(void)[] data, MonoTime rx_time) nothrow @nogc;
 alias TCPEventHandler  = void delegate(TCPConnection* conn, IPEvent event) nothrow @nogc;
 alias TCPAcceptHandler = void delegate(TCPListener* listener, TCPConnection* conn, MonoTime rx_time) nothrow @nogc;
@@ -270,19 +272,28 @@ TCPConnection* tcp_connect(InetAddress remote, TCPRecvHandler on_recv, TCPEventH
             return null;     // TODO: ipv6
         if (remote.family == AddressFamily.ether)
         {
-            // an ether connection binds to a station address; the local mac names the interface
-            if (!local || local.family != AddressFamily.ether)
-                return null;
-            EthernetStation station = find_ether_station(MACAddress(local._a.ether.addr));
-            if (!station)
-                return null;
-            ensure_ether_tap(station);
+            // a bound local names the station; unbound floods the SYN and the peer's
+            // reply pins the source, so replies must be heard on every segment
+            if (local && local.family == AddressFamily.ether && !local.addr_any)
+            {
+                EthernetStation station = find_ether_station(MACAddress(local._a.ether.addr));
+                if (!station)
+                    return null;
+                ensure_ether_tap(station);
+            }
+            else
+                ether_request_tap_all();
         }
 
         TcpPcb* pcb = defaultAllocator().allocT!TcpPcb();
         tcp_assign_id(pcb);
         pcb.handle = TcpEndpointOwned;     // keep tcp_tick from auto-freeing it
-        pcb.local = local && local.family == remote.family ? *local : InetAddress(IPAddr.any, 0);
+        if (local && local.family == remote.family)
+            pcb.local = *local;
+        else if (remote.family == AddressFamily.ether)
+            pcb.local = InetAddress(zero_mac, 0);
+        else
+            pcb.local = InetAddress(IPAddr.any, 0);
         if (pcb.local.port == 0)
             pcb.local.port = allocate_tcp_port();
         pcb.remote = remote;
@@ -379,10 +390,15 @@ TCPListener* tcp_listen(InetAddress local, TCPAcceptHandler on_accept)
             return null;     // TODO: ipv6
         if (local.family == AddressFamily.ether)
         {
-            EthernetStation station = find_ether_station(MACAddress(local._a.ether.addr));
-            if (!station)
-                return null;
-            ensure_ether_tap(station);
+            if (local.addr_any)
+                ether_request_tap_all();    // any-listener: accept on every segment
+            else
+            {
+                EthernetStation station = find_ether_station(MACAddress(local._a.ether.addr));
+                if (!station)
+                    return null;
+                ensure_ether_tap(station);
+            }
         }
 
         TcpPcb* pcb = defaultAllocator().allocT!TcpPcb();
@@ -577,19 +593,24 @@ UDPEndpoint* udp_open(const(InetAddress)* local, const(InetAddress)* remote, UDP
 }
 
 // Datagrams addressed by (mac, port): same UDPEndpoint, backed by the ether transport
-// instead of a socket or PCB. The local address must be a station's mac; it names the
-// interface the endpoint is bound to.
-// TODO: no local address = wildcard listen across all ethernet stations
+// instead of a socket or PCB. A station's mac as the local address binds the endpoint
+// to that interface; a null local or the zero mac is a wildcard bind: receive on every
+// ethernet segment, egress by learned neighbour with unknown-unicast flooding.
 private UDPEndpoint* udp_open_ether(const(InetAddress)* local, const(InetAddress)* remote, UDPRecvHandler on_recv)
 {
-    if (!local || local.family != AddressFamily.ether)
+    if (local && local.family != AddressFamily.ether)
         return null;
     if (remote && remote.family != AddressFamily.ether)
         return null;
 
-    EthernetStation station = find_ether_station(MACAddress(local._a.ether.addr));
-    if (!station)
-        return null;
+    EthernetStation station;
+    ushort local_port = local ? local.port : 0;
+    if (local && !local.addr_any)
+    {
+        station = find_ether_station(MACAddress(local._a.ether.addr));
+        if (!station)
+            return null;
+    }
 
     UDPEndpoint* ep = defaultAllocator().allocT!UDPEndpoint();
     ep._on_recv = on_recv;
@@ -598,7 +619,7 @@ private UDPEndpoint* udp_open_ether(const(InetAddress)* local, const(InetAddress
         ep._remote = *remote;
         ep._connected = true;
     }
-    ep._ether = ether_open(station, local._a.ether.port, &ep.on_ether_recv,
+    ep._ether = ether_open(station, local_port, &ep.on_ether_recv,
                            remote ? MACAddress(remote._a.ether.addr) : MACAddress(),
                            remote ? remote._a.ether.port : 0);
     if (!ep._ether)

@@ -2,6 +2,7 @@ module router.iface.endpoint;
 
 import urt.array;
 import urt.endian;
+import urt.map;
 import urt.mem.allocator : defaultAllocator;
 import urt.time;
 
@@ -93,6 +94,41 @@ EthernetStation find_ether_station(MACAddress mac)
     return null;
 }
 
+void foreach_ether_station(scope void delegate(EthernetStation) nothrow @nogc sink)
+{
+    import manager.collection : Collection;
+    foreach (i; Collection!BaseInterface().values)
+    {
+        if (!(i.caps & InterfaceCaps.ethernet))
+            continue;
+        if (EthernetStation s = cast(EthernetStation)i)
+            sink(s);
+    }
+}
+
+// Egress cache for unbound sources: (peer mac -> station) learned passively from tap
+// ingress, the arp-cache analogue. A miss means the caller floods every segment
+// (unknown-unicast flooding, self-limiting); the peer's reply populates the entry.
+EthernetStation ether_neighbour_lookup(MACAddress mac)
+{
+    if (EtherNeighbour* e = mac.ul in _neighbours)
+    {
+        if (EthernetStation s = e.station.get)
+        {
+            if (s.running && getTime() - e.seen < ether_neighbour_ttl)
+                return s;
+        }
+    }
+    return null;
+}
+
+// Wildcard consumers (bind-any endpoints, unbound connects, any-listeners) need every
+// segment tapped; once requested, the module sweep keeps taps on all stations.
+void ether_request_tap_all()
+{
+    _tap_all = true;
+}
+
 // One ether_transport subscription per station, demuxing to endpoints and the tcp hook.
 // Endpoints and pcbs bound to the station share it; the module sweep re-subscribes if
 // the station is destroyed and recreated with the same name.
@@ -110,26 +146,36 @@ void ensure_ether_tap(EthernetStation station)
 }
 
 
-// Open an ether-UDP datagram endpoint on an ethernet-framed interface, bound to a local port
-// (0 = ephemeral). Datagrams to the station MAC and broadcast are delivered; multicast
-// groups via join(). A remote restricts delivery to that peer and enables send().
-// The endpoint tracks its interface by reference; it rides out restarts, and re-attaches
-// if the interface is destroyed and later recreated with the same name.
+// Open an ether-UDP datagram endpoint bound to a local port (0 = ephemeral). A non-null
+// iface binds the endpoint to that station; a null iface is a wildcard bind: datagrams
+// are accepted on every ethernet segment, and egress uses the learned neighbour (or
+// floods unknown unicast). Datagrams to the receiving station's MAC and broadcast are
+// delivered; multicast groups via join(). A remote restricts delivery to that peer and
+// enables send(). Bound endpoints track their interface by reference; they ride out
+// restarts and re-attach if the interface is destroyed and recreated with the same name.
 EtherEndpoint* ether_open(EthernetStation iface, ushort port, EtherRecvHandler on_recv,
                           MACAddress remote = MACAddress(), ushort remote_port = 0)
 {
-    if (iface is null || on_recv is null)
+    if (on_recv is null)
         return null;
     if (cast(bool)remote != (remote_port != 0))
         return null;
 
     EtherEndpoint* ep = defaultAllocator().allocT!EtherEndpoint();
-    ep._iface = iface;
     ep._local_port = port ? port : allocate_ephemeral();
     ep._remote = remote;
     ep._remote_port = remote_port;
     ep._on_recv = on_recv;
-    ensure_ether_tap(iface);
+    if (iface)
+    {
+        ep._iface = iface;
+        ensure_ether_tap(iface);
+    }
+    else
+    {
+        ep._wildcard = true;
+        ether_request_tap_all();
+    }
     _ether_eps ~= ep;
     return ep;
 }
@@ -180,12 +226,6 @@ nothrow @nogc:
     {
         if (_closing || !dst || dst_port == 0)
             return 0;
-        EthernetStation i = _iface.get;
-        if (!i || !i.running)
-            return 0;
-        ushort mtu = i.actual_mtu;
-        if (mtu && data.length + encap_overhead > mtu)
-            return 0;
 
         ubyte[1518] buf = void;
         if (UdpSegHeader.sizeof + data.length > buf.length)
@@ -196,15 +236,25 @@ nothrow @nogc:
         u.length = nativeToBigEndian(cast(ushort)(UdpSegHeader.sizeof + data.length));
         u.checksum[] = 0;    // link CRC covers integrity
         buf[UdpSegHeader.sizeof .. UdpSegHeader.sizeof + data.length] = (cast(const(ubyte)[])data)[];
+        const(ubyte)[] frame = buf[0 .. UdpSegHeader.sizeof + data.length];
 
-        Packet p;
-        ref h = p.init!EtherTransport(buf[0 .. UdpSegHeader.sizeof + data.length]);
-        h.dst = dst;
-        h.src = i.mac;
-        h.protocol = TransportProto.udp;
-        if (i.forward(p) < 0)
-            return 0;
-        return data.length;
+        if (!_wildcard)
+        {
+            EthernetStation i = _iface.get;
+            if (!i || !i.running)
+                return 0;
+            return emit(i, dst, frame) ? data.length : 0;
+        }
+
+        // wildcard: learned neighbour picks the segment; unknown (or multicast) floods them all
+        if (EthernetStation i = ether_neighbour_lookup(dst))
+            return emit(i, dst, frame) ? data.length : 0;
+        bool sent = false;
+        foreach_ether_station((EthernetStation s) {
+            if (s.running && emit(s, dst, frame))
+                sent = true;
+        });
+        return sent ? data.length : 0;
     }
 
     // Teardown is deferred to the module sweep; safe to call from the recv handler.
@@ -220,11 +270,27 @@ private:
     MACAddress _remote;
     ushort _remote_port;
     ushort _local_port;
+    bool _wildcard;
     bool _closing;
+
+    bool emit(EthernetStation station, MACAddress dst, const(ubyte)[] frame)
+    {
+        ushort mtu = station.actual_mtu;
+        if (mtu && frame.length + encap_overhead - UdpSegHeader.sizeof > mtu)
+            return false;
+        Packet p;
+        ref h = p.init!EtherTransport(frame);
+        h.dst = dst;
+        h.src = station.mac;
+        h.protocol = TransportProto.udp;
+        return station.forward(p) >= 0;
+    }
 
     void deliver(ref const Packet p, ref const EtherTransport h, EthernetStation station)
     {
         if (_closing)
+            return;
+        if (!_wildcard && _iface.get !is station)
             return;
 
         const(ubyte)[] seg = cast(const(ubyte)[])p.data;
@@ -261,6 +327,8 @@ void update_ether_endpoints()
             _ether_eps.removeSwapLast(i);
         }
     }
+    if (_tap_all)
+        foreach_ether_station((EthernetStation s) { ensure_ether_tap(s); });
     foreach (tap; _taps[])
     {
         if (!tap._subscribed)
@@ -311,14 +379,12 @@ nothrow @nogc:
         if (!station)
             return;
         ref const h = p.hdr!EtherTransport;
+        ether_neighbour_learn(h.src, station);
         switch (h.protocol)
         {
             case TransportProto.udp:
                 foreach (ep; _ether_eps[])
-                {
-                    if (ep._iface.get is station)
-                        ep.deliver(p, h, station);
-                }
+                    ep.deliver(p, h, station);
                 break;
 
             case TransportProto.tcp:
@@ -341,9 +407,32 @@ nothrow @nogc:
     }
 }
 
+enum ether_neighbour_ttl = 300.seconds;
+
+struct EtherNeighbour
+{
+    ObjectRef!EthernetStation station;
+    MonoTime seen;
+}
+
+void ether_neighbour_learn(MACAddress mac, EthernetStation station)
+{
+    if (mac.is_multicast)
+        return;
+    if (EtherNeighbour* e = mac.ul in _neighbours)
+    {
+        e.station = station;
+        e.seen = getTime();
+    }
+    else
+        _neighbours[mac.ul] = EtherNeighbour(ObjectRef!EthernetStation(station), getTime());
+}
+
 __gshared Array!(EtherEndpoint*) _ether_eps;
 __gshared Array!(EtherTap*) _taps;
+__gshared Map!(ulong, EtherNeighbour) _neighbours;
 __gshared EtherTcpInput g_ether_tcp_input;
+__gshared bool _tap_all;
 __gshared ushort _next_ephemeral = 49_152;
 
 ushort allocate_ephemeral()
