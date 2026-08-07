@@ -139,9 +139,11 @@ module driver.boards.smartevse;
 version (SmartEVSE):
 
 import urt.meta : AliasSeq;
+import urt.meta.nullable : Nullable;
 import urt.atomic : MemoryOrder, atomicLoad, atomicStore;
 import urt.attribute : critical;
 import urt.driver.gpio;
+import urt.result : Result;
 import urt.si.quantity : Quantity;
 import urt.si.unit : Ampere, ScaledUnit;
 import urt.time : MonoTime, getTime, msecs;
@@ -152,6 +154,7 @@ import manager.collection : CID, Collection, CollectionType, collection_type_inf
 import manager.console.session : Session;
 import manager.plugin : DeclareModule, Module;
 
+import driver.boards.smartevse.display;
 import driver.boards.smartevse.hardware;
 
 public import driver.boards.smartevse.evse;
@@ -160,6 +163,13 @@ nothrow @nogc:
 
 
 alias DeciAmps = Quantity!(ushort, ScaledUnit(Ampere, -1));
+
+struct SmartEVSEButton
+{
+    enum ubyte left   = 1 << 0;
+    enum ubyte middle = 1 << 1;
+    enum ubyte right  = 1 << 2;
+}
 
 enum SmartEVSEState : ubyte
 {
@@ -371,6 +381,29 @@ nothrow @nogc:
     bool contactor2() const pure
         => _contactor2;
 
+    ubyte buttons() const pure
+        => _buttons;
+
+    bool backlight() const
+        => display_backlight(g_display);
+
+    void backlight(bool value)
+    {
+        if (display_backlight(g_display) == value)
+            return;
+        display_backlight(g_display, value);
+    }
+
+    const(void)[] frame() const
+        => display_frame(g_display);
+
+    bool frame(const(void)[] value)
+    {
+        if (!display_frame(g_display, value))
+            return false;
+        return true;
+    }
+
     const(char)[] start_charging()
     {
         if (_rcm_fault)
@@ -513,6 +546,7 @@ private:
     bool _stopped;
     bool _contactor1;
     bool _contactor2;
+    ubyte _buttons;
     bool _temperature_fault;
     bool _rcm_fault;
     bool _rcm_monitor;
@@ -621,6 +655,7 @@ private:
             return;
         }
 
+        sample_buttons();
         Timer10ms_singlerun();
         sync_status();
 
@@ -629,6 +664,16 @@ private:
         if (next <= now)
             next = now + msecs(10);
         arm_control_tick(next);
+    }
+
+    // display_buttons reports released bits and refuses while the panel bus is busy; invert to
+    // pressed here so a busy sample reads as no-change rather than a phantom release.
+    void sample_buttons()
+    {
+        ubyte pressed = (~display_buttons(g_display)) & 0x7;
+        if (pressed == _buttons)
+            return;
+        _buttons = pressed;
     }
 
     void handle_rcm_fault()
@@ -731,6 +776,8 @@ nothrow @nogc:
             "/driver/boards/smartevse", this, "start");
         g_app.console.register_command!cmd_stop(
             "/driver/boards/smartevse", this, "stop");
+        g_app.console.register_command!cmd_display(
+            "/driver/boards/smartevse", this, "display");
 
         _hardware_module = this;
         _hardware_owner = this;
@@ -762,6 +809,52 @@ nothrow @nogc:
     override void update()
     {
         Collection!SmartEVSE().update_all();
+        if (_hardware_ready)
+            display_update(g_display);
+    }
+
+    void cmd_display(Session session, const(char)[] what, Nullable!uint value, Nullable!(ubyte[]) data)
+    {
+        import urt.string.format : tconcat;
+
+        ubyte port = value ? cast(ubyte)value.value : g_display.port;
+        const(ubyte)[] bytes = data ? data.value : null;
+
+        void report(bool ok, const(char)[] label)
+            => session.write_line(ok ? tconcat(label, ": ok") : tconcat(label, ": failed (bus busy or timed out)"));
+
+        if (what == "pins")
+        {
+            uint levels = display_probe_pins(g_display);
+            if (levels == uint.max)
+                session.write_line("pins: bus busy");
+            else
+                session.write_line(tconcat("pins: clk=", (levels >> 0) & 1, " mosi=", (levels >> 1) & 1,
+                                           " a0=", (levels >> 2) & 1, " rst=", (levels >> 3) & 1,
+                                           " led=", (levels >> 4) & 1));
+            display_reinit(g_display, g_display.port);
+        }
+        else if (what == "backlight")
+            display_backlight(g_display, value.value != 0);
+        else if (what == "reinit")
+            report(display_reinit(g_display, port) == Result.success, "reinit");
+        else if (what == "cmd")
+            report(display_transfer(g_display, false, bytes), "cmd");
+        else if (what == "data")
+            report(display_transfer(g_display, true, bytes), "data");
+        else if (what == "bitbang")
+            report(display_bitbang(g_display), "bitbang");
+        else if (what == "bbcmd")
+            report(display_bitbang_bytes(g_display, false, bytes), "bbcmd");
+        else if (what == "bbdata")
+            report(display_bitbang_bytes(g_display, true, bytes), "bbdata");
+        else if (what == "font")
+        {
+            display_font_test(g_display);
+            session.write_line("font: drawn");
+        }
+        else
+            session.write_line("usage: pins|backlight|reinit|cmd|data|bitbang|bbcmd|bbdata|font [value=N] [data=0x..,0x..]");
     }
 
     void cmd_start(Session session, SmartEVSE evse)
