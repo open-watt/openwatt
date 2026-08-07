@@ -13,6 +13,7 @@ import urt.result;
 import urt.string;
 
 import manager.base;
+import manager.features;
 
 nothrow @nogc:
 
@@ -34,11 +35,6 @@ enum SecretKind : ubyte
 
 class Secret : BaseObject
 {
-    alias Properties = AliasSeq!(Prop!("kind", kind),
-                                 Prop!("key_file", key_file),
-                                 Prop!("password", password),
-                                 Prop!("algorithm", algorithm),
-                                 Prop!("services", services));
 nothrow @nogc:
 
     enum type_name = "secret";
@@ -52,7 +48,8 @@ nothrow @nogc:
 
     ~this()
     {
-        clear_key();
+        static if (has_ec_secret)
+            clear_key();
     }
 
     // Properties...
@@ -63,16 +60,20 @@ nothrow @nogc:
     {
         if (_kind != value)
         {
-            if (_kind == SecretKind.ec_p256)
-                clear_key();
+            static if (has_ec_secret)
+                if (_kind == SecretKind.ec_p256)
+                    clear_key();
             _kind = value;
-            maybe_load_key();
+            static if (has_ec_secret)
+                maybe_load_key();
         }
         mark_set!(typeof(this), "kind")();
     }
 
+    static if (has_ec_secret)
     ref const(String) key_file() const pure
         => _key_file;
+    static if (has_ec_secret)
     void key_file(String value)
     {
         if (value != _key_file)
@@ -85,6 +86,18 @@ nothrow @nogc:
         }
         mark_set!(typeof(this), "key_file")();
     }
+
+    static if (has_ec_secret)
+        alias Properties = AliasSeq!(Prop!("kind", kind),
+                                     Prop!("key_file", key_file),
+                                     Prop!("password", password),
+                                     Prop!("algorithm", algorithm),
+                                     Prop!("services", services));
+    else
+        alias Properties = AliasSeq!(Prop!("kind", kind),
+                                     Prop!("password", password),
+                                     Prop!("algorithm", algorithm),
+                                     Prop!("services", services));
 
     const(char)[] password() const pure
     {
@@ -178,7 +191,12 @@ nothrow @nogc:
 
 
     override bool validate() const
-        => _kind != SecretKind.ec_p256 || !_key_file.empty;
+    {
+        static if (has_ec_secret)
+            return _kind != SecretKind.ec_p256 || !_key_file.empty;
+        else
+            return _kind != SecretKind.ec_p256;
+    }
 
 
     // API...
@@ -246,6 +264,7 @@ nothrow @nogc:
 
     // 64-byte uncompressed public point (X || Y), no leading 0x04.
     // Returns empty slice if the key isn't loaded.
+    static if (has_ec_secret)
     const(ubyte)[] public_key_raw() const pure
     {
         if (_kind != SecretKind.ec_p256 || !_pubkey_cached)
@@ -254,6 +273,7 @@ nothrow @nogc:
     }
 
     // Sign a hash (typically SHA-256). Output is DER-encoded ECDSA signature.
+    static if (has_ec_secret)
     Result sign_hash(const(ubyte)[] hash, out Array!ubyte signature)
     {
         if (_kind != SecretKind.ec_p256 || !_keypair.valid)
@@ -263,6 +283,7 @@ nothrow @nogc:
 
     // Compute ECDH-P256 shared secret with peer_xy (64-byte uncompressed point).
     // Writes 32 bytes of the shared X coordinate into shared_x.
+    static if (has_ec_secret)
     Result ecdh_compute_shared(const(ubyte)[] peer_xy, ubyte[] shared_x)
     {
         if (_kind != SecretKind.ec_p256 || !_keypair.valid || !_pubkey_cached)
@@ -283,12 +304,16 @@ private:
     ubyte[16] _salt;
     Array!ubyte _hash;
 
-    KeyPair _keypair;
-    ubyte[32] _privkey_d;
-    ubyte[64] _pubkey_xy;
-    bool _pubkey_cached;
+    static if (has_ec_secret)
+    {
+        KeyPair _keypair;
+        ubyte[32] _privkey_d;
+        ubyte[64] _pubkey_xy;
+        bool _pubkey_cached;
+    }
 
-    String _key_file;
+    static if (has_ec_secret)
+        String _key_file;
 
     Map!(String, Service) _services;
     String _def_profile;
@@ -307,6 +332,7 @@ private:
         mark_set!(typeof(this), [ "password", "algorithm" ])();
     }
 
+    static if (has_ec_secret)
     void maybe_load_key()
     {
         if (_kind != SecretKind.ec_p256 || _key_file.empty)
@@ -385,6 +411,7 @@ private:
         _pubkey_cached = true;
     }
 
+    static if (has_ec_secret)
     void clear_key()
     {
         if (_keypair.valid)

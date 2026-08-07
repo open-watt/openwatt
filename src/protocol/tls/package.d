@@ -1,13 +1,16 @@
 module protocol.tls;
 
-public import protocol.tls.certificate;
-public import protocol.tls.stream;
-
 import manager;
 import manager.collection;
 import manager.console;
 import manager.features;
 import manager.plugin;
+
+static if (has_tls)
+{
+    public import protocol.tls.certificate;
+    public import protocol.tls.stream;
+}
 
 nothrow @nogc:
 
