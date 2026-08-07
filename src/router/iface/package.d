@@ -4,6 +4,7 @@ import urt.array;
 import urt.conv;
 import urt.map;
 import urt.lifetime;
+import urt.meta.nullable;
 import urt.mem.ring;
 import urt.mem.string;
 import urt.meta.enuminfo : bitfield;
@@ -19,6 +20,7 @@ import manager.console;
 import manager.plugin;
 
 import router.iface.endpoint;
+import router.iface.ethernet;
 import router.iface.group;
 import router.iface.vlan;
 
@@ -740,10 +742,111 @@ nothrow @nogc:
         g_app.console.register_collection!VLANInterface();
     }
 
+    override void post_init()
+    {
+        // after init: the platform ethernet collections own /interface/ethernet by now,
+        // so this lands as an extension command on that scope
+        g_app.console.register_command!mac_ping("/interface/ethernet", this, "ping");
+    }
+
     override void update()
     {
         Collection!BaseInterface().update_all();
         update_ether_endpoints();
+        expire_mac_pings();
+    }
+
+    // OW mac-ping: `/interface/ethernet/ping address=<mac> [count=] [identify=]`.
+    // Pings go out every running station; broadcast address makes it a discovery sweep.
+    MacPingState mac_ping(Session session, MACAddress address, Nullable!uint count, Nullable!bool identify)
+    {
+        if (!address)
+        {
+            session.write_line("ping requires a destination mac address");
+            return null;
+        }
+        return g_app.allocator.allocT!MacPingState(session, address,
+                                                   identify ? identify.value : true,
+                                                   count ? count.value : 4);
+    }
+
+    static class MacPingState : CommandState
+    {
+    nothrow @nogc:
+
+        CommandCompletionState state = CommandCompletionState.in_progress;
+
+        MACAddress dst;
+        bool identify;
+        uint count;
+        uint sent;
+        uint replies;
+        MonoTime last_send;
+        Array!uint cookies;
+
+        this(Session session, MACAddress dst, bool identify, uint count)
+        {
+            super(session, null);
+            this.dst = dst;
+            this.identify = identify;
+            this.count = count ? count : 1;
+            send_round();
+        }
+
+        override CommandCompletionState update()
+        {
+            if (state == CommandCompletionState.cancel_requested)
+            {
+                cancel_round();
+                state = CommandCompletionState.cancelled;
+                return state;
+            }
+            if (getTime() - last_send >= 1.seconds)
+            {
+                cancel_round();
+                if (sent >= count)
+                {
+                    session.write_line(replies, " replies for ", sent, " requests");
+                    state = CommandCompletionState.finished;
+                }
+                else
+                    send_round();
+            }
+            return state;
+        }
+
+        override void request_cancel()
+        {
+            if (state == CommandCompletionState.in_progress)
+                state = CommandCompletionState.cancel_requested;
+        }
+
+    private:
+        void send_round()
+        {
+            ++sent;
+            last_send = getTime();
+            foreach_ether_station((EthernetStation s) {
+                if (s.running)
+                    cookies ~= s.ping(dst, identify, &on_reply);
+            });
+        }
+
+        void cancel_round()
+        {
+            foreach (c; cookies[])
+                mac_ping_cancel(c);
+            cookies.clear();
+        }
+
+        void on_reply(MACAddress from, Duration rtt, scope const(char)[] identity)
+        {
+            ++replies;
+            if (identity.length)
+                session.write_line("reply from ", from, ": time=", rtt, " \"", identity, "\"");
+            else
+                session.write_line("reply from ", from, ": time=", rtt);
+        }
     }
 
     final String add_interface_name(Session session, const(char)[] name, const(char)[] default_name_prefix)

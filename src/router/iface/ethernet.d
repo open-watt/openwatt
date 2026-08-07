@@ -1,5 +1,6 @@
 module router.iface.ethernet;
 
+import urt.array;
 import urt.endian;
 import urt.log;
 import urt.map;
@@ -31,6 +32,20 @@ nothrow @nogc:
         eth.dst = dest;
         eth.ether_type = type;
         return forward(p, callback);
+    }
+
+    // OW mac-ping: time an echo round-trip to dst (broadcast for discovery sweeps).
+    // Each reply invokes handler; identify asks responders to name themselves.
+    // The pending entry expires quietly after 10s unless cancelled earlier.
+    final uint ping(MACAddress dst, bool identify, MacPingHandler handler)
+    {
+        uint cookie = _next_ping_cookie++;
+        ubyte[5] req = void;
+        storeBigEndian(cast(uint*)req.ptr, cookie);
+        req[4] = identify ? OWEchoFlag.identify : 0;
+        _pending_pings ~= PendingPing(cookie, getTime(), handler);
+        station_send_control(OWControl.echo_req, dst, req);
+        return cookie;
     }
 
 protected:
@@ -86,6 +101,12 @@ protected:
             if (!station_ingress(packet))
                 add_rx_drop();
             return;
+        }
+        if (packet.type == PacketType.ethernet && packet.eth.ether_type == EtherType.cfm && packet.eth.src != mac)
+        {
+            if (packet.eth.dst == mac || packet.eth.dst.is_multicast)
+                cfm_ingress(packet);
+            // fall through: cfm frames stay visible to subscribers/bridging either way
         }
         dispatch(packet);
     }
@@ -339,6 +360,29 @@ private:
         return MACAddress.broadcast;
     }
 
+    // 802.1ag / Y.1731 loopback responder: an LBM (opcode 3) addressed to this station
+    // is answered with an LBR (opcode 2) echoing the whole PDU, so standard L2 OAM gear
+    // can mac-ping us. We answer at any MD level; a full MEP would filter by configured
+    // level, which we don't model.
+    void cfm_ingress(ref const Packet packet)
+    {
+        enum ubyte opcode_lbr = 2, opcode_lbm = 3;
+
+        const(ubyte)[] pdu = cast(const(ubyte)[])packet.data;
+        if (pdu.length < 8)
+            return;
+        if ((pdu[0] & 0x1F) != 0)
+            return;     // CFM version != 0
+        if (pdu[1] != opcode_lbm)
+            return;     // only the loopback responder is implemented
+
+        ubyte[1500] reply = void;
+        size_t len = min(pdu.length, reply.length);
+        reply[0 .. len] = pdu[0 .. len];
+        reply[1] = opcode_lbr;
+        send(packet.eth.src, reply[0 .. len], EtherType.cfm);
+    }
+
     void station_send_control(OWControl msg, MACAddress dst, scope const(ubyte)[] content)
     {
         ubyte[512] buffer = void;
@@ -399,11 +443,95 @@ private:
                 }
                 return;
 
+            case OWControl.echo_req:
+            {
+                if (content.length < 5)
+                    return;
+                ubyte[288] reply = void;
+                reply[0 .. 5] = content[0 .. 5];
+                size_t len = 5;
+                if (content[4] & OWEchoFlag.identify)
+                {
+                    // TODO: identity should become the system name once one exists;
+                    //       the internal socket backend's hostname is a placeholder
+                    import urt.socket : get_hostname;
+                    char[64] name = void;
+                    if (!get_hostname(name.ptr, name.length).failed)
+                    {
+                        size_t n = 0;
+                        while (n < name.length && name[n])
+                            ++n;
+                        reply[5 .. 5 + n] = cast(ubyte[])name[0 .. n];
+                        len += n;
+                    }
+                }
+                else
+                {
+                    size_t copy = min(content.length, reply.length) - 5;
+                    reply[5 .. 5 + copy] = content[5 .. 5 + copy];
+                    len += copy;
+                }
+                station_send_control(OWControl.echo_reply, src, reply[0 .. len]);
+                return;
+            }
+
+            case OWControl.echo_reply:
+            {
+                if (content.length < 5)
+                    return;
+                uint cookie = loadBigEndian(cast(const(uint)*)content.ptr);
+                foreach (ref p; _pending_pings[])
+                {
+                    if (p.cookie != cookie)
+                        continue;
+                    Duration rtt = getTime() - p.sent;
+                    const(char)[] identity = (content[4] & OWEchoFlag.identify) ? cast(const(char)[])content[5 .. $] : null;
+                    p.handler(src, rtt, identity);
+                    return;    // the entry stays; broadcast pings collect further replies
+                }
+                return;
+            }
+
             default:
                 return;
         }
     }
 }
+
+
+alias MacPingHandler = void delegate(MACAddress from, Duration rtt, scope const(char)[] identity) nothrow @nogc;
+
+void mac_ping_cancel(uint cookie)
+{
+    foreach (i, ref p; _pending_pings[])
+    {
+        if (p.cookie == cookie)
+        {
+            _pending_pings.removeSwapLast(i);
+            return;
+        }
+    }
+}
+
+package void expire_mac_pings()
+{
+    MonoTime now = getTime();
+    for (size_t i = _pending_pings.length; i-- > 0; )
+    {
+        if (now - _pending_pings[i].sent >= 10.seconds)
+            _pending_pings.removeSwapLast(i);
+    }
+}
+
+private struct PendingPing
+{
+    uint cookie;
+    MonoTime sent;
+    MacPingHandler handler;
+}
+
+private __gshared Array!PendingPing _pending_pings;
+private __gshared uint _next_ping_cookie = 1;
 
 
 abstract class EthernetInterface : EthernetStation
