@@ -10,6 +10,9 @@ void system_reboot()
     log_notice("system", "system_reboot: not implemented on this platform");
 }
 
+// TODO: BL808 and kin carry eFuse chip ids; wire them through when those ports need identity
+ulong unique_device_id() => 0;
+
 bool   reboot_pending() => false;
 bool   ota_supported() => false;
 size_t ota_partition_size() => 0;

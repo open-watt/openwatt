@@ -21,6 +21,70 @@ nothrow @nogc:
 
 __gshared String hostname = StringLit!("OpenWatt"); // TODO: we need to make this thing...
 
+// Factory identity: an out-of-box device names itself after its node id, so a fleet of
+// fresh units is tellable-apart at every surface that shows the name (beacons, the
+// provisioning AP's SSID, BLE advertising). startup.conf's set-hostname overrides it.
+void apply_factory_hostname()
+{
+    import urt.conv : format_uint;
+
+    if (hostname[] != "OpenWatt")
+        return;
+    char[13] buf = "openwatt-0000";
+    format_uint(node_id() & 0xFFFF, buf[9 .. 13], 16, 4, '0');
+    hostname = buf[].makeString(defaultAllocator());
+}
+
+
+// Stable node identity for peering: random 64-bit id, generated on first boot and
+// persisted in conf/node.id (the one piece of peering state outside startup.conf).
+// Discovery and claims key on this; hostname is display only.
+ulong node_id()
+{
+    import urt.conv : format_uint, parse_uint;
+    import urt.file : load_file, save_file;
+
+    if (_node_id != 0)
+        return _node_id;
+
+    // a chip-burned hardware id wins where the platform has one (micros: identity
+    // survives reflash, no storage needed); computers carry the software id below
+    {
+        import driver.system : unique_device_id;
+        ulong hw = unique_device_id();
+        if (hw)
+        {
+            import urt.hash : fnv1a64;
+            _node_id = fnv1a64(cast(const(ubyte)[])(&hw)[0 .. 1]);
+            if (_node_id == 0)
+                _node_id = hw;
+            return _node_id;
+        }
+    }
+
+    char[] stored = cast(char[])load_file(node_id_path);
+    if (stored.length >= 16)
+    {
+        size_t taken;
+        ulong id = parse_uint(stored[0 .. 16], &taken, 16);
+        if (taken == 16 && id != 0)
+            _node_id = id;
+    }
+    if (stored)
+        defaultAllocator().free(stored);
+    if (_node_id != 0)
+        return _node_id;
+
+    _node_id = generate_node_id();
+
+    char[17] buf = void;
+    format_uint(_node_id, buf[0 .. 16], 16, 16, '0');
+    buf[16] = '\n';
+    if (save_file(node_id_path, buf[]).failed)
+        log_warning("system", "couldn't persist node id to ", node_id_path, "; identity is ephemeral this boot");
+    return _node_id;
+}
+
 
 void log_level(Session session, Severity severity)
 {
@@ -47,8 +111,9 @@ Array!String sysinfo_suggest(bool, const(char)[] arg_name, const(char)[]) nothro
 {
     import urt.string : startsWith;
 
-    __gshared const String[12] properties = [
+    __gshared const String[13] properties = [
         StringLit!"hostname",
+        StringLit!"node-id",
         StringLit!"os",
         StringLit!"processor",
         StringLit!"total",
@@ -102,6 +167,7 @@ void sysinfo(Session session, const(Variant)[] args)
     if (args.length == 0)
     {
         session.write_line("Hostname: ", hostname[]);
+        session.write_line("Node-Id:  ", format_node_id());
         session.write_line("OS:       ", info.os_name);
         session.write_line("CPU:      ", info.processor);
         foreach (ref p; info.pools)
@@ -122,6 +188,8 @@ void sysinfo(Session session, const(Variant)[] args)
         const(char)[] prop = arg.asString;
         if (icmp(prop, "hostname") == 0)
             session.write_line(hostname[]);
+        else if (icmp(prop, "node-id") == 0)
+            session.write_line(format_node_id());
         else if (icmp(prop, "os") == 0)
             session.write_line(info.os_name);
         else if (icmp(prop, "processor") == 0)
@@ -349,8 +417,44 @@ auto sleep(Session session, Duration duration)
     return defaultAllocator().allocT!SleepCommandState(session, duration);
 }
 
+private:
+
+__gshared ulong _node_id;
+enum node_id_path = "conf/node.id";
+
+const(char)[] format_node_id()
+{
+    import urt.conv : format_uint;
+    import urt.mem.temp : talloc;
+
+    char[] buf = cast(char[])talloc(16);
+    format_uint(node_id(), buf, 16, 16, '0');
+    return buf;
+}
+
+ulong generate_node_id()
+{
+    import urt.crypto.random : crypto_random_bytes;
+    import urt.rand : Rand, rand, srand;
+
+    ulong id;
+    while (true)
+    {
+        if (crypto_random_bytes((cast(ubyte*)&id)[0 .. id.sizeof]).failed)
+        {
+            // no system RNG on this build; PCG over the clocks is good enough for a one-time id
+            Rand rng;
+            srand(getSysTime().ticks, getTime().ticks, rng);
+            id = ulong(rand(rng)) << 32 | rand(rng);
+        }
+        if (id != 0)
+            return id;
+    }
+}
+
+
 // Helper function to format bytes with appropriate unit
-private auto format_bytes(ulong bytes) nothrow @nogc
+auto format_bytes(ulong bytes) nothrow @nogc
 {
     import urt.mem.temp : tconcat;
 
