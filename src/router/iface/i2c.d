@@ -334,7 +334,7 @@ private:
         bool higher_priority_task_woken;
         final switch (context)
         {
-            case I2cCallbackContext.task:
+            case I2cCallbackContext.thread:
                 queued = g_app.post_event(&_completion_sweep.event, getTime(), EventPriority.control);
                 break;
             case I2cCallbackContext.interrupt:

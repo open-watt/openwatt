@@ -109,8 +109,21 @@ class LogModule : Module
 nothrow @nogc:
 
     enum max_consumers = 16;
-    enum delivery_queue_size = 128;
-    enum max_history_messages = 1024;
+    // Retained history is heap, and the desktop defaults outsize a Tiny target's whole free
+    // store: 1024 records is ~100KB against ~40KB free, so a once-a-second heartbeat exhausts
+    // it in minutes. Tiny keeps live delivery and records nothing until asked to.
+    version (Tiny)
+    {
+        enum delivery_queue_size = 32;
+        enum max_history_messages = 32;
+        enum default_history_messages = 0;
+    }
+    else
+    {
+        enum delivery_queue_size = 128;
+        enum max_history_messages = 1024;
+        enum default_history_messages = max_history_messages;
+    }
 
     override void init()
     {
@@ -345,7 +358,7 @@ private:
     uint _delivery_count;
     uint _delivery_dropped;
     uint _history_count;
-    uint _history_limit = max_history_messages;
+    uint _history_limit = default_history_messages;
     Severity _history_max_severity = Severity.info;
     Severity _global_max_severity = Severity.trace;
 
@@ -375,7 +388,14 @@ private:
         if (!pending && !historical)
             return;
 
+        // Out of heap. Dropping the record is the only safe answer: reporting it would log, and
+        // logging allocates through this same path.
         StoredLogMessage* record = defaultAllocator().allocT!StoredLogMessage();
+        if (!record)
+        {
+            ++_delivery_dropped;
+            return;
+        }
         record.message.assign(msg);
         record.source = pending ? _source : null;
         record.pending = pending;
