@@ -58,18 +58,6 @@ Result hardware_open(ref SmartEVSEHardware hardware, ref const SmartEVSEHardware
     AdcInputConfig input_config;
     CounterConfig counter_config;
 
-    hardware.pilot_pwm.port = ubyte.max;
-    hardware.adc.unit = ubyte.max;
-    hardware.pilot_input.channel = ubyte.max;
-    hardware.pilot_input.calibration_source = AdcCalibrationSource.unavailable;
-    hardware.proximity_input.channel = ubyte.max;
-    hardware.proximity_input.calibration_source = AdcCalibrationSource.unavailable;
-    hardware.temperature_input.channel = ubyte.max;
-    hardware.temperature_input.calibration_source = AdcCalibrationSource.unavailable;
-    hardware.pilot_counter.port = ubyte.max;
-    hardware.edge_link.slot = ubyte.max;
-    hardware.alarm_link.slot = ubyte.max;
-
     hardware.pilot_ring[] = 0;
     hardware.pilot_total = 0;
     hardware.pilot_sample_count = 0;

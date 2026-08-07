@@ -27,7 +27,6 @@ version (SmartEVSE):
 
 import urt.driver.gpio;
 
-import driver.boards.smartevse.display;
 import driver.boards.smartevse.hardware;
 
 nothrow @nogc:
@@ -90,7 +89,7 @@ __gshared CircularBuffer RxBuffer;                // USART1 Receive buffer ESP.W
 __gshared CircularBuffer TxBuffer;                // USART1 Transmit ringbuffer WCH.ESP (DMA)
 __gshared CircularBuffer ModbusTx;                // USART2 Transmit buffer (modbus)
 
-__gshared SmartEVSEHardware Hardware = void;
+__gshared SmartEVSEHardware Hardware;
 
 
 // -------------------------- Interrupt Handlers ---------------------------------
@@ -406,9 +405,6 @@ int setup() {
     if (!hardware_open(Hardware, hardware_config))
         return -1;
 
-    if (!display_open(g_display))
-        return -1;
-
     EXTInit();                                      // Interrupt on RCMFAULT pin
     ADCInit();                                      // CP, PP and Temp inputs
     TIM1Init();                                     // Timebase for CP (PWM)signal and CP/PP/Temp ADC reading (1kHz)
@@ -432,7 +428,6 @@ void delay(uint32_t ms) {
 
 void hardware_shutdown()
 {
-    display_close(g_display);
     hardware_close(Hardware);
     gpio_output_set(SSR1, false);
     gpio_output_set(SSR2, false);
