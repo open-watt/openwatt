@@ -96,7 +96,7 @@ unittest
 
 private:
 
-__gshared Encoding[16] g_encodings;
+__gshared Encoding[16] g_encodings = void;
 __gshared ushort g_num_encodings;
 
 // six binary bytes yy MM dd hh mm ss in reading order
