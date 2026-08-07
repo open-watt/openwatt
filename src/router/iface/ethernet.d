@@ -39,6 +39,7 @@ protected:
     {
         super(typeInfo, id, flags);
         _caps |= InterfaceCaps.ethernet;
+        mark_set!(typeof(this), "caps")();
         mac = generate_mac_address(name[]);
     }
 

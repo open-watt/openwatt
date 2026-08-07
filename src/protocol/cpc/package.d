@@ -127,6 +127,8 @@ nothrow @nogc:
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!CPCInterface, id, flags);
+        _caps |= InterfaceCaps.reliable | InterfaceCaps.ordered;
+        mark_set!(typeof(this), "caps")();
 
         // max-l2mtu is the driver's payload cap; the 9-byte CPC framing is transport overhead, not counted
         // in the MTU (same as CAN/BLE). l2mtu defaults to the cap and is user-reducible; mtu derives from
@@ -1283,6 +1285,8 @@ nothrow @nogc:
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!CPCEndpoint, id, flags);
+        _caps |= InterfaceCaps.reliable | InterfaceCaps.ordered;
+        mark_set!(typeof(this), "caps")();
 
         // same payload cap as the trunk (both carry the CPC payload; framing is the trunk's transport
         // overhead). max-l2mtu starts at the cap and is narrowed to the trunk's learned limit on connect.

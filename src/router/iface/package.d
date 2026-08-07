@@ -6,6 +6,7 @@ import urt.map;
 import urt.lifetime;
 import urt.mem.ring;
 import urt.mem.string;
+import urt.meta.enuminfo : bitfield;
 import urt.si.unit;
 import urt.si.quantity;
 import urt.string;
@@ -48,10 +49,12 @@ enum PacketDirection : ubyte
     outgoing = 2
 }
 
-enum InterfaceCaps : ushort
+@bitfield enum InterfaceCaps : ushort
 {
     none     = 0,
     ethernet = 1 << 0, // attaches to an ethernet segment; marshals exotic packets over the OW ethertype
+    reliable = 1 << 1, // delivery is acknowledged and retransmitted; loss surfaces as an error, never silently
+    ordered  = 1 << 2, // frames are delivered in transmit order
 }
 
 enum MessageState
@@ -193,7 +196,8 @@ MACAddress generate_mac_address(const(char)[] name) pure
 
 class BaseInterface : ActiveObject
 {
-    alias Properties = AliasSeq!(Prop!("actual-mtu", actual_mtu, null, "d"),
+    alias Properties = AliasSeq!(Prop!("caps", caps),
+                                 Prop!("actual-mtu", actual_mtu, null, "d"),
                                  Prop!("mtu", mtu, null, "d"),
                                  Prop!("l2mtu", l2mtu),
                                  Prop!("max-l2mtu", max_l2mtu, null, "d"),
@@ -718,6 +722,7 @@ nothrow @nogc:
 
     override void pre_init()
     {
+        g_app.register_bitfield!InterfaceCaps();
         g_app.register_enum!ConnectionStatus();
         g_app.register_enum!LinkStatus();
         g_app.register_enum!VlanTag();
