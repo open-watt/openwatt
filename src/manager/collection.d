@@ -58,6 +58,7 @@ enum CollectionType : ubyte
     spinel,
     stream, // all streams
     sync_channel,
+    sync_discovery,
     sync_peer,
     sync_udp_server,
     sync_ws_server,

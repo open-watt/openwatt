@@ -511,3 +511,27 @@ with the peer. The last of `transport` and `remote` set wins.
 | Property | Values | Description |
 | --- | --- | --- |
 | `remote` | `address:port`, `[ipv6]:port`, `[mac]:port` | Remote UDP peer. The address and port are both required. |
+
+### `/sync/discover/ether`
+
+An ether discovery domain beacons this node's peering identity (node-id, name,
+role, cluster, claim state) over the OpenWatt ethertype on one ethernet
+station, and feeds received beacons into the neighbour table. Domains are the
+per-medium opt-in: no domain configured, no beacons sent or consumed on that
+medium.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `interface` | ethernet station name | required | Segment to beacon on. |
+| `interval` | duration | `30s` | Beacon cadence. |
+
+### `/sync/neighbor`
+
+`print` lists every node heard through any discovery domain: node-id, name,
+role, cluster, claim state, the station it was heard on, its MAC, and the age
+of its last beacon. Entries age out after 10 minutes of silence.
+
+```text
+/sync/discover/ether add name=lan interface=ether1
+/sync/neighbor print
+```

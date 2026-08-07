@@ -148,6 +148,7 @@
     <DCompile Include="src\manager\secret.d" />
     <DCompile Include="src\manager\signal.d" />
     <DCompile Include="src\manager\sample\spec.d" />
+    <DCompile Include="src\manager\sync\discovery.d" />
     <DCompile Include="src\manager\sync\encoder.d" />
     <DCompile Include="src\manager\sync\binary_encoder.d" />
     <DCompile Include="src\manager\sync\json_encoder.d" />
