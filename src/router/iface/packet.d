@@ -26,6 +26,8 @@ enum PacketType : ushort
     ble         = 10,
     cpc         = 11,
     i2c         = 12,
+    // 13 is reserved for the udp packet interface (PR #460)
+    ether_transport = 14,
     count
 }
 static assert(PacketType.count <= 16, "PacketType must fit in 4 bits");
@@ -44,6 +46,7 @@ enum EtherType : ushort
     mtik    = 0x88BF,   // MikroTik RoMON
     lldp    = 0x88CC,   // Link Layer Discovery Protocol (LLDP)
     hpgp    = 0x88E1,   // HomePlug Green PHY (HPGP)
+    cfm     = 0x8902,   // IEEE 802.1ag / ITU-T Y.1731 Connectivity Fault Management
 }
 
 // Bit 15 of the OW encapsulation type field marks control-plane messages;
@@ -56,6 +59,13 @@ enum OWControl : ushort
     who_has     = ow_control_flag | 0x0001,  // body: universal address (u64 BE) -- which station carries this?
     addr_query  = ow_control_flag | 0x0002,  // body: PacketType (u16 BE, unknown = all) -- report your addresses
     addr_report = ow_control_flag | 0x0003,  // body: N x universal address (u64 BE) -- response to either of the above
+    echo_req    = ow_control_flag | 0x0004,  // body: [cookie:u32 BE][flags:u8][payload] -- mac ping / discovery probe
+    echo_reply  = ow_control_flag | 0x0005,  // body: cookie+flags echoed, then payload echo (or identity when requested)
+}
+
+enum OWEchoFlag : ubyte
+{
+    identify = 1 << 0,  // reply carries the responder's identity instead of echoing the payload
 }
 
 // 802.1p PCP traffic classes

@@ -765,6 +765,9 @@
     <DCompile Include="src\protocol\ezsp\client.d">
       <Filter>src\protocol\ezsp</Filter>
     </DCompile>
+    <DCompile Include="src\router\iface\endpoint.d">
+      <Filter>src\router\iface</Filter>
+    </DCompile>
     <DCompile Include="src\router\iface\ethernet.d">
       <Filter>src\router\iface</Filter>
     </DCompile>
