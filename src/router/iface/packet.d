@@ -26,7 +26,7 @@ enum PacketType : ushort
     ble         = 10,
     cpc         = 11,
     i2c         = 12,
-    // 13 is reserved for the udp packet interface (PR #460)
+    udp         = 13,
     ether_transport = 14,
     count
 }
