@@ -126,6 +126,12 @@ protected:
 
         if (_request_failed)
         {
+            if (_last_error == PCF85063Error.oscillator_stopped)
+            {
+                log.info("RTC has never been set; waiting for a clock source");
+                reset_operation();
+                return CompletionStatus.complete;
+            }
             if (_last_error == PCF85063Error.none)
                 set_last_error(PCF85063Error.transport);
             log.error("failed to read RTC at address ", _address);
@@ -162,6 +168,8 @@ protected:
         {
             if (_request_failed)
                 log.error("failed to persist updated UTC time");
+            else
+                set_last_error(PCF85063Error.none);
             reset_operation();
         }
     }
