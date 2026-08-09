@@ -6,7 +6,7 @@ import urt.mem.allocator;
 import urt.string;
 
 import manager.base;
-import manager.base : Property;
+import manager.base : ObjectRef, Property;
 import manager.collection;
 import manager.console.session;
 
@@ -56,11 +56,11 @@ nothrow @nogc:
     }
 
     inout(Stream) transport() inout pure
-        => _inner;
+        => _inner.get;
 
     final void transport(Stream value)
     {
-        if (_inner is value)
+        if (_inner.get is value)
             return;
         if (_subscribed)
         {
@@ -376,7 +376,7 @@ protected:
     }
 
 private:
-    Stream _inner;
+    ObjectRef!Stream _inner;
     TerminalChannel _terminal;
     Array!char _terminal_type;
     Array!ubyte _tail;
