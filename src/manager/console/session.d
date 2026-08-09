@@ -907,6 +907,8 @@ private:
         if (signal == StateSignal.online)
             return;
         unsubscribe_stream();
+        if (_stream && (_stream.flags & ObjectFlags.temporary))
+            _stream = null;
         restart();
     }
 
