@@ -17,11 +17,13 @@ import urt.time;
 import manager.base;
 import manager.collection;
 import manager.console;
+import manager.features;
 import manager.plugin;
 
 import router.iface.endpoint;
 import router.iface.ethernet;
 import router.iface.group;
+import router.iface.udp;
 import router.iface.vlan;
 
 public import router.iface.packet;
@@ -33,6 +35,7 @@ public static import router.iface.endpoint;
 public static import router.iface.ethernet;
 public static import router.iface.group;
 public static import router.iface.i2c;
+public static import router.iface.udp;
 public static import router.iface.vlan;
 public static import router.iface.wifi;
 
@@ -739,6 +742,7 @@ nothrow @nogc:
         register_packet_codec!EtherTransport();
 
         g_app.console.register_collection!InterfaceGroup();
+        g_app.console.register_collection!UDPInterface();
         g_app.console.register_collection!VLANInterface();
     }
 

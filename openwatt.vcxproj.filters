@@ -471,9 +471,6 @@
     <DCompile Include="src\protocol\ip\tcp_stream.d">
       <Filter>src\protocol\ip</Filter>
     </DCompile>
-    <DCompile Include="src\protocol\ip\udp_stream.d">
-      <Filter>src\protocol\ip</Filter>
-    </DCompile>
     <DCompile Include="src\protocol\tls\certificate.d">
       <Filter>src\protocol\tls</Filter>
     </DCompile>
@@ -772,6 +769,9 @@
       <Filter>src\router\iface</Filter>
     </DCompile>
     <DCompile Include="src\router\iface\group.d">
+      <Filter>src\router\iface</Filter>
+    </DCompile>
+    <DCompile Include="src\router\iface\udp.d">
       <Filter>src\router\iface</Filter>
     </DCompile>
     <DCompile Include="src\protocol\dhcp\client.d">
