@@ -32,6 +32,9 @@ import urt.traits : is_boolean, is_some_float, is_some_int, Unqual;
 import urt.typereg : find_type_details, TypeDetails;
 import urt.variant;
 
+import manager.base : BaseObject;
+import manager.collection : CID, CollectionTypeInfo, get_id, item_table, type_matches;
+import manager.id : EID;
 import manager.ows : SeriesContainer;
 
 nothrow @nogc:
@@ -206,6 +209,8 @@ bool value_compatible(ref const DataFormat source, ref const DataFormat destinat
             return source.unit.unit == destination.unit.unit;
         case enum_:
             return source.enum_info is destination.enum_info;
+        case reference:
+            return source.ref_type is destination.ref_type;
     }
 }
 
@@ -291,7 +296,8 @@ nothrow @nogc:
     {
         none,
         quantity,
-        enum_
+        enum_,
+        reference
     }
 
     ValueType type;
@@ -303,9 +309,10 @@ nothrow @nogc:
     const(Constraint)* constraint; // null = unconstrained; write-path validation + UI/schema metadata
     union
     {
-        ScaledUnit unit;                // desc == quantity
-        const(VoidEnumInfo)* enum_info; // desc == enum_
-        const(TypeDetails)* user_type;  // type == user
+        ScaledUnit unit;                 // desc == quantity
+        const(VoidEnumInfo)* enum_info;  // desc == enum_
+        const(TypeDetails)* user_type;   // type == user
+        const(CollectionTypeInfo)* ref_type; // desc == reference: the record is an EID naming an object of this type
     }
 
     this(ValueType t, SeriesKind kind_) pure
@@ -342,6 +349,15 @@ nothrow @nogc:
         type = t;
         kind = kind_;
         user_type = td;
+    }
+
+    this(ValueType t, SeriesKind kind_, const(CollectionTypeInfo)* rt) pure
+    {
+        assert(t == ValueType.u64, "references store EIDs; the type must be u64");
+        type = t;
+        kind = kind_;
+        ref_type = rt;
+        desc = Desc.reference;
     }
 
     bool regular() const pure => rate != 0;
@@ -1045,6 +1061,37 @@ private bool unbox_scalar_value(ref const Variant v, ref const DataFormat fmt, o
     if (!fmt.is_scalar)
         return false;
 
+    if (fmt.desc == DataFormat.Desc.reference)
+    {
+        // the edge conversion: the wire and console carry the target's name. An absent name
+        // reserves its id, so forward references bind when the target is created.
+        if (v.isNull)
+        {
+            s = Scalar.of(ulong(0));
+            return true;
+        }
+        if (!v.isString)
+            return false;
+        const(char)[] name = v.asString;
+        if (name.length == 0)
+        {
+            s = Scalar.of(ulong(0));
+            return true;
+        }
+        ref table = item_table(fmt.ref_type.collection_id);
+        CID cid = table.get_id(name, fmt.ref_type.collection_id);
+        if (cid)
+        {
+            if (BaseObject o = table.get(cid))
+                if (!type_matches(fmt.ref_type, o._typeInfo))
+                    return false;
+        }
+        else
+            cid = table.reserve(name, fmt.ref_type.collection_id);
+        s = Scalar.of(EID(cid).raw);
+        return true;
+    }
+
     if (fmt.desc == DataFormat.Desc.quantity)
     {
         // wrong dimensions never store; unitless numbers adopt the format's unit
@@ -1209,9 +1256,10 @@ bool format_equal(ref const DataFormat a, ref const DataFormat b) pure
         return a.user_type is b.user_type;
     final switch (a.desc) with (DataFormat.Desc)
     {
-        case none:     return true;
-        case quantity: return a.unit == b.unit;
-        case enum_:    return a.enum_info is b.enum_info;
+        case none:      return true;
+        case quantity:  return a.unit == b.unit;
+        case enum_:     return a.enum_info is b.enum_info;
+        case reference: return a.ref_type is b.ref_type;
     }
 }
 
@@ -1251,6 +1299,12 @@ int compare(T)(T a, T b) pure
 
 Variant box_int(long v, ref const DataFormat fmt)
 {
+    if (fmt.desc == DataFormat.Desc.reference)
+    {
+        // the id never leaves the process: references box as the target's name
+        EID eid = EID(cast(ulong)v);
+        return eid ? Variant(get_id(eid.container)) : Variant();
+    }
     if (fmt.desc == DataFormat.Desc.enum_)
         return Variant(cast(ulong)v, fmt.enum_info);
     if (fmt.desc == DataFormat.Desc.quantity)
