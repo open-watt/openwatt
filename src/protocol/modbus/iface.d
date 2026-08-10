@@ -18,6 +18,7 @@ import manager;
 import manager.base;
 import manager.collection;
 import manager.console;
+import manager.element : SampleUpdate;
 import manager.features;
 import manager.plugin;
 
@@ -169,34 +170,45 @@ nothrow @nogc:
     void protocol_changed()
     {
         _support_simultaneous_requests = protocol == ModbusProtocol.tcp;
-        if (protocol == ModbusProtocol.tcp && _stream)
+        if (protocol == ModbusProtocol.tcp && stream)
         {
             import router.stream.serial : SerialStream;
-            if (cast(SerialStream)_stream)
+            if (cast(SerialStream)stream)
                 log.warning("Modbus-TCP has no CRC; using TCP framing over a serial line may cause silent data corruption");
         }
     }
 
-    inout(Stream) stream() inout pure
-        => _stream;
-    const(char)[] stream(Stream value)
-    {
-        if (!value)
-            return "stream cannot be null";
-        if (_stream is value)
-            return null;
-        unsubscribe_stream();
-        static if (has_ip)
-            _conn.clear_remote();
-        _stream = value;
-        mark_set!(typeof(this), "stream")();
+    final Stream stream() const
+        => prop_read!(ModbusInterface, "stream");
+    final void stream(Stream value)
+        => prop_write!(ModbusInterface, "stream")(value);
 
-        if (_stream)
+    void stream_changed(ref const SampleUpdate update)
+    {
+        // the element already holds the new stream; the previous arrives in the update as its name
+        if (_subscribed)
         {
+            if (update.previous.isString)
+            {
+                import manager.collection : get_item_by_name;
+                if (Stream old = get_item_by_name!Stream(update.previous.asString))
+                {
+                    old.unsubscribe(&stream_state);
+                    old.rx_handler = null;
+                }
+            }
+            _subscribed = false;
+        }
+
+        if (Stream s = stream)
+        {
+            static if (has_ip)
+                _conn.clear_remote();
+
             if (protocol == ModbusProtocol.tcp)
             {
                 import router.stream.serial : SerialStream;
-                if (cast(SerialStream)_stream)
+                if (cast(SerialStream)s)
                     log.warning("Modbus-TCP has no CRC; using TCP framing over a serial line may cause silent data corruption");
             }
 
@@ -206,15 +218,13 @@ nothrow @nogc:
             static if (has_ip)
             {
                 import protocol.ip.tcp_stream : TCPStream;
-                auto tcpStream = cast(TCPStream)_stream;
-                if (tcpStream)
+                if (auto tcpStream = cast(TCPStream)s)
                     tcpStream.enable_keep_alive(true, seconds(10), seconds(1), 10);
             }
         }
 
         // flush messages and the address mapping tables
         restart();
-        return null;
     }
 
     static if (has_ip)
@@ -226,11 +236,10 @@ nothrow @nogc:
             auto r = _conn.remote(value.move);
             if (r.succeeded)
             {
-                unsubscribe_stream();
-                _stream = null;  // remote takes ownership of the stream slot
+                stream = null;  // remote takes ownership of the stream slot
                 if (protocol == ModbusProtocol.unknown)
                     protocol = ModbusProtocol.tcp;
-                mark_set!(typeof(this), [ "remote", "stream" ])();
+                mark_set!(typeof(this), "remote")();
                 restart();
             }
             return r;
@@ -238,11 +247,10 @@ nothrow @nogc:
         void remote(InetAddress value)
         {
             _conn.remote(value);
-            unsubscribe_stream();
-            _stream = null;
+            stream = null;
             if (protocol == ModbusProtocol.unknown)
                 protocol = ModbusProtocol.tcp;
-            mark_set!(typeof(this), [ "remote", "stream" ])();
+            mark_set!(typeof(this), "remote")();
             restart();
         }
 
@@ -268,7 +276,7 @@ nothrow @nogc:
             mark_set!(typeof(this), "keepalive")();
         }
 
-        alias Properties = AliasSeq!(Prop!("stream", stream),
+        alias Properties = AliasSeq!(Elem!("stream", Stream, OnChange!stream_changed),
                                      Prop!("remote", remote),
                                      Prop!("port", port),
                                      Elem!("tls", bool, OnChange!restart),
@@ -279,7 +287,7 @@ nothrow @nogc:
                                      Elem!("estimate-baud", bool));
     }
     else
-        alias Properties = AliasSeq!(Prop!("stream", stream),
+        alias Properties = AliasSeq!(Elem!("stream", Stream, OnChange!stream_changed),
                                      Elem!("protocol", ModbusProtocol, Check!protocol_check, OnChange!protocol_changed),
                                      Elem!("master", bool, OnChange!restart),
                                      Elem!("baud", uint, OnChange!restart),
@@ -315,7 +323,7 @@ protected:
 
     override bool validate() const
     {
-        bool have_target = _stream !is null;
+        bool have_target = stream !is null;
         static if (has_ip)
             have_target = have_target || _conn.has_remote();
         return have_target && (!master || protocol != ModbusProtocol.unknown);
@@ -325,7 +333,7 @@ protected:
     {
         static if (has_ip)
         {
-            if (!_stream && _conn.has_remote())
+            if (!stream && _conn.has_remote())
             {
                 if (!_conn.start(this, tls ? 802 : 502, tls))
                     return CompletionStatus.error;
@@ -358,7 +366,7 @@ protected:
         if (!_support_simultaneous_requests)
         {
             import router.stream.serial : SerialStream;
-            if (auto serial = cast(SerialStream)_stream)
+            if (auto serial = cast(SerialStream)stream)
             {
                 compute_timing(serial.baud_rate);
                 _baud_estimated = true;
@@ -405,10 +413,7 @@ protected:
         static if (has_ip)
         {
             if (_conn.has_remote())
-            {
                 _conn.stop();
-                _stream = null;
-            }
         }
 
         return CompletionStatus.complete;
@@ -538,7 +543,6 @@ private:
         MessageCallback callback;
     }
 
-    ObjectRef!Stream _stream;
     bool _subscribed;
     static if (has_ip)
     {
@@ -568,8 +572,8 @@ private:
 
     Stream active_stream()
     {
-        if (_stream)
-            return _stream;
+        if (Stream s = stream)
+            return s;
         static if (has_ip)
             return _conn.get;
         else
