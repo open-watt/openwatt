@@ -23,16 +23,38 @@ if(USE_LWIP)
 endif()
 list(APPEND MAIN_PRIV_REQUIRES esp_driver_uart)
 list(APPEND MAIN_PRIV_REQUIRES esp_driver_ledc esp_driver_spi esp_driver_gptimer esp_adc)
+# Unconditional: IDF collects PRIV_REQUIRES during an early expansion pass that
+# cannot see -D cache variables, so gating this on USE_SPIFFS silently drops it.
+# The component is only referenced when OW_USE_SPIFFS is defined below, so an
+# unused spiffs is discarded at link time.
+list(APPEND MAIN_PRIV_REQUIRES spiffs esp_partition)
 if(OW_EXTRA_REQUIRES)
     list(APPEND MAIN_PRIV_REQUIRES ${OW_EXTRA_REQUIRES})
 endif()
 
+set(LITTLEFS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/urt/third_party/littlefs")
+
 idf_component_register(SRCS "${ESP32_SYS_DIR}/main.c"
                             "${ESP32_SYS_DIR}/ow_shim.c"
+                            "${ESP32_SYS_DIR}/littlefs_port.c"
+                            "${LITTLEFS_DIR}/lfs.c"
+                            "${LITTLEFS_DIR}/lfs_util.c"
                             "${URT_INTERNAL_DIR}/mbedtls.c"
                        INCLUDE_DIRS ""
                        PRIV_REQUIRES ${MAIN_PRIV_REQUIRES}
                        WHOLE_ARCHIVE)
+
+if(USE_SPIFFS)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE OW_USE_SPIFFS=1)
+endif()
+
+# littlefs talks to esp_partition directly, so it needs no VFS and no newlib.
+# LFS_NO_DEBUG/_WARN keep its logging out of the image; asserts stay on.
+target_include_directories(${COMPONENT_LIB} PRIVATE "${LITTLEFS_DIR}")
+target_compile_definitions(${COMPONENT_LIB} PRIVATE LFS_NO_DEBUG LFS_NO_WARN)
+if(USE_LITTLEFS)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE OW_USE_LITTLEFS=1)
+endif()
 
 # Makefile typically passes OPENWATT_OBJ via -D; fall back to the debug path
 # under bin/<buildname>_debug/ for direct idf.py invocations.
