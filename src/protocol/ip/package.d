@@ -533,6 +533,15 @@ UDPEndpoint* udp_open(const(InetAddress)* local, const(InetAddress)* remote, UDP
             ws_closesocket(s);
             return null;
         }
+        if (remote)
+        {
+            sockaddr_in ra = to_sockaddr_in(*remote);
+            if (ws_connect(s, &ra, cast(int)sockaddr_in.sizeof) != 0)
+            {
+                ws_closesocket(s);
+                return null;
+            }
+        }
         UDPEndpoint* ep = defaultAllocator().allocT!UDPEndpoint();
         ep._handle = s;
         ep._on_recv = on_recv;
@@ -570,10 +579,17 @@ UDPEndpoint* udp_open(const(InetAddress)* local, const(InetAddress)* remote, UDP
             return null;
         }
 
+        bool connect_peer = remote && (remote.family == AddressFamily.ipv4 || remote.family == AddressFamily.ipv6);
+        if (connect_peer && s.connect(*remote).failed)
+        {
+            s.close();
+            return null;
+        }
+
         UDPEndpoint* ep = defaultAllocator().allocT!UDPEndpoint();
         ep._socket = s;
         ep._on_recv = on_recv;
-        if (remote && (remote.family == AddressFamily.ipv4 || remote.family == AddressFamily.ipv6))
+        if (connect_peer)
         {
             ep._remote = *remote;
             ep._connected = true;
@@ -1455,6 +1471,8 @@ nothrow @nogc:
         {
             if (_closing)
                 return 0;
+            if (_connected)
+                return to == _remote ? send(data) : 0;   // connected: the peer is the only destination
             if (_ether)
             {
                 const(InetAddress.Ether)* e = to.as_ether;
@@ -1506,6 +1524,8 @@ nothrow @nogc:
         {
             if (_closing)
                 return 0;
+            if (_connected)
+                return dst == _remote ? send(data) : 0;   // connected: the peer is the only destination
             if (_ether)
             {
                 const(InetAddress.Ether)* e = dst.as_ether;
@@ -1564,6 +1584,8 @@ nothrow @nogc:
         {
             if (_closing)
                 return 0;
+            if (_connected)
+                return to == _remote ? send(data) : 0;   // connected: the peer is the only destination
             if (_ether)
             {
                 const(InetAddress.Ether)* e = to.as_ether;
@@ -2112,6 +2134,7 @@ else version (Windows)
     enum uint WSA_FLAG_OVERLAPPED = 0x01;
     pragma(mangle, "WSASocketW")  extern(Windows) IOCP_SOCKET ws_socket(int af, int type, int protocol, void* protoInfo, uint group, uint flags) nothrow @nogc;
     pragma(mangle, "bind")        extern(Windows) int ws_bind(IOCP_SOCKET, const(void)*, int) nothrow @nogc;
+    pragma(mangle, "connect")     extern(Windows) int ws_connect(IOCP_SOCKET, const(void)*, int) nothrow @nogc;
     pragma(mangle, "listen")      extern(Windows) int ws_listen(IOCP_SOCKET, int) nothrow @nogc;
     pragma(mangle, "closesocket") extern(Windows) int ws_closesocket(IOCP_SOCKET) nothrow @nogc;
     pragma(mangle, "shutdown")    extern(Windows) int ws_shutdown(IOCP_SOCKET, int) nothrow @nogc;
