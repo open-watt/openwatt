@@ -276,14 +276,21 @@ nothrow @nogc:
             return null;
         }
 
-        foreach (ref arg; namedArgs)
         {
-            StringResult r = item.set(arg.name, arg.value);
-            if (!r)
+            // one frame for the whole command: element-backed properties coalesce their
+            // change deliveries, so `set x a=1 b=2` restarts once, not per property
+            import manager.element : open_commit;
+            auto commit = open_commit();
+
+            foreach (ref arg; namedArgs)
             {
-                session.write_line("Set '", arg.name, "\' failed: ", r.message);
-                // TODO: should we bail out at first error, or try and set the rest?
-//                return null;
+                StringResult r = item.set(arg.name, arg.value);
+                if (!r)
+                {
+                    session.write_line("Set '", arg.name, "\' failed: ", r.message);
+                    // TODO: should we bail out at first error, or try and set the rest?
+//                    return null;
+                }
             }
         }
         return null;
