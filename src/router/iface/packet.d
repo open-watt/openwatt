@@ -57,15 +57,8 @@ enum ushort ow_control_flag = 0x8000;
 enum OWControl : ushort
 {
     who_has     = ow_control_flag | 0x0001,  // body: universal address (u64 BE) -- which station carries this?
-    addr_query  = ow_control_flag | 0x0002,  // body: PacketType (u16 BE, unknown = all) -- report your addresses
-    addr_report = ow_control_flag | 0x0003,  // body: N x universal address (u64 BE) -- response to either of the above
-    echo_req    = ow_control_flag | 0x0004,  // body: [cookie:u32 BE][flags:u8][payload] -- mac ping / discovery probe
-    echo_reply  = ow_control_flag | 0x0005,  // body: cookie+flags echoed, then payload echo (or identity when requested)
-}
-
-enum OWEchoFlag : ubyte
-{
-    identify = 1 << 0,  // reply carries the responder's identity instead of echoing the payload
+    addr_query  = ow_control_flag | 0x0002,  // body: [txid:u32 BE][PacketType:u16 BE, unknown = all] -- report your addresses
+    addr_report = ow_control_flag | 0x0003,  // body: [txid:u32 BE, 0 = unsolicited][name_len:u8][name][N x universal address (u64 BE)]
 }
 
 // 802.1p PCP traffic classes

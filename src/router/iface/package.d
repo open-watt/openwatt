@@ -748,27 +748,31 @@ nothrow @nogc:
 
     override void post_init()
     {
-        // post_init: the platform ethernet collections own the scope by now, so this extends it
+        // post_init: the platform ethernet collections own the scope by now, so these extend it
         g_app.console.register_command!mac_ping("/interface/ethernet", this, "ping");
+        g_app.console.register_command!mac_discover("/interface/ethernet", this, "discover");
     }
 
     override void update()
     {
         Collection!BaseInterface().update_all();
         update_ether_endpoints();
-        expire_mac_pings();
+        expire_mac_probes();
     }
 
-    MacPingState mac_ping(Session session, MACAddress address, Nullable!uint count, Nullable!bool identify)
+    MacPingState mac_ping(Session session, MACAddress address, Nullable!uint count)
     {
         if (!address)
         {
             session.write_line("ping requires a destination mac address");
             return null;
         }
-        return g_app.allocator.allocT!MacPingState(session, address,
-                                                   identify ? identify.value : true,
-                                                   count ? count.value : 4);
+        if (address.is_multicast)
+        {
+            session.write_line("ping is unicast; use discover to enumerate the segment");
+            return null;
+        }
+        return g_app.allocator.allocT!MacPingState(session, address, count ? count.value : 4);
     }
 
     static class MacPingState : CommandState
@@ -778,18 +782,16 @@ nothrow @nogc:
         CommandCompletionState state = CommandCompletionState.in_progress;
 
         MACAddress dst;
-        bool identify;
         uint count;
         uint sent;
         uint replies;
         MonoTime last_send;
-        Array!uint cookies;
+        Array!uint txids;
 
-        this(Session session, MACAddress dst, bool identify, uint count)
+        this(Session session, MACAddress dst, uint count)
         {
             super(session, null);
             this.dst = dst;
-            this.identify = identify;
             this.count = count ? count : 1;
             send_round();
         }
@@ -829,15 +831,15 @@ nothrow @nogc:
             last_send = getTime();
             foreach_ether_station((EthernetStation s) {
                 if (s.running)
-                    cookies ~= s.ping(dst, identify, &on_reply);
+                    txids ~= s.ping(dst, &on_reply);
             });
         }
 
         void cancel_round()
         {
-            foreach (c; cookies[])
-                mac_ping_cancel(c);
-            cookies.clear();
+            foreach (t; txids[])
+                mac_ping_cancel(t);
+            txids.clear();
         }
 
         void on_reply(MACAddress from, Duration rtt, scope const(char)[] identity)
@@ -847,6 +849,80 @@ nothrow @nogc:
                 session.write_line("reply from ", from, ": time=", rtt, " \"", identity, "\"");
             else
                 session.write_line("reply from ", from, ": time=", rtt);
+        }
+    }
+
+    MacDiscoverState mac_discover(Session session)
+    {
+        return g_app.allocator.allocT!MacDiscoverState(session);
+    }
+
+    static class MacDiscoverState : CommandState
+    {
+    nothrow @nogc:
+
+        CommandCompletionState state = CommandCompletionState.in_progress;
+
+        uint txid;
+        MonoTime begun;
+        Array!MACAddress seen;
+
+        this(Session session)
+        {
+            super(session, null);
+            begun = getTime();
+            txid = mac_discover_begin(&on_report);
+            foreach_ether_station((EthernetStation s) {
+                if (s.running)
+                    s.discover(txid);
+            });
+        }
+
+        override CommandCompletionState update()
+        {
+            if (state == CommandCompletionState.cancel_requested)
+            {
+                mac_discover_cancel(txid);
+                state = CommandCompletionState.cancelled;
+                return state;
+            }
+            if (getTime() - begun >= 2.seconds)
+            {
+                mac_discover_cancel(txid);
+                session.write_line(seen.length, " stations found");
+                state = CommandCompletionState.finished;
+            }
+            return state;
+        }
+
+        override void request_cancel()
+        {
+            if (state == CommandCompletionState.in_progress)
+                state = CommandCompletionState.cancel_requested;
+        }
+
+    private:
+        void on_report(MACAddress from, scope const(char)[] identity, scope const(ulong)[] addresses)
+        {
+            // stations answer each of our querying stations; report each responder once
+            foreach (m; seen[])
+            {
+                if (m == from)
+                    return;
+            }
+            seen ~= from;
+
+            if (identity.length)
+                session.write_line(from, " \"", identity, "\"");
+            else
+                session.write_line(from);
+            foreach (a; addresses)
+            {
+                import urt.conv : format_uint;
+                char[15] hex = void;
+                ptrdiff_t len = format_uint(a & 0x0FFF_FFFF_FFFF_FFFF, hex, 16, 15, '0');
+                session.write_line("    ", cast(PacketType)(a >> 60), ":", hex[0 .. len]);
+            }
         }
     }
 
