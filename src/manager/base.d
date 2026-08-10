@@ -482,7 +482,23 @@ nothrow @nogc:
 
     final package StringResult sync_apply(scope const(char)[] property, ref const Variant value)
     {
-        return set(property, value);
+        // the authority's echo bypasses the read-only gate: a proxy cannot recompute derived state
+        foreach (i, p; properties())
+        {
+            if (p.name[] == property)
+            {
+                if (!p.set)
+                    return StringResult(tconcat("Property '", property, "' is read-only"));
+                auto r = p.set(value, this, *p);
+                if (r)
+                {
+                    _props_set |= ulong(1) << i;
+                    mark_dirty(i);
+                }
+                return r;
+            }
+        }
+        return set_unknown_property(property, value);
     }
 
     final void reset(scope const(char)[] property)
@@ -1762,6 +1778,12 @@ unittest
     assert(proxy.set("gain", echoed));
     assert(proxy.prop_read!(ElemTestObject, "gain") == 3);
     assert(proxy.changes == 0);
+
+    // read-only refuses the console but not the authority's echo
+    Variant lk = Variant(true);
+    assert(!proxy.set("link", lk));
+    assert(proxy.sync_apply("link", lk));
+    assert(proxy.prop_read!(ElemTestObject, "link") == true);
     table.remove(proxy.id);
     defaultAllocator().freeT(proxy);
 }
