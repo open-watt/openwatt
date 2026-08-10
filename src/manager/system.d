@@ -159,6 +159,117 @@ void reboot(Session session)
     system_reboot();
 }
 
+version (UseSpiffs)   version = HasFilesystem;
+version (UseLittleFS) version = HasFilesystem;
+
+version (HasFilesystem)
+{
+    import urt.file : delete_file, load_file, save_file;
+    import urt.result : Result;
+    import manager.console.command : CommandState, CommandCompletionState;
+
+    // Whichever backend is built; littlefs wins when both are.
+    version (UseLittleFS)
+    {
+        import urt.fs.littlefs;
+        private alias Fs = LittleFsBackend;
+        private alias FsFormatState = LittleFsFormatState;
+    }
+    else
+    {
+        import urt.fs.spiffs;
+        private alias Fs = SpiffsBackend;
+        private alias FsFormatState = SpiffsFormatState;
+    }
+
+    void fs_info(Session session)
+    {
+        ulong total, used;
+        if (!Fs.info(total, used))
+        {
+            session.write_line(Fs.name, ": not mounted (last error ", Fs.last_error(), ")");
+            return;
+        }
+        session.write_line(Fs.name, ": ", used, " / ", total, " bytes used, ", total - used, " free");
+        version (UseLittleFS)
+            session.write_line("open handles: ", Fs.open_handles());
+    }
+
+    void fs_write(Session session, const(char)[] name, const(char)[] text)
+    {
+        Result r = save_file(name, cast(const(void)[])text);
+        if (r)
+            session.write_line("wrote ", text.length, " bytes to '", name, "'");
+        else
+            session.write_line("write failed: ", r.system_code, " (backend error ", Fs.last_error(), ")");
+    }
+
+    void fs_read(Session session, const(char)[] name)
+    {
+        import urt.mem.allocator : defaultAllocator;
+
+        void[] data = load_file(name);
+        if (data is null)
+        {
+            session.write_line("read failed / not found: '", name, "'");
+            return;
+        }
+        session.write_line(data.length, " bytes: ", cast(const(char)[])data);
+        defaultAllocator().free(data);
+    }
+
+    void fs_rm(Session session, const(char)[] name)
+    {
+        Result r = delete_file(name);
+        session.write_line(r ? "deleted" : "delete failed");
+    }
+
+    // The format runs on its own task, because on a multi-megabyte partition it
+    // blocks for long enough to starve the watchdog.
+    class FormatCommandState : CommandState
+    {
+    nothrow @nogc:
+
+        this(Session session)
+        {
+            super(session, null);
+        }
+
+        override CommandCompletionState update()
+        {
+            final switch (format_state())
+            {
+                case FsFormatState.running:
+                    return CommandCompletionState.in_progress;
+                case FsFormatState.complete:
+                    session.write_line("format: complete");
+                    return CommandCompletionState.finished;
+                case FsFormatState.failed:
+                    session.write_line("format: failed");
+                    return CommandCompletionState.error;
+                case FsFormatState.idle:
+                    return CommandCompletionState.finished;
+            }
+        }
+
+        // A partition rewrite has no safe interruption point.
+        override void request_cancel()
+        {
+        }
+    }
+
+    CommandState fs_format(Session session)
+    {
+        if (format_state() != FsFormatState.running && !format_begin())
+        {
+            session.write_line("format: could not start");
+            return null;
+        }
+        session.write_line("format: erasing filesystem...");
+        return session.allocator.allocT!FormatCommandState(session);
+    }
+}
+
 version (AllocTracking)
 {
     import urt.mem.tracking;
