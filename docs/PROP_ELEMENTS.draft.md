@@ -6,10 +6,17 @@ getter/setter pairs with hand-rolled dedup and dirty tracking, and become elemen
 data-model space.
 
 Built: the `Elem!` declaration form, the per-object element block, synthesized get/set/reset with
-Default/Min/Max/Check/OnChange, the proxy side-effect gate, and SerialStream's framing properties
-as the first migration. Not built: the descriptor split, reference properties, state-machine
-properties, and the retirement of the per-object sync delta machinery. Deviations from this
-document where it describes the built part are called out inline.
+Default/Min/Max/Check/OnChange, the proxy side-effect gate, property EIDs with container-class
+resolution, Duration/Quantity support through the typed door (the boxed door needed nothing:
+a Variant stores a Duration as Quantity!(long, Nanosecond), so durations and seconds-dimension
+quantities interchange at every boxed boundary already), reference properties (the DataFormat
+reference descriptor, name<->id edge conversion, reserve-on-absent), running/status as ReadOnly
+elements, the commit scope around the console set command, and migrations: SerialStream's framing
+properties, ModbusInterface (protocol/master/baud/estimate-baud/tls and the stream reference),
+and NTPClient (server/port/interval and the read-only offset). Not built: the descriptor split,
+the state-transition point-event element, and the retirement of the per-object sync delta
+machinery. Deviations from this document where it describes the built part are called out
+inline.
 
 ## What exists that this stands on
 
@@ -190,14 +197,13 @@ The element write path replaces, per setter, the hand-written:
 - subscriber notification         -> `SampleUpdate` delivery with previous+new value and
                                      commit-scope coherence
 
-A behavioural improvement becomes *available*, but is not free: because side effects are
-subscriber deliveries, wrapping a multi-property command in a commit scope would coalesce them,
-so `/interface/modbus/set inv baud=19200 protocol=rtu` would restart once after both apply
-rather than once per property. Nothing collects that today -- the only `open_commit()` in the
-tree is `ComponentLink.populate()`, and the console opens no scope around command execution, so
-each set still delivers immediately and restarts independently, exactly as the old setters did.
-Claim it by opening a scope around console command execution (and around the named-argument loop
-in collection create), not by anything in the property machinery.
+A behavioural improvement, now partly claimed: because side effects are subscriber deliveries,
+the commit scope around the set command's named-argument loop coalesces them, so
+`/interface/modbus/set inv baud=19200 protocol=rtu` restarts once after both apply rather than
+once per property. The add command's argument loop deliberately stays unscoped: deferring
+creation-time change handlers past the synchronous state-machine tick would bounce
+freshly-created objects through an extra restart, so scoping it waits on the startup-ordering
+test below.
 
 ### Side effects: the real migration surface
 
@@ -220,7 +226,8 @@ one, it stays on the legacy `Prop!` form until it can be decomposed.
   Never migrates.
 - **`disabled`** -- drives the state machine bits directly; stays bespoke.
 - **`type`** -- a per-type constant; schema, not state.
-- **ObjectRef properties** (`stream=`, `iface=`) -- migrate early, not late. Storage is trivial:
+- **ObjectRef properties** (`stream=`, `iface=`) -- BUILT for ModbusInterface's stream; the rest
+  of the ObjectRef properties still migrate one class at a time. Storage is trivial:
   `EID(cid, 0)` in the 8-byte Scalar; the typed accessor wraps it back into `ObjectRef!T`
   semantics (table deref, null when tombstoned) and held-dedup is a raw compare. What is missing
   is edge vocabulary only: a fourth member of the DataFormat descriptor union
@@ -239,15 +246,17 @@ views over the state-machine bits, and `mark_set` on them means "tell mirrors to
 getter". An element is a push model: something must WRITE the value at the moment it changes.
 The change sites are uneven:
 
-- **`running`** is clean: `set_online`/`set_offline` are exactly the transition points; they
-  become ordinary element writes.
-- **`status`** is nearly clean: `status_message` is a pure function of `_state` (plus
+- **`running`** is BUILT: `set_online`/`set_offline` write the element; the pull-computed
+  member function remains for internal logic and the element mirrors it.
+- **`status`** is BUILT: `status_message` is a pure function of `_state` (plus
   `_fail_reason`, which is always assigned before the transition that exposes it), so one write
-  in `set_state` after the transition covers every site. Held dedup then makes the "probably
-  over-dirty's" HACK comment precise instead of apologetic: redundant writes cost nothing and
-  notify nobody. The state-transition *event* additionally lands as a `point` element, per the
-  sync draft ("`state` becomes a built-in event node on every object"); `StateSignal`
-  subscription becomes element subscription for consumers that only want online/offline.
+  in `set_state` after the transition covers every site (plus the direct `_state` mutation
+  sites: the disabled setter, destroy, and `set_remote_state`). Held dedup made the "probably
+  over-dirty's" HACK precise instead of apologetic: redundant writes cost nothing and notify
+  nobody. Subclasses that override `status_message` with richer state (the wifi/ethernet
+  drivers) call `write_status()` at their own change sites where they used to `mark_set`. NOT
+  yet built: the state-transition *event* as a `point` element, per the sync draft ("`state`
+  becomes a built-in event node on every object"); `StateSignal` subscription stays until then.
 - **`flags` does not migrate.** It folds in `validate()`, a live pull that can flip with no
   local event at all -- a referenced dependency comes into existence and nothing on this object
   runs. Note today's mirror is ALREADY stale in that case (no `mark_set` fires when a dependency
@@ -312,13 +321,16 @@ logic branches on container class. Decide when building; the former is the struc
 5. **Migrate leaf value properties** class by class (baud, mtu, timeouts, booleans, enums,
    comment). Delete member fields, delete `mark_set` calls, declare `OnChange`/checks. Each class
    is a small, verifiable diff.
-6. **The reference descriptor** (`CollectionTypeInfo*` slot in the DataFormat union + name<->id
-   edge conversion), then ObjectRef properties; pending references via `IdAllocator.reserve`
-   retire the synchronous-tick HACK.
-7. **State machine writes `running`/`status`/state-event as elements** (see the derived-views
-   section; `flags` deliberately stays behind). Last of the migrations because the change sites
-   are lifecycle-entangled. These are the first real `ReadOnly` users: the state machine pokes,
-   the operator reads.
+6. **The reference descriptor** -- BUILT (`CollectionTypeInfo*` slot in the DataFormat union,
+   name<->id conversion in the boxed door, reserve-on-absent so forward references bind on
+   creation); ModbusInterface's stream is migrated, remaining ObjectRef properties follow one
+   class at a time. The synchronous-tick HACK retires only when the last reference property
+   leaves the legacy `from_variant` conversion (which still requires the target to exist).
+7. **State machine writes `running`/`status` as elements** -- BUILT (see the derived-views
+   section; `flags` deliberately stays behind, and the state-event `point` element is still to
+   come). These and NTPClient's offset are the first real `ReadOnly` users: the owner pokes, the
+   operator reads. The inbound sync path (`sync_apply`) now bypasses the read-only gate, since a
+   proxy cannot recompute derived state and the encoders deliberately emit it.
 8. **Retire the per-object property sync machinery**: `SyncState`, `attach_delta_slot`,
    `props_dirty`, `_props_set` dirty half; the object mirror's property verbs dissolve per the
    sync draft's convergence table.
