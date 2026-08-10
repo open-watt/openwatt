@@ -350,32 +350,45 @@ no transport properties.
 ### `/interface/ethernet`
 
 Ethernet interfaces are a managed collection, and additionally carry the
-mac-ping command. It sends an OW echo request and times the round trip, so
-only OpenWatt stations answer. Requests go out every running ethernet
-station, which makes a broadcast destination a discovery sweep across all
-segments.
+mac-ping and discovery commands. Reachability testing uses 802.1ag loopback,
+so standard L2 OAM equipment both answers `ping` and can ping an OpenWatt
+station itself. Enumerating the segment is a separate command, because
+loopback is a point-to-point test that gains no third-party responders when
+broadcast.
 
 | Command | Syntax | Description |
 | --- | --- | --- |
-| `ping` | `/interface/ethernet/ping address=<mac> [count=<count>] [identify=<bool>]` | Times echo round trips to `address`, one request per second. |
+| `ping` | `/interface/ethernet/ping address=<mac> [count=<count>]` | Times 802.1ag loopback round trips to `address`, one request per second. |
+| `discover` | `/interface/ethernet/discover` | Sweeps every segment for OpenWatt stations, listing each with its name and addresses. |
 
 | Argument | Values | Default | Description |
 | --- | --- | --- | --- |
-| `address` | mac address | required | Destination. A broadcast address sweeps for responders. |
+| `address` | mac address | required | Unicast destination. Multicast and broadcast are rejected; use `discover`. |
 | `count` | request count | `4` | Number of requests to send; `0` is treated as `1`. |
-| `identify` | `true` or `false` | `true` | Asks responders to name themselves, printing the name with each reply. |
 
-Each reply prints as `reply from <mac>: time=<rtt>`, with the responder's
-identity appended when it supplied one. A summary of
-`<replies> replies for <sent> requests` closes the command, and Ctrl+C
-cancels it early.
+Requests go out every running ethernet station, so whichever segment hosts the
+target answers. Each reply prints as `reply from <mac>: time=<rtt>`, with the
+responder's name appended when its LBR carried a Sender ID TLV. A summary of
+`<replies> replies for <sent> requests` closes the command, and Ctrl+C cancels
+it early.
 
-Ethernet stations also answer 802.1ag loopback messages, so standard L2 OAM
-equipment can mac-ping an OpenWatt station without OW support.
+`discover` broadcasts an OW address query from every running station and
+collects the reports, printing each responder's mac address and name followed
+by its universal addresses, one per line, indented and prefixed with the packet
+type. Responders jitter their replies over a short window, so the sweep runs
+for two seconds before closing with `<count> stations found`. Round-trip times
+are not reported: the jitter makes them meaningless. Only OpenWatt stations
+answer.
+
+Stations answer loopback only at the maintenance level they claim, set per
+interface by the `cfm-level` property (`0`-`7`, default `7`). Loopback messages
+at other levels belong to another maintenance domain and are ignored, so an
+OpenWatt station never corrupts diagnostics on a network with provisioned CFM.
 
 ```text
-/interface/ethernet/ping address=ff:ff:ff:ff:ff:ff count=1
-/interface/ethernet/ping address=02:13:37:aa:bb:64 count=10 identify=false
+/interface/ethernet/ping address=02:13:37:aa:bb:64 count=10
+/interface/ethernet/discover
+/interface/ethernet/set eth0 cfm-level=5
 ```
 
 ### `/interface/udp`
