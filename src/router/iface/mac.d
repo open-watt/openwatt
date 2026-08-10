@@ -43,6 +43,15 @@ nothrow @nogc:
             bool is_link_local() const pure
                 => *cast(uint*)b.ptr == 0x00C28001 && ((*cast(ushort*)(b.ptr + 4) & 0xF0FF) == 0x0000);
         }
+
+        // inverse of ul; bits above 47 are ignored
+        static MACAddress from_ul(ulong v) pure
+        {
+            version (BigEndian)
+                return MACAddress(cast(ubyte)(v >> 40), cast(ubyte)(v >> 32), cast(ubyte)(v >> 24), cast(ubyte)(v >> 16), cast(ubyte)(v >> 8), cast(ubyte)v);
+            else
+                return MACAddress(cast(ubyte)v, cast(ubyte)(v >> 8), cast(ubyte)(v >> 16), cast(ubyte)(v >> 24), cast(ubyte)(v >> 32), cast(ubyte)(v >> 40));
+        }
     }
     else
     {
@@ -231,6 +240,8 @@ unittest
     assert(mac.b == kMac);
     assert(cast(bool)mac);
     assert(!cast(bool)MACAddress.init);
+    assert(MACAddress.from_ul(mac.ul) == mac);
+    assert(MACAddress.from_ul(mac.ul | 0xF000_0000_0000_0000) == mac);
 
     // bit-flag predicates
     assert(!mac.is_multicast);

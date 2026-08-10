@@ -32,6 +32,7 @@ version (UseInternalIPStack)
 }
 
 import router.iface;
+import router.iface.endpoint;
 import router.iface.ethernet;
 
 version(Windows)
@@ -256,6 +257,8 @@ enum IPEvent : ubyte
     error,          // connection reset / fatal error
 }
 
+private static immutable ubyte[6] zero_mac;
+
 alias TCPRecvHandler   = void delegate(TCPConnection* conn, const(void)[] data, MonoTime rx_time) nothrow @nogc;
 alias TCPEventHandler  = void delegate(TCPConnection* conn, IPEvent event) nothrow @nogc;
 alias TCPAcceptHandler = void delegate(TCPListener* listener, TCPConnection* conn, MonoTime rx_time) nothrow @nogc;
@@ -265,21 +268,35 @@ TCPConnection* tcp_connect(InetAddress remote, TCPRecvHandler on_recv, TCPEventH
 {
     version (UseInternalIPStack)
     {
-        if (remote.family != AddressFamily.ipv4)
-            return null;     // in-tree stack TCP is v4-only for now...
+        if (remote.family != AddressFamily.ipv4 && remote.family != AddressFamily.ether)
+            return null;     // TODO: ipv6
+        if (remote.family == AddressFamily.ether)
+        {
+            // a bound local names the station; unbound floods the SYN and the peer's
+            // reply pins the source, so replies must be heard on every segment
+            if (local && local.family == AddressFamily.ether && !local.addr_any)
+            {
+                EthernetStation station = find_ether_station(MACAddress(local._a.ether.addr));
+                if (!station)
+                    return null;
+                ensure_ether_tap(station);
+            }
+            else
+                ether_request_tap_all();
+        }
 
         TcpPcb* pcb = defaultAllocator().allocT!TcpPcb();
         tcp_assign_id(pcb);
         pcb.handle = TcpEndpointOwned;     // keep tcp_tick from auto-freeing it
-        if (local && local.family == AddressFamily.ipv4)
-        {
-            pcb.local_addr = local._a.ipv4.addr;
-            pcb.local_port = local._a.ipv4.port;
-        }
-        if (pcb.local_port == 0)
-            pcb.local_port = allocate_tcp_port();
-        pcb.remote_addr = remote._a.ipv4.addr;
-        pcb.remote_port = remote._a.ipv4.port;
+        if (local && local.family == remote.family)
+            pcb.local = *local;
+        else if (remote.family == AddressFamily.ether)
+            pcb.local = InetAddress(zero_mac, 0);
+        else
+            pcb.local = InetAddress(IPAddr.any, 0);
+        if (pcb.local.port == 0)
+            pcb.local.port = allocate_tcp_port();
+        pcb.remote = remote;
 
         TCPConnection* c = defaultAllocator().allocT!TCPConnection();
         c._pcb = pcb;
@@ -369,20 +386,31 @@ TCPListener* tcp_listen(InetAddress local, TCPAcceptHandler on_accept)
 {
     version (UseInternalIPStack)
     {
-        if (local.family != AddressFamily.ipv4)
-            return null;     // in-tree stack TCP is v4-only
+        if (local.family != AddressFamily.ipv4 && local.family != AddressFamily.ether)
+            return null;     // TODO: ipv6
+        if (local.family == AddressFamily.ether)
+        {
+            if (local.addr_any)
+                ether_request_tap_all();    // any-listener: accept on every segment
+            else
+            {
+                EthernetStation station = find_ether_station(MACAddress(local._a.ether.addr));
+                if (!station)
+                    return null;
+                ensure_ether_tap(station);
+            }
+        }
 
         TcpPcb* pcb = defaultAllocator().allocT!TcpPcb();
         tcp_assign_id(pcb);
         pcb.handle = TcpEndpointOwned;
-        pcb.local_addr = local._a.ipv4.addr;
-        pcb.local_port = local._a.ipv4.port;
-        if (pcb.local_port == 0)
-            pcb.local_port = allocate_tcp_port();
+        pcb.local = local;
+        if (pcb.local.port == 0)
+            pcb.local.port = allocate_tcp_port();
 
         TCPListener* l = defaultAllocator().allocT!TCPListener();
         l._lpcb = pcb;
-        l._local = InetAddress(pcb.local_addr, pcb.local_port);
+        l._local = pcb.local;
         l._on_accept = on_accept;
         pcb.listen_owner = l;
         native_tcp_listen(pcb);     // sets state=listen, registers
@@ -458,6 +486,9 @@ TCPListener* tcp_listen(ushort port, TCPAcceptHandler on_accept)
 // when `remote` is set, send() targets it and the endpoint only delivers datagrams from that peer
 UDPEndpoint* udp_open(const(InetAddress)* local, const(InetAddress)* remote, UDPRecvHandler on_recv)
 {
+    if ((local && local.family == AddressFamily.ether) || (remote && remote.family == AddressFamily.ether))
+        return udp_open_ether(local, remote, on_recv);
+
     version (UseInternalIPStack)
     {
         // The in-tree stack does UDP over v4 only; deliver datagrams inline.
@@ -561,6 +592,45 @@ UDPEndpoint* udp_open(const(InetAddress)* local, const(InetAddress)* remote, UDP
     }
 }
 
+// Datagrams addressed by (mac, port): same UDPEndpoint, backed by the ether transport
+// instead of a socket or PCB. A station's mac as the local address binds the endpoint
+// to that interface; a null local or the zero mac is a wildcard bind: receive on every
+// ethernet segment, egress by learned neighbour with unknown-unicast flooding.
+private UDPEndpoint* udp_open_ether(const(InetAddress)* local, const(InetAddress)* remote, UDPRecvHandler on_recv)
+{
+    if (local && local.family != AddressFamily.ether)
+        return null;
+    if (remote && remote.family != AddressFamily.ether)
+        return null;
+
+    EthernetStation station;
+    ushort local_port = local ? local.port : 0;
+    if (local && !local.addr_any)
+    {
+        station = find_ether_station(MACAddress(local._a.ether.addr));
+        if (!station)
+            return null;
+    }
+
+    UDPEndpoint* ep = defaultAllocator().allocT!UDPEndpoint();
+    ep._on_recv = on_recv;
+    if (remote)
+    {
+        ep._remote = *remote;
+        ep._connected = true;
+    }
+    ep._ether = ether_open(station, local_port, &ep.on_ether_recv,
+                           remote ? MACAddress(remote._a.ether.addr) : MACAddress(),
+                           remote ? remote._a.ether.port : 0);
+    if (!ep._ether)
+    {
+        defaultAllocator().freeT(ep);
+        return null;
+    }
+    _udp_eps ~= ep;
+    return ep;
+}
+
 
 struct TCPConnection
 {
@@ -588,7 +658,7 @@ nothrow @nogc:
     version (UseInternalIPStack)
     {
         InetAddress local()
-            => _pcb ? InetAddress(_pcb.local_addr, _pcb.local_port) : InetAddress();
+            => _pcb ? _pcb.local : InetAddress();
 
         ptrdiff_t send(const(void[])[] data...)
         {
@@ -878,7 +948,7 @@ private:
         void mark_connected()
         {
             _phase = Phase.open;
-            _remote = InetAddress(_pcb.remote_addr, _pcb.remote_port);
+            _remote = _pcb.remote;
             if (_on_event)
                 _on_event(&this, IPEvent.connected);
         }
@@ -1368,12 +1438,18 @@ nothrow @nogc:
     version (UseInternalIPStack)
     {
         InetAddress local()
-            => _pcb ? InetAddress(_pcb.local_addr, _pcb.local_port) : InetAddress();
+        {
+            if (_ether)
+                return InetAddress(_ether.local.b, _ether.local_port);
+            return _pcb ? InetAddress(_pcb.local_addr, _pcb.local_port) : InetAddress();
+        }
 
         ptrdiff_t send(scope const(void)[] data)
         {
             if (_closing || !_connected)
                 return 0;
+            if (_ether)
+                return _ether.send(data);
             if (!udp_output(*_stack_ptr, _pcb.local_addr, _pcb.local_port,
                             v4_addr(_remote), port_of(_remote), cast(const(ubyte)[])data))
                 return 0;
@@ -1384,6 +1460,11 @@ nothrow @nogc:
         {
             if (_closing)
                 return 0;
+            if (_ether)
+            {
+                const(InetAddress.Ether)* e = to.as_ether;
+                return e ? _ether.sendto(MACAddress(e.addr), e.port, data) : 0;
+            }
             if (!udp_output(*_stack_ptr, _pcb.local_addr, _pcb.local_port,
                             v4_addr(to), port_of(to), cast(const(ubyte)[])data))
                 return 0;
@@ -1394,6 +1475,11 @@ nothrow @nogc:
         {
             if (_closing)
                 return;
+            if (_ether)
+            {
+                _ether.close();
+                _ether = null;
+            }
             if (_pcb)
                 _pcb.owner = null;     // stop delivery; pcb torn down by release() on sweep
             _closing = true;
@@ -1402,11 +1488,19 @@ nothrow @nogc:
     else version (Windows)
     {
         InetAddress local()
-            => InetAddress();   // TODO: getsockname
+        {
+            if (_ether)
+                return InetAddress(_ether.local.b, _ether.local_port);
+            return InetAddress();   // TODO: getsockname
+        }
 
         ptrdiff_t send(scope const(void)[] data)
         {
-            if (_closing || !_connected || _handle == INVALID_SOCKET || data.length == 0)
+            if (_closing || !_connected)
+                return 0;
+            if (_ether)
+                return _ether.send(data);
+            if (_handle == INVALID_SOCKET || data.length == 0)
                 return 0;
             sockaddr_in to = to_sockaddr_in(_remote);
             int n = ws_sendto(_handle, data.ptr, cast(int)data.length, 0, &to, cast(int)sockaddr_in.sizeof);
@@ -1415,7 +1509,14 @@ nothrow @nogc:
 
         ptrdiff_t sendto(scope const(void)[] data, InetAddress dst)
         {
-            if (_closing || _handle == INVALID_SOCKET || data.length == 0)
+            if (_closing)
+                return 0;
+            if (_ether)
+            {
+                const(InetAddress.Ether)* e = dst.as_ether;
+                return e ? _ether.sendto(MACAddress(e.addr), e.port, data) : 0;
+            }
+            if (_handle == INVALID_SOCKET || data.length == 0)
                 return 0;
             sockaddr_in to = to_sockaddr_in(dst);
             int n = ws_sendto(_handle, data.ptr, cast(int)data.length, 0, &to, cast(int)sockaddr_in.sizeof);
@@ -1427,6 +1528,11 @@ nothrow @nogc:
             if (_closing)
                 return;
             _closing = true;
+            if (_ether)
+            {
+                _ether.close();
+                _ether = null;
+            }
             if (_handle != INVALID_SOCKET)
             {
                 CancelIoEx(cast(HANDLE)_handle, null);
@@ -1439,6 +1545,8 @@ nothrow @nogc:
     {
         InetAddress local()
         {
+            if (_ether)
+                return InetAddress(_ether.local.b, _ether.local_port);
             InetAddress a;
             if (_socket)
                 _socket.get_socket_name(a);
@@ -1449,6 +1557,8 @@ nothrow @nogc:
         {
             if (_closing || !_connected)
                 return 0;
+            if (_ether)
+                return _ether.send(data);
             size_t sent;
             if (_socket.sendto(&_remote, &sent, data).failed)
                 return 0;
@@ -1459,6 +1569,11 @@ nothrow @nogc:
         {
             if (_closing)
                 return 0;
+            if (_ether)
+            {
+                const(InetAddress.Ether)* e = to.as_ether;
+                return e ? _ether.sendto(MACAddress(e.addr), e.port, data) : 0;
+            }
             size_t sent;
             if (_socket.sendto(&to, &sent, data).failed)
                 return 0;
@@ -1470,6 +1585,11 @@ nothrow @nogc:
             if (_closing)
                 return;
             _closing = true;
+            if (_ether)
+            {
+                _ether.close();
+                _ether = null;
+            }
             if (_watched)
             {
                 g_app.unwatch_io(_socket.handle);
@@ -1488,6 +1608,16 @@ private:
     bool _connected;
     InetAddress _remote;
     UDPRecvHandler _on_recv;
+    EtherEndpoint* _ether;
+
+    void on_ether_recv(EtherEndpoint*, const(void)[] data, MACAddress src, ushort src_port, MonoTime rx_time)
+    {
+        if (_on_recv)
+        {
+            InetAddress from = InetAddress(src.b, src_port);
+            _on_recv(&this, data, from, rx_time);
+        }
+    }
 
     version (UseInternalIPStack)
     {
@@ -1634,6 +1764,8 @@ nothrow @nogc:
             register_frame_handler(PacketType.ethernet, &_stack.on_packet);
             // TODO: register additional frame handlers when other L3 carriers land
             //       (PacketType._6lowpan, ppp/IPCP frame type, raw_ip tunnels).
+
+            set_ether_tcp_input(&ether_tcp_input);
 
             import protocol.ip.tcp : tcp_print;
             g_app.console.register_command!tcp_print("/protocol/ip/tcp", this, "print");
@@ -1940,10 +2072,18 @@ version (UseInternalIPStack)
         TCPConnection* c = defaultAllocator().allocT!TCPConnection();
         c._pcb = pcb;
         c._phase = TCPConnection.Phase.open;
-        c._remote = InetAddress(pcb.remote_addr, pcb.remote_port);
+        c._remote = pcb.remote;
         pcb.conn_owner = c;
         _tcp_conns ~= c;
         return c;
+    }
+
+    // Installed as the ether tap's tcp hook: segments addressed to a station arrive here.
+    void ether_tcp_input(MACAddress src, MACAddress dst, const(void)[] segment, MonoTime rx_time)
+    {
+        import protocol.ip.tcp : tcp_segment_input;
+        if (_stack_ptr)
+            tcp_segment_input(*_stack_ptr, InetAddress(src.b, 0), InetAddress(dst.b, 0), cast(const(ubyte)[])segment, rx_time);
     }
 }
 else version (Windows)
