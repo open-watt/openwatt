@@ -143,53 +143,38 @@ nothrow @nogc:
 
     // Properties...
 
-    ModbusProtocol protocol() const pure
-        => _protocol;
-    const(char)[] protocol(ModbusProtocol value)
-    {
-        if (value == ModbusProtocol.unknown)
-            return "Error: Invalid modbus protocol 'unknown'";
-        _protocol = value;
-        _support_simultaneous_requests = value == ModbusProtocol.tcp;
-        mark_set!(typeof(this), "protocol")();
+    final ModbusProtocol protocol() const
+        => prop_read!(ModbusInterface, "protocol");
+    final void protocol(ModbusProtocol value)
+        => prop_write!(ModbusInterface, "protocol")(value);
 
-        if (_protocol == ModbusProtocol.tcp && _stream)
+    final bool master() const
+        => prop_read!(ModbusInterface, "master");
+    final void master(bool value)
+        => prop_write!(ModbusInterface, "master")(value);
+
+    final uint baud() const
+        => prop_read!(ModbusInterface, "baud");
+    final void baud(uint value)
+        => prop_write!(ModbusInterface, "baud")(value);
+
+    final bool estimate_baud() const
+        => prop_read!(ModbusInterface, "estimate-baud");
+    final void estimate_baud(bool value)
+        => prop_write!(ModbusInterface, "estimate-baud")(value);
+
+    static const(char)[] protocol_check(ref ModbusProtocol value)
+        => value == ModbusProtocol.unknown ? "Invalid modbus protocol 'unknown'" : null;
+
+    void protocol_changed()
+    {
+        _support_simultaneous_requests = protocol == ModbusProtocol.tcp;
+        if (protocol == ModbusProtocol.tcp && _stream)
         {
             import router.stream.serial : SerialStream;
             if (cast(SerialStream)_stream)
                 log.warning("Modbus-TCP has no CRC; using TCP framing over a serial line may cause silent data corruption");
         }
-
-        return null;
-    }
-
-    bool master() const pure
-        => _is_bus_master;
-    void master(bool value)
-    {
-        if (_is_bus_master == value)
-            return;
-
-        _is_bus_master = value;
-        if (value)
-            _master_address = 0;
-        mark_set!(typeof(this), "master")();
-        restart();
-    }
-
-    uint baud() const pure
-        => _user_baud;
-    void baud(uint value)
-    {
-        _user_baud = value;
-        restart();
-    }
-
-    bool estimate_baud() const pure
-        => _estimate_baud;
-    void estimate_baud(bool value)
-    {
-        _estimate_baud = value;
     }
 
     inout(Stream) stream() inout pure
@@ -208,7 +193,7 @@ nothrow @nogc:
 
         if (_stream)
         {
-            if (_protocol == ModbusProtocol.tcp)
+            if (protocol == ModbusProtocol.tcp)
             {
                 import router.stream.serial : SerialStream;
                 if (cast(SerialStream)_stream)
@@ -243,9 +228,9 @@ nothrow @nogc:
             {
                 unsubscribe_stream();
                 _stream = null;  // remote takes ownership of the stream slot
-                if (_protocol == ModbusProtocol.unknown)
-                    _protocol = ModbusProtocol.tcp;
-                mark_set!(typeof(this), [ "remote", "stream", "protocol" ])();
+                if (protocol == ModbusProtocol.unknown)
+                    protocol = ModbusProtocol.tcp;
+                mark_set!(typeof(this), [ "remote", "stream" ])();
                 restart();
             }
             return r;
@@ -255,9 +240,9 @@ nothrow @nogc:
             _conn.remote(value);
             unsubscribe_stream();
             _stream = null;
-            if (_protocol == ModbusProtocol.unknown)
-                _protocol = ModbusProtocol.tcp;
-            mark_set!(typeof(this), [ "remote", "stream", "protocol" ])();
+            if (protocol == ModbusProtocol.unknown)
+                protocol = ModbusProtocol.tcp;
+            mark_set!(typeof(this), [ "remote", "stream" ])();
             restart();
         }
 
@@ -270,16 +255,10 @@ nothrow @nogc:
             restart();
         }
 
-        bool tls() const pure
-            => _tls;
-        void tls(bool value)
-        {
-            if (_tls == value)
-                return;
-            _tls = value;
-            mark_set!(typeof(this), "tls")();
-            restart();
-        }
+        final bool tls() const
+            => prop_read!(ModbusInterface, "tls");
+        final void tls(bool value)
+            => prop_write!(ModbusInterface, "tls")(value);
 
         bool keepalive() const pure
             => _conn.keepalive;
@@ -292,15 +271,19 @@ nothrow @nogc:
         alias Properties = AliasSeq!(Prop!("stream", stream),
                                      Prop!("remote", remote),
                                      Prop!("port", port),
-                                     Prop!("tls", tls),
+                                     Elem!("tls", bool, OnChange!restart),
                                      Prop!("keepalive", keepalive),
-                                     Prop!("protocol", protocol),
-                                     Prop!("master", master));
+                                     Elem!("protocol", ModbusProtocol, Check!protocol_check, OnChange!protocol_changed),
+                                     Elem!("master", bool, OnChange!restart),
+                                     Elem!("baud", uint, OnChange!restart),
+                                     Elem!("estimate-baud", bool));
     }
     else
         alias Properties = AliasSeq!(Prop!("stream", stream),
-                                     Prop!("protocol", protocol),
-                                     Prop!("master", master));
+                                     Elem!("protocol", ModbusProtocol, Check!protocol_check, OnChange!protocol_changed),
+                                     Elem!("master", bool, OnChange!restart),
+                                     Elem!("baud", uint, OnChange!restart),
+                                     Elem!("estimate-baud", bool));
 
 
     // API...
@@ -335,7 +318,7 @@ protected:
         bool have_target = _stream !is null;
         static if (has_ip)
             have_target = have_target || _conn.has_remote();
-        return have_target && (!master || _protocol != ModbusProtocol.unknown);
+        return have_target && (!master || protocol != ModbusProtocol.unknown);
     }
 
     override CompletionStatus startup()
@@ -344,10 +327,11 @@ protected:
         {
             if (!_stream && _conn.has_remote())
             {
-                if (!_conn.start(this, _tls ? 802 : 502, _tls))
+                if (!_conn.start(this, tls ? 802 : 502, tls))
                     return CompletionStatus.error;
-                if (_protocol == ModbusProtocol.unknown)
-                    _protocol = ModbusProtocol.tcp;
+                // startup's protocol inference is not user configuration: poke the element without marking
+                if (protocol == ModbusProtocol.unknown)
+                    prop_element(prop_index!(ModbusInterface, "protocol")).try_write(ModbusProtocol.tcp);
             }
         }
 
@@ -367,7 +351,7 @@ protected:
         super.online();
 
         // allocate a universal address for the remote bus master on non-master interfaces
-        if (!_is_bus_master && _master_address == 0)
+        if (!master && _master_address == 0)
             _master_address = get_module!ModbusProtocolModule().allocate_universal_address(ephemeral: true);
 
         // compute timing parameters from baud rate
@@ -381,10 +365,10 @@ protected:
             }
             else
             {
-                uint baud = _user_baud != 0 ? _user_baud : _estimated_baud != 0 ? _estimated_baud : 9_600;
-                compute_timing(baud);
+                uint remote_baud = baud != 0 ? baud : _estimated_baud != 0 ? _estimated_baud : 9_600;
+                compute_timing(remote_baud);
                 _gap_time_us = 0;
-                _baud_estimated = _user_baud != 0 || _estimated_baud != 0;
+                _baud_estimated = baud != 0 || _estimated_baud != 0;
             }
         }
 
@@ -440,7 +424,7 @@ protected:
         _queue.timeout_stale(getTime());
 
         // estimate remote baud rate for TCP bridges after collecting stats
-        if (_estimate_baud && !_baud_estimated && !_support_simultaneous_requests && _status.tx_packets >= 20)
+        if (estimate_baud && !_baud_estimated && !_support_simultaneous_requests && _status.tx_packets >= 20)
             estimate_remote_baud();
 
         send_queued_messages();
@@ -467,7 +451,7 @@ protected:
         auto mod_mb = get_module!ModbusProtocolModule();
         ref const ModbusFrame hdr = packet.hdr!ModbusFrame();
 
-        if (_is_bus_master)
+        if (master)
         {
             if (hdr.type != ModbusFrameType.request)
             {
@@ -560,18 +544,13 @@ private:
     {
         import protocol.ip.client : IPClient;
         IPClient _conn;
-        bool _tls;
     }
 
-    ModbusProtocol _protocol;
-    bool _is_bus_master;
     bool _support_simultaneous_requests = false;
     uint _request_timeout = 800;   // ms - computed from baud rate in startup()
     uint _queue_timeout = 2500;    // ms - computed from baud rate in startup()
     uint _gap_time_us = 4000;      // microseconds - computed from baud rate in startup()
-    uint _user_baud;               // explicit remote baud rate (0 = not set)
     uint _estimated_baud;          // estimated remote baud rate for TCP bridges
-    bool _estimate_baud;           // enable auto-estimation of remote baud rate
     bool _baud_estimated;
     MonoTime _last_receive_event;
 
@@ -932,10 +911,10 @@ private:
         // across a bridge the far-side serial bus is the bottleneck and the transport rate would wildly
         // overstate it, so report only a baud we were told or measured; native Modbus/TCP has no serial
         // segment, and there the transport rate is the honest answer
-        if (auto serial = cast(SerialStream)_stream)
+        if (auto serial = cast(SerialStream)stream)
             set_link_speed(serial.baud_rate);
-        else if (_protocol != ModbusProtocol.tcp)
-            set_link_speed(_user_baud != 0 ? _user_baud : _estimated_baud);
+        else if (protocol != ModbusProtocol.tcp)
+            set_link_speed(baud != 0 ? baud : _estimated_baud);
         else if (Stream s = active_stream())
             set_link_speed(s.tx_link_speed, s.rx_link_speed);
         else
@@ -951,7 +930,7 @@ private:
             log.debug_("packet received: (", message.length, ")[ ", message[], " ]");
 
         // if we are the bus master, then we can only receive responses...
-        ModbusFrameType type = _is_bus_master ? ModbusFrameType.response : frame_info.frame_type;
+        ModbusFrameType type = master ? ModbusFrameType.response : frame_info.frame_type;
         if (type == ModbusFrameType.unknown && _expect_message_type != ModbusFrameType.unknown)
         {
             // if we haven't seen a packet for longer than the timeout interval, then we can't trust our guess
@@ -970,7 +949,7 @@ private:
             auto mod_mb = get_module!ModbusProtocolModule();
             ServerMap* map = mod_mb.find_server_by_local_address(frame_info.address, this);
 
-            if (_is_bus_master)
+            if (master)
             {
                 // master iface: incoming = response from a slave we polled
                 if (!map)
@@ -999,7 +978,7 @@ private:
         hdr.type = type;
         hdr.function_code = cast(ubyte)frame_info.function_code;
 
-        if (_is_bus_master)
+        if (master)
         {
             if (!_support_simultaneous_requests)
             {
