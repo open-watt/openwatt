@@ -6,6 +6,7 @@ import urt.log;
 import urt.map;
 import urt.meta;
 import urt.meta.enuminfo : bitfield;
+import urt.mem.alloc : alloc, free;
 import urt.mem.string;
 import urt.mem.temp;
 import urt.variant;
@@ -16,7 +17,9 @@ import urt.traits : Parameters, ReturnType, Unqual;
 import urt.util : min;
 
 import manager.console.argument;
+import manager.element : Access, Element, SampleUpdate, SamplingMode;
 import manager.id;
+import manager.series : DataFormat, FormatId, register_format, valid;
 import manager.value;
 
 public import manager.collection : CID, Collection, CollectionType, collection_type_info, CollectionTypeInfo;
@@ -100,13 +103,34 @@ template Prop(string name, alias member, string category = null, string flags = 
     enum f = flags;
 }
 
+template Elem(string name, PropType, options...)
+{
+    enum is_elem = true;
+    enum n = name;
+    alias T = PropType;
+    alias opts = options;
+}
+
+// no Step: Constraint.check honours min/max and check_fn only, so a declared step would not validate
+template Default(alias v)   { enum kind = "default";   alias value = v; }
+template Min(alias v)       { enum kind = "min";       alias value = v; }
+template Max(alias v)       { enum kind = "max";       alias value = v; }
+template Check(alias f)     { enum kind = "check";     alias fn = f; }
+struct ReadOnly             { enum kind = "read_only"; }
+template OnChange(alias f)  { enum kind = "on_change"; alias fn = f; }
+template Category(string s) { enum kind = "category";  enum value = s; }
+template PropFlags(string s){ enum kind = "flags";     enum value = s; }
+
 struct Property
 {
-    alias GetFun = Variant function(BaseObject i) nothrow @nogc;
-    alias SetFun = StringResult function(ref const Variant value, BaseObject i) nothrow @nogc;
+    alias GetFun = Variant function(BaseObject i, ref const Property p) nothrow @nogc;
+    alias SetFun = StringResult function(ref const Variant value, BaseObject i, ref const Property p) nothrow @nogc;
     alias ResetFun = void function(BaseObject i) nothrow @nogc;
     alias DefaultFun = Variant function() nothrow @nogc;
     alias SuggestFun = Array!String function(const(char)[] arg) nothrow @nogc;
+    alias FormatFun = FormatId function() nothrow @nogc;
+    alias ChangeFun = void function(BaseObject i) nothrow @nogc;
+    alias CheckFun = const(char)[] function(void* value) nothrow @nogc; // value is a `ref T` of the declared type
 
     String name;
     String[2] type; // up to 2 types (sometimes like enum + string, or enum + int)
@@ -115,7 +139,13 @@ struct Property
     SetFun set;
     DefaultFun init_val;
     SuggestFun suggest;
+    FormatFun elem_format;  // non-null = element-backed; interns the format on first call
+    ChangeFun on_change;
+    CheckFun check;
+    ushort index;           // == element slot in the property block
     ubyte flags;
+    // not `set is null` like a legacy read-only property: the owner still writes through it
+    bool read_only;
 
     static Property create(string name, alias member, string category = null, string flags = null)()
     {
@@ -125,9 +155,7 @@ struct Property
         Property prop;
         prop.name = StringLit!name;
         prop.category = category ? StringLit!category : String();
-        prop.flags = flags.contains('*') ? 1 : 0; // always
-        prop.flags |= flags.contains('d') ? 2 : 0; // default
-        prop.flags |= flags.contains('h') ? 4 : 0; // hidden
+        prop.flags = parse_prop_flags(flags);
 
         alias Getters = FilterOverloads!(IsGetter, member);
         alias Setters = FilterOverloads!(IsSetter, member);
@@ -170,6 +198,47 @@ struct Property
         // synthesise suggest
         static if (Suggests.length > 0)
             prop.suggest = &SynthSuggest!Suggests;
+
+        return prop;
+    }
+
+    static Property create_elem(alias Decl, size_t index)()
+    {
+        alias T = Decl.T;
+
+        Property prop;
+        prop.name = StringLit!(Decl.n);
+
+        alias Cat = FindElemOpt!("category", Decl.opts);
+        static if (Cat.length)
+            prop.category = StringLit!(Cat[0].value);
+
+        alias Fl = FindElemOpt!("flags", Decl.opts);
+        static if (Fl.length)
+            prop.flags = parse_prop_flags(Fl[0].value);
+
+        prop.read_only = FindElemOpt!("read_only", Decl.opts).length != 0;
+
+        enum type = type_for!T;
+        static if (type)
+            prop.type[0] = StringLit!type;
+
+        prop.index = cast(ushort)index;
+        prop.get = &elem_get;
+        prop.set = &elem_set!T;
+        prop.init_val = &ElemDefault!Decl;
+        prop.elem_format = &ElemFormat!Decl;
+
+        static if (is(typeof(suggest_completion!T)))
+            prop.suggest = &suggest_completion!T;
+
+        alias Chk = FindElemOpt!("check", Decl.opts);
+        static if (Chk.length)
+            prop.check = &CheckShim!(Chk[0].fn, T);
+
+        alias Change = FindElemOpt!("on_change", Decl.opts);
+        static if (Change.length)
+            prop.on_change = &ElemOnChange!(Change[0].fn);
 
         return prop;
     }
@@ -216,6 +285,19 @@ nothrow @nogc:
         _props_set |= ulong(1) << prop_index!(typeof(this), "name") |
                       ulong(1) << prop_index!(typeof(this), "type") |
                       ulong(1) << prop_index!(typeof(this), "flags");
+
+        build_prop_elements();
+    }
+
+    ~this()
+    {
+        if (!_prop_elements)
+            return;
+        foreach (i, p; _typeInfo.properties)
+            if (p.elem_format)
+                _prop_elements[i].teardown();
+        free((cast(void*)_prop_elements)[0 .. _typeInfo.properties.length * Element.sizeof]);
+        _prop_elements = null;
     }
 
     // Properties...
@@ -293,6 +375,24 @@ nothrow @nogc:
     final const(Property*)[] properties() const
         => _typeInfo.properties;
 
+    final ref inout(Element) prop_element(size_t index) inout
+    {
+        debug assert(_prop_elements && _typeInfo.properties[index].elem_format, "property is not element-backed");
+        return _prop_elements[index];
+    }
+
+    ElemType!(Type, prop) prop_read(Type, string prop)() const
+        => prop_element(prop_index!(Type, prop)).read!(ElemType!(Type, prop));
+
+    void prop_write(Type, string prop)(auto ref ElemType!(Type, prop) value)
+    {
+        enum index = prop_index!(Type, prop);
+        StringResult r = elem_apply(this, *_typeInfo.properties[index], value);
+        debug assert(r, tconcat("write to property '", prop, "' refused: ", r.message));
+        if (r)
+            _props_set |= ulong(1) << index;
+    }
+
     // get and set and reset (to default) properties
     final Variant get(scope const(char)[] property)
     {
@@ -302,7 +402,7 @@ nothrow @nogc:
             {
                 // some properties aren't get-able...
                 if (p.get)
-                    return p.get(this);
+                    return p.get(this, *p);
                 return Variant();
             }
         }
@@ -316,9 +416,9 @@ nothrow @nogc:
         {
             if (p.name[] == property)
             {
-                if (!p.set)
+                if (!p.set || p.read_only)
                     return StringResult(tconcat("Property '", property, "' is read-only"));
-                auto r = p.set(value, this);
+                auto r = p.set(value, this, *p);
                 if (r)
                 {
                     // safety-net tracking for old-style classes; for new-style
@@ -348,8 +448,10 @@ nothrow @nogc:
         {
             if (p.name[] == property)
             {
+                if (p.read_only)
+                    return;
                 if (p.set && p.init_val)
-                    p.set(p.init_val(), this);
+                    p.set(p.init_val(), this, *p);
                 _props_set &= ~(ulong(1) << i);
                 mark_dirty(i);
                 return;
@@ -391,7 +493,7 @@ nothrow @nogc:
             }
 
             if (add_item)
-                props.emplaceBack(p.name[], p.get(this));
+                props.emplaceBack(p.name[], p.get(this, *p));
         }
         return Variant(props[]);
     }
@@ -494,6 +596,56 @@ private:
     const CacheString _type; // TODO: DELETE THIS MEMBER!!!
     package CID _id;
     String _comment;
+    Element* _prop_elements;
+
+    void build_prop_elements()
+    {
+        const(Property*)[] props = _typeInfo.properties;
+        bool any = false;
+        foreach (p; props)
+        {
+            if (p.elem_format)
+            {
+                any = true;
+                break;
+            }
+        }
+        if (!any)
+            return;
+
+        void[] mem = alloc(props.length * Element.sizeof);
+        (cast(ubyte[])mem)[] = 0;
+        _prop_elements = cast(Element*)mem.ptr;
+
+        foreach (i, p; props)
+        {
+            if (!p.elem_format)
+                continue;
+            ref Element e = _prop_elements[i];
+            e.id = p.name;
+            e.format = p.elem_format();
+            e.access = p.read_only ? Access.read : Access.read_write;
+            e.sampling_mode = SamplingMode.config;
+            // no EID: id.d's (object CID, prop index + 1) has no resolver, so it would deref to null
+            if (p.init_val)
+            {
+                Variant def = p.init_val();
+                if (!def.isNull)
+                    e.try_set(def);
+            }
+            e.subscribe(&prop_element_changed); // after the default write: defaults are not changes
+        }
+    }
+
+    void prop_element_changed(ref const SampleUpdate update)
+    {
+        size_t index = update.element - _prop_elements;
+        ref const Property p = *_typeInfo.properties[index];
+        // a proxy's elements carry the authority's echo; reacting locally would drive absent hardware
+        if (p.on_change && !_is_remote)
+            p.on_change(this);
+        mark_dirty(index);
+    }
 }
 
 class ActiveObject : BaseObject
@@ -1067,11 +1219,51 @@ template MaterialProperties(Type)
         assert(__ctfe);
         Property[Count] r;
         static foreach (i; 0 .. Count)
-            r[i] = Property.create!(Type.Properties[i].n, Type.Properties[i].p, Type.Properties[i].c, Type.Properties[i].f)();
+        {
+            static if (is(typeof(Type.Properties[i].is_elem)))
+                r[i] = Property.create_elem!(Type.Properties[i], prop_index!(Type, Type.Properties[i].n))();
+            else
+                r[i] = Property.create!(Type.Properties[i].n, Type.Properties[i].p, Type.Properties[i].c, Type.Properties[i].f)();
+        }
         return r;
     }
     __gshared const MaterialProperties = _make();
 }
+
+// '*' always, 'd' default, 'h' hidden
+ubyte parse_prop_flags(string flags) pure
+{
+    ubyte r = flags.contains('*') ? 1 : 0;
+    r |= flags.contains('d') ? 2 : 0;
+    r |= flags.contains('h') ? 4 : 0;
+    return r;
+}
+
+template FindElemOpt(string kind, Opts...)
+{
+    alias FindElemOpt = AliasSeq!();
+    static foreach (Opt; Opts)
+        static if (Opt.kind == kind)
+            FindElemOpt = AliasSeq!(FindElemOpt, Opt);
+}
+
+template elem_decl(Type, string prop)
+{
+    static if (has_local_properties!Type)
+    {
+        static foreach (P; Type.Properties)
+            static if (is(typeof(P.is_elem)) && P.n == prop)
+                alias local = P;
+    }
+    static if (is(typeof(local)))
+        alias elem_decl = local;
+    else static if (is(Type S == super) && !is(S[0] == Object))
+        alias elem_decl = elem_decl!(S[0], prop);
+    else
+        static assert(false, "no element-backed property '" ~ prop ~ "' on " ~ Type.stringof);
+}
+
+alias ElemType(Type, string prop) = elem_decl!(Type, prop).T;
 
 auto all_properties_impl(Type, size_t allocCount)()
 {
@@ -1137,7 +1329,7 @@ template HasSuggest(alias Func)
 }
 
 
-Variant SynthGetter(Getters...)(BaseObject item) nothrow @nogc
+Variant SynthGetter(Getters...)(BaseObject item, ref const Property) nothrow @nogc
 {
     static assert(Getters.length == 1, "Only one getter overload is allowed for a property");
     alias Getter = Getters[0];
@@ -1151,7 +1343,7 @@ Variant SynthGetter(Getters...)(BaseObject item) nothrow @nogc
         return to_variant(__traits(child, instance, Getter)());
 }
 
-StringResult SynthSetter(Setters...)(ref const Variant value, BaseObject item) nothrow @nogc
+StringResult SynthSetter(Setters...)(ref const Variant value, BaseObject item, ref const Property) nothrow @nogc
 {
     alias Type = __traits(parent, Setters[0]);
     Type instance = cast(Type)item;
@@ -1181,6 +1373,83 @@ StringResult SynthSetter(Setters...)(ref const Variant value, BaseObject item) n
     if (Setters.length == 1)
         return StringResult(error);
     return StringResult(tconcat("Couldn't set property '" ~ __traits(identifier, Setters[0]) ~ "' with value: ", value));
+}
+
+// The machinery instantiates per value type, never per property: everything property-specific
+// travels as data in the Property. Only a declared Check! costs a per-declaration shim.
+Variant elem_get(BaseObject item, ref const Property p) nothrow @nogc
+    => item._prop_elements[p.index].value;
+
+StringResult elem_apply(T)(BaseObject item, ref const Property p, auto ref T value) nothrow @nogc
+{
+    if (p.check)
+    {
+        if (const(char)[] error = p.check(&value))
+            return StringResult(error);
+    }
+    return StringResult(item._prop_elements[p.index].try_write(value));
+}
+
+StringResult elem_set(T)(ref const Variant value, BaseObject item, ref const Property p) nothrow @nogc
+{
+    T arg;
+    if (const(char)[] error = from_variant(value, arg))
+        return StringResult(error);
+    return elem_apply(item, p, arg.move);
+}
+
+const(char)[] CheckShim(alias fn, T)(void* value) nothrow @nogc
+    => fn(*cast(T*)value);
+
+Variant ElemDefault(alias Decl)() nothrow @nogc
+{
+    alias Def = FindElemOpt!("default", Decl.opts);
+    static if (Def.length)
+        return to_variant(cast(Decl.T)Def[0].value);
+    else static if (__traits(compiles, { Decl.T v = Decl.T.init; return to_variant(v); }))
+        return to_variant(Decl.T.init);
+    else
+        return Variant();
+}
+
+FormatId ElemFormat(alias Decl)() nothrow @nogc
+{
+    __gshared FormatId cached = FormatId.invalid;
+    if (cached.valid)
+        return cached;
+
+    import manager.sample : register_constraint;
+    import manager.series : Constraint, data_format_of, Scalar;
+
+    DataFormat format = data_format_of!(Decl.T)();
+
+    alias Mn = FindElemOpt!("min", Decl.opts);
+    alias Mx = FindElemOpt!("max", Decl.opts);
+    static if (Mn.length || Mx.length)
+    {
+        Constraint c;
+        static if (Mn.length)
+        {
+            c.min = Scalar.of(cast(Decl.T)Mn[0].value);
+            c.has |= Constraint.Has.min;
+        }
+        static if (Mx.length)
+        {
+            c.max = Scalar.of(cast(Decl.T)Mx[0].value);
+            c.has |= Constraint.Has.max;
+        }
+        format.constraint = register_constraint(c);
+    }
+
+    cached = register_format(format);
+    return cached;
+}
+
+void ElemOnChange(alias fn)(BaseObject item) nothrow @nogc
+{
+    alias Type = __traits(parent, fn);
+    Type instance = cast(Type)cast(void*)item; // static cast: the handler only ever binds to its own class
+    __traits(child, instance, fn)();
 }
 
 Variant SynthDefault(alias Getter)() nothrow @nogc
@@ -1222,3 +1491,118 @@ template SynthSuggest(Setters...)
         }
     }
 }
+
+
+version (unittest)
+{
+    private enum TestMode : ubyte { idle, run, fault }
+
+    private final class ElemTestObject : BaseObject
+    {
+        alias Properties = AliasSeq!(Elem!("gain", uint, Default!7, Min!1, Max!10, OnChange!bump),
+                                     Elem!("mode", TestMode, Default!(TestMode.idle)),
+                                     Elem!("label", String),
+                                     Elem!("link", bool, ReadOnly),
+                                     Elem!("offset", uint));
+    nothrow @nogc:
+
+        uint changes;
+
+        this(const CollectionTypeInfo* type_info, CID id, ObjectFlags flags = ObjectFlags.none)
+        {
+            super(type_info, id, flags);
+        }
+
+        void bump()
+        {
+            ++changes;
+        }
+    }
+}
+
+unittest
+{
+    import urt.mem.allocator : defaultAllocator;
+
+    __gshared CollectionTypeInfo test_ti;
+    test_ti = CollectionTypeInfo(StringLit!"elem-test", String(), cast(CollectionType)0,
+                                 all_properties!ElemTestObject(), null, null, false);
+
+    ElemTestObject o = defaultAllocator().allocT!ElemTestObject(&test_ti, CID(1));
+    enum gain = prop_index!(ElemTestObject, "gain");
+
+    // declared defaults apply at construction and are not "changes"
+    assert(o.prop_read!(ElemTestObject, "gain") == 7);
+    assert(o.get("gain").asLong == 7);
+    assert(o.changes == 0);
+    assert(!(o.props_set & (ulong(1) << gain)));
+
+    // console-shaped writes convert, validate, store, and notify
+    Variant v = Variant(5);
+    assert(o.set("gain", v));
+    assert(o.prop_read!(ElemTestObject, "gain") == 5);
+    assert(o.changes == 1);
+    assert(o.props_set & (ulong(1) << gain));
+
+    // held dedup: an equal write is not a change
+    assert(o.set("gain", v));
+    assert(o.changes == 1);
+
+    // constraints refuse with their own message; nothing stores, nothing notifies
+    Variant big = Variant(20);
+    StringResult r = o.set("gain", big);
+    assert(r.failed && r.message == "above maximum");
+    assert(o.prop_read!(ElemTestObject, "gain") == 5);
+    assert(o.changes == 1);
+
+    // enums arrive as strings from the console
+    Variant mode = Variant("run");
+    assert(o.set("mode", mode));
+    assert(o.prop_read!(ElemTestObject, "mode") == TestMode.run);
+
+    // text properties store through the same path
+    Variant label = Variant("charger");
+    assert(o.set("label", label));
+    assert(o.prop_read!(ElemTestObject, "label") == "charger");
+
+    // typed internal writes ride the same path
+    o.prop_write!(ElemTestObject, "gain")(9u);
+    assert(o.prop_read!(ElemTestObject, "gain") == 9);
+    assert(o.changes == 2);
+
+    // reset restores the declared default through the ordinary write path
+    o.reset("gain");
+    assert(o.prop_read!(ElemTestObject, "gain") == 7);
+    assert(o.changes == 3);
+    assert(!(o.props_set & (ulong(1) << gain)));
+
+    // per-T synthesis: same-typed properties share one setter, and the getter is universal
+    enum offset = prop_index!(ElemTestObject, "offset");
+    assert(o.properties[gain].set is o.properties[offset].set);
+    assert(o.properties[gain].set !is o.properties[prop_index!(ElemTestObject, "mode")].set);
+    assert(o.properties[gain].get is o.properties[prop_index!(ElemTestObject, "label")].get);
+
+    // read-only: refused at both external entries, still written by the owner
+    enum link = prop_index!(ElemTestObject, "link");
+    Variant on = Variant(true);
+    StringResult ro = o.set("link", on);
+    assert(ro.failed && ro.message == "Property 'link' is read-only");
+    assert(o.prop_read!(ElemTestObject, "link") == false);
+    o.prop_write!(ElemTestObject, "link")(true);
+    assert(o.prop_read!(ElemTestObject, "link") == true);
+    o.reset("link");
+    assert(o.prop_read!(ElemTestObject, "link") == true);
+    assert(o.prop_element(link).access == Access.read);
+    assert(o.prop_element(gain).access == Access.read_write);
+
+    defaultAllocator().freeT(o);
+
+    // a proxy (is_remote) stores echoed values but never runs on_change side effects
+    ElemTestObject proxy = defaultAllocator().allocT!ElemTestObject(&test_ti, CID(2), ObjectFlags.remote);
+    Variant echoed = Variant(3);
+    assert(proxy.set("gain", echoed));
+    assert(proxy.prop_read!(ElemTestObject, "gain") == 3);
+    assert(proxy.changes == 0);
+    defaultAllocator().freeT(proxy);
+}
+

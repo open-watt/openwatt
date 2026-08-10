@@ -112,7 +112,7 @@ debug void assert_reset_matches_init(BaseObject obj, ref const Property p) nothr
 {
     if (!p.get || !p.init_val)
         return;
-    Variant cur = p.get(obj);
+    Variant cur = p.get(obj, p);
     Variant iv = p.init_val();
     assert(cur == iv, "encode_reset: prop value diverges from init_val - receiver assumes init");
 }
@@ -135,7 +135,7 @@ nothrow @nogc:
 
     // Mirror protocol - object lifecycle
 
-    // Encoder walks obj.properties() and reads each via p.get(obj) while
+    // Encoder walks obj.properties() and reads each via p.get while
     // encoding. No pre-extracted prop list is passed in.
     abstract void encode_bind(SyncPeer peer, BaseObject obj, uint seq);
     abstract void encode_unbind(SyncPeer peer, CID target, uint seq);

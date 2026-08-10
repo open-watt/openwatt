@@ -112,7 +112,7 @@ nothrow @nogc:
             if (!(set_bits & (ulong(1) << i)) || !p.get || p.name[] == "type")
                 continue;
             _buf.put_str(p.name[]);
-            Variant v = p.get(obj);
+            Variant v = p.get(obj, *p);
             _buf.put_variant(v);
         }
         _buf.put_str(null);
@@ -171,7 +171,7 @@ nothrow @nogc:
         begin_frame(Verb.set);
         _buf.put_varint(peer.handle_of(obj));
         _buf.put_str(p.name[]);
-        Variant v = p.get(obj);
+        Variant v = p.get(obj, *p);
         _buf.put_variant(v);
         _buf.put_varint(seq);
         send_frame(peer);
