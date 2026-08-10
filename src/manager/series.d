@@ -106,6 +106,13 @@ template scalar_type(T)
 {
     static if (is(Unqual!T Base == enum))
         enum scalar_type = value_type_of!Base;
+    else static if (is(Unqual!T == Duration))
+        enum scalar_type = ValueType.s64;
+    else static if (is(Unqual!T == Quantity!(N, scale), N, ScaledUnit scale))
+    {
+        static assert(scale.pack != uint.max, "dynamic quantities have no static format");
+        enum scalar_type = value_type_of!N;
+    }
     else
         enum scalar_type = value_type_of!T;
 }
@@ -377,6 +384,10 @@ nothrow @nogc:
         s.raw[] = 0;
         static if (is(immutable T == immutable bool))
             s.b = v;
+        else static if (is(Unqual!T == Duration))
+            s.i = v.as!"nsecs";
+        else static if (is(Unqual!T == Quantity!(N, scale), N, ScaledUnit scale))
+            return of(v.value);
         else static if (is(immutable T == immutable float))
             s.f32_ = v;
         else static if (is(immutable T == immutable double))

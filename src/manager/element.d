@@ -25,6 +25,7 @@ import urt.mem.string;
 import urt.si.unit : ScaledUnit;
 import urt.string;
 import urt.time;
+import urt.traits : Unqual;
 import urt.variant;
 
 import manager.component;
@@ -287,7 +288,10 @@ nothrow @nogc:
         {
             debug assert(data_format.is_scalar, "element record does not fit the scalar register");
             debug assert(scalar_type!T == data_format.type, "element type mismatch");
-            return *cast(const(T)*)_latest.raw.ptr;
+            static if (is(Unqual!T == Duration))
+                return nsecs(*cast(const(long)*)_latest.raw.ptr);
+            else
+                return *cast(const(T)*)_latest.raw.ptr;
         }
     }
 
