@@ -31,3 +31,16 @@ through them and remove sections as they are absorbed.
 - New command `/interface/ethernet/discover`: broadcast sweep listing OW stations on the
   segment with their system name and universal addresses. Anything that offered broadcast
   ping as a discovery affordance should move to it.
+
+## 2026-08-10: constant-valued elements no longer carry a one-record history
+
+- An element that has never been given a retention policy now keeps its latest value
+  directly and has no series behind it. This is the normal case for `constant`/`config`
+  elements, notably the whole `info.*` subtree (manufacturer, model, serial, firmware).
+- Consequence for clients: a history/backfill request for such an element returns an empty
+  range rather than the single synthetic record it used to report. The element's current
+  value, timestamp and metadata are unaffected, so anything rendering the value needs no
+  change; only views that plot or tabulate history should treat "no history" as normal for
+  these rather than as an error or a gap.
+- Elements that do have retention (everything the default policy covers, plus event/point
+  elements) are unchanged.
