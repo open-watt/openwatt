@@ -174,7 +174,7 @@ nothrow @nogc:
     inout(void)* get_key_context() inout
     {
         version (Posix)
-            return cast(inout(void)*)&_keypair.pk;
+            return cast(inout(void)*)_keypair.pk;
         else
             return null;
     }
