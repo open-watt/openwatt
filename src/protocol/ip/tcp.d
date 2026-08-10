@@ -156,7 +156,6 @@ struct TcpPcb
     // connection's lifetime amid mixed traffic. Assigned in tcp_assign_id.
     uint id;
 
-    // 4-tuple; the address family selects the network layer beneath the connection
     InetAddress local;
     InetAddress remote;
 
@@ -390,8 +389,7 @@ bool tcp_connect(ref IPStack stack, TcpPcb* pcb)
     if (pcb.local.port == 0 || pcb.remote.port == 0)
         return false;
     refresh_route(stack, pcb);
-    // ether needs no resolved egress up front: an unbound connect floods its SYN and the
-    // peer's reply pins the source (and with it the egress)
+    // ether needs no egress up front: an unbound connect floods its SYN and the reply pins it
     if (!pcb.route_egress && !pcb.local_delivery && pcb.remote.family != AddressFamily.ether)
         return false;
     if (pcb.local.family == AddressFamily.ipv4 && pcb.local.addr_any)
@@ -572,7 +570,6 @@ private void tcp_app_deliver(TcpPcb* pcb, const(ubyte)[] bytes, MonoTime rx_time
 // -------------------------------------------------------------------------
 // Ingress
 
-// v4 ingress from the stack dispatch: strip the IP header, then the family-generic path.
 void tcp_input(ref IPStack stack, ref Packet pkt)
 {
     if (pkt.data.length < IPv4Header.sizeof + TcpHeader.sizeof)
@@ -592,9 +589,7 @@ void tcp_input(ref IPStack stack, ref Packet pkt)
     tcp_segment_input(stack, InetAddress(IPAddr(ip.src), 0), InetAddress(IPAddr(ip.dst), 0), tcp_seg, pkt.creation_time);
 }
 
-// Family-generic ingress: src/dst carry the network-layer addresses (ports zero here;
-// filled in from the TCP header), tcp_seg is the whole TCP segment. The ether tap
-// delivers here directly, and ipv6 ingress will land here too.
+// src/dst ports arrive zero here; they are filled in from the TCP header
 void tcp_segment_input(ref IPStack stack, InetAddress src, InetAddress dst, const(ubyte)[] tcp_seg, MonoTime rx_time)
 {
     if (tcp_seg.length < TcpHeader.sizeof)
@@ -630,8 +625,7 @@ void tcp_segment_input(ref IPStack stack, InetAddress src, InetAddress dst, cons
         return;
     }
 
-    // Deferred source bind: an unbound local pins to the address the peer reached us at.
-    // (For ether this also selects the egress: refresh_route resolves it from the mac.)
+    // an unbound local pins to the address the peer reached us at; for ether that also picks the egress
     if (!pcb.is_listener && pcb.local.addr_any)
         pcb.local = dst;
 
@@ -1304,8 +1298,6 @@ void send_segment_at(ref IPStack stack, TcpPcb* pcb, ubyte flags, uint seq, cons
 // Build and emit a fully-specified TCP segment. Used both via PCB and for
 // stateless RSTs to unknown 4-tuples. SYN segments include an MSS option;
 // `advertise_mss` is the value to put in the option (caller's responsibility).
-// `egress`/`next_hop` are optional pre-resolved route hints: for v4 they take the
-// fast path through output_v4_routed; for ether, egress is the station itself.
 void send_segment_raw(ref IPStack stack, ref const InetAddress src, ref const InetAddress dst,
                       uint seq, uint ack_val, ubyte flags, ushort window, const(ubyte)[] data,
                       ushort advertise_mss = 0, BaseInterface egress = null, IPAddr next_hop = IPAddr.any)
@@ -1386,8 +1378,7 @@ void send_segment_raw(ref IPStack stack, ref const InetAddress src, ref const In
             MACAddress src_mac = MACAddress(src._a.ether.addr);
             MACAddress dst_mac = MACAddress(dst._a.ether.addr);
 
-            // an unbound source stamps the egress station's own address; the checksum
-            // covers the pseudo-header, so it is computed per emission
+            // the checksum covers the pseudo-header, so it is computed per emission
             void emit(EthernetStation s)
             {
                 MACAddress use_src = src_mac ? src_mac : s.mac;
@@ -1824,8 +1815,6 @@ void refresh_route(ref IPStack stack, TcpPcb* pcb)
 {
     if (pcb.remote.family == AddressFamily.ether)
     {
-        // No routing at L2: a bound local names the station directly; an unbound local
-        // uses the learned neighbour, and until one is known the send path floods.
         if (pcb.route_egress)
             return;
         EthernetStation station;
@@ -2029,8 +2018,7 @@ ushort pseudo_header_checksum_v4(IPAddr src, IPAddr dst, ubyte protocol, ushort 
 }
 
 
-// Pseudo-header checksum for ether-carried segments. Over ether both ends are us, so
-// the pseudo-header is our own definition: [src:6][dst:6][0][protocol][length:2].
+// our own definition, not an RFC one: [src:6][dst:6][0][protocol][length:2]
 ushort pseudo_header_checksum_ether(MACAddress src, MACAddress dst, ubyte protocol, ushort transport_length) pure
 {
     ubyte[16] ph = void;
@@ -2043,7 +2031,6 @@ ushort pseudo_header_checksum_ether(MACAddress src, MACAddress dst, ubyte protoc
 }
 
 
-// Pseudo-header checksum for the segment's address family.
 // TODO: udp_output/udp_input converge on this once UdpPcb adopts InetAddress addressing.
 ushort transport_pseudo_checksum(ref const InetAddress src, ref const InetAddress dst, ubyte protocol, ushort transport_length) pure
 {

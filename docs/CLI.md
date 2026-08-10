@@ -347,6 +347,37 @@ no transport properties.
 /console/session/add name=default stream=console profile=vt100 initial-command="/log/print --stream"
 ```
 
+### `/interface/ethernet`
+
+Ethernet interfaces are a managed collection, and additionally carry the
+mac-ping command. It sends an OW echo request and times the round trip, so
+only OpenWatt stations answer. Requests go out every running ethernet
+station, which makes a broadcast destination a discovery sweep across all
+segments.
+
+| Command | Syntax | Description |
+| --- | --- | --- |
+| `ping` | `/interface/ethernet/ping address=<mac> [count=<count>] [identify=<bool>]` | Times echo round trips to `address`, one request per second. |
+
+| Argument | Values | Default | Description |
+| --- | --- | --- | --- |
+| `address` | mac address | required | Destination. A broadcast address sweeps for responders. |
+| `count` | request count | `4` | Number of requests to send; `0` is treated as `1`. |
+| `identify` | `true` or `false` | `true` | Asks responders to name themselves, printing the name with each reply. |
+
+Each reply prints as `reply from <mac>: time=<rtt>`, with the responder's
+identity appended when it supplied one. A summary of
+`<replies> replies for <sent> requests` closes the command, and Ctrl+C
+cancels it early.
+
+Ethernet stations also answer 802.1ag loopback messages, so standard L2 OAM
+equipment can mac-ping an OpenWatt station without OW support.
+
+```text
+/interface/ethernet/ping address=ff:ff:ff:ff:ff:ff count=1
+/interface/ethernet/ping address=02:13:37:aa:bb:64 count=10 identify=false
+```
+
 ### `/interface/udp`
 
 A UDP interface is a raw-packet interface over UDP datagrams: one datagram is

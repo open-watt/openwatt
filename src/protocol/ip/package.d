@@ -271,8 +271,7 @@ TCPConnection* tcp_connect(InetAddress remote, TCPRecvHandler on_recv, TCPEventH
             return null;     // TODO: ipv6
         if (remote.family == AddressFamily.ether)
         {
-            // a bound local names the station; unbound floods the SYN and the peer's
-            // reply pins the source, so replies must be heard on every segment
+            // unbound floods the SYN, so the reply must be heard on every segment
             if (local && local.family == AddressFamily.ether && !local.addr_any)
             {
                 EthernetStation station = find_ether_station(MACAddress(local._a.ether.addr));
@@ -591,10 +590,7 @@ UDPEndpoint* udp_open(const(InetAddress)* local, const(InetAddress)* remote, UDP
     }
 }
 
-// Datagrams addressed by (mac, port): same UDPEndpoint, backed by the ether transport
-// instead of a socket or PCB. A station's mac as the local address binds the endpoint
-// to that interface; a null local or the zero mac is a wildcard bind: receive on every
-// ethernet segment, egress by learned neighbour with unknown-unicast flooding.
+// a null local or the zero mac is a wildcard bind: every segment, egress by learned neighbour
 private UDPEndpoint* udp_open_ether(const(InetAddress)* local, const(InetAddress)* remote, UDPRecvHandler on_recv)
 {
     if (local && local.family != AddressFamily.ether)
@@ -2076,7 +2072,6 @@ version (UseInternalIPStack)
         return c;
     }
 
-    // Installed as the ether tap's tcp hook: segments addressed to a station arrive here.
     void ether_tcp_input(MACAddress src, MACAddress dst, const(void)[] segment, MonoTime rx_time)
     {
         import protocol.ip.tcp : tcp_segment_input;

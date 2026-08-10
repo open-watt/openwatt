@@ -748,8 +748,7 @@ nothrow @nogc:
 
     override void post_init()
     {
-        // after init: the platform ethernet collections own /interface/ethernet by now,
-        // so this lands as an extension command on that scope
+        // post_init: the platform ethernet collections own the scope by now, so this extends it
         g_app.console.register_command!mac_ping("/interface/ethernet", this, "ping");
     }
 
@@ -760,8 +759,6 @@ nothrow @nogc:
         expire_mac_pings();
     }
 
-    // OW mac-ping: `/interface/ethernet/ping address=<mac> [count=] [identify=]`.
-    // Pings go out every running station; broadcast address makes it a discovery sweep.
     MacPingState mac_ping(Session session, MACAddress address, Nullable!uint count, Nullable!bool identify)
     {
         if (!address)

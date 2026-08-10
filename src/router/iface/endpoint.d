@@ -16,9 +16,6 @@ import router.iface.packet;
 nothrow @nogc:
 
 
-// Transport segments carried directly over the segment: the OW header supplies the fields the
-// IP header would have (addressing and protocol number); the payload is a regular transport
-// header + data, so TCP/UDP machinery is unaware the network layer beneath it is not IP.
 enum TransportProto : ubyte
 {
     tcp = 6,    // IP protocol numbers
@@ -42,7 +39,6 @@ nothrow @nogc:
 
     alias is_multicast = Ethernet.is_multicast;
 
-    // [dst:6][src:6][protocol:u8]
     static ptrdiff_t encode_ow_header(ref const Packet p, ubyte[] buffer)
     {
         if (buffer.length < 13)
@@ -72,14 +68,12 @@ alias EtherRecvHandler = void delegate(EtherEndpoint* ep, const(void)[] data, MA
 alias EtherTcpInput = void function(MACAddress src, MACAddress dst, const(void)[] segment, MonoTime rx_time) nothrow @nogc;
 
 
-// TCP-over-ether segments are handed up through this hook; the IP module installs it
-// when the internal TCP machinery is present.
+// null unless the IP module installs it; switch builds carry no TCP
 void set_ether_tcp_input(EtherTcpInput handler)
 {
     g_ether_tcp_input = handler;
 }
 
-// The station whose mac is `mac`, if any: ether local addresses name their interface.
 EthernetStation find_ether_station(MACAddress mac)
 {
     import manager.collection : Collection;
@@ -106,9 +100,7 @@ void foreach_ether_station(scope void delegate(EthernetStation) nothrow @nogc si
     }
 }
 
-// Egress cache for unbound sources: (peer mac -> station) learned passively from tap
-// ingress, the arp-cache analogue. A miss means the caller floods every segment
-// (unknown-unicast flooding, self-limiting); the peer's reply populates the entry.
+// the arp-cache analogue; a miss means the caller floods, and the reply populates the entry
 EthernetStation ether_neighbour_lookup(MACAddress mac)
 {
     if (EtherNeighbour* e = mac.ul in _neighbours)
@@ -122,16 +114,11 @@ EthernetStation ether_neighbour_lookup(MACAddress mac)
     return null;
 }
 
-// Wildcard consumers (bind-any endpoints, unbound connects, any-listeners) need every
-// segment tapped; once requested, the module sweep keeps taps on all stations.
 void ether_request_tap_all()
 {
     _tap_all = true;
 }
 
-// One ether_transport subscription per station, demuxing to endpoints and the tcp hook.
-// Endpoints and pcbs bound to the station share it; the module sweep re-subscribes if
-// the station is destroyed and recreated with the same name.
 void ensure_ether_tap(EthernetStation station)
 {
     foreach (t; _taps[])
@@ -146,13 +133,7 @@ void ensure_ether_tap(EthernetStation station)
 }
 
 
-// Open an ether-UDP datagram endpoint bound to a local port (0 = ephemeral). A non-null
-// iface binds the endpoint to that station; a null iface is a wildcard bind: datagrams
-// are accepted on every ethernet segment, and egress uses the learned neighbour (or
-// floods unknown unicast). Datagrams to the receiving station's MAC and broadcast are
-// delivered; multicast groups via join(). A remote restricts delivery to that peer and
-// enables send(). Bound endpoints track their interface by reference; they ride out
-// restarts and re-attach if the interface is destroyed and recreated with the same name.
+// a null iface is a wildcard bind: every segment, egress by learned neighbour
 EtherEndpoint* ether_open(EthernetStation iface, ushort port, EtherRecvHandler on_recv,
                           MACAddress remote = MACAddress(), ushort remote_port = 0)
 {
@@ -218,7 +199,6 @@ nothrow @nogc:
         _groups.removeFirstSwapLast(group);
     }
 
-    // Send to the remote given at open. Returns bytes sent, or 0.
     ptrdiff_t send(scope const(void)[] data)
         => _remote ? sendto(_remote, _remote_port, data) : 0;
 
@@ -234,7 +214,7 @@ nothrow @nogc:
         u.src_port = _local_port.nativeToBigEndian;
         u.dst_port = dst_port.nativeToBigEndian;
         u.length = nativeToBigEndian(cast(ushort)(UdpSegHeader.sizeof + data.length));
-        u.checksum[] = 0;    // link CRC covers integrity
+        u.checksum[] = 0;
         buf[UdpSegHeader.sizeof .. UdpSegHeader.sizeof + data.length] = (cast(const(ubyte)[])data)[];
         const(ubyte)[] frame = buf[0 .. UdpSegHeader.sizeof + data.length];
 
@@ -246,7 +226,6 @@ nothrow @nogc:
             return emit(i, dst, frame) ? data.length : 0;
         }
 
-        // wildcard: learned neighbour picks the segment; unknown (or multicast) floods them all
         if (EthernetStation i = ether_neighbour_lookup(dst))
             return emit(i, dst, frame) ? data.length : 0;
         bool sent = false;
@@ -257,7 +236,7 @@ nothrow @nogc:
         return sent ? data.length : 0;
     }
 
-    // Teardown is deferred to the module sweep; safe to call from the recv handler.
+    // deferred to the module sweep; safe to call from the recv handler
     void close()
     {
         _closing = true;
@@ -341,7 +320,7 @@ private:
 
 enum encap_overhead = 5 + 13 + UdpSegHeader.sizeof;     // ow framing + ether-transport header + udp header
 
-// standard UDP header; over ether the checksum is unused (transmitted zero, ignored on receive)
+// checksum is transmitted zero and ignored on receive; the link CRC covers integrity
 struct UdpSegHeader
 {
     ubyte[2] src_port;      // big-endian
@@ -400,8 +379,7 @@ nothrow @nogc:
 
     void on_iface_state(ActiveObject, StateSignal signal)
     {
-        // Subscriptions on the dying object vanish with it; the module sweep
-        // re-subscribes if an interface with the same name reappears.
+        // subscriptions die with the object; the module sweep re-subscribes if the name reappears
         if (signal == StateSignal.destroyed)
             _subscribed = false;
     }
