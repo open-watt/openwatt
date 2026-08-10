@@ -122,6 +122,11 @@ nothrow @nogc:
         raw = container.raw | (ulong(index) << 32);
     }
 
+    this(ulong raw_value) pure
+    {
+        raw = raw_value;
+    }
+
     CID container() const pure
         => CID(cast(uint)raw);
 
