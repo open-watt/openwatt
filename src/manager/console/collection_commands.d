@@ -556,7 +556,7 @@ void populate_collection_table(ref Table table, BaseCollection collection)
                 continue;
             if (!prop_visible(p.flags, proplist, p.name[]))
                 continue;
-            table.cell(p.get(item));
+            table.cell(p.get(item, *p));
         }
     }
 }

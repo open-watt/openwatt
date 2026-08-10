@@ -270,6 +270,52 @@ nothrow @nogc:
     Variant value() @property const
         => record_value();
 
+    T read(T)() const
+    {
+        static if (is(T == String))
+        {
+            debug assert(data_format.is_text, "element does not hold text");
+            debug assert(!_history, "text series has no String handle; read const(char)[]");
+            return _last_update == SysTime() ? String() : text_register;
+        }
+        else static if (is(T : const(char)[]))
+        {
+            debug assert(data_format.is_text, "element does not hold text");
+            return text_value();
+        }
+        else
+        {
+            debug assert(data_format.is_scalar, "element record does not fit the scalar register");
+            debug assert(scalar_type!T == data_format.type, "element type mismatch");
+            return *cast(const(T)*)_latest.raw.ptr;
+        }
+    }
+
+    const(char)[] try_write(T)(auto ref T v, SysTime t = getSysTime(), Subscriber who = null)
+    {
+        assert(format.valid, "element has no data format");
+        static if (is(T == String) || is(T : const(char)[]))
+        {
+            if (!data_format.is_text)
+                return "incompatible value";
+            store_sample(v, t, who);
+            return null;
+        }
+        else
+        {
+            if (!data_format.is_scalar || scalar_type!T != data_format.type)
+                return "incompatible value";
+            static if (is(T Base == enum))
+                Scalar s = Scalar.of(cast(Base)v);
+            else
+                Scalar s = Scalar.of(v);
+            if (const(char)[] error = data_format.constraint ? data_format.constraint.check(s, *data_format) : null)
+                return error;
+            store_record(s.raw[0 .. data_format.stride], t, who);
+            return null;
+        }
+    }
+
     void value(T)(auto ref T v, SysTime timestamp = getSysTime(), Subscriber who = null)
     {
         assert(format.valid, "element has no data format");
@@ -767,6 +813,20 @@ public:
 
     void teardown()
     {
+        // deferred machinery holds raw Element pointers; a dying element must vanish from both
+        if (_status & Flags.dirty_listed)
+        {
+            g_dirty_elements.removeFirstSwapLast(&this);
+            _status &= ~Flags.dirty_listed;
+        }
+        for (size_t i = 0; i < g_pending_updates.length; )
+        {
+            if (g_pending_updates[i].element is &this)
+                g_pending_updates.remove(i);
+            else
+                ++i;
+        }
+
         release_register();
         if (_history)
         {
@@ -1943,6 +2003,20 @@ unittest
         w.close_series_cursor(wc);
         w.teardown();
     }
+
+    // teardown mid-commit: the dying element's pending updates and dirty listing must vanish
+    add_feed_listener();
+    Element dying;
+    dying.format = register_format(f64_held);
+    begin_commit();
+    dying.write_sample(1.0, from_unix_time_ns(1_000));
+    assert(g_pending_updates.length == 1);
+    assert(g_dirty_elements[].contains(&dying));
+    dying.teardown();
+    assert(g_pending_updates.empty);
+    assert(!g_dirty_elements[].contains(&dying));
+    end_commit();
+    remove_feed_listener();
 
     // TODO: regular-series test returns once regular write_records() and rate-aware tick() are built
 }

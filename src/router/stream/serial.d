@@ -82,41 +82,27 @@ struct ModemLines
     bool cts, dsr, dcd, ri; // what the peer presents
 }
 
-struct SerialParams
-{
-    this(int baud)
-    {
-        this.baud_rate = baud;
-    }
-
-    uint baud_rate = 9600;
-    ubyte data_bits = 8;
-    StopBits stop_bits = StopBits.one;
-    Parity parity = Parity.none;
-    FlowControl flow_control = FlowControl.none;
-}
-
 class SerialStream : Stream
 {
     version (Embedded)
         alias Properties = AliasSeq!(Prop!("device", device),
-                                     Prop!("baud-rate", baud_rate),
-                                     Prop!("data-bits", data_bits),
-                                     Prop!("parity", parity),
-                                     Prop!("stop-bits", stop_bits),
-                                     Prop!("flow-control", flow_control),
-                                     Prop!("tx-gpio", tx_gpio),
-                                     Prop!("rx-gpio", rx_gpio),
-                                     Prop!("rts-gpio", rts_gpio),
-                                     Prop!("cts-gpio", cts_gpio),
-                                     Prop!("de-gpio", de_gpio));
+                                     Elem!("baud-rate", uint, Default!9600, Min!1, OnChange!restart),
+                                     Elem!("data-bits", ubyte, Default!8, Min!5, Max!9, OnChange!restart),
+                                     Elem!("parity", Parity, Default!(Parity.none), Check!parity_check, OnChange!restart),
+                                     Elem!("stop-bits", StopBits, Default!(StopBits.one), OnChange!restart),
+                                     Elem!("flow-control", FlowControl, Default!(FlowControl.none), OnChange!flow_control_changed),
+                                     Elem!("tx-gpio", byte, Default!(-1), OnChange!restart),
+                                     Elem!("rx-gpio", byte, Default!(-1), OnChange!restart),
+                                     Elem!("rts-gpio", byte, Default!(-1), OnChange!restart),
+                                     Elem!("cts-gpio", byte, Default!(-1), OnChange!restart),
+                                     Elem!("de-gpio", byte, Default!(-1), OnChange!restart));
     else
         alias Properties = AliasSeq!(Prop!("device", device),
-                                     Prop!("baud-rate", baud_rate),
-                                     Prop!("data-bits", data_bits),
-                                     Prop!("parity", parity),
-                                     Prop!("stop-bits", stop_bits),
-                                     Prop!("flow-control", flow_control));
+                                     Elem!("baud-rate", uint, Default!9600, Min!1, OnChange!restart),
+                                     Elem!("data-bits", ubyte, Default!8, Min!5, Max!8, OnChange!restart),
+                                     Elem!("parity", Parity, Default!(Parity.none), OnChange!restart),
+                                     Elem!("stop-bits", StopBits, Default!(StopBits.one), OnChange!restart),
+                                     Elem!("flow-control", FlowControl, Default!(FlowControl.none), OnChange!flow_control_changed));
 nothrow @nogc:
 
     enum type_name = "serial";
@@ -163,80 +149,50 @@ nothrow @nogc:
         }
     }
 
-    final uint baud_rate() const pure
-        => _params.baud_rate;
-    final StringResult baud_rate(uint value)
+    final uint baud_rate() const
+        => prop_read!(SerialStream, "baud-rate");
+    final void baud_rate(uint value)
+        => prop_write!(SerialStream, "baud-rate")(value);
+
+    final ubyte data_bits() const
+        => prop_read!(SerialStream, "data-bits");
+    final void data_bits(ubyte value)
+        => prop_write!(SerialStream, "data-bits")(value);
+
+    final Parity parity() const
+        => prop_read!(SerialStream, "parity");
+    final void parity(Parity value)
+        => prop_write!(SerialStream, "parity")(value);
+
+    final StopBits stop_bits() const
+        => prop_read!(SerialStream, "stop-bits");
+    final void stop_bits(StopBits value)
+        => prop_write!(SerialStream, "stop-bits")(value);
+
+    final FlowControl flow_control() const
+        => prop_read!(SerialStream, "flow-control");
+    final void flow_control(FlowControl value)
+        => prop_write!(SerialStream, "flow-control")(value);
+
+    version (Embedded)
     {
-        if (value == 0)
-            return StringResult("baud rate must be greater than 0");
-        if (_params.baud_rate == value)
-        {
-            mark_set!(typeof(this), "baud-rate")();
-            return StringResult.success;
-        }
-        _params.baud_rate = value;
-        mark_set!(typeof(this), "baud-rate");
-        restart();
-        return StringResult.success;
+        final byte tx_gpio() const
+            => prop_read!(SerialStream, "tx-gpio");
+        final byte rx_gpio() const
+            => prop_read!(SerialStream, "rx-gpio");
+        final byte rts_gpio() const
+            => prop_read!(SerialStream, "rts-gpio");
+        final byte cts_gpio() const
+            => prop_read!(SerialStream, "cts-gpio");
+        final byte de_gpio() const
+            => prop_read!(SerialStream, "de-gpio");
+
+        static const(char)[] parity_check(ref Parity value)
+            => value > Parity.odd ? "UART only supports none, even, or odd parity" : null;
     }
 
-    uint data_bits() const pure
-        => _params.data_bits;
-    StringResult data_bits(uint value)
+    void flow_control_changed()
     {
-        version (Embedded)
-            enum uint max_data_bits = 9;
-        else
-            enum uint max_data_bits = 8;
-        if (value < 5 || value > max_data_bits)
-            return StringResult(max_data_bits == 9 ? "data bits must be between 5 and 9" : "data bits must be between 5 and 8");
-        if (_params.data_bits == cast(ubyte)value)
-        {
-            mark_set!(typeof(this), "data-bits")();
-            return StringResult.success;
-        }
-        _params.data_bits = cast(ubyte)value;
-        mark_set!(typeof(this), "data-bits");
-        restart();
-        return StringResult.success;
-    }
-
-    Parity parity() const pure
-        => _params.parity;
-    const(char)[] parity(Parity value)
-    {
-        version (Embedded)
-        {
-            if (value > Parity.odd)
-                return "UART only supports none, even, or odd parity";
-        }
-        if (_params.parity == value)
-            return null;
-        _params.parity = value;
-        mark_set!(typeof(this), "parity");
-        restart();
-        return null;
-    }
-
-    StopBits stop_bits() const pure
-        => _params.stop_bits;
-    void stop_bits(StopBits value)
-    {
-        if (_params.stop_bits == value)
-            return;
-        _params.stop_bits = value;
-        mark_set!(typeof(this), "stop-bits");
-        restart();
-    }
-
-    FlowControl flow_control() const pure
-        => _params.flow_control;
-    void flow_control(FlowControl value)
-    {
-        if (_params.flow_control == value)
-            return;
-        _params.flow_control = value;
-        mark_set!(typeof(this), "flow-control");
         // reconfigure the open port in place rather than restart(): a close/reopen cycles the modem
         // lines the peer sees, which both disturbs flow-control-sensitive devices (Silabs NCPs stop
         // transmitting) and makes runtime flow-control experiments unrepresentative
@@ -246,54 +202,6 @@ nothrow @nogc:
         {
             if (!running || !configure_port(false))
                 restart();
-        }
-    }
-
-    version (Embedded)
-    {
-        final byte tx_gpio() const pure
-            => _tx_gpio;
-        final void tx_gpio(byte value)
-        {
-            _tx_gpio = value;
-            mark_set!(typeof(this), "tx-gpio");
-            restart();
-        }
-
-        final byte rx_gpio() const pure
-            => _rx_gpio;
-        final void rx_gpio(byte value)
-        {
-            _rx_gpio = value;
-            mark_set!(typeof(this), "rx-gpio");
-            restart();
-        }
-
-        final byte rts_gpio() const pure
-            => _rts_gpio;
-        final void rts_gpio(byte value)
-        {
-            _rts_gpio = value;
-            mark_set!(typeof(this), "rts-gpio");
-            restart();
-        }
-
-        final byte cts_gpio() const pure
-            => _cts_gpio;
-        final void cts_gpio(byte value)
-        {
-            _cts_gpio = value;
-            mark_set!(typeof(this), "cts-gpio");
-            restart();
-        }
-
-        final byte de_gpio() const pure
-            => _de_gpio;
-        final void de_gpio(byte value)
-        {
-            _de_gpio = value;
-            mark_set!(typeof(this), "de-gpio");
-            restart();
         }
     }
 
@@ -337,22 +245,22 @@ nothrow @nogc:
             __gshared immutable bm.Parity[5] parity_map = [ bm.Parity.none, bm.Parity.even, bm.Parity.odd, bm.Parity.none, bm.Parity.none ];
 
             bm.UartConfig cfg;
-            cfg.baud_rate = _params.baud_rate;
-            cfg.data_bits = _params.data_bits;
-            cfg.stop_bits = stop_bits_map[_params.stop_bits];
-            cfg.parity = parity_map[_params.parity];
-            if (_tx_gpio >= 0)
-                cfg.tx_gpio = cast(ubyte)_tx_gpio;
-            if (_rx_gpio >= 0)
-                cfg.rx_gpio = cast(ubyte)_rx_gpio;
-            if (_rts_gpio >= 0)
-                cfg.rts_gpio = cast(ubyte)_rts_gpio;
-            if (_cts_gpio >= 0)
-                cfg.cts_gpio = cast(ubyte)_cts_gpio;
-            if (_de_gpio >= 0)
+            cfg.baud_rate = baud_rate;
+            cfg.data_bits = data_bits;
+            cfg.stop_bits = stop_bits_map[stop_bits];
+            cfg.parity = parity_map[parity];
+            if (tx_gpio >= 0)
+                cfg.tx_gpio = cast(ubyte)tx_gpio;
+            if (rx_gpio >= 0)
+                cfg.rx_gpio = cast(ubyte)rx_gpio;
+            if (rts_gpio >= 0)
+                cfg.rts_gpio = cast(ubyte)rts_gpio;
+            if (cts_gpio >= 0)
+                cfg.cts_gpio = cast(ubyte)cts_gpio;
+            if (de_gpio >= 0)
             {
                 cfg.rs485.enabled = true;
-                cfg.rs485.de_gpio = cast(ubyte)_de_gpio;
+                cfg.rs485.de_gpio = cast(ubyte)de_gpio;
             }
 
             Result opened;
@@ -424,17 +332,17 @@ nothrow @nogc:
 
             dcb._bf = 1;
 
-            dcb.BaudRate = DWORD(_params.baud_rate);
-            dcb.ByteSize = _params.data_bits;
+            dcb.BaudRate = DWORD(baud_rate);
+            dcb.ByteSize = data_bits;
 
-            if (_params.stop_bits == StopBits.one)
+            if (stop_bits == StopBits.one)
                 dcb.StopBits = ONESTOPBIT;
-            else if (_params.stop_bits == StopBits.one_point_five)
+            else if (stop_bits == StopBits.one_point_five)
                 dcb.StopBits = ONE5STOPBITS;
-            else if (_params.stop_bits == StopBits.two)
+            else if (stop_bits == StopBits.two)
                 dcb.StopBits = TWOSTOPBITS;
 
-            switch (_params.parity)
+            switch (parity)
             {
                 case Parity.none:   dcb.Parity = NOPARITY;      break;
                 case Parity.even:   dcb.Parity = EVENPARITY;    break;
@@ -443,12 +351,12 @@ nothrow @nogc:
                 case Parity.space:  dcb.Parity = SPACEPARITY;   break;
                 default: assert(false);
             }
-            if (_params.parity != Parity.none)
+            if (parity != Parity.none)
                 dcb._bf |= 2; // fParity: set to enable parity checking?
 
             // RTS idles asserted ("host ready") in the non-hardware modes: we always have receive
             // buffer, and peers that honor RTS/CTS (Silabs NCPs) stop transmitting if it idles low
-            switch (_params.flow_control)
+            switch (flow_control)
             {
                 case FlowControl.none:
                     dcb._bf &= ~4; // fOutxCtsFlow
@@ -535,9 +443,9 @@ nothrow @nogc:
             {
                 // other Posix: standard rates only, via the classic cfsetospeed/Bxxx path.
                 speed_t speed;
-                if (!posix_baud(_params.baud_rate, speed))
+                if (!posix_baud(baud_rate, speed))
                 {
-                    log.error("unsupported serial baud rate ", _params.baud_rate);
+                    log.error("unsupported serial baud rate ", baud_rate);
                     return false;
                 }
                 if (cfsetospeed(&tty, speed) != 0 || cfsetispeed(&tty, speed) != 0)
@@ -545,7 +453,7 @@ nothrow @nogc:
             }
 
             tty.c_cflag &= ~(PARENB | PARODD | CMSPAR);
-            final switch (_params.parity)
+            final switch (parity)
             {
                 case Parity.none:
                     break;
@@ -564,30 +472,30 @@ nothrow @nogc:
             }
 
             tty.c_cflag &= ~CSTOPB;
-            if (_params.stop_bits == StopBits.two)
+            if (stop_bits == StopBits.two)
                 tty.c_cflag |= CSTOPB;
-            else if (_params.stop_bits == StopBits.one_point_five)
+            else if (stop_bits == StopBits.one_point_five)
             {
                 log.error("1.5 stop bits are not supported on Posix");
                 return false;
             }
 
             tty.c_cflag &= ~CSIZE;
-            switch (_params.data_bits)
+            switch (data_bits)
             {
                 case 5: tty.c_cflag |= CS5; break;
                 case 6: tty.c_cflag |= CS6; break;
                 case 7: tty.c_cflag |= CS7; break;
                 case 8: tty.c_cflag |= CS8; break;
                 default:
-                    log.error("unsupported data bits: ", _params.data_bits);
+                    log.error("unsupported data bits: ", data_bits);
                     return false;
             }
 
             tty.c_cflag &= ~CRTSCTS;
             tty.c_cflag |= CREAD | CLOCAL;
             tty.c_iflag &= ~(IXON | IXOFF | IXANY);
-            final switch (_params.flow_control)
+            final switch (flow_control)
             {
                 case FlowControl.none:
                     break;
@@ -619,9 +527,9 @@ nothrow @nogc:
                 return false;
             version (linux)
             {
-                if (!set_linux_custom_baud(_fd, _params.baud_rate))
+                if (!set_linux_custom_baud(_fd, baud_rate))
                 {
-                    log.error("failed to set baud rate ", _params.baud_rate);
+                    log.error("failed to set baud rate ", baud_rate);
                     return false;
                 }
             }
@@ -629,7 +537,7 @@ nothrow @nogc:
             // RTS idles asserted ("host ready") in the non-hardware modes: we always have receive
             // buffer, and peers that honor RTS/CTS (Silabs NCPs) stop transmitting if it idles low
             int dtr_bit = TIOCM_DTR, rts_bit = TIOCM_RTS;
-            final switch (_params.flow_control)
+            final switch (flow_control)
             {
                 case FlowControl.none:
                     ioctl(_fd, TIOCMBIC, &dtr_bit);
@@ -963,8 +871,8 @@ nothrow @nogc:
     final bool set_rts(bool asserted)
     {
         // RTS is owned by the UART under hardware (RTS/CTS) flow control; refuse rather than fight it
-        assert(_params.flow_control != FlowControl.hardware, "cannot drive RTS manually while hardware flow control owns it");
-        if (_params.flow_control == FlowControl.hardware)
+        assert(flow_control != FlowControl.hardware, "cannot drive RTS manually while hardware flow control owns it");
+        if (flow_control == FlowControl.hardware)
             return false;
         version (Windows)
             return _h_com != INVALID_HANDLE_VALUE && EscapeCommFunction(_h_com, asserted ? SETRTS : CLRRTS) != 0;
@@ -982,8 +890,8 @@ nothrow @nogc:
     final bool set_dtr(bool asserted)
     {
         // DTR is owned by the UART under DSR/DTR flow control
-        assert(_params.flow_control != FlowControl.dsr_dtr, "cannot drive DTR manually while DSR/DTR flow control owns it");
-        if (_params.flow_control == FlowControl.dsr_dtr)
+        assert(flow_control != FlowControl.dsr_dtr, "cannot drive DTR manually while DSR/DTR flow control owns it");
+        if (flow_control == FlowControl.dsr_dtr)
             return false;
         version (Windows)
             return _h_com != INVALID_HANDLE_VALUE && EscapeCommFunction(_h_com, asserted ? SETDTR : CLRDTR) != 0;
@@ -1064,15 +972,6 @@ private:
     }
 
     String _device;
-    SerialParams _params;
-    version (Embedded)
-    {
-        byte _tx_gpio = -1;
-        byte _rx_gpio = -1;
-        byte _rts_gpio = -1;
-        byte _cts_gpio = -1;
-        byte _de_gpio = -1;
-    }
 
     version (Windows)
     {

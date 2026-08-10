@@ -102,6 +102,14 @@ template value_type_of(T)
     else static if (is(U == char))   enum value_type_of = ValueType.char_;
 }
 
+template scalar_type(T)
+{
+    static if (is(Unqual!T Base == enum))
+        enum scalar_type = value_type_of!Base;
+    else
+        enum scalar_type = value_type_of!T;
+}
+
 FormatId register_value_format(T)(auto ref const T value)
 {
     static if (is(Unqual!T == Variant))
@@ -111,27 +119,29 @@ FormatId register_value_format(T)(auto ref const T value)
 }
 
 FormatId register_value_format(T)()
+    => register_format(data_format_of!T());
+
+DataFormat data_format_of(T)()
 {
     alias U = Unqual!T;
     static if (is_boolean!U || is_some_int!U || is_some_float!U)
-        return register_format(DataFormat(value_type_of!U, SeriesKind.held));
+        return DataFormat(value_type_of!U, SeriesKind.held);
     else static if (is(U Base == enum))
-        return register_format(DataFormat(value_type_of!Base, SeriesKind.held, enum_info!U.make_void()));
+        return DataFormat(value_type_of!Base, SeriesKind.held, enum_info!U.make_void());
     else static if (is(U == String) || is(U : const(char)[]))
     {
         DataFormat format = DataFormat(ValueType.char_, SeriesKind.held);
         format.count = 0;
-        return register_format(format);
+        return format;
     }
     else static if (is(U == Duration))
-        return register_format(DataFormat(ValueType.s64, SeriesKind.held, Nanosecond));
+        return DataFormat(ValueType.s64, SeriesKind.held, Nanosecond);
     else static if (is(U == Quantity!(N, scale), N, ScaledUnit scale))
-        return register_format(DataFormat(value_type_of!N, SeriesKind.held, scale));
+        return DataFormat(value_type_of!N, SeriesKind.held, scale);
     else static if (ValidUserType!U)
     {
         alias registered = MakeTypeDetails!U;   // registration rides its shared static this
-        return register_format(DataFormat(ValueType.user, SeriesKind.held,
-                                          &find_type_details(TypeDetailsFor!U.type_id)));
+        return DataFormat(ValueType.user, SeriesKind.held, &find_type_details(TypeDetailsFor!U.type_id));
     }
     else
         static assert(false, "value needs an explicit record format");

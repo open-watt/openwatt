@@ -134,7 +134,7 @@ nothrow @nogc:
         _buf.append(",\"prop\":");
         write_str(p.name[]);
         _buf.append(",\"value\":");
-        Variant v = p.get(obj);
+        Variant v = p.get(obj, *p);
         write_variant(v);
         if (seq)
             _buf.append(",\"seq\":", seq);
@@ -1008,7 +1008,7 @@ private:
                 _buf ~= ',';
             write_str(p.name[]);
             _buf ~= ':';
-            Variant val = p.get(obj);
+            Variant val = p.get(obj, *p);
             write_variant(val);
         }
         if (any)
