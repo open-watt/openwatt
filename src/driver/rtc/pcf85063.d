@@ -88,8 +88,16 @@ nothrow @nogc:
         _writing = false;
 
         _time = value;
+        _time_valid = true;
         mark_set!(typeof(this), "time")();
         return StringResult.success;
+    }
+
+    override const(char)[] status_message() const pure
+    {
+        if (running && !_time_valid)
+            return "Waiting for clock source";
+        return super.status_message();
     }
 
 protected:
@@ -126,6 +134,13 @@ protected:
 
         if (_request_failed)
         {
+            if (_last_error == PCF85063Error.oscillator_stopped)
+            {
+                log.info("RTC has never been set; waiting for a clock source");
+                set_last_error(PCF85063Error.none);
+                reset_operation();
+                return CompletionStatus.complete;
+            }
             if (_last_error == PCF85063Error.none)
                 set_last_error(PCF85063Error.transport);
             log.error("failed to read RTC at address ", _address);
@@ -136,6 +151,7 @@ protected:
             return CompletionStatus.continue_;
 
         _time = get_sys_time(_response_time);
+        _time_valid = true;
         set_utc_time(unix_time_ns(_time));
         mark_set!(typeof(this), "time")();
         log.info("restored UTC time ", _response_time);
@@ -162,6 +178,13 @@ protected:
         {
             if (_request_failed)
                 log.error("failed to persist updated UTC time");
+            else
+            {
+                _time = get_sys_time();
+                _time_valid = true;
+                mark_set!(typeof(this), "time")();
+                set_last_error(PCF85063Error.none);
+            }
             reset_operation();
         }
     }
@@ -185,6 +208,7 @@ private:
     bool _response_received;
     bool _request_failed;
     bool _writing;
+    bool _time_valid;
     PCF85063Error _last_error;
     SysTime _time;
     DateTime _response_time;
