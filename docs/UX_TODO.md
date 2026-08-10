@@ -20,3 +20,14 @@ through them and remove sections as they are absorbed.
   `/stream/udp` in pickers/forms must drop it.
 - Log sinks can no longer be given a UDP transport (syslog over UDP is unavailable) until
   sinks can bind a packet interface.
+
+## 2026-08-10: ethernet stations gain `cfm-level`; mac ping/discover CLI split
+
+- All ethernet-station interface collections (platform ethernet, bridge, vlan, wifi, udp)
+  gain a `cfm-level` property (0-7, default 7): the 802.1ag maintenance level the station
+  answers loopback at. Clients rendering interface detail/edit views may surface it.
+- `/interface/ethernet/ping` no longer accepts `identify=` and rejects multicast/broadcast
+  addresses; it is now a unicast 802.1ag loopback (works against third-party CFM gear).
+- New command `/interface/ethernet/discover`: broadcast sweep listing OW stations on the
+  segment with their system name and universal addresses. Anything that offered broadcast
+  ping as a discovery affordance should move to it.
