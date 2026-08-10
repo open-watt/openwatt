@@ -142,7 +142,7 @@ private:
         AdapterChange c = apply_os_adapter_info(this, _l2mtu, _max_l2mtu, _status, info);
         if (c & AdapterChange.mtu)       mark_set!(typeof(this), [ "l2mtu", "actual-mtu" ])();
         if (c & AdapterChange.max_mtu)   mark_set!(typeof(this), "max-l2mtu")();
-        if (c & AdapterChange.connected) mark_set!(typeof(this), [ "connected", "status" ])();
+        if (c & AdapterChange.connected) { mark_set!(typeof(this), "connected")(); write_status(); }
         set_link_speed(info.tx_link_speed, info.rx_link_speed);
     }
 }
