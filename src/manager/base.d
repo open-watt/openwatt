@@ -1504,6 +1504,9 @@ template SynthSuggest(Setters...)
 
 version (unittest)
 {
+    import urt.si.quantity : Quantity;
+    import urt.si.unit : ScaledUnit, Second, Watt;
+
     private enum TestMode : ubyte { idle, run, fault }
 
     private final class ElemTestObject : BaseObject
@@ -1512,7 +1515,10 @@ version (unittest)
                                      Elem!("mode", TestMode, Default!(TestMode.idle)),
                                      Elem!("label", String),
                                      Elem!("link", bool, ReadOnly),
-                                     Elem!("offset", uint));
+                                     Elem!("offset", uint),
+                                     Elem!("timeout", Duration, Default!(msecs(800))),
+                                     Elem!("power", Quantity!(int, ScaledUnit(Watt))),
+                                     Elem!("delay", Quantity!(int, ScaledUnit(Second, -3))));
     nothrow @nogc:
 
         uint changes;
@@ -1610,6 +1616,33 @@ unittest
     assert(o.find_prop_element(0) is null);                                     // the container, not a property
     assert(o.find_prop_element(1) is null);                                     // legacy property, not element-backed
     assert(o.find_prop_element(cast(ushort)(o.properties.length + 1)) is null); // out of range
+
+    // Duration round-trips: the declared default applies, strings parse, and the box comes back as a duration
+    assert(o.prop_read!(ElemTestObject, "timeout") == msecs(800));
+    Variant timeout = Variant("5s");
+    assert(o.set("timeout", timeout));
+    assert(o.prop_read!(ElemTestObject, "timeout") == seconds(5));
+    assert(o.get("timeout").asDuration == seconds(5));
+    o.prop_write!(ElemTestObject, "timeout")(msecs(1500));
+    assert(o.get("timeout").asDuration == msecs(1500));
+
+    // Quantity round-trips through both doors and boxes with its unit
+    o.prop_write!(ElemTestObject, "power")(Quantity!(int, ScaledUnit(Watt))(240));
+    assert(o.prop_read!(ElemTestObject, "power").value == 240);
+    assert(o.get("power").asQuantity!double().value == 240);
+    Variant power = Variant("100W");
+    assert(o.set("power", power));
+    assert(o.prop_read!(ElemTestObject, "power").value == 100);
+
+    // durations and seconds-dimension quantities interchange at every boundary: a Variant
+    // stores a Duration as Quantity!(long, Nanosecond), so the generic paths do the work
+    Variant five_s = Variant(Quantity!long(5, ScaledUnit(Second)));
+    assert(o.set("timeout", five_s));                       // quantity -> Duration element, scale-adjusted
+    assert(o.prop_read!(ElemTestObject, "timeout") == seconds(5));
+    Variant dur = Variant(msecs(1500));
+    assert(o.set("delay", dur));                            // duration -> millisecond quantity element
+    assert(o.prop_read!(ElemTestObject, "delay").value == 1500);
+    assert(!o.set("power", dur));                           // the dimension gate still holds
 
     defaultAllocator().freeT(o);
 
