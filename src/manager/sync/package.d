@@ -217,7 +217,7 @@ nothrow @nogc:
                 SyncEncoder enc = encoder_for(p._encoder);
                 foreach (node; p._pending_vals[])
                 {
-                    Element* e = g_app.devices.resolve(node);
+                    Element* e = resolve_element(node);
                     SyncHandle h = p.handle_of(node);
                     if (!e || h == SyncPeer.invalid_handle)
                         continue;
@@ -1137,7 +1137,7 @@ nothrow @nogc:
             e = g_app.find_element(a.subject);
         }
         else
-            e = g_app.devices.resolve(from.node_of(handle));
+            e = resolve_element(from.node_of(handle));
         if (!e)
         {
             enc.encode_err(from, seq, path.length ? "unknown_path" : "unknown_handle", path);
@@ -1183,7 +1183,7 @@ nothrow @nogc:
         import urt.time : from_unix_time_ns;
 
         EID node = from.node_of(handle);
-        Element* e = g_app.devices.resolve(node);
+        Element* e = resolve_element(node);
         if (!e)
         {
             log.warning("sync: val for unknown handle ", handle);
