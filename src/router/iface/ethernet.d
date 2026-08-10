@@ -34,9 +34,7 @@ nothrow @nogc:
         return forward(p, callback);
     }
 
-    // OW mac-ping: time an echo round-trip to dst (broadcast for discovery sweeps).
-    // Each reply invokes handler; identify asks responders to name themselves.
-    // The pending entry expires quietly after 10s unless cancelled earlier.
+    // the pending entry expires quietly after 10s unless cancelled
     final uint ping(MACAddress dst, bool identify, MacPingHandler handler)
     {
         uint cookie = _next_ping_cookie++;
@@ -360,10 +358,8 @@ private:
         return MACAddress.broadcast;
     }
 
-    // 802.1ag / Y.1731 loopback responder: an LBM (opcode 3) addressed to this station
-    // is answered with an LBR (opcode 2) echoing the whole PDU, so standard L2 OAM gear
-    // can mac-ping us. We answer at any MD level; a full MEP would filter by configured
-    // level, which we don't model.
+    // 802.1ag LBM (opcode 3) is answered with an LBR (opcode 2) echoing the whole PDU
+    // we answer at any MD level; a real MEP would filter by configured level
     void cfm_ingress(ref const Packet packet)
     {
         enum ubyte opcode_lbr = 2, opcode_lbm = 3;

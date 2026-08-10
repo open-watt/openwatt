@@ -15,6 +15,14 @@ module router.iface.udp;
 //
 // TODO: broadcast tx needs SO_BROADCAST and multicast rx needs a group join; UDPEndpoint exposes neither yet
 // TODO: l2mtu assumes a 1500-byte link MTU; query the real path MTU from the endpoint when it can report one
+// TODO: raw-frame compatibility. rx delivers UDPFrame, so PacketFilter(raw) consumers that sit happily on
+//   ASH or a CPCEndpoint see nothing here (tx already accepts raw). Reconcile along CPC's trunk/leaf split:
+//   [ ] connected mode (unicast remote) should deliver RawFrame on rx: the peer is fixed by configuration,
+//       so the UDPFrame header adds nothing, and the interface becomes a drop-in raw pipe. Multi-drop keeps
+//       UDPFrame; a consumer with no notion of peers can't sit on a multi-drop segment anyway.
+//   [ ] if a consumer ever needs per-peer sessions over one socket: peer sub-interfaces bound to a
+//       multi-drop trunk, each presenting one peer as a raw pipe (the CPCEndpoint shape), possibly spawned
+//       dynamically on first datagram from an unknown peer like the TCP server spawns streams.
 
 import urt.inet;
 import urt.lifetime;
