@@ -137,7 +137,7 @@ Collections are the backbone of runtime object management. Key features:
 
 **Property type support:** The property system automatically converts CLI arguments to typed properties via `convertVariant()` functions in [src/manager/console/argument.d](src/manager/console/argument.d). Supported types include:
 - Primitives: `bool`, integers, floats, strings
-- Time types: `Duration` (with unit parsing: "5m", "30s"), `SysTime` (Unix timestamps)
+- Time types: `Duration` (with unit parsing: "5m", "30s"), `SysTime` (ISO-8601 date-times: 2026-08-10T12:00:00)
 - Complex types: enums, arrays, Collection references (BaseObject, Device, Component, Stream, Interface)
 - Custom types can be added by implementing `convertVariant()` function
 
