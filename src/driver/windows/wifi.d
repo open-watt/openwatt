@@ -400,7 +400,8 @@ private:
             _current_bssid = MACAddress();
             _current_rssi = 0;
             _signal_quality = 0;
-            mark_set!(typeof(this), [ "ssid", "bssid", "rssi", "signal-quality", "status" ])();
+            mark_set!(typeof(this), [ "ssid", "bssid", "rssi", "signal-quality" ])();
+            write_status();
         }
         else
         {
@@ -419,7 +420,8 @@ private:
             if (r._wlan.query_rssi(r._guid, rssi))
                 _current_rssi = rssi;
 
-            mark_set!(typeof(this), [ "ssid", "bssid", "rssi", "signal-quality", "status" ])();
+            mark_set!(typeof(this), [ "ssid", "bssid", "rssi", "signal-quality" ])();
+            write_status();
         }
 
         OSAdapterInfo info;

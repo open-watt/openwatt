@@ -693,8 +693,8 @@ private:
 
 class ActiveObject : BaseObject
 {
-    alias Properties = AliasSeq!(Prop!("running", running, null, "h"),
-                                 Prop!("status", status_message, null, "d"));
+    alias Properties = AliasSeq!(Elem!("running", bool, ReadOnly, PropFlags!"h"),
+                                 Elem!("status", String, ReadOnly, PropFlags!"d"));
 nothrow @nogc:
 
     this(const CollectionTypeInfo* type_info, CID id, ObjectFlags flags = ObjectFlags.none)
@@ -709,6 +709,7 @@ nothrow @nogc:
 
         _props_set |= (ulong(1) << prop_index!(typeof(this), "running")) |
                       (ulong(1) << prop_index!(typeof(this), "status"));
+        write_status();
     }
 
     ~this()
@@ -734,7 +735,7 @@ nothrow @nogc:
             _state &= ~_disabled;
         mark_set!(typeof(this), "disabled")();
         mark_set!(typeof(this), "flags")();
-        mark_set!(typeof(this), "status")();
+        write_status();
     }
 
     // TODO: PUT FINAL BACK WHEN EVERYTHING PORTED!
@@ -810,6 +811,7 @@ nothrow @nogc:
         _state &= ~(_start | _fail);
         if (was_valid)
             _state |= _stop;    // -> destroying; state machine will run shutdown then transition to destroyed
+        write_status();
 
         if (was_running)
             set_offline();
@@ -831,6 +833,7 @@ nothrow @nogc:
                 if (_state == State.running)
                     return;
                 _state = State.running;
+                write_status();
                 set_online();
                 break;
             case StateSignal.offline:
@@ -838,6 +841,7 @@ nothrow @nogc:
                     return;
                 set_offline();
                 _state = State.disabled;
+                write_status();
                 break;
             case StateSignal.destroyed:
                 if (_state & _destroyed)
@@ -845,6 +849,7 @@ nothrow @nogc:
                 if (_state == State.running)
                     set_offline();
                 _state = State.destroyed;
+                write_status();
                 signal_state_change(StateSignal.destroyed);
                 _subscribers.clear();
                 super.destroy();
@@ -900,12 +905,11 @@ protected:
 
         State old = _state;
 
-        // HACK: probably over-dirty's the property, but when changing the state there's a good chance the status changed too!
-        mark_set!(typeof(this), "status")();
-
         if (new_state == _state)
             return;
         _state = new_state;
+        // held dedup makes redundant status writes free: an unchanged message stores and notifies nothing
+        write_status();
 
         if (old == State.running)
         {
@@ -976,7 +980,7 @@ protected:
         else
             log.trace("online");
 
-        mark_set!(typeof(this), "running")();
+        write_running(true);
         mark_set!(typeof(this), "flags")();
     }
 
@@ -990,7 +994,7 @@ protected:
         signal_state_change(StateSignal.offline);
         offline();
 
-        mark_set!(typeof(this), "running")();
+        write_running(false);
         mark_set!(typeof(this), "flags")();
     }
 
@@ -1000,6 +1004,18 @@ protected:
 
     void offline()
     {
+    }
+
+    // push the derived views: state transitions (and any subclass state feeding status_message)
+    // write the elements the moment they change
+    final void write_status()
+    {
+        prop_element(prop_index!(ActiveObject, "status")).try_write(status_message());
+    }
+
+    final void write_running(bool value)
+    {
+        prop_element(prop_index!(ActiveObject, "running")).try_write(value);
     }
 
 

@@ -1192,7 +1192,8 @@ protected:
                 ubyte ch = freq_to_channel(_sta.freq);
                 if (_sta.connected && ch != 0)
                     r.update_active_channel(ch);
-                mark_set!(typeof(this), [ "ssid", "bssid", "rssi", "signal-quality", "status" ])();
+                mark_set!(typeof(this), [ "ssid", "bssid", "rssi", "signal-quality" ])();
+                write_status();
                 if (!_sta.connected)
                 {
                     restart();
@@ -1353,7 +1354,8 @@ private:
                 if (auto r = cast(LinuxWifiRadio)radio)
                     r.update_active_channel(ch);
             }
-            mark_set!(typeof(this), [ "bssid", "rssi", "signal-quality", "status" ])();
+            mark_set!(typeof(this), [ "bssid", "rssi", "signal-quality" ])();
+            write_status();
         }
 
         void ensure_scan_started()
@@ -1371,7 +1373,7 @@ private:
             if (r.start_scan(sc, &on_scan_done))
             {
                 _scan_inflight = true;
-                mark_set!(typeof(this), "status")();
+                write_status();
             }
             else
                 schedule_scan_retry(2.seconds);
@@ -1383,7 +1385,7 @@ private:
                 return;
             _scan_retry_armed = true;
             g_app.schedule(getTime() + delay, &scan_retry_event);
-            mark_set!(typeof(this), "status")();
+            write_status();
         }
 
         void cancel_scan_retry()
@@ -1416,7 +1418,7 @@ private:
                 else if (_sta.failed)
                     set_state(State.failure);
                 else
-                    mark_set!(typeof(this), "status")();
+                    write_status();
             }
         }
 
@@ -1445,7 +1447,7 @@ private:
             }
             if (!_sta.connect(super.ssid, get_password(), best.bssid, channel_to_freq(best.channel, best.band)))
                 post_progress_event();
-            mark_set!(typeof(this), "status")();
+            write_status();
         }
     }
 }
