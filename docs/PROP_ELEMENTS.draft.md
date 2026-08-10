@@ -45,10 +45,17 @@ Prop index == element index, so `eid` is `_id.element(prop_index!(T, "baud") + 1
 an `Element*` recover its owner and index by arithmetic, which is what makes `parent`/`_eid`
 derivable rather than stored.
 
-As built, property elements mint no EID: nothing resolves an object-CID container, so a minted
-handle would deref to null. It lands with the model-surface exposure that needs it, together with
-the resolve path. The change handler recovers its index by subtracting the block base, so the
-header is not needed yet either.
+As built, property elements mint their EID at construction and `resolve_element(EID)` (manager
+package) dispatches on the container's type bits: device containers resolve through the
+DeviceTable as before, any other container resolves through `get_item(cid)` and indexes the
+object's property block (`find_prop_element`, null for the container index, legacy properties,
+and out-of-range). The sync inbound paths resolve through the dispatcher, so a property EID on
+the wire reaches its element. One known gap: a write landing directly on a property element
+(`try_set` from the model surface) enforces the constraint and access gates but bypasses the
+declared `Check!` function, which lives in the by-name path (`elem_apply`); route model-surface
+property writes through `BaseObject.set` when property elements become addressable by path. The
+change handler recovers its index by subtracting the block base, so the block header is not
+needed yet.
 
 Also as built, the block is sized by the type's TOTAL property count, not its element-backed
 count, because the prop index is the slot index. SerialStream has 22 properties of which 5 are

@@ -381,6 +381,15 @@ nothrow @nogc:
         return _prop_elements[index];
     }
 
+    // element_index is EID-space: 0 is the container, properties claim 1..N
+    final inout(Element)* find_prop_element(ushort element_index) inout
+    {
+        size_t index = size_t(element_index) - 1;
+        if (!_prop_elements || index >= _typeInfo.properties.length || !_typeInfo.properties[index].elem_format)
+            return null;
+        return &_prop_elements[index];
+    }
+
     ElemType!(Type, prop) prop_read(Type, string prop)() const
         => prop_element(prop_index!(Type, prop)).read!(ElemType!(Type, prop));
 
@@ -623,10 +632,10 @@ private:
                 continue;
             ref Element e = _prop_elements[i];
             e.id = p.name;
+            e._eid = _id.element(cast(ushort)(i + 1)); // element index 0 is the container
             e.format = p.elem_format();
             e.access = p.read_only ? Access.read : Access.read_write;
             e.sampling_mode = SamplingMode.config;
-            // no EID: id.d's (object CID, prop index + 1) has no resolver, so it would deref to null
             if (p.init_val)
             {
                 Variant def = p.init_val();
@@ -1635,6 +1644,13 @@ unittest
     assert(o.set("delay", dur));                            // duration -> millisecond quantity element
     assert(o.prop_read!(ElemTestObject, "delay").value == 1500);
     assert(!o.set("power", dur));                           // the dimension gate still holds
+
+    // property EIDs are (object CID, prop index + 1); resolution indexes the property block
+    assert(o.prop_element(gain).eid == o.id.element(cast(ushort)(gain + 1)));
+    assert(o.find_prop_element(cast(ushort)(gain + 1)) is &o.prop_element(gain));
+    assert(o.find_prop_element(0) is null);                                     // the container, not a property
+    assert(o.find_prop_element(1) is null);                                     // legacy property, not element-backed
+    assert(o.find_prop_element(cast(ushort)(o.properties.length + 1)) is null); // out of range
 
     defaultAllocator().freeT(o);
 
