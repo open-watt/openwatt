@@ -9,6 +9,7 @@ import urt.system;
 import urt.time;
 
 import manager;
+import manager.bootguard;
 import manager.collection;
 import manager.console.session : Session, default_console_session_name;
 import manager.log : default_log_sink_name, format_log_text,
@@ -46,6 +47,7 @@ int main(string[] args)
     // parse command line arguments
     bool interactive_mode = false;
     const(char)[] config_path = "conf/startup.conf";
+    bool config_path_explicit = false;
     const(char)[] profile_path;
     for (size_t i = 1; i < args.length; ++i)
     {
@@ -54,7 +56,10 @@ int main(string[] args)
         else if (args[i] == "--config" || args[i] == "-c")
         {
             if (i + 1 < args.length)
+            {
                 config_path = args[++i];
+                config_path_explicit = true;
+            }
         }
         else if (args[i] == "--profile-path")
         {
@@ -127,8 +132,9 @@ int main(string[] args)
 
     // Config layering:
     //   1. process defaults - generated CLI commands
-    //   2. system.conf      - platform defaults
-    //   3. startup.conf     - regular configuration (--config overrides path)
+    //   2. system.conf      - the platform itself; always applies
+    //   3. default.conf     - bring-up state, used only when there is no startup.conf
+    //      or startup.conf  - regular configuration (--config overrides path)
     //   4. user.conf        - personal overrides
     //   5. process session  - generated CLI commands
 
@@ -136,6 +142,12 @@ int main(string[] args)
         static immutable system_conf = import("system.conf");
     else
         enum system_conf = "";
+
+    // Not every platform has split its bring-up state out yet.
+    static if (__traits(compiles, import("default.conf")))
+        static immutable default_conf = import("default.conf");
+    else
+        enum default_conf = "";
 
     // combine all layers
     Array!char combined_config;
@@ -148,6 +160,18 @@ int main(string[] args)
         if (interactive_mode)
             append_interactive_session_defaults(combined_config);
     }
+
+    // An explicit --config is a human decision and is not second-guessed.
+    bool trust_config = true;
+    if (!config_path_explicit && !boot_config_trusted())
+    {
+        trust_config = false;
+        retire_config(config_path);
+    }
+    char[] conf = trust_config ? cast(char[])load_file(config_path) : null;
+
+    if (conf is null && config_path_explicit)
+        log_error("system", "config '", config_path, "' could not be loaded");
 
     static if (system_conf.length > 0)
     {
@@ -167,13 +191,23 @@ int main(string[] args)
         }
     }
 
-    char[] conf = cast(char[])load_file(config_path);
     if (conf !is null)
     {
+        static if (default_conf.length > 0)
+            log_info("system", "using startup.conf from the filesystem; bring-up defaults skipped");
         combined_config ~= conf;
         combined_config ~= '\n';
         defaultAllocator().free(conf);
         loaded_configuration = true;
+    }
+    else if (!config_path_explicit)
+    {
+        static if (default_conf.length > 0)
+        {
+            combined_config ~= default_conf;
+            combined_config ~= '\n';
+            loaded_configuration = true;
+        }
     }
 
     char[] user_conf = cast(char[])load_file("conf/user.conf");
@@ -230,6 +264,8 @@ int main(string[] args)
 
     while (keep_running)
     {
+        boot_guard_update();
+
         // handle any expired timers (heartbeat-driven update() lives in here).
         MonoTime next_deadline = g_app.process_due();
 
