@@ -416,3 +416,36 @@ The interface self-configures its L2MTU from the peer's datagram payload MTU
 | `local-port` | `0` to `65535` | `0` | Local port; zero requests an ephemeral port. |
 | `remote-host` | host, address or MAC | none | Default datagram destination. |
 | `remote-port` | `1` to `65535` | with remote-host | Default destination port. |
+
+### `/protocol/http/static`
+
+A static mount serves a filesystem directory beneath a URI prefix on an HTTP
+server. `GET <uri>/a/b.css` reads `<root>/a/b.css`; a directory request serves
+`index.html` or `index.htm`. The mount is also a file store: `PUT` writes the
+request body to the mapped path and `DELETE` removes it. Uploads land in a
+temporary and are swapped into place once complete, so an interrupted transfer
+leaves the previous file untouched.
+
+Path mapping URL-decodes the request, rejects `..` traversal, and refuses
+path separators inside a segment, for reads and writes alike.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `http-server` | HTTP server name | required | Server the mount registers its URI handlers on. |
+| `uri` | URI prefix | required | Prefix the mount answers under; `/` serves the whole tree. |
+| `root` | directory path | empty | Directory served; empty is the filesystem origin (the working directory on hosts). |
+| `allowed-origin` | empty, `*`, or an origin | empty | Cross-origin access policy; see below. |
+
+`allowed-origin` controls browser cross-origin access. Unset, the mount sends
+no CORS headers, so browsers only allow same-origin pages to use it; because
+the mount accepts unauthenticated writes, cross-origin access is strictly
+opt-in. `*` allows any origin. Any other value names the single origin
+(`scheme://host[:port]`) allowed, echoed only when the request's `Origin`
+matches. `OPTIONS` preflights are answered per the same policy, and status
+responses (404, 403, ...) carry the headers too, so a cross-origin client sees
+real status codes rather than opaque network errors.
+
+```text
+/protocol/http/server add name=webserver port=80
+/protocol/http/static add name=files http-server=webserver uri=/files root="conf" allowed-origin=http://192.168.0.5:8080
+```

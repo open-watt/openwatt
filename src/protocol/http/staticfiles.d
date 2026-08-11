@@ -24,11 +24,14 @@ nothrow @nogc:
 // Serves files from a filesystem directory beneath a URI root on an HTTPServer.
 // A request for "<uri>/a/b.css" maps to "<root>/a/b.css"; a directory request
 // (the URI root itself, or any path ending in '/') serves index.html / index.htm.
+// PUT stores a file and DELETE removes one; cross-origin access is opt-in via
+// the allowed-origin property.
 class StaticFileServer : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("http-server", http_server),
                                  Prop!("uri", uri),
-                                 Prop!("root", root));
+                                 Prop!("root", root),
+                                 Prop!("allowed-origin", allowed_origin));
 nothrow @nogc:
 
     enum type_name = "static";
@@ -52,9 +55,7 @@ nothrow @nogc:
         {
             if (HTTPServer old = _server.get)
             {
-                old.remove_uri_handler(HTTPMethod.GET, &handle_request);
-                old.remove_uri_handler(HTTPMethod.PUT, &handle_request);
-                old.remove_uri_handler(HTTPMethod.DELETE, &handle_request);
+                remove_handlers(old);
                 old.unsubscribe(&server_state_change);
             }
             _registered = false;
@@ -90,6 +91,18 @@ nothrow @nogc:
         restart();
     }
 
+    // Cross-origin policy. Unset (the default) emits no CORS headers, so browsers only permit
+    // same-origin pages to use the mount; this mount takes unauthenticated writes, so it must not
+    // inherit the api module's wildcard. "*" allows any origin; anything else names the single
+    // origin (scheme://host[:port]) that is allowed, echoed only when the request's Origin matches.
+    const(char)[] allowed_origin() const pure
+        => _allowed_origin[];
+    void allowed_origin(const(char)[] value)
+    {
+        _allowed_origin = value.makeString(g_app.allocator);
+        mark_set!(typeof(this), "allowed-origin")();
+    }
+
 protected:
 
     // An empty root is the filesystem's own origin: the process working
@@ -103,22 +116,17 @@ protected:
         if (!server)
             return CompletionStatus.continue_;
 
-        if (!server.add_uri_handler(HTTPMethod.GET, _uri[], &handle_request))
+        bool ok = server.add_uri_handler(HTTPMethod.GET, _uri[], &handle_request);
+        if (ok)
+            ok = server.add_uri_handler(HTTPMethod.PUT, _uri[], &handle_request);
+        if (ok)
+            ok = server.add_uri_handler(HTTPMethod.DELETE, _uri[], &handle_request);
+        if (ok)
+            ok = server.add_uri_handler(HTTPMethod.OPTIONS, _uri[], &handle_request);
+        if (!ok)
         {
-            writeWarning("static: failed to register handler for uri '", _uri[], "' (prefix conflict?)");
-            return CompletionStatus.error;
-        }
-        if (!server.add_uri_handler(HTTPMethod.PUT, _uri[], &handle_request))
-        {
-            server.remove_uri_handler(HTTPMethod.GET, &handle_request);
-            writeWarning("static: failed to register PUT handler for uri '", _uri[], "' (prefix conflict?)");
-            return CompletionStatus.error;
-        }
-        if (!server.add_uri_handler(HTTPMethod.DELETE, _uri[], &handle_request))
-        {
-            server.remove_uri_handler(HTTPMethod.GET, &handle_request);
-            server.remove_uri_handler(HTTPMethod.PUT, &handle_request);
-            writeWarning("static: failed to register DELETE handler for uri '", _uri[], "' (prefix conflict?)");
+            remove_handlers(server);
+            writeWarning("static: failed to register handlers for uri '", _uri[], "' (prefix conflict?)");
             return CompletionStatus.error;
         }
         server.subscribe(&server_state_change);
@@ -132,9 +140,7 @@ protected:
         {
             if (HTTPServer server = _server.get)
             {
-                server.remove_uri_handler(HTTPMethod.GET, &handle_request);
-                server.remove_uri_handler(HTTPMethod.PUT, &handle_request);
-                server.remove_uri_handler(HTTPMethod.DELETE, &handle_request);
+                remove_handlers(server);
                 server.unsubscribe(&server_state_change);
             }
             _registered = false;
@@ -146,7 +152,16 @@ private:
     ObjectRef!HTTPServer _server;
     String _uri;
     String _root;
+    String _allowed_origin;
     bool _registered;
+
+    void remove_handlers(HTTPServer server)
+    {
+        server.remove_uri_handler(HTTPMethod.GET, &handle_request);
+        server.remove_uri_handler(HTTPMethod.PUT, &handle_request);
+        server.remove_uri_handler(HTTPMethod.DELETE, &handle_request);
+        server.remove_uri_handler(HTTPMethod.OPTIONS, &handle_request);
+    }
 
     void server_state_change(ActiveObject, StateSignal signal)
     {
@@ -160,6 +175,9 @@ private:
         HTTPVersion ver = request.http_version;
         const(char)[] target = request.request_target[];
 
+        if (request.method == HTTPMethod.OPTIONS)
+            return handle_options(request, stream);
+
         // the server dispatches on a path-boundary longest-prefix match, so `rel` is
         // always empty or starts with '/'.
         const(char)[] rel = target[_uri.length .. $];
@@ -170,10 +188,10 @@ private:
 
         char[1024] decode_buf = void;
         if (url_decode_length(rel) > decode_buf.length)
-            return send_status(ver, stream, 414);
+            return send_status(ver, stream, 414, request);
         ptrdiff_t decoded_len = url_decode(rel, decode_buf[]);
         if (decoded_len < 0)
-            return send_status(ver, stream, 400);
+            return send_status(ver, stream, 400, request);
         const(char)[] decoded = decode_buf[0 .. decoded_len];
 
         Array!char fs_path;
@@ -188,11 +206,11 @@ private:
             if (seg.length == 0 || seg == ".")
                 continue;
             if (seg == "..")
-                return send_status(ver, stream, 403); // refuse to escape the root
+                return send_status(ver, stream, 403, request); // refuse to escape the root
             foreach (c; seg)
             {
                 if (c == '\\' || c == '\0')
-                    return send_status(ver, stream, 400);
+                    return send_status(ver, stream, 400, request);
             }
             fs_path ~= seg;
             if (p.length)
@@ -202,22 +220,22 @@ private:
         if (request.method == HTTPMethod.PUT)
         {
             if (want_index)
-                return send_status(ver, stream, 405);
+                return send_status(ver, stream, 405, request);
             return store_file(fs_path[], ver, request, stream);
         }
 
         if (request.method == HTTPMethod.DELETE)
         {
             if (want_index)
-                return send_status(ver, stream, 405);
-            return remove_file(fs_path[], ver, stream);
+                return send_status(ver, stream, 405, request);
+            return remove_file(fs_path[], ver, request, stream);
         }
 
         if (!want_index)
         {
             if (serve_file(fs_path[], ver, request, stream))
                 return 0;
-            return send_status(ver, stream, 404);
+            return send_status(ver, stream, 404, request);
         }
 
         if (fs_path.length && fs_path[$-1] != '/')
@@ -233,7 +251,21 @@ private:
                 return 0;
         }
 
-        return send_status(ver, stream, 404);
+        return send_status(ver, stream, 404, request);
+    }
+
+    // PUT and DELETE are not CORS-safelisted, so a browser always preflights them
+    int handle_options(ref const HTTPMessage request, ref Stream stream)
+    {
+        HTTPMessage response = create_response(request.http_version, 204, String(), null);
+        if (add_cors(response, request))
+        {
+            response.headers ~= HTTPParam(StringLit!"Access-Control-Allow-Methods", StringLit!"GET, PUT, DELETE, OPTIONS");
+            response.headers ~= HTTPParam(StringLit!"Access-Control-Allow-Headers", StringLit!"Content-Type");
+            response.headers ~= HTTPParam(StringLit!"Access-Control-Max-Age", StringLit!"86400");
+        }
+        stream.write(response.format_message()[]);
+        return 0;
     }
 
     bool serve_file(const(char)[] fs_path, HTTPVersion ver, ref const HTTPMessage request, ref Stream stream)
@@ -254,6 +286,7 @@ private:
         response.reason = status_text(200);
         response.timestamp = getSysTime();
         response.content_type = mime_type(fs_path);
+        add_cors(response, request);
 
         if (size > 0)
         {
@@ -262,7 +295,7 @@ private:
             Result r = f.read(response.content[], got);
             f.close();
             if (!r)
-                return send_status(ver, stream, 500) >= 0; // an existing file we failed to read
+                return send_status(ver, stream, 500, request) >= 0; // an existing file we failed to read
 
             if (got != size)
                 response.content.resize(got);
@@ -291,7 +324,7 @@ private:
         if (!o)
         {
             writeWarning("static: open '", tmp_path, "' for write failed: ", o.system_code);
-            return send_status(ver, stream, 500);
+            return send_status(ver, stream, 500, request);
         }
 
         size_t written;
@@ -302,7 +335,7 @@ private:
         {
             writeWarning("static: write '", tmp_path, "' failed: ", r.system_code);
             delete_file(tmp_path);
-            return send_status(ver, stream, 500);
+            return send_status(ver, stream, 500, request);
         }
 
         if (replaced)
@@ -312,32 +345,50 @@ private:
         if (!mv)
         {
             writeWarning("static: could not swap '", tmp_path, "' into place: ", mv.system_code);
-            return send_status(ver, stream, 500);
+            return send_status(ver, stream, 500, request);
         }
 
         writeInfo("static: stored '", fs_path, "' (", written, " bytes)");
-        return send_status(ver, stream, replaced ? 200 : 201);
+        return send_status(ver, stream, replaced ? 200 : 201, request);
     }
 
-    int remove_file(const(char)[] fs_path, HTTPVersion ver, ref Stream stream)
+    int remove_file(const(char)[] fs_path, HTTPVersion ver, ref const HTTPMessage request, ref Stream stream)
     {
         if (!file_exists(fs_path))
-            return send_status(ver, stream, 404);
+            return send_status(ver, stream, 404, request);
 
         Result r = delete_file(fs_path);
         if (!r)
         {
             writeWarning("static: delete '", fs_path, "' failed: ", r.system_code);
-            return send_status(ver, stream, 500);
+            return send_status(ver, stream, 500, request);
         }
 
         writeInfo("static: deleted '", fs_path, "'");
-        return send_status(ver, stream, 200);
+        return send_status(ver, stream, 200, request);
     }
 
-    int send_status(HTTPVersion ver, ref Stream stream, ushort code)
+    // returns true when the request's origin is permitted (headers were added)
+    bool add_cors(ref HTTPMessage response, ref const HTTPMessage request)
+    {
+        if (_allowed_origin.empty)
+            return false;
+        if (_allowed_origin[] == "*")
+        {
+            response.headers ~= HTTPParam(StringLit!"Access-Control-Allow-Origin", StringLit!"*");
+            return true;
+        }
+        if (request.header("Origin")[] != _allowed_origin[])
+            return false;
+        response.headers ~= HTTPParam(StringLit!"Access-Control-Allow-Origin", _allowed_origin);
+        response.headers ~= HTTPParam(StringLit!"Vary", StringLit!"Origin");
+        return true;
+    }
+
+    int send_status(HTTPVersion ver, ref Stream stream, ushort code, ref const HTTPMessage request)
     {
         HTTPMessage response = create_response(ver, code, StringLit!"text/plain; charset=utf-8", status_text(code)[]);
+        add_cors(response, request);
         stream.write(response.format_message()[]);
         return 0;
     }

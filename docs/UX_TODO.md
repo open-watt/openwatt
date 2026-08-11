@@ -44,3 +44,15 @@ through them and remove sections as they are absorbed.
   these rather than as an error or a gap.
 - Elements that do have retention (everything the default policy covers, plus event/point
   elements) are unchanged.
+
+## 2026-08-11: static file mounts gain writes and opt-in CORS
+
+- `/protocol/http/static` mounts accept `PUT` (store a file, `201` created / `200`
+  replaced) and `DELETE` (`200`, or `404` when absent) beneath the mount's URI, plus
+  `OPTIONS` preflight. The config file editor should target these directly.
+- New property `allowed-origin` (empty | `*` | one origin): CORS policy for the mount.
+  The default (empty) sends no CORS headers, so a web client served from a different
+  origin than the backend must have the mount configured with its origin (or `*`) before
+  cross-origin reads or writes work. Error statuses carry the CORS headers too, so a
+  cross-origin client sees real 404/403 codes.
+- There is no ETag/If-Match yet: two editors saving the same file last-writer-wins.
