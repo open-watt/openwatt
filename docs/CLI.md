@@ -425,7 +425,8 @@ server. `GET <uri>/a/b.css` reads `<root>/a/b.css`; a directory request serves
 request body to the mapped path and `DELETE` removes it. Uploads stream to a
 temporary as the body arrives, so they are not limited by the server's
 `max-request-body`, and the target is only replaced once the upload completes:
-an interrupted transfer leaves the previous file untouched.
+an interrupted transfer leaves the previous file untouched. Responses larger
+than 64KB stream from disk instead of buffering, paced by the connection.
 
 Path mapping URL-decodes the request, rejects `..` traversal, and refuses
 path separators inside a segment, for reads and writes alike.
