@@ -148,6 +148,10 @@ DataFormat data_format_of(T)()
         return DataFormat(ValueType.s64, SeriesKind.held, Nanosecond);
     else static if (is(U == Quantity!(N, scale), N, ScaledUnit scale))
         return DataFormat(value_type_of!N, SeriesKind.held, scale);
+    else static if (is(U == DateTime) || is(U == LocalTime))
+        static assert(false, "calendar views never store; coerce to SysTime at the boundary");
+    else static if (is(U == MonoTime))
+        static assert(false, "monotonic time is process-local; store SysTime");
     else static if (ValidUserType!U)
     {
         alias registered = MakeTypeDetails!U;   // registration rides its shared static this
