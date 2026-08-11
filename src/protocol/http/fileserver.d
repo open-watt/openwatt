@@ -821,21 +821,11 @@ private:
         }
     }
 
-    // returns true when the request's origin is permitted (headers were added)
+    // An unset mount policy inherits the server policy.
     bool add_cors(ref HTTPMessage response, ref const HTTPMessage request)
     {
-        if (_allowed_origin.empty)
-            return false;
-        if (_allowed_origin[] == "*")
-        {
-            response.headers ~= HTTPParam(StringLit!"Access-Control-Allow-Origin", StringLit!"*");
-            return true;
-        }
-        if (request.header("Origin")[] != _allowed_origin[])
-            return false;
-        response.headers ~= HTTPParam(StringLit!"Access-Control-Allow-Origin", _allowed_origin);
-        response.headers ~= HTTPParam(StringLit!"Vary", StringLit!"Origin");
-        return true;
+        HTTPServer server = _server.get;
+        return server ? server.add_cors(response, request, &_allowed_origin) : false;
     }
 
     int send_status(HTTPVersion ver, ref Stream stream, ushort code, ref const HTTPMessage request)
