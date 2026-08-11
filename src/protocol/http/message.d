@@ -217,6 +217,20 @@ nothrow @nogc:
 
                 message.content_type = message.header("Content-Type");
 
+                // the round-trip of the format side, which emits these as Authorization
+                String auth = message.header("Authorization");
+                if (auth.length > 6 && auth[0 .. 6] == "Basic ")
+                {
+                    char[256] decode_buf = void;
+                    ptrdiff_t len = base64_decode(auth[6 .. $], decode_buf[]);
+                    size_t colon;
+                    if (len > 0 && decode_buf[0 .. len].contains(':', &colon))
+                    {
+                        message.username = decode_buf[0 .. colon].makeString(defaultAllocator());
+                        message.password = decode_buf[colon + 1 .. len].makeString(defaultAllocator());
+                    }
+                }
+
                 if (state == ParseState.ReadingTailHeaders || message.method == HTTPMethod.HEAD)
                     goto message_done;
 
