@@ -197,7 +197,11 @@ struct SmartEVSEChange
     enum uint contactor2_mode     = 1 << 19;
     enum uint contactor1          = 1 << 20;
     enum uint contactor2          = 1 << 21;
-    enum uint all                 = (1 << 22) - 1;
+    enum uint buttons             = 1 << 22;
+    enum uint backlight           = 1 << 23;
+    enum uint frame               = 1 << 24;
+    enum uint rcm_monitor         = 1 << 25;
+    enum uint all                 = (1 << 26) - 1;
 }
 
 alias SmartEVSEChangeHandler = void delegate(SmartEVSE evse, uint changes) nothrow @nogc;
@@ -393,6 +397,7 @@ nothrow @nogc:
             return;
         _rcm_monitor = value;
         mark_set!(typeof(this), "rcm-monitor")();
+        sync_status(SmartEVSEChange.rcm_monitor);
         restart();
     }
 
@@ -435,6 +440,7 @@ nothrow @nogc:
         if (display_backlight(g_display) == value)
             return;
         display_backlight(g_display, value);
+        sync_status(SmartEVSEChange.backlight);
     }
 
     const(void)[] frame() const
@@ -444,6 +450,7 @@ nothrow @nogc:
     {
         if (!display_frame(g_display, value))
             return false;
+        sync_status(SmartEVSEChange.frame);
         return true;
     }
 
@@ -679,7 +686,7 @@ private:
 
     const(char)[] reset_fault()
     {
-        if (_rcm_monitor && gpio_input_read(RCMFAULT))
+        if (gpio_input_read(RCMFAULT))
             return "RCM input is still active";
         if (!_rcm_fault)
             return "no RCM fault is latched";
@@ -734,6 +741,7 @@ private:
         if (pressed == _buttons)
             return;
         _buttons = pressed;
+        sync_status(SmartEVSEChange.buttons);
     }
 
     void handle_rcm_fault()

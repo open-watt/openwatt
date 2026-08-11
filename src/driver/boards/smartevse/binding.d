@@ -16,11 +16,12 @@ import manager.collection : CID, collection_type_info;
 import manager.component : Component, ComponentEvent;
 import manager.device : Device;
 import manager.element : Access, Element, SampleUpdate, SamplingMode;
-import manager.series : register_value_format;
+import manager.series : DataFormat, SeriesKind, ValueType, register_format, register_value_format;
 
 import driver.boards.smartevse : DeciAmps, SmartEVSE, SmartEVSEADCCalibration,
-                                SmartEVSEChange, SmartEVSEContactor2Mode,
+                                SmartEVSEButton, SmartEVSEChange, SmartEVSEContactor2Mode,
                                 SmartEVSEPilot, SmartEVSEState;
+import driver.boards.smartevse.display : display_height, display_width;
 
 nothrow @nogc:
 
@@ -153,6 +154,17 @@ protected:
         _contactor1 = add_element!bool(diagnostic, "contactor1");
         _contactor2 = add_element!bool(diagnostic, "contactor2");
 
+        Component buttons = find_or_create_component(_device_instance, "buttons", "Buttons");
+        _button_left = add_element!bool(buttons, "left");
+        _button_middle = add_element!bool(buttons, "middle");
+        _button_right = add_element!bool(buttons, "right");
+
+        Component display = find_or_create_component(_device_instance, "display", "Display");
+        set_constant(display, "width", display_width);
+        set_constant(display, "height", display_height);
+        _backlight = add_element!bool(display, "backlight", Access.read_write);
+        _frame = add_blob(display, "frame", Access.read_write);
+
         g_app.request_rebind();
         _device_instance.notify(ComponentEvent.tree_changed);
         _built = true;
@@ -192,6 +204,11 @@ private:
     Element* _activation_pulse;
     Element* _contactor1;
     Element* _contactor2;
+    Element* _button_left;
+    Element* _button_middle;
+    Element* _button_right;
+    Element* _backlight;
+    Element* _frame;
 
     Component find_or_create_component(Component parent, const(char)[] id, const(char)[] template_)
     {
@@ -216,6 +233,16 @@ private:
         return element;
     }
 
+    Element* add_blob(Component parent, const(char)[] id, Access access)
+    {
+        DataFormat format = DataFormat(ValueType.u8, SeriesKind.held);
+        format.count = 0;
+        Element* element = parent.find_or_create_element(id, register_format(format));
+        element.access = access;
+        element.sampling_mode = SamplingMode.report;
+        return element;
+    }
+
     void set_constant(T)(Component parent, const(char)[] id, auto ref T value)
     {
         Element* element = parent.find_or_create_element(id, register_value_format(value));
@@ -234,6 +261,8 @@ private:
         _max_current.subscribe(&element_changed);
         _max_temperature.subscribe(&element_changed);
         _contactor2_mode.subscribe(&element_changed);
+        _backlight.subscribe(&element_changed);
+        _frame.subscribe(&element_changed);
     }
 
     void unsubscribe()
@@ -253,6 +282,8 @@ private:
         _max_current.unsubscribe(&element_changed);
         _max_temperature.unsubscribe(&element_changed);
         _contactor2_mode.unsubscribe(&element_changed);
+        _backlight.unsubscribe(&element_changed);
+        _frame.unsubscribe(&element_changed);
         _subscribed = false;
     }
 
@@ -334,6 +365,17 @@ private:
             _contactor1.value(hardware.contactor1, timestamp, &element_changed);
         if (changes & SmartEVSEChange.contactor2)
             _contactor2.value(hardware.contactor2, timestamp, &element_changed);
+        if (changes & SmartEVSEChange.buttons)
+        {
+            ubyte pressed = hardware.buttons;
+            _button_left.value((pressed & SmartEVSEButton.left) != 0, timestamp, &element_changed);
+            _button_middle.value((pressed & SmartEVSEButton.middle) != 0, timestamp, &element_changed);
+            _button_right.value((pressed & SmartEVSEButton.right) != 0, timestamp, &element_changed);
+        }
+        if (changes & SmartEVSEChange.backlight)
+            _backlight.value(hardware.backlight, timestamp, &element_changed);
+        if (changes & SmartEVSEChange.frame)
+            _frame.value(hardware.frame, timestamp, &element_changed);
         if (changes == SmartEVSEChange.all)
             _adc_calibration.value(hardware.adc_calibration, timestamp, &element_changed);
     }
@@ -398,6 +440,17 @@ private:
         {
             hardware.max_temperature((cast(DegreesC)update.value.asQuantity()).value);
             restore = SmartEVSEChange.max_temperature;
+        }
+        else if (update.element is _backlight)
+        {
+            hardware.backlight(update.value.asBool);
+            restore = SmartEVSEChange.backlight;
+        }
+        else if (update.element is _frame)
+        {
+            if (!hardware.frame(update.value.asBuffer))
+                error = "frame must be the full panel image";
+            restore = SmartEVSEChange.frame;
         }
         else if (update.element is _contactor2_mode)
         {
