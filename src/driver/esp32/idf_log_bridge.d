@@ -2,7 +2,8 @@ module driver.esp32.idf_log_bridge;
 
 import urt.log : Severity;
 
-version (ESP8266) {}
+version (NoIDFLog) {}
+else version (ESP8266) {}
 else version (Espressif) version = ESPIDFLogBridge;
 
 version (ESPIDFLogBridge)

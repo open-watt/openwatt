@@ -1,5 +1,9 @@
 module protocol.tls.stream;
 
+version (NoTLS) {}
+else
+{
+
 // =============================================================================
 // TODO: POSIX TLS CLIENT VALIDATION IS DISABLED.
 //
@@ -1157,4 +1161,5 @@ version (Windows)
         SECURITY_STATUS EncryptMessage(PCtxtHandle,ULONG,PSecBufferDesc,ULONG);
         SECURITY_STATUS DeleteSecurityContext(PCtxtHandle);
     }
+}
 }

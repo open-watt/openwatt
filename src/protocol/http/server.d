@@ -14,9 +14,11 @@ import urt.time;
 
 import manager;
 import manager.base;
-import manager.features;
-import protocol.tls : Certificate;
 import manager.collection;
+import manager.features;
+
+static if (has_tls)
+    import protocol.tls : Certificate;
 
 import protocol.http;
 import protocol.http.message;
@@ -31,11 +33,6 @@ nothrow @nogc:
 
 class HTTPServer : ActiveObject
 {
-    alias Properties = AliasSeq!(Prop!("port", port),
-                                 Prop!("tls-port", tls_port),
-                                 Prop!("certificates", certificates),
-                                 Prop!("https-redirect", https_redirect),
-                                 Prop!("max-request-body", max_request_body));
 nothrow @nogc:
 
     enum type_name = "http-server";
@@ -66,8 +63,10 @@ nothrow @nogc:
         return null;
     }
 
+    static if (has_tls)
     ushort tls_port() const pure
         => _tls_port;
+    static if (has_tls)
     const(char)[] tls_port(ushort value)
     {
         if (_tls_port == value)
@@ -80,6 +79,7 @@ nothrow @nogc:
         return null;
     }
 
+    static if (has_tls)
     void certificates(Certificate[] value)
     {
         if (_cert_subscribed)
@@ -96,8 +96,10 @@ nothrow @nogc:
         restart();
     }
 
+    static if (has_tls)
     bool https_redirect() const pure
         => _https_redirect;
+    static if (has_tls)
     void https_redirect(bool value)
     {
         _https_redirect = value;
@@ -113,6 +115,16 @@ nothrow @nogc:
         foreach (s; _sessions)
             s.parser.max_buffered_body = value;
     }
+
+    static if (has_tls)
+        alias Properties = AliasSeq!(Prop!("port", port),
+                                     Prop!("tls-port", tls_port),
+                                     Prop!("certificates", certificates),
+                                     Prop!("https-redirect", https_redirect),
+                                     Prop!("max-request-body", max_request_body));
+    else
+        alias Properties = AliasSeq!(Prop!("port", port),
+                                     Prop!("max-request-body", max_request_body));
 
     // API...
 
@@ -189,13 +201,23 @@ protected:
 
     override bool validate() const pure
     {
-        return _port != 0 || _tls_port != 0;
+        if (_port != 0)
+            return true;
+        static if (has_tls)
+            return _tls_port != 0;
+        else
+            return false;
     }
 
     override CompletionStatus startup()
     {
         version (DebugHTTPServer)
-            log.trace("startup, port=", _port, " tls-port=", _tls_port, " certs=", _certificates.length);
+        {
+            static if (has_tls)
+                log.trace("startup, port=", _port, " tls-port=", _tls_port, " certs=", _certificates.length);
+            else
+                log.trace("startup, port=", _port);
+        }
 
         if (_port != 0 && !_server)
         {
@@ -203,22 +225,29 @@ protected:
                 return CompletionStatus.error;
         }
 
-        if (_tls_port != 0 && !_tls_server)
-            try_start_tls();
-
-        if (!_cert_subscribed && _certificates.length > 0)
+        static if (has_tls)
         {
-            foreach (ref c; _certificates)
-                if (c) c.subscribe(&cert_state_change);
-            _cert_subscribed = true;
+            if (_tls_port != 0 && !_tls_server)
+                try_start_tls();
 
-            version (DebugHTTPServer)
-                log.trace("subscribed to ", _certificates.length, " certificate(s)");
+            if (!_cert_subscribed && _certificates.length > 0)
+            {
+                foreach (ref c; _certificates)
+                    if (c) c.subscribe(&cert_state_change);
+                _cert_subscribed = true;
+
+                version (DebugHTTPServer)
+                    log.trace("subscribed to ", _certificates.length, " certificate(s)");
+            }
         }
 
         bool http_up = (_port != 0) && _server && _server.running;
-        bool tls_up  = (_tls_port != 0) && _tls_server && _tls_server.running;
-        return (http_up || tls_up) ? CompletionStatus.complete : CompletionStatus.continue_;
+        static if (has_tls)
+        {
+            bool tls_up = (_tls_port != 0) && _tls_server && _tls_server.running;
+            http_up = http_up || tls_up;
+        }
+        return http_up ? CompletionStatus.complete : CompletionStatus.continue_;
     }
 
     override CompletionStatus shutdown()
@@ -226,18 +255,21 @@ protected:
         version (DebugHTTPServer)
             log.trace("shutdown, sessions=", _sessions.length);
 
-        if (_cert_subscribed)
+        static if (has_tls)
         {
-            foreach (ref c; _certificates)
-                if (c) c.unsubscribe(&cert_state_change);
-            _cert_subscribed = false;
-        }
+            if (_cert_subscribed)
+            {
+                foreach (ref c; _certificates)
+                    if (c) c.unsubscribe(&cert_state_change);
+                _cert_subscribed = false;
+            }
 
-        if (_tls_server)
-        {
-            _tls_server.unsubscribe(&server_state_change);
-            _tls_server.destroy();
-            _tls_server = null;
+            if (_tls_server)
+            {
+                _tls_server.unsubscribe(&server_state_change);
+                _tls_server.destroy();
+                _tls_server = null;
+            }
         }
         if (_server)
         {
@@ -299,17 +331,21 @@ private:
     }
 
     ushort _port;
-    ushort _tls_port;
-    bool _https_redirect;
-    bool _cert_subscribed;
     size_t _max_request_body = 64 * 1024;
     RequestHandler _default_request_handler;
 
     TCPServer _server;
-    TCPServer _tls_server;
-    Array!(ObjectRef!Certificate) _certificates;
     Array!Handler _handlers;
     Array!(Session*) _sessions;
+
+    static if (has_tls)
+    {
+        ushort _tls_port;
+        bool _https_redirect;
+        bool _cert_subscribed;
+        TCPServer _tls_server;
+        Array!(ObjectRef!Certificate) _certificates;
+    }
 
     // a prefix matches at a path boundary: the target must equal the prefix, or continue
     // with '/'. The empty prefix (root) matches everything.
@@ -348,15 +384,19 @@ private:
     void accept_http_connection(Stream stream, ref const InetAddress remote, void*)
     {
         log.info("new HTTP session from ", remote);
-        RequestHandler redirect = (_https_redirect && _tls_port != 0) ? &http_redirect_handler : null;
+        RequestHandler redirect;
+        static if (has_tls)
+            redirect = (_https_redirect && _tls_port != 0) ? &http_redirect_handler : null;
         _sessions.emplaceBack(defaultAllocator().allocT!Session(this, stream, redirect));
     }
 
+    static if (has_tls)
     void accept_tls_connection(Stream stream, ref const InetAddress remote, void*)
     {
         _sessions.emplaceBack(defaultAllocator().allocT!Session(this, stream, null));
     }
 
+    static if (has_tls)
     bool any_cert_valid()
     {
         foreach (ref c; _certificates)
@@ -366,14 +406,12 @@ private:
         return false;
     }
 
+    static if (has_tls)
     void push_certs_to_tls()
     {
-        static if (has_tls)
-        {
-            import protocol.tls : TLSServer;
-            if (auto tls = cast(TLSServer)_tls_server)
-                tls.set_certificate_array(_certificates[]);
-        }
+        import protocol.tls : TLSServer;
+        if (auto tls = cast(TLSServer)_tls_server)
+            tls.set_certificate_array(_certificates[]);
     }
 
     bool try_start_http()
@@ -391,34 +429,32 @@ private:
         return true;
     }
 
+    static if (has_tls)
     void try_start_tls()
     {
-        static if (has_tls)
+        import protocol.tls : TLSServer;
+        version (DebugHTTPServer)
+            log.trace("try_start_tls, any_cert_valid=", any_cert_valid());
+        if (!any_cert_valid())
+            return;
+
+        BaseObject[32] certs;
+        size_t num_certs = 0;
+        foreach (ref c; _certificates)
+            if (auto cert = c.get())
+                certs[num_certs++] = cert;
+
+        const(char)[] tls_name = Collection!TLSServer().generate_name(tconcat(name[], "_tls"));
+        _tls_server = Collection!TLSServer().create(tls_name, ObjectFlags.dynamic,
+            NamedArgument("port", _tls_port), NamedArgument("certificates", certs[0 .. num_certs]));
+        if (!_tls_server)
         {
-            import protocol.tls : TLSServer;
-            version (DebugHTTPServer)
-                log.trace("try_start_tls, any_cert_valid=", any_cert_valid());
-            if (!any_cert_valid())
-                return;
-
-            BaseObject[32] certs;
-            size_t num_certs = 0;
-            foreach (ref c; _certificates)
-                if (auto cert = c.get())
-                    certs[num_certs++] = cert;
-
-            const(char)[] tls_name = Collection!TLSServer().generate_name(tconcat(name[], "_tls"));
-            _tls_server = Collection!TLSServer().create(tls_name, ObjectFlags.dynamic,
-                NamedArgument("port", _tls_port), NamedArgument("certificates", certs[0 .. num_certs]));
-            if (!_tls_server)
-            {
-                log.error("failed to create TLS listener");
-                return;
-            }
-            _tls_server.set_connection_callback(&accept_tls_connection, null);
-            _tls_server.subscribe(&server_state_change);
-            log.notice("listening on HTTPS port ", _tls_port);
+            log.error("failed to create TLS listener");
+            return;
         }
+        _tls_server.set_connection_callback(&accept_tls_connection, null);
+        _tls_server.subscribe(&server_state_change);
+        log.notice("listening on HTTPS port ", _tls_port);
     }
 
     void server_state_change(ActiveObject obj, StateSignal signal)
@@ -431,15 +467,19 @@ private:
                 _server = null;
                 try_start_http();
             }
-            else if (obj is _tls_server)
+            static if (has_tls)
             {
-                log.warning("TLS listener destroyed externally, recreating");
-                _tls_server = null;
-                try_start_tls();
+                if (obj is _tls_server)
+                {
+                    log.warning("TLS listener destroyed externally, recreating");
+                    _tls_server = null;
+                    try_start_tls();
+                }
             }
         }
     }
 
+    static if (has_tls)
     void cert_state_change(ActiveObject obj, StateSignal signal)
     {
         version (DebugHTTPServer)
@@ -469,6 +509,7 @@ private:
         }
     }
 
+    static if (has_tls)
     int http_redirect_handler(ref const HTTPMessage request, ref Stream stream, const(ubyte)[] leftover)
     {
         // allow ACME challenge paths
