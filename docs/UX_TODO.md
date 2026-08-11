@@ -59,8 +59,12 @@ through them and remove sections as they are absorbed.
   `max-request-body`, and an interrupted upload leaves the previous file intact. Requests
   the mount refuses (403, 405, 409, 500) still drain the body and answer with the real
   status, so large uploads never die as opaque network errors.
-- Downloads above 64KB stream from disk with a known `Content-Length`; they skip response
-  compression, trading a little link time for bounded memory.
+- Downloads above 64KB stream from disk with a known `Content-Length` and are NOT
+  content-encoded, where the previous buffered path gzipped them. Large text pays for this
+  on the wire: the 132KB `goodwe_ems.conf` gzips ~4.9x, so it now transfers at full size.
+  Compressing a streamed body needs `Transfer-Encoding: chunked` (the compressed length
+  isn't known up front) plus an incremental compressor, and urt.zip's is whole-buffer
+  only, so this is deferred. Clients should not assume large files arrive compressed.
 - `.conf` and `.log` serve as `text/plain`, `.yaml`/`.yml` as `text/yaml`, so they display
   in a browser tab instead of downloading as `application/octet-stream`.
 - There is no ETag/If-Match yet: two editors saving the same file last-writer-wins.
