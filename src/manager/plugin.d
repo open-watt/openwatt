@@ -181,7 +181,8 @@ void register_modules(Application app)
         register_module!(protocol.gpio)(app);
         register_module!(protocol.http)(app);
         register_module!(protocol.ip)(app);
-        register_module!(protocol.modbus)(app);
+        static if (has_modbus)
+            register_module!(protocol.modbus)(app);
         register_module!(protocol.mqtt)(app);
         register_module!(protocol.ntp)(app);
         register_module!(protocol.ppp)(app);

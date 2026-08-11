@@ -37,6 +37,10 @@
 #                   the binary sync side-channel. Gates verbose CLI help,
 #                   interactive prompts, banners, MOTDs. Orthogonal to
 #                   FEATURES and TINY.
+#
+#   MODBUS, HTTP_CLIENT, HTTP_FILESERVER
+#                   Optional components within a feature tier. Each defaults
+#                   to 1 and may be disabled by a constrained BOARD profile.
 # =======================================================================
 
 # -- Per-platform defaults -----------------------------------------------
@@ -54,11 +58,17 @@ endif
 
 FEATURES ?= full
 HEADLESS ?= 0
+MODBUS ?= 1
+HTTP_CLIENT ?= 1
+HTTP_FILESERVER ?= 1
 
 # -- Validate ------------------------------------------------------------
 
 ifeq ($(filter $(FEATURES),switch switch-ip switch-http switch-https full),)
     $(error Unknown FEATURES='$(FEATURES)'; valid: switch | switch-ip | switch-http | switch-https | full)
+endif
+ifneq ($(filter-out 0 1,$(MODBUS) $(HTTP_CLIENT) $(HTTP_FILESERVER)),)
+    $(error MODBUS, HTTP_CLIENT and HTTP_FILESERVER must be 0 or 1)
 endif
 
 # -- Source-tree subset per preset ---------------------------------------
@@ -76,6 +86,17 @@ FEATURE_DIRS_switch-https := $(FEATURE_DIRS_switch-http)
 FEATURE_DIRS_full    := manager driver router protocol apps devices tools
 
 FEATURE_DIRS := $(FEATURE_DIRS_$(FEATURES))
+
+ifeq ($(MODBUS),0)
+    FEATURE_DIRS := $(filter-out protocol/modbus,$(FEATURE_DIRS))
+    FEATURE_DFLAGS += $(VERSION_FLAG)NoModbus
+endif
+ifeq ($(HTTP_CLIENT),0)
+    FEATURE_DFLAGS += $(VERSION_FLAG)NoHTTPClient
+endif
+ifeq ($(HTTP_FILESERVER),0)
+    FEATURE_DFLAGS += $(VERSION_FLAG)NoHTTPFileServer
+endif
 
 # -- D version flags per preset ------------------------------------------
 # Defaults are "everything on" so builds that don't run features.mk

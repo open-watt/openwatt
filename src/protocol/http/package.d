@@ -19,6 +19,7 @@ import manager.collection;
 import manager.config : ConfItem;
 import manager.console;
 import manager.expression : NamedArgument;
+import manager.features : has_http_client, has_http_file_server;
 import manager.plugin;
 import manager.profile;
 import manager.sample.spec : stream_le_context;
@@ -213,14 +214,18 @@ nothrow @nogc:
 
         g_app.register_enum!HTTPMethod();
 
-        g_app.console.register_collection!HTTPClient();
+        static if (has_http_client)
+            g_app.console.register_collection!HTTPClient();
         g_app.console.register_collection!HTTPServer();
-        g_app.console.register_collection!FileServer();
+        static if (has_http_file_server)
+            g_app.console.register_collection!FileServer();
         g_app.console.register_collection!WebSocketServer();
         g_app.console.register_collection!WebSocket();
-        g_app.console.register_collection!HTTPClientBinding();
+        static if (has_http_client)
+            g_app.console.register_collection!HTTPClientBinding();
 
-        g_app.console.register_command!request("/protocol/http", this);
+        static if (has_http_client)
+            g_app.console.register_command!request("/protocol/http", this);
     }
 
     uint element_size(uint)
@@ -424,8 +429,10 @@ nothrow @nogc:
     override void update()
     {
         Collection!HTTPServer().update_all();
-        Collection!HTTPClient().update_all();
-        Collection!FileServer().update_all();
+        static if (has_http_client)
+            Collection!HTTPClient().update_all();
+        static if (has_http_file_server)
+            Collection!FileServer().update_all();
         Collection!WebSocketServer().update_all();
     }
 
