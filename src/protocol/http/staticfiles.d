@@ -147,6 +147,14 @@ protected:
             if (s)
                 s.destroy();
         }
+        while (!_downloads.empty)
+        {
+            Download* d = _downloads[_downloads.length - 1];
+            Stream s = d.stream;
+            finish_download(d);
+            if (s)
+                s.destroy();
+        }
 
         if (_registered)
         {
@@ -160,6 +168,16 @@ protected:
         return CompletionStatus.complete;
     }
 
+    override void update()
+    {
+        for (size_t i = 0; i < _downloads.length; )
+        {
+            // on completion the entry is swap-removed; the same index then holds the next candidate
+            if (!_downloads[i].pump())
+                ++i;
+        }
+    }
+
 private:
     ObjectRef!HTTPServer _server;
     String _uri;
@@ -167,6 +185,7 @@ private:
     String _allowed_origin;
     bool _registered;
     Array!(Upload*) _uploads;
+    Array!(Download*) _downloads;
 
     void remove_handlers(HTTPServer server)
     {
@@ -292,9 +311,30 @@ private:
 
         ulong size = f.get_size();
 
-        // TODO: above some threshold, stream the response (Transfer-Encoding: chunked)
-        //       instead of buffering the whole file. The threshold should eventually be
-        //       adaptive on free memory and detected link bandwidth. For now we always buffer.
+        if (size > Download.stream_threshold)
+        {
+            // head first with the known length, then the body is pumped from update() as the
+            // stream's tx queue drains, so the file is never resident in memory at once
+            HTTPMessage response;
+            response.http_version = ver;
+            response.status_code = 200;
+            response.reason = status_text(200);
+            response.timestamp = getSysTime();
+            response.headers ~= HTTPParam(StringLit!"Content-Type", mime_type(fs_path));
+            response.headers ~= HTTPParam(StringLit!"Content-Length", tconcat(size).makeString(defaultAllocator()));
+            add_cors(response, request);
+            stream.write(format_message_head(response)[]);
+
+            Download* d = defaultAllocator().allocT!Download();
+            d.owner = this;
+            d.stream = stream;
+            d.file = f;
+            d.remaining = size;
+            stream.subscribe(&d.stream_state);
+            _downloads ~= d;
+            d.pump();
+            return true;
+        }
 
         HTTPMessage response;
         response.http_version = ver;
@@ -432,6 +472,16 @@ private:
         defaultAllocator().freeT(u);
     }
 
+    void finish_download(Download* d)
+    {
+        if (d.file.is_open)
+            d.file.close();
+        if (d.stream)
+            d.stream.unsubscribe(&d.stream_state);
+        _downloads.removeFirstSwapLast(d);
+        defaultAllocator().freeT(d);
+    }
+
     static struct Upload
     {
     nothrow @nogc:
@@ -496,6 +546,59 @@ private:
             // the connection died mid-body; the temporary is discarded, the target untouched
             if (signal != StateSignal.online)
                 owner.finish_upload(&this);
+        }
+    }
+
+    static struct Download
+    {
+    nothrow @nogc:
+        enum stream_threshold = 64 * 1024;  // buffer smaller responses (they remain compressible)
+        enum chunk_size = 16 * 1024;
+        enum backlog_high = 64 * 1024;      // stop pumping while this much is queued on the stream
+
+        StaticFileServer owner;
+        Stream stream;
+        File file;
+        ulong remaining;
+
+        // returns true when the transfer completed or died (and this context was freed)
+        bool pump()
+        {
+            while (true)
+            {
+                if (!stream.running || remaining == 0)
+                {
+                    owner.finish_download(&this);
+                    return true;
+                }
+                if (stream.tx_backlog() >= backlog_high)
+                    return false;
+
+                ubyte[chunk_size] buf = void;
+                size_t take = remaining < chunk_size ? cast(size_t)remaining : chunk_size;
+                size_t got;
+                Result r = file.read(buf[0 .. take], got);
+                if (r && got == take && stream.write(buf[0 .. got]) == cast(ptrdiff_t)got)
+                {
+                    remaining -= got;
+                    continue;
+                }
+
+                // the Content-Length is already promised; drop the connection so the client
+                // sees a broken transfer rather than a silently short file
+                writeWarning("static: transfer failed mid-body, dropping connection");
+                Stream s = stream;
+                StaticFileServer o = owner;
+                o.finish_download(&this);
+                s.destroy();
+                return true;
+            }
+        }
+
+        void stream_state(ActiveObject, StateSignal signal)
+        {
+            if (signal != StateSignal.online)
+                owner.finish_download(&this);
         }
     }
 }
