@@ -3,6 +3,7 @@ module protocol.http.staticfiles;
 import urt.array;
 import urt.encoding;
 import urt.file;
+import urt.lifetime;
 import urt.log;
 import urt.mem.allocator;
 import urt.mem.temp : tconcat;
@@ -118,11 +119,11 @@ protected:
 
         bool ok = server.add_uri_handler(HTTPMethod.GET, _uri[], &handle_request);
         if (ok)
-            ok = server.add_uri_handler(HTTPMethod.PUT, _uri[], &handle_request);
-        if (ok)
             ok = server.add_uri_handler(HTTPMethod.DELETE, _uri[], &handle_request);
         if (ok)
             ok = server.add_uri_handler(HTTPMethod.OPTIONS, _uri[], &handle_request);
+        if (ok)
+            ok = server.add_uri_handler(HTTPMethod.PUT, _uri[], &begin_upload);
         if (!ok)
         {
             remove_handlers(server);
@@ -136,6 +137,17 @@ protected:
 
     override CompletionStatus shutdown()
     {
+        // in-flight uploads can't outlive the mount: the parser holds a delegate into freed
+        // context if they do. Drop their connections; the freed handler is never called.
+        while (!_uploads.empty)
+        {
+            Upload* u = _uploads[_uploads.length - 1];
+            Stream s = u.stream;
+            finish_upload(u);
+            if (s)
+                s.destroy();
+        }
+
         if (_registered)
         {
             if (HTTPServer server = _server.get)
@@ -154,13 +166,14 @@ private:
     String _root;
     String _allowed_origin;
     bool _registered;
+    Array!(Upload*) _uploads;
 
     void remove_handlers(HTTPServer server)
     {
         server.remove_uri_handler(HTTPMethod.GET, &handle_request);
-        server.remove_uri_handler(HTTPMethod.PUT, &handle_request);
         server.remove_uri_handler(HTTPMethod.DELETE, &handle_request);
         server.remove_uri_handler(HTTPMethod.OPTIONS, &handle_request);
+        server.remove_uri_handler(HTTPMethod.PUT, &begin_upload);
     }
 
     void server_state_change(ActiveObject, StateSignal signal)
@@ -173,56 +186,15 @@ private:
     int handle_request(ref const HTTPMessage request, ref Stream stream, const(ubyte)[] leftover)
     {
         HTTPVersion ver = request.http_version;
-        const(char)[] target = request.request_target[];
 
         if (request.method == HTTPMethod.OPTIONS)
             return handle_options(request, stream);
 
-        // the server dispatches on a path-boundary longest-prefix match, so `rel` is
-        // always empty or starts with '/'.
-        const(char)[] rel = target[_uri.length .. $];
-
-        bool want_index = rel.length == 0 || rel[$-1] == '/';
-        while (rel.length && rel[0] == '/')
-            rel = rel[1 .. $];
-
-        char[1024] decode_buf = void;
-        if (url_decode_length(rel) > decode_buf.length)
-            return send_status(ver, stream, 414, request);
-        ptrdiff_t decoded_len = url_decode(rel, decode_buf[]);
-        if (decoded_len < 0)
-            return send_status(ver, stream, 400, request);
-        const(char)[] decoded = decode_buf[0 .. decoded_len];
-
         Array!char fs_path;
-        fs_path ~= _root[];
-        if (fs_path.length && fs_path[$-1] != '/' && fs_path[$-1] != '\\')
-            fs_path ~= '/';
-
-        const(char)[] p = decoded;
-        while (p.length)
-        {
-            const(char)[] seg = p.split!'/';
-            if (seg.length == 0 || seg == ".")
-                continue;
-            if (seg == "..")
-                return send_status(ver, stream, 403, request); // refuse to escape the root
-            foreach (c; seg)
-            {
-                if (c == '\\' || c == '\0')
-                    return send_status(ver, stream, 400, request);
-            }
-            fs_path ~= seg;
-            if (p.length)
-                fs_path ~= '/';
-        }
-
-        if (request.method == HTTPMethod.PUT)
-        {
-            if (want_index)
-                return send_status(ver, stream, 405, request);
-            return store_file(fs_path[], ver, request, stream);
-        }
+        bool want_index;
+        ushort status = map_target(request.request_target[], fs_path, want_index);
+        if (status != 0)
+            return send_status(ver, stream, status, request);
 
         if (request.method == HTTPMethod.DELETE)
         {
@@ -268,6 +240,50 @@ private:
         return 0;
     }
 
+    // resolves a request target to a filesystem path beneath root; returns 0 and fills fs_path,
+    // or the HTTP status the request should be refused with
+    ushort map_target(const(char)[] target, ref Array!char fs_path, out bool want_index)
+    {
+        // the server dispatches on a path-boundary longest-prefix match, so `rel` is
+        // always empty or starts with '/'.
+        const(char)[] rel = target[_uri.length .. $];
+
+        want_index = rel.length == 0 || rel[$-1] == '/';
+        while (rel.length && rel[0] == '/')
+            rel = rel[1 .. $];
+
+        char[1024] decode_buf = void;
+        if (url_decode_length(rel) > decode_buf.length)
+            return 414;
+        ptrdiff_t decoded_len = url_decode(rel, decode_buf[]);
+        if (decoded_len < 0)
+            return 400;
+        const(char)[] decoded = decode_buf[0 .. decoded_len];
+
+        fs_path ~= _root[];
+        if (fs_path.length && fs_path[$-1] != '/' && fs_path[$-1] != '\\')
+            fs_path ~= '/';
+
+        const(char)[] p = decoded;
+        while (p.length)
+        {
+            const(char)[] seg = p.split!'/';
+            if (seg.length == 0 || seg == ".")
+                continue;
+            if (seg == "..")
+                return 403; // refuse to escape the root
+            foreach (c; seg)
+            {
+                if (c == '\\' || c == '\0')
+                    return 400;
+            }
+            fs_path ~= seg;
+            if (p.length)
+                fs_path ~= '/';
+        }
+        return 0;
+    }
+
     bool serve_file(const(char)[] fs_path, HTTPVersion ver, ref const HTTPMessage request, ref Stream stream)
     {
         File f;
@@ -307,49 +323,63 @@ private:
         return true;
     }
 
-    // Bodies larger than the server's max_buffered_body never reach here.
+    // PUT streams the body to disk as it arrives, so uploads aren't subject to the server's
+    // max_buffered_body and never buffer in memory.
     //
-    // Written to a temporary and swapped in, so a write that fails partway
-    // leaves the existing file untouched rather than truncated. SPIFFS refuses
-    // to rename onto an existing name, so the swap is a delete then a rename;
-    // losing power between those two leaves the complete upload as .tmp and no
-    // target, which the boot guard survives. Truncating in place does not.
-    int store_file(const(char)[] fs_path, HTTPVersion ver, ref const HTTPMessage request, ref Stream stream)
+    // Written to a temporary and swapped in, so a write that fails partway (or a connection
+    // that dies mid-body) leaves the existing file untouched rather than truncated. SPIFFS
+    // refuses to rename onto an existing name, so the swap is a delete then a rename; losing
+    // power between those two leaves the complete upload as .tmp and no target, which the boot
+    // guard survives. Truncating in place does not.
+    //
+    // A refused request (bad path, directory target, open failure) still returns a chunk sink:
+    // the body is drained and the failure status sent at the end, so the client always reads a
+    // real status rather than a dead connection.
+    StreamingChunkHandler begin_upload(ref const HTTPMessage request, ref Stream stream)
     {
-        const bool replaced = file_exists(fs_path);
-        const(char)[] tmp_path = tconcat(fs_path, ".tmp");
+        Array!char fs_path;
+        bool want_index;
+        ushort status = map_target(request.request_target[], fs_path, want_index);
+        if (status == 0 && want_index)
+            status = 405; // a directory names no file to write
 
-        File f;
-        Result o = f.open(tmp_path, FileOpenMode.WriteTruncate);
-        if (!o)
+        if (status == 0)
         {
-            writeWarning("static: open '", tmp_path, "' for write failed: ", o.system_code);
-            return send_status(ver, stream, 500, request);
+            foreach (existing; _uploads)
+            {
+                if (existing.target[] == fs_path[])
+                {
+                    status = 409; // concurrent upload to the same target would share the temporary
+                    break;
+                }
+            }
         }
 
-        size_t written;
-        Result r = f.write(request.content[], written);
-        f.close();
-
-        if (!r || written != request.content.length)
+        Upload* u = defaultAllocator().allocT!Upload();
+        u.owner = this;
+        u.stream = stream;
+        u.error = status;
+        if (status == 0)
         {
-            writeWarning("static: write '", tmp_path, "' failed: ", r.system_code);
-            delete_file(tmp_path);
-            return send_status(ver, stream, 500, request);
+            u.target = fs_path.move;
+            u.tmp ~= u.target[];
+            u.tmp ~= ".tmp";
+            u.replaced = file_exists(u.target[]);
+            Result o = u.file.open(u.tmp[], FileOpenMode.WriteTruncate);
+            if (!o)
+            {
+                writeWarning("static: open '", u.tmp[], "' for write failed: ", o.system_code);
+                u.error = 500;
+            }
         }
 
-        if (replaced)
-            delete_file(fs_path);
+        stream.subscribe(&u.stream_state);
+        _uploads ~= u;
 
-        Result mv = rename_file(tmp_path, fs_path);
-        if (!mv)
-        {
-            writeWarning("static: could not swap '", tmp_path, "' into place: ", mv.system_code);
-            return send_status(ver, stream, 500, request);
-        }
+        if (request.http_version >= HTTPVersion.V1_1 && request.header("Expect")[] == "100-continue")
+            stream.write("HTTP/1.1 100 Continue\r\n\r\n");
 
-        writeInfo("static: stored '", fs_path, "' (", written, " bytes)");
-        return send_status(ver, stream, replaced ? 200 : 201, request);
+        return &u.on_chunk;
     }
 
     int remove_file(const(char)[] fs_path, HTTPVersion ver, ref const HTTPMessage request, ref Stream stream)
@@ -391,6 +421,82 @@ private:
         add_cors(response, request);
         stream.write(response.format_message()[]);
         return 0;
+    }
+
+    void finish_upload(Upload* u)
+    {
+        u.discard();
+        if (u.stream)
+            u.stream.unsubscribe(&u.stream_state);
+        _uploads.removeFirstSwapLast(u);
+        defaultAllocator().freeT(u);
+    }
+
+    static struct Upload
+    {
+    nothrow @nogc:
+        StaticFileServer owner;
+        Stream stream;
+        File file;
+        Array!char target;
+        Array!char tmp;
+        ushort error;   // pending failure status; the body is drained and this is reported at the end
+        bool replaced;
+
+        int on_chunk(ref const HTTPMessage request, const(ubyte)[] chunk, bool final_chunk, ref Stream s)
+        {
+            if (!final_chunk)
+            {
+                if (error)
+                    return 0;
+                size_t written;
+                Result r = file.write(chunk, written);
+                if (!r || written != chunk.length)
+                {
+                    writeWarning("static: write '", tmp[], "' failed: ", r.system_code);
+                    error = 500;
+                    discard();
+                }
+                return 0;
+            }
+
+            ushort status = error ? error : commit();
+            StaticFileServer o = owner;
+            o.send_status(request.http_version, s, status, request);
+            o.finish_upload(&this);
+            return 0;
+        }
+
+        ushort commit()
+        {
+            file.close();
+            if (replaced)
+                delete_file(target[]);
+            Result mv = rename_file(tmp[], target[]);
+            if (!mv)
+            {
+                writeWarning("static: could not swap '", tmp[], "' into place: ", mv.system_code);
+                return 500;
+            }
+            writeInfo("static: stored '", target[], "'");
+            return replaced ? 200 : 201;
+        }
+
+        void discard()
+        {
+            if (file.is_open)
+            {
+                file.close();
+                delete_file(tmp[]);
+            }
+        }
+
+        void stream_state(ActiveObject, StateSignal signal)
+        {
+            // the connection died mid-body; the temporary is discarded, the target untouched
+            if (signal != StateSignal.online)
+                owner.finish_upload(&this);
+        }
     }
 }
 

@@ -55,4 +55,8 @@ through them and remove sections as they are absorbed.
   origin than the backend must have the mount configured with its origin (or `*`) before
   cross-origin reads or writes work. Error statuses carry the CORS headers too, so a
   cross-origin client sees real 404/403 codes.
+- Uploads stream to disk: `PUT` bodies are no longer capped by the server's 64KB
+  `max-request-body`, and an interrupted upload leaves the previous file intact. Requests
+  the mount refuses (403, 405, 409, 500) still drain the body and answer with the real
+  status, so large uploads never die as opaque network errors.
 - There is no ETag/If-Match yet: two editors saving the same file last-writer-wins.
