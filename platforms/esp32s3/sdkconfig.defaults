@@ -10,9 +10,11 @@ CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 # No ESP-IDF logging -- OpenWatt has its own log system
 CONFIG_LOG_DEFAULT_LEVEL_NONE=y
 
-# No VFS layer (virtual filesystem for stdio redirection)
-CONFIG_VFS_SUPPORT_IO=n
-CONFIG_VFS_SUPPORT_DIR=n
+# VFS: IO and DIR carry the newlib file syscalls that urt.file's SPIFFS backend
+# rides on. Without IO, open() is a stub returning ENOSYS even though a
+# filesystem is mounted. SELECT stays off; nothing selects on files.
+CONFIG_VFS_SUPPORT_IO=y
+CONFIG_VFS_SUPPORT_DIR=y
 CONFIG_VFS_SUPPORT_SELECT=n
 
 # FreeRTOS tuning

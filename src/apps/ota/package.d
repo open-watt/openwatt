@@ -139,6 +139,9 @@ protected:
         return CompletionStatus.complete;
     }
 
+    // TODO: move this checkpoint to the main app, ahead of config execution.
+    // Marking valid from here judges the image by "the configured system stayed
+    // up", so a bad config costs a firmware rollback.
     override void update()
     {
         if (!_committed && getAppTime() >= _commit_time)

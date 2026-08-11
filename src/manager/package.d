@@ -44,6 +44,9 @@ import manager.secret;
 import manager.signal;
 import manager.system;
 
+version (UseSpiffs)   version = HasFilesystem;
+version (UseLittleFS) version = HasFilesystem;
+
 nothrow @nogc:
 
 
@@ -464,6 +467,15 @@ nothrow @nogc:
         console.register_command!show_time("/system", this, "time");
         console.register_command!sleep("/system", this);
         console.register_command!reboot("/system", this);
+
+        version (HasFilesystem)
+        {
+            console.register_command!fs_format("/system/fs", this, "format");
+            console.register_command!fs_info("/system/fs", this, "info");
+            console.register_command!fs_write("/system/fs", this, "write");
+            console.register_command!fs_read("/system/fs", this, "read");
+            console.register_command!fs_rm("/system/fs", this, "rm");
+        }
 
         version (AllocTracking)
         {

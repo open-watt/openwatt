@@ -53,6 +53,8 @@ nothrow @nogc:
             if (HTTPServer old = _server.get)
             {
                 old.remove_uri_handler(HTTPMethod.GET, &handle_request);
+                old.remove_uri_handler(HTTPMethod.PUT, &handle_request);
+                old.remove_uri_handler(HTTPMethod.DELETE, &handle_request);
                 old.unsubscribe(&server_state_change);
             }
             _registered = false;
@@ -90,8 +92,10 @@ nothrow @nogc:
 
 protected:
 
+    // An empty root is the filesystem's own origin: the process working
+    // directory on a host, or no name prefix at all on a flat store.
     override bool validate() const pure
-        => _server.get !is null && !_root.empty;
+        => _server.get !is null;
 
     override CompletionStatus startup()
     {
@@ -102,6 +106,19 @@ protected:
         if (!server.add_uri_handler(HTTPMethod.GET, _uri[], &handle_request))
         {
             writeWarning("static: failed to register handler for uri '", _uri[], "' (prefix conflict?)");
+            return CompletionStatus.error;
+        }
+        if (!server.add_uri_handler(HTTPMethod.PUT, _uri[], &handle_request))
+        {
+            server.remove_uri_handler(HTTPMethod.GET, &handle_request);
+            writeWarning("static: failed to register PUT handler for uri '", _uri[], "' (prefix conflict?)");
+            return CompletionStatus.error;
+        }
+        if (!server.add_uri_handler(HTTPMethod.DELETE, _uri[], &handle_request))
+        {
+            server.remove_uri_handler(HTTPMethod.GET, &handle_request);
+            server.remove_uri_handler(HTTPMethod.PUT, &handle_request);
+            writeWarning("static: failed to register DELETE handler for uri '", _uri[], "' (prefix conflict?)");
             return CompletionStatus.error;
         }
         server.subscribe(&server_state_change);
@@ -116,6 +133,8 @@ protected:
             if (HTTPServer server = _server.get)
             {
                 server.remove_uri_handler(HTTPMethod.GET, &handle_request);
+                server.remove_uri_handler(HTTPMethod.PUT, &handle_request);
+                server.remove_uri_handler(HTTPMethod.DELETE, &handle_request);
                 server.unsubscribe(&server_state_change);
             }
             _registered = false;
@@ -180,6 +199,20 @@ private:
                 fs_path ~= '/';
         }
 
+        if (request.method == HTTPMethod.PUT)
+        {
+            if (want_index)
+                return send_status(ver, stream, 405);
+            return store_file(fs_path[], ver, request, stream);
+        }
+
+        if (request.method == HTTPMethod.DELETE)
+        {
+            if (want_index)
+                return send_status(ver, stream, 405);
+            return remove_file(fs_path[], ver, stream);
+        }
+
         if (!want_index)
         {
             if (serve_file(fs_path[], ver, request, stream))
@@ -239,6 +272,67 @@ private:
 
         send_message(stream, response, &request);
         return true;
+    }
+
+    // Bodies larger than the server's max_buffered_body never reach here.
+    //
+    // Written to a temporary and swapped in, so a write that fails partway
+    // leaves the existing file untouched rather than truncated. SPIFFS refuses
+    // to rename onto an existing name, so the swap is a delete then a rename;
+    // losing power between those two leaves the complete upload as .tmp and no
+    // target, which the boot guard survives. Truncating in place does not.
+    int store_file(const(char)[] fs_path, HTTPVersion ver, ref const HTTPMessage request, ref Stream stream)
+    {
+        const bool replaced = file_exists(fs_path);
+        const(char)[] tmp_path = tconcat(fs_path, ".tmp");
+
+        File f;
+        Result o = f.open(tmp_path, FileOpenMode.WriteTruncate);
+        if (!o)
+        {
+            writeWarning("static: open '", tmp_path, "' for write failed: ", o.system_code);
+            return send_status(ver, stream, 500);
+        }
+
+        size_t written;
+        Result r = f.write(request.content[], written);
+        f.close();
+
+        if (!r || written != request.content.length)
+        {
+            writeWarning("static: write '", tmp_path, "' failed: ", r.system_code);
+            delete_file(tmp_path);
+            return send_status(ver, stream, 500);
+        }
+
+        if (replaced)
+            delete_file(fs_path);
+
+        Result mv = rename_file(tmp_path, fs_path);
+        if (!mv)
+        {
+            writeWarning("static: could not swap '", tmp_path, "' into place: ", mv.system_code);
+            return send_status(ver, stream, 500);
+        }
+
+        writeInfo("static: stored '", fs_path, "' (", written, " bytes)");
+        return send_status(ver, stream, replaced ? 200 : 201);
+    }
+
+    int remove_file(const(char)[] fs_path, HTTPVersion ver, ref Stream stream)
+    {
+        if (!file_exists(fs_path))
+            return send_status(ver, stream, 404);
+
+        Result r = delete_file(fs_path);
+        if (!r)
+        {
+            writeWarning("static: delete '", fs_path, "' failed: ", r.system_code);
+            return send_status(ver, stream, 500);
+        }
+
+        writeInfo("static: deleted '", fs_path, "'");
+        return send_status(ver, stream, 200);
     }
 
     int send_status(HTTPVersion ver, ref Stream stream, ushort code)

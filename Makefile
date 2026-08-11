@@ -484,7 +484,8 @@ endif
 		idf.py -B "$(ESP_BUILD_DIR)" -DIDF_TARGET=$(ESP_IDF_TARGET) \
 			-DSDKCONFIG="$(ESP_SDKCONFIG)" -DSDKCONFIG_DEFAULTS="$(ESP_SDKCONFIG_DEFAULTS)" \
 			-DOPENWATT_OBJ=$(abspath $(ESP_LINK_OBJ)) \
-			-DUSE_LWIP=$(if $(filter 1,$(USE_INTERNAL_IP_STACK)),0,1) build'
+			-DUSE_LWIP=$(if $(filter 1,$(USE_INTERNAL_IP_STACK)),0,1) \
+			-DUSE_SPIFFS=$(USE_SPIFFS) -DUSE_LITTLEFS=$(USE_LITTLEFS) build'
 	cp "$(ESP_BUILD_DIR)/openwatt.bin" "$(TARGETDIR)/openwatt.bin"
 	cp "$(ESP_BUILD_DIR)/bootloader/bootloader.bin" "$(TARGETDIR)/bootloader.bin"
 	cp "$(ESP_BUILD_DIR)/partition_table/partition-table.bin" "$(TARGETDIR)/partition-table.bin"
