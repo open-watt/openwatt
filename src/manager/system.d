@@ -3,6 +3,7 @@ module manager.system;
 import urt.array;
 import urt.log;
 import urt.mem.allocator;
+import urt.meta.nullable;
 import urt.string;
 import urt.system;
 import urt.time;
@@ -216,6 +217,32 @@ version (HasFilesystem)
         }
         session.write_line(data.length, " bytes: ", cast(const(char)[])data);
         defaultAllocator().free(data);
+    }
+
+    void fs_ls(Session session, Nullable!(const(char)[]) path)
+    {
+        import urt.file : Directory, DirEntry, open, read, close;
+
+        const(char)[] dir_path = path ? path.value : null;
+
+        Directory dir;
+        if (!dir.open(dir_path))
+        {
+            session.write_line("cannot list '", dir_path, "'");
+            return;
+        }
+
+        uint count;
+        ulong total;
+        DirEntry entry;
+        while (dir.read(entry))
+        {
+            session.write_line(entry.is_directory ? "d " : "  ", entry.size, "\t", entry.name);
+            total += entry.size;
+            ++count;
+        }
+        dir.close();
+        session.write_line(count, " entries, ", total, " bytes");
     }
 
     void fs_rm(Session session, const(char)[] name)

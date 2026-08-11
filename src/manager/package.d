@@ -474,6 +474,7 @@ nothrow @nogc:
             console.register_command!fs_info("/system/fs", this, "info");
             console.register_command!fs_write("/system/fs", this, "write");
             console.register_command!fs_read("/system/fs", this, "read");
+            console.register_command!fs_ls("/system/fs", this, "ls");
             console.register_command!fs_rm("/system/fs", this, "rm");
         }
 
