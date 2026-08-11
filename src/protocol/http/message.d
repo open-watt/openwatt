@@ -51,6 +51,39 @@ enum HTTPMethod : ubyte
     UNLOCK
 }
 
+// A set of methods, for matching a request against many at once. Members mirror
+// HTTPMethod, so they carry its wire spelling rather than the usual style.
+enum HTTPMethodSet : uint
+{
+    none        = 0,
+
+    GET         = 1 << HTTPMethod.GET,
+    HEAD        = 1 << HTTPMethod.HEAD,
+    OPTIONS     = 1 << HTTPMethod.OPTIONS,
+    POST        = 1 << HTTPMethod.POST,
+    PUT         = 1 << HTTPMethod.PUT,
+    PATCH       = 1 << HTTPMethod.PATCH,
+    DELETE      = 1 << HTTPMethod.DELETE,
+    TRACE       = 1 << HTTPMethod.TRACE,
+    CONNECT     = 1 << HTTPMethod.CONNECT,
+    SEARCH      = 1 << HTTPMethod.SEARCH,
+    PROPFIND    = 1 << HTTPMethod.PROPFIND,
+    PROPPATCH   = 1 << HTTPMethod.PROPPATCH,
+    MKCOL       = 1 << HTTPMethod.MKCOL,
+    COPY        = 1 << HTTPMethod.COPY,
+    MOVE        = 1 << HTTPMethod.MOVE,
+    LOCK        = 1 << HTTPMethod.LOCK,
+    UNLOCK      = 1 << HTTPMethod.UNLOCK,
+
+    any         = (1 << (HTTPMethod.max + 1)) - 1, // extends over methods added later
+}
+
+static assert(__traits(allMembers, HTTPMethodSet).length == __traits(allMembers, HTTPMethod).length + 2,
+              "HTTPMethodSet must mirror HTTPMethod, plus none and any");
+
+HTTPMethodSet method_set(HTTPMethod method) pure
+    => cast(HTTPMethodSet)(1 << method);
+
 enum HTTPVersion : ubyte
 {
     V1_0 = 0x10,

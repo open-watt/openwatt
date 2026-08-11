@@ -645,8 +645,7 @@ private:
         }
         if (sub)
         {
-            sub.add_uri_handler(HTTPMethod.GET, _doh_uri[], &doh_request_handler);
-            sub.add_uri_handler(HTTPMethod.POST, _doh_uri[], &doh_request_handler);
+            sub.add_uri_handler(HTTPMethodSet.GET | HTTPMethodSet.POST, _doh_uri[], &doh_request_handler);
         }
     }
 

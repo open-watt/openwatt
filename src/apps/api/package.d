@@ -77,9 +77,7 @@ protected:
         HTTPServer _server = _server_id.get_item!HTTPServer;
         if (_uri)
         {
-            _server.add_uri_handler(HTTPMethod.GET, _uri[], &handle_request);
-            _server.add_uri_handler(HTTPMethod.POST, _uri[], &handle_request);
-            _server.add_uri_handler(HTTPMethod.OPTIONS, _uri[], &handle_request);
+            _server.add_uri_handler(HTTPMethodSet.GET | HTTPMethodSet.POST | HTTPMethodSet.OPTIONS, _uri[], &handle_request);
         }
         else
             _default_handler = _server.hook_global_handler(&handle_request);

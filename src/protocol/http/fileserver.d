@@ -158,31 +158,21 @@ protected:
                 writeWarning("fileserver: webdav is not in this build; serving read-write");
         }
 
-        bool ok = server.add_uri_handler(HTTPMethod.GET, _uri[], &handle_request);
-        if (ok)
-            ok = server.add_uri_handler(HTTPMethod.HEAD, _uri[], &handle_request);
-        if (ok)
-            ok = server.add_uri_handler(HTTPMethod.OPTIONS, _uri[], &handle_request);
+        HTTPMethodSet methods = HTTPMethodSet.GET | HTTPMethodSet.HEAD | HTTPMethodSet.OPTIONS;
         if (_access >= FileServerAccess.write)
-        {
-            if (ok)
-                ok = server.add_uri_handler(HTTPMethod.DELETE, _uri[], &handle_request);
-            if (ok)
-                ok = server.add_uri_handler(HTTPMethod.PUT, _uri[], &begin_upload);
-        }
+            methods |= HTTPMethodSet.DELETE;
         version (WebDAV)
         {
             if (_access == FileServerAccess.webdav)
-            {
-                static immutable HTTPMethod[6] dav_methods = [ HTTPMethod.PROPFIND, HTTPMethod.MKCOL, HTTPMethod.COPY,
-                                                               HTTPMethod.MOVE, HTTPMethod.LOCK, HTTPMethod.UNLOCK ];
-                foreach (m; dav_methods)
-                {
-                    if (!ok)
-                        break;
-                    ok = server.add_uri_handler(m, _uri[], &handle_request);
-                }
-            }
+                methods |= HTTPMethodSet.PROPFIND | HTTPMethodSet.MKCOL | HTTPMethodSet.COPY |
+                           HTTPMethodSet.MOVE | HTTPMethodSet.LOCK | HTTPMethodSet.UNLOCK;
+        }
+
+        bool ok = server.add_uri_handler(methods, _uri[], &handle_request);
+        if (ok && _access >= FileServerAccess.write)
+        {
+            // PUT is registered apart from the rest: it streams its body
+            ok = server.add_uri_handler(HTTPMethod.PUT, _uri[], &begin_upload);
         }
         if (!ok)
         {
@@ -253,15 +243,8 @@ private:
 
     void remove_handlers(HTTPServer server)
     {
-        version (WebDAV)
-            static immutable HTTPMethod[10] methods = [ HTTPMethod.GET, HTTPMethod.HEAD, HTTPMethod.DELETE, HTTPMethod.OPTIONS,
-                                                        HTTPMethod.PROPFIND, HTTPMethod.MKCOL, HTTPMethod.COPY,
-                                                        HTTPMethod.MOVE, HTTPMethod.LOCK, HTTPMethod.UNLOCK ];
-        else
-            static immutable HTTPMethod[4] methods = [ HTTPMethod.GET, HTTPMethod.HEAD, HTTPMethod.DELETE, HTTPMethod.OPTIONS ];
-        foreach (m; methods)
-            server.remove_uri_handler(m, &handle_request);
-        server.remove_uri_handler(HTTPMethod.PUT, &begin_upload);
+        server.remove_uri_handler(HTTPMethodSet.any, &handle_request);
+        server.remove_uri_handler(HTTPMethodSet.any, &begin_upload);
     }
 
     void server_state_change(ActiveObject, StateSignal signal)
