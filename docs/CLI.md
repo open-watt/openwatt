@@ -417,26 +417,59 @@ The interface self-configures its L2MTU from the peer's datagram payload MTU
 | `remote-host` | host, address or MAC | none | Default datagram destination. |
 | `remote-port` | `1` to `65535` | with remote-host | Default destination port. |
 
-### `/protocol/http/static`
+### `/protocol/http/fileserver`
 
-A static mount serves a filesystem directory beneath a URI prefix on an HTTP
-server. `GET <uri>/a/b.css` reads `<root>/a/b.css`; a directory request serves
-`index.html` or `index.htm`. The mount is also a file store: `PUT` writes the
-request body to the mapped path and `DELETE` removes it. Uploads stream to a
-temporary as the body arrives, so they are not limited by the server's
-`max-request-body`, and the target is only replaced once the upload completes:
-an interrupted transfer leaves the previous file untouched. Responses larger
-than 64KB stream from disk instead of buffering, paced by the connection.
+A file mount serves a filesystem directory beneath a URI prefix on an HTTP
+server. `GET <uri>/a/b.css` reads `<root>/a/b.css`. A directory named without
+its trailing slash redirects (`301`) to it, so a path that names a directory
+is always distinguishable from a file. A directory request serves
+`index.html` or `index.htm`, and otherwise falls back to a JSON listing
+(`{"entries":[{name, dir, size, mtime}]}`, `mtime` in unix seconds) served as
+`application/vnd.openwatt.dir+json` - parseable as plain JSON, but never
+mistakable for a `.json` file. Requesting with `Accept: application/json`
+returns the listing even where an index exists; this is how the web file
+browser enumerates, at every access level. `HEAD` answers with the headers
+alone. Responses larger than 64KB stream from disk instead of buffering,
+paced by the connection.
 
 Path mapping URL-decodes the request, rejects `..` traversal, and refuses
 path separators inside a segment, for reads and writes alike.
+
+The `access` property sets how far the mount goes beyond reading:
+
+- `read`: `GET`/`HEAD` only (the default).
+- `write`: adds `PUT` (store a file) and `DELETE` (remove one). Uploads
+  stream to a temporary as the body arrives, so they are not limited by the
+  server's `max-request-body`, and the target is only replaced once the
+  upload completes: an interrupted transfer leaves the previous file
+  untouched.
+- `webdav`: upgrades the mount to a WebDAV server, so filesystem clients
+  (davfs2, rclone, Windows Explorer, macOS Finder) can mount it. Adds
+  `PROPFIND` (Depth 0 and 1; infinity is refused, clients walk), `MKCOL`,
+  `COPY`, `MOVE` and recursive collection `DELETE`, plus `LOCK`/`UNLOCK`
+  grants that are never enforced: they exist because Windows and macOS
+  refuse to mount read-write without a lock to hold, not to arbitrate
+  writers. The mount root itself cannot be deleted, moved, or overwritten.
+  WebDAV is compiled out of `TINY` builds; such a mount serves read-write.
 
 | Property | Values | Default | Description |
 | --- | --- | --- | --- |
 | `http-server` | HTTP server name | required | Server the mount registers its URI handlers on. |
 | `uri` | URI prefix | required | Prefix the mount answers under; `/` serves the whole tree. |
 | `root` | directory path | empty | Directory served; empty is the filesystem origin (the working directory on hosts). |
+| `access` | `read`, `write`, `webdav` | `read` | Access level; see above. |
+| `auth-required` | `yes`/`no` | `no` | Require HTTP Basic credentials; see below. |
 | `allowed-origin` | empty, `*`, or an origin | empty | Cross-origin access policy; see below. |
+
+With `auth-required=yes` every request except `OPTIONS` (preflights carry no
+credentials) must present Basic credentials naming a `/secret` that validates
+and is allowed the `http` service (or `any`); anything else is a `401` with a
+`WWW-Authenticate` challenge. Basic credentials travel in cleartext, so an
+authenticated mount belongs on an HTTPS server.
+
+```text
+/secret add name=admin password=hunter2 services=http
+```
 
 `allowed-origin` controls browser cross-origin access. Unset, the mount sends
 no CORS headers, so browsers only allow same-origin pages to use it; because
@@ -449,5 +482,5 @@ real status codes rather than opaque network errors.
 
 ```text
 /protocol/http/server add name=webserver port=80
-/protocol/http/static add name=files http-server=webserver uri=/files root="conf" allowed-origin=http://192.168.0.5:8080
+/protocol/http/fileserver add name=files http-server=webserver uri=/files root="conf" access=webdav allowed-origin=http://192.168.0.5:8080
 ```

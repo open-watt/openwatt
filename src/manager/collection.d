@@ -35,7 +35,7 @@ enum CollectionType : ubyte
     ezsp,
     http_client,
     http_server,
-    http_static,
+    http_fileserver,
     interface_, // all interfaces
     interface_group,
     ip_address,

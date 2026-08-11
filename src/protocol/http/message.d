@@ -672,6 +672,7 @@ String status_text(ushort code)
         case 204: return StringLit!"No Content";
         case 205: return StringLit!"Reset Content";
         case 206: return StringLit!"Partial Content";
+        case 207: return StringLit!"Multi-Status";
         case 301: return StringLit!"Moved Permanently";
         case 302: return StringLit!"Found";
         case 303: return StringLit!"See Other";
