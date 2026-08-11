@@ -55,6 +55,34 @@ Use this only for a board compatible with that partition layout, and flash the
 partition table together with the coredump-enabled image. The normal
 `COREDUMP=0` build keeps the full storage partition.
 
+## Supported boards
+
+Board profiles in the tree. Build with `make esp-idf-build BOARD=<name> CONFIG=release`; the
+output lands in `bin/<platform>_<board>_<config>/`. Each board's `system.conf` wires its
+peripherals and its `default.conf` brings up a setup access point at `192.168.4.1` with the HTTP
+API, sync, OTA and file server, so a fresh unit is reachable before it has any credentials.
+
+| Board | `BOARD=` | Platform | Flash | PSRAM |
+| --- | --- | --- | ---: | ---: |
+| SmartEVSE v3.0 | `smartevse-v30` | `esp32` | 4 MB | none |
+| Waveshare ESP32-S3-RS485-CAN | `waveshare-esp32-s3-rs485-can` | `esp32-s3` | 16 MB | 8 MB |
+
+**SmartEVSE v3.0** replaces the stock SmartEVSE firmware in place. The build is `switch-http`,
+headless and tiny, with Modbus, the HTTP client and the file server compiled out, and the
+`SmartEVSE` version set selects the EVSE hardware driver (`/driver/boards/smartevse`), its
+binding, the front panel, and RS485 on UART1. The image is app-only: it retains the stock partition
+table, NVS and SPIFFS, is uploaded through the stock web interface's `/update` page, and the open
+`OpenWatt-SmartEVSE` access point accepts a stock `firmware.bin` back through `/ota` to return the
+unit. The full procedure is in
+[platforms/esp32/boards/smartevse-v30/MIGRATION.md](../platforms/esp32/boards/smartevse-v30/MIGRATION.md).
+
+**Waveshare ESP32-S3-RS485-CAN** is the reference industrial gateway board: RS485 on UART1, CAN
+through the TWAI controller, a PCF85063 RTC on I2C that seeds system time at boot (`startup.conf`
+waits on `object:rtc?state=online` before proceeding), the USB-serial console, LittleFS storage,
+and WiFi running access point and station concurrently alongside BLE scanning. Its setup access
+point is WPA2 (`OpenWatt-Waveshare`, password `openwatt-setup`) and it also opens a telnet
+console.
+
 ## Espressif reference profiles
 
 | Platform | Reference development board | Flash | PSRAM |
