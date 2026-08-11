@@ -95,6 +95,12 @@ void register_modules(Application app)
 
     static if (has_switch)
     {
+        version (SmartEVSE)
+        {
+            import driver.boards.smartevse;
+            register_module!(driver.boards.smartevse)(app);
+        }
+
         version (linux)
         {
             import driver.linux.fdwatch;

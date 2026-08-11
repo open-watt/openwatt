@@ -1,0 +1,13 @@
+# SmartEVSE v3.0 has 4 MB flash and no PSRAM.
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_SPIRAM=n
+
+# CP and RCM interrupt paths must remain live during flash operations.
+CONFIG_GPIO_CTRL_FUNC_IN_IRAM=y
+CONFIG_GPTIMER_CTRL_FUNC_IN_IRAM=y
+CONFIG_GPTIMER_ISR_CACHE_SAFE=y
+
+# The platform SPIFFS backend requires these VFS syscalls.
+CONFIG_VFS_SUPPORT_IO=y
+CONFIG_VFS_SUPPORT_DIR=y
+CONFIG_VFS_SUPPORT_SELECT=n

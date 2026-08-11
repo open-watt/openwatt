@@ -119,23 +119,20 @@ else ifeq ($(COMPILER),dmd)
 endif
 
 # Per-platform string-import dirs (app config for embedded targets)
-ifeq ($(PLATFORM),esp32)
+ifdef BOARD_CONFIG_DIR
+    ifeq ($(wildcard $(BOARD_CONFIG_DIR)/system.conf),)
+        $(error BOARD='$(BOARD)' is missing $(BOARD_CONFIG_DIR)/system.conf)
+    endif
+    DFLAGS := $(DFLAGS) -J $(BOARD_CONFIG_DIR)
+    # system.conf is baked into the D object, so boards need isolated outputs.
+    OBJDIR    := obj/$(BUILDNAME)_$(BOARD)_$(CONFIG)
+    TARGETDIR := bin/$(BUILDNAME)_$(BOARD)_$(CONFIG)
+else ifeq ($(PLATFORM),esp32)
     DFLAGS := $(DFLAGS) -J platforms/esp32
 else ifeq ($(PLATFORM),esp32-s2)
     DFLAGS := $(DFLAGS) -J platforms/esp32s2
 else ifeq ($(PLATFORM),esp32-s3)
-    ifdef BOARD
-        ESP32_S3_CONFIG_DIR := platforms/esp32s3/boards/$(BOARD)
-        ifeq ($(wildcard $(ESP32_S3_CONFIG_DIR)/system.conf),)
-            $(error Unknown ESP32-S3 BOARD='$(BOARD)': missing $(ESP32_S3_CONFIG_DIR)/system.conf)
-        endif
-        DFLAGS := $(DFLAGS) -J $(ESP32_S3_CONFIG_DIR)
-        # the board's system.conf is baked into the D object; keep per-board artifacts apart
-        OBJDIR    := obj/$(BUILDNAME)_$(BOARD)_$(CONFIG)
-        TARGETDIR := bin/$(BUILDNAME)_$(BOARD)_$(CONFIG)
-    else
-        DFLAGS := $(DFLAGS) -J platforms/esp32s3
-    endif
+    DFLAGS := $(DFLAGS) -J platforms/esp32s3
 else ifeq ($(PLATFORM),esp32-c2)
     DFLAGS := $(DFLAGS) -J platforms/esp32c2
 else ifeq ($(PLATFORM),esp32-c3)
@@ -302,8 +299,8 @@ endif
 ifneq ($(filter esp%,$(PLATFORM)),)
 	@echo ""
 	@echo "=== D object ready: $(TARGET) ==="
-	@echo "To build flashable firmware:  make esp-idf-build PLATFORM=$(PLATFORM) CONFIG=$(CONFIG)"
-	@echo "To flash:                     make esp-flash PLATFORM=$(PLATFORM)"
+	@echo "To build flashable firmware:  make esp-idf-build PLATFORM=$(PLATFORM)$(if $(BOARD), BOARD=$(BOARD)) CONFIG=$(CONFIG)"
+	@echo "To flash:                     make esp-flash PLATFORM=$(PLATFORM)$(if $(BOARD), BOARD=$(BOARD))"
 endif
 ifeq ($(ROUTEROS_BUILD),1)
 	@$(MAKE) --no-print-directory routeros-container
@@ -371,7 +368,7 @@ endif
 # Platform packaging: ESP-IDF firmware
 # =======================================================================
 
-.PHONY: esp-idf-build esp-flash esp-monitor
+.PHONY: esp-idf-build esp-flash esp-monitor esp-check-isr
 
 ESP_IDF_PATH ?= $(lastword $(sort $(wildcard $(HOME)/.espressif/*/esp-idf)))
 ifeq ($(PLATFORM),esp32)
@@ -515,6 +512,13 @@ endif
 	@echo ""
 	@echo "Flash with:"
 	@echo "  make esp-flash PLATFORM=$(PLATFORM)$(if $(BOARD), BOARD=$(BOARD)) ESPPORT=<port>"
+
+# @critical code must not call into flash-mapped sections; the call would fault
+# whenever it runs with the instruction cache disabled.
+ESP_OBJDUMP := $(if $(filter xtensa,$(ARCH)),$(ESPRESSIF_XTENSA_BIN)/xtensa-esp-elf-objdump,$(ESPRESSIF_RISCV32_BIN)/riscv32-esp-elf-objdump)
+
+esp-check-isr:
+	@python3 test/check_isr_safety.py "$(ESP_BUILD_DIR)/openwatt.elf" --objdump "$(ESP_OBJDUMP)"
 
 esp-flash: esp-idf-build
 	. "$(ESP_IDF_PATH)/export.sh" > /dev/null 2>&1 && \

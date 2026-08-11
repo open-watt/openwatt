@@ -12,8 +12,10 @@ endif()
 set(ESP32_SYS_DIR    "${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/urt/src/urt/driver/esp32")
 set(URT_INTERNAL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/urt/src/urt/internal")
 
-set(MAIN_PRIV_REQUIRES esp_hal_uart esp_rom esp_event esp_driver_gpio driver nvs_flash mbedtls)
+set(MAIN_PRIV_REQUIRES esp_hal_uart esp_rom esp_event esp_driver_gpio esp_driver_ledc
+                       esp_driver_gptimer esp_adc driver nvs_flash mbedtls)
 list(APPEND MAIN_PRIV_REQUIRES esp_driver_i2c)
+list(APPEND MAIN_PRIV_REQUIRES esp_driver_spi)
 if(NOT OW_NO_WIFI)
     list(APPEND MAIN_PRIV_REQUIRES esp_wifi)
 endif()
