@@ -16,6 +16,7 @@ void system_reboot()
 
 // computers carry a software identity (persisted node.id); no chip-burned id here
 ulong unique_device_id() => 0;
+enum bool has_download_mode = false;
 
 bool   reboot_pending() => false;
 bool   ota_supported() => false;

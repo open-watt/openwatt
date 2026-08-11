@@ -12,6 +12,7 @@ void system_reboot()
 
 // TODO: BL808 and kin carry eFuse chip ids; wire them through when those ports need identity
 ulong unique_device_id() => 0;
+enum bool has_download_mode = false;
 
 bool   reboot_pending() => false;
 bool   ota_supported() => false;
