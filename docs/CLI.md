@@ -422,9 +422,10 @@ The interface self-configures its L2MTU from the peer's datagram payload MTU
 A static mount serves a filesystem directory beneath a URI prefix on an HTTP
 server. `GET <uri>/a/b.css` reads `<root>/a/b.css`; a directory request serves
 `index.html` or `index.htm`. The mount is also a file store: `PUT` writes the
-request body to the mapped path and `DELETE` removes it. Uploads land in a
-temporary and are swapped into place once complete, so an interrupted transfer
-leaves the previous file untouched.
+request body to the mapped path and `DELETE` removes it. Uploads stream to a
+temporary as the body arrives, so they are not limited by the server's
+`max-request-body`, and the target is only replaced once the upload completes:
+an interrupted transfer leaves the previous file untouched.
 
 Path mapping URL-decodes the request, rejects `..` traversal, and refuses
 path separators inside a segment, for reads and writes alike.
