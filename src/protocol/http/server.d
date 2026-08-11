@@ -47,8 +47,6 @@ nothrow @nogc:
         super(collection_type_info!HTTPServer, id, flags);
     }
 
-    // Properties...
-
     ushort port() const pure
         => _port;
     const(char)[] port(ushort value)
@@ -116,17 +114,48 @@ nothrow @nogc:
             s.parser.max_buffered_body = value;
     }
 
+    const(char)[] allowed_origin() const pure
+        => _allowed_origin[];
+    void allowed_origin(const(char)[] value)
+    {
+        _allowed_origin = value.makeString(g_app.allocator);
+        mark_set!(typeof(this), "allowed-origin")();
+    }
+
+    bool add_cors(ref HTTPMessage response, ref const HTTPMessage request, String* override_origin = null)
+        => add_cors(response, request.header("Origin")[], override_origin);
+
+    bool add_cors(ref HTTPMessage response, const(char)[] request_origin, String* override_origin = null)
+    {
+        String* allowed = override_origin ? override_origin : &_allowed_origin;
+        if (allowed.empty)
+            return false;
+
+        if ((*allowed)[] == "*")
+        {
+            response.headers ~= HTTPParam(StringLit!"Access-Control-Allow-Origin", StringLit!"*");
+            return true;
+        }
+
+        if (request_origin != (*allowed)[])
+            return false;
+
+        response.headers ~= HTTPParam(StringLit!"Access-Control-Allow-Origin", *allowed);
+        response.headers ~= HTTPParam(StringLit!"Vary", StringLit!"Origin");
+        return true;
+    }
+
     static if (has_tls)
         alias Properties = AliasSeq!(Prop!("port", port),
                                      Prop!("tls-port", tls_port),
                                      Prop!("certificates", certificates),
                                      Prop!("https-redirect", https_redirect),
-                                     Prop!("max-request-body", max_request_body));
+                                     Prop!("max-request-body", max_request_body),
+                                     Prop!("allowed-origin", allowed_origin));
     else
         alias Properties = AliasSeq!(Prop!("port", port),
-                                     Prop!("max-request-body", max_request_body));
-
-    // API...
+                                     Prop!("max-request-body", max_request_body),
+                                     Prop!("allowed-origin", allowed_origin));
 
     void set_default_request_handler(RequestHandler default_request_handler)
     {
@@ -373,6 +402,7 @@ private:
 
     ushort _port;
     size_t _max_request_body = 64 * 1024;
+    String _allowed_origin;
     RequestHandler _default_request_handler;
 
     TCPServer _server;

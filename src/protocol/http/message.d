@@ -755,13 +755,6 @@ String status_text(ushort code)
     }
 }
 
-void add_cors_headers(ref HTTPMessage response)
-{
-    response.headers ~= HTTPParam(StringLit!"Access-Control-Allow-Origin", StringLit!"*");
-    response.headers ~= HTTPParam(StringLit!"Access-Control-Allow-Methods", StringLit!"GET, POST, PUT, DELETE, OPTIONS");
-    response.headers ~= HTTPParam(StringLit!"Access-Control-Allow-Headers", StringLit!"Content-Type");
-}
-
 enum CompressionEncoding : ubyte
 {
     none,

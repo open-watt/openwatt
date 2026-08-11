@@ -112,6 +112,7 @@ private:
         Stream stream;
         StringSession session;
         CommandState command;
+        String origin;
     }
     Array!PendingRequest _pending_requests;
 
@@ -151,16 +152,31 @@ private:
         else if (_uri)
         {
             HTTPMessage response = create_response(request.http_version, 404, StringLit!"application/json", "{\"error\":\"Not Found\"}");
+            add_cors(response, request);
             stream.write(response.format_message()[]);
         }
 
         return 0;
     }
 
+    bool add_cors(ref HTTPMessage response, ref const HTTPMessage request)
+        => add_cors(response, request.header("Origin")[]);
+
+    bool add_cors(ref HTTPMessage response, const(char)[] origin)
+    {
+        HTTPServer server = _server_id.get_item!HTTPServer;
+        return server ? server.add_cors(response, origin) : false;
+    }
+
     int handle_options(ref const HTTPMessage request, ref Stream stream)
     {
         HTTPMessage response = create_response(request.http_version, 204, String(), null);
-        add_cors_headers(response);
+        if (add_cors(response, request))
+        {
+            response.headers ~= HTTPParam(StringLit!"Access-Control-Allow-Methods", StringLit!"GET, POST, PUT, DELETE, OPTIONS");
+            response.headers ~= HTTPParam(StringLit!"Access-Control-Allow-Headers", StringLit!"Content-Type");
+            response.headers ~= HTTPParam(StringLit!"Access-Control-Max-Age", StringLit!"86400");
+        }
         stream.write(response.format_message()[]);
         return 0;
     }
@@ -171,7 +187,7 @@ private:
             writeDebug("API request: ", request.method, " ", request.request_target);
 
         HTTPMessage response = create_response(request.http_version, 200, StringLit!"application/json", tconcat("{\"status\":\"healthy\",\"uptime\":", getAppTime().as!"seconds", "}"));
-        add_cors_headers(response);
+        add_cors(response, request);
         stream.write(response.format_message()[]);
         return 0;
     }
@@ -196,7 +212,7 @@ private:
         if (command_text.length == 0)
         {
             HTTPMessage response = create_response(request.http_version, 400, StringLit!"application/json", "{\"error\":\"Command body required\"}");
-            add_cors_headers(response);
+            add_cors(response, request);
             stream.write(response.format_message()[]);
             return 0;
         }
@@ -207,7 +223,7 @@ private:
         if (cmd is null)
         {
             MutableString!0 output = session.takeOutput();
-            send_cli_response(request.http_version, stream, output[], result);
+            send_cli_response(request.http_version, stream, output[], result, request.header("Origin")[]);
             g_app.console.destroy_session(session);
             return 0;
         }
@@ -217,14 +233,15 @@ private:
         bool deferred = server.defer_response(stream);
         assert(deferred);
 
+        String origin = request.header("Origin")[].makeString(g_app.allocator);
         stream.subscribe(&stream_state_change);
-        _pending_requests ~= PendingRequest(request.http_version, stream, session, cmd);
+        _pending_requests ~= PendingRequest(request.http_version, stream, session, cmd, origin.move);
         return 0;
     }
 
-    void send_cli_response(HTTPVersion http_version, ref Stream stream, const(char)[] output, ref Variant result)
+    void send_cli_response(HTTPVersion ver, ref Stream stream, const(char)[] output, ref Variant result, const(char)[] origin)
     {
-        HTTPMessage response = create_response(http_version, 200, StringLit!"application/json", "{\"result\":");
+        HTTPMessage response = create_response(ver, 200, StringLit!"application/json", "{\"result\":");
 
         ptrdiff_t len = result.write_json(null, true, 0, 0);
         if (len > 0)
@@ -250,7 +267,7 @@ private:
         }
         else
             response.content ~= "\"\"}";
-        add_cors_headers(response);
+        add_cors(response, origin);
         stream.write(response.format_message()[]);
     }
 
@@ -327,7 +344,7 @@ private:
         json ~= '}';
 
         HTTPMessage response = create_response(request.http_version, 200, StringLit!"application/json", json[]);
-        add_cors_headers(response);
+        add_cors(response, request);
         stream.write(response.format_message()[]);
         return 0;
     }
@@ -395,7 +412,7 @@ private:
         }
 
         HTTPMessage response = create_response(request.http_version, 200, StringLit!"application/json", json[]);
-        add_cors_headers(response);
+        add_cors(response, request);
         stream.write(response.format_message()[]);
         return 0;
     }
@@ -411,7 +428,7 @@ private:
         if (!json.isObject)
         {
             HTTPMessage response = create_response(request.http_version, 400, StringLit!"application/json", "{\"error\":\"Invalid JSON\"}");
-            add_cors_headers(response);
+            add_cors(response, request);
             stream.write(response.format_message()[]);
             return 0;
         }
@@ -423,7 +440,7 @@ private:
         if (!paths_var || paths_var.isNull)
         {
             HTTPMessage response = create_response(request.http_version, 400, StringLit!"application/json", "{\"error\":\"Missing 'path' or 'paths' field\"}");
-            add_cors_headers(response);
+            add_cors(response, request);
             stream.write(response.format_message()[]);
             return 0;
         }
@@ -439,7 +456,7 @@ private:
         else
         {
             HTTPMessage response = create_response(request.http_version, 400, StringLit!"application/json", "{\"error\":\"'path' or 'paths' must be string or array\"}");
-            add_cors_headers(response);
+            add_cors(response, request);
             stream.write(response.format_message()[]);
             return 0;
         }
@@ -464,7 +481,7 @@ private:
         response_json ~= '}';
 
         HTTPMessage response = create_response(request.http_version, 200, StringLit!"application/json", response_json[]);
-        add_cors_headers(response);
+        add_cors(response, request);
         stream.write(response.format_message()[]);
 
         return 0;
@@ -533,7 +550,7 @@ private:
         if (!json.isObject)
         {
             HTTPMessage response = create_response(request.http_version, 400, StringLit!"application/json", "{\"error\":\"Invalid JSON\"}");
-            add_cors_headers(response);
+            add_cors(response, request);
             stream.write(response.format_message()[]);
             return 0;
         }
@@ -542,7 +559,7 @@ private:
         if (!values_var || !values_var.isObject)
         {
             HTTPMessage response = create_response(request.http_version, 400, StringLit!"application/json", "{\"error\":\"Missing 'values' object\"}");
-            add_cors_headers(response);
+            add_cors(response, request);
             stream.write(response.format_message()[]);
             return 0;
         }
@@ -608,7 +625,7 @@ private:
         response_json ~= "}}";
 
         HTTPMessage response = create_response(request.http_version, 200, StringLit!"application/json", response_json[]);
-        add_cors_headers(response);
+        add_cors(response, request);
         stream.write(response.format_message()[]);
 
         return 0;
@@ -624,7 +641,7 @@ private:
         if (!json.isObject)
         {
             HTTPMessage response = create_response(request.http_version, 400, StringLit!"application/json", "{\"error\":\"Invalid JSON\"}");
-            add_cors_headers(response);
+            add_cors(response, request);
             stream.write(response.format_message()[]);
             return 0;
         }
@@ -674,7 +691,7 @@ private:
         response_json ~= '}';
 
         HTTPMessage response = create_response(request.http_version, 200, StringLit!"application/json", response_json[]);
-        add_cors_headers(response);
+        add_cors(response, request);
         stream.write(response.format_message()[]);
 
         return 0;
@@ -764,7 +781,7 @@ private:
             if (send_response && stream_alive)
             {
                 MutableString!0 output = req.session.takeOutput();
-                send_cli_response(req.ver, stream, output[], req.command.result);
+                send_cli_response(req.ver, stream, output[], req.command.result, req.origin[]);
             }
 
             StringSession s = req.session;
