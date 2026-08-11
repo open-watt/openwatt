@@ -269,6 +269,15 @@ endif
 # Note: LDC's -deps format is its own (D module deps), not Make-compatible --
 # so we don't `-include $(DEPFILE)`; full rebuild on file changes.
 
+# Recompile when flags or other compile-command inputs change.
+FLAGS_STAMP := $(OBJDIR)/build-flags
+
+# Parse-time refresh preserves normal timestamp behaviour under -n and -q.
+$(shell mkdir -p $(OBJDIR); \
+        printf '%s\n' '$(COMPILE_CMD)' > $(FLAGS_STAMP).new; \
+        cmp -s $(FLAGS_STAMP).new $(FLAGS_STAMP) || mv -f $(FLAGS_STAMP).new $(FLAGS_STAMP); \
+        rm -f $(FLAGS_STAMP).new)
+
 # =======================================================================
 # Build rules
 # =======================================================================
@@ -290,7 +299,7 @@ endif
 
 # -- Main target -------------------------------------------------------
 
-$(TARGET): $(SOURCES) $(BAREMETAL_OBJS) $(VENDOR_OBJS) $(BK_BEKEN_LIB)
+$(TARGET): $(SOURCES) $(BAREMETAL_OBJS) $(VENDOR_OBJS) $(BK_BEKEN_LIB) $(FLAGS_STAMP)
 
 # -- BK7231 FreeRTOS build (must come after $(TARGET) so it doesn't become default goal)
 
