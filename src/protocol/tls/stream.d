@@ -603,6 +603,13 @@ nothrow @nogc:
         return result;
     }
 
+    final override size_t tx_backlog() const
+    {
+        if (auto s = _stream.get)
+            return s.tx_backlog;
+        return 0;
+    }
+
     final override ptrdiff_t pending()
         => _app_buffer.length;
 

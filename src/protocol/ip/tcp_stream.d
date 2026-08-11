@@ -242,6 +242,9 @@ nothrow @nogc:
         return n;
     }
 
+    override size_t tx_backlog() const
+        => _conn ? _conn.tx_backlog : 0;
+
 private:
     TCPConnection* _conn;
     InetAddress _remote;

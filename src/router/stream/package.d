@@ -226,6 +226,11 @@ nothrow @nogc:
 
     abstract ptrdiff_t write(const(void[])[] data...);
 
+    // bytes accepted by write() but still queued locally awaiting transmission; poll to pace bulk
+    // transfers. Streams that transmit synchronously (or can't tell) report no backlog.
+    size_t tx_backlog() const
+        => 0;
+
     ptrdiff_t pending()
         => _rx_buffer.length;
 

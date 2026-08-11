@@ -653,6 +653,17 @@ nothrow @nogc:
     bool connected() const pure
         => _phase == Phase.open;
 
+    // bytes accepted by send() but not yet handed to the network
+    size_t tx_backlog() const pure
+    {
+        version (UseInternalIPStack)
+            return _tx.length;
+        else version (Windows)
+            return _tx_pending;
+        else
+            return _tx.length;
+    }
+
     void recv_handler(TCPRecvHandler handler)
     {
         _on_recv = handler;
@@ -746,10 +757,12 @@ nothrow @nogc:
             WSABUF wb = WSABUF(cast(uint)op.buf.length, op.buf.ptr);
             uint sent;
             ++_outstanding;
+            _tx_pending += op.buf.length;
             if (WSASend(_handle, &wb, 1, &sent, 0, &op.io.ov, null) != 0 &&
                 ws_lasterror() != WSA_IO_PENDING)
             {
                 --_outstanding;
+                _tx_pending -= op.buf.length;
                 defaultAllocator().free(op.buf);
                 defaultAllocator().freeT(op);
                 fail(IPEvent.error);
@@ -1012,6 +1025,7 @@ private:
 
         IOCP_SOCKET _handle = INVALID_SOCKET;
         int  _outstanding;   // overlapped ops in flight; freed by the pump sweep once they drain
+        size_t _tx_pending;  // bytes owned by in-flight send ops
         IoOp _connect_op;
         RecvOp _recv;
 
@@ -1101,6 +1115,7 @@ private:
         void send_complete(IoOp* op, bool ok, uint, uint)
         {
             SendOp* sop = cast(SendOp*)op;
+            _tx_pending -= sop.buf.length;
             defaultAllocator().free(sop.buf);
             defaultAllocator().freeT(sop);
             --_outstanding;
