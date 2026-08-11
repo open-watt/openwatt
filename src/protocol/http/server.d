@@ -133,61 +133,76 @@ nothrow @nogc:
         _default_request_handler = default_request_handler;
     }
 
-    bool add_uri_handler(HTTPMethod method, const(char)[] uri_prefix, RequestHandler request_handler)
+    // One registration claims a whole set of methods for the prefix, so a handler
+    // that answers many (HTTPMethodSet.GET | HTTPMethodSet.HEAD, or `any`) costs
+    // one entry rather than one per method.
+    bool add_uri_handler(HTTPMethodSet methods, const(char)[] uri_prefix, RequestHandler request_handler)
     {
         foreach (ref h; _handlers)
         {
-            if ((h.methods & (1 << method)) && h.uri_prefix[] == uri_prefix[])
-                return false; // exact duplicate; overlapping prefixes are fine (longest match wins)
+            if ((h.methods & methods) && h.uri_prefix[] == uri_prefix[])
+                return false; // a method already claimed here; overlapping prefixes are fine (longest match wins)
         }
-        _handlers ~= Handler(1 << method, uri_prefix.makeString(defaultAllocator), request_handler);
+        _handlers ~= Handler(methods, uri_prefix.makeString(defaultAllocator), request_handler);
         return true;
     }
 
-    bool add_uri_handler(HTTPMethod method, const(char)[] uri_prefix, StreamingRequestBegin begin_handler)
+    bool add_uri_handler(HTTPMethodSet methods, const(char)[] uri_prefix, StreamingRequestBegin begin_handler)
     {
         foreach (ref h; _handlers)
         {
-            if ((h.methods & (1 << method)) && h.uri_prefix[] == uri_prefix[])
-                return false; // exact duplicate; overlapping prefixes are fine (longest match wins)
+            if ((h.methods & methods) && h.uri_prefix[] == uri_prefix[])
+                return false; // a method already claimed here; overlapping prefixes are fine (longest match wins)
         }
-        _handlers ~= Handler(1 << method, uri_prefix.makeString(defaultAllocator), begin_handler);
+        _handlers ~= Handler(methods, uri_prefix.makeString(defaultAllocator), begin_handler);
         return true;
+    }
+
+    bool add_uri_handler(HTTPMethod method, const(char)[] uri_prefix, RequestHandler request_handler)
+        => add_uri_handler(method.method_set, uri_prefix, request_handler);
+
+    bool add_uri_handler(HTTPMethod method, const(char)[] uri_prefix, StreamingRequestBegin begin_handler)
+        => add_uri_handler(method.method_set, uri_prefix, begin_handler);
+
+    void remove_uri_handler(HTTPMethodSet methods, RequestHandler request_handler)
+    {
+        for (size_t i = 0; i < _handlers.length; )
+        {
+            if ((_handlers[i].methods & methods) && !_handlers[i].is_streaming && _handlers[i].buffered is request_handler)
+            {
+                _handlers[i].methods &= ~methods;
+                if (_handlers[i].methods == 0)
+                    _handlers.remove(i);
+                else
+                    ++i;
+            }
+            else
+                ++i;
+        }
+    }
+
+    void remove_uri_handler(HTTPMethodSet methods, StreamingRequestBegin begin_handler)
+    {
+        for (size_t i = 0; i < _handlers.length; )
+        {
+            if ((_handlers[i].methods & methods) && _handlers[i].is_streaming && _handlers[i].streaming is begin_handler)
+            {
+                _handlers[i].methods &= ~methods;
+                if (_handlers[i].methods == 0)
+                    _handlers.remove(i);
+                else
+                    ++i;
+            }
+            else
+                ++i;
+        }
     }
 
     void remove_uri_handler(HTTPMethod method, RequestHandler request_handler)
-    {
-        for (size_t i = 0; i < _handlers.length; )
-        {
-            if ((_handlers[i].methods & (1 << method)) && !_handlers[i].is_streaming && _handlers[i].buffered is request_handler)
-            {
-                _handlers[i].methods &= ~(1 << method);
-                if (_handlers[i].methods == 0)
-                    _handlers.remove(i);
-                else
-                    ++i;
-            }
-            else
-                ++i;
-        }
-    }
+        => remove_uri_handler(method.method_set, request_handler);
 
     void remove_uri_handler(HTTPMethod method, StreamingRequestBegin begin_handler)
-    {
-        for (size_t i = 0; i < _handlers.length; )
-        {
-            if ((_handlers[i].methods & (1 << method)) && _handlers[i].is_streaming && _handlers[i].streaming is begin_handler)
-            {
-                _handlers[i].methods &= ~(1 << method);
-                if (_handlers[i].methods == 0)
-                    _handlers.remove(i);
-                else
-                    ++i;
-            }
-            else
-                ++i;
-        }
-    }
+        => remove_uri_handler(method.method_set, begin_handler);
 
     RequestHandler hook_global_handler(RequestHandler request_handler)
     {
@@ -307,7 +322,7 @@ private:
     struct Handler
     {
     nothrow @nogc:
-        uint methods;
+        HTTPMethodSet methods;
         String uri_prefix;
         RequestHandler buffered;
         StreamingRequestBegin streaming;
@@ -315,14 +330,14 @@ private:
         bool is_streaming() const pure
             => streaming !is null;
 
-        this(uint methods, String uri_prefix, RequestHandler buffered)
+        this(HTTPMethodSet methods, String uri_prefix, RequestHandler buffered)
         {
             this.methods = methods;
             this.uri_prefix = uri_prefix.move;
             this.buffered = buffered;
         }
 
-        this(uint methods, String uri_prefix, StreamingRequestBegin streaming)
+        this(HTTPMethodSet methods, String uri_prefix, StreamingRequestBegin streaming)
         {
             this.methods = methods;
             this.uri_prefix = uri_prefix.move;
@@ -368,7 +383,7 @@ private:
         size_t best_len = 0;
         foreach (i, ref h; _handlers)
         {
-            if (h.is_streaming != streaming || !(h.methods & (1 << method)))
+            if (h.is_streaming != streaming || !(h.methods & method.method_set))
                 continue;
             if (!uri_prefix_match(target, h.uri_prefix[]))
                 continue;
@@ -666,9 +681,7 @@ private:
                 return result;
             }
 
-            // implement default response...
-            enum message_body = "OpenWatt Webserver";
-            HTTPMessage response = create_response(request.http_version, 200, StringLit!"text/plain", message_body);
+            HTTPMessage response = create_response(request.http_version, 404, StringLit!"text/plain", status_text(404)[]);
             stream.write(response.format_message()[]);
 
             return 0;

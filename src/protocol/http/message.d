@@ -51,6 +51,39 @@ enum HTTPMethod : ubyte
     UNLOCK
 }
 
+// A set of methods, for matching a request against many at once. Members mirror
+// HTTPMethod, so they carry its wire spelling rather than the usual style.
+enum HTTPMethodSet : uint
+{
+    none        = 0,
+
+    GET         = 1 << HTTPMethod.GET,
+    HEAD        = 1 << HTTPMethod.HEAD,
+    OPTIONS     = 1 << HTTPMethod.OPTIONS,
+    POST        = 1 << HTTPMethod.POST,
+    PUT         = 1 << HTTPMethod.PUT,
+    PATCH       = 1 << HTTPMethod.PATCH,
+    DELETE      = 1 << HTTPMethod.DELETE,
+    TRACE       = 1 << HTTPMethod.TRACE,
+    CONNECT     = 1 << HTTPMethod.CONNECT,
+    SEARCH      = 1 << HTTPMethod.SEARCH,
+    PROPFIND    = 1 << HTTPMethod.PROPFIND,
+    PROPPATCH   = 1 << HTTPMethod.PROPPATCH,
+    MKCOL       = 1 << HTTPMethod.MKCOL,
+    COPY        = 1 << HTTPMethod.COPY,
+    MOVE        = 1 << HTTPMethod.MOVE,
+    LOCK        = 1 << HTTPMethod.LOCK,
+    UNLOCK      = 1 << HTTPMethod.UNLOCK,
+
+    any         = (1 << (HTTPMethod.max + 1)) - 1, // extends over methods added later
+}
+
+static assert(__traits(allMembers, HTTPMethodSet).length == __traits(allMembers, HTTPMethod).length + 2,
+              "HTTPMethodSet must mirror HTTPMethod, plus none and any");
+
+HTTPMethodSet method_set(HTTPMethod method) pure
+    => cast(HTTPMethodSet)(1 << method);
+
 enum HTTPVersion : ubyte
 {
     V1_0 = 0x10,
@@ -216,6 +249,20 @@ nothrow @nogc:
                     break;
 
                 message.content_type = message.header("Content-Type");
+
+                // the round-trip of the format side, which emits these as Authorization
+                String auth = message.header("Authorization");
+                if (auth.length > 6 && auth[0 .. 6] == "Basic ")
+                {
+                    char[256] decode_buf = void;
+                    ptrdiff_t len = base64_decode(auth[6 .. $], decode_buf[]);
+                    size_t colon;
+                    if (len > 0 && decode_buf[0 .. len].contains(':', &colon))
+                    {
+                        message.username = decode_buf[0 .. colon].makeString(defaultAllocator());
+                        message.password = decode_buf[colon + 1 .. len].makeString(defaultAllocator());
+                    }
+                }
 
                 if (state == ParseState.ReadingTailHeaders || message.method == HTTPMethod.HEAD)
                     goto message_done;
@@ -620,16 +667,14 @@ void http_field_lines(scope const HTTPParam[] params, ref Array!char str)
         str.append(kvp.key, ':', kvp.value, "\r\n");
 }
 
+// IMF-fixdate: Sun, 06 Nov 1994 08:49:37 GMT
 void http_date(ref const DateTime date, ref Array!char str)
 {
     const(char)[] day = enum_key_by_decl_index!Day(date.wday);
-    const(char)[] month = enum_key_by_decl_index!Month(date.month - 1);
-
-    // IMF-fixdate
-    // Sun, 06 Nov 1994 08:49:37 GMT
+    const(char)[] month = enum_key_by_decl_index!Month(date.month);
 
     //                      wday  day  month year hours  mins   secs
-    str.append_format("Date:{0}, {1,02} {2}, {3}, {4,02}:{5,02}:{6,02} GMT \r\n",
+    str.append_format("{0}, {1,02} {2} {3} {4,02}:{5,02}:{6,02} GMT",
                      day[0..3], date.day, month[0..3], date.year, date.hour, date.minute, date.second);
 }
 
@@ -660,6 +705,7 @@ String status_text(ushort code)
         case 204: return StringLit!"No Content";
         case 205: return StringLit!"Reset Content";
         case 206: return StringLit!"Partial Content";
+        case 207: return StringLit!"Multi-Status";
         case 301: return StringLit!"Moved Permanently";
         case 302: return StringLit!"Found";
         case 303: return StringLit!"See Other";
@@ -855,7 +901,9 @@ Array!char format_message_head(ref HTTPMessage message, const(char)[] host = nul
     {
         msg.append(' ', message.status_code, ' ', message.reason, "\r\n");
         msg.append("Server: OpenWatt\r\n");
+        msg ~= "Date: ";
         http_date(message.timestamp.getDateTime(), msg);
+        msg ~= "\r\n";
     }
 
     foreach (ref h; message.headers)
