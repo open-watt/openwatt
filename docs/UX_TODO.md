@@ -61,4 +61,6 @@ through them and remove sections as they are absorbed.
   status, so large uploads never die as opaque network errors.
 - Downloads above 64KB stream from disk with a known `Content-Length`; they skip response
   compression, trading a little link time for bounded memory.
+- `.conf` and `.log` serve as `text/plain`, `.yaml`/`.yml` as `text/yaml`, so they display
+  in a browser tab instead of downloading as `application/octet-stream`.
 - There is no ETag/If-Match yet: two editors saving the same file last-writer-wins.

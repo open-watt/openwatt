@@ -646,7 +646,11 @@ String mime_type(const(char)[] path) pure
         case "json":    return StringLit!"application/json; charset=utf-8";
         case "map":     return StringLit!"application/json";
         case "xml":     return StringLit!"application/xml; charset=utf-8";
-        case "txt":     return StringLit!"text/plain; charset=utf-8";
+        case "txt":
+        case "conf":
+        case "log":     return StringLit!"text/plain; charset=utf-8";
+        case "yaml":
+        case "yml":     return StringLit!"text/yaml; charset=utf-8";
         case "csv":     return StringLit!"text/csv; charset=utf-8";
         case "md":      return StringLit!"text/markdown; charset=utf-8";
         case "svg":     return StringLit!"image/svg+xml";
