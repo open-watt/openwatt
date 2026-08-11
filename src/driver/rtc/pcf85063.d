@@ -27,7 +27,7 @@ class PCF85063 : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("interface", iface),
                                  Prop!("address", address),
-                                 Prop!("time", time),
+                                 Prop!("last-observed", last_observed),
                                  Prop!("last-error", last_error, "status", "d"));
 nothrow @nogc:
 
@@ -65,13 +65,10 @@ nothrow @nogc:
         restart();
     }
 
-    SysTime time() const pure
+    SysTime last_observed() const pure
         => _time;
 
-    PCF85063Error last_error() const pure
-        => _last_error;
-
-    StringResult time(SysTime value)
+    StringResult last_observed(SysTime value)
     {
         I2CInterface interface_ = _iface.get;
         if (!interface_ || !interface_.running)
@@ -89,9 +86,12 @@ nothrow @nogc:
 
         _time = value;
         _time_valid = true;
-        mark_set!(typeof(this), "time")();
+        mark_set!(typeof(this), "last-observed")();
         return StringResult.success;
     }
+
+    PCF85063Error last_error() const pure
+        => _last_error;
 
     override const(char)[] status_message() const pure
     {
@@ -153,7 +153,7 @@ protected:
         _time = get_sys_time(_response_time);
         _time_valid = true;
         set_utc_time(unix_time_ns(_time));
-        mark_set!(typeof(this), "time")();
+        mark_set!(typeof(this), "last-observed")();
         log.info("restored UTC time ", _response_time);
         reset_operation();
         return CompletionStatus.complete;
@@ -182,7 +182,7 @@ protected:
             {
                 _time = get_sys_time();
                 _time_valid = true;
-                mark_set!(typeof(this), "time")();
+                mark_set!(typeof(this), "last-observed")();
                 set_last_error(PCF85063Error.none);
             }
             reset_operation();
