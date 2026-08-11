@@ -3,6 +3,12 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-09-21: bootloader reboot
+
+- `/system/reboot` accepts optional `bootloader=1` on classic ESP32 and RP2350.
+  Reboot controls that expose firmware recovery should use this argument and handle
+  `reboot: no bootloader mode on this platform` on unsupported targets.
+
 ## 2026-09-20: unprovisioned micros advertise themselves as claimable
 
 - Every micro with a provisioning AP now ships bring-up defaults that beacon on that AP and set

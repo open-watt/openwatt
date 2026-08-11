@@ -1,5 +1,8 @@
 # TODO
 
+- Verify `/system/reboot bootloader=1` on classic ESP32 hardware; the downloader
+  path has compiled, but its RTC GPIO0 hold and subsequent flashing cycle remain untested.
+
 - Separate Element's unseen state from a valid zero timestamp; held-value dedup
   currently treats SysTime.init as unseen on clocks whose epoch starts at zero.
 - Make Tesla BLE startup report unsupported AES-GCM/ECDH backends directly on
