@@ -51,6 +51,10 @@ idf_component_register(SRCS ${ESP32_SYS_SOURCES}
                        PRIV_REQUIRES ${MAIN_PRIV_REQUIRES}
                        WHOLE_ARCHIVE)
 
+if(PRESERVE_NVS)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE OW_PRESERVE_NVS)
+endif()
+
 if(USE_SPIFFS)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE OW_USE_SPIFFS=1)
 endif()

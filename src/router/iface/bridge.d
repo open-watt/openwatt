@@ -12,6 +12,7 @@ import urt.time;
 
 import manager.collection;
 import manager.console;
+import manager.features : has_modbus;
 import manager.plugin;
 
 import router.iface;
@@ -153,20 +154,23 @@ nothrow @nogc:
             return false;
         _members ~= BridgePort(iface, pvid, ingress_filtering, untagged_egress);
 
-        // TODO: move this logic into the modbus interface...
-        // For modbus member interfaces, we'll pre-populate the MAC table with known device addresses...
-        import protocol.modbus;
-        import protocol.modbus.iface;
-        ModbusInterface mb = cast(ModbusInterface)iface;
-        if (mb)
+        static if (has_modbus)
         {
-            ushort vlan = 0;
-
-            auto mod_mb = get_module!ModbusProtocolModule;
-            foreach (ref map; mod_mb.remote_servers.values)
+            // TODO: move this logic into the modbus interface...
+            // For modbus member interfaces, we'll pre-populate the MAC table with known device addresses...
+            import protocol.modbus;
+            import protocol.modbus.iface;
+            ModbusInterface mb = cast(ModbusInterface)iface;
+            if (mb)
             {
-                if (map.iface is iface)
-                    _address_table.insert(ulong(map.universal_address) | (ulong(vlan) << 48) | (ulong(PacketType.modbus) << 60), port);
+                ushort vlan = 0;
+
+                auto mod_mb = get_module!ModbusProtocolModule;
+                foreach (ref map; mod_mb.remote_servers.values)
+                {
+                    if (map.iface is iface)
+                        _address_table.insert(ulong(map.universal_address) | (ulong(vlan) << 48) | (ulong(PacketType.modbus) << 60), port);
+                }
             }
         }
 
