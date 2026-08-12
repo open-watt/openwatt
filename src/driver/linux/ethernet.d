@@ -13,11 +13,14 @@ import manager.collection;
 import manager.console;
 import manager.plugin;
 
+import driver.linux.fdwatch;
 import driver.linux.netlink;
 import driver.linux.netlink_write;
 import driver.linux.sysfs;
 
 import driver.linux.raw;
+
+import urt.internal.sys.posix : pollfd, POLLIN;
 
 import router.iface;
 import router.iface.ethernet;
@@ -80,7 +83,8 @@ nothrow @nogc:
             set_kernel_ifindex(_raw.ifindex);
         }
 
-        SysTime now = getSysTime();
+        // heartbeat() only runs once we are up, so the wait for carrier is polled here
+        MonoTime now = getTime();
         if (now - _last_refresh >= 1.seconds)
         {
             _last_refresh = now;
@@ -89,13 +93,17 @@ nothrow @nogc:
 
         if (_status.connected == ConnectionStatus.disconnected)
             return CompletionStatus.continue_;
+
+        register_fdwatch();
         return CompletionStatus.complete;
     }
 
     override CompletionStatus shutdown()
     {
+        unregister_fdwatch();
         _raw.close();
         set_kernel_ifindex(0);
+        _rx_failed = false;
         return super.shutdown();
     }
 
@@ -119,26 +127,71 @@ nothrow @nogc:
     // wire_send / re-enable); the kernel buffers and ages the unread RX.
     final void set_enslaved(bool value)
     {
+        if (_enslaved == value)
+            return;
         _enslaved = value;
+        fd_watch_changed();
     }
 
-    override void update()
+    override void heartbeat(MonoTime now)
     {
-        super.update();
+        super.heartbeat(now);
 
-        SysTime now = getSysTime();
-        if (now - _last_refresh >= 1.seconds)
+        if (_rx_failed)
+            return restart();
+
+        refresh_os_state();
+        if (_status.connected == ConnectionStatus.disconnected)
+            restart();
+    }
+
+protected:
+    override int wire_send(const(ubyte)[] frame)
+        => _raw.send(frame) ? 0 : -1;
+
+    override void on_mtu_changed()
+    {
+        apply_configured_mtu();
+    }
+
+private:
+    RawAdapter _raw;
+    String _adapter;
+    MonoTime _last_refresh;
+    bool _enslaved;
+    bool _fdwatch_registered;
+    bool _rx_failed;
+
+    void register_fdwatch()
+    {
+        if (!_fdwatch_registered && add_fd_watcher(&service_io, &collect_fds))
         {
-            _last_refresh = now;
-            refresh_os_state();
-            if (_status.connected == ConnectionStatus.disconnected)
-            {
-                restart();
-                return;
-            }
+            _fdwatch_registered = true;
+            fd_watch_changed();
         }
+    }
 
-        if (_enslaved)
+    void unregister_fdwatch()
+    {
+        if (_fdwatch_registered)
+        {
+            remove_fd_watcher(&service_io);
+            _fdwatch_registered = false;
+            fd_watch_changed();
+        }
+    }
+
+    // An enslaved port is switched by the kernel, so its fd stays out of the wait set
+    // entirely rather than being read and discarded.
+    void collect_fds(ref Array!pollfd fds)
+    {
+        if (_raw.valid && !_enslaved)
+            fds ~= pollfd(_raw.fd, POLLIN);
+    }
+
+    void service_io()
+    {
+        if (!running || !_raw.valid || _enslaved)
             return;
 
         const(ubyte)[] data;
@@ -154,7 +207,16 @@ nothrow @nogc:
             if (res == 0)
                 break;
             if (res < 0)
-                break;
+            {
+                // A dead fd stays error-ready forever and the reactor cannot evict it for us
+                // (pooled fds share one tag), so it would spin the wait loop at full tilt.
+                // Drop it here and let the heartbeat restart us -- tearing down from inside
+                // the pool drain would mutate the watcher list being iterated.
+                log.error("receive failed on '", _adapter, "': errno=", _raw.last_recv_error.system_code);
+                _raw.close();
+                _rx_failed = true;
+                return;
+            }
 
             if (pkttype == PACKET_OUTGOING)
                 continue;
@@ -168,21 +230,6 @@ nothrow @nogc:
             incoming_ethernet_frame(data, ts, vlan_tci, vlan_tpid);
         }
     }
-
-protected:
-    override int wire_send(const(ubyte)[] frame)
-        => _raw.send(frame) ? 0 : -1;
-
-    override void on_mtu_changed()
-    {
-        apply_configured_mtu();
-    }
-
-private:
-    RawAdapter _raw;
-    String _adapter;
-    SysTime _last_refresh;
-    bool _enslaved;
 
     void apply_configured_mtu()
     {
@@ -295,8 +342,8 @@ private:
             log_info(ModuleName, "Ethernet adapter gone: ", e.adapter);
             port_remove(PortKind.ethernet, tconcat("linux:ethernet:", e.adapter[]));
             // destroy(), not Collection.remove(): only destroy() runs shutdown(), and shutdown()
-            // is what releases the socket. remove() just nulls the table slot and leaves the
-            // object alive holding its fd.
+            // is what drops our fd from the reactor pool and closes the socket. remove() just
+            // nulls the table slot and leaves a live watcher ingesting frames forever.
             e.destroy();
         }
     }
