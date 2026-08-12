@@ -20,6 +20,7 @@ nothrow @nogc:
 
 enum linux_max_l2mtu = 9000;
 enum SIOCSIFMTU = 0x8922;
+enum ARPHRD_ETHER = 1;
 enum LINUX_AF_INET = 2;
 enum LINUX_SOCK_DGRAM = 2;
 
@@ -77,21 +78,13 @@ struct OSAdapterInfo
 
 // Reads /sys/class/net/<iface>/ifindex. Returns 0 on failure.
 uint read_ifindex(const(char)[] adapter_name)
-{
-    if (adapter_name.length == 0 || adapter_name.length > 32)
-        return 0;
-    char[32] buf = void;
-    auto p = build_path(adapter_name, "/ifindex");
-    auto data = read_file(p, buf[]);
-    if (data is null)
-        return 0;
-    auto s = data.trimBack;
-    size_t consumed;
-    ulong v = parse_uint(s, &consumed);
-    if (consumed != s.length || consumed == 0)
-        return 0;
-    return cast(uint)v;
-}
+    => read_sysfs_uint(adapter_name, "/ifindex");
+
+// /sys/class/net/<iface>/type is the ARPHRD_* link type. The kernel exposes plenty of
+// netdevs that are not ethernet -- notably SocketCAN controllers (ARPHRD_CAN), which
+// carry a /device symlink and no /wireless subdir, so nothing else tells them apart.
+uint read_link_type(const(char)[] adapter_name)
+    => read_sysfs_uint(adapter_name, "/type");
 
 
 // Reads /sys/class/ieee80211/<phy>/index. Returns uint.max on failure.
@@ -267,7 +260,7 @@ bool adapter_is_removable(const(char)[] iface)
 void enumerate_adapters(scope void delegate(const(char)[] name, const(char)[] description) nothrow @nogc on_adapter)
 {
     walk_netdevs((const(char)[] name, const(char)[] desc) nothrow @nogc {
-        if (has_wireless_subdir(name))
+        if (has_wireless_subdir(name) || read_link_type(name) != ARPHRD_ETHER)
             return;
         on_adapter(name, desc);
     });
@@ -476,6 +469,22 @@ struct rtattr
 
 const(char)* build_path(const(char)[] iface, const(char)[] suffix)
     => tconcat("/sys/class/net/", iface, suffix, '\0').ptr;
+
+uint read_sysfs_uint(const(char)[] adapter_name, const(char)[] file)
+{
+    if (adapter_name.length == 0 || adapter_name.length > 32)
+        return 0;
+    char[32] buf = void;
+    auto data = read_file(build_path(adapter_name, file), buf[]);
+    if (data is null)
+        return 0;
+    auto s = data.trimBack;
+    size_t consumed;
+    ulong v = parse_uint(s, &consumed);
+    if (consumed != s.length || consumed == 0)
+        return 0;
+    return cast(uint)v;
+}
 
 const(char)[] read_file(const(char)* path, char[] dst)
 {
