@@ -749,7 +749,7 @@ private:
         if (iface is null || !(iface.flags & ObjectFlags.dynamic))
             return;
         log_info(ModuleName, "BLE adapter gone: hci", index);
-        Collection!LinuxBLEInterface().remove(iface);
+        iface.destroy();
     }
 
     const(char)[] next_iface_name()
