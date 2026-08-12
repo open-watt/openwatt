@@ -536,6 +536,51 @@ each inferring it independently.
 /interface/obd/add name=car-obd stream=obd0
 ```
 
+### `/interface/can`
+
+A CAN interface carries CAN frames from one of two mutually exclusive sources: a
+byte `stream` running a framing `protocol`, or an `adapter` naming a controller
+the host itself owns. Setting either one clears the other, so the last one
+assigned is the one that takes effect.
+
+`adapter` is spelled the way the platform names its controllers. On linux that is
+a SocketCAN netdev (`can0`, `slcan0`, `vcan0`); on Espressif it is the on-chip
+TWAI peripheral (`twai0`). Linux controllers are discovered at startup, listed by
+`/port/print` under kind `can`, and given an interface named `can1`, `can2`... A
+USB CAN dongle is removed again when it is unplugged.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `adapter` | controller name | none | Host CAN controller to bind. Mutually exclusive with `stream`. |
+| `stream` | stream | none | Byte stream carrying framed CAN traffic. Mutually exclusive with `adapter`. |
+| `protocol` | `ebyte` | none | Framing used on `stream`. Required when `stream` is set. |
+| `baud-rate` | bits/second | `500000` | Bus bitrate. Must be set explicitly when `adapter` names a SocketCAN link. |
+| `tx-gpio` | pin | platform | Transmit pin. Espressif only. |
+| `rx-gpio` | pin | platform | Receive pin. Espressif only. |
+
+On linux the bitrate is link configuration rather than socket configuration, and
+the kernel only accepts it while the link is down. Setting `baud-rate` therefore
+takes the link down, applies the rate, and raises it again, which needs
+`CAP_NET_ADMIN`; without it the interface reports the netlink error and retries
+under the usual backoff. Only `baud-rate` is sent, so the driver derives the
+segment timing from its own clock.
+
+A discovered interface takes `baud-rate` from the link rather than imposing one,
+and the link is only bounced when the property and the link disagree. So adopting
+an already-configured bus disturbs nothing, and changing `baud-rate` is what
+pushes a new rate down to the controller.
+
+A controller that has never been configured has no bit timing to report, so the
+property keeps its `500000` default and startup applies that to bring the link up.
+Practically every CAN bus runs at 500k; if yours does not, set `baud-rate` and it
+is applied the same way.
+
+```text
+/interface/can/add name=bms adapter=can0 baud-rate=500000
+/interface/can/add name=goodwe_can stream=can.1 protocol=ebyte
+/interface/can/set bms baud-rate=250000
+```
+
 ### `/interface/udp`
 
 A UDP interface is a raw-packet interface over UDP datagrams: one datagram is

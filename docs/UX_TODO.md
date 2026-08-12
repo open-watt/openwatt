@@ -100,6 +100,27 @@ through them and remove sections as they are absorbed.
   rendering an interface's flags column, or filtering "is this a real device", should re-check
   its assumptions.
 
+## 2026-08-12: CAN interfaces gain `adapter`; SocketCAN controllers auto-discovered
+
+- `/interface/can` property `device` is renamed `adapter`, matching the ethernet and wifi
+  interfaces. It now names a host CAN controller generally, not just an Espressif TWAI
+  peripheral: on linux it is a SocketCAN netdev (`can0`), on Espressif still `twai0`.
+  Clients offering the old `device=` in pickers or forms must rename it.
+- `adapter` and `stream` are mutually exclusive and each setter clears the other, so a form
+  offering both should present them as a mode choice rather than two independent fields.
+  An interface with both set is invalid and reports as such.
+- Linux SocketCAN controllers are discovered at startup and appear as `/interface/can`
+  entries named `can1`, `can2`... alongside any stream-backed ones, plus `/port` entries of
+  kind `can`. A USB CAN dongle carries the `dynamic` flag and is removed when unplugged.
+- A discovered interface reports the bitrate the link actually carries, so `baud-rate` is a
+  live reading on an already-configured bus. A controller that was never configured has no
+  rate to report, so the `500000` default stands and is applied to bring the link up.
+- Changing `baud-rate` on linux is applied to the bus (the link is bounced and the rate set
+  via netlink), so it is a real setting rather than advisory, and needs `CAP_NET_ADMIN`. It
+  is pushed down only when it differs from what the link already carries.
+- Previously a CAN controller was mis-claimed as an ethernet interface, so any client that
+  learned to expect `can0` under `/interface/ethernet` should stop.
+
 ## 2026-08-13: WLAN interfaces report the negotiated PHY as `phy-mode`
 
 - New read-only property `phy-mode` on `/interface/wlan`, a display string such as `VHT80

@@ -175,6 +175,11 @@ void register_modules(Application app)
         static if (is(BLEDriverModule))
             register_module!(driver.ble)(app);
         register_module!(protocol.can)(app);
+
+        import driver.can;
+        static if (is(CANDriverModule))
+            register_module!(driver.can)(app);
+
         register_module!(protocol.cpc)(app);
         register_module!(protocol.dhcp)(app);
         register_module!(protocol.dns)(app);

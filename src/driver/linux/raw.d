@@ -85,6 +85,47 @@ struct ifreq
     }
 }
 
+// SocketCAN (linux/can.h). CAN_RAW carries one struct can_frame per read/write.
+enum AF_CAN  = 29;
+enum CAN_RAW = 1;
+
+enum CAN_EFF_FLAG = 0x8000_0000u; // 29-bit extended id
+enum CAN_RTR_FLAG = 0x4000_0000u; // remote transmission request
+enum CAN_ERR_FLAG = 0x2000_0000u; // error frame, not a bus message
+enum CAN_SFF_MASK = 0x0000_07FFu;
+enum CAN_EFF_MASK = 0x1FFF_FFFFu;
+
+struct sockaddr_can
+{
+    ushort can_family;
+    int    can_ifindex;
+    union CanAddr
+    {
+        struct Tp { uint rx_id, tx_id; }
+        Tp tp;
+        struct J1939 { ulong name; uint pgn; ubyte addr; }  // added in 5.4; widened the union to 8-align
+        J1939 j1939;
+        int[3] reserved;
+    }
+    CanAddr can_addr;
+}
+static assert(sockaddr_can.sizeof == 24);
+
+// Kernels before 5.4 demand exactly the old 16-byte sockaddr_can, later ones accept anything
+// from CAN_REQUIRED_SIZE(can_ifindex) up, so 16 is the one length that binds on every kernel.
+enum can_bind_addrlen = 16;
+
+struct can_frame
+{
+    uint  can_id;   // id plus the EFF/RTR/ERR flags above
+    ubyte len;
+    ubyte __pad;
+    ubyte __res0;
+    ubyte len8_dlc;
+    ubyte[8] data;
+}
+static assert(can_frame.sizeof == 16);
+
 // `ioctl` request is `unsigned long`, which is 64-bit on LP64 and 32-bit on ILP32.
 version (D_LP64)
     alias c_ulong = ulong;
@@ -282,4 +323,105 @@ private:
 
     // Linux delivers one frame per recv(); jumbo-sized buffer.
     ubyte[16 * 1024] rx_buf = void;
+}
+
+
+// CAN_RAW socket bound to a SocketCAN netdev. Bitrate and bus state are link
+// properties owned by the netdev (`ip link set canX type can bitrate N`), not by
+// the socket, so this only carries frames.
+struct CANSocket
+{
+nothrow @nogc:
+
+    StringResult open(const(char)[] adapter_name)
+    {
+        if (adapter_name.length >= IFNAMSIZ)
+            return StringResult(tconcat("adapter name '", adapter_name, "' too long"));
+
+        fd = socket(AF_CAN, SOCK_RAW, CAN_RAW);
+        if (fd < 0)
+            return StringResult(tconcat("socket(AF_CAN, CAN_RAW) failed: errno=", errno_result().system_code));
+
+        ifreq req;
+        req.ifr_name[0 .. adapter_name.length] = adapter_name[];
+        req.ifr_name[adapter_name.length] = 0;
+        if (ioctl(fd, SIOCGIFINDEX, &req) < 0)
+        {
+            auto msg = tconcat("SIOCGIFINDEX('", adapter_name, "') failed: errno=", errno_result().system_code);
+            close_fd();
+            return StringResult(msg);
+        }
+        ifindex = req.ifru_ivalue;
+
+        sockaddr_can addr;
+        addr.can_family = AF_CAN;
+        addr.can_ifindex = ifindex;
+        if (bind(fd, &addr, can_bind_addrlen) < 0)
+        {
+            auto msg = tconcat("bind(AF_CAN, '", adapter_name, "') failed: errno=", errno_result().system_code);
+            close_fd();
+            return StringResult(msg);
+        }
+
+        int flags_val = fcntl(fd, F_GETFL, 0);
+        if (flags_val < 0 || fcntl(fd, F_SETFL, flags_val | O_NONBLOCK) < 0)
+        {
+            auto msg = tconcat("fcntl(O_NONBLOCK, '", adapter_name, "') failed: errno=", errno_result().system_code);
+            close_fd();
+            return StringResult(msg);
+        }
+
+        return StringResult.success;
+    }
+
+    void close()
+    {
+        close_fd();
+    }
+
+    // 1 = got a frame, 0 = socket drained, -1 = error (see last_recv_error)
+    int poll(out can_frame frame, out MonoTime timestamp)
+    {
+        ptrdiff_t n = recv(fd, &frame, can_frame.sizeof, 0);
+        if (n < 0)
+        {
+            Result e = errno_result();
+            if (e.system_code == EAGAIN_ || e.system_code == EWOULDBLOCK_ || e.system_code == EINTR_)
+                return 0;
+            last_recv_error = e;
+            return -1;
+        }
+        if (n != can_frame.sizeof)
+            return 0;
+        timestamp = getTime();
+        return 1;
+    }
+
+    bool send(ref const can_frame frame)
+    {
+        if (write(fd, &frame, can_frame.sizeof) != can_frame.sizeof)
+        {
+            last_send_error = errno_result();
+            return false;
+        }
+        return true;
+    }
+
+    Result last_send_error;
+    Result last_recv_error;
+
+    bool valid() const pure => fd >= 0;
+
+    int fd = -1;
+    int ifindex;
+
+private:
+    void close_fd()
+    {
+        if (fd >= 0)
+        {
+            urt.internal.sys.posix.close(fd);
+            fd = -1;
+        }
+    }
 }
