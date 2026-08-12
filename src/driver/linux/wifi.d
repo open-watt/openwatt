@@ -2366,8 +2366,10 @@ private:
                 if (cast(LinuxWifiRadio)w.radio is r)
                     paired ~= w;
             foreach (w; paired[])
-                Collection!LinuxWlan().remove(w);
-            Collection!LinuxWifiRadio().remove(r);
+                w.destroy();
+            // destroy(), not Collection.remove(): only destroy() runs shutdown(), and these
+            // objects hold an fd in the reactor pool that shutdown() is what unregisters.
+            r.destroy();
         }
     }
 

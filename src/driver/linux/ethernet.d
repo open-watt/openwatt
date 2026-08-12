@@ -290,7 +290,10 @@ private:
         {
             log_info(ModuleName, "Ethernet adapter gone: ", e.adapter);
             port_remove(PortKind.ethernet, tconcat("linux:ethernet:", e.adapter[]));
-            Collection!LinuxRawEthernet().remove(e);
+            // destroy(), not Collection.remove(): only destroy() runs shutdown(), and shutdown()
+            // is what releases the socket. remove() just nulls the table slot and leaves the
+            // object alive holding its fd.
+            e.destroy();
         }
     }
 
