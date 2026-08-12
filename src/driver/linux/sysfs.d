@@ -249,6 +249,21 @@ bool set_adapter_mtu(const(char)[] adapter_name, ushort mtu)
     return ioctl(fd, SIOCSIFMTU, &req) == 0;
 }
 
+// A device's /device/subsystem symlink points at its bus dir, so the basename
+// names the bus: "usb", "pci", "sdio", "platform"... Only USB can take the device
+// away at runtime; the rest (including SDIO radios) are soldered down.
+// Caveat: an SBC whose onboard NIC hangs off an internal USB hub (Pi 3B) reads as
+// removable here, since the bus cannot distinguish an internal port from a socket.
+bool sysfs_device_is_removable(const(char)[] class_dir, const(char)[] device)
+{
+    char[32] buf = void;
+    const(char)[] bus = read_link_basename(tconcat(class_dir, device, "/device/subsystem", '\0').ptr, buf[]);
+    return bus == "usb";
+}
+
+bool adapter_is_removable(const(char)[] iface)
+    => sysfs_device_is_removable("/sys/class/net/", iface);
+
 void enumerate_adapters(scope void delegate(const(char)[] name, const(char)[] description) nothrow @nogc on_adapter)
 {
     walk_netdevs((const(char)[] name, const(char)[] desc) nothrow @nogc {
@@ -499,16 +514,17 @@ bool has_wireless_subdir(const(char)[] iface)
 // /sys/class/net/<iface>/device/driver is a symlink to the driver dir;
 // readlink + basename gives e.g. "e1000e", "r8169", "igb".
 const(char)[] read_driver_name(const(char)[] iface, char[] buf)
+    => read_link_basename(build_path(iface, "/device/driver"), buf);
+
+const(char)[] read_link_basename(const(char)* path, char[] buf)
 {
-    auto p = build_path(iface, "/device/driver");
-    if (p is null)
+    if (path is null)
         return null;
     char[256] link = void;
-    ssize_t n = readlink(p, link.ptr, link.length);
+    ssize_t n = readlink(path, link.ptr, link.length);
     if (n <= 0)
         return null;
     auto target = link[0 .. cast(size_t)n];
-    // basename
     size_t slash = target.length;
     foreach_reverse (i, c; target)
     {

@@ -237,7 +237,10 @@ private:
     {
         Array!String os_buf;
         enumerate_adapters((const(char)[] name, const(char)[] description) nothrow @nogc {
-            port_add(PortKind.ethernet, tconcat("linux:ethernet:", name), name, name, ModuleName, description);
+            // A USB NIC can be unplugged; a PCI or onboard one is soldered down and never leaves.
+            const bool removable = adapter_is_removable(name);
+            port_add(PortKind.ethernet, tconcat("linux:ethernet:", name), name, name, ModuleName, description,
+                     removable ? PortFlags.removable : PortFlags.none);
 
             bool present = false;
             foreach (e; Collection!LinuxRawEthernet().values)
@@ -252,11 +255,8 @@ private:
             {
                 auto iface_name = next_iface_name();
                 log_info(ModuleName, "Found ethernet interface: \"", description, "\" (", name, ")");
-                // dynamic: we own its lifecycle and rediscover it each boot, so
-                // it isn't persisted to config -- and only dynamic entries are
-                // reaped below when their netdev disappears. Operator/config
-                // interfaces (flags == none) are left alone.
-                auto iface = Collection!LinuxRawEthernet().create(iface_name, ObjectFlags.dynamic);
+                auto iface = Collection!LinuxRawEthernet().create(iface_name,
+                                                                  removable ? ObjectFlags.dynamic : ObjectFlags.none);
                 iface.adapter = name;
                 if (description.length > 0)
                     iface.comment = description.makeString(defaultAllocator);
@@ -268,9 +268,9 @@ private:
         Array!LinuxRawEthernet gone;
         foreach (e; Collection!LinuxRawEthernet().values)
         {
-            // Only reap what auto-discovery created; an operator/config interface
-            // (e.g. bound to a veth that enumerate_adapters doesn't list) is not
-            // ours to remove.
+            // Only removable adapters are reaped. A soldered NIC that momentarily drops out
+            // of the scan stays put, as does an operator/config interface (e.g. bound to a
+            // veth that enumerate_adapters doesn't list).
             if (!(e.flags & ObjectFlags.dynamic))
                 continue;
 

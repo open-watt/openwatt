@@ -2304,7 +2304,10 @@ private:
         // VIFs we create (monitor/AP/STA) never spawn duplicate radios.
         Array!String os_buf;
         enumerate_wifi_adapters((const(char)[] name, const(char)[] description) nothrow @nogc {
-            port_add(PortKind.wifi, tconcat("linux:wifi:", name), name, name, ModuleName, description);
+            // A USB/SDIO radio can be unplugged; a PCIe or onboard one is soldered down.
+            const bool removable = adapter_is_removable(name);
+            port_add(PortKind.wifi, tconcat("linux:wifi:", name), name, name, ModuleName, description,
+                     removable ? PortFlags.removable : PortFlags.none);
 
             uint w = read_wiphy(read_ifindex(name));
             bool present = false;
@@ -2321,16 +2324,13 @@ private:
                 auto base = next_radio_name();
                 log_info(ModuleName, "Found wifi interface: \"", description, "\" (", name, ")");
 
-                // dynamic: auto-discovery owns these and rediscovers them each
-                // boot, so they aren't persisted to config -- and only dynamic
-                // entries are reaped below when their netdev disappears.
-                // Operator/config radios (flags == none) are left alone.
-                auto radio = Collection!LinuxWifiRadio().create(tconcat(base, "-radio"), ObjectFlags.dynamic);
+                const ObjectFlags flags = removable ? ObjectFlags.dynamic : ObjectFlags.none;
+                auto radio = Collection!LinuxWifiRadio().create(tconcat(base, "-radio"), flags);
                 radio.wiphy = name;
                 if (description.length > 0)
                     radio.comment = description.makeString(defaultAllocator);
 
-                auto wlan = Collection!LinuxWlan().create(base, ObjectFlags.dynamic);
+                auto wlan = Collection!LinuxWlan().create(base, flags);
                 wlan.radio = radio;
             }
 
@@ -2340,8 +2340,8 @@ private:
         Array!LinuxWifiRadio gone;
         foreach (r; Collection!LinuxWifiRadio().values)
         {
-            // Only reap what auto-discovery created; an operator/config radio is
-            // not ours to remove even if its netdev momentarily disappears.
+            // Only removable radios are reaped; a soldered one is not ours to remove even
+            // if its netdev momentarily disappears, nor is an operator/config radio.
             if (!(r.flags & ObjectFlags.dynamic))
                 continue;
 

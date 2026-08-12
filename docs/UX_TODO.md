@@ -85,6 +85,21 @@ through them and remove sections as they are absorbed.
   link quality on some platforms and is a fixed ceiling on others. Clients should not
   present it as a measured throughput; `tx-rate`/`rx-rate` remain the measured counters.
 
+## 2026-08-12: `D` flag no longer marks physically-attached interfaces
+
+- Discovered hardware interfaces no longer carry the `dynamic` (`D`) flag by default. `D`
+  means "conjured by another subsystem" (a server's accepted stream, a client's transport),
+  not "the driver found it", so it was wrong on soldered-down hardware. Clients treating `D`
+  as "auto-discovered" must stop; it now only appears on genuinely transient objects.
+- On Linux, a discovered interface keeps `D` only when its device sits on a removable bus
+  (USB), because those really can be unplugged and are reaped when they vanish. PCI, SDIO
+  and platform-attached devices are never reaped and carry no flag. Caveat: an SBC whose
+  onboard NIC hangs off an internal USB hub (Pi 3B) still reads as removable.
+- `/port` entries for ethernet and wifi now set the existing `removable` port flag to match.
+- Affected collections: `/interface/ethernet`, `/interface/wifi`, `/interface/ble`. Anything
+  rendering an interface's flags column, or filtering "is this a real device", should re-check
+  its assumptions.
+
 ## 2026-08-13: WLAN interfaces report the negotiated PHY as `phy-mode`
 
 - New read-only property `phy-mode` on `/interface/wlan`, a display string such as `VHT80
