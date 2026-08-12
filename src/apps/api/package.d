@@ -49,8 +49,6 @@ nothrow @nogc:
         super(collection_type_info!APIManager, id, flags);
     }
 
-    // Properties
-
     HTTPServer http_server() const
         => _server_id.get_item!HTTPServer;
     void http_server(HTTPServer value)
@@ -87,6 +85,12 @@ protected:
 
     override CompletionStatus shutdown()
     {
+        foreach (ref req; _pending_requests)
+            req.command.request_cancel();
+        update_pending_requests(false);
+        if (!_pending_requests.empty)
+            return CompletionStatus.continue_;
+
         // TODO: need to unlink these things...
         return CompletionStatus.complete;
     }
@@ -115,7 +119,6 @@ private:
     {
         const(char)[] tail = request.request_target[_uri.length .. $];
 
-        // Handle CORS preflight OPTIONS requests
         if (request.method == HTTPMethod.OPTIONS)
             return handle_options(request, stream);
 
@@ -209,9 +212,12 @@ private:
             return 0;
         }
 
-        // TODO: if it's a persistent session; we need a reference to the session to produce a response.
-        //       if it's an ephemeral session, we need to take the stream from the session so we can produce a deferred response...?
-        assert(false, "TODO: TEST THIS PATH, I'M NOT SURE THE HTTP REQUEST HANDLER CAN HANDLE HANDLE RELAYED RESPONSE?");
+        HTTPServer server = _server_id.get_item!HTTPServer;
+        assert(server);
+        bool deferred = server.defer_response(stream);
+        assert(deferred);
+
+        stream.subscribe(&stream_state_change);
         _pending_requests ~= PendingRequest(request.http_version, stream, session, cmd);
         return 0;
     }
@@ -441,7 +447,6 @@ private:
         version (DebugAPI)
             writeDebug("API request: ", request.method, " ", request.request_target, " - ", paths);
 
-        // build response
         Array!char response_json;
         response_json.reserve(4096);
         response_json ~= '{';
@@ -486,7 +491,6 @@ private:
 
             if (elem.display_unit && su.parseUnit(elem.display_unit[], pre_scale) > 0)
             {
-                // convert to display unit
                 if (quantity.is_nan)
                     json ~= "null";
                 else
@@ -500,7 +504,6 @@ private:
                 else
                     json ~= quantity.value;
 
-                // write the unit separately for quantities
                 if (quantity.unit.pack != 0)
                     json.append(",\"unit\":\"", quantity.unit, '\"');
             }
@@ -740,24 +743,62 @@ private:
         json ~= "}}";
     }
 
-    void update_pending_requests()
+    void update_pending_requests(bool send_response = true)
     {
         size_t i = 0;
         while (i < _pending_requests.length)
         {
             ref PendingRequest req = _pending_requests[i];
 
-            if (req.command.update() == CommandCompletionState.in_progress)
+            Stream stream = req.stream;
+            bool stream_alive = stream && stream.running;
+            if (!stream_alive)
+                req.command.request_cancel();
+
+            if (req.command.update() < CommandCompletionState.finished)
             {
                 ++i;
                 continue;
             }
 
-            MutableString!0 output = req.session.takeOutput();
-            send_cli_response(req.ver, req.stream, output[], req.command.result);
+            if (send_response && stream_alive)
+            {
+                MutableString!0 output = req.session.takeOutput();
+                send_cli_response(req.ver, stream, output[], req.command.result);
+            }
 
-            g_app.console.destroy_session(req.session);
+            StringSession s = req.session;
+            CommandState cmd = req.command;
+            if (stream)
+                stream.unsubscribe(&stream_state_change);
             _pending_requests.remove(i);
+            s.allocator.freeT(cmd);
+            g_app.console.destroy_session(s);
+
+            HTTPServer server = _server_id.get_item!HTTPServer;
+            if (send_response && stream_alive)
+            {
+                if (server)
+                    server.resume_response(stream);
+            }
+            else if (stream)
+                stream.destroy();
+        }
+    }
+
+    void stream_state_change(ActiveObject object, StateSignal signal)
+    {
+        if (signal != StateSignal.offline)
+            return;
+
+        object.unsubscribe(&stream_state_change);
+        foreach (ref req; _pending_requests)
+        {
+            if (req.stream is object)
+            {
+                req.stream = null;
+                req.command.request_cancel();
+            }
         }
     }
 }

@@ -211,6 +211,32 @@ nothrow @nogc:
         return old;
     }
 
+    bool defer_response(Stream stream)
+    {
+        foreach (session; _sessions)
+        {
+            if (session.stream is stream)
+            {
+                session.defer_response();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool resume_response(Stream stream)
+    {
+        foreach (session; _sessions)
+        {
+            if (session.stream is stream)
+            {
+                session.resume_response();
+                return true;
+            }
+        }
+        return false;
+    }
+
 
 protected:
 
@@ -599,7 +625,7 @@ private:
         // Terminal conditions flag _finished; the tick sweep in update() reaps.
         void on_data(Stream s, const(void)[] data, MonoTime)
         {
-            if (_finished || !stream)
+            if (_finished || _deferred || !stream)
                 return;
             int result = parser.feed(cast(const(ubyte)[])data, s);
             if (result < 0)
@@ -622,6 +648,8 @@ private:
                 close();
                 return -1;
             }
+            if (_deferred)
+                return 0;
             // `stream` may be nulled out by signal_handler or by a request handler
             // that claims the stream, so pin the reference for the final unsubscribe.
             Stream s = stream;
@@ -670,6 +698,8 @@ private:
                 int result = handler(request, stream, leftover);
                 if (!stream)
                     return 1;
+                if (_deferred)
+                    return http_response_deferred;
                 return result;
             }
 
@@ -678,6 +708,8 @@ private:
                 int result = server._default_request_handler(request, stream, leftover);
                 if (!stream)
                     return 1;
+                if (_deferred)
+                    return http_response_deferred;
                 return result;
             }
 
@@ -695,6 +727,33 @@ private:
         HTTPParser parser;
         bool _subscribed;
         bool _finished;
+        bool _deferred;
+
+        void defer_response()
+        {
+            assert(!_deferred);
+            _deferred = true;
+            stream.rx_handler(null);
+        }
+
+        void resume_response()
+        {
+            assert(_deferred);
+            _deferred = false;
+
+            Stream s = stream;
+            int result = parser.resume(s);
+            if (result < 0)
+                _finished = true;
+            else if (!stream)
+            {
+                s.rx_handler(null);
+                unsubscribe_signal(s);
+                _finished = true;
+            }
+            if (!_finished && !_deferred && stream)
+                s.rx_handler(&on_data);
+        }
 
         void unsubscribe_signal(Stream s)
         {
