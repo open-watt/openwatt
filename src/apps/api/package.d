@@ -87,6 +87,12 @@ protected:
 
     override CompletionStatus shutdown()
     {
+        foreach (ref req; _pending_requests)
+            req.command.request_cancel();
+        update_pending_requests(false);
+        if (!_pending_requests.empty)
+            return CompletionStatus.continue_;
+
         // TODO: need to unlink these things...
         return CompletionStatus.complete;
     }
@@ -105,7 +111,7 @@ private:
     struct PendingRequest
     {
         HTTPVersion ver;
-        Stream stream;
+        ObjectRef!Stream stream;
         StringSession session;
         CommandState command;
     }
@@ -209,9 +215,6 @@ private:
             return 0;
         }
 
-        // TODO: if it's a persistent session; we need a reference to the session to produce a response.
-        //       if it's an ephemeral session, we need to take the stream from the session so we can produce a deferred response...?
-        assert(false, "TODO: TEST THIS PATH, I'M NOT SURE THE HTTP REQUEST HANDLER CAN HANDLE HANDLE RELAYED RESPONSE?");
         _pending_requests ~= PendingRequest(request.http_version, stream, session, cmd);
         return 0;
     }
@@ -740,12 +743,17 @@ private:
         json ~= "}}";
     }
 
-    void update_pending_requests()
+    void update_pending_requests(bool send_response = true)
     {
         size_t i = 0;
         while (i < _pending_requests.length)
         {
             ref PendingRequest req = _pending_requests[i];
+
+            Stream stream = req.stream.get;
+            bool stream_alive = stream && stream.running;
+            if (!stream_alive)
+                req.command.request_cancel();
 
             if (req.command.update() == CommandCompletionState.in_progress)
             {
@@ -753,11 +761,17 @@ private:
                 continue;
             }
 
-            MutableString!0 output = req.session.takeOutput();
-            send_cli_response(req.ver, req.stream, output[], req.command.result);
+            if (send_response && stream_alive)
+            {
+                MutableString!0 output = req.session.takeOutput();
+                send_cli_response(req.ver, stream, output[], req.command.result);
+            }
 
-            g_app.console.destroy_session(req.session);
+            StringSession s = req.session;
+            CommandState cmd = req.command;
             _pending_requests.remove(i);
+            s.allocator.freeT(cmd);
+            g_app.console.destroy_session(s);
         }
     }
 }
