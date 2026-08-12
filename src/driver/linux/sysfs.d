@@ -21,6 +21,7 @@ nothrow @nogc:
 enum linux_max_l2mtu = 9000;
 enum SIOCSIFMTU = 0x8922;
 enum ARPHRD_ETHER = 1;
+enum ARPHRD_CAN = 280;
 enum LINUX_AF_INET = 2;
 enum LINUX_SOCK_DGRAM = 2;
 
@@ -270,6 +271,15 @@ void enumerate_wifi_adapters(scope void delegate(const(char)[] name, const(char)
 {
     walk_netdevs((const(char)[] name, const(char)[] desc) nothrow @nogc {
         if (!has_wireless_subdir(name))
+            return;
+        on_adapter(name, desc);
+    });
+}
+
+void enumerate_can_adapters(scope void delegate(const(char)[] name, const(char)[] description) nothrow @nogc on_adapter)
+{
+    walk_netdevs((const(char)[] name, const(char)[] desc) nothrow @nogc {
+        if (read_link_type(name) != ARPHRD_CAN)
             return;
         on_adapter(name, desc);
     });
