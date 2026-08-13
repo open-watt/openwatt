@@ -1263,11 +1263,15 @@ nothrow @nogc:
 
     void inbound_res(SyncPeer from, uint seq)
     {
+        if (get_module!SyncPeeringModule.claim_response(from, seq, true, null, null))
+            return;
         log.info("sync: model burst complete from '", from.name[], "' seq=", seq);
     }
 
     void inbound_err(SyncPeer from, uint seq, const(char)[] code, const(char)[] text)
     {
+        if (get_module!SyncPeeringModule.claim_response(from, seq, false, code, text))
+            return;
         log.warning("sync: err from '", from.name[], "' seq=", seq, " code=", code, ": ", text);
     }
 

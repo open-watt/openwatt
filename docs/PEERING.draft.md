@@ -144,7 +144,11 @@ authority; the authority-authority link carries coordination only, never fleet s
    multiple claimants from one cluster accepted (the dual-authority seat); last-detach reverts
    to unbound]
 4. Authority side: claim filter, transport factory via UDPInterface-over-ether, dynamic peer
-   spawn/sweep.
+   spawn/sweep. [done: sweep every 5s over the neighbour table; per-candidate exponential
+   backoff; members listen via a dynamic /sync/udp-server; a claimed member is still claimed
+   by an authority with no session to it (the dual-authority seat doubles as restart
+   recovery), and a member that reboots out from under a session the datagram link cannot
+   pronounce dead is detected by its unbound beacon and re-claimed]
 5. Claim auth (secret + HMAC challenge). The `secret=` property exists; setting it refuses all
    claims until the challenge lands.
 6. Dual-authority: authority-authority session, election, membership exchange.
