@@ -484,3 +484,30 @@ real status codes rather than opaque network errors.
 /protocol/http/server add name=webserver port=80
 /protocol/http/fileserver add name=files http-server=webserver uri=/files root="conf" access=webdav allowed-origin=http://192.168.0.5:8080
 ```
+
+### `/sync/udp-server`
+
+A datagram sync listener: it owns a wildcard multi-drop `/interface/udp` on
+the configured port and spawns a dynamic `/sync/peer` for the first datagram
+from each unknown source. The server routes received frames to its peers by
+source address, and each spawned peer transmits addressed back to its source.
+Datagram links carry no death signal, so a peer whose source goes quiet is
+swept after the idle timeout; a re-appearing source simply spawns afresh.
+It listens on UDP port `4712` unless `port` is set.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `port` | `1` to `65535` | `4712` | Port the listener binds. |
+| `local-host` | host, address or MAC | empty | Bind address, selecting the family: empty is the IP wildcard; the zero MAC (`00:00:00:00:00:00`) is ether's any-station, hearing OpenWatt-ethertype datagrams. |
+| `encoder` | `json`, `binary` | `binary` | Encoding for spawned peers. |
+| `timeout` | duration | `5m` | Idle time after which a silent peer is swept. |
+
+### `/sync/peer`
+
+`transport` binds a peer to an existing interface. Alternatively, `remote`
+creates a dynamic, temporary UDP interface owned by the peer; it is destroyed
+with the peer. The last of `transport` and `remote` set wins.
+
+| Property | Values | Description |
+| --- | --- | --- |
+| `remote` | `address:port`, `[ipv6]:port`, `[mac]:port` | Remote UDP peer. The address and port are both required. |

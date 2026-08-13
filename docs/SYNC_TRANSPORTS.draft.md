@@ -75,16 +75,14 @@ config directly -- no stream underneath. Byte streams are the ones needing an ad
 - `stream=<stream>` (future, lands with CPC) -- for byte streams only (serial, RS232 bridge,
   TCP): the peer materialises the CPC stack above the stream and owns it (dynamic object,
   destroyed with the peer). Mutually exclusive with `transport`, later set wins.
-- `remote=<uri>` (future) -- creates the channel object too. URI scheme selects everything:
-  `udp://host:port`, `ws://host/path`, `serial:///dev/ttyUSB0?baud=115200`,
-  `rs485://bus1/12`, `shm://ring0`. Mirrors WebSocket's `remote=` and the automation
-  `on=` URI convention.
+- `remote=<address>` -- creates and owns a temporary UDP interface. Address syntax is
+  `ip:port`, `[ipv6]:port`, or `[mac]:port`; the port is required. Future URI schemes can
+  extend this to WebSocket, serial, RS485 and shared memory.
 
-**Outbound/symmetric** links are two commands today, one with `remote=`:
+**Outbound/symmetric** links are one command:
 
 ```
-/interface/udp add name=sync1 local-port=7000 remote-host=192.168.0.8 remote-port=7000
-/sync/peer add name=pi transport=sync1 encoder=binary
+/sync/peer add name=pi remote=192.168.0.8:4712 encoder=binary
 ```
 
 **Inbound/server** roles are listeners that spawn dynamic peers on accept, one collection per
@@ -143,8 +141,7 @@ The peer therefore subscribes by transport capability rather than assuming `raw`
 what lets one peer sit on a multi-drop segment later without another framing change.
 
 ```
-/interface/udp add name=sync1 local-port=7000 remote-host=192.168.0.8 remote-port=7000
-/sync/peer add name=pi transport=sync1 encoder=binary
+/sync/peer add name=pi remote=192.168.0.8:4712 encoder=binary
 ```
 
 Multi-drop sync (several peers on one socket) still wants the peer-sub-interface shape from
@@ -245,9 +242,11 @@ legacy device forces it; default is a uniform bus.
 ## Build order
 
 0. ~~UDPInterface~~ -- done upstream ([router/iface/udp.d](../src/router/iface/udp.d)).
-1. **Sync reads UDPFrame** (next): the peer subscribes by transport capability instead of
-   assuming raw. Unblocks node-to-node binary sync end to end, and is the first real two-node
-   validation of the encoder.
+1. ~~Sync reads UDPFrame~~ -- done: the peer takes raw and UDPFrame delivery alike; a
+   `bind_remote` peer on a multi-drop transport is fed by its listener (the server holds the
+   transport's only packet subscription and routes by source) and transmits UDPFrame-addressed.
+   `/sync/udp-server` (from phase 5) landed with it, as the peering claim listener. Validated
+   two-node binary sync end to end (veth pair, ether-family datagrams, claim exchange).
 2. **Backpressure contract**: transmit-is-enqueue, PCP/DEI classification of control vs data.
    Reads `InterfaceCaps` to know what the link already promises.
 3. **Shmem ring** (with the BL808 work): sibling class, binary encoder's original target.

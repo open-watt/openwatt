@@ -59,6 +59,7 @@ enum CollectionType : ubyte
     stream, // all streams
     sync_channel,
     sync_peer,
+    sync_udp_server,
     sync_ws_server,
     tcp_server,
     tesla_vehicle_scanner,
