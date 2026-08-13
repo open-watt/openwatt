@@ -199,6 +199,32 @@ nothrow @nogc:
         send_frame(peer);
     }
 
+    override void encode_suggest(SyncPeer peer, uint seq, const(char)[] text)
+    {
+        begin_frame("suggest");
+        _buf.append(",\"seq\":", seq);
+        _buf.append(",\"text\":");
+        write_str(text);
+        send_frame(peer);
+    }
+
+    override void encode_suggestions(SyncPeer peer, uint seq, const(String)[] suggestions, const(char)[] completed)
+    {
+        begin_frame("suggestions");
+        _buf.append(",\"seq\":", seq);
+        _buf.append(",\"complete\":");
+        write_str(completed);
+        _buf.append(",\"suggestions\":[");
+        foreach (i, ref s; suggestions)
+        {
+            if (i)
+                _buf.append(",");
+            write_str(s[]);
+        }
+        _buf.append("]");
+        send_frame(peer);
+    }
+
     override void encode_sub(SyncPeer peer, const(char)[] pattern)
     {
         begin_frame("sub");
@@ -628,6 +654,12 @@ nothrow @nogc:
                 sync.inbound_result(peer, seq, val ? *val : empty, json.getMember("text").asString());
                 break;
             }
+
+            case "suggest":
+                sync.inbound_suggest(peer,
+                    cast(uint)json.getMember("seq").asLong(),
+                    json.getMember("text").asString());
+                break;
 
             case "error":
                 sync.inbound_error(peer, json.getMember("seq").asUint(), json.getMember("text").asString());

@@ -67,6 +67,8 @@ enum Verb : ubyte
     model_set,
     res,
     err,
+    suggest,
+    suggestions,
 }
 
 
@@ -220,6 +222,25 @@ nothrow @nogc:
         begin_frame(Verb.error);
         _buf.put_varint(seq);
         _buf.put_str(text);
+        send_frame(peer);
+    }
+
+    override void encode_suggest(SyncPeer peer, uint seq, const(char)[] text)
+    {
+        begin_frame(Verb.suggest);
+        _buf.put_varint(seq);
+        _buf.put_str(text);
+        send_frame(peer);
+    }
+
+    override void encode_suggestions(SyncPeer peer, uint seq, const(String)[] suggestions, const(char)[] completed)
+    {
+        begin_frame(Verb.suggestions);
+        _buf.put_varint(seq);
+        _buf.put_str(completed);
+        _buf.put_varint(suggestions.length);
+        foreach (ref suggestion; suggestions)
+            _buf.put_str(suggestion[]);
         send_frame(peer);
     }
 
@@ -887,6 +908,27 @@ nothrow @nogc:
                 const(char)[] text = r.str();
                 if (!r.fail)
                     sync.inbound_err(peer, seq, code, text);
+                break;
+            }
+
+            case Verb.suggest:
+            {
+                uint seq = cast(uint)r.varint();
+                const(char)[] text = r.str();
+                if (!r.fail)
+                    sync.inbound_suggest(peer, seq, text);
+                break;
+            }
+
+            case Verb.suggestions:
+            {
+                r.varint();
+                r.str();
+                size_t count = cast(size_t)r.varint();
+                if (r.fail || count > max_frame_size)
+                    break;
+                foreach (i; 0 .. count)
+                    r.str();
                 break;
             }
         }
