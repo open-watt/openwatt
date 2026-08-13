@@ -77,6 +77,7 @@ ulong wifi_phy_max_rate(WifiPhyMode mode, WifiBandwidth bw, ubyte nss = 1, bool 
             return 0;
         case WifiPhyMode.b:
             return 11_000_000;
+        case WifiPhyMode.a:
         case WifiPhyMode.g:
             return 54_000_000;
         case WifiPhyMode.lr:
@@ -127,6 +128,9 @@ private const(char)[] format_phy(char[] buffer, WifiPhyMode mode, string width, 
         case WifiPhyMode.b:
             name = "11b";
             break;
+        case WifiPhyMode.a:
+            name = "11a";
+            break;
         case WifiPhyMode.g:
             name = "11g";
             break;
@@ -160,6 +164,29 @@ private const(char)[] format_phy(char[] buffer, WifiPhyMode mode, string width, 
 }
 
 
+private struct PhyText
+{
+nothrow @nogc:
+    enum capacity = 16;
+
+    const(char)[] get() const pure
+        => _text[0 .. _len];
+
+    bool set(const(char)[] value)
+    {
+        if (value == _text[0 .. _len])
+            return false;
+        _len = cast(ubyte)value.length;
+        _text[0 .. _len] = value;
+        return true;
+    }
+
+private:
+    char[capacity] _text = void;
+    ubyte _len;
+}
+
+
 abstract class WiFiInterface : BaseInterface
 {
     alias Properties = AliasSeq!(Prop!("mode", mode, "radio"),
@@ -168,7 +195,8 @@ abstract class WiFiInterface : BaseInterface
                                  Prop!("active-channel", active_channel, "radio"),
                                  Prop!("tx-power", tx_power, "radio"),
                                  Prop!("country", country, "radio"),
-                                 Prop!("monitor", monitor, "radio"));
+                                 Prop!("monitor", monitor, "radio"),
+                                 Prop!("phy-capability", phy_capability, "radio"));
 nothrow @nogc:
 
     protected this(const CollectionTypeInfo* typeInfo, CID id, ObjectFlags flags = ObjectFlags.none)
@@ -203,7 +231,7 @@ nothrow @nogc:
         mark_set!(typeof(this), "band")();
         on_band_changed(value);
     }
-    // accepts a centre-ish frequency so the CLI can take `band=2.4ghz` unquoted
+    // accepts a centre-ish frequency so the CLI can take `band=2.4GHz` unquoted
     final const(char)[] band(Quantity!(float, Gigahertz) value)
     {
         float ghz = value.value;
@@ -234,6 +262,9 @@ nothrow @nogc:
 
     final ubyte active_channel() const pure
         => _active_channel;
+
+    final const(char)[] phy_capability() const pure
+        => _phy_capability.get;
 
     final byte tx_power() const pure
         => _tx_power;
@@ -312,6 +343,20 @@ protected:
 
     void on_wlan_bind_changed() {}
 
+    final void set_phy_capability(WifiPhyMode mode, WifiBandwidth bw, ubyte nss)
+    {
+        char[PhyText.capacity] buffer = void;
+        if (_phy_capability.set(format_phy_mode(buffer[], mode, bw, nss)))
+            mark_set!(typeof(this), "phy-capability")();
+    }
+
+    final void set_phy_capability(WifiPhyMode mode)
+    {
+        char[PhyText.capacity] buffer = void;
+        if (_phy_capability.set(format_phy_mode(buffer[], mode)))
+            mark_set!(typeof(this), "phy-capability")();
+    }
+
     final void set_active_channel(ubyte value)
     {
         if (_active_channel == value)
@@ -355,6 +400,7 @@ protected:
 
 private:
     WifiBand _band;
+    PhyText _phy_capability;
     ubyte _channel;
     ubyte _active_channel;
     byte _tx_power;
@@ -367,12 +413,16 @@ private:
 
 abstract class WLANBaseInterface : EthernetInterface
 {
-    alias Properties = AliasSeq!(Prop!("radio",  radio,  "configuration"),
-                                 Prop!("ssid",   ssid,   "configuration"),
-                                 Prop!("secret", secret, "configuration"));
+    alias Properties = AliasSeq!(Prop!("radio",    radio,    "configuration"),
+                                 Prop!("ssid",     ssid,     "configuration"),
+                                 Prop!("secret",   secret,   "configuration"),
+                                 Prop!("phy-mode", phy_mode, "configuration"));
 nothrow @nogc:
 
     // Properties
+
+    final const(char)[] phy_mode() const pure
+        => _phy_mode.get;
 
     final inout(WiFiInterface) radio() inout pure
         => _radio;
@@ -471,6 +521,26 @@ protected:
         return super.shutdown();
     }
 
+    final void set_phy_mode(WifiPhyMode mode, WifiBandwidth bw, ubyte nss, bool short_gi)
+    {
+        char[PhyText.capacity] buffer = void;
+        if (_phy_mode.set(format_phy_mode(buffer[], mode, bw, nss, short_gi)))
+            mark_set!(typeof(this), "phy-mode")();
+    }
+
+    final void set_phy_mode(WifiPhyMode mode)
+    {
+        char[PhyText.capacity] buffer = void;
+        if (_phy_mode.set(format_phy_mode(buffer[], mode)))
+            mark_set!(typeof(this), "phy-mode")();
+    }
+
+    override void offline()
+    {
+        super.offline();
+        set_phy_mode(WifiPhyMode.unknown);
+    }
+
     final const(char)[] get_password() const
     {
         if (_secret)
@@ -490,6 +560,7 @@ protected:
 private:
     ObjectRef!WiFiInterface _radio;
     ObjectRef!Secret _secret;
+    PhyText _phy_mode;
     bool _subscribed;
     bool _bound;
     String _ssid;
@@ -507,8 +578,7 @@ abstract class WLANInterface : WLANBaseInterface
     alias Properties = AliasSeq!(Prop!("bssid-filter",   bssid_filter,   "configuration"),
                                  Prop!("bssid",          bssid,          "configuration"),
                                  Prop!("rssi",           rssi,           "configuration"),
-                                 Prop!("signal-quality", signal_quality, "configuration"),
-                                 Prop!("phy-mode",       phy_mode,       "configuration"));
+                                 Prop!("signal-quality", signal_quality, "configuration"));
 nothrow @nogc:
 
     protected this(const CollectionTypeInfo* typeInfo, CID id, ObjectFlags flags = ObjectFlags.none)
@@ -535,46 +605,8 @@ nothrow @nogc:
     ubyte signal_quality() const
         => 0; // 0..100
 
-    // the PHY the association settled on; empty when not associated or the platform can't name it
-    final const(char)[] phy_mode() const pure
-        => _phy_mode[0 .. _phy_mode_len];
-
-protected:
-
-    // Stored, unlike the virtual getters above, because the string is composed from four platform
-    // values: formatting it here once is what keeps every driver reporting the same shape.
-    final void set_phy_mode(WifiPhyMode mode, WifiBandwidth bw, ubyte nss, bool short_gi)
-    {
-        char[_phy_mode.length] buffer = void;
-        store_phy_mode(format_phy_mode(buffer[], mode, bw, nss, short_gi));
-    }
-
-    // for a platform that can only name the family, and to clear on disassociation
-    final void set_phy_mode(WifiPhyMode mode)
-    {
-        char[_phy_mode.length] buffer = void;
-        store_phy_mode(format_phy_mode(buffer[], mode));
-    }
-
-    override void offline()
-    {
-        super.offline();
-        set_phy_mode(WifiPhyMode.unknown);
-    }
-
 private:
     MACAddress _bssid_filter;
-    char[16] _phy_mode;
-    ubyte _phy_mode_len;
-
-    void store_phy_mode(const(char)[] text)
-    {
-        if (text == _phy_mode[0 .. _phy_mode_len])
-            return;
-        _phy_mode_len = cast(ubyte)text.length;
-        _phy_mode[0 .. _phy_mode_len] = text;
-        mark_set!(typeof(this), "phy-mode")();
-    }
 }
 
 
@@ -669,8 +701,8 @@ unittest
 
     assert(format_phy_mode(buffer[], WifiPhyMode.unknown) is null);
     assert(format_phy_mode(buffer[], WifiPhyMode.b, WifiBandwidth.bw_20mhz) == "11b");
+    assert(format_phy_mode(buffer[], WifiPhyMode.a, WifiBandwidth.bw_20mhz) == "11a");
 
-    // b/g/lr predate the wide channels, so they never carry a width
     assert(format_phy_mode(buffer[], WifiPhyMode.g, WifiBandwidth.bw_80mhz, 1) == "11g 1SS");
     assert(format_phy_mode(buffer[], WifiPhyMode.lr, WifiBandwidth.bw_20mhz) == "LR");
 
@@ -678,13 +710,10 @@ unittest
     assert(format_phy_mode(buffer[], WifiPhyMode.ac, WifiBandwidth.bw_80mhz, 2, true) == "VHT80 2SS SGI");
     assert(format_phy_mode(buffer[], WifiPhyMode.be, WifiBandwidth.bw_160mhz, 8) == "EHT160 8SS");
 
-    // HE picks a guard interval per transmission, so it says nothing about the link
     assert(format_phy_mode(buffer[], WifiPhyMode.ax, WifiBandwidth.bw_160mhz, 2, true) == "HE160 2SS");
 
-    // an unreported stream count is left out, and a family-only report claims no width
     assert(format_phy_mode(buffer[], WifiPhyMode.n, WifiBandwidth.bw_20mhz, 0) == "HT20");
     assert(format_phy_mode(buffer[], WifiPhyMode.ac) == "VHT");
 
-    // the longest string a platform can produce still fits the interface's inline buffer
     assert(format_phy_mode(buffer[], WifiPhyMode.ac, WifiBandwidth.bw_160mhz, 8, true) == "VHT160 8SS SGI");
 }

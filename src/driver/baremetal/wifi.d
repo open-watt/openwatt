@@ -48,6 +48,34 @@ nothrow @nogc:
         return wifi_get_mac(_wifi, vif, mac);
     }
 
+    final bool drv_get_capability(WifiBand requested_band, ref WifiCapability caps)
+    {
+        if (requested_band != WifiBand.any)
+            return wifi_get_capability(_wifi, requested_band, caps);
+
+        bool found;
+        ulong best_rate;
+        foreach (i; cast(ubyte)WifiBand._2_4ghz .. cast(ubyte)WifiBand.max + 1)
+        {
+            WifiBand candidate_band = cast(WifiBand)i;
+            if (!wifi_band_supported(_wifi.port, candidate_band))
+                continue;
+
+            WifiCapability candidate;
+            if (!wifi_get_capability(_wifi, candidate_band, candidate))
+                continue;
+
+            ulong rate = wifi_phy_max_rate(candidate.phy_mode, candidate.bandwidth, candidate.nss);
+            if (!found || rate > best_rate)
+            {
+                caps = candidate;
+                best_rate = rate;
+                found = true;
+            }
+        }
+        return found;
+    }
+
     bool sta_started;
     uint sta_connected_seq;
     uint sta_disconnected_seq;
@@ -195,6 +223,13 @@ protected:
             if (super.channel != 0 && _num_client == 0 && _num_ap == 0)
                 apply_channel(super.channel);
         }
+
+        WifiCapability caps;
+        if (drv_get_capability(band, caps))
+            set_phy_capability(caps.phy_mode, caps.bandwidth, caps.nss);
+        else
+            set_phy_capability(WifiPhyMode.unknown);
+
         return CompletionStatus.complete;
     }
 
@@ -931,6 +966,11 @@ protected:
         ubyte[6] mac_buf = void;
         if (radio.drv_get_mac(WifiVif.ap, mac_buf))
             mac = MACAddress(mac_buf);
+
+        // the BSS runs whatever the radio's protocol set allows, at the width we just configured
+        WifiCapability caps;
+        if (radio.drv_get_capability(radio.band, caps))
+            set_phy_mode(caps.phy_mode, ap_cfg.bandwidth, caps.nss, false);
 
         _ap_config_sent = true;
         _status_detail = "Starting AP";

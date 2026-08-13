@@ -566,6 +566,7 @@ private WifiPhyMode to_phy_mode(DOT11_PHY_TYPE type) pure
         case DOT11_PHY_TYPE.hrdsss:
             return WifiPhyMode.b;
         case DOT11_PHY_TYPE.ofdm:
+            return WifiPhyMode.a;
         case DOT11_PHY_TYPE.erp:
             return WifiPhyMode.g;
         case DOT11_PHY_TYPE.ht:

@@ -397,6 +397,9 @@ protected:
                      " max-monitors=", _phy_caps.max_monitors);
         }
 
+        auto phy = _phy_caps.phy_capability(band);
+        set_phy_capability(phy.phy, phy.bandwidth, phy.nss);
+
         if (!band_available())
         {
             _startup_block = "band is not supported by this radio";
@@ -1464,8 +1467,12 @@ private:
         if (!peer)
             return;
 
+        auto r = cast(LinuxWifiRadio)radio;
+        WifiBand link_band = _sta.freq != 0 ? band_for_freq(_sta.freq)
+            : r ? r.band
+            : WifiBand.any;
         WifiStaLinkInfo link;
-        if (!query_sta_link_info(_link_fd, _link_family, uint(_raw.ifindex), peer.b, link))
+        if (!query_sta_link_info(_link_fd, _link_family, uint(_raw.ifindex), peer.b, link_band, link))
             return;
 
         ulong tx = ulong(link.tx_bitrate) * 1000;
@@ -1785,6 +1792,11 @@ protected:
             register_fdwatch();
         }
 
+        ubyte ch = r.target_channel();
+        WifiBand operating_band = r.band != WifiBand.any ? r.band
+            : ch <= 14 ? WifiBand._2_4ghz
+            : WifiBand._5ghz;
+
         version (WifiApKernel)
         {
             if (!_ap.valid)
@@ -1800,9 +1812,7 @@ protected:
 
             if (!_ap.running)
             {
-                ubyte ch = r.target_channel();
-                WifiBand band = r.band != WifiBand.any ? r.band : (ch <= 14 ? WifiBand._2_4ghz : WifiBand._5ghz);
-                if (!_ap.start(ssid, get_password(), channel_to_freq(ch, band), ch, hidden))
+                if (!_ap.start(ssid, get_password(), channel_to_freq(ch, operating_band), ch, hidden))
                     return CompletionStatus.continue_;
                 _running_channel = ch;
                 arm_ap_timer_if_needed();
@@ -1821,7 +1831,6 @@ protected:
                     return CompletionStatus.continue_;
                 }
             }
-            ubyte ch = r.target_channel();
             if (!_ap.running || _running_channel != ch)
             {
                 if (!_ap.start(ssid, get_password(), auth, ch, r.country, hidden, client_isolation, max_clients))
@@ -1829,6 +1838,10 @@ protected:
                 _running_channel = ch;
             }
         }
+
+        // Both backends bring the BSS up non-HT: the kernel path asks for CHAN_WIDTH_20_NOHT and the
+        // hostapd config sets hw_mode without ieee80211n, so clients use the legacy mode for the band.
+        set_phy_mode(operating_band == WifiBand._2_4ghz ? WifiPhyMode.g : WifiPhyMode.a);
 
         // The BSS netdev is up; publish its kernel ifindex so the IP mirror
         // places ap0's address/routes on it (addresses added before the AP
