@@ -286,6 +286,18 @@ protected:
         return CompletionStatus.continue_;
     }
 
+    override void online()
+    {
+        super.online();
+
+        // an ebyte module hides the CAN bus behind a UART, and its bus bitrate is configured out of band,
+        // so the serial link is both the rate we know and the one that actually limits us
+        if (!_device.empty)
+            set_link_speed(_baud_rate);
+        else if (Stream s = _stream)
+            set_link_speed(s.tx_link_speed, s.rx_link_speed);
+    }
+
     override CompletionStatus shutdown()
     {
         _tail_bytes = 0;

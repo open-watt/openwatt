@@ -125,6 +125,15 @@ protected:
 //        return super.validating();
 //    }
 
+    override void online()
+    {
+        super.online();
+
+        // later changes arrive by push from the parent's set_link_speed
+        if (BaseInterface i = _interface)
+            set_link_speed(i.tx_link_speed, i.rx_link_speed);
+    }
+
     final override void medium_tx(ref Packet packet)
     {
         debug assert((packet.vlan & 0xFFF) == 0, "packet already has a vlan tag");

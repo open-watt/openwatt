@@ -332,6 +332,14 @@ protected:
         return CompletionStatus.continue_;
     }
 
+    override void online()
+    {
+        super.online();
+
+        if (Stream s = _stream)
+            set_link_speed(s.tx_link_speed, s.rx_link_speed);
+    }
+
     override CompletionStatus shutdown()
     {
         _phase = Phase.reboot_mode;
@@ -1409,6 +1417,15 @@ protected:
             _last_attempt = now;
         }
         return CompletionStatus.continue_;
+    }
+
+    override void online()
+    {
+        super.online();
+
+        // every endpoint shares the trunk's wire
+        if (CPCInterface trunk = _cpc.get)
+            set_link_speed(trunk.tx_link_speed, trunk.rx_link_speed);
     }
 
     override CompletionStatus shutdown()

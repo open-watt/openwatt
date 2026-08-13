@@ -236,6 +236,14 @@ protected:
         return CompletionStatus.complete;
     }
 
+    override void online()
+    {
+        super.online();
+
+        // SCL clocks one bit per cycle; the ninth ACK bit of every byte is overhead the caller can account for
+        set_link_speed(_config.frequency);
+    }
+
     override CompletionStatus shutdown()
     {
         if (_operation.is_done)

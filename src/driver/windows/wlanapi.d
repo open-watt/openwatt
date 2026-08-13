@@ -66,15 +66,17 @@ enum WLAN_CONNECTION_MODE : uint
     invalid,
 }
 
+// Values are positional within two disjoint ranges in um/wlanapi.h: the autoconf block counts up from 0,
+// then statistics/rssi restart from msm_start (0x10000100). They are not one contiguous sequence.
 enum WLAN_INTF_OPCODE : uint
 {
     autoconf_start              = 0x00000000,
+    radio_state                 = 0x00000004,
+    interface_state             = 0x00000006,
     current_connection          = 0x00000007,
     channel_number              = 0x00000008,
-    statistics                  = 0x0000000C,
-    rssi                        = 0x0000000D,
-    radio_state                 = 0x0000000F,
-    interface_state             = 0x00000001,
+    statistics                  = 0x10000101,
+    rssi                        = 0x10000102,
 }
 
 enum WLAN_OPCODE_VALUE_TYPE : uint

@@ -185,6 +185,9 @@ nothrow @nogc:
         if (running && g_bridge_member_added)
             g_bridge_member_added(this, iface);
 
+        if (running)
+            update_link_speed();
+
         return true;
     }
 
@@ -392,6 +395,32 @@ nothrow @nogc:
     }
 
 protected:
+
+    override void online()
+    {
+        super.online();
+        update_link_speed();
+    }
+
+    override void on_slave_link_speed_changed()
+    {
+        update_link_speed();
+    }
+
+    // a frame leaves by exactly one port, so the fastest member is what the bridge can actually do;
+    // members that don't know their rate don't vote
+    final void update_link_speed()
+    {
+        ulong tx = 0, rx = 0;
+        foreach (ref m; _members)
+        {
+            if (m.iface.tx_link_speed > tx)
+                tx = m.iface.tx_link_speed;
+            if (m.iface.rx_link_speed > rx)
+                rx = m.iface.rx_link_speed;
+        }
+        set_link_speed(tx, rx);
+    }
 
     override CompletionStatus shutdown()
     {

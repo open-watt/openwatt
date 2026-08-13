@@ -531,6 +531,8 @@ protected:
         _status.max_service_us = 0;
         mark_set!(typeof(this), [ "link-status", "last-status-change-time", "link-downs", "tx-rate", "rx-rate",
                                   "avg-queue-time", "avg-service-time", "max-service-time" ])();
+
+        set_link_speed(0);
     }
 
     abstract int transmit(ref Packet packet, MessageCallback callback = null, const(QueuePolicy)* queue_policy = null);
@@ -674,6 +676,26 @@ protected:
         _props_set |= dirty;
         _mark_dirty(dirty);
     }
+
+    final void set_link_speed(ulong tx, ulong rx)
+    {
+        if (_status.tx_link_speed == tx && _status.rx_link_speed == rx)
+            return;
+        _status.tx_link_speed = tx;
+        _status.rx_link_speed = rx;
+        mark_set!(typeof(this), [ "tx-link-speed", "rx-link-speed" ])();
+
+        // a tagged interface rides its parent's wire, so it inherits whatever rate we just learned
+        foreach (v; _vlans[])
+            v.set_link_speed(tx, rx);
+        if (_master)
+            _master.on_slave_link_speed_changed();
+    }
+
+    final void set_link_speed(ulong speed)
+        => set_link_speed(speed, speed);
+
+    void on_slave_link_speed_changed() {}
 
     final void add_tx_frame(size_t bytes)
     {

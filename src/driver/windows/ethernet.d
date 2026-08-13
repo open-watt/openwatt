@@ -143,8 +143,7 @@ private:
         if (c & AdapterChange.mtu)       mark_set!(typeof(this), [ "l2mtu", "actual-mtu" ])();
         if (c & AdapterChange.max_mtu)   mark_set!(typeof(this), "max-l2mtu")();
         if (c & AdapterChange.connected) mark_set!(typeof(this), [ "connected", "status" ])();
-        if (c & AdapterChange.tx_speed)  mark_set!(typeof(this), "tx-link-speed")();
-        if (c & AdapterChange.rx_speed)  mark_set!(typeof(this), "rx-link-speed")();
+        set_link_speed(info.tx_link_speed, info.rx_link_speed);
     }
 }
 

@@ -163,6 +163,9 @@ All managed items also have these common properties:
 
 Stream collections additionally report status and traffic counters such as
 `link-status`, `tx-bytes`, `rx-bytes`, and current and maximum transfer rates.
+Interfaces and streams expose the underlying signalling rate as the read-only
+`tx-link-speed` and `rx-link-speed`, in bits per second. A value of `0` means
+unknown; use `link-status` to determine whether the link is up.
 
 ### `/log/sink`
 

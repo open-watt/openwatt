@@ -2,6 +2,7 @@ module driver.linux.nl80211;
 
 version (linux):
 
+import urt.driver.wifi : WifiBandwidth, WifiPhyMode, WifiStaLinkInfo;
 import urt.log;
 import urt.time : Duration, getTime;
 
@@ -377,6 +378,49 @@ bool set_vif_channel(uint ifindex, uint freq_mhz)
     b.put_u32(NL80211_ATTR_IFINDEX, ifindex);
     b.put_u32(NL80211_ATTR_WIPHY_FREQ, freq_mhz);
     return nl_ack(fd, b, "SET_CHANNEL");
+}
+
+bool query_sta_link_info(int fd, ushort family_id, uint ifindex, const(ubyte)[6] peer, out WifiStaLinkInfo info)
+{
+    if (fd < 0 || family_id == 0 || ifindex == 0)
+        return false;
+
+    NlBuilder b;
+    b.start(family_id, NLM_F_REQUEST, ++g_seq, NL80211_CMD_GET_STATION);
+    b.put_u32(NL80211_ATTR_IFINDEX, ifindex);
+    b.put_bytes(NL80211_ATTR_MAC, peer[]);
+
+    ubyte[4096] reply = void;
+    size_t n;
+    if (!nl_request(fd, b, reply[], n))
+        return false;
+
+    const nlmsghdr* mh = cast(const nlmsghdr*)reply.ptr;
+    if (n < nlmsghdr.sizeof + genlmsghdr.sizeof || mh.nlmsg_len > n)
+        return false;
+    const(ubyte)[] sta = find_attr(reply[nlmsghdr.sizeof + genlmsghdr.sizeof .. mh.nlmsg_len], NL80211_ATTR_STA_INFO);
+    if (sta.length == 0)
+        return false;
+
+    info.bssid[] = peer[];
+    const(ubyte)[] sig = find_attr(sta, NL80211_STA_INFO_SIGNAL);
+    if (sig.length >= 1)
+        info.rssi = cast(byte)sig[0];   // s8 dBm
+
+    RateInfo tx, rx;
+    parse_rate_info(find_attr(sta, NL80211_STA_INFO_TX_BITRATE), tx);
+    parse_rate_info(find_attr(sta, NL80211_STA_INFO_RX_BITRATE), rx);
+    info.tx_bitrate = tx.kbits;
+    info.rx_bitrate = rx.kbits;
+
+    // WifiStaLinkInfo describes one PHY for both directions; TX carries the local rate-control
+    // decision, so prefer it and fall back to the RX nest when the driver only annotates that one.
+    const RateInfo* phy = tx.mode != WifiPhyMode.unknown ? &tx : &rx;
+    info.phy_mode  = phy.mode;
+    info.bandwidth = phy.bandwidth;
+    info.nss       = phy.nss;
+    info.short_gi  = phy.short_gi;
+    return true;
 }
 
 
@@ -1118,6 +1162,98 @@ void parse_one_limit(const(ubyte)[] data, ref IfaceLimit limit)
     }
 }
 
+struct RateInfo
+{
+    uint kbits;
+    WifiPhyMode mode;
+    WifiBandwidth bandwidth;
+    ubyte nss;
+    bool short_gi;
+}
+
+// One NL80211_STA_INFO_{TX,RX}_BITRATE nest. The kernel emits exactly one MCS family per rate, and
+// BITRATE32 alongside the legacy u16 BITRATE whenever the rate still fits 16 bits.
+void parse_rate_info(const(ubyte)[] data, out RateInfo rate)
+{
+    uint bitrate32, bitrate16;
+    ubyte ht_mcs = ubyte.max;
+
+    while (data.length >= nlattr.sizeof)
+    {
+        const nlattr* a = cast(const nlattr*)data.ptr;
+        ushort len = a.nla_len;
+        if (len < nlattr.sizeof || len > data.length)
+            break;
+        ushort type = a.nla_type & NLA_TYPE_MASK;
+        const(ubyte)[] payload = data[nlattr.sizeof .. len];
+
+        switch (type)
+        {
+            case NL80211_RATE_INFO_BITRATE:
+                if (payload.length >= 2)
+                    bitrate16 = *cast(const(ushort)*)payload.ptr;
+                break;
+            case NL80211_RATE_INFO_BITRATE32:
+                if (payload.length >= 4)
+                    bitrate32 = *cast(const(uint)*)payload.ptr;
+                break;
+            case NL80211_RATE_INFO_MCS:
+                if (payload.length >= 1)
+                    ht_mcs = payload[0];
+                rate.mode = WifiPhyMode.n;
+                break;
+            case NL80211_RATE_INFO_VHT_MCS:
+                rate.mode = WifiPhyMode.ac;
+                break;
+            case NL80211_RATE_INFO_HE_MCS:
+                rate.mode = WifiPhyMode.ax;
+                break;
+            case NL80211_RATE_INFO_EHT_MCS:
+                rate.mode = WifiPhyMode.be;
+                break;
+            case NL80211_RATE_INFO_VHT_NSS:
+            case NL80211_RATE_INFO_HE_NSS:
+            case NL80211_RATE_INFO_EHT_NSS:
+                if (payload.length >= 1)
+                    rate.nss = payload[0];
+                break;
+            case NL80211_RATE_INFO_40_MHZ_WIDTH:
+                rate.bandwidth = WifiBandwidth.bw_40mhz;
+                break;
+            case NL80211_RATE_INFO_80_MHZ_WIDTH:
+                rate.bandwidth = WifiBandwidth.bw_80mhz;
+                break;
+            case NL80211_RATE_INFO_160_MHZ_WIDTH:
+            case NL80211_RATE_INFO_320_MHZ_WIDTH:   // WifiBandwidth stops at 160MHz; clamp rather than lose the width
+                rate.bandwidth = WifiBandwidth.bw_160mhz;
+                break;
+            case NL80211_RATE_INFO_SHORT_GI:
+                rate.short_gi = true;
+                break;
+            default:
+                break;
+        }
+
+        uint aligned = (len + 3) & ~3u;
+        if (aligned >= data.length)
+            break;
+        data = data[aligned .. $];
+    }
+
+    rate.kbits = (bitrate32 ? bitrate32 : bitrate16) * 100;
+
+    // HT has no NSS attribute: streams are encoded in the MCS index (8 rates per stream, up to 4).
+    // MCS 32 (40MHz duplicate) and the absent sentinel fall through as unknown, read as one stream.
+    if (rate.nss == 0 && ht_mcs < 32)
+        rate.nss = cast(ubyte)(ht_mcs / 8 + 1);
+
+    if (rate.mode == WifiPhyMode.unknown && rate.kbits != 0)
+    {
+        const bool cck = rate.kbits == 1000 || rate.kbits == 2000 || rate.kbits == 5500 || rate.kbits == 11000;
+        rate.mode = cck ? WifiPhyMode.b : WifiPhyMode.g;
+    }
+}
+
 
 // === protocol constants and structures ===
 // Public so driver.linux.nl80211_sta reuses this genl/netlink plumbing (structs,
@@ -1287,6 +1423,35 @@ enum NL80211_BSS_CAPABILITY           = 5;
 enum NL80211_BSS_INFORMATION_ELEMENTS = 6;
 enum NL80211_BSS_SIGNAL_MBM           = 7;
 enum NL80211_BSS_STATUS               = 9;
+
+
+// === station info (NL80211_CMD_GET_STATION) ===
+// Values taken from include/uapi/linux/nl80211.h: enum nl80211_commands, nl80211_attrs,
+// nl80211_sta_info, nl80211_rate_info.
+
+enum NL80211_CMD_GET_STATION = 17;
+
+enum NL80211_ATTR_STA_INFO = 21;
+
+enum NL80211_STA_INFO_SIGNAL     = 7;
+enum NL80211_STA_INFO_TX_BITRATE = 8;    // nested nl80211_rate_info
+enum NL80211_STA_INFO_RX_BITRATE = 14;   // nested nl80211_rate_info
+
+// Both bitrate attributes count in units of 100 kbit/s; the width attributes are flags.
+enum NL80211_RATE_INFO_BITRATE       = 1;    // u16
+enum NL80211_RATE_INFO_MCS           = 2;
+enum NL80211_RATE_INFO_40_MHZ_WIDTH  = 3;
+enum NL80211_RATE_INFO_SHORT_GI      = 4;
+enum NL80211_RATE_INFO_BITRATE32     = 5;    // u32
+enum NL80211_RATE_INFO_VHT_MCS       = 6;
+enum NL80211_RATE_INFO_VHT_NSS       = 7;
+enum NL80211_RATE_INFO_80_MHZ_WIDTH  = 8;
+enum NL80211_RATE_INFO_160_MHZ_WIDTH = 10;
+enum NL80211_RATE_INFO_HE_MCS        = 13;
+enum NL80211_RATE_INFO_HE_NSS        = 14;
+enum NL80211_RATE_INFO_320_MHZ_WIDTH = 18;
+enum NL80211_RATE_INFO_EHT_MCS       = 19;
+enum NL80211_RATE_INFO_EHT_NSS       = 20;
 
 
 // === shared WPA key / cipher / auth ABI (STA session + AP session) ===

@@ -80,6 +80,14 @@ protected:
         return CompletionStatus.continue_;
     }
 
+    override void online()
+    {
+        super.online();
+
+        if (Stream s = _stream)
+            set_link_speed(s.tx_link_speed, s.rx_link_speed);
+    }
+
     final override CompletionStatus shutdown()
     {
         _tail.clear();
@@ -255,6 +263,14 @@ nothrow @nogc:
         if (_protocol >= TunnelProtocol.PPPoE && _interface.running)
             return CompletionStatus.complete;
         return CompletionStatus.continue_;
+    }
+
+    override void online()
+    {
+        super.online();
+
+        if (BaseInterface i = _interface)
+            set_link_speed(i.tx_link_speed, i.rx_link_speed);
     }
 
     final override CompletionStatus shutdown()

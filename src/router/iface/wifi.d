@@ -22,7 +22,7 @@ import manager.secret;
 import router.iface;
 import router.iface.ethernet;
 
-import urt.driver.wifi : WifiBand, WifiScanConfig, WifiScanResult;
+import urt.driver.wifi : WifiBand, WifiBandwidth, WifiPhyMode, WifiScanConfig, WifiScanResult;
 
 nothrow @nogc:
 
@@ -47,6 +47,53 @@ enum WifiInstallation : byte
     any,
     indoor,
     outdoor,
+}
+
+
+// Peak PHY rate in bit/s for the described link, for platforms that can name the PHY but not the
+// negotiated rate. Returns 0 for an unknown mode.
+ulong wifi_phy_max_rate(WifiPhyMode mode, WifiBandwidth bw, ubyte nss = 1, bool short_gi = false) pure
+{
+    // bit/s per spatial stream at the highest MCS each mode defines.
+    // HT is 20/40MHz only, so wider requests clamp to HT40 rather than reading as unknown.
+    static immutable uint[4][2] ht  = [[65_000_000, 135_000_000, 135_000_000, 135_000_000],
+                                       [72_200_000, 150_000_000, 150_000_000, 150_000_000]];
+    static immutable uint[4][2] vht = [[78_000_000, 180_000_000, 390_000_000, 780_000_000],
+                                       [86_700_000, 200_000_000, 433_300_000, 866_700_000]];
+    // HE/EHT carry a 12.8us symbol whose shortest guard interval (0.8us) is already the peak these
+    // figures quote, so short_gi has no meaning here and is deliberately ignored.
+    static immutable uint[4] he  = [143_400_000, 286_800_000, 600_400_000, 1_201_000_000];
+    static immutable uint[4] eht = [172_100_000, 344_100_000, 720_600_000, 1_441_200_000];
+
+    static assert(WifiBandwidth.max == WifiBandwidth.bw_160mhz, "a wider channel needs a column in every table here");
+
+    const size_t gi = short_gi ? 1 : 0;
+
+    uint rate;
+    final switch (mode)
+    {
+        case WifiPhyMode.unknown:
+            return 0;
+        case WifiPhyMode.b:
+            return 11_000_000;
+        case WifiPhyMode.g:
+            return 54_000_000;
+        case WifiPhyMode.lr:
+            return 500_000; // ESP-IDF wifi_phy_rate_t offers only LORA_250K and LORA_500K
+        case WifiPhyMode.n:
+            rate = ht[gi][bw];
+            break;
+        case WifiPhyMode.ac:
+            rate = vht[gi][bw];
+            break;
+        case WifiPhyMode.ax:
+            rate = he[bw];
+            break;
+        case WifiPhyMode.be:
+            rate = eht[bw];
+            break;
+    }
+    return ulong(rate) * (nss ? nss : 1);
 }
 
 

@@ -64,3 +64,23 @@ through them and remove sections as they are absorbed.
 - `.conf` and `.log` serve as `text/plain`, `.yaml`/`.yml` as `text/yaml`, so they display
   in a browser tab instead of downloading as `application/octet-stream`.
 - There is no ETag/If-Match yet: two editors saving the same file last-writer-wins.
+
+## 2026-08-12: link speed is populated on every interface, and on streams
+
+- `tx-link-speed` / `rx-link-speed` (bits per second) previously only ever had a value on
+  platform ethernet interfaces. Every interface type now reports one where it can: modbus,
+  can, tesla-twc, zigbee, ble, i2c, ash, cpc (trunk and endpoints), websocket, ppp, vlan,
+  bridge and udp. Views that hid the field, special-cased ethernet, or assumed it meant
+  "ethernet only" should now render it for any interface.
+- `0` still means unknown and must be rendered as such, not as "0 bit/s" or as a down link.
+  It is a genuine outcome: a modbus interface reached over a TCP bridge with no configured
+  or estimated baud honestly does not know its bus rate. `link-status` remains the only
+  thing that says whether the link is up.
+- The fields are now cleared when an interface goes offline and restamped when it comes
+  back, so a client holding a cached value across a link bounce sees it go to 0 and back.
+- Streams gain the same two read-only properties, so `/stream/print` and stream detail
+  views can show the rate of a serial port, or of whatever a tunnel rides on.
+- WLAN interfaces report the negotiated PHY rate where the platform exposes it, and the
+  theoretical maximum for the negotiated mode where it does not, so the number moves with
+  link quality on some platforms and is a fixed ceiling on others. Clients should not
+  present it as a measured throughput; `tx-rate`/`rx-rate` remain the measured counters.

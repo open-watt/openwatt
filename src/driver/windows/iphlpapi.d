@@ -318,14 +318,15 @@ const(char)[] parse_npf_guid(const(char)[] adapter_name) pure
 // adapter's true max, so this is a safe upper bound.
 enum WINDOWS_MAX_L2MTU = 9000;
 
+// link speed is not in here: it goes to the interface through set_link_speed(), which propagates it
+// to anything layered above, and lets a driver with a better source than the adapter table (wifi
+// reads the association) simply not call this with it
 enum AdapterChange : uint
 {
     none      = 0,
     mtu       = 1 << 0,
     max_mtu   = 1 << 1,
     connected = 1 << 2,
-    tx_speed  = 1 << 3,
-    rx_speed  = 1 << 4,
 }
 
 AdapterChange apply_os_adapter_info(BaseInterface iface, ref ushort l2mtu, ref ushort max_l2mtu, ref IfStatus status, ref const OSAdapterInfo info)
@@ -354,17 +355,6 @@ AdapterChange apply_os_adapter_info(BaseInterface iface, ref ushort l2mtu, ref u
     {
         status.connected = info.connection;
         changed |= AdapterChange.connected;
-    }
-
-    if (status.tx_link_speed != info.tx_link_speed)
-    {
-        status.tx_link_speed = info.tx_link_speed;
-        changed |= AdapterChange.tx_speed;
-    }
-    if (status.rx_link_speed != info.rx_link_speed)
-    {
-        status.rx_link_speed = info.rx_link_speed;
-        changed |= AdapterChange.rx_speed;
     }
 
     return changed;

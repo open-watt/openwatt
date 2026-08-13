@@ -388,6 +388,8 @@ protected:
             }
         }
 
+        update_link_speed();
+
         _queue.init(_support_simultaneous_requests ? 8 : 1, 0, PCP.be, this);
         _queue.set_queue_timeout(_queue_timeout.msecs);
         _queue.set_transport_timeout(_request_timeout.msecs);
@@ -918,7 +920,26 @@ private:
         _queue.set_queue_timeout(_queue_timeout.msecs);
         _queue.set_transport_timeout(_request_timeout.msecs);
 
+        update_link_speed();
+
         log.info("estimated remote baud rate: ", closest);
+    }
+
+    void update_link_speed()
+    {
+        import router.stream.serial : SerialStream;
+
+        // across a bridge the far-side serial bus is the bottleneck and the transport rate would wildly
+        // overstate it, so report only a baud we were told or measured; native Modbus/TCP has no serial
+        // segment, and there the transport rate is the honest answer
+        if (auto serial = cast(SerialStream)_stream)
+            set_link_speed(serial.baud_rate);
+        else if (_protocol != ModbusProtocol.tcp)
+            set_link_speed(_user_baud != 0 ? _user_baud : _estimated_baud);
+        else if (Stream s = active_stream())
+            set_link_speed(s.tx_link_speed, s.rx_link_speed);
+        else
+            set_link_speed(0);
     }
 
     final void incoming_frame(const(void)[] message, MonoTime recvTime, ref ModbusFrameInfo frame_info)

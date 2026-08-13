@@ -25,6 +25,10 @@ import router.stream;
 nothrow @nogc:
 
 
+// the TWC RS485 bus is 9600 8N1 by design; there is nothing to negotiate
+enum twc_baud = 9_600;
+
+
 struct TWCFrame
 {
     enum Type = PacketType.tesla_twc;
@@ -122,6 +126,17 @@ protected:
         if (_stream.running)
             return CompletionStatus.complete;
         return CompletionStatus.continue_;
+    }
+
+    override void online()
+    {
+        super.online();
+
+        // reached over an RS485-to-TCP bridge the bus still runs at the TWC rate whatever the transport
+        // does, so only a local serial port gets to state the rate itself
+        import router.stream.serial : SerialStream;
+        auto serial = cast(SerialStream)_stream.get;
+        set_link_speed(serial ? serial.baud_rate : twc_baud);
     }
 
     override void update()

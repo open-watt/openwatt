@@ -171,6 +171,14 @@ protected:
         return _connected ? CompletionStatus.complete : CompletionStatus.continue_;
     }
 
+    override void online()
+    {
+        super.online();
+
+        if (Stream s = _stream)
+            set_link_speed(s.tx_link_speed, s.rx_link_speed);
+    }
+
     override CompletionStatus shutdown()
     {
         _connected = false;

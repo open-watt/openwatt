@@ -691,6 +691,15 @@ protected:
         return CompletionStatus.continue_;
     }
 
+    override void online()
+    {
+        super.online();
+
+        // the link rate is cleared by going offline; heartbeat is up to a second away, so stamp it now
+        if (auto radio = cast(BuiltinWiFi)this.radio)
+            refresh_link_info(radio);
+    }
+
     override CompletionStatus shutdown()
     {
         auto radio = cast(BuiltinWiFi)this.radio;
@@ -735,6 +744,12 @@ private:
             return;
         }
 
+        // A driver that cannot read the live rate names the PHY instead, so that direction reports the
+        // mode's peak rather than the attenuated rate. An unnamed PHY gives 0, which reads as unknown.
+        const ulong peak = wifi_phy_max_rate(info.phy_mode, info.bandwidth, info.nss, info.short_gi);
+        set_link_speed(info.tx_bitrate ? ulong(info.tx_bitrate) * 1000 : peak,
+                       info.rx_bitrate ? ulong(info.rx_bitrate) * 1000 : peak);
+
         MACAddress bssid = MACAddress(info.bssid);
         int rssi = info.rssi;
         ubyte quality = rssi_to_quality(rssi);
@@ -749,6 +764,8 @@ private:
 
     void clear_link_info()
     {
+        set_link_speed(0);
+
         if (_bssid == MACAddress.init && _rssi == 0 && _signal_quality == 0)
             return;
 
