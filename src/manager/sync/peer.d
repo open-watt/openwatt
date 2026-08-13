@@ -1,6 +1,7 @@
 module manager.sync.peer;
 
 import urt.array;
+import urt.inet;
 import urt.log;
 import urt.map;
 import urt.mem.allocator;
@@ -21,6 +22,7 @@ import manager.sync.encoder;
 
 import router.iface;
 import router.iface.packet;
+import router.iface.udp : UDPFrame;
 
 nothrow @nogc:
 
@@ -98,13 +100,27 @@ nothrow @nogc:
 
     // API
 
+    // Bind this peer to one source on a multi-drop datagram transport: rx is filtered
+    // to the address and tx is UDPFrame-addressed to it. Connected transports (a unicast
+    // UDPInterface, a WebSocket) don't need one; frames ride raw.
+    void bind_remote(ref const InetAddress addr)
+    {
+        _remote_addr = addr;
+        _remote_bound = true;
+    }
+
     int transmit_frame(const(ubyte)[] frame, bool is_text = false)
     {
         if (!_transport || !_transport.running)
             return -1;
         Packet p;
-        ref hdr = p.init!RawFrame(frame);
-        hdr.is_text = is_text;
+        if (_remote_bound)
+            p.init!UDPFrame(frame).address = _remote_addr;
+        else
+        {
+            ref hdr = p.init!RawFrame(frame);
+            hdr.is_text = is_text;
+        }
         return _transport.forward(p);
     }
 
@@ -287,7 +303,15 @@ protected:
     {
         if (_transport_subscribed || !_transport)
             return;
-        _transport.subscribe(&on_transport_packet, PacketFilter(PacketType.raw, PacketDirection.incoming));
+        // a remote-bound peer shares a multi-drop transport: its server routes rx by source
+        // (deliver_frame), so only the state signal is subscribed here. the interface holds
+        // few subscriber slots, so per-peer packet subscriptions must not scale with peers.
+        if (!_remote_bound)
+        {
+            // unknown = all types; the handler takes raw and udp frames, so one peer object
+            // sits on connected pipes and datagram transports alike
+            _transport.subscribe(&on_transport_packet, PacketFilter(PacketType.unknown, PacketDirection.incoming));
+        }
         _transport.subscribe(&on_transport_state);
         _transport_subscribed = true;
     }
@@ -358,6 +382,8 @@ package:
 private:
     ObjectRef!BaseInterface _transport;
     bool                    _transport_subscribed;
+    bool                    _remote_bound;
+    InetAddress             _remote_addr;
 
     void clear_log_sink()
     {
@@ -377,9 +403,16 @@ private:
         _transport_subscribed = false;
     }
 
+    package void deliver_frame(const(ubyte)[] frame)
+    {
+        encoder_for(_encoder).decode_and_dispatch(this, frame);
+    }
+
     void on_transport_packet(ref const Packet p, BaseInterface, PacketDirection, void*) nothrow @nogc
     {
-        encoder_for(_encoder).decode_and_dispatch(this, cast(const(ubyte)[])p.data);
+        if (p.type != PacketType.raw && p.type != PacketType.udp)
+            return;
+        deliver_frame(cast(const(ubyte)[])p.data);
     }
 
     void on_transport_state(ActiveObject, StateSignal sig) nothrow @nogc
