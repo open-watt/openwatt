@@ -187,14 +187,19 @@ struct InterfaceSubscriber
 //      02:FE:ED:xx:xx:yy
 //      02:B0:0B:xx:xx:yy
 
-MACAddress generate_mac_address(const(char)[] name) pure
+MACAddress generate_mac_address(const(char)[] name)
 {
     import urt.crc;
+    import manager.system : node_id;
     alias crc_fun = calculate_crc!(Algorithm.crc32_iso_hdlc);
 
     enum ushort MAGIC = 0x1337;
 
+    // seeded by the node id: interfaces share names across nodes ("ether1" everywhere),
+    // and two stations on one segment must never derive the same address
     uint crc = crc_fun(name);
+    ulong id = node_id();
+    crc ^= cast(uint)id ^ cast(uint)(id >> 32);
     MACAddress addr = MACAddress(0x02, MAGIC >> 8, MAGIC & 0xFF, crc & 0xFF, (crc >> 8) & 0xFF, crc >> 24);
     if (addr.b[5] < 100 || addr.b[5] >= 240)
         addr.b[5] ^= 0x80;
