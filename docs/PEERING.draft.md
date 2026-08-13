@@ -155,7 +155,22 @@ authority; the authority-authority link carries coordination only, never fleet s
 7. Later domains: UDP multicast for routed segments, modbus function-code discovery per the
    L2/L3 trajectory.
 
+## The claimed surface
+
+A successful claim arms `device:**` on the session: the member's whole device tree, live. The
+model plane is self-describing (type/add frames), so subscribing is the enumeration; elements
+appearing later stream in through the same sub. The member takes its first claimant as its time
+authority (clock discipline is part of subordination; the elected-active refinement comes with
+the election). Scoping the surface (`sub=` on the authority) is deferred until a
+bandwidth-constrained medium forces it.
+
 ## Open questions
+
+- Device-id collisions across the fleet: every node runs its own `energy` device, so a member's
+  mirror of it is refused at the authority (a remote device never overwrites a local one) and is
+  simply absent from the fleet surface. Fine for the bench; the fleet eventually wants per-node
+  namespacing of mirrored devices (e.g. a node-scoped prefix), which also affects how automations
+  address remote elements.
 
 - Empty `cluster=` on a member: accept any claimant is convenient on the bench and spooky in the
   field. Current position: accept but log loudly; refuse whenever a secret is configured.

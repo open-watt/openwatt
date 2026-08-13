@@ -137,7 +137,7 @@ nothrow @nogc:
         {
             session.write_line("note: released ", _claimants.length, " live claim(s)");
             log.warning("reconfigured while claimed; releasing ", _claimants.length, " claimant(s)");
-            _claimants.clear();
+            release_claimants();
             _adopted_cluster = String();
         }
 
@@ -259,6 +259,11 @@ nothrow @nogc:
 
         _claimants ~= Claimant(from._remote_node_id, from, priority);
 
+        // subordination includes clock discipline: the first claimant becomes this node's
+        // time authority. TODO: follow the elected-active authority once the election lands.
+        if (_claimants.length == 1)
+            from.grant_claim_time_authority();
+
         log.info("claimed by node ", hex_id(from._remote_node_id)[], " ('", from.name[], "') cluster='", bound_cluster, "'");
 
         apply_announce_state();
@@ -272,6 +277,7 @@ nothrow @nogc:
         {
             if (c.peer is p)
             {
+                p.revoke_claim_time_authority();
                 _claimants.remove(i);
                 if (!claimed)
                 {
@@ -279,6 +285,8 @@ nothrow @nogc:
                     log.info("last claimant detached; reverting to unbound");
                     apply_announce_state();
                 }
+                else
+                    _claimants[0].peer.grant_claim_time_authority();
                 return;
             }
         }
@@ -298,6 +306,12 @@ nothrow @nogc:
                 a.claimed_at = getTime();
                 a.failures = 0;
                 log.info("claimed node ", hex_id(kvp.key)[], " ('", from.name[], "')");
+
+                // build the fleet surface: the member's whole device tree, armed live.
+                // the model plane is self-describing (type/add frames), so subscribing IS
+                // the enumeration, and elements appearing later stream in via the same sub.
+                const(char)[][1] patterns = ["device:**"];
+                encoder_for(from._encoder).encode_model_sub(from, get_module!SyncModule.alloc_seq(), patterns[], false);
             }
             else
             {
@@ -347,6 +361,13 @@ private:
     Map!(ulong, ClaimAttempt) _attempts;
     UDPSyncServer _listener;
     MonoTime _next_sweep;
+
+    void release_claimants()
+    {
+        foreach (ref c; _claimants[])
+            c.peer.revoke_claim_time_authority();
+        _claimants.clear();
+    }
 
     static char[16] hex_id(ulong node_id)
     {
