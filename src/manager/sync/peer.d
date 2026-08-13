@@ -539,6 +539,21 @@ package:
     ulong            _remote_node_id;    // hello identity; 0 = peer announced none
     PeerRole         _remote_role;
     String           _remote_cluster;
+    ubyte[16]        _remote_nonce;      // session nonce from the peer's hello; anchors the claim HMAC
+    bool             _remote_nonce_set;
+    bool             _local_nonce_set;
+
+    // our session nonce, sent in hello; fresh per session (cleared on detach)
+    const(ubyte)[] local_nonce()
+    {
+        if (!_local_nonce_set)
+        {
+            import urt.crypto.random : crypto_random_bytes;
+            crypto_random_bytes(_local_nonce);
+            _local_nonce_set = true;
+        }
+        return _local_nonce[];
+    }
     Array!ushort     _ft_sent;           // FormatId -> session ft + 1; 0 = unsent
     uint             _next_ft;
     Array!(const(VoidEnumInfo)*) _enums_sent;
@@ -632,6 +647,7 @@ private:
     bool                    _ctl_ack_pending;
     InetAddress             _remote_addr;
     InetAddress             _remote;
+    ubyte[16]               _local_nonce;
     uint                    _tx_session;
     uint                    _rx_session;
     ubyte                   _tx_seq;         // last sequence assigned

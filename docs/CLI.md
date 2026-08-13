@@ -676,7 +676,7 @@ re-claimed.
 | `cluster` | name | empty | Fleet this node belongs to. A member with no cluster accepts (and adopts) any claimant's cluster, logging loudly; set one to pin the node. |
 | `priority` | number | `100` | Authority election precedence; lower wins, node-id breaks ties. |
 | `claim` | path glob | `*` | Authority only: which member names to adopt. |
-| `secret` | string | empty | Gates claims. The HMAC challenge is not yet implemented, so a configured secret currently refuses all claims. |
+| `secret` | string | empty | Shared fleet secret gating claims: the claim proves it with an HMAC over the member's per-session hello nonce, so the secret never travels and a captured claim cannot replay. Set the same value on the authority and its members. |
 | `port` | `1` to `65535` | `7000` | Member only: sync port the claim listener binds; advertised in discovery beacons. |
 
 ```text

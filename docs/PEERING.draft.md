@@ -149,8 +149,11 @@ authority; the authority-authority link carries coordination only, never fleet s
    by an authority with no session to it (the dual-authority seat doubles as restart
    recovery), and a member that reboots out from under a session the datagram link cannot
    pronounce dead is detected by its unbound beacon and re-claimed]
-5. Claim auth (secret + HMAC challenge). The `secret=` property exists; setting it refuses all
-   claims until the challenge lands.
+5. Claim auth (secret + HMAC challenge). [done: every hello carries a fresh 16-byte session
+   nonce; claim auth = hex(HMAC-SHA256(secret, member_nonce || cluster)). The secret never
+   travels, and a captured claim cannot replay into a new session. A member with a secret
+   refuses unauthenticated claims; an authority with a secret waits for the member's hello
+   before claiming]
 6. Dual-authority: authority-authority session, election, membership exchange.
 7. Later domains: UDP multicast for routed segments, modbus function-code discovery per the
    L2/L3 trajectory.

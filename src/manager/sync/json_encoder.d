@@ -365,6 +365,11 @@ nothrow @nogc:
         char[16] id = void;
         format_uint(node_id(), id[], 16, 16, '0');
         _buf.append(",\"node\":\"", id[], '\"');
+
+        import urt.encoding : hex_encode;
+        char[32] nonce = void;
+        hex_encode(peer.local_nonce(), nonce[]);
+        _buf.append(",\"nonce\":\"", nonce[], '\"');
         auto disco = get_module!SyncDiscoveryModule;
         if (disco.local_role != PeerRole.none)
             _buf.append(",\"role\":\"", role_name(disco.local_role), '\"');
@@ -729,6 +734,7 @@ nothrow @nogc:
                 Variant* mf = json.getMember("max_frame");
 
                 import urt.conv : parse_uint;
+                import urt.encoding : hex_decode;
                 import manager.sync.discovery : PeerRole, role_from_name;
                 ulong nid = 0;
                 if (Variant* nv = json.getMember("node"))
@@ -737,9 +743,15 @@ nothrow @nogc:
                 if (Variant* rv = json.getMember("role"))
                     role_from_name(rv.asString(), role);
                 Variant* cl = json.getMember("cluster");
+                ubyte[16] nonce_buf = void;
+                const(ubyte)[] nonce;
+                if (Variant* no = json.getMember("nonce"))
+                {
+                    if (hex_decode(no.asString(), nonce_buf[]) == 16)
+                        nonce = nonce_buf[];
+                }
 
-                sync.inbound_hello(peer, json.getMember("ver").asUint(), json.getMember("host").asString(), caps, mf ? mf.asUint() : 0,
-                                   nid, role, cl ? cl.asString() : null);
+                sync.inbound_hello(peer, json.getMember("ver").asUint(), json.getMember("host").asString(), caps, mf ? mf.asUint() : 0, nid, role, cl ? cl.asString() : null, nonce);
                 break;
             }
 

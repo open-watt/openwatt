@@ -66,6 +66,8 @@ nothrow @nogc:
         foreach (kvp; _attempts[])
         {
             ref a = kvp.value;
+            if (a.peer && !a.sent && a.peer.running)
+                try_send_claim(a, now);
             if (a.peer && a.sent && !a.claimed && now >= a.deadline)
             {
                 log.warning("claim of node ", hex_id(kvp.key)[], " went unanswered");
@@ -224,10 +226,13 @@ nothrow @nogc:
         }
         if (_secret.length)
         {
-            // HMAC challenge not built yet; a configured secret refuses all claims rather than admit unauthenticated ones
-            log.warning("claim from '", from.name[], "' refused: secret is set and claim auth is not implemented");
-            enc.encode_err(from, seq, "access_denied", "auth required");
-            return;
+            char[64] expected = void;
+            if (!claim_auth(from.local_nonce(), cluster, expected) || !hmac_equal(auth, expected))
+            {
+                log.warning("claim from '", from.name[], "' refused: bad auth");
+                enc.encode_err(from, seq, "access_denied", "bad auth");
+                return;
+            }
         }
         if (_cluster.length && cluster[] != _cluster[])
         {
@@ -376,6 +381,35 @@ private:
         return id;
     }
 
+    // claim auth: hex(HMAC-SHA256(secret, member_nonce || cluster)). the nonce is fresh per
+    // session, so a captured claim cannot replay; the secret never travels.
+    bool claim_auth(const(ubyte)[] nonce, const(char)[] cluster, ref char[64] hex_out)
+    {
+        import urt.digest.hmac : hmac_init, hmac_update, hmac_finalise, HMACContext;
+        import urt.digest.sha : SHA256Context;
+        import urt.encoding : hex_encode;
+
+        if (nonce.length != 16)
+            return false;
+        HMACContext!SHA256Context h;
+        hmac_init(h, cast(const(ubyte)[])_secret[]);
+        hmac_update(h, nonce);
+        hmac_update(h, cluster);
+        ubyte[32] mac = hmac_finalise(h);
+        hex_encode(mac[], hex_out[]);
+        return true;
+    }
+
+    static bool hmac_equal(const(char)[] a, const(char)[] b)
+    {
+        if (a.length != b.length)
+            return false;
+        ubyte diff = 0;
+        foreach (i; 0 .. a.length)
+            diff |= a[i] ^ b[i];
+        return diff == 0;
+    }
+
     void apply_peering_state()
     {
         apply_announce_state();
@@ -456,27 +490,38 @@ private:
         log.info("claiming node ", id[], " ('", n.name, "') at ", n.mac, ":", n.sync_port);
     }
 
-    // claim once the session is up; hello (with our identity) precedes it on the wire
+    // claim once the session is up; hello (with our identity) precedes it on the wire.
+    // with a secret, the claim proves it against the member's hello nonce, so the send
+    // also waits for the member's hello to arrive.
+    void try_send_claim(ref ClaimAttempt a, MonoTime now)
+    {
+        char[64] auth = void;
+        bool have_auth = false;
+        if (_secret.length)
+        {
+            if (!a.peer._remote_nonce_set)
+                return;
+            have_auth = claim_auth(a.peer._remote_nonce[], _cluster[], auth);
+        }
+        a.seq = get_module!SyncModule.alloc_seq();
+        a.sent = true;
+        a.deadline = now + claim_timeout;
+        encoder_for(a.peer._encoder).encode_claim(a.peer, a.seq, _cluster[], _priority, have_auth ? auth[] : null);
+    }
+
     void claim_peer_state(ActiveObject obj, StateSignal sig)
     {
+        if (sig != StateSignal.offline)
+            return;
         foreach (kvp; _attempts[])
         {
             ref a = kvp.value;
-            if (a.peer !is obj)
-                continue;
-            if (sig == StateSignal.online && !a.sent)
-            {
-                a.seq = get_module!SyncModule.alloc_seq();
-                a.sent = true;
-                a.deadline = getTime() + claim_timeout;
-                encoder_for(a.peer._encoder).encode_claim(a.peer, a.seq, _cluster[], _priority, null);
-            }
-            else if (sig == StateSignal.offline && a.claimed)
+            if (a.peer is obj && a.claimed)
             {
                 log.info("session to node ", hex_id(kvp.key)[], " died");
                 fail_attempt(a);
+                return;
             }
-            return;
         }
     }
 

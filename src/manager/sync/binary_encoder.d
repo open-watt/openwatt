@@ -365,6 +365,7 @@ nothrow @nogc:
         _buf.put_varint(node_id());
         _buf ~= disco.local_role;
         _buf.put_str(disco.local_cluster[]);
+        _buf.put_str(cast(const(char)[])peer.local_nonce());
         send_frame(peer);
     }
 
@@ -791,6 +792,7 @@ nothrow @nogc:
                 ulong nid = 0;
                 PeerRole role;
                 const(char)[] cluster;
+                const(ubyte)[] nonce;
                 if (!r.fail && r.more)
                 {
                     nid = r.varint();
@@ -798,9 +800,11 @@ nothrow @nogc:
                     if (rb <= PeerRole.max)
                         role = cast(PeerRole)rb;
                     cluster = r.str();
+                    if (!r.fail && r.more)
+                        nonce = cast(const(ubyte)[])r.str();
                 }
                 if (!r.fail)
-                    sync.inbound_hello(peer, ver, host, caps, max_frame, nid, role, cluster);
+                    sync.inbound_hello(peer, ver, host, caps, max_frame, nid, role, cluster, nonce);
                 break;
             }
 
