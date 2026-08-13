@@ -394,6 +394,33 @@ OpenWatt station never corrupts diagnostics on a network with provisioned CFM.
 /interface/ethernet/set eth0 cfm-level=5
 ```
 
+### `/interface/wlan`
+
+A WLAN interface is one station association, bound to a radio under
+`/interface/wifi`. The association's live state is read-only:
+
+| Property | Description |
+| --- | --- |
+| `bssid` | MAC address of the AP currently associated with. |
+| `rssi` | Received signal strength in dBm; `0` when not associated. |
+| `signal-quality` | Signal quality from 0 to 100. |
+| `phy-mode` | The PHY the association settled on, for example `VHT80 2SS`. |
+
+`phy-mode` reads as the 802.11 mode name with the channel width folded into it
+the way the standard names them (`HT40`, `VHT80`, `HE160`), followed by the
+spatial stream count, and `SGI` when a short guard interval is in use. It is
+empty when not associated, and each part is omitted rather than guessed when the
+platform cannot report it: Windows names only the PHY family from the
+association, so it reports `VHT` with no width or stream count. `11b`, `11g` and
+`LR` never carry a width, and a short guard interval is only reported for HT and
+VHT, because HE and EHT choose one per transmission rather than per link.
+
+These describe the association, not the radio, which is why they live here
+rather than on `/interface/wifi`: a radio in `apsta` mode holds a station
+association and serves AP clients at the same time, and they negotiate
+separately. The negotiated rate itself is reported as `tx-link-speed` and
+`rx-link-speed`, described under the collection commands above.
+
 ### `/interface/udp`
 
 A UDP interface is a raw-packet interface over UDP datagrams: one datagram is

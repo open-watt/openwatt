@@ -41,7 +41,18 @@ enum DOT11_BSS_TYPE : uint
 
 enum DOT11_PHY_TYPE : uint
 {
-    unknown = 0,
+    unknown    = 0,
+    fhss       = 1,
+    dsss       = 2,
+    irbaseband = 3,
+    ofdm       = 4,     // 11a
+    hrdsss     = 5,     // 11b
+    erp        = 6,     // 11g
+    ht         = 7,     // 11n
+    vht        = 8,     // 11ac
+    dmg        = 9,     // 11ad
+    he         = 10,    // 11ax
+    eht        = 11,    // 11be
 }
 
 enum WLAN_INTERFACE_STATE : uint

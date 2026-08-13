@@ -1480,6 +1480,7 @@ private:
                 rx = peak;
         }
         set_link_speed(tx, rx);
+        set_phy_mode(link.phy_mode, link.bandwidth, link.nss, link.short_gi);
     }
 
     void register_fdwatch()

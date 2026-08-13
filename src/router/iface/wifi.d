@@ -10,6 +10,7 @@ import urt.mem.temp;
 import urt.si.quantity;
 import urt.si.unit : Gigahertz;
 import urt.string;
+import urt.string.format;
 import urt.time;
 
 import manager;
@@ -22,7 +23,7 @@ import manager.secret;
 import router.iface;
 import router.iface.ethernet;
 
-import urt.driver.wifi : WifiBand, WifiBandwidth, WifiPhyMode, WifiScanConfig, WifiScanResult;
+public import urt.driver.wifi : WifiBand, WifiBandwidth, WifiPhyMode, WifiScanConfig, WifiScanResult;
 
 nothrow @nogc:
 
@@ -94,6 +95,68 @@ ulong wifi_phy_max_rate(WifiPhyMode mode, WifiBandwidth bw, ubyte nss = 1, bool 
             break;
     }
     return ulong(rate) * (nss ? nss : 1);
+}
+
+
+// Human-readable description of a PHY, e.g. "VHT80 2SS". 802.11 folds the channel width into the mode
+// name, so the width belongs there rather than beside it. Returns null for an unknown mode, and a
+// stream count of 0 is left out rather than printed as a guess.
+const(char)[] format_phy_mode(char[] buffer, WifiPhyMode mode, WifiBandwidth bw, ubyte nss = 0, bool short_gi = false)
+{
+    static immutable string[4] widths = [ "20", "40", "80", "160" ];
+
+    return format_phy(buffer, mode, widths[bw], nss, short_gi);
+}
+
+// For a platform that names the PHY family and nothing else; the width is omitted rather than assumed,
+// since 20MHz would be a wrong guess for anything above 11g.
+const(char)[] format_phy_mode(char[] buffer, WifiPhyMode mode)
+    => format_phy(buffer, mode, "", 0, false);
+
+private const(char)[] format_phy(char[] buffer, WifiPhyMode mode, string width, ubyte nss, bool short_gi)
+{
+    string name;
+    bool sized;
+    final switch (mode)
+    {
+        case WifiPhyMode.unknown:
+            return null;
+        case WifiPhyMode.lr:
+            name = "LR";
+            break;
+        case WifiPhyMode.b:
+            name = "11b";
+            break;
+        case WifiPhyMode.g:
+            name = "11g";
+            break;
+        case WifiPhyMode.n:
+            name = "HT";
+            sized = true;
+            break;
+        case WifiPhyMode.ac:
+            name = "VHT";
+            sized = true;
+            break;
+        case WifiPhyMode.ax:
+            name = "HE";
+            sized = true;
+            break;
+        case WifiPhyMode.be:
+            name = "EHT";
+            sized = true;
+            break;
+    }
+
+    if (!sized)
+        width = "";
+    // HE and EHT choose a guard interval per transmission rather than per link, so it only describes
+    // an HT or VHT rate
+    string gi = short_gi && (mode == WifiPhyMode.n || mode == WifiPhyMode.ac) ? " SGI" : "";
+
+    if (nss == 0)
+        return buffer.concat(name, width, gi);
+    return buffer.concat(name, width, " ", uint(nss), "SS", gi);
 }
 
 
@@ -444,7 +507,8 @@ abstract class WLANInterface : WLANBaseInterface
     alias Properties = AliasSeq!(Prop!("bssid-filter",   bssid_filter,   "configuration"),
                                  Prop!("bssid",          bssid,          "configuration"),
                                  Prop!("rssi",           rssi,           "configuration"),
-                                 Prop!("signal-quality", signal_quality, "configuration"));
+                                 Prop!("signal-quality", signal_quality, "configuration"),
+                                 Prop!("phy-mode",       phy_mode,       "configuration"));
 nothrow @nogc:
 
     protected this(const CollectionTypeInfo* typeInfo, CID id, ObjectFlags flags = ObjectFlags.none)
@@ -471,8 +535,46 @@ nothrow @nogc:
     ubyte signal_quality() const
         => 0; // 0..100
 
+    // the PHY the association settled on; empty when not associated or the platform can't name it
+    final const(char)[] phy_mode() const pure
+        => _phy_mode[0 .. _phy_mode_len];
+
+protected:
+
+    // Stored, unlike the virtual getters above, because the string is composed from four platform
+    // values: formatting it here once is what keeps every driver reporting the same shape.
+    final void set_phy_mode(WifiPhyMode mode, WifiBandwidth bw, ubyte nss, bool short_gi)
+    {
+        char[_phy_mode.length] buffer = void;
+        store_phy_mode(format_phy_mode(buffer[], mode, bw, nss, short_gi));
+    }
+
+    // for a platform that can only name the family, and to clear on disassociation
+    final void set_phy_mode(WifiPhyMode mode)
+    {
+        char[_phy_mode.length] buffer = void;
+        store_phy_mode(format_phy_mode(buffer[], mode));
+    }
+
+    override void offline()
+    {
+        super.offline();
+        set_phy_mode(WifiPhyMode.unknown);
+    }
+
 private:
     MACAddress _bssid_filter;
+    char[16] _phy_mode;
+    ubyte _phy_mode_len;
+
+    void store_phy_mode(const(char)[] text)
+    {
+        if (text == _phy_mode[0 .. _phy_mode_len])
+            return;
+        _phy_mode_len = cast(ubyte)text.length;
+        _phy_mode[0 .. _phy_mode_len] = text;
+        mark_set!(typeof(this), "phy-mode")();
+    }
 }
 
 
@@ -558,4 +660,31 @@ nothrow @nogc:
         g_app.register_enum!WifiBand();
         g_app.register_enum!WifiInstallation();
     }
+}
+
+
+unittest
+{
+    char[16] buffer = void;
+
+    assert(format_phy_mode(buffer[], WifiPhyMode.unknown) is null);
+    assert(format_phy_mode(buffer[], WifiPhyMode.b, WifiBandwidth.bw_20mhz) == "11b");
+
+    // b/g/lr predate the wide channels, so they never carry a width
+    assert(format_phy_mode(buffer[], WifiPhyMode.g, WifiBandwidth.bw_80mhz, 1) == "11g 1SS");
+    assert(format_phy_mode(buffer[], WifiPhyMode.lr, WifiBandwidth.bw_20mhz) == "LR");
+
+    assert(format_phy_mode(buffer[], WifiPhyMode.n, WifiBandwidth.bw_40mhz, 2) == "HT40 2SS");
+    assert(format_phy_mode(buffer[], WifiPhyMode.ac, WifiBandwidth.bw_80mhz, 2, true) == "VHT80 2SS SGI");
+    assert(format_phy_mode(buffer[], WifiPhyMode.be, WifiBandwidth.bw_160mhz, 8) == "EHT160 8SS");
+
+    // HE picks a guard interval per transmission, so it says nothing about the link
+    assert(format_phy_mode(buffer[], WifiPhyMode.ax, WifiBandwidth.bw_160mhz, 2, true) == "HE160 2SS");
+
+    // an unreported stream count is left out, and a family-only report claims no width
+    assert(format_phy_mode(buffer[], WifiPhyMode.n, WifiBandwidth.bw_20mhz, 0) == "HT20");
+    assert(format_phy_mode(buffer[], WifiPhyMode.ac) == "VHT");
+
+    // the longest string a platform can produce still fits the interface's inline buffer
+    assert(format_phy_mode(buffer[], WifiPhyMode.ac, WifiBandwidth.bw_160mhz, 8, true) == "VHT160 8SS SGI");
 }

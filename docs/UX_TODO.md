@@ -84,3 +84,17 @@ through them and remove sections as they are absorbed.
   theoretical maximum for the negotiated mode where it does not, so the number moves with
   link quality on some platforms and is a fixed ceiling on others. Clients should not
   present it as a measured throughput; `tx-rate`/`rx-rate` remain the measured counters.
+
+## 2026-08-13: WLAN interfaces report the negotiated PHY as `phy-mode`
+
+- New read-only property `phy-mode` on `/interface/wlan`, a display string such as `VHT80
+  2SS`: the 802.11 mode name with the channel width folded in the way the standard names
+  them, the spatial stream count, and `SGI` when a short guard interval is in use.
+- It is a label, not something to parse or compute with. The number that goes with it is
+  already `tx-link-speed`/`rx-link-speed`. Render it as-is.
+- Empty means not associated, or that the platform could not name the PHY at all. Parts are
+  omitted rather than guessed, so the string is not a fixed shape: Windows reports only the
+  family (`VHT`) because the association carries no width or stream count, and `11b`/`11g`
+  never carry a width. Don't assume three space-separated fields.
+- It sits with `bssid`/`rssi`/`signal-quality` because it describes the association, not the
+  radio. Nothing was added to `/interface/wifi` or `/interface/ap`.

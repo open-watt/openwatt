@@ -749,6 +749,7 @@ private:
         const ulong peak = wifi_phy_max_rate(info.phy_mode, info.bandwidth, info.nss, info.short_gi);
         set_link_speed(info.tx_bitrate ? ulong(info.tx_bitrate) * 1000 : peak,
                        info.rx_bitrate ? ulong(info.rx_bitrate) * 1000 : peak);
+        set_phy_mode(info.phy_mode, info.bandwidth, info.nss, info.short_gi);
 
         MACAddress bssid = MACAddress(info.bssid);
         int rssi = info.rssi;
@@ -765,6 +766,7 @@ private:
     void clear_link_info()
     {
         set_link_speed(0);
+        set_phy_mode(WifiPhyMode.unknown);
 
         if (_bssid == MACAddress.init && _rssi == 0 && _signal_quality == 0)
             return;

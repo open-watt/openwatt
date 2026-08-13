@@ -400,6 +400,7 @@ private:
             _current_rssi = 0;
             _signal_quality = 0;
             set_link_speed(0);
+            set_phy_mode(WifiPhyMode.unknown);
             mark_set!(typeof(this), [ "ssid", "bssid", "rssi", "signal-quality", "status" ])();
         }
         else
@@ -427,6 +428,9 @@ private:
             // any MIMO link.
             ref assoc = attrs.wlanAssociationAttributes;
             set_link_speed(ulong(assoc.ulTxRate) * 1000, ulong(assoc.ulRxRate) * 1000);
+
+            // width and stream count aren't in the association, so the mode goes out on its own
+            set_phy_mode(to_phy_mode(assoc.dot11PhyType));
         }
 
         OSAdapterInfo info;
@@ -549,5 +553,30 @@ private:
                 return candidate;
         }
         return tconcat("wlan", 999);
+    }
+}
+
+
+// The association names only the PHY family; fhss, irbaseband and dmg (11ad) have no equivalent.
+private WifiPhyMode to_phy_mode(DOT11_PHY_TYPE type) pure
+{
+    switch (type)
+    {
+        case DOT11_PHY_TYPE.dsss:
+        case DOT11_PHY_TYPE.hrdsss:
+            return WifiPhyMode.b;
+        case DOT11_PHY_TYPE.ofdm:
+        case DOT11_PHY_TYPE.erp:
+            return WifiPhyMode.g;
+        case DOT11_PHY_TYPE.ht:
+            return WifiPhyMode.n;
+        case DOT11_PHY_TYPE.vht:
+            return WifiPhyMode.ac;
+        case DOT11_PHY_TYPE.he:
+            return WifiPhyMode.ax;
+        case DOT11_PHY_TYPE.eht:
+            return WifiPhyMode.be;
+        default:
+            return WifiPhyMode.unknown;
     }
 }
