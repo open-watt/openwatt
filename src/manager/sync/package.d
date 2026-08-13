@@ -952,9 +952,9 @@ nothrow @nogc:
                  node_id ? " node=" : "", node_id ? nid[] : "");
     }
 
-    void inbound_claim(SyncPeer from, uint seq, const(char)[] cluster, uint priority, const(char)[] auth)
+    void inbound_claim(SyncPeer from, uint seq, const(char)[] cluster, uint priority, const(char)[] auth, const(char)[] key)
     {
-        get_module!SyncPeeringModule.handle_claim(from, seq, cluster, priority, auth);
+        get_module!SyncPeeringModule.handle_claim(from, seq, cluster, priority, auth, key);
     }
 
     void inbound_model_sub(SyncPeer from, uint seq, const(char[])[] patterns, bool once, ulong from_ms = 0, ulong to_ms = 0)

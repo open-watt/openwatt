@@ -55,6 +55,8 @@ nothrow @nogc:
         g_app.register_enum!PeerRole();
         g_app.console.register_command!peering_set("/sync/peering", this, "set");
         g_app.console.register_command!peering_print("/sync/peering", this, "print");
+        g_app.console.register_command!peering_reset("/sync/peering", this, "reset");
+        load_allegiance();
     }
 
     override void update()
@@ -104,7 +106,13 @@ nothrow @nogc:
                     continue;
             }
             if (a && now < a.retry_at)
-                continue;
+            {
+                // a factory-fresh beacon voids the backoff: the node was reset since we
+                // failed to prove the key, and is adoptable right now
+                if (!(!n.adopted && !a.handover))
+                    continue;
+                a.failures = 0;
+            }
 
             start_claim(kvp.key, n);
         }
@@ -143,6 +151,11 @@ nothrow @nogc:
             _adopted_cluster = String();
         }
 
+        // config cannot walk a node out of a fleet: allegiance outlives it, so a contradicting
+        // cluster= would leave every claim refused as "wrong fleet" with no visible cause
+        if (cluster && _allegiance_cluster.length && cluster.value[] != _allegiance_cluster[])
+            session.write_line("note: node is adopted into fleet '", _allegiance_cluster[], "'; claims from '", cluster.value, "' stay refused until /sync/peering reset");
+
         if (_role == PeerRole.member && _claim.length)
             session.write_line("note: claim filter is ignored for role=member");
 
@@ -169,6 +182,8 @@ nothrow @nogc:
         if (_role == PeerRole.member)
         {
             session.write_line("port:     ", _port);
+            if (_allegiance_cluster.length)
+                session.write_line("fleet:    ", _allegiance_cluster[], " (adopted; /sync/peering reset returns to factory)");
             session.write_line("state:    ", claimed ? "claimed" : "unbound");
             foreach (ref c; _claimants[])
                 session.write_line("claimant: ", hex_id(c.node_id)[], " (", c.peer.name[], ") cluster=", bound_cluster[], " priority=", c.priority);
@@ -196,14 +211,15 @@ nothrow @nogc:
     bool claimed() const pure
         => _claimants.length > 0;
 
-    // The cluster this node is bound to: config wins, else adopted from the first claimant.
+    // The cluster this node is bound to: config wins, then persisted fleet allegiance,
+    // then a cluster adopted for this session by the first claimant.
     const(char)[] bound_cluster() const pure
-        => _cluster.length ? _cluster[] : _adopted_cluster[];
+        => _cluster.length ? _cluster[] : _allegiance_cluster.length ? _allegiance_cluster[] : _adopted_cluster[];
 
     // A claim arrived on the sync channel; accept binds this member to the
     // claimant's cluster. Multiple claimants from one cluster are the
     // dual-authority shape; a second cluster is refused.
-    void handle_claim(SyncPeer from, uint seq, const(char)[] cluster, uint priority, const(char)[] auth)
+    void handle_claim(SyncPeer from, uint seq, const(char)[] cluster, uint priority, const(char)[] auth, const(char)[] key)
     {
         auto enc = encoder_for(from._encoder);
 
@@ -239,6 +255,11 @@ nothrow @nogc:
             enc.encode_err(from, seq, "access_denied", "wrong cluster");
             return;
         }
+        if (_allegiance_cluster.length && cluster[] != _allegiance_cluster[])
+        {
+            enc.encode_err(from, seq, "access_denied", "wrong fleet");
+            return;
+        }
         if (claimed && cluster[] != bound_cluster[])
         {
             enc.encode_err(from, seq, "claimed", "bound to another cluster");
@@ -255,7 +276,16 @@ nothrow @nogc:
             }
         }
 
-        if (!_cluster.length && !claimed)
+        if (!_secret.length && key.length)
+        {
+            // the TOFU handover: a factory node adopts the fleet that claims it, key and
+            // all, and holds that allegiance across reboots until factory reset
+            _secret = key.makeString(defaultAllocator());
+            _allegiance_cluster = cluster.makeString(defaultAllocator());
+            save_allegiance();
+            log.notice("adopted into fleet '", cluster, "' by node ", hex_id(from._remote_node_id)[], "; allegiance persisted (/sync/peering reset returns to factory)");
+        }
+        else if (!bound_cluster.length && !claimed)
         {
             _adopted_cluster = cluster.makeString(defaultAllocator());
             log.warning("claimed into cluster '", cluster, "' by '", from.name[],
@@ -273,6 +303,23 @@ nothrow @nogc:
 
         apply_announce_state();
         enc.encode_res(from, seq);
+    }
+
+    // Factory reset of fleet state: allegiance, key, session claims. The node beacons
+    // unbound-and-unadopted again, so a sweeping authority may immediately re-adopt it;
+    // reset before moving the hardware, or disable its old authority's claim filter.
+    void peering_reset(Session session)
+    {
+        import urt.file : delete_file;
+
+        delete_file(fleet_id_path);
+        _secret = String();
+        _allegiance_cluster = String();
+        _adopted_cluster = String();
+        release_claimants();
+        apply_announce_state();
+        log.notice("fleet allegiance cleared; node is back to factory");
+        session.write_line("fleet allegiance cleared; node is back to factory (unbound)");
     }
 
     // Sync module calls this as a peer detaches; the claim dies with the session.
@@ -344,12 +391,14 @@ package:
         uint priority;
     }
     Array!Claimant _claimants;
-    String _adopted_cluster;
+    String _adopted_cluster;      // session-adopted (bench, keyless); dies with the last claimant
+    String _allegiance_cluster;   // persisted fleet allegiance; dies at factory reset
 
 private:
     enum sweep_interval = 5.seconds;
     enum claim_timeout = 10.seconds;
     enum beacon_grace = 5.seconds;
+    enum fleet_id_path = "conf/fleet.id";
 
     struct ClaimAttempt
     {
@@ -358,6 +407,7 @@ private:
         uint seq;
         bool sent;
         bool claimed;
+        bool handover;   // target beacons un-adopted: the claim carries the fleet key
         ubyte failures;
         MonoTime deadline;
         MonoTime retry_at;
@@ -410,6 +460,61 @@ private:
         return diff == 0;
     }
 
+    // Fleet allegiance: {cluster, key} in conf/fleet.id beside node.id -- the piece of
+    // peering state that persists outside startup.conf. Members write it at adoption;
+    // an authority writes it when it mints the fleet key at first adoption.
+    // TODO: micros without a filesystem need an NVS backing for this and node.id.
+
+    void mint_fleet_key()
+    {
+        import urt.crypto.random : crypto_random_bytes;
+        import urt.encoding : hex_encode;
+
+        ubyte[32] key = void;
+        crypto_random_bytes(key);
+        char[64] hex = void;
+        hex_encode(key[], hex[]);
+        _secret = hex[].makeString(defaultAllocator());
+        save_allegiance();
+        log.notice("minted the fleet key for cluster '", _cluster, "'");
+    }
+
+    void load_allegiance()
+    {
+        import urt.file : load_file;
+
+        char[] stored = cast(char[])load_file(fleet_id_path);
+        if (!stored)
+            return;
+        scope(exit) defaultAllocator().free(stored);
+
+        const(char)[] s = stored;
+        const(char)[] cluster = s.split!'\n';
+        const(char)[] key = s.split!'\n';
+        if (!key.length)
+            return;
+        _secret = key.makeString(defaultAllocator());
+        _allegiance_cluster = cluster.makeString(defaultAllocator());
+        apply_announce_state();
+    }
+
+    void save_allegiance()
+    {
+        import urt.file : save_file;
+
+        const(char)[] cluster = _allegiance_cluster.length ? _allegiance_cluster[] : _cluster[];
+        char[512] buf = void;
+        size_t len = cluster.length + _secret.length + 2;
+        if (len > buf.length)
+            return;
+        buf[0 .. cluster.length] = cluster[];
+        buf[cluster.length] = '\n';
+        buf[cluster.length + 1 .. len - 1] = _secret[];
+        buf[len - 1] = '\n';
+        if (save_file(fleet_id_path, buf[0 .. len]).failed)
+            log.warning("couldn't persist fleet allegiance to ", fleet_id_path, "; adoption is ephemeral this boot");
+    }
+
     void apply_peering_state()
     {
         apply_announce_state();
@@ -446,8 +551,9 @@ private:
     {
         auto disco = get_module!SyncDiscoveryModule;
         disco.local_role = _enabled ? _role : PeerRole.none;
-        disco.local_cluster = _cluster.length ? _cluster : _adopted_cluster;
+        disco.local_cluster = _cluster.length ? _cluster : _allegiance_cluster.length ? _allegiance_cluster : _adopted_cluster;
         disco.local_claimed = claimed;
+        disco.local_adopted = _secret.length != 0;
         disco.local_sync_port = (_enabled && _role == PeerRole.member) ? _port : 0;
     }
 
@@ -463,6 +569,12 @@ private:
         }
         iface.remote_host(tconcat(n.mac).makeString(defaultAllocator()));
         iface.remote_port(n.sync_port);
+
+        // adopting a factory node hands the fleet key over inside the claim; mint one
+        // the first time this fleet adopts anything
+        bool handover = !n.adopted;
+        if (handover && !_secret.length)
+            mint_fleet_key();
 
         // the peer takes the remote node's name (the per-VIN session precedent); a collision
         // with an existing peer (manual, or a stale attempt) falls back to the node id
@@ -486,8 +598,9 @@ private:
         a.iface = iface;
         a.sent = false;
         a.claimed = false;
+        a.handover = handover;
 
-        log.info("claiming node ", id[], " ('", n.name, "') at ", n.mac, ":", n.sync_port);
+        log.info("claiming node ", id[], " ('", n.name, "') at ", n.mac, ":", n.sync_port, handover ? " (adoption)" : "");
     }
 
     // claim once the session is up; hello (with our identity) precedes it on the wire.
@@ -506,7 +619,7 @@ private:
         a.seq = get_module!SyncModule.alloc_seq();
         a.sent = true;
         a.deadline = now + claim_timeout;
-        encoder_for(a.peer._encoder).encode_claim(a.peer, a.seq, _cluster[], _priority, have_auth ? auth[] : null);
+        encoder_for(a.peer._encoder).encode_claim(a.peer, a.seq, _cluster[], _priority, have_auth ? auth[] : null, a.handover ? _secret[] : null);
     }
 
     void claim_peer_state(ActiveObject obj, StateSignal sig)

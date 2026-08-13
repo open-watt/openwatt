@@ -211,8 +211,9 @@ nothrow @nogc:
 
     // Peering claim (docs/PEERING.draft.md): authority asks the member to bind to
     // its cluster. The member answers res(seq) or err(seq, "claimed"/"access_denied").
-    // auth carries the HMAC challenge response when secrets land; empty until then.
-    abstract void encode_claim(SyncPeer peer, uint seq, const(char)[] cluster, uint priority, const(char)[] auth);
+    // auth proves the fleet key against the member's hello nonce; key carries the
+    // fleet key itself, sent only when adopting a factory member (the TOFU handover).
+    abstract void encode_claim(SyncPeer peer, uint seq, const(char)[] cluster, uint priority, const(char)[] auth, const(char)[] key);
 
     abstract void encode_model_sub(SyncPeer peer, uint seq, const(char[])[] patterns, bool once);
 

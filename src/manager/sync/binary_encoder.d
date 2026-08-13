@@ -369,13 +369,14 @@ nothrow @nogc:
         send_frame(peer);
     }
 
-    override void encode_claim(SyncPeer peer, uint seq, const(char)[] cluster, uint priority, const(char)[] auth)
+    override void encode_claim(SyncPeer peer, uint seq, const(char)[] cluster, uint priority, const(char)[] auth, const(char)[] key)
     {
         begin_frame(Verb.claim);
         _buf.put_varint(seq);
         _buf.put_str(cluster);
         _buf.put_varint(priority);
         _buf.put_str(auth);
+        _buf.put_str(key);
         send_frame(peer);
     }
 
@@ -814,8 +815,9 @@ nothrow @nogc:
                 const(char)[] cluster = r.str();
                 uint priority = cast(uint)r.varint();
                 const(char)[] auth = r.str();
+                const(char)[] key = r.more ? r.str() : null;
                 if (!r.fail)
-                    sync.inbound_claim(peer, seq, cluster, priority, auth);
+                    sync.inbound_claim(peer, seq, cluster, priority, auth, key);
                 break;
             }
 

@@ -676,12 +676,19 @@ re-claimed.
 | `cluster` | name | empty | Fleet this node belongs to. A member with no cluster accepts (and adopts) any claimant's cluster, logging loudly; set one to pin the node. |
 | `priority` | number | `100` | Authority election precedence; lower wins, node-id breaks ties. |
 | `claim` | path glob | `*` | Authority only: which member names to adopt. |
-| `secret` | string | empty | Shared fleet secret gating claims: the claim proves it with an HMAC over the member's per-session hello nonce, so the secret never travels and a captured claim cannot replay. Set the same value on the authority and its members. |
+| `secret` | string | empty | The fleet key, set by hand. Normally unset: the authority mints one at first adoption and hands it to each factory member inside the claim; thereafter claims prove it with an HMAC over the member's per-session hello nonce, so the key never travels again and a captured claim cannot replay. |
 | `port` | `1` to `65535` | `7000` | Member only: sync port the claim listener binds; advertised in discovery beacons. |
 
+A factory member (no key) is adopted by the first claiming authority: the claim hands the
+fleet key over (the one trust-on-first-use moment), and the member persists its allegiance
+(`{cluster, key}` in `conf/fleet.id`) across reboots, beaconing `adopted` and refusing any
+claim that cannot prove the key. `reset` is the factory reset: it clears the allegiance and
+the node is adoptable again immediately.
+
 ```text
-/sync/peering set role=member cluster=home
+/sync/peering set role=member                      # factory: adopted by whoever claims first
 /sync/peering set role=authority cluster=home claim=*
 /sync/peering print
+/sync/peering reset                                # factory reset: leave the fleet
 ```
 

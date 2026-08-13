@@ -394,7 +394,7 @@ nothrow @nogc:
         send_frame(peer);
     }
 
-    override void encode_claim(SyncPeer peer, uint seq, const(char)[] cluster, uint priority, const(char)[] auth)
+    override void encode_claim(SyncPeer peer, uint seq, const(char)[] cluster, uint priority, const(char)[] auth, const(char)[] key)
     {
         begin_frame("claim");
         _buf.append(",\"seq\":", seq);
@@ -405,6 +405,11 @@ nothrow @nogc:
         {
             _buf ~= ",\"auth\":";
             write_str(auth);
+        }
+        if (key.length)
+        {
+            _buf ~= ",\"key\":";
+            write_str(key);
         }
         send_frame(peer);
     }
@@ -759,8 +764,8 @@ nothrow @nogc:
             {
                 Variant* pr = json.getMember("priority");
                 Variant* auth = json.getMember("auth");
-                sync.inbound_claim(peer, json.getMember("seq").asUint(), json.getMember("cluster").asString(),
-                                   pr ? pr.asUint() : 0, auth ? auth.asString() : null);
+                Variant* key = json.getMember("key");
+                sync.inbound_claim(peer, json.getMember("seq").asUint(), json.getMember("cluster").asString(), pr ? pr.asUint() : 0, auth ? auth.asString() : null, key ? key.asString() : null);
                 break;
             }
 
