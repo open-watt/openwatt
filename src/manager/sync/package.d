@@ -809,6 +809,13 @@ nothrow @nogc:
         pending_inbound_cmds ~= PendingInboundCmd(from, seq, session, cmd);
     }
 
+    void inbound_suggest(SyncPeer from, uint seq, const(char)[] text)
+    {
+        Array!String suggestions = g_app.console.suggest(text, g_app.console.root);
+        MutableString!0 completed = g_app.console.complete(text, g_app.console.root);
+        encoder_for(from._encoder).encode_suggestions(from, seq, suggestions[], completed[]);
+    }
+
     void inbound_result(SyncPeer from, uint seq, ref const Variant v, const(char)[] out_text)
     {
         auto pf = seq in pending_forwards;

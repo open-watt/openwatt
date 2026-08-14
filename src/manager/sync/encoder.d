@@ -171,6 +171,11 @@ nothrow @nogc:
     abstract void encode_result(SyncPeer peer, uint seq, ref const Variant value, const(char)[] out_text);
     abstract void encode_error(SyncPeer peer, uint seq, const(char)[] text);
 
+    // Completion request for a partial command line; answered synchronously with
+    // the candidate tokens plus the line extended by their common prefix.
+    abstract void encode_suggest(SyncPeer peer, uint seq, const(char)[] text);
+    abstract void encode_suggestions(SyncPeer peer, uint seq, const(String)[] suggestions, const(char)[] completed);
+
     abstract void encode_sub(SyncPeer peer, const(char)[] pattern);
     abstract void encode_unsub(SyncPeer peer, const(char)[] pattern);
 

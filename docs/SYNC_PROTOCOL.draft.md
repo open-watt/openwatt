@@ -26,8 +26,9 @@ deferrals are recorded in the commit messages on the way past; the notable ones:
 ## Implementation status (2026-07-31, first pass)
 
 **Built** ([src/manager/sync/](../src/manager/sync/)): peer/transport objects, the encoder
-abstraction with a JSON implementation, and 21 verbs: the object mirror (`add_name`, `bind`,
-`unbind`, `create`, `destroy`, `state`, `set`, `reset`), console (`cmd`, `result`, `error`),
+abstraction with a JSON implementation, and 23 verbs: the object mirror (`add_name`, `bind`,
+`unbind`, `create`, `destroy`, `state`, `set`, `reset`), console (`cmd`, `result`, `error`,
+`suggest`, `suggestions`),
 subscription (`sub`, `unsub`), enums (`enum_req`, `enum`), element history (`history_req`,
 `history`), log tap (`log_sub`, `log`), and time discipline (`time_req`, `time_resp`,
 `time_push`).
@@ -172,7 +173,8 @@ protocols -- validate what payload actually needs syncing before designing for i
 Conventions: verb in `kind`; `seq` correlates and is omitted when zero; `h`/`target` is a session
 handle; `err` answers any `seq`-bearing request.
 
-Unchanged orthogonal planes: console text (`cmd`), log tap (`log_sub`/`log`), time discipline
+Unchanged orthogonal planes: console text (`cmd`, plus `suggest {seq, text}` answered by
+`suggestions {seq, complete, suggestions[]}` for remote tab-completion), log tap (`log_sub`/`log`), time discipline
 (`time_req`/`time_resp`/`time_push`). The `elements` capability implies `time`: `val` timestamps
 are meaningless across nodes without clock discipline.
 
