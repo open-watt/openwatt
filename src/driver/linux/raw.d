@@ -41,6 +41,8 @@ enum IFNAMSIZ                 = 16;
 
 enum ETH_P_ALL                = 0x0003;
 
+enum MSG_TRUNC                = 0x20;
+
 enum SO_RCVBUF                = 8;
 enum SOL_SOCKET               = 1;
 
@@ -219,6 +221,27 @@ nothrow @nogc:
         if (n == 0)
             return 0;
         data = rx_buf[0 .. cast(size_t)n];
+        wire_len = cast(uint)n;
+        timestamp = getTime();
+        return 1;
+    }
+
+    // Like poll(), but receives into a caller-supplied buffer (e.g. a packet pool
+    // page). wire_len can exceed buf.length (MSG_TRUNC): the frame was truncated and
+    // the caller should drop it.
+    int poll_into(ubyte[] buf, out uint wire_len, out MonoTime timestamp)
+    {
+        ptrdiff_t n = recv(fd, buf.ptr, buf.length, MSG_TRUNC);
+        if (n < 0)
+        {
+            Result e = errno_result();
+            if (e.system_code == EAGAIN_ || e.system_code == EWOULDBLOCK_ || e.system_code == EINTR_)
+                return 0;
+            last_recv_error = e;
+            return -1;
+        }
+        if (n == 0)
+            return 0;
         wire_len = cast(uint)n;
         timestamp = getTime();
         return 1;
