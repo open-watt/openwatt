@@ -74,7 +74,7 @@ APP_SOURCES := $(SRCDIR)/main.d \
     $(foreach d,$(FEATURE_DIRS),$(shell find "$(SRCDIR)/$(d)" -type f -name '*.d'))
 SOURCES := $(APP_SOURCES) $(URT_SOURCES)
 
-DFLAGS := $(DFLAGS) $(FEATURE_DFLAGS)
+DFLAGS := $(DFLAGS) $(FEATURE_DFLAGS) $(EXTRA_DFLAGS)
 
 # Allocation lifetime profiler (urt.mem.profile): logs an event per
 # allocation for host-side analysis; ~50 bytes of target state.
@@ -86,6 +86,29 @@ endif
 # target can answer "what has leaked" by itself, at the cost of the table.
 ifeq ($(ALLOC_TRACKING),1)
     DFLAGS := $(DFLAGS) $(VERSION_FLAG)AllocTracking
+endif
+
+# ModuleInfo only exists to run module ctors/dtors and to enumerate unittests,
+# and costs ~27KB of RAM on x86-64. Nothing declares a module ctor - urt.typereg
+# registers via crt_constructor - so only the test runner still needs it.
+# LDC SILENTLY SKIPS module ctors under this flag, so refuse to build if one
+# reappears rather than dropping its initialisation on the floor.
+ifeq ($(COMPILER),ldc)
+  ifneq ($(CONFIG),unittest)
+    # via a variable: make counts parens inside $(shell ...) without regard for quoting
+    lparen := (
+    MODULE_CTORS := $(shell grep -rlE '(^|[^_[:alnum:]])static[[:space:]]+~?this[[:space:]]*[$(lparen)]' \
+        $(SRCDIR) $(URT_SRCDIR) --include=*.d 2>/dev/null)
+    ifneq ($(MODULE_CTORS),)
+      $(error --fno-moduleinfo would silently skip module ctors declared in: $(MODULE_CTORS))
+    endif
+    # a scan that cannot even find a file we know exists proves nothing about
+    # module ctors, so the flag stays off ($(shell) is unusable under some Windows makes)
+    CTOR_SCAN_OK := $(shell grep -rl 'module urt.typereg;' $(URT_SRCDIR) --include=*.d 2>/dev/null)
+    ifneq ($(CTOR_SCAN_OK),)
+      DFLAGS := $(DFLAGS) --fno-moduleinfo
+    endif
+  endif
 endif
 
 
