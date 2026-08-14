@@ -121,7 +121,7 @@ nothrow @nogc:
         if (_time_authority == value)
             return;
         _time_authority = value;
-        _next_time_poll = getTime(); // (re)establish promptly
+        _next_time_poll = getTime();
         mark_set!(typeof(this), "time-authority")();
     }
 
