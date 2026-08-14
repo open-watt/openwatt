@@ -76,6 +76,19 @@ SOURCES := $(APP_SOURCES) $(URT_SOURCES)
 
 DFLAGS := $(DFLAGS) $(FEATURE_DFLAGS)
 
+# Allocation lifetime profiler (urt.mem.profile): logs an event per
+# allocation for host-side analysis; ~50 bytes of target state.
+ifeq ($(ALLOC_PROFILE),1)
+    DFLAGS := $(DFLAGS) $(VERSION_FLAG)AllocProfile
+endif
+
+# Allocation recorder (urt.mem.profile.record): keeps a live table so the
+# target can answer "what has leaked" by itself, at the cost of the table.
+ifeq ($(ALLOC_TRACKING),1)
+    DFLAGS := $(DFLAGS) $(VERSION_FLAG)AllocTracking
+endif
+
+
 # Linux builds without the in-tree IP stack drive the kernel data plane directly.
 ifeq ($(OS),linux)
   ifneq ($(USE_INTERNAL_IP_STACK),1)

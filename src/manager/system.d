@@ -299,7 +299,7 @@ version (HasFilesystem)
 
 version (AllocTracking)
 {
-    import urt.mem.tracking;
+    import urt.mem.profile.record;
 
     void alloc_stats_cmd(Session session)
     {
@@ -315,6 +315,33 @@ version (AllocTracking)
     void alloc_leaks_cmd(Session session, Duration age = seconds(60))
     {
         alloc_print_leaks(age, (const(char)[] line) { session.write_line(line); });
+    }
+}
+
+version (AllocProfile)
+{
+    import urt.mem.profile.log;
+
+    void alloc_profile_cmd(Session session)
+    {
+        alloc_profile_stats((const(char)[] line) { session.write_line(line); });
+    }
+
+    void alloc_reset_cmd(Session session)
+    {
+        alloc_profile_reset_peaks();
+        session.write_line("allocation peaks reset");
+    }
+
+    void alloc_log_cmd(Session session, bool enable)
+    {
+        alloc_profile_logging(enable);
+        session.write_line("allocation event stream ", enable ? "on" : "off");
+    }
+
+    void alloc_mark_point_cmd(Session session, const(char)[] label)
+    {
+        alloc_profile_mark(label);
     }
 }
 

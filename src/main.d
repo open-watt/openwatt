@@ -346,6 +346,12 @@ void finish_startup(ref Session startup_session, bool interactive_mode, ref Obje
     startup_session = null;
     retire_bootstrap_log_sink();
 
+    version (AllocProfile)
+    {
+        import urt.mem.profile.log : alloc_profile_mark;
+        alloc_profile_mark("boot-complete");
+    }
+
     if (interactive_mode)
         interactive_session = Collection!Session().get(default_console_session_name);
 }
