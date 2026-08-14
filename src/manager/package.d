@@ -319,7 +319,7 @@ void shutdown_application()
     version (AllocTracking)
     {
         import urt.log : writeDebug;
-        import urt.mem.tracking : alloc_print_live;
+        import urt.mem.profile.record : alloc_print_live;
         writeDebug("Allocation tracker: leak dump after application teardown");
         alloc_print_live((const(char)[] line) { writeDebug(line); });
     }
@@ -483,6 +483,14 @@ nothrow @nogc:
             console.register_command!alloc_stats_cmd("/system/alloc", this, "stats");
             console.register_command!alloc_mark_cmd("/system/alloc", this, "mark");
             console.register_command!alloc_leaks_cmd("/system/alloc", this, "leaks");
+        }
+
+        version (AllocProfile)
+        {
+            console.register_command!alloc_profile_cmd("/system/alloc", this, "profile");
+            console.register_command!alloc_reset_cmd("/system/alloc", this, "reset");
+            console.register_command!alloc_log_cmd("/system/alloc", this, "log");
+            console.register_command!alloc_mark_point_cmd("/system/alloc", this, "mark-point");
         }
 
         register_type(&device_type_info, "/device");
