@@ -225,7 +225,13 @@ private:
                             ": dropping queued packet for ", e.ip,
                             " on ", e.iface.name, " (state=", e.state, ")");
         }
-        e.pending[e.pending_count] = pkt.clone();
+        Packet* retained = pkt.retain();
+        if (!retained)
+        {
+            ++_pending_overflow;
+            return;
+        }
+        e.pending[e.pending_count] = retained;
         ++e.pending_count;
     }
 

@@ -114,7 +114,12 @@ nothrow @nogc:
         }
 
         QueuedFrame* frame = _pool.alloc();
-        frame.packet = packet.clone();
+        frame.packet = packet.retain();
+        if (!frame.packet)
+        {
+            _pool.free(frame);
+            return -1;
+        }
         frame.callback = callback;
         frame.enqueue_time = getTime();
         frame.deadline_after = policy ? policy.deadline_after : 0;
@@ -471,4 +476,13 @@ unittest
     assert(!queue.is_queued(cast(ubyte)next_background_tag));
 
     queue.abort_all();
+
+    // every enqueue above went through the packet page pool; nothing may leak
+    import urt.mem.pagepool : page_pool_stats, page_pool_num_categories;
+    foreach (i; 0 .. page_pool_num_categories())
+    {
+        auto stats = page_pool_stats(cast(ubyte)i);
+        assert(stats.pages_in_use == 0);
+        assert(i != 0 || stats.alloc_count > 0);
+    }
 }
