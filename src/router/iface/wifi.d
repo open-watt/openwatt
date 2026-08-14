@@ -7,6 +7,8 @@ import urt.mem;
 import urt.result : Result;
 import urt.mem.string;
 import urt.mem.temp;
+import urt.si.quantity;
+import urt.si.unit : Gigahertz;
 import urt.string;
 import urt.time;
 
@@ -20,7 +22,7 @@ import manager.secret;
 import router.iface;
 import router.iface.ethernet;
 
-import urt.driver.wifi : WifiScanConfig, WifiScanResult;
+import urt.driver.wifi : WifiBand, WifiScanConfig, WifiScanResult;
 
 nothrow @nogc:
 
@@ -51,6 +53,7 @@ enum WifiInstallation : byte
 abstract class WiFiInterface : BaseInterface
 {
     alias Properties = AliasSeq!(Prop!("mode", mode, "radio"),
+                                 Prop!("band", band, "radio"),
                                  Prop!("channel", channel, "radio"),
                                  Prop!("active-channel", active_channel, "radio"),
                                  Prop!("tx-power", tx_power, "radio"),
@@ -80,11 +83,36 @@ nothrow @nogc:
         return "monitor";
     }
 
+    final WifiBand band() const pure
+        => _band;
+    final void band(WifiBand value)
+    {
+        if (_band == value)
+            return;
+        _band = value;
+        mark_set!(typeof(this), "band")();
+        on_band_changed(value);
+    }
+    // accepts a centre-ish frequency so the CLI can take `band=2.4ghz` unquoted
+    final const(char)[] band(Quantity!(float, Gigahertz) value)
+    {
+        float ghz = value.value;
+        if (ghz >= 2 && ghz < 3)
+            band = WifiBand._2_4ghz;
+        else if (ghz >= 4.9 && ghz < 5.9)
+            band = WifiBand._5ghz;
+        else if (ghz >= 5.925 && ghz <= 7.2)
+            band = WifiBand._6ghz;
+        else
+            return "not a WiFi band";
+        return null;
+    }
+
     final ubyte channel() const pure
         => _channel;
     final const(char)[] channel(ubyte value)
     {
-        if (value > 196)
+        if (value > 233)
             return "invalid channel number";
         if (_channel == value)
             return null;
@@ -153,6 +181,25 @@ nothrow @nogc:
 
 protected:
 
+    override bool validate() const
+        => band_channel_conflict() is null && super.validate();
+
+    override const(char)[] status_message() const
+    {
+        if (auto conflict = band_channel_conflict())
+            return conflict;
+        return super.status_message();
+    }
+
+    final const(char)[] band_channel_conflict() const pure
+    {
+        if (_band == WifiBand._2_4ghz && _channel > 14)
+            return "channel is not in the 2.4GHz band";
+        if (_band == WifiBand._5ghz && _channel != 0 && _channel < 32)
+            return "channel is not in the 5GHz band";
+        return null;
+    }
+
     void on_wlan_bind_changed() {}
 
     final void set_active_channel(ubyte value)
@@ -165,6 +212,8 @@ protected:
     }
 
     void on_active_channel_changed(ubyte channel) {}
+
+    void on_band_changed(WifiBand band) {}
 
     void on_channel_changed(ubyte channel) {}
 
@@ -195,6 +244,7 @@ protected:
     }
 
 private:
+    WifiBand _band;
     ubyte _channel;
     ubyte _active_channel;
     byte _tx_power;
@@ -458,6 +508,7 @@ nothrow @nogc:
         register_packet_codec!Wifi80211();
 
         g_app.register_enum!WifiAuth();
+        g_app.register_enum!WifiBand();
         g_app.register_enum!WifiInstallation();
     }
 }

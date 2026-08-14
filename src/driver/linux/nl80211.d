@@ -5,6 +5,7 @@ version (linux):
 import urt.log;
 import urt.time : Duration, getTime;
 
+import urt.driver.wifi : WifiBand;
 import urt.internal.sys.posix;
 
 import driver.linux.raw : ioctl, ifreq, SIOCGIFFLAGS, IFF_UP, IFNAMSIZ;
@@ -46,18 +47,43 @@ struct PhyCapabilities
     ubyte max_aps_with_monitor;
     ubyte max_aps_with_sta_monitor;
     ubyte max_monitors;     // largest monitor count when no STA/AP constraints are applied.
+
+    ubyte bands;            // 0 = kernel did not report bands.
+    ubyte nfreqs;
+    ushort[128] freqs;      // enabled frequencies in MHz, all bands interleaved as reported.
+
+    void band_freqs(WifiBand band, scope void delegate(uint freq_mhz) nothrow @nogc sink) const
+    {
+        foreach (f; freqs[0 .. nfreqs])
+        {
+            if (band == WifiBand.any || band_for_freq(f) == band)
+                sink(f);
+        }
+    }
 }
 
+WifiBand band_for_freq(uint freq_mhz) pure
+{
+    if (freq_mhz < 3000)
+        return WifiBand._2_4ghz;
+    if (freq_mhz < 5925)
+        return WifiBand._5ghz;
+    return WifiBand._6ghz;
+}
 
 // Live state of one wifi VIF, from NL80211_CMD_GET_INTERFACE.
 struct WifiIfInfo
 {
     uint     ifindex;
+    uint     wiphy;
     uint     iftype;        // NL80211_IFTYPE_* (name via wifi_iftype_name)
     uint     freq;          // operating frequency in MHz (0 if not on a channel)
+    char[16] name;          // netdev name (IFNAMSIZ)
+    ubyte    name_len;
     char[32] ssid;
     ubyte    ssid_len;
 
+    const(char)[] name_s() const nothrow @nogc return => name[0 .. name_len];
     const(char)[] ssid_s() const nothrow @nogc return => ssid[0 .. ssid_len];
 }
 
@@ -306,6 +332,11 @@ bool create_vif(uint wiphy, const(char)[] name, uint iftype)
 bool create_ap_vif(uint wiphy, const(char)[] name)
 {
     return create_vif(wiphy, name, NL80211_IFTYPE_AP);
+}
+
+bool create_sta_vif(uint wiphy, const(char)[] name)
+{
+    return create_vif(wiphy, name, NL80211_IFTYPE_STATION);
 }
 
 bool create_monitor_vif(uint wiphy, const(char)[] name)
@@ -611,7 +642,7 @@ bool get_wiphy(int fd, ushort family_id, uint ifindex, out PhyCapabilities caps)
         caps.max_monitors = 1;
 
     caps.valid = caps.supports_sta || caps.supports_ap || caps.supports_monitor ||
-                 caps.max_aps > 0 || caps.max_monitors > 0;
+                 caps.max_aps > 0 || caps.max_monitors > 0 || caps.bands != 0;
     return true;
 }
 
@@ -682,6 +713,7 @@ bool get_interfaces(int fd, ushort family_id, scope WifiSink sink)
 void parse_interface_attrs(const(ubyte)[] attrs, scope WifiSink sink)
 {
     WifiIfInfo info;
+    info.wiphy = uint.max;
     bool have_ifindex = false;
 
     while (attrs.length >= nlattr.sizeof)
@@ -696,6 +728,18 @@ void parse_interface_attrs(const(ubyte)[] attrs, scope WifiSink sink)
         {
             case NL80211_ATTR_IFINDEX:
                 if (payload.length >= 4) { info.ifindex = *cast(const(uint)*)payload.ptr; have_ifindex = true; }
+                break;
+            case NL80211_ATTR_WIPHY:
+                if (payload.length >= 4) info.wiphy = *cast(const(uint)*)payload.ptr;
+                break;
+            case NL80211_ATTR_IFNAME:
+                size_t nc = payload.length;
+                while (nc > 0 && payload[nc - 1] == 0)
+                    --nc;
+                if (nc > info.name.length)
+                    nc = info.name.length;
+                info.name[0 .. nc] = cast(const(char)[])payload[0 .. nc];
+                info.name_len = cast(ubyte)nc;
                 break;
             case NL80211_ATTR_IFTYPE:
                 if (payload.length >= 4) info.iftype = *cast(const(uint)*)payload.ptr;
@@ -741,10 +785,89 @@ void parse_wiphy_attrs(const(ubyte)[] attrs, ref PhyCapabilities caps)
         }
         else if (type == NL80211_ATTR_INTERFACE_COMBINATIONS)
             parse_combinations(payload, caps);
+        else if (type == NL80211_ATTR_WIPHY_BANDS)
+            parse_bands(payload, caps);
 
         uint aligned = (len + 3) & ~3u;
         if (aligned >= attrs.length) break;
         attrs = attrs[aligned .. $];
+    }
+}
+
+// NL80211_ATTR_WIPHY_BANDS: nest keyed by NL80211_BAND_* index, each band
+// nesting NL80211_BAND_ATTR_FREQS. A split wiphy dump spreads a band's
+// attributes over several messages, so this accumulates rather than resets.
+void parse_bands(const(ubyte)[] data, ref PhyCapabilities caps)
+{
+    while (data.length >= nlattr.sizeof)
+    {
+        const nlattr* a = cast(const nlattr*)data.ptr;
+        ushort len = a.nla_len;
+        if (len < nlattr.sizeof || len > data.length) break;
+        ushort band_index = a.nla_type & NLA_TYPE_MASK;
+        const(ubyte)[] band = data[nlattr.sizeof .. len];
+
+        ubyte bit = 0;
+        if (band_index == NL80211_BAND_2GHZ) bit = cast(ubyte)(1 << WifiBand._2_4ghz);
+        else if (band_index == NL80211_BAND_5GHZ) bit = cast(ubyte)(1 << WifiBand._5ghz);
+        else if (band_index == NL80211_BAND_6GHZ) bit = cast(ubyte)(1 << WifiBand._6ghz);
+        if (bit != 0)
+            parse_band_freqs(band, bit, caps);
+
+        uint aligned = (len + 3) & ~3u;
+        if (aligned >= data.length) break;
+        data = data[aligned .. $];
+    }
+}
+
+void parse_band_freqs(const(ubyte)[] data, ubyte band_mask, ref PhyCapabilities caps)
+{
+    while (data.length >= nlattr.sizeof)
+    {
+        const nlattr* a = cast(const nlattr*)data.ptr;
+        ushort len = a.nla_len;
+        if (len < nlattr.sizeof || len > data.length) break;
+        if ((a.nla_type & NLA_TYPE_MASK) == NL80211_BAND_ATTR_FREQS)
+        {
+            const(ubyte)[] freqs = data[nlattr.sizeof .. len];
+            while (freqs.length >= nlattr.sizeof)
+            {
+                const nlattr* f = cast(const nlattr*)freqs.ptr;
+                ushort flen = f.nla_len;
+                if (flen < nlattr.sizeof || flen > freqs.length) break;
+                const(ubyte)[] fattrs = freqs[nlattr.sizeof .. flen];
+
+                uint mhz = 0;
+                bool disabled = false;
+                while (fattrs.length >= nlattr.sizeof)
+                {
+                    const nlattr* fa = cast(const nlattr*)fattrs.ptr;
+                    ushort falen = fa.nla_len;
+                    if (falen < nlattr.sizeof || falen > fattrs.length) break;
+                    ushort fatype = fa.nla_type & NLA_TYPE_MASK;
+                    if (fatype == NL80211_FREQUENCY_ATTR_FREQ && falen >= nlattr.sizeof + 4)
+                        mhz = *cast(const(uint)*)(fattrs.ptr + nlattr.sizeof);
+                    else if (fatype == NL80211_FREQUENCY_ATTR_DISABLED)
+                        disabled = true;
+                    uint faal = (falen + 3) & ~3u;
+                    if (faal >= fattrs.length) break;
+                    fattrs = fattrs[faal .. $];
+                }
+
+                if (mhz != 0 && !disabled && caps.nfreqs < caps.freqs.length)
+                {
+                    caps.freqs[caps.nfreqs++] = cast(ushort)mhz;
+                    caps.bands |= band_mask;
+                }
+
+                uint fal = (flen + 3) & ~3u;
+                if (fal >= freqs.length) break;
+                freqs = freqs[fal .. $];
+            }
+        }
+        uint aligned = (len + 3) & ~3u;
+        if (aligned >= data.length) break;
+        data = data[aligned .. $];
     }
 }
 
@@ -1044,6 +1167,7 @@ enum NL80211_ATTR_WIPHY                  = 1;
 enum NL80211_ATTR_IFINDEX                = 3;
 enum NL80211_ATTR_IFNAME                 = 4;
 enum NL80211_ATTR_IFTYPE                 = 5;
+enum NL80211_ATTR_WIPHY_BANDS            = 22;
 enum NL80211_ATTR_SUPPORTED_IFTYPES      = 32;
 enum NL80211_ATTR_WIPHY_FREQ             = 38;
 enum NL80211_ATTR_SSID                   = 52;
@@ -1143,8 +1267,19 @@ enum NL80211_CMD_TRIGGER_SCAN     = 33;
 enum NL80211_CMD_NEW_SCAN_RESULTS = 34;
 enum NL80211_CMD_SCAN_ABORTED     = 35;
 
-enum NL80211_ATTR_SCAN_SSIDS = 45;
-enum NL80211_ATTR_BSS        = 47;
+enum NL80211_ATTR_SCAN_FREQUENCIES = 44;
+enum NL80211_ATTR_SCAN_SSIDS       = 45;
+enum NL80211_ATTR_BSS              = 47;
+
+enum NL80211_BAND_2GHZ  = 0;
+enum NL80211_BAND_5GHZ  = 1;
+enum NL80211_BAND_60GHZ = 2;
+enum NL80211_BAND_6GHZ  = 3;
+
+enum NL80211_BAND_ATTR_FREQS = 1;
+
+enum NL80211_FREQUENCY_ATTR_FREQ     = 1;
+enum NL80211_FREQUENCY_ATTR_DISABLED = 2;
 
 enum NL80211_BSS_BSSID                = 1;
 enum NL80211_BSS_FREQUENCY            = 2;

@@ -41,10 +41,11 @@ Array!String suggest_completion(T : bool)(const(char)[] argument_text)
 Array!String suggest_completion(E)(const(char)[] argument_text)
     if (is(E == enum))
 {
+    import urt.meta.enuminfo : trim_key;
     Array!String completions;
     static foreach(M; __traits(allMembers, E))
     {{
-        enum Member = Alias!(M.to_lower);
+        enum Member = Alias!(to_lower(trim_key!M));
         if (Member.startsWith(argument_text))
             completions ~= StringLit!Member;
     }}
