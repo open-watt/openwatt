@@ -253,7 +253,7 @@ protected:
             return false;
         if (monitor && _phy_caps.valid && would_accept_monitor() !is null)
             return false;
-        return true;
+        return super.validate();
     }
 
     override const(char)[] status_message() const
@@ -647,7 +647,7 @@ private:
         ubyte ch = target_channel();
         if (ch == 0 || ch == _monitor_channel)
             return;
-        WifiBand band = ch <= 14 ? WifiBand.band_2g4 : WifiBand.band_5g;
+        WifiBand band = ch <= 14 ? WifiBand._2_4ghz : WifiBand._5ghz;
         if (set_vif_channel(_monitor_ifindex, channel_to_freq(ch, band)))
         {
             _monitor_channel = ch;
@@ -938,7 +938,7 @@ private:
         const(ubyte)[] fr = find_attr(bss, NL80211_BSS_FREQUENCY);
         uint freq = fr.length >= 4 ? *cast(const(uint)*)fr.ptr : 0;
         r.channel = freq_to_channel(freq);
-        r.band = freq >= 5000 ? WifiBand.band_5g : WifiBand.band_2g4;
+        r.band = freq >= 5000 ? WifiBand._5ghz : WifiBand._2_4ghz;
         const(ubyte)[] sig = find_attr(bss, NL80211_BSS_SIGNAL_MBM);
         if (sig.length >= 4)
             r.rssi = cast(byte)(*cast(const(int)*)sig.ptr / 100);   // mBm -> dBm
@@ -1563,7 +1563,7 @@ protected:
             if (!_ap.running)
             {
                 ubyte ch = r.target_channel();
-                WifiBand band = ch <= 14 ? WifiBand.band_2g4 : WifiBand.band_5g;
+                WifiBand band = ch <= 14 ? WifiBand._2_4ghz : WifiBand._5ghz;
                 if (!_ap.start(ssid, get_password(), channel_to_freq(ch, band), ch, hidden))
                     return CompletionStatus.continue_;
                 _running_channel = ch;
@@ -1843,7 +1843,7 @@ private uint channel_to_freq(ubyte ch, WifiBand band) pure
 {
     if (ch == 0)
         return 0;
-    if (band == WifiBand.band_5g || ch > 14)
+    if (band == WifiBand._5ghz || ch > 14)
         return 5000 + ch * 5;
     if (ch == 14)
         return 2484;

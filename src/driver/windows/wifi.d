@@ -125,7 +125,7 @@ nothrow @nogc:
 protected:
 
     override bool validate() const
-        => !_adapter.empty;
+        => !_adapter.empty && super.validate();
 
     override CompletionStatus startup()
     {

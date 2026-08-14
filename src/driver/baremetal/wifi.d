@@ -136,11 +136,15 @@ protected:
             return false;
         if (!supports_apsta && _num_ap > 0 && _num_client > 0)
             return false;
+        if (!wifi_band_supported(0, band))
+            return false;
         return super.validate();
     }
 
     override const(char)[] status_message() const
     {
+        if (!wifi_band_supported(0, band))
+            return "band is not supported by this radio";
         if (_num_ap > 1)
             return "only one AP per radio";
         if (_num_client > 1)
@@ -165,6 +169,7 @@ protected:
         WifiConfig cfg;
         cfg.tx_power = tx_power;
         cfg.channel = super.channel;
+        cfg.band = band;
 
         if (!wifi_open(_wifi, 0, cfg))
         {
@@ -244,6 +249,12 @@ protected:
             update_drv_mode();
         if (enabled && super.channel != 0 && _num_client == 0 && _num_ap == 0)
             apply_channel(super.channel);
+    }
+
+    override void on_band_changed(WifiBand)
+    {
+        if (_wifi.is_open)
+            restart();
     }
 
     override void on_channel_changed(ubyte ch)
