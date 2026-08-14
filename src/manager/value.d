@@ -373,11 +373,12 @@ const(char[]) from_variant(T)(ref const Variant v, out T r) nothrow @nogc
         const(char)[] s = v.asString;
         if (!s)
             return "No value";
+        import urt.meta.enuminfo : trim_key;
         switch (s)
         {
             static foreach(E; __traits(allMembers, T))
             {
-                case Alias!(to_lower(E)):
+                case Alias!(to_lower(trim_key!E)):
                     r = __traits(getMember, T, E);
                     return null;
             }
