@@ -1,9 +1,11 @@
 module driver.linux.wifi;
 
 // =====================================================================
-// Linux wifi backend. The physical adapter is the radio/STA netdev. APs and
-// monitor capture use sibling VIFs on the same phy so STA channel ownership can
-// coexist with AP beacons and radiotap capture.
+// Linux wifi backend. The radio is backed by a wiphy; its band selects the RF
+// unit within it, and VIFs are consequences of our sub-interface config. The
+// radio adopts (or creates) a managed netdev for the STA side; APs and monitor
+// capture use sibling VIFs on the same phy so STA channel ownership can coexist
+// with AP beacons and radiotap capture.
 // =====================================================================
 
 version (linux):
@@ -65,7 +67,8 @@ nothrow @nogc:
 
 class LinuxWifiRadio : WiFiInterface
 {
-    alias Properties = AliasSeq!(Prop!("adapter", adapter));
+    alias Properties = AliasSeq!(Prop!("wiphy", wiphy),
+                                 Prop!("netdev", netdev));
 nothrow @nogc:
 
     enum type_name = "wifi";
@@ -76,29 +79,46 @@ nothrow @nogc:
         super(collection_type_info!LinuxWifiRadio, id, flags);
     }
 
-    final const(char)[] adapter() const pure
-        => _adapter[];
-    final void adapter(const(char)[] value)
+    // The backing hardware: a wiphy, named by its phy name ("phy0") or by any
+    // netdev on it ("wlan0"), which resolves to the phy behind it. The radio's
+    // band then selects the RF unit within the wiphy; VIFs are consequences of
+    // our sub-interface config, created on top.
+    final const(char)[] wiphy() const pure
+        => _wiphy_name[];
+    final void wiphy(const(char)[] value)
     {
-        _adapter = value.makeString(defaultAllocator);
-        mark_set!(typeof(this), "adapter")();
+        if (_wiphy_name[] == value)
+            return;
+        _wiphy_name = value.makeString(defaultAllocator);
+        _wiphy_index = uint.max;
+        mark_set!(typeof(this), "wiphy")();
+        restart();
     }
+
+    // The managed netdev this radio adopted or created on its wiphy (read-only).
+    final const(char)[] netdev() const pure
+        => _netdev[];
+
+    final uint wiphy_index() const pure
+        => _wiphy_index;
 
     override const(char)[] mode() const pure
         => super.mode();
 
     // VIF lookup for a bound AP.
-    // The physical adapter stays the radio/STA netdev; every AP gets a
-    // sibling AP-mode VIF. That makes AP/STA ownership independent of bind
-    // order and avoids flipping the station netdev into AP mode.
+    // The primary netdev stays the radio/STA side; every AP gets a sibling
+    // AP-mode VIF. That makes AP/STA ownership independent of bind order and
+    // avoids flipping the station netdev into AP mode.
     // Returns empty slice if `target` isn't bound to this radio.
     final const(char)[] vif_for(const(APInterface) target) const
     {
+        if (_netdev.empty)
+            return null;
         auto aps = bound_aps;
         foreach (ap; aps)
         {
             if (ap is target)
-                return tconcat(_adapter[], "-", target.name[]);
+                return tconcat(_netdev[], "-", target.name[]);
         }
         return null;
     }
@@ -249,7 +269,7 @@ protected:
 
     override bool validate() const
     {
-        if (_adapter.empty)
+        if (_wiphy_name.empty)
             return false;
         if (monitor && _phy_caps.valid && would_accept_monitor() !is null)
             return false;
@@ -258,6 +278,8 @@ protected:
 
     override const(char)[] status_message() const
     {
+        if (_startup_block)
+            return _startup_block;
         if (monitor)
         {
             if (auto reason = would_accept_monitor())
@@ -270,13 +292,123 @@ protected:
 
     override CompletionStatus startup()
     {
-        // We own the adapter outright: reset it to a clean station-mode slate --
-        // tearing down any AP/association/keys left by hostapd, NetworkManager,
-        // wpa_supplicant or a previous run -- before any STA/AP binds to it.
-        _ifindex = read_ifindex(_adapter[]);
-        if (_ifindex != 0)
-            reset_device(_adapter[], _ifindex);
+        // Resolve the nominated wiphy: a phy name, or a netdev name resolving
+        // to the phy behind it.
+        if (_wiphy_index == uint.max)
+        {
+            uint ifi = read_ifindex(_wiphy_name[]);
+            if (ifi != 0)
+                _wiphy_index = read_wiphy(ifi);
+            else
+                _wiphy_index = read_phy_index(_wiphy_name[]);
+            if (_wiphy_index == uint.max)
+            {
+                _startup_block = "waiting for wiphy";
+                return CompletionStatus.continue_;
+            }
+        }
+
+        // One RF unit per wiphy: a band-switchable single radio must not be
+        // claimed twice even with disjoint bands. Multi-radio wiphys (kernel
+        // 6.12+ per-radio info) will relax this to a (wiphy, radio) claim once
+        // NL80211_ATTR_WIPHY_RADIOS is parsed.
+        foreach (r; _active_radios)
+        {
+            if (r !is this && r._wiphy_index == _wiphy_index)
+            {
+                _startup_block = "wiphy is in use by another radio";
+                return CompletionStatus.continue_;
+            }
+        }
+
+        // Adopt a managed netdev on the wiphy (typically the distro default),
+        // or create one when the wiphy is bare. Re-adopt if a previous netdev
+        // vanished or belongs to a different wiphy after a rename.
+        uint netdev_ifi = _netdev.empty ? 0 : read_ifindex(_netdev[]);
+        if (netdev_ifi == 0 || read_wiphy(netdev_ifi) != _wiphy_index)
+        {
+            WifiIfInfo primary;
+            void consider(ref const WifiIfInfo info)
+            {
+                if (info.wiphy != _wiphy_index || info.name_len == 0)
+                    return;
+                if (primary.ifindex == 0 ||
+                    (primary.iftype != NL80211_IFTYPE_STATION && info.iftype == NL80211_IFTYPE_STATION))
+                    primary = info;
+            }
+            query_wifi_interfaces(&consider);
+
+            if (primary.ifindex != 0)
+            {
+                _netdev = primary.name_s.makeString(defaultAllocator);
+                _netdev_created = false;
+            }
+            else
+            {
+                const(char)[] name = tconcat(_wiphy_name[], "-sta");
+                if (!create_sta_vif(_wiphy_index, name))
+                {
+                    _startup_block = "failed to create station VIF";
+                    return CompletionStatus.continue_;
+                }
+                _netdev = name.makeString(defaultAllocator);
+                _netdev_created = true;
+            }
+            mark_set!(typeof(this), "netdev")();
+        }
+
+        _ifindex = read_ifindex(_netdev[]);
+        if (_ifindex == 0)
+        {
+            _startup_block = "waiting for netdev";
+            return CompletionStatus.continue_;
+        }
+
+        // We own the wiphy outright: clear any leftover soft rfkill block (eg
+        // Raspberry Pi OS ships wifi blocked until a country is set), then
+        // reset the netdev to a clean station-mode slate -- tearing down any
+        // AP/association/keys left by hostapd, NetworkManager, wpa_supplicant
+        // or a previous run -- before any STA/AP binds to it.
+        {
+            char[32] phy_buf = void;
+            const(char)[] phy = read_phy_name(_netdev[], phy_buf[]);
+            if (phy is null)
+                phy = _wiphy_name[];
+            if (rfkill_unblock_phy(phy))
+                log.info("cleared rfkill soft block on ", phy);
+        }
+        reset_device(_netdev[], _ifindex);
         apply_configured_mtu();
+
+        if (!_caps_queried)
+        {
+            query_phy_capabilities(_ifindex, _phy_caps);
+            _caps_queried = true;
+            log.info("phy capabilities: valid=", _phy_caps.valid, " bands=", _phy_caps.bands,
+                     " freqs=", _phy_caps.nfreqs, " sta=", _phy_caps.supports_sta,
+                     " ap=", _phy_caps.supports_ap, " monitor=", _phy_caps.supports_monitor,
+                     " sta+ap=", _phy_caps.supports_sta_ap, " max-aps=", _phy_caps.max_aps,
+                     " max-aps-with-sta=", _phy_caps.max_aps_with_sta,
+                     " sta+monitor=", _phy_caps.supports_sta_monitor,
+                     " ap+monitor=", _phy_caps.supports_ap_monitor,
+                     " sta+ap+monitor=", _phy_caps.supports_sta_ap_monitor,
+                     " max-aps-with-monitor=", _phy_caps.max_aps_with_monitor,
+                     " max-aps-with-sta-monitor=", _phy_caps.max_aps_with_sta_monitor,
+                     " max-monitors=", _phy_caps.max_monitors);
+        }
+
+        if (!band_available())
+        {
+            _startup_block = "band is not supported by this radio";
+            return CompletionStatus.continue_;
+        }
+
+        _startup_block = null;
+        if (!_claimed)
+        {
+            _active_radios ~= this;
+            _claimed = true;
+        }
 
         open_scan_sockets();
         sync_monitor_vif();
@@ -298,7 +430,27 @@ protected:
     {
         close_monitor_vif();
         close_scan_sockets();
+        if (_claimed)
+        {
+            _active_radios.removeFirst(this);
+            _claimed = false;
+        }
+        if (_netdev_created)
+        {
+            uint ifi = read_ifindex(_netdev[]);
+            if (ifi != 0)
+                delete_vif(ifi);
+            _netdev = String();
+            _netdev_created = false;
+            mark_set!(typeof(this), "netdev")();
+        }
+        _startup_block = null;
         return CompletionStatus.complete;
+    }
+
+    override void on_band_changed(WifiBand)
+    {
+        restart();
     }
 
     override void on_wlan_bind_changed()
@@ -384,11 +536,25 @@ protected:
     }
 
 private:
-    String _adapter;
+    String _wiphy_name;
+    String _netdev;
+    uint _wiphy_index = uint.max;
+    bool _netdev_created;
+    bool _claimed;
+    const(char)[] _startup_block;
     SysTime _last_refresh;
 
     PhyCapabilities _phy_caps;
     bool _caps_queried;
+
+    __gshared Array!LinuxWifiRadio _active_radios;
+
+    bool band_available() const
+    {
+        if (band == WifiBand.any || !_phy_caps.valid || _phy_caps.bands == 0)
+            return true;
+        return (_phy_caps.bands & (1 << band)) != 0;
+    }
 
     bool sta_providing_channel() const
     {
@@ -424,32 +590,10 @@ private:
         // We still pull MAC/MTU/carrier/speed from sysfs -- carrier-up on a
         // wlan netdev means associated, which is the proxy for "STA online"
         // until nl80211 lands.
-
-        // Snapshot chipset capabilities once -- but only latch after the
-        // netdev's ifindex resolves; at startup the adapter may still be
-        // bouncing (eg a daemon restart recreating VIFs).
-        if (!_caps_queried)
-        {
-            uint ifindex = read_ifindex(_adapter[]);
-            if (ifindex != 0)
-            {
-                query_phy_capabilities(ifindex, _phy_caps);
-                _caps_queried = true;
-                log.info("phy capabilities: valid=", _phy_caps.valid, " sta=", _phy_caps.supports_sta,
-                         " ap=", _phy_caps.supports_ap, " monitor=", _phy_caps.supports_monitor,
-                         " sta+ap=", _phy_caps.supports_sta_ap, " max-aps=", _phy_caps.max_aps,
-                         " max-aps-with-sta=", _phy_caps.max_aps_with_sta,
-                         " sta+monitor=", _phy_caps.supports_sta_monitor,
-                         " ap+monitor=", _phy_caps.supports_ap_monitor,
-                         " sta+ap+monitor=", _phy_caps.supports_sta_ap_monitor,
-                         " max-aps-with-monitor=", _phy_caps.max_aps_with_monitor,
-                         " max-aps-with-sta-monitor=", _phy_caps.max_aps_with_sta_monitor,
-                         " max-monitors=", _phy_caps.max_monitors);
-            }
-        }
-
+        if (_netdev.empty)
+            return;
         OSAdapterInfo info;
-        if (!query_adapter(_adapter[], info))
+        if (!query_adapter(_netdev[], info))
             return;
         AdapterChange c = apply_os_adapter_info(this, _l2mtu, _max_l2mtu, _status, info);
         if (c & AdapterChange.mtu)       mark_set!(typeof(this), [ "l2mtu", "actual-mtu" ])();
@@ -461,10 +605,10 @@ private:
 
     void apply_configured_mtu()
     {
-        if (_mtu == 0 || _adapter.empty)
+        if (_mtu == 0 || _netdev.empty)
             return;
-        if (!set_adapter_mtu(_adapter[], actual_mtu))
-            log.warning("failed to set MTU ", actual_mtu, " on '", _adapter, "'");
+        if (!set_adapter_mtu(_netdev[], actual_mtu))
+            log.warning("failed to set MTU ", actual_mtu, " on '", _netdev, "'");
     }
 
     // --- nl80211 scan (device-level: the radio owns the adapter) ---
@@ -482,6 +626,13 @@ public:
     {
         if (_scanning || _scan_cmd_fd < 0 || _nl_family == 0 || !running)
             return false;
+
+        // Restrict a banded scan to the band's enabled frequencies. A band with
+        // no known frequencies can't be scanned at all.
+        bool restrict_band = cfg.band != WifiBand.any && _phy_caps.valid && _phy_caps.bands != 0;
+        if (restrict_band && (_phy_caps.bands & (1 << cfg.band)) == 0)
+            return false;
+
         NlBuilder b;
         b.start(_nl_family, NLM_F_REQUEST | NLM_F_ACK, ++_scan_seq, NL80211_CMD_TRIGGER_SCAN);
         b.put_u32(NL80211_ATTR_IFINDEX, _ifindex);
@@ -490,6 +641,17 @@ public:
         size_t nest = b.nest_start(NL80211_ATTR_SCAN_SSIDS);
         b.put_bytes(1, cast(const(ubyte)[])cfg.ssid);
         b.nest_end(nest);
+        if (restrict_band)
+        {
+            size_t fnest = b.nest_start(NL80211_ATTR_SCAN_FREQUENCIES);
+            ushort i = 0;
+            foreach (f; _phy_caps.freqs[0 .. _phy_caps.nfreqs])
+            {
+                if (band_for_freq(f) == cfg.band)
+                    b.put_u32(++i, f);
+            }
+            b.nest_end(fnest);
+        }
         if (!nl_ack(_scan_cmd_fd, b, "TRIGGER_SCAN"))
             return false;
         _scan_handler = done;
@@ -564,7 +726,7 @@ private:
 
     const(char)[] monitor_vif_name() const
     {
-        return tconcat(_adapter[], "-mon");
+        return tconcat(_netdev[], "-mon");
     }
 
     void sync_monitor_vif()
@@ -588,8 +750,10 @@ private:
                 return;
             }
         }
+        if (_netdev.empty)
+            return;
         if (_ifindex == 0)
-            _ifindex = read_ifindex(_adapter[]);
+            _ifindex = read_ifindex(_netdev[]);
         if (_ifindex == 0)
             return;
 
@@ -598,8 +762,7 @@ private:
             _monitor_ifindex = read_ifindex(vif);
         if (_monitor_ifindex == 0)
         {
-            uint wiphy = read_wiphy(_ifindex);
-            if (wiphy == uint.max || !create_monitor_vif(wiphy, vif))
+            if (_wiphy_index == uint.max || !create_monitor_vif(_wiphy_index, vif))
             {
                 _monitor_failure = MonitorFailure.create_vif;
                 log.warning("failed to create monitor VIF '", vif, "'");
@@ -647,8 +810,8 @@ private:
         ubyte ch = target_channel();
         if (ch == 0 || ch == _monitor_channel)
             return;
-        WifiBand band = ch <= 14 ? WifiBand._2_4ghz : WifiBand._5ghz;
-        if (set_vif_channel(_monitor_ifindex, channel_to_freq(ch, band)))
+        WifiBand b = band != WifiBand.any ? band : (ch <= 14 ? WifiBand._2_4ghz : WifiBand._5ghz);
+        if (set_vif_channel(_monitor_ifindex, channel_to_freq(ch, b)))
         {
             _monitor_channel = ch;
             _monitor_failure = MonitorFailure.none;
@@ -938,7 +1101,7 @@ private:
         const(ubyte)[] fr = find_attr(bss, NL80211_BSS_FREQUENCY);
         uint freq = fr.length >= 4 ? *cast(const(uint)*)fr.ptr : 0;
         r.channel = freq_to_channel(freq);
-        r.band = freq >= 5000 ? WifiBand._5ghz : WifiBand._2_4ghz;
+        r.band = band_for_freq(freq);
         const(ubyte)[] sig = find_attr(bss, NL80211_BSS_SIGNAL_MBM);
         if (sig.length >= 4)
             r.rssi = cast(byte)(*cast(const(int)*)sig.ptr / 100);   // mBm -> dBm
@@ -1070,7 +1233,7 @@ protected:
 
         if (!_raw.valid)
         {
-            auto rr = _raw.open(r.adapter);
+            auto rr = _raw.open(r.netdev);
             if (rr.failed)
             {
                 log.error(rr.message);
@@ -1088,7 +1251,7 @@ protected:
         {
             if (kernel_ifindex() == 0)
             {
-                set_kernel_ifindex(read_ifindex(r.adapter));
+                set_kernel_ifindex(read_ifindex(r.netdev));
                 mirror_refresh_interface(this);
             }
         }
@@ -1099,7 +1262,7 @@ protected:
             // the matching BSS (a concrete BSS lets cfg80211 install keys).
             if (!_sta.valid)
             {
-                auto rs = _sta.open(r.adapter, &_raw);
+                auto rs = _sta.open(r.netdev, &_raw);
                 if (rs.failed)
                 {
                     log.error(rs.message);
@@ -1121,7 +1284,7 @@ protected:
             // and wait until it reports an association before going Running.
             if (!_sta.valid)
             {
-                auto rs = _sta.open(r.adapter);
+                auto rs = _sta.open(r.netdev);
                 if (rs.failed)
                 {
                     log.error(rs.message);
@@ -1234,8 +1397,8 @@ private:
         auto r = cast(LinuxWifiRadio)radio;
         if (!r)
             return;
-        if (!set_adapter_mtu(r.adapter, actual_mtu))
-            log.warning("failed to set MTU ", actual_mtu, " on '", r.adapter, "'");
+        if (!set_adapter_mtu(r.netdev, actual_mtu))
+            log.warning("failed to set MTU ", actual_mtu, " on '", r.netdev, "'");
     }
 
     void refresh_os_state()
@@ -1244,7 +1407,7 @@ private:
         if (!r)
             return;
         OSAdapterInfo info;
-        if (!query_adapter(r.adapter, info))
+        if (!query_adapter(r.netdev, info))
             return;
         AdapterChange c = apply_os_adapter_info(this, _l2mtu, _max_l2mtu, _status, info);
         if (c & AdapterChange.mtu)     mark_set!(typeof(this), [ "l2mtu", "actual-mtu" ])();
@@ -1368,6 +1531,7 @@ private:
             }
             WifiScanConfig sc;
             sc.ssid = super.ssid;
+            sc.band = r.band;
             if (r.start_scan(sc, &on_scan_done))
             {
                 _scan_inflight = true;
@@ -1429,10 +1593,14 @@ private:
                 schedule_scan_retry(2.seconds);
                 return;
             }
+            auto r = cast(LinuxWifiRadio)radio;
+            WifiBand want = r ? r.band : WifiBand.any;
             const(WifiScanResult)* best;
             foreach (ref res; results)
             {
                 if (res.ssid != super.ssid)
+                    continue;
+                if (want != WifiBand.any && res.band != want)
                     continue;
                 if (best is null || res.rssi > best.rssi)
                     best = &res;
@@ -1523,7 +1691,7 @@ protected:
         // reserved for the radio/STA side.
         if (read_ifindex(vif) == 0)
         {
-            uint wiphy = read_wiphy(read_ifindex(r.adapter));
+            uint wiphy = r.wiphy_index;
             if (wiphy == uint.max || !create_ap_vif(wiphy, vif))
                 return CompletionStatus.continue_;
             _created_vif_ifindex = read_ifindex(vif);
@@ -1563,7 +1731,7 @@ protected:
             if (!_ap.running)
             {
                 ubyte ch = r.target_channel();
-                WifiBand band = ch <= 14 ? WifiBand._2_4ghz : WifiBand._5ghz;
+                WifiBand band = r.band != WifiBand.any ? r.band : (ch <= 14 ? WifiBand._2_4ghz : WifiBand._5ghz);
                 if (!_ap.start(ssid, get_password(), channel_to_freq(ch, band), ch, hidden))
                     return CompletionStatus.continue_;
                 _running_channel = ch;
@@ -1826,8 +1994,8 @@ private:
 }
 
 
-// MHz -> 802.11 channel for the bands we support (2.4GHz + 5GHz). 6GHz uses
-// op_class-based numbering and a different hostapd config shape; punt for now.
+// MHz -> 802.11 channel. 6GHz channel numbers overlap 2.4GHz numbering, so a
+// bare channel is only meaningful alongside a band.
 private ubyte freq_to_channel(uint freq_mhz) pure
 {
     if (freq_mhz == 2484)
@@ -1836,6 +2004,8 @@ private ubyte freq_to_channel(uint freq_mhz) pure
         return cast(ubyte)((freq_mhz - 2407) / 5);
     if (freq_mhz >= 5180 && freq_mhz <= 5905)
         return cast(ubyte)((freq_mhz - 5000) / 5);
+    if (freq_mhz >= 5955 && freq_mhz <= 7115)
+        return cast(ubyte)((freq_mhz - 5950) / 5);
     return 0;
 }
 
@@ -1843,6 +2013,8 @@ private uint channel_to_freq(ubyte ch, WifiBand band) pure
 {
     if (ch == 0)
         return 0;
+    if (band == WifiBand._6ghz)
+        return 5950 + ch * 5;
     if (band == WifiBand._5ghz || ch > 14)
         return 5000 + ch * 5;
     if (ch == 14)
@@ -1995,17 +2167,18 @@ private:
 
     void sync_radios()
     {
-        // Radio identity == OS netdev identity. Paired WLAN inherits its
-        // adapter via the radio at startup (don't set wlan.adapter directly
-        // -- the WLANBaseInterface.radio setter clears adapter as a side-effect).
+        // Radio identity == wiphy identity. Discovery walks netdevs (that's
+        // what sysfs exposes) but dedupes by the phy behind them, so sibling
+        // VIFs we create (monitor/AP/STA) never spawn duplicate radios.
         Array!String os_buf;
         enumerate_wifi_adapters((const(char)[] name, const(char)[] description) nothrow @nogc {
             port_add(PortKind.wifi, tconcat("linux:wifi:", name), name, name, ModuleName, description);
 
+            uint w = read_wiphy(read_ifindex(name));
             bool present = false;
             foreach (r; Collection!LinuxWifiRadio().values)
             {
-                if (r.adapter == name)
+                if (r.wiphy == name || (w != uint.max && r.wiphy_index == w))
                 {
                     present = true;
                     break;
@@ -2021,7 +2194,7 @@ private:
                 // entries are reaped below when their netdev disappears.
                 // Operator/config radios (flags == none) are left alone.
                 auto radio = Collection!LinuxWifiRadio().create(tconcat(base, "-radio"), ObjectFlags.dynamic);
-                radio.adapter = name;
+                radio.wiphy = name;
                 if (description.length > 0)
                     radio.comment = description.makeString(defaultAllocator);
 
@@ -2043,7 +2216,7 @@ private:
             bool still_there = false;
             foreach (ref s; os_buf[])
             {
-                if (r.adapter == s[])
+                if (r.wiphy == s[])
                 {
                     still_there = true;
                     break;
@@ -2054,8 +2227,8 @@ private:
         }
         foreach (r; gone[])
         {
-            log_info(ModuleName, "Wifi adapter gone: ", r.adapter);
-            port_remove(PortKind.wifi, tconcat("linux:wifi:", r.adapter[]));
+            log_info(ModuleName, "Wifi adapter gone: ", r.wiphy);
+            port_remove(PortKind.wifi, tconcat("linux:wifi:", r.wiphy[]));
             Array!LinuxWlan paired;
             foreach (w; Collection!LinuxWlan().values)
                 if (cast(LinuxWifiRadio)w.radio is r)

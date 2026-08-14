@@ -107,6 +107,79 @@ uint read_ifindex(const(char)[] adapter_name)
 }
 
 
+// Reads /sys/class/ieee80211/<phy>/index. Returns uint.max on failure.
+uint read_phy_index(const(char)[] phy_name)
+{
+    if (phy_name.length == 0 || phy_name.length > 32)
+        return uint.max;
+    char[32] buf = void;
+    auto p = tconcat("/sys/class/ieee80211/", phy_name, "/index", '\0').ptr;
+    auto data = read_file(p, buf[]);
+    if (data is null)
+        return uint.max;
+    auto s = data.trimBack;
+    size_t consumed;
+    ulong v = parse_uint(s, &consumed);
+    if (consumed != s.length || consumed == 0)
+        return uint.max;
+    return cast(uint)v;
+}
+
+
+// The phy name behind a netdev (/sys/class/net/<dev>/phy80211/name), or null.
+const(char)[] read_phy_name(const(char)[] netdev, char[] buf)
+{
+    if (netdev.length == 0 || netdev.length > 32)
+        return null;
+    auto p = tconcat("/sys/class/net/", netdev, "/phy80211/name", '\0').ptr;
+    auto data = read_file(p, buf);
+    if (data is null)
+        return null;
+    return data.trimBack;
+}
+
+// Clears a soft rfkill block on a phy. A leftover soft block (eg Raspberry Pi
+// OS before a wifi country is set) means the radio can never come up; hard
+// blocks are physical switches we respect. Requires privilege; best-effort.
+// Returns true if a block was found and cleared.
+bool rfkill_unblock_phy(const(char)[] phy_name)
+{
+    if (phy_name.length == 0 || phy_name.length > 32)
+        return false;
+    auto dpath = tconcat("/sys/class/ieee80211/", phy_name, '\0').ptr;
+    DIR* dir = opendir(dpath);
+    if (dir is null)
+        return false;
+    scope(exit) closedir(dir);
+
+    while (true)
+    {
+        dirent* ent = readdir(dir);
+        if (ent is null)
+            break;
+        size_t len = 0;
+        while (len < ent.d_name.length && ent.d_name[len] != 0)
+            ++len;
+        const(char)[] name = ent.d_name[0 .. len];
+        if (len <= 6 || name[0 .. 6] != "rfkill")
+            continue;
+
+        auto sp = tconcat("/sys/class/ieee80211/", phy_name, "/", name, "/soft", '\0').ptr;
+        char[16] soft = void;
+        auto cur = read_file(sp, soft[]);
+        if (cur is null || cur.trimBack[] == "0")
+            continue;
+
+        int fd = open(sp, O_WRONLY);
+        if (fd < 0)
+            return false;
+        scope(exit) close(fd);
+        return write(fd, "0".ptr, 1) == 1;
+    }
+    return false;
+}
+
+
 bool query_adapter(const(char)[] adapter_name, out OSAdapterInfo info)
 {
     if (adapter_name.length == 0 || adapter_name.length > 32)
