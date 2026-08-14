@@ -1,12 +1,15 @@
 module manager.sync.peer;
 
 import urt.array;
+import urt.inet;
 import urt.log;
 import urt.map;
 import urt.mem.allocator;
+import urt.mem.temp : tconcat;
 import urt.meta : AliasSeq;
 import urt.meta.enuminfo : VoidEnumInfo;
 import urt.string;
+import urt.string.format : tstring;
 import urt.time;
 
 import manager;
@@ -21,6 +24,7 @@ import manager.sync.encoder;
 
 import router.iface;
 import router.iface.packet;
+import router.iface.udp : UDPFrame, UDPInterface;
 
 nothrow @nogc:
 
@@ -47,6 +51,7 @@ enum ubyte local_sync_caps = SyncCaps.objects | SyncCaps.model | SyncCaps.histor
 class SyncPeer : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("transport",      transport),
+                                 Prop!("remote",         remote),
                                  Prop!("encoder",        encoder),
                                  Prop!("time-authority", time_authority));
 nothrow @nogc:
@@ -66,12 +71,36 @@ nothrow @nogc:
         => _transport;
     final void transport(BaseInterface value)
     {
-        if (_transport is value)
+        if (_transport is value && !_owned_transport)
             return;
         detach_transport();
+        destroy_owned_transport();
         _transport = value;
-        mark_set!(typeof(this), "transport")();
+        _remote = InetAddress();
+        _remote_bound = false;
+        _remote_addr = InetAddress();
+        mark_set!(typeof(this), [ "transport", "remote" ])();
         restart();
+    }
+
+    final InetAddress remote() const pure
+        => _remote;
+    final const(char)[] remote(InetAddress value)
+    {
+        if (value.family == AddressFamily.unspecified || value.addr_any || value.port == 0)
+            return "remote needs a non-wildcard address and port";
+        if (value == _remote)
+            return null;
+
+        detach_transport();
+        destroy_owned_transport();
+        _transport = null;
+        _remote = value;
+        _remote_bound = false;
+        _remote_addr = InetAddress();
+        mark_set!(typeof(this), [ "transport", "remote" ])();
+        restart();
+        return null;
     }
 
     final SyncEncoderKind encoder() const pure
@@ -96,15 +125,24 @@ nothrow @nogc:
         mark_set!(typeof(this), "time-authority")();
     }
 
-    // API
+    void bind_remote(ref const InetAddress addr)
+    {
+        _remote_addr = addr;
+        _remote_bound = true;
+    }
 
     int transmit_frame(const(ubyte)[] frame, bool is_text = false)
     {
         if (!_transport || !_transport.running)
             return -1;
         Packet p;
-        ref hdr = p.init!RawFrame(frame);
-        hdr.is_text = is_text;
+        if (_remote_bound)
+            p.init!UDPFrame(frame).address = _remote_addr;
+        else
+        {
+            ref hdr = p.init!RawFrame(frame);
+            hdr.is_text = is_text;
+        }
         return _transport.forward(p);
     }
 
@@ -278,7 +316,7 @@ nothrow @nogc:
 protected:
 
     override bool validate() const pure
-        => _transport !is null;
+        => _transport !is null || _remote.family != AddressFamily.unspecified;
 
     // Idempotent; WS-spawned peers call this at accept time, because the client's
     // first frames can arrive before our first startup tick and unsubscribed
@@ -287,13 +325,23 @@ protected:
     {
         if (_transport_subscribed || !_transport)
             return;
-        _transport.subscribe(&on_transport_packet, PacketFilter(PacketType.raw, PacketDirection.incoming));
+        // a remote-bound peer shares a multi-drop transport: its server routes rx by source
+        // (deliver_frame), so only the state signal is subscribed here. the interface holds
+        // few subscriber slots, so per-peer packet subscriptions must not scale with peers.
+        if (!_remote_bound)
+        {
+            // unknown = all types; the handler takes raw and udp frames, so one peer object
+            // sits on connected pipes and datagram transports alike
+            _transport.subscribe(&on_transport_packet, PacketFilter(PacketType.unknown, PacketDirection.incoming));
+        }
         _transport.subscribe(&on_transport_state);
         _transport_subscribed = true;
     }
 
     override CompletionStatus startup()
     {
+        if (!_transport && _remote.family != AddressFamily.unspecified && !create_remote_transport())
+            return CompletionStatus.error;
         if (!_transport || !_transport.running)
             return CompletionStatus.continue_;
 
@@ -314,6 +362,7 @@ protected:
 
         get_module!SyncModule.detach_peer(this);
         detach_transport();
+        destroy_owned_transport();
 
         // Peer-derived tap state dies with the stream; the desire to receive
         // (_want_*) persists so a reconnect re-subscribes.
@@ -357,7 +406,11 @@ package:
 
 private:
     ObjectRef!BaseInterface _transport;
+    ObjectRef!UDPInterface  _owned_transport;
     bool                    _transport_subscribed;
+    bool                    _remote_bound;
+    InetAddress             _remote_addr;
+    InetAddress             _remote;
 
     void clear_log_sink()
     {
@@ -372,14 +425,47 @@ private:
     {
         if (!_transport_subscribed)
             return;
-        _transport.unsubscribe(&on_transport_packet);
-        _transport.unsubscribe(&on_transport_state);
+        if (BaseInterface transport = _transport)
+        {
+            transport.unsubscribe(&on_transport_packet);
+            transport.unsubscribe(&on_transport_state);
+        }
         _transport_subscribed = false;
+    }
+
+    bool create_remote_transport()
+    {
+        const(char)[] transport_name = Collection!UDPInterface().generate_name(tconcat(name[], "-udp"));
+        UDPInterface transport = Collection!UDPInterface().create(transport_name, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary));
+        if (!transport)
+            return false;
+
+        transport.remote_host(tstring(_remote).makeString(defaultAllocator));
+        transport.remote_port(_remote.port);
+        _owned_transport = transport;
+        _transport = transport;
+        return true;
+    }
+
+    void destroy_owned_transport()
+    {
+        if (UDPInterface transport = _owned_transport)
+        {
+            _owned_transport = null;
+            transport.destroy();
+        }
+    }
+
+    package void deliver_frame(const(ubyte)[] frame)
+    {
+        encoder_for(_encoder).decode_and_dispatch(this, frame);
     }
 
     void on_transport_packet(ref const Packet p, BaseInterface, PacketDirection, void*) nothrow @nogc
     {
-        encoder_for(_encoder).decode_and_dispatch(this, cast(const(ubyte)[])p.data);
+        if (p.type != PacketType.raw && p.type != PacketType.udp)
+            return;
+        deliver_frame(cast(const(ubyte)[])p.data);
     }
 
     void on_transport_state(ActiveObject, StateSignal sig) nothrow @nogc

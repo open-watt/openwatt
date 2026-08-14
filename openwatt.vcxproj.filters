@@ -447,6 +447,9 @@
     <DCompile Include="src\manager\sync\peer.d">
       <Filter>src\manager\sync</Filter>
     </DCompile>
+    <DCompile Include="src\manager\sync\udp_server.d">
+      <Filter>src\manager\sync</Filter>
+    </DCompile>
     <DCompile Include="src\manager\sync\ws_server.d">
       <Filter>src\manager\sync</Filter>
     </DCompile>

@@ -79,6 +79,7 @@ import manager.sync.binary_encoder;
 import manager.sync.encoder;
 import manager.sync.json_encoder;
 import manager.sync.peer;
+import manager.sync.udp_server;
 static if (has_http)
     import manager.sync.ws_server;
 
@@ -145,6 +146,7 @@ nothrow @nogc:
         g_encoders[SyncEncoderKind.binary] = g_binary_encoder;
 
         g_app.console.register_collection!SyncPeer();
+        g_app.console.register_collection!UDPSyncServer();
         static if (has_http)
             g_app.console.register_collection!WebSocketSyncServer();
 
@@ -166,6 +168,7 @@ nothrow @nogc:
 
     override void update()
     {
+        Collection!UDPSyncServer().update_all();
         static if (has_http)
             Collection!WebSocketSyncServer().update_all();
         Collection!SyncPeer().update_all();
