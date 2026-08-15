@@ -346,7 +346,9 @@ nothrow @nogc:
         p._introduced.clear();
         p._adopted.clear();
         p._remote_caps = 0;
-        p.reset_sublayer();   // seq spaces are session state
+        p.reset_sublayer();           // seq spaces are session state
+        p._remote_nonce_set = false;
+        p._local_nonce_set = false;   // a reconnect is a new session; fresh nonce
         p._ft_sent.clear();
         p._next_ft = 0;
         p._enums_sent.clear();
@@ -928,8 +930,7 @@ nothrow @nogc:
 
     // Inbound: model plane
 
-    void inbound_hello(SyncPeer from, uint ver, const(char)[] host, ubyte caps, uint max_frame,
-                       ulong node_id = 0, PeerRole role = PeerRole.none, const(char)[] cluster = null)
+    void inbound_hello(SyncPeer from, uint ver, const(char)[] host, ubyte caps, uint max_frame, ulong node_id = 0, PeerRole role = PeerRole.none, const(char)[] cluster = null, const(ubyte)[] nonce = null)
     {
         import urt.conv : format_uint;
 
@@ -938,6 +939,11 @@ nothrow @nogc:
         from._remote_role = role;
         if (from._remote_cluster[] != cluster)
             from._remote_cluster = cluster.makeString(defaultAllocator);
+        if (nonce.length == from._remote_nonce.length)
+        {
+            from._remote_nonce[] = nonce[];
+            from._remote_nonce_set = true;
+        }
 
         char[16] nid = void;
         if (node_id)
@@ -946,9 +952,9 @@ nothrow @nogc:
                  node_id ? " node=" : "", node_id ? nid[] : "");
     }
 
-    void inbound_claim(SyncPeer from, uint seq, const(char)[] cluster, uint priority, const(char)[] auth)
+    void inbound_claim(SyncPeer from, uint seq, const(char)[] cluster, uint priority, const(char)[] auth, const(char)[] key)
     {
-        get_module!SyncPeeringModule.handle_claim(from, seq, cluster, priority, auth);
+        get_module!SyncPeeringModule.handle_claim(from, seq, cluster, priority, auth, key);
     }
 
     void inbound_model_sub(SyncPeer from, uint seq, const(char[])[] patterns, bool once, ulong from_ms = 0, ulong to_ms = 0)
@@ -1263,11 +1269,15 @@ nothrow @nogc:
 
     void inbound_res(SyncPeer from, uint seq)
     {
+        if (get_module!SyncPeeringModule.claim_response(from, seq, true, null, null))
+            return;
         log.info("sync: model burst complete from '", from.name[], "' seq=", seq);
     }
 
     void inbound_err(SyncPeer from, uint seq, const(char)[] code, const(char)[] text)
     {
+        if (get_module!SyncPeeringModule.claim_response(from, seq, false, code, text))
+            return;
         log.warning("sync: err from '", from.name[], "' seq=", seq, " code=", code, ": ", text);
     }
 

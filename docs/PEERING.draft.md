@@ -29,7 +29,8 @@ hardware). Every node carries:
 
 - **name** -- the human name; the existing `/system` hostname. An out-of-box device names
   itself `openwatt-XXXX` from its node-id, so a box of fresh units is tellable-apart at every
-  surface that shows the name; startup.conf (or, later, the adopting controller) renames it.
+  surface that shows the name (beacons, the provisioning AP's SSID, BLE advertising);
+  startup.conf or the adopting controller renames it.
 - **node-id** -- a 64-bit id. A chip-burned hardware identity wins where the platform has one
   (the eFuse factory MAC on ESP32; chip UIDs on other micros): it survives reflash and needs
   no storage, and on a micro the chip *is* the node. Computers carry a software identity
@@ -71,9 +72,9 @@ with the protocol; the sync module only sees the domain interface.
 - `cluster=` names the fleet. Members accept claims only for their cluster (empty = accept any,
   for bench bring-up; refused when a secret is set). Two authorities declaring the same cluster
   is what creates the dual-authority relationship -- no dedicated pairing config.
-- `secret=` gates claims (HMAC challenge inside the claim exchange). Claiming a node hands over
-  the full control surface; the property exists day one even while the challenge detail lands
-  later.
+- `secret=` sets the fleet key by hand. Normally nobody does: the key is minted by the
+  authority at first adoption and handed over inside the claim (see *Adoption* below); the
+  property remains for hand-wired fleets and key rotation.
 
 **Manual peers keep working.** `/sync/peer add transport=...` remains the hand-wired escape
 hatch; auto-claimed peers are `dynamic` instances in the same collection, named after the remote
@@ -144,19 +145,81 @@ authority; the authority-authority link carries coordination only, never fleet s
    multiple claimants from one cluster accepted (the dual-authority seat); last-detach reverts
    to unbound]
 4. Authority side: claim filter, transport factory via UDPInterface-over-ether, dynamic peer
-   spawn/sweep.
-5. Claim auth (secret + HMAC challenge). The `secret=` property exists; setting it refuses all
-   claims until the challenge lands.
+   spawn/sweep. [done: sweep every 5s over the neighbour table; per-candidate exponential
+   backoff; members listen via a dynamic /sync/udp-server; a claimed member is still claimed
+   by an authority with no session to it (the dual-authority seat doubles as restart
+   recovery), and a member that reboots out from under a session the datagram link cannot
+   pronounce dead is detected by its unbound beacon and re-claimed]
+5. Claim auth (secret + HMAC challenge). [done: every hello carries a fresh 16-byte session
+   nonce; claim auth = hex(HMAC-SHA256(secret, member_nonce || cluster)). The secret never
+   travels, and a captured claim cannot replay into a new session. A member with a secret
+   refuses unauthenticated claims; an authority with a secret waits for the member's hello
+   before claiming]
 6. Dual-authority: authority-authority session, election, membership exchange.
 7. Later domains: UDP multicast for routed segments, modbus function-code discovery per the
    L2/L3 trajectory.
 
+## Adoption
+
+Nobody should type keys. The fleet forms Zigbee-join style, trust-on-first-use:
+
+- **Factory state**: a member with no key accepts any claim. An authority adopting such a node
+  mints the fleet key if it doesn't hold one yet (32 random bytes, persisted), and hands it
+  over inside the claim -- the one TOFU moment where the channel is trusted.
+- **Allegiance**: the member persists `{cluster, key}` in `conf/fleet.id` beside node.id.
+  From then on it beacons `adopted`, refuses claims that cannot prove the key (HMAC over its
+  per-session hello nonce -- the key itself never travels again), and holds that allegiance
+  across reboots. One fleet key shared by the cluster's authorities keeps dual-authority
+  hot-hot without waiting on the election channel.
+- **Approval mode is authority policy, not protocol**: `claim=*` auto-adopts matching factory
+  nodes; an empty filter leaves the sweep observing only, and the neighbour table -- which
+  already lists unbound nodes -- is the "waiting for adoption" list a controller UI presents
+  for the user to approve.
+- **Factory reset**: `/sync/peering reset` clears the allegiance (file and runtime); the node
+  beacons factory-fresh again, which also voids any authority's claim backoff so re-adoption
+  is immediate. Reset before moving hardware between fleets. Embedded builds will want a
+  hardware-button hook.
+- The MITM window is the adoption instant itself, as with every pairing scheme; user-present
+  approval mode narrows it.
+
+## Out-of-box onboarding (design sketch)
+
+Adoption assumes the device is already on the network; the layer beneath gets it there. A
+factory device has no WiFi credentials, so first contact is a phone app against one of:
+
+- **SoftAP provisioning**: the unconfigured device boots an AP named after its factory
+  hostname (`openwatt-XXXX`) and serves the existing config surface (HTTP/API); the app joins,
+  sets WiFi credentials (and optionally pre-seeds cluster/name), the device joins the LAN, and
+  fleet adoption proceeds from beacons as above. Nearly free: AP mode and the HTTP server
+  already exist.
+- **BLE provisioning**: the device advertises its factory name and exposes a small GATT
+  config service for the same credentials. Needs BLE peripheral mode, which the stack does not
+  do yet (the Tesla work built the central role).
+
+The chain end to end: factory -> provision (get on the network) -> discovered (beacons) ->
+adopted (claim + key handover) -> configured (the authority pushes config; phase B).
+
+## The claimed surface
+
+A successful claim arms `device:**` on the session: the member's whole device tree, live. The
+model plane is self-describing (type/add frames), so subscribing is the enumeration; elements
+appearing later stream in through the same sub. The member takes its first claimant as its time
+authority (clock discipline is part of subordination; the elected-active refinement comes with
+the election). Scoping the surface (`sub=` on the authority) is deferred until a
+bandwidth-constrained medium forces it.
+
 ## Open questions
+
+- Device-id collisions across the fleet: every node runs its own `energy` device, so a member's
+  mirror of it is refused at the authority (a remote device never overwrites a local one) and is
+  simply absent from the fleet surface. Fine for the bench; the fleet eventually wants per-node
+  namespacing of mirrored devices (e.g. a node-scoped prefix), which also affects how automations
+  address remote elements.
 
 - Empty `cluster=` on a member: accept any claimant is convenient on the bench and spooky in the
   field. Current position: accept but log loudly; refuse whenever a secret is configured.
-- Optional persistence of claimed state, so a moved node does not silently join a neighbour's
-  cluster. Deferred until it bites.
+- ~~Optional persistence of claimed state~~ -- resolved by adoption: allegiance persists,
+  sessions do not; a moved node keeps refusing foreign fleets until factory reset.
 - Announce cadence config: per-domain property, probably; not decided.
 - Whether the member should prefer its previous claimant on reconnect (affinity without
   persistence). Cheap to add later.

@@ -50,6 +50,7 @@ enum AnnounceTag : ubyte
 enum AnnounceFlags : ubyte
 {
     claimed = 1 << 0,
+    adopted = 1 << 1,   // holds fleet allegiance (cluster + key); claims must prove the key
 }
 
 struct NodeAnnounce
@@ -158,6 +159,9 @@ nothrow @nogc:
 
     bool claimed() const pure
         => (flags & AnnounceFlags.claimed) != 0;
+
+    bool adopted() const pure
+        => (flags & AnnounceFlags.adopted) != 0;
 }
 
 
@@ -274,6 +278,7 @@ nothrow @nogc:
     PeerRole local_role;
     String   local_cluster;
     bool     local_claimed;
+    bool     local_adopted;
     ushort   local_sync_port;
 
     override void init()
@@ -308,7 +313,7 @@ nothrow @nogc:
         a.name = hostname[];
         a.cluster = local_cluster[];
         a.role = local_role;
-        a.flags = local_claimed ? AnnounceFlags.claimed : 0;
+        a.flags = cast(ubyte)((local_claimed ? AnnounceFlags.claimed : 0) | (local_adopted ? AnnounceFlags.adopted : 0));
         a.sync_port = local_sync_port;
         return encode_announce(a, buffer);
     }

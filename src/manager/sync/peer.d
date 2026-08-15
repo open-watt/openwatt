@@ -128,11 +128,8 @@ nothrow @nogc:
         => _time_authority;
     final void time_authority(bool value)
     {
-        if (_time_authority == value)
-            return;
-        _time_authority = value;
-        _next_time_poll = getTime();
-        mark_set!(typeof(this), "time-authority")();
+        _time_authority_from_claim = false;
+        set_time_authority(value);
     }
 
     void bind_remote(ref const InetAddress addr)
@@ -515,6 +512,22 @@ protected:
     }
 
 package:
+    void grant_claim_time_authority()
+    {
+        if (_time_authority)
+            return;
+        _time_authority_from_claim = true;
+        set_time_authority(true);
+    }
+
+    void revoke_claim_time_authority()
+    {
+        if (!_time_authority_from_claim)
+            return;
+        _time_authority_from_claim = false;
+        set_time_authority(false);
+    }
+
     Array!String     _subscriptions;
     Array!BaseObject _bound;             // objects we've sent bind{...} to this peer
     Array!BaseObject _authoritative;     // proxies we hold on this peer's behalf
@@ -526,6 +539,21 @@ package:
     ulong            _remote_node_id;    // hello identity; 0 = peer announced none
     PeerRole         _remote_role;
     String           _remote_cluster;
+    ubyte[16]        _remote_nonce;      // session nonce from the peer's hello; anchors the claim HMAC
+    bool             _remote_nonce_set;
+    bool             _local_nonce_set;
+
+    // our session nonce, sent in hello; fresh per session (cleared on detach)
+    const(ubyte)[] local_nonce()
+    {
+        if (!_local_nonce_set)
+        {
+            import urt.crypto.random : crypto_random_bytes;
+            crypto_random_bytes(_local_nonce);
+            _local_nonce_set = true;
+        }
+        return _local_nonce[];
+    }
     Array!ushort     _ft_sent;           // FormatId -> session ft + 1; 0 = unsent
     uint             _next_ft;
     Array!(const(VoidEnumInfo)*) _enums_sent;
@@ -536,6 +564,7 @@ package:
     Array!EID        _pending_vals;      // dirty matched nodes awaiting this tick's flush
 
     bool     _time_authority;
+    bool     _time_authority_from_claim;
     bool     _time_subordinate;
     uint     _last_authority_version;
     uint     _time_seq;                  // 0 = no pull in flight
@@ -552,6 +581,15 @@ package:
     String   _want_log_tag;
 
 private:
+    void set_time_authority(bool value)
+    {
+        if (_time_authority == value)
+            return;
+        _time_authority = value;
+        _next_time_poll = getTime();
+        mark_set!(typeof(this), "time-authority")();
+    }
+
     enum retransmit_ms = 250;
     enum max_retries = 8;
     enum max_unacked = 64;
@@ -609,6 +647,7 @@ private:
     bool                    _ctl_ack_pending;
     InetAddress             _remote_addr;
     InetAddress             _remote;
+    ubyte[16]               _local_nonce;
     uint                    _tx_session;
     uint                    _rx_session;
     ubyte                   _tx_seq;         // last sequence assigned
@@ -940,4 +979,31 @@ private:
         if (sig == StateSignal.offline)
             restart();
     }
+}
+
+
+unittest
+{
+    SyncPeer peer = defaultAllocator().allocT!SyncPeer(CID(1));
+    scope(exit) defaultAllocator().freeT(peer);
+
+    peer.grant_claim_time_authority();
+    assert(peer.time_authority);
+    assert(peer._time_authority_from_claim);
+    peer.revoke_claim_time_authority();
+    assert(!peer.time_authority);
+    assert(!peer._time_authority_from_claim);
+
+    peer.time_authority(true);
+    peer.grant_claim_time_authority();
+    assert(!peer._time_authority_from_claim);
+    peer.revoke_claim_time_authority();
+    assert(peer.time_authority);
+
+    peer.time_authority(false);
+    peer.grant_claim_time_authority();
+    peer.time_authority(true);
+    assert(!peer._time_authority_from_claim);
+    peer.revoke_claim_time_authority();
+    assert(peer.time_authority);
 }

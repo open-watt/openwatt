@@ -365,16 +365,18 @@ nothrow @nogc:
         _buf.put_varint(node_id());
         _buf ~= disco.local_role;
         _buf.put_str(disco.local_cluster[]);
+        _buf.put_str(cast(const(char)[])peer.local_nonce());
         send_frame(peer);
     }
 
-    override void encode_claim(SyncPeer peer, uint seq, const(char)[] cluster, uint priority, const(char)[] auth)
+    override void encode_claim(SyncPeer peer, uint seq, const(char)[] cluster, uint priority, const(char)[] auth, const(char)[] key)
     {
         begin_frame(Verb.claim);
         _buf.put_varint(seq);
         _buf.put_str(cluster);
         _buf.put_varint(priority);
         _buf.put_str(auth);
+        _buf.put_str(key);
         send_frame(peer);
     }
 
@@ -791,6 +793,7 @@ nothrow @nogc:
                 ulong nid = 0;
                 PeerRole role;
                 const(char)[] cluster;
+                const(ubyte)[] nonce;
                 if (!r.fail && r.more)
                 {
                     nid = r.varint();
@@ -798,9 +801,11 @@ nothrow @nogc:
                     if (rb <= PeerRole.max)
                         role = cast(PeerRole)rb;
                     cluster = r.str();
+                    if (!r.fail && r.more)
+                        nonce = cast(const(ubyte)[])r.str();
                 }
                 if (!r.fail)
-                    sync.inbound_hello(peer, ver, host, caps, max_frame, nid, role, cluster);
+                    sync.inbound_hello(peer, ver, host, caps, max_frame, nid, role, cluster, nonce);
                 break;
             }
 
@@ -810,8 +815,9 @@ nothrow @nogc:
                 const(char)[] cluster = r.str();
                 uint priority = cast(uint)r.varint();
                 const(char)[] auth = r.str();
+                const(char)[] key = r.more ? r.str() : null;
                 if (!r.fail)
-                    sync.inbound_claim(peer, seq, cluster, priority, auth);
+                    sync.inbound_claim(peer, seq, cluster, priority, auth, key);
                 break;
             }
 

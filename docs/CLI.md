@@ -595,6 +595,9 @@ Datagram links carry no death signal, so a peer whose source goes quiet is
 swept after the idle timeout; a re-appearing source simply spawns afresh.
 It listens on UDP port `4712` unless `port` is set.
 
+The peering agent creates one of these (named `peering`) for `role=member`;
+explicit instances serve hand-wired datagram sync.
+
 | Property | Values | Default | Description |
 | --- | --- | --- | --- |
 | `port` | `1` to `65535` | `4712` | Port the listener binds. |
@@ -649,8 +652,22 @@ shape); a claim naming a second cluster is refused. Claims are runtime state:
 when the last claimant's session dies the member reverts to unbound and is
 re-claimed within a beacon interval.
 
-An `authority` sweeps the neighbour table and claims unbound members matching
-the `claim` filter.
+A member listens for claimants' sessions on the sync port: a dynamic
+`/sync/udp-server` named `peering`, bound to the ether wildcard, created and
+destroyed with the role. Its port rides the discovery beacons, so an authority
+learns where to connect without configuration.
+
+An `authority` sweeps the neighbour table every few seconds and claims members
+matching the `claim` filter: it builds a dynamic connected `/interface/udp`
+toward the member's address and beaconed port, spawns a dynamic `/sync/peer`
+named after the remote node, and sends the claim once the session says hello.
+Refused or unanswered claims tear the pair down and back off per candidate
+(30s doubling to 10m). A member already claimed by its own cluster is still
+claimed by an authority holding no session to it: that is how a second
+authority takes its dual-authority seat, and how a restarted authority
+re-adopts its fleet. A member that reboots out from under a session the
+datagram link cannot pronounce dead is detected by its unbound beacon and
+re-claimed.
 
 | Property | Values | Default | Description |
 | --- | --- | --- | --- |
@@ -659,10 +676,19 @@ the `claim` filter.
 | `cluster` | name | empty | Fleet this node belongs to. A member with no cluster accepts (and adopts) any claimant's cluster, logging loudly; set one to pin the node. |
 | `priority` | number | `100` | Authority election precedence; lower wins, node-id breaks ties. |
 | `claim` | path glob | `*` | Authority only: which member names to adopt. |
-| `secret` | string | empty | Gates claims. The HMAC challenge is not yet implemented, so a configured secret currently refuses all claims. |
+| `secret` | string | empty | The fleet key, set by hand. Normally unset: the authority mints one at first adoption and hands it to each factory member inside the claim; thereafter claims prove it with an HMAC over the member's per-session hello nonce, so the key never travels again and a captured claim cannot replay. |
+| `port` | `1` to `65535` | `7000` | Member only: sync port the claim listener binds; advertised in discovery beacons. |
+
+A factory member (no key) is adopted by the first claiming authority: the claim hands the
+fleet key over (the one trust-on-first-use moment), and the member persists its allegiance
+(`{cluster, key}` in `conf/fleet.id`) across reboots, beaconing `adopted` and refusing any
+claim that cannot prove the key. `reset` is the factory reset: it clears the allegiance and
+the node is adoptable again immediately.
 
 ```text
-/sync/peering set role=member cluster=home
+/sync/peering set role=member                      # factory: adopted by whoever claims first
 /sync/peering set role=authority cluster=home claim=*
 /sync/peering print
+/sync/peering reset                                # factory reset: leave the fleet
 ```
+
