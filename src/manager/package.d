@@ -457,6 +457,8 @@ nothrow @nogc:
 
         console.set_prompt(StringLit!"> ");
 
+        apply_factory_hostname();
+
         console.register_command!log_level("/system", this);
         console.register_command!set_hostname("/system", this);
         console.register_command!get_hostname("/system", this, "hostname");

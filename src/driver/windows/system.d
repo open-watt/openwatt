@@ -14,6 +14,9 @@ void system_reboot()
     exit(0);
 }
 
+// computers carry a software identity (persisted node.id); no chip-burned id here
+ulong unique_device_id() => 0;
+
 bool   reboot_pending() => false;
 bool   ota_supported() => false;
 size_t ota_partition_size() => 0;

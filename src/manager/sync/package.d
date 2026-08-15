@@ -76,8 +76,10 @@ import manager.log;
 import manager.syslog;
 import manager.system : hostname;
 import manager.sync.binary_encoder;
+import manager.sync.discovery : PeerRole;
 import manager.sync.encoder;
 import manager.sync.json_encoder;
+import manager.sync.peering : SyncPeeringModule;
 import manager.sync.peer;
 import manager.sync.udp_server;
 static if (has_http)
@@ -330,6 +332,8 @@ nothrow @nogc:
 
     void detach_peer(SyncPeer p)
     {
+        get_module!SyncPeeringModule.peer_detached(p);
+
         // Destroy proxies we held on this peer's behalf.
         foreach (obj; p._authoritative[])
         {
@@ -924,10 +928,27 @@ nothrow @nogc:
 
     // Inbound: model plane
 
-    void inbound_hello(SyncPeer from, uint ver, const(char)[] host, ubyte caps, uint max_frame)
+    void inbound_hello(SyncPeer from, uint ver, const(char)[] host, ubyte caps, uint max_frame,
+                       ulong node_id = 0, PeerRole role = PeerRole.none, const(char)[] cluster = null)
     {
+        import urt.conv : format_uint;
+
         from._remote_caps = caps;
-        log.info("sync: hello from '", from.name[], "' host='", host, "' ver=", ver, " caps=", caps);
+        from._remote_node_id = node_id;
+        from._remote_role = role;
+        if (from._remote_cluster[] != cluster)
+            from._remote_cluster = cluster.makeString(defaultAllocator);
+
+        char[16] nid = void;
+        if (node_id)
+            format_uint(node_id, nid[], 16, 16, '0');
+        log.info("hello from '", from.name[], "' host='", host, "' ver=", ver, " caps=", caps,
+                 node_id ? " node=" : "", node_id ? nid[] : "");
+    }
+
+    void inbound_claim(SyncPeer from, uint seq, const(char)[] cluster, uint priority, const(char)[] auth)
+    {
+        get_module!SyncPeeringModule.handle_claim(from, seq, cluster, priority, auth);
     }
 
     void inbound_model_sub(SyncPeer from, uint seq, const(char[])[] patterns, bool once, ulong from_ms = 0, ulong to_ms = 0)

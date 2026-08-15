@@ -209,6 +209,11 @@ nothrow @nogc:
 
     abstract void encode_hello(SyncPeer peer);
 
+    // Peering claim (docs/PEERING.draft.md): authority asks the member to bind to
+    // its cluster. The member answers res(seq) or err(seq, "claimed"/"access_denied").
+    // auth carries the HMAC challenge response when secrets land; empty until then.
+    abstract void encode_claim(SyncPeer peer, uint seq, const(char)[] cluster, uint priority, const(char)[] auth);
+
     abstract void encode_model_sub(SyncPeer peer, uint seq, const(char[])[] patterns, bool once);
 
     // form 1: intern a format under a session ft id

@@ -69,6 +69,7 @@ enum Verb : ubyte
     err,
     suggest,
     suggestions,
+    claim,
 }
 
 
@@ -349,13 +350,31 @@ nothrow @nogc:
 
     override void encode_hello(SyncPeer peer)
     {
-        import manager.system : hostname;
+        import manager : get_module;
+        import manager.system : hostname, node_id;
+        import manager.sync.discovery : SyncDiscoveryModule;
 
         begin_frame(Verb.hello);
         _buf.put_varint(model_protocol_version);
         _buf.put_str(hostname[]);
         _buf ~= local_sync_caps;
         _buf.put_varint(max_frame_size);
+
+        // identity tail; pre-identity decoders stop at max_frame and ignore it
+        auto disco = get_module!SyncDiscoveryModule;
+        _buf.put_varint(node_id());
+        _buf ~= disco.local_role;
+        _buf.put_str(disco.local_cluster[]);
+        send_frame(peer);
+    }
+
+    override void encode_claim(SyncPeer peer, uint seq, const(char)[] cluster, uint priority, const(char)[] auth)
+    {
+        begin_frame(Verb.claim);
+        _buf.put_varint(seq);
+        _buf.put_str(cluster);
+        _buf.put_varint(priority);
+        _buf.put_str(auth);
         send_frame(peer);
     }
 
@@ -762,12 +781,37 @@ nothrow @nogc:
 
             case Verb.hello:
             {
+                import manager.sync.discovery : PeerRole;
+
                 uint ver = cast(uint)r.varint();
                 const(char)[] host = r.str();
                 ubyte caps = r.u8();
                 uint max_frame = cast(uint)r.varint();
+
+                ulong nid = 0;
+                PeerRole role;
+                const(char)[] cluster;
+                if (!r.fail && r.more)
+                {
+                    nid = r.varint();
+                    ubyte rb = r.u8();
+                    if (rb <= PeerRole.max)
+                        role = cast(PeerRole)rb;
+                    cluster = r.str();
+                }
                 if (!r.fail)
-                    sync.inbound_hello(peer, ver, host, caps, max_frame);
+                    sync.inbound_hello(peer, ver, host, caps, max_frame, nid, role, cluster);
+                break;
+            }
+
+            case Verb.claim:
+            {
+                uint seq = cast(uint)r.varint();
+                const(char)[] cluster = r.str();
+                uint priority = cast(uint)r.varint();
+                const(char)[] auth = r.str();
+                if (!r.fail)
+                    sync.inbound_claim(peer, seq, cluster, priority, auth);
                 break;
             }
 
@@ -1155,6 +1199,9 @@ nothrow @nogc:
     const(ubyte)[] buf;
     size_t pos;
     bool fail;
+
+    bool more() const pure
+        => pos < buf.length;
 
     ubyte u8()
     {

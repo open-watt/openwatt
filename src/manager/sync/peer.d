@@ -21,6 +21,7 @@ import manager.log;
 import manager.series : FormatId;
 import manager.syslog;
 import manager.sync;
+import manager.sync.discovery : PeerRole;
 import manager.sync.encoder;
 
 import router.iface;
@@ -522,6 +523,9 @@ package:
     SyncEncoderKind  _encoder;
 
     ubyte            _remote_caps;       // hello negotiation; 0 = no hello received
+    ulong            _remote_node_id;    // hello identity; 0 = peer announced none
+    PeerRole         _remote_role;
+    String           _remote_cluster;
     Array!ushort     _ft_sent;           // FormatId -> session ft + 1; 0 = unsent
     uint             _next_ft;
     Array!(const(VoidEnumInfo)*) _enums_sent;

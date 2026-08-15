@@ -611,3 +611,58 @@ with the peer. The last of `transport` and `remote` set wins.
 | Property | Values | Description |
 | --- | --- | --- |
 | `remote` | `address:port`, `[ipv6]:port`, `[mac]:port` | Remote UDP peer. The address and port are both required. |
+
+### `/sync/discover/ether`
+
+An ether discovery domain beacons this node's peering identity (node-id, name,
+role, cluster, claim state) over the OpenWatt ethertype on one ethernet
+station, and feeds received beacons into the neighbour table. Domains are the
+per-medium opt-in: no domain configured, no beacons sent or consumed on that
+medium.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `interface` | ethernet station name | required | Segment to beacon on. |
+| `interval` | duration | `30s` | Beacon cadence. |
+
+### `/sync/neighbor`
+
+`print` lists every node heard through any discovery domain: node-id, name,
+role, cluster, claim state, the station it was heard on, its MAC, and the age
+of its last beacon. Entries age out after 10 minutes of silence.
+
+```text
+/sync/discover/ether add name=lan interface=ether1
+/sync/neighbor print
+```
+
+### `/sync/peering`
+
+The peering agent (see [PEERING.draft.md](PEERING.draft.md)) is the node-global
+auto-peering policy: it does not exist as a collection, just `set`/`print` on a
+singleton. Setting `role=` is the opt-in (it implies `enabled=yes`).
+
+A `member` advertises itself as claimable through the configured discovery
+domains and accepts claims arriving on the sync channel. A member accepts any
+number of claimants from a single cluster (two claimants is the dual-authority
+shape); a claim naming a second cluster is refused. Claims are runtime state:
+when the last claimant's session dies the member reverts to unbound and is
+re-claimed within a beacon interval.
+
+An `authority` sweeps the neighbour table and claims unbound members matching
+the `claim` filter.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `enabled` | `yes`/`no` | `no` | Participate in peering; implied by setting `role`. |
+| `role` | `member`, `authority` | none | This node's peering role. |
+| `cluster` | name | empty | Fleet this node belongs to. A member with no cluster accepts (and adopts) any claimant's cluster, logging loudly; set one to pin the node. |
+| `priority` | number | `100` | Authority election precedence; lower wins, node-id breaks ties. |
+| `claim` | path glob | `*` | Authority only: which member names to adopt. |
+| `secret` | string | empty | Gates claims. The HMAC challenge is not yet implemented, so a configured secret currently refuses all claims. |
+
+```text
+/sync/peering set role=member cluster=home
+/sync/peering set role=authority cluster=home claim=*
+/sync/peering print
+```

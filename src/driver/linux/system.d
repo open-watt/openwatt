@@ -40,6 +40,10 @@ void system_reboot()
     g_reboot = true;
 }
 
+// computers carry a software identity (persisted node.id): a Pi's identity travels
+// with its SD card, not the board
+ulong unique_device_id() => 0;
+
 bool reboot_pending() => g_reboot;
 
 bool ota_supported() => true;
