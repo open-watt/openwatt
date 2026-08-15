@@ -150,21 +150,67 @@ first datagram from an unknown source. That is precisely the `/sync/udp-server` 
 described above, so the two land together -- and with `UDPFrame` throughout, that work no longer
 has to re-open framing.
 
-### Reliability split (phase 2)
+### Reliability split (phase 2) -- BUILT
 
 Not one scheme, two planes:
 
 - **Control plane** (registry, bind/create/destroy, set/reset, cmd/result, sub, type/add,
-  model_set, res/err): small, rare, must arrive in order. A thin reliable layer per peer:
-  frame seq (varint), piggybacked cumulative ack, retransmit on timeout, small window (4-8).
-  Sits between the encoder and the interface, or as a framing wrapper the peer applies --
-  placement decided when built; it must not leak into encoders.
-- **Data plane** (val/val_block, log, time_push): best-effort, no retransmit. Loss recovery is
-  the protocol's own machinery: latest-value overwrites, and point-series gaps detected by the
-  receiver trigger a `sub {from}` backfill.
+  model_set, res/err, claim, time_push): small, rare, must arrive in order and in good time.
+  time_push rides here because a lost delta corrupts every timestamp the subordinate collects
+  until the next push or the 17-minute poll repairs it.
+- **Data plane** (val/val_block, log): reliable but lazy. No retransmit timer and no urgency,
+  but nothing is willingly lost: unacked data refolds into the next frame as catch-up, so a
+  dropped val simply arrives as `{ts+val, ts+val}` alongside its successor. Peers agree on
+  history; `sub {from}` backfill is demoted to deep-history repair (rejoin after an outage
+  longer than the catch-up backlog).
 
-Classification is by verb, known at encode time; a flag on `transmit_frame` (or PCP/DEI on the
-packet: control = ca/DEI=0, data = be/DEI=1) carries it to the link.
+As built: the layer lives on the peer (the placement question resolved itself: reliability
+state is per remote, and on a shared multi-drop transport only the peer knows its remote).
+It arms when the transport doesn't advertise `reliable+ordered` -- both ends decide from
+their own link, so arming is symmetric by construction; websocket, CPC and shmem skip it.
+Armed, every frame carries `[src_session:4][dst_session:4][kind:1]` (fixed bytes; all windows
+are tiny, so seq/ack/id fields are wrapping single bytes). Control frames add `[seq][ack]`,
+are retransmitted on timeout (250ms doubling, 8 tries, then the session restarts) until the
+piggybacked cumulative ack covers them, and deliver strictly in order through a small reorder
+hold. Data frames carry `[epoch][ack_epoch][ack]` plus `[id][len:2][payload]` records: each
+queue (val, log) has its own id space and backlog, every data frame refolds the entire
+unacked backlog, and the receiver's per-queue watermark dedups replays while keeping
+application in order. A record the receiver can't apply yet -- a val racing its add through
+the control plane -- is left unacked, so the refold resupplies it until the add lands.
+Handles are announced in ascending order over the in-order control plane, so the receiver
+can tell that race from a poison: a handle below the announced high-water mark had its add
+delivered (adds announce their handle even when the node fails to materialise), so a val
+citing it that still doesn't resolve is dead and skipped as declared loss rather than
+stalling the queue; only handles above the high-water hold, and that hold is bounded by the
+control plane's own repair horizon. A bare ack carrying all watermarks goes out on the next
+tick when no reverse traffic piggybacks them.
+
+Bounded retention means eviction (cap overflow, or the ttl -- derived from the control
+retransmit schedule so it outlasts any legitimate repair) is possible, and eviction breaks
+the catch-up promise, so it is declared, not silent: the queue's epoch bumps once per
+repair cycle, and the receiver re-bases its watermark under a newer epoch's refold. That
+keeps the single-byte ids sound (within an epoch, watermark-to-newest distance is bounded
+by the backlog cap), and acks are epoch-qualified, so a pre-bump ack can never release
+post-bump frames through wrap ambiguity. A bump is durable: with nothing left to refold an
+empty frame keeps announcing it, and only an ack carrying the new epoch closes the repair
+cycle -- so however long a partition lasts, the epoch stays within one of the receiver and
+can never wrap out of its own comparison window. The gap itself is repaired above the
+sublayer once the cycle closes: a val-queue bump re-pushes the latest value of every armed
+live node (idempotent, so the mirror is correct again and only intermediate history is
+missing -- backfill's job), and a log-queue bump emits a lost-lines marker.
+
+Session ids echo rather than "new id wins": a frame is honored only when its `dst` matches
+the receiver's live tx session (`dst 0` passes only for a stream-opening hello, or while
+`src` is already the adopted session), so stragglers from a dead session can neither deliver
+nor ack. Adopting a genuinely new `src` restarts the peer -- the remote rebooted and the whole
+session space (handles, interning, subs) must rebuild -- and the freshly-restarted side
+re-adopts from zero without restarting again, so mutual restart cannot ping-pong.
+
+Classification is by verb at encode time, carried as a queue tag on `transmit_frame`; the
+four data-plane emitters in each encoder are the only call sites that tag it. Control
+transmit is accepted-means-enqueued (the backpressure contract above): a control frame is
+only lost if the peer is genuinely dead, at which point the session restarts and re-syncs
+from hello. PCP/DEI marking of the underlying packets remains a TODO.
 
 ### Multicast (phase 5)
 
@@ -252,7 +298,7 @@ legacy device forces it; default is a uniform bus.
 3. **Shmem ring** (with the BL808 work): sibling class, binary encoder's original target.
 4. **CPC endpoint transport** + **RS485 envelope**: RS485 benefits from the mux/seq conventions
    the others settle.
-5. **UDP reliability layer** (control-plane seq/ack), **peer sub-interfaces** /
+5. ~~UDP reliability layer~~ -- done (see Reliability split above). Remaining: **peer sub-interfaces** /
    `/sync/udp-server`, then **multicast**.
 
 Order of 2 vs 5a is flexible: the UDP control-plane layer may *be* the backpressure contract's

@@ -303,7 +303,7 @@ nothrow @nogc:
         begin_frame("log");
         _buf.append(",\"msg\":");
         write_str(line);
-        send_frame(peer);
+        send_frame(peer, TxQueue.log);
         return !_last_drop;
     }
 
@@ -345,7 +345,7 @@ nothrow @nogc:
         begin_frame("time_push");
         _buf.append(",\"ver\":", ver);
         _buf.append(",\"delta\":", delta_ns);
-        send_frame(peer);
+        send_frame(peer);   // control: staleness corrupts collection timestamps until repaired
     }
 
     // Outbound: model plane
@@ -493,7 +493,7 @@ nothrow @nogc:
         Variant v = e.value;
         write_variant(v);
         _buf ~= "]]";
-        send_frame(peer);
+        send_frame(peer, TxQueue.val);
     }
 
     override void encode_val_block(SyncPeer peer, SyncHandle h, ref const RecordBlock blk)
@@ -515,7 +515,7 @@ nothrow @nogc:
             _buf ~= ']';
         }
         _buf ~= ']';
-        send_frame(peer);
+        send_frame(peer, TxQueue.val);
     }
 
     override void encode_res(SyncPeer peer, uint seq)
@@ -546,20 +546,20 @@ nothrow @nogc:
 
     // Inbound
 
-    override void decode_and_dispatch(SyncPeer peer, const(ubyte)[] frame)
+    override bool decode_and_dispatch(SyncPeer peer, const(ubyte)[] frame)
     {
         Variant json = parse_json(cast(char[])cast(const(char)[])frame);
         if (!json.isObject)
         {
             log.warning("sync/json: frame is not a JSON object");
-            return;
+            return true;
         }
 
         const(char)[] kind_str = json.getMember("kind").asString();
         if (kind_str.length == 0)
         {
             log.warning("sync/json: frame missing 'kind' field");
-            return;
+            return true;
         }
 
         switch (kind_str)
@@ -764,7 +764,8 @@ nothrow @nogc:
                     ref Variant pair = (*s)[i];
                     if (!pair.isArray || pair.length() < 2)
                         continue;
-                    sync.inbound_val(peer, h, pair[1], pair[0].asUlong());
+                    if (!sync.inbound_val(peer, h, pair[1], pair[0].asUlong()))
+                        return false;
                 }
                 break;
             }
@@ -891,6 +892,7 @@ nothrow @nogc:
                 log.warning("sync/json: unknown kind: ", kind_str);
                 break;
         }
+        return true;
     }
 
     // For bind: iterate the frame's "props" object (if present) and emit one
@@ -966,10 +968,10 @@ private:
         _buf.append("{\"kind\":\"", kind, "\"");
     }
 
-    void send_frame(SyncPeer peer)
+    void send_frame(SyncPeer peer, TxQueue queue = TxQueue.control)
     {
         _buf ~= '}';
-        _last_drop = peer.transmit_frame(cast(const(ubyte)[])_buf[], true) < 0;
+        _last_drop = peer.transmit_frame(cast(const(ubyte)[])_buf[], true, queue) < 0;
         if (_last_drop)
         {
             // event-driven encodes (state/cmd/result/error/sub/...) have no retry path!!

@@ -173,8 +173,9 @@ private:
             log.warning("failed to create sync peer for ", src);
             return;
         }
-        peer.transport(_iface);
         peer.encoder(_encoder);
+        // transport() clears the binding; its initial hello retries once bound.
+        peer.transport(_iface);
         peer.bind_remote(src);
         peer.subscribe_transport();
         _peers ~= Spawned(src, peer, getTime());

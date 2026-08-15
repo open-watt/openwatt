@@ -73,6 +73,8 @@ nothrow @nogc:
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!WebSocket, id, flags);
+        _caps |= InterfaceCaps.reliable | InterfaceCaps.ordered;   // TCP-backed: consumers needn't supply either
+        mark_set!(typeof(this), "caps")();
     }
 
     // Properties...
