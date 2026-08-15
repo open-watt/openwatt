@@ -444,6 +444,9 @@
     <DCompile Include="src\manager\sync\json_encoder.d">
       <Filter>src\manager\sync</Filter>
     </DCompile>
+    <DCompile Include="src\manager\sync\peering.d">
+      <Filter>src\manager\sync</Filter>
+    </DCompile>
     <DCompile Include="src\manager\sync\package.d">
       <Filter>src\manager\sync</Filter>
     </DCompile>

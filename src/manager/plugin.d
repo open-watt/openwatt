@@ -75,13 +75,15 @@ mixin template DeclareModule(string name)
 //
 void register_modules(Application app)
 {
-    import manager.log, manager.cron, manager.object_signal, manager.record, manager.sync, manager.sync.discovery;
+    import manager.log, manager.cron, manager.object_signal, manager.record, manager.sync, manager.sync.discovery,
+           manager.sync.peering;
     register_module!(manager.log)(app);
     register_module!(manager.cron)(app);
     register_module!(manager.object_signal)(app);
     register_module!(manager.record)(app);
     register_module!(manager.sync)(app);
     register_module!(manager.sync.discovery)(app);
+    register_module!(manager.sync.peering)(app);
 
     version (NoIDFLog) {}
     else version (ESP8266) {}

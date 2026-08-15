@@ -372,3 +372,16 @@ const(char)[] role_name(PeerRole role)
         case PeerRole.authority: return "authority";
     }
 }
+
+bool role_from_name(const(char)[] s, out PeerRole role)
+{
+    static foreach (m; __traits(allMembers, PeerRole))
+    {
+        if (s[] == role_name(__traits(getMember, PeerRole, m))[])
+        {
+            role = __traits(getMember, PeerRole, m);
+            return true;
+        }
+    }
+    return false;
+}

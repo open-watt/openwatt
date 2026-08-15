@@ -352,12 +352,27 @@ nothrow @nogc:
 
     override void encode_hello(SyncPeer peer)
     {
-        import manager.system : hostname;
+        import urt.conv : format_uint;
+        import manager : get_module;
+        import manager.system : hostname, node_id;
+        import manager.sync.discovery : SyncDiscoveryModule, PeerRole, role_name;
 
         begin_frame("hello");
         _buf.append(",\"ver\":", model_protocol_version);
         _buf.append(",\"host\":");
         write_str(hostname[]);
+
+        char[16] id = void;
+        format_uint(node_id(), id[], 16, 16, '0');
+        _buf.append(",\"node\":\"", id[], '\"');
+        auto disco = get_module!SyncDiscoveryModule;
+        if (disco.local_role != PeerRole.none)
+            _buf.append(",\"role\":\"", role_name(disco.local_role), '\"');
+        if (disco.local_cluster.length)
+        {
+            _buf ~= ",\"cluster\":";
+            write_str(disco.local_cluster[]);
+        }
         _buf ~= ",\"caps\":[";
         bool first = true;
         foreach (bit; 0 .. 8)
@@ -371,6 +386,21 @@ nothrow @nogc:
         }
         _buf ~= "],\"encoders\":[\"json\"]";
         _buf.append(",\"max_frame\":", max_frame_size);
+        send_frame(peer);
+    }
+
+    override void encode_claim(SyncPeer peer, uint seq, const(char)[] cluster, uint priority, const(char)[] auth)
+    {
+        begin_frame("claim");
+        _buf.append(",\"seq\":", seq);
+        _buf ~= ",\"cluster\":";
+        write_str(cluster);
+        _buf.append(",\"priority\":", priority);
+        if (auth.length)
+        {
+            _buf ~= ",\"auth\":";
+            write_str(auth);
+        }
         send_frame(peer);
     }
 
@@ -697,7 +727,28 @@ nothrow @nogc:
                     }
                 }
                 Variant* mf = json.getMember("max_frame");
-                sync.inbound_hello(peer, json.getMember("ver").asUint(), json.getMember("host").asString(), caps, mf ? mf.asUint() : 0);
+
+                import urt.conv : parse_uint;
+                import manager.sync.discovery : PeerRole, role_from_name;
+                ulong nid = 0;
+                if (Variant* nv = json.getMember("node"))
+                    nid = parse_uint(nv.asString(), null, 16);
+                PeerRole role;
+                if (Variant* rv = json.getMember("role"))
+                    role_from_name(rv.asString(), role);
+                Variant* cl = json.getMember("cluster");
+
+                sync.inbound_hello(peer, json.getMember("ver").asUint(), json.getMember("host").asString(), caps, mf ? mf.asUint() : 0,
+                                   nid, role, cl ? cl.asString() : null);
+                break;
+            }
+
+            case "claim":
+            {
+                Variant* pr = json.getMember("priority");
+                Variant* auth = json.getMember("auth");
+                sync.inbound_claim(peer, json.getMember("seq").asUint(), json.getMember("cluster").asString(),
+                                   pr ? pr.asUint() : 0, auth ? auth.asString() : null);
                 break;
             }
 

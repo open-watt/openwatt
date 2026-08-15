@@ -136,13 +136,17 @@ authority; the authority-authority link carries coordination only, never fleet s
 
 ## Build order
 
-1. `/system` name + persistent node-id; point echo identify at it.
+1. `/system` name + persistent node-id; point echo identify at it. [done]
 2. Neighbour table on the sync hub + ether discovery domain (announce TLV + sweep reuse),
-   `/sync/neighbor print`.
-3. `/sync/peering` singleton, member side: announce unbound, accept claim, mark claimed.
+   `/sync/neighbor print`. [done]
+3. `/sync/peering` singleton, member side: announce unbound, accept claim, mark claimed. [done:
+   hello carries identity (node-id, role, cluster); claim rides the channel, answered res/err;
+   multiple claimants from one cluster accepted (the dual-authority seat); last-detach reverts
+   to unbound]
 4. Authority side: claim filter, transport factory via UDPInterface-over-ether, dynamic peer
    spawn/sweep.
-5. Claim auth (secret + HMAC challenge).
+5. Claim auth (secret + HMAC challenge). The `secret=` property exists; setting it refuses all
+   claims until the challenge lands.
 6. Dual-authority: authority-authority session, election, membership exchange.
 7. Later domains: UDP multicast for routed segments, modbus function-code discovery per the
    L2/L3 trajectory.
