@@ -64,3 +64,54 @@ through them and remove sections as they are absorbed.
 - `.conf` and `.log` serve as `text/plain`, `.yaml`/`.yml` as `text/yaml`, so they display
   in a browser tab instead of downloading as `application/octet-stream`.
 - There is no ETag/If-Match yet: two editors saving the same file last-writer-wins.
+
+## 2026-08-12: link speed is populated on every interface, and on streams
+
+- `tx-link-speed` / `rx-link-speed` (bits per second) previously only ever had a value on
+  platform ethernet interfaces. Every interface type now reports one where it can: modbus,
+  can, tesla-twc, zigbee, ble, i2c, ash, cpc (trunk and endpoints), websocket, ppp, vlan,
+  bridge and udp. Views that hid the field, special-cased ethernet, or assumed it meant
+  "ethernet only" should now render it for any interface.
+- `0` still means unknown and must be rendered as such, not as "0 bit/s" or as a down link.
+  It is a genuine outcome: a modbus interface reached over a TCP bridge with no configured
+  or estimated baud honestly does not know its bus rate. `link-status` remains the only
+  thing that says whether the link is up.
+- The fields are now cleared when an interface goes offline and restamped when it comes
+  back, so a client holding a cached value across a link bounce sees it go to 0 and back.
+- Streams gain the same two read-only properties, so `/stream/print` and stream detail
+  views can show the rate of a serial port, or of whatever a tunnel rides on.
+- WLAN interfaces report the negotiated PHY rate where the platform exposes it, and the
+  theoretical maximum for the negotiated mode where it does not, so the number moves with
+  link quality on some platforms and is a fixed ceiling on others. Clients should not
+  present it as a measured throughput; `tx-rate`/`rx-rate` remain the measured counters.
+
+## 2026-08-13: WLAN interfaces report the negotiated PHY as `phy-mode`
+
+- New read-only property `phy-mode` on `/interface/wlan`, a display string such as `VHT80
+  2SS`: the 802.11 mode name with the channel width folded in the way the standard names
+  them, the spatial stream count, and `SGI` when a short guard interval is in use.
+- It is a label, not something to parse or compute with. The number that goes with it is
+  already `tx-link-speed`/`rx-link-speed`. Render it as-is.
+- Empty means not associated, or that the platform could not name the PHY at all. Parts are
+  omitted rather than guessed, so the string is not a fixed shape: Windows reports only the
+  family (`VHT`) because the association carries no width or stream count, and `11a`/`11b`/`11g`
+  never carry a width. Don't assume three space-separated fields.
+- It sits with `bssid`/`rssi`/`signal-quality` because it describes the association, not the
+  radio.
+
+## 2026-08-13: radios report `phy-capability`, APs report their operating `phy-mode`
+
+- `phy-mode` is now on `/interface/ap` as well as `/interface/wlan`, same format and same
+  rules. On an AP it is what the BSS operates at, which is the ceiling for every client on
+  it, not any one client's negotiated rate. Per-client PHY is not reported: there is no
+  client object to attach it to.
+- New read-only `phy-capability` on `/interface/wifi` (the radio), same format again: the
+  hardware's own ceiling, e.g. `HE160 2SS`. A bound WLAN's `phy-mode` is at or below it.
+  A concrete `band` reports that band's ceiling; `band=any` reports the best supported band.
+  Useful as the denominator when showing how good a link is relative to the hardware.
+- Expect these to be partly filled, and don't infer "broken" from a short string. Linux and
+  ESP32 report all three parts; Windows reports no capability at all, as it exposes no API
+  for it.
+- Worth surfacing in UI: on Linux an AP currently reads legacy `11g` on 2.4 GHz or `11a` on
+  5/6 GHz, because both AP backends run the BSS non-HT, so clients are capped at 54 Mbit/s
+  no matter what the radio can do. That is real, not a reporting artifact.

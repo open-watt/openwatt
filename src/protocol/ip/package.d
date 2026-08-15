@@ -653,6 +653,16 @@ nothrow @nogc:
     bool connected() const pure
         => _phase == Phase.open;
 
+    // interface this connection's route egresses through; null when the OS owns the socket and the
+    // route is opaque to us
+    inout(BaseInterface) egress_iface() inout pure
+    {
+        version (UseInternalIPStack)
+            return _pcb ? _pcb.route_egress : null;
+        else
+            return null;
+    }
+
     // bytes accepted by send() but not yet handed to the network
     size_t tx_backlog() const pure
     {
@@ -1459,6 +1469,23 @@ struct UDPEndpoint
 nothrow @nogc:
     InetAddress remote() const pure
         => _remote;
+
+    // interface datagrams egress through; null when the endpoint is multi-drop or the OS owns the route
+    BaseInterface egress_iface()
+    {
+        if (_ether)
+            return _ether.iface;
+        version (UseInternalIPStack)
+        {
+            if (_stack_ptr && _remote.family == AddressFamily.ipv4)
+            {
+                RouteResult r = _stack_ptr.route_lookup_v4_dst(v4_addr(_remote));
+                if (r.kind == RouteResult.Kind.forward)
+                    return r.out_iface;
+            }
+        }
+        return null;
+    }
 
     // Send to the connected remote (set at open). Returns bytes sent, or 0.
     version (UseInternalIPStack)

@@ -312,6 +312,11 @@ nothrow @nogc:
         return _inner ? _inner.flush() : 0;
     }
 
+    override ulong tx_link_speed() const
+        => _inner ? _inner.tx_link_speed : 0;
+    override ulong rx_link_speed() const
+        => _inner ? _inner.rx_link_speed : 0;
+
 
 protected:
 

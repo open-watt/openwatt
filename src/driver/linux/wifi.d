@@ -18,7 +18,7 @@ import urt.mem.temp;
 import urt.string;
 import urt.time;
 
-import urt.driver.wifi : WifiScanResult, WifiScanConfig, WifiBand, DrvWifiAuth = WifiAuth;
+import urt.driver.wifi : WifiScanResult, WifiScanConfig, WifiBand, WifiStaLinkInfo, DrvWifiAuth = WifiAuth;
 import urt.meta.nullable : Nullable;
 
 import manager;
@@ -397,6 +397,9 @@ protected:
                      " max-monitors=", _phy_caps.max_monitors);
         }
 
+        auto phy = _phy_caps.phy_capability(band);
+        set_phy_capability(phy.phy, phy.bandwidth, phy.nss);
+
         if (!band_available())
         {
             _startup_block = "band is not supported by this radio";
@@ -599,8 +602,6 @@ private:
         if (c & AdapterChange.mtu)       mark_set!(typeof(this), [ "l2mtu", "actual-mtu" ])();
         if (c & AdapterChange.max_mtu)   mark_set!(typeof(this), "max-l2mtu")();
         if (c & AdapterChange.connected) mark_set!(typeof(this), "connected")();
-        if (c & AdapterChange.tx_speed)  mark_set!(typeof(this), "tx-link-speed")();
-        if (c & AdapterChange.rx_speed)  mark_set!(typeof(this), "rx-link-speed")();
     }
 
     void apply_configured_mtu()
@@ -1242,6 +1243,9 @@ protected:
             apply_configured_mtu();
             refresh_os_state();
             register_fdwatch();
+            // once per start cycle: resolve_nl80211 is a blocking round trip and startup() re-runs
+            // every frame until the association completes
+            open_link_socket();
         }
 
         // Publish the netdev ifindex so the IP mirror can place an address on it
@@ -1298,6 +1302,14 @@ protected:
         }
     }
 
+    override void online()
+    {
+        super.online();
+
+        // the link rate was cleared by going offline; the periodic poll is up to a second away
+        refresh_link_rate();
+    }
+
     override CompletionStatus shutdown()
     {
         version (WifiStaKernel)
@@ -1311,6 +1323,7 @@ protected:
             cancel_scan_retry();
         }
         unregister_fdwatch();
+        close_link_socket();
         _sta.close();
         _raw.close();
         version (WifiStaKernel)
@@ -1361,6 +1374,7 @@ protected:
                     restart();
                     return;
                 }
+                refresh_link_rate();
             }
             pump_raw_frames();
         }
@@ -1377,6 +1391,9 @@ protected:
 private:
     RawAdapter _raw;
     SysTime _last_refresh;
+    MonoTime _last_rate_poll;
+    int _link_fd = -1;      // GET_STATION command socket, independent of whoever runs the supplicant
+    ushort _link_family;
     bool _fdwatch_registered;
 
     version (WifiStaKernel)
@@ -1409,9 +1426,68 @@ private:
         OSAdapterInfo info;
         if (!query_adapter(r.netdev, info))
             return;
+        // note the sysfs path carries no link speed: /sys/class/net/<if>/speed is an ethtool field
+        // that wireless drivers leave at -1 or stale. refresh_link_rate() owns the rate here.
         AdapterChange c = apply_os_adapter_info(this, _l2mtu, _max_l2mtu, _status, info);
         if (c & AdapterChange.mtu)     mark_set!(typeof(this), [ "l2mtu", "actual-mtu" ])();
         if (c & AdapterChange.max_mtu) mark_set!(typeof(this), "max-l2mtu")();
+    }
+
+    void open_link_socket()
+    {
+        if (_link_fd >= 0)
+            return;
+        _link_fd = nl_open_socket(false);
+        if (_link_fd < 0)
+            return;
+        uint scan_grp, mlme_grp;
+        if (!resolve_nl80211(_link_fd, _link_family, scan_grp, mlme_grp))
+            nl_close(_link_fd);
+    }
+
+    void close_link_socket()
+    {
+        nl_close(_link_fd);
+        _link_family = 0;
+        _last_rate_poll = MonoTime.init;
+    }
+
+    // Poll the negotiated PHY rate. Throttled to 1Hz because the kernel STA backend drives
+    // refresh_connected_state() from a packet-driven service_io, and this is a netlink round trip.
+    void refresh_link_rate()
+    {
+        if (_link_fd < 0 || _link_family == 0 || !_raw.valid)
+            return;
+        MonoTime now = getTime();
+        if (now - _last_rate_poll < 1.seconds)
+            return;
+        _last_rate_poll = now;
+
+        MACAddress peer = _sta.bssid;
+        if (!peer)
+            return;
+
+        auto r = cast(LinuxWifiRadio)radio;
+        WifiBand link_band = _sta.freq != 0 ? band_for_freq(_sta.freq)
+            : r ? r.band
+            : WifiBand.any;
+        WifiStaLinkInfo link;
+        if (!query_sta_link_info(_link_fd, _link_family, uint(_raw.ifindex), peer.b, link_band, link))
+            return;
+
+        ulong tx = ulong(link.tx_bitrate) * 1000;
+        ulong rx = ulong(link.rx_bitrate) * 1000;
+        if (tx == 0 || rx == 0)
+        {
+            // Driver named the PHY but not the rate: the mode's ceiling beats reporting nothing.
+            ulong peak = wifi_phy_max_rate(link.phy_mode, link.bandwidth, link.nss, link.short_gi);
+            if (tx == 0)
+                tx = peak;
+            if (rx == 0)
+                rx = peak;
+        }
+        set_link_speed(tx, rx);
+        set_phy_mode(link.phy_mode, link.bandwidth, link.nss, link.short_gi);
     }
 
     void register_fdwatch()
@@ -1510,6 +1586,7 @@ private:
         void refresh_connected_state()
         {
             _sta.refresh_signal();
+            refresh_link_rate();
             ubyte ch = freq_to_channel(_sta.freq);
             if (ch != 0)
             {
@@ -1715,6 +1792,11 @@ protected:
             register_fdwatch();
         }
 
+        ubyte ch = r.target_channel();
+        WifiBand operating_band = r.band != WifiBand.any ? r.band
+            : ch <= 14 ? WifiBand._2_4ghz
+            : WifiBand._5ghz;
+
         version (WifiApKernel)
         {
             if (!_ap.valid)
@@ -1730,9 +1812,7 @@ protected:
 
             if (!_ap.running)
             {
-                ubyte ch = r.target_channel();
-                WifiBand band = r.band != WifiBand.any ? r.band : (ch <= 14 ? WifiBand._2_4ghz : WifiBand._5ghz);
-                if (!_ap.start(ssid, get_password(), channel_to_freq(ch, band), ch, hidden))
+                if (!_ap.start(ssid, get_password(), channel_to_freq(ch, operating_band), ch, hidden))
                     return CompletionStatus.continue_;
                 _running_channel = ch;
                 arm_ap_timer_if_needed();
@@ -1751,7 +1831,6 @@ protected:
                     return CompletionStatus.continue_;
                 }
             }
-            ubyte ch = r.target_channel();
             if (!_ap.running || _running_channel != ch)
             {
                 if (!_ap.start(ssid, get_password(), auth, ch, r.country, hidden, client_isolation, max_clients))
@@ -1759,6 +1838,10 @@ protected:
                 _running_channel = ch;
             }
         }
+
+        // Both backends bring the BSS up non-HT: the kernel path asks for CHAN_WIDTH_20_NOHT and the
+        // hostapd config sets hw_mode without ieee80211n, so clients use the legacy mode for the band.
+        set_phy_mode(operating_band == WifiBand._2_4ghz ? WifiPhyMode.g : WifiPhyMode.a);
 
         // The BSS netdev is up; publish its kernel ifindex so the IP mirror
         // places ap0's address/routes on it (addresses added before the AP

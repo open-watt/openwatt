@@ -77,6 +77,14 @@ protected:
         return CompletionStatus.complete;
     }
 
+    override void online()
+    {
+        super.online();
+
+        if (Stream s = _stream)
+            set_link_speed(s.tx_link_speed, s.rx_link_speed);
+    }
+
     final override CompletionStatus shutdown()
     {
         return CompletionStatus.complete;

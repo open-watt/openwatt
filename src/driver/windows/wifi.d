@@ -234,12 +234,11 @@ private:
         OSAdapterInfo info;
         if (!query_adapter(_adapter[], info))
             return;
+        // the rate is a property of the association, so it lives on the bound WLAN, not on the radio
         AdapterChange c = apply_os_adapter_info(this, _l2mtu, _max_l2mtu, _status, info);
         if (c & AdapterChange.mtu)       mark_set!(typeof(this), [ "l2mtu", "actual-mtu" ])();
         if (c & AdapterChange.max_mtu)   mark_set!(typeof(this), "max-l2mtu")();
         if (c & AdapterChange.connected) mark_set!(typeof(this), "connected")();
-        if (c & AdapterChange.tx_speed)  mark_set!(typeof(this), "tx-link-speed")();
-        if (c & AdapterChange.rx_speed)  mark_set!(typeof(this), "rx-link-speed")();
     }
 }
 
@@ -400,6 +399,8 @@ private:
             _current_bssid = MACAddress();
             _current_rssi = 0;
             _signal_quality = 0;
+            set_link_speed(0);
+            set_phy_mode(WifiPhyMode.unknown);
             mark_set!(typeof(this), [ "ssid", "bssid", "rssi", "signal-quality", "status" ])();
         }
         else
@@ -420,17 +421,28 @@ private:
                 _current_rssi = rssi;
 
             mark_set!(typeof(this), [ "ssid", "bssid", "rssi", "signal-quality", "status" ])();
+
+            // Rates are kbit/s, and 0 means the miniport didn't report one. No wifi_phy_max_rate
+            // fallback: the association names the PHY but carries neither bandwidth nor stream count,
+            // so the only rate we could compute is the 20MHz single-stream one, several times under
+            // any MIMO link.
+            ref assoc = attrs.wlanAssociationAttributes;
+            set_link_speed(ulong(assoc.ulTxRate) * 1000, ulong(assoc.ulRxRate) * 1000);
+
+            // width and stream count aren't in the association, so the mode goes out on its own
+            set_phy_mode(to_phy_mode(assoc.dot11PhyType));
         }
 
         OSAdapterInfo info;
         if (!query_adapter(r.adapter, info))
             return;
+        // note the sysfs/iphlpapi path carries no link speed: iphlpapi's figure is fabricated for a
+        // native 802.11 miniport (an Intel AC 3168 reports a flat 120Mb/s while disassociated), so the
+        // association rate set above stands
         AdapterChange c = apply_os_adapter_info(this, _l2mtu, _max_l2mtu, _status, info);
         if (c & AdapterChange.mtu)       mark_set!(typeof(this), [ "l2mtu", "actual-mtu" ])();
         if (c & AdapterChange.max_mtu)   mark_set!(typeof(this), "max-l2mtu")();
         if (c & AdapterChange.connected) mark_set!(typeof(this), "connected")();
-        if (c & AdapterChange.tx_speed)  mark_set!(typeof(this), "tx-link-speed")();
-        if (c & AdapterChange.rx_speed)  mark_set!(typeof(this), "rx-link-speed")();
     }
 }
 
@@ -541,5 +553,31 @@ private:
                 return candidate;
         }
         return tconcat("wlan", 999);
+    }
+}
+
+
+// The association names only the PHY family; fhss, irbaseband and dmg (11ad) have no equivalent.
+private WifiPhyMode to_phy_mode(DOT11_PHY_TYPE type) pure
+{
+    switch (type)
+    {
+        case DOT11_PHY_TYPE.dsss:
+        case DOT11_PHY_TYPE.hrdsss:
+            return WifiPhyMode.b;
+        case DOT11_PHY_TYPE.ofdm:
+            return WifiPhyMode.a;
+        case DOT11_PHY_TYPE.erp:
+            return WifiPhyMode.g;
+        case DOT11_PHY_TYPE.ht:
+            return WifiPhyMode.n;
+        case DOT11_PHY_TYPE.vht:
+            return WifiPhyMode.ac;
+        case DOT11_PHY_TYPE.he:
+            return WifiPhyMode.ax;
+        case DOT11_PHY_TYPE.eht:
+            return WifiPhyMode.be;
+        default:
+            return WifiPhyMode.unknown;
     }
 }

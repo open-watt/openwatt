@@ -44,6 +44,32 @@ nothrow @nogc:
 
     // API...
 
+    // a write fans out to every member, so the slowest gates transmission; a read may arrive from
+    // any member, so the fastest bounds reception. streams that don't know their rate don't vote.
+    override ulong tx_link_speed() const
+    {
+        ulong slowest = 0;
+        foreach (ref s; m_streams[])
+        {
+            ulong r = s ? s.tx_link_speed : 0;
+            if (r != 0 && (slowest == 0 || r < slowest))
+                slowest = r;
+        }
+        return slowest;
+    }
+
+    override ulong rx_link_speed() const
+    {
+        ulong fastest = 0;
+        foreach (ref s; m_streams[])
+        {
+            ulong r = s ? s.rx_link_speed : 0;
+            if (r > fastest)
+                fastest = r;
+        }
+        return fastest;
+    }
+
     override ptrdiff_t read(void[] buffer)
     {
         size_t read;

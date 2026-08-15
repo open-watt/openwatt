@@ -57,6 +57,8 @@ abstract class Stream : ActiveObject
     alias Properties = AliasSeq!(Prop!("last-status-change-time", last_status_change_time, "status"),
                                  Prop!("link-status", link_status, "status", "d"),
                                  Prop!("link-downs", link_downs, "status"),
+                                 Prop!("tx-link-speed", tx_link_speed, "status"),
+                                 Prop!("rx-link-speed", rx_link_speed, "status"),
                                  Prop!("tx-bytes", tx_bytes, "traffic", "d"),
                                  Prop!("rx-bytes", rx_bytes, "traffic", "d"),
                                  Prop!("tx-rate", tx_rate, "traffic", "d"),
@@ -92,6 +94,8 @@ nothrow @nogc:
     ulong rx_rate() const => _status.rx_rate;
     ulong tx_rate_max() const => _status.tx_rate_max;
     ulong rx_rate_max() const => _status.rx_rate_max;
+    ulong tx_link_speed() const => 0;
+    ulong rx_link_speed() const => 0;
 
 
     // API...

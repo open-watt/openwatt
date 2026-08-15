@@ -17,6 +17,7 @@ import manager.console;
 
 import protocol.ip;
 
+import router.iface : BaseInterface;
 public import router.stream;
 
 //version = DebugTCPStream;       // TCPStream write/queue/drain activity
@@ -106,6 +107,18 @@ nothrow @nogc:
 
 
     // API...
+
+    // a TCP connection has no rate of its own; the first hop bounds it, so report the egress link
+    final override ulong tx_link_speed() const
+    {
+        const(BaseInterface) egress = _conn ? _conn.egress_iface : null;
+        return egress ? egress.tx_link_speed : 0;
+    }
+    final override ulong rx_link_speed() const
+    {
+        const(BaseInterface) egress = _conn ? _conn.egress_iface : null;
+        return egress ? egress.rx_link_speed : 0;
+    }
 
     final override bool validate() const pure
     {

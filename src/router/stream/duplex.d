@@ -62,6 +62,11 @@ nothrow @nogc:
 
     // API
 
+    override ulong tx_link_speed() const
+        => _tx ? _tx.tx_link_speed : 0;
+    override ulong rx_link_speed() const
+        => _rx ? _rx.rx_link_speed : 0;
+
     override ptrdiff_t read(void[] buffer)
     {
         if (!_rx || !_rx.running)

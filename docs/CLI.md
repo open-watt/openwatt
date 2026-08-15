@@ -161,9 +161,6 @@ All managed items also have these common properties:
 | `running` | read-only | Whether an active object is online. |
 | `status` | read-only | Lifecycle status such as `Running`, `Starting`, `Disabled`, or `Failed`. |
 
-Stream collections additionally report status and traffic counters such as
-`link-status`, `tx-bytes`, `rx-bytes`, and current and maximum transfer rates.
-
 ### `/log/sink`
 
 A log sink subscribes to application log messages and writes them to a Stream.
@@ -277,6 +274,25 @@ Creating two consumers for one stream is currently permitted. Reader ownership
 and exclusivity are intentionally not specified yet; configuration should avoid
 assigning two active readers to the same stream.
 
+### `/stream/*`
+
+All stream collections expose these properties in addition to the common
+managed-item properties above:
+
+| Property | Access | Description |
+| --- | --- | --- |
+| `last-status-change-time` | read-only | Time of the most recent link-status change. |
+| `link-status` | read-only | Operational state: `unknown`, `down`, or `up`. |
+| `link-downs` | read-only | Number of link-down transitions. |
+| `tx-link-speed` | read-only | Underlying transmit signalling rate in bits per second; `0` when unknown. |
+| `rx-link-speed` | read-only | Underlying receive signalling rate in bits per second; `0` when unknown. |
+| `tx-bytes` | read-only | Bytes transmitted. |
+| `rx-bytes` | read-only | Bytes received. |
+| `tx-rate` | read-only | Current transmit rate in bytes per second. |
+| `rx-rate` | read-only | Current receive rate in bytes per second. |
+| `tx-rate-max` | read-only | Maximum observed transmit rate in bytes per second. |
+| `rx-rate-max` | read-only | Maximum observed receive rate in bytes per second. |
+
 ### `/stream/console`
 
 This desktop stream exposes the process console handles. It is also useful as a
@@ -333,8 +349,8 @@ Additional commands:
 
 | Command | Availability | Description |
 | --- | --- | --- |
-| `/stream/serial/lines <name>` | all platforms | Prints the current modem-line state for an open serial stream, including RTS, CTS, DTR, DSR, DCD, and RI where supported. |
 | `/stream/serial/devices` | POSIX hosts | Lists detected serial devices. |
+| `/stream/serial/lines <name>` | all platforms | Prints the current modem-line state for an open serial stream, including RTS, CTS, DTR, DSR, DCD, and RI where supported. |
 
 ### `/stream/usb-serial`
 
@@ -347,6 +363,56 @@ no transport properties.
 /console/session/add name=default stream=console profile=vt100 initial-command="/log/print --stream"
 ```
 
+### `/interface/*`
+
+All interface collections expose these properties in addition to the common
+managed-item properties above:
+
+| Property | Access | Description |
+| --- | --- | --- |
+| `caps` | read-only | Interface capability flags. |
+| `actual-mtu` | read-only | Effective MTU after resolving an automatic `mtu`. |
+| `mtu` | read/write | Configured MTU; `0` uses `l2mtu`. |
+| `l2mtu` | read/write | Link-layer MTU in bytes. |
+| `max-l2mtu` | read-only | Maximum link-layer MTU reported by the driver; `0` when unknown. |
+| `pcap` | write-only | Attaches the interface to a named packet capture. |
+| `last-status-change-time` | read-only | Time of the most recent link-status change. |
+| `connected` | read-only | Connection state: `unknown`, `disconnected`, or `connected`. |
+| `link-status` | read-only | Operational state: `unknown`, `down`, or `up`. |
+| `link-downs` | read-only | Number of link-down transitions. |
+| `tx-link-speed` | read-only | Underlying transmit signalling rate in bits per second; `0` when unknown. |
+| `rx-link-speed` | read-only | Underlying receive signalling rate in bits per second; `0` when unknown. |
+| `tx-bytes` | read-only | Bytes transmitted. |
+| `rx-bytes` | read-only | Bytes received. |
+| `tx-packets` | read-only | Packets transmitted. |
+| `rx-packets` | read-only | Packets received. |
+| `tx-dropped` | read-only | Transmit packets dropped. |
+| `rx-dropped` | read-only | Receive packets dropped. |
+| `tx-rate` | read-only | Current transmit rate in bytes per second. |
+| `rx-rate` | read-only | Current receive rate in bytes per second. |
+| `tx-rate-max` | read-only | Maximum observed transmit rate in bytes per second. |
+| `rx-rate-max` | read-only | Maximum observed receive rate in bytes per second. |
+| `avg-queue-time` | read-only | Average transmit queue time in milliseconds. |
+| `avg-service-time` | read-only | Average packet service time in milliseconds. |
+| `max-service-time` | read-only | Maximum packet service time in milliseconds. |
+
+### `/interface/ap`
+
+An AP interface is one BSS served by a WiFi radio.
+
+| Property | Access | Values | Default | Description |
+| --- | --- | --- | --- | --- |
+| `radio` | read/write | WiFi interface name | required | Radio serving the BSS. |
+| `ssid` | read/write | SSID | required | Network name advertised by the BSS. |
+| `secret` | read/write | Secret name | empty | Credentials authorized for the `wifi` service. |
+| `phy-mode` | read-only | PHY label | empty | BSS operating PHY and client ceiling; not a per-client value. |
+| `cfm-level` | read/write | `0` to `7` | `7` | Ethernet OAM maintenance level. |
+| `auth` | read/write | `open`, `wpa2`, `wpa3`, `wpa2_wpa3`, `wpa2_enterprise`, `wpa3_enterprise` | `open` | Authentication mode. |
+| `client-isolation` | read/write | boolean | `false` | Prevents clients on the BSS from communicating directly. |
+| `max-clients` | read/write | `0` to `255` | `0` | Client limit; `0` selects the platform default. |
+| `hidden` | read/write | boolean | `false` | Suppresses SSID broadcast. |
+| `installation` | read/write | `any`, `indoor`, `outdoor` | `any` | Declared installation environment. |
+
 ### `/interface/ethernet`
 
 Ethernet interfaces are a managed collection, and additionally carry the
@@ -358,8 +424,8 @@ broadcast.
 
 | Command | Syntax | Description |
 | --- | --- | --- |
-| `ping` | `/interface/ethernet/ping address=<mac> [count=<count>]` | Times 802.1ag loopback round trips to `address`, one request per second. |
 | `discover` | `/interface/ethernet/discover` | Sweeps every segment for OpenWatt stations, listing each with its name and addresses. |
+| `ping` | `/interface/ethernet/ping address=<mac> [count=<count>]` | Times 802.1ag loopback round trips to `address`, one request per second. |
 
 | Argument | Values | Default | Description |
 | --- | --- | --- | --- |
@@ -416,6 +482,40 @@ The interface self-configures its L2MTU from the peer's datagram payload MTU
 | `local-port` | `0` to `65535` | `0` | Local port; zero requests an ephemeral port. |
 | `remote-host` | host, address or MAC | none | Default datagram destination. |
 | `remote-port` | `1` to `65535` | with remote-host | Default destination port. |
+
+### `/interface/wifi`
+
+This collection represents physical radios; WLAN and AP interfaces bind to them.
+
+| Property | Access | Values | Default | Description |
+| --- | --- | --- | --- | --- |
+| `mode` | read-only | `monitor`, `sta`, `ap`, `apsta` | derived | Active role from the bound interfaces. |
+| `band` | read/write | `any`, `2_4ghz`, `5ghz`, `6ghz`; or a frequency such as `2.4GHz` | `any` | Selected operating band. Enum keys are lowercase; units are case-sensitive. |
+| `channel` | read/write | `0` to `233` | `0` | Requested channel; `0` selects automatically. |
+| `active-channel` | read-only | `0` to `233` | `0` | Current channel; `0` means unavailable. |
+| `tx-power` | read/write | dBm | `0` | Requested transmit power; `0` selects the platform default. |
+| `country` | read/write | ISO 3166-1 alpha-2 | empty | Regulatory country; empty selects the platform default. |
+| `monitor` | read/write | boolean | `false` | Enables monitor capture alongside configured WLAN/AP roles. |
+| `phy-capability` | read-only | PHY label | empty | Radio ceiling, for example `HE160 2SS`; a concrete `band` reports that band and `any` reports the best supported band. |
+| `wiphy` | read/write | Linux phy or netdev name | required on Linux | Physical Linux radio to manage. |
+| `netdev` | read-only | Linux netdev name | empty | Primary Linux virtual interface adopted or created for the radio. |
+| `adapter` | read/write | Windows adapter name | required on Windows | Physical Windows WiFi adapter to manage. |
+
+### `/interface/wlan`
+
+A WLAN interface is one station association bound to a WiFi radio.
+
+| Property | Access | Values | Default | Description |
+| --- | --- | --- | --- | --- |
+| `radio` | read/write | WiFi interface name | required | Radio used for the association. |
+| `ssid` | read/write | SSID | required | Network to associate with. |
+| `secret` | read/write | Secret name | empty | Credentials authorized for the `wifi` service. |
+| `phy-mode` | read-only | PHY label | empty | Negotiated PHY, for example `VHT80 2SS`; unavailable parts are omitted. |
+| `cfm-level` | read/write | `0` to `7` | `7` | Ethernet OAM maintenance level. |
+| `bssid-filter` | read/write | MAC address | none | Restricts association to one AP. |
+| `bssid` | read-only | MAC address | empty | Currently associated AP. |
+| `rssi` | read-only | dBm | `0` | Received signal strength; `0` means unavailable. |
+| `signal-quality` | read-only | `0` to `100` | `0` | Normalized signal quality. |
 
 ### `/protocol/http/fileserver`
 

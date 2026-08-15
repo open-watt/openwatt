@@ -155,6 +155,9 @@ static assert(BLEFrame.sizeof <= 24);
 
 enum uint ble_queue_timeout = 5000; // milliseconds
 
+// LE 1M PHY symbol rate; LE 2M and coded PHYs exist but nothing here negotiates them yet
+enum ble_le_1m_bitrate = 1_000_000;
+
 abstract class BLEInterface : BaseInterface
 {
     alias Properties = AliasSeq!(Prop!("max-in-flight", max_in_flight));
@@ -256,6 +259,14 @@ protected:
     {
         _queue.init(_max_in_flight, 0, PCP.be, this);
         return CompletionStatus.complete;
+    }
+
+    override void online()
+    {
+        super.online();
+
+        // no backend reports the negotiated PHY yet; a driver that learns 2M or coded PHY should restamp
+        set_link_speed(ble_le_1m_bitrate);
     }
 
     override CompletionStatus shutdown()

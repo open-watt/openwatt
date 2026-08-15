@@ -157,6 +157,11 @@ nothrow @nogc:
     String selected_cert_name() const pure
         => _selected_cert ? _selected_cert.name : String();
 
+    final override ulong tx_link_speed() const
+        => _stream ? _stream.tx_link_speed : 0;
+    final override ulong rx_link_speed() const
+        => _stream ? _stream.rx_link_speed : 0;
+
     final override bool validate() const pure
     {
         // Server mode: need a certificate. Client mode: need a remote host.

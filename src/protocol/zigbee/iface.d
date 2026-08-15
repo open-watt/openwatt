@@ -54,6 +54,9 @@ EUI64 zigbee_multicast_addr(ushort group)
 enum uint queue_timeout = 10_000; // milliseconds - safety net only; message_sent_handler is the real completion path
 enum uint ezsp_grace_period = 4000; // milliseconds - how long to wait for EZSP client to recover before restarting
 
+// IEEE 802.15.4 O-QPSK in the 2.4GHz band; the only PHY zigbee runs on here
+enum ieee802154_phy_bitrate = 250_000;
+
 
 class ZigbeeInterface : BaseInterface
 {
@@ -201,6 +204,14 @@ protected:
             return CompletionStatus.error;
         }
         return CompletionStatus.continue_;
+    }
+
+    override void online()
+    {
+        super.online();
+
+        // the radio's O-QPSK PHY rate, not the host UART's; the NCP link is never the constraint here
+        set_link_speed(ieee802154_phy_bitrate);
     }
 
     override CompletionStatus shutdown()

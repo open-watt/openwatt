@@ -207,6 +207,12 @@ nothrow @nogc:
 
     // API...
 
+    // a UART signals one bit per baud, so the configured baud is the wire rate outright
+    final override ulong tx_link_speed() const
+        => baud_rate;
+    final override ulong rx_link_speed() const
+        => baud_rate;
+
     final override bool validate() const
         => !_device.empty;
 

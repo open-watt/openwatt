@@ -256,6 +256,20 @@ protected:
         return CompletionStatus.complete;
     }
 
+    override void online()
+    {
+        super.online();
+
+        // a multi-drop endpoint has no single egress, so this only resolves for a connected peer
+        BaseInterface egress;
+        static if (has_ip)
+            egress = _ep ? _ep.egress_iface : null;
+        else
+            egress = _ether ? _ether.iface : null;
+        if (egress)
+            set_link_speed(egress.tx_link_speed, egress.rx_link_speed);
+    }
+
     override CompletionStatus shutdown()
     {
         static if (has_ip)
