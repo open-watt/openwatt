@@ -234,8 +234,13 @@ nothrow @nogc:
     // (or create) call followed by zero or more set calls, one per prop.
     //
     // No intermediate SyncMessage / SyncEvent struct. No PropReader.
+    //
+    // Returns false only when the frame cites state that hasn't arrived yet
+    // (a val racing its add); an armed sublayer withholds the ack so the
+    // sender's catch-up resupplies it. Malformed frames return true: they
+    // will never become applicable.
 
-    abstract void decode_and_dispatch(SyncPeer peer, const(ubyte)[] frame);
+    abstract bool decode_and_dispatch(SyncPeer peer, const(ubyte)[] frame);
 
     // Per-peer per-tick property flush
     //

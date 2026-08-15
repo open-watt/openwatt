@@ -314,7 +314,7 @@ nothrow @nogc:
     {
         begin_frame(Verb.log);
         _buf.put_str(line);
-        send_frame(peer);
+        send_frame(peer, TxQueue.log);
         return !_last_drop;
     }
 
@@ -342,7 +342,7 @@ nothrow @nogc:
         begin_frame(Verb.time_push);
         _buf.put_varint(ver);
         _buf.put_zigzag(delta_ns);
-        send_frame(peer);
+        send_frame(peer);   // control: staleness corrupts collection timestamps until repaired
     }
 
     // Outbound: model plane
@@ -459,7 +459,7 @@ nothrow @nogc:
         _buf.put_varint(unix_time_ns(e.last_update) / 1_000_000);
         Variant v = e.value;
         _buf.put_variant(v);
-        send_frame(peer);
+        send_frame(peer, TxQueue.val);
     }
 
     override void encode_val_block(SyncPeer peer, SyncHandle h, ref const RecordBlock blk)
@@ -476,7 +476,7 @@ nothrow @nogc:
             Variant v = blk.box(i);
             _buf.put_variant(v);
         }
-        send_frame(peer);
+        send_frame(peer, TxQueue.val);
     }
 
     override void encode_res(SyncPeer peer, uint seq)
@@ -507,14 +507,14 @@ nothrow @nogc:
 
     // Inbound
 
-    override void decode_and_dispatch(SyncPeer peer, const(ubyte)[] frame)
+    override bool decode_and_dispatch(SyncPeer peer, const(ubyte)[] frame)
     {
         if (frame.length == 0)
-            return;
+            return true;
         if (frame[0] > Verb.max)
         {
             log.warning("sync/bin: unknown verb ", frame[0]);
-            return;
+            return true;
         }
         Verb verb = cast(Verb)frame[0];
         Reader r = Reader(frame[1 .. $]);
@@ -875,7 +875,8 @@ nothrow @nogc:
                     Variant v = r.variant();
                     if (r.fail)
                         break;
-                    sync.inbound_val(peer, h, v, t_ms);
+                    if (!sync.inbound_val(peer, h, v, t_ms))
+                        return false;
                 }
                 break;
             }
@@ -935,6 +936,7 @@ nothrow @nogc:
 
         if (r.fail)
             log.warning("sync/bin: truncated or malformed '", enum_key_name!Verb(verb), "' frame from '", peer.name[], "'");
+        return true;
     }
 
     // Per-peer per-tick property flush
@@ -997,9 +999,9 @@ private:
         _buf ~= verb;
     }
 
-    void send_frame(SyncPeer peer)
+    void send_frame(SyncPeer peer, TxQueue queue = TxQueue.control)
     {
-        _last_drop = peer.transmit_frame(_buf[], false) < 0;
+        _last_drop = peer.transmit_frame(_buf[], false, queue) < 0;
         if (_last_drop)
         {
             // event-driven encodes (state/cmd/result/error/sub/...) have no retry path!!

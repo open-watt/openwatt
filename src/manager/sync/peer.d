@@ -2,6 +2,7 @@ module manager.sync.peer;
 
 import urt.array;
 import urt.inet;
+import urt.lifetime : move;
 import urt.log;
 import urt.map;
 import urt.mem.allocator;
@@ -46,6 +47,14 @@ enum SyncCaps : ubyte
 }
 
 enum ubyte local_sync_caps = SyncCaps.objects | SyncCaps.model | SyncCaps.history | SyncCaps.console | SyncCaps.logs | SyncCaps.time;
+
+// reliability sublayer classification; values are the wire kind byte
+enum TxQueue : ubyte
+{
+    control = 0,
+    val     = 1,
+    log     = 2,
+}
 
 
 class SyncPeer : ActiveObject
@@ -131,19 +140,69 @@ nothrow @nogc:
         _remote_bound = true;
     }
 
-    int transmit_frame(const(ubyte)[] frame, bool is_text = false)
+    // Unreliable links wrap every frame with source/destination sessions and a kind.
+    // Control uses ordered retransmission; val and log queues refold unacknowledged
+    // records. Eviction bumps a durable queue epoch so the receiver declares the gap
+    // and re-bases. Destination-session matching prevents stale streams from delivering
+    // or acknowledging frames. Reliable, ordered transports skip this sublayer.
+
+    int transmit_frame(const(ubyte)[] frame, bool is_text = false, TxQueue queue = TxQueue.control)
     {
         if (!_transport || !_transport.running)
             return -1;
-        Packet p;
-        if (_remote_bound)
-            p.init!UDPFrame(frame).address = _remote_addr;
-        else
+        if (!sublayer_armed)
+            return raw_tx(frame, is_text);
+
+        if (queue == TxQueue.control)
         {
-            ref hdr = p.init!RawFrame(frame);
-            hdr.is_text = is_text;
+            if (_resend.length >= max_unacked)
+            {
+                log.warning("peer '", name[], "' control queue overflow; restarting session");
+                restart();
+                return -1;
+            }
+            begin_header(TxQueue.control);
+            _rel_buf ~= ++_tx_seq;
+            _rel_buf ~= _rx_delivered;
+            _ctl_ack_pending = false;
+            _rel_buf ~= frame[];
+
+            SentFrame s;
+            s.seq = _tx_seq;
+            s.sent = getTime();
+            s.bytes ~= _rel_buf[];
+            _resend ~= s.move;
+            // accepted-means-enqueued: a failed first send just leaves the frame
+            // to the retransmit path
+            raw_tx(_rel_buf[], false);
+            return 0;
         }
-        return _transport.forward(p);
+
+        DataQueue* q = &_queues[queue - 1];
+        DataEntry e;
+        e.id = ++q.tx_id;
+        e.first = getTime();
+        e.payload ~= frame[];
+        q.bytes += frame.length;
+        q.backlog ~= e.move;
+        // An acknowledged epoch starts a new declared gap; an unacknowledged epoch
+        // absorbs later evictions so it never outruns the receiver by more than one.
+        bool fresh_cycle = q.evicted == 0;
+        bool evicted;
+        while (q.backlog.length > 1 && (q.backlog.length > backlog_max_frames || q.bytes > backlog_max_bytes))
+        {
+            q.bytes -= q.backlog[0].payload.length;
+            q.backlog.remove(0);
+            ++q.evicted;
+            evicted = true;
+        }
+        if (evicted && (fresh_cycle || q.epoch_acked))
+        {
+            ++q.tx_epoch;
+            q.epoch_acked = false;
+        }
+        send_data_frame(queue);
+        return 0;
     }
 
     // Session name/handle binding. Local ids never travel: each side announces its
@@ -214,6 +273,12 @@ nothrow @nogc:
             return idx < _introduced.length ? _introduced[idx] : EID.invalid;
         return idx < _adopted.length ? _adopted[idx] : EID.invalid;
     }
+
+    // handles are announced in ascending order over the reliable in-order control
+    // plane, so anything below the high-water mark has had its add delivered (even
+    // if the node failed to materialise); anything above is still in flight
+    bool handle_announced(SyncHandle handle) const pure
+        => (handle >> 1) < ((handle & 1) ? _introduced.length : _adopted.length);
 
     // legacy object-mirror accessor; dissolves with the mirror verbs
     CID cid_of(SyncHandle handle)
@@ -370,6 +435,84 @@ protected:
         return CompletionStatus.complete;
     }
 
+    override void update()
+    {
+        if (!_transport || !_transport.running || !sublayer_armed)
+            return;
+
+        MonoTime now = getTime();
+        foreach (ref s; _resend[])
+        {
+            if (now - s.sent < msecs(retransmit_ms << s.tries))
+                continue;
+            if (++s.tries > max_retries)
+            {
+                log.warning("peer '", name[], "' control frames unacknowledged; restarting session");
+                restart();
+                return;
+            }
+            s.sent = now;
+            raw_tx(s.bytes[], false);
+        }
+
+        foreach (i, ref q; _queues)
+        {
+            bool fresh_cycle = q.evicted == 0;
+            bool evicted;
+            while (!q.backlog.empty && now - q.backlog[0].first > msecs(backlog_ttl_ms))
+            {
+                log.debug_("peer '", name[], "' aged out an unacked data frame");
+                q.bytes -= q.backlog[0].payload.length;
+                q.backlog.remove(0);
+                ++q.evicted;
+                evicted = true;
+            }
+            if (evicted && (fresh_cycle || q.epoch_acked))
+            {
+                ++q.tx_epoch;
+                q.epoch_acked = false;
+            }
+            // an un-acked bump with nothing left to refold still needs announcing:
+            // an empty frame carries the epoch until the receiver acks it
+            if ((!q.backlog.empty || (q.evicted && !q.epoch_acked)) && now - q.last_tx >= msecs(data_flush_ms))
+                send_data_frame(cast(TxQueue)(i + 1));
+        }
+
+        ref DataQueue lq = _queues[TxQueue.log - 1];
+        if (lq.evicted && lq.backlog.empty && lq.epoch_acked)
+        {
+            // the receiver stands on the bumped epoch: the repair can go out;
+            // cleared first, the marker itself rides the log queue
+            uint lost = lq.evicted;
+            lq.evicted = 0;
+            encoder_for(_encoder).encode_log(this, tconcat("[sync: ", lost, " log lines lost]"));
+        }
+
+        if (_ctl_ack_pending || _queues[0].ack_pending || _queues[1].ack_pending)
+        {
+            begin_header(wire_ack);
+            _rel_buf ~= _rx_delivered;
+            _rel_buf ~= _queues[0].rx_epoch;
+            _rel_buf ~= _queues[0].rx_seen;
+            _rel_buf ~= _queues[1].rx_epoch;
+            _rel_buf ~= _queues[1].rx_seen;
+            _ctl_ack_pending = false;
+            _queues[0].ack_pending = false;
+            _queues[1].ack_pending = false;
+            raw_tx(_rel_buf[], false);
+        }
+    }
+
+    // Wait for the peer to acknowledge the gap before re-pushing current live values.
+    package bool take_val_repush()
+    {
+        ref DataQueue q = _queues[TxQueue.val - 1];
+        if (!q.evicted || !q.backlog.empty || !q.epoch_acked)
+            return false;
+        q.evicted = 0;
+        return true;
+    }
+
 package:
     Array!String     _subscriptions;
     Array!BaseObject _bound;             // objects we've sent bind{...} to this peer
@@ -405,12 +548,177 @@ package:
     String   _want_log_tag;
 
 private:
+    enum retransmit_ms = 250;
+    enum max_retries = 8;
+    enum max_unacked = 64;
+    enum reorder_cap = 16;
+    enum reorder_span = 32;
+    enum backlog_max_frames = 32;
+    enum backlog_max_bytes = 1024;
+    enum data_flush_ms = 300;
+    // the retransmit schedule's full span: doubling intervals through max_retries
+    // sends, plus the final wait before the session is declared dead
+    enum control_horizon_ms = retransmit_ms * ((1 << (max_retries + 1)) - 1);
+    // derived, not hand-picked: aging out a val whose add is still legitimately
+    // retrying is real data loss, so the ttl must outlast any control-plane repair;
+    // it exists only to unstick a poison orphan (add then destroy)
+    enum backlog_ttl_ms = control_horizon_ms + 10_000;
+
+    enum ubyte wire_ack = 3;   // TxQueue values are the other kind bytes
+
+    struct SentFrame
+    {
+        ubyte seq;
+        ubyte tries;
+        MonoTime sent;
+        Array!ubyte bytes;   // full wire frame, header included; retransmit is a straight resend
+    }
+    struct HeldFrame
+    {
+        ubyte seq;
+        Array!ubyte payload;
+    }
+    struct DataEntry
+    {
+        ubyte id;
+        MonoTime first;
+        Array!ubyte payload;
+    }
+    struct DataQueue
+    {
+        ubyte tx_id;         // last id assigned
+        ubyte tx_epoch;      // bumped when an unacked entry is evicted: declared discontinuity
+        ubyte rx_seen;       // watermark: last record accepted from the peer
+        ubyte rx_epoch;      // the peer stream epoch the watermark belongs to
+        bool  epoch_acked;   // the receiver has acked tx_epoch; gates repair and further bumps
+        bool  ack_pending;
+        uint  evicted;       // entries lost since the last repair (repush / lost marker)
+        MonoTime last_tx;
+        size_t bytes;
+        Array!DataEntry backlog;   // unacked payloads, oldest first; every send refolds them all
+    }
+
     ObjectRef!BaseInterface _transport;
     ObjectRef!UDPInterface  _owned_transport;
     bool                    _transport_subscribed;
     bool                    _remote_bound;
+    bool                    _ctl_ack_pending;
     InetAddress             _remote_addr;
     InetAddress             _remote;
+    uint                    _tx_session;
+    uint                    _rx_session;
+    ubyte                   _tx_seq;         // last sequence assigned
+    ubyte                   _rx_delivered;   // cumulative in-order delivered
+    Array!SentFrame         _resend;
+    Array!HeldFrame         _reorder;
+    Array!ubyte             _rel_buf;
+    DataQueue[2]            _queues;         // val, log
+
+    bool sublayer_armed()
+    {
+        enum promised = InterfaceCaps.reliable | InterfaceCaps.ordered;
+        return (_transport.caps & promised) != promised;
+    }
+
+    int raw_tx(const(ubyte)[] bytes, bool is_text)
+    {
+        Packet p;
+        if (_remote_bound)
+            p.init!UDPFrame(bytes).address = _remote_addr;
+        else
+        {
+            ref hdr = p.init!RawFrame(bytes);
+            hdr.is_text = is_text;
+        }
+        return _transport.forward(p);
+    }
+
+    void drain_reorder()
+    {
+        bool advanced = true;
+        while (advanced)
+        {
+            advanced = false;
+            foreach (i, ref h; _reorder[])
+            {
+                if (h.seq != cast(ubyte)(_rx_delivered + 1))
+                    continue;
+                _rx_delivered = h.seq;
+                encoder_for(_encoder).decode_and_dispatch(this, h.payload[]);
+                _reorder.remove(i);
+                advanced = true;
+                break;
+            }
+        }
+    }
+
+    void begin_header(ubyte kind)
+    {
+        if (_tx_session == 0)
+            _tx_session = make_session_id();
+        _rel_buf.clear();
+        put_u32(_rel_buf, _tx_session);
+        put_u32(_rel_buf, _rx_session);
+        _rel_buf ~= kind;
+    }
+
+    void send_data_frame(TxQueue queue)
+    {
+        DataQueue* q = &_queues[queue - 1];
+        begin_header(queue);
+        _rel_buf ~= q.tx_epoch;
+        _rel_buf ~= q.rx_epoch;
+        _rel_buf ~= q.rx_seen;
+        // the id just before the refold: a newer epoch re-bases the receiver here,
+        // which works even for the empty frame that announces a bump post-drain
+        _rel_buf ~= q.backlog.empty ? q.tx_id : cast(ubyte)(q.backlog[0].id - 1);
+        q.ack_pending = false;
+        foreach (ref e; q.backlog[])
+        {
+            _rel_buf ~= e.id;
+            _rel_buf ~= cast(ubyte)e.payload.length;
+            _rel_buf ~= cast(ubyte)(e.payload.length >> 8);
+            _rel_buf ~= e.payload[];
+        }
+        q.last_tx = getTime();
+        raw_tx(_rel_buf[], false);
+    }
+
+    void release_control(ubyte ack)
+    {
+        while (!_resend.empty && cast(ubyte)(ack - _resend[0].seq) < 128)
+            _resend.remove(0);
+    }
+
+    static void release_data(ref DataQueue q, ubyte ack)
+    {
+        while (!q.backlog.empty && cast(ubyte)(ack - q.backlog[0].id) < 128)
+        {
+            q.bytes -= q.backlog[0].payload.length;
+            q.backlog.remove(0);
+        }
+    }
+
+    static uint make_session_id()
+    {
+        import urt.crypto.random : crypto_random_bytes;
+        ubyte[4] b = void;
+        uint id = 0;
+        while (id == 0)
+        {
+            crypto_random_bytes(b);
+            id = *cast(uint*)b.ptr;
+        }
+        return id;
+    }
+
+    static void put_u32(ref Array!ubyte buf, uint v)
+    {
+        buf ~= cast(ubyte)v;
+        buf ~= cast(ubyte)(v >> 8);
+        buf ~= cast(ubyte)(v >> 16);
+        buf ~= cast(ubyte)(v >> 24);
+    }
 
     void clear_log_sink()
     {
@@ -458,7 +766,162 @@ private:
 
     package void deliver_frame(const(ubyte)[] frame)
     {
-        encoder_for(_encoder).decode_and_dispatch(this, frame);
+        if (!sublayer_armed)
+        {
+            encoder_for(_encoder).decode_and_dispatch(this, frame);
+            return;
+        }
+
+        if (frame.length < 10)
+            return;
+        uint src = frame[0] | frame[1] << 8 | frame[2] << 16 | frame[3] << 24;
+        uint dst = frame[4] | frame[5] << 8 | frame[6] << 16 | frame[7] << 24;
+        ubyte kind = frame[8];
+        frame = frame[9 .. $];
+        if (src == 0 || kind > wire_ack)
+            return;
+
+        if (dst != 0 && dst != _tx_session)
+            return;   // straggler from a dead session, or not for us
+        if (src != _rx_session)
+        {
+            // a matching dst proves freshness (no straggler knows our live session);
+            // dst 0 passes only for a stream-opening hello
+            if (dst == 0 && !(kind == TxQueue.control && frame[0] == 1))
+                return;
+            if (_rx_session != 0)
+            {
+                // the remote began a new stream: it rebooted, and the whole session
+                // space (handles, interning, subs) must rebuild
+                restart();
+                return;
+            }
+            _rx_session = src;
+        }
+
+        if (kind == wire_ack)
+        {
+            if (frame.length < 5)
+                return;
+            release_control(frame[0]);
+            if (frame[1] == _queues[0].tx_epoch)
+            {
+                release_data(_queues[0], frame[2]);
+                _queues[0].epoch_acked = true;
+            }
+            if (frame[3] == _queues[1].tx_epoch)
+            {
+                release_data(_queues[1], frame[4]);
+                _queues[1].epoch_acked = true;
+            }
+            return;
+        }
+
+        if (kind != TxQueue.control)
+        {
+            if (frame.length < 4)
+                return;
+            DataQueue* q = &_queues[kind - 1];
+            ubyte epoch = frame[0];
+            if (frame[1] == q.tx_epoch)
+            {
+                release_data(*q, frame[2]);
+                q.epoch_acked = true;
+            }
+            ubyte base = frame[3];
+            frame = frame[4 .. $];
+
+            byte age = cast(byte)(epoch - q.rx_epoch);
+            if (age < 0)
+                return;   // a stale-epoch straggler; its stream content is superseded
+            q.ack_pending = true;
+            if (age > 0)
+            {
+                // a declared discontinuity: whatever we never acked is gone, the
+                // stream re-bases just below this frame's refold
+                q.rx_epoch = epoch;
+                q.rx_seen = base;
+            }
+            while (frame.length >= 3)
+            {
+                ubyte id = frame[0];
+                size_t len = frame[1] | frame[2] << 8;
+                frame = frame[3 .. $];
+                if (len > frame.length)
+                    return;
+                ubyte dist = cast(ubyte)(id - q.rx_seen);
+                if (dist != 0 && dist < 128)
+                {
+                    // an unapplicable record (val racing its add) stays unacked; the
+                    // sender refolds it into its next frame, so stop at it and let
+                    // that resupply this one's successors too
+                    if (!encoder_for(_encoder).decode_and_dispatch(this, frame[0 .. len]))
+                        return;
+                    q.rx_seen = id;
+                }
+                frame = frame[len .. $];
+            }
+            return;
+        }
+
+        if (frame.length < 2)
+            return;
+        ubyte seq = frame[0];
+        release_control(frame[1]);
+        frame = frame[2 .. $];
+
+        ubyte dist = cast(ubyte)(seq - _rx_delivered);
+        if (dist == 0 || dist >= 128)
+        {
+            _ctl_ack_pending = true;   // duplicate; our ack was lost
+            return;
+        }
+        if (dist == 1)
+        {
+            _rx_delivered = seq;
+            // raised before dispatch: a response transmitted from inside the decode
+            // piggybacks the ack and lowers it again
+            _ctl_ack_pending = true;
+            encoder_for(_encoder).decode_and_dispatch(this, frame);
+            drain_reorder();
+        }
+        else if (dist <= reorder_span && _reorder.length < reorder_cap)
+        {
+            foreach (ref h; _reorder[])
+            {
+                if (h.seq == seq)
+                    return;
+            }
+            HeldFrame h;
+            h.seq = seq;
+            h.payload ~= frame[];
+            _reorder ~= h.move;
+        }
+        // else: too far ahead or hold full; retransmission re-supplies it once the window moves
+    }
+
+    package void reset_sublayer()
+    {
+        _resend.clear();
+        _reorder.clear();
+        _tx_session = 0;
+        _rx_session = 0;
+        _tx_seq = 0;
+        _rx_delivered = 0;
+        _ctl_ack_pending = false;
+        foreach (ref q; _queues)
+        {
+            q.backlog.clear();
+            q.bytes = 0;
+            q.tx_id = 0;
+            q.tx_epoch = 0;
+            q.rx_seen = 0;
+            q.rx_epoch = 0;
+            q.epoch_acked = false;
+            q.ack_pending = false;
+            q.evicted = 0;
+            q.last_tx = MonoTime.init;
+        }
     }
 
     void on_transport_packet(ref const Packet p, BaseInterface, PacketDirection, void*) nothrow @nogc

@@ -307,7 +307,7 @@ protected:
             return -1;
         }
 
-        if (dst.family == AddressFamily.unspecified || packet.data.length > actual_mtu)
+        if (dst.family <= AddressFamily.unspecified || packet.data.length > actual_mtu)
         {
             add_tx_drop();
             return -1;

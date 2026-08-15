@@ -192,6 +192,30 @@ nothrow @nogc:
         }
         if (feeds)
         {
+            // a val-queue eviction broke the catch-up promise; re-push the latest
+            // value of every armed node (idempotent) so only history stays lost
+            foreach (p; peers[])
+            {
+                if (!p.take_val_repush())
+                    continue;
+                foreach (raw; p._live_nodes.keys)
+                {
+                    EID node;
+                    node.raw = raw;
+                    bool queued = false;
+                    foreach (pe; p._pending_vals[])
+                    {
+                        if (pe == node)
+                        {
+                            queued = true;
+                            break;
+                        }
+                    }
+                    if (!queued)
+                        p._pending_vals ~= node;
+                }
+            }
+
             sweep_dirty((ref Element e) {
                 EID node = e.ensure_eid();
                 if (!node)
@@ -318,6 +342,7 @@ nothrow @nogc:
         p._introduced.clear();
         p._adopted.clear();
         p._remote_caps = 0;
+        p.reset_sublayer();   // seq spaces are session state
         p._ft_sent.clear();
         p._next_ft = 0;
         p._enums_sent.clear();
@@ -1075,40 +1100,45 @@ nothrow @nogc:
 
     void inbound_model_add(SyncPeer from, SyncHandle handle, const(char)[] path, const(char)[] node_class, uint ft, const(char)[] access, const(char)[] mode, Variant* v, ulong t_ms)
     {
+        // the handle is announced even when the node fails to materialise: it must
+        // advance the announced high-water regardless, or vals citing it read as
+        // still-in-flight and stall the data queue behind a node that never comes
+        from.adopt(handle, materialise_add(from, path, node_class, ft, access, mode, v, t_ms));
+    }
+
+    EID materialise_add(SyncPeer from, const(char)[] path, const(char)[] node_class, uint ft, const(char)[] access, const(char)[] mode, Variant* v, ulong t_ms)
+    {
         import urt.time : from_unix_time_ns;
 
         Address a = Address.parse(path);
         if (!a.valid || a.ns[] != "device")
         {
             log.warning("sync: add with unsupported path '", path, "'");
-            return;
+            return EID.invalid;
         }
         const(char)[] rest = a.subject;
         const(char)[] dev_id = rest.split!'.';
 
         Device dev = find_or_create_remote_device(dev_id);
         if (!dev)
-            return;
+            return EID.invalid;
 
         if (node_class[] == "device")
-        {
-            from.adopt(handle, EID(dev.cid));
-            return;
-        }
+            return EID(dev.cid);
         if (node_class[] != "element" || rest.empty)
         {
             log.warning("sync: add with unsupported class '", node_class, "' at '", path, "'");
-            return;
+            return EID.invalid;
         }
         FormatId* pf = ft in from._ft_recv;
         if (!pf)
         {
             log.warning("sync: add cites unknown ft ", ft);
-            return;
+            return EID.invalid;
         }
         Element* e = dev.find_or_create_element(rest, *pf);
         if (!e)
-            return;
+            return EID.invalid;
         if (e.data_format.kind == SeriesKind.point && !e.has_history)
         {
             // a mirror event log retains the same window the authority's default gives
@@ -1127,7 +1157,7 @@ nothrow @nogc:
         }
         if (v && !v.isNull)
             e.value(*v, t_ms ? from_unix_time_ns(t_ms * 1_000_000) : getSysTime());
-        from.adopt(handle, e.ensure_eid());
+        return e.ensure_eid();
     }
 
     // Element write. `res {seq, value}` carries the applied value; any further
@@ -1188,7 +1218,12 @@ nothrow @nogc:
         enc.encode_res(from, seq, applied);
     }
 
-    void inbound_val(SyncPeer from, SyncHandle handle, ref Variant value, ulong t_ms)
+    // false = the handle's add is still in flight on the ordered control plane; the
+    // sublayer withholds the ack so the sender's catch-up retries it. An announced
+    // handle that doesn't resolve is dead (its node failed to materialise or is
+    // gone) - those samples are skipped, never held, so a poison val can't stall
+    // the queue behind it.
+    bool inbound_val(SyncPeer from, SyncHandle handle, ref Variant value, ulong t_ms)
     {
         import urt.time : from_unix_time_ns;
 
@@ -1196,10 +1231,13 @@ nothrow @nogc:
         Element* e = g_app.devices.resolve(node);
         if (!e)
         {
-            log.warning("sync: val for unknown handle ", handle);
-            return;
+            if (!from.handle_announced(handle))
+                return false;
+            log.debug_("sync: val for dead handle ", handle);
+            return true;
         }
         e.value(value, t_ms ? from_unix_time_ns(t_ms * 1_000_000) : getSysTime());
+        return true;
     }
 
     void inbound_res(SyncPeer from, uint seq)
