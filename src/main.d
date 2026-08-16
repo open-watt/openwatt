@@ -170,6 +170,12 @@ int main(string[] args)
     }
     char[] conf = trust_config ? cast(char[])load_file(config_path) : null;
 
+    version (CoreDump)
+    {
+        import driver.esp32.crash : export_pending_crash_dump;
+        export_pending_crash_dump();
+    }
+
     if (conf is null && config_path_explicit)
         log_error("system", "config '", config_path, "' could not be loaded");
 
