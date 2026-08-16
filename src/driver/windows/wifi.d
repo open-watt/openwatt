@@ -401,7 +401,8 @@ private:
             _signal_quality = 0;
             set_link_speed(0);
             set_phy_mode(WifiPhyMode.unknown);
-            mark_set!(typeof(this), [ "ssid", "bssid", "rssi", "signal-quality", "status" ])();
+            mark_set!(typeof(this), [ "ssid", "bssid", "rssi", "signal-quality" ])();
+            write_status();
         }
         else
         {
@@ -420,7 +421,8 @@ private:
             if (r._wlan.query_rssi(r._guid, rssi))
                 _current_rssi = rssi;
 
-            mark_set!(typeof(this), [ "ssid", "bssid", "rssi", "signal-quality", "status" ])();
+            mark_set!(typeof(this), [ "ssid", "bssid", "rssi", "signal-quality" ])();
+            write_status();
 
             // Rates are kbit/s, and 0 means the miniport didn't report one. No wifi_phy_max_rate
             // fallback: the association names the PHY but carries neither bandwidth nor stream count,

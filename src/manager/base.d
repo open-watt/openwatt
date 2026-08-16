@@ -19,7 +19,7 @@ import urt.util : min;
 import manager.console.argument;
 import manager.element : Access, Element, SampleUpdate, SamplingMode;
 import manager.id;
-import manager.series : DataFormat, FormatId, register_format, valid;
+import manager.series : DataFormat, FormatId, register_format, SeriesKind, valid, ValueType;
 import manager.value;
 
 public import manager.collection : CID, Collection, CollectionType, collection_type_info, CollectionTypeInfo;
@@ -129,7 +129,7 @@ struct Property
     alias DefaultFun = Variant function() nothrow @nogc;
     alias SuggestFun = Array!String function(const(char)[] arg) nothrow @nogc;
     alias FormatFun = FormatId function() nothrow @nogc;
-    alias ChangeFun = void function(BaseObject i) nothrow @nogc;
+    alias ChangeFun = void function(BaseObject i, ref const SampleUpdate u) nothrow @nogc;
     alias CheckFun = const(char)[] function(void* value) nothrow @nogc; // value is a `ref T` of the declared type
 
     String name;
@@ -225,7 +225,19 @@ struct Property
 
         prop.index = cast(ushort)index;
         prop.get = &elem_get;
-        prop.set = &elem_set!T;
+        static if (is(T : BaseObject))
+        {
+            // reference: the boxed door already converts name <-> id at the edge, so the
+            // by-name entry forwards the variant straight through
+            static assert(FindElemOpt!("default", Decl.opts).length == 0 &&
+                          FindElemOpt!("min", Decl.opts).length == 0 &&
+                          FindElemOpt!("max", Decl.opts).length == 0 &&
+                          FindElemOpt!("check", Decl.opts).length == 0,
+                          "reference properties take no Default/Min/Max/Check");
+            prop.set = &elem_ref_set;
+        }
+        else
+            prop.set = &elem_set!T;
         prop.init_val = &ElemDefault!Decl;
         prop.elem_format = &ElemFormat!Decl;
 
@@ -381,16 +393,47 @@ nothrow @nogc:
         return _prop_elements[index];
     }
 
+    // element_index is EID-space: 0 is the container, properties claim 1..N
+    final inout(Element)* find_prop_element(ushort element_index) inout
+    {
+        size_t index = size_t(element_index) - 1;
+        if (!_prop_elements || index >= _typeInfo.properties.length || !_typeInfo.properties[index].elem_format)
+            return null;
+        return &_prop_elements[index];
+    }
+
     ElemType!(Type, prop) prop_read(Type, string prop)() const
-        => prop_element(prop_index!(Type, prop)).read!(ElemType!(Type, prop));
+    {
+        alias T = ElemType!(Type, prop);
+        static if (is(T : BaseObject))
+        {
+            import manager.collection : get_item;
+            EID eid = EID(prop_element(prop_index!(Type, prop)).read!ulong);
+            // dynamic cast: the slot can rebind to a same-named sibling of another class
+            return eid ? cast(T)get_item(eid.container) : null;
+        }
+        else
+            return prop_element(prop_index!(Type, prop)).read!T;
+    }
 
     void prop_write(Type, string prop)(auto ref ElemType!(Type, prop) value)
     {
         enum index = prop_index!(Type, prop);
-        StringResult r = elem_apply(this, *_typeInfo.properties[index], value);
-        debug assert(r, tconcat("write to property '", prop, "' refused: ", r.message));
-        if (r)
-            _props_set |= ulong(1) << index;
+        static if (is(ElemType!(Type, prop) : BaseObject))
+        {
+            ulong eid = value ? EID(value.id).raw : 0;
+            const(char)[] error = prop_element(index).try_write(eid);
+            debug assert(error is null, tconcat("write to property '", prop, "' refused: ", error));
+            if (error is null)
+                _props_set |= ulong(1) << index;
+        }
+        else
+        {
+            StringResult r = elem_apply(this, *_typeInfo.properties[index], value);
+            debug assert(r, tconcat("write to property '", prop, "' refused: ", r.message));
+            if (r)
+                _props_set |= ulong(1) << index;
+        }
     }
 
     // get and set and reset (to default) properties
@@ -439,7 +482,23 @@ nothrow @nogc:
 
     final package StringResult sync_apply(scope const(char)[] property, ref const Variant value)
     {
-        return set(property, value);
+        // the authority's echo bypasses the read-only gate: a proxy cannot recompute derived state
+        foreach (i, p; properties())
+        {
+            if (p.name[] == property)
+            {
+                if (!p.set)
+                    return StringResult(tconcat("Property '", property, "' is read-only"));
+                auto r = p.set(value, this, *p);
+                if (r)
+                {
+                    _props_set |= ulong(1) << i;
+                    mark_dirty(i);
+                }
+                return r;
+            }
+        }
+        return set_unknown_property(property, value);
     }
 
     final void reset(scope const(char)[] property)
@@ -623,10 +682,10 @@ private:
                 continue;
             ref Element e = _prop_elements[i];
             e.id = p.name;
+            e._eid = _id.element(cast(ushort)(i + 1)); // element index 0 is the container
             e.format = p.elem_format();
             e.access = p.read_only ? Access.read : Access.read_write;
             e.sampling_mode = SamplingMode.config;
-            // no EID: id.d's (object CID, prop index + 1) has no resolver, so it would deref to null
             if (p.init_val)
             {
                 Variant def = p.init_val();
@@ -643,15 +702,15 @@ private:
         ref const Property p = *_typeInfo.properties[index];
         // a proxy's elements carry the authority's echo; reacting locally would drive absent hardware
         if (p.on_change && !_is_remote)
-            p.on_change(this);
+            p.on_change(this, update);
         mark_dirty(index);
     }
 }
 
 class ActiveObject : BaseObject
 {
-    alias Properties = AliasSeq!(Prop!("running", running, null, "h"),
-                                 Prop!("status", status_message, null, "d"));
+    alias Properties = AliasSeq!(Elem!("running", bool, ReadOnly, PropFlags!"h"),
+                                 Elem!("status", String, ReadOnly, PropFlags!"d"));
 nothrow @nogc:
 
     this(const CollectionTypeInfo* type_info, CID id, ObjectFlags flags = ObjectFlags.none)
@@ -666,6 +725,7 @@ nothrow @nogc:
 
         _props_set |= (ulong(1) << prop_index!(typeof(this), "running")) |
                       (ulong(1) << prop_index!(typeof(this), "status"));
+        write_status();
     }
 
     ~this()
@@ -691,7 +751,7 @@ nothrow @nogc:
             _state &= ~_disabled;
         mark_set!(typeof(this), "disabled")();
         mark_set!(typeof(this), "flags")();
-        mark_set!(typeof(this), "status")();
+        write_status();
     }
 
     // TODO: PUT FINAL BACK WHEN EVERYTHING PORTED!
@@ -771,6 +831,7 @@ nothrow @nogc:
         _state &= ~(_start | _fail);
         if (was_valid)
             _state |= _stop;    // -> destroying; state machine will run shutdown then transition to destroyed
+        write_status();
 
         if (was_running)
             set_offline();
@@ -792,6 +853,7 @@ nothrow @nogc:
                 if (_state == State.running)
                     return;
                 _state = State.running;
+                write_status();
                 set_online();
                 break;
             case StateSignal.offline:
@@ -799,6 +861,7 @@ nothrow @nogc:
                     return;
                 set_offline();
                 _state = State.disabled;
+                write_status();
                 break;
             case StateSignal.destroyed:
                 if (_state & _destroyed)
@@ -806,6 +869,7 @@ nothrow @nogc:
                 if (_state == State.running)
                     set_offline();
                 _state = State.destroyed;
+                write_status();
                 signal_state_change(StateSignal.destroyed);
                 _subscribers.clear();
                 super.destroy();
@@ -865,12 +929,11 @@ protected:
 
         State old = _state;
 
-        // HACK: probably over-dirty's the property, but when changing the state there's a good chance the status changed too!
-        mark_set!(typeof(this), "status")();
-
         if (new_state == _state)
             return;
         _state = new_state;
+        // held dedup makes redundant status writes free: an unchanged message stores and notifies nothing
+        write_status();
 
         if (old == State.running)
         {
@@ -941,7 +1004,7 @@ protected:
         else
             log.trace("online");
 
-        mark_set!(typeof(this), "running")();
+        write_running(true);
         mark_set!(typeof(this), "flags")();
     }
 
@@ -955,7 +1018,7 @@ protected:
         signal_state_change(StateSignal.offline);
         offline();
 
-        mark_set!(typeof(this), "running")();
+        write_running(false);
         mark_set!(typeof(this), "flags")();
     }
 
@@ -965,6 +1028,18 @@ protected:
 
     void offline()
     {
+    }
+
+    // push the derived views: state transitions (and any subclass state feeding status_message)
+    // write the elements the moment they change
+    final void write_status()
+    {
+        prop_element(prop_index!(ActiveObject, "status")).try_write(status_message());
+    }
+
+    final void write_running(bool value)
+    {
+        prop_element(prop_index!(ActiveObject, "running")).try_write(value);
     }
 
 
@@ -1406,6 +1481,9 @@ StringResult elem_set(T)(ref const Variant value, BaseObject item, ref const Pro
     return elem_apply(item, p, arg.move);
 }
 
+StringResult elem_ref_set(ref const Variant value, BaseObject item, ref const Property p) nothrow @nogc
+    => StringResult(item._prop_elements[p.index].try_set(value));
+
 const(char)[] CheckShim(alias fn, T)(void* value) nothrow @nogc
     => fn(*cast(T*)value);
 
@@ -1414,6 +1492,8 @@ Variant ElemDefault(alias Decl)() nothrow @nogc
     alias Def = FindElemOpt!("default", Decl.opts);
     static if (Def.length)
         return to_variant(cast(Decl.T)Def[0].value);
+    else static if (is(Decl.T : BaseObject))
+        return Variant(); // references default to unset
     else static if (__traits(compiles, { Decl.T v = Decl.T.init; return to_variant(v); }))
         return to_variant(Decl.T.init);
     else
@@ -1429,7 +1509,10 @@ FormatId ElemFormat(alias Decl)() nothrow @nogc
     import manager.sample : register_constraint;
     import manager.series : Constraint, data_format_of, Scalar;
 
-    DataFormat format = data_format_of!(Decl.T)();
+    static if (is(Decl.T : BaseObject))
+        DataFormat format = DataFormat(ValueType.u64, SeriesKind.held, collection_type_info!(Decl.T)());
+    else
+        DataFormat format = data_format_of!(Decl.T)();
 
     alias Mn = FindElemOpt!("min", Decl.opts);
     alias Mx = FindElemOpt!("max", Decl.opts);
@@ -1453,11 +1536,14 @@ FormatId ElemFormat(alias Decl)() nothrow @nogc
     return cached;
 }
 
-void ElemOnChange(alias fn)(BaseObject item) nothrow @nogc
+void ElemOnChange(alias fn)(BaseObject item, ref const SampleUpdate update) nothrow @nogc
 {
     alias Type = __traits(parent, fn);
     Type instance = cast(Type)cast(void*)item; // static cast: the handler only ever binds to its own class
-    __traits(child, instance, fn)();
+    static if (is(typeof(__traits(child, instance, fn)(update))))
+        __traits(child, instance, fn)(update);  // handlers that care receive previous+new
+    else
+        __traits(child, instance, fn)();
 }
 
 Variant SynthDefault(alias Getter)() nothrow @nogc
@@ -1510,26 +1596,37 @@ version (unittest)
 
     private final class ElemTestObject : BaseObject
     {
+        enum type_name = "elem-test";
+        enum collection_id = cast(CollectionType)0;
+
         alias Properties = AliasSeq!(Elem!("gain", uint, Default!7, Min!1, Max!10, OnChange!bump),
-                                     Elem!("mode", TestMode, Default!(TestMode.idle)),
+                                     Elem!("mode", TestMode, Default!(TestMode.idle), OnChange!mode_changed),
                                      Elem!("label", String),
                                      Elem!("link", bool, ReadOnly),
                                      Elem!("offset", uint),
                                      Elem!("timeout", Duration, Default!(msecs(800))),
                                      Elem!("power", Quantity!(int, ScaledUnit(Watt))),
-                                     Elem!("delay", Quantity!(int, ScaledUnit(Second, -3))));
+                                     Elem!("delay", Quantity!(int, ScaledUnit(Second, -3))),
+                                     Elem!("peer", ElemTestObject));
     nothrow @nogc:
 
         uint changes;
+        String last_previous;
 
-        this(const CollectionTypeInfo* type_info, CID id, ObjectFlags flags = ObjectFlags.none)
+        this(CID id, ObjectFlags flags = ObjectFlags.none)
         {
-            super(type_info, id, flags);
+            super(collection_type_info!ElemTestObject(), id, flags);
         }
 
         void bump()
         {
             ++changes;
+        }
+
+        void mode_changed(ref const SampleUpdate update)
+        {
+            import urt.mem.allocator : defaultAllocator;
+            last_previous = update.previous.tstring.makeString(defaultAllocator);
         }
     }
 }
@@ -1537,12 +1634,11 @@ version (unittest)
 unittest
 {
     import urt.mem.allocator : defaultAllocator;
+    import manager.collection : item_table;
 
-    __gshared CollectionTypeInfo test_ti;
-    test_ti = CollectionTypeInfo(StringLit!"elem-test", String(), cast(CollectionType)0,
-                                 all_properties!ElemTestObject(), null, null, false);
-
-    ElemTestObject o = defaultAllocator().allocT!ElemTestObject(&test_ti, CID(1));
+    auto table = &item_table(0);
+    ElemTestObject o = defaultAllocator().allocT!ElemTestObject(table.allocate("elem-test-o", 0));
+    table.bind(o.id, o);
     enum gain = prop_index!(ElemTestObject, "gain");
 
     // declared defaults apply at construction and are not "changes"
@@ -1569,10 +1665,11 @@ unittest
     assert(o.prop_read!(ElemTestObject, "gain") == 5);
     assert(o.changes == 1);
 
-    // enums arrive as strings from the console
+    // enums arrive as strings from the console; change handlers see the previous value
     Variant mode = Variant("run");
     assert(o.set("mode", mode));
     assert(o.prop_read!(ElemTestObject, "mode") == TestMode.run);
+    assert(o.last_previous[] == "idle");
 
     // text properties store through the same path
     Variant label = Variant("charger");
@@ -1636,14 +1733,66 @@ unittest
     assert(o.prop_read!(ElemTestObject, "delay").value == 1500);
     assert(!o.set("power", dur));                           // the dimension gate still holds
 
+    // property EIDs are (object CID, prop index + 1); resolution indexes the property block
+    assert(o.prop_element(gain).eid == o.id.element(cast(ushort)(gain + 1)));
+    assert(o.find_prop_element(cast(ushort)(gain + 1)) is &o.prop_element(gain));
+    assert(o.find_prop_element(0) is null);                                     // the container, not a property
+    assert(o.find_prop_element(1) is null);                                     // legacy property, not element-backed
+    assert(o.find_prop_element(cast(ushort)(o.properties.length + 1)) is null); // out of range
+
+    // reference properties: the edge converts name <-> id, storage is an EID
+    ElemTestObject target = defaultAllocator().allocT!ElemTestObject(table.allocate("ref-target", 0));
+    table.bind(target.id, target);
+    Variant peer = Variant("ref-target");
+    assert(o.set("peer", peer));
+    assert(o.prop_read!(ElemTestObject, "peer") is target);
+    assert(o.get("peer").asString == "ref-target");
+
+    // the ref tracks the name's slot: destruction tombstones, recreation at the name rebinds
+    table.remove(target.id);
+    assert(o.prop_read!(ElemTestObject, "peer") is null);
+    ElemTestObject target2 = defaultAllocator().allocT!ElemTestObject(table.allocate("ref-target", 0));
+    table.bind(target2.id, target2);
+    assert(o.prop_read!(ElemTestObject, "peer") is target2);
+    defaultAllocator().freeT(target);
+
+    // a forward reference reserves its id: the write succeeds before the target exists
+    Variant later = Variant("ref-later");
+    assert(o.set("peer", later));
+    assert(o.prop_read!(ElemTestObject, "peer") is null);
+    ElemTestObject target3 = defaultAllocator().allocT!ElemTestObject(table.allocate("ref-later", 0));
+    table.bind(target3.id, target3);
+    assert(o.prop_read!(ElemTestObject, "peer") is target3);
+
+    // the typed door writes the id straight in; null clears
+    o.prop_write!(ElemTestObject, "peer")(target2);
+    assert(o.get("peer").asString == "ref-target");
+    o.prop_write!(ElemTestObject, "peer")(null);
+    assert(o.prop_read!(ElemTestObject, "peer") is null);
+    assert(o.get("peer").isNull);
+
+    table.remove(target2.id);
+    table.remove(target3.id);
+    defaultAllocator().freeT(target2);
+    defaultAllocator().freeT(target3);
+
+    table.remove(o.id);
     defaultAllocator().freeT(o);
 
     // a proxy (is_remote) stores echoed values but never runs on_change side effects
-    ElemTestObject proxy = defaultAllocator().allocT!ElemTestObject(&test_ti, CID(2), ObjectFlags.remote);
+    ElemTestObject proxy = defaultAllocator().allocT!ElemTestObject(table.allocate("elem-test-proxy", 0), ObjectFlags.remote);
+    table.bind(proxy.id, proxy);
     Variant echoed = Variant(3);
     assert(proxy.set("gain", echoed));
     assert(proxy.prop_read!(ElemTestObject, "gain") == 3);
     assert(proxy.changes == 0);
+
+    // read-only refuses the console but not the authority's echo
+    Variant lk = Variant(true);
+    assert(!proxy.set("link", lk));
+    assert(proxy.sync_apply("link", lk));
+    assert(proxy.prop_read!(ElemTestObject, "link") == true);
+    table.remove(proxy.id);
     defaultAllocator().freeT(proxy);
 }
 

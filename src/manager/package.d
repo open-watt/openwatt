@@ -1691,6 +1691,15 @@ private:
         uint _heartbeats;
 }
 
+Element* resolve_element(EID eid) nothrow @nogc
+{
+    if (eid.container.type_index == CollectionType.device)
+        return g_app.devices.resolve(eid);
+    if (BaseObject o = get_item(eid.container))
+        return o.find_prop_element(eid.index);
+    return null;
+}
+
 Element* resolve_global_element(const(char)[] path) nothrow @nogc
 {
     const(char)[] rest = path;
