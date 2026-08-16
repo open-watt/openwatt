@@ -707,6 +707,32 @@ private:
     }
 }
 
+// Checked downcast for the BaseObject hierarchy.
+//
+// `cast(T)obj` needs a TypeInfo to check against, which is most of what D's
+// RTTI is for and costs 92 bytes per class. This walks the CollectionTypeInfo
+// chain the objects already carry instead. Written as a function rather than
+// left to the language because the alternatives are both silent: extern(C++)
+// classes lower a downcast to an unconditional pointer move, and -fno-rtti
+// removes the check with nothing to replace it.
+//
+// Only accurate for collection-registered types: an unregistered subclass
+// inherits its parent's type info, so casting to it yields null.
+T dyn_cast(T)(inout(BaseObject) o) nothrow @nogc
+    if (is(T : BaseObject))
+{
+    if (o is null)
+        return null;
+
+    const(CollectionTypeInfo)* target = collection_type_info!T();
+    for (const(CollectionTypeInfo)* ti = o._typeInfo; ti !is null; ti = ti.get_super ? ti.get_super() : null)
+    {
+        if (ti is target)
+            return cast(T)cast(void*)o;
+    }
+    return null;
+}
+
 class ActiveObject : BaseObject
 {
     alias Properties = AliasSeq!(Elem!("running", bool, ReadOnly, PropFlags!"h"),
