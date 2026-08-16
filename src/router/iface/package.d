@@ -756,6 +756,9 @@ nothrow @nogc:
 
     override void pre_init()
     {
+        import router.iface.pool : packet_pool_init;
+        packet_pool_init();
+
         g_app.register_bitfield!InterfaceCaps();
         g_app.register_enum!ConnectionStatus();
         g_app.register_enum!LinkStatus();

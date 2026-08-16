@@ -1,6 +1,5 @@
 module router.iface.packet;
 
-import urt.mem.allocator;
 import urt.time;
 
 public import router.iface.mac;
@@ -151,6 +150,25 @@ bool is_network_multicast_address(ulong address) pure
 struct Packet
 {
 nothrow @nogc:
+    enum ubyte flag_mutable = 0x01;
+    enum ubyte flag_pool    = 0x02;  // lives in a pool page; free via packet_page_free
+    enum ubyte flag_owner   = 0x04;  // current holder owns the buffer; retain() may steal it
+
+    // Copies are borrows: page ownership belongs to the Packet struct embedded in the
+    // pool page, and must not follow a by-value copy (retain() on a copy would steal
+    // a pointer to the copy, not the page).
+    this(ref return scope const Packet rhs)
+    {
+        creation_time = rhs.creation_time;
+        embed = rhs.embed;
+        type = rhs.type;
+        vlan = rhs.vlan;
+        _flags = rhs._flags & ~(flag_pool | flag_owner);
+        _offset = rhs._offset;
+        _length = rhs._length;
+        _ptr = rhs._ptr;
+    }
+
     ref T init(T)(const(void)[] payload, MonoTime create_time = getTime())
     {
         static assert(T.sizeof <= embed.length);
@@ -167,7 +185,7 @@ nothrow @nogc:
     ref T init(T)(void[] payload, MonoTime create_time = getTime())
     {
         ref T r = init!T(cast(const)payload, create_time);
-        _flags |= 0x01; // mutable
+        _flags |= flag_mutable;
         return r;
     }
 
@@ -184,7 +202,7 @@ nothrow @nogc:
     void* alloc_prefix(size_t bytes)
     {
         // check we have mutable header bytes
-        if (!(_flags & 0x01) || _offset < bytes)
+        if (!(_flags & flag_mutable) || _offset < bytes)
             return null;
         _offset -= cast(ubyte)bytes;
         return cast(void*)_ptr + _offset;
@@ -201,21 +219,41 @@ nothrow @nogc:
     uint length() const
         => _length - _offset;
 
-    Packet* clone(NoGCAllocator allocator = defaultAllocator()) const
+    // Deep copy into a pool page. Returns null when the pool category is capped out;
+    // the caller should drop the packet (the pool counts the failure).
+    Packet* clone() const
     {
-        Packet* r = cast(Packet*)allocator.alloc(Packet.sizeof + _length);
+        import router.iface.pool : packet_page_alloc, packet_headroom;
+
+        Packet* r = packet_page_alloc(_length);
+        if (!r)
+            return null;
         *r = this;
-        r._flags |= 0x01; // mutable
-        r._ptr = &r[1];
+        r._flags = flag_mutable | flag_pool | flag_owner;
+        r._ptr = cast(void*)&r[1] + packet_headroom;
         cast(void[])r._ptr[0 .. _length] = _ptr[0 .. _length];
         return r;
     }
 
-    // Free a Packet returned by clone(). Caller must pass the same allocator
-    // that was used to clone(); defaults match.
-    void free_clone(NoGCAllocator allocator = defaultAllocator())
+    // Free a Packet returned by clone() or retain().
+    void free_clone()
     {
-        allocator.free((cast(void*)&this)[0 .. Packet.sizeof + _length]);
+        import router.iface.pool : packet_page_free;
+        packet_page_free(&this);
+    }
+
+    // Take ownership of the packet beyond the current dispatch: steals the buffer
+    // when this packet owns a pool page, else falls back to a copy. A stealer must
+    // treat the packet as read-only until the dispatch that delivered it returns --
+    // consumers later in the fan-out still read the same bytes.
+    Packet* retain()
+    {
+        if ((_flags & (flag_pool | flag_owner)) == (flag_pool | flag_owner))
+        {
+            _flags &= ~flag_owner;
+            return &this;
+        }
+        return clone();
     }
 
     PCP pcp() const pure

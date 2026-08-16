@@ -120,25 +120,40 @@ nothrow @nogc:
         if (_enslaved)
             return;
 
-        const(ubyte)[] data;
-        uint wire_len;
-        MonoTime ts;
+        import router.iface.pool;
 
         while (true)
         {
-            int res = _raw.poll(data, wire_len, ts);
-            if (res == 0)
-                break;
-            if (res < 0)
-                break;
+            uint wire_len;
+            MonoTime ts;
 
-            if (data.length < wire_len)
+            Packet* pkt = packet_page_alloc(packet_page_rx_budget);
+            if (!pkt)
             {
+                // pool capped out: keep draining the socket, count the drops
+                const(ubyte)[] data;
+                int res = _raw.poll(data, wire_len, ts);
+                if (res <= 0)
+                    break;
                 add_rx_drop();
                 continue;
             }
 
-            incoming_ethernet_frame(data, ts);
+            ubyte[] buf = packet_page_data(pkt, packet_page_rx_budget);
+            int res = _raw.poll_into(buf, wire_len, ts);
+            if (res <= 0)
+            {
+                packet_page_free(pkt);
+                break;
+            }
+            if (wire_len > buf.length)
+            {
+                packet_page_free(pkt);
+                add_rx_drop();
+                continue;
+            }
+
+            incoming_ethernet_packet(pkt, wire_len, ts);
         }
     }
 

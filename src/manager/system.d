@@ -413,6 +413,54 @@ version (AllocProfile)
     }
 }
 
+void page_pool_cmd(Session session)
+{
+    import urt.mem.pagepool;
+    import urt.mem.temp : tconcat;
+
+    static void write_stats(Session session, const(char)[] label, ref const PagePoolStats s)
+    {
+        session.write_line(label, ": in-use ", s.pages_in_use, ", free ", s.pages_free,
+                           ", slabs ", s.slab_count, ", peak ", s.high_water,
+                           ", allocs ", s.alloc_count, ", fails ", s.fail_count);
+
+        bool any = false;
+        foreach (b; s.size_histogram)
+            any |= b != 0;
+        if (!any)
+            return;
+        session.write("  sizes:");
+        size_t threshold = 64;
+        foreach (i, b; s.size_histogram)
+        {
+            if (b != 0)
+            {
+                if (i + 1 < s.size_histogram.length)
+                    session.write(" <=", threshold, ":", b);
+                else
+                    session.write(" >", threshold / 2, ":", b);
+            }
+            threshold <<= 1;
+        }
+        session.write_line();
+    }
+
+    uint categories = page_pool_num_categories();
+    if (categories == 0)
+    {
+        session.write_line("page pool not initialised");
+        return;
+    }
+    foreach (i; 0 .. categories)
+    {
+        PagePoolStats s = page_pool_stats(cast(ubyte)i);
+        write_stats(session, tconcat(page_payload_size(cast(ubyte)i), "b pages"), s);
+    }
+    PagePoolStats js = page_pool_stats(page_category_heap);
+    if (js.alloc_count != 0 || js.fail_count != 0)
+        write_stats(session, "heap pages", js);
+}
+
 auto sleep(Session session, Duration duration)
 {
     import manager.console.command;

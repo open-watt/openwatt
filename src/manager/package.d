@@ -469,6 +469,7 @@ nothrow @nogc:
         console.register_command!show_time("/system", this, "time");
         console.register_command!sleep("/system", this);
         console.register_command!reboot("/system", this);
+        console.register_command!page_pool_cmd("/system", this, "page-pool");
 
         version (HasFilesystem)
         {

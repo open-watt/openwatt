@@ -146,7 +146,10 @@ void udp_input(ref IPStack stack, ref Packet pkt)
         dgm.src_port = src_port;
         if (body_.length > 0)
         {
-            dgm.data = cast(ubyte[])defaultAllocator().alloc(body_.length);
+            import urt.mem.pagepool : page_alloc_for;
+            dgm.data = cast(ubyte[])page_alloc_for(body_.length);
+            if (!dgm.data.ptr)
+                return;     // pool capped out; drop (the pool counts the failure)
             dgm.data[] = body_[];
         }
         pcb.recv_queue ~= dgm;
@@ -221,7 +224,8 @@ void udp_free_datagram_data(ref UdpDatagram d)
 {
     if (d.data.length > 0)
     {
-        defaultAllocator().free(cast(void[])d.data);
+        import urt.mem.pagepool : page_free;
+        page_free(d.data.ptr);
         d.data = null;
     }
 }

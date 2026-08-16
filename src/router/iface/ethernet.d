@@ -796,6 +796,46 @@ protected:
         incoming_packet(packet);
     }
 
+    // Receive-into-page path: `pkt` is a pool page whose data area already holds the
+    // raw frame (packet_page_data). The Packet is framed in place so a consumer that
+    // retain()s it steals the page instead of copying; if nobody does, the page is
+    // released here.
+    final void incoming_ethernet_packet(Packet* pkt, size_t frame_len, MonoTime ts)
+    {
+        import router.iface.pool : packet_headroom, packet_page_free;
+
+        if (frame_len < 14)
+        {
+            log.trace("drop degenerate ethernet frame: ", frame_len, " < 14 bytes!");
+            add_rx_drop();
+            packet_page_free(pkt);
+            return;
+        }
+
+        void[] payload = (cast(void*)&pkt[1])[0 .. packet_headroom + frame_len];
+        const(ubyte)[] frame = cast(const(ubyte)[])payload[packet_headroom .. $];
+
+        ref eth = (*pkt).init!Ethernet(payload, ts);
+        eth.dst = MACAddress(frame[0 .. 6]);
+        eth.src = MACAddress(frame[6 .. 12]);
+        eth.ether_type = frame[12 .. 14].bigEndianToNative!ushort;
+        pkt._offset = packet_headroom + 14;
+        pkt._flags |= Packet.flag_pool | Packet.flag_owner;
+
+        if (eth.ether_type == 0x88E5) // MACsec
+        {
+            add_rx_drop();
+            packet_page_free(pkt);
+            return;
+        }
+
+        _status.rx_bytes += frame_len - pkt.length;
+        incoming_packet(*pkt);
+
+        if (pkt._flags & Packet.flag_owner)
+            packet_page_free(pkt);
+    }
+
     // The medium is the wire: frame the packet and push it via wire_send.
     final override void medium_tx(ref Packet packet)
     {
