@@ -57,6 +57,22 @@ You can customize the build by setting the following variables:
   ```
   Replace `$(PLATFORM)` with your target platform (e.g., `x86_64`).
 
+### ESP32-S3 core-dump diagnostics
+
+`CONFIG=debug` is the diagnostic build configuration; there is no separate
+`DEBUG` make variable. For an ESP32-S3 image that retains panic dumps in flash,
+combine it with `COREDUMP=1`:
+
+```bash
+make esp-idf-build PLATFORM=esp32-s3 CONFIG=debug COREDUMP=1
+```
+
+`COREDUMP` defaults to `0` and is currently supported only on the ESP32-S3.
+The enabled build selects a 16 MB S3 partition table with a 512 KiB `coredump`
+partition, and writes into separate `*_coredump` output directories. It is a
+diagnostic image, not a drop-in replacement for the normal layout: flash its
+partition table together with the application image.
+
 ### Cleaning the Build
 
 To remove all generated build files, run:

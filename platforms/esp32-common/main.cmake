@@ -30,6 +30,9 @@ list(APPEND MAIN_PRIV_REQUIRES esp_driver_ledc esp_driver_spi esp_driver_gptimer
 # The component is only referenced when OW_USE_SPIFFS is defined below, so an
 # unused spiffs is discarded at link time.
 list(APPEND MAIN_PRIV_REQUIRES spiffs esp_partition)
+if(OPENWATT_COREDUMP)
+    list(APPEND MAIN_PRIV_REQUIRES espcoredump)
+endif()
 if(OW_EXTRA_REQUIRES)
     list(APPEND MAIN_PRIV_REQUIRES ${OW_EXTRA_REQUIRES})
 endif()
@@ -65,6 +68,9 @@ target_include_directories(${COMPONENT_LIB} PRIVATE "${LITTLEFS_DIR}")
 target_compile_definitions(${COMPONENT_LIB} PRIVATE LFS_NO_DEBUG LFS_NO_WARN)
 if(USE_LITTLEFS)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE OW_USE_LITTLEFS=1)
+endif()
+if(OPENWATT_COREDUMP)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE OW_ENABLE_COREDUMP=1)
 endif()
 
 # Makefile typically passes OPENWATT_OBJ via -D; fall back to the debug path

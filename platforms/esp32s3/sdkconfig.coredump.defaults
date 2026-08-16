@@ -1,0 +1,8 @@
+# COREDUMP=1 reserves the coredump partition and exports the next panic image
+# to the filesystem during normal startup.
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.coredump.csv"
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+# CONFIG_ESP_COREDUMP_ENABLE_TO_NONE is not set
+CONFIG_ESP_COREDUMP_CAPTURE_DRAM=n
+CONFIG_ESP_COREDUMP_MAX_TASKS_NUM=4
+CONFIG_ESP_COREDUMP_LOGS=n

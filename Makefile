@@ -46,6 +46,20 @@ endif
 include $(URT_DIR)/platforms.mk
 include features.mk
 
+# Flash coredumps require both ESP-IDF support and a dedicated partition. Keep
+# the feature opt-in so ordinary images retain all available storage.
+COREDUMP ?= 0
+ifeq ($(filter 0 1,$(COREDUMP)),)
+    $(error COREDUMP must be 0 or 1)
+endif
+ifeq ($(COREDUMP),1)
+    ifneq ($(PLATFORM),esp32-s3)
+        $(error COREDUMP=1 is currently supported only on PLATFORM=esp32-s3)
+    endif
+    DFLAGS := $(DFLAGS) $(VERSION_FLAG)CoreDump
+    BUILD_VARIANT_SUFFIX := _coredump
+endif
+
 # =======================================================================
 # Paths and names
 # =======================================================================
@@ -138,8 +152,8 @@ ifdef BOARD_CONFIG_DIR
     endif
     DFLAGS := $(DFLAGS) -J $(BOARD_CONFIG_DIR)
     # system.conf is baked into the D object, so boards need isolated outputs.
-    OBJDIR    := obj/$(BUILDNAME)_$(BOARD)_$(CONFIG)
-    TARGETDIR := bin/$(BUILDNAME)_$(BOARD)_$(CONFIG)
+    OBJDIR    := obj/$(BUILDNAME)_$(BOARD)_$(CONFIG)$(BUILD_VARIANT_SUFFIX)
+    TARGETDIR := bin/$(BUILDNAME)_$(BOARD)_$(CONFIG)$(BUILD_VARIANT_SUFFIX)
 else ifeq ($(PLATFORM),esp32)
     DFLAGS := $(DFLAGS) -J platforms/esp32
 else ifeq ($(PLATFORM),esp32-s2)
@@ -158,6 +172,13 @@ else ifeq ($(PLATFORM),esp32-h2)
     DFLAGS := $(DFLAGS) -J platforms/esp32h2
 else ifeq ($(PLATFORM),esp32-p4)
     DFLAGS := $(DFLAGS) -J platforms/esp32p4
+endif
+
+ifneq ($(BUILD_VARIANT_SUFFIX),)
+    ifndef BOARD_CONFIG_DIR
+        OBJDIR := $(OBJDIR)$(BUILD_VARIANT_SUFFIX)
+        TARGETDIR := $(TARGETDIR)$(BUILD_VARIANT_SUFFIX)
+    endif
 endif
 ifeq ($(PLATFORM),bl808)
   ifeq ($(PROCESSOR),c906)
@@ -471,6 +492,13 @@ ifdef ESP_PROJECT_DIR
         ESP_FLASH_SIZE := $(BOARD_FLASH_SIZE)
         ESP_PSRAM_SIZE := $(BOARD_PSRAM_SIZE)
     endif
+    ifeq ($(COREDUMP),1)
+        ESP_COREDUMP_SDKCONFIG := $(abspath platforms/esp32s3/sdkconfig.coredump.defaults)
+        ifeq ($(wildcard $(ESP_COREDUMP_SDKCONFIG)),)
+            $(error Missing ESP-IDF coredump policy $(ESP_COREDUMP_SDKCONFIG))
+        endif
+        ESP_SDKCONFIG_DEFAULTS := $(ESP_SDKCONFIG_DEFAULTS);$(ESP_COREDUMP_SDKCONFIG)
+    endif
 
     IDF_LOG_LEVEL ?= none
     ifeq ($(filter $(IDF_LOG_LEVEL),none error warn),)
@@ -511,6 +539,7 @@ endif
 			-DSDKCONFIG="$(ESP_SDKCONFIG)" -DSDKCONFIG_DEFAULTS="$(ESP_SDKCONFIG_DEFAULTS)" \
 			-DOPENWATT_OBJ=$(abspath $(ESP_LINK_OBJ)) \
 			-DIDF_LOG_ENABLED=$(ESP_IDF_LOG_ENABLED) \
+			-DOPENWATT_COREDUMP=$(COREDUMP) \
 			-DPRESERVE_NVS=$(if $(filter 1,$(PRESERVE_NVS)),1,0) \
 			-DUSE_LWIP=$(if $(filter 1,$(USE_INTERNAL_IP_STACK)),0,1) \
 			-DUSE_SPIFFS=$(USE_SPIFFS) -DUSE_LITTLEFS=$(USE_LITTLEFS) build'

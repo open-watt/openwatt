@@ -41,6 +41,20 @@ ESP-IDF output and generated `sdkconfig` files live below the board-specific
 OpenWatt object directory. Building two boards therefore cannot reuse one
 another's generated configuration.
 
+## ESP32-S3 core-dump builds
+
+`COREDUMP=1` is an opt-in diagnostic feature for the ESP32-S3 only. It selects
+the S3 16 MB coredump partition table, reserving 512 KiB of flash, and places
+the result in a separate `*_coredump` build directory:
+
+```bash
+make esp-idf-build PLATFORM=esp32-s3 CONFIG=debug COREDUMP=1
+```
+
+Use this only for a board compatible with that partition layout, and flash the
+partition table together with the coredump-enabled image. The normal
+`COREDUMP=0` build keeps the full storage partition.
+
 ## Espressif reference profiles
 
 | Platform | Reference development board | Flash | PSRAM |
