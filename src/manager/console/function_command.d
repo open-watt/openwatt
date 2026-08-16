@@ -59,21 +59,24 @@ class FunctionCommand : Command
 {
 nothrow @nogc:
 
-    alias GenericCall = const(char)[] function(Session, out CommandState, const Variant[], const NamedArgument[], void*) nothrow @nogc;
+    alias GenericCall = const(char)[] function(Session, out CommandState, const AlignedArgument[], const Variant[], const NamedArgument[], void*) nothrow @nogc;
 
     static FunctionCommand create(alias fun, Instance)(ref Console console, Instance i, const(char)[] commandName = null)
     {
         static assert(is(Parameters!fun[0] == Session), "First parameter must be manager.console.session.Session for command hander function");
 
         enum FunctionName = transform_command_name(__traits(identifier, fun));
+        alias ParamNames = STATIC_MAP!(TransformCommandName, parameter_identifier_tuple!fun[1 .. $]);
+        alias Params = STATIC_MAP!(Unqual, Parameters!fun[1 .. $]);
 
-        static const(char)[] function_adapter(Session session, out CommandState state, const Variant[] arguments, const NamedArgument[] parameters, void* _instance)
+        static const(char)[] function_adapter(Session session, out CommandState state, const AlignedArgument[] arguments, const Variant[] positional_arguments, const NamedArgument[] named_arguments, void* _instance)
         {
-            const(char)[] error;
-            auto _args = make_arg_tuple!fun(arguments, parameters, error, session._console.appInstance);
+            Tuple!Params _args;
+            size_t error_slot;
+            const(char)[] error = convert_arguments!Params(arguments, positional_arguments, named_arguments, _args, error_slot);
             if (error)
             {
-                session.write_line(error);
+                write_argument_error(session, arguments[error_slot].definition.name, error);
                 return null;
             }
             static if (is(__traits(parent, fun)))
@@ -115,13 +118,19 @@ nothrow @nogc:
         }
 
         FunctionCommand fnCmd = console._allocator.allocT!FunctionCommand(console, commandName ? commandName.makeString(defaultAllocator) : StringLit!FunctionName, cast(void*)i, &function_adapter);
-
-        alias ParamNames = STATIC_MAP!(TransformCommandName, parameter_identifier_tuple!fun[1 .. $]);
-        alias Params = STATIC_MAP!(Unqual, Parameters!fun[1 .. $]);
+        static assert(Params.length <= ubyte.max, "Too many command parameters");
+        fnCmd._parameter_count = cast(ubyte)Params.length;
 
         static foreach (j; 0 .. ParamNames.length)
         {
-            static if (ParamNames[j] != "args" && ParamNames[j] != "named-args")
+            static if (ParamNames[j] == "named-args")
+            {
+                static assert(is(const(NamedArgument)[] : Params[j]), "`named_args` parameter must be of type const(NamedArgument)[]");
+                fnCmd._accepts_named_arguments = true;
+            }
+            else static if (ParamNames[j] == "args")
+                static assert(is(const(Variant)[] : Params[j]), "`args` parameter must be of type const(Variant)[]");
+            else
             {{
                 static if (is(Params[j] == Nullable!T, T))
                 {
@@ -134,9 +143,9 @@ nothrow @nogc:
                     alias ArgTy = Params[j];
                 }
                 version (ExcludeHelpText)
-                    fnCmd._args ~= FunctionArgument(StringLit!(ParamNames[j]));
+                    fnCmd._args ~= FunctionArgument(cast(ubyte)j, ParamIsNullable, StringLit!(ParamNames[j]));
                 else
-                    fnCmd._args ~= FunctionArgument(StringLit!(ParamNames[j]), StringLit!(ParamIsNullable ? "?" ~ ArgTy.stringof : ArgTy.stringof));
+                    fnCmd._args ~= FunctionArgument(cast(ubyte)j, ParamIsNullable, StringLit!(ParamNames[j]), StringLit!(ParamIsNullable ? "?" ~ ArgTy.stringof : ArgTy.stringof));
                 static if (is(typeof(&suggest_completion!ArgTy)))
                     fnCmd._args[$-1].suggest = &suggest_completion!ArgTy;
             }}
@@ -160,10 +169,17 @@ nothrow @nogc:
         this._fn = _fn;
     }
 
-    override CommandState execute(Session session, Scope*, const Variant[] _args, const NamedArgument[] namedArgs, out Variant result)
+    override CommandState execute(Session session, Scope*, const Variant[] positional_arguments, const NamedArgument[] named_arguments, out Variant result)
     {
+        AlignedArgument[] arguments = tempAllocator().allocArray!AlignedArgument(_parameter_count);
+        if (const(char)[] error = align_arguments(_args[], named_arguments, arguments, _accepts_named_arguments))
+        {
+            session.write_line(error);
+            return null;
+        }
+
         CommandState state;
-        const(char)[] r = _fn(session, state, _args, namedArgs, _instance);
+        const(char)[] r = _fn(session, state, arguments, positional_arguments, named_arguments, _instance);
 
         // TODO: when a function returns a token, it might be fed into the calling context?
         assert(!(state && r), "Shouldn't return a latent state AND a result...");
@@ -260,6 +276,8 @@ private:
     GenericCall _fn;
     Array!FunctionArgument _args;
     Array!String function(bool, const(char)[], const(char)[]) nothrow @nogc _custom_suggest;
+    ubyte _parameter_count;
+    bool _accepts_named_arguments;
 
     Array!String suggest_args(const(char)[] arg_prefix)
     {
@@ -301,88 +319,142 @@ private:
 
 struct FunctionArgument
 {
+nothrow @nogc:
+
+    version (ExcludeHelpText)
+    this(ubyte slot, bool optional, String name)
+    {
+        this.slot = slot;
+        this.optional = optional;
+        this.name = name.move;
+    }
+    else
+    this(ubyte slot, bool optional, String name, String type_name)
+    {
+        this.slot = slot;
+        this.optional = optional;
+        this.name = name.move;
+        this.type_name = type_name.move;
+    }
+
     String name;
     version (ExcludeHelpText) {} else
         String type_name = StringLit!"";  // prefixed with '?' if the param is Nullable
     Array!String function(const(char)[]) nothrow @nogc suggest;
+    ubyte slot;
+    bool optional;
 }
 
-auto make_arg_tuple(alias F)(const Variant[] args, const NamedArgument[] parameters, out const(char)[] error, Application app)
-    if (is_some_function!F)
+struct AlignedArgument
 {
-    import urt.meta;
+    const(FunctionArgument)* definition;
+    const(Variant)* value;
+}
 
-    alias Params = STATIC_MAP!(Unqual, Parameters!F[1 .. $]);
-    alias ParamNames = STATIC_MAP!(TransformCommandName, parameter_identifier_tuple!F[1 .. $]);
-
-    Tuple!Params params;
-    error = null;
-    bool[Params.length] got_arg;
-    bool has_named_args = false;
-
-    static foreach (i, P; Params)
+const(char)[] align_arguments(const FunctionArgument[] definitions, const NamedArgument[] parameters, ref AlignedArgument[] arguments, bool accepts_named_arguments)
+{
+    foreach (ref definition; definitions)
     {
-        static if (ParamNames[i] == "named-args")
-            has_named_args = true;
+        assert(definition.slot < arguments.length);
+        assert(arguments[definition.slot].definition is null);
+        arguments[definition.slot].definition = &definition;
     }
 
-    outer: foreach (ref param; parameters)
+    foreach (ref parameter; parameters)
     {
-        param_switch: switch (param.name)
+        const(FunctionArgument)* definition;
+        foreach (ref candidate; definitions)
         {
-            static foreach (i, P; Params)
+            if (candidate.name[] == parameter.name)
             {
-                static if (ParamNames[i] != "args" && ParamNames[i] != "named-args")
-                {
-                    case ParamNames[i]:
-                        static if (is(const(Variant) : typeof(params[i])))
-                            params[i] = param.value;
-                        else
-                        {
-                            error = from_variant(param.value, params[i]);
-                            if (error)
-                            {
-                                error = tconcat("Argument '", param.name, "' error: ", error);
-                                break outer;
-                            }
-                        }
-                        got_arg[i] = true;
-                        break param_switch;
-                }
+                definition = &candidate;
+                break;
             }
-            default:
-                if (!has_named_args)
-                {
-                    error = tconcat("Unknown parameter '", param.name, "'");
-                    break outer;
-                }
         }
+        if (definition)
+            arguments[definition.slot].value = &parameter.value;
+        else if (!accepts_named_arguments)
+            return tconcat("Unknown parameter '", parameter.name, "'");
     }
 
+    foreach (ref definition; definitions)
+    {
+        if (!definition.optional && arguments[definition.slot].value is null)
+            return tconcat("Missing argument: ", definition.name);
+    }
+    return null;
+}
+
+pragma(inline, false)
+const(char)[] convert_arguments(Params...)(const AlignedArgument[] arguments, const Variant[] positional_arguments, const NamedArgument[] named_arguments, ref Tuple!Params result, out size_t error_slot)
+{
+    assert(arguments.length == Params.length);
     static foreach (i, P; Params)
     {
+        static if (is(const(Variant)[] : P))
         {
-            static if (ParamNames[i] == "args")
+            assert(arguments[i].definition is null);
+            result[i] = positional_arguments;
+        }
+        else static if (is(const(NamedArgument)[] : P))
+        {
+            assert(arguments[i].definition is null);
+            result[i] = named_arguments;
+        }
+        else
+        {
+            assert(arguments[i].definition);
+            if (arguments[i].value)
             {
-                static assert(is(const(Variant)[] : P), "`args` parameter must be of type const(Variant)[]");
-                params[i] = args;
-            }
-            else static if (ParamNames[i] == "named-args")
-            {
-                static assert(is(const(NamedArgument)[] : P), "`named_args` parameter must be of type const(NamedArgument)[]");
-                params[i] = parameters;
-            }
-            else static if (!is(P : Nullable!U, U))
-            {
-                if (!got_arg[i])
+                static if (is(const(Variant) : typeof(result[i])))
+                    result[i] = *arguments[i].value;
+                else if (const(char)[] error = from_variant(*arguments[i].value, result[i]))
                 {
-                    error = tconcat("Missing argument: ", ParamNames[i]);
-                    goto done;
+                    error_slot = i;
+                    return error;
                 }
             }
         }
     }
+    return null;
+}
 
-done:
-    return params;
+pragma(inline, false)
+void write_argument_error(Session session, ref const String name, const(char)[] error)
+{
+    session.write_line(tconcat("Argument '", name, "' error: ", error));
+}
+
+
+unittest
+{
+    version (ExcludeHelpText)
+        FunctionArgument[2] definitions = [FunctionArgument(1, false, StringLit!"required"), FunctionArgument(0, true, StringLit!"optional")];
+    else
+        FunctionArgument[2] definitions = [FunctionArgument(1, false, StringLit!"required", StringLit!"uint"), FunctionArgument(0, true, StringLit!"optional", StringLit!"uint")];
+    NamedArgument[1] parameters = [NamedArgument("required", 42u)];
+    AlignedArgument[4] storage;
+    AlignedArgument[] arguments = storage[];
+    assert(!align_arguments(definitions[], parameters[], arguments, false));
+    assert(arguments[0].definition is &definitions[1] && arguments[0].value is null);
+    assert(arguments[1].definition is &definitions[0] && arguments[1].value is &parameters[0].value);
+    assert(arguments[2].definition is null && arguments[2].value is null);
+    assert(arguments[3].definition is null && arguments[3].value is null);
+
+    arguments[] = AlignedArgument.init;
+    assert(align_arguments(definitions[], null, arguments, false) == "Missing argument: required");
+    arguments[] = AlignedArgument.init;
+    NamedArgument[1] unknown = [NamedArgument("unknown", true)];
+    assert(align_arguments(definitions[], unknown[], arguments, false) == "Unknown parameter 'unknown'");
+    arguments[] = AlignedArgument.init;
+    NamedArgument[2] parameters_and_unknown = [NamedArgument("required", 42u), NamedArgument("unknown", true)];
+    assert(align_arguments(definitions[], parameters_and_unknown[], arguments, true) is null);
+
+    Tuple!(Nullable!uint, uint, const(Variant)[], const(NamedArgument)[]) result;
+    Variant[2] positional = [Variant(1u), Variant(2u)];
+    size_t error_slot;
+    assert(!convert_arguments!(Nullable!uint, uint, const(Variant)[], const(NamedArgument)[])(arguments, positional[], parameters[], result, error_slot));
+    assert(result[0] == null && result[1] == 42u);
+    assert(result[2].ptr is positional.ptr && result[2].length == positional.length);
+    assert(result[3].ptr is parameters.ptr && result[3].length == parameters.length);
 }
