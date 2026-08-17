@@ -322,11 +322,12 @@ private:
         {
             case ATTOpcode.exchange_mtu_req:
             {
-                // TODO: report the platform's real negotiated MTU when the
-                //       driver API grows an accessor for it
+                ushort mtu = ble_get_mtu(_ble, session_conn(session));
+                if (mtu < 23)
+                    mtu = att_emu_mtu;
                 ubyte[3] rsp = void;
                 rsp[0] = ATTOpcode.exchange_mtu_rsp;
-                rsp[1 .. 3] = nativeToLittleEndian(ushort(att_emu_mtu));
+                rsp[1 .. 3] = nativeToLittleEndian(mtu);
                 emu_respond(f, rsp[]);
                 _queue.complete(frame.tag, MessageState.complete);
                 return true;
@@ -394,7 +395,11 @@ private:
                     if (handle != 0 && emu_cccd(c) == handle)
                     {
                         bool enable = data.length >= 1 && (data[0] & 0x03) != 0;
-                        ble_gatt_subscribe(_ble, conn, c.handle, enable);
+                        if (!ble_gatt_subscribe(_ble, conn, c.handle, enable))
+                        {
+                            log.error("could not ", enable ? "enable" : "disable", " notifications for GATT handle ", c.handle);
+                            return false;
+                        }
                         if (with_response)
                         {
                             ubyte[1] rsp = [ ATTOpcode.write_rsp ];

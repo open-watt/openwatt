@@ -509,11 +509,17 @@ private:
     CapacitySamplerState _cap;
 
     Array!ubyte _rx_buffer;
+    Array!ubyte _rx_frame;
 
     void client_state_change(ActiveObject, StateSignal signal)
     {
         if (signal == StateSignal.offline)
+        {
+            // Avoid re-entering client destruction from its state dispatch.
+            _subscribed = false;
+            _client = null;
             restart();
+        }
     }
 
     // NFC authorises the unsigned AddKey request.
@@ -624,9 +630,11 @@ private:
             if (_rx_buffer.length < 2 + msg_len)
                 return;  // need more chunks
 
-            const(ubyte)[] msg = _rx_buffer[2 .. 2 + msg_len];
-            dispatch_response(msg);
+            // Dispatch may restart the session or append to _rx_buffer.
+            _rx_frame.clear();
+            _rx_frame ~= _rx_buffer[2 .. 2 + msg_len];
             _rx_buffer.remove(0, 2 + msg_len);
+            dispatch_response(_rx_frame[]);
         }
     }
 
