@@ -357,8 +357,9 @@ size_t encode_value(bool pack, ubyte ty, T)(ubyte[] buffer, auto ref const T val
     {
         size_t len = buffer_len(value);
         size_t offset = buffer.put_varint(len);
-        debug assert(proto_serialise(buffer[offset .. $], value) == len);
-        return offset + len;
+        size_t written = proto_serialise(buffer[offset .. $], value);
+        debug assert(written == len);
+        return offset + written;
     }
     else
         static assert(false, "Unsupported type");
