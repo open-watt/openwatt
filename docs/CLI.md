@@ -293,6 +293,30 @@ managed-item properties above:
 | `tx-rate-max` | read-only | Maximum observed transmit rate in bytes per second. |
 | `rx-rate-max` | read-only | Maximum observed receive rate in bytes per second. |
 
+### `/stream/ble-serial`
+
+A ble-serial stream carries a byte stream over a BLE GATT serial bridge: bytes
+written to the stream are written to one characteristic, and notifications from
+another are delivered as received bytes. This covers the common vendor serial
+services (Nordic UART, Microchip Transparent UART, HM-10 and ELM327 clones),
+which all share this shape and differ only in UUIDs.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `client` | BLE client name | required | Connected `/protocol/ble/client` providing the GATT session. |
+| `service` | UUID | required | Service containing the serial characteristics. 16-bit shorthand is accepted. |
+| `write` | UUID | required | Characteristic bytes are written to. |
+| `notify` | UUID | `write` | Characteristic bytes are received from. Omit for single-characteristic devices. |
+| `write-mode` | `auto`, `command`, `request` | `auto` | `command` uses unacknowledged writes, `request` acknowledged writes. `auto` prefers `command` when the characteristic supports it. |
+
+Writes are chunked to the negotiated ATT MTU. `tx-backlog` pressure is visible
+to producers; acknowledged mode paces transmission on the peer's responses.
+
+```text
+/protocol/ble/client/add name=obd interface=ble1 peer=A1:B2:C3:D4:E5:F6
+/stream/ble-serial/add name=obd0 client=obd service=FFF0 write=FFF2 notify=FFF1
+```
+
 ### `/stream/console`
 
 This desktop stream exposes the process console handles. It is also useful as a

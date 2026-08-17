@@ -182,6 +182,7 @@
     <DCompile Include="src\protocol\ble\device.d" />
     <DCompile Include="src\protocol\ble\iface.d" />
     <DCompile Include="src\protocol\ble\package.d" />
+    <DCompile Include="src\protocol\ble\stream.d" />
     <DCompile Include="src\protocol\can\binding.d" />
     <DCompile Include="src\protocol\can\iface.d" />
     <DCompile Include="src\protocol\can\package.d" />

@@ -567,6 +567,9 @@
     <DCompile Include="src\protocol\ble\package.d">
       <Filter>src\protocol\ble</Filter>
     </DCompile>
+    <DCompile Include="src\protocol\ble\stream.d">
+      <Filter>src\protocol\ble</Filter>
+    </DCompile>
     <DCompile Include="src\protocol\can\binding.d">
       <Filter>src\protocol\can</Filter>
     </DCompile>
