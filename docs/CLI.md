@@ -437,6 +437,17 @@ An AP interface is one BSS served by a WiFi radio.
 | `hidden` | read/write | boolean | `false` | Suppresses SSID broadcast. |
 | `installation` | read/write | `any`, `indoor`, `outdoor` | `any` | Declared installation environment. |
 
+### `/interface/ble`
+
+A BLE interface is one Bluetooth LE radio. It scans continuously while running,
+feeding discovered advertisements to `/protocol/ble/device/print`, and carries
+connections opened by `/protocol/ble/client` entries.
+
+| Property | Access | Values | Default | Description |
+| --- | --- | --- | --- | --- |
+| `port` | read/write | `0` to radio count | `0` | Platform radio index. |
+| `max-in-flight` | read/write | `1` to `255` | `4` | Concurrent unacknowledged frames; must be non-zero. |
+
 ### `/interface/ethernet`
 
 Ethernet interfaces are a managed collection, and additionally carry the
@@ -540,6 +551,71 @@ A WLAN interface is one station association bound to a WiFi radio.
 | `bssid` | read-only | MAC address | empty | Currently associated AP. |
 | `rssi` | read-only | dBm | `0` | Received signal strength; `0` means unavailable. |
 | `signal-quality` | read-only | `0` to `100` | `0` | Normalized signal quality. |
+
+### `/protocol/ble/device`
+
+| Command | Syntax | Description |
+| --- | --- | --- |
+| `print` | `/protocol/ble/device/print` | Lists devices heard advertising, with RSSI, name, and advertised service and manufacturer identifiers. |
+
+Entries expire twenty seconds after the last advertisement. A connected device
+stops advertising, so it leaves this list while a client holds it.
+
+### `/protocol/ble/client`
+
+A BLE client is one GATT connection to a peer device. It connects on startup and
+completes service and characteristic discovery before reporting `Running`, so a
+running client always has a populated attribute table.
+
+| Property | Access | Values | Default | Description |
+| --- | --- | --- | --- | --- |
+| `interface` | read/write | BLE interface name | required | Radio carrying the connection. |
+| `peer` | read/write | MAC address | required | Device address to connect to. |
+
+| Command | Syntax | Description |
+| --- | --- | --- |
+| `gatt` | `/protocol/ble/client/gatt <client>` | Prints the discovered attribute table grouped by service. |
+| `read` | `/protocol/ble/client/read <client> <handle>` | Submits an ATT read; the value is written to the log. |
+
+`gatt` reports the negotiated ATT MTU, then each service with its handle range
+and characteristics. `PROPS` is a fixed eight-column mask, one letter per ATT
+property bit, `-` where the bit is clear:
+
+| Letter | Property |
+| --- | --- |
+| `B` | Broadcast |
+| `R` | Read |
+| `C` | Write without response (write command) |
+| `W` | Write with response (write request) |
+| `N` | Notify |
+| `I` | Indicate |
+| `A` | Authenticated signed writes |
+| `E` | Extended properties |
+
+Reads and writes are refused locally against these bits, so a characteristic
+without `R` reports `read_not_permitted` without transmitting.
+
+```
+/protocol/ble/client/add name=obd interface=ble1 peer=00:10:CC:4F:36:03
+/protocol/ble/client/gatt obd
+```
+
+```
+mtu=247, 3 services, 4 characteristics
+
+service 00001800-0000-1000-8000-00805F9B34FB  handles 0x0001-0x0003
+  VALUE   DECL    CCCD    PROPS     UUID
+  0x0003  0x0002  -       -R------  00002A00-0000-1000-8000-00805F9B34FB
+
+service 00001801-0000-1000-8000-00805F9B34FB  handles 0x0004-0x0007
+  VALUE   DECL    CCCD    PROPS     UUID
+  0x0006  0x0005  0x0007  -----I--  00002A05-0000-1000-8000-00805F9B34FB
+
+service 0000FFF0-0000-1000-8000-00805F9B34FB  handles 0x0008-0xFFFF
+  VALUE   DECL    CCCD    PROPS     UUID
+  0x000A  0x0009  0x000B  --CWN---  0000FFF1-0000-1000-8000-00805F9B34FB
+  0x000D  0x000C  -       --CW----  0000FFF2-0000-1000-8000-00805F9B34FB
+```
 
 ### `/protocol/http/server`
 
