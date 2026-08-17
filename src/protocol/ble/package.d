@@ -25,6 +25,7 @@ import protocol.ble.client;
 import protocol.ble.device;
 import protocol.ble.iface;
 import protocol.ble.binding;
+import protocol.ble.stream;
 
 nothrow @nogc:
 
@@ -54,6 +55,7 @@ nothrow @nogc:
 
         g_app.console.register_collection!BLEClient();
         g_app.console.register_collection!BLEClientBinding();
+        g_app.console.register_collection!BLESerialStream();
         g_app.console.register_command!print_devices("/protocol/ble/device", this, "print");
         g_app.console.register_command!cmd_read("/protocol/ble/client", this, "read");
     }
@@ -326,7 +328,7 @@ void request_ble_service_from_ready()
 
 private:
 
-bool parse_ble_uuid(const(char)[] str, out GUID guid) pure
+package bool parse_ble_uuid(const(char)[] str, out GUID guid) pure
 {
     if (guid.fromString(str) == 36)
         return str.length == 36;
