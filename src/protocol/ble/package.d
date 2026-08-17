@@ -21,6 +21,7 @@ import router.iface;
 import router.iface.mac;
 import router.iface.packet;
 
+import protocol.ble.att;
 import protocol.ble.client;
 import protocol.ble.device;
 import protocol.ble.iface;
@@ -58,6 +59,7 @@ nothrow @nogc:
         g_app.console.register_collection!BLESerialStream();
         g_app.console.register_command!print_devices("/protocol/ble/device", this, "print");
         g_app.console.register_command!cmd_read("/protocol/ble/client", this, "read");
+        g_app.console.register_command!cmd_gatt("/protocol/ble/client", this, "gatt");
     }
 
     uint element_size(uint)
@@ -237,8 +239,48 @@ nothrow @nogc:
             session.write_line("client not connected");
             return;
         }
-        client.read(handle);
+        if (!client.read(handle))
+        {
+            session.write_line("read rejected");
+            return;
+        }
         session.write_line("read submitted");
+    }
+
+    void cmd_gatt(Session session, BLEClient client)
+    {
+        if (!client.discovery_complete)
+        {
+            session.write_line("GATT discovery incomplete");
+            return;
+        }
+
+        const(GattService)[] services = client.services;
+        const(GattChar)[] chars = client.characteristics;
+
+        session.writef("mtu={0}, {1} services, {2} characteristics\n", client.att_mtu, services.length, chars.length);
+
+        foreach (i, ref svc; services)
+        {
+            session.writef("\nservice {0}  handles 0x{1,04x}-0x{2,04x}\n", svc.uuid, svc.start, svc.end);
+            session.write_line("  VALUE   DECL    CCCD    PROPS     UUID");
+
+            foreach (ref c; chars)
+            {
+                if (c.service != i)
+                    continue;
+
+                char[8] props = void;
+                render_gatt_props(c.props, props);
+
+                session.writef("  0x{0,04x}  0x{1,04x}  ", c.value_handle, c.decl);
+                if (c.cccd)
+                    session.writef("0x{0,04x}  ", c.cccd);
+                else
+                    session.write("-       ");
+                session.writef("{0}  {1}\n", props[], c.uuid);
+            }
+        }
     }
 
     void print_devices(Session session)
@@ -327,6 +369,14 @@ void request_ble_service_from_ready()
 }
 
 private:
+
+// bit order matches GattProps; W is a write request, C a write command
+void render_gatt_props(ubyte props, ref char[8] buf) pure
+{
+    static immutable char[8] letters = ['B', 'R', 'C', 'W', 'N', 'I', 'A', 'E'];
+    foreach (i; 0 .. 8)
+        buf[i] = (props & (1 << i)) ? letters[i] : '-';
+}
 
 package bool parse_ble_uuid(const(char)[] str, out GUID guid) pure
 {
