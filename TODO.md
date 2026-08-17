@@ -575,6 +575,19 @@ The current implementation and remaining phases are described in
   right; the tree view's quantity formatting wants integers printed as integers and floats to a
   precision that matches their resolution.
 
+- **`system` device memory is the allocator's own accounting**: on desktop that counts uRT
+  allocations only, not the process's working set, which stays in `/system/sysinfo`. On ESP32
+  the counters move when urt allocates or frees, so transient IDF-only allocations are missed;
+  add allocator hooks if exact extrema are required. Concurrent interval sampling has
+  approximate boundaries; serialize it with updates if exact windows become necessary.
+
+- **Fragmentation is not published**: `largest_free` walks the heap under its lock, so it left
+  the per-second `system` device and is reported only by `/system/sysinfo`. A periodic figure
+  needs a bounded or incremental walk.
+
+- **Byte counts carry no unit**: urt's unit encoding has no free unit type for information, so
+  `system.mem` values are plain integers of bytes. A unit for bytes means widening that encoding.
+
 - **A numeric-to-text format change with history crashes the next text read**: `text_value`
   reads the tail bucket without checking that bucket's format, so after `format` switches a
   numeric element with recorded history to text, it takes the scalar bucket's samples as `ushort`

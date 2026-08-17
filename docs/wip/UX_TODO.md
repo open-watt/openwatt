@@ -47,6 +47,21 @@ through them and remove sections as they are absorbed.
   as no reading, not as the last value, an empty string or zero. It arrives as a `val` sample
   whose value is null, or as an `add` with `"v":null` and a `t`.
 
+## 2026-09-25: every node publishes a `system` device
+
+- A local `system` device appears on every node, with `mem.<pool>.{total,used,low,high}`
+  (pools are `ram` on desktop, `sram`, `psram` and friends on embedded) and
+  `cpu.{load,low,high}` in percent (a `%` quantity), updated each second. `low`/`high` are the
+  extremes reached during the last second, not all-time. Show it as node health rather than as
+  user equipment.
+- These are read-only reported metrics; memory values are plain integers of bytes (no unit
+  travels with them). `used`, `low` and `high` share one accounting, so draw the level inside
+  its band; on desktop it counts OpenWatt's own allocations, not the process working set. ESP32
+  extrema are observed at urt allocation/free calls and may miss IDF-only peaks.
+- `system.mem.stack` reports the main stack's `peak` high-water mark and `total` where its
+  limit is known. These are bytes; `peak` is all-time, unlike the RAM interval bands.
+  Omit the utilization percentage when `total` is absent.
+
 ## 2026-09-23: boot guard recovery status
 
 - `/system/sysinfo` adds `Boot:` with the configuration rung and recovery reason;
