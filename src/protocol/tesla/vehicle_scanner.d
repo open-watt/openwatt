@@ -225,7 +225,15 @@ protected:
         MonoTime now = getTime();
         foreach (s; Collection!TeslaVehicleSession().values)
         {
-            if (s.scanner is this && now - s.last_seen > out_of_range_timeout)
+            if (s.scanner !is this)
+                continue;
+
+            // A connected vehicle need not continue advertising.
+            BLEClient client = s.client;
+            if (client && client.running)
+                continue;
+
+            if (now - s.last_seen > out_of_range_timeout)
             {
                 log.info("Tesla vehicle '", s.name[], "' out of range, ending session");
                 s.destroy();
