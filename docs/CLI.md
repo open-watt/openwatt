@@ -492,6 +492,27 @@ OpenWatt station never corrupts diagnostics on a network with provisioned CFM.
 /interface/ethernet/set eth0 cfm-level=5
 ```
 
+### `/interface/obd`
+
+An OBD interface speaks OBD-II diagnostics to a vehicle: requests and responses
+are carried as packets holding a complete service message (mode + pid + data),
+with ISO-TP segmentation handled below. Two data sources are supported and the
+properties are mutually exclusive; the one set last wins.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `interface` | CAN interface name | none | Speaks ISO-TP directly on the nominated CAN bus. |
+| `stream` | Stream name | none | Speaks to an ELM327 adapter over any byte stream: serial, `tcp-client` (WiFi adapters), or `ble-serial` (BLE dongles). |
+
+The ELM327 backend initialises the adapter (echo off, headers on, automatic
+protocol) and runs one command at a time against its prompt. 29-bit addressing
+is not yet supported over ELM327.
+
+```text
+/stream/ble-serial/add name=obd0 client=car service=FFF0 write=FFF2 notify=FFF1
+/interface/obd/add name=car-obd stream=obd0
+```
+
 ### `/interface/udp`
 
 A UDP interface is a raw-packet interface over UDP datagrams: one datagram is
@@ -551,6 +572,31 @@ A WLAN interface is one station association bound to a WiFi radio.
 | `bssid` | read-only | MAC address | empty | Currently associated AP. |
 | `rssi` | read-only | dBm | `0` | Received signal strength; `0` means unavailable. |
 | `signal-quality` | read-only | `0` to `100` | `0` | Normalized signal quality. |
+
+### `/binding/obd`
+
+An OBD binding polls a vehicle through an OBD interface and materialises the
+results into a Device from a profile's `obd:` element map. Polling batches up
+to six mode-01 pids per request, queries the supported-pid bitmasks at startup
+so pids the vehicle does not implement are never polled, and treats a silent
+vehicle as parked rather than failed: after three missed responses the binding
+drops to a quiet probe every ten seconds until the vehicle answers again.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `interface` | OBD interface name | required | Interface used to reach the vehicle. |
+| `device` | device name | required | Device to create or populate. |
+| `profile` | profile basename | required | Profile holding the `obd:` element map. |
+| `model` | model name | empty | Model selector within the profile. |
+
+Profile `obd:` lines are `mode, pid, offset, type` with an optional units
+column and an optional `ecu=<id>` field addressing a specific ECU (the default
+is the functional broadcast). Mode `0x22` pids are 16-bit UDS data identifiers.
+
+```text
+/interface/obd/add name=car-obd stream=obd0
+/binding/obd/add name=car device=mg profile=j1979
+```
 
 ### `/protocol/ble/device`
 

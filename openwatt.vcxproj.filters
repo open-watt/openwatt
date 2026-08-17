@@ -136,6 +136,9 @@
     <Filter Include="src\protocol\ntp">
       <UniqueIdentifier>{a7e3c1d4-2b59-4f80-9a16-6c4d8e2f1b03}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\protocol\obd">
+      <UniqueIdentifier>{5b8f2a91-c364-47de-8f02-91a7d5c3e6b4}</UniqueIdentifier>
+    </Filter>
     <Filter Include="src\protocol\http">
       <UniqueIdentifier>{072e997d-5dcf-4378-947a-4a665e1fd242}</UniqueIdentifier>
     </Filter>
@@ -671,6 +674,15 @@
     </DCompile>
     <DCompile Include="src\protocol\ntp\package.d">
       <Filter>src\protocol\ntp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\obd\iface.d">
+      <Filter>src\protocol\obd</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\obd\isotp.d">
+      <Filter>src\protocol\obd</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\obd\package.d">
+      <Filter>src\protocol\obd</Filter>
     </DCompile>
     <DCompile Include="src\router\iface\packet.d">
       <Filter>src\router\iface</Filter>
