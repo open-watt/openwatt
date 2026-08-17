@@ -6,7 +6,7 @@ import urt.traits;
 import urt.variant;
 
 // these are used by the conversion functions...
-import manager.base : ActiveObject;
+import manager.base : ActiveObject, BaseObject;
 import manager.component : Component;
 import manager.device : Device;
 
