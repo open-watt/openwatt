@@ -162,11 +162,30 @@ Validate → Starting → Running
 
 **Key methods to override:**
 - `validate()`: Return true if config is valid
-- `startup()`: Initialize resources (return `Complete`, `Continue`, or `Error`)
+- `startup()`: Initialize resources (return `Complete`, `Continue`, or `Error`). The state machine
+  re-drives it while Starting, so async bring-up and its timeouts live here.
 - `shutdown()`: Clean up resources (must not fail)
-- `update()`: Per-frame processing when Running
+- `update()`: DEPRECATED per-frame polling. Existing overrides are migration debt; do NOT add new
+  ones. Use the event-driven mechanisms below.
 
 See [src/manager/base.d:325-495](src/manager/base.d#L325-L495) for state machine implementation.
+
+##### Event-Driven Operation (no polling!)
+
+OpenWatt is event-driven. New code never polls; work is initiated by data arrival, state signals,
+timers, and completion callbacks:
+
+- **Bytes push**: install `stream.rx_handler(&handler)` (release it in `shutdown()`); the reactor
+  delivers data the moment it arrives. Never call `stream.read()` from a tick.
+- **Packets push**: subscribe to the interface with a `PacketFilter`; handlers fire on dispatch.
+- **State pushes**: subscribe `StateSignal` handlers; never poll `dependency.running` (see
+  ObjectRef section below).
+- **Time-driven logic schedules timers**: `g_app.schedule(when, &handler)` and
+  `g_app.cancel(&handler)` (one-shot, main thread only) drive timeouts, retries, probes, and
+  sampling cadence. The 1s `heartbeat()` hook is only for coarse periodic supervision such as rate
+  counters, and fires only while Running.
+- **TX is self-clocking**: transmit on submission when the link is idle; send the next queued item
+  from the completion event (ack callback, prompt, response), never from a tick.
 
 ##### ObjectRef and Dependency Management
 
