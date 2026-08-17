@@ -197,6 +197,14 @@ nothrow @nogc:
             if (equals == lastTok.length)
             {
                 tokens = suggest_args(lastTok);
+                if (const(FunctionArgument)* a = positional_arg(cmdLine[0 .. lastToken]))
+                {
+                    if (a.suggest)
+                    {
+                        foreach (ref s; a.suggest(lastTok))
+                            tokens ~= s;
+                    }
+                }
                 result ~= get_completion_suffix(lastTok, tokens);
                 if (result.length > 0 && result.length > cmdLine.length)
                 {
@@ -231,7 +239,18 @@ nothrow @nogc:
         // if the partial argument alrady contains an '='
         size_t equals = lastTok.findFirst('=');
         if (equals == lastTok.length)
-            return suggest_args(lastTok);
+        {
+            Array!String suggestions = suggest_args(lastTok);
+            if (const(FunctionArgument)* a = positional_arg(cmdLine[0 .. lastToken]))
+            {
+                if (a.suggest)
+                {
+                    foreach (ref s; a.suggest(lastTok))
+                        suggestions ~= s;
+                }
+            }
+            return suggestions;
+        }
         return suggest_values(lastTok[0 .. equals], lastTok[equals + 1 .. $]);
     }
 
@@ -272,6 +291,57 @@ private:
                 suggestions ~= String(MutableString!0(Concat, arg.name, '=')); // TODO: MOVE construct!
         }
         return suggestions;
+    }
+
+    // an unnamed argument binds to the nth parameter not already given by name, so
+    // positional completion resolves through the same per-argument suggester
+    const(FunctionArgument)* positional_arg(const(char)[] preceding)
+    {
+        size_t count;
+        for (const(char)[] t = preceding; t.length; )
+        {
+            const(char)[] tok = next_token(t);
+            if (!tok.length)
+                break;
+            if (tok.findFirst('=') == tok.length)
+                ++count;
+        }
+
+        foreach (ref a; _args)
+        {
+            if (named_arg_given(preceding, a.name[]))
+                continue;
+            if (count == 0)
+                return &a;
+            --count;
+        }
+        return null;
+    }
+
+    static const(char)[] next_token(ref const(char)[] text)
+    {
+        while (text.length && text[0].is_whitespace)
+            text = text[1 .. $];
+        size_t e;
+        while (e < text.length && !text[e].is_whitespace)
+            ++e;
+        const(char)[] tok = text[0 .. e];
+        text = text[e .. $];
+        return tok;
+    }
+
+    static bool named_arg_given(const(char)[] text, const(char)[] name)
+    {
+        for (const(char)[] t = text; t.length; )
+        {
+            const(char)[] tok = next_token(t);
+            if (!tok.length)
+                break;
+            size_t eq = tok.findFirst('=');
+            if (eq != tok.length && tok[0 .. eq] == name)
+                return true;
+        }
+        return false;
     }
 
     Array!String suggest_values(const(char)[] argument, const(char)[] value)
@@ -319,11 +389,14 @@ auto make_arg_tuple(alias F)(const Variant[] args, const NamedArgument[] paramet
     error = null;
     bool[Params.length] got_arg;
     bool has_named_args = false;
+    bool has_args_param = false;
 
     static foreach (i, P; Params)
     {
         static if (ParamNames[i] == "named-args")
             has_named_args = true;
+        else static if (ParamNames[i] == "args")
+            has_args_param = true;
     }
 
     outer: foreach (ref param; parameters)
@@ -356,6 +429,41 @@ auto make_arg_tuple(alias F)(const Variant[] args, const NamedArgument[] paramet
                     error = tconcat("Unknown parameter '", param.name, "'");
                     break outer;
                 }
+        }
+    }
+
+    // unnamed arguments fill the parameters left over in declaration order; a command
+    // taking `args` wants the raw list, so it opts out rather than competing for them
+    if (error is null && !has_args_param)
+    {
+        size_t next;
+        static foreach (i, P; Params)
+        {
+            static if (ParamNames[i] != "args" && ParamNames[i] != "named-args")
+            {
+                if (!got_arg[i] && next < args.length)
+                {
+                    static if (is(const(Variant) : typeof(params[i])))
+                        params[i] = args[next];
+                    else
+                    {
+                        error = from_variant(args[next], params[i]);
+                        if (error)
+                        {
+                            error = tconcat("Argument '", ParamNames[i], "' error: ", error);
+                            goto done;
+                        }
+                    }
+                    got_arg[i] = true;
+                    ++next;
+                }
+            }
+        }
+
+        if (next < args.length)
+        {
+            error = "Too many arguments";
+            goto done;
         }
     }
 
