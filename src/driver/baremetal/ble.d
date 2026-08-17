@@ -360,9 +360,12 @@ private:
                     return false;
                 ushort handle = pdu.ptr[1 .. 3].littleEndianToNative!ushort;
 
-                if (session.find_char(handle) is null)
+                // the host stack silently drops reads the peer won't answer, so an
+                // unreadable characteristic must be refused here or the transaction hangs
+                const(GattCharacteristic)* c = session.find_char(handle);
+                if (c is null || !c.can_read)
                 {
-                    emu_error(f, pdu[0], handle, ATTError.invalid_handle);
+                    emu_error(f, pdu[0], handle, c is null ? ATTError.invalid_handle : ATTError.read_not_permitted);
                     _queue.complete(frame.tag, MessageState.complete);
                     return true;
                 }
@@ -410,10 +413,11 @@ private:
                     }
                 }
 
-                if (session.find_char(handle) is null)
+                const(GattCharacteristic)* ch = session.find_char(handle);
+                if (ch is null || !ch.can_write(with_response))
                 {
                     if (with_response)
-                        emu_error(f, pdu[0], handle, ATTError.invalid_handle);
+                        emu_error(f, pdu[0], handle, ch is null ? ATTError.invalid_handle : ATTError.write_not_permitted);
                     _queue.complete(frame.tag, MessageState.complete);
                     return true;
                 }
