@@ -10,6 +10,7 @@ import urt.endian;
 import urt.log;
 import urt.map;
 import urt.mem.temp;
+import urt.time;
 import urt.uuid;
 
 import manager;
@@ -55,6 +56,18 @@ nothrow @nogc:
         _port = value;
         mark_set!(typeof(this), "port")();
         restart();
+    }
+
+    override void heartbeat(MonoTime now)
+    {
+        // the host stack does not always report a failed connect; without this the
+        // connect gate latches and every later connect on this radio is refused
+        if (_pending_connect_tag >= 0 && now - _pending_connect_time > pending_connect_timeout)
+        {
+            log.warning("connect to ", _pending_connect_peer, " timed out");
+            complete_pending_connect(MessageState.failed);
+        }
+        super.heartbeat(now);
     }
 
     override void service()
@@ -119,7 +132,7 @@ protected:
         }
 
         _num_pending_ops = 0;
-        _pending_connect_tag = -1;
+        clear_pending_connect();
         _adv_handles.clear();
         _addr_types.clear();
 
@@ -169,7 +182,9 @@ private:
     ubyte _port;
 
     // pending connect state
+    enum Duration pending_connect_timeout = 10.seconds;
     int _pending_connect_tag = -1;
+    MonoTime _pending_connect_time;
     MACAddress _pending_connect_client;
     MACAddress _pending_connect_peer;
 
@@ -270,6 +285,7 @@ private:
                     return false;
 
                 _pending_connect_tag = frame.tag;
+                _pending_connect_time = getTime();
                 _pending_connect_client = f.src;
                 _pending_connect_peer = f.dst;
                 return true;
@@ -288,6 +304,8 @@ private:
                 if (session !is null)
                 {
                     log.info("disconnecting from ", session.peer);
+                    if (_pending_connect_tag >= 0 && session.peer == _pending_connect_peer)
+                        complete_pending_connect(MessageState.failed);
                     destroy_session(session);
                 }
                 _queue.complete(frame.tag, MessageState.complete);
@@ -360,9 +378,12 @@ private:
                     return false;
                 ushort handle = pdu.ptr[1 .. 3].littleEndianToNative!ushort;
 
-                if (session.find_char(handle) is null)
+                // the host stack silently drops reads the peer won't answer, so an
+                // unreadable characteristic must be refused here or the transaction hangs
+                const(GattCharacteristic)* c = session.find_char(handle);
+                if (c is null || !c.can_read)
                 {
-                    emu_error(f, pdu[0], handle, ATTError.invalid_handle);
+                    emu_error(f, pdu[0], handle, c is null ? ATTError.invalid_handle : ATTError.read_not_permitted);
                     _queue.complete(frame.tag, MessageState.complete);
                     return true;
                 }
@@ -410,10 +431,11 @@ private:
                     }
                 }
 
-                if (session.find_char(handle) is null)
+                const(GattCharacteristic)* ch = session.find_char(handle);
+                if (ch is null || !ch.can_write(with_response))
                 {
                     if (with_response)
-                        emu_error(f, pdu[0], handle, ATTError.invalid_handle);
+                        emu_error(f, pdu[0], handle, ch is null ? ATTError.invalid_handle : ATTError.write_not_permitted);
                     _queue.complete(frame.tag, MessageState.complete);
                     return true;
                 }
@@ -732,6 +754,14 @@ private:
     {
         if (connected)
         {
+            if (_pending_connect_tag < 0)
+            {
+                // the attempt already timed out, so no client owns this link
+                log.warning("unexpected connection; disconnecting");
+                ble_disconnect(_ble, conn);
+                return;
+            }
+
             auto session = add_session(_pending_connect_client, _pending_connect_peer, conn.id);
             log.info("connected to ", session.peer, ", caching GATT...");
 

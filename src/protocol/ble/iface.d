@@ -574,6 +574,11 @@ struct GattCharacteristic
 
     bool can_notify() const pure nothrow @nogc
         => (properties & 0x0030) != 0; // notify | indicate
+    bool can_read() const pure nothrow @nogc
+        => (properties & 0x0002) != 0;
+    // a write request needs the write bit, a write command needs write_without_response
+    bool can_write(bool with_response) const pure nothrow @nogc
+        => (properties & (with_response ? 0x0008 : 0x0004)) != 0;
 }
 
 struct BLESession
