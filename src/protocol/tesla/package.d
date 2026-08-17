@@ -2,10 +2,12 @@ module protocol.tesla;
 
 import urt.map;
 import urt.mem;
+import urt.mem.allocator : defaultAllocator;
 import urt.meta.nullable;
 import urt.string;
 import urt.string.format;
 import urt.time;
+import urt.variant;
 
 import manager;
 import manager.collection;
@@ -59,6 +61,7 @@ nothrow @nogc:
             g_app.console.register_command!vehicle_set_temperature("/protocol/tesla/session", this, "set-temperature");
         }
         g_app.console.register_command!vehicle_schedule_charging("/protocol/tesla/session", this, "schedule-charging");
+        g_app.console.register_command!vehicle_enroll("/protocol/tesla/session", this, "enroll");
     }
 
     override void update()
@@ -159,6 +162,27 @@ nothrow @nogc:
         session.write_line("(refresh requested - values above are last cached)");
     }
 
+    CommandState vehicle_enroll(Session session, TeslaVehicleSession vehicle, Nullable!(const(char)[]) role)
+    {
+        uint r = tesla_role_owner;
+        if (role)
+        {
+            if (role.value == "driver")
+                r = tesla_role_driver;
+            else if (role.value == "owner")
+                r = tesla_role_owner;
+            else
+            {
+                session.write_line("role must be 'owner' or 'driver'");
+                return null;
+            }
+        }
+
+        TeslaEnrollCommandState state = session.allocator.allocT!TeslaEnrollCommandState(session, vehicle);
+        vehicle.request_enrollment(r, &state.on_outcome);
+        return state;
+    }
+
     void vehicle_charge_start(Session session, TeslaVehicleSession vehicle)
     {
         if (!vehicle.charging_start())
@@ -248,4 +272,101 @@ nothrow @nogc:
             session.write_line("charging schedule disable sent");
     }
 
+}
+
+
+private class TeslaEnrollCommandState : CommandState
+{
+nothrow @nogc:
+
+    enum Duration response_timeout = 25.seconds;
+    enum Duration tap_timeout = 95.seconds;
+
+    this(Session session, TeslaVehicleSession vehicle)
+    {
+        super(session, null);
+        _vehicle = vehicle;
+        _deadline = getTime() + response_timeout;
+    }
+
+    void on_outcome(TeslaVehicleSession.EnrollOutcome outcome, uint reason)
+    {
+        final switch (outcome)
+        {
+            case TeslaVehicleSession.EnrollOutcome.not_connected:
+                result = Variant(StringLit!"vehicle not connected (out of range or link not ready)");
+                _final = CommandCompletionState.error;
+                break;
+            case TeslaVehicleSession.EnrollOutcome.send_failed:
+                result = Variant(StringLit!"failed to send enrolment request");
+                _final = CommandCompletionState.error;
+                break;
+            case TeslaVehicleSession.EnrollOutcome.in_progress:
+                result = Variant(StringLit!"another enrolment command is already waiting");
+                _final = CommandCompletionState.error;
+                break;
+            case TeslaVehicleSession.EnrollOutcome.waiting:
+                session.write_line("vehicle accepted the request; tap a key card on the console now");
+                _deadline = getTime() + tap_timeout;
+                return;
+            case TeslaVehicleSession.EnrollOutcome.enrolled:
+                result = Variant(StringLit!"key enrolled");
+                _final = CommandCompletionState.finished;
+                break;
+            case TeslaVehicleSession.EnrollOutcome.rejected:
+                _message = tconcat("vehicle rejected enrolment (information ", reason, ")").makeString(defaultAllocator);
+                result = Variant(_message[]);
+                _final = CommandCompletionState.error;
+                break;
+            case TeslaVehicleSession.EnrollOutcome.timed_out:
+                result = Variant(StringLit!"no enrolment response from vehicle (timed out)");
+                _final = CommandCompletionState.timeout;
+                break;
+        }
+        _done = true;
+    }
+
+    override CommandCompletionState update()
+    {
+        if (_cancelled)
+        {
+            detach();
+            return CommandCompletionState.cancelled;
+        }
+        if (_done)
+        {
+            detach();
+            return _final;
+        }
+        if (getTime() >= _deadline)
+        {
+            result = Variant(StringLit!"no enrolment response from vehicle (timed out)");
+            detach();
+            return CommandCompletionState.timeout;
+        }
+        return CommandCompletionState.in_progress;
+    }
+
+    override void request_cancel()
+    {
+        _cancelled = true;
+    }
+
+private:
+    ObjectRef!TeslaVehicleSession _vehicle;
+    MonoTime _deadline;
+    String _message;
+    bool _done;
+    bool _cancelled;
+    CommandCompletionState _final = CommandCompletionState.finished;
+
+    void detach()
+    {
+        TeslaVehicleSession vehicle = _vehicle.get;
+        if (vehicle)
+        {
+            vehicle.cancel_enroll_watch(&on_outcome);
+            _vehicle = null;
+        }
+    }
 }

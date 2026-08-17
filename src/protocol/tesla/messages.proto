@@ -105,3 +105,44 @@ message TeslaVcsecSignedMessage {
 message TeslaToVcsecMessage {
     optional TeslaVcsecSignedMessage signed_message = 1;
 }
+
+// operation_status: 0 = OK, 1 = WAIT (waiting for NFC tap), 2 = ERROR.
+
+message TeslaVcsecKeyId {
+    optional bytes public_key_sha1 = 1;
+}
+
+message TeslaWhitelistOperationStatus {
+    optional uint32 information = 1;
+    optional TeslaVcsecKeyId signer = 2;
+    optional uint32 operation_status = 3;
+}
+
+message TeslaSignedMessageStatus {
+    optional uint32 counter = 1;
+    optional uint32 information = 2;
+}
+
+message TeslaCommandStatus {
+    optional uint32 operation_status = 1;
+    optional TeslaSignedMessageStatus signed_message_status = 2;
+    optional TeslaWhitelistOperationStatus whitelist_operation_status = 3;
+}
+
+// proto3 oneof is wire-identical to optional fields, so it is flattened here.
+
+message TeslaVehicleStatus {
+    optional uint32 vehicle_lock_state = 2;
+    optional uint32 vehicle_sleep_status = 3;
+    optional uint32 user_presence = 4;
+}
+
+message TeslaNominalError {
+    optional uint32 generic_error = 1;
+}
+
+message TeslaFromVcsecMessage {
+    optional TeslaVehicleStatus vehicle_status = 1;
+    optional TeslaCommandStatus command_status = 4;
+    optional TeslaNominalError nominal_error = 46;
+}

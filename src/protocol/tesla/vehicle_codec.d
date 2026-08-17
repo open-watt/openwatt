@@ -5,6 +5,7 @@ import urt.crypto.aes : aes_gcm_decrypt;
 import urt.digest.sha;
 import urt.encoding : hex_decode;
 import urt.endian;
+import urt.lifetime : move;
 import urt.result;
 import urt.uuid;
 
@@ -72,28 +73,49 @@ bool parse_tesla_local_name(const(char)[] local_name, out ubyte[8] hash) pure
     return hex_decode(local_name[1 .. 17], hash[]) == 8;
 }
 
-// NFC authorises this otherwise unsigned pairing request.
-Array!ubyte build_add_key_request(const(ubyte)[] pubkey_xy)
+enum uint vcsec_signature_type_present_key = 2;
+enum uint tesla_role_owner = 2;
+enum uint tesla_role_driver = 3;
+
+private Array!ubyte build_add_key_unsigned(const(ubyte)[] pubkey_xy, uint role)
 {
     assert(pubkey_xy.length == 64, "Tesla AddKey requires 64-byte raw public point");
 
-    enum uint role_owner = 2;                  // Keys.Role.ROLE_OWNER
-    enum uint form_factor_cloud_key = 9;       // vcsec.KeyFormFactor.KEY_FORM_FACTOR_CLOUD_KEY
-    enum uint signature_type_present_key = 2;  // vcsec.SignatureType.SIGNATURE_TYPE_PRESENT_KEY
+    enum uint form_factor_cloud_key = 9;
 
     TeslaUnsignedMessage unsigned;
     ref whitelist = unsigned.whitelist_operation.ensure();
     ref permission = whitelist.add_key_to_whitelist_and_add_permissions.ensure();
     set_sec1(permission.key.ensure().public_key_raw, pubkey_xy);
-    permission.key_role.set(role_owner);
+    permission.key_role.set(role);
     whitelist.metadata_for_key.ensure().key_form_factor.set(form_factor_cloud_key);
 
-    Array!ubyte unsigned_bytes = encode(unsigned);
+    return encode(unsigned);
+}
+
+private Array!ubyte build_to_vcsec_add_key(const(ubyte)[] pubkey_xy, uint role)
+{
+    Array!ubyte unsigned_bytes = build_add_key_unsigned(pubkey_xy, role);
 
     TeslaToVcsecMessage msg;
     ref signed = msg.signed_message.ensure();
     set_bytes(signed.protobuf_message_as_bytes, unsigned_bytes[]);
-    signed.signature_type.set(signature_type_present_key);
+    signed.signature_type.set(vcsec_signature_type_present_key);
+    return encode(msg);
+}
+
+Array!ubyte build_add_key_request(const(ubyte)[] pubkey_xy, uint role, const(ubyte)[] routing_address, const(ubyte)[] uuid)
+{
+    assert(routing_address.length == 16);
+    assert(uuid.length == 16);
+
+    Array!ubyte to_vcsec = build_to_vcsec_add_key(pubkey_xy, role);
+
+    TeslaRoutableMessage msg;
+    msg.to_destination.ensure().domain.set(cast(uint)TeslaDomain.vehicle_security);
+    set_bytes(msg.from_destination.ensure().routing_address, routing_address);
+    set_bytes(msg.protobuf_message_as_bytes, to_vcsec[]);
+    set_bytes(msg.uuid, uuid);
     return encode(msg);
 }
 
@@ -291,6 +313,20 @@ nothrow @nogc:
     uint flags() const pure
         => message.flags.present ? message.flags.value : 0;
 
+    bool has_to_destination() const pure
+        => message.to_destination.present;
+    const(ubyte)[] to_routing_address() const pure
+    {
+        if (!message.to_destination.present)
+            return null;
+        ref dest = message.to_destination.value;
+        return dest.routing_address.present ? dest.routing_address.value[] : null;
+    }
+    bool has_to_domain() const pure
+        => message.to_destination.present && message.to_destination.value.domain.present;
+    TeslaDomain to_domain() const pure
+        => cast(TeslaDomain)(has_to_domain ? message.to_destination.value.domain.value : 0);
+
     bool has_from_domain() const pure
         => message.from_destination.present && message.from_destination.value.domain.present;
     TeslaDomain from_domain() const pure
@@ -343,6 +379,66 @@ nothrow @nogc:
 
 bool decode_routable_response(const(ubyte)[] buf, ref RoutableResponse r)
     => proto_deserialise(buf, r.message) == buf.length;
+
+enum TeslaOperationStatus : uint { ok = 0, wait = 1, error = 2 }
+
+enum VcsecReplyKind : ubyte { none, command_status, vehicle_status, nominal_error }
+
+struct VcsecReply
+{
+nothrow @nogc:
+
+    VcsecReplyKind kind;
+    TeslaFromVcsecMessage fv;
+
+    bool has_operation_status() const pure
+        => fv.command_status.present && fv.command_status.value.operation_status.present;
+    uint operation_status() const pure
+        => has_operation_status ? fv.command_status.value.operation_status.value : 0;
+
+    bool has_whitelist_status() const pure
+        => fv.command_status.present && fv.command_status.value.whitelist_operation_status.present;
+
+    enum uint no_information = uint.max;
+    uint whitelist_information() const pure
+        => (has_whitelist_status && fv.command_status.value.whitelist_operation_status.value.information.present)
+            ? fv.command_status.value.whitelist_operation_status.value.information.value : no_information;
+}
+
+bool extract_vcsec_reply(const(ubyte)[] buf, ref VcsecReply reply)
+{
+    reply = VcsecReply.init;
+
+    RoutableResponse r;
+    if (decode_routable_response(buf, r) && r.protobuf_message.length && r.has_from_domain && r.from_domain == TeslaDomain.vehicle_security)
+    {
+        if (populate_from_vcsec(r.protobuf_message, reply))
+            return true;
+    }
+
+    if (populate_from_vcsec(buf, reply))
+        return true;
+
+    // A bare CommandStatus is ambiguous with unmodelled FromVCSEC field 3 broadcasts.
+    return false;
+}
+
+private bool populate_from_vcsec(const(ubyte)[] buf, ref VcsecReply reply)
+{
+    TeslaFromVcsecMessage decoded;
+    if (proto_deserialise(buf, decoded) != buf.length)
+        return false;
+    if (decoded.command_status.present)
+        reply.kind = VcsecReplyKind.command_status;
+    else if (decoded.vehicle_status.present)
+        reply.kind = VcsecReplyKind.vehicle_status;
+    else if (decoded.nominal_error.present)
+        reply.kind = VcsecReplyKind.nominal_error;
+    else
+        return false;
+    reply.fv = decoded.move;
+    return true;
+}
 
 // The GCM tag authenticates the response metadata as AAD.
 bool decrypt_routable_response(ref const RoutableResponse response,
@@ -584,10 +680,49 @@ unittest
     static ubyte[16] tg = () { ubyte[16] a; foreach (i; 0 .. 16) a[i] = cast(ubyte)(0x80 + i); return a; }();
     static immutable ubyte[6] ct = [1,2,3,4,5,6];
 
-    assert(build_add_key_request(pub_xy[])[] == HexDecode!(
+    assert(build_to_vcsec_add_key(pub_xy[], tesla_role_owner)[] == HexDecode!(
         "0A54125082014D2A470A430A4104000102030405060708090A0B0C0D0E0F1011121314151617"
         ~ "18191A1B1C1D1E1F202122232425262728292A2B2C2D2E2F303132333435363738393A3B3C3D3E3F"
         ~ "2002320208091802"));
+
+    Array!ubyte add_key = build_add_key_request(pub_xy[], tesla_role_driver, ra[], uu[]);
+    RoutableResponse add_key_route;
+    assert(decode_routable_response(add_key[], add_key_route));
+    assert(add_key_route.has_to_domain);
+    assert(add_key_route.to_domain == TeslaDomain.vehicle_security);
+    assert(add_key_route.message.from_destination.value.routing_address.value[] == ra[]);
+    assert(add_key_route.message.uuid.value[] == uu[]);
+
+    TeslaToVcsecMessage add_key_inner;
+    assert(proto_deserialise(add_key_route.protobuf_message, add_key_inner) == add_key_route.protobuf_message.length);
+    assert(add_key_inner.signed_message.present);
+    assert(add_key_inner.signed_message.value.signature_type.value == vcsec_signature_type_present_key);
+
+    TeslaFromVcsecMessage from_vcsec;
+    ref command_status = from_vcsec.command_status.ensure();
+    command_status.operation_status.set(cast(uint)TeslaOperationStatus.wait);
+    ref whitelist_status = command_status.whitelist_operation_status.ensure();
+    whitelist_status.information.set(7);
+    Array!ubyte from_vcsec_bytes = encode(from_vcsec);
+
+    VcsecReply reply;
+    assert(extract_vcsec_reply(from_vcsec_bytes[], reply));
+    assert(reply.kind == VcsecReplyKind.command_status);
+    assert(reply.operation_status == TeslaOperationStatus.wait);
+    assert(reply.whitelist_information == 7);
+
+    TeslaRoutableMessage vcsec_route;
+    vcsec_route.from_destination.ensure().domain.set(cast(uint)TeslaDomain.vehicle_security);
+    set_bytes(vcsec_route.protobuf_message_as_bytes, from_vcsec_bytes[]);
+    Array!ubyte vcsec_route_bytes = encode(vcsec_route);
+    assert(extract_vcsec_reply(vcsec_route_bytes[], reply));
+    assert(reply.kind == VcsecReplyKind.command_status);
+    assert(reply.whitelist_information == 7);
+
+    TeslaCommandStatus ambiguous;
+    ambiguous.whitelist_operation_status.ensure();
+    Array!ubyte ambiguous_bytes = encode(ambiguous);
+    assert(!extract_vcsec_reply(ambiguous_bytes[], reply));
 
     assert(build_session_info_request(TeslaDomain.vehicle_security, sec1[], ra[], uu[])[] == HexDecode!(
         "320208023A121210404142434445464748494A4B4C4D4E4F72430A4104000102030405060708"
