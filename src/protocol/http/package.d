@@ -213,6 +213,7 @@ nothrow @nogc:
         http_requests_kind = register_profile_root_section("requests", this);
 
         g_app.register_enum!HTTPMethod();
+        g_app.register_enum!FileServerAccess();
 
         static if (has_http_client)
             g_app.console.register_collection!HTTPClient();

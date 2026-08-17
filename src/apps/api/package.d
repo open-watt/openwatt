@@ -49,8 +49,6 @@ nothrow @nogc:
         super(collection_type_info!APIManager, id, flags);
     }
 
-    // Properties
-
     HTTPServer http_server() const
         => _server_id.get_item!HTTPServer;
     void http_server(HTTPServer value)
@@ -87,6 +85,12 @@ protected:
 
     override CompletionStatus shutdown()
     {
+        foreach (ref req; _pending_requests)
+            req.command.request_cancel();
+        update_pending_requests(false);
+        if (!_pending_requests.empty)
+            return CompletionStatus.continue_;
+
         // TODO: need to unlink these things...
         return CompletionStatus.complete;
     }
@@ -108,6 +112,7 @@ private:
         Stream stream;
         StringSession session;
         CommandState command;
+        String origin;
     }
     Array!PendingRequest _pending_requests;
 
@@ -115,7 +120,6 @@ private:
     {
         const(char)[] tail = request.request_target[_uri.length .. $];
 
-        // Handle CORS preflight OPTIONS requests
         if (request.method == HTTPMethod.OPTIONS)
             return handle_options(request, stream);
 
@@ -148,16 +152,31 @@ private:
         else if (_uri)
         {
             HTTPMessage response = create_response(request.http_version, 404, StringLit!"application/json", "{\"error\":\"Not Found\"}");
+            add_cors(response, request);
             stream.write(response.format_message()[]);
         }
 
         return 0;
     }
 
+    bool add_cors(ref HTTPMessage response, ref const HTTPMessage request)
+        => add_cors(response, request.header("Origin")[]);
+
+    bool add_cors(ref HTTPMessage response, const(char)[] origin)
+    {
+        HTTPServer server = _server_id.get_item!HTTPServer;
+        return server ? server.add_cors(response, origin) : false;
+    }
+
     int handle_options(ref const HTTPMessage request, ref Stream stream)
     {
         HTTPMessage response = create_response(request.http_version, 204, String(), null);
-        add_cors_headers(response);
+        if (add_cors(response, request))
+        {
+            response.headers ~= HTTPParam(StringLit!"Access-Control-Allow-Methods", StringLit!"GET, POST, PUT, DELETE, OPTIONS");
+            response.headers ~= HTTPParam(StringLit!"Access-Control-Allow-Headers", StringLit!"Content-Type");
+            response.headers ~= HTTPParam(StringLit!"Access-Control-Max-Age", StringLit!"86400");
+        }
         stream.write(response.format_message()[]);
         return 0;
     }
@@ -168,7 +187,7 @@ private:
             writeDebug("API request: ", request.method, " ", request.request_target);
 
         HTTPMessage response = create_response(request.http_version, 200, StringLit!"application/json", tconcat("{\"status\":\"healthy\",\"uptime\":", getAppTime().as!"seconds", "}"));
-        add_cors_headers(response);
+        add_cors(response, request);
         stream.write(response.format_message()[]);
         return 0;
     }
@@ -193,7 +212,7 @@ private:
         if (command_text.length == 0)
         {
             HTTPMessage response = create_response(request.http_version, 400, StringLit!"application/json", "{\"error\":\"Command body required\"}");
-            add_cors_headers(response);
+            add_cors(response, request);
             stream.write(response.format_message()[]);
             return 0;
         }
@@ -204,21 +223,25 @@ private:
         if (cmd is null)
         {
             MutableString!0 output = session.takeOutput();
-            send_cli_response(request.http_version, stream, output[], result);
+            send_cli_response(request.http_version, stream, output[], result, request.header("Origin")[]);
             g_app.console.destroy_session(session);
             return 0;
         }
 
-        // TODO: if it's a persistent session; we need a reference to the session to produce a response.
-        //       if it's an ephemeral session, we need to take the stream from the session so we can produce a deferred response...?
-        assert(false, "TODO: TEST THIS PATH, I'M NOT SURE THE HTTP REQUEST HANDLER CAN HANDLE HANDLE RELAYED RESPONSE?");
-        _pending_requests ~= PendingRequest(request.http_version, stream, session, cmd);
+        HTTPServer server = _server_id.get_item!HTTPServer;
+        assert(server);
+        bool deferred = server.defer_response(stream);
+        assert(deferred);
+
+        String origin = request.header("Origin")[].makeString(g_app.allocator);
+        stream.subscribe(&stream_state_change);
+        _pending_requests ~= PendingRequest(request.http_version, stream, session, cmd, origin.move);
         return 0;
     }
 
-    void send_cli_response(HTTPVersion http_version, ref Stream stream, const(char)[] output, ref Variant result)
+    void send_cli_response(HTTPVersion ver, ref Stream stream, const(char)[] output, ref Variant result, const(char)[] origin)
     {
-        HTTPMessage response = create_response(http_version, 200, StringLit!"application/json", "{\"result\":");
+        HTTPMessage response = create_response(ver, 200, StringLit!"application/json", "{\"result\":");
 
         ptrdiff_t len = result.write_json(null, true, 0, 0);
         if (len > 0)
@@ -244,7 +267,7 @@ private:
         }
         else
             response.content ~= "\"\"}";
-        add_cors_headers(response);
+        add_cors(response, origin);
         stream.write(response.format_message()[]);
     }
 
@@ -321,7 +344,7 @@ private:
         json ~= '}';
 
         HTTPMessage response = create_response(request.http_version, 200, StringLit!"application/json", json[]);
-        add_cors_headers(response);
+        add_cors(response, request);
         stream.write(response.format_message()[]);
         return 0;
     }
@@ -389,7 +412,7 @@ private:
         }
 
         HTTPMessage response = create_response(request.http_version, 200, StringLit!"application/json", json[]);
-        add_cors_headers(response);
+        add_cors(response, request);
         stream.write(response.format_message()[]);
         return 0;
     }
@@ -405,7 +428,7 @@ private:
         if (!json.isObject)
         {
             HTTPMessage response = create_response(request.http_version, 400, StringLit!"application/json", "{\"error\":\"Invalid JSON\"}");
-            add_cors_headers(response);
+            add_cors(response, request);
             stream.write(response.format_message()[]);
             return 0;
         }
@@ -417,7 +440,7 @@ private:
         if (!paths_var || paths_var.isNull)
         {
             HTTPMessage response = create_response(request.http_version, 400, StringLit!"application/json", "{\"error\":\"Missing 'path' or 'paths' field\"}");
-            add_cors_headers(response);
+            add_cors(response, request);
             stream.write(response.format_message()[]);
             return 0;
         }
@@ -433,7 +456,7 @@ private:
         else
         {
             HTTPMessage response = create_response(request.http_version, 400, StringLit!"application/json", "{\"error\":\"'path' or 'paths' must be string or array\"}");
-            add_cors_headers(response);
+            add_cors(response, request);
             stream.write(response.format_message()[]);
             return 0;
         }
@@ -441,7 +464,6 @@ private:
         version (DebugAPI)
             writeDebug("API request: ", request.method, " ", request.request_target, " - ", paths);
 
-        // build response
         Array!char response_json;
         response_json.reserve(4096);
         response_json ~= '{';
@@ -459,7 +481,7 @@ private:
         response_json ~= '}';
 
         HTTPMessage response = create_response(request.http_version, 200, StringLit!"application/json", response_json[]);
-        add_cors_headers(response);
+        add_cors(response, request);
         stream.write(response.format_message()[]);
 
         return 0;
@@ -486,7 +508,6 @@ private:
 
             if (elem.display_unit && su.parseUnit(elem.display_unit[], pre_scale) > 0)
             {
-                // convert to display unit
                 if (quantity.is_nan)
                     json ~= "null";
                 else
@@ -500,7 +521,6 @@ private:
                 else
                     json ~= quantity.value;
 
-                // write the unit separately for quantities
                 if (quantity.unit.pack != 0)
                     json.append(",\"unit\":\"", quantity.unit, '\"');
             }
@@ -530,7 +550,7 @@ private:
         if (!json.isObject)
         {
             HTTPMessage response = create_response(request.http_version, 400, StringLit!"application/json", "{\"error\":\"Invalid JSON\"}");
-            add_cors_headers(response);
+            add_cors(response, request);
             stream.write(response.format_message()[]);
             return 0;
         }
@@ -539,7 +559,7 @@ private:
         if (!values_var || !values_var.isObject)
         {
             HTTPMessage response = create_response(request.http_version, 400, StringLit!"application/json", "{\"error\":\"Missing 'values' object\"}");
-            add_cors_headers(response);
+            add_cors(response, request);
             stream.write(response.format_message()[]);
             return 0;
         }
@@ -605,7 +625,7 @@ private:
         response_json ~= "}}";
 
         HTTPMessage response = create_response(request.http_version, 200, StringLit!"application/json", response_json[]);
-        add_cors_headers(response);
+        add_cors(response, request);
         stream.write(response.format_message()[]);
 
         return 0;
@@ -621,7 +641,7 @@ private:
         if (!json.isObject)
         {
             HTTPMessage response = create_response(request.http_version, 400, StringLit!"application/json", "{\"error\":\"Invalid JSON\"}");
-            add_cors_headers(response);
+            add_cors(response, request);
             stream.write(response.format_message()[]);
             return 0;
         }
@@ -671,7 +691,7 @@ private:
         response_json ~= '}';
 
         HTTPMessage response = create_response(request.http_version, 200, StringLit!"application/json", response_json[]);
-        add_cors_headers(response);
+        add_cors(response, request);
         stream.write(response.format_message()[]);
 
         return 0;
@@ -740,24 +760,62 @@ private:
         json ~= "}}";
     }
 
-    void update_pending_requests()
+    void update_pending_requests(bool send_response = true)
     {
         size_t i = 0;
         while (i < _pending_requests.length)
         {
             ref PendingRequest req = _pending_requests[i];
 
-            if (req.command.update() == CommandCompletionState.in_progress)
+            Stream stream = req.stream;
+            bool stream_alive = stream && stream.running;
+            if (!stream_alive)
+                req.command.request_cancel();
+
+            if (req.command.update() < CommandCompletionState.finished)
             {
                 ++i;
                 continue;
             }
 
-            MutableString!0 output = req.session.takeOutput();
-            send_cli_response(req.ver, req.stream, output[], req.command.result);
+            if (send_response && stream_alive)
+            {
+                MutableString!0 output = req.session.takeOutput();
+                send_cli_response(req.ver, stream, output[], req.command.result, req.origin[]);
+            }
 
-            g_app.console.destroy_session(req.session);
+            StringSession s = req.session;
+            CommandState cmd = req.command;
+            if (stream)
+                stream.unsubscribe(&stream_state_change);
             _pending_requests.remove(i);
+            s.allocator.freeT(cmd);
+            g_app.console.destroy_session(s);
+
+            HTTPServer server = _server_id.get_item!HTTPServer;
+            if (send_response && stream_alive)
+            {
+                if (server)
+                    server.resume_response(stream);
+            }
+            else if (stream)
+                stream.destroy();
+        }
+    }
+
+    void stream_state_change(ActiveObject object, StateSignal signal)
+    {
+        if (signal != StateSignal.offline)
+            return;
+
+        object.unsubscribe(&stream_state_change);
+        foreach (ref req; _pending_requests)
+        {
+            if (req.stream is object)
+            {
+                req.stream = null;
+                req.command.request_cancel();
+            }
         }
     }
 }

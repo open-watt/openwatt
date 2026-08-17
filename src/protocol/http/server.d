@@ -47,8 +47,6 @@ nothrow @nogc:
         super(collection_type_info!HTTPServer, id, flags);
     }
 
-    // Properties...
-
     ushort port() const pure
         => _port;
     const(char)[] port(ushort value)
@@ -116,17 +114,48 @@ nothrow @nogc:
             s.parser.max_buffered_body = value;
     }
 
+    const(char)[] allowed_origin() const pure
+        => _allowed_origin[];
+    void allowed_origin(const(char)[] value)
+    {
+        _allowed_origin = value.makeString(g_app.allocator);
+        mark_set!(typeof(this), "allowed-origin")();
+    }
+
+    bool add_cors(ref HTTPMessage response, ref const HTTPMessage request, String* override_origin = null)
+        => add_cors(response, request.header("Origin")[], override_origin);
+
+    bool add_cors(ref HTTPMessage response, const(char)[] request_origin, String* override_origin = null)
+    {
+        String* allowed = override_origin ? override_origin : &_allowed_origin;
+        if (allowed.empty)
+            return false;
+
+        if ((*allowed)[] == "*")
+        {
+            response.headers ~= HTTPParam(StringLit!"Access-Control-Allow-Origin", StringLit!"*");
+            return true;
+        }
+
+        if (request_origin != (*allowed)[])
+            return false;
+
+        response.headers ~= HTTPParam(StringLit!"Access-Control-Allow-Origin", *allowed);
+        response.headers ~= HTTPParam(StringLit!"Vary", StringLit!"Origin");
+        return true;
+    }
+
     static if (has_tls)
         alias Properties = AliasSeq!(Prop!("port", port),
                                      Prop!("tls-port", tls_port),
                                      Prop!("certificates", certificates),
                                      Prop!("https-redirect", https_redirect),
-                                     Prop!("max-request-body", max_request_body));
+                                     Prop!("max-request-body", max_request_body),
+                                     Prop!("allowed-origin", allowed_origin));
     else
         alias Properties = AliasSeq!(Prop!("port", port),
-                                     Prop!("max-request-body", max_request_body));
-
-    // API...
+                                     Prop!("max-request-body", max_request_body),
+                                     Prop!("allowed-origin", allowed_origin));
 
     void set_default_request_handler(RequestHandler default_request_handler)
     {
@@ -209,6 +238,32 @@ nothrow @nogc:
         RequestHandler old = _default_request_handler;
         _default_request_handler = request_handler;
         return old;
+    }
+
+    bool defer_response(Stream stream)
+    {
+        foreach (session; _sessions)
+        {
+            if (session.stream is stream)
+            {
+                session.defer_response();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool resume_response(Stream stream)
+    {
+        foreach (session; _sessions)
+        {
+            if (session.stream is stream)
+            {
+                session.resume_response();
+                return true;
+            }
+        }
+        return false;
     }
 
 
@@ -347,6 +402,7 @@ private:
 
     ushort _port;
     size_t _max_request_body = 64 * 1024;
+    String _allowed_origin;
     RequestHandler _default_request_handler;
 
     TCPServer _server;
@@ -599,7 +655,7 @@ private:
         // Terminal conditions flag _finished; the tick sweep in update() reaps.
         void on_data(Stream s, const(void)[] data, MonoTime)
         {
-            if (_finished || !stream)
+            if (_finished || _deferred || !stream)
                 return;
             int result = parser.feed(cast(const(ubyte)[])data, s);
             if (result < 0)
@@ -622,6 +678,8 @@ private:
                 close();
                 return -1;
             }
+            if (_deferred)
+                return 0;
             // `stream` may be nulled out by signal_handler or by a request handler
             // that claims the stream, so pin the reference for the final unsubscribe.
             Stream s = stream;
@@ -670,6 +728,8 @@ private:
                 int result = handler(request, stream, leftover);
                 if (!stream)
                     return 1;
+                if (_deferred)
+                    return http_response_deferred;
                 return result;
             }
 
@@ -678,6 +738,8 @@ private:
                 int result = server._default_request_handler(request, stream, leftover);
                 if (!stream)
                     return 1;
+                if (_deferred)
+                    return http_response_deferred;
                 return result;
             }
 
@@ -695,6 +757,33 @@ private:
         HTTPParser parser;
         bool _subscribed;
         bool _finished;
+        bool _deferred;
+
+        void defer_response()
+        {
+            assert(!_deferred);
+            _deferred = true;
+            stream.rx_handler(null);
+        }
+
+        void resume_response()
+        {
+            assert(_deferred);
+            _deferred = false;
+
+            Stream s = stream;
+            int result = parser.resume(s);
+            if (result < 0)
+                _finished = true;
+            else if (!stream)
+            {
+                s.rx_handler(null);
+                unsubscribe_signal(s);
+                _finished = true;
+            }
+            if (!_finished && !_deferred && stream)
+                s.rx_handler(&on_data);
+        }
 
         void unsubscribe_signal(Stream s)
         {

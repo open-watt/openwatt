@@ -37,8 +37,7 @@ enum FileServerAccess : ubyte
 // (the URI root itself, or any path ending in '/') serves index.html / index.htm.
 // The access property sets how far the mount goes beyond that: write adds PUT
 // and DELETE, webdav upgrades it to a WebDAV server that filesystem clients
-// (davfs2, rclone, Explorer, Finder) can mount. Cross-origin access is opt-in
-// via the allowed-origin property.
+// (davfs2, rclone, Explorer, Finder) can mount.
 class FileServer : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("http-server", http_server),
@@ -57,8 +56,6 @@ nothrow @nogc:
     {
         super(collection_type_info!FileServer, id, flags);
     }
-
-    // Properties
 
     inout(HTTPServer) http_server() inout
         => _server.get;
@@ -106,10 +103,6 @@ nothrow @nogc:
         restart();
     }
 
-    // Cross-origin policy. Unset (the default) emits no CORS headers, so browsers only permit
-    // same-origin pages to use the mount; this mount takes unauthenticated writes, so it must not
-    // inherit the api module's wildcard. "*" allows any origin; anything else names the single
-    // origin (scheme://host[:port]) that is allowed, echoed only when the request's Origin matches.
     const(char)[] allowed_origin() const pure
         => _allowed_origin[];
     void allowed_origin(const(char)[] value)
@@ -821,21 +814,12 @@ private:
         }
     }
 
-    // returns true when the request's origin is permitted (headers were added)
     bool add_cors(ref HTTPMessage response, ref const HTTPMessage request)
     {
-        if (_allowed_origin.empty)
-            return false;
-        if (_allowed_origin[] == "*")
-        {
-            response.headers ~= HTTPParam(StringLit!"Access-Control-Allow-Origin", StringLit!"*");
-            return true;
-        }
-        if (request.header("Origin")[] != _allowed_origin[])
-            return false;
-        response.headers ~= HTTPParam(StringLit!"Access-Control-Allow-Origin", _allowed_origin);
-        response.headers ~= HTTPParam(StringLit!"Vary", StringLit!"Origin");
-        return true;
+        HTTPServer server = _server.get;
+        enum mask = ulong(1) << prop_index!(typeof(this), "allowed-origin");
+        String* policy = (_props_set & mask) ? &_allowed_origin : null;
+        return server ? server.add_cors(response, request, policy) : false;
     }
 
     int send_status(HTTPVersion ver, ref Stream stream, ushort code, ref const HTTPMessage request)

@@ -26,6 +26,8 @@ alias HTTPMessageHandler = int delegate(ref const HTTPMessage) nothrow @nogc;
 alias HeadersReadyHandler = int delegate(ref const HTTPMessage, out StreamingChunkHandler chunk_handler) nothrow @nogc;
 alias StreamingChunkHandler = int delegate(ref const HTTPMessage message, const(ubyte)[] chunk, bool final_chunk, ref Stream stream) nothrow @nogc;
 
+enum int http_response_deferred = 2;
+
 enum HTTPMethod : ubyte
 {
     GET,
@@ -217,6 +219,9 @@ nothrow @nogc:
         return 0;
     }
 
+    int resume(Stream stream)
+        => tail.empty ? 0 : feed(null, stream);
+
     int feed(const(ubyte)[] data, Stream stream)
     {
         // no stashed tail: parse `data` in place (handler slices are consumed synchronously)
@@ -230,6 +235,7 @@ nothrow @nogc:
         else
             msg = cast(const(char)[])data;
 
+        bool deferred;
         final switch (state)
         {
             case ParseState.Pending:
@@ -393,13 +399,14 @@ nothrow @nogc:
 
                     message.timestamp = getSysTime();
 
-                    // message complete
                     current_leftover = cast(const(ubyte)[])msg;
                     handler_result = message_handler(message);
                     current_leftover = null;
                     if (handler_result < 0)
                         return -1;
-                    if (handler_result > 0)
+                    if (handler_result == http_response_deferred)
+                        deferred = true;
+                    else if (handler_result > 0)
                         return 1; // connection upgraded, handler owns any leftover bytes
                 }
 
@@ -412,6 +419,8 @@ nothrow @nogc:
                 chunk_data_remaining = 0;
                 chunk_trailer_remaining = 0;
 
+                if (deferred)
+                    break;
                 if (!msg.empty)
                     goto case ParseState.Pending;
                 break;
@@ -432,7 +441,7 @@ nothrow @nogc:
                 tail ~= cast(const(ubyte)[])msg;
         }
 
-        return 0;
+        return deferred ? http_response_deferred : 0;
     }
 
 private:
@@ -744,13 +753,6 @@ String status_text(ushort code)
             if (code >= 500 && code < 600) return StringLit!"Internal Server Error";
             return StringLit!"Error";
     }
-}
-
-void add_cors_headers(ref HTTPMessage response)
-{
-    response.headers ~= HTTPParam(StringLit!"Access-Control-Allow-Origin", StringLit!"*");
-    response.headers ~= HTTPParam(StringLit!"Access-Control-Allow-Methods", StringLit!"GET, POST, PUT, DELETE, OPTIONS");
-    response.headers ~= HTTPParam(StringLit!"Access-Control-Allow-Headers", StringLit!"Content-Type");
 }
 
 enum CompressionEncoding : ubyte

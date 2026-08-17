@@ -517,6 +517,20 @@ A WLAN interface is one station association bound to a WiFi radio.
 | `rssi` | read-only | dBm | `0` | Received signal strength; `0` means unavailable. |
 | `signal-quality` | read-only | `0` to `100` | `0` | Normalized signal quality. |
 
+### `/protocol/http/server`
+
+An HTTP server provides the listener and shared policy for its registered
+handlers.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `port` | `0` to `65535` | `0` | Plain HTTP listen port; zero disables it. |
+| `tls-port` | `0` to `65535` | `0` | HTTPS listen port; available when TLS is built. |
+| `certificates` | certificate names | empty | Certificates used by HTTPS. |
+| `https-redirect` | `yes`/`no` | `no` | Redirect plain HTTP requests to HTTPS. |
+| `max-request-body` | bytes | `65536` | Maximum body buffered by the HTTP parser. Streaming handlers are not limited by it. |
+| `allowed-origin` | empty, `*`, or an origin | empty | Default cross-origin policy for handlers on this server. Empty disables cross-origin access, `*` allows any origin, and another value allows that exact `scheme://host[:port]`. |
+
 ### `/protocol/http/fileserver`
 
 A file mount serves a filesystem directory beneath a URI prefix on an HTTP
@@ -559,7 +573,7 @@ The `access` property sets how far the mount goes beyond reading:
 | `root` | directory path | empty | Directory served; empty is the filesystem origin (the working directory on hosts). |
 | `access` | `read`, `write`, `webdav` | `read` | Access level; see above. |
 | `auth-required` | `yes`/`no` | `no` | Require HTTP Basic credentials; see below. |
-| `allowed-origin` | empty, `*`, or an origin | empty | Cross-origin access policy; see below. |
+| `allowed-origin` | empty, `*`, or an origin | inherited | Cross-origin access policy; see below. |
 
 With `auth-required=yes` every request except `OPTIONS` (preflights carry no
 credentials) must present Basic credentials naming a `/secret` that validates
@@ -571,14 +585,11 @@ authenticated mount belongs on an HTTPS server.
 /secret add name=admin password=hunter2 services=http
 ```
 
-`allowed-origin` controls browser cross-origin access. Unset, the mount sends
-no CORS headers, so browsers only allow same-origin pages to use it; because
-the mount accepts unauthenticated writes, cross-origin access is strictly
-opt-in. `*` allows any origin. Any other value names the single origin
-(`scheme://host[:port]`) allowed, echoed only when the request's `Origin`
-matches. `OPTIONS` preflights are answered per the same policy, and status
-responses (404, 403, ...) carry the headers too, so a cross-origin client sees
-real status codes rather than opaque network errors.
+When `allowed-origin` is not specified, the mount inherits its HTTP server's
+policy. An explicitly assigned value overrides the server: empty disables
+cross-origin access, `*` allows any origin, and another value allows that exact
+`scheme://host[:port]`. Resetting the property restores inheritance. `OPTIONS`
+preflights and normal responses use the effective policy.
 
 ```text
 /protocol/http/server add name=webserver port=80
