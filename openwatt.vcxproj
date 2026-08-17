@@ -80,7 +80,15 @@
     <DCompile Include="src\driver\baremetal\watchdog.d" />
     <DCompile Include="src\driver\baremetal\wifi.d" />
     <DCompile Include="src\driver\ble.d" />
-    <DCompile Include="src\driver\boards\smartevse.d" />
+    <DCompile Include="src\driver\boards\smartevse\binding.d" />
+    <DCompile Include="src\driver\boards\smartevse\display.d" />
+    <DCompile Include="src\driver\boards\smartevse\evse.d" />
+    <DCompile Include="src\driver\boards\smartevse\hardware.d" />
+    <DCompile Include="src\driver\boards\smartevse\package.d" />
+    <DCompile Include="src\driver\boards\smartevse\pins.d" />
+    <DCompile Include="src\driver\font\render.d" />
+    <DCompile Include="src\driver\font\small.d" />
+    <DCompile Include="src\driver\rtc\pcf85063.d" />
     <DCompile Include="src\driver\esp32\system.d" />
     <DCompile Include="src\driver\esp32\idf_log_bridge.d" />
     <DCompile Include="src\driver\esp32\watchdog.d" />
@@ -90,8 +98,13 @@
     <DCompile Include="src\driver\linux\ethernet.d" />
     <DCompile Include="src\driver\linux\fdwatch.d" />
     <DCompile Include="src\driver\linux\hostapd.d" />
+    <DCompile Include="src\driver\linux\bridge.d" />
     <DCompile Include="src\driver\linux\netlink.d" />
+    <DCompile Include="src\driver\linux\netlink_dump.d" />
+    <DCompile Include="src\driver\linux\netlink_write.d" />
     <DCompile Include="src\driver\linux\nl80211.d" />
+    <DCompile Include="src\driver\linux\nl80211_ap.d" />
+    <DCompile Include="src\driver\linux\nl80211_sta.d" />
     <DCompile Include="src\driver\linux\raw.d" />
     <DCompile Include="src\driver\linux\supervisor.d" />
     <DCompile Include="src\driver\linux\sysfs.d" />
@@ -112,6 +125,8 @@
     <DCompile Include="src\main.d" />
     <DCompile Include="src\manager\base.d" />
     <DCompile Include="src\manager\binding.d" />
+    <DCompile Include="src\manager\bootguard.d" />
+    <DCompile Include="src\manager\object_signal.d" />
     <DCompile Include="src\manager\sample\codec.d" />
     <DCompile Include="src\manager\collection.d" />
     <DCompile Include="src\manager\component.d" />
@@ -196,7 +211,7 @@
     <DCompile Include="src\protocol\http\message.d" />
     <DCompile Include="src\protocol\http\package.d" />
     <DCompile Include="src\protocol\http\server.d" />
-    <DCompile Include="src\protocol\http\staticfiles.d" />
+    <DCompile Include="src\protocol\http\fileserver.d" />
     <DCompile Include="src\protocol\http\websocket.d" />
     <DCompile Include="src\protocol\ip\address.d" />
     <DCompile Include="src\protocol\ip\arp.d" />
@@ -208,6 +223,7 @@
     <DCompile Include="src\protocol\ip\pool.d" />
     <DCompile Include="src\protocol\ip\route.d" />
     <DCompile Include="src\protocol\ip\socket.d" />
+    <DCompile Include="src\protocol\ip\linux_mirror.d" />
     <DCompile Include="src\protocol\ip\stack.d" />
     <DCompile Include="src\protocol\ip\tcp.d" />
     <DCompile Include="src\protocol\ip\tcp_stream.d" />
@@ -223,6 +239,8 @@
     <DCompile Include="src\protocol\mqtt\client.d" />
     <DCompile Include="src\protocol\mqtt\codec.d" />
     <DCompile Include="src\protocol\mqtt\connection.d" />
+    <DCompile Include="src\protocol\mqtt\ha_discovery.d" />
+    <DCompile Include="src\protocol\mqtt\ha_jinja.d" />
     <DCompile Include="src\protocol\mqtt\package.d" />
     <DCompile Include="src\protocol\mqtt\session.d" />
     <DCompile Include="src\protocol\mqtt\topic.d" />
@@ -269,6 +287,7 @@
     <DCompile Include="src\router\iface\bridge.d" />
     <DCompile Include="src\router\iface\endpoint.d" />
     <DCompile Include="src\router\iface\ethernet.d" />
+    <DCompile Include="src\router\iface\i2c.d" />
     <DCompile Include="src\router\iface\group.d" />
     <DCompile Include="src\router\iface\mac.d" />
     <DCompile Include="src\router\iface\package.d" />
@@ -347,8 +366,18 @@
     <DCompile Include="third_party\urt\src\urt\driver\gpio.d" />
     <DCompile Include="third_party\urt\src\urt\driver\irq.d" />
     <DCompile Include="third_party\urt\src\urt\driver\timer.d" />
+    <DCompile Include="third_party\urt\src\urt\driver\adc.d" />
+    <DCompile Include="third_party\urt\src\urt\driver\counter.d" />
+    <DCompile Include="third_party\urt\src\urt\driver\event.d" />
+    <DCompile Include="third_party\urt\src\urt\driver\i2c.d" />
+    <DCompile Include="third_party\urt\src\urt\driver\nvs.d" />
+    <DCompile Include="third_party\urt\src\urt\driver\pwm.d" />
+    <DCompile Include="third_party\urt\src\urt\driver\spi.d" />
     <DCompile Include="third_party\urt\src\urt\driver\uart.d" />
+    <DCompile Include="third_party\urt\src\urt\fs\littlefs.d" />
+    <DCompile Include="third_party\urt\src\urt\fs\spiffs.d" />
     <DCompile Include="third_party\urt\src\urt\driver\wifi.d" />
+    <DCompile Include="third_party\urt\src\urt\driver\wpa\authenticator.d" />
     <DCompile Include="third_party\urt\src\urt\driver\wpa\crypto.d" />
     <DCompile Include="third_party\urt\src\urt\driver\wpa\eapol.d" />
     <DCompile Include="third_party\urt\src\urt\driver\wpa\fourway.d" />
@@ -1153,7 +1182,10 @@
     <DCompile Include="third_party\urt\src\urt\internal\aa.d" />
     <DCompile Include="third_party\urt\src\urt\internal\bitop.d" />
     <DCompile Include="third_party\urt\src\urt\internal\exception.d" />
+    <DCompile Include="third_party\urt\src\urt\internal\dwarfeh.d" />
     <DCompile Include="third_party\urt\src\urt\internal\lifetime.d" />
+    <DCompile Include="third_party\urt\src\urt\internal\sys\posix\package.d" />
+    <DCompile Include="third_party\urt\src\urt\internal\sys\posix\termios.d" />
     <DCompile Include="third_party\urt\src\urt\internal\mbedtls.d">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
@@ -1220,6 +1252,11 @@
     <DCompile Include="third_party\urt\src\urt\math.d" />
     <DCompile Include="third_party\urt\src\urt\mem\alloc.d" />
     <DCompile Include="third_party\urt\src\urt\mem\allocator.d" />
+    <DCompile Include="third_party\urt\src\urt\mem\bitmap.d" />
+    <DCompile Include="third_party\urt\src\urt\mem\profile\common.d" />
+    <DCompile Include="third_party\urt\src\urt\mem\profile\log.d" />
+    <DCompile Include="third_party\urt\src\urt\mem\profile\package.d" />
+    <DCompile Include="third_party\urt\src\urt\mem\profile\record.d" />
     <DCompile Include="third_party\urt\src\urt\mem\freelist.d" />
     <DCompile Include="third_party\urt\src\urt\mem\package.d" />
     <DCompile Include="third_party\urt\src\urt\mem\refman.d" />
@@ -1228,7 +1265,6 @@
     <DCompile Include="third_party\urt\src\urt\mem\scratchpad.d" />
     <DCompile Include="third_party\urt\src\urt\mem\string.d" />
     <DCompile Include="third_party\urt\src\urt\mem\temp.d" />
-    <DCompile Include="third_party\urt\src\urt\mem\tracking.d" />
     <DCompile Include="third_party\urt\src\urt\meta\enuminfo.d" />
     <DCompile Include="third_party\urt\src\urt\meta\nullable.d" />
     <DCompile Include="third_party\urt\src\urt\meta\package.d" />
@@ -1686,7 +1722,6 @@
       <ImportPaths>src/;third_party/urt/src/;third_party/npcap-sdk-1.15/Include/</ImportPaths>
       <StringImportPaths>src/</StringImportPaths>
       <PreviewRvalueRefParam>true</PreviewRvalueRefParam>
-      <PreviewNoSharedAccess>true</PreviewNoSharedAccess>
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
       <EnableDebugMixin>true</EnableDebugMixin>
@@ -1716,7 +1751,6 @@
       <ImportPaths>src/;third_party/urt/src/;third_party/npcap-sdk-1.15/Include/</ImportPaths>
       <StringImportPaths>src/</StringImportPaths>
       <PreviewRvalueRefParam>true</PreviewRvalueRefParam>
-      <PreviewNoSharedAccess>true</PreviewNoSharedAccess>
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
       <Unittest>true</Unittest>
@@ -1752,7 +1786,6 @@
       <ImportPaths>src/;third_party/urt/src/;third_party/npcap-sdk-1.15/Include/</ImportPaths>
       <StringImportPaths>src/</StringImportPaths>
       <PreviewRvalueRefParam>true</PreviewRvalueRefParam>
-      <PreviewNoSharedAccess>true</PreviewNoSharedAccess>
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
       <BoundsCheck>Off</BoundsCheck>
@@ -1784,7 +1817,6 @@
       <PreviewRvalueRefParam>true</PreviewRvalueRefParam>
       <ImportPaths>src/;third_party/urt/src/;third_party/npcap-sdk-1.15/Include/</ImportPaths>
       <StringImportPaths>src/</StringImportPaths>
-      <PreviewNoSharedAccess>true</PreviewNoSharedAccess>
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
       <EnableDebugMixin>true</EnableDebugMixin>
@@ -1815,7 +1847,6 @@
       <PreviewRvalueRefParam>true</PreviewRvalueRefParam>
       <ImportPaths>src/;third_party/urt/src/;third_party/npcap-sdk-1.15/Include/</ImportPaths>
       <StringImportPaths>src/</StringImportPaths>
-      <PreviewNoSharedAccess>true</PreviewNoSharedAccess>
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
       <Unittest>true</Unittest>
@@ -1851,7 +1882,6 @@
       <ImportPaths>src/;third_party/urt/src/;third_party/npcap-sdk-1.15/Include/</ImportPaths>
       <StringImportPaths>src/</StringImportPaths>
       <PreviewRvalueRefParam>true</PreviewRvalueRefParam>
-      <PreviewNoSharedAccess>true</PreviewNoSharedAccess>
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
       <BoundsCheck>Off</BoundsCheck>
@@ -1883,7 +1913,6 @@
       <ImportPaths>src/;third_party/urt/src/;third_party/npcap-sdk-1.15/Include/</ImportPaths>
       <StringImportPaths>src/</StringImportPaths>
       <PreviewRvalueRefParam>true</PreviewRvalueRefParam>
-      <PreviewNoSharedAccess>true</PreviewNoSharedAccess>
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
       <EnableDebugMixin>true</EnableDebugMixin>
@@ -1912,7 +1941,6 @@
       <ImportPaths>src/;third_party/urt/src/;third_party/npcap-sdk-1.15/Include/</ImportPaths>
       <StringImportPaths>src/</StringImportPaths>
       <PreviewRvalueRefParam>true</PreviewRvalueRefParam>
-      <PreviewNoSharedAccess>true</PreviewNoSharedAccess>
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
       <EnableDebugMixin>true</EnableDebugMixin>
@@ -1947,7 +1975,6 @@
       <ImportPaths>src/;third_party/urt/src/;third_party/npcap-sdk-1.15/Include/</ImportPaths>
       <StringImportPaths>src/</StringImportPaths>
       <PreviewRvalueRefParam>true</PreviewRvalueRefParam>
-      <PreviewNoSharedAccess>true</PreviewNoSharedAccess>
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
       <DebugInfo>Mago</DebugInfo>
@@ -1979,7 +2006,6 @@
       <ImportPaths>src/;third_party/urt/src/;third_party/npcap-sdk-1.15/Include/</ImportPaths>
       <StringImportPaths>src/</StringImportPaths>
       <PreviewRvalueRefParam>true</PreviewRvalueRefParam>
-      <PreviewNoSharedAccess>true</PreviewNoSharedAccess>
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
       <EnableDebugMixin>true</EnableDebugMixin>
@@ -2008,7 +2034,6 @@
       <ImportPaths>src/;third_party/urt/src/;third_party/npcap-sdk-1.15/Include/</ImportPaths>
       <StringImportPaths>src/</StringImportPaths>
       <PreviewRvalueRefParam>true</PreviewRvalueRefParam>
-      <PreviewNoSharedAccess>true</PreviewNoSharedAccess>
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
       <EnableDebugMixin>true</EnableDebugMixin>
@@ -2043,7 +2068,6 @@
       <ImportPaths>src/;third_party/urt/src/;third_party/npcap-sdk-1.15/Include/</ImportPaths>
       <StringImportPaths>src/</StringImportPaths>
       <PreviewRvalueRefParam>true</PreviewRvalueRefParam>
-      <PreviewNoSharedAccess>true</PreviewNoSharedAccess>
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
       <DebugInfo>Mago</DebugInfo>
