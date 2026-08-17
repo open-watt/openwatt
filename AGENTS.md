@@ -170,7 +170,11 @@ See [src/manager/base.d:325-495](src/manager/base.d#L325-L495) for state machine
 
 ##### ObjectRef and Dependency Management
 
-When a BaseObject holds a reference to another BaseObject (e.g., an interface referencing its stream, or a binding referencing its client), use `ObjectRef!Type` instead of a raw pointer.
+Choose storage from the reference's identity semantics, not merely because the target is Collection-managed:
+
+- **User supplies the object**: use `ObjectRef!Type`. The configured name is the identity, so destroy/recreate should rebind.
+- **User may supply an object, otherwise the context auto-creates one**: keep `ObjectRef!Type` for the property, but subscribe to the auto-created temporary object's lifetime and set the `ObjectRef` to `null` when that object goes offline. This prevents its CID from rebinding to a later temporary object with the same generated name.
+- **The context always receives or creates a temporary object**: store a raw class pointer, subscribe to its lifetime, and set the pointer to `null` when it goes offline. Rebinding is not a feature of this relationship, so `ObjectRef` would be actively wrong.
 
 `ObjectRef!T` stores a single `CID` — a hash of the target's `(name, type_index)`. Every dereference looks up the CID in the global `CollectionTable`, so the ref tracks the underlying entry rather than caching a pointer:
 
@@ -179,7 +183,7 @@ When a BaseObject holds a reference to another BaseObject (e.g., an interface re
 
 **Offline detection via state subscriptions**: Don't poll `!dependency.running` in `update()` — this misses offline→online bounces between update cycles. Subscribe to `StateSignal.offline` on the dependency and call `restart()` from the handler.
 
-**Subscription lifecycle rule**: Subscribe at the end of `startup()`, unsubscribe in `shutdown()`. Track with an explicit `_subscribed` flag (placed in struct padding). The flag ensures visibly symmetrical bookkeeping — every subscribe has a matching unsubscribe, no no-ops. Property setters unsubscribe and clear the flag when `_subscribed` is true, then store the new reference and `restart()` — startup will re-subscribe. This prevents use-after-free: destruction cycles through shutdown, which unsubscribes before the object is freed.
+**Subscription lifecycle rule for configured dependencies**: Subscribe at the end of `startup()`, unsubscribe in `shutdown()`. Track with an explicit `_subscribed` flag (placed in struct padding). The flag ensures visibly symmetrical bookkeeping — every subscribe has a matching unsubscribe, no no-ops. Property setters unsubscribe and clear the flag when `_subscribed` is true, then store the new reference and `restart()` — startup will re-subscribe. This prevents use-after-free: destruction cycles through shutdown, which unsubscribes before the object is freed.
 
 ```d
 // Property setter — tear down subscription, swap reference, restart
@@ -232,6 +236,8 @@ void iface_state_change(ActiveObject, StateSignal signal)
 
 **Key details:**
 - `ObjectRef` uses `alias get this`, so `_iface !is null` works naturally and covers both "never set" and "target destroyed/missing" cases — no separate `detached()` check needed at use sites.
+- A temporary target must never remain represented by a live `ObjectRef` after it goes offline unless rebinding that exact identity is intentional.
+- A retained raw pointer must be protected by a lifetime subscription and nulled from its `offline` handler before the target can be freed.
 - `destroy()` fires `StateSignal.offline` before `StateSignal.destroyed` for running objects, so handling `offline` alone is sufficient.
 - `unsubscribe()` is idempotent — safe to call in `shutdown()` even if `startup()` never completed.
 
