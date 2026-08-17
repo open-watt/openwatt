@@ -432,9 +432,42 @@ Follow these conventions (from [CONTRIBUTING.md](CONTRIBUTING.md)):
       do_one_thing();
   ```
 - Increment operators: Prefer prefix (`++i`) over postfix (`i++`) where semantically equivalent
-- Comments: Avoid self-explanatory comments. *Only* add comments that explain WHY or provide context the code doesn't make obvious. Remove grouping comments like "// Schedule configuration" or "// Update counters" where the code is clear. You don't need function headers unless there's something surprising about the calling environment or the arguments/results. No need to narrate code (the code should do that itself!), function named and argument names should be obvious wherever possible.
+- Comments: see the **Commenting** subsection below. The default is NO COMMENT. This rule is ignored more than any other in this document; read that subsection before you write a comment.
 - Code is always ascii; only unicode inside string literals or where unicode is to be expected.
 - NO EM-DASH EVER.
+
+**Commenting:**
+
+The default is **no comment**. Write one only when a competent D programmer reading the code would be
+*surprised*. Assume the comment you are about to write is unnecessary, and delete it. Code says what it
+does; a comment is an admission that it could not.
+
+Hard rules:
+- **One line.** Two only for a real hardware quirk or protocol wart. Three or more is always wrong. If it
+  needs a paragraph, it is not a comment: it belongs in the commit message, the PR description, or a doc.
+- **Never explain the language.** No notes on what `const`, `static if`, a template deduction, a cast or an
+  idiom does. The reader writes D.
+- **Never justify a change.** The bug you just fixed, why the old code was wrong, what you tried first, how
+  clever the fix is: that is all commit-message material. Code describes what IS, not its own history.
+  This is the single most common failure, and the urge peaks right after a hard debugging session. Resist it.
+- **No function or method headers.** Not for parameters, not for return values, not for behaviour. The only
+  exception is a surprising *calling environment* (runs in an ISR, must not allocate, caller owns the buffer).
+- **No grouping or narration.** `// Schedule configuration`, `// Update counters`, `// now send the frame`.
+  Delete on sight, including ones already in the file.
+
+Comments that earn their place: hardware errata, a spec violation you must mirror, a workaround for a
+compiler bug, a non-obvious ordering or lifetime constraint, a TODO/HACK at the deferral site.
+
+```d
+// NO. Explains the language, justifies the change, and is three lines long:
+// `const I` so qualified arguments deduce I unqualified: the exact-match branches below would
+// otherwise all miss for const(int) and leave flags at Null, and it keeps the qualified variants
+// from instantiating a second copy of the ctor.
+this(I)(const I i)
+
+// YES. Nothing. The signature already says it, and the reason lives in the commit.
+this(I)(const I i)
+```
 
 **Import order:**
 - uRT imports first (e.g., `import urt.string;`, `import urt.time;`)
@@ -598,7 +631,7 @@ The REPL method enables true interactive investigation: send a command, analyze 
 ## Remember...
 
 And remember,
-- NO GRATUITOUS COMMENTING! (see above)
+- NO GRATUITOUS COMMENTING! Default to none. One line if you must, never three. Never explain the language, never justify your change in the code, never write a function header. See the **Commenting** subsection under Coding Style.
 - NO EM-DASH EVER!
 - No unicode in source files unless it's string data that's meant to contain unicode.
 - Line-breaks at col 120 is fine, no need to break at 80! Use good taste, avoid gratuitous line breaking!
