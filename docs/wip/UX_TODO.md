@@ -3,6 +3,14 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-09-25: every node publishes a `system` device
+
+- A local `system` device appears on every node, with `mem.<pool>.{total,used,low,high}`
+  (plus `largest_free` where the platform reports it; pools are `ram` on desktop, `sram`,
+  `psram` and friends on embedded) and `cpu.{load,low,high}` in percent, updated each second.
+  `low`/`high` are the extremes reached during the last second, not all-time. Show it as
+  node health rather than as user equipment.
+
 ## 2026-09-23: boot guard recovery status
 
 - `/system/sysinfo` adds `Boot:` with the configuration rung and recovery reason;

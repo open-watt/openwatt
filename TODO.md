@@ -553,6 +553,12 @@ The current implementation and remaining phases are described in
 
 ## Data model
 
+- **`system` device memory scales disagree on Windows**: `mem.ram.used` is the process working
+  set (~16 MB) while `low`/`high` are urt's accounted heap (~100 KB), because
+  `GetProcessMemoryInfo` is too expensive per allocation. Switching `used` to
+  `pmc.PagefileUsage` would line them up, but changes `/system/sysinfo` output. Linux is
+  close (`mallinfo2` vs urt's count); embedded targets are exact.
+
 - **A numeric-to-text format change with history crashes the next text read**: `text_value`
   reads the tail bucket without checking that bucket's format, so after `format` switches a
   numeric element with recorded history to text, it takes the scalar bucket's samples as `ushort`
