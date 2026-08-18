@@ -299,7 +299,11 @@ private:
         bool done = false;
         while (!done)
         {
-            EmberNetworkStatus network_status = ezsp.request!EZSP_NetworkState();
+            auto state = ezsp.request!EZSP_NetworkState();
+            if (!state.ok)
+                return false;
+
+            EmberNetworkStatus network_status = state.value;
             switch (network_status) with(EmberNetworkStatus)
             {
                 case JOINED_NETWORK:
@@ -341,58 +345,73 @@ private:
 
 //        ezsp.request!EZSP_SetManufacturerCode(0xFFFF); // "not specified"
 
-        set_configuration(ezsp, EzspConfigId.SUPPORTED_NETWORKS, 1);
-        set_configuration(ezsp, EzspConfigId.STACK_PROFILE, 2);
-        set_configuration(ezsp, EzspConfigId.SECURITY_LEVEL, 5);
-        set_configuration(ezsp, EzspConfigId.TRUST_CENTER_ADDRESS_CACHE_SIZE, 2);
+        bool configured = set_configuration(ezsp, EzspConfigId.SUPPORTED_NETWORKS, 1)
+                       && set_configuration(ezsp, EzspConfigId.STACK_PROFILE, 2)
+                       && set_configuration(ezsp, EzspConfigId.SECURITY_LEVEL, 5)
+                       && set_configuration(ezsp, EzspConfigId.TRUST_CENTER_ADDRESS_CACHE_SIZE, 2)
 
         // Enable MAC passthrough for beacons and join requests
         // TODO: do we want to handle APP_HANDLES_ZDO_ENDPOINT_REQUESTS and APP_HANDLES_ZDO_BINDING_REQUESTS ourself? add them here...
-        set_configuration(ezsp, EzspConfigId.APPLICATION_ZDO_FLAGS, cast(EmberZdoConfigurationFlags)(EmberZdoConfigurationFlags.APP_HANDLES_UNSUPPORTED_ZDO_REQUESTS | EmberZdoConfigurationFlags.APP_RECEIVES_SUPPORTED_ZDO_REQUESTS));
+                       && set_configuration(ezsp, EzspConfigId.APPLICATION_ZDO_FLAGS, cast(EmberZdoConfigurationFlags)(EmberZdoConfigurationFlags.APP_HANDLES_UNSUPPORTED_ZDO_REQUESTS | EmberZdoConfigurationFlags.APP_RECEIVES_SUPPORTED_ZDO_REQUESTS))
 
         // TODO: do we need/want any of these?
-        set_configuration(ezsp, EzspConfigId.INDIRECT_TRANSMISSION_TIMEOUT, 300); // >= 300
-        set_configuration(ezsp, EzspConfigId.MAX_END_DEVICE_CHILDREN, 32); // >= 16
-        set_configuration(ezsp, EzspConfigId.KEY_TABLE_SIZE, 8);
-        set_configuration(ezsp, EzspConfigId.ADDRESS_TABLE_SIZE, 16);
-        set_configuration(ezsp, EzspConfigId.SOURCE_ROUTE_TABLE_SIZE, 32);
-//        set_configuration(ezsp, EzspConfigId.APS_ACK_TIMEOUT, 0x2000);
+                       && set_configuration(ezsp, EzspConfigId.INDIRECT_TRANSMISSION_TIMEOUT, 300) // >= 300
+                       && set_configuration(ezsp, EzspConfigId.MAX_END_DEVICE_CHILDREN, 32) // >= 16
+                       && set_configuration(ezsp, EzspConfigId.KEY_TABLE_SIZE, 8)
+                       && set_configuration(ezsp, EzspConfigId.ADDRESS_TABLE_SIZE, 16)
+                       && set_configuration(ezsp, EzspConfigId.SOURCE_ROUTE_TABLE_SIZE, 32)
+//                     && set_configuration(ezsp, EzspConfigId.APS_ACK_TIMEOUT, 0x2000)
 
-        set_policy(ezsp, EzspPolicyId.TRUST_CENTER, cast(EzspDecisionId)(EzspDecisionBitmask.ALLOW_JOINS | EzspDecisionBitmask.ALLOW_UNSECURED_REJOINS));
-//        set_policy(ezsp, EzspPolicyId.TC_KEY_REQUEST, EzspDecisionId.DENY_TC_KEY_REQUESTS);
-        set_policy(ezsp, EzspPolicyId.TC_KEY_REQUEST, EzspDecisionId.ALLOW_TC_KEY_REQUESTS_AND_SEND_CURRENT_KEY);
-        set_policy(ezsp, EzspPolicyId.APP_KEY_REQUEST, EzspDecisionId.DENY_APP_KEY_REQUESTS);
-//        set_policy(ezsp, EzspPolicyId.APP_KEY_REQUEST, EzspDecisionId.ALLOW_APP_KEY_REQUESTS);
-        set_policy(ezsp, EzspPolicyId.BINDING_MODIFICATION, EzspDecisionId.ALLOW_BINDING_MODIFICATION);
-        set_policy(ezsp, EzspPolicyId.MESSAGE_CONTENTS_IN_CALLBACK, EzspDecisionId.MESSAGE_TAG_AND_CONTENTS_IN_CALLBACK);
-//        set_policy(ezsp, EzspPolicyId.UNICAST_REPLIES, EzspDecisionId.HOST_WILL_SUPPLY_REPLY);
-        set_policy(ezsp, EzspPolicyId.UNICAST_REPLIES, EzspDecisionId.HOST_WILL_NOT_SUPPLY_REPLY);
+                       && set_policy(ezsp, EzspPolicyId.TRUST_CENTER, cast(EzspDecisionId)(EzspDecisionBitmask.ALLOW_JOINS | EzspDecisionBitmask.ALLOW_UNSECURED_REJOINS))
+//                     && set_policy(ezsp, EzspPolicyId.TC_KEY_REQUEST, EzspDecisionId.DENY_TC_KEY_REQUESTS)
+                       && set_policy(ezsp, EzspPolicyId.TC_KEY_REQUEST, EzspDecisionId.ALLOW_TC_KEY_REQUESTS_AND_SEND_CURRENT_KEY)
+                       && set_policy(ezsp, EzspPolicyId.APP_KEY_REQUEST, EzspDecisionId.DENY_APP_KEY_REQUESTS)
+//                     && set_policy(ezsp, EzspPolicyId.APP_KEY_REQUEST, EzspDecisionId.ALLOW_APP_KEY_REQUESTS)
+                       && set_policy(ezsp, EzspPolicyId.BINDING_MODIFICATION, EzspDecisionId.ALLOW_BINDING_MODIFICATION)
+                       && set_policy(ezsp, EzspPolicyId.MESSAGE_CONTENTS_IN_CALLBACK, EzspDecisionId.MESSAGE_TAG_AND_CONTENTS_IN_CALLBACK)
+//                     && set_policy(ezsp, EzspPolicyId.UNICAST_REPLIES, EzspDecisionId.HOST_WILL_SUPPLY_REPLY)
+                       && set_policy(ezsp, EzspPolicyId.UNICAST_REPLIES, EzspDecisionId.HOST_WILL_NOT_SUPPLY_REPLY);
+        if (!configured)
+            return false;
 
         // Set MAC passthrough flags for beacon requests
         ubyte flags = 0xF;
-        EzspStatus r = ezsp.request!EZSP_SetValue(EzspValueId.MAC_PASSTHROUGH_FLAGS, (&flags)[0..1]);//EzspValueId.MAC_PASSTHROUGH_FLAGS, EmberMacPassthroughType.EMBER_MAC_PASSTHROUGH_BEACON | EmberMacPassthroughType.EMBERMGMT | EmberMacPassthroughType.EMBER_MAC_PASSTHROUGH_MAC_COMMAND);
-        if (r != EzspStatus.SUCCESS)
-            log.warning("MAC_PASSTHROUGH_FLAGS failed: ", r);
+        auto passthrough = ezsp.request!EZSP_SetValue(EzspValueId.MAC_PASSTHROUGH_FLAGS, (&flags)[0..1]);//EzspValueId.MAC_PASSTHROUGH_FLAGS, EmberMacPassthroughType.EMBER_MAC_PASSTHROUGH_BEACON | EmberMacPassthroughType.EMBERMGMT | EmberMacPassthroughType.EMBER_MAC_PASSTHROUGH_MAC_COMMAND);
+        if (!passthrough.ok)
+            return false;
+        if (passthrough.value != EzspStatus.SUCCESS)
+            log.warning("MAC_PASSTHROUGH_FLAGS failed: ", passthrough.value);
 
         // update the EUI for this interface; since it's determined by the NCP...
-        _eui.b = ezsp.request!EZSP_GetEui64();
+        auto eui = ezsp.request!EZSP_GetEui64();
+        if (!eui.ok)
+            return false;
+        _eui.b = eui.value;
 
         auto security_state = ezsp.request!EZSP_GetCurrentSecurityState();
-        if (security_state.status != EmberStatus.SUCCESS)
-            log.warning("GetCurrentSecurityState failed: ", security_state.status);
+        if (!security_state.ok)
+            return false;
+        if (security_state.value.status != EmberStatus.SUCCESS)
+            log.warning("GetCurrentSecurityState failed: ", security_state.value.status);
         else
-            log.debugf("GetCurrentSecurityState bitmask = {0,04x}", security_state.state.bitmask);
+            log.debugf("GetCurrentSecurityState bitmask = {0,04x}", security_state.value.state.bitmask);
 
         // register local endpoints
         foreach (ref e; _endpoints)
         {
-            r = ezsp.request!EZSP_AddEndpoint(e.id, e.endpoint.profile_id, e.endpoint.device, ubyte(0), e.endpoint.in_clusters[], e.endpoint.out_clusters[]);
-            if (r != EzspStatus.SUCCESS)
-                log.warning("AddEndpoint failed: ", r);
+            auto ep = ezsp.request!EZSP_AddEndpoint(e.id, e.endpoint.profile_id, e.endpoint.device, ubyte(0), e.endpoint.in_clusters[], e.endpoint.out_clusters[]);
+            if (!ep.ok)
+                return false;
+            if (ep.value != EzspStatus.SUCCESS)
+                log.warning("AddEndpoint failed: ", ep.value);
         }
 
         // try and raise the network...
-        EmberStatus status = ezsp.request!EZSP_NetworkInit(EmberNetworkInitStruct(bitmask: EmberNetworkInitBitmask.NO_OPTIONS));
+        auto init_result = ezsp.request!EZSP_NetworkInit(EmberNetworkInitStruct(bitmask: EmberNetworkInitBitmask.NO_OPTIONS));
+        if (!init_result.ok)
+            return false;
+
+        EmberStatus status = init_result.value;
         if (status == EmberStatus.NOT_JOINED)
         {
             log.info("network init failed: ", status);
@@ -432,9 +451,11 @@ private:
             // sec.networkKey.contents[] = _network_key[];
             // sec.bitmask |= EmberInitialSecurityBitmask.HAVE_NETWORK_KEY;
 
-            EmberStatus sec_status = ezsp.request!EZSP_SetInitialSecurityState(sec);
-            if (sec_status != EmberStatus.SUCCESS)
-                log.warning("SetInitialSecurityState failed: ", sec_status);
+            auto sec_status = ezsp.request!EZSP_SetInitialSecurityState(sec);
+            if (!sec_status.ok)
+                return false;
+            if (sec_status.value != EmberStatus.SUCCESS)
+                log.warning("SetInitialSecurityState failed: ", sec_status.value);
 
             // we should form a network here...
             uint[2] id = [ rand(), rand() ];
@@ -453,10 +474,12 @@ private:
             params.channels = 1 << params.radioChannel;
 
             log.infof("form network - pan-id={0} ({1, 04x}) channel={2}...", EUI64(params.extendedPanId), params.panId, params.radioChannel);
-            status = ezsp.request!EZSP_FormNetwork(params);
-            if (status != EmberStatus.SUCCESS)
+            auto formed = ezsp.request!EZSP_FormNetwork(params);
+            if (!formed.ok)
+                return false;
+            if (formed.value != EmberStatus.SUCCESS)
             {
-                log.error("form network FAILED: ", status);
+                log.error("form network FAILED: ", formed.value);
                 return false;
             }
         }
@@ -472,13 +495,26 @@ private:
 
     bool sync_network_state(EZSPClient ezsp)
     {
-        auto nwk_params = ezsp.request!EZSP_GetNetworkParameters();
+        auto reply = ezsp.request!EZSP_GetNetworkParameters();
+        if (!reply.ok)
+            return false;
+        if (reply.value.status != EmberStatus.SUCCESS)
+        {
+            log.error("GetNetworkParameters failed: ", reply.value.status);
+            return false;
+        }
+        ref nwk_params = reply.value;
+
+        auto node_id = ezsp.request!EZSP_GetNodeId();
+        if (!node_id.ok)
+            return false;
+
         _network_params.extended_pan_id.b = nwk_params.parameters.extendedPanId;
         _network_params.pan_id = nwk_params.parameters.panId;
         _network_params.radio_channel = nwk_params.parameters.radioChannel;
         _network_params.radio_tx_power = nwk_params.parameters.radioTxPower;
 
-        set_node_id(ezsp.request!EZSP_GetNodeId());
+        set_node_id(node_id.value);
         mark_set!(typeof(this), [ "pan-eui", "pan-id", "node-id", "channel" ])();
         zigbee_iface().network_state_changed();
         if (_node_id != nwk_params.parameters.nwkManagerId || _node_id != 0x0000)
@@ -542,75 +578,101 @@ private:
         // TODO: are we supposed to permit joining for a little while after network-up?
         //       is this for all the clients to re-sync, or will they all join anyway?
         //       if this is for new clients to join, then we don't need to do this here...
-        EmberStatus status = ezsp.request!EZSP_PermitJoining(0xFF);
-        if (status != EmberStatus.SUCCESS)
-            log.warning("PermitJoining failed - ", status);
+        auto permit = ezsp.request!EZSP_PermitJoining(0xFF);
+        if (!permit.ok)
+            return false;
+        if (permit.value != EmberStatus.SUCCESS)
+            log.warning("PermitJoining failed - ", permit.value);
 
         // pre-populate the node table as best we can...
         auto conf = ezsp.request!EZSP_GetConfigurationValue(EzspConfigId.MAX_END_DEVICE_CHILDREN);
-        if (conf.status != EzspStatus.SUCCESS)
-            log.warning("GetConfigurationValue failed - ", conf.status);
+        if (!conf.ok)
+            return false;
+        if (conf.value.status != EzspStatus.SUCCESS)
+            log.warning("GetConfigurationValue failed - ", conf.value.status);
         else
         {
-            foreach (ubyte i; 0 .. cast(ubyte)conf.value)
+            foreach (ubyte i; 0 .. cast(ubyte)conf.value.value)
             {
                 auto child = ezsp.request!EZSP_GetChildData(i);
-                if (child.status == EmberStatus.SUCCESS)
+                if (!child.ok)
+                    return false;
+                if (child.value.status == EmberStatus.SUCCESS)
                 {
-                    if (child.childData.id == 0xFFFF)
+                    if (child.value.childData.id == 0xFFFF)
                         continue;
-                    nm = mod_zb.attach_node(EUI64(child.childData.eui64), pan_id, child.childData.id);
+                    nm = mod_zb.attach_node(EUI64(child.value.childData.eui64), pan_id, child.value.childData.id);
 //                    nm.parent_id = _node_id; // TODO: is the coordinator the parent, or it's preferred router?
-                    nm.desc.type = cast(NodeType)child.childData.type;
+                    nm.desc.type = cast(NodeType)child.value.childData.type;
                     nm.via = _interface;
                 }
             }
         }
 
         conf = ezsp.request!EZSP_GetConfigurationValue(EzspConfigId.ADDRESS_TABLE_SIZE);
-        if (conf.status != EzspStatus.SUCCESS)
-            log.warning("GetConfigurationValue failed - ", conf.status);
+        if (!conf.ok)
+            return false;
+        if (conf.value.status != EzspStatus.SUCCESS)
+            log.warning("GetConfigurationValue failed - ", conf.value.status);
         else
         {
-            foreach (ubyte i; 0 .. cast(ubyte)conf.value)
+            foreach (ubyte i; 0 .. cast(ubyte)conf.value.value)
             {
-                EmberNodeId nodeId = ezsp.request!EZSP_GetAddressTableRemoteNodeId(i);
-                if (nodeId == 0xFFFF)
+                auto node = ezsp.request!EZSP_GetAddressTableRemoteNodeId(i);
+                if (!node.ok)
+                    return false;
+                if (node.value == 0xFFFF)
                     continue;
-                EmberEUI64 eui = ezsp.request!EZSP_GetAddressTableRemoteEui64(i);
-                nm = mod_zb.attach_node(EUI64(eui), pan_id, nodeId);
+                auto eui = ezsp.request!EZSP_GetAddressTableRemoteEui64(i);
+                if (!eui.ok)
+                    return false;
+                nm = mod_zb.attach_node(EUI64(eui.value), pan_id, node.value);
 //                nm.parent_id = _node_id; // TODO: is the coordinator the parent, or it's preferred router?
             }
         }
         return true;
     }
 
-    void set_configuration(EZSPClient ezsp, EzspConfigId id, ushort value)
+    bool set_configuration(EZSPClient ezsp, EzspConfigId id, ushort value)
     {
-        EzspStatus r = ezsp.request!EZSP_SetConfigurationValue(id, value);
-        if (r != EzspStatus.SUCCESS)
-            log.warning("SetConfigurationValue(", id, ", ", value, ") failed: ", r);
+        auto r = ezsp.request!EZSP_SetConfigurationValue(id, value);
+        if (!r.ok)
+            return false;
+        if (r.value != EzspStatus.SUCCESS)
+            log.warning("SetConfigurationValue(", id, ", ", value, ") failed: ", r.value);
+        return true;
     }
 
-    void set_policy(EZSPClient ezsp, EzspPolicyId id, EzspDecisionId decision)
+    bool set_policy(EZSPClient ezsp, EzspPolicyId id, EzspDecisionId decision)
     {
-        EzspStatus r = ezsp.request!EZSP_SetPolicy(id, decision);
-        if (r != EzspStatus.SUCCESS)
-            log.warning("SetPolicy(", id, ", ", decision, ") failed: ", r);
+        auto r = ezsp.request!EZSP_SetPolicy(id, decision);
+        if (!r.ok)
+            return false;
+        if (r.value != EzspStatus.SUCCESS)
+            log.warning("SetPolicy(", id, ", ", decision, ") failed: ", r.value);
+        return true;
     }
 
     bool do_destroy_network()
     {
         auto ezsp = get_ezsp();
 
-        EmberStatus status = ezsp.request!EZSP_LeaveNetwork();
-        log.debug_("leave network - status: ", status);
+        auto left = ezsp.request!EZSP_LeaveNetwork();
+        if (!left.ok)
+            return false;
+        log.debug_("leave network - status: ", left.value);
 
-        status = ezsp.request!EZSP_ClearKeyTable();
-        log.debug_("clear key table - status: ", status);
+        auto cleared = ezsp.request!EZSP_ClearKeyTable();
+        if (!cleared.ok)
+            return false;
+        log.debug_("clear key table - status: ", cleared.value);
 
-        ezsp.request!EZSP_ClearTransientLinkKeys();
-        ezsp.request!EZSP_TokenFactoryReset(false, true);
+        if (!ezsp.request!EZSP_ClearTransientLinkKeys().ok)
+            return false;
+        if (!ezsp.request!EZSP_TokenFactoryReset(false, true).ok)
+            return false;
+
+        // the NCP reboots on reset, so this one never answers
         ezsp.request!EZSP_ResetNode();
 
         return true;
