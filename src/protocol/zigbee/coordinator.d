@@ -24,18 +24,18 @@ import protocol.zigbee.client;
 import protocol.zigbee.router;
 import protocol.zigbee.zdo;
 
-@nogc:
+nothrow @nogc:
 
 
 class ZigbeeCoordinator : ZigbeeRouter
 {
     alias Properties = AliasSeq!(Prop!("channel", channel));
-@nogc:
+nothrow @nogc:
 
     enum type_name = "zb-coordinator";
     enum path = "/protocol/zigbee/coordinator";
 
-    this(CID id, ObjectFlags flags = ObjectFlags.none) nothrow
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!ZigbeeCoordinator, id, flags);
     }
@@ -43,7 +43,7 @@ class ZigbeeCoordinator : ZigbeeRouter
     // Properties...
 
     alias iface = typeof(super).iface; // merge the overload set
-    final override StringResult iface(BaseInterface value) nothrow
+    final override StringResult iface(BaseInterface value)
     {
         if (!value)
             return StringResult("interface cannot be null");
@@ -72,9 +72,9 @@ class ZigbeeCoordinator : ZigbeeRouter
         return StringResult.success;
     }
 
-    final ubyte channel() inout pure nothrow
+    final ubyte channel() inout pure
         => _network_params.radio_channel ? _network_params.radio_channel : _channel;
-    final StringResult channel(uint value) nothrow
+    final StringResult channel(uint value)
     {
         if (value == 0)
             return StringResult("868 MHz not supported");
@@ -86,7 +86,7 @@ class ZigbeeCoordinator : ZigbeeRouter
         mark_set!(typeof(this), "channel")();
         return StringResult.success;
     }
-    final StringResult channel(const(char)[] value) nothrow
+    final StringResult channel(const(char)[] value)
     {
         if (value[] == "auto")
             _channel = 0xFF;
@@ -96,15 +96,15 @@ class ZigbeeCoordinator : ZigbeeRouter
         return StringResult.success;
     }
 
-    final override bool is_coordinator() const pure nothrow
+    final override bool is_coordinator() const pure
         => true;
 
-    final bool ready() const pure nothrow
+    final bool ready() const pure
         => _ready;
 
     // API...
 
-    void reboot() nothrow
+    void reboot()
     {
         // reboot the NCP
         if (auto ezsp = get_ezsp())
@@ -115,7 +115,7 @@ class ZigbeeCoordinator : ZigbeeRouter
         restart();
     }
 
-    void destroy_network() nothrow
+    void destroy_network()
     {
         if (_destroying)
             return;
@@ -129,10 +129,10 @@ class ZigbeeCoordinator : ZigbeeRouter
         _init_promise = async(&do_destroy_network);
     }
 
-    override bool validate() const nothrow
+    override bool validate() const
         => super.validate();
 
-    override CompletionStatus startup() nothrow
+    override CompletionStatus startup()
     {
         auto zb = zigbee_iface();
         if (!zb || !zb.is_coordinator)
@@ -208,7 +208,7 @@ class ZigbeeCoordinator : ZigbeeRouter
         return CompletionStatus.continue_;
     }
 
-    override CompletionStatus shutdown() nothrow
+    override CompletionStatus shutdown()
     {
         if (_init_promise)
         {
@@ -230,7 +230,7 @@ class ZigbeeCoordinator : ZigbeeRouter
         return super.shutdown();
     }
 
-    override void update() nothrow
+    override void update()
     {
         if (_destroying)
         {
@@ -267,7 +267,7 @@ class ZigbeeCoordinator : ZigbeeRouter
         }
     }
 
-    override final void subscribe_client(EZSPClient client, bool subscribe) nothrow
+    override final void subscribe_client(EZSPClient client, bool subscribe)
     {
         super.subscribe_client(client, subscribe);
 
@@ -612,7 +612,6 @@ private:
         return true;
     }
 
-nothrow:
     void join_handler(EmberNodeId new_node_id, EmberEUI64 new_node_eui64, EmberDeviceUpdate status, EmberJoinDecision policy_decision, EmberNodeId parent_of_new_node_id)
     {
         if (!running)
