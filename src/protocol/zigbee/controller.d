@@ -43,20 +43,20 @@ class ZigbeeController : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("endpoint", endpoint),
                                  Prop!("auto-create", auto_create));
-@nogc:
+nothrow @nogc:
 
     enum type_name = "zb-controller";
     enum path = "/protocol/zigbee/controller";
     enum collection_id = CollectionType.zb_controller;
 
-    this(CID id, ObjectFlags flags = ObjectFlags.none) nothrow
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!ZigbeeController, id, flags);
 
         _promises.reserve(MaxFibers);
     }
 
-    ~this() nothrow
+    ~this()
     {
         if (_endpoint)
         {
@@ -67,9 +67,9 @@ class ZigbeeController : ActiveObject
 
     // Properties...
 
-    final inout(ZigbeeEndpoint) endpoint() inout pure nothrow
+    final inout(ZigbeeEndpoint) endpoint() inout pure
         => _endpoint;
-    final StringResult endpoint(ZigbeeEndpoint value) nothrow
+    final StringResult endpoint(ZigbeeEndpoint value)
     {
         if (!value)
             return StringResult("endpoint cannot be null");
@@ -86,9 +86,9 @@ class ZigbeeController : ActiveObject
         return StringResult.success;
     }
 
-    final bool auto_create() const pure nothrow
+    final bool auto_create() const pure
         => _auto_create_devices;
-    final void auto_create(bool value) nothrow
+    final void auto_create(bool value)
     {
         _auto_create_devices = value;
         mark_set!(typeof(this), "auto-create")();
@@ -98,10 +98,10 @@ class ZigbeeController : ActiveObject
 
 protected:
 
-    override bool validate() const nothrow
+    override bool validate() const
         => _endpoint !is null;
 
-    override CompletionStatus startup() nothrow
+    override CompletionStatus startup()
     {
         if (!_zigbee_profile)
             _zigbee_profile = g_app.acquire_profile("zigbee");
@@ -109,7 +109,7 @@ protected:
         return _endpoint.running ? CompletionStatus.complete : CompletionStatus.continue_;
     }
 
-    override CompletionStatus shutdown() nothrow
+    override CompletionStatus shutdown()
     {
         // abort any outstanding interviews
         while (!_promises.empty)
@@ -117,7 +117,7 @@ protected:
             Promise!bool* p = _promises.popBack();
             if (!p.finished)
                 p.abort();
-            freePromise(p);
+            free_promise(p);
         }
 
         // release, don't free: devices created from this profile borrow its strings
@@ -132,7 +132,7 @@ protected:
         return CompletionStatus.complete;
     }
 
-    override void update() nothrow
+    override void update()
     {
         // we need to populate our database of devices with detail...
 
@@ -157,7 +157,7 @@ protected:
                 {
                     // TODO: anything on failure? retry? reason why?
                 }
-                freePromise(_promises[i]);
+                free_promise(_promises[i]);
                 _promises.remove(i);
             }
             else
@@ -203,7 +203,7 @@ protected:
         //       if they change (firmware update) we should re-interview the device to rebuild it's detail map
     }
 
-    void probe_response(ZigbeeResult result, ZDOStatus status, const(ubyte)[] message, void* user_data) nothrow
+    void probe_response(ZigbeeResult result, ZDOStatus status, const(ubyte)[] message, void* user_data)
     {
         if (result == ZigbeeResult.pending)
             return;
@@ -239,7 +239,7 @@ protected:
         }
     }
 
-    final void add_sample_element(Element* element, EUI64 eui, ref const ElementDesc desc, ref const ElementDesc_Zigbee zb, ubyte endpoint) nothrow
+    final void add_sample_element(Element* element, EUI64 eui, ref const ElementDesc desc, ref const ElementDesc_Zigbee zb, ubyte endpoint)
     {
         ulong[2] key = make_sample_key(eui, endpoint, zb.cluster_id, zb.attribute_id, zb.manufacturer_code);
         assert(key !in _sample_elements, "TODO: support element duplicates?");
@@ -260,16 +260,16 @@ protected:
             element.subscribe(&on_samples);
     }
 
-    final SampleElement* find_sample_element(EUI64 eui, ubyte endpoint, ushort cluster, ushort attribute, ushort manufacturer = 0) nothrow
+    final SampleElement* find_sample_element(EUI64 eui, ubyte endpoint, ushort cluster, ushort attribute, ushort manufacturer = 0)
     {
         ulong[2] key = make_sample_key(eui, endpoint, cluster, attribute, manufacturer);
         return key in _sample_elements;
     }
 
-    final SampleElement* find_sample_element_tuya(EUI64 eui, ubyte endpoint, ushort dp) nothrow
+    final SampleElement* find_sample_element_tuya(EUI64 eui, ubyte endpoint, ushort dp)
         => find_sample_element(eui, endpoint, 0xEF00, dp);
 
-    final void on_samples(ref const SampleUpdate update) nothrow
+    final void on_samples(ref const SampleUpdate update)
     {
         if (!update.value_ready)
             return;
@@ -323,7 +323,7 @@ private:
 
     Profile* _zigbee_profile;
 
-    ulong[2] make_sample_key(EUI64 eui, ubyte endpoint, ushort cluster, ushort attribute, ushort manufacturer = 0) nothrow
+    ulong[2] make_sample_key(EUI64 eui, ubyte endpoint, ushort cluster, ushort attribute, ushort manufacturer = 0)
     {
         ulong[2] r;
         r[0] = eui.ul;
@@ -331,11 +331,11 @@ private:
         return r;
     }
 
-    ulong[2] make_sample_key_tuya(EUI64 eui, ubyte endpoint, ubyte dp) nothrow
+    ulong[2] make_sample_key_tuya(EUI64 eui, ubyte endpoint, ubyte dp)
         => make_sample_key(eui, endpoint, 0xEF00, dp);
 
     void write_decoded_sample(ref SampleElement e, ref const Variant decoded, const(void)[] wire,
-                        SysTime timestamp) nothrow
+                        SysTime timestamp)
     {
         if (!e.desc.valid)
         {
@@ -389,13 +389,13 @@ private:
         return r;
     }
 
-    int send_default_response(ushort dst, ubyte endpoint, ushort profile, ushort cluster, ref const ZCLHeader req, ubyte cmd, ubyte status, PCP pcp = PCP.ca) nothrow
+    int send_default_response(ushort dst, ubyte endpoint, ushort profile, ushort cluster, ref const ZCLHeader req, ubyte cmd, ubyte status, PCP pcp = PCP.ca)
     {
         const ubyte[2] msg = [ cmd, status ];
         return _endpoint.send_zcl_response(dst, endpoint, profile, cluster, ZCLCommand.default_response, req, msg[], pcp);
     }
 
-    int send_ieee_request(ushort dst, PCP pcp = PCP.be, ZDOResponseHandler response_hander = null, void* user_data = null) nothrow
+    int send_ieee_request(ushort dst, PCP pcp = PCP.be, ZDOResponseHandler response_hander = null, void* user_data = null)
     {
         ubyte[5] addr_req_msg = void;
         addr_req_msg[0] = 0;
@@ -405,7 +405,7 @@ private:
         return _endpoint.send_zdo_message(dst, ZDOCluster.ieee_addr_req, addr_req_msg[], pcp, response_hander, user_data);
     }
 
-    void message_handler(ref const APSFrame aps, const(void)[] message, MonoTime timestamp) nothrow
+    void message_handler(ref const APSFrame aps, const(void)[] message, MonoTime timestamp)
     {
         if (message.length < ZCLHeader.min_length)
             return;
@@ -866,7 +866,7 @@ private:
         }
     }
 
-    void set_value(ref SampleElement e, ref const Variant val, SysTime timestamp) nothrow
+    void set_value(ref SampleElement e, ref const Variant val, SysTime timestamp)
     {
         if (!(e.element.access & manager.element.Access.write))
             return; // attribute is read-only!
@@ -916,7 +916,7 @@ private:
         }
     }
 
-    void create_device(ref NodeMap node) nothrow
+    void create_device(ref NodeMap node)
     {
         if (_zigbee_profile)
         {
@@ -1015,7 +1015,7 @@ private:
     }
 
     // a little helper to try a request up to 3 times with a delay
-    ZigbeeResult try_thrice(scope ZigbeeResult delegate() @nogc fn)
+    ZigbeeResult try_thrice(scope ZigbeeResult delegate() nothrow @nogc fn)
     {
         ZigbeeResult res;
         for (size_t attempt = 0; attempt < 3; ++attempt)

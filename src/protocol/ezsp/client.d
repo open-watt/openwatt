@@ -60,6 +60,15 @@ template EZSPResult(T)
         alias EZSPResult = T.Response;
 }
 
+alias FailShim = void function(void*, void*, void*) nothrow @nogc;
+
+struct EZSPReply(R)
+{
+    bool ok;
+    static if (!is(EZSPResult!R == void))
+        EZSPResult!R value;
+}
+
 class EZSPClient : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("ash-stream", ash_stream),
@@ -70,22 +79,22 @@ class EZSPClient : ActiveObject
                                  Prop!("protocol-version", protocol_version, "status"),
                                  Prop!("queued", queued_count, "status"),
                                  Prop!("peak-queue", peak_queue, "status"));
-@nogc:
+nothrow @nogc:
 
     enum type_name = "ezsp";
     enum path = "/protocol/ezsp/client";
     enum collection_id = CollectionType.ezsp;
 
-    this(CID id, ObjectFlags flags = ObjectFlags.none) nothrow
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!EZSPClient, id, flags);
     }
 
     // Properties...
 
-    final inout(Stream) ash_stream() inout pure nothrow
+    final inout(Stream) ash_stream() inout pure
         => _stream;
-    final void ash_stream(Stream stream) nothrow
+    final void ash_stream(Stream stream)
     {
         if (_stream is stream)
             return;
@@ -95,9 +104,9 @@ class EZSPClient : ActiveObject
         restart();
     }
 
-    final inout(ASHInterface) ash_interface() inout pure nothrow
+    final inout(ASHInterface) ash_interface() inout pure
         => _ash_ext;
-    final void ash_interface(ASHInterface iface) nothrow
+    final void ash_interface(ASHInterface iface)
     {
         if (_ash_ext is iface)
             return;
@@ -107,9 +116,9 @@ class EZSPClient : ActiveObject
         restart();
     }
 
-    final ubyte concurrency() const pure nothrow
+    final ubyte concurrency() const pure
         => _concurrency;
-    final StringResult concurrency(ubyte value) nothrow
+    final StringResult concurrency(ubyte value)
     {
         if (value < 1 || value > 5)
             return StringResult("concurrency must be between 1 and 5");
@@ -133,38 +142,39 @@ class EZSPClient : ActiveObject
         return StringResult.success;
     }
 
-    final EZSPStackType stack_type() const pure nothrow
+    final EZSPStackType stack_type() const pure
         => _stack_type;
 
-    final String stack_version() const pure nothrow
+    final String stack_version() const pure
         => _stack_version;
 
-    final ubyte protocol_version() const pure nothrow
+    final ubyte protocol_version() const pure
         => _known_version;
 
-    final size_t queued_count() const pure nothrow
+    final size_t queued_count() const pure
         => _queued_requests.length;
-    final ushort peak_queue() const pure nothrow
+    final ushort peak_queue() const pure
         => _peak_queue;
 
     // API...
 
-    final void reboot_ncp() nothrow
+    final void reboot_ncp()
     {
         send_command!EZSP_ResetNode(null);
         restart();
     }
 
-    EZSPResult!R request(R)(auto ref EZSPArgs!R args)
+    EZSPReply!R request(R)(auto ref EZSPArgs!R args)
         if (IsEZSPRequest!R)
     {
         import urt.util : InPlace, Default;
 
-        assert(isInFibre(), "EZSPClient.request() must be called from a fibre context");
+        assert(is_in_fibre(), "EZSPClient.request() must be called from a fibre context");
 
         struct Result
         {
             YieldEZSP e;
+            bool failed;
             static if (!is(EZSPResult!R == void))
                 EZSPResult!R result;
         }
@@ -187,17 +197,64 @@ class EZSPClient : ActiveObject
                 r.result = results[0];
         }
 
-        bool success = send_command!R(&response, forward!args, cast(void*)&r);
-        assert(success, "EZSP: failed to send command!");
+        static void on_fail(void*, void*, void* user_data)
+        {
+            Result* r = cast(Result*)user_data;
+            r.failed = true;
+            r.e.finished = true;
+        }
 
-        yield(ev);
+        if (!aborting())
+        {
+            bool success = send_command!R(&response, forward!args, cast(void*)&r, 1, false, &on_fail);
+            assert(success, "EZSP: failed to send command!");
 
+            if (yield(ev) == YieldResult.aborted && !ev.finished)
+                cancel_request(cast(void*)&r);
+        }
+
+        EZSPReply!R reply;
+        reply.ok = ev.finished && !r.failed;
         static if (!is(EZSPResult!R == void))
-            return r.result;
+        {
+            if (reply.ok)
+                reply.value = r.result;
+        }
+        return reply;
     }
 
-nothrow:
-    final void set_message_handler(void delegate(ubyte, ushort, const(ubyte)[]) nothrow @nogc callback) pure nothrow
+    final void cancel_request(void* user_data)
+    {
+        foreach (i; 0 .. _queued_requests.length)
+        {
+            if (_queued_requests[i].user_data !is user_data)
+                continue;
+
+            auto fail = _queued_requests[i].fail_shim;
+            void* cb = _queued_requests[i].cb_funcptr, inst = _queued_requests[i].cb_instance;
+
+            if (i < _in_flight)
+            {
+                // the NCP still owes a response for this slot; keep it so the reply stream stays aligned
+                _queued_requests[i].response_shim = null;
+                _queued_requests[i].fail_shim = null;
+                _queued_requests[i].cb_funcptr = null;
+                _queued_requests[i].cb_instance = null;
+                _queued_requests[i].user_data = null;
+            }
+            else
+            {
+                _queued_requests.remove(i);
+                mark_set!(typeof(this), "queued")();
+            }
+
+            if (fail)
+                fail(cb, inst, user_data);
+            return;
+        }
+    }
+
+    final void set_message_handler(void delegate(ubyte, ushort, const(ubyte)[]) nothrow @nogc callback) pure
     {
         _message_handler = callback;
     }
@@ -207,7 +264,7 @@ nothrow:
     {
         alias ResponseParams = typeof(EZSP_Command.Response.tupleof);
 
-        final void set_callback_handler(Callback)(Callback response_handler, void* user_data = null) nothrow
+        final void set_callback_handler(Callback)(Callback response_handler, void* user_data = null)
         {
             static if (is(Callback == typeof(null)))
             {
@@ -253,7 +310,8 @@ nothrow:
         alias ResponseParams = typeof(EZSP_Command.Response.tupleof);
 
         final bool send_command(Callback)(Callback response_handler, auto ref RequestParams args,
-                                          void* user_data = null, ubyte priority = 1, bool dei = false)
+                                          void* user_data = null, ubyte priority = 1, bool dei = false,
+                                          FailShim fail_override = null)
         {
             if (!running)
                 return false;
@@ -281,10 +339,14 @@ nothrow:
 
             static if (is(Callback == typeof(null)))
                 return send_command_impl(EZSP_Command.Command, buffer[0..offset], null, null, null, null, null, priority, dei);
-            else static if (is_delegate!Callback)
-                return send_command_impl(EZSP_Command.Command, buffer[0..offset], &response_shim!(HasUserData, ResponseParams), &fail_shim!(HasUserData, ResponseParams), response_handler.funcptr, response_handler.ptr, HasUserData ? user_data : null, priority, dei);
             else
-                return send_command_impl(EZSP_Command.Command, buffer[0..offset], &response_shim!(HasUserData, ResponseParams), &fail_shim!(HasUserData, ResponseParams), response_handler, null, HasUserData ? user_data : null, priority, dei);
+            {
+                FailShim on_fail = fail_override ? fail_override : &fail_shim!(HasUserData, ResponseParams);
+                static if (is_delegate!Callback)
+                    return send_command_impl(EZSP_Command.Command, buffer[0..offset], &response_shim!(HasUserData, ResponseParams), on_fail, response_handler.funcptr, response_handler.ptr, HasUserData ? user_data : null, priority, dei);
+                else
+                    return send_command_impl(EZSP_Command.Command, buffer[0..offset], &response_shim!(HasUserData, ResponseParams), on_fail, response_handler, null, HasUserData ? user_data : null, priority, dei);
+            }
         }
     }
 
