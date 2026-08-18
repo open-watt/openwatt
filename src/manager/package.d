@@ -2,6 +2,7 @@ module manager;
 
 import urt.array;
 import urt.conv : parse_float;
+import urt.file : Directory, DirEntry, open, read, close;
 import urt.lifetime : move;
 import urt.log : writeWarning;
 import urt.map;
@@ -17,18 +18,6 @@ import urt.sync.mpsc;
 import urt.time;
 import urt.traits : is_enum, Unqual;
 import urt.variant;
-
-version (Windows)
-{
-    import urt.internal.sys.windows;
-    import urt.internal.sys.windows.winbase;
-    import urt.internal.sys.windows.winnt;
-    import urt.string.uni : uni_convert;
-}
-else version (Posix)
-{
-    import urt.internal.sys.posix : stat, stat_t;
-}
 
 import manager.binding;
 import manager.collection;
@@ -1993,12 +1982,18 @@ enum MaxProfilePath = 1024;
 struct ProfileSearch
 {
 nothrow @nogc:
-    const(char)[] target;
+    const(char)[] basename;
     NoGCAllocator allocator;
     String first;
     String second;
     bool incomplete;
     bool overflow;
+
+    // the target is never materialised; temp memory would not survive the traversal
+    bool matches(const(char)[] name) const pure
+        => name.length == basename.length + 5 &&
+           name[0 .. basename.length] == basename &&
+           name[basename.length .. $] == ".conf";
 
     void found(const(char)[] path)
     {
@@ -2032,7 +2027,7 @@ String resolve_profile_path(const(char)[] root, const(char)[] basename, NoGCAllo
     }
 
     ProfileSearch search;
-    search.target = tconcat(basename, ".conf");
+    search.basename = basename;
     search.allocator = allocator;
 
     char[MaxProfilePath] path = void;
@@ -2076,147 +2071,68 @@ bool append_profile_path(ref char[MaxProfilePath] path, ref size_t length, const
     return true;
 }
 
-version (Windows)
+// littlefs offers very few directory handles at once, so a listing is closed before
+// descending into it; the traversal is then bounded by depth rather than the backend
+enum max_profile_depth = 8;
+
+bool walk_profile_directory(ref ProfileSearch search, ref char[MaxProfilePath] path, size_t length, uint depth = 0)
 {
-    bool walk_profile_directory(ref ProfileSearch search, ref char[MaxProfilePath] path, size_t length)
+    Array!char names;
+    Array!uint ends;
+
     {
-        char[MaxProfilePath] pattern = void;
-        if (length + 2 >= pattern.length)
+        Directory dir;
+        if (!dir.open(path[0 .. length]))
+            return false;
+        scope(exit) dir.close();
+
+        DirEntry entry;
+        while (search.second.empty && dir.read(entry))
+        {
+            if (entry.name == "." || entry.name == ".." || entry.name == ".git")
+                continue;
+            // following a link can leave the catalogue root, or find the same file twice
+            if (entry.is_symlink)
+                continue;
+
+            if (entry.is_directory)
+            {
+                names ~= entry.name;
+                ends ~= cast(uint)names.length;
+            }
+            else if (search.matches(entry.name))
+            {
+                size_t child_length = length;
+                if (!append_profile_path(path, child_length, entry.name))
+                    search.overflow = true;
+                else
+                    search.found(path[0 .. child_length]);
+                path[length] = '\0';
+            }
+        }
+    }
+
+    uint start = 0;
+    foreach (end; ends[])
+    {
+        const(char)[] name = names[start .. end];
+        start = end;
+        if (!search.second.empty)
+            break;
+
+        size_t child_length = length;
+        if (!append_profile_path(path, child_length, name))
         {
             search.overflow = true;
-            return false;
+            continue;
         }
-        pattern[0 .. length] = path[0 .. length];
-        pattern[length .. length + 3] = "/*\0";
-
-        WIN32_FIND_DATAW data;
-        HANDLE handle = FindFirstFileW(pattern[0 .. length + 2].twstringz, &data);
-        if (handle == INVALID_HANDLE_VALUE)
-            return false;
-        scope(exit) FindClose(handle);
-
-        bool more = true;
-        while (more && search.second.empty)
-        {
-            char[MaxProfilePath] name_buffer = void;
-            size_t wide_length;
-            while (wide_length < data.cFileName.length && data.cFileName[wide_length] != 0)
-                ++wide_length;
-            size_t name_length = data.cFileName[0 .. wide_length].uni_convert(name_buffer[]);
-            if (name_length != 0)
-            {
-                const(char)[] name = name_buffer[0 .. name_length];
-                if (name != "." && name != ".." && name != ".git")
-                {
-                    bool reparse = (data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
-                    if (!reparse)
-                    {
-                        size_t child_length = length;
-                        if (!append_profile_path(path, child_length, name))
-                            search.overflow = true;
-                        else if ((data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
-                        {
-                            if (!walk_profile_directory(search, path, child_length))
-                                search.incomplete = true;
-                        }
-                        else if (name == search.target)
-                            search.found(path[0 .. child_length]);
-                        path[length] = '\0';
-                    }
-                }
-            }
-            more = FindNextFileW(handle, &data) != 0;
-        }
-        return true;
+        if (depth + 1 >= max_profile_depth)
+            search.incomplete = true;
+        else if (!walk_profile_directory(search, path, child_length, depth + 1))
+            search.incomplete = true;
+        path[length] = '\0';
     }
-}
-else version (Posix)
-{
-    bool walk_profile_directory(ref ProfileSearch search, ref char[MaxProfilePath] path, size_t length)
-    {
-        DIR* dir = opendir(path.ptr);
-        if (dir is null)
-            return false;
-        scope(exit) closedir(dir);
-
-        while (search.second.empty)
-        {
-            dirent* entry = readdir(dir);
-            if (entry is null)
-                break;
-            size_t name_length;
-            while (name_length < entry.d_name.length && entry.d_name[name_length] != 0)
-                ++name_length;
-            if (name_length == 0)
-                continue;
-            const(char)[] name = entry.d_name[0 .. name_length];
-            if (name == "." || name == ".." || name == ".git" || entry.d_type == DT_LNK)
-                continue;
-
-            size_t child_length = length;
-            if (!append_profile_path(path, child_length, name))
-            {
-                search.overflow = true;
-                continue;
-            }
-
-            bool is_directory = entry.d_type == DT_DIR;
-            bool is_file = entry.d_type == DT_REG;
-            if (entry.d_type == DT_UNKNOWN)
-            {
-                stat_t info;
-                if (stat(path.ptr, &info) != 0)
-                    search.incomplete = true;
-                else
-                {
-                    is_directory = (info.st_mode & S_IFMT) == S_IFDIR;
-                    is_file = (info.st_mode & S_IFMT) == S_IFREG;
-                }
-            }
-
-            if (is_directory)
-            {
-                if (!walk_profile_directory(search, path, child_length))
-                    search.incomplete = true;
-            }
-            else if (is_file && name == search.target)
-                search.found(path[0 .. child_length]);
-            path[length] = '\0';
-        }
-        return true;
-    }
-
-    extern(C) nothrow @nogc
-    {
-        struct DIR;
-        struct dirent
-        {
-            ulong d_ino;
-            long d_off;
-            ushort d_reclen;
-            ubyte d_type;
-            char[256] d_name;
-        }
-
-        DIR* opendir(const(char)* name);
-        int closedir(DIR* dir);
-        dirent* readdir(DIR* dir);
-    }
-
-    enum DT_UNKNOWN = 0;
-    enum DT_DIR = 4;
-    enum DT_REG = 8;
-    enum DT_LNK = 10;
-    enum S_IFMT = 0xF000;
-    enum S_IFDIR = 0x4000;
-    enum S_IFREG = 0x8000;
-}
-else
-{
-    bool walk_profile_directory(ref ProfileSearch, ref char[MaxProfilePath], size_t)
-    {
-        return false;
-    }
+    return true;
 }
 
 enum Boolean : ubyte
