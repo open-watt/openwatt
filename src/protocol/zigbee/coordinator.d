@@ -123,7 +123,7 @@ nothrow @nogc:
         if (_init_promise)
         {
             _init_promise.abort();
-            freePromise(_init_promise);
+            free_promise(_init_promise);
         }
         _destroying = true;
         _init_promise = async(&do_destroy_network);
@@ -164,9 +164,9 @@ nothrow @nogc:
 
             if (_destroying)
             {
-                if (_init_promise.state != PromiseState.Pending)
+                if (_init_promise.state != PromiseState.pending)
                 {
-                    freePromise(_init_promise);
+                    free_promise(_init_promise);
                     return CompletionStatus.error;
                 }
                 return CompletionStatus.continue_;
@@ -186,10 +186,10 @@ nothrow @nogc:
 
                     _init_promise = async(&init);
                 }
-                else if (_init_promise.state != PromiseState.Pending)
+                else if (_init_promise.state != PromiseState.pending)
                 {
-                    bool failed = _init_promise.state == PromiseState.Failed ? true : !_init_promise.result;
-                    freePromise(_init_promise);
+                    bool failed = _init_promise.state == PromiseState.failed ? true : !_init_promise.result;
+                    free_promise(_init_promise);
                     if (failed)
                         return CompletionStatus.error;
                     _ready = true;
@@ -218,7 +218,7 @@ nothrow @nogc:
                     return CompletionStatus.continue_;
                 _init_promise.abort();
             }
-            freePromise(_init_promise);
+            free_promise(_init_promise);
             _init_promise = null;
         }
 
@@ -234,9 +234,9 @@ nothrow @nogc:
     {
         if (_destroying)
         {
-            if (_init_promise.state != PromiseState.Pending)
+            if (_init_promise.state != PromiseState.pending)
             {
-                freePromise(_init_promise);
+                free_promise(_init_promise);
                 restart();
             }
             return;
@@ -318,7 +318,8 @@ private:
                 case JOINING_NETWORK:
                 case LEAVING_NETWORK:
                     log.debug_("JOINING/LEAVING NETWORK");
-                    sleep(1.seconds);
+                    if (sleep(1.seconds) == YieldResult.aborted)
+                        return false;
                     break;
 
                 default:
@@ -461,7 +462,10 @@ private:
         }
 
         while (zigbee_iface._network_status != EmberStatus.NETWORK_UP)
-            sleep(100.msecs);
+        {
+            if (sleep(100.msecs) == YieldResult.aborted)
+                return false;
+        }
 
         return sync_network_state(ezsp);
     }

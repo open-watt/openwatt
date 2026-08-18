@@ -175,7 +175,7 @@ nothrow @nogc:
 
     final ZigbeeResult send_message_async(ushort dst, ubyte dst_endpoint, ubyte src_endpoint, ushort profile_id, ushort cluster_id, const(void)[] message, PCP pcp = PCP.be, bool group = false)
     {
-        debug assert(isInFibre(), "send_message_async() must be called from a fibre context");
+        debug assert(is_in_fibre(), "send_message_async() must be called from a fibre context");
 
         if (aborting())
             return ZigbeeResult.aborted;
@@ -222,7 +222,7 @@ nothrow @nogc:
 
     final ZigbeeResult send_message_async(EUI64 eui, ubyte dst_endpoint, ubyte src_endpoint, ushort profile_id, ushort cluster, const(void)[] message, PCP pcp = PCP.be)
     {
-        debug assert(isInFibre(), "send_message_async() must be called from a fibre context");
+        debug assert(is_in_fibre(), "send_message_async() must be called from a fibre context");
 
         if (!running)
             return ZigbeeResult.no_network;
@@ -299,7 +299,7 @@ nothrow @nogc:
 
     final ZigbeeResult zdo_request(ushort dst, ushort cluster, void[] message, out ZDOResponse response, PCP pcp = PCP.be)
     {
-        debug assert(isInFibre(), "send_message_async() must be called from a fibre context");
+        debug assert(is_in_fibre(), "send_message_async() must be called from a fibre context");
 
         if (aborting())
             return ZigbeeResult.aborted;
@@ -459,7 +459,7 @@ nothrow @nogc:
 
     final ZigbeeResult zcl_request(ushort dst, ubyte dst_endpoint, ubyte src_endpoint, ushort profile, ushort cluster, ZCLCommand command, ubyte flags, const(void)[] payload, out ZCLResponse response, PCP pcp = PCP.be)
     {
-        debug assert(isInFibre(), "send_message_async() must be called from a fibre context");
+        debug assert(is_in_fibre(), "send_message_async() must be called from a fibre context");
 
         if (aborting())
             return ZigbeeResult.aborted;

@@ -117,7 +117,7 @@ protected:
             Promise!bool* p = _promises.popBack();
             if (!p.finished)
                 p.abort();
-            freePromise(p);
+            free_promise(p);
         }
 
         // release, don't free: devices created from this profile borrow its strings
@@ -157,7 +157,7 @@ protected:
                 {
                     // TODO: anything on failure? retry? reason why?
                 }
-                freePromise(_promises[i]);
+                free_promise(_promises[i]);
                 _promises.remove(i);
             }
             else

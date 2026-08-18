@@ -160,7 +160,7 @@ nothrow @nogc:
     {
         import urt.util : InPlace, Default;
 
-        assert(isInFibre(), "EZSPClient.request() must be called from a fibre context");
+        assert(is_in_fibre(), "EZSPClient.request() must be called from a fibre context");
 
         struct Result
         {

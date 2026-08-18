@@ -1055,15 +1055,15 @@ nothrow @nogc:
             }
         }
 
-        import urt.async : asyncUpdate;
+        import urt.async : async_update;
         MonoTime async_t = getTime();
-        asyncUpdate();
+        async_update();
         Duration async_d = getTime() - async_t;
         if (async_d > worst_module_dur)
         {
             worst_module_dur = async_d;
             worst_module_name = "(async)";
-            worst_module_phase = "asyncUpdate";
+            worst_module_phase = "async_update";
         }
 
         MonoTime devices_t = getTime();
