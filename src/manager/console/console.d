@@ -191,14 +191,12 @@ nothrow @nogc:
         Array!char source;
         source ~= cmdLine;
 
-        Array!ScriptCommand cmds;
-        try
+        const(char)[] text = source[];
+        const(char)[] parse_error;
+        Array!ScriptCommand cmds = parse_commands(text, parse_error);
+        if (parse_error)
         {
-            const(char)[] text = source[];
-            cmds = parse_commands(text);
-        }
-        catch (Exception e)
-        {
+            session.writef("Parse error at column {0}: {1}\n", source.length - text.length + 1, parse_error);
             return null;
         }
         if (cmds.empty)
@@ -237,14 +235,11 @@ nothrow @nogc:
     {
         assert(session.current_command is null, "TODO: gotta do something about concurrent command execution...");
 
-        Array!ScriptCommand cmds;
         const(char)[] text = source[];
         const(char)[] text_orig = text;
-        try
-        {
-            cmds = parse_commands(text);
-        }
-        catch (SyntaxError e)
+        const(char)[] parse_error;
+        Array!ScriptCommand cmds = parse_commands(text, parse_error);
+        if (parse_error)
         {
             size_t consumed = text_orig.length - text.length;
             uint line = 1, col = 1;
@@ -253,11 +248,9 @@ nothrow @nogc:
                 if (text_orig[i] == '\n') { ++line; col = 1; }
                 else ++col;
             }
-            log_error("config", "parse error at line ", line, ", col ", col, ": ", e.message);
+            log_error("config", "parse error at line ", line, ", col ", col, ": ", parse_error);
             return false;
         }
-        catch (Exception e)
-            assert(false, "parse_commands should only throw SyntaxError");
 
         if (cmds.empty)
             return true;

@@ -484,11 +484,9 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
                 case expression:
                     if (!is_new_element)
                         break;
-                    Expression* expr;
                     const(char)[] expr_str = el.get_expression(profile);
-                    try
-                        expr = parse_expression(expr_str);
-                    catch (Exception ex)
+                    Expression* expr = parse_expression(expr_str);
+                    if (!expr)
                     {
                         writeWarning("Failed to parse expression: ", expr_str);
                         g_app.allocator.freeT(e);

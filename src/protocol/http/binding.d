@@ -431,9 +431,8 @@ private:
             if (!success_expr.empty)
             {
                 const(char)[] success_text = success_expr[];
-                try
-                    rs.success_expr = parse_expression(success_text);
-                catch (Exception)
+                rs.success_expr = parse_expression(success_text);
+                if (!rs.success_expr)
                     log.warning("failed to parse success expression '", success_text, "'");
             }
 

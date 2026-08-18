@@ -16,6 +16,7 @@ import manager.console.argument;
 public import manager.console.command;
 public import manager.console.session;
 public import manager.expression : NamedArgument;
+import manager.expression : ScriptCommand, parse_arguments, free_script_command;
 import manager.value;
 
 
@@ -294,54 +295,34 @@ private:
     }
 
     // an unnamed argument binds to the nth parameter not already given by name, so
-    // positional completion resolves through the same per-argument suggester
+    // positional completion resolves through the same per-argument suggester. The
+    // arguments are parsed rather than split on whitespace, so a quoted or braced
+    // value containing spaces or '=' still counts as the single argument it is.
     const(FunctionArgument)* positional_arg(const(char)[] preceding)
     {
-        size_t count;
-        for (const(char)[] t = preceding; t.length; )
-        {
-            const(char)[] tok = next_token(t);
-            if (!tok.length)
-                break;
-            if (tok.findFirst('=') == tok.length)
-                ++count;
-        }
+        ScriptCommand c;
+        scope(exit) free_script_command(c);
+        parse_arguments(preceding, c);
 
+        size_t count = c.args.length;
         foreach (ref a; _args)
         {
-            if (named_arg_given(preceding, a.name[]))
+            bool named;
+            foreach (ref n; c.named_args)
+            {
+                if (n.name && n.name.get_str() == a.name[])
+                {
+                    named = true;
+                    break;
+                }
+            }
+            if (named)
                 continue;
             if (count == 0)
                 return &a;
             --count;
         }
         return null;
-    }
-
-    static const(char)[] next_token(ref const(char)[] text)
-    {
-        while (text.length && text[0].is_whitespace)
-            text = text[1 .. $];
-        size_t e;
-        while (e < text.length && !text[e].is_whitespace)
-            ++e;
-        const(char)[] tok = text[0 .. e];
-        text = text[e .. $];
-        return tok;
-    }
-
-    static bool named_arg_given(const(char)[] text, const(char)[] name)
-    {
-        for (const(char)[] t = text; t.length; )
-        {
-            const(char)[] tok = next_token(t);
-            if (!tok.length)
-                break;
-            size_t eq = tok.findFirst('=');
-            if (eq != tok.length && tok[0 .. eq] == name)
-                return true;
-        }
-        return false;
     }
 
     Array!String suggest_values(const(char)[] argument, const(char)[] value)

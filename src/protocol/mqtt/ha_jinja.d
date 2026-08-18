@@ -26,15 +26,9 @@ bool compile_jinja_template(const(char)[] template_, out String source, out Expr
     source = translated[].makeString(defaultAllocator());
 
     const(char)[] cursor = source[];
-    try
-        expression = parse_expression(cursor);
-    catch (Exception)
-    {
-        if (expression)
-            expression.free_expression();
-        expression = null;
+    expression = parse_expression(cursor);
+    if (!expression)
         return false;
-    }
     if (!cursor.trim().empty)
     {
         expression.free_expression();
