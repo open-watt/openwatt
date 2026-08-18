@@ -306,11 +306,7 @@ bool parse_goal(const(char)[] text, out Goal goal)
     if (text.length >= 2 && text[0] == '(' && text[$-1] == ')')
     {
         const(char)[] cursor = text[1 .. $-1].trim;
-        Expression* expr;
-        try
-            expr = parse_expression(cursor);
-        catch (Exception)
-            return false;
+        Expression* expr = parse_expression(cursor);
         if (expr is null || cursor.length > 0)
         {
             if (expr)

@@ -111,11 +111,7 @@ class Automation : ActiveObject
         if (value.length)
         {
             const(char)[] cursor = value;
-            Expression* e;
-            try
-                e = parse_expression(cursor);
-            catch (Exception)
-                return "invalid condition expression";
+            Expression* e = parse_expression(cursor);
             const bool ok = e !is null && cursor.length == 0;
             if (e)
                 free_expression(e);
@@ -296,10 +292,8 @@ protected:
         if (_condition.length && !_condition_expr)
         {
             const(char)[] cursor = _condition[];
-            try
-                _condition_expr = parse_expression(cursor);
-            catch (Exception)
-                _condition_expr = null;   // validated in the setter; a failure here just skips gating
+            // validated in the setter; a failure here just skips gating
+            _condition_expr = parse_expression(cursor);
         }
 
         if (_time.length)

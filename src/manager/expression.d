@@ -17,7 +17,7 @@ import manager.series : FormatId;
 
 //version = ExpressionDebug;
 
-@nogc:
+nothrow @nogc:
 
 
 enum Type : ubyte
@@ -68,13 +68,15 @@ enum Flags : ubyte
 
 struct NamedArgument
 {
-    this(ref NamedArgument rh) nothrow @nogc
+nothrow @nogc:
+
+    this(ref NamedArgument rh)
     {
         name = rh.name;
         value = rh.value;
     }
 
-    this(T)(const(char)[] name, auto ref T value) nothrow @nogc
+    this(T)(const(char)[] name, auto ref T value)
     {
         this.name = name;
         this.value = to_variant(forward!value);
@@ -111,7 +113,7 @@ struct EvalContext
 // a representative value of a format, for evaluating an expression's TYPE before any data
 // exists: numerics are unit-carrying double zeros (derived formats are f64 by policy, and
 // zeros dodge integer division), text is empty, anything else refuses to compute
-private Variant format_exemplar(FormatId id) nothrow @nogc
+private Variant format_exemplar(FormatId id)
 {
     import manager.series : DataFormat, format_info, value_class, ValueClass, ValueType;
     import urt.si.quantity : Quantity;
@@ -195,22 +197,18 @@ private:
     Payload* p;
 }
 
-Script make_script(const(char)[] source_text) nothrow @nogc
+Script make_script(const(char)[] source_text)
 {
     Script b;
     b.p = defaultAllocator().allocT!(Script.Payload)();
     b.p.refcount = 1;
     b.p.source ~= source_text;
     const(char)[] cursor = b.p.source[];
-    try
-        b.p.commands = parse_commands(cursor);
-    catch (Exception)
-    {
-    }
+    b.p.commands = parse_commands(cursor);
     return b;
 }
 
-bool is_truthy(ref const Variant v) nothrow @nogc
+bool is_truthy(ref const Variant v)
 {
     if (v.isBool)
         return v.asBool;
@@ -252,9 +250,16 @@ nothrow @nogc:
         if (is_string())
             str.destroy!false();
         else if (ty == Type.arr)
+        {
+            foreach (e; arr)
+                free_expression(e);
             arr.destroy!false();
+        }
         else if (ty == Type.cmd_list)
+        {
+            free_script_commands(cmds.list);
             cmds.list.destroy!false();
+        }
         else if (ty >= Type.neg)
         {
             left.free_expression();
@@ -668,39 +673,66 @@ private:
     }
 }
 
-class SyntaxError : Exception
+private struct Parser
 {
-    const(char)[] message;
+nothrow @nogc:
 
-    this(const(char)[] message) nothrow @nogc
+    this(const(char)[] text)
     {
-        this.message = message;
-        super(cast(string)message);
+        this.text = text;
     }
-}
 
-noreturn syntax_error(Args...)(auto ref Args args)
-{
-    throw tempAllocator().allocT!SyntaxError(tconcat(forward!args));
-}
-
-void skip_whitespace(ref const(char)[] text) nothrow
-{
-    while (text.length > 0)
+    typeof(null) fail(Args...)(auto ref Args args)
     {
-        if (text[0].is_space)
-            text = text[1..$];
-        else
+        if (error is null)
+            error = tconcat(forward!args);
+        return null;
+    }
+
+    void skip_whitespace()
+    {
+        while (text.length > 0)
         {
-            if (text[0] == '#')
-                while (text.length > 0 && text[0] != '\n' && text[0] != '\r')
-                    text = text[1..$];
-            break;
+            if (text[0].is_space)
+                text = text[1..$];
+            else
+            {
+                if (text[0] == '#')
+                    while (text.length > 0 && text[0] != '\n' && text[0] != '\r')
+                        text = text[1..$];
+                break;
+            }
         }
     }
+
+    void skip_whitespace_and_newlines()
+    {
+        text.skip_whitespace_and_newlines();
+    }
+
+    bool match(bool take = true)(char c)
+    {
+        if (text.length == 0 || text[0] != c)
+            return false;
+        static if (take)
+            text = text[1..$];
+        return true;
+    }
+
+    bool match(bool take = true)(const(char)[] s)
+    {
+        if (text.length < s.length || text[0 .. s.length] != s)
+            return false;
+        static if (take)
+            text = text[s.length .. $];
+        return true;
+    }
+
+    const(char)[] text;
+    const(char)[] error;
 }
 
-void skip_whitespace_and_newlines(ref const(char)[] text) nothrow
+void skip_whitespace_and_newlines(ref const(char)[] text)
 {
     while (text.length > 0)
     {
@@ -716,117 +748,170 @@ void skip_whitespace_and_newlines(ref const(char)[] text) nothrow
     }
 }
 
-bool match(bool take = true)(ref const(char)[] text, char c) nothrow
-{
-    if (text.length == 0 || text[0] != c)
-        return false;
-    static if (take)
-        text = text[1..$];
-    return true;
-}
-
-bool match(bool take = true)(ref const(char)[] text, const(char)[] s)
-{
-    if (text.length < s.length || text[0 .. s.length] != s)
-        return false;
-    static if (take)
-        text = text[s.length .. $];
-    return true;
-}
-
-void expect(ref const(char)[] text, char expected)
-{
-    if (!text.match(expected))
-        syntax_error("Expected '", expected, "'");
-}
-
-Expression* alloc_expression(Args...)(auto ref Args args) nothrow
+Expression* alloc_expression(Args...)(auto ref Args args)
     => defaultAllocator().allocT!Expression(forward!args);
 
-void free_expression(Expression* exp) nothrow
+void free_expression(Expression* exp)
 {
     defaultAllocator().freeT(exp);
+}
+
+void free_script_command(ref ScriptCommand command)
+{
+    foreach (e; command.args)
+        free_expression(e);
+    foreach (ref a; command.named_args)
+    {
+        free_expression(a.name);
+        free_expression(a.value);
+    }
+    command.args.clear();
+    command.named_args.clear();
+    command.command = null;
+}
+
+private void free_script_commands(ref Array!ScriptCommand commands)
+{
+    foreach (ref command; commands)
+        free_script_command(command);
+    commands.clear();
 }
 
 
 Array!ScriptCommand parse_commands(ref const(char)[] text)
 {
-    version (ExpressionDebug)
-        writeDebug("PARSE: ", text);
+    const(char)[] error;
+    return parse_commands(text, error);
+}
 
-    Array!ScriptCommand commands;
-    while (text.length > 0)
+Array!ScriptCommand parse_commands(ref const(char)[] text, out const(char)[] error)
+{
+    Parser parser = Parser(text);
+    Array!ScriptCommand commands = parse_command_list(parser);
+    if (!parser.error && parser.text.length > 0)
     {
-        skip_whitespace_and_newlines(text);
-        if (text.length == 0 || text[0] == ']' || text[0] == '}')
-            break;
-        commands ~= parse_command(text);
-        skip_whitespace(text);
-        if (text.length > 0)
-        {
-            if (text[0] == ']' || text[0] == '}')
-                break;
-            if (text[0] == ';' || text[0].is_newline)
-            {
-                // CRLF is one separator
-                if (text[0] == '\r' && text.length > 1 && text[1] == '\n')
-                    text = text[2 .. $];
-                else
-                    text = text[1 .. $];
-            }
-            else // if (test[0] == invalid characters...)
-            {
-                assert(false, "TODO: what is the set of invalid characters here?");
-            }
-        }
+        parser.fail("Unexpected '", parser.text[0], "'");
+        free_script_commands(commands);
     }
+    text = parser.text;
+    error = parser.error;
     return commands;
 }
 
-ScriptCommand parse_command(ref const(char)[] text)
+private Array!ScriptCommand parse_command_list(ref Parser parser)
 {
-    Expression* e = parse_primary_exp(text);
+    version (ExpressionDebug)
+        writeDebug("PARSE: ", parser.text);
 
-    if (e.ty != Type.str || !(e.flags & Flags.identifier))
-        syntax_error("Invalid command");
-
-    ScriptCommand c;
-    c.command = e.get_str();
-
-    bool in_args = false;
-    while (text.length > 0)
+    Array!ScriptCommand commands;
+    while (parser.text.length > 0)
     {
-        skip_whitespace(text);
-        if (text.length == 0 || text[0].is_newline || text[0] == ';' || text[0] == '}' || text[0] == ']')
+        parser.skip_whitespace_and_newlines();
+        if (parser.text.length == 0 || parser.text[0] == ']' || parser.text[0] == '}')
+            break;
+        ScriptCommand c = parse_command(parser);
+        if (parser.error)
+        {
+            free_script_command(c);
+            break;
+        }
+        commands ~= c.move;
+        parser.skip_whitespace();
+        if (parser.text.length > 0)
+        {
+            if (parser.text[0] == ']' || parser.text[0] == '}')
+                break;
+            if (parser.text[0] == ';' || parser.text[0].is_newline)
+            {
+                // CRLF is one separator
+                if (parser.text[0] == '\r' && parser.text.length > 1 && parser.text[1] == '\n')
+                    parser.text = parser.text[2 .. $];
+                else
+                    parser.text = parser.text[1 .. $];
+            }
+            else
+            {
+                parser.fail("Unexpected '", parser.text[0], "' after command");
+                break;
+            }
+        }
+    }
+    if (parser.error)
+        free_script_commands(commands);
+    return commands;
+}
+
+private ScriptCommand parse_command(ref Parser parser)
+{
+    ScriptCommand c;
+
+    Expression* e = parse_primary_exp(parser);
+    if (!e)
+        return c;
+    if (e.ty != Type.str || !(e.flags & Flags.identifier))
+    {
+        free_expression(e);
+        parser.fail("Invalid command");
+        return c;
+    }
+
+    c.command = e.get_str();
+    free_expression(e);
+    parse_arguments(parser, c);
+    return c;
+}
+
+// Fills whatever arguments parse before the first failure. A caller that only needs
+// the shape of the line so far, such as tab completion, can use the partial result.
+void parse_arguments(ref const(char)[] text, ref ScriptCommand c)
+{
+    Parser parser = Parser(text);
+    parse_arguments(parser, c);
+    text = parser.text;
+}
+
+private void parse_arguments(ref Parser parser, ref ScriptCommand c)
+{
+    bool in_args = false;
+    while (parser.text.length > 0)
+    {
+        parser.skip_whitespace();
+        if (parser.text.length == 0 || parser.text[0].is_newline || parser.text[0] == ';' || parser.text[0] == '}' || parser.text[0] == ']')
             break;
 
-        ScriptCommand.Argument a = parse_argument(text, in_args);
+        ScriptCommand.Argument a = parse_argument(parser, in_args);
+        if (!a.value)
+            break;
         if (a.name)
             c.named_args ~= a;
         else
             c.args ~= a.value;
     }
-
-    return c;
 }
 
-ScriptCommand.Argument parse_argument(ref const(char)[] text, ref bool in_args)
+private ScriptCommand.Argument parse_argument(ref Parser parser, ref bool in_args)
 {
     ScriptCommand.Argument a;
 
-    static parse_arg_element(ref const(char)[] text, bool allow_slash)
+    static Expression* parse_arg_element(ref Parser parser, bool allow_slash)
     {
         Array!(Expression*) arr;
         Expression* arg;
         while (true)
         {
-            arg = parse_primary_exp(text, allow_slash);
-            if (text.length == 0 || text[0] != ',')
+            arg = parse_primary_exp(parser, allow_slash);
+            if (!arg)
+            {
+                foreach (e; arr[])
+                    free_expression(e);
+                return null;
+            }
+            if (parser.text.length == 0 || parser.text[0] != ',')
                 break;
 
             // append to array and take next token...
             arr ~= arg;
-            text = text[1 .. $];
+            parser.text = parser.text[1 .. $];
             version (ExpressionDebug)
                 writeDebug(",");
         }
@@ -839,14 +924,26 @@ ScriptCommand.Argument parse_argument(ref const(char)[] text, ref bool in_args)
         return arg;
     }
 
-    Expression* arg = parse_arg_element(text, in_args);
-    if (text.length > 0 && text[0] == '=')
+    Expression* arg = parse_arg_element(parser, in_args);
+    if (!arg)
+        return a;
+    if (parser.text.length > 0 && parser.text[0] == '=')
     {
         if (arg.ty != Type.str || !(arg.flags & Flags.identifier))
-            syntax_error("Expected identifier left of '='");
-        text = text[1 .. $];
+        {
+            free_expression(arg);
+            parser.fail("Expected identifier left of '='");
+            return a;
+        }
+        parser.text = parser.text[1 .. $];
         in_args = true;
-        a.value = parse_arg_element(text, true);
+        Expression* value = parse_arg_element(parser, true);
+        if (!value)
+        {
+            free_expression(arg);
+            return a;
+        }
+        a.value = value;
         a.name = arg;
     }
     else
@@ -854,163 +951,220 @@ ScriptCommand.Argument parse_argument(ref const(char)[] text, ref bool in_args)
     return a;
 }
 
-alias parse_expression = parse_logical_or_exp;
-
-Expression* parse_logical_or_exp(ref const(char)[] text)
+Expression* parse_expression(ref const(char)[] text)
 {
-    Expression* left = parse_logical_and_exp(text);
-    scope(failure) free_expression(left);
-    skip_whitespace(text);
-    while (text.match("||"))
+    Parser parser = Parser(text);
+    Expression* expression = parse_logical_or_exp(parser);
+    text = parser.text;
+    return expression;
+}
+
+private Expression* parse_logical_or_exp(ref Parser parser)
+{
+    Expression* left = parse_logical_and_exp(parser);
+    if (!left)
+        return null;
+    parser.skip_whitespace();
+    while (parser.match("||"))
     {
         version (ExpressionDebug)
             writeDebug("OR");
-        skip_whitespace(text);
-        Expression* right = parse_logical_and_exp(text);
+        parser.skip_whitespace();
+        Expression* right = parse_logical_and_exp(parser);
+        if (!right)
+        {
+            free_expression(left);
+            return null;
+        }
         left = try_fold(Type.or, left, right);
-        skip_whitespace(text);
+        parser.skip_whitespace();
     }
     return left;
 }
 
-Expression* parse_logical_and_exp(ref const(char)[] text)
+private Expression* parse_logical_and_exp(ref Parser parser)
 {
-    Expression* left = parse_equality_exp(text);
-    scope(failure) free_expression(left);
-    skip_whitespace(text);
-    while (text.match("&&"))
+    Expression* left = parse_equality_exp(parser);
+    if (!left)
+        return null;
+    parser.skip_whitespace();
+    while (parser.match("&&"))
     {
         version (ExpressionDebug)
             writeDebug("AND");
-        skip_whitespace(text);
-        Expression* right = parse_equality_exp(text);
+        parser.skip_whitespace();
+        Expression* right = parse_equality_exp(parser);
+        if (!right)
+        {
+            free_expression(left);
+            return null;
+        }
         left = try_fold(Type.and, left, right);
-        skip_whitespace(text);
+        parser.skip_whitespace();
     }
     return left;
 }
 
-Expression* parse_equality_exp(ref const(char)[] text)
+private Expression* parse_equality_exp(ref Parser parser)
 {
-    Expression* left = parse_relational_exp(text);
-    scope(failure) free_expression(left);
-    skip_whitespace(text);
-    while (text.match("==") || text.match("!="))
+    Expression* left = parse_relational_exp(parser);
+    if (!left)
+        return null;
+    parser.skip_whitespace();
+    while (parser.match("==") || parser.match("!="))
     {
         version (ExpressionDebug)
             writeDebug("EQ");
-        Type ty = text.ptr[-1] == '=' ? Type.eq : Type.ne;
-        skip_whitespace(text);
-        Expression* right = parse_relational_exp(text);
+        Type ty = parser.text.ptr[-1] == '=' ? Type.eq : Type.ne;
+        parser.skip_whitespace();
+        Expression* right = parse_relational_exp(parser);
+        if (!right)
+        {
+            free_expression(left);
+            return null;
+        }
         left = try_fold(ty, left, right);
-        skip_whitespace(text);
+        parser.skip_whitespace();
     }
     return left;
 }
 
-Expression* parse_relational_exp(ref const(char)[] text)
+private Expression* parse_relational_exp(ref Parser parser)
 {
-    Expression* left = parse_concat_exp(text);
-    scope(failure) free_expression(left);
-    skip_whitespace(text);
-    while (text.match('<') || text.match("<=") || text.match('>') || text.match(">="))
+    Expression* left = parse_concat_exp(parser);
+    if (!left)
+        return null;
+    parser.skip_whitespace();
+    while (parser.match('<') || parser.match("<=") || parser.match('>') || parser.match(">="))
     {
         version (ExpressionDebug)
             writeDebug("REL");
-        Type ty = text.ptr[-1] == '=' ? Type.le : Type.lt;
-        bool swap = text.ptr[text.ptr[-1] == '=' ? -2 : -1] == '>';
-        skip_whitespace(text);
-        Expression* right = parse_concat_exp(text);
+        Type ty = parser.text.ptr[-1] == '=' ? Type.le : Type.lt;
+        bool swap = parser.text.ptr[parser.text.ptr[-1] == '=' ? -2 : -1] == '>';
+        parser.skip_whitespace();
+        Expression* right = parse_concat_exp(parser);
+        if (!right)
+        {
+            free_expression(left);
+            return null;
+        }
         left = try_fold(ty, swap ? right : left, swap ? left : right);
-        skip_whitespace(text);
+        parser.skip_whitespace();
     }
     return left;
 }
 
-Expression* parse_concat_exp(ref const(char)[] text)
+private Expression* parse_concat_exp(ref Parser parser)
 {
-    Expression* left = parse_additive_exp(text);
-    scope(failure) free_expression(left);
-    skip_whitespace(text);
-    while (text.match(".."))
+    Expression* left = parse_additive_exp(parser);
+    if (!left)
+        return null;
+    parser.skip_whitespace();
+    while (parser.match(".."))
     {
         version (ExpressionDebug)
             writeDebug("CAT");
-        skip_whitespace(text);
-        Expression* right = parse_additive_exp(text);
+        parser.skip_whitespace();
+        Expression* right = parse_additive_exp(parser);
+        if (!right)
+        {
+            free_expression(left);
+            return null;
+        }
         left = try_fold(Type.cat, left, right);
-        skip_whitespace(text);
+        parser.skip_whitespace();
     }
     return left;
 }
 
-Expression* parse_additive_exp(ref const(char)[] text)
+private Expression* parse_additive_exp(ref Parser parser)
 {
-    Expression* left = parse_multiplicative_exp(text);
-    scope(failure) free_expression(left);
-    skip_whitespace(text);
-    while (text.match('+') || text.match('-'))
+    Expression* left = parse_multiplicative_exp(parser);
+    if (!left)
+        return null;
+    parser.skip_whitespace();
+    while (parser.match('+') || parser.match('-'))
     {
         version (ExpressionDebug)
             writeDebug("ADD");
-        Type ty = text.ptr[-1] == '+' ? Type.add : Type.sub;
-        skip_whitespace(text);
-        Expression* right = parse_multiplicative_exp(text);
+        Type ty = parser.text.ptr[-1] == '+' ? Type.add : Type.sub;
+        parser.skip_whitespace();
+        Expression* right = parse_multiplicative_exp(parser);
+        if (!right)
+        {
+            free_expression(left);
+            return null;
+        }
         left = try_fold(ty, left, right);
-        skip_whitespace(text);
+        parser.skip_whitespace();
     }
     return left;
 }
 
-Expression* parse_multiplicative_exp(ref const(char)[] text)
+private Expression* parse_multiplicative_exp(ref Parser parser)
 {
-    Expression* left = parse_unary_exp(text);
-    scope(failure) free_expression(left);
-    skip_whitespace(text);
-    while (text.match('*') || text.match('/'))
+    Expression* left = parse_unary_exp(parser);
+    if (!left)
+        return null;
+    parser.skip_whitespace();
+    while (parser.match('*') || parser.match('/'))
     {
         version (ExpressionDebug)
             writeDebug("MUL");
-        Type ty = text.ptr[-1] == '*' ? Type.mul : Type.div;
-        skip_whitespace(text);
-        Expression* right = parse_unary_exp(text);
+        Type ty = parser.text.ptr[-1] == '*' ? Type.mul : Type.div;
+        parser.skip_whitespace();
+        Expression* right = parse_unary_exp(parser);
+        if (!right)
+        {
+            free_expression(left);
+            return null;
+        }
         left = try_fold(ty, left, right);
-        skip_whitespace(text);
+        parser.skip_whitespace();
     }
     return left;
 }
 
-Expression* parse_unary_exp(ref const(char)[] text)
+private Expression* parse_unary_exp(ref Parser parser)
 {
-    if (text.match('-') || text.match('!') || text.match('+'))
+    if (parser.match('-') || parser.match('!') || parser.match('+'))
     {
         version (ExpressionDebug)
             writeDebug("UNARY");
-        char op = text.ptr[-1];
-        Expression* expr = parse_unary_exp(text);
+        char op = parser.text.ptr[-1];
+        Expression* expr = parse_unary_exp(parser);
+        if (!expr)
+            return null;
         if (op == '+')
             return expr;
         Type ty = op ? Type.neg : Type.not;
         return try_fold(ty, expr, null);
     }
-    return parse_postfix_exp(text);
+    return parse_postfix_exp(parser);
 }
 
-Expression* parse_postfix_exp(ref const(char)[] text)
+private Expression* parse_postfix_exp(ref Parser parser)
 {
-    Expression* left = parse_primary_exp(text);
-    scope(failure) free_expression(left);
-    while (text.match('(') || text.match('['))
+    Expression* left = parse_primary_exp(parser);
+    if (!left)
+        return null;
+    while (parser.match('(') || parser.match('['))
     {
-        bool call = text.ptr[-1] == '(';
+        bool call = parser.text.ptr[-1] == '(';
         version (ExpressionDebug)
             writeDebug(call ? "CALL (" : "IDX [");
         Expression* right;
-        scope(failure) if (right) free_expression(right);
         do
         {
-            skip_whitespace(text);
-            Expression* expr = parse_expression(text);
+            parser.skip_whitespace();
+            Expression* expr = parse_logical_or_exp(parser);
+            if (!expr)
+            {
+                free_expression(left);
+                if (right)
+                    free_expression(right);
+                return null;
+            }
 
             if (!right)
                 right = expr;
@@ -1021,14 +1175,18 @@ Expression* parse_postfix_exp(ref const(char)[] text)
                 list.right = expr;
                 right = list;
             }
-            skip_whitespace(text);
+            parser.skip_whitespace();
         }
-        while (text.match(','));
+        while (parser.match(','));
 
-        if (call)
-            text.expect(')');
-        else
-            text.expect(']');
+        char expected = call ? ')' : ']';
+        if (!parser.match(expected))
+        {
+            free_expression(left);
+            if (right)
+                free_expression(right);
+            return parser.fail("Expected '", expected, "'");
+        }
         version (ExpressionDebug)
             writeDebug(call ? "CALL ]" : "IDX ]");
         left = try_fold(call ? Type.call : Type.idx, left, right);
@@ -1038,37 +1196,54 @@ Expression* parse_postfix_exp(ref const(char)[] text)
 
 Expression* parse_primary_exp(ref const(char)[] text, bool allow_slash = false)
 {
-    if (text.length == 0)
-        syntax_error("Expected expression");
+    Parser parser = Parser(text);
+    Expression* expression = parse_primary_exp(parser, allow_slash);
+    text = parser.text;
+    return expression;
+}
+
+private Expression* parse_primary_exp(ref Parser parser, bool allow_slash = false)
+{
+    if (parser.text.length == 0)
+        return parser.fail("Expected expression");
 
     Expression* r;
 
     // parse paren-enclosed expression
-    if (text.match('('))
+    if (parser.match('('))
     {
         version (ExpressionDebug)
             writeDebug("PAREN (");
-        skip_whitespace(text);
-        Expression* expr = parse_expression(text);
-        scope(failure) free_expression(expr);
-        skip_whitespace(text);
-        text.expect(')');
+        parser.skip_whitespace();
+        Expression* expr = parse_logical_or_exp(parser);
+        if (!expr)
+            return null;
+        parser.skip_whitespace();
+        if (!parser.match(')'))
+        {
+            free_expression(expr);
+            return parser.fail("Expected ')'");
+        }
         version (ExpressionDebug)
             writeDebug("PAREN )");
         return expr;
     }
 
     // parse command blocks
-    if (text.match('[') || text.match('{'))
+    if (parser.match('[') || parser.match('{'))
     {
-        bool eval = text.ptr[-1] == '[';
-        const(char)* body_start = text.ptr;
-        Array!ScriptCommand commands = parse_commands(text);
-        const(char)[] body = body_start[0 .. text.ptr - body_start].trim;
-        if (eval)
-            text.expect(']');
-        else
-            text.expect('}');
+        bool eval = parser.text.ptr[-1] == '[';
+        const(char)* body_start = parser.text.ptr;
+        Array!ScriptCommand commands = parse_command_list(parser);
+        if (parser.error)
+            return null;
+        const(char)[] body = body_start[0 .. parser.text.ptr - body_start].trim;
+        char expected = eval ? ']' : '}';
+        if (!parser.match(expected))
+        {
+            free_script_commands(commands);
+            return parser.fail("Expected '", expected, "'");
+        }
         Expression* cmds = alloc_expression(Type.cmd_list);
         commands.moveEmplace(cmds.cmds.list);
         cmds.cmds.source = body;
@@ -1078,66 +1253,66 @@ Expression* parse_primary_exp(ref const(char)[] text, bool allow_slash = false)
     }
 
     // parse quoted string
-    if (text.match('"'))
+    if (parser.match('"'))
     {
         MutableString!0 copy;
         bool interpolated = false;
 
         size_t len = 0;
-        while (len < text.length && text[len] != '"')
+        while (len < parser.text.length && parser.text[len] != '"')
         {
-            if (text[len] == '\\')
+            if (parser.text[len] == '\\')
             {
-                if (++len == text.length)
-                    syntax_error("Expected '\"'");
-                copy = text[0 .. len - 1];
+                if (++len == parser.text.length)
+                    return parser.fail("Expected '\"'");
+                copy = parser.text[0 .. len - 1];
             }
-            if (text[len] == '$')
+            if (parser.text[len] == '$')
                 interpolated = true;
             if (copy)
-                copy ~= text[len];
+                copy ~= parser.text[len];
             len++;
         }
-        if (len == text.length)
-            syntax_error("Expected '\"'");
+        if (len == parser.text.length)
+            return parser.fail("Expected '\"'");
 
         if (copy)
             r = alloc_expression(copy.move);
         else
         {
             r = alloc_expression(Type.str);
-            r.s = text[0 .. len];
+            r.s = parser.text[0 .. len];
         }
         r.flags |= Flags.constant;
         if (interpolated)
             r.flags |= Flags.interpolated_string;
 
-        text = text[len + 1 .. $];
+        parser.text = parser.text[len + 1 .. $];
         return r;
     }
 
     // parse unquoted strings, numbers, maybe even lists...
 
     // parse string...
-    bool is_var = text[0] == '$';
-    bool is_element = text[0] == '@';
+    bool is_var = parser.text[0] == '$';
+    bool is_element = parser.text[0] == '@';
     bool identifier;
 
     if (is_var || is_element)
     {
-        text = text[1 .. $];
+        parser.text = parser.text[1 .. $];
 
-        if (text.length == 0 || text[0] == '/')
-            syntax_error("Invalid ", is_var ? "variable" : "element", " name");
+        if (parser.text.length == 0 || parser.text[0] == '/')
+            return parser.fail("Invalid ", is_var ? "variable" : "element", " name");
     }
 
-    identifier = text[0].is_alpha || text[0] == '_' || text[0] == '/' || text[0] == ':' || (is_element && text[0] == '.');
+    identifier = parser.text[0].is_alpha || parser.text[0] == '_' || parser.text[0] == '/' || parser.text[0] == ':' || (is_element && parser.text[0] == '.');
 
     string string_delimiters = "/$=,;\"\\{}[]()?'`";
     size_t len = identifier; // skip the first char; first char has some special cases
-    scan_string: while (len < text.length)
+    scan_string: while (len < parser.text.length)
     {
-        char c = text[len];
+        char c = parser.text[len];
         if (c <= ' ' || c >= 0x7F) // only ascii characters
             break;
         // TODO: use a lookup table?
@@ -1161,14 +1336,18 @@ Expression* parse_primary_exp(ref const(char)[] text, bool allow_slash = false)
     }
 
     // validate the string...
-    if (len < text.length)
+    if (len < parser.text.length)
     {
         // string should have terminated on a valid delimiter
-        if (!text[len].is_whitespace && text[len] != '=' && text[len] != '/' && text[len] != ';' && text[len] != ',' && text[len] != ')' && text[len] != '}' && text[len] != ']' && !(is_var && text[len] == '('))
-            syntax_error("Invalid token");
+        if (!parser.text[len].is_whitespace && parser.text[len] != '=' && parser.text[len] != '/' && parser.text[len] != ';' && parser.text[len] != ',' && parser.text[len] != ')' && parser.text[len] != '}' && parser.text[len] != ']' && !(is_var && parser.text[len] == '('))
+            return parser.fail("Invalid token");
     }
 
-    if (!is_var && !is_element && text[0 .. len] == "null")
+    // an empty token consumes nothing; returning one spins the argument loop forever
+    if (len == 0)
+        return parser.fail("Expected expression");
+
+    if (!is_var && !is_element && parser.text[0 .. len] == "null")
     {
         r = alloc_expression(Type.null_);
 
@@ -1178,7 +1357,7 @@ Expression* parse_primary_exp(ref const(char)[] text, bool allow_slash = false)
     else
     {
         size_t taken = 0;
-        VarQuantity q = text[0..len].parse_quantity(&taken);
+        VarQuantity q = parser.text[0..len].parse_quantity(&taken);
         if (taken == len)
         {
             // we parsed a number!
@@ -1192,18 +1371,18 @@ Expression* parse_primary_exp(ref const(char)[] text, bool allow_slash = false)
         else
         {
             if ((is_var || is_element) && !identifier)
-                syntax_error("Expected identifier");
+                return parser.fail("Expected identifier");
             r = alloc_expression(is_var ? Type.var : is_element ? Type.elem : Type.str);
             r.flags = Flags.no_quotes;
             if (identifier)
                 r.flags |= Flags.identifier;
-            r.s = text[0 .. len];
+            r.s = parser.text[0 .. len];
 
             version (ExpressionDebug)
                 writeDebug(is_var ? "VAR: " : is_element ? "ELEMENT: " : "STR: ", r.get_str());
         }
     }
-    text = text[len .. $];
+    parser.text = parser.text[len .. $];
 
     return r;
 }
@@ -1383,4 +1562,58 @@ unittest
     assert(cmds[0].named_args.length == 1);
     assert(cmds[0].named_args[0].name.get_str() == "solar.mppt1");
     assert(cmds[0].named_args[0].value.get_str() == "cabin.pv1");
+
+    Script invalid = make_script(":put before\n)");
+    assert(invalid.commands.empty);
+
+    text = ")";
+    const(char)[] error;
+    cmds = parse_commands(text, error);
+    assert(cmds.empty);
+    assert(error == "Expected expression");
+
+    text = ":set x=5";
+    cmds = parse_commands(text, error);
+    assert(error is null);
+
+    text = ":put before\n}";
+    cmds = parse_commands(text, error);
+    assert(cmds.empty);
+    assert(error == "Unexpected '}'");
+    assert(text == "}");
+
+    text = "]";
+    cmds = parse_commands(text, error);
+    assert(cmds.empty);
+    assert(error == "Unexpected ']'");
+
+    invalid = make_script(":put before\n}");
+    assert(invalid.commands.empty);
+}
+
+version (AllocProfile) unittest
+{
+    import urt.mem.profile.log : alloc_profile_counters, alloc_profile_logging;
+
+    bool was_logging = alloc_profile_logging();
+    alloc_profile_logging(false);
+    scope(exit) alloc_profile_logging(was_logging);
+
+    static void check(const(char)[] input)
+    {
+        auto before = alloc_profile_counters();
+        {
+            ScriptCommand command;
+            const(char)[] text = input;
+            parse_arguments(text, command);
+            assert(text.empty);
+            free_script_command(command);
+        }
+        auto after = alloc_profile_counters();
+        assert(after.live_allocs == before.live_allocs);
+        assert(after.live_bytes == before.live_bytes);
+    }
+
+    check("a,b");
+    check("{ /put a,b }");
 }
