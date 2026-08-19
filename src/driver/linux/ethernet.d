@@ -123,14 +123,18 @@ nothrow @nogc:
         const(ubyte)[] data;
         uint wire_len;
         MonoTime ts;
+        ubyte pkttype;
 
         while (true)
         {
-            int res = _raw.poll(data, wire_len, ts);
+            int res = _raw.poll_ll(data, wire_len, ts, pkttype);
             if (res == 0)
                 break;
             if (res < 0)
                 break;
+
+            if (pkttype == PACKET_OUTGOING)
+                continue;
 
             if (data.length < wire_len)
             {
