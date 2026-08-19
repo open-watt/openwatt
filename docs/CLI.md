@@ -809,8 +809,12 @@ medium.
 ### `/sync/neighbor`
 
 `print` lists every node heard through any discovery domain: node-id, name,
-role, cluster, claim state, the station it was heard on, its MAC, and the age
-of its last beacon. Entries age out after 10 minutes of silence.
+role, cluster, claim state, and the age of its last beacon, followed by one
+line per link: the station a beacon arrived on, the source address, and the
+sync port announced for that medium. A multi-homed node shows one link per
+(station, address) pair it beacons through; the peering agent claims via the
+most preferable live link. Nodes and links age out after 10 minutes of
+silence.
 
 ```text
 /sync/discover/ether add name=lan interface=ether1
@@ -837,8 +841,10 @@ learns where to connect without configuration.
 
 An `authority` sweeps the neighbour table every few seconds and claims members
 matching the `claim` filter: it builds a dynamic connected `/interface/udp`
-toward the member's address and beaconed port, spawns a dynamic `/sync/peer`
-named after the remote node, and sends the claim once the session says hello.
+from the member's most preferable live link (bound to the station the beacon
+arrived on, toward its address and beaconed port), spawns a dynamic
+`/sync/peer` named after the remote node, and sends the claim once the session
+says hello.
 Refused or unanswered claims tear the pair down and back off per candidate
 (30s doubling to 10m). A member already claimed by its own cluster is still
 claimed by an authority holding no session to it: that is how a second
