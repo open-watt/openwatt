@@ -387,7 +387,7 @@ nothrow @nogc:
     final const(Property*)[] properties() const
         => _typeInfo.properties;
 
-    final ref inout(Element) prop_element(size_t index) inout
+    final ref inout(Element) prop_element(size_t index) inout pure
     {
         debug assert(_prop_elements && _typeInfo.properties[index].elem_format, "property is not element-backed");
         return _prop_elements[index];

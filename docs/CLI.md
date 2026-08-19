@@ -518,10 +518,18 @@ properties are mutually exclusive; the one set last wins.
 | --- | --- | --- | --- |
 | `interface` | CAN interface name | none | Speaks ISO-TP directly on the nominated CAN bus. |
 | `stream` | Stream name | none | Speaks to an ELM327 adapter over any byte stream: serial, `tcp-client` (WiFi adapters), or `ble-serial` (BLE dongles). |
+| `vehicle` | `unknown`, `awake`, `asleep` | `unknown` | Read-only. Whether the vehicle is answering. |
 
 The ELM327 backend initialises the adapter (echo off, headers on, automatic
 protocol) and runs one command at a time against its prompt. 29-bit addressing
 is not yet supported over ELM327.
+
+A parked vehicle stops answering without anything failing, so this is reported
+rather than treated as an error: the interface stays running and `status` reads
+`Asleep`. `awake` is a fact, since something answered. `asleep` is a heuristic
+inferred from a run of requests that drew no reply, so a vehicle that answers
+slower than the interface waits looks the same. Bindings read this rather than
+each inferring it independently.
 
 ```text
 /stream/ble-serial/add name=obd0 client=car service=FFF0 write=FFF2 notify=FFF1
@@ -593,8 +601,9 @@ An OBD binding polls a vehicle through an OBD interface and materialises the
 results into a Device from a profile's `obd:` element map. Polling batches up
 to six mode-01 pids per request, queries the supported-pid bitmasks at startup
 so pids the vehicle does not implement are never polled, and treats a silent
-vehicle as parked rather than failed: after three missed responses the binding
-drops to a quiet probe every ten seconds until the vehicle answers again.
+vehicle as parked rather than failed: it follows the interface's `vehicle` state,
+dropping to a quiet probe every ten seconds while that reads `asleep` and
+resuming its normal cadence when the vehicle answers again.
 
 | Property | Values | Default | Description |
 | --- | --- | --- | --- |
