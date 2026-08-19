@@ -1189,29 +1189,24 @@ unittest
     Variant ok_json = parse_json(`{"result": "OK", "count": 5}`);
     Variant fail_json = parse_json(`{"result": "FAIL", "count": 0}`);
 
-    try
-    {
-        // null expression - defaults to true
-        assert(evaluate_success(ok_json, null));
+    // null expression - defaults to true
+    assert(evaluate_success(ok_json, null));
 
-        // string equality via $var
-        const(char)[] program = `$result == "OK"`;
-        auto expr1 = parse_expression(program);
-        assert(evaluate_success(ok_json, expr1));
-        assert(!evaluate_success(fail_json, expr1));
+    // string equality via $var
+    const(char)[] program = `$result == "OK"`;
+    auto expr1 = parse_expression(program);
+    assert(evaluate_success(ok_json, expr1));
+    assert(!evaluate_success(fail_json, expr1));
 
-        // numeric comparison
-        program = "$count > 0";
-        auto expr2 = parse_expression(program);
-        assert(evaluate_success(ok_json, expr2));
-        assert(!evaluate_success(fail_json, expr2));
-        program = "$count == 5";
-        auto expr3 = parse_expression(program);
-        assert(evaluate_success(ok_json, expr3));
-        assert(!evaluate_success(fail_json, expr3));
-    }
-    catch (Exception)
-        assert(false, "parse failed");
+    // numeric comparison
+    program = "$count > 0";
+    auto expr2 = parse_expression(program);
+    assert(evaluate_success(ok_json, expr2));
+    assert(!evaluate_success(fail_json, expr2));
+    program = "$count == 5";
+    auto expr3 = parse_expression(program);
+    assert(evaluate_success(ok_json, expr3));
+    assert(!evaluate_success(fail_json, expr3));
 
     // non-object JSON - locals empty
     Variant scalar = parse_json(`42`);
