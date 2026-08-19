@@ -158,3 +158,58 @@ before expecting the stall to appear.
   only called from `startup()` ([ota/package.d:137](../src/apps/ota/package.d#L137)), so setting the
   property stores the new value while the supervisor keeps enforcing the old one. This blocks the
   otherwise obvious "widen the watchdog and let the claim run to completion" experiment.
+
+## Retest on master c2085d35 (both ends updated) - STILL FAILS, but the flood is gone
+
+Retested after #543, #546 (ether-drop-outgoing-echo), #549 (ether-ow-source-learning), #550
+(link set per neighbour, claim through the best link) and `iface/udp: bind an ether peer to an
+explicit station` landed. Both ends rebuilt from `c2085d35`: Pi on slot 106, ESP32-S3 OTA'd.
+
+The claim now selects a link explicitly, which those fixes did deliver:
+
+```
+[Info] sync.peering: claiming node 709889988161F993 ('openwatt-F993') at 28:84:85:54:FB:08:7000 via ether1 (adoption)
+2026-08-19T17:19:58 [ota-supervisor] no heartbeat for 5000ms; killing app
+```
+
+and the neighbour table carries the link set:
+
+```
+709889988161F993  openwatt-F993  role=member state=unbound
+    via=ether1 mac=28:84:85:54:FB:08 port=7000
+```
+
+The stall is unchanged. `/proc` sampling still shows a pure CPU spin (`state=R`, `wchan=0`,
+utime +94 / stime +172 ticks over ~3s, still roughly two thirds kernel).
+
+**What changed, and it matters:** `EtherEndpoint.sendto` no longer appears via
+`__lambda_L232_C31`. It now calls `emit()` directly:
+
+```
+#9 router.iface.endpoint.EtherEndpoint.sendto(EUI!48, ushort, scope const(void)[])
+#8 router.iface.endpoint.EtherEndpoint.emit(EthernetStation, EUI!48, const(ubyte)[])
+#7 router.iface.BaseInterface.forward(...)
+#6 router.iface.ethernet.EthernetStation.transmit(...)
+#5 router.iface.ethernet.EthernetStation.station_egress(...)
+```
+
+So the neighbour lookup hits and the single-station path is taken - **the flood is fixed and the
+spin survives it**. Suspects 1 and 2 above are therefore largely retired: it is not the fallback
+flood, and it is not a lookup miss.
+
+Other samples in the same run place the send under the scheduler:
+
+```
+#8 manager.Application.process_due()
+#7 manager.Application.tick(...)
+#6 manager.Application.update()
+```
+
+which points at **a due timer that re-arms with no delay**, firing continuously and emitting one
+frame per iteration, rather than at anything in the send path itself. Candidates worth reading
+first: the claim retry deadline in `peering.d`, the reliable sublayer's retransmit timer
+(250ms doubling x8), and the peer session's hello timing. A scheduled event whose next-due time is
+computed as already-past would produce exactly this signature.
+
+Reproduced twice on `c2085d35`, once with an old-firmware member and once with both ends updated,
+so it is not a version-skew artifact between the two nodes.
