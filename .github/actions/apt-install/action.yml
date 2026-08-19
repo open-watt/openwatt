@@ -26,6 +26,8 @@ runs:
       run: |
         image="${ImageOS:-$( . /etc/os-release && echo "$ID$VERSION_ID" )}"
         hash=$(printf '%s|%s' "$PACKAGES" "$FOREIGN_ARCH" | sha256sum | cut -c1-12)
+        # The cache restore untars as the runner user, so the parent must not be root-owned.
+        mkdir -p "$HOME/.apt-debs"
         echo "dir=$HOME/.apt-debs/$SET" >> "$GITHUB_OUTPUT"
         echo "key=apt-v1-$image-$(uname -m)-$SET-$hash" >> "$GITHUB_OUTPUT"
         if [ -n "$FOREIGN_ARCH" ]; then
@@ -47,11 +49,10 @@ runs:
         DIR: ${{ steps.prep.outputs.dir }}
       run: |
         sudo rm -rf "$DIR"
-        sudo mkdir -p "$DIR/partial"
-        sudo chown -R _apt:root "$DIR"
+        mkdir -p "$DIR/partial"
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends --download-only \
-            -o Dir::Cache::archives="$DIR" -o Acquire::Retries=5 $PACKAGES
+            -o Dir::Cache::archives="$DIR" -o APT::Sandbox::User=root -o Acquire::Retries=5 $PACKAGES
         sudo chown -R "$(id -u):$(id -g)" "$DIR"
         rm -rf "$DIR/partial" "$DIR/lock"
         du -sh "$DIR"
