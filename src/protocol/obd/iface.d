@@ -84,10 +84,21 @@ struct OBDFrame
 }
 
 
+// Whether the vehicle is answering. A parked car stops replying without the link
+// failing, so this is reported rather than treated as an error.
+enum VehicleState : ubyte
+{
+    unknown,  // nothing heard yet; neither state has been proven
+    awake,
+    asleep,
+}
+
+
 class OBDInterface : BaseInterface
 {
     alias Properties = AliasSeq!(Prop!("stream", stream),
-                                 Prop!("interface", can_iface));
+                                 Prop!("interface", can_iface),
+                                 Elem!("vehicle", VehicleState, ReadOnly));
 nothrow @nogc:
 
     enum type_name = "obd";
@@ -133,6 +144,9 @@ nothrow @nogc:
         restart();
     }
 
+    final VehicleState vehicle() const pure
+        => prop_read!(typeof(this), "vehicle");
+
     // API...
 
     // a live handle is always pre-dispatch: the handle is released at the request write,
@@ -172,7 +186,14 @@ nothrow @nogc:
     override const(char)[] status_message() const
     {
         if (running)
-            return "Running";
+        {
+            final switch (vehicle)
+            {
+                case VehicleState.unknown:  return "Waiting for the vehicle";
+                case VehicleState.asleep:   return "Asleep";
+                case VehicleState.awake:    return "Running";
+            }
+        }
         final switch (_backend)
         {
             case Backend.none:
@@ -208,6 +229,8 @@ protected:
 
     override CompletionStatus startup()
     {
+        _unanswered = 0;
+
         final switch (_backend)
         {
             case Backend.none:
@@ -262,6 +285,7 @@ protected:
         _elm_busy = false;
         _elm_recover = 0;
         _elm_header = 0;
+        set_vehicle(VehicleState.unknown);
 
         return CompletionStatus.complete;
     }
@@ -330,6 +354,7 @@ protected:
                     return -1;
                 }
                 add_tx_frame(payload.length);
+                note_dispatched();
                 return 0;
         }
     }
@@ -363,6 +388,8 @@ private:
     ObjectRef!CANInterface _can;
     Backend _backend;
     bool _subscribed;
+    MonoTime _unanswered_since;
+    ubyte _unanswered;
 
     IsoTpReassembler _reassembler;
 
@@ -408,6 +435,8 @@ private:
         version (DebugOBDInterface)
             log.debug_("rx from ", src_id, ": [ ", cast(const(void)[])message, " ]");
 
+        note_awake();
+
         Packet p;
         ref OBDFrame f = p.init!OBDFrame(message, rx_time);
         f.src_id = src_id;
@@ -432,6 +461,8 @@ private:
             fc_id = 0x18DA0000 | ((can.id & 0xFF) << 8) | 0xF1;
         else
             return; // TODO: ECU table for non-convention id pairings
+
+        note_awake();
 
         const(ubyte)[] message;
         final switch (_reassembler.feed(can.id, cast(const(ubyte)[])p.data, message))
@@ -462,22 +493,23 @@ private:
 
     // --- ELM327 backend ---
 
-    void elm_send(const(char)[] cmd)
+    bool elm_send(const(char)[] cmd)
     {
         Stream s = _stream.get;
         if (!s)
-            return;
+            return false;
         version (DebugOBDInterface)
             log.debug_("elm tx: ", cmd);
         if (s.write(cmd, "\r") != cmd.length + 1)
         {
             log.warning("adapter write failed");
             elm_fail();
-            return;
+            return false;
         }
         _elm_busy = true;
         g_app.cancel(&elm_timeout_fired);
         g_app.schedule(getTime() + elm_timeout, &elm_timeout_fired);
+        return true;
     }
 
     void elm_fail()
@@ -563,7 +595,8 @@ private:
             cmd[len++] = hex_digits[b >> 4];
             cmd[len++] = hex_digits[b & 0xF];
         }
-        elm_send(cmd[0 .. len]);
+        if (elm_send(cmd[0 .. len]))
+            note_dispatched();
         finish_request(req, _elm_state == ElmState.failed ? MessageState.failed : MessageState.complete);
     }
 
@@ -587,6 +620,34 @@ private:
             _elm_queue.remove(0);
             finish_request(req, state);
         }
+    }
+
+    void set_vehicle(VehicleState value)
+    {
+        if (vehicle == value)
+            return;
+        prop_write!(typeof(this), "vehicle")(value);
+        write_status();
+    }
+
+    // a message from the vehicle proves it regardless of backend, and must land before
+    // the message reaches subscribers so they resume on the same event that woke it
+    void note_awake()
+    {
+        _unanswered = 0;
+        set_vehicle(VehicleState.awake);
+    }
+
+    // only a reply ends a run, even when dispatches are sparse
+    void note_dispatched()
+    {
+        MonoTime now = getTime();
+        if (_unanswered == 0)
+            _unanswered_since = now;
+        if (_unanswered <= unanswered_threshold)
+            ++_unanswered;
+        if (_unanswered > unanswered_threshold && now - _unanswered_since >= silence_timeout)
+            set_vehicle(VehicleState.asleep);
     }
 
     void elm_prompt()
@@ -652,6 +713,7 @@ private:
         }
         if (n == 0)
             return;
+        note_awake();
 
         const(ubyte)[] message;
         if (_reassembler.feed(id, frame[0 .. n], message) == IsoTpResult.complete)
@@ -667,6 +729,8 @@ private:
 
 enum Duration elm_timeout = 3.seconds;
 enum elm_recover_limit = 3;
+enum Duration silence_timeout = 15.seconds;
+enum unanswered_threshold = 3;
 
 immutable char[16] hex_digits = "0123456789ABCDEF";
 
@@ -678,4 +742,145 @@ bool all_hex(const(char)[] s) pure
             return false;
     }
     return true;
+}
+
+
+// ====================================================================
+// Tests
+// ====================================================================
+
+unittest
+{
+    import urt.mem.allocator;
+    import manager.element : SampleUpdate;
+
+    // with no stream and no CAN interface both transmit paths are inert
+    static class TestOBD : OBDInterface
+    {
+    nothrow @nogc:
+        uint notifications;
+        bool saw_packet;
+        VehicleState at_delivery;
+
+        this() { super(CID(1)); }
+
+        void on_vehicle(ref const SampleUpdate) { ++notifications; }
+
+        void on_packet(ref const Packet, BaseInterface, PacketDirection, void*)
+        {
+            saw_packet = true;
+            at_delivery = vehicle;
+        }
+    }
+
+    // drives the adapter dispatch point; with no stream elm_send reports no write,
+    // so this stands in for a request that never reached the adapter
+    static void dispatch_unsent(TestOBD o) nothrow @nogc
+    {
+        OBDInterface.ElmRequest req;
+        req.dst = 0x7E0;
+        req.len = 2;
+        static immutable ubyte[2] probe = [0x01, 0x00];
+        req.data[0 .. 2] = probe[];
+        req.handle = o._elm_tags.alloc();
+        o._elm_pending = req;
+        o._elm_pending_valid = true;
+        o.elm_dispatch_pending();
+    }
+
+    // a run long enough in both count and elapsed span
+    static void sustained_silence(TestOBD o) nothrow @nogc
+    {
+        o.note_dispatched();
+        o._unanswered_since = getTime() - silence_timeout - 1.seconds;
+        foreach (_; 0 .. unanswered_threshold)
+            o.note_dispatched();
+    }
+
+    TestOBD o = defaultAllocator().allocT!TestOBD();
+    scope (exit) defaultAllocator().freeT(o);
+    o._elm_state = OBDInterface.ElmState.ready;
+    o.prop_element(prop_index!(OBDInterface, "vehicle")).subscribe(&o.on_vehicle);
+
+    assert(o.vehicle == VehicleState.unknown && o.notifications == 0);
+
+    // any delivered message proves the vehicle, whichever backend produced it
+    static immutable ubyte[3] rsp = [0x41, 0x00, 0x01];
+    o.deliver_message(0x7E8, false, rsp[], getTime());
+    assert(o.vehicle == VehicleState.awake && o.notifications == 1);
+
+    // a request that never reached the adapter is not evidence of anything
+    foreach (_; 0 .. unanswered_threshold * 4)
+        dispatch_unsent(o);
+    assert(o._unanswered == 0 && o.vehicle == VehicleState.awake);
+
+    // a burst of unanswered requests is not sleep: the run has to last long enough
+    // for a reply to have been possible
+    foreach (_; 0 .. unanswered_threshold * 4)
+        o.note_dispatched();
+    assert(o.vehicle == VehicleState.awake && o.notifications == 1);
+
+    // nor is a long-standing run of too few requests
+    o.deliver_message(0x7E8, false, rsp[], getTime());
+    o.note_dispatched();
+    o._unanswered_since = getTime() - silence_timeout - 1.seconds;
+    o.note_dispatched();
+    assert(o.vehicle == VehicleState.awake);
+
+    // a run that is sustained in both count and span concludes sleep
+    o.deliver_message(0x7E8, false, rsp[], getTime());
+    assert(o.notifications == 1);       // still awake; no edge
+    sustained_silence(o);
+    assert(o.vehicle == VehicleState.asleep && o.notifications == 2);
+
+    // holding the verdict does not re-notify
+    o.note_dispatched();
+    assert(o.vehicle == VehicleState.asleep && o.notifications == 2);
+
+    // the wake lands before the message reaches subscribers, and clears the run
+    o.subscribe(&o.on_packet, PacketFilter(type: PacketType.obd, direction: PacketDirection.incoming));
+    o.deliver_message(0x7E8, false, rsp[], getTime());
+    assert(o.vehicle == VehicleState.awake && o.notifications == 3 && o._unanswered == 0);
+    assert(o.saw_packet && o.at_delivery == VehicleState.awake);
+    o.unsubscribe(&o.on_packet);
+
+    // an elm frame proves the vehicle before isotp reassembly completes
+    sustained_silence(o);
+    assert(o.vehicle == VehicleState.asleep);
+    static immutable char[] first_frame = "7E8 10 14 62 F1 90 4C 53";
+    o._elm_line[0 .. first_frame.length] = first_frame[];
+    o._elm_line_len = cast(ushort)first_frame.length;
+    o.elm_line();
+    assert(o.vehicle == VehicleState.awake);
+
+    // status chatter is not a reply and must not wake it
+    sustained_silence(o);
+    assert(o.vehicle == VehicleState.asleep);
+    static immutable char[] chatter = "NO DATA";
+    o._elm_line[0 .. chatter.length] = chatter[];
+    o._elm_line_len = cast(ushort)chatter.length;
+    o.elm_line();
+    assert(o.vehicle == VehicleState.asleep);
+
+    // a recognised response id proves the vehicle at recognition: this frame joins
+    // no reassembly session and is discarded, yet it still wakes it
+    static immutable ubyte[8] orphan = [0x21, 0x57, 0x37, 0x34, 0x30, 0x39, 0x33, 0x4D];
+    Packet cp;
+    ref CANFrame can = cp.init!CANFrame(orphan[]);
+    can.id = 0x7E8;
+    o.can_packet_handler(cp, null, PacketDirection.incoming, null);
+    assert(o.vehicle == VehicleState.awake);
+
+    // a frame that is not a diagnostic response proves nothing
+    sustained_silence(o);
+    assert(o.vehicle == VehicleState.asleep);
+    ref CANFrame other = cp.init!CANFrame(orphan[]);
+    other.id = 0x123;
+    o.can_packet_handler(cp, null, PacketDirection.incoming, null);
+    assert(o.vehicle == VehicleState.asleep);
+
+    // an accepted dispatch reaches g_app through elm_send's timeout arming, and
+    // shutdown() cancels that timer, so neither is covered by a unittest.
+
+    o.prop_element(prop_index!(OBDInterface, "vehicle")).unsubscribe(&o.on_vehicle);
 }

@@ -154,6 +154,8 @@ nothrow @nogc:
             return;
         if (_subscribed)
         {
+            if (OBDInterface i = _iface.get)
+                i.prop_element(prop_index!(OBDInterface, "vehicle")).unsubscribe(&vehicle_changed);
             _iface.unsubscribe(&iface_state_change);
             _iface.unsubscribe(&packet_handler);
             _subscribed = false;
@@ -185,11 +187,18 @@ nothrow @nogc:
         restart();
     }
 
-    override const(char)[] status_message() const
+    override const(char)[] status_detail() const pure
     {
-        if (running && _asleep)
-            return "Vehicle not responding";
-        return super.status_message();
+        if (running)
+        {
+            final switch (_vehicle)
+            {
+                case VehicleState.unknown:  return "Waiting for the vehicle";
+                case VehicleState.asleep:   return "Asleep";
+                case VehicleState.awake:    break;
+            }
+        }
+        return super.status_detail();
     }
 
     final override bool validate() const pure
@@ -208,6 +217,8 @@ nothrow @nogc:
 
         i.subscribe(&packet_handler, PacketFilter(type: PacketType.obd, direction: PacketDirection.incoming));
         i.subscribe(&iface_state_change);
+        i.prop_element(prop_index!(OBDInterface, "vehicle")).subscribe(&vehicle_changed);
+        _vehicle = i.vehicle;
         _subscribed = true;
 
         begin_discovery();
@@ -219,6 +230,8 @@ nothrow @nogc:
     {
         if (_subscribed)
         {
+            if (OBDInterface i = _iface.get)
+                i.prop_element(prop_index!(OBDInterface, "vehicle")).unsubscribe(&vehicle_changed);
             _iface.unsubscribe(&iface_state_change);
             _iface.unsubscribe(&packet_handler);
             _subscribed = false;
@@ -231,9 +244,8 @@ nothrow @nogc:
         disarm_window();
         elements.clear();
         _outstanding = false;
-        _asleep = false;
+        _vehicle = VehicleState.unknown;
         _wake_discovery_pending = false;
-        _misses = 0;
         return super.shutdown();
     }
 
@@ -337,7 +349,6 @@ private:
     enum Duration collection_window = 250.msecs;
     enum Duration retry_interval = 1.seconds;
     enum Duration probe_interval = 10.seconds;
-    enum miss_threshold = 3;
 
     ObjectRef!OBDInterface _iface;
     String _profile_name;
@@ -346,11 +357,10 @@ private:
     bool _subscribed;
     bool _outstanding;
     bool _dispatched;
-    bool _asleep;
+    VehicleState _vehicle;
     bool _discovering;
     bool _wake_discovery_pending;
     int _dispatch_handle;
-    ubyte _misses;
     ubyte _out_mode;
     ubyte _out_responses;
     ubyte _out_num_pids;
@@ -382,6 +392,19 @@ private:
     static uint response_for(uint request) pure
         => request <= 0x7FF ? request + 8 : (request & 0xFFFF0000) | ((request & 0xFF) << 8) | ((request >> 8) & 0xFF);
 
+    void vehicle_changed(ref const SampleUpdate)
+    {
+        OBDInterface i = _iface.get;
+        if (!i)
+            return;
+        VehicleState was = _vehicle;
+        _vehicle = i.vehicle;
+        if (was == VehicleState.asleep && _vehicle != VehicleState.asleep)
+            _wake_discovery_pending = true;
+        write_status();
+        issue_requests();
+    }
+
     void iface_state_change(ActiveObject, StateSignal signal)
     {
         if (signal == StateSignal.offline)
@@ -402,8 +425,6 @@ private:
 
         if (_out_responses == 0)
         {
-            if (++_misses >= miss_threshold)
-                _asleep = true;
             if (_discovering)
                 discovery_page_missed();
         }
@@ -425,7 +446,7 @@ private:
 
         MonoTime now = getTime();
 
-        if (_asleep)
+        if (_vehicle == VehicleState.asleep)
         {
             if (now - _sent_time < probe_interval)
                 return arm_poll(_sent_time + probe_interval);
@@ -710,12 +731,6 @@ private:
                 return;
             version (DebugOBDBinding)
                 log.debugf("negative response: service {0,02x} nrc {1,02x}", payload[1], payload[2]);
-            _misses = 0;
-            if (_asleep)
-            {
-                _asleep = false;
-                _wake_discovery_pending = true;
-            }
             if (payload[2] == 0x78)
             {
                 arm_window(request_timeout);
@@ -745,13 +760,6 @@ private:
         if (!response_matches(mode, src, payload))
             return;
 
-        _misses = 0;
-        if (_asleep)
-        {
-            // let the probe finish through its collection window; discovery starts when it closes
-            _asleep = false;
-            _wake_discovery_pending = true;
-        }
 
         // a physical reply completes the request; a functional reply holds the
         // collection window open for sibling ECUs
@@ -992,7 +1000,6 @@ unittest
     assert((b.elements[0].flags & 1) == 0);
     assert(b.submits == 1);
     assert(b.polls_armed == polls_before + 1);  // next poll scheduled at the element's due time
-    assert(b._misses == 0);                     // replies arrived; not a miss
 
     // physical requests complete only on the matching ECU's reply to a requested pid
     b.elements[0].ecu = 0x7E0;
@@ -1014,15 +1021,14 @@ unittest
     assert(!b._outstanding);
     assert(b.submits == 2 && b.polls_armed == polls_before + 1);
 
-    // an asleep binding ignores traffic that answers nothing it asked for
-    b._asleep = true;
-    b._misses = OBDBinding.miss_threshold;
+    // an asleep binding probes rather than polling its elements
+    b._vehicle = VehicleState.asleep;
     ref OBDFrame t = p.init!OBDFrame(rsp[]);
     t.src_id = 0x7E8;
     b.packet_handler(p, null, PacketDirection.incoming, null);
-    assert(b._asleep && b._misses == OBDBinding.miss_threshold);
+    assert(b._vehicle == VehicleState.asleep);
 
-    // only a reply to its own probe wakes it, and waking must not transmit until
+    // waking arrives as an interface state change, and must not transmit until
     // the probe's collection window expires
     b._sent_time = MonoTime.init;
     b.issue_requests();
@@ -1030,8 +1036,10 @@ unittest
     static immutable ubyte[6] mask_rsp = [0x41, 0x00, 0x00, 0x00, 0x00, 0x01];
     ref OBDFrame u = p.init!OBDFrame(mask_rsp[]);
     u.src_id = 0x7E8;
+    b._vehicle = VehicleState.awake;    // the interface wakes before it delivers
+    b._wake_discovery_pending = true;
     b.packet_handler(p, null, PacketDirection.incoming, null);
-    assert(!b._asleep && b._misses == 0);
+    assert(b._wake_discovery_pending);
     assert(b._outstanding && b.submits == 3);
     assert(!b._discovering);            // discovery deferred to the window close
 
@@ -1077,14 +1085,12 @@ unittest
     // a negative response is a reply, not silence: it completes and keeps the vehicle awake
     b.elements[0].flags = 0;
     b.elements[0].lastUpdate = MonoTime.init;
-    b._misses = 2;
     b.issue_requests();
     assert(b.submits == 7 && b.last_ecu == 0x7E0);
     static immutable ubyte[3] nrc = [0x7F, 0x01, 0x12];
     ref OBDFrame x = p.init!OBDFrame(nrc[]);
     x.src_id = 0x7E8;
     b.packet_handler(p, null, PacketDirection.incoming, null);
-    assert(!b._outstanding && b._misses == 0);
 
     // response-pending (NRC 78) extends the wait instead of completing
     b.elements[0].lastUpdate = MonoTime.init;
@@ -1103,17 +1109,13 @@ unittest
 
     // a negative echoing a different service does not correlate
     b.elements[0].lastUpdate = MonoTime.init;
-    b._misses = 2;
     b.issue_requests();
     assert(b.submits == 9);
     static immutable ubyte[3] nrc_other = [0x7F, 0x22, 0x31];
     ref OBDFrame zz = p.init!OBDFrame(nrc_other[]);
     zz.src_id = 0x7E8;
     b.packet_handler(p, null, PacketDirection.incoming, null);
-    assert(b._outstanding && b._misses == 2);
     b.window_fired(MonoTime.init);
-    b._asleep = false;
-    b._misses = 0;
 
     // a queued request does not start response timing until the transport dispatches it
     b.defer_dispatch = true;
