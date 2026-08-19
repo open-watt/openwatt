@@ -47,14 +47,25 @@ jobs:
       # Linux needs mbedtls for TLS/crypto support
       - name: Install mbedtls (Linux)
         if: ${{ matrix.os == 'linux' }}
-        run: sudo apt-get update && sudo apt-get install -y libmbedtls-dev
+        uses: ./.github/actions/apt-install
+        with:
+          key: mbedtls
+          packages: libmbedtls-dev
       # 32-bit linux needs libs to link and run tests...
       - name: Install 32-bit Toolchains (Linux)
         if: ${{ matrix.os == 'linux' && matrix.arch == 'x86' }}
-        run: sudo dpkg --add-architecture i386 && sudo apt-get update && sudo apt-get install -y gcc-multilib libmbedtls-dev:i386
+        uses: ./.github/actions/apt-install
+        with:
+          key: multilib-i386
+          foreign-arch: i386
+          packages: gcc-multilib libmbedtls-dev:i386
       - name: Install 32-bit ARM Toolchains (Linux)
         if: ${{ matrix.os == 'linux' && matrix.arch == 'arm' }}
-        run: sudo dpkg --add-architecture armhf && sudo apt-get update && sudo apt-get install -y libstdc++6:armhf
+        uses: ./.github/actions/apt-install
+        with:
+          key: libstdcxx-armhf
+          foreign-arch: armhf
+          packages: libstdc++6:armhf
 
       - name: Build release
         if: ${{ github.ref == 'refs/heads/release' }}
@@ -104,8 +115,13 @@ jobs:
         with:
           compiler: ldc
 
+      # arm links newlib's libc.a through the gcc-arm-none-eabi-lib alternative, so newlib
+      # is explicit here; its libstdc++-arm-none-eabi-newlib recommend (463MB) is not linked.
       - name: Install cross toolchain
-        run: sudo apt-get update && sudo apt-get install -y gcc-${{ matrix.toolchain }} picolibc-${{ matrix.toolchain }}
+        uses: ./.github/actions/apt-install
+        with:
+          key: ${{ matrix.toolchain }}
+          packages: gcc-${{ matrix.toolchain }} picolibc-${{ matrix.toolchain }}${{ matrix.toolchain == 'arm-none-eabi' && ' libnewlib-arm-none-eabi' || '' }}
 
       - name: Build
         run: timeout 180 make PLATFORM=${{ matrix.platform }} CONFIG=release ${{ matrix.make_args || '' }}
@@ -132,7 +148,10 @@ jobs:
 
       - name: Install RISC-V toolchain
         if: matrix.target.arch == 'riscv'
-        run: sudo apt-get update && sudo apt-get install -y gcc-riscv64-unknown-elf picolibc-riscv64-unknown-elf
+        uses: ./.github/actions/apt-install
+        with:
+          key: riscv64-unknown-elf
+          packages: gcc-riscv64-unknown-elf picolibc-riscv64-unknown-elf
 
       - name: Build
         run: make PLATFORM=${{ matrix.target.name }} CONFIG=unittest
