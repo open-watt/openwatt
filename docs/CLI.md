@@ -541,7 +541,13 @@ per-frame (falling back to the configured remote).
 
 A peer may be a MAC address (`02:13:37:AA:BB:64`), in which case datagrams ride raw
 ethernet over the OpenWatt ethertype and no IP configuration is required; builds
-without the IP stack carry these peers only.
+without the IP stack carry these peers only. An ether peer may additionally be
+bound to a station with `interface=`: datagrams then egress that station only,
+where an unbound endpoint selects egress by learned neighbour (flooding on a
+miss). A station name binds unambiguously where a MAC cannot: a VLAN
+sub-interface shares its parent's address. A bound station is a dependency: the
+interface waits for it to come up, restarts when it goes offline, and holds
+rather than falling back to a wildcard endpoint if it disappears.
 
 The interface self-configures its L2MTU from the peer's datagram payload MTU
 (assuming a 1500-byte link MTU: 1472 for IPv4, 1452 for IPv6, 1474 for ether);
@@ -549,6 +555,7 @@ The interface self-configures its L2MTU from the peer's datagram payload MTU
 
 | Property | Values | Default | Description |
 | --- | --- | --- | --- |
+| `interface` | ethernet station name | none | Egress binding for an ether peer; datagrams ride this station only. |
 | `local-host` | host or address | wildcard | Local address to bind. |
 | `local-port` | `0` to `65535` | `0` | Local port; zero requests an ephemeral port. |
 | `remote-host` | host, address or MAC | none | Default datagram destination. |
@@ -802,8 +809,12 @@ medium.
 ### `/sync/neighbor`
 
 `print` lists every node heard through any discovery domain: node-id, name,
-role, cluster, claim state, the station it was heard on, its MAC, and the age
-of its last beacon. Entries age out after 10 minutes of silence.
+role, cluster, claim state, and the age of its last beacon, followed by one
+line per link: the station a beacon arrived on, the source address, and the
+sync port announced for that medium. A multi-homed node shows one link per
+(station, address) pair it beacons through; the peering agent claims via the
+most preferable live link. Nodes and links age out after 10 minutes of
+silence.
 
 ```text
 /sync/discover/ether add name=lan interface=ether1
@@ -830,8 +841,10 @@ learns where to connect without configuration.
 
 An `authority` sweeps the neighbour table every few seconds and claims members
 matching the `claim` filter: it builds a dynamic connected `/interface/udp`
-toward the member's address and beaconed port, spawns a dynamic `/sync/peer`
-named after the remote node, and sends the claim once the session says hello.
+from the member's most preferable live link (bound to the station the beacon
+arrived on, toward its address and beaconed port), spawns a dynamic
+`/sync/peer` named after the remote node, and sends the claim once the session
+says hello.
 Refused or unanswered claims tear the pair down and back off per candidate
 (30s doubling to 10m). A member already claimed by its own cluster is still
 claimed by an authority holding no session to it: that is how a second

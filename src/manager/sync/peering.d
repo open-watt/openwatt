@@ -35,6 +35,8 @@ import manager.sync.encoder : encoder_for, SyncEncoderKind;
 import manager.sync.peer : SyncPeer;
 import manager.sync.udp_server : UDPSyncServer;
 
+import router.iface.ethernet : EthernetStation;
+import router.iface.mac : MACAddress;
 import router.iface.udp : UDPInterface;
 
 nothrow @nogc:
@@ -70,10 +72,10 @@ nothrow @nogc:
             ref a = kvp.value;
             if (a.peer && !a.sent && a.peer.running)
                 try_send_claim(a, now);
-            if (a.peer && a.sent && !a.claimed && now >= a.deadline)
+            if (a.expired(now))
             {
-                log.warning("claim of node ", hex_id(kvp.key)[], " went unanswered");
-                fail_attempt(a);
+                log.warning("claim of node ", hex_id(kvp.key)[], a.sent ? " went unanswered" : " stalled in setup");
+                fail_attempt(kvp.key, a);
             }
         }
 
@@ -83,11 +85,11 @@ nothrow @nogc:
 
         foreach (kvp; get_module!SyncDiscoveryModule.neighbors[])
         {
-            ref const n = kvp.value;
+            ref n = kvp.value;
             // a claimed member is NOT skipped: same-cluster members accept every authority's
             // session (the dual-authority seat), and a restarted authority re-claims through
             // the member's still-claimed announce; a foreign claim is refused at the member
-            if (n.role != PeerRole.member || !n.sync_port)
+            if (n.role != PeerRole.member)
                 continue;
             if (n.cluster.length && n.cluster[] != _cluster[])
                 continue;
@@ -105,16 +107,15 @@ nothrow @nogc:
                 else
                     continue;
             }
-            if (a && now < a.retry_at)
-            {
-                // a factory-fresh beacon voids the backoff: the node was reset since we
-                // failed to prove the key, and is adoptable right now
-                if (!(!n.adopted && !a.handover))
-                    continue;
-                a.failures = 0;
-            }
+            // a factory-fresh beacon voids link demotion: the node was reset since we
+            // failed to prove the key, and is adoptable right now
+            if (a && !n.adopted && !a.handover)
+                n.clear_link_demotion();
 
-            start_claim(kvp.key, n);
+            NeighborLink* link = n.best_link(now);
+            if (!link)
+                continue;
+            start_claim(kvp.key, n, *link);
         }
     }
 
@@ -356,7 +357,11 @@ nothrow @nogc:
             {
                 a.claimed = true;
                 a.claimed_at = getTime();
-                a.failures = 0;
+                if (NeighborLink* l = attempt_link(kvp.key, a))
+                {
+                    l.failures = 0;
+                    l.retry_at = MonoTime();
+                }
                 log.info("claimed node ", hex_id(kvp.key)[], " ('", from.name[], "')");
 
                 // build the fleet surface: the member's whole device tree, armed live.
@@ -368,7 +373,7 @@ nothrow @nogc:
             else
             {
                 log.warning("claim of node ", hex_id(kvp.key)[], " refused: ", code, " (", text, ")");
-                fail_attempt(a);
+                fail_attempt(kvp.key, a);
             }
             return true;
         }
@@ -404,14 +409,17 @@ private:
     {
         SyncPeer peer;
         UDPInterface iface;
+        ObjectRef!EthernetStation link_station;  // the link this attempt went through; demoted on failure
+        MACAddress link_mac;
         uint seq;
         bool sent;
         bool claimed;
         bool handover;   // target beacons un-adopted: the claim carries the fleet key
-        ubyte failures;
         MonoTime deadline;
-        MonoTime retry_at;
         MonoTime claimed_at;
+
+        bool expired(MonoTime now) const pure nothrow @nogc
+            => peer !is null && !claimed && now >= deadline;
     }
     Map!(ulong, ClaimAttempt) _attempts;
     UDPSyncServer _listener;
@@ -557,7 +565,7 @@ private:
         disco.local_sync_port = (_enabled && _role == PeerRole.member) ? _port : 0;
     }
 
-    void start_claim(ulong node_id, ref const Neighbor n)
+    void start_claim(ulong node_id, ref const Neighbor n, ref NeighborLink link)
     {
         char[16] id = hex_id(node_id);
 
@@ -567,8 +575,9 @@ private:
             log.warning("failed to create claim transport for node ", id[]);
             return;
         }
-        iface.remote_host(tconcat(n.mac).makeString(defaultAllocator()));
-        iface.remote_port(n.sync_port);
+        iface.iface(link.station.get);
+        iface.remote_host(tconcat(link.mac).makeString(defaultAllocator()));
+        iface.remote_port(link.sync_port);
 
         // adopting a factory node hands the fleet key over inside the claim; mint one
         // the first time this fleet adopts anything
@@ -596,11 +605,15 @@ private:
             a = _attempts.insert(node_id, ClaimAttempt());
         a.peer = peer;
         a.iface = iface;
+        a.link_station = link.station;
+        a.link_mac = link.mac;
         a.sent = false;
         a.claimed = false;
         a.handover = handover;
+        // the setup window: transport up, hellos exchanged, claim away; expiry fails the link
+        a.deadline = getTime() + claim_timeout;
 
-        log.info("claiming node ", id[], " ('", n.name, "') at ", n.mac, ":", n.sync_port, handover ? " (adoption)" : "");
+        log.info("claiming node ", id[], " ('", n.name, "') at ", link.mac, ":", link.sync_port, " via ", link.station.name[], handover ? " (adoption)" : "");
     }
 
     // claim once the session is up; hello (with our identity) precedes it on the wire.
@@ -632,7 +645,7 @@ private:
             if (a.peer is obj && a.claimed)
             {
                 log.info("session to node ", hex_id(kvp.key)[], " died");
-                fail_attempt(a);
+                fail_attempt(kvp.key, a);
                 return;
             }
         }
@@ -658,13 +671,53 @@ private:
         a.claimed = false;
     }
 
-    void fail_attempt(ref ClaimAttempt a)
+    // the link the attempt went through, if the neighbour still lists it
+    NeighborLink* attempt_link(ulong node_id, ref const ClaimAttempt a)
+    {
+        Neighbor* n = node_id in get_module!SyncDiscoveryModule.neighbors;
+        if (!n)
+            return null;
+        foreach (ref l; n.links[])
+        {
+            if (l.is_link(a.link_station, a.link_mac))
+                return &l;
+        }
+        return null;
+    }
+
+    void fail_attempt(ulong node_id, ref ClaimAttempt a)
     {
         import urt.util : min;
 
         teardown_attempt(a);
-        if (a.failures < 8)
-            ++a.failures;
-        a.retry_at = getTime() + seconds(min(30 << (a.failures - 1), 600));
+        if (NeighborLink* l = attempt_link(node_id, a))
+        {
+            if (l.failures < 8)
+                ++l.failures;
+            l.retry_at = getTime() + seconds(min(30 << (l.failures - 1), 600));
+        }
     }
+}
+
+
+unittest
+{
+    import urt.mem.allocator : defaultAllocator;
+
+    // the setup deadline expires attempts that never sent, not just unanswered claims
+    SyncPeeringModule.ClaimAttempt a;
+    MonoTime t0 = MonoTime() + 100.seconds;
+    a.deadline = t0 + 10.seconds;
+    assert(!a.expired(t0 + 11.seconds));    // no peer: nothing to expire
+
+    a.peer = defaultAllocator().allocT!SyncPeer(CID(1));
+    scope(exit) defaultAllocator().freeT(a.peer);
+    assert(!a.expired(t0));
+    assert(a.expired(t0 + 11.seconds));     // unsent and stale: a dead link during setup fails over
+
+    a.sent = true;
+    assert(a.expired(t0 + 11.seconds));     // sent and unanswered: same path
+
+    a.claimed = true;
+    assert(!a.expired(t0 + 11.seconds));    // a live claim never expires here
 }

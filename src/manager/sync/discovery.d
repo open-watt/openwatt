@@ -144,24 +144,100 @@ bool decode_announce(scope return const(ubyte)[] tlv, out NodeAnnounce a)
 }
 
 
+enum neighbor_max_age = 600.seconds;
+
+// one way to reach a neighbour: the (station, address) pair a beacon arrived through
+struct NeighborLink
+{
+nothrow @nogc:
+    ObjectRef!EthernetStation station;
+    MACAddress mac;
+    ushort sync_port;   // sync reach via this medium; 0 = not listening here
+    ubyte failures;     // claim failures through this link; drives retry_at
+    MonoTime retry_at;
+    MonoTime last_seen;
+
+    // identity by stable ref: detached refs must not collapse, and parent/vlan stations share a mac
+    bool is_link(ref const ObjectRef!EthernetStation station, MACAddress mac) const pure
+        => this.station == station && this.mac == mac;
+}
+
 struct Neighbor
 {
+    this(this) @disable;
 nothrow @nogc:
     ulong node_id;
     String name;
     String cluster;
     PeerRole role;
     ubyte flags;
-    ushort sync_port;
-    MACAddress mac;
-    String via;         // station the last announce arrived on
     MonoTime last_seen;
+    Array!NeighborLink links;
 
     bool claimed() const pure
         => (flags & AnnounceFlags.claimed) != 0;
 
     bool adopted() const pure
         => (flags & AnnounceFlags.adopted) != 0;
+
+    NeighborLink* touch_link(EthernetStation station, MACAddress mac, ushort sync_port, MonoTime now)
+    {
+        foreach (ref l; links[])
+        {
+            if (l.station.get is station && l.mac == mac)
+            {
+                l.sync_port = sync_port;
+                l.last_seen = now;
+                return &l;
+            }
+        }
+        links ~= NeighborLink(ObjectRef!EthernetStation(station), mac, sync_port);
+        links[links.length - 1].last_seen = now;
+        return &links[links.length - 1];
+    }
+
+    // not pruned on station death: the ref self-heals if the name returns, and without beacons it ages out anyway
+    void prune_links(MonoTime now)
+    {
+        for (size_t i = links.length; i-- > 0; )
+        {
+            if (now - links[i].last_seen >= neighbor_max_age)
+                links.removeSwapLast(i);
+        }
+    }
+
+    void clear_link_demotion()
+    {
+        foreach (ref l; links[])
+        {
+            l.failures = 0;
+            l.retry_at = MonoTime();
+        }
+    }
+
+    NeighborLink* best_link(MonoTime now)
+    {
+        NeighborLink* best = null;
+        ulong best_speed = 0;
+        foreach (ref l; links[])
+        {
+            EthernetStation s = l.station.get;
+            if (!s || !s.running || !l.sync_port)
+                continue;
+            if (now - l.last_seen >= neighbor_max_age || now < l.retry_at)
+                continue;
+            if (!best || link_prefers(s.tx_link_speed, l.last_seen, best_speed, best.last_seen))
+            {
+                best = &l;
+                best_speed = s.tx_link_speed;
+            }
+        }
+        return best;
+    }
+
+    // TODO: operator cost override and link-class rank ahead of speed (see PEERING.draft.md)
+    static bool link_prefers(ulong speed_a, MonoTime seen_a, ulong speed_b, MonoTime seen_b) pure
+        => speed_a > speed_b || (speed_a == speed_b && seen_a > seen_b);
 }
 
 
@@ -297,7 +373,9 @@ nothrow @nogc:
         size_t num_expired = 0;
         foreach (kvp; neighbors[])
         {
-            if (now - kvp.value.last_seen >= neighbor_max_age && num_expired < expired.length)
+            ref n = kvp.value;
+            n.prune_links(now);
+            if (now - n.last_seen >= neighbor_max_age && num_expired < expired.length)
                 expired[num_expired++] = kvp.key;
         }
         foreach (k; expired[0 .. num_expired])
@@ -329,13 +407,16 @@ nothrow @nogc:
             session.write_line(id[], "  ", n.name[], "  role=", role_name(n.role),
                                n.cluster.length ? " cluster=" : "", n.cluster[],
                                " state=", n.claimed ? "claimed" : "unbound",
-                               " via=", n.via[], " mac=", n.mac,
                                " age=", now - n.last_seen);
+            foreach (ref l; n.links[])
+            {
+                EthernetStation s = l.station.get;
+                session.write_line("    via=", s ? s.name[] : "(gone)", " mac=", l.mac, " port=", l.sync_port, " age=", now - l.last_seen);
+            }
         }
     }
 
 private:
-    enum neighbor_max_age = 600.seconds;
 
     void on_announce(EthernetStation station, MACAddress src, scope const(ubyte)[] tlv)
     {
@@ -359,11 +440,12 @@ private:
             n.cluster = a.cluster.makeString(defaultAllocator());
         n.role = a.role;
         n.flags = a.flags;
-        n.sync_port = a.sync_port;
-        n.mac = src;
-        if (n.via[] != station.name[])
-            n.via = station.name[].makeString(defaultAllocator());
         n.last_seen = getTime();
+
+        size_t known = n.links.length;
+        n.touch_link(station, src, a.sync_port, n.last_seen);
+        if (known && n.links.length > known)
+            log.debug_("node '", a.name, "' also reachable via ", station.name[], " (", src, ")");
     }
 }
 
@@ -389,4 +471,66 @@ bool role_from_name(const(char)[] s, out PeerRole role)
         }
     }
     return false;
+}
+
+
+unittest
+{
+    MonoTime t0 = MonoTime() + 1000.seconds;
+    MACAddress mac_a = MACAddress(0x02, 0, 0, 0, 0, 1);
+    MACAddress mac_b = MACAddress(0x02, 0, 0, 0, 0, 2);
+
+    Neighbor n;
+    n.touch_link(null, mac_a, 7000, t0);
+    assert(n.links.length == 1);
+
+    // a repeat beacon refreshes the link rather than duplicating it
+    n.touch_link(null, mac_a, 7001, t0 + 10.seconds);
+    assert(n.links.length == 1);
+    assert(n.links[0].sync_port == 7001 && n.links[0].last_seen == t0 + 10.seconds);
+
+    // a different source address is an independent link
+    n.touch_link(null, mac_b, 7000, t0 + 100.seconds);
+    assert(n.links.length == 2);
+
+    // demotion clears wholesale on a factory-fresh beacon
+    n.links[0].failures = 3;
+    n.links[0].retry_at = t0 + 500.seconds;
+    n.clear_link_demotion();
+    assert(n.links[0].failures == 0 && n.links[0].retry_at == MonoTime());
+
+    // links expire independently
+    n.prune_links(t0 + 10.seconds + neighbor_max_age);
+    assert(n.links.length == 1 && n.links[0].mac == mac_b);
+
+    // no live station behind a link, no candidate
+    assert(n.best_link(t0 + 200.seconds) is null);
+
+    // link identity survives detach: same mac through two stations must not collapse
+    {
+        import urt.mem.allocator : defaultAllocator;
+        import router.iface.bridge : BridgeInterface;
+
+        BridgeInterface s1 = defaultAllocator().allocT!BridgeInterface(CID(1));
+        BridgeInterface s2 = defaultAllocator().allocT!BridgeInterface(CID(2));
+        scope(exit) { defaultAllocator().freeT(s2); defaultAllocator().freeT(s1); }
+
+        NeighborLink l;
+        l.station = s1;
+        l.mac = mac_a;
+        ObjectRef!EthernetStation r1 = s1;
+        ObjectRef!EthernetStation r2 = s2;
+        ObjectRef!EthernetStation r_none;
+        assert(r1.get is null && r2.get is null);   // neither is in the collection table
+        assert( l.is_link(r1, mac_a));
+        assert(!l.is_link(r2, mac_a));
+        assert(!l.is_link(r1, mac_b));
+        assert(!l.is_link(r_none, mac_a));
+    }
+
+    // preference: speed first, freshness breaks ties
+    assert( Neighbor.link_prefers(1000, t0, 100, t0 + 50.seconds));
+    assert(!Neighbor.link_prefers(100, t0 + 50.seconds, 1000, t0));
+    assert( Neighbor.link_prefers(100, t0 + 50.seconds, 100, t0));
+    assert(!Neighbor.link_prefers(100, t0, 100, t0 + 50.seconds));
 }

@@ -98,6 +98,44 @@ ether backend targeting the neighbour's MAC and the well-known sync port; an RS4
 yield the RTU-envelope adapter. The peering agent stays transport-blind, same seam as
 `SyncPeer.transport`.
 
+## Links and reachability
+
+The neighbour table is the fabric's L3 table: node-id is the address, beacons are the adjacency
+protocol, and each node keeps its own view of who it heard and how. A beacon is link-local (never
+forwarded), so an entry means "I personally heard you"; reachability *through* the fabric is a
+future propagation mechanism, not a beacon concern.
+
+A neighbour holds identity once (node-id, name, cluster, role, claim state) and a set of
+**links**, one per `(interface, address)` pair a beacon arrived through. The pair is indivisible:
+an address alone does not identify a path (a modbus address is meaningless without its bus, a MAC
+is ambiguous across segments -- and since stations adopt their driver's address, a VLAN leg shares
+its parent's MAC). The sync port rides per link, since it is announced per medium. A multi-homed
+node (say, an ethernet leg and a wifi leg, plus an RS485 drop later) contributes one link each;
+every fabric member populates the table symmetrically, so member-initiated traffic picks paths by
+the same rules.
+
+Link **eligibility** is freshness only: a link that stops beaconing is dead after the table's
+max-age, individually, while its siblings live on. **Preference** among live links is currently
+fastest-link-speed with recency as tie-break; the full order is intended to be: operator cost
+override, then link class (ethernet > wifi > 15.4 > RS485), then link speed, then recency. A
+working session is sticky: re-ranking never moves it. Failure (the session dying, a claim
+refused or unanswered) demotes the link the attempt went through with doubling backoff, and the
+next sweep rebuilds through the next preferable live link; success clears the demotion. There is
+no proactive move off a live session.
+
+Transports are built from both halves of the chosen link (`interface=` + address), so the send
+path never consults the L2 fdb and never floods. Failover today means rebuilding the transport
+from the next link -- the reliability sublayer sees a new session and rebuilds, which it already
+tolerates. Seamless failover (a session that addresses the node-id and late-binds its path per
+send) is the full L3 move, deferred alongside election.
+
+RTT can be collected from any sync exchange that expects a response (control acks, the time-sync
+pull), per link, Karn-filtered and smoothed. Its primary uses are the retransmit clock (a flat
+250ms schedule is wrong for both a LAN and a 9600-baud drop) and demotion of a degrading active
+link against its own baseline; cross-class preference stays with the static order. Standby links
+have no traffic, hence no RTT: class + freshness is their prior until a solicited probe (the CFM
+mac-ping already exists for ether) proves worth adding.
+
 ## Claim lifecycle
 
 Discovery is unauthenticated and lossy; the claim rides the sync channel:
