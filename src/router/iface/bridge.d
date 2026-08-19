@@ -62,6 +62,7 @@ nothrow @nogc:
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!BridgeInterface, id, flags);
+        adopt_generated_mac();
         _address_table = AddressTable(32);
         _address_table.insert(mac.ul | (ulong(PacketType.ethernet) << 60), _local_port);
     }
@@ -439,6 +440,14 @@ protected:
             recycle_tracking(entry);
         }
         return super.shutdown();
+    }
+
+    override const(char)[] apply_mac(ref MACAddress value)
+    {
+        ulong type = ulong(PacketType.ethernet) << 60;
+        _address_table.remove(mac.ul | type);
+        _address_table.insert(value.ul | type, _local_port);
+        return null;
     }
 
     override void update()

@@ -333,13 +333,6 @@ AdapterChange apply_os_adapter_info(BaseInterface iface, ref ushort l2mtu, ref u
 {
     AdapterChange changed;
 
-//    if (info.mac != iface.mac)
-//    {
-//        iface.remove_address(iface.mac);
-//        iface.mac = info.mac;
-//        iface.add_address(iface.mac, iface);
-//    }
-
     if (info.mtu != 0 && info.mtu != l2mtu)
     {
         l2mtu = cast(ushort)info.mtu;
