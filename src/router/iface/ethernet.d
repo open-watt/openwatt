@@ -14,6 +14,7 @@ import manager.console;
 import manager.plugin;
 
 import router.iface;
+import router.iface.endpoint : ether_neighbour_learn;
 
 //version = DebugEthernetFlow;
 
@@ -250,6 +251,9 @@ protected:
         const(ubyte)[] content = cast(const(ubyte)[])packet.data;
         if (content.length < 5)
             return false;
+
+        // any ow frame proves its sender is reachable via this station
+        ether_neighbour_learn(packet.eth.src, this);
         ushort wire_type = loadBigEndian(cast(const(ushort)*)content.ptr);
         ushort data_len = loadBigEndian(cast(const(ushort)*)(content.ptr + 2));
         ubyte hdr_len = content[4];

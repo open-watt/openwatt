@@ -100,7 +100,7 @@ void foreach_ether_station(scope void delegate(EthernetStation) nothrow @nogc si
     }
 }
 
-// the arp-cache analogue; a miss means the caller floods, and the reply populates the entry
+// fdb for ow speakers: mac -> station that heard it; a miss means the caller floods
 EthernetStation ether_neighbour_lookup(MACAddress mac)
 {
     if (EtherNeighbour* e = mac.ul in _neighbours)
@@ -112,6 +112,19 @@ EthernetStation ether_neighbour_lookup(MACAddress mac)
         }
     }
     return null;
+}
+
+void ether_neighbour_learn(MACAddress mac, EthernetStation station)
+{
+    if (mac.is_multicast)
+        return;
+    if (EtherNeighbour* e = mac.ul in _neighbours)
+    {
+        e.station = station;
+        e.seen = getTime();
+    }
+    else
+        _neighbours[mac.ul] = EtherNeighbour(ObjectRef!EthernetStation(station), getTime());
 }
 
 void ether_request_tap_all()
@@ -313,6 +326,20 @@ void update_ether_endpoints()
         if (!tap._subscribed)
             tap.try_subscribe();
     }
+
+    MonoTime now = getTime();
+    if (now - _last_neighbour_sweep >= ether_neighbour_ttl)
+    {
+        _last_neighbour_sweep = now;
+        Array!ulong expired;
+        foreach (ref kvp; _neighbours)
+        {
+            if (!kvp.value.station.get || now - kvp.value.seen >= ether_neighbour_ttl)
+                expired ~= kvp.key;
+        }
+        foreach (k; expired[])
+            _neighbours.remove(k);
+    }
 }
 
 
@@ -393,22 +420,10 @@ struct EtherNeighbour
     MonoTime seen;
 }
 
-void ether_neighbour_learn(MACAddress mac, EthernetStation station)
-{
-    if (mac.is_multicast)
-        return;
-    if (EtherNeighbour* e = mac.ul in _neighbours)
-    {
-        e.station = station;
-        e.seen = getTime();
-    }
-    else
-        _neighbours[mac.ul] = EtherNeighbour(ObjectRef!EthernetStation(station), getTime());
-}
-
 __gshared Array!(EtherEndpoint*) _ether_eps;
 __gshared Array!(EtherTap*) _taps;
 __gshared Map!(ulong, EtherNeighbour) _neighbours;
+__gshared MonoTime _last_neighbour_sweep;
 __gshared EtherTcpInput g_ether_tcp_input;
 __gshared bool _tap_all;
 __gshared ushort _next_ephemeral = 49_152;
