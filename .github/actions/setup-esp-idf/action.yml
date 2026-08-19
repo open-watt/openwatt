@@ -1,0 +1,66 @@
+name: Setup ESP-IDF
+description: ESP-IDF build environment (tree, python env, toolchains) under ~/.espressif, installed by IDF's own installer and cached whole.
+
+inputs:
+  ref:
+    description: esp-idf git tag or branch.
+    required: true
+  targets:
+    description: Comma-separated IDF targets to install toolchains for (install.sh argument).
+    required: true
+  clang:
+    description: Also install esp-clang; Xtensa two-stage codegen runs its llc.
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - name: Prepare
+      id: prep
+      shell: bash
+      env:
+        REF: ${{ inputs.ref }}
+        TARGETS: ${{ inputs.targets }}
+        CLANG: ${{ inputs.clang }}
+      run: |
+        image="${ImageOS:-$( . /etc/os-release && echo "$ID$VERSION_ID" )}"
+        # The python env bakes absolute interpreter paths, so a runner python bump invalidates it.
+        hash=$(printf '%s|%s|%s' "$TARGETS" "$CLANG" "$(python3 -V)" | sha256sum | cut -c1-12)
+        echo "idf=$HOME/.espressif/$REF/esp-idf" >> "$GITHUB_OUTPUT"
+        echo "key=esp-idf-$REF-$image-$hash" >> "$GITHUB_OUTPUT"
+
+    - name: Restore ESP-IDF cache
+      id: cache
+      uses: actions/cache@v5
+      with:
+        path: ~/.espressif
+        key: ${{ steps.prep.outputs.key }}
+
+    - name: Install ESP-IDF
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        REF: ${{ inputs.ref }}
+        TARGETS: ${{ inputs.targets }}
+        CLANG: ${{ inputs.clang }}
+        IDF: ${{ steps.prep.outputs.idf }}
+      run: |
+        git clone --depth 1 --branch "$REF" --recurse-submodules --shallow-submodules \
+            https://github.com/espressif/esp-idf.git "$IDF"
+        "$IDF/install.sh" "$TARGETS"
+        if [ "$CLANG" = 'true' ]; then
+            "$IDF/tools/idf_tools.py" install esp-clang
+        fi
+        rm -rf "$HOME/.espressif/dist"
+        du -sh "$HOME/.espressif"
+
+    - name: Report environment
+      shell: bash
+      env:
+        IDF: ${{ steps.prep.outputs.idf }}
+      run: |
+        . "$IDF/export.sh" > /dev/null 2>&1
+        echo "IDF_PATH=$IDF_PATH"
+        idf.py --version
+        ls -d "$HOME"/.espressif/tools/*/ | sed 's|.*/tools/|  tool: |'

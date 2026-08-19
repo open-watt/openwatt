@@ -1,0 +1,71 @@
+name: Cached apt install
+description: Install apt packages from a cached .deb set; the Ubuntu archive is only touched on a cache miss.
+
+inputs:
+  packages:
+    description: Space-separated package list.
+    required: true
+  key:
+    description: Cache discriminator; jobs sharing a package set should share a key.
+    required: true
+  foreign-arch:
+    description: dpkg architecture to enable first (e.g. i386, armhf).
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Prepare
+      id: prep
+      shell: bash
+      env:
+        PACKAGES: ${{ inputs.packages }}
+        SET: ${{ inputs.key }}
+        FOREIGN_ARCH: ${{ inputs.foreign-arch }}
+      run: |
+        image="${ImageOS:-$( . /etc/os-release && echo "$ID$VERSION_ID" )}"
+        hash=$(printf '%s|%s' "$PACKAGES" "$FOREIGN_ARCH" | sha256sum | cut -c1-12)
+        echo "dir=$HOME/.apt-debs/$SET" >> "$GITHUB_OUTPUT"
+        echo "key=apt-v1-$image-$(uname -m)-$SET-$hash" >> "$GITHUB_OUTPUT"
+        if [ -n "$FOREIGN_ARCH" ]; then
+            sudo dpkg --add-architecture "$FOREIGN_ARCH"
+        fi
+
+    - name: Restore .deb cache
+      id: cache
+      uses: actions/cache@v5
+      with:
+        path: ${{ steps.prep.outputs.dir }}
+        key: ${{ steps.prep.outputs.key }}
+
+    - name: Fetch packages
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        PACKAGES: ${{ inputs.packages }}
+        DIR: ${{ steps.prep.outputs.dir }}
+      run: |
+        sudo rm -rf "$DIR"
+        sudo mkdir -p "$DIR/partial"
+        sudo chown -R _apt:root "$DIR"
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends --download-only \
+            -o Dir::Cache::archives="$DIR" -o Acquire::Retries=5 $PACKAGES
+        sudo chown -R "$(id -u):$(id -g)" "$DIR"
+        rm -rf "$DIR/partial" "$DIR/lock"
+        du -sh "$DIR"
+
+    - name: Install packages
+      shell: bash
+      env:
+        DIR: ${{ steps.prep.outputs.dir }}
+      run: |
+        shopt -s nullglob
+        debs=("$DIR"/*.deb)
+        [ ${#debs[@]} -gt 0 ] || exit 0
+        # A stale cache can miss a dep the current image no longer preinstalls; fall back to the archive.
+        sudo dpkg -i "${debs[@]}" || {
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends -f
+        }

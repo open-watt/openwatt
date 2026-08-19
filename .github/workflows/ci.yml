@@ -5,6 +5,7 @@ on:
     branches: [ "master", "release" ]
   pull_request:
     branches: [ "master", "release" ]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -47,14 +48,25 @@ jobs:
       # Linux needs mbedtls for TLS/crypto support
       - name: Install mbedtls (Linux)
         if: ${{ matrix.os == 'linux' }}
-        run: sudo apt-get update && sudo apt-get install -y libmbedtls-dev
+        uses: ./.github/actions/apt-install
+        with:
+          key: mbedtls
+          packages: libmbedtls-dev
       # 32-bit linux needs libs to link and run tests...
       - name: Install 32-bit Toolchains (Linux)
         if: ${{ matrix.os == 'linux' && matrix.arch == 'x86' }}
-        run: sudo dpkg --add-architecture i386 && sudo apt-get update && sudo apt-get install -y gcc-multilib libmbedtls-dev:i386
+        uses: ./.github/actions/apt-install
+        with:
+          key: multilib-i386
+          foreign-arch: i386
+          packages: gcc-multilib libmbedtls-dev:i386
       - name: Install 32-bit ARM Toolchains (Linux)
         if: ${{ matrix.os == 'linux' && matrix.arch == 'arm' }}
-        run: sudo dpkg --add-architecture armhf && sudo apt-get update && sudo apt-get install -y libstdc++6:armhf
+        uses: ./.github/actions/apt-install
+        with:
+          key: libstdcxx-armhf
+          foreign-arch: armhf
+          packages: libstdc++6:armhf
 
       - name: Build release
         if: ${{ github.ref == 'refs/heads/release' }}
@@ -104,21 +116,34 @@ jobs:
         with:
           compiler: ldc
 
+      # arm links newlib's libc.a through the gcc-arm-none-eabi-lib alternative, so newlib
+      # is explicit here; its libstdc++-arm-none-eabi-newlib recommend (463MB) is not linked.
       - name: Install cross toolchain
-        run: sudo apt-get update && sudo apt-get install -y gcc-${{ matrix.toolchain }} picolibc-${{ matrix.toolchain }}
+        uses: ./.github/actions/apt-install
+        with:
+          key: ${{ matrix.toolchain }}
+          packages: gcc-${{ matrix.toolchain }} picolibc-${{ matrix.toolchain }}${{ matrix.toolchain == 'arm-none-eabi' && ' libnewlib-arm-none-eabi' || '' }}
 
       - name: Build
         run: timeout 180 make PLATFORM=${{ matrix.platform }} CONFIG=release ${{ matrix.make_args || '' }}
 
   cross-esp:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     strategy:
       matrix:
         target:
           - { name: esp32,    arch: xtensa }  # LX6
           - { name: esp32-s3, arch: xtensa }  # LX7
+          - { name: esp32-c5, arch: riscv  }
+          - { name: esp32-c6, arch: riscv  }
           - { name: esp32-p4, arch: riscv  }  # RV32IMAFDCV
       fail-fast: false
+    env:
+      # The IDF link is minutes per target, so only builds that ship binaries pay for it.
+      BUILD_FIRMWARE: ${{ github.ref == 'refs/heads/release' || github.event_name == 'workflow_dispatch' }}
+      IDF_REF: v6.0
+      IDF_TARGETS: esp32,esp32s3,esp32c5,esp32c6,esp32p4
     steps:
       - uses: actions/checkout@v5
         with:
@@ -131,14 +156,37 @@ jobs:
           compiler: ldc
 
       - name: Install RISC-V toolchain
-        if: matrix.target.arch == 'riscv'
-        run: sudo apt-get update && sudo apt-get install -y gcc-riscv64-unknown-elf picolibc-riscv64-unknown-elf
+        if: ${{ matrix.target.arch == 'riscv' }}
+        uses: ./.github/actions/apt-install
+        with:
+          key: riscv64-unknown-elf
+          packages: gcc-riscv64-unknown-elf picolibc-riscv64-unknown-elf
 
       - name: Build
         run: make PLATFORM=${{ matrix.target.name }} CONFIG=unittest
 
-      - name: Upload artifact
+      # One IDF install serves every target here, so all these jobs share a cache entry.
+      - name: Setup ESP-IDF
+        if: ${{ env.BUILD_FIRMWARE == 'true' }}
+        uses: ./.github/actions/setup-esp-idf
+        with:
+          ref: ${{ env.IDF_REF }}
+          targets: ${{ env.IDF_TARGETS }}
+          clang: true
+
+      # Embedded is release-only; a unittest image overflows flash.
+      - name: Build firmware
+        if: ${{ env.BUILD_FIRMWARE == 'true' }}
+        run: make esp-idf-build PLATFORM=${{ matrix.target.name }} CONFIG=release
+
+      # Devkit config, not a board build: flashing this to a deployed unit strands it.
+      - name: Upload firmware
+        if: ${{ env.BUILD_FIRMWARE == 'true' }}
         uses: actions/upload-artifact@v4
         with:
-          name: openwatt_test_${{ matrix.target.name }}
-          path: bin/*/openwatt_test
+          name: firmware_${{ matrix.target.name }}_devkit
+          path: |
+            bin/${{ matrix.target.name }}_release/openwatt.bin
+            bin/${{ matrix.target.name }}_release/bootloader.bin
+            bin/${{ matrix.target.name }}_release/partition-table.bin
+            bin/${{ matrix.target.name }}_release/ota_data_initial.bin
