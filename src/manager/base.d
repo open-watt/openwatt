@@ -130,7 +130,7 @@ struct Property
     alias SuggestFun = Array!String function(const(char)[] arg) nothrow @nogc;
     alias FormatFun = FormatId function() nothrow @nogc;
     alias ChangeFun = void function(BaseObject i, ref const SampleUpdate u) nothrow @nogc;
-    alias CheckFun = const(char)[] function(void* value) nothrow @nogc; // value is a `ref T` of the declared type
+    alias CheckFun = const(char)[] function(BaseObject item, void* value) nothrow @nogc; // value is a `ref T` of the declared type
 
     String name;
     String[2] type; // up to 2 types (sometimes like enum + string, or enum + int)
@@ -1467,7 +1467,7 @@ StringResult elem_apply(T)(BaseObject item, ref const Property p, auto ref T val
 {
     if (p.check)
     {
-        if (const(char)[] error = p.check(&value))
+        if (const(char)[] error = p.check(item, &value))
             return StringResult(error);
     }
     return StringResult(item._prop_elements[p.index].try_write(value));
@@ -1484,8 +1484,17 @@ StringResult elem_set(T)(ref const Variant value, BaseObject item, ref const Pro
 StringResult elem_ref_set(ref const Variant value, BaseObject item, ref const Property p) nothrow @nogc
     => StringResult(item._prop_elements[p.index].try_set(value));
 
-const(char)[] CheckShim(alias fn, T)(void* value) nothrow @nogc
-    => fn(*cast(T*)value);
+const(char)[] CheckShim(alias fn, T)(BaseObject item, void* value) nothrow @nogc
+{
+    static if (__traits(isStaticFunction, fn))
+        return fn(*cast(T*)value);
+    else
+    {
+        alias Type = __traits(parent, fn);
+        Type instance = cast(Type)cast(void*)item;
+        return __traits(child, instance, fn)(*cast(T*)value);
+    }
+}
 
 Variant ElemDefault(alias Decl)() nothrow @nogc
 {
@@ -1600,6 +1609,7 @@ version (unittest)
         enum collection_id = cast(CollectionType)0;
 
         alias Properties = AliasSeq!(Elem!("gain", uint, Default!7, Min!1, Max!10, OnChange!bump),
+                                     Elem!("checked", uint, Check!checked_check),
                                      Elem!("mode", TestMode, Default!(TestMode.idle), OnChange!mode_changed),
                                      Elem!("label", String),
                                      Elem!("link", bool, ReadOnly),
@@ -1611,6 +1621,7 @@ version (unittest)
     nothrow @nogc:
 
         uint changes;
+        uint checks;
         String last_previous;
 
         this(CID id, ObjectFlags flags = ObjectFlags.none)
@@ -1621,6 +1632,12 @@ version (unittest)
         void bump()
         {
             ++changes;
+        }
+
+        const(char)[] checked_check(ref uint value)
+        {
+            ++checks;
+            return value > 10 ? "check refused" : null;
         }
 
         void mode_changed(ref const SampleUpdate update)
@@ -1657,6 +1674,15 @@ unittest
     // held dedup: an equal write is not a change
     assert(o.set("gain", v));
     assert(o.changes == 1);
+
+    Variant checked = Variant(6);
+    assert(o.set("checked", checked));
+    assert(o.prop_read!(ElemTestObject, "checked") == 6);
+    Variant refused = Variant(11);
+    StringResult check_result = o.set("checked", refused);
+    assert(check_result.failed && check_result.message == "check refused");
+    assert(o.prop_read!(ElemTestObject, "checked") == 6);
+    assert(o.checks == 2);
 
     // constraints refuse with their own message; nothing stores, nothing notifies
     Variant big = Variant(20);
