@@ -541,7 +541,13 @@ per-frame (falling back to the configured remote).
 
 A peer may be a MAC address (`02:13:37:AA:BB:64`), in which case datagrams ride raw
 ethernet over the OpenWatt ethertype and no IP configuration is required; builds
-without the IP stack carry these peers only.
+without the IP stack carry these peers only. An ether peer may additionally be
+bound to a station with `interface=`: datagrams then egress that station only,
+where an unbound endpoint selects egress by learned neighbour (flooding on a
+miss). A station name binds unambiguously where a MAC cannot: a VLAN
+sub-interface shares its parent's address. A bound station is a dependency: the
+interface waits for it to come up, restarts when it goes offline, and holds
+rather than falling back to a wildcard endpoint if it disappears.
 
 The interface self-configures its L2MTU from the peer's datagram payload MTU
 (assuming a 1500-byte link MTU: 1472 for IPv4, 1452 for IPv6, 1474 for ether);
@@ -549,6 +555,7 @@ The interface self-configures its L2MTU from the peer's datagram payload MTU
 
 | Property | Values | Default | Description |
 | --- | --- | --- | --- |
+| `interface` | ethernet station name | none | Egress binding for an ether peer; datagrams ride this station only. |
 | `local-host` | host or address | wildcard | Local address to bind. |
 | `local-port` | `0` to `65535` | `0` | Local port; zero requests an ephemeral port. |
 | `remote-host` | host, address or MAC | none | Default datagram destination. |

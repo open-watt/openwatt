@@ -482,10 +482,10 @@ TCPListener* tcp_listen(ushort port, TCPAcceptHandler on_accept)
 
 // `local` binds a receive address/port (null binds any:ephemeral);
 // when `remote` is set, send() targets it and the endpoint only delivers datagrams from that peer
-UDPEndpoint* udp_open(const(InetAddress)* local, const(InetAddress)* remote, UDPRecvHandler on_recv)
+UDPEndpoint* udp_open(const(InetAddress)* local, const(InetAddress)* remote, UDPRecvHandler on_recv, EthernetStation ether_station = null)
 {
     if ((local && local.family == AddressFamily.ether) || (remote && remote.family == AddressFamily.ether))
-        return udp_open_ether(local, remote, on_recv);
+        return udp_open_ether(local, remote, on_recv, ether_station);
 
     version (UseInternalIPStack)
     {
@@ -606,17 +606,17 @@ UDPEndpoint* udp_open(const(InetAddress)* local, const(InetAddress)* remote, UDP
     }
 }
 
-// a null local or the zero mac is a wildcard bind: every segment, egress by learned neighbour
-private UDPEndpoint* udp_open_ether(const(InetAddress)* local, const(InetAddress)* remote, UDPRecvHandler on_recv)
+// a null local or the zero mac is a wildcard bind: every segment, egress by learned neighbour;
+// an explicit station binds one segment (a mac cannot: a vlan shares its parent's address)
+private UDPEndpoint* udp_open_ether(const(InetAddress)* local, const(InetAddress)* remote, UDPRecvHandler on_recv, EthernetStation station)
 {
     if (local && local.family != AddressFamily.ether)
         return null;
     if (remote && remote.family != AddressFamily.ether)
         return null;
 
-    EthernetStation station;
     ushort local_port = local ? local.port : 0;
-    if (local && !local.addr_any)
+    if (!station && local && !local.addr_any)
     {
         station = find_ether_station(MACAddress(local._a.ether.addr));
         if (!station)

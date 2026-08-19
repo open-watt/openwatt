@@ -32,6 +32,7 @@ import urt.string.format;
 import urt.time;
 
 import manager;
+import manager.base;
 import manager.collection;
 import manager.features;
 import manager.plugin;
@@ -94,7 +95,8 @@ nothrow @nogc:
 
 class UDPInterface : BaseInterface
 {
-    alias Properties = AliasSeq!(Prop!("local-host", local_host),
+    alias Properties = AliasSeq!(Prop!("interface", iface),
+                                 Prop!("local-host", local_host),
                                  Prop!("local-port", local_port),
                                  Prop!("remote-host", remote_host),
                                  Prop!("remote-port", remote_port));
@@ -112,6 +114,24 @@ nothrow @nogc:
     }
 
     // Properties...
+
+    final inout(EthernetStation) iface() inout pure
+        => _iface.get;
+    final void iface(EthernetStation value)
+    {
+        if (_bound == (value !is null) && _iface.get is value)
+            return;
+        if (_subscribed)
+        {
+            if (EthernetStation s = _iface.get)
+                s.unsubscribe(&iface_state_change);
+            _subscribed = false;
+        }
+        _iface = value;
+        _bound = value !is null;
+        mark_set!(typeof(this), "interface")();
+        restart();
+    }
 
     final ref const(String) local_host() const pure
         => _local_host;
@@ -207,12 +227,26 @@ protected:
 
         AddressFamily family = have_remote ? _remote.family : local.family;
 
+        // a bound station is a dependency: wait for it, never degrade to a wildcard endpoint
+        EthernetStation bind_station;
+        if (_bound)
+        {
+            if (family != AddressFamily.ether)
+            {
+                log.error("interface= binds an ether-family peer; '", _remote_host, "' is not an ether address");
+                return CompletionStatus.error;
+            }
+            bind_station = _iface.get;
+            if (!bind_station || !bind_station.running)
+                return CompletionStatus.continue_;
+        }
+
         static if (has_ip)
         {
             // a unicast remote connects the endpoint (rx filtered to the peer); broadcast/multicast or no
             // remote leaves it unconnected so any peer can be heard - the multi-drop case
             const(InetAddress)* peer = have_remote && !multidrop ? &_remote : null;
-            _ep = udp_open(have_local ? &local : null, peer, &on_recv);
+            _ep = udp_open(have_local ? &local : null, peer, &on_recv, bind_station);
             if (!_ep)
             {
                 log.error("failed to open UDP endpoint");
@@ -227,8 +261,8 @@ protected:
                 log.error("this build carries ether peers only; '", _remote_host, "' needs the IP stack");
                 return CompletionStatus.error;
             }
-            EthernetStation station;
-            if (have_local && !local.addr_any)
+            EthernetStation station = bind_station;
+            if (!station && have_local && !local.addr_any)
             {
                 station = find_ether_station(MACAddress(local._a.ether.addr));
                 if (!station)
@@ -253,6 +287,11 @@ protected:
         else if (family == AddressFamily.ether && _l2mtu == default_payload_v4)
             l2mtu = default_payload_ether;
 
+        if (_bound)
+        {
+            bind_station.subscribe(&iface_state_change);
+            _subscribed = true;
+        }
         return CompletionStatus.complete;
     }
 
@@ -272,6 +311,12 @@ protected:
 
     override CompletionStatus shutdown()
     {
+        if (_subscribed)
+        {
+            if (EthernetStation s = _iface.get)
+                s.unsubscribe(&iface_state_change);
+            _subscribed = false;
+        }
         static if (has_ip)
         {
             if (_ep)
@@ -340,6 +385,9 @@ private:
     enum default_payload_v6 = 1500 - 48;
     enum default_payload_ether = 1500 - 26; // ow framing + ether-transport + UDP headers
 
+    ObjectRef!EthernetStation _iface;
+    bool _bound;        // iface was configured; a detached ref must wait for rebind, not go wildcard
+    bool _subscribed;
     String _local_host;
     String _remote_host;
     ushort _local_port;
@@ -349,6 +397,12 @@ private:
         UDPEndpoint* _ep;
     else
         EtherEndpoint* _ether;
+
+    void iface_state_change(ActiveObject, StateSignal signal)
+    {
+        if (signal == StateSignal.offline)
+            restart();
+    }
 
     static bool resolve(const(char)[] host, ushort port, out InetAddress addr)
     {
@@ -408,4 +462,19 @@ unittest
     f.address = em;
     assert(f.family == AddressFamily.ether && f.port == 7000);
     assert(f.address == em);
+
+    // a bound station that detaches holds the binding; only an explicit clear un-binds
+    {
+        import urt.mem.allocator : defaultAllocator;
+        import router.iface.bridge : BridgeInterface;
+
+        UDPInterface u = defaultAllocator().allocT!UDPInterface(CID(1));
+        BridgeInterface b = defaultAllocator().allocT!BridgeInterface(CID(2));
+        scope(exit) { defaultAllocator().freeT(b); defaultAllocator().freeT(u); }
+
+        u.iface(b);
+        assert(u._bound && u.iface is null);    // configured, but unresolvable: detached, not wildcard
+        u.iface(null);
+        assert(!u._bound);                      // the null-vs-detached ambiguity must not block the clear
+    }
 }
