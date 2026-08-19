@@ -513,13 +513,16 @@ private:
 
     void client_state_change(ActiveObject, StateSignal signal)
     {
-        if (signal == StateSignal.offline)
+        // only `destroyed` releases ownership; an offline client is still ours,
+        // so shutdown() is what tears it down
+        if (signal == StateSignal.destroyed)
         {
-            // Avoid re-entering client destruction from its state dispatch.
             _subscribed = false;
             _client = null;
-            restart();
         }
+        else if (signal != StateSignal.offline)
+            return;
+        restart();
     }
 
     // NFC authorises the unsigned AddKey request.
