@@ -23,10 +23,15 @@ nothrow @nogc:
 
 abstract class EthernetStation : BaseInterface
 {
-    alias Properties = AliasSeq!(Prop!("cfm-level", cfm_level));
+    alias Properties = AliasSeq!(Prop!("cfm-level", cfm_level),
+                                 Elem!("mac", MACAddress, Check!mac_check));
 nothrow @nogc:
 
-    MACAddress mac;
+    final MACAddress mac() const
+        => prop_read!(EthernetStation, "mac")();
+
+    final const(char)[] mac_check(ref MACAddress value)
+        => is_remote ? null : apply_mac(value);
 
     final int send(MACAddress dest, const(void)[] message, EtherType type, MessageCallback callback = null)
     {
@@ -90,7 +95,30 @@ protected:
         super(typeInfo, id, flags);
         _caps |= InterfaceCaps.ethernet;
         mark_set!(typeof(this), "caps")();
-        mac = generate_mac_address(name[]);
+    }
+
+    // A station wears its driver's address: adopt_mac is how a driver reports one,
+    // and a station with no hardware behind it synthesises one instead.
+    final void adopt_mac(MACAddress value)
+    {
+        if (mac == value)
+            return;
+        const(char)[] error = prop_element(prop_index!(EthernetStation, "mac")).try_write(value);
+        debug assert(error is null, error);
+        if (error is null)
+            mark_assigned!(EthernetStation, "mac")();
+    }
+
+    final void adopt_generated_mac()
+    {
+        adopt_mac(generate_mac_address(name[]));
+    }
+
+    // Push an operator-assigned address down to the driver; refusing it here
+    // would leave the station addressed differently to the medium.
+    const(char)[] apply_mac(ref MACAddress value)
+    {
+        return null;
     }
 
     // Egress seam toward the segment; takes a fully-formed ethernet packet.

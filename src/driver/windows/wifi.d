@@ -438,6 +438,8 @@ private:
         OSAdapterInfo info;
         if (!query_adapter(r.adapter, info))
             return;
+        if (info.mac != MACAddress())
+            adopt_mac(info.mac);
         // note the sysfs/iphlpapi path carries no link speed: iphlpapi's figure is fabricated for a
         // native 802.11 miniport (an Intel AC 3168 reports a flat 120Mb/s while disassociated), so the
         // association rate set above stands
@@ -445,6 +447,14 @@ private:
         if (c & AdapterChange.mtu)       mark_set!(typeof(this), [ "l2mtu", "actual-mtu" ])();
         if (c & AdapterChange.max_mtu)   mark_set!(typeof(this), "max-l2mtu")();
         if (c & AdapterChange.connected) mark_set!(typeof(this), "connected")();
+    }
+
+    protected override const(char)[] apply_mac(ref MACAddress value)
+    {
+        // TODO: reprogramming a windows adapter address is a registry write plus a
+        // device restart, not an ioctl; until that lands the station cannot honour it.
+        assert(false, "TODO");
+        return "setting the hardware address is not supported";
     }
 }
 

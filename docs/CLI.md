@@ -420,6 +420,22 @@ managed-item properties above:
 | `avg-service-time` | read-only | Average packet service time in milliseconds. |
 | `max-service-time` | read-only | Maximum packet service time in milliseconds. |
 
+### Ethernet station properties
+
+Ethernet-class interfaces (`ethernet`, `wlan`, `ap`, `bridge`, and `vlan`)
+expose these properties in addition to the common interface properties above:
+
+| Property | Access | Values | Default | Description |
+| --- | --- | --- | --- | --- |
+| `cfm-level` | read/write | `0` to `7` | `7` | 802.1ag maintenance level used for CFM loopback. |
+| `mac` | read/write; VLAN read-only | MAC address | driver, parent, or generated address | Address used by the station on its Ethernet segment. |
+
+A driver-backed station adopts the driver's address so its source address
+matches the address accepted by the medium. A supported `mac` assignment is
+accepted only after the driver has reprogrammed that address. A bridge generates
+an address from the node id, while a VLAN follows its parent interface's address
+and cannot be assigned independently.
+
 ### `/interface/ap`
 
 An AP interface is one BSS served by a WiFi radio.
@@ -430,7 +446,6 @@ An AP interface is one BSS served by a WiFi radio.
 | `ssid` | read/write | SSID | required | Network name advertised by the BSS. |
 | `secret` | read/write | Secret name | empty | Credentials authorized for the `wifi` service. |
 | `phy-mode` | read-only | PHY label | empty | BSS operating PHY and client ceiling; not a per-client value. |
-| `cfm-level` | read/write | `0` to `7` | `7` | Ethernet OAM maintenance level. |
 | `auth` | read/write | `open`, `wpa2`, `wpa3`, `wpa2_wpa3`, `wpa2_enterprise`, `wpa3_enterprise` | `open` | Authentication mode. |
 | `client-isolation` | read/write | boolean | `false` | Prevents clients on the BSS from communicating directly. |
 | `max-clients` | read/write | `0` to `255` | `0` | Client limit; `0` selects the platform default. |
@@ -567,7 +582,6 @@ A WLAN interface is one station association bound to a WiFi radio.
 | `ssid` | read/write | SSID | required | Network to associate with. |
 | `secret` | read/write | Secret name | empty | Credentials authorized for the `wifi` service. |
 | `phy-mode` | read-only | PHY label | empty | Negotiated PHY, for example `VHT80 2SS`; unavailable parts are omitted. |
-| `cfm-level` | read/write | `0` to `7` | `7` | Ethernet OAM maintenance level. |
 | `bssid-filter` | read/write | MAC address | none | Restricts association to one AP. |
 | `bssid` | read-only | MAC address | empty | Currently associated AP. |
 | `rssi` | read-only | dBm | `0` | Received signal strength; `0` means unavailable. |

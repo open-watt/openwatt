@@ -30,6 +30,7 @@ import manager.console.table : Table;
 import manager.plugin;
 
 import driver.linux.netlink;
+import driver.linux.netlink_write;
 import driver.linux.nl80211;
 import driver.linux.sysfs;
 import driver.linux.fdwatch;
@@ -1243,6 +1244,12 @@ protected:
             apply_configured_mtu();
             refresh_os_state();
             register_fdwatch();
+
+            // The AP bridges only the address that associated, so the station must
+            // wear the netdev's own address rather than a synthesised one.
+            ubyte[6] hw = void;
+            if (_raw.read_mac(r.netdev, hw))
+                adopt_mac(MACAddress(hw));
             // once per start cycle: resolve_nl80211 is a blocking round trip and startup() re-runs
             // every frame until the association completes
             open_link_socket();
@@ -1390,6 +1397,24 @@ protected:
     }
 
 private:
+    protected override const(char)[] apply_mac(ref MACAddress value)
+    {
+        auto r = cast(LinuxWifiRadio)radio;
+        if (!r)
+            return "wifi radio is unavailable";
+        int ifindex = _raw.valid ? _raw.ifindex : netlink_ifindex(r.netdev);
+        if (ifindex == 0)
+            return "network interface is unavailable";
+        int err = netlink_reprogram_link_mac(ifindex, value.b);
+        if (err != 0)
+        {
+            log.error("could not set ", r.netdev, " hardware address: netlink error=", err);
+            return "driver rejected hardware address";
+        }
+        restart();
+        return null;
+    }
+
     RawAdapter _raw;
     SysTime _last_refresh;
     MonoTime _last_rate_poll;
@@ -1753,6 +1778,24 @@ protected:
         return super.status_message();
     }
 
+    protected override const(char)[] apply_mac(ref MACAddress value)
+    {
+        auto vif = current_vif();
+        if (vif.length == 0)
+            return "wifi interface is unavailable";
+        int ifindex = _raw.valid ? _raw.ifindex : cast(int)read_ifindex(vif);
+        if (ifindex == 0)
+            return "network interface is unavailable";
+        int err = netlink_reprogram_link_mac(ifindex, value.b);
+        if (err != 0)
+        {
+            log.error("could not set ", vif, " hardware address: netlink error=", err);
+            return "driver rejected hardware address";
+        }
+        restart();
+        return null;
+    }
+
     override CompletionStatus startup()
     {
         auto result = super.startup();
@@ -1792,6 +1835,10 @@ protected:
             apply_configured_mtu();
             refresh_os_state(vif);
             register_fdwatch();
+
+            ubyte[6] hw = void;
+            if (_raw.read_mac(vif, hw))
+                adopt_mac(MACAddress(hw));
         }
 
         ubyte ch = r.target_channel();

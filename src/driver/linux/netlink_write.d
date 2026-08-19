@@ -3,13 +3,14 @@ module driver.linux.netlink_write;
 version (linux):
 
 import urt.log;
+import urt.internal.sys.posix;
 
 import manager;
 import manager.plugin;
 import manager.console;
 import manager.console.session;
 
-import urt.internal.sys.posix;
+import driver.linux.raw : ioctl, ifreq, SIOCGIFFLAGS, IFF_UP, IFNAMSIZ;
 
 nothrow @nogc:
 
@@ -130,6 +131,41 @@ int netlink_set_master(int ifindex, int master_ifindex)
     return nl_send_ack(b.finalise(RTM_NEWLINK, NLM_F_REQUEST | NLM_F_ACK, seq), seq);
 }
 
+// The kernel refuses a hardware-address change while the link is up, so the
+// caller must down the interface first.
+int netlink_set_link_mac(int ifindex, ubyte[6] mac)
+{
+    uint seq = ++g_seq;
+    NlBuilder b;
+    ifinfomsg ifi;
+    ifi.ifi_index = ifindex;
+    b.family(ifi);
+    b.attr(IFLA_ADDRESS, mac[]);
+    return nl_send_ack(b.finalise(RTM_NEWLINK, NLM_F_REQUEST | NLM_F_ACK, seq), seq);
+}
+
+int netlink_reprogram_link_mac(int ifindex, ubyte[6] mac)
+{
+    bool was_up;
+    if (!netlink_link_is_up(ifindex, was_up))
+        return TRANSPORT_ERROR;
+    if (was_up)
+    {
+        int err = netlink_set_link_up(ifindex, false);
+        if (err != 0)
+            return err;
+    }
+
+    int err = netlink_set_link_mac(ifindex, mac);
+    if (was_up)
+    {
+        int restore_err = netlink_set_link_up(ifindex, true);
+        if (restore_err != 0)
+            log_error("os.netlink.write", "could not restore link state: netlink error=", restore_err);
+    }
+    return err;
+}
+
 int netlink_set_link_up(int ifindex, bool up)
 {
     uint seq = ++g_seq;
@@ -151,7 +187,6 @@ int netlink_ifindex(const(char)[] name)
     namebuf[0 .. name.length] = name[];
     return cast(int)if_nametoindex(namebuf.ptr);
 }
-
 
 // === console-facing module ===
 
@@ -218,6 +253,26 @@ private:
 
 
 __gshared uint g_seq;
+
+
+bool netlink_link_is_up(int ifindex, out bool up)
+{
+    char[IFNAMSIZ] name = 0;
+    if (if_indextoname(cast(uint)ifindex, name.ptr) is null)
+        return false;
+
+    int fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd < 0)
+        return false;
+    scope(exit) close(fd);
+
+    ifreq req;
+    req.ifr_name[] = name[];
+    if (ioctl(fd, SIOCGIFFLAGS, &req) < 0)
+        return false;
+    up = (req.ifru_flags & IFF_UP) != 0;
+    return true;
+}
 
 
 int route_msg(ushort type, ushort extra_flags, ubyte[4] dst, ubyte prefix, ubyte[4] gateway, int oif)
@@ -525,6 +580,7 @@ bool parse_mac(const(char)[] s, out ubyte[6] mac)
 
 enum AF_NETLINK    = 16;
 enum SOCK_RAW      = 3;
+enum SOCK_DGRAM    = 2;
 enum NETLINK_ROUTE = 0;
 enum AF_INET       = 2;
 
@@ -548,7 +604,6 @@ enum RTM_DELNEIGH  = 29;
 enum RTM_NEWADDR   = 20;
 enum RTM_DELADDR   = 21;
 
-enum IFF_UP        = 0x1;
 enum NLA_F_NESTED  = 0x8000;
 
 enum IFLA_ADDRESS   = 1;
@@ -660,6 +715,7 @@ extern(C) nothrow @nogc
     ptrdiff_t sendto(int fd, const(void)* buf, size_t len, int flags, const(void)* dest_addr, uint addrlen);
     ptrdiff_t recv(int fd, void* buf, size_t len, int flags);
     uint if_nametoindex(const(char)* ifname);
+    char* if_indextoname(uint ifindex, char* ifname);
     int* __errno_location();
 }
 

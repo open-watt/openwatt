@@ -284,6 +284,14 @@ nothrow @nogc:
             debug assert(data_format.is_text, "element does not hold text");
             return text_value();
         }
+        else static if (ValidUserType!(Unqual!T))
+        {
+            alias U = Unqual!T;
+            static assert(U.sizeof <= Scalar.sizeof, "wide user values cannot use the scalar register");
+            debug assert(data_format.is_scalar && data_format.type == ValueType.user, "element does not hold a scalar user value");
+            debug assert(data_format.user_type.type_id == TypeDetailsFor!U.type_id, "element type mismatch");
+            return *cast(const(T)*)_latest.raw.ptr;
+        }
         else
         {
             debug assert(data_format.is_scalar, "element record does not fit the scalar register");
@@ -307,12 +315,29 @@ nothrow @nogc:
         }
         else
         {
-            if (!data_format.is_scalar || scalar_type!T != data_format.type)
-                return "incompatible value";
-            static if (is(T Base == enum))
-                Scalar s = Scalar.of(cast(Base)v);
+            static if (ValidUserType!(Unqual!T))
+            {
+                alias U = Unqual!T;
+                static if (U.sizeof > Scalar.sizeof)
+                    return "incompatible value";
+                else
+                {
+                    if (!data_format.is_scalar || data_format.type != ValueType.user || data_format.user_type.type_id != TypeDetailsFor!U.type_id)
+                        return "incompatible value";
+                    Scalar s;
+                    s.raw[] = 0;
+                    s.raw[0 .. U.sizeof] = (cast(const(ubyte)*)&v)[0 .. U.sizeof];
+                }
+            }
             else
-                Scalar s = Scalar.of(v);
+            {
+                if (!data_format.is_scalar || scalar_type!T != data_format.type)
+                    return "incompatible value";
+                static if (is(T Base == enum))
+                    Scalar s = Scalar.of(cast(Base)v);
+                else
+                    Scalar s = Scalar.of(v);
+            }
             if (const(char)[] error = data_format.constraint ? data_format.constraint.check(s, *data_format) : null)
                 return error;
             store_record(s.raw[0 .. data_format.stride], t, who);

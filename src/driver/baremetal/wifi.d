@@ -717,7 +717,7 @@ protected:
 
         ubyte[6] mac_buf = void;
         if (radio.drv_get_mac(WifiVif.sta, mac_buf))
-            mac = MACAddress(mac_buf);
+            adopt_mac(MACAddress(mac_buf));
 
         _connect_initiated = true;
         _status_detail = "Connecting";
@@ -748,6 +748,9 @@ protected:
     }
 
 protected:
+    override const(char)[] apply_mac(ref MACAddress value)
+        => "setting the hardware address is not supported";
+
     override int wire_send(const(ubyte)[] frame)
     {
         auto r = cast(BuiltinWiFi)radio;
@@ -965,7 +968,7 @@ protected:
 
         ubyte[6] mac_buf = void;
         if (radio.drv_get_mac(WifiVif.ap, mac_buf))
-            mac = MACAddress(mac_buf);
+            adopt_mac(MACAddress(mac_buf));
 
         // the BSS runs whatever the radio's protocol set allows, at the width we just configured
         WifiCapability caps;
@@ -987,6 +990,9 @@ protected:
     }
 
 protected:
+    override const(char)[] apply_mac(ref MACAddress value)
+        => "setting the hardware address is not supported";
+
     override int wire_send(const(ubyte)[] frame)
     {
         auto r = cast(BuiltinWiFi)radio;

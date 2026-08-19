@@ -7,6 +7,7 @@ import urt.string;
 import manager;
 import manager.base;
 import manager.collection;
+import manager.element : SampleUpdate;
 
 import router.iface;
 import router.iface.ethernet;
@@ -38,8 +39,7 @@ nothrow @nogc:
     {
         super(collection_type_info!VLANInterface, id, flags);
 
-        // the super made a mac address, but we don't actually want one...
-        mac = MACAddress();
+        adopt_mac(MACAddress());
     }
 
     // Properties...
@@ -82,14 +82,20 @@ nothrow @nogc:
         if (_vlan != 0)
         {
             if (!value.bind_vlan(this, false))
+            {
+                if (_interface !is null)
+                    _interface.bind_vlan(this, false);
                 return tconcat("interface ", value.name, " of type ", value.type, " does not support vlans");
+            }
         }
+        unsubscribe_parent_mac();
         _interface = value;
         if (auto station = cast(EthernetStation)value)
-            mac = station.mac;
+            adopt_parent_mac(station);
         else
-            mac = MACAddress();
+            adopt_mac(MACAddress());
         mark_set!(typeof(this), "interface")();
+        restart();
         return null;
     }
 
@@ -111,19 +117,28 @@ protected:
     override bool validate() const
         => _interface !is null && _vlan != 0;
 
-    // TODO: this needs to be a startup action, and we need to subscribe for restart() events...
-//    override CompletionStatus validating()
-//    {
-//        if (_interface.detached)
-//        {
-//            if (BaseInterface s = Collection!BaseInterface().get(_interface.name[]))
-//            {
-//                _interface = s;
-//                mac = _interface.mac;
-//            }
-//        }
-//        return super.validating();
-//    }
+    override CompletionStatus startup()
+    {
+        auto result = super.startup();
+        if (result != CompletionStatus.complete)
+            return result;
+        if (!_mac_subscribed)
+        {
+            if (auto station = cast(EthernetStation)_interface.get)
+            {
+                adopt_parent_mac(station);
+                station.prop_element(prop_index!(EthernetStation, "mac")).subscribe(&parent_mac_changed);
+                _mac_subscribed = true;
+            }
+        }
+        return CompletionStatus.complete;
+    }
+
+    override CompletionStatus shutdown()
+    {
+        unsubscribe_parent_mac();
+        return super.shutdown();
+    }
 
     override void online()
     {
@@ -133,6 +148,9 @@ protected:
         if (BaseInterface i = _interface)
             set_link_speed(i.tx_link_speed, i.rx_link_speed);
     }
+
+    override const(char)[] apply_mac(ref MACAddress value)
+        => "vlan address is inherited from its parent";
 
     final override void medium_tx(ref Packet packet)
     {
@@ -187,4 +205,32 @@ private:
     ObjectRef!BaseInterface _interface;
     ushort _vlan;
     VlanTag _tag = VlanTag._8100;
+    bool _mac_subscribed;
+
+    void adopt_parent_mac(EthernetStation station)
+    {
+        if (mac == station.mac)
+            return;
+        bool rebound = _interface !is null && _vlan != 0;
+        if (rebound)
+            _interface.bind_vlan(this, true);
+        adopt_mac(station.mac);
+        if (rebound)
+            _interface.bind_vlan(this, false);
+    }
+
+    void parent_mac_changed(ref const SampleUpdate)
+    {
+        if (auto station = cast(EthernetStation)_interface.get)
+            adopt_parent_mac(station);
+    }
+
+    void unsubscribe_parent_mac()
+    {
+        if (!_mac_subscribed)
+            return;
+        if (auto station = cast(EthernetStation)_interface.get)
+            station.prop_element(prop_index!(EthernetStation, "mac")).unsubscribe(&parent_mac_changed);
+        _mac_subscribed = false;
+    }
 }

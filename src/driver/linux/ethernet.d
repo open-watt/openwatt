@@ -14,6 +14,7 @@ import manager.console;
 import manager.plugin;
 
 import driver.linux.netlink;
+import driver.linux.netlink_write;
 import driver.linux.sysfs;
 
 import driver.linux.raw;
@@ -72,6 +73,10 @@ nothrow @nogc:
                 return CompletionStatus.error;
             }
             apply_configured_mtu();
+
+            ubyte[6] hw = void;
+            if (_raw.read_mac(_adapter[], hw))
+                adopt_mac(MACAddress(hw));
         }
 
         SysTime now = getSysTime();
@@ -90,6 +95,20 @@ nothrow @nogc:
     {
         _raw.close();
         return super.shutdown();
+    }
+
+    protected override const(char)[] apply_mac(ref MACAddress value)
+    {
+        int ifindex = _raw.valid ? _raw.ifindex : netlink_ifindex(_adapter[]);
+        if (ifindex == 0)
+            return "network interface is unavailable";
+        int err = netlink_reprogram_link_mac(ifindex, value.b);
+        if (err != 0)
+        {
+            log.error("could not set ", _adapter[], " hardware address: netlink error=", err);
+            return "driver rejected hardware address";
+        }
+        return null;
     }
 
     // Enslaved to a kernel bridge (offloaded): the kernel switches this port's

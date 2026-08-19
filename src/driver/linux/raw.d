@@ -248,6 +248,19 @@ nothrow @nogc:
         return true;
     }
 
+    bool read_mac(const(char)[] adapter_name, out ubyte[6] mac)
+    {
+        if (fd < 0 || adapter_name.length >= IFNAMSIZ)
+            return false;
+        ifreq req;
+        req.ifr_name[0 .. adapter_name.length] = adapter_name[];
+        req.ifr_name[adapter_name.length] = 0;
+        if (ioctl(fd, SIOCGIFHWADDR, &req) < 0)
+            return false;
+        mac[] = req.ifru_addr.data[0 .. 6];
+        return true;
+    }
+
     Result last_send_error;
     Result last_recv_error;
 
