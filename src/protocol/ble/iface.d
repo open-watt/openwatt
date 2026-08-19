@@ -198,6 +198,7 @@ nothrow @nogc:
         debug assert(msg_handle >= 0 && msg_handle <= 0xFF, "invalid msg_handle");
 
         ubyte t = cast(ubyte)msg_handle;
+        abort_frame(t);
         if (auto pm = t in _pending)
         {
             if (pm.callback)
@@ -329,6 +330,12 @@ protected:
     // right now; dequeueing pauses until capacity frees up.
     bool submit_capacity()
         => true;
+
+    // Backend hook: release transport state bound to a cancelled frame. The
+    // caller still owns completing the frame itself.
+    void abort_frame(ubyte tag)
+    {
+    }
 
     // Backend hook: tear down the transport connection backing a session.
     void transport_close(BLESession* session)
