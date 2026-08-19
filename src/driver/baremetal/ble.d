@@ -65,6 +65,7 @@ nothrow @nogc:
         if (_pending_connect_tag >= 0 && now - _pending_connect_time > pending_connect_timeout)
         {
             log.warning("connect to ", _pending_connect_peer, " timed out");
+            ble_connect_cancel(_ble);
             complete_pending_connect(MessageState.failed);
         }
         super.heartbeat(now);
@@ -159,6 +160,14 @@ protected:
             case BLEFrameKind.att:
                 return submit_att(frame, f);
         }
+    }
+
+    override void abort_frame(ubyte tag)
+    {
+        if (_pending_connect_tag != tag)
+            return;
+        ble_connect_cancel(_ble);
+        clear_pending_connect();
     }
 
     override void transport_close(BLESession* session)
@@ -282,7 +291,10 @@ private:
                 BLEConnConfig conn_cfg;
                 auto r = ble_connect(_ble, f.dst.b, peer_type ? *peer_type : BLEAddrType.public_, conn_cfg);
                 if (!r)
+                {
+                    log.error("driver refused connect to ", f.dst);
                     return false;
+                }
 
                 _pending_connect_tag = frame.tag;
                 _pending_connect_time = getTime();
