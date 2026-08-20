@@ -177,6 +177,11 @@ nothrow @nogc:
 
         foreach (p; peers[])
         {
+            if (p._introducing)
+            {
+                pump_introductions(p);
+                continue;
+            }
             encoder_for(p._encoder).tick_dirty(p);
             p.flush_logs();
         }
@@ -301,16 +306,32 @@ nothrow @nogc:
                 return;
         peers ~= p;
 
-        // Eager registry: announce every local authoritative syncable object
-        // to the newly-attached peer.
+        p._intro_table = 0;
+        p._intro_slot = 1;
+        p._introducing = true;
+        pump_introductions(p);
+    }
+
+    void pump_introductions(SyncPeer p)
+    {
+        if (!p._introducing)
+            return;
+
         SyncEncoder enc = encoder_for(p._encoder);
-        foreach_object((BaseObject obj) nothrow @nogc {
-            if (!obj._typeInfo.syncable)
+        while (p.control_window_free() > SyncPeer.control_reserve)
+        {
+            BaseObject obj = next_object(p._intro_table, p._intro_slot);
+            if (!obj)
+            {
+                p._introducing = false;
                 return;
-            if (obj._is_remote)
-                return;
+            }
+            if (!obj._typeInfo.syncable || obj._is_remote)
+                continue;
+            if (p.handle_of(obj) != SyncPeer.invalid_handle)
+                continue;   // the lifecycle hook announced it while the walk was paused
             enc.encode_add_name(p, obj);
-        });
+        }
     }
 
     // Peer teardown: request cancellation of the peer's in-flight inbound commands;

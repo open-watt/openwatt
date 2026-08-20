@@ -535,6 +535,16 @@ package:
     Array!EID        _adopted;           // handle table: local ids for names the peer announced
     SyncEncoderKind  _encoder = SyncEncoderKind.binary;
 
+    // bulk walks stop short of the window's end so the session's other control frames always find room
+    enum control_reserve = 16;
+
+    size_t control_window_free()
+        => !sublayer_armed ? size_t.max : (_resend.length >= max_unacked ? 0 : max_unacked - _resend.length);
+
+    uint             _intro_table;
+    uint             _intro_slot;
+    bool             _introducing;
+
     ubyte            _remote_caps;       // hello negotiation; 0 = no hello received
     ulong            _remote_node_id;    // hello identity; 0 = peer announced none
     PeerRole         _remote_role;

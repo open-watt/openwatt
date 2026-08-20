@@ -486,6 +486,23 @@ void register_object_lifecycle_handler(ObjectLifecycleHandler handler) nothrow @
     _on_object_lifecycle ~= handler;
 }
 
+BaseObject next_object(ref uint table, ref uint slot)
+{
+    while (table < g_item_tables.length)
+    {
+        CollectionTable* t = &g_item_tables[table];
+        while (slot <= t.slot_count)
+        {
+            BaseObject o = t.at(slot++);
+            if (o)
+                return o;
+        }
+        ++table;
+        slot = 1;
+    }
+    return null;
+}
+
 void foreach_object(scope void delegate(BaseObject obj) nothrow @nogc fn)
 {
     foreach (ref table; g_item_tables)
