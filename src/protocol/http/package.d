@@ -32,7 +32,7 @@ import protocol.http.fileserver;
 import protocol.http.websocket;
 
 import router.stream;
-import protocol.ip.tcp_stream;
+import router.transport.tcp.stream;
 import protocol.tls;
 
 nothrow @nogc:

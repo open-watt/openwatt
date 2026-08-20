@@ -1,4 +1,8 @@
-module protocol.ip.tcp_stream;
+module router.transport.tcp.stream;
+
+// no engine and no kernel sockets means no TCP backend at all; gate the stream objects out
+version (NoTCP) version (UseInternalIPStack) version = NoTcpBackend;
+version (NoTcpBackend) {} else:
 
 import urt.array;
 import urt.conv;
@@ -15,7 +19,7 @@ import manager.base;
 import manager.collection;
 import manager.console;
 
-import protocol.ip;
+import router.transport.tcp;
 
 import router.iface : BaseInterface;
 public import router.stream;
@@ -276,9 +280,9 @@ private:
         incoming(data, rx_time);
     }
 
-    void on_event(TCPConnection* conn, IPEvent event)
+    void on_event(TCPConnection* conn, TCPEvent event)
     {
-        if (event == IPEvent.connected)
+        if (event == TCPEvent.connected)
         {
             _link = 1;
             if (_state == State.starting)

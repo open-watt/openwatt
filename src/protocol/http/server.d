@@ -23,7 +23,7 @@ static if (has_tls)
 import protocol.http;
 import protocol.http.message;
 
-import protocol.ip.tcp_stream;
+import router.transport.tcp.stream;
 import router.iface;
 
 version = DebugHTTPServer;

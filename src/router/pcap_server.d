@@ -1,7 +1,7 @@
 module router.pcap_server;
 
 import manager.features;
-static if (has_ip):
+static if (has_ip && has_tcp_endpoints):
 
 import urt.array;
 import urt.endian;
@@ -20,7 +20,7 @@ import manager.expression : NamedArgument;
 import router.iface;
 import router.stream;
 
-import protocol.ip.tcp_stream : TCPServer;
+import router.transport.tcp.stream : TCPServer;
 
 nothrow @nogc:
 

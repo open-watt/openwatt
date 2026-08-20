@@ -14,7 +14,9 @@ import manager.collection;
 import manager.expression : NamedArgument;
 import manager.features;
 
-import protocol.ip.tcp_stream : TCPStream;
+static if (has_tcp_endpoints):
+
+import router.transport.tcp.stream : TCPStream;
 
 import router.stream : Stream;
 

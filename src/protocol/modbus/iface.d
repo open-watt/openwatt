@@ -201,7 +201,7 @@ nothrow @nogc:
         if (_stream is value)
             return null;
         unsubscribe_stream();
-        static if (has_ip)
+        static if (has_ip && has_tcp_endpoints)
             _conn.clear_remote();
         _stream = value;
         mark_set!(typeof(this), "stream")();
@@ -218,9 +218,9 @@ nothrow @nogc:
             // if we're not the master, we can't write to the bus unless we are responding...
             // and if the stream is TCP, we'll never know if the remote has dropped the connection
             // we'll enable keep-alive in tcp streams to to detect this...
-            static if (has_ip)
+            static if (has_ip && has_tcp_endpoints)
             {
-                import protocol.ip.tcp_stream : TCPStream;
+                import router.transport.tcp.stream : TCPStream;
                 auto tcpStream = cast(TCPStream)_stream;
                 if (tcpStream)
                     tcpStream.enable_keep_alive(true, seconds(10), seconds(1), 10);
@@ -232,7 +232,7 @@ nothrow @nogc:
         return null;
     }
 
-    static if (has_ip)
+    static if (has_ip && has_tcp_endpoints)
     {
         const(char)[] remote() const
             => _conn.remote_name();
@@ -333,14 +333,14 @@ protected:
     override bool validate() const
     {
         bool have_target = _stream !is null;
-        static if (has_ip)
+        static if (has_ip && has_tcp_endpoints)
             have_target = have_target || _conn.has_remote();
         return have_target && (!master || _protocol != ModbusProtocol.unknown);
     }
 
     override CompletionStatus startup()
     {
-        static if (has_ip)
+        static if (has_ip && has_tcp_endpoints)
         {
             if (!_stream && _conn.has_remote())
             {
@@ -418,7 +418,7 @@ protected:
             _master_address = 0;
         }
 
-        static if (has_ip)
+        static if (has_ip && has_tcp_endpoints)
         {
             if (_conn.has_remote())
             {
@@ -556,7 +556,7 @@ private:
 
     ObjectRef!Stream _stream;
     bool _subscribed;
-    static if (has_ip)
+    static if (has_ip && has_tcp_endpoints)
     {
         import protocol.ip.client : IPClient;
         IPClient _conn;
@@ -591,7 +591,7 @@ private:
     {
         if (_stream)
             return _stream;
-        static if (has_ip)
+        static if (has_ip && has_tcp_endpoints)
             return _conn.get;
         else
             return null;

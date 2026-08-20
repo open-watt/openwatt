@@ -25,6 +25,7 @@ The CLI is organized into a few top-level categories, each managing a different 
 -   `/stream`: Manages data streams, which are typically network connections (TCP, WebSocket), serial ports, etc.
 -   `/interface`: Configures hardware or logical interfaces, like Modbus, CAN, network bridges, etc.
 -   `/protocol`: Manages protocol-specific configuration, such as Modbus clients, MQTT brokers, HTTP servers, etc.
+-   `/transport`: Live state for the L4 endpoint layer (TCP connections, UDP endpoints).
 -   `/apps`: High-level application functionality, like the energy management system.
 
 Each of these top-level commands has its own set of sub-commands for more specific configuration.
@@ -375,6 +376,27 @@ Additional commands:
 | --- | --- | --- |
 | `/stream/serial/devices` | POSIX hosts | Lists detected serial devices. |
 | `/stream/serial/lines <name>` | all platforms | Prints the current modem-line state for an open serial stream, including RTS, CTS, DTR, DSR, DCD, and RI where supported. |
+
+### `/transport/*`
+
+Diagnostics for the L4 endpoint layer: connections and datagram endpoints that
+terminate here. These are not collections, so they carry no configuration; they
+report live state.
+
+Transports are family-agnostic. An ether peer is written `[mac]:port` and rides
+raw ethernet over the OpenWatt ethertype with no IP configured; ip peers ride
+the IP stack, whether the in-tree one or the host kernel's.
+
+| Command | Description |
+| --- | --- |
+| `/transport/tcp/print` | Connection table for the in-tree TCP engine: state, endpoints, MSS, window/buffer occupancy, RTO/SRTT, retries, and out-of-order backlog per connection. Connections the host kernel owns are not listed. |
+| `/transport/udp/print` | Datagram endpoints: local and peer address, connected or multi-drop, and egress interface where one resolves. |
+
+```text
+[/]> /transport/tcp/print
+ id  state        local              remote             mss  pwnd   snd     rcv    rto     srtt  rtry  ooo
+ c1  established  [02:11..:01]:5000  [02:11..:02]:2323  1460 8192   0/0     0/8192 1000ms  2ms   0     -
+```
 
 ### `/stream/usb-serial`
 

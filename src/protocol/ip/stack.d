@@ -10,6 +10,7 @@ import urt.log;
 import urt.time;
 
 import manager.collection;
+import manager.features : has_tcp;
 
 import router.iface;
 import router.iface.ethernet;
@@ -23,8 +24,10 @@ import protocol.ip.firewall;
 import protocol.ip.icmp;
 import protocol.ip.neighbour;
 import protocol.ip.route;
-import protocol.ip.tcp;
 import protocol.ip.udp;
+
+static if (has_tcp)
+    import router.transport.tcp.engine : TcpHeader, tcp_segment_input;
 
 //version = DebugIP;            // bind / unbind, no-route, etc.
 //version = DebugRawIngress;    // every packet entering on_packet
@@ -35,6 +38,10 @@ import protocol.ip.udp;
 
 nothrow @nogc:
 
+
+// the ip module installs its stack here before anything can run; transports lowering ip peers
+// read it. It lives beside IPStack so the router layer needs no ip import to declare it.
+__gshared IPStack* g_ip_stack;
 
 __gshared uint _route_gen = 1;
 __gshared ushort _ip_id;
@@ -108,8 +115,6 @@ nothrow @nogc:
         MonoTime now = getTime();
         neighbour_v4.tick(now);
         neighbour_v6.tick(now);
-        version (UseInternalIPStack)
-            tcp_tick(this, now);
     }
 
     IPAddr select_source_v4(IPAddr dst)
@@ -439,7 +444,8 @@ private:
                 .icmp_input(this, pkt);
                 break;
             case IPProtocol.tcp:
-                .tcp_input(this, pkt);
+                static if (has_tcp)
+                    .tcp_input(pkt);
                 break;
             case IPProtocol.udp:
                 .udp_input(this, pkt);
@@ -468,4 +474,25 @@ private:
     FirewallChains firewall_v6;
     // TODO: ReassemblyTable reasm;
     // TODO: ConntrackTable conntrack;
+}
+
+
+static if (has_tcp)
+void tcp_input(ref Packet pkt)
+{
+    if (pkt.data.length < IPv4Header.sizeof + TcpHeader.sizeof)
+        return;
+    const ip = cast(const IPv4Header*)pkt.data.ptr;
+    size_t ip_hdr_len = ip.ihl * 4;
+    if (pkt.data.length < ip_hdr_len + TcpHeader.sizeof)
+        return;
+
+    // Trim to IP total_length: Ethernet pads small frames to 46-byte minimum
+    // payload, and pkt.data may include those padding bytes.
+    size_t ip_total = ip.total_length.bigEndianToNative!ushort;
+    if (ip_total < ip_hdr_len + TcpHeader.sizeof || ip_total > pkt.data.length)
+        return;
+
+    const(ubyte)[] tcp_seg = (cast(const(ubyte)*)pkt.data.ptr)[ip_hdr_len .. ip_total];
+    tcp_segment_input(InetAddress(IPAddr(ip.src), 0), InetAddress(IPAddr(ip.dst), 0), tcp_seg, pkt.creation_time);
 }

@@ -20,9 +20,9 @@ import manager.plugin;
 import manager.console;
 
 import router.iface;
-import protocol.ip.tcp_stream;
+import router.transport.tcp.stream;
 
-static if (has_ip)
+static if (has_ip && has_tcp_endpoints)
     import router.pcap_server;
 
 nothrow @nogc:
@@ -279,13 +279,13 @@ nothrow @nogc:
     override void init()
     {
         g_app.console.register_command!add("/tools/pcap", this);
-        static if (has_ip)
+        static if (has_ip && has_tcp_endpoints)
             g_app.console.register_collection!PCAPServer();
     }
 
     override void update()
     {
-        static if (has_ip)
+        static if (has_ip && has_tcp_endpoints)
             Collection!PCAPServer().update_all();
     }
 

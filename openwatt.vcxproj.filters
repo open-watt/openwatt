@@ -163,6 +163,12 @@
     <Filter Include="src\router\stream">
       <UniqueIdentifier>{e1c51f7a-999b-4f32-97d6-9364d012699e}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\router\transport">
+      <UniqueIdentifier>{a71f2b45-6c38-4d92-b0e5-14c7d9f83a26}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\router\transport\tcp">
+      <UniqueIdentifier>{f3a09c21-5d84-4b6e-9a17-c2e64f80d3b5}</UniqueIdentifier>
+    </Filter>
     <Filter Include="src\tools">
       <UniqueIdentifier>{7c4f8e2d-9b1a-4e3f-8d6b-2a5c9e1f4b8d}</UniqueIdentifier>
     </Filter>
@@ -384,6 +390,9 @@
     <DCompile Include="src\driver\windows\wlanapi.d">
       <Filter>src\driver\windows</Filter>
     </DCompile>
+    <DCompile Include="src\driver\windows\winsock.d">
+      <Filter>src\driver\windows</Filter>
+    </DCompile>
     <DCompile Include="src\main.d">
       <Filter>src</Filter>
     </DCompile>
@@ -486,13 +495,25 @@
     <DCompile Include="src\router\stream\serial.d">
       <Filter>src\router\stream</Filter>
     </DCompile>
+    <DCompile Include="src\router\transport\package.d">
+      <Filter>src\router\transport</Filter>
+    </DCompile>
+    <DCompile Include="src\router\transport\udp.d">
+      <Filter>src\router\transport</Filter>
+    </DCompile>
+    <DCompile Include="src\router\transport\tcp\engine.d">
+      <Filter>src\router\transport\tcp</Filter>
+    </DCompile>
+    <DCompile Include="src\router\transport\tcp\package.d">
+      <Filter>src\router\transport\tcp</Filter>
+    </DCompile>
+    <DCompile Include="src\router\transport\tcp\stream.d">
+      <Filter>src\router\transport\tcp</Filter>
+    </DCompile>
     <DCompile Include="src\router\stream\usb_serial.d">
       <Filter>src\router\stream</Filter>
     </DCompile>
     <DCompile Include="src\protocol\ip\client.d">
-      <Filter>src\protocol\ip</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\ip\tcp_stream.d">
       <Filter>src\protocol\ip</Filter>
     </DCompile>
     <DCompile Include="src\protocol\tls\certificate.d">
@@ -949,9 +970,6 @@
       <Filter>src\protocol\ip</Filter>
     </DCompile>
     <DCompile Include="src\protocol\ip\stack.d">
-      <Filter>src\protocol\ip</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\ip\tcp.d">
       <Filter>src\protocol\ip</Filter>
     </DCompile>
     <DCompile Include="src\protocol\ip\udp.d">

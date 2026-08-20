@@ -121,6 +121,7 @@
     <DCompile Include="src\driver\windows\pcap.d" />
     <DCompile Include="src\driver\windows\system.d" />
     <DCompile Include="src\driver\windows\wifi.d" />
+    <DCompile Include="src\driver\windows\winsock.d" />
     <DCompile Include="src\driver\windows\wlanapi.d" />
     <DCompile Include="src\main.d" />
     <DCompile Include="src\manager\base.d" />
@@ -226,8 +227,6 @@
     <DCompile Include="src\protocol\ip\socket.d" />
     <DCompile Include="src\protocol\ip\linux_mirror.d" />
     <DCompile Include="src\protocol\ip\stack.d" />
-    <DCompile Include="src\protocol\ip\tcp.d" />
-    <DCompile Include="src\protocol\ip\tcp_stream.d" />
     <DCompile Include="src\protocol\ip\udp.d" />
     <DCompile Include="src\protocol\modbus\binding.d" />
     <DCompile Include="src\protocol\modbus\iface.d" />
@@ -312,6 +311,11 @@
     <DCompile Include="src\router\stream\package.d" />
     <DCompile Include="src\router\stream\serial.d" />
     <DCompile Include="src\router\stream\usb_serial.d" />
+    <DCompile Include="src\router\transport\package.d" />
+    <DCompile Include="src\router\transport\udp.d" />
+    <DCompile Include="src\router\transport\tcp\engine.d" />
+    <DCompile Include="src\router\transport\tcp\package.d" />
+    <DCompile Include="src\router\transport\tcp\stream.d" />
     <DCompile Include="src\tools\protobuf\package.d" />
     <DCompile Include="src\tools\protobuf\parse.d" />
     <DCompile Include="third_party\urt\src\object.d" />

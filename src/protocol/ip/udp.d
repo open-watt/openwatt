@@ -52,7 +52,7 @@ struct UdpPcb
 
     version (UseInternalIPStack)
     {
-        import protocol.ip : UDPEndpoint;
+        import router.transport.udp : UDPEndpoint;
         UDPEndpoint* owner;
     }
 

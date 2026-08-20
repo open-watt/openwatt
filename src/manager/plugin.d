@@ -158,6 +158,9 @@ void register_modules(Application app)
         register_module!(router.iface.i2c)(app);
         register_module!(router.iface.wifi)(app);
 
+        import router.transport;
+        register_module!(router.transport)(app);
+
         import driver.ethernet, driver.wifi;
         register_module!(driver.ethernet)(app);
         register_module!(driver.wifi)(app);
