@@ -524,8 +524,7 @@ protected:
         // check for link-local frames (bridges must not forward link-local frames)
         if (packet.eth.dst.is_link_local && packet.type == PacketType.ethernet)
         {
-            // STP/LACP/EAPOL/LLDP... should we support these?
-            debug assert(false, "TODO?");
+            // TODO: STP/LACP/EAPOL/LLDP... should we support these?
             goto drop_packet;
         }
 
