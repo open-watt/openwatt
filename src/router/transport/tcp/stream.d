@@ -18,10 +18,12 @@ import urt.time;
 import manager.base;
 import manager.collection;
 import manager.console;
+import manager.features : has_tcp;
 
 import router.transport.tcp;
 
 import router.iface : BaseInterface;
+import router.iface.mac : MACAddress;
 public import router.stream;
 
 //version = DebugTCPStream;       // TCPStream write/queue/drain activity
@@ -52,7 +54,7 @@ nothrow @nogc:
     {
         // apply explicit port if assigned
         if (_port != 0)
-            update_port(value, _port);
+            value.port = _port;
 
         _host = null;
         if (value == _remote)
@@ -91,10 +93,9 @@ nothrow @nogc:
 
         _port = value;
         mark_set!(typeof(this), "port")();
-        if ((_remote.family == AddressFamily.ipv4 && _remote._a.ipv4.port == value) ||
-            (_remote.family == AddressFamily.ipv6 && _remote._a.ipv6.port == value))
+        if (_remote.port == value)
             return;
-        update_port(_remote, _port);
+        _remote.port = _port;
         mark_set!(typeof(this), "remote_address")();
 
         restart();
@@ -127,16 +128,8 @@ nothrow @nogc:
     final override bool validate() const pure
     {
         if (_remote != InetAddress())
-        {
-            if (!_host.empty)
-                return false;
-            if ((_remote.family == AddressFamily.ipv4 && _remote._a.ipv4.port != 0) ||
-                (_remote.family == AddressFamily.ipv6 && _remote._a.ipv6.port != 0))
-                return true;
-        }
-        else if (_host.empty)
-            return false;
-        return true;
+            return _host.empty && _remote.port != 0;
+        return !_host.empty;
     }
 
     final override CompletionStatus startup()
@@ -165,7 +158,7 @@ nothrow @nogc:
 
             // apply explicit port if assigned
             if (_port != 0)
-                update_port(_remote, _port);
+                _remote.port = _port;
             mark_set!(typeof(this), "remote_address")();
         }
 
@@ -302,20 +295,6 @@ private:
         _link = 0;
     }
 
-    bool update_port(ref InetAddress addr, ushort port)
-    {
-        if (addr.family == AddressFamily.ipv4)
-        {
-            addr._a.ipv4.port = port;
-            return true;
-        }
-        else if (addr.family == AddressFamily.ipv6)
-        {
-            addr._a.ipv6.port = port;
-            return true;
-        }
-        return false;
-    }
 }
 
 enum ServerOptions
@@ -364,14 +343,31 @@ nothrow @nogc:
     override bool validate() const pure
         => _port != 0;
 
+    // Every family the build carries must bind, so a port already served by another object fails
+    // here rather than reporting Running while answering on neither.
     override CompletionStatus startup()
     {
-        assert(_listener is null);
-        _listener = tcp_listen(_port, &on_accept);
-        if (_listener is null)
+        static if (has_ip_tcp)
         {
-            debug log.error("failed to listen on port ", _port);
-            return CompletionStatus.error;
+            assert(_listener is null);
+            _listener = tcp_listen(_port, &on_accept);
+            if (_listener is null)
+            {
+                log.error("failed to listen on port ", _port);
+                return CompletionStatus.error;
+            }
+        }
+        static if (has_tcp)
+        {
+            // companion ether listener: the same port is reachable at [our-mac]:port on every segment
+            assert(_ether_listener is null);
+            _ether_listener = tcp_listen(InetAddress(MACAddress().b, _port), &on_accept);
+            if (_ether_listener is null)
+            {
+                log.error("failed to listen on port ", _port, " at the ether family");
+                shutdown();
+                return CompletionStatus.error;
+            }
         }
         debug log.info("listening on port ", _port);
         return CompletionStatus.complete;
@@ -384,6 +380,14 @@ nothrow @nogc:
             _listener.close();
             _listener = null;
         }
+        static if (has_tcp)
+        {
+            if (_ether_listener)
+            {
+                _ether_listener.close();
+                _ether_listener = null;
+            }
+        }
         return CompletionStatus.complete;
     }
 
@@ -393,6 +397,8 @@ protected:
     NewConnection _connection_callback;
     void* _user_data;
     TCPListener* _listener;
+    static if (has_tcp)
+        TCPListener* _ether_listener;
 
     this(const CollectionTypeInfo* type_info, CID id, ObjectFlags flags)
     {

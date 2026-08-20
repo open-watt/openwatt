@@ -201,7 +201,8 @@ SocketResult c_listen(Socket socket, uint backlog)
             s.tcp.local = InetAddress(IPAddr.any, 0);
         if (s.tcp.local.port == 0)
             s.tcp.local.port = allocate_ephemeral();
-        tcp_listen(s.tcp);
+        if (!tcp_listen(s.tcp))
+            return SocketResult.address_in_use;
         return SocketResult.success;
     }
     else

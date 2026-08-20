@@ -378,14 +378,22 @@ void set_pcb_egress(TcpPcb* pcb, BaseInterface new_iface)
 // -------------------------------------------------------------------------
 // Public API
 
-void tcp_listen(TcpPcb* pcb)
+// Refused when an existing listener would swallow the same traffic: find_listener returns the
+// first match, so a second listener on one address would register and then never be reached.
+bool tcp_listen(TcpPcb* pcb)
 {
+    if (listener_conflict(pcb.local))
+    {
+        log.warning("listen :", pcb.local.port, " refused; already listening on ", pcb.local);
+        return false;
+    }
     pcb.state        = TcpState.listen;
     pcb.is_listener  = true;
     pcb.rcv_wnd      = TcpRecvBufSize;
     tcp_register(pcb);
     version (DebugTCP)
         log.trace("c", pcb.id, " listen :", pcb.local.port);
+    return true;
 }
 
 bool tcp_connect(TcpPcb* pcb)
@@ -1948,6 +1956,20 @@ TcpPcb* find_pcb_4tuple(ref const InetAddress local, ref const InetAddress remot
         return p;
     }
     return null;
+}
+
+// A wildcard on either side collides: it accepts everything the specific one would have taken.
+bool listener_conflict(ref const InetAddress local)
+{
+    foreach (p; _pcbs[])
+    {
+        if (!p.is_listener) continue;
+        if (p.local.family != local.family) continue;
+        if (p.local.port != local.port) continue;
+        if (p.local.addr_any || local.addr_any || p.local.same_addr(local))
+            return true;
+    }
+    return false;
 }
 
 TcpPcb* find_listener(ref const InetAddress local)

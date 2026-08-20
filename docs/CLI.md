@@ -385,7 +385,11 @@ report live state.
 
 Transports are family-agnostic. An ether peer is written `[mac]:port` and rides
 raw ethernet over the OpenWatt ethertype with no IP configured; ip peers ride
-the IP stack, whether the in-tree one or the host kernel's.
+the IP stack, whether the in-tree one or the host kernel's. Every
+`/stream/tcp-server` (and everything built on one: telnet, HTTP, MQTT, ...)
+listens at the ether family beside its ip listener, so `[station-mac]:port`
+reaches the same service. A `/stream/tcp-client` dials an ether peer with
+`remote="[mac]:port"` (quoted: the CLI reserves those characters).
 
 | Command | Description |
 | --- | --- |

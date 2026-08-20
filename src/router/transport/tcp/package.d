@@ -30,11 +30,14 @@ static if (has_tcp)
 static if (os_iocp)
     import driver.windows.winsock;
 
+private alias log = Log!"tcp";
+
 nothrow @nogc:
 
 
 enum stack_lowering = has_tcp && ip_lowering;   // the engine lowers ip peers onto the internal stack
 enum has_os_tcp     = !internal_stack;          // kernel sockets carry the ip families
+enum has_ip_tcp     = stack_lowering || has_os_tcp;   // something carries the ip families
 
 
 enum TCPEvent : ubyte
@@ -152,6 +155,14 @@ TCPConnection* tcp_connect(InetAddress remote, TCPRecvHandler on_recv, TCPEventH
 
 TCPListener* tcp_listen(InetAddress local, TCPAcceptHandler on_accept)
 {
+    // One rule for every backend: windows binds listeners with SO_REUSEADDR, so the OS would
+    // hand a second server the same port and neither would reliably accept.
+    if (listener_bound(local))
+    {
+        log.warning("listen ", local, " refused; already listening there");
+        return null;
+    }
+
     if (local.family == AddressFamily.ether)
     {
         static if (has_tcp)
@@ -1143,6 +1154,24 @@ __gshared Array!(TCPConnection*) _tcp_conns;
 __gshared Array!(TCPListener*)   _tcp_listeners;
 
 
+// A wildcard on either side collides: it accepts everything the specific one would have taken.
+// A zero port is an ephemeral request, and each of those lands somewhere different.
+bool listener_bound(ref const InetAddress local)
+{
+    if (local.port == 0)
+        return false;
+    foreach (l; _tcp_listeners[])
+    {
+        if (l._closing)
+            continue;
+        if (l._local.family != local.family || l._local.port != local.port)
+            continue;
+        if (l._local.addr_any || local.addr_any || l._local.same_addr(local))
+            return true;
+    }
+    return false;
+}
+
 void unregister_tcp_conn(TCPConnection* c)
 {
     for (size_t i = _tcp_conns.length; i-- > 0; )
@@ -1245,7 +1274,13 @@ static if (has_tcp)
         static if (has_os_tcp)
             l._engine = true;
         pcb.listen_owner = l;
-        native_tcp_listen(pcb);     // sets state=listen, registers
+        if (!native_tcp_listen(pcb))    // sets state=listen, registers
+        {
+            pcb.listen_owner = null;
+            free_pcb(pcb);
+            defaultAllocator().freeT(l);
+            return null;
+        }
         _tcp_listeners ~= l;
         return l;
     }
