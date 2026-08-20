@@ -924,10 +924,11 @@ private:
     void finish_close()
     {
         _close_requested = true;
+        // a configured session has no client to hand back to, so it re-offers a prompt
         if (_flags & (ObjectFlags.dynamic | ObjectFlags.temporary))
             request_destroy();
         else
-            disabled(true);
+            restart();
     }
 
     void poll_terminal_events()
