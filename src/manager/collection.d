@@ -39,9 +39,11 @@ enum CollectionType : ubyte
     interface_, // all interfaces
     interface_group,
     ip_address,
+    ip_address6,
     ip_pool,
     ip_pool6,
     ip_route,
+    ip_route6,
     mb_node,
     mqtt_broker,
     mqtt_client,

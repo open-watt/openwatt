@@ -17,11 +17,13 @@ import router.iface.ethernet;
 import router.iface.mac;
 import router.iface.packet;
 
-import protocol.ip : IPv4Header, IPProtocol;
+import protocol.ip : IPv4Header, IPv6Header, IPProtocol;
 import protocol.ip.address;
 import protocol.ip.arp;
 import protocol.ip.firewall;
 import protocol.ip.icmp;
+import protocol.ip.icmp6;
+import protocol.ip.nd;
 import protocol.ip.neighbour;
 import protocol.ip.route;
 import protocol.ip.udp;
@@ -57,7 +59,7 @@ ushort next_ip_id()
     => ++_ip_id;
 
 
-struct RouteResult
+struct RouteResultT(Addr)
 {
     enum Kind : ubyte
     {
@@ -69,9 +71,11 @@ struct RouteResult
 
     Kind kind;
     BaseInterface out_iface;
-    IPAddr next_hop;        // == destination if directly attached
+    Addr next_hop;          // == destination if directly attached
     ubyte ttl_decrement;
 }
+alias RouteResult  = RouteResultT!IPAddr;
+alias RouteResult6 = RouteResultT!IPv6Addr;
 
 
 struct IPStack
@@ -84,7 +88,8 @@ nothrow @nogc:
     {
         neighbour_v4.send_request = &v4_send_request;
         neighbour_v4.drain        = &v4_drain;
-        // TODO: ND wiring once v6 lands
+        neighbour_v6.send_request = &v6_send_request;
+        neighbour_v6.drain        = &v6_drain;
     }
 
     void output_v4(ref Packet pkt)
@@ -107,7 +112,16 @@ nothrow @nogc:
     {
         if (firewall_v6.run(HookPoint.output, pkt) == Verdict.drop)
             return;
-        // TODO: RouteResult r = route_lookup_v6(pkt); dispatch(pkt, r, firewall_v6);
+        RouteResult6 r = route_lookup_v6(pkt);
+        dispatch_v6(pkt, r, null);
+    }
+
+    void output_v6_routed(ref Packet pkt, BaseInterface egress, IPv6Addr next_hop)
+    {
+        if (firewall_v6.run(HookPoint.output, pkt) == Verdict.drop)
+            return;
+        RouteResult6 r = RouteResult6(RouteResult6.Kind.forward, egress, next_hop, 1);
+        dispatch_v6(pkt, r, null);
     }
 
     void update()
@@ -196,6 +210,102 @@ nothrow @nogc:
                 log.trace("route dst=", dst, " -> kind=", best.kind, " via=", best.next_hop, " (", best.out_iface ? best.out_iface.name[] : "<none>", ')');
             else
                 log.trace("route dst=", dst, " -> kind=", best.kind, " via=", best.out_iface ? best.out_iface.name[] : "<none>");
+        }
+
+        return best;
+    }
+
+    IPv6Addr select_source_v6(IPv6Addr dst, BaseInterface iface_hint)
+    {
+        if (dst.is_link_local || dst.is_multicast)
+        {
+            if (iface_hint)
+                return link_local_of(iface_hint);
+            return IPv6Addr.any;
+        }
+
+        RouteResult6 r = route_lookup_v6_dst(dst, iface_hint);
+        if (r.kind == RouteResult6.Kind.local)
+            return dst;
+        if (r.kind != RouteResult6.Kind.forward || !r.out_iface)
+            return IPv6Addr.any;
+        // TODO: RFC 6724 source selection; for now first non-link-local address on the egress iface
+        foreach (a; Collection!IPv6Address().values)
+            if (a.iface is r.out_iface && !a.address.addr.is_link_local)
+                return a.address.addr;
+        return link_local_of(r.out_iface);
+    }
+
+    RouteResult6 route_lookup_v6_dst(IPv6Addr dst, BaseInterface iface_hint = null)
+    {
+        if (dst == IPv6Addr.loopback)
+        {
+            version (DebugIPRoute)
+                log.trace("route6 dst=", dst, " -> local (loopback)");
+            return RouteResult6(RouteResult6.Kind.local, null, dst, 0);
+        }
+
+        // Link-local and multicast destinations never leave the link; they need
+        // an interface scope rather than a route.
+        if (dst.is_link_local || dst.is_multicast)
+        {
+            if (iface_hint)
+                return RouteResult6(RouteResult6.Kind.forward, iface_hint, dst, 0);
+            return RouteResult6(RouteResult6.Kind.none);
+        }
+
+        foreach (a; Collection!IPv6Address().values)
+        {
+            if (a.address.addr == dst)
+            {
+                version (DebugIPRoute)
+                    log.trace("route6 dst=", dst, " -> local on ", a.iface.name[]);
+                return RouteResult6(RouteResult6.Kind.local, a.iface, dst, 0);
+            }
+        }
+
+        IPv6Route best_rt = null;
+        ubyte best_prefix = 0;
+        foreach (rt; Collection!IPv6Route().values)
+        {
+            if (!rt.destination.contains(dst))
+                continue;
+            ubyte plen = rt.destination.prefix_len;
+            if (best_rt && plen <= best_prefix)
+                continue;
+            best_rt = rt;
+            best_prefix = plen;
+        }
+
+        RouteResult6 best = RouteResult6(RouteResult6.Kind.none);
+        if (best_rt)
+        {
+            if (best_rt.blackhole)
+                best = RouteResult6(RouteResult6.Kind.blackhole);
+            else
+            {
+                IPv6Addr next = best_rt.gateway != IPv6Addr.any ? best_rt.gateway : dst;
+                BaseInterface egress = best_rt.out_interface;
+                if (!egress && best_rt.gateway != IPv6Addr.any && !best_rt.gateway.is_link_local)
+                    egress = resolve_connected_iface_v6(best_rt.gateway);
+                if (egress)
+                    best = RouteResult6(RouteResult6.Kind.forward, egress, next, 1);
+            }
+        }
+
+        // Same implicit-connected fallback HACK as v4; resolve both together.
+        if (best.kind == RouteResult6.Kind.none)
+        {
+            if (BaseInterface egress = resolve_connected_iface_v6(dst))
+                best = RouteResult6(RouteResult6.Kind.forward, egress, dst, 1);
+        }
+
+        version (DebugIPRoute)
+        {
+            if (best.kind == RouteResult6.Kind.none)
+                log.trace("route6 dst=", dst, " -> none");
+            else
+                log.trace("route6 dst=", dst, " -> kind=", best.kind, " via=", best.next_hop, " (", best.out_iface ? best.out_iface.name[] : "<none>", ')');
         }
 
         return best;
@@ -297,14 +407,52 @@ private:
 
     void ingress_v6(ref Packet pkt, BaseInterface iface)
     {
-        // TODO: validate v6 header: version==6, payload_length, walk extension headers
+        if (pkt.data.length < IPv6Header.sizeof)
+            return;
+
+        const ip = cast(const IPv6Header*)pkt.data.ptr;
+        if (ip.version_ != 6)
+            return;
+        size_t total = IPv6Header.sizeof + ip.payload_length.bigEndianToNative!ushort;
+        if (total > pkt.data.length)
+            return;
+
         // TODO: reassembly via fragment extension header
         // TODO: conntrack lookup for stateful firewall
 
         if (firewall_v6.run(HookPoint.prerouting, pkt) == Verdict.drop)
             return;
 
-        // TODO: RouteResult r = route_lookup_v6(pkt); dispatch(pkt, r, firewall_v6);
+        IPv6Addr dst = ip.dst_addr;
+        IPv6Addr src = ip.src_addr;
+
+        if (src.is_multicast)
+            return;
+
+        if (dst.is_multicast)
+        {
+            if (!is_our_multicast_v6(dst, iface))
+                return;
+            if (firewall_v6.run(HookPoint.input, pkt) == Verdict.drop)
+                return;
+            deliver_local_v6(pkt, iface);
+            return;
+        }
+
+        if (is_our_ip_v6(dst, iface))
+        {
+            if (firewall_v6.run(HookPoint.input, pkt) == Verdict.drop)
+                return;
+            deliver_local_v6(pkt, iface);
+            return;
+        }
+
+        // Link-local scope never crosses the link, in either address.
+        if (dst.is_link_local || src.is_link_local)
+            return;
+
+        RouteResult6 r = route_lookup_v6_dst(dst);
+        dispatch_v6(pkt, r, iface);
     }
 
     void dispatch(ref Packet pkt, ref RouteResult r, ref FirewallChains fw)
@@ -350,9 +498,150 @@ private:
         }
     }
 
+    void dispatch_v6(ref Packet pkt, ref RouteResult6 r, BaseInterface in_iface)
+    {
+        final switch (r.kind)
+        {
+            case RouteResult6.Kind.none:
+                version (DebugIP)
+                    log.trace("no route for v6 packet");
+                icmp6_send_error(this, Icmp6Type.dest_unreachable, Icmp6DestUnreachableCode.no_route, pkt);
+                return;
+            case RouteResult6.Kind.blackhole:
+                return;
+            case RouteResult6.Kind.local:
+                if (firewall_v6.run(HookPoint.input, pkt) == Verdict.drop)
+                    return;
+                deliver_local_v6(pkt, in_iface);
+                return;
+            case RouteResult6.Kind.forward:
+            {
+                if (pkt.data.length < IPv6Header.sizeof)
+                    return;
+                auto ip = cast(IPv6Header*)pkt.data.ptr;
+                if (r.ttl_decrement)
+                {
+                    if (ip.hop_limit <= r.ttl_decrement)
+                    {
+                        icmp6_send_error(this, Icmp6Type.time_exceeded, 0, pkt);
+                        return;
+                    }
+                    ip.hop_limit -= r.ttl_decrement;
+                }
+                // TODO: if pkt.length > out_iface.actual_mtu, send packet-too-big
+                if (firewall_v6.run(HookPoint.forward, pkt) == Verdict.drop)
+                    return;
+                egress_v6(pkt, r.out_iface, r.next_hop);
+                return;
+            }
+        }
+    }
+
+    void egress_v6(ref Packet pkt, BaseInterface out_iface, IPv6Addr next_hop)
+    {
+        if (firewall_v6.run(HookPoint.postrouting, pkt) == Verdict.drop)
+            return;
+
+        if (!out_iface)
+            return;
+
+        version (DebugIPEgress)
+            log.trace("egress6 if=", out_iface.name, " next_hop=", next_hop, " (", pkt.length, ")");
+
+        if (next_hop.is_multicast)
+        {
+            MACAddress mac = ether_multicast(next_hop);
+            frame_and_send(pkt, out_iface, mac.b[]);
+            return;
+        }
+
+        const(ubyte)[] link_addr = neighbour_v6.resolve(next_hop, out_iface, pkt);
+        if (link_addr is null)
+        {
+            version (DebugIPEgress)
+                log.trace("egress6 defer: no neighbour for ", next_hop, " (queued, awaiting resolution)");
+            return;
+        }
+
+        frame_and_send(pkt, out_iface, link_addr);
+    }
+
+    void deliver_local_v6(ref Packet pkt, BaseInterface iface)
+    {
+        size_t l4_offset, nh_offset;
+        IPProtocol proto;
+        if (!walk_ext_headers_v6(pkt.data, l4_offset, nh_offset, proto))
+            return;
+
+        switch (proto)
+        {
+            case IPProtocol.icmp6:
+                .icmp6_input(this, pkt, l4_offset, iface);
+                break;
+            case IPProtocol.tcp:
+                // TODO: v6 TCP delivery into the transport engine
+                break;
+            case IPProtocol.udp:
+                // TODO: v6 UDP delivery
+                break;
+            case IPProtocol.no_next:
+                break;
+            default:
+                icmp6_send_error(this, Icmp6Type.parameter_problem, 1, pkt, cast(uint)nh_offset);
+                break;
+        }
+    }
+
+    // Walk v6 extension headers to the upper-layer protocol. Returns false for
+    // malformed chains and fragments (no reassembly yet). nh_offset is the
+    // offset of the field that named the resulting protocol.
+    bool walk_ext_headers_v6(const(void)[] data, out size_t l4_offset, out size_t nh_offset, out IPProtocol proto)
+    {
+        if (data.length < IPv6Header.sizeof)
+            return false;
+        const ip = cast(const IPv6Header*)data.ptr;
+        const bytes = cast(const(ubyte)*)data.ptr;
+
+        IPProtocol next = ip.next_header;
+        nh_offset = IPv6Header.next_header.offsetof;
+        size_t offset = IPv6Header.sizeof;
+        for (int depth = 0; depth < 8; ++depth)
+        {
+            switch (next)
+            {
+                case IPProtocol.hopopt:
+                case IPProtocol.ipv6_route:
+                case IPProtocol.ipv6_opts:
+                    if (data.length < offset + 8)
+                        return false;
+                    next = cast(IPProtocol)bytes[offset];
+                    nh_offset = offset;
+                    offset += (bytes[offset + 1] + 1) * 8;
+                    if (offset > data.length)
+                        return false;
+                    break;
+                case IPProtocol.ipv6_frag:
+                    return false;   // TODO: reassembly
+                default:
+                    l4_offset = offset;
+                    proto = next;
+                    return true;
+            }
+        }
+        return false;
+    }
+
     BaseInterface resolve_connected_iface(IPAddr ip)
     {
         foreach (a; Collection!IPAddress().values)
+            if (a.address.contains(ip))
+                return a.iface;
+        return null;
+    }
+
+    BaseInterface resolve_connected_iface_v6(IPv6Addr ip)
+    {
+        foreach (a; Collection!IPv6Address().values)
             if (a.address.contains(ip))
                 return a.iface;
         return null;
@@ -392,6 +681,14 @@ private:
             return RouteResult(RouteResult.Kind.none);
         const IPv4Header* h = cast(const(IPv4Header)*)pkt.data.ptr;
         return route_lookup_v4_dst(IPAddr(h.dst));
+    }
+
+    RouteResult6 route_lookup_v6(ref const Packet pkt)
+    {
+        if (pkt.length < IPv6Header.sizeof)
+            return RouteResult6(RouteResult6.Kind.none);
+        const IPv6Header* h = cast(const(IPv6Header)*)pkt.data.ptr;
+        return route_lookup_v6_dst(h.dst_addr);
     }
 
     void egress(ref Packet pkt, BaseInterface out_iface, IPAddr next_hop, ref FirewallChains fw)
@@ -464,6 +761,17 @@ private:
     }
 
     void v4_drain(ref Packet pkt, BaseInterface iface, const(ubyte)[] link_addr)
+    {
+        frame_and_send(pkt, iface, link_addr);
+    }
+
+    void v6_send_request(IPv6Addr target, BaseInterface iface)
+    {
+        if (EthernetStation station = cast(EthernetStation)iface)
+            send_neighbour_solicit(this, target, station);
+    }
+
+    void v6_drain(ref Packet pkt, BaseInterface iface, const(ubyte)[] link_addr)
     {
         frame_and_send(pkt, iface, link_addr);
     }

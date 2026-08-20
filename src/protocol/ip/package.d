@@ -3,6 +3,7 @@ module protocol.ip;
 import urt.array;
 import urt.inet;
 import urt.mem.temp;
+import urt.meta.nullable;
 import urt.string;
 import urt.time;
 import urt.log;
@@ -216,9 +217,15 @@ nothrow @nogc:
 
 enum IPProtocol : ubyte
 {
-    icmp = 1,
-    tcp  = 6,
-    udp  = 17,
+    hopopt     = 0,     // v6 hop-by-hop options extension header
+    icmp       = 1,
+    tcp        = 6,
+    udp        = 17,
+    ipv6_route = 43,    // v6 routing extension header
+    ipv6_frag  = 44,    // v6 fragment extension header
+    icmp6      = 58,
+    no_next    = 59,
+    ipv6_opts  = 60,    // v6 destination options extension header
 }
 
 struct IPv4Header
@@ -242,6 +249,54 @@ nothrow @nogc:
         => ver_ihl & 0x0F;
 }
 
+struct IPv6Header
+{
+nothrow @nogc:
+
+    ubyte[4] ver_tc_flow;   // 4b version, 8b traffic class, 20b flow label
+    ubyte[2] payload_length;
+    IPProtocol next_header;
+    ubyte hop_limit;
+    ubyte[16] src;
+    ubyte[16] dst;
+
+    ubyte version_() const pure
+        => ver_tc_flow[0] >> 4;
+
+    IPv6Addr src_addr() const pure
+    {
+        IPv6Addr a;
+        foreach (i; 0 .. 8)
+            a.s[i] = cast(ushort)(src[i*2] << 8 | src[i*2 + 1]);
+        return a;
+    }
+    IPv6Addr dst_addr() const pure
+    {
+        IPv6Addr a;
+        foreach (i; 0 .. 8)
+            a.s[i] = cast(ushort)(dst[i*2] << 8 | dst[i*2 + 1]);
+        return a;
+    }
+
+    void src_addr(IPv6Addr a) pure
+    {
+        foreach (i; 0 .. 8)
+        {
+            src[i*2]     = cast(ubyte)(a.s[i] >> 8);
+            src[i*2 + 1] = cast(ubyte)a.s[i];
+        }
+    }
+    void dst_addr(IPv6Addr a) pure
+    {
+        foreach (i; 0 .. 8)
+        {
+            dst[i*2]     = cast(ubyte)(a.s[i] >> 8);
+            dst[i*2 + 1] = cast(ubyte)a.s[i];
+        }
+    }
+}
+static assert(IPv6Header.sizeof == 40);
+
 
 class IPModule : Module
 {
@@ -261,9 +316,11 @@ nothrow @nogc:
     override void init()
     {
         g_app.console.register_collection!IPAddress();
+        g_app.console.register_collection!IPv6Address();
         g_app.console.register_collection!IPPool();
         g_app.console.register_collection!IPv6Pool();
         g_app.console.register_collection!IPRoute();
+        g_app.console.register_collection!IPv6Route();
 
         version (KernelMirror)
         {
@@ -280,6 +337,8 @@ nothrow @nogc:
             //       (PacketType._6lowpan, ppp/IPCP frame type, raw_ip tunnels).
 
             g_app.console.register_command!neighbour_v4_print("/protocol/ip/neighbour", this, "print");
+            g_app.console.register_command!neighbour_v6_print("/protocol/ip/neighbour6", this, "print");
+            g_app.console.register_command!ping6("/protocol/ip", this, "ping6");
         }
     }
 
@@ -319,6 +378,137 @@ nothrow @nogc:
         }
 
         t.render(session);
+    }
+
+    static if (ip_lowering)
+    void neighbour_v6_print(Session session)
+    {
+        import router.iface.mac : MACAddress;
+        import manager.console.table : Table;
+        import urt.mem.temp : tconcat;
+
+        auto entries = _stack.neighbour_v6_cache.entries;
+        if (entries.length == 0)
+        {
+            session.write_line("No IPv6 neighbour entries");
+            return;
+        }
+
+        Table t;
+        t.add_column("ip");
+        t.add_column("mac");
+        t.add_column("state");
+        t.add_column("rtry", Table.TextAlign.right);
+        t.add_column("iface");
+
+        foreach (ref e; entries)
+        {
+            MACAddress mac;
+            if (e.link_addr_len >= 6)
+                mac.b[] = e.link_addr[0 .. 6];
+
+            t.add_row();
+            t.cell(tconcat(e.ip));
+            t.cell(tconcat(mac));
+            t.cell(tconcat(e.state));
+            t.cell(tconcat(e.retry_count));
+            t.cell(e.iface ? e.iface.name[] : "");
+        }
+
+        t.render(session);
+    }
+
+    static if (ip_lowering)
+    {
+        Ping6State ping6(Session session, IPv6Addr address, Nullable!uint count, Nullable!BaseInterface iface)
+        {
+            BaseInterface scope_iface = iface ? iface.value : null;
+            if (address == IPv6Addr.any)
+            {
+                session.write_line("ping6 requires a destination address");
+                return null;
+            }
+            if (address.is_link_local && !scope_iface)
+            {
+                session.write_line("link-local destinations need iface=<interface> for scope");
+                return null;
+            }
+            return g_app.allocator.allocT!Ping6State(&_stack, session, address, count ? count.value : 4, scope_iface);
+        }
+
+        static class Ping6State : CommandState
+        {
+        nothrow @nogc:
+
+            CommandCompletionState state = CommandCompletionState.in_progress;
+
+            IPStack* stack;
+            IPv6Addr dst;
+            BaseInterface iface;
+            uint count;
+            uint sent;
+            uint replies;
+            ushort seq;
+            MonoTime last_send;
+
+            this(IPStack* stack, Session session, IPv6Addr dst, uint count, BaseInterface iface)
+            {
+                super(session, null);
+                this.stack = stack;
+                this.dst = dst;
+                this.iface = iface;
+                this.count = count ? count : 1;
+                send_round();
+            }
+
+            override CommandCompletionState update()
+            {
+                import protocol.ip.icmp6 : icmp6_echo_cancel;
+
+                if (state == CommandCompletionState.cancel_requested)
+                {
+                    icmp6_echo_cancel(seq);
+                    state = CommandCompletionState.cancelled;
+                    return state;
+                }
+                if (getTime() - last_send >= 1.seconds)
+                {
+                    icmp6_echo_cancel(seq);
+                    if (sent >= count)
+                    {
+                        session.write_line(replies, " replies for ", sent, " requests");
+                        state = CommandCompletionState.finished;
+                    }
+                    else
+                        send_round();
+                }
+                return state;
+            }
+
+            override void request_cancel()
+            {
+                if (state == CommandCompletionState.in_progress)
+                    state = CommandCompletionState.cancel_requested;
+            }
+
+        private:
+            void send_round()
+            {
+                import protocol.ip.icmp6 : icmp6_echo_send;
+
+                ++sent;
+                last_send = getTime();
+                seq = icmp6_echo_send(*stack, dst, iface, &on_reply);
+                if (seq == 0)
+                    session.write_line("no source address or route for ", dst);
+            }
+
+            void on_reply(IPv6Addr from, Duration rtt)
+            {
+                ++replies;
+                session.write_line("reply from ", from, ": time=", rtt);
+            }
+        }
     }
 
     version(Windows)
@@ -424,9 +614,11 @@ nothrow @nogc:
     override void update()
     {
         Collection!IPAddress().update_all();
+        Collection!IPv6Address().update_all();
         Collection!IPPool().update_all();
         Collection!IPv6Pool().update_all();
         Collection!IPRoute().update_all();
+        Collection!IPv6Route().update_all();
 
         static if (ip_lowering)
             _stack.update();
