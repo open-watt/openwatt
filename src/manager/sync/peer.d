@@ -535,6 +535,21 @@ package:
     Array!EID        _adopted;           // handle table: local ids for names the peer announced
     SyncEncoderKind  _encoder;
 
+    // Bulk traffic stops short of the window's end: the claim exchange and the rest
+    // of the session's control frames must always find room, or the overflow path
+    // restarts the session and the bulk walk begins again from nothing.
+    enum control_reserve = 16;
+
+    // Control frames the reliable window can still accept; an unarmed sublayer
+    // rides a transport that promises delivery, so it never backs up here.
+    size_t control_window_free()
+        => !sublayer_armed ? size_t.max : (_resend.length >= max_unacked ? 0 : max_unacked - _resend.length);
+
+    // registry introduction cursor; SyncModule paces the walk against the window
+    uint             _intro_table;
+    uint             _intro_slot;
+    bool             _introducing;
+
     ubyte            _remote_caps;       // hello negotiation; 0 = no hello received
     ulong            _remote_node_id;    // hello identity; 0 = peer announced none
     PeerRole         _remote_role;
@@ -593,6 +608,7 @@ private:
     enum retransmit_ms = 250;
     enum max_retries = 8;
     enum max_unacked = 64;
+
     enum reorder_cap = 16;
     enum reorder_span = 32;
     enum backlog_max_frames = 32;
