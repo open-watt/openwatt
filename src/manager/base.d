@@ -964,6 +964,12 @@ protected:
     const(char)[] _fail_reason;
 
     final void set_state(State new_state)
+        => set_state_impl(new_state, true);
+
+    final void set_state_deferred(State new_state)
+        => set_state_impl(new_state, false);
+
+    private void set_state_impl(State new_state, bool dispatch)
     {
         assert(_state != State.destroyed, "Cannot change state of a destroyed object!");
 
@@ -1020,7 +1026,8 @@ protected:
             case State.stopping:
             case State.failure:
             do_update:
-                do_update();
+                if (dispatch)
+                    do_update();
                 break;
 
             default:
@@ -1114,6 +1121,8 @@ package:
 
             case State.starting:
                 CompletionStatus s = startup();
+                if (_state != State.starting)
+                    break;      // startup() re-targeted us (restart, destroy); its result is stale
                 if (s == CompletionStatus.complete)
                     set_state(State.running);
                 else if (s == CompletionStatus.error)
@@ -1124,10 +1133,13 @@ package:
             case State.stopping:
             case State.destroying:
             case State.failure:
+                State entry = _state;
                 CompletionStatus s = shutdown();
                 debug assert(s != CompletionStatus.error, "shutdown() should not fail; just clear/reset the state!");
+                if (_state != entry)
+                    break;
                 if (s == CompletionStatus.complete)
-                    set_state(cast(State)(_state & ~(_stop | _valid)));
+                    set_state_deferred(cast(State)(_state & ~(_stop | _valid)));
                 break;
 
             case State.running:
