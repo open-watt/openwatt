@@ -432,7 +432,10 @@ expose these properties in addition to the common interface properties above:
 
 A driver-backed station adopts the driver's address so its source address
 matches the address accepted by the medium. A supported `mac` assignment is
-accepted only after the driver has reprogrammed that address. A bridge generates
+accepted only after the driver has reprogrammed that address, which drops that
+interface's link while it is applied. An ESP32 `wlan` and `ap` use independent
+addresses, and only the assigned interface restarts. In APSTA mode, the station's
+reconnection scan can still disrupt clients of the running AP. A bridge generates
 an address from the node id, while a VLAN follows its parent interface's address
 and cannot be assigned independently.
 

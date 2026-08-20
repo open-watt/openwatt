@@ -48,6 +48,11 @@ nothrow @nogc:
         return wifi_get_mac(_wifi, vif, mac);
     }
 
+    final Result drv_set_mac(WifiVif vif, ref const MACAddress mac)
+    {
+        return wifi_set_mac(_wifi, vif, mac.b);
+    }
+
     final bool drv_get_capability(WifiBand requested_band, ref WifiCapability caps)
     {
         if (requested_band != WifiBand.any)
@@ -665,6 +670,10 @@ protected:
             return CompletionStatus.continue_;
         }
 
+        CompletionStatus mac_state = sync_mac(radio);
+        if (mac_state != CompletionStatus.complete)
+            return mac_state;
+
         if (_connect_initiated)
         {
             if (radio.sta_connected_seq != _connect_sta_connected_seq)
@@ -715,10 +724,6 @@ protected:
             return CompletionStatus.error;
         }
 
-        ubyte[6] mac_buf = void;
-        if (radio.drv_get_mac(WifiVif.sta, mac_buf))
-            adopt_mac(MACAddress(mac_buf));
-
         _connect_initiated = true;
         _status_detail = "Connecting";
         log.info("connecting to '", ssid, "'");
@@ -741,6 +746,8 @@ protected:
         if (_connect_initiated && radio)
             wifi_sta_disconnect(radio.wifi);
         _connect_initiated = false;
+        _mac_synced = false;
+        _mac_pushed = false;
         clear_link_info();
         if (_state != State.failure)
             _status_detail = null;
@@ -749,7 +756,49 @@ protected:
 
 protected:
     override const(char)[] apply_mac(ref MACAddress value)
-        => "setting the hardware address is not supported";
+    {
+        if (value == MACAddress.init || value.is_multicast)
+            return "not a valid unicast hardware address";
+        auto r = cast(BuiltinWiFi)radio;
+        if (r && r.running && r.drv_set_mac(WifiVif.sta, value).failed)
+            return "hardware address rejected by driver";
+        _assigned_mac = value;
+        _mac_pushed = false;
+        restart();
+        return null;
+    }
+
+    // ESP32 latches the vif address when it starts, so sync it before configuration.
+    final CompletionStatus sync_mac(BuiltinWiFi radio)
+    {
+        if (_mac_synced)
+            return CompletionStatus.complete;
+
+        ubyte[6] hw = void;
+        if (radio.drv_get_mac(WifiVif.sta, hw).failed)
+        {
+            _status_detail = "Driver would not report its hardware address";
+            log.error(_status_detail);
+            return CompletionStatus.error;
+        }
+
+        if (_assigned_mac != MACAddress.init && _assigned_mac != MACAddress(hw))
+        {
+            if (_mac_pushed || radio.drv_set_mac(WifiVif.sta, _assigned_mac).failed)
+            {
+                _status_detail = "Hardware address rejected by driver";
+                log.error(_status_detail);
+                return CompletionStatus.error;
+            }
+            _mac_pushed = true;
+            _status_detail = "Applying hardware address";
+            return CompletionStatus.continue_;
+        }
+
+        adopt_mac(MACAddress(hw));
+        _mac_synced = true;
+        return CompletionStatus.complete;
+    }
 
     override int wire_send(const(ubyte)[] frame)
     {
@@ -765,9 +814,12 @@ private:
 
     const(char)[] _status_detail;
     MACAddress _bssid;
+    MACAddress _assigned_mac;
     int _rssi;
     ubyte _signal_quality;
     bool _connect_initiated;
+    bool _mac_synced;
+    bool _mac_pushed;
     uint _connect_sta_connected_seq;
     uint _connect_sta_disconnected_seq;
     uint _last_sta_disconnected_seq;
@@ -908,6 +960,10 @@ protected:
             return CompletionStatus.continue_;
         }
 
+        CompletionStatus mac_state = sync_mac(radio);
+        if (mac_state != CompletionStatus.complete)
+            return mac_state;
+
         if (_ap_config_sent)
         {
             if (radio.ap_started_seq != _ap_started_seq_start)
@@ -966,10 +1022,6 @@ protected:
             return CompletionStatus.error;
         }
 
-        ubyte[6] mac_buf = void;
-        if (radio.drv_get_mac(WifiVif.ap, mac_buf))
-            adopt_mac(MACAddress(mac_buf));
-
         // the BSS runs whatever the radio's protocol set allows, at the width we just configured
         WifiCapability caps;
         if (radio.drv_get_capability(radio.band, caps))
@@ -985,13 +1037,57 @@ protected:
     override CompletionStatus shutdown()
     {
         _ap_config_sent = false;
+        _mac_synced = false;
+        _mac_pushed = false;
         _status_detail = null;
         return super.shutdown();
     }
 
 protected:
     override const(char)[] apply_mac(ref MACAddress value)
-        => "setting the hardware address is not supported";
+    {
+        if (value == MACAddress.init || value.is_multicast)
+            return "not a valid unicast hardware address";
+        auto r = cast(BuiltinWiFi)radio;
+        if (r && r.running && r.drv_set_mac(WifiVif.ap, value).failed)
+            return "hardware address rejected by driver";
+        _assigned_mac = value;
+        _mac_pushed = false;
+        restart();
+        return null;
+    }
+
+    // ESP32 latches the vif address when it starts, so sync it before configuration.
+    final CompletionStatus sync_mac(BuiltinWiFi radio)
+    {
+        if (_mac_synced)
+            return CompletionStatus.complete;
+
+        ubyte[6] hw = void;
+        if (radio.drv_get_mac(WifiVif.ap, hw).failed)
+        {
+            _status_detail = "Driver would not report its hardware address";
+            log.error(_status_detail);
+            return CompletionStatus.error;
+        }
+
+        if (_assigned_mac != MACAddress.init && _assigned_mac != MACAddress(hw))
+        {
+            if (_mac_pushed || radio.drv_set_mac(WifiVif.ap, _assigned_mac).failed)
+            {
+                _status_detail = "Hardware address rejected by driver";
+                log.error(_status_detail);
+                return CompletionStatus.error;
+            }
+            _mac_pushed = true;
+            _status_detail = "Applying hardware address";
+            return CompletionStatus.continue_;
+        }
+
+        adopt_mac(MACAddress(hw));
+        _mac_synced = true;
+        return CompletionStatus.complete;
+    }
 
     override int wire_send(const(ubyte)[] frame)
     {
@@ -1006,7 +1102,10 @@ protected:
 private:
 
     const(char)[] _status_detail;
+    MACAddress _assigned_mac;
     bool _ap_config_sent;
+    bool _mac_synced;
+    bool _mac_pushed;
     uint _ap_started_seq_start;
     uint _ap_stopped_seq_start;
     uint _last_ap_stopped_seq;
