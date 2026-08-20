@@ -421,6 +421,13 @@ nothrow @nogc:
 
     void subscribe(InterfaceSubscriber.PacketHandler packet_handler, ref const PacketFilter filter, void* user_data = null)
     {
+        // release builds have no bounds check: overrunning this scribbles over the
+        // fields behind it, and the interface then misroutes traffic it still accepts
+        if (_num_subscribers >= _subscribers.length)
+        {
+            log.error("subscriber table full (", cast(uint)_subscribers.length, " slots); refusing subscription");
+            return;
+        }
         bool was = _num_subscribers != 0;
         _subscribers[_num_subscribers++] = InterfaceSubscriber(filter, packet_handler, user_data);
         if (!was)
@@ -742,7 +749,7 @@ package:
 
 //private:
 protected: // TODO: should probably be private?
-    InterfaceSubscriber[4] _subscribers;
+    InterfaceSubscriber[8] _subscribers;
     ubyte _num_subscribers;
     int _kernel_ifindex;    // OS netdev ifindex when a platform backend backs this interface (0 = none)
     Array!VLANInterface _vlans;
