@@ -252,7 +252,7 @@ void icmp6_input(ref IPStack stack, ref Packet pkt, size_t l4_offset, BaseInterf
             on_neighbour_advert(stack, *ip, icmp, iface);
             break;
         case Icmp6Type.router_solicit:
-            // TODO: answer when we grow a router-advertisement role
+            on_router_solicit(stack, *ip, icmp, iface);
             break;
         case Icmp6Type.router_advert:
             on_router_advert(stack, *ip, icmp, iface);

@@ -1,7 +1,5 @@
 module protocol.ip.nd;
 
-version (UseInternalIPStack):
-
 import urt.array;
 import urt.endian;
 import urt.hash;
@@ -81,6 +79,11 @@ IPv6Addr link_local_of(BaseInterface iface)
 }
 
 
+// Everything below is the internal stack's ND engine; host-stack builds keep
+// only the pure address helpers above.
+version (UseInternalIPStack):
+
+
 bool is_our_ip_v6(IPv6Addr ip, BaseInterface iface)
 {
     if (ip == link_local_of(iface))
@@ -91,12 +94,21 @@ bool is_our_ip_v6(IPv6Addr ip, BaseInterface iface)
     return false;
 }
 
-// True for multicast groups we implicitly listen on: all-nodes, and the
-// solicited-node group of every address we own on `iface`.
+// True for multicast groups we implicitly listen on: all-nodes, all-routers
+// while advertising on `iface`, and the solicited-node group of every address
+// we own there.
 bool is_our_multicast_v6(IPv6Addr ip, BaseInterface iface)
 {
     if (ip == IPv6Addr.linkLocal_allNodes)
         return true;
+    if (ip == IPv6Addr.linkLocal_routers)
+    {
+        import protocol.ip.ra : RAService;
+        foreach (r; Collection!RAService().values)
+            if (r.iface is iface && r.running)
+                return true;
+        return false;
+    }
     if ((ip.s[0] != 0xFF02) || ip.s[5] != 1 || (ip.s[6] & 0xFF00) != 0xFF00)
         return false;
     if (ip == solicited_node(link_local_of(iface)))
@@ -189,6 +201,27 @@ void on_neighbour_advert(ref IPStack stack, ref const IPv6Header ip, const(ubyte
         write_log(Severity.debug_, "nd", null, "rx advert ", target, tlla.length == 6 ? " is-at tlla" : " (no tlla)", " on ", iface.name);
     if (tlla.length == 6)
         stack.neighbour_v6_cache.learn(target, iface, tlla);
+}
+
+
+void on_router_solicit(ref IPStack stack, ref const IPv6Header ip, const(ubyte)[] icmp, BaseInterface iface)
+{
+    import protocol.ip.ra : RAService;
+
+    if (ip.hop_limit != 255 || icmp[1] != 0 || icmp.length < 8)
+        return;
+
+    IPv6Addr src = ip.src_addr;
+    const(ubyte)[] slla = find_option(icmp[8 .. $], NDOption.source_link_addr);
+    if (src != IPv6Addr.any && slla.length == 6)
+        stack.neighbour_v6_cache.learn(src, iface, slla);
+
+    version (DebugND)
+        write_log(Severity.debug_, "nd", null, "rx router-solicit from ", src, " on ", iface.name);
+
+    foreach (r; Collection!RAService().values)
+        if (r.iface is iface)
+            r.solicited();
 }
 
 

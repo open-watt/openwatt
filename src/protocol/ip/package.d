@@ -330,6 +330,9 @@ nothrow @nogc:
 
         static if (ip_lowering)
         {
+            import protocol.ip.ra : RAService;
+            g_app.console.register_collection!RAService();
+
             _stack.init_resolvers();
 
             register_frame_handler(PacketType.ethernet, &_stack.on_packet);
@@ -621,7 +624,11 @@ nothrow @nogc:
         Collection!IPv6Route().update_all();
 
         static if (ip_lowering)
+        {
+            import protocol.ip.ra : RAService;
+            Collection!RAService().update_all();
             _stack.update();
+        }
 
         version (KernelMirror)
         {
