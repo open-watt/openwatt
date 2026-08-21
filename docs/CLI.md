@@ -755,6 +755,16 @@ is required to obtain a global address on a network that advertises one.
 | `blackhole` | `yes`/`no` | Silently discard matching traffic. |
 | `distance` | `0` to `255` | Route preference; lower wins. |
 
+`/protocol/ip/pool6` describes a v6 allocation prefix serving two shapes at
+once: individual host addresses (DHCPv6 `IA_NA`) and delegated sub-prefixes
+(DHCPv6 `IA_PD`) of `delegation-length` carved from the same prefix.
+
+| Property | Values | Description |
+| --- | --- | --- |
+| `prefix` | IPv6 address | The pool's covering prefix. |
+| `prefix-length` | `1` to `128` | Length of the covering prefix. |
+| `delegation-length` | `prefix-length+1` to `64` | Size of delegated sub-prefixes; unset disables delegation. |
+
 | Command | Description |
 | --- | --- |
 | `/protocol/ip/neighbour/print` | Show the IPv4 neighbour (ARP) cache: address, MAC, reachability state, retries, interface. |
@@ -765,6 +775,45 @@ is required to obtain a global address on a network that advertises one.
 /protocol/ip/address6/add address=2001:db8:1::10/64 interface=eth0
 /protocol/ip/route6/add destination=::/0 gateway=fe80::1 out-interface=eth0
 /protocol/ip/neighbour6/print
+```
+
+### `/protocol/dhcp/client6` and `/protocol/dhcp/server6`
+
+DHCPv6 rides beside SLAAC: addresses and delegated prefixes come from DHCPv6,
+while the default route always comes from Router Advertisements (the protocol
+carries no routes by design).
+
+The client requests a host address (`IA_NA`) and/or a delegated prefix
+(`IA_PD`). A bound address appears as a dynamic `address6`; a delegated prefix
+appears as a dynamic `pool6` under `pool-name`, ready for downstream consumers
+to draw from.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `interface` | interface name | | Interface to solicit on. |
+| `request-address` | `yes`/`no` | `yes` | Request an `IA_NA` host address. |
+| `request-prefix` | `yes`/`no` | `no` | Request an `IA_PD` delegated prefix. |
+| `pool-name` | name | `<name>.pd` | Name of the dynamic pool created for the delegated prefix. |
+| `delegation-length` | `1` to `64` | `64` | `delegation-length` applied to the created pool. |
+
+The server leases host addresses and delegates sub-prefixes from one `pool6`,
+tracked as `D`-flagged `/protocol/dhcp/lease6` entries keyed by client DUID.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `interface` | interface name | | Interface to serve on. |
+| `pool` | `pool6` name | | Pool supplying addresses and delegable prefixes. |
+| `lease-time` | duration | `1d` | Valid lifetime granted to clients. |
+| `dns` | IPv6 addresses | empty | DNS servers offered (option 23). |
+
+```
+# upstream: take an address and a /60 out of the provider's delegation
+/protocol/dhcp/client6/add name=wan interface=eth0 request-prefix=true pool-name=site
+
+# downstream: serve addresses and /64s to the LAN from that delegation
+/protocol/ip/pool6/add name=lan prefix="fd00:60::" prefix-length=48 delegation-length=60
+/protocol/dhcp/server6/add name=srv interface=eth1 pool=lan dns="fd00:60::53"
+/protocol/dhcp/lease6/print
 ```
 
 ### `/protocol/http/server`
