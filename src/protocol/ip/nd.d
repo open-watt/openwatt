@@ -169,6 +169,36 @@ void on_neighbour_advert(ref IPStack stack, ref const IPv6Header ip, const(ubyte
     stack.neighbour_v6_cache.advertise(target, iface, target_link_address, router, solicited, override_);
 }
 
+void on_router_solicit(ref IPStack stack, ref const IPv6Header ip, const(ubyte)[] message, BaseInterface iface)
+{
+    import protocol.ip.ra : RAService;
+
+    EthernetStation station = dyn_cast!EthernetStation(iface);
+    if (!station || ip.hop_limit != 255 || message.length < 8 || message[1] != 0)
+        return;
+    const(ubyte)[] options = message[8 .. $];
+    if (!valid_options(options))
+        return;
+
+    IPv6Addr source = ip.src_addr;
+    const(ubyte)[] source_link_address = find_option(options, NDOption.source_link_addr);
+    if (source_link_address.length != 0 && source_link_address.length != 6)
+        return;
+    if (source == IPv6Addr.any && source_link_address.length)
+        return;
+    if (source == IPv6Addr.any && ip.dst_addr != IPv6Addr.linkLocal_routers)
+        return;
+    if (source != IPv6Addr.any && source_link_address.length)
+        stack.neighbour_v6_cache.observe(source, iface, source_link_address);
+
+    version (DebugND)
+        write_log(Severity.debug_, "nd", null, "rx router-solicit from ", source, " on ", iface.name);
+
+    foreach (service; Collection!RAService().values)
+        if (service.iface is iface)
+            service.solicited();
+}
+
 void on_router_advert(ref IPStack stack, ref const IPv6Header ip, const(ubyte)[] message, BaseInterface iface)
 {
     EthernetStation station = dyn_cast!EthernetStation(iface);

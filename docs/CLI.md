@@ -746,6 +746,39 @@ is required to obtain a global address on a network that advertises one.
 /protocol/ip/ping6 address=fe80::1 iface=eth0
 ```
 
+### `/protocol/ip/ra`
+
+The Router Advertisement service makes this node an IPv6 router for a link:
+it advertises one /64 prefix for SLAAC, periodically and in answer to Router
+Solicitations, and withdraws itself (zero router-lifetime) on shutdown. The
+prefix comes from a `pool6` (one slot held for the service's lifetime, so a
+DHCPv6-PD delegation flows straight through) or is given statically; either
+way the node takes prefix+EUI-64 as a dynamic `address6` so the advertised
+subnet is routed and sourced. Only built with the in-tree IP stack; on
+desktop hosts the kernel owns the router role.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `interface` | interface name | | Interface to advertise on. |
+| `pool` | `pool6` name | | Pool to draw the /64 from (`delegation-length` must be 64). |
+| `prefix` | `prefix/64` | | Static alternative to `pool`. |
+| `interval` | duration >= 3s | `200s` | Unsolicited advertisement interval. |
+| `router-lifetime` | duration | `30m` | Default-router lifetime; `0s` advertises prefix only. |
+| `valid-lifetime` | duration | `30d` | Prefix valid lifetime. |
+| `preferred-lifetime` | duration | `7d` | Prefix preferred lifetime. |
+| `managed` | `yes`/`no` | `no` | M flag: clients should use DHCPv6 for addresses. |
+| `other-config` | `yes`/`no` | `no` | O flag: clients should use DHCPv6 for other config. |
+| `dns` | IPv6 addresses | empty | RDNSS servers advertised. |
+
+Durations with a bare `m` suffix parse as metres (the SI unit system owns
+unquoted suffixes); write minutes quoted (`"30m"`) or in another unit.
+
+```
+# advertise a /64 out of the site delegation, with DNS
+/protocol/ip/pool6/add name=site prefix="2001:db8:40::" prefix-length=56 delegation-length=64
+/protocol/ip/ra/add name=lan interface=eth1 pool=site dns="2001:db8:40::53"
+```
+
 ### `/protocol/http/server`
 
 An HTTP server provides the listener and shared policy for its registered

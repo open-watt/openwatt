@@ -226,6 +226,7 @@ void icmp6_input(ref IPStack stack, ref Packet packet, size_t offset, BaseInterf
             on_neighbour_advert(stack, *ip, message, iface);
             break;
         case Icmp6Type.router_solicit:
+            on_router_solicit(stack, *ip, message, iface);
             break;
         case Icmp6Type.router_advert:
             on_router_advert(stack, *ip, message, iface);

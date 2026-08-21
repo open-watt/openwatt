@@ -2038,6 +2038,11 @@ class IPModule : Module
     mixin DeclareModule!"protocol.ip";
 nothrow @nogc:
 
+    version (UseInternalIPStack)
+    static if (has_ipv6)
+    ref IPStack stack() return
+        => _stack;
+
     override void pre_init()
     {
         version (UseInternalIPStack)
@@ -2070,6 +2075,12 @@ nothrow @nogc:
 
         version (UseInternalIPStack)
         {
+            static if (has_ipv6)
+            {
+                import protocol.ip.ra : RAService;
+                g_app.console.register_collection!RAService();
+            }
+
             _stack.init_resolvers();
 
             register_frame_handler(PacketType.ethernet, &_stack.on_packet);
@@ -2392,7 +2403,14 @@ nothrow @nogc:
         Collection!TCPServer().update_all();
 
         version (UseInternalIPStack)
+        {
+            static if (has_ipv6)
+            {
+                import protocol.ip.ra : RAService;
+                Collection!RAService().update_all();
+            }
             _stack.update();
+        }
 
         version (KernelMirror)
         {
