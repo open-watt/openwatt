@@ -18,6 +18,7 @@ import manager.plugin;
 import router.iface;
 import router.iface.address_table;
 import router.iface.ethernet;
+import router.iface.snoop;
 import router.iface.vlan;
 
 nothrow @nogc:
@@ -53,7 +54,9 @@ class BridgeInterface : EthernetStation
     alias Properties = AliasSeq!(Prop!("vlan-filtering", vlan_filtering),
                                  Prop!("pvid", pvid),
                                  Prop!("ingress-filtering", ingress_filtering),
-                                 Prop!("untagged-egress", untagged_egress));
+                                 Prop!("untagged-egress", untagged_egress),
+                                 Prop!("igmp-snooping", igmp_snooping),
+                                 Prop!("dhcp-snooping", dhcp_snooping));
 nothrow @nogc:
 
     enum type_name = "bridge";
@@ -142,9 +145,27 @@ nothrow @nogc:
         mark_set!(typeof(this), "untagged-egress")();
     }
 
+    bool igmp_snooping() const
+        => _igmp_snooping;
+    void igmp_snooping(bool value)
+    {
+        if (_igmp_snooping && !value)
+            _mcast_snoop.clear();
+        _igmp_snooping = value;
+        mark_set!(typeof(this), "igmp-snooping")();
+    }
+
+    bool dhcp_snooping() const
+        => _dhcp_snooping;
+    void dhcp_snooping(bool value)
+    {
+        _dhcp_snooping = value;
+        mark_set!(typeof(this), "dhcp-snooping")();
+    }
+
     // API...
 
-    bool add_member(BaseInterface iface, ushort pvid = 1, bool ingress_filtering = true, bool untagged_egress = true)
+    bool add_member(BaseInterface iface, ushort pvid = 1, bool ingress_filtering = true, bool untagged_egress = true, bool trusted = false)
     {
         assert(iface !is this, "Cannot add a bridge to itself!");
         assert(_members.length < _cpu_port, "Too many _members in the bridge!"); // member indices live below the pseudo-ports
@@ -153,7 +174,7 @@ nothrow @nogc:
         ubyte port = cast(ubyte)_members.length;
         if (!iface.set_master(this, port))
             return false;
-        _members ~= BridgePort(iface, pvid, ingress_filtering, untagged_egress);
+        _members ~= BridgePort(iface, pvid, ingress_filtering, untagged_egress, trusted);
 
         static if (has_modbus)
         {
@@ -223,6 +244,9 @@ nothrow @nogc:
         }
         return false;
     }
+
+    ref const(MulticastSnoop) mcast_snoop() const pure
+        => _mcast_snoop;
 
     // --- kernel-bridge offload seam (driver.linux.bridge drives this) ---
 
@@ -425,6 +449,7 @@ protected:
 
     override CompletionStatus shutdown()
     {
+        _mcast_snoop.clear();
         while (_tracking_active)
         {
             TagTracking* entry = _tracking_active;
@@ -561,6 +586,12 @@ protected:
             packet.vlan = src_vlan;
         }
 
+        if (_dhcp_snooping && !port.trusted && is_dhcp_server_frame(packet))
+        {
+            log.warning("dhcp snooping: dropped server frame from untrusted port ", port.iface.name[]);
+            goto drop_packet;
+        }
+
         src_address = get_network_src_address(packet);
         if (!src_address.is_multicast_address)
             _address_table.insert(src_address, src_port);
@@ -612,6 +643,7 @@ private:
         ushort pvid = 1;
         bool ingress_filtering = false;
         bool untagged_egress = true;
+        bool trusted = false;       // may originate DHCP server traffic when dhcp-snooping is on
         bool offloaded = false;     // enslaved to a kernel bridge; the kernel switches it, OW skips it
     }
 
@@ -675,9 +707,12 @@ private:
     }
 
     bool _vlan_filtering;
+    bool _igmp_snooping;
+    bool _dhcp_snooping;
     BridgePort _bridge_port;
     Array!BridgePort _members;
     AddressTable _address_table;
+    MulticastSnoop _mcast_snoop;
 
     TagTracking* _tracking_free;
     TagTracking* _tracking_active;
@@ -728,6 +763,10 @@ private:
             return;
 
         bool is_eth = packet.type == PacketType.ethernet;
+
+        bool mcast_control = false;
+        if (_igmp_snooping && is_eth)
+            mcast_control = _mcast_snoop.snoop(packet, src_port, cast(ubyte)_members.length);
 
         ulong address = get_network_dst_address(packet);
         if (!address.is_multicast_address)
@@ -784,12 +823,18 @@ private:
         }
 
         // broadcast, or unknown destination: flood within the packet's switching domain
+        const(MulticastSnoop.Group)* mgroup = null;
+        if (_igmp_snooping && is_eth && !mcast_control && address.is_multicast_address)
+            mgroup = _mcast_snoop.lookup(address);
+
         foreach (i, ref member; _members)
         {
             if (i == src_port || member.offloaded || !member.iface.running)
                 continue;
             bool eth_member = (member.iface.caps & InterfaceCaps.ethernet) != 0;
             if (eth_member != is_eth)
+                continue;
+            if (mgroup && !_mcast_snoop.group_member(*mgroup, cast(ubyte)i) && !_mcast_snoop.router_port(cast(ubyte)i))
                 continue;
 
             if (_vlan_filtering)
@@ -893,6 +938,7 @@ private:
 
         TagTracking* tracking = alloc_tracking();
         bool any_succeeded = false;
+        const(MulticastSnoop.Group)* mgroup = null;
 
         ulong address = get_network_dst_address(packet);
         if (!address.is_multicast_address)
@@ -962,10 +1008,15 @@ private:
         }
 
         // broadcast / unknown destination: flood within the packet's switching domain
+        if (_igmp_snooping && is_eth && address.is_multicast_address && !_mcast_snoop.snoop(packet, _local_port, cast(ubyte)_members.length))
+            mgroup = _mcast_snoop.lookup(address);
+
         foreach (i, ref member; _members)
         {
             bool eth_member = (member.iface.caps & InterfaceCaps.ethernet) != 0;
             if (!member.iface.running || member.offloaded || eth_member != is_eth)
+                continue;
+            if (mgroup && !_mcast_snoop.group_member(*mgroup, cast(ubyte)i) && !_mcast_snoop.router_port(cast(ubyte)i))
                 continue;
 
             if (_vlan_filtering)
@@ -1045,9 +1096,10 @@ nothrow @nogc:
     {
         g_app.console.register_collection!BridgeInterface();
         g_app.console.register_command!port_add("/interface/bridge/port", this, "add");
+        g_app.console.register_command!mdb_print("/interface/bridge/mdb", this, "print");
     }
 
-    void port_add(Session session, BridgeInterface bridge, BaseInterface _interface, Nullable!ushort pvid, Nullable!bool ingress_filtering, Nullable!bool untagged_egress)
+    void port_add(Session session, BridgeInterface bridge, BaseInterface _interface, Nullable!ushort pvid, Nullable!bool ingress_filtering, Nullable!bool untagged_egress, Nullable!bool trusted)
     {
         if (bridge is _interface)
         {
@@ -1060,12 +1112,55 @@ nothrow @nogc:
             return;
         }
 
-        if (!bridge.add_member(_interface, pvid ? pvid.value : 1, ingress_filtering ? ingress_filtering.value : true, untagged_egress ? untagged_egress.value : true))
+        if (!bridge.add_member(_interface, pvid ? pvid.value : 1, ingress_filtering ? ingress_filtering.value : true, untagged_egress ? untagged_egress.value : true, trusted ? trusted.value : false))
         {
             session.write_line("Failed to add interface '", _interface.name[], "' to bridge '", bridge.name[], "'.");
             return;
         }
 
         log_info(ModuleName, "bridge port add - bridge: ", bridge.name[], "  interface: ", _interface.name[]);
+    }
+
+    void mdb_print(Session session)
+    {
+        import manager.console.table : Table;
+        import urt.mem.temp : tconcat;
+        import urt.time : getTime;
+
+        Table t;
+        t.add_column("bridge");
+        t.add_column("group");
+        t.add_column("vid", Table.TextAlign.right);
+        t.add_column("port");
+        t.add_column("expires", Table.TextAlign.right);
+
+        auto now = getTime();
+        bool any = false;
+        foreach (bridge; Collection!BridgeInterface().values)
+        {
+            foreach (ref const MulticastSnoop.Group g; bridge.mcast_snoop)
+            {
+                MACAddress mac = MACAddress.from_ul(g.address);
+                ushort vid = cast(ushort)((g.address >> 48) & 0xFFF);
+                foreach (ref m; g.members[])
+                {
+                    if (m.port >= bridge.member_count || now >= m.expiry)
+                        continue;
+                    any = true;
+                    t.add_row();
+                    t.cell(bridge.name[]);
+                    t.cell(tconcat(mac));
+                    t.cell(vid ? tconcat(vid) : "");
+                    t.cell(bridge.member_iface(m.port).name[]);
+                    t.cell(tconcat((m.expiry - now).as!"seconds", "s"));
+                }
+            }
+        }
+        if (!any)
+        {
+            session.write_line("No snooped multicast groups");
+            return;
+        }
+        t.render(session);
     }
 }

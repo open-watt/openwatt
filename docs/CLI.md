@@ -489,6 +489,33 @@ connections opened by `/protocol/ble/client` entries.
 | `port` | read/write | `0` to radio count | `0` | Platform radio index. |
 | `max-in-flight` | read/write | `1` to `255` | `4` | Concurrent unacknowledged frames; must be non-zero. |
 
+### `/interface/bridge`
+
+A bridge switches frames between its member ports, learning source addresses
+and flooding unknown or broadcast traffic. Members are added with
+`/interface/bridge/port add`.
+
+| Property | Access | Values | Default | Description |
+| --- | --- | --- | --- | --- |
+| `vlan-filtering` | read/write | `yes`/`no` | `no` | Enables 802.1Q VLAN processing on member ports. |
+| `pvid` | read/write | `1` to `4094` | `1` | Port VLAN id of the bridge's own port. |
+| `ingress-filtering` | read/write | `yes`/`no` | `no` | Drops frames tagged with VLANs the bridge port is not a member of. |
+| `untagged-egress` | read/write | `yes`/`no` | `yes` | Strips the VLAN tag on egress for the bridge port's PVID. |
+| `igmp-snooping` | read/write | `yes`/`no` | `no` | Learns multicast group membership from IGMP/MLD traffic and forwards registered groups only to subscribed and router ports. Unregistered groups still flood. |
+| `dhcp-snooping` | read/write | `yes`/`no` | `no` | Drops DHCP server-role traffic (v4 source port 67, v6 source port 547) arriving on untrusted member ports. |
+
+| Command | Syntax | Description |
+| --- | --- | --- |
+| `port add` | `/interface/bridge/port add bridge=<bridge> interface=<iface> [pvid=<vid>] [ingress-filtering=yes/no] [untagged-egress=yes/no] [trusted=yes/no]` | Adds a member port to a bridge. `trusted` (default `no`) permits DHCP server traffic from the port when `dhcp-snooping` is enabled; set it on the uplink toward the legitimate server. |
+| `mdb print` | `/interface/bridge/mdb print` | Prints the snooped multicast group database: bridge, group MAC, VLAN, member port, and seconds until the entry expires. |
+
+```text
+/interface/bridge add name=lan igmp-snooping=yes dhcp-snooping=yes
+/interface/bridge/port add bridge=lan interface=eth0 trusted=yes
+/interface/bridge/port add bridge=lan interface=wlan0
+/interface/bridge/mdb print
+```
+
 ### `/interface/ethernet`
 
 Ethernet interfaces are a managed collection, and additionally carry the

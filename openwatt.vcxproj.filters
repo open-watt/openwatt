@@ -711,6 +711,9 @@
     <DCompile Include="src\router\iface\priority_queue.d">
       <Filter>src\router\iface</Filter>
     </DCompile>
+    <DCompile Include="src\router\iface\snoop.d">
+      <Filter>src\router\iface</Filter>
+    </DCompile>
     <DCompile Include="src\manager\console\function_command.d">
       <Filter>src\manager\console</Filter>
     </DCompile>
