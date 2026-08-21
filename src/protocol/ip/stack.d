@@ -23,6 +23,7 @@ import protocol.ip.arp;
 import protocol.ip.firewall;
 import protocol.ip.icmp;
 import protocol.ip.icmp6;
+import protocol.ip.mcast;
 import protocol.ip.nd;
 import protocol.ip.neighbour;
 import protocol.ip.route;
@@ -130,6 +131,7 @@ nothrow @nogc:
         neighbour_v4.tick(now);
         neighbour_v6.tick(now);
         slaac_update(this, now);
+        mcast_update(now);
     }
 
     IPAddr select_source_v4(IPAddr dst)
@@ -152,6 +154,17 @@ nothrow @nogc:
             version (DebugIPRoute)
                 log.trace("route dst=", dst, " -> local (loopback)");
             return RouteResult(RouteResult.Kind.local, null, dst, 0);
+        }
+
+        if (dst.is_multicast())
+        {
+            // TODO: IP_MULTICAST_IF / per-iface fanout; for now the first v4-carrying iface
+            foreach (a; Collection!IPAddress().values)
+            {
+                if (a.iface && a.iface.running)
+                    return RouteResult(RouteResult.Kind.forward, a.iface, dst, 0);
+            }
+            return RouteResult(RouteResult.Kind.none);
         }
 
         foreach (a; Collection!IPAddress().values)
@@ -398,7 +411,23 @@ private:
         if (firewall_v4.run(HookPoint.prerouting, pkt) == Verdict.drop)
             return;
 
-        bool non_forwardable = is_non_forwardable_v4_dst(IPAddr(ip.dst), iface);
+        IPAddr dst = IPAddr(ip.dst);
+        if (dst.is_multicast())
+        {
+            if (ip.protocol == IPProtocol.igmp)
+            {
+                igmp_input(pkt, iface);
+                return;
+            }
+            if (dst != IPAddr(224, 0, 0, 1) && !is_member_v4(dst, iface))
+                return;
+            if (firewall_v4.run(HookPoint.input, pkt) == Verdict.drop)
+                return;
+            deliver_local(pkt);
+            return;
+        }
+
+        bool non_forwardable = is_non_forwardable_v4_dst(dst, iface);
         if (non_forwardable)
             return;
 
@@ -702,6 +731,19 @@ private:
 
         version (DebugIPEgress)
             log.trace("egress if=", out_iface.name, " next_hop=", next_hop, " (", pkt.length, ") [ ", pkt.data[0 .. 24 < pkt.length ? 24 : pkt.length], 24 < pkt.length ? " ... ]" : " ]");
+
+        if (next_hop.is_multicast())
+        {
+            MACAddress mac = ether_multicast_v4(next_hop);
+            frame_and_send(pkt, out_iface, mac.b[]);
+            return;
+        }
+        if (next_hop == IPAddr.broadcast)
+        {
+            static immutable MACAddress bcast = MACAddress.broadcast;
+            frame_and_send(pkt, out_iface, bcast.b[]);
+            return;
+        }
 
         const(ubyte)[] link_addr = neighbour_v4.resolve(next_hop, out_iface, pkt);
         if (link_addr is null)

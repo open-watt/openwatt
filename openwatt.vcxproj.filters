@@ -969,6 +969,9 @@
     <DCompile Include="src\protocol\ip\icmp6.d">
       <Filter>src\protocol\ip</Filter>
     </DCompile>
+    <DCompile Include="src\protocol\ip\mcast.d">
+      <Filter>src\protocol\ip</Filter>
+    </DCompile>
     <DCompile Include="src\protocol\ip\nd.d">
       <Filter>src\protocol\ip</Filter>
     </DCompile>

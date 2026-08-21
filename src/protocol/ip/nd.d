@@ -1,7 +1,5 @@
 module protocol.ip.nd;
 
-version (UseInternalIPStack):
-
 import urt.array;
 import urt.endian;
 import urt.hash;
@@ -80,6 +78,26 @@ IPv6Addr link_local_of(BaseInterface iface)
     return IPv6Addr.any;
 }
 
+IPv6Addr read_addr(const(ubyte)[] b) pure
+{
+    IPv6Addr a;
+    foreach (i; 0 .. 8)
+        a.s[i] = cast(ushort)(b[i*2] << 8 | b[i*2 + 1]);
+    return a;
+}
+
+void write_addr(ubyte[] b, IPv6Addr a) pure
+{
+    foreach (i; 0 .. 8)
+    {
+        b[i*2]     = cast(ubyte)(a.s[i] >> 8);
+        b[i*2 + 1] = cast(ubyte)a.s[i];
+    }
+}
+
+
+version (UseInternalIPStack):
+
 
 bool is_our_ip_v6(IPv6Addr ip, BaseInterface iface)
 {
@@ -95,7 +113,11 @@ bool is_our_ip_v6(IPv6Addr ip, BaseInterface iface)
 // solicited-node group of every address we own on `iface`.
 bool is_our_multicast_v6(IPv6Addr ip, BaseInterface iface)
 {
+    import protocol.ip.mcast : is_member_v6;
+
     if (ip == IPv6Addr.linkLocal_allNodes)
+        return true;
+    if (is_member_v6(ip, iface))
         return true;
     if ((ip.s[0] != 0xFF02) || ip.s[5] != 1 || (ip.s[6] & 0xFF00) != 0xFF00)
         return false;
@@ -612,24 +634,6 @@ const(ubyte)[] find_option(const(ubyte)[] options, ubyte type)
     }
     return null;
 }
-
-IPv6Addr read_addr(const(ubyte)[] b) pure
-{
-    IPv6Addr a;
-    foreach (i; 0 .. 8)
-        a.s[i] = cast(ushort)(b[i*2] << 8 | b[i*2 + 1]);
-    return a;
-}
-
-void write_addr(ubyte[] b, IPv6Addr a) pure
-{
-    foreach (i; 0 .. 8)
-    {
-        b[i*2]     = cast(ubyte)(a.s[i] >> 8);
-        b[i*2 + 1] = cast(ubyte)a.s[i];
-    }
-}
-
 
 unittest
 {

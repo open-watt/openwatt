@@ -225,6 +225,7 @@
     <DCompile Include="src\protocol\ip\firewall.d" />
     <DCompile Include="src\protocol\ip\icmp.d" />
     <DCompile Include="src\protocol\ip\icmp6.d" />
+    <DCompile Include="src\protocol\ip\mcast.d" />
     <DCompile Include="src\protocol\ip\nd.d" />
     <DCompile Include="src\protocol\ip\neighbour.d" />
     <DCompile Include="src\protocol\ip\package.d" />

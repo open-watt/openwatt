@@ -15,6 +15,7 @@ import router.iface.packet;
 
 import protocol.ip : IPv6Header, IPProtocol;
 import protocol.ip.icmp : RateLimiter;
+import protocol.ip.mcast : on_mld_query, on_mld_report;
 import protocol.ip.nd;
 import protocol.ip.stack;
 
@@ -31,11 +32,15 @@ enum Icmp6Type : ubyte
     parameter_problem  = 4,
     echo_request       = 128,
     echo_reply         = 129,
+    mld_query          = 130,
+    mld_report         = 131,
+    mld_done           = 132,
     router_solicit     = 133,
     router_advert      = 134,
     neighbour_solicit  = 135,
     neighbour_advert   = 136,
     redirect           = 137,
+    mld2_report        = 143,
 }
 
 enum Icmp6DestUnreachableCode : ubyte
@@ -256,6 +261,12 @@ void icmp6_input(ref IPStack stack, ref Packet pkt, size_t l4_offset, BaseInterf
             break;
         case Icmp6Type.router_advert:
             on_router_advert(stack, *ip, icmp, iface);
+            break;
+        case Icmp6Type.mld_query:
+            on_mld_query(*ip, icmp, iface);
+            break;
+        case Icmp6Type.mld_report:
+            on_mld_report(*ip, icmp, iface);
             break;
         case Icmp6Type.dest_unreachable:
         case Icmp6Type.packet_too_big:

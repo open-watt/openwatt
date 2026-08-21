@@ -11,6 +11,7 @@ import urt.time;
 
 import manager.features : has_tcp;
 
+import protocol.ip.mcast : mcast_join_v4, mcast_leave_v4;
 import protocol.ip.stack;
 import protocol.ip.udp;
 
@@ -56,6 +57,7 @@ struct Slot
     SocketType    sock_type;
     AddressFamily family;
     bool          non_blocking;
+    Array!IPAddr  mcast_groups;
     UdpPcb*       udp;
     static if (has_tcp)
         TcpPcb*   tcp;
@@ -132,6 +134,10 @@ SocketResult c_close(Socket socket)
     auto s = lookup(socket);
     if (!s)
         return SocketResult.invalid_socket;
+
+    foreach (g; s.mcast_groups[])
+        mcast_leave_v4(g, null);
+    s.mcast_groups.clear();
 
     if (s.udp)
     {
@@ -508,6 +514,16 @@ SocketResult c_set_option(Socket socket, SocketOption opt, const(void)* value, s
         if (size != 1)
             return SocketResult.invalid_argument;
         s.non_blocking = *cast(ubyte*)value != 0;
+        return SocketResult.success;
+    }
+    else if (opt == SocketOption.multicast)
+    {
+        if (size != MulticastGroup.sizeof)
+            return SocketResult.invalid_argument;
+        auto g = cast(const MulticastGroup*)value;
+        // TODO: honour g.iface scoping; joins apply to all v4-carrying interfaces
+        mcast_join_v4(g.address, null);
+        s.mcast_groups ~= g.address;
         return SocketResult.success;
     }
     else

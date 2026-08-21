@@ -219,6 +219,7 @@ enum IPProtocol : ubyte
 {
     hopopt     = 0,     // v6 hop-by-hop options extension header
     icmp       = 1,
+    igmp       = 2,
     tcp        = 6,
     udp        = 17,
     ipv6_route = 43,    // v6 routing extension header
