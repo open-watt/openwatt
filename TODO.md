@@ -135,6 +135,11 @@ the commit history and linked design documents carry the implementation record.
 - **[P3, IPv6 UDP] TCPv6 on the internal stack**: `c_create` refuses IPv6 stream sockets
   (`// TODO: TCPv6` in protocol/ip/socket.d); the v6 input path drops TCP segments. Windows IOCP
   TCP is IPv4-only too.
+- **[P3, IPv6 SLAAC] Source selection is first-fit, not RFC 6724**: `preferred_source_v6` honours
+  only rule 3 (skip deprecated addresses); no longest-matching-prefix, scope or ULA-versus-global
+  ordering, and `source_for_target` in nd.d ignores deprecation. Renumbering (a `preferred=0` RA
+  deprecating the old prefix under the two-hour valid floor) has only been reasoned through, not
+  exercised against a real router.
 
 - **[P3, style-audit deferrals] Preserve outstanding design work**: validate
   appliance port names against a profile-authoritative or explicit namespace

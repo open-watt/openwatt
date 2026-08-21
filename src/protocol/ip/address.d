@@ -125,7 +125,8 @@ static if (has_ipv6)
 class IPv6Address : BaseObject
 {
     alias Properties = AliasSeq!(Prop!("address", address),
-                                 Prop!("interface", iface));
+                                 Prop!("interface", iface),
+                                 Prop!("deprecated", deprecated_));
 nothrow @nogc:
 
     enum type_name = "ipv6-address";
@@ -172,6 +173,16 @@ nothrow @nogc:
         return null;
     }
 
+    bool deprecated_() const pure
+        => _deprecated;
+    void deprecated_(bool value)
+    {
+        if (_deprecated == value)
+            return;
+        _deprecated = value;
+        mark_set!(typeof(this), "deprecated")();
+    }
+
 protected:
 
     override bool validate() const pure nothrow @nogc
@@ -180,6 +191,7 @@ protected:
 private:
     IPv6NetworkAddress _address;
     ObjectRef!BaseInterface _iface;
+    bool _deprecated;
 }
 
 

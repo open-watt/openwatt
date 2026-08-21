@@ -142,6 +142,7 @@ nothrow @nogc:
             nd_update(this, now);
             neighbour_v6.tick(now);
             mld_update(this, now);
+            slaac_update(this, now);
         }
     }
 
@@ -246,10 +247,7 @@ nothrow @nogc:
             return dst;
         if (r.kind != RouteResult6.Kind.forward || !r.out_iface)
             return IPv6Addr.any;
-        foreach (a; Collection!IPv6Address().values)
-            if (a.iface is r.out_iface && !a.address.addr.is_link_local)
-                return a.address.addr;
-        return link_local_of(r.out_iface);
+        return preferred_source_v6(r.out_iface);
     }
 
     IPv6Addr select_source_v6_on_iface(IPv6Addr destination, BaseInterface iface)
@@ -258,10 +256,7 @@ nothrow @nogc:
             return IPv6Addr.any;
         if (destination.is_link_local)
             return link_local_of(iface);
-        foreach (address; Collection!IPv6Address().values)
-            if (address.iface is iface && !address.address.addr.is_link_local)
-                return address.address.addr;
-        return link_local_of(iface);
+        return preferred_source_v6(iface);
     }
 
     bool owns_address_v6(IPv6Addr address)
@@ -889,6 +884,25 @@ private:
     // TODO: ConntrackTable conntrack;
 }
 
+
+static if (has_ipv6)
+{
+    // RFC 6724 rules 2 and 3: a deprecated global address still outranks link-local for a global destination
+    private IPv6Addr preferred_source_v6(BaseInterface iface)
+    {
+        IPv6Addr fallback = IPv6Addr.any;
+        foreach (a; Collection!IPv6Address().values)
+        {
+            if (a.iface !is iface || a.address.addr.is_link_local)
+                continue;
+            if (!a.deprecated_)
+                return a.address.addr;
+            if (fallback == IPv6Addr.any)
+                fallback = a.address.addr;
+        }
+        return fallback != IPv6Addr.any ? fallback : link_local_of(iface);
+    }
+}
 
 private bool route_preferred(ubyte prefix, ubyte distance, bool have_best, ubyte best_prefix, ubyte best_distance) pure
     => !have_best || prefix > best_prefix || (prefix == best_prefix && distance < best_distance);
