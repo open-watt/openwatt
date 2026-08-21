@@ -71,8 +71,14 @@ IPv6Addr link_local_for(MACAddress mac) pure
     return a;
 }
 
+// The interface's link-local address: its entry in the address6 table (the ND
+// engine maintains one per running station), falling back to derivation for
+// the window before that entry exists.
 IPv6Addr link_local_of(BaseInterface iface)
 {
+    foreach (a; Collection!IPv6Address().values)
+        if (cast(BaseInterface)a.iface is iface && a.address.addr.is_link_local)
+            return a.address.addr;
     if (EthernetStation station = cast(EthernetStation)iface)
         return link_local_for(station.mac);
     return IPv6Addr.any;
@@ -86,8 +92,6 @@ version (UseInternalIPStack):
 
 bool is_our_ip_v6(IPv6Addr ip, BaseInterface iface)
 {
-    if (ip == link_local_of(iface))
-        return true;
     foreach (a; Collection!IPv6Address().values)
         if (cast(BaseInterface)a.iface is iface && a.address.addr == ip)
             return true;
@@ -111,8 +115,6 @@ bool is_our_multicast_v6(IPv6Addr ip, BaseInterface iface)
     }
     if ((ip.s[0] != 0xFF02) || ip.s[5] != 1 || (ip.s[6] & 0xFF00) != 0xFF00)
         return false;
-    if (ip == solicited_node(link_local_of(iface)))
-        return true;
     foreach (a; Collection!IPv6Address().values)
         if (cast(BaseInterface)a.iface is iface && solicited_node(a.address.addr) == ip)
             return true;
@@ -287,8 +289,35 @@ void slaac_update(ref IPStack stack, MonoTime now)
         {
             st.rs_sent = 0;
             st.ra_seen = false;
+            if (auto a = st.ll.get)
+                a.destroy();
+            st.ll = null;
             return;
         }
+
+        // Maintain the station's link-local in the address6 table; a MAC
+        // change retires and re-forms it.
+        IPv6Addr ll = link_local_for(s.mac);
+        if (IPv6Address a = st.ll.get)
+        {
+            if (a.address.addr != ll)
+            {
+                a.destroy();
+                st.ll = null;
+            }
+        }
+        if (!st.ll)
+        {
+            const(char)[] ll_name = Collection!IPv6Address().generate_name(tconcat(s.name[], ".ll"));
+            st.ll = Collection!IPv6Address().create(
+                ll_name,
+                ObjectFlags.dynamic,
+                NamedArgument("address", IPv6NetworkAddress(ll, 64)),
+                NamedArgument("interface", cast(BaseInterface)s));
+            if (!st.ll)
+                log.error("failed to create link-local IPv6Address for ", s.name);
+        }
+
         if (st.ra_seen || st.rs_sent >= max_rtr_solicitations)
             return;
         if (now - st.last_rs < rtr_solicitation_interval)
@@ -335,7 +364,11 @@ void slaac_update(ref IPStack stack, MonoTime now)
     for (size_t i = _slaac_ifaces.length; i > 0; --i)
     {
         if (!_slaac_ifaces[i - 1].iface)
+        {
+            if (auto a = _slaac_ifaces[i - 1].ll.get)
+                a.destroy();
             _slaac_ifaces.removeSwapLast(i - 1);
+        }
     }
 }
 
@@ -350,6 +383,7 @@ enum uint max_lifetime_s             = 0x00FF_FFFF;     // clamp; routers re-adv
 struct SlaacIface
 {
     ObjectRef!BaseInterface iface;
+    ObjectRef!IPv6Address ll;
     ubyte rs_sent;
     bool ra_seen;
     MonoTime last_rs;

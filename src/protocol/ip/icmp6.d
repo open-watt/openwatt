@@ -240,7 +240,7 @@ void icmp6_input(ref IPStack stack, ref Packet pkt, size_t l4_offset, BaseInterf
     switch (icmp[0])
     {
         case Icmp6Type.echo_request:
-            handle_echo_request(stack, pkt, l4_offset, datagram_end);
+            handle_echo_request(stack, pkt, l4_offset, datagram_end, iface);
             break;
         case Icmp6Type.echo_reply:
             handle_echo_reply(*ip, icmp);
@@ -269,7 +269,7 @@ void icmp6_input(ref IPStack stack, ref Packet pkt, size_t l4_offset, BaseInterf
 
 private:
 
-void handle_echo_request(ref IPStack stack, ref const Packet pkt, size_t l4_offset, size_t datagram_end)
+void handle_echo_request(ref IPStack stack, ref const Packet pkt, size_t l4_offset, size_t datagram_end, BaseInterface iface)
 {
     enum max_size = 1500;
     if (datagram_end > max_size)
@@ -311,7 +311,12 @@ void handle_echo_request(ref IPStack stack, ref const Packet pkt, size_t l4_offs
 
     Packet reply;
     reply.init!RawFrame(buf[0 .. total]);
-    stack.output_v6(reply);
+    // A link-local requester is only reachable within the ingress scope.
+    IPv6Addr reply_dst = rip.dst_addr;
+    if (reply_dst.is_link_local && iface)
+        stack.output_v6_routed(reply, iface, reply_dst);
+    else
+        stack.output_v6(reply);
 }
 
 void handle_echo_reply(ref const IPv6Header ip, const(ubyte)[] icmp)
