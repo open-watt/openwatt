@@ -501,7 +501,7 @@ and flooding unknown or broadcast traffic. Members are added with
 | `pvid` | read/write | `1` to `4094` | `1` | Port VLAN id of the bridge's own port. |
 | `ingress-filtering` | read/write | `yes`/`no` | `no` | Drops frames tagged with VLANs the bridge port is not a member of. |
 | `untagged-egress` | read/write | `yes`/`no` | `yes` | Strips the VLAN tag on egress for the bridge port's PVID. |
-| `igmp-snooping` | read/write | `yes`/`no` | `no` | Learns multicast group membership from IGMP/MLD traffic and forwards registered groups only to subscribed and router ports. Unregistered groups still flood. |
+| `igmp-snooping` | read/write | `yes`/`no` | `no` | Learns multicast group membership from IGMP/MLD traffic and forwards registered groups only to subscribed and router ports. Unregistered groups still flood. Absent on builds with the IGMP feature stripped (`IGMP=0`). |
 | `dhcp-snooping` | read/write | `yes`/`no` | `no` | Drops DHCP server-role traffic (v4 source port 67, v6 source port 547) arriving on untrusted member ports. |
 
 | Command | Syntax | Description |

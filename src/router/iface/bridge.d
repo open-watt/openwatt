@@ -12,7 +12,7 @@ import urt.time;
 
 import manager.collection;
 import manager.console;
-import manager.features : has_modbus;
+import manager.features : has_igmp, has_modbus;
 import manager.plugin;
 
 import router.iface;
@@ -51,11 +51,15 @@ void register_bridge_offload_hooks(MemberAddedHook member_added, CpuPromiscHook 
 // The attachment appears in both: it is where the domains meet.
 class BridgeInterface : EthernetStation
 {
+    static if (has_igmp)
+        private alias SnoopProps = AliasSeq!(Prop!("igmp-snooping", igmp_snooping));
+    else
+        private alias SnoopProps = AliasSeq!();
     alias Properties = AliasSeq!(Prop!("vlan-filtering", vlan_filtering),
                                  Prop!("pvid", pvid),
                                  Prop!("ingress-filtering", ingress_filtering),
                                  Prop!("untagged-egress", untagged_egress),
-                                 Prop!("igmp-snooping", igmp_snooping),
+                                 SnoopProps,
                                  Prop!("dhcp-snooping", dhcp_snooping));
 nothrow @nogc:
 
@@ -146,13 +150,21 @@ nothrow @nogc:
     }
 
     bool igmp_snooping() const
-        => _igmp_snooping;
+    {
+        static if (has_igmp)
+            return _igmp_snooping;
+        else
+            return false;
+    }
     void igmp_snooping(bool value)
     {
-        if (_igmp_snooping && !value)
-            _mcast_snoop.clear();
-        _igmp_snooping = value;
-        mark_set!(typeof(this), "igmp-snooping")();
+        static if (has_igmp)
+        {
+            if (_igmp_snooping && !value)
+                _mcast_snoop.clear();
+            _igmp_snooping = value;
+            mark_set!(typeof(this), "igmp-snooping")();
+        }
     }
 
     bool dhcp_snooping() const
@@ -245,6 +257,7 @@ nothrow @nogc:
         return false;
     }
 
+    static if (has_igmp)
     ref const(MulticastSnoop) mcast_snoop() const pure
         => _mcast_snoop;
 
@@ -449,7 +462,8 @@ protected:
 
     override CompletionStatus shutdown()
     {
-        _mcast_snoop.clear();
+        static if (has_igmp)
+            _mcast_snoop.clear();
         while (_tracking_active)
         {
             TagTracking* entry = _tracking_active;
@@ -707,12 +721,15 @@ private:
     }
 
     bool _vlan_filtering;
-    bool _igmp_snooping;
     bool _dhcp_snooping;
     BridgePort _bridge_port;
     Array!BridgePort _members;
     AddressTable _address_table;
-    MulticastSnoop _mcast_snoop;
+    static if (has_igmp)
+    {
+        bool _igmp_snooping;
+        MulticastSnoop _mcast_snoop;
+    }
 
     TagTracking* _tracking_free;
     TagTracking* _tracking_active;
@@ -764,9 +781,12 @@ private:
 
         bool is_eth = packet.type == PacketType.ethernet;
 
-        bool mcast_control = false;
-        if (_igmp_snooping && is_eth)
-            mcast_control = _mcast_snoop.snoop(packet, src_port, cast(ubyte)_members.length);
+        static if (has_igmp)
+        {
+            bool mcast_control = false;
+            if (_igmp_snooping && is_eth)
+                mcast_control = _mcast_snoop.snoop(packet, src_port, cast(ubyte)_members.length);
+        }
 
         ulong address = get_network_dst_address(packet);
         if (!address.is_multicast_address)
@@ -823,9 +843,12 @@ private:
         }
 
         // broadcast, or unknown destination: flood within the packet's switching domain
-        const(MulticastSnoop.Group)* mgroup = null;
-        if (_igmp_snooping && is_eth && !mcast_control && address.is_multicast_address)
-            mgroup = _mcast_snoop.lookup(address);
+        static if (has_igmp)
+        {
+            const(MulticastSnoop.Group)* mgroup = null;
+            if (_igmp_snooping && is_eth && !mcast_control && address.is_multicast_address)
+                mgroup = _mcast_snoop.lookup(address);
+        }
 
         foreach (i, ref member; _members)
         {
@@ -834,8 +857,11 @@ private:
             bool eth_member = (member.iface.caps & InterfaceCaps.ethernet) != 0;
             if (eth_member != is_eth)
                 continue;
-            if (mgroup && !_mcast_snoop.group_member(*mgroup, cast(ubyte)i) && !_mcast_snoop.router_port(cast(ubyte)i))
-                continue;
+            static if (has_igmp)
+            {
+                if (mgroup && !_mcast_snoop.group_member(*mgroup, cast(ubyte)i) && !_mcast_snoop.router_port(cast(ubyte)i))
+                    continue;
+            }
 
             if (_vlan_filtering)
             {
@@ -938,7 +964,8 @@ private:
 
         TagTracking* tracking = alloc_tracking();
         bool any_succeeded = false;
-        const(MulticastSnoop.Group)* mgroup = null;
+        static if (has_igmp)
+            const(MulticastSnoop.Group)* mgroup = null;
 
         ulong address = get_network_dst_address(packet);
         if (!address.is_multicast_address)
@@ -1008,16 +1035,22 @@ private:
         }
 
         // broadcast / unknown destination: flood within the packet's switching domain
-        if (_igmp_snooping && is_eth && address.is_multicast_address && !_mcast_snoop.snoop(packet, _local_port, cast(ubyte)_members.length))
-            mgroup = _mcast_snoop.lookup(address);
+        static if (has_igmp)
+        {
+            if (_igmp_snooping && is_eth && address.is_multicast_address && !_mcast_snoop.snoop(packet, _local_port, cast(ubyte)_members.length))
+                mgroup = _mcast_snoop.lookup(address);
+        }
 
         foreach (i, ref member; _members)
         {
             bool eth_member = (member.iface.caps & InterfaceCaps.ethernet) != 0;
             if (!member.iface.running || member.offloaded || eth_member != is_eth)
                 continue;
-            if (mgroup && !_mcast_snoop.group_member(*mgroup, cast(ubyte)i) && !_mcast_snoop.router_port(cast(ubyte)i))
-                continue;
+            static if (has_igmp)
+            {
+                if (mgroup && !_mcast_snoop.group_member(*mgroup, cast(ubyte)i) && !_mcast_snoop.router_port(cast(ubyte)i))
+                    continue;
+            }
 
             if (_vlan_filtering)
             {
@@ -1096,7 +1129,8 @@ nothrow @nogc:
     {
         g_app.console.register_collection!BridgeInterface();
         g_app.console.register_command!port_add("/interface/bridge/port", this, "add");
-        g_app.console.register_command!mdb_print("/interface/bridge/mdb", this, "print");
+        static if (has_igmp)
+            g_app.console.register_command!mdb_print("/interface/bridge/mdb", this, "print");
     }
 
     void port_add(Session session, BridgeInterface bridge, BaseInterface _interface, Nullable!ushort pvid, Nullable!bool ingress_filtering, Nullable!bool untagged_egress, Nullable!bool trusted)
@@ -1121,6 +1155,7 @@ nothrow @nogc:
         log_info(ModuleName, "bridge port add - bridge: ", bridge.name[], "  interface: ", _interface.name[]);
     }
 
+    static if (has_igmp)
     void mdb_print(Session session)
     {
         import manager.console.table : Table;

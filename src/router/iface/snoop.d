@@ -6,6 +6,8 @@ import urt.inet : IPv6Addr;
 import urt.log;
 import urt.time;
 
+import manager.features : has_igmp;
+
 import router.iface.mac;
 import router.iface.packet;
 
@@ -15,6 +17,9 @@ nothrow @nogc:
 // L2 snooping support for the bridge: multicast group learning from IGMP/MLD
 // control traffic, and DHCP server-role detection for port trust filtering.
 // Self-contained frame peeks only; the router layer stays free of protocol/ip.
+
+static if (has_igmp)
+{
 
 enum Duration membership_timeout  = 260.seconds;    // RFC 3376 group membership interval
 enum Duration router_port_timeout = 255.seconds;    // RFC 3376 other-querier-present interval
@@ -274,6 +279,8 @@ private:
     }
 }
 
+}
+
 
 // True for DHCP frames only a server (or relay) may originate: v4 UDP source
 // port 67, v6 UDP source port 547. Untrusted bridge ports drop these.
@@ -344,6 +351,9 @@ const(ubyte)[] l3_of(ref const Packet packet, out ushort ether_type)
     return data;
 }
 
+static if (has_igmp)
+{
+
 ulong group_key_v4(const(ubyte)[] group, ushort vlan)
 {
     // 224.0.0.0/24 is never snooped: local-segment control groups always flood
@@ -359,7 +369,10 @@ ulong group_key_v6(const(ubyte)[] group, ushort vlan)
     return m.ul | (ulong(vlan & 0xFFF) << 48) | (ulong(PacketType.ethernet) << 60);
 }
 
+}
 
+
+static if (has_igmp)
 unittest
 {
     // IGMPv2 report for 239.1.2.3 on port 2 constrains lookup; query marks router port
@@ -396,14 +409,18 @@ unittest
     eth2.ether_type = EtherType.ip4;
     assert(snoop.snoop(p, 1, 4));
     assert(snoop.router_port(1) && !snoop.router_port(2));
+}
 
+unittest
+{
     // DHCP: server frame (sport 67) detected, client frame (sport 68) passed
     ubyte[28] dhcp;
     dhcp[0] = 0x45;
     dhcp[9] = 17;
     dhcp[21] = 67;
-    ref eth3 = p.init!Ethernet(dhcp[]);
-    eth3.ether_type = EtherType.ip4;
+    Packet p;
+    ref eth = p.init!Ethernet(dhcp[]);
+    eth.ether_type = EtherType.ip4;
     assert(is_dhcp_server_frame(p));
     dhcp[21] = 68;
     assert(!is_dhcp_server_frame(p));

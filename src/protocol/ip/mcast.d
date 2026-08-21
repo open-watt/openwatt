@@ -11,6 +11,7 @@ import urt.time;
 
 import manager.base;
 import manager.collection;
+import manager.features : has_igmp;
 
 import router.iface;
 import router.iface.endpoint : foreach_ether_station;
@@ -50,6 +51,10 @@ MACAddress ether_multicast_v4(IPAddr a) pure
 // v6 solicited-node groups are derived from owned addresses by reconciliation.
 // Membership drives both local delivery and IGMPv2/MLDv1 host signalling so
 // snooping switches keep forwarding us the groups.
+// NoIGMP strips the engine: joins are inert, only implicit groups deliver.
+
+static if (has_igmp)
+{
 
 // iface null = all interfaces carrying an IPv4 address
 void mcast_join_v4(IPAddr group, BaseInterface iface)
@@ -504,4 +509,21 @@ void send_mld(ref GroupV6 e, Icmp6Type type)
         log.debug_("tx mld type=", type, " group=", e.group, " on ", s.name[]);
 
     s.send(ether_multicast(dst), buf[], EtherType.ip6);
+}
+
+}
+else
+{
+
+void mcast_join_v4(IPAddr, BaseInterface) {}
+void mcast_leave_v4(IPAddr, BaseInterface) {}
+void mcast_join_v6(IPv6Addr, BaseInterface) {}
+void mcast_leave_v6(IPv6Addr, BaseInterface) {}
+bool is_member_v4(IPAddr, BaseInterface) => false;
+bool is_member_v6(IPv6Addr, BaseInterface) => false;
+void mcast_update(MonoTime) {}
+void igmp_input(ref Packet, BaseInterface) {}
+void on_mld_query(ref const IPv6Header, const(ubyte)[], BaseInterface) {}
+void on_mld_report(ref const IPv6Header, const(ubyte)[], BaseInterface) {}
+
 }

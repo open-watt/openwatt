@@ -38,12 +38,15 @@
 #                   interactive prompts, banners, MOTDs. Orthogonal to
 #                   FEATURES and TINY.
 #
-#   MODBUS, TCP, HTTP_CLIENT, HTTP_FILESERVER
+#   MODBUS, TCP, HTTP_CLIENT, HTTP_FILESERVER, IGMP
 #                   Optional components within a feature tier. Each defaults
 #                   to 1 and may be disabled by a constrained BOARD profile.
 #                   TCP=0 drops the in-tree TCP engine (router/transport/tcp/engine.d);
 #                   kernel-socket TCP survives on OS platforms, but ether-TCP
 #                   and internal-stack TCP disappear.
+#                   IGMP=0 drops IGMP/MLD entirely: bridge multicast snooping
+#                   and the IP stack's group-membership signalling. Multicast
+#                   floods at L2 and only implicit groups deliver at L3.
 # =======================================================================
 
 # -- Per-platform defaults -----------------------------------------------
@@ -65,14 +68,15 @@ MODBUS ?= 1
 TCP ?= 1
 HTTP_CLIENT ?= 1
 HTTP_FILESERVER ?= 1
+IGMP ?= 1
 
 # -- Validate ------------------------------------------------------------
 
 ifeq ($(filter $(FEATURES),switch switch-ip switch-http switch-https full),)
     $(error Unknown FEATURES='$(FEATURES)'; valid: switch | switch-ip | switch-http | switch-https | full)
 endif
-ifneq ($(filter-out 0 1,$(MODBUS) $(TCP) $(HTTP_CLIENT) $(HTTP_FILESERVER)),)
-    $(error MODBUS, TCP, HTTP_CLIENT and HTTP_FILESERVER must be 0 or 1)
+ifneq ($(filter-out 0 1,$(MODBUS) $(TCP) $(HTTP_CLIENT) $(HTTP_FILESERVER) $(IGMP)),)
+    $(error MODBUS, TCP, HTTP_CLIENT, HTTP_FILESERVER and IGMP must be 0 or 1)
 endif
 
 # TCP=0 drops the in-tree engine; on a target driving the in-tree IP stack that leaves no TCP
@@ -111,6 +115,9 @@ ifeq ($(HTTP_CLIENT),0)
 endif
 ifeq ($(HTTP_FILESERVER),0)
     FEATURE_DFLAGS += $(VERSION_FLAG)NoHTTPFileServer
+endif
+ifeq ($(IGMP),0)
+    FEATURE_DFLAGS += $(VERSION_FLAG)NoIGMP
 endif
 
 # -- D version flags per preset ------------------------------------------

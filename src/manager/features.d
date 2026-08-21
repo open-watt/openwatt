@@ -24,6 +24,7 @@ version (NoECSecret) enum has_ec_secret = false; else enum has_ec_secret = true;
 version (NoHTTPClient) enum has_http_client = false; else enum has_http_client = true;
 version (NoHTTPFileServer) enum has_http_file_server = false; else enum has_http_file_server = true;
 version (NoModbus) enum has_modbus = false; else enum has_modbus = true;
+version (NoIGMP)   enum has_igmp   = false; else enum has_igmp   = true;
 version (HasAPI)   enum has_api    = true; else version (NoAll) enum has_api = false; else enum has_api = true;
 version (HasOTA)   enum has_ota    = true; else version (NoAll) enum has_ota = false; else enum has_ota = true;
 
