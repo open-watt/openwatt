@@ -142,6 +142,7 @@ nothrow @nogc:
             nd_update(this, now);
             neighbour_v6.tick(now);
             mld_update(this, now);
+            slaac_update(this, now);
         }
     }
 
