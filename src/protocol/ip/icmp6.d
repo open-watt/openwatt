@@ -1,5 +1,6 @@
 module protocol.ip.icmp6;
 
+version (NoIPv6) {} else:
 version (UseInternalIPStack):
 
 import urt.array;

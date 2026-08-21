@@ -3,6 +3,7 @@ module protocol.dhcp;
 import manager;
 import manager.collection;
 import manager.console;
+import manager.features : has_gateway, has_ipv6;
 import manager.plugin;
 
 import protocol.dhcp.client;
@@ -26,19 +27,31 @@ nothrow @nogc:
         g_app.register_enum!DHCPOptionType();
 
         g_app.console.register_collection!DHCPClient();
-        g_app.console.register_collection!DHCP6Client();
-        g_app.console.register_collection!DHCPLease();
-        g_app.console.register_collection!DHCP6Lease();
         g_app.console.register_collection!DHCPOption();
-        g_app.console.register_collection!DHCPServer();
-        g_app.console.register_collection!DHCP6Server();
+        static if (has_ipv6)
+            g_app.console.register_collection!DHCP6Client();
+        static if (has_gateway)
+        {
+            g_app.console.register_collection!DHCPLease();
+            g_app.console.register_collection!DHCPServer();
+            static if (has_ipv6)
+            {
+                g_app.console.register_collection!DHCP6Lease();
+                g_app.console.register_collection!DHCP6Server();
+            }
+        }
     }
 
     override void update()
     {
         Collection!DHCPClient().update_all();
-        Collection!DHCP6Client().update_all();
-        Collection!DHCPServer().update_all();
-        Collection!DHCP6Server().update_all();
+        static if (has_ipv6)
+            Collection!DHCP6Client().update_all();
+        static if (has_gateway)
+        {
+            Collection!DHCPServer().update_all();
+            static if (has_ipv6)
+                Collection!DHCP6Server().update_all();
+        }
     }
 }

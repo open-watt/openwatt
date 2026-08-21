@@ -1,5 +1,7 @@
 module protocol.dhcp.message6;
 
+version (NoIPv6) {} else:
+
 import urt.endian;
 import urt.hash;
 import urt.inet;

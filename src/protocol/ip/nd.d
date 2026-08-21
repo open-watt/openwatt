@@ -1,5 +1,7 @@
 module protocol.ip.nd;
 
+version (NoIPv6) {} else:
+
 import urt.array;
 import urt.endian;
 import urt.hash;
@@ -11,6 +13,7 @@ import urt.time;
 import manager.base;
 import manager.collection;
 import manager.expression : NamedArgument;
+import manager.features : has_gateway;
 
 import router.iface;
 import router.iface.endpoint : foreach_ether_station;
@@ -107,10 +110,13 @@ bool is_our_multicast_v6(IPv6Addr ip, BaseInterface iface)
         return true;
     if (ip == IPv6Addr.linkLocal_routers)
     {
-        import protocol.ip.ra : RAService;
-        foreach (r; Collection!RAService().values)
-            if (r.iface is iface && r.running)
-                return true;
+        static if (has_gateway)
+        {
+            import protocol.ip.ra : RAService;
+            foreach (r; Collection!RAService().values)
+                if (r.iface is iface && r.running)
+                    return true;
+        }
         return false;
     }
     if ((ip.s[0] != 0xFF02) || ip.s[5] != 1 || (ip.s[6] & 0xFF00) != 0xFF00)
@@ -208,8 +214,6 @@ void on_neighbour_advert(ref IPStack stack, ref const IPv6Header ip, const(ubyte
 
 void on_router_solicit(ref IPStack stack, ref const IPv6Header ip, const(ubyte)[] icmp, BaseInterface iface)
 {
-    import protocol.ip.ra : RAService;
-
     if (ip.hop_limit != 255 || icmp[1] != 0 || icmp.length < 8)
         return;
 
@@ -221,9 +225,13 @@ void on_router_solicit(ref IPStack stack, ref const IPv6Header ip, const(ubyte)[
     version (DebugND)
         write_log(Severity.debug_, "nd", null, "rx router-solicit from ", src, " on ", iface.name);
 
-    foreach (r; Collection!RAService().values)
-        if (r.iface is iface)
-            r.solicited();
+    static if (has_gateway)
+    {
+        import protocol.ip.ra : RAService;
+        foreach (r; Collection!RAService().values)
+            if (r.iface is iface)
+                r.solicited();
+    }
 }
 
 

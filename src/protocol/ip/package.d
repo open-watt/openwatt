@@ -11,6 +11,7 @@ import urt.log;
 import manager.collection;
 import manager.console;
 import manager.console.session : Session;
+import manager.features : has_gateway, has_ipv6;
 import manager.plugin;
 import manager : g_app;
 
@@ -316,11 +317,14 @@ nothrow @nogc:
     override void init()
     {
         g_app.console.register_collection!IPAddress();
-        g_app.console.register_collection!IPv6Address();
         g_app.console.register_collection!IPPool();
-        g_app.console.register_collection!IPv6Pool();
         g_app.console.register_collection!IPRoute();
-        g_app.console.register_collection!IPv6Route();
+        static if (has_ipv6)
+        {
+            g_app.console.register_collection!IPv6Address();
+            g_app.console.register_collection!IPv6Pool();
+            g_app.console.register_collection!IPv6Route();
+        }
 
         version (KernelMirror)
         {
@@ -330,8 +334,11 @@ nothrow @nogc:
 
         static if (ip_lowering)
         {
-            import protocol.ip.ra : RAService;
-            g_app.console.register_collection!RAService();
+            static if (has_ipv6 && has_gateway)
+            {
+                import protocol.ip.ra : RAService;
+                g_app.console.register_collection!RAService();
+            }
 
             _stack.init_resolvers();
 
@@ -340,8 +347,11 @@ nothrow @nogc:
             //       (PacketType._6lowpan, ppp/IPCP frame type, raw_ip tunnels).
 
             g_app.console.register_command!neighbour_v4_print("/protocol/ip/neighbour", this, "print");
-            g_app.console.register_command!neighbour_v6_print("/protocol/ip/neighbour6", this, "print");
-            g_app.console.register_command!ping6("/protocol/ip", this, "ping6");
+            static if (has_ipv6)
+            {
+                g_app.console.register_command!neighbour_v6_print("/protocol/ip/neighbour6", this, "print");
+                g_app.console.register_command!ping6("/protocol/ip", this, "ping6");
+            }
         }
     }
 
@@ -383,7 +393,7 @@ nothrow @nogc:
         t.render(session);
     }
 
-    static if (ip_lowering)
+    static if (ip_lowering && has_ipv6)
     void neighbour_v6_print(Session session)
     {
         import router.iface.mac : MACAddress;
@@ -421,7 +431,7 @@ nothrow @nogc:
         t.render(session);
     }
 
-    static if (ip_lowering)
+    static if (ip_lowering && has_ipv6)
     {
         Ping6State ping6(Session session, IPv6Addr address, Nullable!uint count, Nullable!BaseInterface iface)
         {
@@ -617,16 +627,22 @@ nothrow @nogc:
     override void update()
     {
         Collection!IPAddress().update_all();
-        Collection!IPv6Address().update_all();
         Collection!IPPool().update_all();
-        Collection!IPv6Pool().update_all();
         Collection!IPRoute().update_all();
-        Collection!IPv6Route().update_all();
+        static if (has_ipv6)
+        {
+            Collection!IPv6Address().update_all();
+            Collection!IPv6Pool().update_all();
+            Collection!IPv6Route().update_all();
+        }
 
         static if (ip_lowering)
         {
-            import protocol.ip.ra : RAService;
-            Collection!RAService().update_all();
+            static if (has_ipv6 && has_gateway)
+            {
+                import protocol.ip.ra : RAService;
+                Collection!RAService().update_all();
+            }
             _stack.update();
         }
 

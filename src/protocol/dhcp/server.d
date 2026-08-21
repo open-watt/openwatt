@@ -1,5 +1,7 @@
 module protocol.dhcp.server;
 
+version (NoGateway) {} else:
+
 import urt.array;
 import urt.inet;
 import urt.lifetime;

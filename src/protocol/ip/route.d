@@ -7,6 +7,7 @@ import urt.string;
 import manager;
 import manager.base;
 import manager.collection;
+import manager.features : has_ipv6;
 
 import router.iface;
 
@@ -114,6 +115,7 @@ private:
 }
 
 
+static if (has_ipv6)
 class IPv6Route : BaseObject
 {
     alias Properties = AliasSeq!(Prop!("destination", destination),

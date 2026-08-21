@@ -1,5 +1,8 @@
 module protocol.dhcp.server6;
 
+version (NoIPv6) {} else:
+version (NoGateway) {} else:
+
 import urt.array;
 import urt.endian;
 import urt.inet;

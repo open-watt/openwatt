@@ -1,5 +1,7 @@
 module protocol.ip.ra;
 
+version (NoIPv6) {} else:
+version (NoGateway) {} else:
 version (UseInternalIPStack):
 
 import urt.array;

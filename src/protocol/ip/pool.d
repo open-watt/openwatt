@@ -9,6 +9,7 @@ import urt.string;
 import manager;
 import manager.base;
 import manager.collection;
+import manager.features : has_ipv6;
 
 nothrow @nogc:
 
@@ -192,6 +193,7 @@ private:
 // A v6 pool serves two allocation shapes from one prefix: individual host
 // addresses (DHCPv6 IA_NA) as interface-id offsets within the prefix, and
 // delegated sub-prefixes (DHCPv6 IA_PD) of `delegation-length` carved from it.
+static if (has_ipv6)
 class IPv6Pool : BaseObject
 {
     alias Properties = AliasSeq!(Prop!("prefix", prefix),

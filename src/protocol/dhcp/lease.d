@@ -1,5 +1,7 @@
 module protocol.dhcp.lease;
 
+version (NoGateway) {} else:
+
 import urt.inet;
 import urt.lifetime;
 import urt.string;

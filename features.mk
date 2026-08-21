@@ -44,6 +44,16 @@
 #                   TCP=0 drops the in-tree TCP engine (router/transport/tcp/engine.d);
 #                   kernel-socket TCP survives on OS platforms, but ether-TCP
 #                   and internal-stack TCP disappear.
+#
+#   IPV6            IPV6=0 drops IPv6: the v6 side of the in-tree stack
+#                   (ND, SLAAC, ICMPv6), the address6/route6/pool6
+#                   collections, and DHCPv6. Defaults to 1.
+#
+#   GATEWAY         The router-role axis. GATEWAY=0 builds a plain node:
+#                   no transit forwarding, no RA service, no DHCP servers
+#                   or leases. Clients (DHCP, SLAAC) and diagnostics stay.
+#                   Defaults to 1, except TINY targets which default to 0
+#                   -- microcontrollers are generally just nodes.
 # =======================================================================
 
 # -- Per-platform defaults -----------------------------------------------
@@ -65,14 +75,19 @@ MODBUS ?= 1
 TCP ?= 1
 HTTP_CLIENT ?= 1
 HTTP_FILESERVER ?= 1
+IPV6 ?= 1
+ifeq ($(TINY),1)
+  GATEWAY ?= 0
+endif
+GATEWAY ?= 1
 
 # -- Validate ------------------------------------------------------------
 
 ifeq ($(filter $(FEATURES),switch switch-ip switch-http switch-https full),)
     $(error Unknown FEATURES='$(FEATURES)'; valid: switch | switch-ip | switch-http | switch-https | full)
 endif
-ifneq ($(filter-out 0 1,$(MODBUS) $(TCP) $(HTTP_CLIENT) $(HTTP_FILESERVER)),)
-    $(error MODBUS, TCP, HTTP_CLIENT and HTTP_FILESERVER must be 0 or 1)
+ifneq ($(filter-out 0 1,$(MODBUS) $(TCP) $(HTTP_CLIENT) $(HTTP_FILESERVER) $(IPV6) $(GATEWAY)),)
+    $(error MODBUS, TCP, HTTP_CLIENT, HTTP_FILESERVER, IPV6 and GATEWAY must be 0 or 1)
 endif
 
 # TCP=0 drops the in-tree engine; on a target driving the in-tree IP stack that leaves no TCP
@@ -111,6 +126,12 @@ ifeq ($(HTTP_CLIENT),0)
 endif
 ifeq ($(HTTP_FILESERVER),0)
     FEATURE_DFLAGS += $(VERSION_FLAG)NoHTTPFileServer
+endif
+ifeq ($(IPV6),0)
+    FEATURE_DFLAGS += $(VERSION_FLAG)NoIPv6
+endif
+ifeq ($(GATEWAY),0)
+    FEATURE_DFLAGS += $(VERSION_FLAG)NoGateway
 endif
 
 # -- D version flags per preset ------------------------------------------

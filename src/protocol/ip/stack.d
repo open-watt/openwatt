@@ -10,7 +10,7 @@ import urt.log;
 import urt.time;
 
 import manager.collection;
-import manager.features : has_tcp;
+import manager.features : has_gateway, has_ipv6, has_tcp;
 
 import router.iface;
 import router.iface.ethernet;
@@ -88,8 +88,11 @@ nothrow @nogc:
     {
         neighbour_v4.send_request = &v4_send_request;
         neighbour_v4.drain        = &v4_drain;
-        neighbour_v6.send_request = &v6_send_request;
-        neighbour_v6.drain        = &v6_drain;
+        static if (has_ipv6)
+        {
+            neighbour_v6.send_request = &v6_send_request;
+            neighbour_v6.drain        = &v6_drain;
+        }
     }
 
     void output_v4(ref Packet pkt)
@@ -108,6 +111,9 @@ nothrow @nogc:
         dispatch(pkt, r, firewall_v4);
     }
 
+    static if (has_ipv6)
+    {
+
     void output_v6(ref Packet pkt)
     {
         if (firewall_v6.run(HookPoint.output, pkt) == Verdict.drop)
@@ -124,12 +130,17 @@ nothrow @nogc:
         dispatch_v6(pkt, r, null);
     }
 
+    }   // has_ipv6
+
     void update()
     {
         MonoTime now = getTime();
         neighbour_v4.tick(now);
-        neighbour_v6.tick(now);
-        slaac_update(this, now);
+        static if (has_ipv6)
+        {
+            neighbour_v6.tick(now);
+            slaac_update(this, now);
+        }
     }
 
     IPAddr select_source_v4(IPAddr dst)
@@ -215,6 +226,9 @@ nothrow @nogc:
 
         return best;
     }
+
+    static if (has_ipv6)
+    {
 
     IPv6Addr select_source_v6(IPv6Addr dst, BaseInterface iface_hint)
     {
@@ -312,6 +326,8 @@ nothrow @nogc:
         return best;
     }
 
+    }   // has_ipv6
+
     // Frame handler registered for PacketType.ethernet by the IP module at init.
     // Ethernet-shaped frames (real Ethernet, VLAN sub-interfaces, Ethernet-bridge,
     // and protocols normalised to Ethernet framing) all funnel here.
@@ -335,6 +351,7 @@ nothrow @nogc:
     // Diagnostics access to the neighbour caches (for /protocol/ip/neighbour print).
     ref inout(NeighbourCache!IPAddr) neighbour_v4_cache() inout pure return
         => neighbour_v4;
+    static if (has_ipv6)
     ref inout(NeighbourCache!IPv6Addr) neighbour_v6_cache() inout pure return
         => neighbour_v6;
 
@@ -355,9 +372,12 @@ private:
             case EtherType.ip4:
                 ingress_v4(pkt, iface);
                 break;
+            static if (has_ipv6)
+            {
             case EtherType.ip6:
                 ingress_v6(pkt, iface);
                 break;
+            }
             default:
                 break;  // not an L3 frame we care about; another subscriber may handle it
         }
@@ -403,9 +423,10 @@ private:
             return;
 
         RouteResult r = route_lookup_v4(pkt);
-        dispatch(pkt, r, firewall_v4);
+        dispatch(pkt, r, firewall_v4, true);
     }
 
+    static if (has_ipv6)
     void ingress_v6(ref Packet pkt, BaseInterface iface)
     {
         if (pkt.data.length < IPv6Header.sizeof)
@@ -456,7 +477,7 @@ private:
         dispatch_v6(pkt, r, iface);
     }
 
-    void dispatch(ref Packet pkt, ref RouteResult r, ref FirewallChains fw)
+    void dispatch(ref Packet pkt, ref RouteResult r, ref FirewallChains fw, bool transit = false)
     {
         final switch (r.kind)
         {
@@ -474,6 +495,10 @@ private:
                 return;
             case RouteResult.Kind.forward:
             {
+                // Hosts don't forward transit traffic.
+                static if (!has_gateway)
+                    if (transit)
+                        return;
                 if (pkt.data.length < IPv4Header.sizeof)
                     return;
                 auto ip = cast(IPv4Header*)pkt.data.ptr;
@@ -499,6 +524,9 @@ private:
         }
     }
 
+    static if (has_ipv6)
+    {
+
     void dispatch_v6(ref Packet pkt, ref RouteResult6 r, BaseInterface in_iface)
     {
         final switch (r.kind)
@@ -517,6 +545,10 @@ private:
                 return;
             case RouteResult6.Kind.forward:
             {
+                // Hosts don't forward transit traffic; in_iface marks ingress.
+                static if (!has_gateway)
+                    if (in_iface)
+                        return;
                 if (pkt.data.length < IPv6Header.sizeof)
                     return;
                 auto ip = cast(IPv6Header*)pkt.data.ptr;
@@ -632,6 +664,8 @@ private:
         return false;
     }
 
+    }   // has_ipv6
+
     BaseInterface resolve_connected_iface(IPAddr ip)
     {
         foreach (a; Collection!IPAddress().values)
@@ -640,6 +674,7 @@ private:
         return null;
     }
 
+    static if (has_ipv6)
     BaseInterface resolve_connected_iface_v6(IPv6Addr ip)
     {
         foreach (a; Collection!IPv6Address().values)
@@ -684,6 +719,7 @@ private:
         return route_lookup_v4_dst(IPAddr(h.dst));
     }
 
+    static if (has_ipv6)
     RouteResult6 route_lookup_v6(ref const Packet pkt)
     {
         if (pkt.length < IPv6Header.sizeof)
@@ -766,21 +802,27 @@ private:
         frame_and_send(pkt, iface, link_addr);
     }
 
-    void v6_send_request(IPv6Addr target, BaseInterface iface)
+    static if (has_ipv6)
     {
-        if (EthernetStation station = cast(EthernetStation)iface)
-            send_neighbour_solicit(this, target, station);
+        void v6_send_request(IPv6Addr target, BaseInterface iface)
+        {
+            if (EthernetStation station = cast(EthernetStation)iface)
+                send_neighbour_solicit(this, target, station);
+        }
+
+        void v6_drain(ref Packet pkt, BaseInterface iface, const(ubyte)[] link_addr)
+        {
+            frame_and_send(pkt, iface, link_addr);
+        }
     }
 
-    void v6_drain(ref Packet pkt, BaseInterface iface, const(ubyte)[] link_addr)
-    {
-        frame_and_send(pkt, iface, link_addr);
-    }
-
-    NeighbourCache!IPAddr   neighbour_v4;
-    NeighbourCache!IPv6Addr neighbour_v6;
+    NeighbourCache!IPAddr neighbour_v4;
     FirewallChains firewall_v4;
-    FirewallChains firewall_v6;
+    static if (has_ipv6)
+    {
+        NeighbourCache!IPv6Addr neighbour_v6;
+        FirewallChains firewall_v6;
+    }
     // TODO: ReassemblyTable reasm;
     // TODO: ConntrackTable conntrack;
 }

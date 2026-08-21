@@ -53,6 +53,8 @@ make CONFIG=unittest                    # Build with unit tests enabled
 - `OS`: Target OS (`windows`, `linux`, `freertos`) - usually auto-detected
 - `FEATURES`: `switch` (L2 fabric only) or `full` (default; protocols+apps+devices+tools). `minimal` is deferred. See [features.mk](features.mk).
 - `HEADLESS`: `0` (default) or `1`. Orthogonal to FEATURES; strips human-facing CLI affordances. Auto-set with BL808 e907.
+- `IPV6`: `1` (default) or `0`. `IPV6=0` drops IPv6 entirely: the v6 side of the in-tree stack (ND, SLAAC, ICMPv6), the `address6`/`route6`/`pool6` collections, and DHCPv6.
+- `GATEWAY`: the router-role axis. `GATEWAY=0` builds a plain node: no transit forwarding, no RA service, no DHCP servers/leases; clients (DHCP, SLAAC) and diagnostics stay. Defaults to `1`, but `0` on TINY targets.
 - `TINY`: `0`/`1`, set by [third_party/urt/platforms.mk](third_party/urt/platforms.mk) for <~350KB-RAM / <2MB-flash targets. Forces `-Oz` under LDC, strips verbose strings, drops heavy helpers.
 
 **Output directories:**

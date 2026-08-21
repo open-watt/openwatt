@@ -1,5 +1,7 @@
 module protocol.dhcp.client6;
 
+version (NoIPv6) {} else:
+
 import urt.array;
 import urt.endian;
 import urt.inet;
