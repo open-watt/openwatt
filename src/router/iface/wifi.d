@@ -1,12 +1,14 @@
 module router.iface.wifi;
 
 import urt.array;
+import urt.endian;
 import urt.lifetime;
 import urt.log;
 import urt.mem;
 import urt.result : Result;
 import urt.mem.string;
 import urt.mem.temp;
+import urt.rand : rand;
 import urt.si.quantity;
 import urt.si.unit : Gigahertz;
 import urt.string;
@@ -605,8 +607,143 @@ nothrow @nogc:
     ubyte signal_quality() const
         => 0; // 0..100
 
+    final override bool can_forward_ethernet_sources() const pure
+        => four_address_mode();
+
+protected:
+
+    bool four_address_mode() const pure
+        => false;
+
+    override int transmit(ref Packet packet, MessageCallback callback, const(QueuePolicy)* queue_policy)
+    {
+        if (packet.type != PacketType.ethernet || packet.eth.src == mac || four_address_mode())
+            return super.transmit(packet, callback, queue_policy);
+
+        STAAssistClient* client = assist_client(packet.vlan, true);
+        solicit_assist(*client, packet.vlan);
+        if (!client.helper)
+        {
+            add_tx_drop();
+            return -1;
+        }
+        if (!station_egress(packet, client.helper))
+        {
+            add_tx_drop();
+            return -1;
+        }
+        return 0;
+    }
+
+    override void medium_ingress(ref Packet packet)
+    {
+        if (_assist_clients.empty)
+            return super.medium_ingress(packet);
+
+        ushort ether_type = packet.eth.ether_type;
+        const(ubyte)[] data = cast(const(ubyte)[])packet.data;
+        ushort vlan = packet.vlan;
+        bool tagged;
+        if (ether_type != EtherType.ow)
+        {
+            if (ether_type != EtherType.vlan || data.length < 4 ||
+                data[2 .. 4].bigEndianToNative!ushort != EtherType.ow)
+                return super.medium_ingress(packet);
+            vlan = data[0 .. 2].bigEndianToNative!ushort;
+            data = data[4 .. $];
+            tagged = true;
+        }
+
+        if (packet.eth.src == mac || (packet.eth.dst != mac && !packet.eth.dst.is_multicast) || data.length < 2)
+            return super.medium_ingress(packet);
+
+        STAAssistClient* client = assist_client(vlan, false);
+        ushort wire_type = data[0 .. 2].bigEndianToNative!ushort;
+        bool pending_offer = client && client.nonce && wire_type == OWControl.sta_assist_offer;
+        if (!client || (client.helper != packet.eth.src && !pending_offer))
+            return super.medium_ingress(packet);
+
+        if (tagged)
+        {
+            packet.vlan = vlan;
+            packet.eth.ether_type = EtherType.ow;
+            packet._offset += 4;
+        }
+        if (!station_ingress(packet))
+            add_rx_drop();
+    }
+
+    override void station_deliver(ref Packet inner, MACAddress)
+    {
+        ushort vid = inner.vlan & 0x0FFF;
+        if (vid)
+        {
+            foreach (vif; _vlans[])
+            {
+                if (vif.vlan == vid)
+                {
+                    vif.vlan_incoming(inner);
+                    return;
+                }
+            }
+        }
+        incoming_packet(inner);
+    }
+
+    override void station_control_received(OWControl msg, const(ubyte)[] content, MACAddress src, ushort vlan)
+    {
+        if (msg != OWControl.sta_assist_offer || content.length != 4)
+            return;
+        STAAssistClient* client = assist_client(vlan, false);
+        if (!client || !client.nonce || content[0 .. 4].bigEndianToNative!uint != client.nonce)
+            return;
+        client.helper = src;
+        client.nonce = 0;
+    }
+
+    override CompletionStatus shutdown()
+    {
+        _assist_clients.clear();
+        return super.shutdown();
+    }
+
 private:
+    struct STAAssistClient
+    {
+        ushort vlan;
+        MACAddress helper;
+        uint nonce;
+        MonoTime last_solicit;
+    }
+
     MACAddress _bssid_filter;
+    Array!STAAssistClient _assist_clients;
+
+    STAAssistClient* assist_client(ushort vlan, bool create)
+    {
+        ushort vid = vlan & 0x0FFF;
+        foreach (ref client; _assist_clients[])
+            if (client.vlan == vid)
+                return &client;
+        if (!create)
+            return null;
+        _assist_clients ~= STAAssistClient(vid);
+        return &_assist_clients[_assist_clients.length - 1];
+    }
+
+    void solicit_assist(ref STAAssistClient client, ushort vlan)
+    {
+        MonoTime now = getTime();
+        Duration interval = client.helper ? 30.seconds : 2.seconds;
+        if (client.last_solicit != MonoTime.init && now - client.last_solicit < interval)
+            return;
+        client.last_solicit = now;
+        client.nonce = cast(uint)rand();
+        if (client.nonce == 0)
+            client.nonce = 1;
+        ubyte[4] content = client.nonce.nativeToBigEndian;
+        station_control_send(OWControl.sta_assist_solicit, MACAddress.broadcast, content, vlan);
+    }
 }
 
 

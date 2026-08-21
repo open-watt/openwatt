@@ -20,6 +20,7 @@ import router.iface.endpoint : ether_neighbour_learn;
 
 nothrow @nogc:
 
+enum size_t ethernet_frame_capacity = 1537;
 
 abstract class EthernetStation : BaseInterface
 {
@@ -124,11 +125,19 @@ protected:
     // Egress seam toward the segment; takes a fully-formed ethernet packet.
     abstract void medium_tx(ref Packet packet);
 
-    // Where locally-decapped exotic traffic enters: standalone = local delivery;
-    // Bridge redirects this into its exotic switching domain.
-    void station_deliver(ref Packet inner)
+    // Where locally-decapped OW traffic enters.
+    void station_deliver(ref Packet inner, MACAddress)
     {
         dispatch(inner);
+    }
+
+    void station_control_received(OWControl, const(ubyte)[], MACAddress, ushort)
+    {
+    }
+
+    final void station_control_send(OWControl msg, MACAddress dst, scope const(ubyte)[] content, ushort vlan = 0)
+    {
+        station_send_control(msg, dst, content, vlan);
     }
 
     override int transmit(ref Packet packet, MessageCallback, const(QueuePolicy)*)
@@ -243,8 +252,8 @@ protected:
         discover(0);
     }
 
-    // Encapsulate an exotic packet and transmit it across the segment.
-    final bool station_egress(ref const Packet packet)
+    // Encapsulate a packet and transmit it across the segment.
+    final bool station_egress(ref const Packet packet, MACAddress station = MACAddress())
     {
         const(PacketCodec)* codec = get_ow_codec(packet.type);
         if (!codec)
@@ -258,7 +267,7 @@ protected:
         if (!is_network_multicast_address(src))
             _local_addresses[src] = getTime();
 
-        ubyte[1518] buffer = void;
+        ubyte[ethernet_frame_capacity] buffer = void;
         ptrdiff_t len = build_ow_payload(packet, *codec, buffer);
         if (len <= 0)
             return false;
@@ -266,7 +275,7 @@ protected:
         Packet wrapped;
         ref eth = wrapped.init!Ethernet(buffer[0 .. len], packet.creation_time);
         eth.src = mac;
-        eth.dst = resolve(get_network_dst_address(packet));
+        eth.dst = station ? station : resolve(get_network_dst_address(packet));
         eth.ether_type = EtherType.ow;
         wrapped.vlan = packet.vlan;
         medium_tx(wrapped);
@@ -291,7 +300,8 @@ protected:
             if (content.length < 5 + data_len)
                 return false;
             add_rx_frame(packet.length);
-            station_control(cast(OWControl)wire_type, content[5 .. 5 + data_len], packet.eth.src, !packet.eth.dst.is_multicast);
+            station_control(cast(OWControl)wire_type, content[5 .. 5 + data_len], packet.eth.src,
+                            !packet.eth.dst.is_multicast, packet.vlan);
             return true;
         }
 
@@ -317,7 +327,7 @@ protected:
 
         // the inner packet accounts where it terminates; the encap overhead counts here
         _status.rx_bytes += packet.length - inner.length;
-        station_deliver(inner);
+        station_deliver(inner, packet.eth.src);
         return true;
     }
 
@@ -386,7 +396,7 @@ protected:
         storeBigEndian(ethertype++, ushort(EtherType.ow));
         sink(hdr[0 .. cast(ubyte*)ethertype - hdr.ptr]);
 
-        ubyte[1518] buffer = void;
+        ubyte[ethernet_frame_capacity] buffer = void;
         ptrdiff_t len = build_ow_payload(packet, *codec, buffer);
         if (len <= 0)
             return;
@@ -561,7 +571,7 @@ private:
     static MACAddress cfm_class_multicast(ubyte level) pure
         => MACAddress(0x01, 0x80, 0xC2, 0x00, 0x00, cast(ubyte)(0x30 | level));
 
-    void station_send_control(OWControl msg, MACAddress dst, scope const(ubyte)[] content)
+    void station_send_control(OWControl msg, MACAddress dst, scope const(ubyte)[] content, ushort vlan = 0)
     {
         ubyte[512] buffer = void;
         if (content.length + 5 > buffer.length)
@@ -576,10 +586,11 @@ private:
         eth.src = mac;
         eth.dst = dst;
         eth.ether_type = EtherType.ow;
+        wrapped.vlan = vlan;
         medium_tx(wrapped);
     }
 
-    void station_control(OWControl msg, const(ubyte)[] content, MACAddress src, bool unicast)
+    void station_control(OWControl msg, const(ubyte)[] content, MACAddress src, bool unicast, ushort vlan)
     {
         switch (msg)
         {
@@ -646,6 +657,15 @@ private:
             case OWControl.announce:
                 if (_announce_sink && src != mac)
                     _announce_sink(this, src, content);
+                return;
+
+            case OWControl.sta_assist_solicit:
+                if (content.length == 4 && can_assist_ethernet_sources())
+                    station_send_control(OWControl.sta_assist_offer, src, content, vlan);
+                return;
+
+            case OWControl.sta_assist_offer:
+                station_control_received(msg, content, src, vlan);
                 return;
 
             default:
@@ -825,6 +845,11 @@ protected:
 
         // the packet accounts only payload bytes; account the link-layer overhead here
         _status.rx_bytes += data.length - packet.length;
+        medium_ingress(packet);
+    }
+
+    void medium_ingress(ref Packet packet)
+    {
         incoming_packet(packet);
     }
 
@@ -833,14 +858,13 @@ protected:
     {
         debug assert(packet.type == PacketType.ethernet, "medium_tx expects an ethernet packet");
 
-        ubyte[1518] buffer = void; // 1500 IP + 14 ETH + 4 VLAN. TODO: jumbos / double-tag.
+        ubyte[ethernet_frame_capacity] buffer = void;
 
         Ethernet* eth = cast(Ethernet*)buffer.ptr;
         eth.dst = packet.eth.dst;
         eth.src = packet.eth.src;
         ushort* ethertype = &eth.ether_type;
 
-        // if there should be a vlan header
         if (packet.vlan)
         {
             storeBigEndian(ethertype++, ushort(EtherType.vlan));
@@ -848,7 +872,6 @@ protected:
         }
         storeBigEndian(ethertype++, packet.eth.ether_type);
 
-        // write the payload...
         ubyte* payload = cast(ubyte*)ethertype;
         if (packet.data.length > buffer.sizeof - (payload - buffer.ptr))
         {
