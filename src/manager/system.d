@@ -9,7 +9,7 @@ import urt.system;
 import urt.time;
 import urt.variant : Variant;
 
-import driver.system : system_reboot;
+import driver.system : system_reboot, reset_reason;
 
 import manager : get_module;
 import manager.console.session;
@@ -176,6 +176,8 @@ void sysinfo(Session session, const(Variant)[] args)
                 session.write_pool_line(p);
         }
         session.write_line("Uptime:   ", seconds(getAppTime().as!"seconds"));
+        if (const(char)[] reason = reset_reason())
+            session.write_line("Reset:    ", reason);
     }
     else foreach (ref arg; args)
     {
@@ -212,6 +214,8 @@ void sysinfo(Session session, const(Variant)[] args)
             session.write_line(info.pools[1].largest_free.format_bytes());
         else if (icmp(prop, "uptime") == 0)
             session.write_line(seconds(getAppTime().as!"seconds"));
+        else if (icmp(prop, "reset-reason") == 0)
+            session.write_line(reset_reason());
         else
             session.write_line("Unknown property: ", prop);
     }

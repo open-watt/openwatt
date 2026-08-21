@@ -17,6 +17,9 @@ void system_reboot()
 // computers carry a software identity (persisted node.id); no chip-burned id here
 ulong unique_device_id() => 0;
 
+// no reset-reason source on this platform
+const(char)[] reset_reason() => null;
+
 bool   reboot_pending() => false;
 bool   ota_supported() => false;
 size_t ota_partition_size() => 0;

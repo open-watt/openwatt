@@ -13,6 +13,9 @@ void system_reboot()
 // TODO: BL808 and kin carry eFuse chip ids; wire them through when those ports need identity
 ulong unique_device_id() => 0;
 
+// no reset-reason source on this platform
+const(char)[] reset_reason() => null;
+
 bool   reboot_pending() => false;
 bool   ota_supported() => false;
 size_t ota_partition_size() => 0;
