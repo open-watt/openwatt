@@ -68,7 +68,7 @@ alias EtherRecvHandler = void delegate(EtherEndpoint* ep, const(void)[] data, MA
 alias EtherTcpInput = void function(MACAddress src, MACAddress dst, const(void)[] segment, MonoTime rx_time) nothrow @nogc;
 
 
-// null unless the IP module installs it; switch builds carry no TCP
+// null unless the transport layer installs it; a build with no TCP engine carries none
 void set_ether_tcp_input(EtherTcpInput handler)
 {
     g_ether_tcp_input = handler;

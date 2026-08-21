@@ -10,8 +10,7 @@ module router.iface.udp;
 //
 // The peer may be any address family, including ether ([mac]:port over the OW ethertype), which is
 // why this is a router-layer interface: UDP datagrams ride raw ethernet with no IP configured, so
-// ip-less tiers get the interface too. With the ip stack linked, udp_open dispatches every family;
-// without it, the interface lowers straight onto the ether datagram service and carries ether peers.
+// ip-less tiers get the interface too. udp_open dispatches every family it was built for.
 //
 // TODO: broadcast tx needs SO_BROADCAST and multicast rx needs a group join; UDPEndpoint exposes neither yet
 // TODO: l2mtu assumes a 1500-byte link MTU; query the real path MTU from the endpoint when it can report one
@@ -41,8 +40,7 @@ import router.iface;
 import router.iface.endpoint;
 import router.iface.ethernet;
 
-static if (has_ip)
-    import protocol.ip;
+import router.transport.udp;
 
 nothrow @nogc:
 
@@ -241,45 +239,23 @@ protected:
                 return CompletionStatus.continue_;
         }
 
-        static if (has_ip)
+        static if (!has_ip)
         {
-            // a unicast remote connects the endpoint (rx filtered to the peer); broadcast/multicast or no
-            // remote leaves it unconnected so any peer can be heard - the multi-drop case
-            const(InetAddress)* peer = have_remote && !multidrop ? &_remote : null;
-            _ep = udp_open(have_local ? &local : null, peer, &on_recv, bind_station);
-            if (!_ep)
-            {
-                log.error("failed to open UDP endpoint");
-                return CompletionStatus.error;
-            }
-        }
-        else
-        {
-            // ip-less tier: ether peers only, straight onto the router-layer datagram service
             if (family != AddressFamily.ether)
             {
                 log.error("this build carries ether peers only; '", _remote_host, "' needs the IP stack");
                 return CompletionStatus.error;
             }
-            EthernetStation station = bind_station;
-            if (!station && have_local && !local.addr_any)
-            {
-                station = find_ether_station(MACAddress(local._a.ether.addr));
-                if (!station)
-                {
-                    log.error("no ethernet station with address ", local);
-                    return CompletionStatus.error;
-                }
-            }
-            bool connected = have_remote && !multidrop;
-            _ether = ether_open(station, have_local ? local.port : 0, &on_ether_recv,
-                                connected ? MACAddress(_remote._a.ether.addr) : MACAddress(),
-                                connected ? _remote._a.ether.port : 0);
-            if (!_ether)
-            {
-                log.error("failed to open ether datagram endpoint");
-                return CompletionStatus.error;
-            }
+        }
+
+        // a unicast remote connects the endpoint (rx filtered to the peer); broadcast/multicast or no
+        // remote leaves it unconnected so any peer can be heard - the multi-drop case
+        const(InetAddress)* peer = have_remote && !multidrop ? &_remote : null;
+        _ep = udp_open(have_local ? &local : null, peer, &on_recv, bind_station);
+        if (!_ep)
+        {
+            log.error("failed to open UDP endpoint");
+            return CompletionStatus.error;
         }
 
         if (family == AddressFamily.ipv6 && _l2mtu == default_payload_v4)
@@ -300,11 +276,7 @@ protected:
         super.online();
 
         // a multi-drop endpoint has no single egress, so this only resolves for a connected peer
-        BaseInterface egress;
-        static if (has_ip)
-            egress = _ep ? _ep.egress_iface : null;
-        else
-            egress = _ether ? _ether.iface : null;
+        BaseInterface egress = _ep ? _ep.egress_iface : null;
         if (egress)
             set_link_speed(egress.tx_link_speed, egress.rx_link_speed);
     }
@@ -317,21 +289,10 @@ protected:
                 s.unsubscribe(&iface_state_change);
             _subscribed = false;
         }
-        static if (has_ip)
+        if (_ep)
         {
-            if (_ep)
-            {
-                _ep.close();
-                _ep = null;
-            }
-        }
-        else
-        {
-            if (_ether)
-            {
-                _ether.close();
-                _ether = null;
-            }
+            _ep.close();
+            _ep = null;
         }
         _remote = InetAddress();
         return CompletionStatus.complete;
@@ -358,22 +319,10 @@ protected:
             return -1;
         }
 
-        static if (has_ip)
+        if (!_ep || _ep.sendto(packet.data, dst) != packet.data.length)
         {
-            if (!_ep || _ep.sendto(packet.data, dst) != packet.data.length)
-            {
-                add_tx_drop();
-                return -1;
-            }
-        }
-        else
-        {
-            const(InetAddress.Ether)* e = dst.as_ether;
-            if (!_ether || !e || _ether.sendto(MACAddress(e.addr), e.port, packet.data) != packet.data.length)
-            {
-                add_tx_drop();
-                return -1;
-            }
+            add_tx_drop();
+            return -1;
         }
         add_tx_frame(packet.data.length);
         return 0;
@@ -393,10 +342,7 @@ private:
     ushort _local_port;
     ushort _remote_port;
     InetAddress _remote;
-    static if (has_ip)
-        UDPEndpoint* _ep;
-    else
-        EtherEndpoint* _ether;
+    UDPEndpoint* _ep;
 
     void iface_state_change(ActiveObject, StateSignal signal)
     {
@@ -423,23 +369,11 @@ private:
         return true;
     }
 
-    static if (has_ip)
+    void on_recv(UDPEndpoint*, const(void)[] data, ref const InetAddress from, MonoTime rx_time)
     {
-        void on_recv(UDPEndpoint*, const(void)[] data, ref const InetAddress from, MonoTime rx_time)
-        {
-            Packet packet;
-            packet.init!UDPFrame(data, rx_time).address = from;
-            incoming_packet(packet);
-        }
-    }
-    else
-    {
-        void on_ether_recv(EtherEndpoint*, const(void)[] data, MACAddress src, ushort src_port, MonoTime rx_time)
-        {
-            Packet packet;
-            packet.init!UDPFrame(data, rx_time).address = InetAddress(src.b, src_port);
-            incoming_packet(packet);
-        }
+        Packet packet;
+        packet.init!UDPFrame(data, rx_time).address = from;
+        incoming_packet(packet);
     }
 }
 

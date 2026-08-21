@@ -9,9 +9,13 @@ import urt.mem : defaultAllocator;
 import urt.socket;
 import urt.time;
 
+import manager.features : has_tcp;
+
 import protocol.ip.stack;
-import protocol.ip.tcp;
 import protocol.ip.udp;
+
+static if (has_tcp)
+    import router.transport.tcp.engine;
 
 nothrow @nogc:
 
@@ -53,7 +57,10 @@ struct Slot
     AddressFamily family;
     bool          non_blocking;
     UdpPcb*       udp;
-    TcpPcb*       tcp;
+    static if (has_tcp)
+        TcpPcb*   tcp;
+    else
+        enum tcp = false;
     // RawPcb*    raw;     // future
 }
 
@@ -97,9 +104,17 @@ SocketResult c_create(AddressFamily af, SocketType type, Protocol proto, out Soc
     }
     else if (type == SocketType.stream)
     {
-        s.tcp = defaultAllocator().allocT!TcpPcb();
-        s.tcp.handle = h;
-        tcp_assign_id(s.tcp);
+        static if (has_tcp)
+        {
+            s.tcp = defaultAllocator().allocT!TcpPcb();
+            s.tcp.handle = h;
+            tcp_assign_id(s.tcp);
+        }
+        else
+        {
+            defaultAllocator().freeT(s);
+            return SocketResult.invalid_argument;
+        }
     }
     else
     {
@@ -125,16 +140,19 @@ SocketResult c_close(Socket socket)
             udp_free_datagram_data(dgm);
         defaultAllocator().freeT(s.udp);
     }
-    else if (s.tcp)
+    else static if (has_tcp)
     {
-        // Detach from socket layer; TCP may continue closing in background
-        // (FIN_WAIT/TIME_WAIT). Mark handle=0 so tcp_tick can free once closed.
-        s.tcp.handle = 0;
-        tcp_close(*_stack, s.tcp);
-        // If tcp_close drove us straight to closed (e.g. listen with no children,
-        // or syn_sent), the PCB has already been unregistered and we own it.
-        if (s.tcp.state == TcpState.closed)
-            free_pcb(s.tcp);
+        if (s.tcp)
+        {
+            // Detach from socket layer; TCP may continue closing in background
+            // (FIN_WAIT/TIME_WAIT). Mark handle=0 so tcp_tick can free once closed.
+            s.tcp.handle = 0;
+            tcp_close(s.tcp);
+            // If tcp_close drove us straight to closed (e.g. listen with no children,
+            // or syn_sent), the PCB has already been unregistered and we own it.
+            if (s.tcp.state == TcpState.closed)
+                free_pcb(s.tcp);
+        }
     }
     _slots.remove(socket.handle);
     defaultAllocator().freeT(s);
@@ -149,12 +167,15 @@ SocketResult c_bind(Socket socket, ref const InetAddress address)
     if (address.family != AddressFamily.ipv4)
         return SocketResult.invalid_argument;
 
-    if (s.tcp)
+    static if (has_tcp)
     {
-        s.tcp.local = address;
-        if (s.tcp.local.port == 0)
-            s.tcp.local.port = allocate_ephemeral();
-        return SocketResult.success;
+        if (s.tcp)
+        {
+            s.tcp.local = address;
+            if (s.tcp.local.port == 0)
+                s.tcp.local.port = allocate_ephemeral();
+            return SocketResult.success;
+        }
     }
     if (!s.udp)
         return SocketResult.invalid_argument;
@@ -172,14 +193,20 @@ SocketResult c_listen(Socket socket, uint backlog)
     auto s = lookup(socket);
     if (!s)
         return SocketResult.invalid_socket;
-    if (!s.tcp)
+    static if (has_tcp)
+    {
+        if (!s.tcp)
+            return SocketResult.invalid_argument;
+        if (s.tcp.local.family == AddressFamily.unspecified)
+            s.tcp.local = InetAddress(IPAddr.any, 0);
+        if (s.tcp.local.port == 0)
+            s.tcp.local.port = allocate_ephemeral();
+        if (!tcp_listen(s.tcp))
+            return SocketResult.address_in_use;
+        return SocketResult.success;
+    }
+    else
         return SocketResult.invalid_argument;
-    if (s.tcp.local.family == AddressFamily.unspecified)
-        s.tcp.local = InetAddress(IPAddr.any, 0);
-    if (s.tcp.local.port == 0)
-        s.tcp.local.port = allocate_ephemeral();
-    tcp_listen(s.tcp);
-    return SocketResult.success;
 }
 
 SocketResult c_connect(Socket socket, ref const InetAddress address)
@@ -190,25 +217,28 @@ SocketResult c_connect(Socket socket, ref const InetAddress address)
     if (address.family != AddressFamily.ipv4)
         return SocketResult.invalid_argument;
 
-    if (s.tcp)
+    static if (has_tcp)
     {
-        if (s.tcp.state != TcpState.closed)
-            return SocketResult.already_connected;
-        if (s.tcp.local.family == AddressFamily.unspecified)
-            s.tcp.local = InetAddress(IPAddr.any, 0);
-        if (s.tcp.local.port == 0)
-            s.tcp.local.port = allocate_ephemeral();
-        s.tcp.remote = address;
-        if (s.tcp.local.addr_any)
+        if (s.tcp)
         {
-            IPAddr src = _stack.select_source_v4(s.tcp.remote._a.ipv4.addr);
-            if (src == IPAddr.any)
-                return SocketResult.network_unreachable;
-            s.tcp.local = InetAddress(src, s.tcp.local.port);
+            if (s.tcp.state != TcpState.closed)
+                return SocketResult.already_connected;
+            if (s.tcp.local.family == AddressFamily.unspecified)
+                s.tcp.local = InetAddress(IPAddr.any, 0);
+            if (s.tcp.local.port == 0)
+                s.tcp.local.port = allocate_ephemeral();
+            s.tcp.remote = address;
+            if (s.tcp.local.addr_any)
+            {
+                IPAddr src = _stack.select_source_v4(s.tcp.remote._a.ipv4.addr);
+                if (src == IPAddr.any)
+                    return SocketResult.network_unreachable;
+                s.tcp.local = InetAddress(src, s.tcp.local.port);
+            }
+            if (!tcp_connect(s.tcp))
+                return SocketResult.failure;
+            return SocketResult.would_block;
         }
-        if (!tcp_connect(*_stack, s.tcp))
-            return SocketResult.failure;
-        return SocketResult.would_block;
     }
     if (s.udp)
     {
@@ -227,27 +257,32 @@ SocketResult c_accept(Socket socket, out Socket connection, InetAddress* remote)
     auto s = lookup(socket);
     if (!s)
         return SocketResult.invalid_socket;
-    if (!s.tcp || !s.tcp.is_listener)
+    static if (has_tcp)
+    {
+        if (!s.tcp || !s.tcp.is_listener)
+            return SocketResult.invalid_argument;
+
+        TcpPcb* child;
+        if (!tcp_accept(s.tcp, child))
+            return SocketResult.would_block;
+
+        int h = _next_handle++;
+        Slot* cs = defaultAllocator().allocT!Slot();
+        cs.sock_type = SocketType.stream;
+        cs.family    = AddressFamily.ipv4;
+        cs.tcp       = child;
+        child.handle = h;
+        _slots[h] = cs;
+
+        connection = Socket(h);
+        if (remote)
+            *remote = child.remote;
+
+        s.tcp.accept_event = (s.tcp.accept_queue.length > 0);
+        return SocketResult.success;
+    }
+    else
         return SocketResult.invalid_argument;
-
-    TcpPcb* child;
-    if (!tcp_accept(s.tcp, child))
-        return SocketResult.would_block;
-
-    int h = _next_handle++;
-    Slot* cs = defaultAllocator().allocT!Slot();
-    cs.sock_type = SocketType.stream;
-    cs.family    = AddressFamily.ipv4;
-    cs.tcp       = child;
-    child.handle = h;
-    _slots[h] = cs;
-
-    connection = Socket(h);
-    if (remote)
-        *remote = child.remote;
-
-    s.tcp.accept_event = (s.tcp.accept_queue.length > 0);
-    return SocketResult.success;
 }
 
 SocketResult c_shutdown(Socket socket, SocketShutdownMode how)
@@ -255,8 +290,11 @@ SocketResult c_shutdown(Socket socket, SocketShutdownMode how)
     auto s = lookup(socket);
     if (!s)
         return SocketResult.invalid_socket;
-    if (s.tcp && (how == SocketShutdownMode.write || how == SocketShutdownMode.read_write))
-        tcp_shutdown_write(*_stack, s.tcp);
+    static if (has_tcp)
+    {
+        if (s.tcp && (how == SocketShutdownMode.write || how == SocketShutdownMode.read_write))
+            tcp_shutdown_write(s.tcp);
+    }
     return SocketResult.success;
 }
 
@@ -266,27 +304,30 @@ SocketResult c_sendmsg(Socket socket, const(InetAddress)* addr, MsgFlags flags, 
     if (!s)
         return SocketResult.invalid_socket;
 
-    if (s.tcp)
+    static if (has_tcp)
     {
-        // Stream send. Gather buffers, push as much as the send buffer accepts.
-        size_t total_avail = 0;
-        foreach (b; buffers)
-            total_avail += b.length;
-
-        size_t total_sent = 0;
-        foreach (b; buffers)
+        if (s.tcp)
         {
-            if (b.length == 0) continue;
-            size_t n = tcp_send_data(*_stack, s.tcp, cast(const(ubyte)[])b);
-            total_sent += n;
-            if (n < b.length)
-                break;     // send buffer full; partial accept
+            // Stream send. Gather buffers, push as much as the send buffer accepts.
+            size_t total_avail = 0;
+            foreach (b; buffers)
+                total_avail += b.length;
+
+            size_t total_sent = 0;
+            foreach (b; buffers)
+            {
+                if (b.length == 0) continue;
+                size_t n = tcp_send_data(s.tcp, cast(const(ubyte)[])b);
+                total_sent += n;
+                if (n < b.length)
+                    break;     // send buffer full; partial accept
+            }
+            if (bytes_sent)
+                *bytes_sent = total_sent;
+            if (total_sent == 0 && total_avail > 0)
+                return SocketResult.would_block;
+            return SocketResult.success;
         }
-        if (bytes_sent)
-            *bytes_sent = total_sent;
-        if (total_sent == 0 && total_avail > 0)
-            return SocketResult.would_block;
-        return SocketResult.success;
     }
 
     if (!s.udp)
@@ -340,24 +381,27 @@ SocketResult c_recvfrom(Socket socket, void[] buffer, MsgFlags flags, InetAddres
     if (!s)
         return SocketResult.invalid_socket;
 
-    if (s.tcp)
+    static if (has_tcp)
     {
-        size_t n = tcp_recv_data(s.tcp, cast(ubyte[])buffer);
-        if (bytes_received)
-            *bytes_received = n;
-        if (from)
-            *from = s.tcp.remote;
-        if (n == 0)
+        if (s.tcp)
         {
-            // EOF on closed connection vs just-no-data-yet:
-            if (s.tcp.fin_seen ||
-                s.tcp.state == TcpState.close_wait ||
-                s.tcp.state == TcpState.last_ack ||
-                s.tcp.state == TcpState.closed)
-                return SocketResult.connection_closed;
-            return SocketResult.would_block;
+            size_t n = tcp_recv_data(s.tcp, cast(ubyte[])buffer);
+            if (bytes_received)
+                *bytes_received = n;
+            if (from)
+                *from = s.tcp.remote;
+            if (n == 0)
+            {
+                // EOF on closed connection vs just-no-data-yet:
+                if (s.tcp.fin_seen ||
+                    s.tcp.state == TcpState.close_wait ||
+                    s.tcp.state == TcpState.last_ack ||
+                    s.tcp.state == TcpState.closed)
+                    return SocketResult.connection_closed;
+                return SocketResult.would_block;
+            }
+            return SocketResult.success;
         }
-        return SocketResult.success;
     }
 
     if (!s.udp)
@@ -388,12 +432,14 @@ SocketResult c_pending(Socket socket, out size_t bytes)
     auto s = lookup(socket);
     if (!s)
         return SocketResult.invalid_socket;
-    if (s.tcp)
-        bytes = s.tcp.recv_buf.length;
-    else if (s.udp && s.udp.recv_queue.length > 0)
+    bytes = 0;
+    static if (has_tcp)
+    {
+        if (s.tcp)
+            bytes = s.tcp.recv_buf.length;
+    }
+    if (bytes == 0 && s.udp && s.udp.recv_queue.length > 0)
         bytes = s.udp.recv_queue[0].data.length;
-    else
-        bytes = 0;
     return SocketResult.success;
 }
 
@@ -417,26 +463,32 @@ SocketResult c_poll(PollFd[] fds, Duration timeout, out uint num_ready)
             if (fd.request_events & PollEvents.write)
                 fd.return_events |= PollEvents.write;     // UDP is always writable
         }
-        else if (s.tcp)
+        else
         {
-            if (fd.request_events & PollEvents.read)
+            static if (has_tcp)
             {
-                bool readable = s.tcp.recv_buf.length > 0
-                              || (s.tcp.is_listener && s.tcp.accept_queue.length > 0)
-                              || s.tcp.fin_seen
-                              || s.tcp.state == TcpState.close_wait
-                              || s.tcp.state == TcpState.closed;
-                if (readable)
-                    fd.return_events |= PollEvents.read;
+                if (s.tcp)
+                {
+                    if (fd.request_events & PollEvents.read)
+                    {
+                        bool readable = s.tcp.recv_buf.length > 0
+                                      || (s.tcp.is_listener && s.tcp.accept_queue.length > 0)
+                                      || s.tcp.fin_seen
+                                      || s.tcp.state == TcpState.close_wait
+                                      || s.tcp.state == TcpState.closed;
+                        if (readable)
+                            fd.return_events |= PollEvents.read;
+                    }
+                    if (fd.request_events & PollEvents.write)
+                    {
+                        if (s.tcp.state == TcpState.established &&
+                            s.tcp.send_buf.length < TcpSendBufSize)
+                            fd.return_events |= PollEvents.write;
+                    }
+                    if (s.tcp.error_event || s.tcp.state == TcpState.closed)
+                        fd.return_events |= PollEvents.hangup;
+                }
             }
-            if (fd.request_events & PollEvents.write)
-            {
-                if (s.tcp.state == TcpState.established &&
-                    s.tcp.send_buf.length < TcpSendBufSize)
-                    fd.return_events |= PollEvents.write;
-            }
-            if (s.tcp.error_event || s.tcp.state == TcpState.closed)
-                fd.return_events |= PollEvents.hangup;
         }
         if (fd.return_events != PollEvents.none)
             ++num_ready;
@@ -485,10 +537,13 @@ SocketResult c_get_peer_name(Socket socket, out InetAddress addr)
     auto s = lookup(socket);
     if (!s)
         return SocketResult.invalid_socket;
-    if (s.tcp && s.tcp.remote.port != 0)
+    static if (has_tcp)
     {
-        addr = s.tcp.remote;
-        return SocketResult.success;
+        if (s.tcp && s.tcp.remote.port != 0)
+        {
+            addr = s.tcp.remote;
+            return SocketResult.success;
+        }
     }
     if (s.udp && s.udp.connected)
     {
@@ -503,10 +558,13 @@ SocketResult c_get_socket_name(Socket socket, out InetAddress addr)
     auto s = lookup(socket);
     if (!s)
         return SocketResult.invalid_socket;
-    if (s.tcp)
+    static if (has_tcp)
     {
-        addr = s.tcp.local;
-        return SocketResult.success;
+        if (s.tcp)
+        {
+            addr = s.tcp.local;
+            return SocketResult.success;
+        }
     }
     if (s.udp)
     {

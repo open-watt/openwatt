@@ -201,8 +201,6 @@ void icmp_input(ref IPStack stack, ref Packet pkt)
 
 void handle_dest_unreachable(ref IPStack stack, const(ubyte)[] icmp)
 {
-    import protocol.ip.tcp : tcp_handle_unreachable;
-
     // ICMP body: 1B type, 1B code, 2B checksum, 4B rest-of-header,
     // then quoted original IP header + first 8B of original payload.
     if (icmp.length < IcmpHeader.sizeof + 4 + IPv4Header.sizeof)
@@ -219,15 +217,20 @@ void handle_dest_unreachable(ref IPStack stack, const(ubyte)[] icmp)
     if (inner_hdr_len < IPv4Header.sizeof || inner.length < inner_hdr_len + 8)
         return;
 
-    if (inner_ip.protocol == IPProtocol.tcp)
+    import router.transport.tcp : stack_lowering;
+    static if (stack_lowering)
     {
-        const(ubyte)[] tcp8 = inner[inner_hdr_len .. inner_hdr_len + 8];
-        ushort src_port = tcp8[0..2].bigEndianToNative!ushort;
-        ushort dst_port = tcp8[2..4].bigEndianToNative!ushort;
-        // inner_ip.src is *us* (the original sender), inner_ip.dst is the peer.
-        tcp_handle_unreachable(stack, code, code_data,
-                               IPAddr(inner_ip.src), src_port,
-                               IPAddr(inner_ip.dst), dst_port);
+        if (inner_ip.protocol == IPProtocol.tcp)
+        {
+            import router.transport.tcp.engine : tcp_handle_unreachable;
+            const(ubyte)[] tcp8 = inner[inner_hdr_len .. inner_hdr_len + 8];
+            ushort src_port = tcp8[0..2].bigEndianToNative!ushort;
+            ushort dst_port = tcp8[2..4].bigEndianToNative!ushort;
+            // inner_ip.src is *us* (the original sender), inner_ip.dst is the peer.
+            tcp_handle_unreachable(code, code_data,
+                                   IPAddr(inner_ip.src), src_port,
+                                   IPAddr(inner_ip.dst), dst_port);
+        }
     }
     // TODO: UDP unreachables -> notify socket layer
 }

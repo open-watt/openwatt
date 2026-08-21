@@ -361,7 +361,8 @@ An automation runs a `do={...}` action when a signal fires. It is a `Collection`
 
 Network routing infrastructure:
 - **Interfaces** (`router/iface/`): Generic L2 packet infrastructure (Ethernet, WiFi, Bridge, VLAN) and shared utilities (Packet, MAC, PriorityQueue, AddressTable). Protocol-specific interfaces (Modbus, CAN, Tesla, Zigbee, BLE) live in `protocol/<name>/iface.d`.
-- **Streams** (`router/stream/`): Byte streams (Serial, Bridge, Console, Duplex, File, Memory). IP-dependent streams (TCP, UDP) live in `protocol/ip/`; TLS lives in `protocol/tls/`; WebSocket lives in `protocol/http/`.
+- **Streams** (`router/stream/`): Byte streams (Serial, Bridge, Console, Duplex, File, Memory). TLS lives in `protocol/tls/`; WebSocket lives in `protocol/http/`.
+- **Transports** (`router/transport/`): the L4 endpoint layer, family-agnostic. `package.d` holds the build-shape flags (`ip_lowering`, `os_sockets`) and the module that owns the collections and per-frame service; `udp.d` is `udp_open`/`UDPEndpoint`; `tcp/` is TCP: `engine.d` (in-tree state machine, always carries ether peers over raw ethernet, lowers ip peers onto the internal stack when present), `package.d` (dispatches `tcp_connect`/`tcp_listen` by family: ether -> engine, ip -> internal stack or OS kernel sockets), `stream.d` (`TCPStream`/`TCPServer`, which listen at both families). Live state prints under `/transport/tcp` and `/transport/udp`. `TCP=0` (`-version=NoTCP`) drops the engine. This layer must not depend on `protocol/ip` except inside `static if (ip_lowering)`: the ip stack imports it back, and an ungated ip symbol deadlocks the import cycle.
 - **Ports** (`router/port/`): Low-level hardware (serial ports)
 
 #### Protocol Layer (src/protocol/)
@@ -380,7 +381,7 @@ Protocol implementations. Several protocols carry their own packet interface (`i
 - **BLE** (`protocol/ble/`): Bluetooth LE link layer as a packet interface, advert dispatch, client/device objects. Tesla vehicle session logic also lives here (see [[tesla_ble_architecture]]).
 
 **IP stack and transports:**
-- **IP** (`protocol/ip/`): in-tree IPv4/IPv6 stack — `stack.d`, `address.d`, `route.d`, `arp.d`, `neighbour.d`, `icmp.d`, `firewall.d`, `pool.d`, `socket.d`. `tcp.d` / `udp.d` are the transports; `tcp_stream.d` / `udp_stream.d` expose them as router Streams. `client.d` is the `IPClient` helper used by protocols that need a TCP (or, when TLS is built, TLS-over-TCP) outbound connection.
+- **IP** (`protocol/ip/`): in-tree IPv4/IPv6 stack — `stack.d`, `address.d`, `route.d`, `arp.d`, `neighbour.d`, `icmp.d`, `firewall.d`, `pool.d`, `socket.d`. `udp.d` is the ip-side datagram plumbing (the endpoint layer lives in `router/transport/`). `client.d` is the `IPClient` helper used by protocols that need a TCP (or, when TLS is built, TLS-over-TCP) outbound connection.
 - **TLS** (`protocol/tls/`): `certificate.d` for cert management, `stream.d` wraps any byte stream as a TLSStream. Fully gated by the `has_tls` feature flag — protocols that opt-in (HTTP, IPClient) gracefully degrade when TLS is compiled out.
 - **DHCP** (`protocol/dhcp/`): client + server, lease store, option codec, message decoder.
 - **DNS** (`protocol/dns/`): server (mDNS-capable) + message codec.

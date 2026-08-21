@@ -51,8 +51,8 @@ import manager.plugin;
 
 import router.stream;
 import protocol.ip.client : IPClient;
-import protocol.ip.tcp_stream;
-import protocol.ip : TCPConnection;
+import router.transport.tcp.stream;
+import router.transport.tcp : TCPConnection;
 
 version (MbedTLS)
 {

@@ -5,11 +5,9 @@ import urt.array;
 import urt.string;
 import urt.conv;
 
-nothrow:
-
 // This parser is designed to run as CTFE.
 
-alias ImportHandler = string delegate(string filename) nothrow;
+alias ImportHandler = string delegate(string filename);
 
 struct ProtoSpec
 {
@@ -108,7 +106,10 @@ ProtoSpec load_proto(const(char)[] path, const(char)[] filename) nothrow
 ProtoSpec parse_proto(string data, ImportHandler import_handler) nothrow
 {
     ProtoSpec proto;
-    parse(proto, data, import_handler);
+    try
+        parse(proto, data, import_handler);
+    catch (Exception e)
+        assert(false, "Failed to parse proto: " ~ e.msg);
 
     foreach (ref msg; proto.messages)
     {
@@ -171,7 +172,7 @@ void parse(ref ProtoSpec proto, string data, ImportHandler import_handler)
             else if (syntax == "proto3")
                 proto.syntax = 3;
             else
-                assert(false, "Unknown syntax");
+                throw new Exception("Unknown syntax");
         }
         else if (data.startsWith("import"))
         {
@@ -187,13 +188,15 @@ void parse(ref ProtoSpec proto, string data, ImportHandler import_handler)
         }
         else
         {
-            data.seek_next_token();
-            if (data.startsWith("service"))
-                proto.services ~= data.parse_service();
-            else if (data.startsWith("message"))
-                proto.messages ~= data.parse_message();
-            else
-                proto.enums ~= data.parse_enum();
+            try proto.services ~= data.parse_service();
+            catch (WrongItem e)
+            {
+                try proto.messages ~= data.parse_message();
+                catch (WrongItem e)
+                {
+                    proto.enums ~= data.parse_enum();
+                }
+            }
         }
     }
 }
@@ -202,7 +205,7 @@ ProtoRPC parse_rpc(ref string data)
 {
     data.seek_next_token();
     if (!data.startsWith("rpc"))
-        assert(false, "Expected 'rpc'");
+        throw new WrongItem("Expected 'rpc'");
     data = data[3..$];
     ProtoRPC r;
     r.name = data.take_identifier();
@@ -223,7 +226,7 @@ ProtoService parse_service(ref string data)
 {
     data.seek_next_token();
     if (!data.startsWith("service"))
-        assert(false, "Expected 'service'");
+        throw new WrongItem("Expected 'service'");
     data = data[7..$];
     ProtoService r;
     r.name = data.take_identifier();
@@ -237,7 +240,7 @@ ProtoMessage parse_message(ref string data)
 {
     data.seek_next_token();
     if (!data.startsWith("message"))
-        assert(false, "Expected 'message'");
+        throw new WrongItem("Expected 'message'");
     data = data[7..$];
     ProtoMessage r;
     r.name = data.take_identifier();
@@ -256,16 +259,15 @@ ProtoEnum parse_enum(ref string data)
 {
     data.seek_next_token();
     if (!data.startsWith("enum"))
-        assert(false, "Expected 'enum'");
+        throw new WrongItem("Expected 'enum'");
     data = data[4..$];
     ProtoEnum r;
     r.name = data.take_identifier();
     data.expect('{');
     while (!data.check('}'))
     {
-        if (data.starts_with_keyword("option", true))
-            r.opts ~= data.parse_option(true);
-        else
+        try r.opts ~= data.parse_option(true);
+        catch (WrongItem e)
         {
             r.members ~= ProtoEnum.Member(); // TODO: handle non-int values
             ref ProtoEnum.Member m = r.members[$-1];
@@ -296,7 +298,7 @@ ProtoOption parse_option(ref string data, bool statement)
     {
         data.seek_next_token();
         if (!data.starts_with_keyword("option", true))
-            assert(false, "Expected 'option'");
+            throw new WrongItem("Expected 'option'");
         data = data[6..$];
     }
     ProtoOption r;
@@ -345,7 +347,7 @@ ProtoField parse_field(ref string data)
         data.expect('=');
         long id = data.take_int();
         if (!valid_field_id(id))
-            assert(false, "Invalid field number");
+            throw new Exception("Invalid field number");
         r.id = cast(uint)id;
         if (data.check('['))
         {
@@ -371,7 +373,7 @@ ProtoValue parse_value(ref string data)
 {
     data.seek_next_token();
     if (data.empty())
-        assert(false, "Unexpected end of input");
+        throw new Exception("Unexpected end of input");
     if (data[0] == '+' || data[0] == '-' || data[0].is_numeric)
     {
         size_t i = 0;
@@ -452,7 +454,7 @@ private bool starts_with_keyword(string data, string keyword, bool allow_parenth
 void expect_whitespace(ref string data)
 {
     if (data.empty || !data[0].is_whitespace)
-        assert(false, "Expected whitespace");
+        throw new Exception("Expected whitespace");
     data = data[1..$];
 }
 
@@ -460,7 +462,7 @@ void expect(ref string data, char token)
 {
     data.seek_next_token();
     if (data.empty || data[0] != token)
-        assert(false, "Expected token: " ~ token);
+        throw new Exception("Expected token: " ~ token);
     data = data[1..$];
 }
 
@@ -468,7 +470,7 @@ void expect(ref string data, string token)
 {
     data.seek_next_token();
     if (!data.startsWith(token))
-        assert(false, "Expected token");
+        throw new Exception("Expected token");
     data = data[token.length..$];
 }
 
@@ -496,7 +498,7 @@ long take_int(ref string data)
     size_t taken;
     long i = data.parse_int(&taken);
     if (taken == 0)
-        assert(false, "Expected integer");
+        throw new Exception("Expected integer");
     data = data[taken..$];
     return i;
 }
@@ -505,7 +507,7 @@ string take_string(ref string data)
 {
     data.seek_next_token();
     if (data.empty || (data[0] != '"'))
-        assert(false, "Expected string");
+        throw new Exception("Expected string");
     size_t i = 1;
     while (i < data.length)
     {
@@ -517,7 +519,7 @@ string take_string(ref string data)
             ++i;
     }
     if (i >= data.length)
-        assert(false, "Unterminated string");
+        throw new Exception("Unterminated string");
     string result = data[1..i];
     data = data[i + 1..$];
     return result;
@@ -527,7 +529,7 @@ string take_identifier(ref string data)
 {
     data.seek_next_token();
     if (data.empty || !(data[0].is_alpha || data[0] == '_'))
-        assert(false, "Invalid identifier");
+        throw new Exception("Invalid identifier");
     size_t i = 1;
     for (; i < data.length; ++i)
     {
@@ -589,6 +591,14 @@ string to_string(long value)
     if (i < 0)
         buf[--i] = '-';
     return buf[i..$].idup;
+}
+
+class WrongItem : Exception
+{
+    this(string msg)
+    {
+        super(msg);
+    }
 }
 
 enum LogicalType : ubyte

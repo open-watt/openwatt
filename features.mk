@@ -38,9 +38,12 @@
 #                   interactive prompts, banners, MOTDs. Orthogonal to
 #                   FEATURES and TINY.
 #
-#   MODBUS, HTTP_CLIENT, HTTP_FILESERVER
+#   MODBUS, TCP, HTTP_CLIENT, HTTP_FILESERVER
 #                   Optional components within a feature tier. Each defaults
 #                   to 1 and may be disabled by a constrained BOARD profile.
+#                   TCP=0 drops the in-tree TCP engine (router/transport/tcp/engine.d);
+#                   kernel-socket TCP survives on OS platforms, but ether-TCP
+#                   and internal-stack TCP disappear.
 # =======================================================================
 
 # -- Per-platform defaults -----------------------------------------------
@@ -59,6 +62,7 @@ endif
 FEATURES ?= full
 HEADLESS ?= 0
 MODBUS ?= 1
+TCP ?= 1
 HTTP_CLIENT ?= 1
 HTTP_FILESERVER ?= 1
 
@@ -67,8 +71,16 @@ HTTP_FILESERVER ?= 1
 ifeq ($(filter $(FEATURES),switch switch-ip switch-http switch-https full),)
     $(error Unknown FEATURES='$(FEATURES)'; valid: switch | switch-ip | switch-http | switch-https | full)
 endif
-ifneq ($(filter-out 0 1,$(MODBUS) $(HTTP_CLIENT) $(HTTP_FILESERVER)),)
-    $(error MODBUS, HTTP_CLIENT and HTTP_FILESERVER must be 0 or 1)
+ifneq ($(filter-out 0 1,$(MODBUS) $(TCP) $(HTTP_CLIENT) $(HTTP_FILESERVER)),)
+    $(error MODBUS, TCP, HTTP_CLIENT and HTTP_FILESERVER must be 0 or 1)
+endif
+
+# TCP=0 drops the in-tree engine; on a target driving the in-tree IP stack that leaves no TCP
+# backend at all, so every tier carrying a TCP consumer (http, mqtt, telnet, dns, esphome) is out.
+ifeq ($(TCP)$(USE_INTERNAL_IP_STACK),01)
+    ifneq ($(filter-out switch switch-ip,$(FEATURES)),)
+        $(error TCP=0 with the in-tree IP stack leaves no TCP backend, but FEATURES='$(FEATURES)' needs TCP streams; use FEATURES=switch or switch-ip, or build TCP=1)
+    endif
 endif
 
 # -- Source-tree subset per preset ---------------------------------------
@@ -90,6 +102,9 @@ FEATURE_DIRS := $(FEATURE_DIRS_$(FEATURES))
 ifeq ($(MODBUS),0)
     FEATURE_DIRS := $(filter-out protocol/modbus,$(FEATURE_DIRS))
     FEATURE_DFLAGS += $(VERSION_FLAG)NoModbus
+endif
+ifeq ($(TCP),0)
+    FEATURE_DFLAGS += $(VERSION_FLAG)NoTCP
 endif
 ifeq ($(HTTP_CLIENT),0)
     FEATURE_DFLAGS += $(VERSION_FLAG)NoHTTPClient

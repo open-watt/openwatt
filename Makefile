@@ -290,8 +290,6 @@ endif
 
 # -- Main target -------------------------------------------------------
 
-FLAGSTAMP = $(OBJDIR)/build.flags
-
 $(TARGET): $(SOURCES) $(BAREMETAL_OBJS) $(VENDOR_OBJS) $(BK_BEKEN_LIB)
 
 # -- BK7231 FreeRTOS build (must come after $(TARGET) so it doesn't become default goal)
@@ -338,7 +336,6 @@ ifneq ($(filter esp%,$(PLATFORM)),)
 	@echo "To build flashable firmware:  make esp-idf-build PLATFORM=$(PLATFORM)$(if $(BOARD), BOARD=$(BOARD)) CONFIG=$(CONFIG)"
 	@echo "To flash:                     make esp-flash PLATFORM=$(PLATFORM)$(if $(BOARD), BOARD=$(BOARD))"
 endif
-	@printf '%s' '$(BUILD_FLAGS)' > $(FLAGSTAMP)
 ifeq ($(ROUTEROS_BUILD),1)
 	@$(MAKE) --no-print-directory routeros-container
 	@$(MAKE) --no-print-directory routeros-tar
@@ -586,13 +583,4 @@ clean:
 	rm -rf $(OBJDIR) $(TARGETDIR)
 ifeq ($(ROUTEROS_BUILD),1)
 	@$(MAKE) --no-print-directory routeros-clean
-endif
-
-BUILD_FLAGS := $(DFLAGS) $(BUILD_CMD_FLAGS)
-FLAGS_CHANGED := $(shell printf '%s' '$(BUILD_FLAGS)' | cmp -s - $(FLAGSTAMP) || echo 1)
-
-ifneq ($(FLAGS_CHANGED),)
-.PHONY: flags_changed
-flags_changed:
-$(TARGET): flags_changed
 endif

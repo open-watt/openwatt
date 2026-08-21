@@ -21,7 +21,7 @@ import protocol.esphome;
 import tools.protobuf;
 
 import router.stream;
-import protocol.ip.tcp_stream;
+import router.transport.tcp.stream;
 
 //version = DebugESPHomeClient;
 
