@@ -38,8 +38,8 @@ nothrow @nogc:
 // parse as strings (`encoder=json`) and property state stays compact.
 enum SyncEncoderKind : ubyte
 {
-    json,
     binary,
+    json,
 }
 
 enum uint model_protocol_version = 1;

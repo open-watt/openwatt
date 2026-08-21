@@ -533,7 +533,7 @@ package:
     Array!BaseObject _authoritative;     // proxies we hold on this peer's behalf
     Array!EID        _introduced;        // handle table: nodes we announced (slot = handle >> 1)
     Array!EID        _adopted;           // handle table: local ids for names the peer announced
-    SyncEncoderKind  _encoder;
+    SyncEncoderKind  _encoder = SyncEncoderKind.binary;
 
     ubyte            _remote_caps;       // hello negotiation; 0 = no hello received
     ulong            _remote_node_id;    // hello identity; 0 = peer announced none
