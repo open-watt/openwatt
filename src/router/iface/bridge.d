@@ -9,6 +9,7 @@ import urt.mem.allocator;
 import urt.meta.nullable;
 import urt.string;
 import urt.time;
+import urt.util : min;
 
 import manager.collection;
 import manager.console;
@@ -197,19 +198,31 @@ nothrow @nogc:
         if (index >= _members.length)
             return false;
 
-        _members[index].iface.set_master(null, 0);
+        BaseInterface iface = _members[index].iface;
+        if (_members[index].offloaded)
+            return false;
+        for (TagTracking* entry = _tracking_active; entry; entry = entry.next)
+            foreach (ref tag; entry.port_tags[])
+                if (tag.iface is iface)
+                    return false;
+
+        ubyte old_count = cast(ubyte)_members.length;
+        iface.set_master(null, 0);
         _members.remove(index);
+        _address_table.remove_port(cast(ubyte)index, old_count);
 
-        // TODO: update the MAC table to adjust all the port numbers!
-        assert(false);
+        foreach (i; index .. _members.length)
+        {
+            BaseInterface shifted = _members[i].iface;
+            shifted.set_master(null, 0);
+            bool attached = shifted.set_master(this, cast(ubyte)i);
+            debug assert(attached, "bridge member reattach failed");
+            if (STAAssistPort port = cast(STAAssistPort)shifted)
+                port.port_id(cast(ubyte)i);
+        }
 
-        // TODO: all the subscriber user_data's are wrong!!!
-        //       we need to unsubscribe and resubscribe all the _members...
-        assert(false);
-
-        // TODO: scan active TagTracking entries and remove PortTags for the removed
-        //       interface, decrementing n_pending for each. If n_pending reaches 0,
-        //       fire the upstream callback and recycle the entry.
+        if (running)
+            update_link_speed();
 
         return true;
     }
@@ -565,6 +578,9 @@ protected:
         if (!src_address.is_multicast_address)
             _address_table.insert(src_address, src_port);
 
+        if (handle_sta_assist(packet, src_port))
+            return;
+
         send(packet, src_port);
 
         debug
@@ -682,6 +698,122 @@ private:
     TagTracking* _tracking_free;
     TagTracking* _tracking_active;
     TagAllocator _bridge_tags;
+
+    bool handle_sta_assist(ref Packet packet, ubyte src_port)
+    {
+        OWControl msg;
+        const(ubyte)[] content;
+        ushort vlan;
+        if (!decode_ow_control(packet, msg, content, vlan))
+            return false;
+
+        if (msg == OWControl.sta_assist_solicit)
+        {
+            if (content.length != 4 || !_members[src_port].iface.can_forward_ethernet_sources())
+                return false;
+            send_assist_control(OWControl.sta_assist_offer, packet.eth.src, vlan, content, _attach_port);
+            return false;
+        }
+        if (msg != OWControl.sta_assist_data || packet.eth.dst != mac)
+            return false;
+
+        ushort total = content.length >= sta_assist_fragment_header ? content[2 .. 4].bigEndianToNative!ushort : 0;
+        bool first_fragment = content.length > sta_assist_fragment_header && total >= 14 &&
+                              total <= sta_assist_frame_capacity &&
+                              content.length - sta_assist_fragment_header <= total &&
+                              content[4 .. 6].bigEndianToNative!ushort == 0;
+        STAAssistPort port = assist_port(packet.eth.src, vlan, first_fragment);
+        if (!port)
+        {
+            add_rx_drop();
+            return true;
+        }
+        port.assist_incoming(content, packet.creation_time);
+        return true;
+    }
+
+    STAAssistPort assist_port(MACAddress peer, ushort vlan, bool create)
+    {
+        ushort vid = vlan & 0x0FFF;
+        foreach (ref member; _members[])
+        {
+            STAAssistPort port = cast(STAAssistPort)member.iface;
+            if (port && port.peer == peer && port.transport_vlan == vid)
+                return port;
+        }
+        if (!create)
+            return null;
+
+        STAAssistPort port = Collection!STAAssistPort().create(
+            null, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary));
+        if (!port)
+            return null;
+        ubyte port_id = cast(ubyte)_members.length;
+        port.bind(this, peer, vid, port_id);
+        ushort pvid = vid ? vid : 1;
+        if (!add_member(port, pvid, false, vid == 0))
+        {
+            port.destroy();
+            return null;
+        }
+        return port;
+    }
+
+    bool send_assisted_frame(STAAssistPort port, ref ushort frame_id, ref const Packet packet)
+    {
+        ubyte[sta_assist_frame_capacity] frame = void;
+        ptrdiff_t total = encode_ethernet_frame(packet, frame);
+        if (total <= 0)
+            return false;
+
+        if (++frame_id == 0)
+            ++frame_id;
+        for (size_t offset = 0; offset < total; offset += sta_assist_fragment_data)
+        {
+            size_t length = min(sta_assist_fragment_data, total - offset);
+            ubyte[sta_assist_fragment_header + sta_assist_fragment_data] fragment = void;
+            fragment[0 .. 2] = frame_id.nativeToBigEndian;
+            fragment[2 .. 4] = (cast(ushort)total).nativeToBigEndian;
+            fragment[4 .. 6] = (cast(ushort)offset).nativeToBigEndian;
+            fragment[6 .. 6 + length] = frame[offset .. offset + length];
+            if (!send_assist_control(OWControl.sta_assist_data, port.peer, port.transport_vlan,
+                                     fragment[0 .. 6 + length], port.port_id))
+                return false;
+        }
+        return true;
+    }
+
+    bool send_assist_control(OWControl msg, MACAddress dst, ushort vlan, scope const(ubyte)[] content, ubyte src_port)
+    {
+        ubyte[sta_assist_control_payload] buffer = void;
+        ptrdiff_t length = encode_ow_control(msg, content, buffer);
+        if (length <= 0)
+            return false;
+
+        Packet wrapped;
+        ref eth = wrapped.init!Ethernet(buffer[0 .. length]);
+        eth.src = mac;
+        eth.dst = dst;
+        eth.ether_type = EtherType.ow;
+        wrapped.vlan = vlan;
+        send(wrapped, src_port);
+        return true;
+    }
+
+    void expire_assist_port(STAAssistPort port)
+    {
+        foreach (i, ref member; _members[])
+        {
+            if (member.iface is port)
+            {
+                if (!remove_member(i))
+                    return;
+                port.unbind();
+                port.destroy();
+                return;
+            }
+        }
+    }
 
     // an exotic address is ours if it lives behind a software-domain port (a local
     // endpoint or an exotic member), not across the ethernet domain
@@ -1032,6 +1164,114 @@ private:
 
         add_tx_frame(packet.data.length);
         return btag;
+    }
+}
+
+
+final class STAAssistPort : BaseInterface
+{
+nothrow @nogc:
+    enum type_name = "sta-assist";
+    enum syncable = false;
+
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
+    {
+        super(collection_type_info!STAAssistPort, id, flags);
+        _caps |= InterfaceCaps.ethernet;
+        mark_set!(typeof(this), "caps")();
+    }
+
+    MACAddress peer() const pure
+        => _peer;
+
+    ushort transport_vlan() const pure
+        => _transport_vlan;
+
+    ubyte port_id() const pure
+        => _port_id;
+
+    void port_id(ubyte value) pure
+    {
+        _port_id = value;
+    }
+
+    void bind(BridgeInterface bridge, MACAddress peer, ushort vlan, ubyte port_id)
+    {
+        _bridge = bridge;
+        _peer = peer;
+        _transport_vlan = vlan;
+        _port_id = port_id;
+    }
+
+    void assist_incoming(scope const(ubyte)[] content, MonoTime ts)
+    {
+        Packet packet;
+        int result = _reassembly.push(content, ts, packet);
+        if (result >= 0)
+            touch();
+        if (result > 0)
+            incoming_packet(packet);
+        else if (result < 0)
+            add_rx_drop();
+    }
+
+protected:
+    override int transmit(ref Packet packet, MessageCallback, const(QueuePolicy)*)
+    {
+        if (packet.type != PacketType.ethernet || !_bridge)
+        {
+            add_tx_drop();
+            return -1;
+        }
+        if (!_bridge.send_assisted_frame(this, _tx_frame, packet))
+        {
+            add_tx_drop();
+            return -1;
+        }
+        touch();
+        add_tx_frame(packet.length);
+        return 0;
+    }
+
+    override CompletionStatus shutdown()
+    {
+        if (_expiry_scheduled)
+        {
+            g_app.cancel(&expire);
+            _expiry_scheduled = false;
+        }
+        return super.shutdown();
+    }
+
+private:
+    enum assist_idle_time = 300.seconds;
+
+    BridgeInterface _bridge;
+    MACAddress _peer;
+    ushort _transport_vlan;
+    ushort _tx_frame;
+    ubyte _port_id;
+    bool _expiry_scheduled;
+    STAAssistReassembly _reassembly;
+
+    void touch()
+    {
+        if (_expiry_scheduled)
+            g_app.cancel(&expire);
+        g_app.schedule(getTime() + assist_idle_time, &expire);
+        _expiry_scheduled = true;
+    }
+
+    void expire(MonoTime)
+    {
+        _expiry_scheduled = false;
+        if (_bridge)
+            _bridge.expire_assist_port(this);
+    }
+
+    void unbind()
+    {
+        _bridge = null;
     }
 }
 

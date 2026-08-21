@@ -61,6 +61,9 @@ enum OWControl : ushort
     addr_query  = ow_control_flag | 0x0002,  // body: [txid:u32 BE][PacketType:u16 BE, unknown = all] -- report your addresses
     addr_report = ow_control_flag | 0x0003,  // body: [txid:u32 BE, 0 = unsolicited][name_len:u8][name][N x universal address (u64 BE)]
     announce    = ow_control_flag | 0x0004,  // body: identity TLVs (see manager.sync.discovery) -- peering beacon
+    sta_assist_solicit = ow_control_flag | 0x0005, // body: nonce (u32 BE)
+    sta_assist_offer   = ow_control_flag | 0x0006, // body: echoed nonce (u32 BE)
+    sta_assist_data    = ow_control_flag | 0x0007, // body: [frame:u16][total:u16][offset:u16][ethernet fragment]
 }
 
 // 802.1p PCP traffic classes

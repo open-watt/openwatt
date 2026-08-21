@@ -21,6 +21,127 @@ import router.iface.endpoint : ether_neighbour_learn;
 nothrow @nogc:
 
 
+enum size_t sta_assist_fragment_header = 6;
+enum size_t sta_assist_control_payload = 1500;
+enum size_t sta_assist_fragment_data = sta_assist_control_payload - 5 - sta_assist_fragment_header;
+enum size_t sta_assist_frame_capacity = 1518;
+
+package ptrdiff_t encode_ethernet_frame(ref const Packet packet, ubyte[] buffer)
+{
+    if (packet.type != PacketType.ethernet)
+        return -1;
+
+    size_t header_len = packet.vlan ? 18 : 14;
+    if (header_len + packet.data.length > buffer.length)
+        return -1;
+
+    buffer[0 .. 6] = packet.eth.dst.b[];
+    buffer[6 .. 12] = packet.eth.src.b[];
+    size_t offset = 12;
+    if (packet.vlan)
+    {
+        buffer[offset .. offset + 2] = ushort(EtherType.vlan).nativeToBigEndian;
+        buffer[offset + 2 .. offset + 4] = packet.vlan.nativeToBigEndian;
+        offset += 4;
+    }
+    buffer[offset .. offset + 2] = packet.eth.ether_type.nativeToBigEndian;
+    offset += 2;
+    buffer[offset .. offset + packet.data.length] = cast(const(ubyte)[])packet.data[];
+    return offset + packet.data.length;
+}
+
+package bool decode_ethernet_frame(scope const(ubyte)[] frame, MonoTime ts, ref Packet packet)
+{
+    if (frame.length < 14)
+        return false;
+
+    ref eth = packet.init!Ethernet(frame[14 .. $], ts);
+    eth.dst = MACAddress(frame[0 .. 6]);
+    eth.src = MACAddress(frame[6 .. 12]);
+    eth.ether_type = frame[12 .. 14].bigEndianToNative!ushort;
+    return true;
+}
+
+package ptrdiff_t encode_ow_control(OWControl msg, scope const(ubyte)[] content, ubyte[] buffer)
+{
+    if (content.length > ushort.max || content.length + 5 > buffer.length)
+        return -1;
+    buffer[0 .. 2] = ushort(msg).nativeToBigEndian;
+    buffer[2 .. 4] = (cast(ushort)content.length).nativeToBigEndian;
+    buffer[4] = 0;
+    buffer[5 .. 5 + content.length] = content[];
+    return 5 + content.length;
+}
+
+package bool decode_ow_control(ref const Packet packet, ref OWControl msg, ref const(ubyte)[] content, ref ushort vlan)
+{
+    if (packet.type != PacketType.ethernet)
+        return false;
+
+    ushort ether_type = packet.eth.ether_type;
+    content = cast(const(ubyte)[])packet.data;
+    vlan = packet.vlan;
+    if (ether_type == EtherType.vlan)
+    {
+        if (content.length < 4)
+            return false;
+        vlan = content[0 .. 2].bigEndianToNative!ushort;
+        ether_type = content[2 .. 4].bigEndianToNative!ushort;
+        content = content[4 .. $];
+    }
+    if (ether_type != EtherType.ow || content.length < 5)
+        return false;
+
+    ushort wire_type = content[0 .. 2].bigEndianToNative!ushort;
+    ushort data_len = content[2 .. 4].bigEndianToNative!ushort;
+    if (!(wire_type & ow_control_flag) || content[4] != 0 || content.length < 5 + data_len)
+        return false;
+    msg = cast(OWControl)wire_type;
+    content = content[5 .. 5 + data_len];
+    return true;
+}
+
+package struct STAAssistReassembly
+{
+nothrow @nogc:
+    int push(scope const(ubyte)[] fragment, MonoTime ts, ref Packet packet)
+    {
+        if (fragment.length <= sta_assist_fragment_header)
+            return -1;
+
+        ushort frame_id = fragment[0 .. 2].bigEndianToNative!ushort;
+        ushort total = fragment[2 .. 4].bigEndianToNative!ushort;
+        ushort offset = fragment[4 .. 6].bigEndianToNative!ushort;
+        fragment = fragment[sta_assist_fragment_header .. $];
+        if (total < 14 || total > _buffer.length || offset > total || fragment.length > total - offset)
+            return -1;
+
+        if (offset == 0)
+        {
+            _frame_id = frame_id;
+            _total = total;
+            _next = 0;
+        }
+        else if (frame_id != _frame_id || total != _total || offset != _next)
+            return -1;
+
+        _buffer[offset .. offset + fragment.length] = fragment[];
+        _next = cast(ushort)(offset + fragment.length);
+        if (_next != _total)
+            return 0;
+
+        _next = 0;
+        return decode_ethernet_frame(_buffer[0 .. _total], ts, packet) ? 1 : -1;
+    }
+
+private:
+    ubyte[sta_assist_frame_capacity] _buffer;
+    ushort _frame_id;
+    ushort _total;
+    ushort _next;
+}
+
+
 abstract class EthernetStation : BaseInterface
 {
     alias Properties = AliasSeq!(Prop!("cfm-level", cfm_level),
@@ -825,6 +946,11 @@ protected:
 
         // the packet accounts only payload bytes; account the link-layer overhead here
         _status.rx_bytes += data.length - packet.length;
+        medium_ingress(packet);
+    }
+
+    void medium_ingress(ref Packet packet)
+    {
         incoming_packet(packet);
     }
 
@@ -834,30 +960,13 @@ protected:
         debug assert(packet.type == PacketType.ethernet, "medium_tx expects an ethernet packet");
 
         ubyte[1518] buffer = void; // 1500 IP + 14 ETH + 4 VLAN. TODO: jumbos / double-tag.
-
-        Ethernet* eth = cast(Ethernet*)buffer.ptr;
-        eth.dst = packet.eth.dst;
-        eth.src = packet.eth.src;
-        ushort* ethertype = &eth.ether_type;
-
-        // if there should be a vlan header
-        if (packet.vlan)
+        ptrdiff_t packet_len = encode_ethernet_frame(packet, buffer);
+        if (packet_len <= 0)
         {
-            storeBigEndian(ethertype++, ushort(EtherType.vlan));
-            storeBigEndian(ethertype++, packet.vlan);
-        }
-        storeBigEndian(ethertype++, packet.eth.ether_type);
-
-        // write the payload...
-        ubyte* payload = cast(ubyte*)ethertype;
-        if (packet.data.length > buffer.sizeof - (payload - buffer.ptr))
-        {
-            log.warning("egress buffer too small: payload=", packet.data.length, " avail=", buffer.sizeof - (payload - buffer.ptr), " vlan=", packet.vlan, " etype=", packet.eth.ether_type);
+            log.warning("egress buffer too small: payload=", packet.data.length, " vlan=", packet.vlan, " etype=", packet.eth.ether_type);
             add_tx_drop();
             return;
         }
-        payload[0 .. packet.data.length] = cast(const(ubyte)[])packet.data[];
-        size_t packet_len = (payload + packet.data.length) - buffer.ptr;
 
         if (wire_send(buffer[0 .. packet_len]) != 0)
             add_tx_drop();
@@ -896,4 +1005,54 @@ unittest
     assert(report[0 .. 4].bigEndianToNative!uint == 0x12345678);
     assert(report[4] == hostname.length);
     assert(cast(const(char)[])report[5 .. offset] == hostname[]);
+
+    ubyte[1500] payload;
+    foreach (i, ref b; payload)
+        b = cast(ubyte)i;
+    Packet original;
+    ref original_eth = original.init!Ethernet(payload);
+    original_eth.dst = MACAddress(0x10, 0x20, 0x30, 0x40, 0x50, 0x60);
+    original_eth.src = MACAddress(0x02, 0x03, 0x04, 0x05, 0x06, 0x07);
+    original_eth.ether_type = EtherType.ip4;
+
+    ubyte[sta_assist_frame_capacity] frame = void;
+    ptrdiff_t frame_len = encode_ethernet_frame(original, frame);
+    assert(frame_len == 1514);
+
+    STAAssistReassembly reassembly;
+    Packet decoded;
+    ushort frame_id = 7;
+    size_t fragment_offset;
+    int result;
+    while (fragment_offset < frame_len)
+    {
+        size_t fragment_len = min(sta_assist_fragment_data, frame_len - fragment_offset);
+        ubyte[sta_assist_fragment_header + sta_assist_fragment_data] fragment = void;
+        fragment[0 .. 2] = frame_id.nativeToBigEndian;
+        fragment[2 .. 4] = (cast(ushort)frame_len).nativeToBigEndian;
+        fragment[4 .. 6] = (cast(ushort)fragment_offset).nativeToBigEndian;
+        fragment[6 .. 6 + fragment_len] = frame[fragment_offset .. fragment_offset + fragment_len];
+        result = reassembly.push(fragment[0 .. 6 + fragment_len], MonoTime.init, decoded);
+        fragment_offset += fragment_len;
+    }
+    assert(result == 1);
+    assert(decoded.eth.dst == original.eth.dst);
+    assert(decoded.eth.src == original.eth.src);
+    assert(decoded.eth.ether_type == original.eth.ether_type);
+    assert(decoded.data == original.data);
+
+    ubyte[32] control_buffer = void;
+    ubyte[4] nonce = 0x12345678.nativeToBigEndian;
+    ptrdiff_t control_len = encode_ow_control(OWControl.sta_assist_offer, nonce, control_buffer);
+    Packet control_packet;
+    ref control_eth = control_packet.init!Ethernet(control_buffer[0 .. control_len]);
+    control_eth.src = MACAddress(0x02, 0, 0, 0, 0, 1);
+    control_eth.dst = MACAddress(0x02, 0, 0, 0, 0, 2);
+    control_eth.ether_type = EtherType.ow;
+    OWControl control;
+    const(ubyte)[] control_content;
+    ushort control_vlan;
+    assert(decode_ow_control(control_packet, control, control_content, control_vlan));
+    assert(control == OWControl.sta_assist_offer);
+    assert(control_content == nonce[]);
 }

@@ -1,17 +1,20 @@
 module router.iface.wifi;
 
 import urt.array;
+import urt.endian;
 import urt.lifetime;
 import urt.log;
 import urt.mem;
 import urt.result : Result;
 import urt.mem.string;
 import urt.mem.temp;
+import urt.rand : rand;
 import urt.si.quantity;
 import urt.si.unit : Gigahertz;
 import urt.string;
 import urt.string.format;
 import urt.time;
+import urt.util : min;
 
 import manager;
 import manager.base;
@@ -605,8 +608,152 @@ nothrow @nogc:
     ubyte signal_quality() const
         => 0; // 0..100
 
+    final override bool can_forward_ethernet_sources() const pure
+        => four_address_mode();
+
+protected:
+
+    bool four_address_mode() const pure
+        => false;
+
+    override int transmit(ref Packet packet, MessageCallback callback, const(QueuePolicy)* queue_policy)
+    {
+        if (packet.type != PacketType.ethernet || packet.eth.src == mac || four_address_mode())
+            return super.transmit(packet, callback, queue_policy);
+
+        STAAssistClient* client = assist_client(packet.vlan, true);
+        solicit_assist(*client, packet.vlan);
+        if (!client.helper)
+        {
+            add_tx_drop();
+            return -1;
+        }
+        if (!send_assisted_frame(client.helper, packet.vlan, client.tx_frame, packet))
+        {
+            add_tx_drop();
+            return -1;
+        }
+        return 0;
+    }
+
+    override void medium_ingress(ref Packet packet)
+    {
+        OWControl msg;
+        const(ubyte)[] content;
+        ushort vlan;
+        if (packet.eth.src != mac && packet.eth.dst == mac && decode_ow_control(packet, msg, content, vlan))
+        {
+            STAAssistClient* client = assist_client(vlan, false);
+            if (msg == OWControl.sta_assist_offer)
+            {
+                add_rx_frame(packet.length);
+                if (client && client.nonce && content.length == 4 && content[0 .. 4].bigEndianToNative!uint == client.nonce)
+                {
+                    client.helper = packet.eth.src;
+                    client.nonce = 0;
+                }
+                return;
+            }
+            if (msg == OWControl.sta_assist_data && client && client.helper == packet.eth.src)
+            {
+                add_rx_frame(packet.length);
+                Packet inner;
+                int result = client.reassembly.push(content, packet.creation_time, inner);
+                if (result > 0)
+                    incoming_packet(inner);
+                else if (result < 0)
+                    add_rx_drop();
+                return;
+            }
+        }
+        super.medium_ingress(packet);
+    }
+
+    override CompletionStatus shutdown()
+    {
+        _assist_clients.clear();
+        return super.shutdown();
+    }
+
 private:
+    struct STAAssistClient
+    {
+        ushort vlan;
+        MACAddress helper;
+        uint nonce;
+        MonoTime last_solicit;
+        ushort tx_frame;
+        STAAssistReassembly reassembly;
+    }
+
     MACAddress _bssid_filter;
+    Array!STAAssistClient _assist_clients;
+
+    STAAssistClient* assist_client(ushort vlan, bool create)
+    {
+        ushort vid = vlan & 0x0FFF;
+        foreach (ref client; _assist_clients[])
+            if (client.vlan == vid)
+                return &client;
+        if (!create)
+            return null;
+        _assist_clients ~= STAAssistClient(vid);
+        return &_assist_clients[_assist_clients.length - 1];
+    }
+
+    void solicit_assist(ref STAAssistClient client, ushort vlan)
+    {
+        MonoTime now = getTime();
+        Duration interval = client.helper ? 30.seconds : 2.seconds;
+        if (client.last_solicit != MonoTime.init && now - client.last_solicit < interval)
+            return;
+        client.last_solicit = now;
+        client.nonce = cast(uint)rand();
+        if (client.nonce == 0)
+            client.nonce = 1;
+        ubyte[4] content = client.nonce.nativeToBigEndian;
+        send_assist_control(OWControl.sta_assist_solicit, MACAddress.broadcast, vlan, content);
+    }
+
+    bool send_assisted_frame(MACAddress helper, ushort vlan, ref ushort frame_id, ref const Packet packet)
+    {
+        ubyte[sta_assist_frame_capacity] frame = void;
+        ptrdiff_t total = encode_ethernet_frame(packet, frame);
+        if (total <= 0)
+            return false;
+
+        if (++frame_id == 0)
+            ++frame_id;
+        for (size_t offset = 0; offset < total; offset += sta_assist_fragment_data)
+        {
+            size_t length = min(sta_assist_fragment_data, total - offset);
+            ubyte[sta_assist_fragment_header + sta_assist_fragment_data] fragment = void;
+            fragment[0 .. 2] = frame_id.nativeToBigEndian;
+            fragment[2 .. 4] = (cast(ushort)total).nativeToBigEndian;
+            fragment[4 .. 6] = (cast(ushort)offset).nativeToBigEndian;
+            fragment[6 .. 6 + length] = frame[offset .. offset + length];
+            if (!send_assist_control(OWControl.sta_assist_data, helper, vlan, fragment[0 .. 6 + length]))
+                return false;
+        }
+        return true;
+    }
+
+    bool send_assist_control(OWControl msg, MACAddress dst, ushort vlan, scope const(ubyte)[] content)
+    {
+        ubyte[sta_assist_control_payload] buffer = void;
+        ptrdiff_t length = encode_ow_control(msg, content, buffer);
+        if (length <= 0)
+            return false;
+
+        Packet wrapped;
+        ref eth = wrapped.init!Ethernet(buffer[0 .. length]);
+        eth.src = mac;
+        eth.dst = dst;
+        eth.ether_type = EtherType.ow;
+        wrapped.vlan = vlan;
+        medium_tx(wrapped);
+        return true;
+    }
 }
 
 

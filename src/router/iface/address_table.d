@@ -97,35 +97,26 @@ nothrow @nogc:
         return 0;
     }
 
-    void remove_port(ubyte port_index)
+    void remove_port(ubyte port_index, ubyte port_limit)
     {
         ulong[64] remove_buf = void;
-        size_t remove_count = 0;
-        // re-index survivors in the first pass
-        foreach (ref kvp; _backing)
-        {
-            if (kvp.value == port_index)
-            {
-                if (remove_count < remove_buf.length)
-                    remove_buf[remove_count++] = kvp.key;
-            }
-            else if (kvp.value > port_index)
-                --kvp.value;
-        }
+        size_t remove_count;
         do
         {
+            remove_count = 0;
+            foreach (ref kvp; _backing)
+                if (kvp.value == port_index && remove_count < remove_buf.length)
+                    remove_buf[remove_count++] = kvp.key;
             foreach (k; remove_buf[0 .. remove_count])
                 _backing.remove(k);
             if (remove_count < remove_buf.length)
                 break;
-            // drain excess removals in following batches
-            remove_count = 0;
-            foreach (ref kvp; _backing)
-                if (kvp.value == port_index)
-                    if (remove_count < remove_buf.length)
-                        remove_buf[remove_count++] = kvp.key;
         }
         while (remove_count > 0);
+
+        foreach (ref kvp; _backing)
+            if (kvp.value > port_index && kvp.value < port_limit)
+                --kvp.value;
 
         for (ubyte i = 0; i < _len;)
         {
@@ -133,7 +124,7 @@ nothrow @nogc:
                 cache_remove(i);
             else
             {
-                if (_values[i] > port_index)
+                if (_values[i] > port_index && _values[i] < port_limit)
                     --_values[i];
                 ++i;
             }
@@ -224,4 +215,20 @@ private:
         }
         --_len;
     }
+}
+
+
+unittest
+{
+    AddressTable table = AddressTable(2);
+    foreach (i; 0 .. 70)
+        table.insert(0x1000 + i, 1);
+    table.insert(0x2000, 2);
+    table.insert(0x3000, 0xFE);
+
+    table.remove_port(1, 3);
+    foreach (i; 0 .. 70)
+        assert(table.get(0x1000 + i) < 0);
+    assert(table.get(0x2000) == 1);
+    assert(table.get(0x3000) == 0xFE);
 }

@@ -486,6 +486,9 @@ nothrow @nogc:
     final InterfaceCaps caps() const pure
         => _caps;
 
+    bool can_forward_ethernet_sources() const pure
+        => true;
+
     ushort pcap_type() const
         => 0;
 
