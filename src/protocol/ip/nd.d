@@ -2,14 +2,20 @@ module protocol.ip.nd;
 
 version (UseInternalIPStack):
 
+import urt.array;
 import urt.endian;
 import urt.hash;
 import urt.inet;
 import urt.log;
+import urt.mem.temp : tconcat;
+import urt.time;
 
+import manager.base;
 import manager.collection;
+import manager.expression : NamedArgument;
 
 import router.iface;
+import router.iface.endpoint : foreach_ether_station;
 import router.iface.ethernet;
 import router.iface.mac;
 import router.iface.packet;
@@ -18,9 +24,12 @@ import protocol.ip : IPv6Header, IPProtocol;
 import protocol.ip.address;
 import protocol.ip.icmp6;
 import protocol.ip.neighbour;
+import protocol.ip.route;
 import protocol.ip.stack;
 
 //version = DebugND;
+
+private alias log = Log!"nd";
 
 nothrow @nogc:
 
@@ -141,7 +150,11 @@ void on_neighbour_solicit(ref IPStack stack, ref const IPv6Header ip, const(ubyt
 
     if (src == IPv6Addr.any)
     {
-        // DAD probe: defend addresses we own with an unsolicited advert to all-nodes.
+        // Another node is running DAD on `target`: if it collides with our own
+        // in-flight DAD both must back off, but an address we hold is defended
+        // with an unsolicited advert to all-nodes.
+        if (slaac_dad_defeat(target, iface))
+            return;
         if (!is_our_ip_v6(target, iface))
             return;
         send_neighbour_advert(stack, target, IPv6Addr.linkLocal_allNodes, station, false);
@@ -169,6 +182,8 @@ void on_neighbour_advert(ref IPStack stack, ref const IPv6Header ip, const(ubyte
     if (target.is_multicast)
         return;
 
+    slaac_dad_defeat(target, iface);
+
     const(ubyte)[] tlla = find_option(icmp[24 .. $], NDOption.target_link_addr);
     version (DebugND)
         write_log(Severity.debug_, "nd", null, "rx advert ", target, tlla.length == 6 ? " is-at tlla" : " (no tlla)", " on ", iface.name);
@@ -179,22 +194,350 @@ void on_neighbour_advert(ref IPStack stack, ref const IPv6Header ip, const(ubyte
 
 void on_router_advert(ref IPStack stack, ref const IPv6Header ip, const(ubyte)[] icmp, BaseInterface iface)
 {
-    // TODO: SLAAC - consume prefix-information options into dynamic IPv6Address
-    //       entries with lifetimes, install a default route via the advertising
-    //       router, honour the MTU option.
+    EthernetStation station = cast(EthernetStation)iface;
+    if (!station)
+        return;
+    if (ip.hop_limit != 255 || icmp[1] != 0)
+        return;
+    if (icmp.length < 16)
+        return;
+    IPv6Addr router = ip.src_addr;
+    if (!router.is_link_local)
+        return;     // RFC 4861 6.1.2
+
     version (DebugND)
-        write_log(Severity.debug_, "nd", null, "rx router-advert from ", ip.src_addr, " on ", iface.name, " (SLAAC TODO)");
+        write_log(Severity.debug_, "nd", null, "rx router-advert from ", router, " on ", iface.name);
+
+    MonoTime now = getTime();
+    SlaacIface* st = iface_state(iface);
+    st.ra_seen = true;
+
+    ra_router(station, router, icmp[6..8].bigEndianToNative!ushort, now);
+
+    const(ubyte)[] opts = icmp[16 .. $];
+    while (opts.length >= 8)
+    {
+        size_t len = opts[1] * 8;
+        if (len == 0 || len > opts.length)
+            break;
+        switch (opts[0])
+        {
+            case NDOption.source_link_addr:
+                if (len == 8)
+                    stack.neighbour_v6_cache.learn(router, iface, opts[2 .. 8]);
+                break;
+            case NDOption.mtu:
+                // TODO: apply to egress once fragmentation / packet-too-big lands
+                if (len == 8)
+                    st.mtu = opts[4 .. 8].bigEndianToNative!uint;
+                break;
+            case NDOption.prefix_info:
+                if (len == 32)
+                    ra_prefix(station, router, opts[0 .. 32], now);
+                break;
+            default:
+                break;
+        }
+        opts = opts[len .. $];
+    }
+}
+
+
+// Drives router solicitation, DAD completion, and lifetime expiry of
+// RA-learned addresses and routes. Called from the stack's frame update, the
+// same cadence as the neighbour cache tick.
+void slaac_update(ref IPStack stack, MonoTime now)
+{
+    foreach_ether_station((EthernetStation s) {
+        SlaacIface* st = iface_state(s);
+        if (!s.running)
+        {
+            st.rs_sent = 0;
+            st.ra_seen = false;
+            return;
+        }
+        if (st.ra_seen || st.rs_sent >= max_rtr_solicitations)
+            return;
+        if (now - st.last_rs < rtr_solicitation_interval)
+            return;
+        ++st.rs_sent;
+        st.last_rs = now;
+        send_router_solicit(s);
+    });
+
+    for (size_t i = _slaac_prefixes.length; i > 0; --i)
+    {
+        auto e = &_slaac_prefixes[i - 1];
+        if (!e.iface || now >= e.valid_until)
+        {
+            if (auto a = e.addr.get)
+            {
+                log.info("SLAAC address ", a.address, " expired");
+                a.destroy();
+            }
+            _slaac_prefixes.removeSwapLast(i - 1);
+            continue;
+        }
+        if (e.dad_in_flight && now - e.dad_sent >= dad_window)
+        {
+            e.dad_in_flight = false;
+            create_slaac_address(*e);
+        }
+    }
+
+    for (size_t i = _slaac_routers.length; i > 0; --i)
+    {
+        auto r = &_slaac_routers[i - 1];
+        if (!r.iface || now >= r.expires)
+        {
+            if (auto rt = r.route.get)
+            {
+                log.info("default route via ", r.router, " expired");
+                rt.destroy();
+            }
+            _slaac_routers.removeSwapLast(i - 1);
+        }
+    }
+
+    for (size_t i = _slaac_ifaces.length; i > 0; --i)
+    {
+        if (!_slaac_ifaces[i - 1].iface)
+            _slaac_ifaces.removeSwapLast(i - 1);
+    }
 }
 
 
 private:
 
+enum ubyte max_rtr_solicitations     = 3;
+enum Duration rtr_solicitation_interval = 4.seconds;
+enum Duration dad_window             = 1.seconds;
+enum uint max_lifetime_s             = 0x00FF_FFFF;     // clamp; routers re-advertise long before this
+
+struct SlaacIface
+{
+    ObjectRef!BaseInterface iface;
+    ubyte rs_sent;
+    bool ra_seen;
+    MonoTime last_rs;
+    uint mtu;
+}
+
+struct SlaacPrefix
+{
+    IPv6Addr prefix;
+    ubyte prefix_len;
+    ObjectRef!BaseInterface iface;
+    IPv6Addr router;
+    IPv6Addr formed;            // prefix + our interface identifier
+    MonoTime valid_until;
+    MonoTime preferred_until;   // TODO: deprecate for source selection past this
+    bool dad_in_flight;
+    bool duplicate;
+    MonoTime dad_sent;
+    ObjectRef!IPv6Address addr;
+}
+
+struct SlaacRouter
+{
+    IPv6Addr router;
+    ObjectRef!BaseInterface iface;
+    MonoTime expires;
+    ObjectRef!IPv6Route route;
+}
+
+__gshared Array!SlaacIface  _slaac_ifaces;
+__gshared Array!SlaacPrefix _slaac_prefixes;
+__gshared Array!SlaacRouter _slaac_routers;
+
+SlaacIface* iface_state(BaseInterface iface)
+{
+    foreach (ref s; _slaac_ifaces[])
+        if (s.iface.get is iface)
+            return &s;
+    SlaacIface s;
+    s.iface = iface;
+    _slaac_ifaces ~= s;
+    return &_slaac_ifaces[$ - 1];
+}
+
+void send_router_solicit(EthernetStation iface)
+{
+    enum size_t icmp_len = 8 + 8;
+    ubyte[IPv6Header.sizeof + icmp_len] buf = void;
+
+    auto hdr = cast(IPv6Header*)buf.ptr;
+    hdr.ver_tc_flow[] = 0;
+    hdr.ver_tc_flow[0] = 0x60;
+    hdr.payload_length = nativeToBigEndian(cast(ushort)icmp_len);
+    hdr.next_header = IPProtocol.icmp6;
+    hdr.hop_limit = 255;
+    hdr.src_addr = link_local_for(iface.mac);
+    hdr.dst_addr = IPv6Addr.linkLocal_routers;
+
+    ubyte* icmp = buf.ptr + IPv6Header.sizeof;
+    icmp[0] = Icmp6Type.router_solicit;
+    icmp[1 .. 8] = 0;
+    icmp[8] = NDOption.source_link_addr;
+    icmp[9] = 1;
+    icmp[10 .. 16] = iface.mac.b[];
+
+    ushort pseudo = pseudo_header_checksum_v6(hdr.src, hdr.dst, icmp_len, IPProtocol.icmp6);
+    ushort cc = internet_checksum(icmp[0 .. icmp_len], pseudo);
+    icmp[2..4] = cc.nativeToBigEndian;
+
+    version (DebugND)
+        write_log(Severity.debug_, "nd", null, "solicit routers on ", iface.name);
+
+    iface.send(ether_multicast(IPv6Addr.linkLocal_routers), buf[], EtherType.ip6);
+}
+
+void ra_router(EthernetStation iface, IPv6Addr router, ushort lifetime, MonoTime now)
+{
+    foreach (i, ref r; _slaac_routers[])
+    {
+        if (r.router == router && r.iface.get is iface)
+        {
+            if (lifetime == 0)
+            {
+                if (auto rt = r.route.get)
+                    rt.destroy();
+                _slaac_routers.removeSwapLast(i);
+            }
+            else
+                r.expires = now + lifetime.seconds;
+            return;
+        }
+    }
+    if (lifetime == 0)
+        return;
+
+    SlaacRouter r;
+    r.router = router;
+    r.iface = iface;
+    r.expires = now + lifetime.seconds;
+    const(char)[] name = Collection!IPv6Route().generate_name(tconcat(iface.name[], ".ra"));
+    r.route = Collection!IPv6Route().create(
+        name,
+        ObjectFlags.dynamic,
+        NamedArgument("destination", IPv6NetworkAddress(IPv6Addr.any, 0)),
+        NamedArgument("gateway", router),
+        NamedArgument("out-interface", cast(BaseInterface)iface));
+    if (!r.route)
+    {
+        log.error("failed to create dynamic default route");
+        return;
+    }
+    _slaac_routers ~= r;
+    log.info("default route via ", router, " on ", iface.name, " (lifetime ", lifetime, "s)");
+}
+
+void ra_prefix(EthernetStation iface, IPv6Addr router, const(ubyte)[] opt, MonoTime now)
+{
+    ubyte plen = opt[2];
+    if (!(opt[3] & 0x40))
+        return;     // autonomous flag absent; on-link-only prefixes need no address
+    uint valid = opt[4..8].bigEndianToNative!uint;
+    uint preferred = opt[8..12].bigEndianToNative!uint;
+    IPv6Addr prefix = read_addr(opt[16 .. 32]);
+
+    if (prefix.is_link_local || prefix.is_multicast)
+        return;
+    if (plen != 64)
+    {
+        log.warning("ignoring RA prefix ", prefix, "/", plen, ": SLAAC needs a /64 for the interface identifier");
+        return;
+    }
+    if (valid > max_lifetime_s)
+        valid = max_lifetime_s;
+    if (preferred > valid)
+        preferred = valid;
+
+    foreach (i, ref e; _slaac_prefixes[])
+    {
+        if (e.prefix == prefix && e.iface.get is iface)
+        {
+            if (valid == 0)
+            {
+                if (auto a = e.addr.get)
+                    a.destroy();
+                _slaac_prefixes.removeSwapLast(i);
+                return;
+            }
+            // TODO: RFC 4862 5.5.3(e) two-hour rule against lifetime-shortening attacks
+            e.valid_until = now + valid.seconds;
+            e.preferred_until = now + preferred.seconds;
+            return;
+        }
+    }
+    if (valid == 0)
+        return;
+
+    SlaacPrefix e;
+    e.prefix = prefix;
+    e.prefix_len = plen;
+    e.iface = iface;
+    e.router = router;
+    e.formed = prefix;
+    e.formed.s[4 .. 8] = link_local_for(iface.mac).s[4 .. 8];
+    e.valid_until = now + valid.seconds;
+    e.preferred_until = now + preferred.seconds;
+    e.dad_in_flight = true;
+    e.dad_sent = now;
+    _slaac_prefixes ~= e;
+
+    version (DebugND)
+        write_log(Severity.debug_, "nd", null, "DAD probe for ", e.formed, " on ", iface.name);
+
+    ubyte[IPv6Header.sizeof + 24] buf = void;
+    size_t icmp_len = build_ns_na(buf[], Icmp6Type.neighbour_solicit, 0, IPv6Addr.any,
+                                  solicited_node(e.formed), e.formed, MACAddress(), 0);
+    iface.send(ether_multicast(solicited_node(e.formed)), buf[0 .. IPv6Header.sizeof + icmp_len], EtherType.ip6);
+}
+
+void create_slaac_address(ref SlaacPrefix e)
+{
+    if (e.duplicate)
+        return;
+    BaseInterface iface = e.iface.get;
+    if (!iface)
+        return;
+    const(char)[] name = Collection!IPv6Address().generate_name(tconcat(iface.name[], ".slaac"));
+    e.addr = Collection!IPv6Address().create(
+        name,
+        ObjectFlags.dynamic,
+        NamedArgument("address", IPv6NetworkAddress(e.formed, e.prefix_len)),
+        NamedArgument("interface", iface));
+    if (!e.addr)
+    {
+        log.error("failed to create dynamic IPv6Address");
+        return;
+    }
+    log.info("SLAAC address ", e.formed, "/", e.prefix_len, " on ", iface.name);
+}
+
+bool slaac_dad_defeat(IPv6Addr target, BaseInterface iface)
+{
+    foreach (ref e; _slaac_prefixes[])
+    {
+        if (e.dad_in_flight && e.formed == target && e.iface.get is iface)
+        {
+            e.dad_in_flight = false;
+            e.duplicate = true;
+            log.warning("DAD: ", target, " already in use on ", iface.name, "; address suppressed");
+            return true;
+        }
+    }
+    return false;
+}
+
 // NS and NA share a layout: 4B rest-of-header, 16B target, then options.
+// option_type 0 omits the link-address option (DAD probes MUST NOT carry SLLA).
 // Returns the ICMPv6 message length; buf receives the complete IPv6 datagram.
 size_t build_ns_na(ubyte[] buf, ubyte type, uint flags, IPv6Addr src, IPv6Addr dst, IPv6Addr target,
                    MACAddress link_addr, ubyte option_type)
 {
-    enum size_t icmp_len = 24 + 8;
+    size_t icmp_len = option_type ? 24 + 8 : 24;
 
     auto hdr = cast(IPv6Header*)buf.ptr;
     hdr.ver_tc_flow[] = 0;
@@ -212,11 +555,14 @@ size_t build_ns_na(ubyte[] buf, ubyte type, uint flags, IPv6Addr src, IPv6Addr d
     icmp[3] = 0;
     icmp[4..8] = flags.nativeToBigEndian;
     write_addr(icmp[8 .. 24], target);
-    icmp[24] = option_type;
-    icmp[25] = 1;
-    icmp[26 .. 32] = link_addr.b[];
+    if (option_type)
+    {
+        icmp[24] = option_type;
+        icmp[25] = 1;
+        icmp[26 .. 32] = link_addr.b[];
+    }
 
-    ushort pseudo = pseudo_header_checksum_v6(hdr.src, hdr.dst, icmp_len, IPProtocol.icmp6);
+    ushort pseudo = pseudo_header_checksum_v6(hdr.src, hdr.dst, cast(uint)icmp_len, IPProtocol.icmp6);
     ushort cc = internet_checksum(icmp[0 .. icmp_len], pseudo);
     icmp[2..4] = cc.nativeToBigEndian;
     return icmp_len;

@@ -129,6 +129,7 @@ nothrow @nogc:
         MonoTime now = getTime();
         neighbour_v4.tick(now);
         neighbour_v6.tick(now);
+        slaac_update(this, now);
     }
 
     IPAddr select_source_v4(IPAddr dst)

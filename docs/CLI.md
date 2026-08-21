@@ -727,8 +727,16 @@ stack is used by default and these collections only take effect when built with
 
 IPv4 and IPv6 are configured through parallel collections: `address`/`address6`,
 `route`/`route6`, `pool`/`pool6`. Interfaces derive an implicit IPv6 link-local
-address (EUI-64 from the MAC), so `address6` entries are only needed for global
-or ULA addressing.
+address (EUI-64 from the MAC), so `address6` entries are only needed for static
+global or ULA addressing.
+
+IPv6 hosts autoconfigure by default (SLAAC, RFC 4862): each Ethernet interface
+solicits routers on bring-up and consumes Router Advertisements. An advertised
+prefix with the autonomous flag becomes a dynamic `address6` (prefix + EUI-64,
+duplicate-address-detected before use); a nonzero router lifetime becomes a
+dynamic default `route6` via the advertising router. These entries carry the
+`D` flag in `print` and expire on their advertised lifetimes; no configuration
+is required to obtain a global address on a network that advertises one.
 
 `/protocol/ip/address` and `/protocol/ip/address6` properties:
 
