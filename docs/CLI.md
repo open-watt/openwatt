@@ -846,24 +846,27 @@ shape); a claim naming a second cluster is refused. Claims are runtime state:
 when the last claimant's session dies the member reverts to unbound and is
 re-claimed within a beacon interval.
 
-A member listens for claimants' sessions on the sync port: a dynamic
+An `authority` listens for members' sessions on the sync port: a dynamic
 `/sync/udp-server` named `peering`, bound to the ether wildcard, created and
-destroyed with the role. Its port rides the discovery beacons, so an authority
+destroyed with the role. Its port rides the discovery beacons, so a member
 learns where to connect without configuration.
 
-An `authority` sweeps the neighbour table every few seconds and claims members
-matching the `claim` filter: it builds a dynamic connected `/interface/udp`
-from the member's most preferable live link (bound to the station the beacon
-arrived on, toward its address and beaconed port), spawns a dynamic
-`/sync/peer` named after the remote node, and sends the claim once the session
-says hello.
-Refused or unanswered claims tear the pair down and back off per candidate
-(30s doubling to 10m). A member already claimed by its own cluster is still
-claimed by an authority holding no session to it: that is how a second
-authority takes its dual-authority seat, and how a restarted authority
-re-adopts its fleet. A member that reboots out from under a session the
-datagram link cannot pronounce dead is detected by its unbound beacon and
-re-claimed.
+A `member` sweeps the neighbour table every few seconds and opens a session to
+each authority of its fleet: it builds a dynamic connected `/interface/udp`
+from that authority's most preferable live link (bound to the station the
+beacon arrived on, toward its address and beaconed port) and spawns a dynamic
+`/sync/peer` named after the remote node. The leaf dials because it is the end
+that can: a member behind a NAT, or with no inbound surface at all, still joins
+its fleet. The authority claims the members that reach it and match the
+`claim` filter, so it still decides who joins - it just answers rather than
+dials.
+A dial that never establishes tears the pair down and backs off per link (30s
+doubling to 10m), so a member seeing an authority on two segments settles on
+the one that works. A member holds a session to every authority of its fleet,
+which is what gives a second authority its dual-authority seat, and a restarted
+authority is rejoined by its members rather than having to rediscover them. A
+member that reboots simply dials again on the way up, without waiting for a
+sweep.
 
 | Property | Values | Default | Description |
 | --- | --- | --- | --- |
@@ -873,7 +876,7 @@ re-claimed.
 | `priority` | number | `100` | Authority election precedence; lower wins, node-id breaks ties. |
 | `claim` | path glob | `*` | Authority only: which member names to adopt. |
 | `secret` | string | empty | The fleet key, set by hand. Normally unset: the authority mints one at first adoption and hands it to each factory member inside the claim; thereafter claims prove it with an HMAC over the member's per-session hello nonce, so the key never travels again and a captured claim cannot replay. |
-| `port` | `1` to `65535` | `7000` | Member only: sync port the claim listener binds; advertised in discovery beacons. |
+| `port` | `1` to `65535` | `7000` | Authority only: sync port the session listener binds; advertised in discovery beacons so members know where to dial. |
 
 A factory member (no key) is adopted by the first claiming authority: the claim hands the
 fleet key over (the one trust-on-first-use moment), and the member persists its allegiance
