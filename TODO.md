@@ -140,6 +140,10 @@ the commit history and linked design documents carry the implementation record.
   ordering, and `source_for_target` in nd.d ignores deprecation. Renumbering (a `preferred=0` RA
   deprecating the old prefix under the two-hour valid floor) has only been reasoned through, not
   exercised against a real router.
+- **[P3, IPv6 RA] Router-side gaps**: the SLAAC host still solicits routers on a link this node
+  advertises (RFC 4861 6.3.7 says a router does not); no RA consistency checking against other
+  routers on the link (6.2.7); no per-service DHCPv6 tie-in behind `managed`/`other-config`. The
+  service has not been exercised against a real host beyond compilation.
 
 - **[P3, style-audit deferrals] Preserve outstanding design work**: validate
   appliance port names against a profile-authoritative or explicit namespace
