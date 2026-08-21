@@ -75,11 +75,22 @@ nothrow @nogc:
         connecting,
         gatt_ready,
         session_info_xchg,
+        not_enrolled,
         awaiting_approval,
         info_xchg,
         ready,
         failed,
     }
+
+    enum EnrollStatus : ubyte
+    {
+        none,
+        waiting,
+        rejected,
+    }
+
+    enum EnrollOutcome : ubyte { not_connected, send_failed, in_progress, waiting, enrolled, rejected, timed_out }
+    alias EnrollWatcher = void delegate(EnrollOutcome outcome, uint reason) nothrow @nogc;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
@@ -151,6 +162,39 @@ nothrow @nogc:
     MonoTime last_seen() const pure
         => _last_seen;
 
+    void request_enrollment(uint role = tesla_role_owner, EnrollWatcher watcher = null)
+    {
+        if (_phase == Phase.ready || _phase == Phase.info_xchg)
+        {
+            if (watcher !is null)
+                watcher(EnrollOutcome.enrolled, 0);
+            return;
+        }
+        if (_client is null || !_client.running || _tx_handle == 0)
+        {
+            if (watcher !is null)
+                watcher(EnrollOutcome.not_connected, 0);
+            return;
+        }
+
+        if (_enroll_watcher !is null)
+        {
+            if (watcher !is null)
+                watcher(EnrollOutcome.in_progress, 0);
+            return;
+        }
+
+        _enroll_role = role;
+        _enroll_watcher = watcher;
+        begin_enroll_attempt();
+    }
+
+    void cancel_enroll_watch(EnrollWatcher watcher)
+    {
+        if (_enroll_watcher is watcher)
+            _enroll_watcher = null;
+    }
+
 package:
     void attach(TeslaVehicleScanner scanner, MACAddress peer)
     {
@@ -187,7 +231,14 @@ protected:
             case Phase.gatt_ready:
             case Phase.session_info_xchg:
             case Phase.info_xchg:         return "Establishing session";
-            case Phase.awaiting_approval: return "Tap an enrolled key card on the console to authorise";
+            case Phase.not_enrolled:
+                return _enroll_status == EnrollStatus.rejected
+                    ? "Key not enrolled (vehicle rejected); run enroll to retry"
+                    : "Key not enrolled; run enroll to authorise";
+            case Phase.awaiting_approval:
+                return _enroll_status == EnrollStatus.waiting
+                    ? "Tap key card on console now to authorise"
+                    : "Requesting key enrolment";
             case Phase.ready:
             case Phase.failed:            return super.status_message();
         }
@@ -214,11 +265,12 @@ protected:
         {
             _client.subscribe(&client_state_change);
             _subscribed = true;
-            _phase = Phase.connecting;
+            set_phase(Phase.connecting);
             _rx_buffer.clear();
             _counter = 0;
             _routing_seeded = false;
             _last_rx_time = getTime();
+            _last_probe_time = getTime();
         }
 
         return advance();
@@ -226,6 +278,7 @@ protected:
 
     override CompletionStatus shutdown()
     {
+        deliver_enroll(EnrollOutcome.not_connected, 0);
         unsubscribe_vehicle_controls();
         if (_subscribed)
         {
@@ -256,7 +309,7 @@ protected:
         if (Device* vehicle = name[] in g_app.devices)
             (*vehicle).set_element("connected", false);
         _routing_seeded = false;
-        _phase = Phase.connecting;
+        set_phase(Phase.connecting);
         if (_client !is null)
         {
             _client.destroy();
@@ -272,6 +325,14 @@ protected:
     }
 
 private:
+    void set_phase(Phase p)
+    {
+        if (_phase == p)
+            return;
+        _phase = p;
+        mark_set!(typeof(this), "status")();
+    }
+
     CompletionStatus advance()
     {
         // WinRT can report a dead GATT channel as connected.
@@ -298,14 +359,14 @@ private:
                 _last_rx_time = getTime();
                 version (DebugTeslaSession)
                     log.trace("GATT discovery complete, tx=", _tx_handle, " rx=", _rx_handle, ", state=gatt_ready");
-                _phase = Phase.gatt_ready;
+                set_phase(Phase.gatt_ready);
                 return CompletionStatus.continue_;
 
             case Phase.gatt_ready:
                 send_session_info_request(TeslaDomain.vehicle_security);
                 version (DebugTeslaSession)
                     log.trace("sent SessionInfoRequest, state=session_info_xchg");
-                _phase = Phase.session_info_xchg;
+                set_phase(Phase.session_info_xchg);
                 return CompletionStatus.continue_;
 
             case Phase.session_info_xchg:
@@ -313,16 +374,28 @@ private:
                     send_session_info_request(TeslaDomain.vehicle_security);
                 return CompletionStatus.continue_;
 
+            case Phase.not_enrolled:
+                if (getTime() - _last_probe_time > enroll_reprobe_interval)
+                {
+                    _last_probe_time = getTime();
+                    send_session_info_request(TeslaDomain.vehicle_security);
+                    set_phase(Phase.session_info_xchg);
+                }
+                return CompletionStatus.continue_;
+
             case Phase.awaiting_approval:
-                // Avoid overlapping GATT writes while waiting for NFC approval.
-                if (getTime() - _last_request_time > approval_interval)
+                if (getTime() > _enroll_deadline)
+                {
+                    log.info("enrolment attempt for VIN '", name[], "' ended without approval");
+                    deliver_enroll(EnrollOutcome.timed_out, 0);
+                    set_phase(Phase.not_enrolled);
+                    _last_probe_time = getTime();
+                    return CompletionStatus.continue_;
+                }
+                if (getTime() - _last_request_time > enroll_addkey_interval)
                 {
                     _last_request_time = getTime();
-                    _approval_toggle = !_approval_toggle;
-                    if (_approval_toggle)
-                        send_add_key_request();
-                    else
-                        send_session_info_request(TeslaDomain.vehicle_security);
+                    send_add_key_request();
                 }
                 return CompletionStatus.continue_;
 
@@ -357,7 +430,10 @@ private:
     }
 
     enum Duration retry_interval = 5.seconds;
-    enum Duration approval_interval = 2.seconds;
+    enum Duration enroll_addkey_interval = 15.seconds;
+    enum Duration enroll_attempt_window = 30.seconds;
+    enum Duration tap_wait_window = 90.seconds;
+    enum Duration enroll_reprobe_interval = 300.seconds;
     enum Duration link_timeout = 45.seconds;
     enum Duration poll_charging = 2.seconds;
     enum Duration poll_idle = 30.seconds;
@@ -369,7 +445,11 @@ private:
     BLEClient _client;
     bool _subscribed;
     bool _controls_subscribed;
-    bool _approval_toggle;
+    EnrollStatus _enroll_status;
+    uint _enroll_role = tesla_role_owner;
+    EnrollWatcher _enroll_watcher;
+    MonoTime _last_probe_time;
+    MonoTime _enroll_deadline;
     ushort _tx_handle;
     ushort _rx_handle;
     Phase _phase = Phase.connecting;
@@ -525,7 +605,6 @@ private:
         restart();
     }
 
-    // NFC authorises the unsigned AddKey request.
     bool send_add_key_request()
     {
         Secret secret = _scanner.secret;
@@ -538,7 +617,14 @@ private:
             return false;
         }
 
-        Array!ubyte msg = build_add_key_request(pub);
+        if (!_routing_seeded)
+        {
+            crypto_random_bytes(_routing_address[]);
+            _routing_seeded = true;
+        }
+        ubyte[16] uuid = void;
+        crypto_random_bytes(uuid[]);
+        Array!ubyte msg = build_add_key_request(pub, _enroll_role, _routing_address[], uuid[]);
         return write_tesla_frame(msg[]);
     }
 
@@ -643,6 +729,17 @@ private:
 
     void dispatch_response(const(ubyte)[] msg)
     {
+        // VCSEC replies may be bare or wrapped in a RoutableMessage.
+        if (_phase == Phase.session_info_xchg || _phase == Phase.awaiting_approval || _phase == Phase.not_enrolled)
+        {
+            VcsecReply reply;
+            if (extract_vcsec_reply(msg, reply))
+            {
+                handle_vcsec_reply(reply);
+                return;
+            }
+        }
+
         RoutableResponse r;
         if (!decode_routable_response(msg, r))
         {
@@ -650,7 +747,20 @@ private:
             return;
         }
 
-        if (_phase == Phase.session_info_xchg || _phase == Phase.awaiting_approval || _phase == Phase.info_xchg)
+        // VCSEC status is multicast and is not a response to this session.
+        if (!addressed_to_this_session(r))
+        {
+            version (DebugTeslaSession)
+            {
+                if (r.to_routing_address.length)
+                    log.trace("ignoring vehicle frame for routing address ", toHexString(r.to_routing_address));
+                else
+                    log.trace("ignoring vehicle frame broadcast to domain ", cast(uint)r.to_domain);
+            }
+            return;
+        }
+
+        if (_phase == Phase.session_info_xchg || _phase == Phase.awaiting_approval || _phase == Phase.not_enrolled || _phase == Phase.info_xchg)
         {
             handle_session_info_response(r);
             return;
@@ -658,14 +768,26 @@ private:
 
         if (_phase == Phase.ready)
         {
+            PendingCommand* pending = find_pending_command(r.request_uuid);
+
             if (!r.has_response_signature)
             {
-                if (r.protobuf_message.length)
-                    log.warning("discarding unauthenticated vehicle response for VIN '", name[], "'");
+                // Refusals carry only an unsigned fault status.
+                if (r.has_status)
+                {
+                    VehicleCommandKind kind = pending !is null ? pending.kind : VehicleCommandKind.unknown;
+                    log.warning("vehicle refused ", vehicle_command_names[cast(size_t)kind],
+                                " for VIN '", name[], "' with fault ", r.signed_message_fault);
+                    if (pending !is null)
+                        *pending = PendingCommand.init;
+                    return;
+                }
+                log.warning("discarding unsigned vehicle response for VIN '", name[], "': ",
+                            r.protobuf_message.length, " byte payload, ",
+                            r.session_info.length, " byte session info");
                 return;
             }
 
-            PendingCommand* pending = find_pending_command(r.request_uuid);
             if (pending is null)
             {
                 log.warning("encrypted vehicle response has no matching request for VIN '", name[], "'");
@@ -692,6 +814,110 @@ private:
         }
     }
 
+    // Some replies omit to_destination; reject only an explicit foreign address.
+    bool addressed_to_this_session(ref const RoutableResponse r) const pure
+    {
+        if (!r.has_to_destination)
+            return true;
+        const(ubyte)[] addr = r.to_routing_address;
+        return addr.length == _routing_address.length && addr[] == _routing_address[];
+    }
+
+    void begin_enroll_attempt()
+    {
+        set_enroll_status(EnrollStatus.none);
+        _last_request_time = getTime();
+        _enroll_deadline = getTime() + enroll_attempt_window;
+        log.info("requesting key enrolment for VIN '", name[], "'; tap a key card on the console");
+        set_phase(Phase.awaiting_approval);
+        if (!send_add_key_request())
+        {
+            deliver_enroll(EnrollOutcome.send_failed, 0);
+            set_phase(Phase.not_enrolled);
+        }
+    }
+
+    void on_enroll_waiting()
+    {
+        _enroll_deadline = getTime() + tap_wait_window;
+        bool first = _enroll_status != EnrollStatus.waiting;
+        set_enroll_status(EnrollStatus.waiting);
+        if (first && _enroll_watcher !is null)
+            _enroll_watcher(EnrollOutcome.waiting, 0);
+        if (_phase != Phase.awaiting_approval)
+            set_phase(Phase.awaiting_approval);
+    }
+
+    void handle_vcsec_reply(ref const VcsecReply reply)
+    {
+        _last_rx_time = getTime();
+
+        version (DebugTeslaSession)
+            log.trace("VCSEC reply kind=", cast(uint)reply.kind);
+
+        final switch (reply.kind)
+        {
+            case VcsecReplyKind.command_status:
+                handle_vcsec_command_status(reply);
+                return;
+            case VcsecReplyKind.vehicle_status:
+                return;
+            case VcsecReplyKind.nominal_error:
+                log.warning("vehicle reported a VCSEC nominal error during enrolment for VIN '", name[], "'");
+                return;
+            case VcsecReplyKind.none:
+                return;
+        }
+    }
+
+    // Whitelist information is terminal; only a top-level WAIT keeps enrolment pending.
+    void handle_vcsec_command_status(ref const VcsecReply reply)
+    {
+        if (_phase != Phase.awaiting_approval)
+            return;
+
+        if (reply.has_whitelist_status)
+        {
+            uint info = reply.whitelist_information;
+            if (info == VcsecReply.no_information || info == 0)
+            {
+                log.info("key enrolled for VIN '", name[], "', re-establishing session");
+                set_enroll_status(EnrollStatus.none);
+                deliver_enroll(EnrollOutcome.enrolled, 0);
+                restart();
+                return;
+            }
+
+            if (_enroll_status != EnrollStatus.rejected)
+                log.warning("vehicle rejected key enrolment for VIN '", name[], "' (information ", info, ")");
+            set_enroll_status(EnrollStatus.rejected);
+            deliver_enroll(EnrollOutcome.rejected, info);
+            set_phase(Phase.not_enrolled);
+            _last_probe_time = getTime();
+            return;
+        }
+
+        if (reply.has_operation_status && reply.operation_status == TeslaOperationStatus.wait)
+            on_enroll_waiting();
+    }
+
+    void set_enroll_status(EnrollStatus s)
+    {
+        if (_enroll_status == s)
+            return;
+        _enroll_status = s;
+        mark_set!(typeof(this), "status")();
+    }
+
+    void deliver_enroll(EnrollOutcome outcome, uint reason)
+    {
+        if (_enroll_watcher is null)
+            return;
+        EnrollWatcher w = _enroll_watcher;
+        _enroll_watcher = null;
+        w(outcome, reason);
+    }
+
     void handle_session_info_response(ref const RoutableResponse r)
     {
         if (r.request_uuid.length == 16 && r.request_uuid[] != _request_uuid[])
@@ -714,11 +940,11 @@ private:
 
         if (info.status == 1)  // SESSION_INFO_STATUS_KEY_NOT_ON_WHITELIST
         {
-            if (_phase != Phase.awaiting_approval)
+            if (_phase != Phase.awaiting_approval && _phase != Phase.not_enrolled)
             {
-                log.info("key not enrolled for VIN '", name[], "'; tap an enrolled key card on the console reader to authorise (retrying continuously)");
-                send_add_key_request();
-                _phase = Phase.awaiting_approval;
+                log.info("key not enrolled for VIN '", name[], "'; run enroll to authorise");
+                set_phase(Phase.not_enrolled);
+                _last_probe_time = getTime();
             }
             return;
         }
@@ -744,14 +970,15 @@ private:
 
         if (_phase == Phase.info_xchg)
         {
-            _phase = Phase.ready;
+            set_phase(Phase.ready);
+            set_enroll_status(EnrollStatus.none);
             log.info("session ready for VIN '", name[], "'");
         }
         else
         {
             log.info("trust verified for VIN '", name[], "', establishing infotainment session");
             send_session_info_request(TeslaDomain.infotainment);
-            _phase = Phase.info_xchg;
+            set_phase(Phase.info_xchg);
         }
     }
 
@@ -801,7 +1028,11 @@ private:
         }
 
         if (!response.vehicle_data.present)
+        {
+            log.warning("vehicle answered ", vehicle_command_names[cast(size_t)kind], " for VIN '",
+                        name[], "' with no vehicle data (", payload.length, " byte payload)");
             return;
+        }
 
         ref data = response.vehicle_data.value;
         if (data.charge_state.present)
@@ -877,7 +1108,10 @@ private:
     {
         Component v = _scanner.component_for_vin(name[]);
         if (v is null)
+        {
+            log.warning("no vehicle component registered for VIN '", name[], "', discarding charge state");
             return;
+        }
 
         SysTime now = getSysTime();
         v.set_element("connected", true, now);
