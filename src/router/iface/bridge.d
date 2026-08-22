@@ -232,6 +232,14 @@ nothrow @nogc:
     BaseInterface member_iface(size_t i)
         => _members[i].iface;
 
+    final override bool can_assist_ethernet_sources() const
+    {
+        foreach (ref member; _members)
+            if ((member.iface.caps & InterfaceCaps.ethernet) != 0 && member.iface.can_forward_ethernet_sources())
+                return true;
+        return false;
+    }
+
     // Mark/unmark a member as kernel-offloaded (by identity, not removal -- the
     // member stays in _members, keeping port indices and the address table stable).
     void set_member_offloaded(BaseInterface iface, bool offloaded)
@@ -439,6 +447,7 @@ protected:
                 cb(entry.bridge_tag, MessageState.aborted);
             recycle_tracking(entry);
         }
+        _sta_assist_peers.clear();
         return super.shutdown();
     }
 
@@ -476,13 +485,22 @@ protected:
         send(packet, _attach_port);
     }
 
-    // Decapped exotic traffic enters the exotic switching domain at the attachment.
-    final override void station_deliver(ref Packet inner)
+    // Decapped OW traffic enters switching at the attachment.
+    final override void station_deliver(ref Packet inner, MACAddress station)
     {
+        if (inner.type == PacketType.ethernet)
+            learn_assist_peer(station, inner.vlan);
         ulong src_address = get_network_src_address(inner);
         if (!src_address.is_multicast_address)
             _address_table.insert(src_address, _attach_port);
 
+        ulong dst_address = get_network_dst_address(inner);
+        if (inner.type == PacketType.ethernet &&
+            (dst_address.is_multicast_address || _address_table.get(dst_address) < 0))
+        {
+            Packet local = inner;
+            local_dispatch(local);
+        }
         send(inner, _attach_port);
     }
 
@@ -679,10 +697,38 @@ private:
     BridgePort _bridge_port;
     Array!BridgePort _members;
     AddressTable _address_table;
+    Array!STAAssistPeer _sta_assist_peers;
 
     TagTracking* _tracking_free;
     TagTracking* _tracking_active;
     TagAllocator _bridge_tags;
+
+    struct STAAssistPeer
+    {
+        MACAddress station;
+        ushort vlan;
+    }
+
+    void learn_assist_peer(MACAddress station, ushort vlan)
+    {
+        ushort vid = vlan & 0x0FFF;
+        foreach (ref peer; _sta_assist_peers[])
+            if (peer.station == station && peer.vlan == vid)
+                return;
+        _sta_assist_peers ~= STAAssistPeer(station, vid);
+    }
+
+    bool send_assist_flood(ref Packet packet)
+    {
+        bool sent;
+        ushort vid = packet.vlan & 0x0FFF;
+        foreach (ref peer; _sta_assist_peers[])
+        {
+            if (peer.vlan == vid && station_egress(packet, peer.station))
+                sent = true;
+        }
+        return sent;
+    }
 
     // an exotic address is ours if it lives behind a software-domain port (a local
     // endpoint or an exotic member), not across the ethernet domain
@@ -745,8 +791,7 @@ private:
                 }
                 else if (dst_port == _attach_port)
                 {
-                    // exotic packet crossing to the ethernet domain
-                    if (!is_eth && !station_egress(packet))
+                    if (!station_egress(packet))
                         add_tx_drop();
                 }
                 else if (dst_port == _cpu_port)
@@ -785,6 +830,8 @@ private:
         }
 
         // broadcast, or unknown destination: flood within the packet's switching domain
+        if (is_eth && !_sta_assist_peers.empty && src_port != _attach_port)
+            send_assist_flood(packet);
         foreach (i, ref member; _members)
         {
             if (i == src_port || member.offloaded || !member.iface.running)
@@ -912,7 +959,7 @@ private:
                 {
                     // crossing to the ethernet domain is synchronous
                     recycle_tracking(tracking);
-                    if (is_eth || !station_egress(packet))
+                    if (!station_egress(packet))
                         return -1;
                     add_tx_frame(packet.data.length);
                     return 0;
@@ -963,6 +1010,8 @@ private:
         }
 
         // broadcast / unknown destination: flood within the packet's switching domain
+        if (is_eth && !_sta_assist_peers.empty && send_assist_flood(packet))
+            any_succeeded = true;
         foreach (i, ref member; _members)
         {
             bool eth_member = (member.iface.caps & InterfaceCaps.ethernet) != 0;

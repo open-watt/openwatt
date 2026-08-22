@@ -61,6 +61,8 @@ enum OWControl : ushort
     addr_query  = ow_control_flag | 0x0002,  // body: [txid:u32 BE][PacketType:u16 BE, unknown = all] -- report your addresses
     addr_report = ow_control_flag | 0x0003,  // body: [txid:u32 BE, 0 = unsolicited][name_len:u8][name][N x universal address (u64 BE)]
     announce    = ow_control_flag | 0x0004,  // body: identity TLVs (see manager.sync.discovery) -- peering beacon
+    sta_assist_solicit = ow_control_flag | 0x0005, // body: nonce (u32 BE)
+    sta_assist_offer   = ow_control_flag | 0x0006, // body: echoed nonce (u32 BE)
 }
 
 // 802.1p PCP traffic classes
@@ -290,6 +292,31 @@ struct Ethernet
         else
             return ((address >> 40) & 1) != 0;
     }
+
+    static ptrdiff_t encode_ow_header(ref const Packet p, ubyte[] buffer) nothrow @nogc
+    {
+        import urt.endian : nativeToBigEndian;
+        if (buffer.length < 14)
+            return -1;
+        ref const eth = p.hdr!Ethernet;
+        buffer[0 .. 6] = eth.dst.b[];
+        buffer[6 .. 12] = eth.src.b[];
+        buffer[12 .. 14] = eth.ether_type.nativeToBigEndian;
+        return 14;
+    }
+
+    static ptrdiff_t decode_ow_header(ref Packet p, const(ubyte)[] header) nothrow @nogc
+    {
+        import urt.endian : bigEndianToNative;
+        if (header.length < 14)
+            return -1;
+        p.type = PacketType.ethernet;
+        ref eth = p.hdr!Ethernet;
+        eth.dst = MACAddress(header[0 .. 6]);
+        eth.src = MACAddress(header[6 .. 12]);
+        eth.ether_type = header[12 .. 14].bigEndianToNative!ushort;
+        return 14;
+    }
 }
 
 struct Wifi80211
@@ -370,7 +397,9 @@ static assert(Wifi80211.sizeof == 24);
 
 private:
 
-__gshared PacketCodec[PacketType.count] g_packet_codecs = [ PacketCodec(), PacketCodec(&Ethernet.extract_src, &Ethernet.extract_dst, &Ethernet.is_multicast) ];
+__gshared PacketCodec[PacketType.count] g_packet_codecs = [ PacketCodec(), PacketCodec(
+    &Ethernet.extract_src, &Ethernet.extract_dst, &Ethernet.is_multicast,
+    &Ethernet.encode_ow_header, &Ethernet.decode_ow_header) ];
 
 ref const(PacketCodec) packet_codec(PacketType type) pure
 {
@@ -378,4 +407,24 @@ ref const(PacketCodec) packet_codec(PacketType type) pure
         => g_packet_codecs[ty];
     alias FP = ref const(PacketCodec) function(PacketType) pure nothrow @nogc;
     return (cast(FP)&impl)(type);
+}
+
+
+unittest
+{
+    Packet original;
+    ref eth = original.init!Ethernet(null);
+    eth.dst = MACAddress(0x10, 0x20, 0x30, 0x40, 0x50, 0x60);
+    eth.src = MACAddress(0x02, 0x03, 0x04, 0x05, 0x06, 0x07);
+    eth.ether_type = EtherType.ip4;
+
+    ubyte[14] header;
+    assert(Ethernet.encode_ow_header(original, header) == header.length);
+
+    Packet decoded;
+    assert(Ethernet.decode_ow_header(decoded, header) == header.length);
+    assert(decoded.type == PacketType.ethernet);
+    assert(decoded.eth.dst == eth.dst);
+    assert(decoded.eth.src == eth.src);
+    assert(decoded.eth.ether_type == eth.ether_type);
 }

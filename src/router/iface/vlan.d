@@ -112,6 +112,18 @@ nothrow @nogc:
         return _interface.msg_state(msg_handle);
     }
 
+    override bool can_forward_ethernet_sources() const pure
+    {
+        const(BaseInterface) parent = _interface.get;
+        return parent && parent.can_forward_ethernet_sources();
+    }
+
+    override bool can_assist_ethernet_sources() const
+    {
+        const(BaseInterface) parent = _interface.get;
+        return parent && parent.can_assist_ethernet_sources();
+    }
+
 protected:
 
     override bool validate() const
