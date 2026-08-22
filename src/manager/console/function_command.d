@@ -65,9 +65,8 @@ template function_command_desc(alias fun, string command_name = null)
 
     private static const(char)[] function_adapter(Session session, out CommandState state, const Variant[] arguments, const NamedArgument[] parameters, void* _instance)
     {
-        const(char)[] error;
-        auto _args = make_arg_tuple!fun(arguments, parameters, error, session._console.appInstance);
-        if (error)
+        ArgTuple _args;
+        if (const(char)[] error = marshal_arguments(function_command_desc, arguments, parameters, &_args))
         {
             session.write_line(error);
             return null;
@@ -112,6 +111,7 @@ template function_command_desc(alias fun, string command_name = null)
 
     private alias ParamNames = STATIC_MAP!(TransformCommandName, parameter_identifier_tuple!fun[1 .. $]);
     private alias Params = STATIC_MAP!(Unqual, Parameters!fun[1 .. $]);
+    private alias ArgTuple = Tuple!Params;
 
     private enum size_t ArgCount = () {
         size_t n = 0;
@@ -125,6 +125,8 @@ template function_command_desc(alias fun, string command_name = null)
     // with no arguments must not instantiate the builder at all.
     static if (ArgCount > 0)
     {
+        static assert(ArgCount <= 64, "Too many command arguments; marshal_arguments tracks them in a ulong");
+
         private FunctionArgument[ArgCount] build_args() pure
         {
             FunctionArgument[ArgCount] args;
@@ -144,6 +146,10 @@ template function_command_desc(alias fun, string command_name = null)
                         alias ArgTy = Params[j];
                     }
                     args[n].name = StringLit!(ParamNames[j]);
+                    args[n].convert = &convert_argument!(Params[j]);
+                    args[n].offset = ushort(ArgTuple.expand[j].offsetof);
+                    static if (ParamIsNullable)
+                        args[n].flags = FunctionArgument.Flags.optional;
                     version (ExcludeHelpText) {} else
                     {
                         enum TypeName = ParamIsNullable ? "?" ~ ArgTy.stringof : ArgTy.stringof;
@@ -170,6 +176,19 @@ template function_command_desc(alias fun, string command_name = null)
         d.fn = &function_adapter;
         static if (ArgCount > 0)
             d.args = function_args[];
+        static foreach (j; 0 .. ParamNames.length)
+        {
+            static if (ParamNames[j] == "args")
+            {
+                static assert(is(const(Variant)[] : Params[j]), "`args` parameter must be of type const(Variant)[]");
+                d.args_offset = ushort(ArgTuple.expand[j].offsetof);
+            }
+            else static if (ParamNames[j] == "named-args")
+            {
+                static assert(is(const(NamedArgument)[] : Params[j]), "`named_args` parameter must be of type const(NamedArgument)[]");
+                d.named_args_offset = ushort(ArgTuple.expand[j].offsetof);
+            }
+        }
         static foreach (attr; __traits(getAttributes, fun))
         {
             static if (is(typeof(attr) == TabComplete))
@@ -373,120 +392,70 @@ Array!String suggest_values(ref immutable CommandDesc desc, const(char)[] argume
     return Array!String();
 }
 
-public auto make_arg_tuple(alias F)(const Variant[] args, const NamedArgument[] parameters, out const(char)[] error, Application app)
-    if (is_some_function!F)
+const(char)[] convert_argument(T)(ref const Variant v, void* arg)
 {
-    import urt.meta;
-
-    alias Params = STATIC_MAP!(Unqual, Parameters!F[1 .. $]);
-    alias ParamNames = STATIC_MAP!(TransformCommandName, parameter_identifier_tuple!F[1 .. $]);
-
-    Tuple!Params params;
-    error = null;
-    bool[Params.length] got_arg;
-    bool has_named_args = false;
-    bool has_args_param = false;
-
-    static foreach (i, P; Params)
+    static if (is(const(Variant) : T))
     {
-        static if (ParamNames[i] == "named-args")
-            has_named_args = true;
-        else static if (ParamNames[i] == "args")
-            has_args_param = true;
+        *cast(T*)arg = v;
+        return null;
     }
+    else
+        return from_variant(v, *cast(T*)arg);
+}
 
-    outer: foreach (ref param; parameters)
+const(char)[] marshal_arguments(ref immutable CommandDesc desc, const Variant[] args, const NamedArgument[] parameters, void* buffer)
+{
+    ubyte* base = cast(ubyte*)buffer;
+    const bool has_args_param = desc.args_offset != ushort.max;
+    const bool has_named_args = desc.named_args_offset != ushort.max;
+    ulong got;
+
+    foreach (ref param; parameters)
     {
-        param_switch: switch (param.name)
+        size_t i = 0;
+        for (; i < desc.args.length; ++i)
         {
-            static foreach (i, P; Params)
-            {
-                static if (ParamNames[i] != "args" && ParamNames[i] != "named-args")
-                {
-                    case ParamNames[i]:
-                        static if (is(const(Variant) : typeof(params[i])))
-                            params[i] = param.value;
-                        else
-                        {
-                            error = from_variant(param.value, params[i]);
-                            if (error)
-                            {
-                                error = tconcat("Argument '", param.name, "' error: ", error);
-                                break outer;
-                            }
-                        }
-                        got_arg[i] = true;
-                        break param_switch;
-                }
-            }
-            default:
-                if (!has_named_args)
-                {
-                    error = tconcat("Unknown parameter '", param.name, "'");
-                    break outer;
-                }
+            if (desc.args[i].name[] == param.name)
+                break;
         }
+        if (i == desc.args.length)
+        {
+            if (has_named_args)
+                continue;
+            return tconcat("Unknown parameter '", param.name, "'");
+        }
+        if (const(char)[] error = desc.args[i].convert(param.value, base + desc.args[i].offset))
+            return tconcat("Argument '", param.name, "' error: ", error);
+        got |= 1UL << i;
     }
 
     // unnamed arguments fill the parameters left over in declaration order; a command
     // taking `args` wants the raw list, so it opts out rather than competing for them
-    if (error is null && !has_args_param)
+    if (has_args_param)
+        *cast(const(Variant)[]*)(base + desc.args_offset) = args;
+    else
     {
-        size_t next;
-        static foreach (i, P; Params)
+        size_t next = 0;
+        foreach (i, ref arg; desc.args)
         {
-            static if (ParamNames[i] != "args" && ParamNames[i] != "named-args")
-            {
-                if (!got_arg[i] && next < args.length)
-                {
-                    static if (is(const(Variant) : typeof(params[i])))
-                        params[i] = args[next];
-                    else
-                    {
-                        error = from_variant(args[next], params[i]);
-                        if (error)
-                        {
-                            error = tconcat("Argument '", ParamNames[i], "' error: ", error);
-                            goto done;
-                        }
-                    }
-                    got_arg[i] = true;
-                    ++next;
-                }
-            }
+            if ((got & (1UL << i)) || next >= args.length)
+                continue;
+            if (const(char)[] error = arg.convert(args[next], base + arg.offset))
+                return tconcat("Argument '", arg.name, "' error: ", error);
+            got |= 1UL << i;
+            ++next;
         }
-
         if (next < args.length)
-        {
-            error = "Too many arguments";
-            goto done;
-        }
+            return "Too many arguments";
     }
 
-    static foreach (i, P; Params)
+    if (has_named_args)
+        *cast(const(NamedArgument)[]*)(base + desc.named_args_offset) = parameters;
+
+    foreach (i, ref arg; desc.args)
     {
-        {
-            static if (ParamNames[i] == "args")
-            {
-                static assert(is(const(Variant)[] : P), "`args` parameter must be of type const(Variant)[]");
-                params[i] = args;
-            }
-            else static if (ParamNames[i] == "named-args")
-            {
-                static assert(is(const(NamedArgument)[] : P), "`named_args` parameter must be of type const(NamedArgument)[]");
-                params[i] = parameters;
-            }
-            else static if (!is(P : Nullable!U, U))
-            {
-                if (!got_arg[i])
-                {
-                    error = tconcat("Missing argument: ", ParamNames[i]);
-                    goto done;
-                }
-            }
-        }
+        if (!(got & (1UL << i)) && !(arg.flags & FunctionArgument.Flags.optional))
+            return tconcat("Missing argument: ", arg.name);
     }
-
-done:
-    return params;
+    return null;
 }
