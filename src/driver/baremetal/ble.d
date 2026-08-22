@@ -972,10 +972,9 @@ nothrow @nogc:
 
     override void pre_init()
     {
-        // builtin radios are fixed hardware; rediscovered each boot, not persisted
         foreach (ubyte i; 0 .. num_ble)
         {
-            auto iface = Collection!BuiltinBLEInterface().create(tconcat("ble", i + 1), ObjectFlags.dynamic);
+            auto iface = Collection!BuiltinBLEInterface().create(tconcat("ble", i + 1));
             iface.port = i;
         }
     }

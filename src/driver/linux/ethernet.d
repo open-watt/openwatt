@@ -13,11 +13,14 @@ import manager.collection;
 import manager.console;
 import manager.plugin;
 
+import driver.linux.fdwatch;
 import driver.linux.netlink;
 import driver.linux.netlink_write;
 import driver.linux.sysfs;
 
 import driver.linux.raw;
+
+import urt.internal.sys.posix : pollfd, POLLIN;
 
 import router.iface;
 import router.iface.ethernet;
@@ -79,7 +82,8 @@ nothrow @nogc:
                 adopt_mac(MACAddress(hw));
         }
 
-        SysTime now = getSysTime();
+        // heartbeat() only runs once we are up, so the wait for carrier is polled here
+        MonoTime now = getTime();
         if (now - _last_refresh >= 1.seconds)
         {
             _last_refresh = now;
@@ -88,12 +92,16 @@ nothrow @nogc:
 
         if (_status.connected == ConnectionStatus.disconnected)
             return CompletionStatus.continue_;
+
+        register_fdwatch();
         return CompletionStatus.complete;
     }
 
     override CompletionStatus shutdown()
     {
+        unregister_fdwatch();
         _raw.close();
+        _rx_failed = false;
         return super.shutdown();
     }
 
@@ -117,52 +125,22 @@ nothrow @nogc:
     // wire_send / re-enable); the kernel buffers and ages the unread RX.
     final void set_enslaved(bool value)
     {
+        if (_enslaved == value)
+            return;
         _enslaved = value;
+        fd_watch_changed();
     }
 
-    override void update()
+    override void heartbeat(MonoTime now)
     {
-        super.update();
+        super.heartbeat(now);
 
-        SysTime now = getSysTime();
-        if (now - _last_refresh >= 1.seconds)
-        {
-            _last_refresh = now;
-            refresh_os_state();
-            if (_status.connected == ConnectionStatus.disconnected)
-            {
-                restart();
-                return;
-            }
-        }
+        if (_rx_failed)
+            return restart();
 
-        if (_enslaved)
-            return;
-
-        const(ubyte)[] data;
-        uint wire_len;
-        MonoTime ts;
-        ubyte pkttype;
-
-        while (true)
-        {
-            int res = _raw.poll_ll(data, wire_len, ts, pkttype);
-            if (res == 0)
-                break;
-            if (res < 0)
-                break;
-
-            if (pkttype == PACKET_OUTGOING)
-                continue;
-
-            if (data.length < wire_len)
-            {
-                add_rx_drop();
-                continue;
-            }
-
-            incoming_ethernet_frame(data, ts);
-        }
+        refresh_os_state();
+        if (_status.connected == ConnectionStatus.disconnected)
+            restart();
     }
 
 protected:
@@ -177,8 +155,77 @@ protected:
 private:
     RawAdapter _raw;
     String _adapter;
-    SysTime _last_refresh;
+    MonoTime _last_refresh;
     bool _enslaved;
+    bool _fdwatch_registered;
+    bool _rx_failed;
+
+    void register_fdwatch()
+    {
+        if (!_fdwatch_registered && add_fd_watcher(&service_io, &collect_fds))
+        {
+            _fdwatch_registered = true;
+            fd_watch_changed();
+        }
+    }
+
+    void unregister_fdwatch()
+    {
+        if (_fdwatch_registered)
+        {
+            remove_fd_watcher(&service_io);
+            _fdwatch_registered = false;
+            fd_watch_changed();
+        }
+    }
+
+    // An enslaved port is switched by the kernel, so its fd stays out of the wait set
+    // entirely rather than being read and discarded.
+    void collect_fds(ref Array!pollfd fds)
+    {
+        if (_raw.valid && !_enslaved)
+            fds ~= pollfd(_raw.fd, POLLIN);
+    }
+
+    void service_io()
+    {
+        if (!running || !_raw.valid || _enslaved)
+            return;
+
+        const(ubyte)[] data;
+        uint wire_len;
+        MonoTime ts;
+        ubyte pkttype;
+
+        while (true)
+        {
+            int res = _raw.poll_ll(data, wire_len, ts, pkttype);
+            if (res == 0)
+                break;
+            if (res < 0)
+            {
+                // A dead fd stays error-ready forever and the reactor cannot evict it for us
+                // (pooled fds share one tag), so it would spin the wait loop at full tilt.
+                // Drop it here and let the heartbeat restart us -- tearing down from inside
+                // the pool drain would mutate the watcher list being iterated.
+                log.error("receive failed on '", _adapter, "': errno=", _raw.last_recv_error.system_code);
+                _raw.close();
+                _rx_failed = true;
+                return;
+            }
+
+            if (pkttype == PACKET_OUTGOING)
+                continue;
+
+            if (data.length < wire_len)
+            {
+                add_rx_drop();
+                continue;
+            }
+
+            incoming_ethernet_frame(data, ts);
+        }
+    }
 
     void apply_configured_mtu()
     {
@@ -237,7 +284,10 @@ private:
     {
         Array!String os_buf;
         enumerate_adapters((const(char)[] name, const(char)[] description) nothrow @nogc {
-            port_add(PortKind.ethernet, tconcat("linux:ethernet:", name), name, name, ModuleName, description);
+            // A USB NIC can be unplugged; a PCI or onboard one is soldered down and never leaves.
+            const bool removable = adapter_is_removable(name);
+            port_add(PortKind.ethernet, tconcat("linux:ethernet:", name), name, name, ModuleName, description,
+                     removable ? PortFlags.removable : PortFlags.none);
 
             bool present = false;
             foreach (e; Collection!LinuxRawEthernet().values)
@@ -252,11 +302,8 @@ private:
             {
                 auto iface_name = next_iface_name();
                 log_info(ModuleName, "Found ethernet interface: \"", description, "\" (", name, ")");
-                // dynamic: we own its lifecycle and rediscover it each boot, so
-                // it isn't persisted to config -- and only dynamic entries are
-                // reaped below when their netdev disappears. Operator/config
-                // interfaces (flags == none) are left alone.
-                auto iface = Collection!LinuxRawEthernet().create(iface_name, ObjectFlags.dynamic);
+                auto iface = Collection!LinuxRawEthernet().create(iface_name,
+                                                                  removable ? ObjectFlags.dynamic : ObjectFlags.none);
                 iface.adapter = name;
                 if (description.length > 0)
                     iface.comment = description.makeString(defaultAllocator);
@@ -268,9 +315,9 @@ private:
         Array!LinuxRawEthernet gone;
         foreach (e; Collection!LinuxRawEthernet().values)
         {
-            // Only reap what auto-discovery created; an operator/config interface
-            // (e.g. bound to a veth that enumerate_adapters doesn't list) is not
-            // ours to remove.
+            // Only removable adapters are reaped. A soldered NIC that momentarily drops out
+            // of the scan stays put, as does an operator/config interface (e.g. bound to a
+            // veth that enumerate_adapters doesn't list).
             if (!(e.flags & ObjectFlags.dynamic))
                 continue;
 
@@ -290,7 +337,10 @@ private:
         {
             log_info(ModuleName, "Ethernet adapter gone: ", e.adapter);
             port_remove(PortKind.ethernet, tconcat("linux:ethernet:", e.adapter[]));
-            Collection!LinuxRawEthernet().remove(e);
+            // destroy(), not Collection.remove(): only destroy() runs shutdown(), and shutdown()
+            // is what drops our fd from the reactor pool and closes the socket. remove() just
+            // nulls the table slot and leaves a live watcher ingesting frames forever.
+            e.destroy();
         }
     }
 

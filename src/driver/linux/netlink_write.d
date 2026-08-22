@@ -178,6 +178,87 @@ int netlink_set_link_up(int ifindex, bool up)
     return nl_send_ack(b.finalise(RTM_NEWLINK, NLM_F_REQUEST | NLM_F_ACK, seq), seq);
 }
 
+// The link's current bit timing. Returns 0 when it has none -- the state a CAN controller
+// boots in, and the reason a freshly probed link cannot be raised.
+uint netlink_get_can_bitrate(int ifindex)
+{
+    uint seq = ++g_seq;
+    NlBuilder b;
+    ifinfomsg ifi;
+    ifi.ifi_index = ifindex;
+    b.family(ifi);
+    const(ubyte)[] msg = b.finalise(RTM_GETLINK, NLM_F_REQUEST, seq);
+
+    int fd = socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
+    if (fd < 0)
+        return 0;
+    scope(exit) close(fd);
+
+    sockaddr_nl local;
+    local.nl_family = AF_NETLINK;
+    if (bind(fd, &local, sockaddr_nl.sizeof) < 0)
+        return 0;
+
+    timeval tv;
+    tv.tv_sec = 1;
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, timeval.sizeof);
+
+    sockaddr_nl kernel;
+    kernel.nl_family = AF_NETLINK;
+    if (sendto(fd, msg.ptr, msg.length, 0, &kernel, sockaddr_nl.sizeof) != cast(ptrdiff_t)msg.length)
+        return 0;
+
+    ubyte[4096] buf = void;
+    ptrdiff_t n = recv(fd, buf.ptr, buf.length, 0);
+    if (n <= 0)
+        return 0;
+
+    const(ubyte)[] data = buf[0 .. cast(size_t)n];
+    while (data.length >= nlmsghdr.sizeof)
+    {
+        const(nlmsghdr)* h = peek!nlmsghdr(data);
+        if (!h || h.nlmsg_len < nlmsghdr.sizeof || h.nlmsg_len > data.length)
+            break;
+
+        if (h.nlmsg_type == RTM_NEWLINK && h.nlmsg_len >= nlmsghdr.sizeof + ifinfomsg.sizeof)
+        {
+            auto bt = find_attr(find_attr(find_attr(data[nlmsghdr.sizeof + ifinfomsg.sizeof .. h.nlmsg_len],
+                                                    IFLA_LINKINFO), IFLA_INFO_DATA), IFLA_CAN_BITTIMING);
+            if (bt.length >= can_bittiming.sizeof)
+                return (cast(const(can_bittiming)*)bt.ptr).bitrate;
+        }
+
+        uint aligned = (h.nlmsg_len + 3u) & ~3u;
+        if (aligned >= data.length)
+            break;
+        data = data[aligned .. $];
+    }
+    return 0;
+}
+
+// CAN bit timing is link configuration, not socket configuration, and the kernel rejects
+// it unless the link is down -- bring it down first. Zeroing everything but `bitrate` asks
+// the driver to derive the segment timing from its own clock, which is what
+// `ip link set canX type can bitrate N` does.
+int netlink_set_can_bitrate(int ifindex, uint bitrate)
+{
+    can_bittiming bt;
+    bt.bitrate = bitrate;
+
+    uint seq = ++g_seq;
+    NlBuilder b;
+    ifinfomsg ifi;
+    ifi.ifi_index = ifindex;
+    b.family(ifi);
+    size_t li = b.nest_begin(IFLA_LINKINFO);
+    b.attr_str(IFLA_INFO_KIND, "can");
+    size_t data = b.nest_begin(IFLA_INFO_DATA);
+    b.attr(IFLA_CAN_BITTIMING, as_bytes(bt));
+    b.nest_end(data);
+    b.nest_end(li);
+    return nl_send_ack(b.finalise(RTM_NEWLINK, NLM_F_REQUEST | NLM_F_ACK, seq), seq);
+}
+
 // Resolve a kernel netdev name to its ifindex; 0 if unknown.
 int netlink_ifindex(const(char)[] name)
 {
@@ -609,8 +690,43 @@ enum NLA_F_NESTED  = 0x8000;
 enum IFLA_ADDRESS   = 1;
 enum IFLA_IFNAME    = 3;
 enum IFLA_MASTER    = 10;
+enum RTM_GETLINK    = 18;
+enum NLA_TYPE_MASK  = 0x3FFF;
+
+// Payload of the first `type` attribute at this nesting level, or null.
+const(ubyte)[] find_attr(const(ubyte)[] attrs, ushort type)
+{
+    while (attrs.length >= rtattr.sizeof)
+    {
+        const(rtattr)* a = cast(const(rtattr)*)attrs.ptr;
+        if (a.rta_len < rtattr.sizeof || a.rta_len > attrs.length)
+            break;
+        if ((a.rta_type & NLA_TYPE_MASK) == type)
+            return attrs[rtattr.sizeof .. a.rta_len];
+        uint aligned = (a.rta_len + 3u) & ~3u;
+        if (aligned >= attrs.length)
+            break;
+        attrs = attrs[aligned .. $];
+    }
+    return null;
+}
+
 enum IFLA_LINKINFO  = 18;
 enum IFLA_INFO_KIND = 1;    // nested under IFLA_LINKINFO
+enum IFLA_INFO_DATA = 2;    // nested under IFLA_LINKINFO, link-type specific
+enum IFLA_CAN_BITTIMING = 1;    // nested under IFLA_INFO_DATA when INFO_KIND is "can"
+
+struct can_bittiming
+{
+    uint bitrate;
+    uint sample_point;
+    uint tq;
+    uint prop_seg;
+    uint phase_seg1;
+    uint phase_seg2;
+    uint sjw;
+    uint brp;
+}
 
 enum RT_TABLE_MAIN     = 254;
 enum RTPROT_OPENWATT   = 80;    // private protocol id -- our routes are tagged with this

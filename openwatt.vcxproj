@@ -80,6 +80,7 @@
     <DCompile Include="src\driver\baremetal\watchdog.d" />
     <DCompile Include="src\driver\baremetal\wifi.d" />
     <DCompile Include="src\driver\ble.d" />
+    <DCompile Include="src\driver\can.d" />
     <DCompile Include="src\driver\boards\smartevse\binding.d" />
     <DCompile Include="src\driver\boards\smartevse\display.d" />
     <DCompile Include="src\driver\boards\smartevse\evse.d" />
@@ -94,6 +95,7 @@
     <DCompile Include="src\driver\esp32\watchdog.d" />
     <DCompile Include="src\driver\ethernet.d" />
     <DCompile Include="src\driver\linux\ble.d" />
+    <DCompile Include="src\driver\linux\can.d" />
     <DCompile Include="src\driver\linux\ctrl_iface.d" />
     <DCompile Include="src\driver\linux\ethernet.d" />
     <DCompile Include="src\driver\linux\fdwatch.d" />
