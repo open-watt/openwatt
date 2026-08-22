@@ -45,20 +45,20 @@ nothrow @nogc:
         g_app.console.register_collection!TeslaVehicleScanner();
         g_app.console.register_collection!TeslaVehicleSession();
 
-        g_app.console.register_command!twc_add("/protocol/tesla/twc", this, "add");
-        g_app.console.register_command!twc_set("/protocol/tesla/twc", this, "set");
+        g_app.console.register_command!(twc_add, "add")("/protocol/tesla/twc", this);
+        g_app.console.register_command!(twc_set, "set")("/protocol/tesla/twc", this);
         version (Tiny) {}
         else
         {
-            g_app.console.register_command!vehicle_get_charge("/protocol/tesla/session", this, "get-charge");
-            g_app.console.register_command!vehicle_get_climate("/protocol/tesla/session", this, "get-climate");
-            g_app.console.register_command!vehicle_charge_start("/protocol/tesla/session", this, "charge-start");
-            g_app.console.register_command!vehicle_charge_stop("/protocol/tesla/session", this, "charge-stop");
-            g_app.console.register_command!vehicle_set_amps("/protocol/tesla/session", this, "set-amps");
-            g_app.console.register_command!vehicle_climate("/protocol/tesla/session", this, "climate");
-            g_app.console.register_command!vehicle_set_temperature("/protocol/tesla/session", this, "set-temperature");
+            g_app.console.register_command!(vehicle_get_charge, "get-charge")("/protocol/tesla/session", this);
+            g_app.console.register_command!(vehicle_get_climate, "get-climate")("/protocol/tesla/session", this);
+            g_app.console.register_command!(vehicle_charge_start, "charge-start")("/protocol/tesla/session", this);
+            g_app.console.register_command!(vehicle_charge_stop, "charge-stop")("/protocol/tesla/session", this);
+            g_app.console.register_command!(vehicle_set_amps, "set-amps")("/protocol/tesla/session", this);
+            g_app.console.register_command!(vehicle_climate, "climate")("/protocol/tesla/session", this);
+            g_app.console.register_command!(vehicle_set_temperature, "set-temperature")("/protocol/tesla/session", this);
         }
-        g_app.console.register_command!vehicle_schedule_charging("/protocol/tesla/session", this, "schedule-charging");
+        g_app.console.register_command!(vehicle_schedule_charging, "schedule-charging")("/protocol/tesla/session", this);
     }
 
     override void update()

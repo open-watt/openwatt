@@ -2246,7 +2246,7 @@ nothrow @nogc:
         g_app.console.register_collection!LinuxWifiRadio();
         g_app.console.register_collection!LinuxWlan();
         g_app.console.register_collection!LinuxAP();
-        g_app.console.register_command!scan_cmd("/interface/wifi", this, "scan");
+        g_app.console.register_command!(scan_cmd, "scan")("/interface/wifi", this);
     }
 
     override void update()

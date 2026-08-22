@@ -36,15 +36,15 @@ nothrow @nogc:
         g_app.console.register_collection!MQTTClient();
         g_app.console.register_collection!MQTTBinding();
 
-        g_app.console.register_command!retained("/protocol/mqtt/broker", this, "retained");
+        g_app.console.register_command!(retained, "retained")("/protocol/mqtt/broker", this);
         static if (has_message_cache)
-            g_app.console.register_command!cache("/protocol/mqtt/broker", this, "cache");
-        g_app.console.register_command!read("/protocol/mqtt/broker", this, "read");
-        g_app.console.register_command!sessions("/protocol/mqtt/broker", this, "sessions");
-        g_app.console.register_command!subscriptions("/protocol/mqtt/broker", this, "subscriptions");
-        g_app.console.register_command!local_publish("/protocol/mqtt/broker", this, "publish");
+            g_app.console.register_command!(cache, "cache")("/protocol/mqtt/broker", this);
+        g_app.console.register_command!(read, "read")("/protocol/mqtt/broker", this);
+        g_app.console.register_command!(sessions, "sessions")("/protocol/mqtt/broker", this);
+        g_app.console.register_command!(subscriptions, "subscriptions")("/protocol/mqtt/broker", this);
+        g_app.console.register_command!(local_publish, "publish")("/protocol/mqtt/broker", this);
 
-        g_app.console.register_command!client_publish("/protocol/mqtt/client", this, "publish");
+        g_app.console.register_command!(client_publish, "publish")("/protocol/mqtt/client", this);
     }
 
     uint element_size(uint)

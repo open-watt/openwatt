@@ -1826,8 +1826,8 @@ nothrow @nogc:
             set_ether_tcp_input(&ether_tcp_input);
 
             import protocol.ip.tcp : tcp_print;
-            g_app.console.register_command!tcp_print("/protocol/ip/tcp", this, "print");
-            g_app.console.register_command!neighbour_v4_print("/protocol/ip/neighbour", this, "print");
+            g_app.console.register_command!(tcp_print, "print")("/protocol/ip/tcp", this);
+            g_app.console.register_command!(neighbour_v4_print, "print")("/protocol/ip/neighbour", this);
         }
         else version (Windows)
             load_socket_extensions();

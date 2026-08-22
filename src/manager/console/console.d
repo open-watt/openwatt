@@ -38,58 +38,68 @@ struct Scope
 nothrow @nogc:
     import manager.collection : BaseCollection, CollectionTypeInfo;
 
-    String name;
-    Scope* parent;
+    enum ushort no_parent = 0xFFFF;
+
     const(CollectionTypeInfo)* collection_type;   // non-null on collection-host scopes
 
-    @disable this(this);
-
-    this(String name)
+    // aliases the caller's memory: registration paths must be persistent (string literals)
+    this(const(char)[] name)
     {
-        this.name = name.move;
+        assert(name.length <= ubyte.max, "Scope name too long");
+        _name_ptr = name.ptr;
+        _name_len = cast(ubyte)name.length;
     }
+
+    const(char)[] name() const pure
+        => _name_ptr[0 .. _name_len];
 
     BaseCollection collection() const
         => BaseCollection(collection_type);
 
-    inout(Scope)[] sub_scopes() inout pure
-        => _sub_ptr[0 .. _sub_len];
+    Scope* parent(ref Console console) pure
+        => _parent == no_parent ? null : &console._scopes[_parent];
 
-    inout(Command)[] commands() inout pure
-        => _cmd_ptr[0 .. _cmd_len];
+    Scope[] sub_scopes(ref Console console) pure
+        => console._scopes[_sub_start .. _sub_start + _sub_len];
 
-    Scope* find_scope(const(char)[] name)
+    Command[] commands(ref Console console) pure
+        => console._commands[_cmd_start .. _cmd_start + _cmd_len];
+
+    Scope* find_scope(ref Console console, const(char)[] name)
     {
-        foreach (ref s; sub_scopes)
+        foreach (ref s; sub_scopes(console))
             if (s.name[] == name[])
                 return &s;
         return null;
     }
 
-    Command find_command(const(char)[] name)
+    Command* find_command(ref Console console, const(char)[] name)
     {
-        foreach (c; commands)
+        foreach (ref c; commands(console))
             if (c.name[] == name[])
-                return c;
+                return &c;
         return null;
     }
 
     alias get_command = find_command;
 
-    Scope* descend(const(char)[] seg)
+    Scope* descend(ref Console console, const(char)[] seg)
     {
         if (seg.front_is('/') || seg.front_is(':'))
             seg = seg[1..$];
         if (seg.length == 0)
             return &this;
         if (seg == "..")
-            return parent;
-        return find_scope(seg);
+            return parent(console);
+        return find_scope(console, seg);
     }
 
 package:
-    Scope* _sub_ptr;
-    Command* _cmd_ptr;
+    const(char)* _name_ptr;
+    ubyte _name_len;
+    ushort _parent = no_parent;
+    ushort _sub_start;
+    ushort _cmd_start;
     ushort _sub_len;
     ushort _cmd_len;
 }
@@ -100,9 +110,6 @@ struct Console
 nothrow @nogc:
 
     Application appInstance;
-
-    Scope* root;
-    Scope* script_scope;
 
     this() @disable;
     this(this) @disable;
@@ -124,17 +131,23 @@ nothrow @nogc:
 
         // [0] = root, [1] = script_scope. Both empty initially; sub-scope strips
         // anchor at index 2 (where the first sub-scope would go).
-        push_root(String(null));   // root
-        push_root(String(null));   // script_scope
-        root = &_scopes[0];
-        script_scope = &_scopes[1];
-        root._sub_ptr = _scopes.ptr + 2;
-        script_scope._sub_ptr = _scopes.ptr + 2;
-        root._cmd_ptr = _commands.ptr;
-        script_scope._cmd_ptr = _commands.ptr;
+        push_root();   // root
+        push_root();   // script_scope
+        root._sub_start = 2;
+        script_scope._sub_start = 2;
+
+        import manager.console.collection_commands : init_shared_commands;
+        init_shared_commands(this);
+        root._cmd_start = shared_cmd_count;
+        script_scope._cmd_start = shared_cmd_count;
 
         RegisterBuiltinCommands(this);
     }
+
+    Scope* root() pure
+        => &_scopes[0];
+    Scope* script_scope() pure
+        => &_scopes[1];
 
     ~this()
     {
@@ -281,7 +294,7 @@ nothrow @nogc:
                 search = root;
             else if (i < cmdLine.length && cmdLine[i] == ':')
                 search = script_scope;
-            return complete_in(search, cmdLine[i .. $], _cur_scope).insert(0, cmdLine[0 .. i]);
+            return complete_in(this, search, cmdLine[i .. $], _cur_scope).insert(0, cmdLine[0 .. i]);
         }
     }
 
@@ -302,7 +315,7 @@ nothrow @nogc:
                 while (i < cmdLine.length && (cmdLine[i] == ' ' || cmdLine[i] == '\t'))
                     ++i;
             }
-            return suggest_in(search, cmdLine[i .. $], _cur_scope);
+            return suggest_in(this, search, cmdLine[i .. $], _cur_scope);
         }
     }
 
@@ -312,16 +325,9 @@ nothrow @nogc:
         add_command(parent, command);
     }
 
-    void register_commands(const(char)[] _scope, Command[] commands)
+    void register_command(alias method, string command_name = null, Instance)(const(char)[] _scope, Instance instance)
     {
-        Scope* parent = create_scope(_scope);
-        foreach (cmd; commands)
-            add_command(parent, cmd);
-    }
-
-    void register_command(alias method, Instance)(const(char)[] _scope, Instance instance, const(char)[] commandName = null)
-    {
-        return register_command(_scope, FunctionCommand.create!method(this, instance, commandName));
+        register_command(_scope, Command(&function_command_desc!(method, command_name), cast(void*)instance));
     }
 
     void register_collection(Type)()
@@ -354,56 +360,31 @@ nothrow @nogc:
     {
         debug assert(!_frozen, "Console.add_command after freeze()");
         const(char)[] name = command.name[];
-        assert(parent.find_command(name) is null, tconcat("Command already exists: ", name));
-        assert(parent.find_scope(name) is null, tconcat("Name collides with sub-scope: ", name));
+        assert(parent.find_command(this, name) is null, tconcat("Command already exists: ", name));
+        assert(parent.find_scope(this, name) is null, tconcat("Name collides with sub-scope: ", name));
 
-        // Collection scopes start out pointing at a shared side-array. The
-        // first extension command forces a copy into _commands so the strip
-        // can grow.
-        if (in_side_array(parent._cmd_ptr))
+        if (parent._cmd_start < shared_cmd_count)
             promote(parent);
 
-        size_t parent_cmd_start = parent._cmd_ptr - _commands.ptr;
-        size_t local_pos = binary_search!((Command c, const(char)[] n) => cmp(c.name[], n), true)(parent.commands, name);
-        size_t K = parent_cmd_start + local_pos;
+        size_t local_pos = binary_search!((Command c, const(char)[] n) => cmp(c.name[], n), true)(parent.commands(this), name);
+        size_t K = parent._cmd_start + local_pos;
 
-        insert_command(K, command);
-
-        parent._cmd_ptr = _commands.ptr + parent_cmd_start;
+        _commands.insert(K, command);
+        foreach (ref Scope s; _scopes[])
+        {
+            if (&s !is parent && s._cmd_start >= K)
+                ++s._cmd_start;
+        }
         ++parent._cmd_len;
     }
 
-    private bool in_side_array(const Command* p) const pure
-        => p >= &_coll_cmds[0] && p < &_coll_cmds[0] + _coll_cmds.length;
-
-    // Copy `parent`'s shared-strip entries to a fresh slice at the end of
-    // _commands so the strip can be extended. Other scopes' _cmd_ptr that
-    // already live in _commands get fixed up if the buffer reallocs.
     private void promote(Scope* parent)
     {
-        Command* src = parent._cmd_ptr;
-        ushort n = parent._cmd_len;
-
-        Command* old_base = _commands.ptr;
-        _commands.reserve(_commands.length + n);
-        Command* base = _commands.ptr;
-
-        if (base !is old_base)
-        {
-            foreach (ref Scope s; _scopes[])
-            {
-                if (s._cmd_ptr is null || in_side_array(s._cmd_ptr))
-                    continue;
-                size_t old_idx = s._cmd_ptr - old_base;
-                s._cmd_ptr = base + old_idx;
-            }
-        }
-
         size_t start = _commands.length;
-        for (size_t i = 0; i < n; ++i)
-            _commands ~= src[i];
-
-        parent._cmd_ptr = base + start;
+        _commands.reserve(start + parent._cmd_len);
+        foreach (i; 0 .. parent._cmd_len)
+            _commands ~= _commands[parent._cmd_start + i];
+        parent._cmd_start = cast(ushort)start;
     }
 
     Scope* find_scope_path(const(char)[] path) { return walk_path(path, false); }
@@ -430,7 +411,7 @@ nothrow @nogc:
                 assert(!create, "Invalid path syntax");
                 return null;
             }
-            Scope* next = n.descend(seg);
+            Scope* next = n.descend(this, seg);
             if (next is null && create && seg != "..")
                 next = grow_scope(n, seg);
             n = next;
@@ -440,93 +421,45 @@ nothrow @nogc:
 
     private Scope* grow_scope(Scope* parent, const(char)[] name)
     {
-        import urt.mem.string : addString;
-
         debug assert(!_frozen, "Console.grow_scope after freeze()");
 
-        Scope* old_base = _scopes.ptr;
-        size_t parent_idx = parent - old_base;
-        size_t parent_sub_start = parent._sub_ptr - old_base;
-        size_t parent_sub_count = parent._sub_len;
+        // a scope always precedes its own strip, so parent_idx never shifts
+        ushort parent_idx = cast(ushort)(parent - _scopes.ptr);
 
         // find sorted position within the parent's strip
-        size_t local_pos = binary_search!((ref Scope s, const(char)[] n) => cmp(s.name[], n), true)(parent.sub_scopes, name);
-        size_t K = parent_sub_start + local_pos;
+        size_t local_pos = binary_search!((ref Scope s, const(char)[] n) => cmp(s.name[], n), true)(parent.sub_scopes(this), name);
+        size_t K = parent._sub_start + local_pos;
 
-        _scopes.insertEmplace(K, String(name.addString));
+        _scopes.insertEmplace(K, name);
 
-        Scope* base = _scopes.ptr;
-
-        // fix up all OTHER scopes' parent and _sub_ptr fields.
-        // plus the inserting parent's _sub_ptr (which doesn't shift since
-        // parent_idx < K, but we also need to extend its _sub_len).
-        foreach (ref Scope s; _scopes[])
+        foreach (i, ref Scope s; _scopes[])
         {
-            if (&s is &base[K])
+            if (i == K)
                 continue; // new scope: set explicitly below
 
-            if (s.parent !is null)
-            {
-                size_t old_p = s.parent - old_base;
-                s.parent = base + (old_p < K ? old_p : old_p + 1);
-            }
+            if (s._parent != Scope.no_parent && s._parent >= K)
+                ++s._parent;
 
-            if (s._sub_ptr !is null)
-            {
-                size_t old_p = s._sub_ptr - old_base;
-                s._sub_ptr = base + (old_p < K ? old_p : old_p + 1);
-            }
-
-            // Commands pointer just needs the (unchanged) _commands.ptr — pool
-            // didn't move. But after a Scope-pool realloc, &s might have shifted
-            // and we still hold the correct _cmd_ptr (it points into a different
-            // pool).
+            // the parent's strip extends rather than shifts, even when anchored at K
+            if (i != parent_idx && s._sub_start >= K)
+                ++s._sub_start;
         }
 
-        Scope* fresh = &base[K];
-        Scope* p = &base[parent_idx]; // parent_idx < K, so parent stayed put
-
-        // restore parent's _sub_ptr (the loop incorrectly shifted it if its
-        // old start was at K — empty strip / left-insert case) and extend.
-        p._sub_ptr = base + parent_sub_start;
+        Scope* p = &_scopes[parent_idx];
         ++p._sub_len;
 
-        fresh.parent = p;
-        size_t parent_new_end = parent_sub_start + parent_sub_count + 1;
-        fresh._sub_ptr = base + parent_new_end;
-        fresh._cmd_ptr = _commands.ptr + _commands.length;
+        Scope* fresh = &_scopes[K];
+        fresh._parent = parent_idx;
+        fresh._sub_start = cast(ushort)(p._sub_start + p._sub_len);
+        fresh._cmd_start = cast(ushort)_commands.length;
         fresh._cmd_len = 0;
-
-        if (base !is old_base)
-        {
-            root = &_scopes[0];
-            script_scope = &_scopes[1];
-        }
 
         return fresh;
     }
 
-    private void insert_command(size_t K, Command cmd)
+    private void push_root()
     {
-        Command* old_base = _commands.ptr;
-        _commands.insert(K, cmd);
-
-        // fix up every Scope's _cmd_ptr that lives in _commands. Scopes
-        // pointing into the shared side-array (collection scopes) are
-        // untouched — the side-array isn't part of _commands.
-        Command* base = _commands.ptr;
-        foreach (ref Scope s; _scopes[])
-        {
-            if (s._cmd_ptr is null || in_side_array(s._cmd_ptr))
-                continue;
-            size_t old_idx = s._cmd_ptr - old_base;
-            s._cmd_ptr = base + (old_idx < K ? old_idx : old_idx + 1);
-        }
-    }
-
-    private void push_root(String name)
-    {
-        _scopes.emplaceBack(name.move);
+        _scopes.emplaceBack(cast(const(char)[])null);
     }
 
 package:
@@ -536,9 +469,11 @@ package:
     String _identifier;
     String _prompt;
 
+    // the shared collection-op strips; see collection_commands.d
+    enum ushort shared_cmd_count = 12;
+
     Array!Scope _scopes;
     Array!Command _commands;
-    Command[12] _coll_cmds;      // shared collection-op commands (lazy-init); see collection_commands.d
 
     debug bool _frozen = false;
 
@@ -623,7 +558,7 @@ MutableString!0 get_completion_suffix(const(char)[] token_start, ref const Array
 }
 
 
-MutableString!0 complete_in(Scope* node, const(char)[] cmdLine, Scope* user_scope)
+MutableString!0 complete_in(ref Console console, Scope* node, const(char)[] cmdLine, Scope* user_scope)
 {
     version (ExcludeAutocomplete)
         return MutableString!0(cmdLine);
@@ -645,10 +580,10 @@ MutableString!0 complete_in(Scope* node, const(char)[] cmdLine, Scope* user_scop
         {
             const(char)[] name = cmdLine[i..j];
             MutableString!0 r;
-            if (Scope* sub = node.find_scope(name))
-                r = complete_in(sub, cmdLine[j..$], user_scope);
-            else if (Command cmd = node.find_command(name))
-                r = cmd.complete(cmdLine[j..$], node, user_scope);
+            if (Scope* sub = node.find_scope(console, name))
+                r = complete_in(console, sub, cmdLine[j..$], user_scope);
+            else if (Command* cmd = node.find_command(console, name))
+                r = cmd.complete(console, cmdLine[j..$], node, user_scope);
             else
                 return MutableString!0(cmdLine);
             return r.insert(0, cmdLine[0..j]);
@@ -660,17 +595,17 @@ MutableString!0 complete_in(Scope* node, const(char)[] cmdLine, Scope* user_scop
             bool isScope;
         }
         Array!Cmd cmds;
-        foreach (ref Scope s; node.sub_scopes)
+        foreach (ref Scope s; node.sub_scopes(console))
             if (s.name[].startsWith(cmdLine[i..j]))
                 cmds ~= Cmd(s.name[], true);
-        foreach (Command c; node.commands)
+        foreach (ref Command c; node.commands(console))
             if (c.name[].startsWith(cmdLine[i..j]))
                 cmds ~= Cmd(c.name[], false);
 
         if (cmds.length == 0)
             return MutableString!0(cmdLine);
         if (cmds.length == 1)
-            return complete_in(node, tconcat(cmdLine[0..i], cmds[0].name[], cmds[0].isScope && (i == 0 || cmdLine[0] == '/') ? '/' : ' '), user_scope);
+            return complete_in(console, node, tconcat(cmdLine[0..i], cmds[0].name[], cmds[0].isScope && (i == 0 || cmdLine[0] == '/') ? '/' : ' '), user_scope);
         size_t k = j-i;
         outer: for (; k < cmds[0].name.length; ++k)
         {
@@ -683,7 +618,7 @@ MutableString!0 complete_in(Scope* node, const(char)[] cmdLine, Scope* user_scop
 }
 
 
-Array!String suggest_in(Scope* node, const(char)[] cmdLine, Scope* user_scope)
+Array!String suggest_in(ref Console console, Scope* node, const(char)[] cmdLine, Scope* user_scope)
 {
     version (ExcludeAutocomplete)
         return Array!String();
@@ -696,32 +631,32 @@ Array!String suggest_in(Scope* node, const(char)[] cmdLine, Scope* user_scope)
         if (i < cmdLine.length)
         {
             const(char)[] name = cmdLine[0 .. i];
-            if (Scope* sub = node.find_scope(name))
+            if (Scope* sub = node.find_scope(console, name))
             {
                 size_t j = i;
                 if (j < cmdLine.length && cmdLine[j] == '/')
                     ++j;
                 while (j < cmdLine.length && is_whitespace(cmdLine[j]))
                     ++j;
-                return suggest_in(sub, cmdLine[j..$], user_scope);
+                return suggest_in(console, sub, cmdLine[j..$], user_scope);
             }
-            if (Command cmd = node.find_command(name))
+            if (Command* cmd = node.find_command(console, name))
             {
                 size_t j = i;
                 while (j < cmdLine.length && is_whitespace(cmdLine[j]))
                     ++j;
-                return cmd.suggest(cmdLine[j..$], node, user_scope);
+                return cmd.suggest(console, cmdLine[j..$], node, user_scope);
             }
             return Array!String();
         }
 
         Array!String r;
-        foreach (ref Scope s; node.sub_scopes)
+        foreach (ref Scope s; node.sub_scopes(console))
             if (s.name[].startsWith(cmdLine))
-                r ~= s.name;
-        foreach (Command c; node.commands)
+                r ~= String(MutableString!0(s.name));
+        foreach (ref Command c; node.commands(console))
             if (c.name[].startsWith(cmdLine))
-                r ~= c.name;
+                r ~= String(MutableString!0(c.name));
         return r;
     }
 }
@@ -730,3 +665,31 @@ Array!String suggest_in(Scope* node, const(char)[] cmdLine, Scope* user_scope)
 private:
 
 __gshared Console* g_console_instances = null;
+
+
+unittest
+{
+    import urt.mem.allocator : Mallocator;
+
+    // Heap-allocated and leaked: Console registers itself in a __gshared list
+    // and never removes itself, so the address must outlive the test.
+    Console* console = Mallocator.instance.allocT!Console(null, StringLit!"test.console", Mallocator.instance);
+
+    Scope* s = console.create_scope("/system/test");
+    assert(console.find_scope_path("/system/test") is s);
+    assert(s.parent(*console).name[] == "system");
+    assert(s.parent(*console).parent(*console) is console.root);
+
+    Scope* a = console.create_scope("/system/apple");
+    assert(console.find_scope_path("/system/test").name[] == "test");
+    assert(console.find_scope_path("/system/apple") is a);
+
+    assert(console.script_scope.find_command(*console, "put") !is null);
+    assert(console.root.find_command(*console, "put") is null);
+
+    MutableString!0 c = console.complete(":pu", console.root);
+    assert(c[].startsWith(":put"));
+
+    Array!String suggestions = console.suggest(":r", console.root);
+    assert(suggestions.length == 2);   // return, run
+}

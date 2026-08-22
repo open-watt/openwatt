@@ -450,47 +450,47 @@ nothrow @nogc:
 
         console.register_command!log_level("/system", this);
         console.register_command!set_hostname("/system", this);
-        console.register_command!get_hostname("/system", this, "hostname");
-        console.register_command!set_update_rate("/system", this, "update-rate");
-        console.register_command!set_profile_path("/system", this, "profile-path");
+        console.register_command!(get_hostname, "hostname")("/system", this);
+        console.register_command!(set_update_rate, "update-rate")("/system", this);
+        console.register_command!(set_profile_path, "profile-path")("/system", this);
         console.register_command!uptime("/system", this);
         console.register_command!sysinfo("/system", this);
-        console.register_command!show_time("/system", this, "time");
+        console.register_command!(show_time, "time")("/system", this);
         console.register_command!sleep("/system", this);
         console.register_command!reboot("/system", this);
 
         version (HasFilesystem)
         {
-            console.register_command!fs_format("/system/fs", this, "format");
-            console.register_command!fs_info("/system/fs", this, "info");
-            console.register_command!fs_write("/system/fs", this, "write");
-            console.register_command!fs_read("/system/fs", this, "read");
-            console.register_command!fs_ls("/system/fs", this, "ls");
-            console.register_command!fs_rm("/system/fs", this, "rm");
+            console.register_command!(fs_format, "format")("/system/fs", this);
+            console.register_command!(fs_info, "info")("/system/fs", this);
+            console.register_command!(fs_write, "write")("/system/fs", this);
+            console.register_command!(fs_read, "read")("/system/fs", this);
+            console.register_command!(fs_ls, "ls")("/system/fs", this);
+            console.register_command!(fs_rm, "rm")("/system/fs", this);
         }
 
         version (AllocTracking)
         {
-            console.register_command!alloc_stats_cmd("/system/alloc", this, "stats");
-            console.register_command!alloc_mark_cmd("/system/alloc", this, "mark");
-            console.register_command!alloc_leaks_cmd("/system/alloc", this, "leaks");
+            console.register_command!(alloc_stats_cmd, "stats")("/system/alloc", this);
+            console.register_command!(alloc_mark_cmd, "mark")("/system/alloc", this);
+            console.register_command!(alloc_leaks_cmd, "leaks")("/system/alloc", this);
         }
 
         version (AllocProfile)
         {
-            console.register_command!alloc_profile_cmd("/system/alloc", this, "profile");
-            console.register_command!alloc_reset_cmd("/system/alloc", this, "reset");
-            console.register_command!alloc_log_cmd("/system/alloc", this, "log");
-            console.register_command!alloc_mark_point_cmd("/system/alloc", this, "mark-point");
+            console.register_command!(alloc_profile_cmd, "profile")("/system/alloc", this);
+            console.register_command!(alloc_reset_cmd, "reset")("/system/alloc", this);
+            console.register_command!(alloc_log_cmd, "log")("/system/alloc", this);
+            console.register_command!(alloc_mark_point_cmd, "mark-point")("/system/alloc", this);
         }
 
         register_type(&device_type_info, "/device");
 
-        console.register_command!device_add("/device", this, "add");
-        console.register_command!device_print("/device", this, "print");
-        console.register_command!element_set("/element", this, "set");
-        console.register_command!link_add("/element/link", this, "add");
-        console.register_command!link_print("/element/link", this, "print");
+        console.register_command!(device_add, "add")("/device", this);
+        console.register_command!(device_print, "print")("/device", this);
+        console.register_command!(element_set, "set")("/element", this);
+        console.register_command!(link_add, "add")("/element/link", this);
+        console.register_command!(link_print, "print")("/element/link", this);
 
         console.register_collection!Secret();
         console.register_collection!ProtocolBinding();

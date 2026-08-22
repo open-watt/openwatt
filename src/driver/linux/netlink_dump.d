@@ -55,7 +55,7 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.register_command!print_cmd("/system/linux", this, "print");
+        g_app.console.register_command!(print_cmd, "print")("/system/linux", this);
     }
 
     // /system/linux/print [format=ip|interfaces] -- dump the live kernel network

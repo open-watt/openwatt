@@ -152,8 +152,8 @@ nothrow @nogc:
         static if (has_http)
             g_app.console.register_collection!WebSocketSyncServer();
 
-        g_app.console.register_command!sync_log_sub("/sync", this, "log-sub");
-        g_app.console.register_command!sync_model_sub("/sync", this, "model-sub");
+        g_app.console.register_command!(sync_log_sub, "log-sub")("/sync", this);
+        g_app.console.register_command!(sync_model_sub, "model-sub")("/sync", this);
 
         set_log_hostname(hostname[]);
 

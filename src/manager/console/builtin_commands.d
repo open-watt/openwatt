@@ -19,44 +19,66 @@ import manager.value : from_variant;
 nothrow @nogc:
 
 
-class ExitCommand : Command
+void RegisterBuiltinCommands(ref Console console)
 {
-nothrow @nogc:
-
-    this(ref Console console)
-    {
-        super(console, StringLit!"exit");
-    }
-
-    override CommandState execute(Session session, Scope*, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
-    {
-        session.close_session();
-        return null;
-    }
-
+    Scope* s = console.script_scope;
+    console.add_command(s, Command(&exit_desc));
     version (ExcludeHelpText) {} else
-    override const(char)[] help(const(char)[] args) const
-        => "Terminate the console session.\nUsage: :exit";
+        console.add_command(s, Command(&help_desc));
+    console.add_command(s, Command(&set_desc));
+    console.add_command(s, Command(&put_desc));
+    console.add_command(s, Command(&eval_desc));
+    console.add_command(s, Command(&return_desc));
+    console.add_command(s, Command(&run_desc));
+    console.add_command(s, Command(&if_desc));
+    console.add_command(s, Command(&while_desc));
+    console.add_command(s, Command(&wait_desc));
+}
+
+
+private:
+
+static immutable CommandClass exit_class = {
+    exec: &exit_exec,
+};
+
+static immutable CommandDesc exit_desc = {
+    cls: &exit_class,
+    name: StringLit!"exit",
+    help_text: StringLit!("Terminate the console session.\nUsage: :exit"),
+};
+
+CommandState exit_exec(ref Command, Session session, Scope*, const Variant[] args, const NamedArgument[] named_args, out Variant result)
+{
+    session.close_session();
+    return null;
 }
 
 
 version (ExcludeHelpText) {} else
-class HelpCommand : Command
 {
-nothrow @nogc:
+    static immutable CommandClass help_class = {
+        exec: &help_exec,
+        suggest: &help_suggest,
+    };
 
-    this(ref Console console)
-    {
-        super(console, StringLit!"help");
-    }
+    static immutable CommandDesc help_desc = {
+        cls: &help_class,
+        name: StringLit!"help",
+        help_text: StringLit!("Print help text for console commands. With no argument, lists\n"
+                            ~ "all available commands.\n"
+                            ~ "Usage: :help [command]"),
+    };
 
-    override CommandState execute(Session session, Scope*, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
+    CommandState help_exec(ref Command, Session session, Scope*, const Variant[] args, const NamedArgument[] named_args, out Variant result)
     {
+        Console* console = session._console;
+
         if (args.length == 0)
         {
             session.write_output("Available commands:", true);
-            list_scope(session, _console.script_scope, ':');
-            list_scope(session, _console.root, '/');
+            list_scope(session, *console, console.script_scope, ':');
+            list_scope(session, *console, console.root, '/');
             session.write_output("Type `:help <name>` for details on a specific command.", true);
             return null;
         }
@@ -68,19 +90,19 @@ nothrow @nogc:
         }
 
         const(char)[] name = args[0].asString;
-        Command cmd;
+        Command* cmd;
         if (name.front_is(':'))
-            cmd = _console.script_scope.find_command(name[1 .. $]);
+            cmd = console.script_scope.find_command(*console, name[1 .. $]);
         else if (name.front_is('/'))
-            cmd = _console.root.find_command(name[1 .. $]);
+            cmd = console.root.find_command(*console, name[1 .. $]);
         else
         {
             if (session._cur_scope !is null)
-                cmd = session._cur_scope.find_command(name);
+                cmd = session._cur_scope.find_command(*console, name);
             if (cmd is null)
-                cmd = _console.script_scope.find_command(name);
-            if (cmd is null && session._cur_scope !is _console.root)
-                cmd = _console.root.find_command(name);
+                cmd = console.script_scope.find_command(*console, name);
+            if (cmd is null && session._cur_scope !is console.root)
+                cmd = console.root.find_command(*console, name);
         }
         if (cmd is null)
         {
@@ -91,319 +113,285 @@ nothrow @nogc:
         return null;
     }
 
-    override Array!String suggest(const(char)[] cmdLine, Scope*, Scope* user_scope = null)
+    Array!String help_suggest(ref Command, ref Console console, const(char)[] cmd_line, Scope*, Scope* user_scope)
     {
-        size_t lastToken = cmdLine.length;
-        while (lastToken > 0 && !is_separator(cmdLine[lastToken - 1]))
+        size_t lastToken = cmd_line.length;
+        while (lastToken > 0 && !is_separator(cmd_line[lastToken - 1]))
             --lastToken;
-        foreach (c; cmdLine[0 .. lastToken])
+        foreach (c; cmd_line[0 .. lastToken])
             if (!is_separator(c))
                 return Array!String();
-        const(char)[] arg = cmdLine[lastToken .. $];
+        const(char)[] arg = cmd_line[lastToken .. $];
 
         Array!String r;
         if (arg.front_is(':'))
-            list_matching(r, _console.script_scope, arg[1 .. $], ':');
+            list_matching(console, r, console.script_scope, arg[1 .. $], ':');
         else if (arg.front_is('/'))
-            list_matching(r, _console.root, arg[1 .. $], '/');
+            list_matching(console, r, console.root, arg[1 .. $], '/');
         else if (user_scope !is null)
-            list_matching(r, user_scope, arg, '\0');
+            list_matching(console, r, user_scope, arg, '\0');
         return r;
     }
 
-    override const(char)[] help(const(char)[] args) const
-        => "Print help text for console commands. With no argument, lists\n"
-         ~ "all available commands.\n"
-         ~ "Usage: :help [command]";
-
-private:
-    void list_scope(Session session, Scope* s, char prefix)
+    void list_scope(Session session, ref Console console, Scope* s, char prefix)
     {
-        foreach (ref Scope sub; s.sub_scopes)
+        foreach (ref Scope sub; s.sub_scopes(console))
             session.write_output(tconcat("  ", prefix, sub.name[]), true);
-        foreach (Command c; s.commands)
+        foreach (ref Command c; s.commands(console))
             session.write_output(tconcat("  ", prefix, c.name[]), true);
     }
 
-    static void list_matching(ref Array!String r, Scope* s, const(char)[] partial, char prefix)
+    void list_matching(ref Console console, ref Array!String r, Scope* s, const(char)[] partial, char prefix)
     {
-        foreach (ref Scope sub; s.sub_scopes)
+        foreach (ref Scope sub; s.sub_scopes(console))
         {
             if (!sub.name[].startsWith(partial))
                 continue;
             if (prefix)
                 r ~= String(MutableString!0(Concat, prefix, sub.name));
             else
-                r ~= sub.name;
+                r ~= String(MutableString!0(sub.name));
         }
-        foreach (Command c; s.commands)
+        foreach (ref Command c; s.commands(console))
         {
             if (!c.name[].startsWith(partial))
                 continue;
             if (prefix)
                 r ~= String(MutableString!0(Concat, prefix, c.name));
             else
-                r ~= c.name;
+                r ~= String(MutableString!0(c.name));
         }
     }
 }
 
 
-class SetCommand : Command
+static immutable CommandClass set_class = {
+    exec: &set_exec,
+};
+
+static immutable CommandDesc set_desc = {
+    cls: &set_class,
+    name: StringLit!"set",
+    help_text: StringLit!("Set one or more local variables. Variables created here are\n"
+             ~ "visible to the rest of the running script and to nested :if /\n"
+             ~ ":while bodies.\n"
+             ~ "Usage: :set name=value [name=value ...]"),
+};
+
+CommandState set_exec(ref Command, Session session, Scope*, const Variant[] args, const NamedArgument[] named_args, out Variant result)
 {
-nothrow @nogc:
-
-    this(ref Console console)
+    Context ctx = session._executing_context;
+    if (ctx is null)
     {
-        super(console, StringLit!"set");
-    }
-
-    override CommandState execute(Session session, Scope*, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
-    {
-        Context ctx = session._executing_context;
-        if (ctx is null)
-        {
-            session.write_output("Error: :set has no execution context", true);
-            return null;
-        }
-
-        foreach (ref na; namedArgs)
-        {
-            if (auto p = na.name in *ctx.locals)
-                *p = Variant(na.value);
-            else
-                (*ctx.locals)[makeString(na.name, _console._allocator)] = Variant(na.value);
-        }
-
+        session.write_output("Error: :set has no execution context", true);
         return null;
     }
 
-    version (ExcludeHelpText) {} else
-    override const(char)[] help(const(char)[] args) const
-        => "Set one or more local variables. Variables created here are\n"
-         ~ "visible to the rest of the running script and to nested :if /\n"
-         ~ ":while bodies.\n"
-         ~ "Usage: :set name=value [name=value ...]";
-}
-
-
-class PutCommand : Command
-{
-nothrow @nogc:
-
-    this(ref Console console)
+    foreach (ref na; named_args)
     {
-        super(console, StringLit!"put");
-    }
-
-    override CommandState execute(Session session, Scope*, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
-    {
-        Array!char buf;
-        foreach (i, ref a; args)
-        {
-            if (i > 0)
-                buf ~= ' ';
-            if (a.isString)
-                buf ~= a.asString;
-            else
-            {
-                ptrdiff_t l = a.toString(null, null, null);
-                if (l > 0)
-                    a.toString(buf.extend(l), null, null);
-            }
-        }
-        session.write_output(buf[], true);
-        return null;
-    }
-
-    version (ExcludeHelpText) {} else
-    override const(char)[] help(const(char)[] args) const
-        => "Print one or more values, separated by spaces and followed by\n"
-         ~ "a newline.\n"
-         ~ "Usage: :put <value> [<value> ...]";
-}
-
-
-class EvalCommand : Command
-{
-nothrow @nogc:
-
-    this(ref Console console)
-    {
-        super(console, StringLit!"eval");
-    }
-
-    override CommandState execute(Session session, Scope*, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
-    {
-        if (args.length > 0)
-            result = Variant(args[0]);
-        return null;
-    }
-
-    version (ExcludeHelpText) {} else
-    override const(char)[] help(const(char)[] args) const
-        => "Evaluate an expression and yield its value as the script's\n"
-         ~ "result. Useful for the cond= of :while.\n"
-         ~ "Usage: :eval <expr>";
-}
-
-
-class ReturnCommand : Command
-{
-nothrow @nogc:
-
-    this(ref Console console)
-    {
-        super(console, StringLit!"return");
-    }
-
-    override CommandState execute(Session session, Scope*, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
-    {
-        if (args.length > 0)
-            session._return_value = Variant(args[0]);
+        if (auto p = na.name in *ctx.locals)
+            *p = Variant(na.value);
         else
-            session._return_value = Variant(null);
-        session._returning = true;
+            (*ctx.locals)[makeString(na.name, session._console._allocator)] = Variant(na.value);
+    }
+
+    return null;
+}
+
+
+static immutable CommandClass put_class = {
+    exec: &put_exec,
+};
+
+static immutable CommandDesc put_desc = {
+    cls: &put_class,
+    name: StringLit!"put",
+    help_text: StringLit!("Print one or more values, separated by spaces and followed by\n"
+             ~ "a newline.\n"
+             ~ "Usage: :put <value> [<value> ...]"),
+};
+
+CommandState put_exec(ref Command, Session session, Scope*, const Variant[] args, const NamedArgument[] named_args, out Variant result)
+{
+    Array!char buf;
+    foreach (i, ref a; args)
+    {
+        if (i > 0)
+            buf ~= ' ';
+        if (a.isString)
+            buf ~= a.asString;
+        else
+        {
+            ptrdiff_t l = a.toString(null, null, null);
+            if (l > 0)
+                a.toString(buf.extend(l), null, null);
+        }
+    }
+    session.write_output(buf[], true);
+    return null;
+}
+
+
+static immutable CommandClass eval_class = {
+    exec: &eval_exec,
+};
+
+static immutable CommandDesc eval_desc = {
+    cls: &eval_class,
+    name: StringLit!"eval",
+    help_text: StringLit!("Evaluate an expression and yield its value as the script's\n"
+             ~ "result. Useful for the cond= of :while.\n"
+             ~ "Usage: :eval <expr>"),
+};
+
+CommandState eval_exec(ref Command, Session session, Scope*, const Variant[] args, const NamedArgument[] named_args, out Variant result)
+{
+    if (args.length > 0)
+        result = Variant(args[0]);
+    return null;
+}
+
+
+static immutable CommandClass return_class = {
+    exec: &return_exec,
+};
+
+static immutable CommandDesc return_desc = {
+    cls: &return_class,
+    name: StringLit!"return",
+    help_text: StringLit!("Stop running the current script and return <value> to whatever\n"
+             ~ "called it. From inside :if or :while, this exits the surrounding\n"
+             ~ "script too.\n"
+             ~ "Usage: :return [<value>]"),
+};
+
+CommandState return_exec(ref Command, Session session, Scope*, const Variant[] args, const NamedArgument[] named_args, out Variant result)
+{
+    if (args.length > 0)
+        session._return_value = Variant(args[0]);
+    else
+        session._return_value = Variant(null);
+    session._returning = true;
+    return null;
+}
+
+
+static immutable CommandClass run_class = {
+    exec: &run_exec,
+};
+
+static immutable CommandDesc run_desc = {
+    cls: &run_class,
+    name: StringLit!"run",
+    help_text: StringLit!("Execute a script value, or load and execute a script file from\n"
+             ~ "disk.\n"
+             ~ "Usage: :run script=<script-value>\n"
+             ~ "       :run file=<path>"),
+};
+
+CommandState run_exec(ref Command, Session session, Scope*, const Variant[] args, const NamedArgument[] named_args, out Variant result)
+{
+    Context parent = session._executing_context;
+    if (parent is null)
+        return null;
+
+    Script body_;
+    foreach (ref na; named_args)
+    {
+        if (na.name == "file" && na.value.isString)
+        {
+            const(char)[] path = na.value.asString;
+            void[] buf = load_file(path);
+            if (buf is null)
+            {
+                session.write_output(tconcat("Error: cannot read `", path, "`"), true);
+                return null;
+            }
+            body_ = make_script(cast(const(char)[])buf);
+            defaultAllocator().free(buf);
+            break;
+        }
+    }
+
+    if (body_.empty)
+        body_ = find_script(args, named_args, "script");
+
+    if (body_.empty)
+    {
+        session.write_output("Error: :run requires script= or file=", true);
         return null;
     }
 
-    version (ExcludeHelpText) {} else
-    override const(char)[] help(const(char)[] args) const
-        => "Stop running the current script and return <value> to whatever\n"
-         ~ "called it. From inside :if or :while, this exits the surrounding\n"
-         ~ "script too.\n"
-         ~ "Usage: :return [<value>]";
+    return session._console._allocator.allocT!Context(
+        session, parent.root_scope, parent.script_scope,
+        body_, parent.locals, Context.FrameKind.function_);
 }
 
 
-class RunCommand : Command
+static immutable CommandClass if_class = {
+    exec: &if_exec,
+};
+
+static immutable CommandDesc if_desc = {
+    cls: &if_class,
+    name: StringLit!"if",
+    help_text: StringLit!("Run the then-branch if cond is truthy; otherwise run the\n"
+             ~ "else-branch (if given).\n"
+             ~ "Usage: :if cond=<value> then={ ... } [else={ ... }]"),
+};
+
+CommandState if_exec(ref Command, Session session, Scope*, const Variant[] args, const NamedArgument[] named_args, out Variant result)
 {
-nothrow @nogc:
+    Context parent = session._executing_context;
+    if (parent is null)
+        return null;
 
-    this(ref Console console)
+    bool cond = false;
+    foreach (ref na; named_args)
     {
-        super(console, StringLit!"run");
+        if (na.name == "cond")
+        {
+            cond = is_truthy(na.value);
+            break;
+        }
     }
 
-    override CommandState execute(Session session, Scope*, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
-    {
-        Context parent = session._executing_context;
-        if (parent is null)
-            return null;
+    Script chosen = cond ? find_script_named(named_args, "then") : find_script_named(named_args, "else");
+    if (chosen.empty)
+        return null;
 
-        Script body_;
-        foreach (ref na; namedArgs)
-        {
-            if (na.name == "file" && na.value.isString)
-            {
-                const(char)[] path = na.value.asString;
-                void[] buf = load_file(path);
-                if (buf is null)
-                {
-                    session.write_output(tconcat("Error: cannot read `", path, "`"), true);
-                    return null;
-                }
-                body_ = make_script(cast(const(char)[])buf);
-                defaultAllocator().free(buf);
-                break;
-            }
-        }
-
-        if (body_.empty)
-            body_ = find_script(args, namedArgs, "script");
-
-        if (body_.empty)
-        {
-            session.write_output("Error: :run requires script= or file=", true);
-            return null;
-        }
-
-        return _console._allocator.allocT!Context(
-            session, parent.root_scope, parent.script_scope,
-            body_, parent.locals, Context.FrameKind.function_);
-    }
-
-    version (ExcludeHelpText) {} else
-    override const(char)[] help(const(char)[] args) const
-        => "Execute a script value, or load and execute a script file from\n"
-         ~ "disk.\n"
-         ~ "Usage: :run script=<script-value>\n"
-         ~ "       :run file=<path>";
+    return session._console._allocator.allocT!Context(session, parent.root_scope, parent.script_scope, chosen, parent.locals, Context.FrameKind.block);
 }
 
 
-class IfCommand : Command
+static immutable CommandClass while_class = {
+    exec: &while_exec,
+};
+
+static immutable CommandDesc while_desc = {
+    cls: &while_class,
+    name: StringLit!"while",
+    help_text: StringLit!("Repeat the do-block while cond returns truthy. Use :return to\n"
+             ~ "break out early.\n"
+             ~ "Usage: :while cond={ ... } do={ ... }"),
+};
+
+CommandState while_exec(ref Command, Session session, Scope*, const Variant[] args, const NamedArgument[] named_args, out Variant result)
 {
-nothrow @nogc:
+    Context parent = session._executing_context;
+    if (parent is null)
+        return null;
 
-    this(ref Console console)
+    Script cond_body = find_script_named(named_args, "cond");
+    Script do_body = find_script_named(named_args, "do");
+
+    if (cond_body.empty || do_body.empty)
     {
-        super(console, StringLit!"if");
+        session.write_output("Error: :while requires cond=<script> and do=<script>", true);
+        return null;
     }
 
-    override CommandState execute(Session session, Scope*, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
-    {
-        Context parent = session._executing_context;
-        if (parent is null)
-            return null;
-
-        bool cond = false;
-        foreach (ref na; namedArgs)
-        {
-            if (na.name == "cond")
-            {
-                cond = is_truthy(na.value);
-                break;
-            }
-        }
-
-        Script chosen = cond ? find_script_named(namedArgs, "then") : find_script_named(namedArgs, "else");
-        if (chosen.empty)
-            return null;
-
-        return _console._allocator.allocT!Context(session, parent.root_scope, parent.script_scope, chosen, parent.locals, Context.FrameKind.block);
-    }
-
-    version (ExcludeHelpText) {} else
-    override const(char)[] help(const(char)[] args) const
-        => "Run the then-branch if cond is truthy; otherwise run the\n"
-         ~ "else-branch (if given).\n"
-         ~ "Usage: :if cond=<value> then={ ... } [else={ ... }]";
-}
-
-
-class WhileCommand : Command
-{
-nothrow @nogc:
-
-    this(ref Console console)
-    {
-        super(console, StringLit!"while");
-    }
-
-    override CommandState execute(Session session, Scope*, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
-    {
-        Context parent = session._executing_context;
-        if (parent is null)
-            return null;
-
-        Script cond_body = find_script_named(namedArgs, "cond");
-        Script do_body = find_script_named(namedArgs, "do");
-
-        if (cond_body.empty || do_body.empty)
-        {
-            session.write_output("Error: :while requires cond=<script> and do=<script>", true);
-            return null;
-        }
-
-        return _console._allocator.allocT!WhileLoopState(session, parent, cond_body, do_body);
-    }
-
-    version (ExcludeHelpText) {} else
-    override const(char)[] help(const(char)[] args) const
-        => "Repeat the do-block while cond returns truthy. Use :return to\n"
-         ~ "break out early.\n"
-         ~ "Usage: :while cond={ ... } do={ ... }";
+    return session._console._allocator.allocT!WhileLoopState(session, parent, cond_body, do_body);
 }
 
 
@@ -414,7 +402,7 @@ nothrow @nogc:
 
     this(Session session, Context parent, ref const Script cond_body, ref const Script do_body)
     {
-        super(session, null);
+        super(session);
         this.parent = parent;
         this.cond_body = cond_body;
         this.do_body = do_body;
@@ -478,77 +466,74 @@ private:
     bool _cancelled = false;
 }
 
-class WaitCommand : Command
+
+static immutable CommandClass wait_class = {
+    exec: &wait_exec,
+};
+
+static immutable CommandDesc wait_desc = {
+    cls: &wait_class,
+    name: StringLit!"wait",
+    help_text: StringLit!("Wait for a registered signal while the main loop continues to run.\n"
+             ~ "The optional timeout is implemented through the time signal provider.\n"
+             ~ "Usage: :wait on=<signal-uri> [timeout=<duration>]"),
+};
+
+CommandState wait_exec(ref Command, Session session, Scope*, const Variant[] args, const NamedArgument[] named_args, out Variant result)
 {
-nothrow @nogc:
-
-    this(ref Console console)
+    const(char)[] signal;
+    Duration timeout;
+    foreach (ref argument; named_args)
     {
-        super(console, StringLit!"wait");
-    }
-
-    override CommandState execute(Session session, Scope*, const Variant[] args, const NamedArgument[] named_args, out Variant result)
-    {
-        const(char)[] signal;
-        Duration timeout;
-        foreach (ref argument; named_args)
+        if (argument.name == "on")
         {
-            if (argument.name == "on")
+            if (!argument.value.isString)
             {
-                if (!argument.value.isString)
-                {
-                    session.write_output("Error: :wait on= must be a signal URI", true);
-                    return null;
-                }
-                signal = argument.value.asString;
+                session.write_output("Error: :wait on= must be a signal URI", true);
+                return null;
             }
-            else if (argument.name == "timeout")
+            signal = argument.value.asString;
+        }
+        else if (argument.name == "timeout")
+        {
+            if (const(char)[] error = from_variant(argument.value, timeout))
             {
-                if (const(char)[] error = from_variant(argument.value, timeout))
-                {
-                    session.write_output(tconcat("Error: ", error), true);
-                    return null;
-                }
-            }
-            else
-            {
-                session.write_output(tconcat("Error: unknown :wait argument: ", argument.name), true);
+                session.write_output(tconcat("Error: ", error), true);
                 return null;
             }
         }
-
-        if (args.length != 0 || signal.length == 0 || timeout < Duration.zero)
+        else
         {
-            session.write_output("Usage: :wait on=<signal-uri> [timeout=<duration>]", true);
+            session.write_output(tconcat("Error: unknown :wait argument: ", argument.name), true);
             return null;
         }
-
-        WaitCommandState state = _console._allocator.allocT!WaitCommandState(session, signal, timeout);
-        StringResult started = state.start();
-        if (!started)
-        {
-            session.write_output(tconcat("Error: ", started.message), true);
-            _console._allocator.freeT(state);
-            return null;
-        }
-        return state;
     }
 
-    version (ExcludeHelpText) {} else
-    override const(char)[] help(const(char)[]) const
-        => "Wait for a registered signal while the main loop continues to run.\n"
-         ~ "The optional timeout is implemented through the time signal provider.\n"
-         ~ "Usage: :wait on=<signal-uri> [timeout=<duration>]";
+    if (args.length != 0 || signal.length == 0 || timeout < Duration.zero)
+    {
+        session.write_output("Usage: :wait on=<signal-uri> [timeout=<duration>]", true);
+        return null;
+    }
+
+    WaitCommandState state = session._console._allocator.allocT!WaitCommandState(session, signal, timeout);
+    StringResult started = state.start();
+    if (!started)
+    {
+        session.write_output(tconcat("Error: ", started.message), true);
+        session._console._allocator.freeT(state);
+        return null;
+    }
+    return state;
 }
 
 
-private class WaitCommandState : CommandState
+class WaitCommandState : CommandState
 {
 nothrow @nogc:
 
     this(Session session, const(char)[] signal, Duration timeout)
     {
-        super(session, null);
+        super(session);
         _signal_uri = signal.makeString(g_app.allocator);
         _timeout = timeout;
     }
@@ -653,34 +638,17 @@ private:
 }
 
 
-private Script find_script(const Variant[] args, const NamedArgument[] namedArgs, const(char)[] name)
+Script find_script(const Variant[] args, const NamedArgument[] namedArgs, const(char)[] name)
 {
     if (args.length > 0 && args[0].isUser!Script)
         return Script(args[0].asUser!Script);
     return find_script_named(namedArgs, name);
 }
 
-private Script find_script_named(const NamedArgument[] namedArgs, const(char)[] name)
+Script find_script_named(const NamedArgument[] namedArgs, const(char)[] name)
 {
     foreach (ref na; namedArgs)
         if (na.name == name && na.value.isUser!Script)
             return Script(na.value.asUser!Script);
     return Script.init;
-}
-
-
-void RegisterBuiltinCommands(ref Console console)
-{
-    Scope* s = console.script_scope;
-    console.add_command(s, console._allocator.allocT!ExitCommand(console));
-    version (ExcludeHelpText) {} else
-        console.add_command(s, console._allocator.allocT!HelpCommand(console));
-    console.add_command(s, console._allocator.allocT!SetCommand(console));
-    console.add_command(s, console._allocator.allocT!PutCommand(console));
-    console.add_command(s, console._allocator.allocT!EvalCommand(console));
-    console.add_command(s, console._allocator.allocT!ReturnCommand(console));
-    console.add_command(s, console._allocator.allocT!RunCommand(console));
-    console.add_command(s, console._allocator.allocT!IfCommand(console));
-    console.add_command(s, console._allocator.allocT!WhileCommand(console));
-    console.add_command(s, console._allocator.allocT!WaitCommand(console));
 }

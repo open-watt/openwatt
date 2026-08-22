@@ -776,8 +776,8 @@ nothrow @nogc:
     override void post_init()
     {
         // post_init: the platform ethernet collections own the scope by now, so these extend it
-        g_app.console.register_command!mac_ping("/interface/ethernet", this, "ping");
-        g_app.console.register_command!mac_discover("/interface/ethernet", this, "discover");
+        g_app.console.register_command!(mac_ping, "ping")("/interface/ethernet", this);
+        g_app.console.register_command!(mac_discover, "discover")("/interface/ethernet", this);
     }
 
     override void update()

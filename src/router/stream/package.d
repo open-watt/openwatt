@@ -364,8 +364,8 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.register_command!stream_tap("/stream", this, "tap");
-        g_app.console.register_command!stream_rts("/stream", this, "rts");
+        g_app.console.register_command!(stream_tap, "tap")("/stream", this);
+        g_app.console.register_command!(stream_rts, "rts")("/stream", this);
     }
 
     override void pre_update()

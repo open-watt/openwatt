@@ -74,11 +74,11 @@ nothrow @nogc:
         g_app.console.register_collection!EnergyLink();
         g_app.console.register_collection!Policy();
 
-        g_app.console.register_command!topology_print("/apps/energy", this, "topology");
-        g_app.console.register_command!circuit_print("/apps/energy", this, "circuit");
-        g_app.console.register_command!control_print("/apps/energy", this, "control");
-        g_app.console.register_command!why("/apps/energy", this, "why");
-        g_app.console.register_command!live("/apps/energy", this, "live");
+        g_app.console.register_command!(topology_print, "topology")("/apps/energy", this);
+        g_app.console.register_command!(circuit_print, "circuit")("/apps/energy", this);
+        g_app.console.register_command!(control_print, "control")("/apps/energy", this);
+        g_app.console.register_command!(why, "why")("/apps/energy", this);
+        g_app.console.register_command!(live, "live")("/apps/energy", this);
 
     }
 

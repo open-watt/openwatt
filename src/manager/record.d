@@ -851,8 +851,8 @@ nothrow @nogc:
     override void init()
     {
         g_app.console.register_collection!Recorder();
-        g_app.console.register_command!query_cmd("/record", this, "query");
-        g_app.console.register_command!graph_cmd("/record", this, "graph");
+        g_app.console.register_command!(query_cmd, "query")("/record", this);
+        g_app.console.register_command!(graph_cmd, "graph")("/record", this);
     }
 
     override void update()

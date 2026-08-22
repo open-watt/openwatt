@@ -1032,9 +1032,9 @@ nothrow @nogc:
         g_app.register_enum!FlowControl();
 
         g_app.console.register_collection!SerialStream();
-        g_app.console.register_command!serial_lines("/stream/serial", this, "lines");
+        g_app.console.register_command!(serial_lines, "lines")("/stream/serial", this);
         version (Posix)
-            g_app.console.register_command!serial_devices("/stream/serial", this, "devices");
+            g_app.console.register_command!(serial_devices, "devices")("/stream/serial", this);
     }
 
     // /stream/serial/lines <name> - live modem-line state (and kernel line-event counters where the

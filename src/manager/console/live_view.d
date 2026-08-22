@@ -23,7 +23,7 @@ class LiveViewState : CommandState
 {
 nothrow @nogc:
 
-    this(Session session, Command command, LiveViewMode mode = LiveViewMode.auto_)
+    this(Session session, Command* command, LiveViewMode mode = LiveViewMode.auto_)
     {
         super(session, command);
         _has_cursor = (session.features & ClientFeatures.cursor) != 0;
@@ -339,7 +339,7 @@ nothrow @nogc:
 
     alias LineArray = Array!(MutableString!0);
 
-    this(Session session, Command command, LineArray* lines, bool word_wrap = false, LiveViewMode mode = LiveViewMode.auto_)
+    this(Session session, Command* command, LineArray* lines, bool word_wrap = false, LiveViewMode mode = LiveViewMode.auto_)
     {
         super(session, command, mode);
         _lines = lines;
