@@ -55,9 +55,9 @@ nothrow @nogc:
     override void init()
     {
         g_app.register_enum!PeerRole();
-        g_app.console.register_command!peering_set("/sync/peering", this, "set");
-        g_app.console.register_command!peering_print("/sync/peering", this, "print");
-        g_app.console.register_command!peering_reset("/sync/peering", this, "reset");
+        g_app.console.register_command!(peering_set, "set")("/sync/peering", this);
+        g_app.console.register_command!(peering_print, "print")("/sync/peering", this);
+        g_app.console.register_command!(peering_reset, "reset")("/sync/peering", this);
         load_allegiance();
     }
 

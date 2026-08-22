@@ -73,11 +73,11 @@ nothrow @nogc:
         return null;
     }
 
-    Command find_command(ref Console console, const(char)[] name)
+    Command* find_command(ref Console console, const(char)[] name)
     {
-        foreach (c; commands(console))
+        foreach (ref c; commands(console))
             if (c.name[] == name[])
-                return c;
+                return &c;
         return null;
     }
 
@@ -136,8 +136,6 @@ nothrow @nogc:
         root._sub_start = 2;
         script_scope._sub_start = 2;
 
-        // _commands[0..shared_cmd_count) hold the shared collection-op strips;
-        // see collection_commands.d. All other strips insert strictly after them.
         import manager.console.collection_commands : init_shared_commands;
         init_shared_commands(this);
         root._cmd_start = shared_cmd_count;
@@ -327,16 +325,9 @@ nothrow @nogc:
         add_command(parent, command);
     }
 
-    void register_commands(const(char)[] _scope, Command[] commands)
+    void register_command(alias method, string command_name = null, Instance)(const(char)[] _scope, Instance instance)
     {
-        Scope* parent = create_scope(_scope);
-        foreach (cmd; commands)
-            add_command(parent, cmd);
-    }
-
-    void register_command(alias method, Instance)(const(char)[] _scope, Instance instance, const(char)[] commandName = null)
-    {
-        return register_command(_scope, FunctionCommand.create!method(this, instance, commandName));
+        register_command(_scope, Command(&function_command_desc!(method, command_name), cast(void*)instance));
     }
 
     void register_collection(Type)()
@@ -372,9 +363,6 @@ nothrow @nogc:
         assert(parent.find_command(this, name) is null, tconcat("Command already exists: ", name));
         assert(parent.find_scope(this, name) is null, tconcat("Name collides with sub-scope: ", name));
 
-        // Collection scopes start out pointing at the shared strips at the
-        // head of _commands. The first extension command forces a copy to the
-        // tail so the strip can grow.
         if (parent._cmd_start < shared_cmd_count)
             promote(parent);
 
@@ -390,8 +378,6 @@ nothrow @nogc:
         ++parent._cmd_len;
     }
 
-    // Copy `parent`'s shared-strip entries to a fresh strip at the end of
-    // _commands so the strip can be extended.
     private void promote(Scope* parent)
     {
         size_t start = _commands.length;
@@ -437,8 +423,7 @@ nothrow @nogc:
     {
         debug assert(!_frozen, "Console.grow_scope after freeze()");
 
-        // parent_idx < parent._sub_start <= K always: a scope precedes its
-        // strip, so the parent's own index never shifts.
+        // a scope always precedes its own strip, so parent_idx never shifts
         ushort parent_idx = cast(ushort)(parent - _scopes.ptr);
 
         // find sorted position within the parent's strip
@@ -455,8 +440,7 @@ nothrow @nogc:
             if (s._parent != Scope.no_parent && s._parent >= K)
                 ++s._parent;
 
-            // the parent's own strip doesn't shift (empty-strip / left-insert
-            // case anchors it at K); it extends instead.
+            // the parent's strip extends rather than shifts, even when anchored at K
             if (i != parent_idx && s._sub_start >= K)
                 ++s._sub_start;
         }
@@ -485,8 +469,7 @@ package:
     String _identifier;
     String _prompt;
 
-    // _commands[0..shared_cmd_count) are the shared collection-op strips;
-    // see collection_commands.d. Insertions always land at K >= shared_cmd_count.
+    // the shared collection-op strips; see collection_commands.d
     enum ushort shared_cmd_count = 12;
 
     Array!Scope _scopes;
@@ -599,8 +582,8 @@ MutableString!0 complete_in(ref Console console, Scope* node, const(char)[] cmdL
             MutableString!0 r;
             if (Scope* sub = node.find_scope(console, name))
                 r = complete_in(console, sub, cmdLine[j..$], user_scope);
-            else if (Command cmd = node.find_command(console, name))
-                r = cmd.complete(cmdLine[j..$], node, user_scope);
+            else if (Command* cmd = node.find_command(console, name))
+                r = cmd.complete(console, cmdLine[j..$], node, user_scope);
             else
                 return MutableString!0(cmdLine);
             return r.insert(0, cmdLine[0..j]);
@@ -615,7 +598,7 @@ MutableString!0 complete_in(ref Console console, Scope* node, const(char)[] cmdL
         foreach (ref Scope s; node.sub_scopes(console))
             if (s.name[].startsWith(cmdLine[i..j]))
                 cmds ~= Cmd(s.name[], true);
-        foreach (Command c; node.commands(console))
+        foreach (ref Command c; node.commands(console))
             if (c.name[].startsWith(cmdLine[i..j]))
                 cmds ~= Cmd(c.name[], false);
 
@@ -657,12 +640,12 @@ Array!String suggest_in(ref Console console, Scope* node, const(char)[] cmdLine,
                     ++j;
                 return suggest_in(console, sub, cmdLine[j..$], user_scope);
             }
-            if (Command cmd = node.find_command(console, name))
+            if (Command* cmd = node.find_command(console, name))
             {
                 size_t j = i;
                 while (j < cmdLine.length && is_whitespace(cmdLine[j]))
                     ++j;
-                return cmd.suggest(cmdLine[j..$], node, user_scope);
+                return cmd.suggest(console, cmdLine[j..$], node, user_scope);
             }
             return Array!String();
         }
@@ -671,9 +654,9 @@ Array!String suggest_in(ref Console console, Scope* node, const(char)[] cmdLine,
         foreach (ref Scope s; node.sub_scopes(console))
             if (s.name[].startsWith(cmdLine))
                 r ~= String(MutableString!0(s.name));
-        foreach (Command c; node.commands(console))
+        foreach (ref Command c; node.commands(console))
             if (c.name[].startsWith(cmdLine))
-                r ~= c.name;
+                r ~= String(MutableString!0(c.name));
         return r;
     }
 }

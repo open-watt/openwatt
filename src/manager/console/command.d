@@ -33,15 +33,110 @@ enum CommandCompletionState : ubyte
     timeout,            ///< Command was aborted for some reason
 }
 
+// Behaviour shared by a family of commands; all function commands share one.
+struct CommandClass
+{
+nothrow @nogc:
+    alias ExecFn = CommandState function(ref Command cmd, Session session, Scope* _scope, const Variant[] args, const NamedArgument[] named_args, out Variant result) nothrow @nogc;
+    alias SuggestFn = Array!String function(ref Command cmd, ref Console console, const(char)[] cmd_line, Scope* _scope, Scope* user_scope) nothrow @nogc;
+    alias CompleteFn = MutableString!0 function(ref Command cmd, ref Console console, const(char)[] cmd_line, Scope* _scope, Scope* user_scope) nothrow @nogc;
+    alias HelpFn = const(char)[] function(ref const Command cmd, const(char)[] args) nothrow @nogc;
+
+    ExecFn exec;
+    SuggestFn suggest;      // null = no suggestions
+    CompleteFn complete;    // null = default completion derived from suggest
+
+    version (ExcludeHelpText) {} else
+        HelpFn help_fn;     // non-null wins over desc.help_text
+}
+
+// A command's constant identity; each registration site emits one as static immutable data.
+struct CommandDesc
+{
+nothrow @nogc:
+    alias GenericCall = const(char)[] function(Session session, out CommandState state, const Variant[] args, const NamedArgument[] named_args, void* instance) nothrow @nogc;
+    alias CustomSuggestFn = Array!String function(bool is_value, const(char)[] name, const(char)[] value) nothrow @nogc;
+
+    immutable(CommandClass)* cls;
+    String name;
+
+    GenericCall fn;
+    immutable(FunctionArgument)[] args;
+    CustomSuggestFn custom_suggest;
+
+    version (ExcludeHelpText) {} else
+        String help_text;
+}
+
+struct FunctionArgument
+{
+    String name;
+    Array!String function(const(char)[]) nothrow @nogc suggest;
+    version (ExcludeHelpText) {} else
+        String type_name;   // prefixed with '?' if the param is Nullable
+}
+
+struct Command
+{
+nothrow @nogc:
+
+    immutable(CommandDesc)* desc;
+    void* instance;
+
+    bool opCast(T : bool)() const pure
+        => desc !is null;
+
+    const(char)[] name() const pure
+        => desc.name[];
+
+    CommandState execute(Session session, Scope* _scope, const Variant[] args, const NamedArgument[] named_args, out Variant result)
+        => desc.cls.exec(this, session, _scope, args, named_args, result);
+
+    MutableString!0 complete(ref Console console, const(char)[] cmd_line, Scope* _scope, Scope* user_scope = null)
+    {
+        version (ExcludeAutocomplete)
+            return null;
+        else
+        {
+            if (desc.cls.complete)
+                return desc.cls.complete(this, console, cmd_line, _scope, user_scope);
+
+            MutableString!0 result = cmd_line;
+            Array!String tokens = suggest(console, cmd_line, _scope, user_scope);
+            if (tokens.empty)
+                return result;
+            size_t last_token = cmd_line.length;
+            while (last_token > 0 && !is_separator(cmd_line[last_token - 1]))
+                --last_token;
+            result ~= get_completion_suffix(cmd_line[last_token .. cmd_line.length], tokens);
+            return result;
+        }
+    }
+
+    Array!String suggest(ref Console console, const(char)[] cmd_line, Scope* _scope, Scope* user_scope = null)
+    {
+        version (ExcludeAutocomplete)
+            return Array!String();
+        else
+            return desc.cls.suggest ? desc.cls.suggest(this, console, cmd_line, _scope, user_scope) : Array!String();
+    }
+
+    version (ExcludeHelpText) {} else
+    const(char)[] help(const(char)[] args) const
+        => desc.cls.help_fn ? desc.cls.help_fn(this, args)
+         : desc.help_text ? desc.help_text[]
+         : "No help available for this command.";
+}
+
 class CommandState
 {
 nothrow @nogc:
 
     Session session;
-    Command command;
+    Command* command;
     Variant result;
 
-    this(Session session, Command command)
+    this(Session session, Command* command = null)
     {
         this.session = session;
         this.command = command;
@@ -256,7 +351,7 @@ private:
         // to find_command at the current node to catch leaves. Run out of
         // segments on a pure namespace = cd into it.
         const(Variant)[] args = vars[];
-        Command leaf = null;
+        Command* leaf = null;
         while (args.length > 0)
         {
             if (!args[0].isString)
@@ -272,7 +367,7 @@ private:
 
                 if (core != "..")
                 {
-                    if (Command found = node.find_command(*session._console, core))
+                    if (Command* found = node.find_command(*session._console, core))
                     {
                         leaf = found;
                         args = args[1..$];
@@ -316,57 +411,6 @@ private:
             arg.value.gather_command_evals(_pending_subs);
     }
 }
-
-class Command
-{
-nothrow @nogc:
-
-    const String name;
-
-    this(ref Console console, String name) nothrow @nogc
-    {
-        _console = &console;
-        this.name = name.move;
-    }
-
-    final Application app() pure nothrow @nogc => _console.appInstance;
-    final ref Console console() pure nothrow @nogc => *_console;
-
-    abstract CommandState execute(Session session, Scope* _scope, const Variant[] args, const NamedArgument[] namedArgs, out Variant result);
-
-    MutableString!0 complete(const(char)[] cmdLine, Scope* _scope, Scope* user_scope = null)
-    {
-        version (ExcludeAutocomplete)
-            return null;
-        else
-        {
-            MutableString!0 result = cmdLine;
-            Array!String tokens = suggest(cmdLine, _scope, user_scope);
-            if (tokens.empty)
-                return result;
-            size_t lastToken = cmdLine.length;
-            while (lastToken > 0 && !is_separator(cmdLine[lastToken - 1]))
-                --lastToken;
-            result ~= get_completion_suffix(cmdLine[lastToken .. cmdLine.length], tokens);
-            return result;
-        }
-    }
-
-    Array!String suggest(const(char)[] cmdLine, Scope* _scope, Scope* user_scope = null)
-        => Array!String();
-
-    version (ExcludeHelpText) {} else
-    const(char)[] help(const(char)[] args) const
-        => "No help available for this command.";
-
-
-package:
-    final NoGCAllocator allocator() => _console._allocator;
-    final NoGCAllocator tempAllocator() => _console._tempAllocator;
-
-    Console* _console;
-}
-
 
 nothrow @nogc:
 

@@ -1045,7 +1045,7 @@ nothrow @nogc:
     override void init()
     {
         g_app.console.register_collection!BridgeInterface();
-        g_app.console.register_command!port_add("/interface/bridge/port", this, "add");
+        g_app.console.register_command!(port_add, "add")("/interface/bridge/port", this);
     }
 
     void port_add(Session session, BridgeInterface bridge, BaseInterface _interface, Nullable!ushort pvid, Nullable!bool ingress_filtering, Nullable!bool untagged_egress)

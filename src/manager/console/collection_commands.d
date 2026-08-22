@@ -27,12 +27,7 @@ void add_collection_commands(ref Console console, Scope* n, BaseCollection colle
 
     n.collection_type = collection.type_info;
 
-    // Point at the appropriate shared strip at the head of _commands. Layouts:
-    //   [0..7)   full: add, get, list, print, remove, reset, set
-    //   [1..7)   no add: get, list, print, remove, reset, set
-    //   [7..12)  no add, no remove: get, list, print, reset, set
-    // If the scope later gets an extension command via register_command,
-    // Console.add_command will promote it to a private strip at the tail.
+    // strips in the shared table: full, no-add, then no-add-no-remove
     if (collection.type_info && collection.type_info.create)
     {
         n._cmd_start = 0;
@@ -50,486 +45,391 @@ void add_collection_commands(ref Console console, Scope* n, BaseCollection colle
     }
 }
 
-// Called once from the Console constructor, before anything else populates
-// _commands: the shared strips must occupy [0..shared_cmd_count).
 void init_shared_commands(ref Console console)
 {
     assert(console._commands.empty, "shared strips must be at the head of _commands");
 
-    Command add    = defaultAllocator.allocT!CollectionAddCommand(console);
-    Command remove = defaultAllocator.allocT!CollectionRemoveCommand(console);
-    Command get    = defaultAllocator.allocT!CollectionGetCommand(console);
-    Command set_   = defaultAllocator.allocT!CollectionSetCommand(console);
-    Command reset  = defaultAllocator.allocT!CollectionResetCommand(console);
-    Command list   = defaultAllocator.allocT!CollectionListCommand(console);
-    Command print  = defaultAllocator.allocT!CollectionPrintCommand(console);
-
     // [0..7) alphabetical
-    console._commands ~= add;
-    console._commands ~= get;
-    console._commands ~= list;
-    console._commands ~= print;
-    console._commands ~= remove;
-    console._commands ~= reset;
-    console._commands ~= set_;
+    console._commands ~= Command(&collection_add_desc);
+    console._commands ~= Command(&collection_get_desc);
+    console._commands ~= Command(&collection_list_desc);
+    console._commands ~= Command(&collection_print_desc);
+    console._commands ~= Command(&collection_remove_desc);
+    console._commands ~= Command(&collection_reset_desc);
+    console._commands ~= Command(&collection_set_desc);
     // [7..12) alphabetical, no add/remove
-    console._commands ~= get;
-    console._commands ~= list;
-    console._commands ~= print;
-    console._commands ~= reset;
-    console._commands ~= set_;
+    console._commands ~= Command(&collection_get_desc);
+    console._commands ~= Command(&collection_list_desc);
+    console._commands ~= Command(&collection_print_desc);
+    console._commands ~= Command(&collection_reset_desc);
+    console._commands ~= Command(&collection_set_desc);
 
     assert(console._commands.length == Console.shared_cmd_count);
 }
 
 
-class CollectionAddCommand : Command
-{
-nothrow @nogc:
+static immutable CommandClass collection_add_class = {
+    exec: &collection_add_exec,
+    suggest: &collection_suggest!(SuggestFlags.Add),
+    complete: &collection_complete!(SuggestFlags.Add),
+};
 
-    this(ref Console console)
+static immutable CommandDesc collection_add_desc = {
+    cls: &collection_add_class,
+    name: StringLit!"add",
+    help_text: StringLit!("Create a new item in this collection, setting any given\n"
+             ~ "properties on it.\n"
+             ~ "Usage: add [name=<value>] [<property>=<value> ...]"),
+};
+
+CommandState collection_add_exec(ref Command, Session session, Scope* _scope, const Variant[] args, const NamedArgument[] named_args, out Variant result)
+{
+    BaseCollection collection = _scope.collection;
+
+    if (args.length != 0)
     {
-        super(console, StringLit!"add");
+        session.write_line("Usage: add [<property=value> [...]]");
+        return null;
     }
 
-    override CommandState execute(Session session, Scope* _scope, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
+    // find the name if it was given
+    const(char)[] name = null;
+    foreach (ref arg; named_args)
     {
-        BaseCollection collection = _scope.collection;
-
-        if (args.length != 0)
+        if (arg.name == "name")
         {
-            session.write_line("Usage: add [<property=value> [...]]");
+            assert(arg.value.isString, "TODO: what if it's not a string?!");
+            name = arg.value.asString();
+            if (collection.get(name))
+            {
+                session.write_line("Item with name '", name, "' already exists");
+                return null;
+            }
+            break;
+        }
+    }
+
+    // create an instance
+    BaseObject item = collection.alloc(name);
+
+    // set all the properties...
+    foreach (ref arg; named_args)
+    {
+        if (arg.name[] == "name")
+            continue;
+        StringResult r = item.set(arg.name, arg.value);
+        if (!r)
+        {
+            session.write_line("Invalid value for property: ", arg.name, "=", arg.value, " - ", r.message);
+            defaultAllocator.freeT(item);
             return null;
         }
+    }
+    collection.add(item);
 
-        // find the name if it was given
-        const(char)[] name = null;
-        foreach (ref arg; namedArgs)
+    // TODO: maybe something better? perhaps a virtual on the object which lets it supply a creation message?
+    //       how do we know what properties are relevant for the create logs?
+    item.log.info("created");
+
+    // HACK: advance the state machine synchronously so subsequent script lines
+    // have a chance to work when the early startup creates things.
+    // this should be removed, and replaced by a more comprehensive latent startup tolerance.
+    if (auto active = cast(ActiveObject)item)
+        active.do_update();
+
+    return null;
+}
+
+
+static immutable CommandClass collection_remove_class = {
+    exec: &collection_remove_exec,
+    suggest: &collection_suggest!(SuggestFlags.Remove),
+    complete: &collection_complete!(SuggestFlags.Remove),
+};
+
+static immutable CommandDesc collection_remove_desc = {
+    cls: &collection_remove_class,
+    name: StringLit!"remove",
+    help_text: StringLit!("Remove the named item from this collection.\nUsage: remove <name>"),
+};
+
+CommandState collection_remove_exec(ref Command, Session session, Scope* _scope, const Variant[] args, const NamedArgument[] named_args, out Variant result)
+{
+    if (args.length != 1 || named_args.length != 0)
+    {
+        session.write_line("Usage: remove <name>");
+        return null;
+    }
+
+    BaseObject item = _scope.collection.get(args[0].asString());
+    if (!item)
+    {
+        session.write_line("No such item: ", args[0].asString());
+        return null;
+    }
+
+    item.destroy();
+    return null;
+}
+
+
+static immutable CommandClass collection_get_class = {
+    exec: &collection_get_exec,
+    suggest: &collection_suggest!(SuggestFlags.Get),
+    complete: &collection_complete!(SuggestFlags.Get),
+};
+
+static immutable CommandDesc collection_get_desc = {
+    cls: &collection_get_class,
+    name: StringLit!"get",
+    help_text: StringLit!("Read the value of a property on a named item.\nUsage: get <name> <property>"),
+};
+
+CommandState collection_get_exec(ref Command, Session session, Scope* _scope, const Variant[] args, const NamedArgument[] named_args, out Variant result)
+{
+    BaseCollection collection = _scope.collection;
+
+    if (args.length != 2 || named_args.length != 0)
+    {
+        session.write_line("Usage: get <name> <property>");
+        return null;
+    }
+    if (!args[0].isString)
+    {
+        session.write_line("'name' must be a string");
+        return null;
+    }
+    if (!args[1].isString)
+    {
+        session.write_line("'property' must be a string");
+        return null;
+    }
+
+    BaseObject item = collection.get(args[0].asString());
+    if (!item)
+    {
+        session.write_line("No item '", args[0].asString(), '\'');
+        return null;
+    }
+
+    result = item.get(args[1].asString());
+
+    return null;
+}
+
+
+static immutable CommandClass collection_set_class = {
+    exec: &collection_set_exec,
+    suggest: &collection_suggest!(SuggestFlags.Set),
+    complete: &collection_complete!(SuggestFlags.Set),
+};
+
+static immutable CommandDesc collection_set_desc = {
+    cls: &collection_set_class,
+    name: StringLit!"set",
+    help_text: StringLit!("Change one or more properties on an existing item.\nUsage: set <name> <property>=<value> [<property>=<value> ...]"),
+};
+
+CommandState collection_set_exec(ref Command, Session session, Scope* _scope, const Variant[] args, const NamedArgument[] named_args, out Variant result)
+{
+    BaseCollection collection = _scope.collection;
+
+    if (args.length != 1 || named_args.length == 0)
+    {
+        session.write_line("Usage: set <name> <property=value> [<property=value> [...]]");
+        return null;
+    }
+    if (!args[0].isString)
+    {
+        session.write_line("'name' must be a string");
+        return null;
+    }
+
+    BaseObject item = collection.get(args[0].asString());
+    if (!item)
+    {
+        session.write_line("No item '", args[0].asString(), '\'');
+        return null;
+    }
+
+    {
+        // one frame for the whole command: element-backed properties coalesce their
+        // change deliveries, so `set x a=1 b=2` restarts once, not per property
+        import manager.element : open_commit;
+        auto commit = open_commit();
+
+        foreach (ref arg; named_args)
         {
-            if (arg.name == "name")
-            {
-                assert(arg.value.isString, "TODO: what if it's not a string?!");
-                name = arg.value.asString();
-                if (collection.get(name))
-                {
-                    session.write_line("Item with name '", name, "' already exists");
-                    return null;
-                }
-                break;
-            }
-        }
-
-        // create an instance
-        BaseObject item = collection.alloc(name);
-
-        // set all the properties...
-        foreach (ref arg; namedArgs)
-        {
-            if (arg.name[] == "name")
-                continue;
             StringResult r = item.set(arg.name, arg.value);
             if (!r)
             {
-                session.write_line("Invalid value for property: ", arg.name, "=", arg.value, " - ", r.message);
-                defaultAllocator.freeT(item);
-                return null;
-            }
-        }
-        collection.add(item);
-
-        // TODO: maybe something better? perhaps a virtual on the object which lets it supply a creation message?
-        //       how do we know what properties are relevant for the create logs?
-        item.log.info("created");
-
-        // HACK: advance the state machine synchronously so subsequent script lines
-        // have a chance to work when the early startup creates things.
-        // this should be removed, and replaced by a more comprehensive latent startup tolerance.
-        if (auto active = cast(ActiveObject)item)
-            active.do_update();
-
-        return null;
-    }
-
-    final override MutableString!0 complete(const(char)[] cmdLine, Scope* _scope, Scope* user_scope = null)
-    {
-        version (ExcludeAutocomplete)
-            return null;
-        else
-            return .complete(cmdLine, _scope.collection, SuggestFlags.Add);
-    }
-
-    final override Array!String suggest(const(char)[] cmdLine, Scope* _scope, Scope* user_scope = null)
-    {
-        return .suggest(cmdLine, _scope.collection, SuggestFlags.Add);
-    }
-
-    version (ExcludeHelpText) {} else
-    override const(char)[] help(const(char)[] args) const
-        => "Create a new item in this collection, setting any given\n"
-         ~ "properties on it.\n"
-         ~ "Usage: add [name=<value>] [<property>=<value> ...]";
-}
-
-class CollectionRemoveCommand : Command
-{
-nothrow @nogc:
-
-    this(ref Console console)
-    {
-        super(console, StringLit!"remove");
-    }
-
-    override CommandState execute(Session session, Scope* _scope, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
-    {
-        if (args.length != 1 || namedArgs.length != 0)
-        {
-            session.write_line("Usage: remove <name>");
-            return null;
-        }
-
-        BaseObject item = _scope.collection.get(args[0].asString());
-        if (!item)
-        {
-            session.write_line("No such item: ", args[0].asString());
-            return null;
-        }
-
-        item.destroy();
-        return null;
-    }
-
-    final override MutableString!0 complete(const(char)[] cmdLine, Scope* _scope, Scope* user_scope = null)
-    {
-        version (ExcludeAutocomplete)
-            return null;
-        else
-            return .complete(cmdLine, _scope.collection, SuggestFlags.Remove);
-    }
-
-    final override Array!String suggest(const(char)[] cmdLine, Scope* _scope, Scope* user_scope = null)
-    {
-        return .suggest(cmdLine, _scope.collection, SuggestFlags.Remove);
-    }
-
-    version (ExcludeHelpText) {} else
-    override const(char)[] help(const(char)[] args) const
-        => "Remove the named item from this collection.\nUsage: remove <name>";
-}
-
-class CollectionGetCommand : Command
-{
-nothrow @nogc:
-
-    this(ref Console console)
-    {
-        super(console, StringLit!"get");
-    }
-
-    override CommandState execute(Session session, Scope* _scope, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
-    {
-        BaseCollection collection = _scope.collection;
-
-        if (args.length != 2 || namedArgs.length != 0)
-        {
-            session.write_line("Usage: get <name> <property>");
-            return null;
-        }
-        if (!args[0].isString)
-        {
-            session.write_line("'name' must be a string");
-            return null;
-        }
-        if (!args[1].isString)
-        {
-            session.write_line("'property' must be a string");
-            return null;
-        }
-
-        BaseObject item = collection.get(args[0].asString());
-        if (!item)
-        {
-            session.write_line("No item '", args[0].asString(), '\'');
-            return null;
-        }
-
-        result = item.get(args[1].asString());
-
-        return null;
-    }
-
-    final override MutableString!0 complete(const(char)[] cmdLine, Scope* _scope, Scope* user_scope = null)
-    {
-        version (ExcludeAutocomplete)
-            return null;
-        else
-            return .complete(cmdLine, _scope.collection, SuggestFlags.Get);
-    }
-
-    final override Array!String suggest(const(char)[] cmdLine, Scope* _scope, Scope* user_scope = null)
-    {
-        return .suggest(cmdLine, _scope.collection, SuggestFlags.Get);
-    }
-
-    version (ExcludeHelpText) {} else
-    override const(char)[] help(const(char)[] args) const
-        => "Read the value of a property on a named item.\nUsage: get <name> <property>";
-}
-
-class CollectionSetCommand : Command
-{
-nothrow @nogc:
-
-    this(ref Console console)
-    {
-        super(console, StringLit!"set");
-    }
-
-    override CommandState execute(Session session, Scope* _scope, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
-    {
-        BaseCollection collection = _scope.collection;
-
-        if (args.length != 1 || namedArgs.length == 0)
-        {
-            session.write_line("Usage: set <name> <property=value> [<property=value> [...]]");
-            return null;
-        }
-        if (!args[0].isString)
-        {
-            session.write_line("'name' must be a string");
-            return null;
-        }
-
-        BaseObject item = collection.get(args[0].asString());
-        if (!item)
-        {
-            session.write_line("No item '", args[0].asString(), '\'');
-            return null;
-        }
-
-        {
-            // one frame for the whole command: element-backed properties coalesce their
-            // change deliveries, so `set x a=1 b=2` restarts once, not per property
-            import manager.element : open_commit;
-            auto commit = open_commit();
-
-            foreach (ref arg; namedArgs)
-            {
-                StringResult r = item.set(arg.name, arg.value);
-                if (!r)
-                {
-                    session.write_line("Set '", arg.name, "\' failed: ", r.message);
-                    // TODO: should we bail out at first error, or try and set the rest?
+                session.write_line("Set '", arg.name, "\' failed: ", r.message);
+                // TODO: should we bail out at first error, or try and set the rest?
 //                    return null;
-                }
             }
         }
-        return null;
     }
-
-    final override MutableString!0 complete(const(char)[] cmdLine, Scope* _scope, Scope* user_scope = null)
-    {
-        version (ExcludeAutocomplete)
-            return null;
-        else
-            return .complete(cmdLine, _scope.collection, SuggestFlags.Set);
-    }
-
-    final override Array!String suggest(const(char)[] cmdLine, Scope* _scope, Scope* user_scope = null)
-    {
-        return .suggest(cmdLine, _scope.collection, SuggestFlags.Set);
-    }
-
-    version (ExcludeHelpText) {} else
-    override const(char)[] help(const(char)[] args) const
-        => "Change one or more properties on an existing item.\nUsage: set <name> <property>=<value> [<property>=<value> ...]";
+    return null;
 }
 
-class CollectionResetCommand : Command
+
+static immutable CommandClass collection_reset_class = {
+    exec: &collection_reset_exec,
+    suggest: &collection_suggest!(SuggestFlags.Reset),
+    complete: &collection_complete!(SuggestFlags.Reset),
+};
+
+static immutable CommandDesc collection_reset_desc = {
+    cls: &collection_reset_class,
+    name: StringLit!"reset",
+    help_text: StringLit!("Reset properties to their defaults. With no arguments, resets\n"
+             ~ "every property on every item. With a name, scopes to one item;\n"
+             ~ "with property names, scopes to those properties.\n"
+             ~ "Usage: reset [<name>] [<property> ...]"),
+};
+
+CommandState collection_reset_exec(ref Command, Session session, Scope* _scope, const Variant[] args, const NamedArgument[] named_args, out Variant result)
 {
-nothrow @nogc:
+    BaseCollection collection = _scope.collection;
 
-    this(ref Console console)
+    if (named_args.length != 0)
     {
-        super(console, StringLit!"reset");
-    }
-
-    override CommandState execute(Session session, Scope* _scope, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
-    {
-        BaseCollection collection = _scope.collection;
-
-        if (namedArgs.length != 0)
-        {
-            session.write_line("Usage: reset [<name>] [<property> [...]]");
-            return null;
-        }
-        foreach (i, ref a; args)
-        {
-            if (!a.isString)
-            {
-                session.write_line("arguments must be strings");
-                return null;
-            }
-        }
-
-        static void reset_item(BaseObject item, const Variant[] args)
-        {
-            if (args.length == 0)
-            {
-                foreach (ref prop; item.properties)
-                    item.reset(prop.name[]);
-            }
-            else
-            {
-                foreach (ref arg; args)
-                    item.reset(arg.asString());
-            }
-        }
-
-        // TODO: first arg may not be an item name; it may be a property name applied to all items...
-        BaseObject item = args.length > 0 ? collection.get(args[0].asString()) : null;
-        if (item)
-            reset_item(item, args[1 .. $]);
-        else
-        {
-            foreach (i; collection.values)
-                reset_item(i, args[0 .. $]);
-        }
+        session.write_line("Usage: reset [<name>] [<property> [...]]");
         return null;
     }
-
-    final override MutableString!0 complete(const(char)[] cmdLine, Scope* _scope, Scope* user_scope = null)
+    foreach (i, ref a; args)
     {
-        version (ExcludeAutocomplete)
+        if (!a.isString)
+        {
+            session.write_line("arguments must be strings");
             return null;
-        else
-            return .complete(cmdLine, _scope.collection, SuggestFlags.Reset);
+        }
     }
 
-    final override Array!String suggest(const(char)[] cmdLine, Scope* _scope, Scope* user_scope = null)
+    static void reset_item(BaseObject item, const Variant[] args)
     {
-        return .suggest(cmdLine, _scope.collection, SuggestFlags.Reset);
+        if (args.length == 0)
+        {
+            foreach (ref prop; item.properties)
+                item.reset(prop.name[]);
+        }
+        else
+        {
+            foreach (ref arg; args)
+                item.reset(arg.asString());
+        }
     }
 
-    version (ExcludeHelpText) {} else
-    override const(char)[] help(const(char)[] args) const
-        => "Reset properties to their defaults. With no arguments, resets\n"
-         ~ "every property on every item. With a name, scopes to one item;\n"
-         ~ "with property names, scopes to those properties.\n"
-         ~ "Usage: reset [<name>] [<property> ...]";
+    // TODO: first arg may not be an item name; it may be a property name applied to all items...
+    BaseObject item = args.length > 0 ? collection.get(args[0].asString()) : null;
+    if (item)
+        reset_item(item, args[1 .. $]);
+    else
+    {
+        foreach (i; collection.values)
+            reset_item(i, args[0 .. $]);
+    }
+    return null;
 }
 
 // TODO: enable/disable commands, which act on multiple items...
 
 // TODO: export command which calls and returns item.export_config(), but also works on full collections...
 
-class CollectionListCommand : Command
+static immutable CommandClass collection_list_class = {
+    exec: &collection_list_exec,
+    suggest: &collection_suggest!(SuggestFlags.Reset),
+    complete: &collection_complete!(SuggestFlags.Reset),
+};
+
+static immutable CommandDesc collection_list_desc = {
+    cls: &collection_list_class,
+    name: StringLit!"list",
+    help_text: StringLit!("List the names of all items in this collection.\nUsage: list"),
+};
+
+CommandState collection_list_exec(ref Command, Session session, Scope* _scope, const Variant[] args, const NamedArgument[] named_args, out Variant result)
 {
-nothrow @nogc:
+    BaseCollection collection = _scope.collection;
 
-    this(ref Console console)
+    bool json_output;
+    foreach (ref a; args)
     {
-        super(console, StringLit!"list");
+        if (a == "--json")
+            json_output = true;
     }
 
-    override CommandState execute(Session session, Scope* _scope, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
-    {
-        BaseCollection collection = _scope.collection;
+    foreach (object; collection.values)
+        result.asArray ~= Variant(object.name[]);
 
-        bool json_output;
-        foreach (ref a; args)
-        {
-            if (a == "--json")
-                json_output = true;
-        }
-
-        foreach (object; collection.values)
-            result.asArray ~= Variant(object.name[]);
-
-        return null;
-    }
-
-    final override MutableString!0 complete(const(char)[] cmdLine, Scope* _scope, Scope* user_scope = null)
-    {
-        version (ExcludeAutocomplete)
-            return null;
-        else
-            return .complete(cmdLine, _scope.collection, SuggestFlags.Reset);
-    }
-
-    final override Array!String suggest(const(char)[] cmdLine, Scope* _scope, Scope* user_scope = null)
-    {
-        return .suggest(cmdLine, _scope.collection, SuggestFlags.Reset);
-    }
-
-    version (ExcludeHelpText) {} else
-    override const(char)[] help(const(char)[] args) const
-        => "List the names of all items in this collection.\nUsage: list";
+    return null;
 }
 
-class CollectionPrintCommand : Command
+
+static immutable CommandClass collection_print_class = {
+    exec: &collection_print_exec,
+    suggest: &collection_suggest!(SuggestFlags.Reset),
+    complete: &collection_complete!(SuggestFlags.Reset),
+};
+
+static immutable CommandDesc collection_print_desc = {
+    cls: &collection_print_class,
+    name: StringLit!"print",
+    help_text: StringLit!("Show a table of all items in this collection and their\n"
+             ~ "properties. Use --watch for a live view; --json for machine\n"
+             ~ "output.\n"
+             ~ "Usage: print [--watch|-w] [--json]"),
+};
+
+CommandState collection_print_exec(ref Command cmd, Session session, Scope* _scope, const Variant[] args, const NamedArgument[] named_args, out Variant result)
 {
-nothrow @nogc:
+    BaseCollection collection = _scope.collection;
 
-    this(ref Console console)
+    bool watch_mode = false;
+
+    foreach (ref arg; args)
     {
-        super(console, StringLit!"print");
-    }
-
-    override CommandState execute(Session session, Scope* _scope, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
-    {
-        BaseCollection collection = _scope.collection;
-
-        bool watch_mode = false;
-
-        foreach (ref arg; args)
+        if (arg == "--json")
         {
-            if (arg == "--json")
-            {
-                auto items = Array!Variant(Reserve, collection.item_count);
-                foreach (item; collection.values)
-                    items ~= item.gather();
-                result = Variant(items.move);
-                return null;
-            }
-            if (arg == "--watch" || arg == "-w")
-                watch_mode = true;
-        }
-
-        if (watch_mode)
-            return allocator.allocT!CollectionWatchState(session, this, collection);
-
-        Table table;
-        populate_collection_table(table, collection);
-        table.render(session);
-        return null;
-    }
-
-    final override MutableString!0 complete(const(char)[] cmdLine, Scope* _scope, Scope* user_scope = null)
-    {
-        version (ExcludeAutocomplete)
+            auto items = Array!Variant(Reserve, collection.item_count);
+            foreach (item; collection.values)
+                items ~= item.gather();
+            result = Variant(items.move);
             return null;
-        else
-            return .complete(cmdLine, _scope.collection, SuggestFlags.Reset);
+        }
+        if (arg == "--watch" || arg == "-w")
+            watch_mode = true;
     }
 
-    final override Array!String suggest(const(char)[] cmdLine, Scope* _scope, Scope* user_scope = null)
-    {
-        return .suggest(cmdLine, _scope.collection, SuggestFlags.Reset);
-    }
+    if (watch_mode)
+        return session._console._allocator.allocT!CollectionWatchState(session, &cmd, collection);
 
-    version (ExcludeHelpText) {} else
-    override const(char)[] help(const(char)[] args) const
-        => "Show a table of all items in this collection and their\n"
-         ~ "properties. Use --watch for a live view; --json for machine\n"
-         ~ "output.\n"
-         ~ "Usage: print [--watch|-w] [--json]";
+    Table table;
+    populate_collection_table(table, collection);
+    table.render(session);
+    return null;
 }
+
+
+Array!String collection_suggest(SuggestFlags flags)(ref Command, ref Console, const(char)[] cmd_line, Scope* _scope, Scope*)
+{
+    return .suggest(cmd_line, _scope.collection, flags);
+}
+
+MutableString!0 collection_complete(SuggestFlags flags)(ref Command, ref Console, const(char)[] cmd_line, Scope* _scope, Scope*)
+{
+    version (ExcludeAutocomplete)
+        return null;
+    else
+        return .complete(cmd_line, _scope.collection, flags);
+}
+
 
 class CollectionWatchState : LiveViewState
 {
 nothrow @nogc:
 
-    this(Session session, CollectionPrintCommand command, BaseCollection collection)
+    this(Session session, Command* command, BaseCollection collection)
     {
         super(session, command);
         _collection = collection;

@@ -124,23 +124,19 @@ nothrow @nogc:
 
     override void init()
     {
-        Command[9] commands = [
-            g_app.allocator.allocT!LogCommand(g_app.console, "emergency", Severity.emergency, this),
-            g_app.allocator.allocT!LogCommand(g_app.console, "alert", Severity.alert, this),
-            g_app.allocator.allocT!LogCommand(g_app.console, "critical", Severity.critical, this),
-            g_app.allocator.allocT!LogCommand(g_app.console, "error", Severity.error, this),
-            g_app.allocator.allocT!LogCommand(g_app.console, "warning", Severity.warning, this),
-            g_app.allocator.allocT!LogCommand(g_app.console, "notice", Severity.notice, this),
-            g_app.allocator.allocT!LogCommand(g_app.console, "info", Severity.info, this),
-            g_app.allocator.allocT!LogCommand(g_app.console, "debug", Severity.debug_, this),
-            g_app.allocator.allocT!LogCommand(g_app.console, "trace", Severity.trace, this),
-        ];
-
-        g_app.console.register_commands("/log", commands);
-        g_app.console.register_command!log_print("/log", this, "print");
-        g_app.console.register_command!history_get("/log/history", this, "get");
-        g_app.console.register_command!history_set("/log/history", this, "set");
-        g_app.console.register_command!history_clear("/log/history", this, "clear");
+        g_app.console.register_command("/log", Command(&log_desc!("emergency", Severity.emergency)));
+        g_app.console.register_command("/log", Command(&log_desc!("alert", Severity.alert)));
+        g_app.console.register_command("/log", Command(&log_desc!("critical", Severity.critical)));
+        g_app.console.register_command("/log", Command(&log_desc!("error", Severity.error)));
+        g_app.console.register_command("/log", Command(&log_desc!("warning", Severity.warning)));
+        g_app.console.register_command("/log", Command(&log_desc!("notice", Severity.notice)));
+        g_app.console.register_command("/log", Command(&log_desc!("info", Severity.info)));
+        g_app.console.register_command("/log", Command(&log_desc!("debug", Severity.debug_)));
+        g_app.console.register_command("/log", Command(&log_desc!("trace", Severity.trace)));
+        g_app.console.register_command!(log_print, "print")("/log", this);
+        g_app.console.register_command!(history_get, "get")("/log/history", this);
+        g_app.console.register_command!(history_set, "set")("/log/history", this);
+        g_app.console.register_command!(history_clear, "clear")("/log/history", this);
         g_app.register_enum!LogFormat();
         g_app.register_enum!LogLineEnding();
         g_app.console.register_collection!LogSink();
@@ -1173,57 +1169,29 @@ private:
 }
 
 
-class LogCommand : Command
+template log_desc(string name, Severity severity)
 {
-nothrow @nogc:
+    static immutable CommandClass log_class = {
+        exec: &log_exec!severity,
+    };
 
-    LogModule instance;
-    Severity severity;
+    static immutable CommandDesc log_desc = {
+        cls: &log_class,
+        name: StringLit!name,
+        help_text: StringLit!("Write a message to the log at this severity.\nUsage: " ~ name ~ " <message>"),
+    };
+}
 
-    this(ref Console console, const(char)[] name, Severity severity, LogModule instance)
+CommandState log_exec(Severity severity)(ref Command, Session session, Scope*, const Variant[] args, const NamedArgument[] named_args, out Variant result)
+{
+    if (args.length == 0 || args.length > 1)
     {
-        import urt.mem.string;
-
-        super(console, String(name.addString));
-        this.instance = instance;
-        this.severity = severity;
-    }
-
-    override CommandState execute(Session session, Scope*, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
-    {
-        if (args.length == 0 || args.length > 1)
-        {
-            session.write_line("/log command expected string argument");
-            return null;
-        }
-
-        write_log(severity, "console", null, args[0]);
+        session.write_line("/log command expected string argument");
         return null;
     }
 
-    version (ExcludeAutocomplete) {} else
-    {
-        override MutableString!0 complete(const(char)[] cmdLine, Scope*, Scope*) const
-        {
-            assert(false);
-            return MutableString!0();
-        }
-
-
-        override Array!String suggest(const(char)[] cmdLine, Scope*, Scope*) const
-        {
-            return Array!String();
-        }
-    }
-
-    version (ExcludeHelpText) {} else
-    {
-        override const(char)[] help(const(char)[] args) const
-        {
-            assert(false);
-            return null;
-        }
-    }
+    write_log(severity, "console", null, args[0]);
+    return null;
 }
 
 

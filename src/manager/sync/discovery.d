@@ -360,7 +360,7 @@ nothrow @nogc:
     override void init()
     {
         g_app.console.register_collection!EtherDiscovery();
-        g_app.console.register_command!neighbor_print("/sync/neighbor", this, "print");
+        g_app.console.register_command!(neighbor_print, "print")("/sync/neighbor", this);
         set_announce_sink(&on_announce);
     }
 

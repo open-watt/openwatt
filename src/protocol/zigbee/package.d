@@ -321,8 +321,8 @@ nothrow @nogc:
         g_app.console.register_collection!ZigbeeController();
 
         g_app.console.register_command!scan("/protocol/zigbee", this);
-        g_app.console.register_command!zcl_read("/protocol/zigbee", this, "read");
-        g_app.console.register_command!zcl_write("/protocol/zigbee", this, "write");
+        g_app.console.register_command!(zcl_read, "read")("/protocol/zigbee", this);
+        g_app.console.register_command!(zcl_write, "write")("/protocol/zigbee", this);
     }
 
     uint element_size(uint)

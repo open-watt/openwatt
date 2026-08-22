@@ -76,12 +76,12 @@ nothrow @nogc:
         g_app.console.register_collection!SunspecBinding();
 
         // TODO: should we relocate this command?
-        g_app.console.register_command!remote_server_add("/interface/modbus/remote-server", this, "add");
+        g_app.console.register_command!(remote_server_add, "add")("/interface/modbus/remote-server", this);
 
-        g_app.console.register_command!request_raw("/protocol/modbus/node/request", this, "raw");
-        g_app.console.register_command!request_read("/protocol/modbus/node/request", this, "read");
-        g_app.console.register_command!request_write("/protocol/modbus/node/request", this, "write");
-        g_app.console.register_command!request_read_device_id("/protocol/modbus/node/request", this, "read-device-id");
+        g_app.console.register_command!(request_raw, "raw")("/protocol/modbus/node/request", this);
+        g_app.console.register_command!(request_read, "read")("/protocol/modbus/node/request", this);
+        g_app.console.register_command!(request_write, "write")("/protocol/modbus/node/request", this);
+        g_app.console.register_command!(request_read_device_id, "read-device-id")("/protocol/modbus/node/request", this);
     }
 
     uint element_size(uint)

@@ -57,9 +57,9 @@ nothrow @nogc:
         g_app.console.register_collection!BLEClient();
         g_app.console.register_collection!BLEClientBinding();
         g_app.console.register_collection!BLESerialStream();
-        g_app.console.register_command!print_devices("/protocol/ble/device", this, "print");
-        g_app.console.register_command!cmd_read("/protocol/ble/client", this, "read");
-        g_app.console.register_command!cmd_gatt("/protocol/ble/client", this, "gatt");
+        g_app.console.register_command!(print_devices, "print")("/protocol/ble/device", this);
+        g_app.console.register_command!(cmd_read, "read")("/protocol/ble/client", this);
+        g_app.console.register_command!(cmd_gatt, "gatt")("/protocol/ble/client", this);
     }
 
     uint element_size(uint)

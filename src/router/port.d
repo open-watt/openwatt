@@ -80,7 +80,7 @@ nothrow @nogc:
     override void init()
     {
         g_app.register_enum!PortKind();
-        g_app.console.register_command!port_print("/port", this, "print");
+        g_app.console.register_command!(port_print, "print")("/port", this);
     }
 
     const(PortInfo)[] ports() const pure

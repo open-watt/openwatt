@@ -875,12 +875,9 @@ nothrow @nogc:
         g_app.register_enum!SmartEVSEADCCalibration();
         g_app.console.register_collection!SmartEVSE();
         g_app.console.register_collection!SmartEVSEBinding();
-        g_app.console.register_command!cmd_start(
-            "/driver/boards/smartevse", this, "start");
-        g_app.console.register_command!cmd_stop(
-            "/driver/boards/smartevse", this, "stop");
-        g_app.console.register_command!cmd_display(
-            "/driver/boards/smartevse", this, "display");
+        g_app.console.register_command!(cmd_start, "start")("/driver/boards/smartevse", this);
+        g_app.console.register_command!(cmd_stop, "stop")("/driver/boards/smartevse", this);
+        g_app.console.register_command!(cmd_display, "display")("/driver/boards/smartevse", this);
 
         _hardware_module = this;
         _hardware_owner = this;

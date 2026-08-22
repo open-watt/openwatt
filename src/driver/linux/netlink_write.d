@@ -197,8 +197,8 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.register_command!add_route("/system/netlink", this, "add-route");
-        g_app.console.register_command!add_neighbour("/system/netlink", this, "add-neighbour");
+        g_app.console.register_command!(add_route, "add-route")("/system/netlink", this);
+        g_app.console.register_command!(add_neighbour, "add-neighbour")("/system/netlink", this);
     }
 
     // /system/netlink/add-route <destination[/prefix]> <gateway>
