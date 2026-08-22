@@ -1,12 +1,16 @@
 module manager.console.argument;
 
 import urt.array;
+import urt.mem : defaultAllocator;
+import urt.meta.enuminfo : VoidEnumInfo;
 import urt.string;
+import urt.string.ascii : to_lower;
 import urt.traits;
 import urt.variant;
 
 // these are used by the conversion functions...
 import manager.base : ActiveObject, BaseObject;
+import manager.collection : BaseCollection, CollectionTypeInfo;
 import manager.component : Component;
 import manager.device : Device;
 
@@ -41,14 +45,23 @@ Array!String suggest_completion(T : bool)(const(char)[] argument_text)
 Array!String suggest_completion(E)(const(char)[] argument_text)
     if (is(E == enum))
 {
-    import urt.meta.enuminfo : trim_key;
+    import urt.meta.enuminfo : enum_info;
+    return suggest_enum_keys(enum_info!E.make_void(), argument_text);
+}
+
+// keys are stored trimmed but in declaration case; the console speaks lower-case
+Array!String suggest_enum_keys(const(VoidEnumInfo)* info, const(char)[] argument_text)
+{
+    char[128] buffer = void;
     Array!String completions;
-    static foreach(M; __traits(allMembers, E))
-    {{
-        enum Member = Alias!(to_lower(trim_key!M));
-        if (Member.startsWith(argument_text))
-            completions ~= StringLit!Member;
-    }}
+    foreach (i; 0 .. info.count)
+    {
+        const(char)[] key = info.key_by_sorted_index(i);
+        assert(key.length <= buffer.length, "Enum key too long");
+        const(char)[] lower = key.to_lower(buffer[]);
+        if (lower.startsWith(argument_text))
+            completions ~= lower.makeString(defaultAllocator);
+    }
     return completions;
 }
 
@@ -129,18 +142,41 @@ Array!String suggest_completion(T : const Device)(const(char)[] argument_text)
 Array!String suggest_completion(T)(const(char)[] argument_text)
     if (!is(T == typeof(null)) && is(T : const BaseObject))
 {
-    import manager.collection : Collection;
+    import manager.collection : collection_type_info;
+    return suggest_collection_keys(collection_type_info!(Unqual!T)(), argument_text);
+}
 
-    alias Type = Unqual!T;
-    auto collection = Collection!Type();
-    if (collection.type_info is null)
+Array!String suggest_collection_keys(const(CollectionTypeInfo)* type_info, const(char)[] argument_text)
+{
+    if (type_info is null)
         return Array!String();
 
     Array!String completions;
-    foreach (ref name; collection.keys)
+    foreach (ref name; BaseCollection(type_info).keys)
     {
         if (name[].startsWith(argument_text))
             completions ~= name;
     }
     return completions;
+}
+
+
+unittest
+{
+    // keys are trimmed of underscores and lowered, whatever case they are declared in
+    enum Colour { red, Green, BLUE, orange_ }
+
+    Array!String all = suggest_completion!Colour("");
+    assert(all.length == 4);
+
+    Array!String b = suggest_completion!Colour("b");
+    assert(b.length == 1 && b[0][] == "blue");
+
+    Array!String o = suggest_completion!Colour("o");
+    assert(o.length == 1 && o[0][] == "orange");
+
+    Array!String g = suggest_completion!Colour("g");
+    assert(g.length == 1 && g[0][] == "green");
+
+    assert(suggest_completion!Colour("z").length == 0);
 }
