@@ -183,6 +183,12 @@ nothrow @nogc:
             consumer.filter = filter;
             consumer.active = true;
             recalc_ingress_filter();
+
+            // Something is now consuming the log through the managed path, so the
+            // bootstrap sink's raw writes are both redundant and a second writer
+            // racing the console session on the same wire.
+            retire_bootstrap_log_sink();
+
             return LogConsumerHandle(cast(int)i);
         }
         return LogConsumerHandle.init;

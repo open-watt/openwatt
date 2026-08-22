@@ -62,27 +62,38 @@ ulong node_id()
         }
     }
 
-    char[] stored = cast(char[])load_file(node_id_path);
-    if (stored.length >= 16)
+    // Micros key on the chip-burned id above. There is no writable config to fall
+    // back on, and generating a fresh id every boot would churn peering identity,
+    // so an absent hardware id is a platform gap to fill rather than paper over.
+    version (Embedded)
     {
-        size_t taken;
-        ulong id = parse_uint(stored[0 .. 16], &taken, 16);
-        if (taken == 16 && id != 0)
-            _node_id = id;
+        log_warning("system", "no hardware device id on this platform; peering identity unavailable");
+        return 0;
     }
-    if (stored)
-        defaultAllocator().free(stored);
-    if (_node_id != 0)
+    else
+    {
+        char[] stored = cast(char[])load_file(node_id_path);
+        if (stored.length >= 16)
+        {
+            size_t taken;
+            ulong id = parse_uint(stored[0 .. 16], &taken, 16);
+            if (taken == 16 && id != 0)
+                _node_id = id;
+        }
+        if (stored)
+            defaultAllocator().free(stored);
+        if (_node_id != 0)
+            return _node_id;
+
+        _node_id = generate_node_id();
+
+        char[17] buf = void;
+        format_uint(_node_id, buf[0 .. 16], 16, 16, '0');
+        buf[16] = '\n';
+        if (save_file(node_id_path, buf[]).failed)
+            log_warning("system", "couldn't persist node id to ", node_id_path, "; identity is ephemeral this boot");
         return _node_id;
-
-    _node_id = generate_node_id();
-
-    char[17] buf = void;
-    format_uint(_node_id, buf[0 .. 16], 16, 16, '0');
-    buf[16] = '\n';
-    if (save_file(node_id_path, buf[]).failed)
-        log_warning("system", "couldn't persist node id to ", node_id_path, "; identity is ephemeral this boot");
-    return _node_id;
+    }
 }
 
 
