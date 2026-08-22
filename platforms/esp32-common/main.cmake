@@ -30,9 +30,12 @@ list(APPEND MAIN_PRIV_REQUIRES esp_driver_ledc esp_driver_spi esp_driver_gptimer
 # The component is only referenced when OW_USE_SPIFFS is defined below, so an
 # unused spiffs is discarded at link time.
 list(APPEND MAIN_PRIV_REQUIRES spiffs esp_partition)
-if(OPENWATT_COREDUMP)
-    list(APPEND MAIN_PRIV_REQUIRES espcoredump)
-endif()
+# Unconditional: requirements are resolved in an early expansion pass that sees
+# neither -D project variables nor CONFIG_ values, so anything conditional here
+# is simply dropped from the component graph - which left COREDUMP=1 builds
+# unable to find esp_core_dump.h. With coredump disabled the component registers
+# no sources and no include dirs, so naming it always costs nothing.
+list(APPEND MAIN_PRIV_REQUIRES espcoredump)
 if(OW_EXTRA_REQUIRES)
     list(APPEND MAIN_PRIV_REQUIRES ${OW_EXTRA_REQUIRES})
 endif()
