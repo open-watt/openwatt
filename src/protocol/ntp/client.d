@@ -16,10 +16,10 @@ nothrow @nogc:
 // SNTP (RFC 4330) unicast client
 class NTPClient : ActiveObject
 {
-    alias Properties = AliasSeq!(Prop!("server",   server),
-                                 Prop!("port",     port),
-                                 Prop!("interval", interval),
-                                 Prop!("offset",   offset));
+    alias Properties = AliasSeq!(Elem!("server",   String, OnChange!restart),
+                                 Elem!("port",     ushort, Default!123, OnChange!restart),
+                                 Elem!("interval", Duration, Default!(seconds(17 * 60))),
+                                 Elem!("offset",   Duration, ReadOnly));
 nothrow @nogc:
 
     enum type_name = "ntp-client";
@@ -29,60 +29,43 @@ nothrow @nogc:
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!NTPClient, id, flags);
-        _port = 123;
-        _interval = seconds(17 * 60);
     }
 
     // Properties
 
-    final const(char)[] server() const pure
-        => _server[];
-    final void server(const(char)[] value)
-    {
-        if (_server[] == value)
-            return;
-        _server = value.makeString(g_app.allocator);
-        mark_set!(typeof(this), "server")();
-        restart();
-    }
+    final const(char)[] server() const
+        => prop_read!(NTPClient, "server")[];
+    final void server(String value)
+        => prop_write!(NTPClient, "server")(value.move);
 
-    final ushort port() const pure
-        => _port;
+    final ushort port() const
+        => prop_read!(NTPClient, "port");
     final void port(ushort value)
-    {
-        if (_port == value)
-            return;
-        _port = value;
-        mark_set!(typeof(this), "port")();
-        restart();
-    }
+        => prop_write!(NTPClient, "port")(value);
 
-    final Duration interval() const pure
-        => _interval;
+    final Duration interval() const
+        => prop_read!(NTPClient, "interval");
     final void interval(Duration value)
-    {
-        _interval = value;
-        mark_set!(typeof(this), "interval")();
-    }
+        => prop_write!(NTPClient, "interval")(value);
 
-    final Duration offset() const pure
-        => _last_offset;
+    final Duration offset() const
+        => prop_read!(NTPClient, "offset");
 
 protected:
 
-    override bool validate() const pure
-        => _server.length > 0;
+    override bool validate() const
+        => server.length > 0;
 
     override CompletionStatus startup()
     {
         IPAddr ip;
-        size_t n = ip.fromString(_server[]);
-        if (n == 0 || n != _server.length)
+        size_t n = ip.fromString(server);
+        if (n == 0 || n != server.length)
         {
-            log.warning("invalid server address '", _server[], "'");
+            log.warning("invalid server address '", server, "'");
             return CompletionStatus.error;
         }
-        _addr = InetAddress(ip, _port);
+        _addr = InetAddress(ip, port);
 
         Result r = create_socket(AddressFamily.ipv4, SocketType.datagram, Protocol.udp, _socket);
         if (r)
@@ -131,12 +114,12 @@ protected:
                 if (apply_response(buf[0 .. bytes]))
                 {
                     _pending = false;
-                    _next_poll = now + _interval;
+                    _next_poll = now + interval;
                 }
             }
             else if (now - _request_time > response_timeout)
             {
-                log.warning("no response from ", _server[], ':', _port);
+                log.warning("no response from ", server, ':', port);
                 _pending = false;
                 _next_poll = now + retry_interval;
             }
@@ -146,11 +129,6 @@ protected:
     }
 
 private:
-    String   _server;
-    ushort   _port;
-    Duration _interval;
-    Duration _last_offset;
-
     Socket      _socket = Socket.invalid;
     InetAddress _addr;
     MonoTime    _next_poll;
@@ -172,7 +150,7 @@ private:
         size_t sent;
         if (!_socket.send(pkt[], MsgFlags.none, &sent))
         {
-            log.warning("send to ", _server[], ':', _port, " failed");
+            log.warning("send to ", server, ':', port, " failed");
             _next_poll = now + retry_interval;
             return;
         }
@@ -201,11 +179,11 @@ private:
         long rtt = (t4 - _t1).as!"nsecs";
         ulong corrected = cast(ulong)(t3 + (rtt - (t3 - t2)) / 2);
 
-        _last_offset = from_unix_time_ns(corrected) - getSysTime();
-        mark_set!(typeof(this), "offset")();
+        Duration off = from_unix_time_ns(corrected) - getSysTime();
+        prop_write!(NTPClient, "offset")(off);
         set_utc_time(corrected);
 
-        log.info("synced from ", _server[], " offset ", _last_offset.as!"msecs", "ms");
+        log.info("synced from ", server, " offset ", off.as!"msecs", "ms");
         return true;
     }
 }
