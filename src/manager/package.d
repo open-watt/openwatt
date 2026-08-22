@@ -7,7 +7,6 @@ import urt.lifetime : move;
 import urt.log : writeWarning;
 import urt.map;
 import urt.mem.allocator;
-import urt.mem.string;
 import urt.mem.temp : tconcat;
 import urt.meta.enuminfo : VoidEnumInfo;
 import urt.result : StringResult;
@@ -442,7 +441,7 @@ nothrow @nogc:
         register_intrinsic(StringLit!"energy.apparent", &apparent);
         register_intrinsic(StringLit!"energy.reactive", &reactive);
 
-        console = Console(this, String("console".addString), Mallocator.instance);
+        console = Console(this, StringLit!"console", Mallocator.instance);
 
         console.set_prompt(StringLit!"> ");
 

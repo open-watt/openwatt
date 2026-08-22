@@ -2,7 +2,6 @@ module driver.boards.smartevse.binding;
 
 version (SmartEVSE):
 
-import urt.mem.string : addString;
 import urt.meta : AliasSeq;
 import urt.si.quantity : Quantity;
 import urt.si.unit : Celsius, ScaledUnit, Volt;
@@ -217,8 +216,8 @@ private:
             if (component.id[] == id)
                 return component;
         }
-        Component component = g_app.allocator.allocT!Component(String(id.addString()));
-        component.template_ = template_.addString();
+        Component component = g_app.allocator.allocT!Component(id.makeString(g_app.allocator));
+        component.template_ = template_.makeString(g_app.allocator);
         component.parent = parent;
         parent.components ~= component;
         return component;

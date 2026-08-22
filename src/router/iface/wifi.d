@@ -5,7 +5,6 @@ import urt.lifetime;
 import urt.log;
 import urt.mem;
 import urt.result : Result;
-import urt.mem.string;
 import urt.mem.temp;
 import urt.si.quantity;
 import urt.si.unit : Gigahertz;

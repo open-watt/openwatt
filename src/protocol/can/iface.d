@@ -3,7 +3,6 @@ module protocol.can.iface;
 import urt.endian;
 import urt.log;
 import urt.mem;
-import urt.mem.string;
 import urt.meta.nullable;
 import urt.string;
 import urt.time;

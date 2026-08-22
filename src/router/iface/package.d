@@ -6,7 +6,6 @@ import urt.map;
 import urt.lifetime;
 import urt.meta.nullable;
 import urt.mem.ring;
-import urt.mem.string;
 import urt.meta.enuminfo : bitfield;
 import urt.si.unit;
 import urt.si.quantity;
