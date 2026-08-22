@@ -745,7 +745,7 @@ private:
     static uint make_session_id()
     {
         import urt.crypto.random : crypto_random_bytes;
-        ubyte[4] b = void;
+        align(4) ubyte[4] b = void;
         uint id = 0;
         while (id == 0)
         {

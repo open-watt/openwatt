@@ -254,7 +254,7 @@ unittest
 
     // floats
     immutable float f = 1234.5f;
-    ubyte[4] fbuf;
+    align(4) ubyte[4] fbuf;
     *cast(uint*)fbuf.ptr = *cast(const uint*)&f;
     assert(wire_extract_float(fbuf, WireLayout(WK.float_, 32)) == 1234.5f);
     ubyte[4] fbe = [fbuf[3], fbuf[2], fbuf[1], fbuf[0]];
