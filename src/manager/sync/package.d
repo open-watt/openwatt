@@ -950,6 +950,23 @@ nothrow @nogc:
             format_uint(node_id, nid[], 16, 16, '0');
         log.info("hello from '", from.name[], "' host='", host, "' ver=", ver, " caps=", caps,
                  node_id ? " node=" : "", node_id ? nid[] : "");
+
+        // One session per node. A listener spawns a peer per source address, so a node that
+        // re-dialled - new ephemeral source, new spawned peer - would otherwise accumulate a
+        // session per attempt, and the old ones keep transmitting: the far end receives frames
+        // from several sessions over one link, restarts, and re-dials again.
+        if (node_id)
+        {
+            Array!SyncPeer superseded;
+            foreach (p; peers[])
+                if (p !is from && p._remote_node_id == node_id)
+                    superseded ~= p;
+            foreach (p; superseded[])
+            {
+                log.info("session '", p.name[], "' superseded by '", from.name[], "' for node ", nid[]);
+                p.destroy();
+            }
+        }
     }
 
     void inbound_claim(SyncPeer from, uint seq, const(char)[] cluster, uint priority, const(char)[] auth, const(char)[] key)
