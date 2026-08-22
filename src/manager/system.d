@@ -2,6 +2,7 @@ module manager.system;
 
 import urt.array;
 import urt.log;
+import urt.meta.nullable : Nullable;
 import urt.mem.allocator;
 import urt.meta.nullable;
 import urt.string;
@@ -9,7 +10,9 @@ import urt.system;
 import urt.time;
 import urt.variant : Variant;
 
-import driver.system : system_reboot;
+import driver.system : has_download_mode, system_reboot;
+static if (has_download_mode)
+    import driver.system : system_reboot_to_bootloader;
 
 import manager : get_module;
 import manager.console.session;
@@ -222,8 +225,22 @@ void show_time(Session session)
     session.write_line(getDateTime());
 }
 
-void reboot(Session session)
+void reboot(Session session, Nullable!uint bootloader)
 {
+    if (bootloader && bootloader.value)
+    {
+        static if (has_download_mode)
+        {
+            session.write_line("reboot: entering bootloader...");
+            system_reboot_to_bootloader(bootloader.value);
+            return;
+        }
+        else
+        {
+            session.write_line("reboot: no bootloader mode on this platform");
+            return;
+        }
+    }
     session.write_line("reboot: rebooting...");
     system_reboot();
 }
