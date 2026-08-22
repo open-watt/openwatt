@@ -10,6 +10,7 @@ import urt.variant;
 
 // these are used by the conversion functions...
 import manager.base : ActiveObject, BaseObject;
+import manager.collection : BaseCollection, CollectionTypeInfo;
 import manager.component : Component;
 import manager.device : Device;
 
@@ -141,15 +142,17 @@ Array!String suggest_completion(T : const Device)(const(char)[] argument_text)
 Array!String suggest_completion(T)(const(char)[] argument_text)
     if (!is(T == typeof(null)) && is(T : const BaseObject))
 {
-    import manager.collection : Collection;
+    import manager.collection : collection_type_info;
+    return suggest_collection_keys(collection_type_info!(Unqual!T)(), argument_text);
+}
 
-    alias Type = Unqual!T;
-    auto collection = Collection!Type();
-    if (collection.type_info is null)
+Array!String suggest_collection_keys(const(CollectionTypeInfo)* type_info, const(char)[] argument_text)
+{
+    if (type_info is null)
         return Array!String();
 
     Array!String completions;
-    foreach (ref name; collection.keys)
+    foreach (ref name; BaseCollection(type_info).keys)
     {
         if (name[].startsWith(argument_text))
             completions ~= name;
