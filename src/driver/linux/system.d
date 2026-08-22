@@ -46,6 +46,10 @@ ulong unique_device_id() => 0;
 
 bool reboot_pending() => g_reboot;
 
+// The supervisor relaunches this process; the reason it stopped is in its log,
+// not in anything the new process can read.
+const(char)[] reset_reason() => null;
+
 bool ota_supported() => true;
 
 size_t ota_partition_size() => 256 * 1024 * 1024;
