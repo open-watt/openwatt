@@ -1179,9 +1179,9 @@ private:
             send_prompt_and_buffer(true);
     }
 
-    static void append_scope_path(ref MutableString!0 buf, Scope* s)
+    void append_scope_path(ref MutableString!0 buf, Scope* s)
     {
-        if (s is null || s.parent is null)
+        if (s is null || s.parent(*_console) is null)
         {
             buf ~= '/';
             return;
@@ -1189,11 +1189,12 @@ private:
         walk_scope_path(buf, s);
     }
 
-    static void walk_scope_path(ref MutableString!0 buf, Scope* s)
+    void walk_scope_path(ref MutableString!0 buf, Scope* s)
     {
-        if (s.parent is null)
+        Scope* p = s.parent(*_console);
+        if (p is null)
             return;
-        walk_scope_path(buf, s.parent);
+        walk_scope_path(buf, p);
         buf ~= '/';
         buf ~= s.name[];
     }

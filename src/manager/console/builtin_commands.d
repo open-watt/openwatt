@@ -70,17 +70,17 @@ nothrow @nogc:
         const(char)[] name = args[0].asString;
         Command cmd;
         if (name.front_is(':'))
-            cmd = _console.script_scope.find_command(name[1 .. $]);
+            cmd = _console.script_scope.find_command(*_console, name[1 .. $]);
         else if (name.front_is('/'))
-            cmd = _console.root.find_command(name[1 .. $]);
+            cmd = _console.root.find_command(*_console, name[1 .. $]);
         else
         {
             if (session._cur_scope !is null)
-                cmd = session._cur_scope.find_command(name);
+                cmd = session._cur_scope.find_command(*_console, name);
             if (cmd is null)
-                cmd = _console.script_scope.find_command(name);
+                cmd = _console.script_scope.find_command(*_console, name);
             if (cmd is null && session._cur_scope !is _console.root)
-                cmd = _console.root.find_command(name);
+                cmd = _console.root.find_command(*_console, name);
         }
         if (cmd is null)
         {
@@ -103,11 +103,11 @@ nothrow @nogc:
 
         Array!String r;
         if (arg.front_is(':'))
-            list_matching(r, _console.script_scope, arg[1 .. $], ':');
+            list_matching(*_console, r, _console.script_scope, arg[1 .. $], ':');
         else if (arg.front_is('/'))
-            list_matching(r, _console.root, arg[1 .. $], '/');
+            list_matching(*_console, r, _console.root, arg[1 .. $], '/');
         else if (user_scope !is null)
-            list_matching(r, user_scope, arg, '\0');
+            list_matching(*_console, r, user_scope, arg, '\0');
         return r;
     }
 
@@ -119,24 +119,24 @@ nothrow @nogc:
 private:
     void list_scope(Session session, Scope* s, char prefix)
     {
-        foreach (ref Scope sub; s.sub_scopes)
+        foreach (ref Scope sub; s.sub_scopes(*_console))
             session.write_output(tconcat("  ", prefix, sub.name[]), true);
-        foreach (Command c; s.commands)
+        foreach (Command c; s.commands(*_console))
             session.write_output(tconcat("  ", prefix, c.name[]), true);
     }
 
-    static void list_matching(ref Array!String r, Scope* s, const(char)[] partial, char prefix)
+    static void list_matching(ref Console console, ref Array!String r, Scope* s, const(char)[] partial, char prefix)
     {
-        foreach (ref Scope sub; s.sub_scopes)
+        foreach (ref Scope sub; s.sub_scopes(console))
         {
             if (!sub.name[].startsWith(partial))
                 continue;
             if (prefix)
                 r ~= String(MutableString!0(Concat, prefix, sub.name));
             else
-                r ~= sub.name;
+                r ~= String(MutableString!0(sub.name));
         }
-        foreach (Command c; s.commands)
+        foreach (Command c; s.commands(console))
         {
             if (!c.name[].startsWith(partial))
                 continue;

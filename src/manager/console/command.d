@@ -263,7 +263,7 @@ private:
                 assert(false, "path segment must be an identifier");
             const(char)[] seg = args[0].asString;
 
-            Scope* next = node.descend(seg);
+            Scope* next = node.descend(*session._console, seg);
             if (next is null)
             {
                 const(char)[] core = seg;
@@ -272,7 +272,7 @@ private:
 
                 if (core != "..")
                 {
-                    if (Command found = node.find_command(core))
+                    if (Command found = node.find_command(*session._console, core))
                     {
                         leaf = found;
                         args = args[1..$];

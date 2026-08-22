@@ -27,29 +27,59 @@ void add_collection_commands(ref Console console, Scope* n, BaseCollection colle
 
     n.collection_type = collection.type_info;
 
-    Command[12]* shared_ = shared_commands(console);
-
-    // Point at the appropriate shared strip in the side-array. Layouts:
+    // Point at the appropriate shared strip at the head of _commands. Layouts:
     //   [0..7)   full: add, get, list, print, remove, reset, set
     //   [1..7)   no add: get, list, print, remove, reset, set
     //   [7..12)  no add, no remove: get, list, print, reset, set
     // If the scope later gets an extension command via register_command,
-    // Console.add_command will promote it into _commands.
+    // Console.add_command will promote it to a private strip at the tail.
     if (collection.type_info && collection.type_info.create)
     {
-        n._cmd_ptr = shared_.ptr;
+        n._cmd_start = 0;
         n._cmd_len = 7;
     }
     else if (collection.type_info)
     {
-        n._cmd_ptr = shared_.ptr + 1;
+        n._cmd_start = 1;
         n._cmd_len = 6;
     }
     else
     {
-        n._cmd_ptr = shared_.ptr + 7;
+        n._cmd_start = 7;
         n._cmd_len = 5;
     }
+}
+
+// Called once from the Console constructor, before anything else populates
+// _commands: the shared strips must occupy [0..shared_cmd_count).
+void init_shared_commands(ref Console console)
+{
+    assert(console._commands.empty, "shared strips must be at the head of _commands");
+
+    Command add    = defaultAllocator.allocT!CollectionAddCommand(console);
+    Command remove = defaultAllocator.allocT!CollectionRemoveCommand(console);
+    Command get    = defaultAllocator.allocT!CollectionGetCommand(console);
+    Command set_   = defaultAllocator.allocT!CollectionSetCommand(console);
+    Command reset  = defaultAllocator.allocT!CollectionResetCommand(console);
+    Command list   = defaultAllocator.allocT!CollectionListCommand(console);
+    Command print  = defaultAllocator.allocT!CollectionPrintCommand(console);
+
+    // [0..7) alphabetical
+    console._commands ~= add;
+    console._commands ~= get;
+    console._commands ~= list;
+    console._commands ~= print;
+    console._commands ~= remove;
+    console._commands ~= reset;
+    console._commands ~= set_;
+    // [7..12) alphabetical, no add/remove
+    console._commands ~= get;
+    console._commands ~= list;
+    console._commands ~= print;
+    console._commands ~= reset;
+    console._commands ~= set_;
+
+    assert(console._commands.length == Console.shared_cmd_count);
 }
 
 
@@ -566,36 +596,6 @@ void populate_collection_table(ref Table table, BaseCollection collection)
             table.cell(p.get(item, *p));
         }
     }
-}
-
-Command[12]* shared_commands(ref Console console)
-{
-    if (console._coll_cmds[0] is null)
-    {
-        Command add    = defaultAllocator.allocT!CollectionAddCommand(console);
-        Command remove = defaultAllocator.allocT!CollectionRemoveCommand(console);
-        Command get    = defaultAllocator.allocT!CollectionGetCommand(console);
-        Command set_   = defaultAllocator.allocT!CollectionSetCommand(console);
-        Command reset  = defaultAllocator.allocT!CollectionResetCommand(console);
-        Command list   = defaultAllocator.allocT!CollectionListCommand(console);
-        Command print  = defaultAllocator.allocT!CollectionPrintCommand(console);
-
-        // [0..7) alphabetical
-        console._coll_cmds[0] = add;
-        console._coll_cmds[1] = get;
-        console._coll_cmds[2] = list;
-        console._coll_cmds[3] = print;
-        console._coll_cmds[4] = remove;
-        console._coll_cmds[5] = reset;
-        console._coll_cmds[6] = set_;
-        // [7..12) alphabetical, no add/remove
-        console._coll_cmds[7]  = get;
-        console._coll_cmds[8]  = list;
-        console._coll_cmds[9]  = print;
-        console._coll_cmds[10] = reset;
-        console._coll_cmds[11] = set_;
-    }
-    return &console._coll_cmds;
 }
 
 const(char)[] format_flags(ObjectFlags f)
