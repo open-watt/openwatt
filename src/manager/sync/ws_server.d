@@ -125,7 +125,7 @@ protected:
 private:
     ObjectRef!HTTPServer _http_server;
     String               _uri;
-    SyncEncoderKind      _encoder;
+    SyncEncoderKind      _encoder = SyncEncoderKind.json;
     WebSocketServer      _ws_server;
     Array!SyncPeer       _peers;
     uint                 _next_conn_id;
