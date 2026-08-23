@@ -21,7 +21,7 @@ import manager.id;
 import manager.series : DataFormat, FormatId, register_format, SeriesKind, valid, ValueType;
 import manager.value;
 
-public import manager.collection : CID, Collection, CollectionType, collection_type_info, CollectionTypeInfo;
+public import manager.collection : CID, Collection, CollectionType, collection_type_info, CollectionTypeInfo, dyn_type_info;
 
 //version = TraceLifetimeSubscriptions;
 
@@ -92,6 +92,33 @@ enum StateSignal
 alias StateSignalHandler = void delegate(ActiveObject object, StateSignal signal) nothrow @nogc;
 
 enum ushort sync_slot_none = ushort.max;
+
+struct DynTypeInfo
+{
+    String type;
+    package const(void)* _parent;
+
+    const(DynTypeInfo)* parent() const pure nothrow @nogc
+        => cast(const(DynTypeInfo)*)_parent;
+}
+
+package template BaseClassOf(T)
+{
+    static if (is(T Bases == super))
+        alias BaseClassOf = Bases[0];
+    else
+        alias BaseClassOf = void;
+}
+
+package template DynTypeOf(T)
+    if (is(T : BaseObject) && !is(T == BaseObject))
+{
+    alias Super = BaseClassOf!T;
+    static if (is(Super == BaseObject))
+        __gshared immutable DynTypeInfo info = { StringLit!(T.stringof), null };
+    else
+        __gshared immutable DynTypeInfo info = { StringLit!(T.stringof), &DynTypeOf!Super.info };
+}
 
 
 template Prop(string name, alias member, string category = null, string flags = null)
@@ -703,6 +730,19 @@ private:
             p.on_change(this, update);
         mark_dirty(index);
     }
+}
+
+inout(T) dyn_cast(T)(inout(BaseObject) object) nothrow @nogc
+    if (is(T : BaseObject) && !is(T == BaseObject))
+{
+    if (object is null)
+        return null;
+
+    const(DynTypeInfo)* target = dyn_type_info!T();
+    for (const(DynTypeInfo)* type_info = &object._typeInfo.dyn_type; type_info; type_info = type_info.parent)
+        if (type_info is target)
+            return cast(inout(T))cast(inout(void)*)object;
+    return null;
 }
 
 class ActiveObject : BaseObject
@@ -1609,7 +1649,39 @@ version (unittest)
 
     private enum TestMode : ubyte { idle, run, fault }
 
-    private final class ElemTestObject : BaseObject
+    private abstract class ElemTestBase : BaseObject
+    {
+    nothrow @nogc:
+
+        this(const CollectionTypeInfo* type_info, CID id, ObjectFlags flags)
+        {
+            super(type_info, id, flags);
+        }
+    }
+
+    private abstract class ElemTestSibling : ElemTestBase
+    {
+    nothrow @nogc:
+
+        this(const CollectionTypeInfo* type_info, CID id, ObjectFlags flags)
+        {
+            super(type_info, id, flags);
+        }
+    }
+
+    private final class ActiveTestObject : ActiveObject
+    {
+        enum type_name = "active-test";
+        enum collection_id = cast(CollectionType)0;
+    nothrow @nogc:
+
+        this(CID id, ObjectFlags flags = ObjectFlags.none)
+        {
+            super(collection_type_info!ActiveTestObject(), id, flags);
+        }
+    }
+
+    private final class ElemTestObject : ElemTestBase
     {
         enum type_name = "elem-test";
         enum collection_id = cast(CollectionType)0;
@@ -1694,6 +1766,20 @@ unittest
     ElemTestObject o = alloc!ElemTestObject(table.allocate("elem-test-o", 0));
     table.bind(o.id, o);
     enum gain = prop_index!(ElemTestObject, "gain");
+
+    static assert(is(typeof(dyn_cast!ElemTestObject(cast(BaseObject)null)) == ElemTestObject));
+    static assert(is(typeof(dyn_cast!ElemTestObject(cast(const(BaseObject))null)) == const(ElemTestObject)));
+    static assert(is(typeof(dyn_cast!ElemTestObject(cast(immutable(BaseObject))null)) == immutable(ElemTestObject)));
+    assert(dyn_cast!ElemTestObject(cast(BaseObject)o) is o);
+    assert(dyn_cast!ElemTestBase(cast(BaseObject)o) is o);
+    assert(dyn_cast!ActiveObject(o) is null);
+    assert(dyn_type_info!ElemTestObject() is &o._typeInfo.dyn_type);
+    assert(dyn_type_info!ElemTestObject().parent is &DynTypeOf!ElemTestBase.info);
+    assert(&DynTypeOf!ElemTestBase.info !is &DynTypeOf!ElemTestSibling.info);
+    const(BaseObject) const_o = o;
+    assert(dyn_cast!ElemTestObject(const_o) is o);
+
+    assert(dyn_type_info!ActiveTestObject().parent is &DynTypeOf!ActiveObject.info);
 
     // declared defaults apply at construction and are not "changes"
     assert(o.prop_read!(ElemTestObject, "gain") == 7);

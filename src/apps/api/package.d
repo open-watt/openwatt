@@ -284,7 +284,7 @@ private:
                 json ~= ',';
             first_col = false;
 
-            bool is_collection = col.type_info.get_super is null;
+            bool is_collection = col.type_info.collection_root;
             json.append('\"', col.type_info.type[], "\":{\"collection_id\":", cast(uint)col.type_info.collection_id, ",\"path\":\"", col.path[], '\"');
             if (col.type_info.is_abstract)
                 json ~= ",\"abstract\":true";
