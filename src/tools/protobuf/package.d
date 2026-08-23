@@ -446,8 +446,8 @@ ptrdiff_t decode_value(bool pack, ubyte ty, T)(const(ubyte)[] buffer, ref T valu
     }
     else static if (is(T == String))
     {
-        import urt.mem : defaultAllocator;
-        value = (cast(char[])block).makeString(defaultAllocator);
+        import urt.mem;
+        value = (cast(char[])block).make_string();
     }
     else static if (is(T == struct))
     {

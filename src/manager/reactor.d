@@ -2,7 +2,7 @@ module manager.reactor;
 
 import urt.array;
 import urt.atomic;
-import urt.mem.allocator : defaultAllocator;
+import urt.mem;
 import urt.time;
 
 version (Windows)
@@ -178,7 +178,7 @@ nothrow @nogc:
             }
             foreach (e; _watches[])
                 if (!e.outstanding)      // a wedged driver's read may still complete into e.buf
-                    defaultAllocator().freeT(e);
+                    free(e);
             _watches.clear();
             CloseHandle(_iocp);
             _iocp = null;
@@ -186,7 +186,7 @@ nothrow @nogc:
         else version (linux)
         {
             foreach (e; _watches[])
-                defaultAllocator().freeT(e);
+                free(e);
             _watches.clear();
             _pool_fds.clear();          // pooled fds are owned/closed by their watchers, not us
             if (_wake_fd >= 0)
@@ -347,7 +347,7 @@ nothrow @nogc:
             {
                 if (!associate(file))
                     return false;
-                WatchEntry* e = defaultAllocator().allocT!WatchEntry();
+                WatchEntry* e = alloc!WatchEntry();
                 if (!e)
                     return false;
                 e.op.on_complete = &e.complete;
@@ -357,7 +357,7 @@ nothrow @nogc:
                 e.on_error = on_error;
                 if (!e.post_read())
                 {
-                    defaultAllocator().freeT(e);
+                    free(e);
                     return false;
                 }
                 _watches ~= e;
@@ -367,7 +367,7 @@ nothrow @nogc:
             {
                 if (_epoll < 0)
                     return false;
-                WatchEntry* e = defaultAllocator().allocT!WatchEntry();
+                WatchEntry* e = alloc!WatchEntry();
                 if (!e)
                     return false;
                 e.file = file;
@@ -378,7 +378,7 @@ nothrow @nogc:
                 ev.data.ptr = e;
                 if (epoll_ctl(_epoll, EPOLL_CTL_ADD, file, &ev) != 0)
                 {
-                    defaultAllocator().freeT(e);
+                    free(e);
                     return false;
                 }
                 _watches ~= e;
@@ -399,7 +399,7 @@ nothrow @nogc:
             {
                 if (_epoll < 0)
                     return false;
-                WatchEntry* e = defaultAllocator().allocT!WatchEntry();
+                WatchEntry* e = alloc!WatchEntry();
                 if (!e)
                     return false;
                 e.file = fd;
@@ -409,7 +409,7 @@ nothrow @nogc:
                 ev.data.ptr = e;
                 if (epoll_ctl(_epoll, EPOLL_CTL_ADD, fd, &ev) != 0)
                 {
-                    defaultAllocator().freeT(e);
+                    free(e);
                     return false;
                 }
                 _watches ~= e;
@@ -503,7 +503,7 @@ nothrow @nogc:
                     else
                     {
                         _watches.removeSwapLast(i);
-                        defaultAllocator().freeT(e);
+                        free(e);
                     }
                     return;
                 }
@@ -595,7 +595,7 @@ private:
         {
             foreach (i; 0 .. _watches.length)
                 if (_watches[i] is e) { _watches.removeSwapLast(i); break; }
-            defaultAllocator().freeT(e);
+            free(e);
         }
     }
     else version (linux)
@@ -742,7 +742,7 @@ private:
             {
                 if (_watches[i].dead)
                 {
-                    defaultAllocator().freeT(_watches[i]);
+                    free(_watches[i]);
                     _watches.removeSwapLast(i);
                 }
             }

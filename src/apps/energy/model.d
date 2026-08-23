@@ -138,18 +138,18 @@ const(char)[] port_role_name(PortRole r) pure
 
 unittest
 {
-    import urt.mem.allocator : defaultAllocator;
+    import urt.mem;
     import urt.si.quantity : Quantity;
     import urt.si.unit : Ampere, AmpereHour, Celsius, Percent, ScaledUnit, Volt;
-    import urt.string : makeString;
+    import urt.string : StringLit;
     import urt.variant : Variant;
 
     import manager.series : DataFormat, SeriesKind, ValueType, register_format;
 
     static Element* elem(double value, ScaledUnit unit)
     {
-        Element* e = defaultAllocator.allocT!Element();
-        e.id = "e".makeString(defaultAllocator);
+        Element* e = alloc!Element();
+        e.id = StringLit!"e";
         e.format = register_format(DataFormat(ValueType.f64, SeriesKind.held, unit));
         e.value = Variant(Quantity!double(value, unit));
         return e;
@@ -157,8 +157,8 @@ unittest
 
     static Element* bare(double value)
     {
-        Element* e = defaultAllocator.allocT!Element();
-        e.id = "e".makeString(defaultAllocator);
+        Element* e = alloc!Element();
+        e.id = StringLit!"e";
         e.format = register_value_format(value);
         e.value = Variant(value);
         return e;
@@ -188,8 +188,8 @@ unittest
     assert(read_in_unit(null, Percent) != read_in_unit(null, Percent));
 
     // register_value_format reads a static unit from the type, not the value.
-    Element* typed = defaultAllocator.allocT!Element();
-    typed.id = "soc_floor".makeString(defaultAllocator);
+    Element* typed = alloc!Element();
+    typed.id = StringLit!"soc_floor";
     typed.format = register_value_format!(Quantity!(double, Percent))();
     typed.value = Variant(Quantity!(double, Percent)(50));
     assert(near(read_in_unit(typed, Percent), 50));

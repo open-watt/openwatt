@@ -48,7 +48,7 @@ import urt.array;
 import urt.lifetime;
 import urt.log;
 import urt.map;
-import urt.mem.allocator;
+import urt.mem;
 import urt.meta.enuminfo : enum_from_key, make_enum_info, VoidEnumInfo;
 import urt.meta.nullable;
 import urt.string;
@@ -142,9 +142,9 @@ nothrow @nogc:
     {
         g_app.register_enum!SyncEncoderKind();
 
-        g_json_encoder = defaultAllocator.allocT!JsonEncoder(this);
+        g_json_encoder = alloc!JsonEncoder(this);
         g_encoders[SyncEncoderKind.json] = g_json_encoder;
-        g_binary_encoder = defaultAllocator.allocT!BinaryEncoder(this);
+        g_binary_encoder = alloc!BinaryEncoder(this);
         g_encoders[SyncEncoderKind.binary] = g_binary_encoder;
 
         g_app.console.register_collection!SyncPeer();
@@ -288,7 +288,7 @@ nothrow @nogc:
             }
             encoder_for(req.peer._encoder)
                 .encode_result(req.peer, req.seq, req.command.result, req.session.takeOutput()[]);
-            req.session.allocator.freeT(req.command);
+            free(req.command);
             g_app.console.destroy_session(req.session);
             pending_inbound_cmds.remove(i);
         }
@@ -938,7 +938,7 @@ nothrow @nogc:
         from._remote_node_id = node_id;
         from._remote_role = role;
         if (from._remote_cluster[] != cluster)
-            from._remote_cluster = cluster.makeString(defaultAllocator);
+            from._remote_cluster = cluster.make_string();
         if (nonce.length == from._remote_nonce.length)
         {
             from._remote_nonce[] = nonce[];
@@ -983,7 +983,7 @@ nothrow @nogc:
                 }
                 if (arm)
                 {
-                    from._model_subs ~= pat.makeString(defaultAllocator);
+                    from._model_subs ~= pat.make_string();
                     add_feed_listener();
                 }
             }
@@ -1888,7 +1888,7 @@ nothrow @nogc:
             }
             return *d;
         }
-        Device dev = g_app.allocator.allocT!Device(id.makeString(g_app.allocator));
+        Device dev = alloc!Device(id.make_string());
         dev.remote = true;
         g_app.devices.insert(dev.id[], dev);
         return dev;

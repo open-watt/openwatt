@@ -1,9 +1,9 @@
 module main;
 
+import urt.array;
 import urt.file : load_file;
 import urt.log;
-import urt.mem.allocator;
-import urt.array;
+import urt.mem;
 import urt.string.format : tconcat;
 import urt.system;
 import urt.time;
@@ -192,7 +192,7 @@ int main(string[] args)
         {
             combined_config ~= sys_conf;
             combined_config ~= '\n';
-            defaultAllocator().free(sys_conf);
+            free(sys_conf);
             loaded_configuration = true;
         }
     }
@@ -203,7 +203,7 @@ int main(string[] args)
             log_info("system", "using startup.conf from the filesystem; bring-up defaults skipped");
         combined_config ~= conf;
         combined_config ~= '\n';
-        defaultAllocator().free(conf);
+        free(conf);
         loaded_configuration = true;
     }
     else if (!config_path_explicit)
@@ -223,7 +223,7 @@ int main(string[] args)
     {
         combined_config ~= user_conf;
         combined_config ~= '\n';
-        defaultAllocator().free(user_conf);
+        free(user_conf);
         loaded_configuration = true;
     }
 

@@ -4,16 +4,16 @@ import urt.array;
 import urt.lifetime;
 import urt.log;
 import urt.map;
-import urt.meta;
-import urt.meta.enuminfo : bitfield;
 import urt.mem.alloc : alloc, free;
 import urt.mem.temp;
-import urt.variant;
+import urt.meta;
+import urt.meta.enuminfo : bitfield;
 import urt.result;
 import urt.string;
 import urt.time;
 import urt.traits : Parameters, ReturnType, Unqual;
 import urt.util : min;
+import urt.variant;
 
 import manager.console.argument;
 import manager.element : Access, Element, SampleUpdate, SamplingMode;
@@ -1642,19 +1642,19 @@ version (unittest)
 
         void mode_changed(ref const SampleUpdate update)
         {
-            import urt.mem.allocator : defaultAllocator;
-            last_previous = update.previous.tstring.makeString(defaultAllocator);
+            import urt.mem;
+            last_previous = update.previous.tstring.make_string();
         }
     }
 }
 
 unittest
 {
-    import urt.mem.allocator : defaultAllocator;
+    import urt.mem;
     import manager.collection : item_table;
 
     auto table = &item_table(0);
-    ElemTestObject o = defaultAllocator().allocT!ElemTestObject(table.allocate("elem-test-o", 0));
+    ElemTestObject o = alloc!ElemTestObject(table.allocate("elem-test-o", 0));
     table.bind(o.id, o);
     enum gain = prop_index!(ElemTestObject, "gain");
 
@@ -1767,7 +1767,7 @@ unittest
     assert(o.find_prop_element(cast(ushort)(o.properties.length + 1)) is null); // out of range
 
     // reference properties: the edge converts name <-> id, storage is an EID
-    ElemTestObject target = defaultAllocator().allocT!ElemTestObject(table.allocate("ref-target", 0));
+    ElemTestObject target = alloc!ElemTestObject(table.allocate("ref-target", 0));
     table.bind(target.id, target);
     Variant peer = Variant("ref-target");
     assert(o.set("peer", peer));
@@ -1777,16 +1777,16 @@ unittest
     // the ref tracks the name's slot: destruction tombstones, recreation at the name rebinds
     table.remove(target.id);
     assert(o.prop_read!(ElemTestObject, "peer") is null);
-    ElemTestObject target2 = defaultAllocator().allocT!ElemTestObject(table.allocate("ref-target", 0));
+    ElemTestObject target2 = alloc!ElemTestObject(table.allocate("ref-target", 0));
     table.bind(target2.id, target2);
     assert(o.prop_read!(ElemTestObject, "peer") is target2);
-    defaultAllocator().freeT(target);
+    free(target);
 
     // a forward reference reserves its id: the write succeeds before the target exists
     Variant later = Variant("ref-later");
     assert(o.set("peer", later));
     assert(o.prop_read!(ElemTestObject, "peer") is null);
-    ElemTestObject target3 = defaultAllocator().allocT!ElemTestObject(table.allocate("ref-later", 0));
+    ElemTestObject target3 = alloc!ElemTestObject(table.allocate("ref-later", 0));
     table.bind(target3.id, target3);
     assert(o.prop_read!(ElemTestObject, "peer") is target3);
 
@@ -1799,14 +1799,14 @@ unittest
 
     table.remove(target2.id);
     table.remove(target3.id);
-    defaultAllocator().freeT(target2);
-    defaultAllocator().freeT(target3);
+    free(target2);
+    free(target3);
 
     table.remove(o.id);
-    defaultAllocator().freeT(o);
+    free(o);
 
     // a proxy (is_remote) stores echoed values but never runs on_change side effects
-    ElemTestObject proxy = defaultAllocator().allocT!ElemTestObject(table.allocate("elem-test-proxy", 0), ObjectFlags.remote);
+    ElemTestObject proxy = alloc!ElemTestObject(table.allocate("elem-test-proxy", 0), ObjectFlags.remote);
     table.bind(proxy.id, proxy);
     Variant echoed = Variant(3);
     assert(proxy.set("gain", echoed));
@@ -1819,6 +1819,6 @@ unittest
     assert(proxy.sync_apply("link", lk));
     assert(proxy.prop_read!(ElemTestObject, "link") == true);
     table.remove(proxy.id);
-    defaultAllocator().freeT(proxy);
+    free(proxy);
 }
 

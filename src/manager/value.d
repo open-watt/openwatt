@@ -7,8 +7,8 @@ import urt.mem;
 import urt.mem.temp;
 import urt.meta;
 import urt.meta.nullable;
-import urt.si.unit : ScaledUnit;
 import urt.si.quantity;
+import urt.si.unit : ScaledUnit;
 import urt.string;
 import urt.time;
 import urt.traits;
@@ -351,11 +351,11 @@ const(char[]) from_variant(ref const Variant v, out String r) nothrow @nogc
     if (v.isNull)
         r = null;
     else if (v.isString)
-        r = v.asString.makeString(defaultAllocator);
+        r = v.asString.make_string();
     else
     {
         // TODO: expand this and catch possible error cases...
-        r = v.tstring().makeString(defaultAllocator);
+        r = v.tstring().make_string();
     }
     return null;
 }
@@ -440,7 +440,7 @@ const(char[]) from_variant(U)(ref const Variant v, out U[] r) nothrow @nogc
         else
             arr = (&v)[0..1];
 
-        r = tempAllocator().allocArray!U(arr.length);
+        r = talloc_array!U(arr.length);
         foreach (i, ref e; arr)
         {
             if (const(char[]) error = from_variant(e, r[i]))

@@ -1,7 +1,7 @@
 module protocol.spinel.client;
 
 import urt.log;
-import urt.mem.allocator;
+import urt.mem;
 import urt.mem.temp : tformat;
 import urt.meta : AliasSeq;
 import urt.string;
@@ -274,14 +274,14 @@ private:
             case SpinelProperty.PROTOCOL_VERSION:
                 uint major = read_packed_uint(value);
                 uint minor = read_packed_uint(value);
-                _protocol_version = tformat("{0}.{1}", major, minor).makeString(defaultAllocator());
+                _protocol_version = tformat("{0}.{1}", major, minor).make_string();
                 mark_set!(typeof(this), "protocol-version")();  // flag dirty so the sync layer pushes it to the UI
                 log.info("protocol version ", major, ".", minor);
                 break;
 
             case SpinelProperty.NCP_VERSION:
                 const(char)[] ver = read_utf8(value);
-                _ncp_version = ver.makeString(defaultAllocator());
+                _ncp_version = ver.make_string();
                 _have_ncp_version = true;
                 mark_set!(typeof(this), "ncp-version")();
                 log.info("ncp version: ", ver);

@@ -74,7 +74,7 @@ CommandState telnet(Session session, const(char)[] remote)
 
     session.write_line("Connecting to ", host, ":", port, "  (escape: Ctrl-])");
 
-    return defaultAllocator().allocT!TelnetClientCommand(session, telnet_stream);
+    return alloc!TelnetClientCommand(session, telnet_stream);
 }
 
 

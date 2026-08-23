@@ -81,7 +81,7 @@ nothrow @nogc:
         Appliance a = get_item_by_name!Appliance(value);
         if (a is null)
             return tconcat("appliance not found: ", value);
-        _target_name = value.makeString(g_app.allocator);
+        _target_name = value.make_string();
         _target_appliance = a;
         mark_set!(typeof(this), "target")();
         restart();
@@ -105,7 +105,7 @@ nothrow @nogc:
             return "invalid goal syntax; expected on, off, soc(N), temp(N), duty(Nh|Nm|Ns), or (expression)";
         if (_goal.expression)
             free_expression(_goal.expression);
-        _goal_text = value.makeString(g_app.allocator);
+        _goal_text = value.make_string();
         _goal = parsed;
         mark_set!(typeof(this), "goal")();
         restart();

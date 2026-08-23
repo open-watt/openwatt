@@ -6,7 +6,7 @@ import urt.endian;
 import urt.lifetime;
 import urt.log;
 import urt.map;
-import urt.mem.allocator;
+import urt.mem;
 import urt.meta.nullable;
 import urt.string;
 import urt.time;
@@ -548,7 +548,7 @@ nothrow @nogc:
             return null;
         }
 
-        EnergyScanState state = g_app.allocator.allocT!EnergyScanState(session, c);
+        EnergyScanState state = alloc!EnergyScanState(session, c);
         c.set_message_handler(&state.message_handler);
         c.send_command!EZSP_StartScan(&state.start_scan, energy_scan ? EzspNetworkScanType.ENERGY_SCAN : EzspNetworkScanType.ACTIVE_SCAN, 0x07FFF800, energy_scan ? 1 : 3);
         return state;
@@ -564,7 +564,7 @@ nothrow @nogc:
         if (cluster == 0xEF00)
             return tuya_read(session, source, nm, endpoint, attributes);
 
-        auto state = g_app.allocator.allocT!ZCLReadState(session, source, nm.id, endpoint, cluster, attributes);
+        auto state = alloc!ZCLReadState(session, source, nm.id, endpoint, cluster, attributes);
         state.send_requests();
         return state;
     }
@@ -588,7 +588,7 @@ nothrow @nogc:
 
         source.send_zcl_message(nm.id, endpoint, source.profile_id, 0xEF00, ZCLCommand.tuya_data_query, 0, buffer[], PCP.be);
 
-        return g_app.allocator.allocT!TuyaReadState(session, nm, attributes);
+        return alloc!TuyaReadState(session, nm, attributes);
     }
 
     // /protocol/zigbee/write command
@@ -619,7 +619,7 @@ nothrow @nogc:
             }
         }
 
-        auto state = g_app.allocator.allocT!ZCLWriteState(session, source, nm, endpoint, cluster, attribute, value, data_type);
+        auto state = alloc!ZCLWriteState(session, source, nm, endpoint, cluster, attribute, value, data_type);
         if (data_type != ZCLDataType.no_data)
             state.send_write();
         else

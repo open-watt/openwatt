@@ -5,7 +5,7 @@ import urt.encoding;
 import urt.file;
 import urt.lifetime;
 import urt.log;
-import urt.mem.allocator;
+import urt.mem;
 import urt.mem.temp : tconcat;
 import urt.string;
 import urt.time;
@@ -87,9 +87,9 @@ nothrow @nogc:
         if (value.length == 0)
             _uri = String();
         else if (value[0] == '/')
-            _uri = value.makeString(g_app.allocator);
+            _uri = value.make_string();
         else
-            _uri = tconcat("/", value).makeString(g_app.allocator);
+            _uri = tconcat("/", value).make_string();
         mark_set!(typeof(this), "uri")();
         restart();
     }
@@ -98,7 +98,7 @@ nothrow @nogc:
         => _root[];
     void root(const(char)[] value)
     {
-        _root = value.makeString(g_app.allocator);
+        _root = value.make_string();
         mark_set!(typeof(this), "root")();
         restart();
     }
@@ -107,7 +107,7 @@ nothrow @nogc:
         => _allowed_origin[];
     void allowed_origin(const(char)[] value)
     {
-        _allowed_origin = value.makeString(g_app.allocator);
+        _allowed_origin = value.make_string();
         mark_set!(typeof(this), "allowed-origin")();
     }
 
@@ -456,7 +456,7 @@ private:
             response.reason = status_text(200);
             response.timestamp = getSysTime();
             response.headers ~= HTTPParam(StringLit!"Content-Type", mime_type(fs_path));
-            response.headers ~= HTTPParam(StringLit!"Content-Length", tconcat(size).makeString(defaultAllocator()));
+            response.headers ~= HTTPParam(StringLit!"Content-Length", tconcat(size).make_string());
             add_cors(response, request);
             stream.write(format_message_head(response)[]);
             return true;
@@ -472,11 +472,11 @@ private:
             response.reason = status_text(200);
             response.timestamp = getSysTime();
             response.headers ~= HTTPParam(StringLit!"Content-Type", mime_type(fs_path));
-            response.headers ~= HTTPParam(StringLit!"Content-Length", tconcat(size).makeString(defaultAllocator()));
+            response.headers ~= HTTPParam(StringLit!"Content-Length", tconcat(size).make_string());
             add_cors(response, request);
             stream.write(format_message_head(response)[]);
 
-            Download* d = defaultAllocator().allocT!Download();
+            Download* d = alloc!Download();
             d.owner = this;
             d.stream = stream;
             d.file = f;
@@ -548,7 +548,7 @@ private:
             }
         }
 
-        Upload* u = defaultAllocator().allocT!Upload();
+        Upload* u = alloc!Upload();
         u.owner = this;
         u.stream = stream;
         u.error = status;
@@ -807,7 +807,7 @@ private:
             xml ~= "</D:href></D:locktoken></D:activelock></D:lockdiscovery></D:prop>";
 
             HTTPMessage response = create_response(request.http_version, 200, StringLit!"application/xml; charset=utf-8", xml[]);
-            response.headers ~= HTTPParam(StringLit!"Lock-Token", tconcat("<", token[], ">").makeString(defaultAllocator()));
+            response.headers ~= HTTPParam(StringLit!"Lock-Token", tconcat("<", token[], ">").make_string());
             add_cors(response, request);
             stream.write(response.format_message()[]);
             return 0;
@@ -884,7 +884,7 @@ private:
     {
         HTTPMessage response = create_response(ver, 301, String(), null);
         response.flags = HTTPFlags.ForceBody; // a 301 without Content-Length reads as body-until-close
-        response.headers ~= HTTPParam(StringLit!"Location", tconcat(request.request_target[], "/").makeString(defaultAllocator()));
+        response.headers ~= HTTPParam(StringLit!"Location", tconcat(request.request_target[], "/").make_string());
         add_cors(response, request);
         stream.write(response.format_message()[]);
         return 0;
@@ -896,7 +896,7 @@ private:
         if (u.stream)
             u.stream.unsubscribe(&u.stream_state);
         _uploads.removeFirstSwapLast(u);
-        defaultAllocator().freeT(u);
+        free(u);
     }
 
     void finish_download(Download* d)
@@ -906,7 +906,7 @@ private:
         if (d.stream)
             d.stream.unsubscribe(&d.stream_state);
         _downloads.removeFirstSwapLast(d);
-        defaultAllocator().freeT(d);
+        free(d);
     }
 
     static struct Upload

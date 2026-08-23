@@ -216,8 +216,8 @@ private:
             if (component.id[] == id)
                 return component;
         }
-        Component component = g_app.allocator.allocT!Component(id.makeString(g_app.allocator));
-        component.template_ = template_.makeString(g_app.allocator);
+        Component component = alloc!Component(id.make_string());
+        component.template_ = template_.make_string();
         component.parent = parent;
         parent.components ~= component;
         return component;

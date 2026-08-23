@@ -6,7 +6,7 @@ import urt.endian;
 import urt.inet;
 import urt.lifetime;
 import urt.log;
-import urt.mem.allocator;
+import urt.mem;
 import urt.meta;
 import urt.result;
 import urt.si;
@@ -785,10 +785,10 @@ private:
         ref IDInfo info = *cast(IDInfo*)response.ptr;
         _active = true;
 
-        firmware_version = info.firmware_version.strlen_trim.makeString(defaultAllocator());
-        model_name = info.model_name.strlen_trim.makeString(defaultAllocator());
-        serial_number = info.serial_number.strlen_trim.makeString(defaultAllocator());
-        software_version = info.software_version.strlen_trim.makeString(defaultAllocator());
+        firmware_version = info.firmware_version.strlen_trim.make_string();
+        model_name = info.model_name.strlen_trim.make_string();
+        serial_number = info.serial_number.strlen_trim.make_string();
+        software_version = info.software_version.strlen_trim.make_string();
 
         size_t taken;
         nom_vpv = cast(uint)info.nom_vpv[].parse_uint(&taken);

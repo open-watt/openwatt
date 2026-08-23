@@ -1,5 +1,6 @@
 module manager.cron;
 
+import urt.mem;
 import urt.mem.temp : tconcat;
 import urt.result : StringResult;
 import urt.string;
@@ -52,7 +53,7 @@ nothrow @nogc:
         if (!e)
             return e;
 
-        TimeSub s = g_app.allocator.allocT!TimeSub();
+        TimeSub s = alloc!TimeSub();
         s.sink = sink;
         s.kind = spec.kind;
         s.schedule = spec.schedule;
@@ -70,7 +71,7 @@ nothrow @nogc:
     {
         TimeSub s = cast(TimeSub)handle;
         s.disarm();
-        g_app.allocator.freeT(s);
+        free(s);
     }
 
     override SysTime next_run(SignalSub handle) const

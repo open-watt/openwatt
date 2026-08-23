@@ -64,7 +64,7 @@ nothrow @nogc:
     {
         if (_kind[] == value)
             return;
-        _kind = value.makeString(g_app.allocator);
+        _kind = value.make_string();
         mark_set!(typeof(this), "kind")();
         restart();
     }
@@ -74,7 +74,7 @@ nothrow @nogc:
     {
         if (_vin[] == value)
             return;
-        _vin = value.makeString(g_app.allocator);
+        _vin = value.make_string();
         mark_set!(typeof(this), "vin")();
         restart();
     }
@@ -123,7 +123,7 @@ nothrow @nogc:
         Component c = resolve_component_path(value);
         if (c is null)
             return tconcat("device not found: ", value);
-        _device_path = value.makeString(g_app.allocator);
+        _device_path = value.make_string();
         _device = c;
         mark_set!(typeof(this), [ "device", "kind" ])();
         restart();
@@ -144,7 +144,7 @@ nothrow @nogc:
         Component c = resolve_component_path(value);
         if (c is null)
             return tconcat("meter not found: ", value);
-        _meter_path = value.makeString(g_app.allocator);
+        _meter_path = value.make_string();
         _meter = c;
         mark_set!(typeof(this), "meter")();
         restart();
@@ -179,7 +179,7 @@ nothrow @nogc:
         Component c = resolve_component_path(value);
         if (c is null)
             return tconcat("state not found: ", value);
-        _state_path = value.makeString(g_app.allocator);
+        _state_path = value.make_string();
         _state = c;
         mark_set!(typeof(this), "state")();
         restart();
@@ -233,14 +233,14 @@ private:
                 continue;
             if (binding.circuit[] == circuit)
                 return;
-            binding.circuit = circuit.makeString(g_app.allocator);
+            binding.circuit = circuit.make_string();
             restart();
             return;
         }
 
         PortCircuitBinding binding;
-        binding.port = port.makeString(g_app.allocator);
-        binding.circuit = circuit.makeString(g_app.allocator);
+        binding.port = port.make_string();
+        binding.circuit = circuit.make_string();
         _port_bindings ~= binding.move;
         restart();
     }

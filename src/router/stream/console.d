@@ -2,7 +2,7 @@ module router.stream.console;
 
 import urt.io;
 import urt.log;
-import urt.mem.allocator;
+import urt.mem;
 import urt.string : StringLit;
 import urt.string;
 import urt.string.ansi;

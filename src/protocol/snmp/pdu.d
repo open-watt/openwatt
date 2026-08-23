@@ -2,7 +2,7 @@ module protocol.snmp.pdu;
 
 import urt.array;
 import urt.lifetime : move;
-import urt.mem.allocator;
+import urt.mem;
 import urt.string;
 
 import protocol.snmp.asn1;
@@ -308,7 +308,7 @@ bool decode_message(const(ubyte)[] data, out SNMPMessage msg)
     const(ubyte)[] community_bytes;
     if (!body_.read_value(UniversalTag.octet_string, community_bytes))
         return false;
-    msg.community = (cast(const(char)[])community_bytes).makeString(defaultAllocator());
+    msg.community = (cast(const(char)[])community_bytes).make_string();
 
     return decode_pdu(body_, msg.pdu);
 }

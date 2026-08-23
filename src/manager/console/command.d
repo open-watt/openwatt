@@ -272,7 +272,7 @@ nothrow @nogc:
                         break;
                     }
                     const(Expression)* node = _pending_subs[_sub_index];
-                    _waiting_on = session._console._allocator.allocT!Context(session, root_scope, script_scope, node.cmd_list(), locals, FrameKind.function_);
+                    _waiting_on = alloc!Context(session, root_scope, script_scope, node.cmd_list(), locals, FrameKind.function_);
                     _state = State.awaiting_sub;
                     goto case State.awaiting_sub;
 
@@ -281,7 +281,7 @@ nothrow @nogc:
                     if (cs < CommandCompletionState.finished)
                         return cs;
                     _sub_results[_pending_subs[_sub_index]] = _waiting_on.result.move;
-                    session._console._allocator.freeT(_waiting_on);
+                    free(_waiting_on);
                     _waiting_on = null;
                     ++_sub_index;
                     _state = State.resolving_subs;
@@ -305,7 +305,7 @@ nothrow @nogc:
                     if (cs < CommandCompletionState.finished)
                         return cs;
                     result = _waiting_on.result.move;
-                    session._console._allocator.freeT(_waiting_on);
+                    free(_waiting_on);
                     _waiting_on = null;
                     ++_stmt;
                     _state = State.next_stmt;
@@ -478,7 +478,7 @@ private void run_script(ref Console console, const(char)[] script_text, out Muta
         if (cs >= CommandCompletionState.finished)
         {
             result = cmd.result.move;
-            console._allocator.freeT(cmd);
+            free(cmd);
             cmd = null;
             break;
         }
@@ -502,14 +502,13 @@ private void run_script(ref Console console, const(char)[] script_text, out Muta
 
 unittest
 {
-    import urt.mem.allocator : Mallocator;
 
     // Bare Console — no Application — exercises only the script primitives
     // (:set, :put, :if, :while, :run, :return, :eval, :help). Avoids
     // pulling in module pre_init that touches platform NPCap on Windows.
     // Heap-allocated and leaked: Console registers itself in a __gshared list
     // and never removes itself, so the address must outlive the test.
-    Console* console = Mallocator.instance.allocT!Console(null, StringLit!"test.command", Mallocator.instance);
+    Console* console = alloc!Console(null, StringLit!"test.command");
 
     MutableString!0 out_;
     Variant r;

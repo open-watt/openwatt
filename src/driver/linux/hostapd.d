@@ -176,7 +176,7 @@ nothrow @nogc:
 
     StringResult open(const(char)[] adapter)
     {
-        _iface = adapter.makeString(defaultAllocator);
+        _iface = adapter.make_string();
         return hostapd_open(_hostapd, adapter);
     }
 

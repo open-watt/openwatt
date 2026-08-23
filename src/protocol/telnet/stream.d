@@ -2,7 +2,7 @@ module protocol.telnet.stream;
 
 import urt.array;
 import urt.log;
-import urt.mem.allocator;
+import urt.mem;
 import urt.string;
 
 import manager.base;

@@ -2,7 +2,7 @@ module apps.energy.allocator;
 
 import urt.array;
 import urt.lifetime;
-import urt.mem : defaultAllocator;
+import urt.mem;
 import urt.mem.temp : tconcat;
 import urt.si.quantity : Amps, VarQuantity, Watts;
 import urt.string;
@@ -669,17 +669,17 @@ void record_decision(Device energy_device, Policy p, const(char)[] reason, float
     energy_device.set_element(tconcat(base, ".reason"), reason, now);
     energy_device.set_element(tconcat(base, ".target"), p.target, now);
     energy_device.set_element(tconcat(base, ".via"),
-        (ctl !is null && ctl.partner !is null ? ctl.partner.name[] : "").makeString(defaultAllocator()), now);
+        (ctl !is null && ctl.partner !is null ? ctl.partner.name[] : "").make_string(), now);
     energy_device.set_element(tconcat(base, ".device"),
-        (ctl !is null && ctl.device !is null ? ctl.device.id[] : "").makeString(defaultAllocator()), now);
+        (ctl !is null && ctl.device !is null ? ctl.device.id[] : "").make_string(), now);
     if (commanded == commanded)
         energy_device.set_element(tconcat(base, ".commanded"), commanded, now);
     if (ctx !is null && ctx.path.target_bus !is null)
     {
         energy_device.set_element(tconcat(base, ".target_bus"),
-            ctx.path.target_bus.id[].makeString(defaultAllocator()), now);
+            ctx.path.target_bus.id, now);
         energy_device.set_element(tconcat(base, ".source_bus"),
-            (ctx.path.source_bus ? ctx.path.source_bus.id[] : "").makeString(defaultAllocator()), now);
+            (ctx.path.source_bus ? ctx.path.source_bus.id[] : "").make_string(), now);
         energy_device.set_element(tconcat(base, ".path_complete"), ctx.path.complete, now);
         energy_device.set_element(tconcat(base, ".path_headroom_amps"), ctx.path.headroom_amps, now);
         energy_device.set_element(tconcat(base, ".path_headroom_watts"), ctx.path.headroom_watts, now);
@@ -689,6 +689,6 @@ void record_decision(Device energy_device, Policy p, const(char)[] reason, float
         energy_device.set_element(tconcat(base, ".committed_watts"), ctx.committed_watts, now);
         energy_device.set_element(tconcat(base, ".path_voltage"), ctx.path.voltage, now);
         energy_device.set_element(tconcat(base, ".limiting_link"),
-            (ctx.path.limiting_link ? ctx.path.limiting_link.id[] : "").makeString(defaultAllocator()), now);
+            (ctx.path.limiting_link ? ctx.path.limiting_link.id[] : "").make_string(), now);
     }
 }

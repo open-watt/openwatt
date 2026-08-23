@@ -5,7 +5,7 @@ import urt.endian;
 import urt.log;
 import urt.map;
 import urt.mem;
-import urt.mem.allocator;
+import urt.mem;
 import urt.meta.nullable;
 import urt.string;
 import urt.time;
@@ -97,7 +97,7 @@ nothrow @nogc:
                 else
                     pp = &(*pp).next;
             }
-            defaultAllocator().freeArray(base[0 .. _tracking_batch_size]);
+            free(base[0 .. _tracking_batch_size]);
         }
     }
 
@@ -842,7 +842,7 @@ private:
         }
 
         // batch-allocate
-        TagTracking[] batch = defaultAllocator().allocArray!TagTracking(_tracking_batch_size);
+        TagTracking[] batch = alloc_array!TagTracking(_tracking_batch_size);
         assert(batch.ptr, "Out of memory");
         foreach (i; 0 .. _tracking_batch_size)
         {

@@ -7,7 +7,7 @@ import urt.inet;
 import urt.kvp;
 import urt.lifetime;
 import urt.log;
-import urt.mem.allocator;
+import urt.mem;
 import urt.string;
 import urt.string.format : tconcat, tstring;
 import urt.time;
@@ -118,7 +118,7 @@ nothrow @nogc:
         => _allowed_origin[];
     void allowed_origin(const(char)[] value)
     {
-        _allowed_origin = value.makeString(g_app.allocator);
+        _allowed_origin = value.make_string();
         mark_set!(typeof(this), "allowed-origin")();
     }
 
@@ -172,7 +172,7 @@ nothrow @nogc:
             if ((h.methods & methods) && h.uri_prefix[] == uri_prefix[])
                 return false; // a method already claimed here; overlapping prefixes are fine (longest match wins)
         }
-        _handlers ~= Handler(methods, uri_prefix.makeString(defaultAllocator), request_handler);
+        _handlers ~= Handler(methods, uri_prefix.make_string(), request_handler);
         return true;
     }
 
@@ -183,7 +183,7 @@ nothrow @nogc:
             if ((h.methods & methods) && h.uri_prefix[] == uri_prefix[])
                 return false; // a method already claimed here; overlapping prefixes are fine (longest match wins)
         }
-        _handlers ~= Handler(methods, uri_prefix.makeString(defaultAllocator), begin_handler);
+        _handlers ~= Handler(methods, uri_prefix.make_string(), begin_handler);
         return true;
     }
 
@@ -352,7 +352,7 @@ protected:
         {
             Session* s = _sessions.popBack();
             s.close();
-            defaultAllocator().freeT(s);
+            free(s);
         }
 
         return CompletionStatus.complete;
@@ -365,7 +365,7 @@ protected:
             int result = _sessions[i].update();
             if (result != 0)
             {
-                defaultAllocator().freeT(_sessions[i]);
+                free(_sessions[i]);
                 _sessions.remove(i);
             }
             else
@@ -458,13 +458,13 @@ private:
         RequestHandler redirect;
         static if (has_tls)
             redirect = (_https_redirect && _tls_port != 0) ? &http_redirect_handler : null;
-        _sessions.emplaceBack(defaultAllocator().allocT!Session(this, stream, redirect));
+        _sessions.emplaceBack(alloc!Session(this, stream, redirect));
     }
 
     static if (has_tls)
     void accept_tls_connection(Stream stream, ref const InetAddress remote, void*)
     {
-        _sessions.emplaceBack(defaultAllocator().allocT!Session(this, stream, null));
+        _sessions.emplaceBack(alloc!Session(this, stream, null));
     }
 
     static if (has_tls)
@@ -617,7 +617,7 @@ private:
         response.http_version = request.http_version;
         response.status_code = 301;
         response.reason = StringLit!"Moved Permanently";
-        response.headers ~= HTTPParam(StringLit!"Location", location.makeString(defaultAllocator));
+        response.headers ~= HTTPParam(StringLit!"Location", location.make_string());
         response.headers ~= HTTPParam(StringLit!"Content-Length", StringLit!"0");
         stream.write(response.format_message()[]);
         return 1;

@@ -103,23 +103,23 @@ void reconcile_battery_stores(ref Array!BatteryStoreContribution contributions, 
 
 unittest
 {
-    import urt.mem.allocator : defaultAllocator;
+    import urt.mem;
     import urt.si.quantity : Quantity;
-    import urt.string : StringLit, makeString;
+    import urt.string : StringLit, make_string;
     import manager.series : DataFormat, SeriesKind, ValueType, register_format;
     import urt.variant : Variant;
 
     static Component component(const(char)[] id, const(char)[] template_)
     {
-        Component c = defaultAllocator.allocT!Component(id.makeString(defaultAllocator));
-        c.template_ = template_.makeString(defaultAllocator);
+        Component c = alloc!Component(id.make_string());
+        c.template_ = template_.make_string();
         return c;
     }
 
     static void add_num(Component c, const(char)[] id, float value, ScaledUnit unit)
     {
-        Element* e = defaultAllocator.allocT!Element();
-        e.id = id.makeString(defaultAllocator);
+        Element* e = alloc!Element();
+        e.id = id.make_string();
         e.format = register_format(DataFormat(ValueType.f64, SeriesKind.held, unit));
         e.value = Variant(Quantity!double(value, unit));
         c.elements ~= e;

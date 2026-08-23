@@ -4,7 +4,7 @@ import urt.array;
 import urt.lifetime;
 import urt.log;
 import urt.map;
-import urt.mem.allocator;
+import urt.mem;
 import urt.string;
 import urt.time;
 
@@ -136,7 +136,7 @@ nothrow @nogc:
                     return c.find_or_create_element(name, format);
             }
 
-            Component c = g_app.allocator.allocT!Component(id.makeString(defaultAllocator()));
+            Component c = alloc!Component(id.make_string());
             c.parent = this;
             components ~= c;
             return c.find_or_create_element(name, format);
@@ -152,11 +152,11 @@ nothrow @nogc:
             }
         }
 
-        Element* e = g_app.allocator.allocT!Element();
+        Element* e = alloc!Element();
         e.format = format;
         e.parent = this;
         elements ~= e;
-        e.id = id.makeString(defaultAllocator());
+        e.id = id.make_string();
         g_app.notify_element_created(e);
         return e;
     }

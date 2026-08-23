@@ -46,7 +46,7 @@ import urt.crc;
 import urt.endian;
 import urt.lifetime;
 import urt.log;
-import urt.mem.allocator;
+import urt.mem;
 import urt.mem.temp;
 import urt.result;
 import urt.string;
@@ -139,13 +139,13 @@ nothrow @nogc:
         retransmits(10);
         ack_timeout(500);
 
-        _buf = defaultAllocator.allocT!Buffers();
+        _buf = alloc!Buffers();
     }
 
     ~this()
     {
         if (_buf)
-            defaultAllocator.freeT(_buf);
+            free(_buf);
     }
 
     // Properties...
@@ -366,7 +366,7 @@ protected:
         while (_free_messages)
         {
             Message* next = _free_messages.next;
-            defaultAllocator.freeT(_free_messages);
+            free(_free_messages);
             _free_messages = next;
         }
 
@@ -1082,7 +1082,7 @@ private:
         if (msg)
             _free_messages = msg.next;
         else
-            msg = defaultAllocator.allocT!Message();
+            msg = alloc!Message();
         msg.next = null;
         msg.enqueue_time = MonoTime();
         msg.send_time = MonoTime();
@@ -1549,7 +1549,7 @@ private:
             if (trunk)
                 trunk.release_message(_channel.in_flight);
             else
-                defaultAllocator.freeT(_channel.in_flight);
+                free(_channel.in_flight);
             _channel.in_flight = next;
         }
         while (_channel.queue)
@@ -1558,7 +1558,7 @@ private:
             if (trunk)
                 trunk.release_message(_channel.queue);
             else
-                defaultAllocator.freeT(_channel.queue);
+                free(_channel.queue);
             _channel.queue = next;
         }
         _channel = Channel();

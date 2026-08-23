@@ -7,7 +7,7 @@ import urt.hash : fnv1;
 import urt.lifetime : move;
 import urt.log;
 import urt.map;
-import urt.mem.allocator;
+import urt.mem;
 import urt.mem.temp : tconcat;
 import urt.meta.enuminfo : make_enum_info, VoidEnumInfo;
 import urt.si.quantity : VarQuantity;
@@ -95,7 +95,7 @@ nothrow @nogc:
         {
             const(char)[] normalised = normalise_prefix(prefix);
             if (!normalised.empty)
-                _prefixes ~= normalised.makeString(defaultAllocator());
+                _prefixes ~= normalised.make_string();
         }
         if (publisher)
             resume(publisher);
@@ -375,11 +375,11 @@ private:
         Element* state = record.device.find_or_create_element(path, state_format);
         Component ha_component = record.device.find_component("ha");
         if (ha_component && ha_component.name.empty)
-            ha_component.name = "Home Assistant".makeString(defaultAllocator());
+            ha_component.name = StringLit!"Home Assistant";
 
-        state.name = (entity_name.empty ? object_id : entity_name).makeString(defaultAllocator());
-        state.desc = device_class.makeString(defaultAllocator());
-        state.display_unit = unit.makeString(defaultAllocator());
+        state.name = (entity_name.empty ? object_id : entity_name).make_string();
+        state.desc = device_class.make_string();
+        state.display_unit = unit.make_string();
         state.sampling_mode = SamplingMode.report;
         if (select_info)
         {
@@ -391,14 +391,14 @@ private:
         }
 
         HAEntity* entity = &_entities.pushBack();
-        entity.config_topic = config_topic.makeString(defaultAllocator());
-        entity.component_key = component_key.makeString(defaultAllocator());
-        entity.domain = domain.makeString(defaultAllocator());
-        entity.object_id = object_id.makeString(defaultAllocator());
+        entity.config_topic = config_topic.make_string();
+        entity.component_key = component_key.make_string();
+        entity.domain = domain.make_string();
+        entity.object_id = object_id.make_string();
         entity.state_topic = state_topic.move;
         entity.command_topic = command_topic.move;
-        entity.value_template = json_string(config, "value_template", "val_tpl").makeString(defaultAllocator());
-        entity.command_template = json_string(config, "command_template", "cmd_tpl").makeString(defaultAllocator());
+        entity.value_template = json_string(config, "value_template", "val_tpl").make_string();
+        entity.command_template = json_string(config, "command_template", "cmd_tpl").make_string();
         entity.value_template_valid = compile_jinja_template(entity.value_template[],
                                                              entity.value_expression_source,
                                                              entity.value_expression);
@@ -406,10 +406,10 @@ private:
                                                                entity.command_expression_source,
                                                                entity.command_expression);
         entity.uses_value_json = entity.value_expression_source[].contains("$value_json");
-        entity.payload_on = state_payload(config, true).makeString(defaultAllocator());
-        entity.payload_off = state_payload(config, false).makeString(defaultAllocator());
-        entity.unit = unit.makeString(defaultAllocator());
-        entity.state_class = state_class.makeString(defaultAllocator());
+        entity.payload_on = state_payload(config, true).make_string();
+        entity.payload_off = state_payload(config, false).make_string();
+        entity.unit = unit.make_string();
+        entity.state_class = state_class.make_string();
         entity.select_info = select_info;
         entity.state = state;
         entity.device = record.device;
@@ -445,7 +445,7 @@ private:
                 const(char)[] candidate = tconcat(base_id[], suffix);
                 if (!(candidate in g_app.devices))
                 {
-                    id = candidate.makeString(defaultAllocator());
+                    id = candidate.make_string();
                     break;
                 }
             }
@@ -453,11 +453,11 @@ private:
         if (id.empty)
             return null;
 
-        Device device = g_app.allocator.allocT!Device(id.move);
+        Device device = alloc!Device(id.move);
         g_app.devices.insert(device.id[], device);
 
         HADevice* record = &_devices.pushBack();
-        record.identity = identity.makeString(defaultAllocator());
+        record.identity = identity.make_string();
         record.device = device;
         return record;
     }
@@ -476,7 +476,7 @@ private:
             base_id[].startsWith(device_id[]) &&
             base_id[device_id.length] == '_')
         {
-            String local_id = base_id[device_id.length + 1 .. $].makeString(defaultAllocator());
+            String local_id = base_id[device_id.length + 1 .. $].make_string();
             base_id = local_id.move;
         }
 
@@ -498,7 +498,7 @@ private:
             }
             if (!occupied)
             {
-                id = candidate.makeString(defaultAllocator());
+                id = candidate.make_string();
                 break;
             }
         }
@@ -506,7 +506,7 @@ private:
             return null;
 
         HAEntityId* entry = &_entity_ids.pushBack();
-        entry.identity = identity.makeString(defaultAllocator());
+        entry.identity = identity.make_string();
         entry.id = id.move;
         entry.device = device;
         return entry.id[];
@@ -518,7 +518,7 @@ private:
         const(char)[] name = config ? json_string(*config, "name", null) : null;
         if (name.empty)
             name = identity;
-        device.name = name.makeString(defaultAllocator());
+        device.name = name.make_string();
 
         set_info(device, "name", name, "Device Name");
         if (config)
@@ -532,7 +532,7 @@ private:
         }
         Component info = device.find_component("info");
         if (info)
-            info.template_ = "DeviceInfo".makeString(defaultAllocator());
+            info.template_ = StringLit!"DeviceInfo";
     }
 
     static void set_info(Device device, const(char)[] id, const(char)[] value, const(char)[] name)
@@ -540,7 +540,7 @@ private:
         if (value.empty)
             return;
         Element* element = device.set_element(tconcat("info.", id), value);
-        element.name = name.makeString(defaultAllocator());
+        element.name = name.make_string();
         element.sampling_mode = SamplingMode.constant;
         element.access = Access.read;
     }
@@ -577,14 +577,14 @@ private:
         if (topic.empty)
             return String();
         if (base.empty || topic.findFirst('~') == topic.length)
-            return topic.makeString(defaultAllocator());
+            return topic.make_string();
         if (topic == "~")
-            return base.makeString(defaultAllocator());
+            return base.make_string();
         if (topic.startsWith("~/"))
-            return tconcat(base, topic[1 .. $]).makeString(defaultAllocator());
+            return tconcat(base, topic[1 .. $]).make_string();
         if (topic.length >= 2 && topic[$ - 2 .. $] == "/~")
-            return tconcat(topic[0 .. $ - 1], base).makeString(defaultAllocator());
-        return topic.makeString(defaultAllocator());
+            return tconcat(topic[0 .. $ - 1], base).make_string();
+        return topic.make_string();
     }
 
     static const(char)[] state_payload(ref Variant config, bool on)
@@ -792,8 +792,8 @@ private:
     {
         if (_template_locals.empty)
         {
-            _template_locals["value".makeString(defaultAllocator())] = Variant();
-            _template_locals["value_json".makeString(defaultAllocator())] = Variant();
+            _template_locals[StringLit!"value"] = Variant();
+            _template_locals[StringLit!"value_json"] = Variant();
         }
         *_template_locals.get("value") = value;
         *_template_locals.get("value_json") = value_json;
@@ -918,13 +918,13 @@ private:
 
         Component status = device.find_component("status");
         if (status && status.template_.empty)
-            status.template_ = "DeviceStatus".makeString(defaultAllocator());
+            status.template_ = StringLit!"DeviceStatus";
         Component network = device.find_component("status.network");
         if (network && network.template_.empty)
-            network.template_ = "Network".makeString(defaultAllocator());
+            network.template_ = StringLit!"Network";
         Component wifi = device.find_component("status.network.wifi");
         if (wifi && wifi.template_.empty)
-            wifi.template_ = "Wifi".makeString(defaultAllocator());
+            wifi.template_ = StringLit!"Wifi";
 
         target.name = source.name;
         target.desc = source.desc;
@@ -1030,7 +1030,7 @@ unittest
     scope(exit) translated_expression.free_expression();
     assert(translated_source[] == "$select($is_number($value), $to_int($value) / 10, null)");
     Map!(String, Variant) template_locals;
-    String template_value_key = "value".makeString(defaultAllocator());
+    String template_value_key = StringLit!"value";
     template_locals[template_value_key] = Variant("250");
     EvalContext template_context;
     template_context.locals = &template_locals;
@@ -1209,8 +1209,8 @@ version (unittest)
 
         void publish(const(char)[] topic_value, const(ubyte)[] payload_value, MonoTime) nothrow @nogc
         {
-            topic = topic_value.makeString(defaultAllocator());
-            payload = (cast(const(char)[])payload_value).makeString(defaultAllocator());
+            topic = topic_value.make_string();
+            payload = (cast(const(char)[])payload_value).make_string();
         }
     }
 }
@@ -1251,7 +1251,7 @@ String safe_id(const(char)[] value)
         result.erase(-1, 1);
     if (result.empty)
         result ~= "entity";
-    return result[].makeString(defaultAllocator());
+    return result[].make_string();
 }
 
 bool json_number(ref Variant object, const(char)[] key, out double result)

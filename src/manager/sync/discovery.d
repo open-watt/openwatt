@@ -11,7 +11,7 @@ import urt.conv : format_uint;
 import urt.endian;
 import urt.log;
 import urt.map;
-import urt.mem.allocator;
+import urt.mem;
 import urt.meta : AliasSeq;
 import urt.string;
 import urt.time;
@@ -435,9 +435,9 @@ private:
             log.info("node '", a.name, "' appeared via ", station.name[], " (", src, ")");
         }
         if (n.name[] != a.name)
-            n.name = a.name.makeString(defaultAllocator());
+            n.name = a.name.make_string();
         if (n.cluster[] != a.cluster)
-            n.cluster = a.cluster.makeString(defaultAllocator());
+            n.cluster = a.cluster.make_string();
         n.role = a.role;
         n.flags = a.flags;
         n.last_seen = getTime();
@@ -508,12 +508,12 @@ unittest
 
     // link identity survives detach: same mac through two stations must not collapse
     {
-        import urt.mem.allocator : defaultAllocator;
+        import urt.mem;
         import router.iface.bridge : BridgeInterface;
 
-        BridgeInterface s1 = defaultAllocator().allocT!BridgeInterface(CID(1));
-        BridgeInterface s2 = defaultAllocator().allocT!BridgeInterface(CID(2));
-        scope(exit) { defaultAllocator().freeT(s2); defaultAllocator().freeT(s1); }
+        BridgeInterface s1 = alloc!BridgeInterface(CID(1));
+        BridgeInterface s2 = alloc!BridgeInterface(CID(2));
+        scope(exit) { free(s2); free(s1); }
 
         NeighborLink l;
         l.station = s1;

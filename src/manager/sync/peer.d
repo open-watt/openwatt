@@ -5,7 +5,7 @@ import urt.inet;
 import urt.lifetime : move;
 import urt.log;
 import urt.map;
-import urt.mem.allocator;
+import urt.mem;
 import urt.mem.temp : tconcat;
 import urt.meta : AliasSeq;
 import urt.meta.enuminfo : VoidEnumInfo;
@@ -330,7 +330,7 @@ nothrow @nogc:
     {
         _want_logs = !off;
         _want_log_severity = max_severity;
-        _want_log_tag = tag.makeString(defaultAllocator);
+        _want_log_tag = tag.make_string();
         if (_transport && _transport.running)
             encoder_for(_encoder).encode_log_sub(this, max_severity, off, tag);
     }
@@ -343,7 +343,7 @@ nothrow @nogc:
             return;
         }
 
-        _log_tag = tag.makeString(defaultAllocator);
+        _log_tag = tag.make_string();
         LogFilter filter;
         filter.max_severity = max_severity;
         filter.tag_prefix = _log_tag[];
@@ -791,7 +791,7 @@ private:
         if (!transport)
             return false;
 
-        transport.remote_host(tstring(_remote).makeString(defaultAllocator));
+        transport.remote_host(tstring(_remote).make_string());
         transport.remote_port(_remote.port);
         _owned_transport = transport;
         _transport = transport;
@@ -984,8 +984,8 @@ private:
 
 unittest
 {
-    SyncPeer peer = defaultAllocator().allocT!SyncPeer(CID(1));
-    scope(exit) defaultAllocator().freeT(peer);
+    SyncPeer peer = alloc!SyncPeer(CID(1));
+    scope(exit) free(peer);
 
     peer.grant_claim_time_authority();
     assert(peer.time_authority);

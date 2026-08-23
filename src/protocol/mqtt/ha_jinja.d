@@ -1,6 +1,6 @@
 module protocol.mqtt.ha_jinja;
 
-import urt.mem.allocator;
+import urt.mem;
 import urt.string;
 
 import manager.expression : Expression, free_expression, parse_expression;
@@ -23,7 +23,7 @@ bool compile_jinja_template(const(char)[] template_, out String source, out Expr
     MutableString!0 translated;
     if (!translate_jinja_expression(body, translated))
         return false;
-    source = translated[].makeString(defaultAllocator());
+    source = translated[].make_string();
 
     const(char)[] cursor = source[];
     expression = parse_expression(cursor);

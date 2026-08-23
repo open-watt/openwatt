@@ -2,6 +2,7 @@ module manager.binding;
 
 import urt.log;
 import urt.map;
+import urt.mem;
 import urt.mem.temp : tconcat;
 import urt.meta : AliasSeq;
 import urt.result;
@@ -42,7 +43,7 @@ nothrow @nogc:
         mark_set!(typeof(this), "device")();
         if (!_device.empty && _device[] !in g_app.devices)
         {
-            Device d = g_app.allocator.allocT!Device(_device[].makeString(g_app.allocator));
+            Device d = alloc!Device(_device);
             g_app.devices.insert(d.id[], d);
         }
         restart();
@@ -87,8 +88,8 @@ protected:
     {
         if (!value.isString)
             return StringResult(tconcat("Profile parameter '", property, "' must be a string"));
-        String key = property.makeString(g_app.allocator);
-        String val = value.asString().makeString(g_app.allocator);
+        String key = property.make_string();
+        String val = value.asString().make_string();
         _params[key.move] = val.move;
         restart();
         return StringResult.success;

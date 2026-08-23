@@ -4,8 +4,8 @@ import urt.array;
 import urt.lifetime;
 import urt.log;
 import urt.mem;
-import urt.result : Result;
 import urt.mem.temp;
+import urt.result : Result;
 import urt.si.quantity;
 import urt.si.unit : Gigahertz;
 import urt.string;
@@ -281,7 +281,7 @@ nothrow @nogc:
         => _country[];
     final void country(const(char)[] value)
     {
-        _country = value.makeString(defaultAllocator);
+        _country = value.make_string();
         mark_set!(typeof(this), "country")();
     }
 
@@ -450,7 +450,7 @@ nothrow @nogc:
     {
         if (_ssid[] == value)
             return;
-        _ssid = value.makeString(defaultAllocator);
+        _ssid = value.make_string();
         mark_set!(typeof(this), "ssid")();
         restart();
     }

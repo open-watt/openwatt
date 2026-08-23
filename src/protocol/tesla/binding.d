@@ -2,6 +2,7 @@ module protocol.tesla.binding;
 
 import urt.array;
 import urt.log;
+import urt.mem;
 import urt.meta : AliasSeq;
 import urt.meta.enuminfo : enum_info;
 import urt.si;
@@ -153,7 +154,7 @@ protected:
             device = *existing;
         else
         {
-            device = g_app.allocator.allocT!Device(_device);
+            device = alloc!Device(_device);
             g_app.devices.insert(device.id[], device);
         }
 
@@ -252,8 +253,8 @@ private:
         foreach (c; parent.components)
             if (c.id[] == id)
                 return c;
-        Component c = g_app.allocator.allocT!Component(id.makeString(g_app.allocator));
-        c.template_ = template_.makeString(g_app.allocator);
+        Component c = alloc!Component(id.make_string());
+        c.template_ = template_.make_string();
         c.parent = parent;
         parent.components ~= c;
         return c;
@@ -271,9 +272,9 @@ private:
                 return e;
             }
         }
-        Element* e = g_app.allocator.allocT!Element();
+        Element* e = alloc!Element();
         e.parent = parent;
-        e.id = id.makeString(g_app.allocator);
+        e.id = id.make_string();
         e.format = format;
         e.access = access;
         parent.elements ~= e;

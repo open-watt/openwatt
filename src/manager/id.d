@@ -59,7 +59,7 @@ module manager.id;
 
 import urt.array;
 import urt.map;
-import urt.mem.allocator : defaultAllocator;
+import urt.mem;
 import urt.string.string;
 
 import manager.collection : CID;
@@ -201,7 +201,7 @@ nothrow @nogc:
         }
         else
         {
-            String s = new_name.makeString(defaultAllocator);
+            String s = new_name.make_string();
             _slot_names[][id] = s;
             _names.insert(s.move, id);
         }
@@ -334,7 +334,7 @@ private:
         }
         uint id = cast(uint)_slots.length;
         _slots ~= 0;
-        String s = name.makeString(defaultAllocator);
+        String s = name.make_string();
         _slot_names ~= s;
         _names.insert(s.move, id);
         return id;

@@ -20,7 +20,6 @@ import urt.array;
 import urt.lifetime;
 import urt.log : writeWarning;
 import urt.mem.alloc;
-import urt.mem.allocator : defaultAllocator;
 import urt.si.unit : ScaledUnit;
 import urt.string;
 import urt.time;
@@ -975,7 +974,7 @@ private:
             append_text(v, unix_time_ns(t) / 1000);
         else
         {
-            set_text_register(handle ? handle.move : v.makeString(defaultAllocator()));
+            set_text_register(handle ? handle.move : v.make_string());
             _status &= ~Flags.gap_open;
             mark_dirty();
         }
@@ -1553,7 +1552,7 @@ unittest
     Element tx_b;
     tx_a.format = register_format(f64_held);
     tx_b.format = register_format(f64_held);
-    CommitReceiver receiver = defaultAllocator().allocT!CommitReceiver(tx_a, tx_b);
+    CommitReceiver receiver = alloc!CommitReceiver(tx_a, tx_b);
     tx_a.subscribe(&receiver.receive);
     tx_b.subscribe(&receiver.receive);
 
@@ -1587,7 +1586,7 @@ unittest
     tx_b.unsubscribe(&receiver.receive);
     tx_a.teardown();
     tx_b.teardown();
-    defaultAllocator().freeT(receiver);
+    free(receiver);
 
     // retention=none: latest and last_update track, nothing is stored
     Element n;
@@ -1665,7 +1664,7 @@ unittest
     assert((cast(const(ushort)*)tb.samples)[0] == (cast(const(ushort)*)tb.samples)[2]);
 
     // String ingress stores content; the series retains no handles
-    String src = "second value arriving as a shared handle".makeString(defaultAllocator());
+    String src = "second value arriving as a shared handle".make_string();
     static ushort rc(ref const String s) => (cast(const(ushort)*)s.ptr)[-2] & 0x3FFF;
     assert(rc(src) == 0);
     te.write_sample(src, from_unix_time_ns(4_000));
@@ -1884,7 +1883,7 @@ unittest
     // a String handle is kept, not copied: the element takes a reference and releases it
     Element th_lit;
     th_lit.format = register_format(text_fmt);
-    String shared_value = "a shared handle".makeString(defaultAllocator());
+    String shared_value = "a shared handle".make_string();
     assert(rc(shared_value) == 0);
     th_lit.write_sample(shared_value, from_unix_time_ns(1_000));
     assert(!th_lit.has_history);

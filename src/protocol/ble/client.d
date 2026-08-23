@@ -922,7 +922,7 @@ private:
 
 unittest
 {
-    import urt.mem.allocator;
+    import urt.mem;
 
     // A BLEClient allocated directly (no Application/collection harness),
     // with the transport edge overridden so the test scripts the peer.
@@ -962,8 +962,8 @@ unittest
     enum GUID vendor_svc = UUID!"12345678-9ABC-DEF0-1234-56789ABCDEF0";
     enum GUID vendor_chr = UUID!"0FEDCBA9-8765-4321-0FED-CBA987654321";
 
-    TestClient c = defaultAllocator().allocT!TestClient();
-    scope (exit) defaultAllocator().freeT(c);
+    TestClient c = alloc!TestClient();
+    scope (exit) free(c);
 
     c.on_discovery_done(&c.on_ready);
     c._connected = true; // the engine is driven below the connect machinery

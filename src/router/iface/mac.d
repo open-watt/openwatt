@@ -340,7 +340,7 @@ nothrow @nogc:
         _ttl = ttl;
         _free_list_head = 0;
 
-        _elements = defaultAllocator().allocArray!Entry(min_elements);
+        _elements = alloc_array!Entry(min_elements);
         size_t i = 0;
         for (; i < min_elements - 1; ++i)
             _elements[i].next = cast(ushort)(i + 1);
@@ -352,7 +352,7 @@ nothrow @nogc:
     ~this()
     {
         if (_elements)
-            defaultAllocator().freeArray(_elements);
+            free(_elements);
     }
 
     bool insert(MACAddress mac, ushort vlan, byte port)
@@ -384,7 +384,7 @@ nothrow @nogc:
 
             // expand the allocation
             void[] mem = cast(void[])_elements;
-            mem = defaultAllocator().realloc(mem, min(mem.length * 2, _max_elements * Entry.sizeof));
+            mem = realloc(mem, min(mem.length * 2, _max_elements * Entry.sizeof));
             _elements = cast(Entry[])mem;
             _free_list_head = cast(ushort)numElements;
             for (; numElements < _elements.length - 1; ++numElements)

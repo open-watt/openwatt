@@ -3,7 +3,7 @@ module router.iface.endpoint;
 import urt.array;
 import urt.endian;
 import urt.map;
-import urt.mem.allocator : defaultAllocator;
+import urt.mem;
 import urt.time;
 
 import manager.base;
@@ -139,7 +139,7 @@ void ensure_ether_tap(EthernetStation station)
         if (t._iface.get is station)
             return;
     }
-    EtherTap* tap = defaultAllocator().allocT!EtherTap();
+    EtherTap* tap = alloc!EtherTap();
     tap._iface = station;
     tap.try_subscribe();
     _taps ~= tap;
@@ -155,7 +155,7 @@ EtherEndpoint* ether_open(EthernetStation iface, ushort port, EtherRecvHandler o
     if (cast(bool)remote != (remote_port != 0))
         return null;
 
-    EtherEndpoint* ep = defaultAllocator().allocT!EtherEndpoint();
+    EtherEndpoint* ep = alloc!EtherEndpoint();
     ep._local_port = port ? port : allocate_ephemeral();
     ep._remote = remote;
     ep._remote_port = remote_port;
@@ -315,7 +315,7 @@ void update_ether_endpoints()
         EtherEndpoint* ep = _ether_eps[i];
         if (ep._closing)
         {
-            defaultAllocator().freeT(ep);
+            free(ep);
             _ether_eps.removeSwapLast(i);
         }
     }

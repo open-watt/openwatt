@@ -2,7 +2,7 @@ module protocol.ppp;
 
 import urt.lifetime;
 import urt.map;
-import urt.mem.allocator;
+import urt.mem;
 import urt.meta.nullable;
 import urt.string;
 

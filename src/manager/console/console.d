@@ -114,11 +114,9 @@ nothrow @nogc:
     this() @disable;
     this(this) @disable;
 
-    this(Application appInstance, String identifier, NoGCAllocator allocator, NoGCAllocator tempAllocator = null)
+    this(Application appInstance, String identifier)
     {
         this.appInstance = appInstance;
-        _allocator = allocator;
-        _tempAllocator = tempAllocator ? tempAllocator : allocator;
         _identifier = identifier;
 
         // TODO: this is not threadsafe! creating/destroying console instances should be threadsafe!
@@ -182,7 +180,7 @@ nothrow @nogc:
                 return null;
 
             enum flags = cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary);
-            SessionType session = defaultAllocator().allocT!SessionType(id, flags, this);
+            SessionType session = alloc!SessionType(id, flags, this);
             if (stream)
                 session.stream(stream);
             sessions.add(session);
@@ -215,12 +213,12 @@ nothrow @nogc:
         if (cmds.empty)
             return null;
 
-        Context ctx = _allocator.allocT!Context(session, root, script_scope, source.move, cmds.move);
+        Context ctx = alloc!Context(session, root, script_scope, source.move, cmds.move);
         auto state = ctx.update();
         if (state >= CommandCompletionState.finished)
         {
             result = ctx.result.move;
-            _allocator.freeT(ctx);
+            free(ctx);
             return null;
         }
         return ctx;
@@ -233,12 +231,12 @@ nothrow @nogc:
         if (body_.empty)
             return null;
 
-        Context ctx = _allocator.allocT!Context(session, root, script_scope, body_, &session._session_locals, Context.FrameKind.function_);
+        Context ctx = alloc!Context(session, root, script_scope, body_, &session._session_locals, Context.FrameKind.function_);
         auto state = ctx.update();
         if (state >= CommandCompletionState.finished)
         {
             result = ctx.result.move;
-            _allocator.freeT(ctx);
+            free(ctx);
             return null;
         }
         return ctx;
@@ -268,11 +266,11 @@ nothrow @nogc:
         if (cmds.empty)
             return true;
 
-        Context ctx = _allocator.allocT!Context(session, root, script_scope, source.move, cmds.move);
+        Context ctx = alloc!Context(session, root, script_scope, source.move, cmds.move);
         auto state = ctx.update();
         if (state >= CommandCompletionState.finished)
         {
-            _allocator.freeT(ctx);
+            free(ctx);
             return true;
         }
         session.current_command = ctx;
@@ -463,9 +461,6 @@ nothrow @nogc:
     }
 
 package:
-    NoGCAllocator _allocator;
-    NoGCAllocator _tempAllocator;
-
     String _identifier;
     String _prompt;
 
@@ -669,11 +664,10 @@ __gshared Console* g_console_instances = null;
 
 unittest
 {
-    import urt.mem.allocator : Mallocator;
 
     // Heap-allocated and leaked: Console registers itself in a __gshared list
     // and never removes itself, so the address must outlive the test.
-    Console* console = Mallocator.instance.allocT!Console(null, StringLit!"test.console", Mallocator.instance);
+    Console* console = alloc!Console(null, StringLit!"test.console");
 
     Scope* s = console.create_scope("/system/test");
     assert(console.find_scope_path("/system/test") is s);

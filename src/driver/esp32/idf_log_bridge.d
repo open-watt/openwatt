@@ -11,7 +11,7 @@ version (ESPIDFLogBridge)
     import urt.atomic : atomicLoad, atomicStore, cas, MemoryOrder;
     import urt.driver.esp32.idf_log;
     import urt.log : write_log;
-    import urt.mem.allocator : defaultAllocator;
+    import urt.mem;
     import urt.time;
 
     import manager;
@@ -30,7 +30,7 @@ nothrow @nogc:
 
     override void init()
     {
-        void[] memory = defaultAllocator().alloc(LineAssembler.sizeof * max_sources,
+        void[] memory = alloc(LineAssembler.sizeof * max_sources,
                                                  LineAssembler.alignof);
         if (!memory.ptr)
         {
@@ -61,7 +61,7 @@ nothrow @nogc:
         _open = false;
         if (_lines)
         {
-            defaultAllocator().free((cast(void*)_lines)[0 .. LineAssembler.sizeof * max_sources]);
+            free((cast(void*)_lines)[0 .. LineAssembler.sizeof * max_sources]);
             _lines = null;
         }
     }

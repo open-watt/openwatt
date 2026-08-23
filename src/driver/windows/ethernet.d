@@ -48,7 +48,7 @@ nothrow @nogc:
         => _adapter[];
     final void adapter(const(char)[] value)
     {
-        _adapter = value.makeString(defaultAllocator);
+        _adapter = value.make_string();
         mark_set!(typeof(this), "adapter")();
     }
 
@@ -214,7 +214,7 @@ private:
                 port_add(PortKind.ethernet, tconcat("windows:ethernet:", ev.name), ev.name, ev.name, ModuleName, ev.description);
                 auto iface = Collection!WindowsPcapEthernet().create(iface_name);
                 iface.adapter = ev.name;
-                iface.comment = ev.description.makeString(defaultAllocator);
+                iface.comment = ev.description.make_string();
                 // TODO: we need to set the MAC for the interface to the NIC MAC address...
                 return;
             case removed:

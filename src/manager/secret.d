@@ -7,7 +7,7 @@ import urt.file : file_exists, load_file, save_file;
 import urt.lifetime;
 import urt.log;
 import urt.map;
-import urt.mem.allocator;
+import urt.mem;
 import urt.rand;
 import urt.result;
 import urt.string;
@@ -146,7 +146,7 @@ nothrow @nogc:
                 r.concat(r.length > 0 ? "," : "", s.key);
         }
         // TODO: we should be able to promote MutableString to String!!
-        return r[].makeString(defaultAllocator());
+        return r[].make_string();
     }
     void services(String[] value)
     {
@@ -343,7 +343,7 @@ private:
         // a key file that exists but can't be read must not be overwritten; that would discard an enrolled identity
         if (file_exists(_key_file[]))
         {
-            void[] file = load_file(_key_file[], defaultAllocator());
+            void[] file = load_file(_key_file[]);
             if (!file)
             {
                 log.error("failed to read EC key file '", _key_file[], "'");
@@ -352,7 +352,7 @@ private:
             scope(exit)
             {
                 secure_zero(cast(ubyte[])file);
-                defaultAllocator.free(file);
+                free(file);
             }
             Result r = import_private_key(cast(const(ubyte)[])file, _keypair);
             if (r.failed)

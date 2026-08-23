@@ -751,7 +751,7 @@ bool all_hex(const(char)[] s) pure
 
 unittest
 {
-    import urt.mem.allocator;
+    import urt.mem;
     import manager.element : SampleUpdate;
 
     // with no stream and no CAN interface both transmit paths are inert
@@ -797,8 +797,8 @@ unittest
             o.note_dispatched();
     }
 
-    TestOBD o = defaultAllocator().allocT!TestOBD();
-    scope (exit) defaultAllocator().freeT(o);
+    TestOBD o = alloc!TestOBD();
+    scope (exit) free(o);
     o._elm_state = OBDInterface.ElmState.ready;
     o.prop_element(prop_index!(OBDInterface, "vehicle")).subscribe(&o.on_vehicle);
 

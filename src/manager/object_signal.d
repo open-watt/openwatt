@@ -1,5 +1,6 @@
 module manager.object_signal;
 
+import urt.mem;
 import urt.mem.temp : tconcat;
 import urt.result : StringResult;
 import urt.string;
@@ -57,9 +58,9 @@ nothrow @nogc:
         if (!object)
             return StringResult(tconcat("active object not found: ", uri.body));
 
-        ObjectSignalSub s = g_app.allocator.allocT!ObjectSignalSub();
+        ObjectSignalSub s = alloc!ObjectSignalSub();
         s.sink = sink;
-        s.source = tconcat("object:", uri.body).makeString(g_app.allocator);
+        s.source = tconcat("object:", uri.body).make_string();
         s.object_id = object.id;
         switch (uri_param(uri.query, "state"))
         {
@@ -91,7 +92,7 @@ nothrow @nogc:
                 object.unsubscribe(&s.on_state);
             s.subscribed = false;
         }
-        g_app.allocator.freeT(s);
+        free(s);
     }
 
     override SysTime next_run(SignalSub) const

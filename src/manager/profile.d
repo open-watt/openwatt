@@ -432,41 +432,41 @@ nothrow @nogc:
     ~this()
     {
         if (device_templates)
-            defaultAllocator().freeArray(device_templates);
+            free(device_templates);
         if (component_templates)
-            defaultAllocator().freeArray(component_templates);
+            free(component_templates);
         if (element_templates)
-            defaultAllocator().freeArray(element_templates);
+            free(element_templates);
         if (elements)
-            defaultAllocator().freeArray(elements);
+            free(elements);
         if (lookup_table)
-            defaultAllocator().freeArray(lookup_table);
+            free(lookup_table);
         if (indirections)
-            defaultAllocator().freeArray(indirections);
+            free(indirections);
         if (id_strings)
-            defaultAllocator().freeArray(id_strings);
+            free(id_strings);
         if (name_strings)
-            defaultAllocator().freeArray(name_strings);
+            free(name_strings);
         if (lookup_strings)
-            defaultAllocator().freeArray(lookup_strings);
+            free(lookup_strings);
         if (desc_strings)
-           defaultAllocator().freeArray(desc_strings);
+           free(desc_strings);
         if (expression_strings)
-            defaultAllocator().freeArray(expression_strings);
+            free(expression_strings);
         if (param_strings)
-            defaultAllocator().freeArray(param_strings);
+            free(param_strings);
         foreach (ref b; section_blocks)
             if (b.data)
-                defaultAllocator().free(b.data);
+                free(b.data);
         if (section_blocks)
-            defaultAllocator().freeArray(section_blocks);
+            free(section_blocks);
         foreach (ref b; root_blocks)
             if (b.data)
-                defaultAllocator().free(b.data);
+                free(b.data);
         if (root_blocks)
-            defaultAllocator().freeArray(root_blocks);
+            free(root_blocks);
         if (section_strings)
-            defaultAllocator().freeArray(section_strings);
+            free(section_strings);
     }
 
     inout(DeviceTemplate)* get_model_template(const(char)[] model) inout pure
@@ -653,13 +653,13 @@ nothrow @nogc:
             l.id = hash >> 16;
         }
 
-        defaultAllocator().freeArray(lookup_strings);
+        free(lookup_strings);
         lookup_strings = null;
     }
 
     void drop_description_strings()
     {
-        defaultAllocator().freeArray(desc_strings);
+        free(desc_strings);
         desc_strings = null;
     }
 
@@ -806,8 +806,8 @@ unittest
                 return true;
             }
         }
-        uint tsec = register_profile_section("tsec", defaultAllocator().allocT!TestSections());
-        uint troot = register_profile_root_section("troot", defaultAllocator().allocT!TestRoots());
+        uint tsec = register_profile_section("tsec", alloc!TestSections());
+        uint troot = register_profile_root_section("troot", alloc!TestRoots());
 
         static immutable string conf_text =
             "enum: Mode\n" ~
@@ -892,12 +892,12 @@ unittest
     }
 }
 
-Profile* load_profile(const(char)[] filename, NoGCAllocator allocator = defaultAllocator())
+Profile* load_profile(const(char)[] filename)
 {
     import urt.file;
 
-    void[] file = load_file(filename, allocator);
-    scope (exit) { allocator.free(file); }
+    void[] file = load_file(filename);
+    scope (exit) { free(file); }
     if (!file)
         return null;
 
@@ -918,18 +918,18 @@ Profile* load_profile(const(char)[] filename, NoGCAllocator allocator = defaultA
             break;
         }
     }
-    return parse_profile(cast(const char[])file, name, allocator);
+    return parse_profile(cast(const char[])file, name);
 }
 
-Profile* parse_profile(const(char)[] conf, const(char)[] profile_name = null, NoGCAllocator allocator = defaultAllocator())
+Profile* parse_profile(const(char)[] conf, const(char)[] profile_name = null)
 {
     ConfItem root = parse_config(conf);
-    return parse_profile(root, profile_name, allocator);
+    return parse_profile(root, profile_name);
 }
 
-Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAllocator allocator = defaultAllocator())
+Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null)
 {
-    Profile* profile = allocator.allocT!Profile();
+    Profile* profile = alloc!Profile();
 
     // first we need to count up all the memory...
     size_t item_count = 0;
@@ -980,7 +980,7 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
             qualified[profile_name.length] = '.';
             qualified[profile_name.length + 1 .. qlen] = enum_name[];
             const(VoidEnumInfo)* canonical = register_enum_info(qualified[0 .. qlen], enum_info);
-            profile.enum_templates.insert(enum_name.makeString(allocator), canonical);
+            profile.enum_templates.insert(enum_name.make_string(), canonical);
             break;
 
         case "parameters":
@@ -1190,32 +1190,32 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
 
     // allocate the buffers
     // TODO: aggregate the allocations into one big buffer?
-    profile.device_templates = allocator.allocArray!DeviceTemplate(num_device_templates);
-    profile.component_templates = allocator.allocArray!ComponentTemplate(num_component_templates);
-    profile.element_templates = allocator.allocArray!ElementTemplate(num_element_templates);
-    profile.elements = allocator.allocArray!ElementDesc(item_count);
-    profile.lookup_table = allocator.allocArray!(Profile.Lookup)(item_count);
-    profile.indirections = allocator.allocArray!ushort(num_indirections);
+    profile.device_templates = alloc_array!DeviceTemplate(num_device_templates);
+    profile.component_templates = alloc_array!ComponentTemplate(num_component_templates);
+    profile.element_templates = alloc_array!ElementTemplate(num_element_templates);
+    profile.elements = alloc_array!ElementDesc(item_count);
+    profile.lookup_table = alloc_array!(Profile.Lookup)(item_count);
+    profile.indirections = alloc_array!ushort(num_indirections);
     if (id_string_length)
-        profile.id_strings = allocator.allocArray!char(2 + id_string_length);
+        profile.id_strings = alloc_array!char(2 + id_string_length);
     if (name_string_length)
-        profile.name_strings = allocator.allocArray!char(2 + name_string_length);
+        profile.name_strings = alloc_array!char(2 + name_string_length);
     if (lookup_string_len)
-        profile.lookup_strings = allocator.allocArray!char(2 + lookup_string_len);
+        profile.lookup_strings = alloc_array!char(2 + lookup_string_len);
     if (expression_string_len)
-        profile.expression_strings = allocator.allocArray!char(2 + expression_string_len);
+        profile.expression_strings = alloc_array!char(2 + expression_string_len);
     if (desc_string_len)
-        profile.desc_strings = allocator.allocArray!char(2 + desc_string_len);
+        profile.desc_strings = alloc_array!char(2 + desc_string_len);
     if (param_string_len)
-        profile.param_strings = allocator.allocArray!char(2 + param_string_len);
+        profile.param_strings = alloc_array!char(2 + param_string_len);
 
     size_t active_sections = 0;
     foreach (n; section_counts)
         if (n)
             ++active_sections;
-    profile.section_blocks = allocator.allocArray!(Profile.SectionBlock)(active_sections);
+    profile.section_blocks = alloc_array!(Profile.SectionBlock)(active_sections);
     if (section_size.string_bytes)
-        profile.section_strings = allocator.allocArray!char(2 + section_size.string_bytes);
+        profile.section_strings = alloc_array!char(2 + section_size.string_bytes);
     {
         size_t sb = 0;
         foreach (ref s; g_profile_sections)
@@ -1224,7 +1224,7 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
             if (!n)
                 continue;
             uint esz = s.handler.element_size(s.kind);
-            profile.section_blocks[sb++] = Profile.SectionBlock(s.kind, cast(ushort)esz, n, allocator.allocArray!ubyte(n * esz));
+            profile.section_blocks[sb++] = Profile.SectionBlock(s.kind, cast(ushort)esz, n, alloc_array!ubyte(n * esz));
         }
     }
 
@@ -1232,14 +1232,14 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
     foreach (n; root_sizes)
         if (n)
             ++active_roots;
-    profile.root_blocks = allocator.allocArray!(Profile.RootBlock)(active_roots);
+    profile.root_blocks = alloc_array!(Profile.RootBlock)(active_roots);
     {
         size_t rb = 0;
         foreach (i, ref s; g_profile_root_sections)
         {
             uint n = root_sizes[i];
             if (n)
-                profile.root_blocks[rb++] = Profile.RootBlock(s.kind, allocator.allocArray!ubyte(n));
+                profile.root_blocks[rb++] = Profile.RootBlock(s.kind, alloc_array!ubyte(n));
         }
     }
 

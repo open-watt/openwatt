@@ -90,7 +90,7 @@ nothrow @nogc:
     {
         if (_wiphy_name[] == value)
             return;
-        _wiphy_name = value.makeString(defaultAllocator);
+        _wiphy_name = value.make_string();
         _wiphy_index = uint.max;
         mark_set!(typeof(this), "wiphy")();
         restart();
@@ -341,7 +341,7 @@ protected:
 
             if (primary.ifindex != 0)
             {
-                _netdev = primary.name_s.makeString(defaultAllocator);
+                _netdev = primary.name_s.make_string();
                 _netdev_created = false;
             }
             else
@@ -352,7 +352,7 @@ protected:
                     _startup_block = "failed to create station VIF";
                     return CompletionStatus.continue_;
                 }
-                _netdev = name.makeString(defaultAllocator);
+                _netdev = name.make_string();
                 _netdev_created = true;
             }
             mark_set!(typeof(this), "netdev")();
@@ -2280,7 +2280,7 @@ nothrow @nogc:
             session.write_line("no wifi radio found");
             return null;
         }
-        return session.allocator.allocT!WifiScanView(session, r);
+        return alloc!WifiScanView(session, r);
     }
 
 private:
@@ -2328,13 +2328,13 @@ private:
                 auto radio = Collection!LinuxWifiRadio().create(tconcat(base, "-radio"), ObjectFlags.dynamic);
                 radio.wiphy = name;
                 if (description.length > 0)
-                    radio.comment = description.makeString(defaultAllocator);
+                    radio.comment = description.make_string();
 
                 auto wlan = Collection!LinuxWlan().create(base, ObjectFlags.dynamic);
                 wlan.radio = radio;
             }
 
-            os_buf ~= name.makeString(defaultAllocator);
+            os_buf ~= name.make_string();
         });
 
         Array!LinuxWifiRadio gone;

@@ -1,7 +1,7 @@
 module protocol.mqtt;
 
+import urt.mem;
 import urt.meta.nullable;
-import urt.mem.allocator;
 import urt.string;
 
 import manager;
@@ -289,7 +289,7 @@ unittest
     import manager.sample : desc_by_index;
     import manager.series : ValueType;
 
-    MQTTModule module_ = defaultAllocator().allocT!MQTTModule(null);
+    MQTTModule module_ = alloc!MQTTModule(null);
     register_profile_handlers(module_);
 
     static immutable string conf =

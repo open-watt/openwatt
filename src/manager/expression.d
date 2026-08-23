@@ -6,8 +6,8 @@ import urt.log;
 import urt.map;
 import urt.mem;
 import urt.mem.temp : tconcat;
-import urt.si.unit;
 import urt.si.quantity;
+import urt.si.unit;
 import urt.string;
 
 public import urt.variant;
@@ -147,7 +147,7 @@ nothrow @nogc:
     ~this() pure
     {
         if (p && --(cast(Payload*)p).refcount == 0)
-            defaultAllocator().freeT(cast(Payload*)p);
+            free(cast(Payload*)p);
     }
 
     void opAssign(typeof(null))
@@ -155,7 +155,7 @@ nothrow @nogc:
         if (p)
         {
             if (--(cast(Payload*)p).refcount == 0)
-                defaultAllocator().freeT(cast(Payload*)p);
+                free(cast(Payload*)p);
             p = null;
         }
     }
@@ -167,7 +167,7 @@ nothrow @nogc:
         if (rhs.p)
             ++(cast(Payload*)rhs.p).refcount;
         if (p && --(cast(Payload*)p).refcount == 0)
-            defaultAllocator().freeT(cast(Payload*)p);
+            free(cast(Payload*)p);
         p = cast(Payload*)rhs.p;
     }
 
@@ -200,7 +200,7 @@ private:
 Script make_script(const(char)[] source_text)
 {
     Script b;
-    b.p = defaultAllocator().allocT!(Script.Payload)();
+    b.p = alloc!(Script.Payload)();
     b.p.refcount = 1;
     b.p.source ~= source_text;
     const(char)[] cursor = b.p.source[];
@@ -749,11 +749,11 @@ void skip_whitespace_and_newlines(ref const(char)[] text)
 }
 
 Expression* alloc_expression(Args...)(auto ref Args args)
-    => defaultAllocator().allocT!Expression(forward!args);
+    => alloc!Expression(forward!args);
 
 void free_expression(Expression* exp)
 {
-    defaultAllocator().freeT(exp);
+    free(exp);
 }
 
 void free_script_command(ref ScriptCommand command)

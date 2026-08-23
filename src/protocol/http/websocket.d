@@ -8,7 +8,7 @@ import urt.inet;
 import urt.lifetime;
 import urt.log;
 import urt.mem : memmove;
-import urt.mem.allocator;
+import urt.mem;
 import urt.rand;
 import urt.string;
 import urt.string.format : tconcat;
@@ -106,11 +106,11 @@ nothrow @nogc:
         if (url.host.empty)
             return "host cannot be empty";
 
-        auto r = _conn.remote(url.host.makeString(defaultAllocator));
+        auto r = _conn.remote(url.host.make_string());
         if (r.failed)
             return r.message;
         _tls = tls;
-        _resource = url.path.makeString(defaultAllocator);
+        _resource = url.path.make_string();
         _stream = null;
         mark_set!(typeof(this), [ "remote", "stream" ])();
         restart();
@@ -169,13 +169,13 @@ protected:
                 (cast(uint*)nonce.ptr)[i] = rand();
             char[base64_encode_length(16)] key_b64 = void;
             base64_encode(nonce[], key_b64[]);
-            _handshake_key = key_b64[].makeString(defaultAllocator);
+            _handshake_key = key_b64[].make_string();
 
             HTTPMessage req;
             req.http_version = HTTPVersion.V1_1;
             req.method = HTTPMethod.GET;
             req.flags = HTTPFlags.NoDefaults;
-            req.request_target = (_resource.empty ? "/" : _resource[]).makeString(defaultAllocator);
+            req.request_target = (_resource.empty ? "/" : _resource[]).make_string();
             req.headers ~= HTTPParam(StringLit!"User-Agent", StringLit!"OpenWatt");
             req.headers ~= HTTPParam(StringLit!"Upgrade", StringLit!"websocket");
             req.headers ~= HTTPParam(StringLit!"Connection", StringLit!"Upgrade");
@@ -186,7 +186,7 @@ protected:
             if (msg.empty || _stream.write(msg[]) != msg.length)
                 return CompletionStatus.error;
 
-            _handshake_parser = defaultAllocator().allocT!HTTPParser(&handshake_response);
+            _handshake_parser = alloc!HTTPParser(&handshake_response);
         }
 
         if (_handshake_parser)
@@ -197,7 +197,7 @@ protected:
             if (r == 0)
                 return CompletionStatus.continue_;
             // r > 0: upgrade handler claimed the connection
-            defaultAllocator().freeT(_handshake_parser);
+            free(_handshake_parser);
             _handshake_parser = null;
             _handshake_key = String();
         }
@@ -226,7 +226,7 @@ protected:
         }
         if (_handshake_parser)
         {
-            defaultAllocator().freeT(_handshake_parser);
+            free(_handshake_parser);
             _handshake_parser = null;
             _handshake_key = String();
         }
@@ -702,7 +702,7 @@ nothrow @nogc:
     const(char)[] uri(const(char)[] value)
     {
         // TODO: property should just accept a String!
-        _uri = value.makeString(defaultAllocator);
+        _uri = value.make_string();
         mark_set!(typeof(this), "uri")();
         return null;
     }
@@ -772,7 +772,7 @@ private:
             // check subprotocol from `Sec-WebSocket-Protocol`...?
             // if server accepts, must reply with acceptable `Sec-WebSocket-Protocol` header
 
-            import urt.mem.allocator;
+            import urt.mem;
             import urt.mem.temp;
             const(char)[] n = tconcat(name, ++_num_connections);
 

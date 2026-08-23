@@ -4,7 +4,7 @@ import urt.array;
 import urt.inet : InetAddress;
 import urt.lifetime;
 import urt.log;
-import urt.mem.allocator;
+import urt.mem;
 import urt.string;
 import urt.string.format : tconcat;
 import urt.time;

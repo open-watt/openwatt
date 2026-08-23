@@ -3,7 +3,7 @@ module protocol.dns;
 import urt.lifetime;
 import urt.log;
 import urt.map;
-import urt.mem.allocator;
+import urt.mem;
 import urt.string;
 
 import manager;
@@ -82,7 +82,7 @@ nothrow @nogc:
         // NBNS broadcast (if NetBIOS over TCP/IP is enabled)
         // WINS (if configured)
 
-        DNSRequestState state = g_app.allocator.allocT!DNSRequestState(session);
+        DNSRequestState state = alloc!DNSRequestState(session);
 //        c.request(method, uri, &state.response_handler);
         return state;
     }

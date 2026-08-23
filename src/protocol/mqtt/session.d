@@ -2,7 +2,7 @@ module protocol.mqtt.session;
 
 import urt.array;
 import urt.lifetime;
-import urt.mem.allocator;
+import urt.mem;
 import urt.string;
 import urt.time;
 
