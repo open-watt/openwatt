@@ -235,8 +235,14 @@ nothrow @nogc:
 
     void add_anchor(ulong index, SysTime observed)
     {
-        anchors ~= ClockAnchor(index, observed);
-        // TODO: discipline: smooth to (offset, skew) segments, min-latency filtered; bound the raw history
+        if (anchors.empty)
+            anchors ~= ClockAnchor(index, observed);
+        else
+        {
+            anchors[$-1].index = index;
+            anchors[$-1].observed = observed;
+        }
+        // TODO: discipline: smooth to (offset, skew) segments, min-latency filtered
     }
 
     SysTime to_wall(ulong index) const
@@ -1158,6 +1164,13 @@ private bool unbox_scalar_value(ref const Variant v, ref const DataFormat fmt, o
 
 unittest
 {
+    ClockDomain clock;
+    clock.nominal_rate = 1_000;
+    clock.add_anchor(10, SysTime(100));
+    clock.add_anchor(20, SysTime(200));
+    assert(clock.anchors.length == 1);
+    assert(clock.anchors[0].index == 20 && clock.anchors[0].observed == SysTime(200));
+
     // count multiplies stride; 0 is a dynamic handle and scalar records require count == 1
     DataFormat f = DataFormat(ValueType.s32, SeriesKind.held);
     assert(f.stride == 4 && f.is_scalar);
