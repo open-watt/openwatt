@@ -177,7 +177,7 @@ protected:
             // TODO: if _host and _port, then we need to stick the port on the end of the host string... (truncate if there's one already there!)
 
             const(char)[] new_name = Collection!Stream().generate_name(name[]);
-            _stream = cast(Stream)Collection!TCPStream().create(new_name, ObjectFlags.dynamic, NamedArgument("remote", _host ? Variant(_host) : Variant(_remote)), NamedArgument("port", Variant(_port)));
+            _stream = Collection!TCPStream().create(new_name, ObjectFlags.dynamic, NamedArgument("remote", _host ? Variant(_host) : Variant(_remote)), NamedArgument("port", Variant(_port)));
             _stream.subscribe(&stream_state_handler);
             version (DebugESPHomeClient)
                 writeDebug("esphome - created tcp stream with name: ", new_name);

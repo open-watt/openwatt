@@ -7,6 +7,7 @@ import urt.mem;
 import urt.time;
 
 import manager.base;
+import manager.collection : Collection, dyn_cast;
 
 import router.iface;
 import router.iface.ethernet;
@@ -76,12 +77,11 @@ void set_ether_tcp_input(EtherTcpInput handler)
 
 EthernetStation find_ether_station(MACAddress mac)
 {
-    import manager.collection : Collection;
     foreach (i; Collection!BaseInterface().values)
     {
         if (!(i.caps & InterfaceCaps.ethernet))
             continue;
-        EthernetStation s = cast(EthernetStation)i;
+        EthernetStation s = dyn_cast!EthernetStation(i);
         if (s && s.mac == mac)
             return s;
     }
@@ -90,12 +90,11 @@ EthernetStation find_ether_station(MACAddress mac)
 
 void foreach_ether_station(scope void delegate(EthernetStation) nothrow @nogc sink)
 {
-    import manager.collection : Collection;
     foreach (i; Collection!BaseInterface().values)
     {
         if (!(i.caps & InterfaceCaps.ethernet))
             continue;
-        if (EthernetStation s = cast(EthernetStation)i)
+        if (EthernetStation s = dyn_cast!EthernetStation(i))
             sink(s);
     }
 }

@@ -111,8 +111,8 @@ nothrow @nogc:
 
     final const(char)[] would_accept(const(WLANBaseInterface) candidate) const pure
     {
-        bool candidate_is_ap = cast(const(APInterface))candidate !is null;
-        bool candidate_is_sta = !candidate_is_ap && cast(const(WLANInterface))candidate !is null;
+        bool candidate_is_ap = dyn_cast!APInterface(candidate) !is null;
+        bool candidate_is_sta = !candidate_is_ap && dyn_cast!WLANInterface(candidate) !is null;
 
         size_t ap_count = _num_ap;
         size_t sta_count = _num_client;
@@ -151,7 +151,7 @@ nothrow @nogc:
 
     override void bind_wlan(WLANBaseInterface wlan, bool remove)
     {
-        bool is_ap = cast(APInterface)wlan !is null;
+        bool is_ap = dyn_cast!APInterface(wlan) !is null;
         if (is_ap)
             _num_ap = cast(ubyte)(_num_ap + (remove ? -1 : 1));
         else
@@ -602,7 +602,7 @@ nothrow @nogc:
     {
         if (_status_detail.length > 0)
             return _status_detail;
-        auto r = cast(const(BuiltinWiFi))radio;
+        auto r = dyn_cast!BuiltinWiFi(radio);
         if (!r)
             return "no radio configured";
         if (auto reason = r.would_accept(this))
@@ -614,7 +614,7 @@ nothrow @nogc:
     {
         super.heartbeat(now);
 
-        if (auto radio = cast(BuiltinWiFi)this.radio)
+        if (auto radio = dyn_cast!BuiltinWiFi(this.radio))
             refresh_link_info(radio);
         else
             clear_link_info();
@@ -625,7 +625,7 @@ protected:
     {
         if (!super.validate())
             return false;
-        auto r = cast(const(BuiltinWiFi))radio;
+        auto r = dyn_cast!BuiltinWiFi(radio);
         if (!r)
             return false;
         return r.would_accept(this) is null;
@@ -635,7 +635,7 @@ protected:
     {
         super.update();
 
-        auto radio = cast(BuiltinWiFi)this.radio;
+        auto radio = dyn_cast!BuiltinWiFi(this.radio);
         if (radio && radio.sta_disconnected_seq != _last_sta_disconnected_seq)
         {
             _last_sta_disconnected_seq = radio.sta_disconnected_seq;
@@ -655,7 +655,7 @@ protected:
         if (result != CompletionStatus.complete)
             return result;
 
-        auto radio = cast(BuiltinWiFi)this.radio;
+        auto radio = dyn_cast!BuiltinWiFi(this.radio);
         if (!radio)
             return CompletionStatus.error;
 
@@ -736,13 +736,13 @@ protected:
         super.online();
 
         // the link rate is cleared by going offline; heartbeat is up to a second away, so stamp it now
-        if (auto radio = cast(BuiltinWiFi)this.radio)
+        if (auto radio = dyn_cast!BuiltinWiFi(this.radio))
             refresh_link_info(radio);
     }
 
     override CompletionStatus shutdown()
     {
-        auto radio = cast(BuiltinWiFi)this.radio;
+        auto radio = dyn_cast!BuiltinWiFi(this.radio);
         if (_connect_initiated && radio)
             wifi_sta_disconnect(radio.wifi);
         _connect_initiated = false;
@@ -759,7 +759,7 @@ protected:
     {
         if (value == MACAddress.init || value.is_multicast)
             return "not a valid unicast hardware address";
-        auto r = cast(BuiltinWiFi)radio;
+        auto r = dyn_cast!BuiltinWiFi(radio);
         if (r && r.running && r.drv_set_mac(WifiVif.sta, value).failed)
             return "hardware address rejected by driver";
         _assigned_mac = value;
@@ -802,7 +802,7 @@ protected:
 
     override int wire_send(const(ubyte)[] frame)
     {
-        auto r = cast(BuiltinWiFi)radio;
+        auto r = dyn_cast!BuiltinWiFi(radio);
         if (!r || !r.running || frame.length == 0)
             return -1;
         if (!r.drv_transmit(WifiVif.sta, frame))
@@ -898,7 +898,7 @@ nothrow @nogc:
             return _status_detail;
         if (max_clients > wifi_max_ap_clients)
             return "too many AP clients configured for this WiFi driver";
-        auto r = cast(const(BuiltinWiFi))radio;
+        auto r = dyn_cast!BuiltinWiFi(radio);
         if (!r)
             return "no radio configured";
         if (auto reason = r.would_accept(this))
@@ -909,7 +909,7 @@ nothrow @nogc:
 protected:
     override void on_max_clients_changed(ubyte value)
     {
-        auto r = cast(BuiltinWiFi)radio;
+        auto r = dyn_cast!BuiltinWiFi(radio);
         if (!r || !running || !r.running)
             return;
         if (value > wifi_max_ap_clients)
@@ -924,7 +924,7 @@ protected:
             return false;
         if (max_clients > wifi_max_ap_clients)
             return false;
-        auto r = cast(const(BuiltinWiFi))radio;
+        auto r = dyn_cast!BuiltinWiFi(radio);
         if (!r)
             return false;
         return r.would_accept(this) is null;
@@ -934,7 +934,7 @@ protected:
     {
         super.update();
 
-        auto radio = cast(BuiltinWiFi)this.radio;
+        auto radio = dyn_cast!BuiltinWiFi(this.radio);
         if (!radio || radio.ap_stopped_seq == _last_ap_stopped_seq)
             return;
 
@@ -950,7 +950,7 @@ protected:
         if (result != CompletionStatus.complete)
             return result;
 
-        auto radio = cast(BuiltinWiFi)this.radio;
+        auto radio = dyn_cast!BuiltinWiFi(this.radio);
         if (!radio)
             return CompletionStatus.error;
 
@@ -1048,7 +1048,7 @@ protected:
     {
         if (value == MACAddress.init || value.is_multicast)
             return "not a valid unicast hardware address";
-        auto r = cast(BuiltinWiFi)radio;
+        auto r = dyn_cast!BuiltinWiFi(radio);
         if (r && r.running && r.drv_set_mac(WifiVif.ap, value).failed)
             return "hardware address rejected by driver";
         _assigned_mac = value;
@@ -1091,7 +1091,7 @@ protected:
 
     override int wire_send(const(ubyte)[] frame)
     {
-        auto r = cast(BuiltinWiFi)radio;
+        auto r = dyn_cast!BuiltinWiFi(radio);
         if (!r || !r.running || frame.length == 0)
             return -1;
         if (!r.drv_transmit(WifiVif.ap, frame))

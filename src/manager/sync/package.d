@@ -645,7 +645,7 @@ nothrow @nogc:
             return;
         }
 
-        if (auto ao = cast(ActiveObject)proxy)
+        if (auto ao = dyn_cast!ActiveObject(proxy))
             ao.set_remote_state(sig);
 
         // Fan out to our bound peers (hub-of-hubs).

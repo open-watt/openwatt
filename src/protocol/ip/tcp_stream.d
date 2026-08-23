@@ -416,9 +416,9 @@ protected:
     Stream create_stream(TCPConnection* conn)
     {
         // prevent duplicate stream names...
-        const(char)[] newName = Collection!Stream().generate_name(name[]);
+        const(char)[] new_name = Collection!Stream().generate_name(name[]);
 
-        TCPStream stream = cast(TCPStream)Collection!TCPStream().alloc(newName, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary));
+        TCPStream stream = Collection!TCPStream().alloc(new_name, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary));
 
         // adopt the accepted connection and bypass the startup/connect process
         stream._conn = conn;

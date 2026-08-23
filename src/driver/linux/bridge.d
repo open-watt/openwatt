@@ -122,7 +122,7 @@ private:
 
     void on_object_state(ActiveObject obj, StateSignal sig)
     {
-        BridgeInterface bridge = cast(BridgeInterface)obj;
+        BridgeInterface bridge = dyn_cast!BridgeInterface(obj);
         if (!bridge)
             return;
 
@@ -143,9 +143,9 @@ private:
         Offload* o = find(bridge);
         if (o && o.engaged)
         {
-            if (LinuxRawEthernet eth = cast(LinuxRawEthernet)member)
+            if (LinuxRawEthernet eth = dyn_cast!LinuxRawEthernet(member))
                 enslave(o, eth);
-            else if (cast(EthernetInterface)member)
+            else if (dyn_cast!EthernetInterface(member))
             {
                 // the kernel segment can't forward to a software ethernet member;
                 // fall back to full software bridging
@@ -187,9 +187,9 @@ private:
         foreach (i; 0 .. bridge.member_count)
         {
             BaseInterface m = bridge.member_iface(i);
-            if (cast(LinuxRawEthernet)m)
+            if (dyn_cast!LinuxRawEthernet(m))
                 ++netdev_members;
-            else if (cast(EthernetInterface)m)
+            else if (dyn_cast!EthernetInterface(m))
             {
                 log_info(ModuleName, "bridge '", bridge.name[], "': software ethernet member '", m.name[], "' prevents kernel offload");
                 return;
@@ -222,7 +222,7 @@ private:
 
         foreach (i; 0 .. bridge.member_count)
         {
-            if (LinuxRawEthernet eth = cast(LinuxRawEthernet)bridge.member_iface(i))
+            if (LinuxRawEthernet eth = dyn_cast!LinuxRawEthernet(bridge.member_iface(i)))
                 enslave(o, eth);
         }
 

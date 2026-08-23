@@ -117,8 +117,7 @@ ProtoSpec parse_proto(string data, ImportHandler import_handler) nothrow
         if (f.reserved > 0)
             continue;
 
-        TypeInfo* info = f.type in type_map;
-        if (info)
+        if (const(TypeInfo)* info = get_type_info(f.type))
         {
             f.wire_type = info.wire_type;
             f.logical_type = info.logical_type;
@@ -613,25 +612,39 @@ struct TypeInfo
     LogicalType logical_type;
 }
 
-enum TypeInfo[string] type_map = [
-    "bool":     TypeInfo(WireType.varint, LogicalType.bool_),
-    "uint32":   TypeInfo(WireType.varint, LogicalType.uint32),
-    "uint64":   TypeInfo(WireType.varint, LogicalType.uint64),
-    "sint32":   TypeInfo(WireType.zigzag, LogicalType.int32),
-    "sint64":   TypeInfo(WireType.zigzag, LogicalType.int64),
-    "int32":    TypeInfo(WireType.varint, LogicalType.int32),
-    "int64":    TypeInfo(WireType.varint, LogicalType.int64),
-    "fixed32":  TypeInfo(WireType.fixed32, LogicalType.uint32),
-    "fixed64":  TypeInfo(WireType.fixed64, LogicalType.uint64),
-    "sfixed32": TypeInfo(WireType.fixed32, LogicalType.int32),
-    "sfixed64": TypeInfo(WireType.fixed64, LogicalType.int64),
-    "float":    TypeInfo(WireType.fixed32, LogicalType.float32),
-    "double":   TypeInfo(WireType.fixed64, LogicalType.float64),
-    "string":   TypeInfo(WireType.length_delimited, LogicalType.string),
-    "bytes":    TypeInfo(WireType.length_delimited, LogicalType.bytes),
+private struct NamedTypeInfo
+{
+    string name;
+    TypeInfo info;
+}
+
+private immutable NamedTypeInfo[15] type_infos = [
+    NamedTypeInfo("bool", TypeInfo(WireType.varint, LogicalType.bool_)),
+    NamedTypeInfo("uint32", TypeInfo(WireType.varint, LogicalType.uint32)),
+    NamedTypeInfo("uint64", TypeInfo(WireType.varint, LogicalType.uint64)),
+    NamedTypeInfo("sint32", TypeInfo(WireType.zigzag, LogicalType.int32)),
+    NamedTypeInfo("sint64", TypeInfo(WireType.zigzag, LogicalType.int64)),
+    NamedTypeInfo("int32", TypeInfo(WireType.varint, LogicalType.int32)),
+    NamedTypeInfo("int64", TypeInfo(WireType.varint, LogicalType.int64)),
+    NamedTypeInfo("fixed32", TypeInfo(WireType.fixed32, LogicalType.uint32)),
+    NamedTypeInfo("fixed64", TypeInfo(WireType.fixed64, LogicalType.uint64)),
+    NamedTypeInfo("sfixed32", TypeInfo(WireType.fixed32, LogicalType.int32)),
+    NamedTypeInfo("sfixed64", TypeInfo(WireType.fixed64, LogicalType.int64)),
+    NamedTypeInfo("float", TypeInfo(WireType.fixed32, LogicalType.float32)),
+    NamedTypeInfo("double", TypeInfo(WireType.fixed64, LogicalType.float64)),
+    NamedTypeInfo("string", TypeInfo(WireType.length_delimited, LogicalType.string)),
+    NamedTypeInfo("bytes", TypeInfo(WireType.length_delimited, LogicalType.bytes)),
 ];
 
-enum string[] type_names = [
+private const(TypeInfo)* get_type_info(string type)
+{
+    foreach (ref named; type_infos)
+        if (type == named.name)
+            return &named.info;
+    return null;
+}
+
+enum string[10] type_names = [
     "void",
     "bool",
     "int",

@@ -408,7 +408,7 @@ nothrow @nogc:
     {
         import router.stream.serial : SerialStream;
 
-        SerialStream ss = cast(SerialStream)Collection!Stream().get(name);
+        SerialStream ss = dyn_cast!SerialStream(Collection!Stream().get(name));
         if (!ss)
         {
             session.write_line(tconcat("no such serial stream: ", name));

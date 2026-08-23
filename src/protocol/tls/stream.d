@@ -235,7 +235,7 @@ nothrow @nogc:
                         log.trace("no valid certificate available yet (sni='", sni, "' certs=", _certificates.length, ")");
                         foreach (ref c; _certificates)
                         {
-                            if (auto cert = cast(Certificate)c.get())
+                            if (auto cert = dyn_cast!Certificate(c.get()))
                                 log.trace("  cert '", cert.name, "': valid=", cert.is_valid, " domain='", cert.domain, "'");
                             else
                                 log.trace("  cert: null ref");
@@ -252,7 +252,7 @@ nothrow @nogc:
             version (MbedTLS)
             {
                 if (is_server)
-                    init_mbedtls_context(true, cast(Certificate)_selected_cert);
+                    init_mbedtls_context(true, dyn_cast!Certificate(_selected_cert));
                 else
                     init_mbedtls_context(false, null);
             }
@@ -260,7 +260,7 @@ nothrow @nogc:
             {
                 if (is_server)
                 {
-                    init_context(true, cast(const(CERT_CONTEXT)*)(cast(Certificate)_selected_cert).get_cert_context());
+                    init_context(true, cast(const(CERT_CONTEXT)*)dyn_cast!Certificate(_selected_cert).get_cert_context());
                     // process the already-buffered ClientHello
                     if (_handshake_state == HandshakeState.in_progress)
                         advance_handshake(_conn.host[], true);
@@ -656,7 +656,7 @@ private:
             // Exact domain match
             foreach (ref c; _certificates)
             {
-                if (auto cert = cast(Certificate)c.get())
+                if (auto cert = dyn_cast!Certificate(c.get()))
                     if (cert.is_valid && cert.domain[] == sni)
                         return c.get();
             }
@@ -665,7 +665,7 @@ private:
         // Fallback: first cert with no domain (self-signed)
         foreach (ref c; _certificates)
         {
-            if (auto cert = cast(Certificate)c.get())
+            if (auto cert = dyn_cast!Certificate(c.get()))
                 if (cert.is_valid && cert.domain[].empty)
                     return c.get();
         }
@@ -673,7 +673,7 @@ private:
         // Last resort: first valid cert
         foreach (ref c; _certificates)
         {
-            if (auto cert = cast(Certificate)c.get())
+            if (auto cert = dyn_cast!Certificate(c.get()))
                 if (cert.is_valid)
                     return c.get();
         }
@@ -1011,7 +1011,7 @@ protected:
 
         Stream tcp = super.create_stream(conn);
         const(char)[] stream_name = Collection!TLSStream().generate_name(tconcat(name[], "_conn"));
-        auto tls = cast(TLSStream)Collection!TLSStream().create(stream_name[], cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary),
+        auto tls = Collection!TLSStream().create(stream_name[], cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary),
             NamedArgument("stream", tcp), NamedArgument("certificates", certs[0 .. num_certs]));
         if (!tls)
         {

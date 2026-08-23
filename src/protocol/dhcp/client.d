@@ -53,7 +53,7 @@ nothrow @nogc:
     {
         if (!value)
             return "interface cannot be null";
-        if (!cast(EthernetStation)value)
+        if (!dyn_cast!EthernetStation(value))
             return "interface must be an ethernet interface";
         if (_iface is value)
             return null;
@@ -231,7 +231,7 @@ private:
 
     // TODO: delete this hack, promote _iface to EthernetStation...
     EthernetStation station()
-        => cast(EthernetStation)_iface.get;
+        => dyn_cast!EthernetStation(_iface.get);
     bool _add_default_route = true;
     bool _subscribed;
 

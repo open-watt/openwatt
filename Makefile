@@ -114,6 +114,9 @@ ifeq ($(COMPILER),ldc)
     CTOR_SCAN_OK := $(shell grep -rl 'module urt.typereg;' $(URT_SRCDIR) --include=*.d 2>/dev/null)
     ifneq ($(CTOR_SCAN_OK),)
       DFLAGS := $(DFLAGS) --fno-moduleinfo
+      ifeq ($(NOEXCEPTIONS),1)
+        DFLAGS := $(DFLAGS) --fno-rtti
+      endif
     endif
   endif
 endif

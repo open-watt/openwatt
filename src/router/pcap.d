@@ -202,7 +202,7 @@ private:
             idb.linkType = ib.linkType;
             buffer ~= idb.as_bytes;
             buffer.write_option(2, i.name[]); // if_name
-            if (auto station = cast(EthernetStation)i)
+            if (auto station = dyn_cast!EthernetStation(i))
                 buffer.write_option(6, station.mac.b[]); // if_MACaddr
             ubyte ts = 9; // 6 = microseconds, 9 = nanoseconds
             buffer.write_option(9, (&ts)[0..1]); // if_tsresol

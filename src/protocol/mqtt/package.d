@@ -248,7 +248,7 @@ private:
         uint count;
         foreach (obj; Collection!MQTTBroker().values)
         {
-            found = cast(MQTTBroker)obj;
+            found = dyn_cast!MQTTBroker(obj);
             ++count;
             if (count > 1)
                 break;
@@ -270,7 +270,7 @@ private:
         uint count;
         foreach (obj; Collection!MQTTClient().values)
         {
-            found = cast(MQTTClient)obj;
+            found = dyn_cast!MQTTClient(obj);
             ++count;
             if (count > 1)
                 break;

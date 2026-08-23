@@ -69,14 +69,14 @@ nothrow @nogc:
 
     override void unsubscribe(SignalSub handle)
     {
-        TimeSub s = cast(TimeSub)handle;
+        TimeSub s = cast(TimeSub)cast(void*)handle;
         s.disarm();
         free(s);
     }
 
     override SysTime next_run(SignalSub handle) const
     {
-        TimeSub s = cast(TimeSub)handle;
+        TimeSub s = cast(TimeSub)cast(void*)handle;
         return s.next_run();
     }
 }

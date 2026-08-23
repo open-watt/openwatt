@@ -436,7 +436,7 @@ nothrow @nogc:
             import manager.collection : get_item;
             EID eid = EID(prop_element(prop_index!(Type, prop)).read!ulong);
             // dynamic cast: the slot can rebind to a same-named sibling of another class
-            return eid ? cast(T)get_item(eid.container) : null;
+            return eid ? dyn_cast!T(get_item(eid.container)) : null;
         }
         else
             return prop_element(prop_index!(Type, prop)).read!T;
@@ -1464,7 +1464,7 @@ Variant SynthGetter(Getters...)(BaseObject item, ref const Property) nothrow @no
     alias Getter = Getters[0];
 
     alias Type = __traits(parent, Getter);
-    Type instance = cast(Type)item;
+    Type instance = cast(Type)cast(void*)item;
 
     static if (is(ReturnType!(__traits(child, instance, Getter)) == Variant))
         return __traits(child, instance, Getter)();
@@ -1475,7 +1475,7 @@ Variant SynthGetter(Getters...)(BaseObject item, ref const Property) nothrow @no
 StringResult SynthSetter(Setters...)(ref const Variant value, BaseObject item, ref const Property) nothrow @nogc
 {
     alias Type = __traits(parent, Setters[0]);
-    Type instance = cast(Type)item;
+    Type instance = cast(Type)cast(void*)item;
 
     const(char)[] error;
     static foreach (Setter; Setters)

@@ -161,7 +161,7 @@ nothrow @nogc:
             // For modbus member interfaces, we'll pre-populate the MAC table with known device addresses...
             import protocol.modbus;
             import protocol.modbus.iface;
-            ModbusInterface mb = cast(ModbusInterface)iface;
+            ModbusInterface mb = dyn_cast!ModbusInterface(iface);
             if (mb)
             {
                 ushort vlan = 0;

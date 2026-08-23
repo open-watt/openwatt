@@ -6,6 +6,7 @@ import urt.lifetime;
 import urt.mem;
 import urt.mem.temp;
 import urt.meta;
+import urt.meta.enuminfo : VoidEnumInfo;
 import urt.meta.nullable;
 import urt.si.quantity;
 import urt.si.unit : ScaledUnit;
@@ -373,20 +374,14 @@ const(char[]) from_variant(T)(ref const Variant v, out T r) nothrow @nogc
         const(char)[] s = v.asString;
         if (!s)
             return "No value";
-        import urt.meta.enuminfo : trim_key;
-        switch (s)
+        import urt.meta.enuminfo : enum_info, is_bitfield_enum;
+        Variant value = enum_value_icase(enum_info!T.make_void(), s);
+        if (!value.isNull)
         {
-            static foreach(E; __traits(allMembers, T))
-            {
-                case Alias!(to_lower(trim_key!E)):
-                    r = __traits(getMember, T, E);
-                    return null;
-            }
-            default:
-                break;
+            r = cast(T)value.as!(EnumType!T);
+            return null;
         }
 
-        import urt.meta.enuminfo : enum_info, is_bitfield_enum;
         static if (is_bitfield_enum!T)
         {
             bool ok;
@@ -403,6 +398,19 @@ const(char[]) from_variant(T)(ref const Variant v, out T r) nothrow @nogc
     // TODO: could be a non-key... do we want to allow this?
 
     return "Invalid value";
+}
+
+pragma(inline, false)
+private Variant enum_value_icase(const(VoidEnumInfo)* info, const(char)[] value)
+{
+    import urt.string.ascii : ieq;
+    foreach (i; 0 .. info.count)
+    {
+        const(char)[] key = info.key_by_sorted_index(i);
+        if (ieq(key, value))
+            return info.value_for(key);
+    }
+    return Variant();
 }
 
 const(char[]) from_variant(U)(ref const Variant v, out Array!U r) nothrow @nogc
@@ -515,7 +523,7 @@ const(char[]) from_variant(T)(ref const Variant v, out T r) nothrow @nogc
     }
     if (v.isUser!Type)
     {
-        r = cast(Type)v.asUser!Type;
+        r = cast(Type)cast(void*)v.asUser!Type;
         return null;
     }
     if (!v.isString)
@@ -566,7 +574,10 @@ const(char[]) from_variant(T)(ref const Variant v, out T r) nothrow @nogc
         BaseObject obj = item_table(cid).get_by_name(tail, cid);
         if (!obj)
             return tconcat("Item does not exist: ", type, ":", tail);
-        r = cast(Type)obj;
+        static if (is(Type == BaseObject))
+            r = obj;
+        else
+            r = dyn_cast!Type(obj);
         if (!r)
             return tconcat("expected " ~ Type.stringof ~ ", got ", type);
         return null;

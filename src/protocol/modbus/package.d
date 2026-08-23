@@ -278,8 +278,8 @@ nothrow @nogc:
             session.write_line("Interface '", _interface, "' not found.");
             return;
         }
-        ModbusInterface modbusInterface = cast(ModbusInterface)iface;
-        if (!modbusInterface)
+        ModbusInterface modbus_interface = dyn_cast!ModbusInterface(iface);
+        if (!modbus_interface)
         {
             session.write_line("Interface '", _interface, "' is not a modbus interface.");
             return;
@@ -295,7 +295,7 @@ nothrow @nogc:
             }
         }
 
-        add_remote_server(name, modbusInterface, address, profile ? profile.value : null, model ? model.value : null, universal_address ? universal_address.value : 0);
+        add_remote_server(name, modbus_interface, address, profile ? profile.value : null, model ? model.value : null, universal_address ? universal_address.value : 0);
     }
 
     ModbusRequestState sendRequest(Session session, const(char)[] client, const(char)[] slave, ref ModbusPDU msg)

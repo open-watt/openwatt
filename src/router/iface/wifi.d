@@ -301,7 +301,7 @@ nothrow @nogc:
 
     void bind_wlan(WLANBaseInterface wlan, bool remove)
     {
-        if (auto ap = cast(APInterface)wlan)
+        if (auto ap = dyn_cast!APInterface(wlan))
         {
             if (remove)
                 _bound_aps.removeFirst(ap);

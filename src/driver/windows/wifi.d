@@ -299,7 +299,7 @@ protected:
         if (result != CompletionStatus.complete)
             return result;
 
-        auto r = cast(WindowsWifiRadio)radio;
+        auto r = dyn_cast!WindowsWifiRadio(radio);
         if (_pcap.handle is null && !_pcap.open(r.adapter))
             return CompletionStatus.error;
 
@@ -384,7 +384,7 @@ private:
 
     void refresh_state()
     {
-        auto r = cast(WindowsWifiRadio)radio;
+        auto r = dyn_cast!WindowsWifiRadio(radio);
         if (!r)
         {
             clear_os_state();
@@ -535,7 +535,7 @@ private:
                     port_remove(PortKind.wifi, tconcat("windows:wifi:", ev.name));
                     Array!WindowsWlan paired;
                     foreach (w; Collection!WindowsWlan().values)
-                        if (cast(WindowsWifiRadio)w.radio is r)
+                        if (dyn_cast!WindowsWifiRadio(w.radio) is r)
                             paired ~= w;
                     foreach (w; paired[])
                         Collection!WindowsWlan().remove(w);

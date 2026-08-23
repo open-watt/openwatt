@@ -80,14 +80,14 @@ package:
     {
         const(char)[] stream_name = Collection!Stream().generate_name(this.name[]);
 
-        TelnetStream telnet_stream = cast(TelnetStream)Collection!TelnetStream().create(stream_name, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary), NamedArgument("transport", client));
+        TelnetStream telnet_stream = Collection!TelnetStream().create(stream_name, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary), NamedArgument("transport", client));
         if (telnet_stream is null)
         {
             client.destroy();
             return;
         }
 
-        Session session = _console.createSession!Session(cast(Stream)telnet_stream);
+        Session session = _console.createSession!Session(telnet_stream);
         session.show_prompt(true);
         session.load_history(".telnet_history");
 
@@ -100,7 +100,7 @@ package:
         if (signal != StateSignal.destroyed)
             return;
 
-        Session session = cast(Session)object;
+        Session session = dyn_cast!Session(object);
         session.unsubscribe(&session_state_change);
         m_sessions.removeFirstSwapLast(session);
     }

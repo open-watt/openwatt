@@ -203,7 +203,7 @@ nothrow @nogc:
         static if (has_all)
         {
             import protocol.telnet.stream : TelnetStream;
-            _nvt_input = cast(TelnetStream)s !is null;
+            _nvt_input = dyn_cast!TelnetStream(s) !is null;
         }
         rebuild_prompt();
 

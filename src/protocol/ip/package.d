@@ -1906,7 +1906,7 @@ nothrow @nogc:
             {
                 if (parse_npf_guid(e.adapter) == guid)
                 {
-                    iface = cast(BaseInterface)e;
+                    iface = e;
                     break;
                 }
             }
@@ -1914,10 +1914,10 @@ nothrow @nogc:
             {
                 foreach (w; Collection!WindowsWlan().values)
                 {
-                    auto r = cast(WindowsWifiRadio)w.radio;
+                    auto r = dyn_cast!WindowsWifiRadio(w.radio);
                     if (r && parse_npf_guid(r.adapter) == guid)
                     {
-                        iface = cast(BaseInterface)w;
+                        iface = w;
                         break;
                     }
                 }

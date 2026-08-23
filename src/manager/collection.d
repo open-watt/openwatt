@@ -103,14 +103,14 @@ Item get_item(Item : BaseObject)(CID id) pure
 {
     assert(id.type_index == Item.collection_id);
     BaseObject item = item_table(Item.collection_id).get(id);
-    return cast(Item)item; // TODO: this is a D dynamic cast, but we could check our own typeinfo
+    return dyn_cast!Item(item);
 }
 
 Item get_item_by_name(Item : BaseObject)(const(char)[] id) pure
     if (!is(Item == BaseObject))
 {
     BaseObject item = item_table(Item.collection_id).get_by_name(id, Item.collection_id);
-    return cast(Item)item; // TODO: this is a D dynamic cast, but we could check our own typeinfo
+    return dyn_cast!Item(item);
 }
 
 package template CollectionTypeInfoOf(Type)
@@ -153,13 +153,13 @@ package template CollectionTypeInfoOf(Type)
         else
             enum const(void)* dyn_parent = &DynTypeOf!Super.info;
 
-        __gshared const CollectionTypeInfo info = CollectionTypeInfo(DynTypeInfo(StringLit!(Type.type_name), dyn_parent),
-                                                                     StringLit!_path,
-                                                                     Type.collection_id,
-                                                                     all_properties!Type(),
-                                                                     create_instance,
-                                                                     collection_root,
-                                                                     _syncable);
+        __gshared immutable CollectionTypeInfo info = cast(immutable)CollectionTypeInfo(DynTypeInfo(StringLit!(Type.type_name), dyn_parent),
+                                                                                        StringLit!_path,
+                                                                                        Type.collection_id,
+                                                                                        all_properties!Type(),
+                                                                                        create_instance,
+                                                                                        collection_root,
+                                                                                        _syncable);
     }
 }
 
@@ -230,7 +230,7 @@ nothrow @nogc:
         // HACK: advance the state machine synchronously so subsequent script lines
         // have a chance to work when the early startup creates things.
         // this should be removed, and replaced by a more comprehensive latent startup tolerance.
-        if (auto active = cast(ActiveObject)item)
+        if (auto active = dyn_cast!ActiveObject(item))
             active.do_update();
 
         return item;
@@ -261,7 +261,7 @@ nothrow @nogc:
         // slots are stable and append-only, so items added mid-update are reached too
         for (uint slot = 1; slot <= t.slot_count; ++slot)
         {
-            if (auto active = cast(ActiveObject)t.at(slot))
+            if (auto active = dyn_cast!ActiveObject(t.at(slot)))
             {
                 MonoTime start = getTime();
                 active.do_update();
@@ -393,19 +393,19 @@ nothrow @nogc:
 
     Type create(const(char)[] name, ObjectFlags flags = ObjectFlags.none, in NamedArgument[] named_args...)
     {
-        return cast(Type)_base.create(name, flags, named_args);
+        return cast(Type)cast(void*)_base.create(name, flags, named_args);
     }
 
     Type alloc(const(char)[] name, ObjectFlags flags = ObjectFlags.none)
     {
-        return cast(Type)_base.alloc(name, flags);
+        return cast(Type)cast(void*)_base.alloc(name, flags);
     }
 
     void add(Type item)
         => _base.add(item);
 
     Type get(const(char)[] name)
-        => cast(Type)_base.get(name);
+        => cast(Type)cast(void*)_base.get(name);
 
     // iterate live objects of Type and all derived types
     auto values()

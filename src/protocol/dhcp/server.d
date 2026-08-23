@@ -58,7 +58,7 @@ nothrow @nogc:
     {
         if (!value)
             return "interface cannot be null";
-        if (!cast(EthernetStation)value)
+        if (!dyn_cast!EthernetStation(value))
             return "interface must be an ethernet interface";
         if (_iface is value)
             return null;
@@ -127,7 +127,7 @@ protected:
         if (!_iface)
             return false;
 
-        auto self = cast(DHCPServer)this;
+        auto self = cast(DHCPServer)cast(void*)this;
         auto reason = compute_config_reason();
         if (reason !is _config_reason)
         {
@@ -149,7 +149,7 @@ protected:
     {
         if (!_pool)
             return null;    // static-only mode
-        IPAddress addr = find_iface_address(cast(BaseInterface)_iface);
+        IPAddress addr = find_iface_address(_iface);
         if (!addr)
             return null;    // defer: iface not yet bound
         if (!addr.address.contains(_pool.start) || !addr.address.contains(_pool.end))
@@ -217,7 +217,7 @@ protected:
         SysTime now = getSysTime();
         foreach (l; Collection!DHCPLease().values)
         {
-            DHCPLease lease = cast(DHCPLease)l;
+            DHCPLease lease = l;
             if (!lease.is_expired(now))
                 continue;
             if (_pool && _pool.contains(lease.address))
@@ -236,7 +236,7 @@ private:
 
     // TODO: remove this hack and promote _iface to EthernetStation...
     EthernetStation station()
-        => cast(EthernetStation)_iface.get;
+        => dyn_cast!EthernetStation(_iface.get);
     ObjectRef!IPPool _pool;
     Duration _lease_time;       // initialised in ctor; default = 1 day
     uint _mac_limit;        // 0 = unlimited
@@ -482,7 +482,7 @@ private:
         DHCPLease dynamic_match;
         foreach (l; Collection!DHCPLease().values)
         {
-            DHCPLease lease = cast(DHCPLease)l;
+            DHCPLease lease = l;
             if (lease.mac != mac)
                 continue;
             if (_pool && !_pool.contains(lease.address))
@@ -498,7 +498,7 @@ private:
     {
         foreach (l; Collection!DHCPLease().values)
         {
-            DHCPLease lease = cast(DHCPLease)l;
+            DHCPLease lease = l;
             if (lease.address == addr && lease.mac == mac)
                 return lease;
         }
@@ -512,7 +512,7 @@ private:
         uint count = 0;
         foreach (l; Collection!DHCPLease().values)
         {
-            DHCPLease lease = cast(DHCPLease)l;
+            DHCPLease lease = l;
             if (lease.mac != mac)
                 continue;
             if (_pool && !_pool.contains(lease.address))
@@ -615,11 +615,11 @@ private:
 
 private:
 
-IPAddress find_iface_address(BaseInterface iface)
+IPAddress find_iface_address(const BaseInterface iface)
 {
     foreach (a; Collection!IPAddress().values)
     {
-        IPAddress addr = cast(IPAddress)a;
+        IPAddress addr = a;
         if (addr.iface is iface)
             return addr;
     }
