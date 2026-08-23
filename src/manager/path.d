@@ -168,13 +168,13 @@ unittest
 
     // element walk over a small tree
     import urt.mem;
-    Component root = alloc!Component("dev".make_string());
-    Component child = alloc!Component("battery".make_string());
+    Component root = alloc!Component(StringLit!"dev");
+    Component child = alloc!Component(StringLit!"battery");
     child.parent = root;
     root.components ~= child;
     Element e1, e2;
-    e1.id = "voltage".make_string();
-    e2.id = "current".make_string();
+    e1.id = StringLit!"voltage";
+    e2.id = StringLit!"current";
     e1.parent = child;
     e2.parent = root;
     child.elements ~= &e1;

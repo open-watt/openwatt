@@ -677,7 +677,7 @@ void record_decision(Device energy_device, Policy p, const(char)[] reason, float
     if (ctx !is null && ctx.path.target_bus !is null)
     {
         energy_device.set_element(tconcat(base, ".target_bus"),
-            ctx.path.target_bus.id[].make_string(), now);
+            ctx.path.target_bus.id, now);
         energy_device.set_element(tconcat(base, ".source_bus"),
             (ctx.path.source_bus ? ctx.path.source_bus.id[] : "").make_string(), now);
         energy_device.set_element(tconcat(base, ".path_complete"), ctx.path.complete, now);

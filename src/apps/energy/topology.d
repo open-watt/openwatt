@@ -1209,7 +1209,7 @@ private:
             if (binding.circuit.length == 0)
                 continue;
             DevicePort spec;
-            spec.path = binding.port[].make_string();
+            spec.path = binding.port;
             spec.circuit = binding.circuit[];
             spec.role = port_role_from_name(last_path_segment(binding.port[]));
             spec.flow = flow_for_port(binding.port[], a.kind);

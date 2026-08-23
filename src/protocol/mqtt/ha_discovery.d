@@ -375,7 +375,7 @@ private:
         Element* state = record.device.find_or_create_element(path, state_format);
         Component ha_component = record.device.find_component("ha");
         if (ha_component && ha_component.name.empty)
-            ha_component.name = "Home Assistant".make_string();
+            ha_component.name = StringLit!"Home Assistant";
 
         state.name = (entity_name.empty ? object_id : entity_name).make_string();
         state.desc = device_class.make_string();
@@ -532,7 +532,7 @@ private:
         }
         Component info = device.find_component("info");
         if (info)
-            info.template_ = "DeviceInfo".make_string();
+            info.template_ = StringLit!"DeviceInfo";
     }
 
     static void set_info(Device device, const(char)[] id, const(char)[] value, const(char)[] name)
@@ -792,8 +792,8 @@ private:
     {
         if (_template_locals.empty)
         {
-            _template_locals["value".make_string()] = Variant();
-            _template_locals["value_json".make_string()] = Variant();
+            _template_locals[StringLit!"value"] = Variant();
+            _template_locals[StringLit!"value_json"] = Variant();
         }
         *_template_locals.get("value") = value;
         *_template_locals.get("value_json") = value_json;
@@ -918,13 +918,13 @@ private:
 
         Component status = device.find_component("status");
         if (status && status.template_.empty)
-            status.template_ = "DeviceStatus".make_string();
+            status.template_ = StringLit!"DeviceStatus";
         Component network = device.find_component("status.network");
         if (network && network.template_.empty)
-            network.template_ = "Network".make_string();
+            network.template_ = StringLit!"Network";
         Component wifi = device.find_component("status.network.wifi");
         if (wifi && wifi.template_.empty)
-            wifi.template_ = "Wifi".make_string();
+            wifi.template_ = StringLit!"Wifi";
 
         target.name = source.name;
         target.desc = source.desc;
@@ -1030,7 +1030,7 @@ unittest
     scope(exit) translated_expression.free_expression();
     assert(translated_source[] == "$select($is_number($value), $to_int($value) / 10, null)");
     Map!(String, Variant) template_locals;
-    String template_value_key = "value".make_string();
+    String template_value_key = StringLit!"value";
     template_locals[template_value_key] = Variant("250");
     EvalContext template_context;
     template_context.locals = &template_locals;

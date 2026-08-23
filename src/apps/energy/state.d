@@ -25,16 +25,16 @@ nothrow @nogc:
 
 Device create_energy_device()
 {
-    Device d = alloc!Device("energy".make_string());
+    Device d = alloc!Device(StringLit!"energy");
     d.hidden = true;
 
-    d.add_component(alloc!Component("topology".make_string()));
-    d.add_component(alloc!Component("circuit".make_string()));
-    d.add_component(alloc!Component("islands".make_string()));
-    d.add_component(alloc!Component("policy".make_string()));
-    d.add_component(alloc!Component("allocation".make_string()));
-    d.add_component(alloc!Component("control_path".make_string()));
-    d.add_component(alloc!Component("config".make_string()));
+    d.add_component(alloc!Component(StringLit!"topology"));
+    d.add_component(alloc!Component(StringLit!"circuit"));
+    d.add_component(alloc!Component(StringLit!"islands"));
+    d.add_component(alloc!Component(StringLit!"policy"));
+    d.add_component(alloc!Component(StringLit!"allocation"));
+    d.add_component(alloc!Component(StringLit!"control_path"));
+    d.add_component(alloc!Component(StringLit!"config"));
 
     g_app.devices.insert(d.id[], d);
     d.notify(ComponentEvent.tree_changed);
@@ -213,7 +213,7 @@ private void publish_topology_layout(Device energy, ref TopologyGraph graph)
     foreach (bus; graph.bus_list[])
     {
         const(char)[] base = tconcat("topology.bus.", bus.id[], ".");
-        energy.set_element(tconcat(base, "name"), bus.id[].make_string());
+        energy.set_element(tconcat(base, "name"), bus.id);
         energy.set_element(tconcat(base, "ports"), cast(int)bus.ports.length);
         energy.set_element(tconcat(base, "links"), cast(int)bus.links.length);
         energy.set_element(tconcat(base, "contains_grid"), bus.contains_grid);
@@ -241,7 +241,7 @@ private void publish_topology_layout(Device energy, ref TopologyGraph graph)
         energy.set_element(tconcat(base, "id"), id.make_string());
         energy.set_element(tconcat(base, "label"), link.label.make_string());
         energy.set_element(tconcat(base, "owner"), (link.owner ? link.owner.name[] : "").make_string());
-        energy.set_element(tconcat(base, "parent"), link.a.id[].make_string());
+        energy.set_element(tconcat(base, "parent"), link.a.id);
         energy.set_element(tconcat(base, "child"), (link.b ? link.b.id[] : "").make_string());
         energy.set_element(tconcat(base, "parent_port"), (link.port_a ? link.port_a.id[] : "").make_string());
         energy.set_element(tconcat(base, "child_port"), (link.port_b ? link.port_b.id[] : "").make_string());
@@ -491,7 +491,7 @@ nothrow @nogc:
                            (p.owner ? p.owner.name[] : "").make_string());
         energy.set_element(tconcat(base, "origin"),
                            (p.group ? port_group_kind_name(p.group.kind) : "").make_string());
-        energy.set_element(tconcat(base, "port"), p.id[].make_string());
+        energy.set_element(tconcat(base, "port"), p.id);
         FormatId string_format = register_value_format!String();
         circuit_e = energy.find_or_create_element(tconcat(base, "circuit"), string_format);
         island_e = energy.find_or_create_element(tconcat(base, "island"), string_format);
@@ -844,7 +844,7 @@ private void publish_circuit_bus(Device energy, uint generation, apps.energy.top
 {
     const(char)[] base = tconcat("circuit.bus.", bus.id[], ".");
     energy.set_element(tconcat(base, "generation"), cast(int)generation);
-    energy.set_element(tconcat(base, "id"), bus.id[].make_string());
+    energy.set_element(tconcat(base, "id"), bus.id);
     energy.set_element(tconcat(base, "coverage"), coverage_name(bus.coverage).make_string());
     energy.set_element(tconcat(base, "accounted_power"), bus.accounted_power);
     energy.set_element(tconcat(base, "residual_power"), bus.residual_power);
@@ -875,7 +875,7 @@ private void publish_control_path(Device energy, ref TopologyGraph graph, Applia
 
     const(char)[] base = tconcat("control_path.", owner.name[], ".");
     energy.set_element(tconcat(base, "generation"), cast(int)graph.generation);
-    energy.set_element(tconcat(base, "target"), owner.name[].make_string());
+    energy.set_element(tconcat(base, "target"), owner.name);
     energy.set_element(tconcat(base, "target_bus"),
         (path.target_bus ? path.target_bus.id[] : "").make_string());
     energy.set_element(tconcat(base, "source_bus"),
@@ -925,7 +925,7 @@ private void publish_port(Device energy, Port* port)
 {
     const(char)[] base = tconcat("topology.port.", port.id[], ".");
     const(char)[] port_name = port.path.length ? port.path[] : port_role_name(port.role);
-    energy.set_element(tconcat(base, "id"), port.id[].make_string());
+    energy.set_element(tconcat(base, "id"), port.id);
     energy.set_element(tconcat(base, "owner"), (port.owner ? port.owner.name[] : "").make_string());
     energy.set_element(tconcat(base, "label"), port.label.make_string());
     energy.set_element(tconcat(base, "bus"), (port.bus ? port.bus.id[] : "").make_string());

@@ -1026,7 +1026,7 @@ private:
             device = *existing;
         else
         {
-            device = alloc!Device(_device[].make_string());
+            device = alloc!Device(_device);
             is_new = true;
         }
         version (DebugSunspec)

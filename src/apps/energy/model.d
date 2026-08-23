@@ -141,7 +141,7 @@ unittest
     import urt.mem;
     import urt.si.quantity : Quantity;
     import urt.si.unit : Ampere, AmpereHour, Celsius, Percent, ScaledUnit, Volt;
-    import urt.string : make_string;
+    import urt.string : StringLit;
     import urt.variant : Variant;
 
     import manager.series : DataFormat, SeriesKind, ValueType, register_format;
@@ -149,7 +149,7 @@ unittest
     static Element* elem(double value, ScaledUnit unit)
     {
         Element* e = alloc!Element();
-        e.id = "e".make_string();
+        e.id = StringLit!"e";
         e.format = register_format(DataFormat(ValueType.f64, SeriesKind.held, unit));
         e.value = Variant(Quantity!double(value, unit));
         return e;
@@ -158,7 +158,7 @@ unittest
     static Element* bare(double value)
     {
         Element* e = alloc!Element();
-        e.id = "e".make_string();
+        e.id = StringLit!"e";
         e.format = register_value_format(value);
         e.value = Variant(value);
         return e;
@@ -189,7 +189,7 @@ unittest
 
     // register_value_format reads a static unit from the type, not the value.
     Element* typed = alloc!Element();
-    typed.id = "soc_floor".make_string();
+    typed.id = StringLit!"soc_floor";
     typed.format = register_value_format!(Quantity!(double, Percent))();
     typed.value = Variant(Quantity!(double, Percent)(50));
     assert(near(read_in_unit(typed, Percent), 50));

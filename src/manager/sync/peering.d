@@ -540,7 +540,7 @@ private:
             if (_listener)
             {
                 // ether any-station: claims arrive over the OW ethertype from the segment
-                _listener.local_host("00:00:00:00:00:00".make_string());
+                _listener.local_host(StringLit!"00:00:00:00:00:00");
                 _listener.port(_port);
             }
             else

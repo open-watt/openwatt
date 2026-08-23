@@ -853,7 +853,7 @@ Array!String log_print_suggest(bool is_value, const(char)[] name, const(char)[])
 {
     Array!String result;
     if (!is_value && "--stream".startsWith(name))
-        result ~= "--stream".make_string();
+        result ~= StringLit!"--stream";
     return result;
 }
 

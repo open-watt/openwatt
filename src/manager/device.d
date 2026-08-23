@@ -638,8 +638,8 @@ unittest
     import urt.string : make_string;
     import urt.time : from_unix_time_ns;
 
-    Device d = alloc!Device("testdev".make_string());
-    Component c = alloc!Component("child".make_string());
+    Device d = alloc!Device(StringLit!"testdev");
+    Component c = alloc!Component(StringLit!"child");
     c.parent = d;
     assert(!c.is_device);
     Component as_comp = d;

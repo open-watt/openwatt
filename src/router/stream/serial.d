@@ -1244,7 +1244,7 @@ version(Posix)
                 }
             }
             if (!still_there)
-                gone ~= p.id[].make_string();
+                gone ~= p.id;
         }
         foreach (ref id; gone[])
             port_remove(PortKind.serial, id[]);

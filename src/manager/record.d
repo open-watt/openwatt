@@ -687,7 +687,7 @@ nothrow @nogc:
         foreach (i; 0 .. n)
         {
             RecordStream* rs = streams[i];
-            labels[][i] = rs.path[].make_string();
+            labels[][i] = rs.path;
             data[][i].clear();
             query_local(*rs, t0, t1, max_points, mode, data[][i]);
         }

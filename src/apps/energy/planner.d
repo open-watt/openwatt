@@ -52,7 +52,7 @@ nothrow @nogc:
         {
             IslandBudget b = compute_island_budget(island, registry, now, slack_threshold,
                                                    reserve_safety_factor, &graph);
-            island_budgets.insert(island.id[].make_string(), b);
+            island_budgets.insert(island.id, b);
             publish_island_budget(energy_device, island, b, now);
         }
 
