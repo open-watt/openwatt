@@ -222,6 +222,86 @@ authority; the authority-authority link carries coordination only, never fleet s
 6. Dual-authority: authority-authority session, election, membership exchange.
 7. Later domains: modbus function-code discovery per the L2/L3 trajectory.
 
+## Status and development order (2026-08-25)
+
+Where the fleet bring-up actually stands, and the order the remaining work lands in. Update this
+section as items move; it is the working TODO for peering, the design above is the intent.
+
+**Hardware state.** Pi authority (prod, `/sync/peering role=authority claim=*`, ether domain on
+`ether1`) + ESP32-S3 member over ether-UDP. Both ends run current builds. The link forms, the
+claim is answered, the session carries traffic, and the authority no longer crash-loops under it.
+The crash cluster that blocked bring-up resolved into six separate faults, all landed:
+
+- The authority's own registry announce (`attach_peer`, one `add_name` per syncable object, 135
+  on the Pi) outsized the reliable control window (64) and the overflow path restarted the
+  session inline from inside `startup()`, recursing until the watchdog killed it. #557.
+- A listener spawned a peer per source address; a re-dialling member accumulated sessions and the
+  far end restarted on the foreign session ids. #562.
+- Loops read state their callee tore down. `restart()` from a frame handler or a transmit is
+  legitimate, but `drain_reorder`, the per-tick and claim loops over `peers[]`, and the model-sub
+  burst were not keeping their own books. #576.
+- A ws client's pre-tick `sub` bound objects that were never introduced; asserts-enabled builds
+  (debug, and embedded release) died the moment a browser opened the UI. #585.
+- A frame missing an expected member dereferenced null in ~30 decoder sites, and once that was
+  closed, defaulted fields still fed a clock, a queue cursor and an allocation size. #586.
+- D `crt_constructor`s never ran on Espressif targets: LDC emits `.init_array`, IDF's linker
+  script collects only `.ctors`, so type registration was whatever LLVM had const-folded into
+  `.dram0.data`. This was the real "crashes as soon as I look at it" on the S3. #587.
+
+**Development order.**
+
+1. [merged: #557, #562] The window overflow and the session-per-source-address bugs. #562
+   supersedes older sessions by node-id at `hello` by *disabling* the old dynamic peer
+   (destruction stays with its owner; configured peers are only warned about), and owners follow
+   the destroyed signal for the destructions that remain. Rules adopted on the way through:
+   signal handlers never destroy, they record and update() reaps; terminal offline/destroyed
+   decisions deregister immediately; subscriptions that only matter to a live session live in the
+   online()/offline() window rather than filtering arrivals.
+2. [merged: #576, #585, #586] Session-lifetime correctness. #576 gives every peer a burst
+   generation: `begin_burst()` returns it, `send_ok(gen)` after each send reports whether the
+   session that started the burst is still the session underneath, control refusal on a live
+   session restarts it, data planes commit on accept, detach condemns until the replacement
+   session starts, and frames arriving before startup are buffered (8 frames / 8KiB) rather than
+   processed outside a session. #585 makes a bind introduce the object it cites. #586 makes every
+   inbound frame untrusted: typed tri-state extraction, per-verb validation, and two contract
+   fixes below the decoder (announced handles are dense and ascending, so a sparse one can no
+   longer size the adoption table; user value types are refused at both ends because no
+   TypeDetails travel on the wire).
+3. [merged: #582, #583, #587, #588] Field-driven work from the same incident. #582 arms `log_sub`
+   in claim_response so log delegation is claim policy and survives member reboots; #583 routes
+   retained data (log history, element buckets, series images) to slow ram and routes blob
+   `heap_caps` failures into the reclaim walk; #587 runs the D constructors on Espressif; #588
+   reports the wall clock in sysinfo, which is what makes item 5 observable at all. Remaining
+   from #582: render origin hostname + producer timestamp in the text sink, and cap the
+   remote-raisable ingress severity.
+4. [next] Flow control as a channel property, not a call site. #557 paces one producer and #576
+   gives every send a truthful pass/fail, but that is detection, not backpressure: every other
+   control emitter still bursts into the window (`model_sub`/`sub` fan-out, lifecycle fan-out,
+   `result`, `history`), and a refused send now aborts a burst that had real work left. Producers
+   must be able to ask for room and suspend/resume. Oversize control frames must be refused at
+   encode time rather than dropped in the interface (UDPInterface drops anything over its MTU,
+   control tx ignores the result, `hello.max_frame` is discarded). Without this, every activity
+   below reproduces the overflow.
+5. [todo] Clock discipline hardening. Gate member sampling/recording/shipping on wall time (an
+   ESP32 ships 1970-stamped samples until its first pull), carry a synced flag in `hello`, a
+   minimum-delta threshold so steady-state polls do not step, and `adjust_utc_time` actually
+   stepping the OS clock on Posix (it rewrites the current time, so a chained authority drops
+   pushes and forwards them). NTP vs peer discipline needs an owner.
+6. [todo] Full mirror as claim policy, view first. Node-scoped naming for remote devices and
+   objects (flat `g_app.devices` collides on `energy`/`system`; a colliding `add_name` adopts
+   onto the local CID), offline/gone on detach (remote devices currently persist forever with
+   stale values), paced `model_sub` burst (item 4), one quiet skip per unknown type per session.
+   Write routing to the authority is the step after; until then a console `set` on a proxy
+   diverges it silently.
+7. [later] Dual-authority election, reachability propagation, routed-segment discovery, as
+   ordered in *Build order* above.
+
+**Parked, with owners elsewhere.** A module-level sync test harness (the reliable sublayer and the
+decoder are both unit-testable in isolation, and every fix in items 1-3 was proven on hardware
+instead). An `Array`/`MutableString` allocation-flag placement API, which would unwind #583's
+hand-rolled buffer and unlock console history and HTTP bodies. Pool-backed packet buffers (#518),
+with esp32 wifi RX-into-page stacked behind it.
+
 ## Adoption
 
 Nobody should type keys. The fleet forms Zigbee-join style, trust-on-first-use:
