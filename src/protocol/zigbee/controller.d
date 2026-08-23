@@ -423,6 +423,8 @@ private:
             version (DebugZigbeeController)
                 log.warningf("Received ZCL message from unknown device {0,04x}", aps.src);
         }
+        else if (nm.initialised < 0xFF && nm.retry_after != MonoTime())
+            nm.retry_after = MonoTime();    // a sleepy device is only reachable awake; it just spoke, so resume the interview now
 
         ZCLStatus status = ZCLStatus.success;
         ZCLReply reply = ZCLReply.default_;
