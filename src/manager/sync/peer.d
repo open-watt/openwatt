@@ -389,15 +389,13 @@ protected:
         if (_transport_subscribed || !_transport)
             return;
         // a remote-bound peer shares a multi-drop transport: its server routes rx by source
-        // (deliver_frame), so only the state signal is subscribed here. the interface holds
-        // few subscriber slots, so per-peer packet subscriptions must not scale with peers.
-        if (!_remote_bound)
-        {
-            // unknown = all types; the handler takes raw and udp frames, so one peer object
-            // sits on connected pipes and datagram transports alike
-            _transport.subscribe(&on_transport_packet, PacketFilter(PacketType.unknown, PacketDirection.incoming));
-        }
-        _transport.subscribe(&on_transport_state);
+        // (deliver_frame). the interface holds few subscriber slots, so per-peer packet
+        // subscriptions must not scale with peers.
+        if (_remote_bound)
+            return;
+        // unknown = all types; the handler takes raw and udp frames, so one peer object
+        // sits on connected pipes and datagram transports alike
+        _transport.subscribe(&on_transport_packet, PacketFilter(PacketType.unknown, PacketDirection.incoming));
         _transport_subscribed = true;
     }
 
@@ -416,6 +414,21 @@ protected:
         if (_want_logs)
             encoder_for(_encoder).encode_log_sub(this, _want_log_severity, false, _want_log_tag[]);
         return CompletionStatus.complete;
+    }
+
+    // the transport's state matters to a live session only: the subscription is the running window
+    override void online()
+    {
+        if (BaseInterface transport = _transport)
+        {
+            transport.subscribe(&on_transport_state);
+            _transport_state_subscribed = true;
+        }
+    }
+
+    override void offline()
+    {
+        release_transport_state();
     }
 
     override CompletionStatus shutdown()
@@ -653,6 +666,7 @@ private:
     ObjectRef!BaseInterface _transport;
     ObjectRef!UDPInterface  _owned_transport;
     bool                    _transport_subscribed;
+    bool                    _transport_state_subscribed;
     bool                    _remote_bound;
     bool                    _ctl_ack_pending;
     InetAddress             _remote_addr;
@@ -784,14 +798,21 @@ private:
 
     void detach_transport()
     {
+        release_transport_state();
         if (!_transport_subscribed)
             return;
         if (BaseInterface transport = _transport)
-        {
             transport.unsubscribe(&on_transport_packet);
-            transport.unsubscribe(&on_transport_state);
-        }
         _transport_subscribed = false;
+    }
+
+    void release_transport_state()
+    {
+        if (!_transport_state_subscribed)
+            return;
+        if (BaseInterface transport = _transport)
+            transport.unsubscribe(&on_transport_state);
+        _transport_state_subscribed = false;
     }
 
     bool create_remote_transport()
@@ -819,6 +840,8 @@ private:
 
     package void deliver_frame(const(ubyte)[] frame)
     {
+        if (disabled)
+            return;
         if (!sublayer_armed)
         {
             encoder_for(_encoder).decode_and_dispatch(this, frame);

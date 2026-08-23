@@ -24,6 +24,8 @@ import manager.collection;
 import manager.sync.encoder;
 import manager.sync.peer;
 
+import router.iface;
+
 import protocol.http.server;
 import protocol.http.websocket;
 
@@ -142,6 +144,7 @@ private:
         peer.transport(ws);
         peer.encoder(_encoder);
         peer.subscribe_transport();
+        peer.subscribe(&on_peer_state);
         _peers ~= peer;
 
         debug log.info("client connected -> ", peer.name[]);
@@ -153,14 +156,31 @@ private:
         while (i < _peers.length)
         {
             SyncPeer peer = _peers[i];
-            if (all || peer.transport is null)
+            if (all || peer.transport is null || peer.disabled)
             {
                 debug log.info("removing peer ", peer.name[]);
-                peer.destroy();
-                _peers.remove(i);
+                BaseInterface t = peer.transport;
+                peer.destroy();   // on_peer_state drops the entry
+                if (t)
+                    t.destroy();  // the per-connection socket serves only this session
             }
             else
                 ++i;
+        }
+    }
+
+    // whoever destroys a spawned peer (our sweep, session reconciliation), the table follows
+    void on_peer_state(ActiveObject peer, StateSignal signal)
+    {
+        if (signal != StateSignal.destroyed)
+            return;
+        foreach (i, p; _peers[])
+        {
+            if (p is peer)
+            {
+                _peers.remove(i);
+                return;
+            }
         }
     }
 }

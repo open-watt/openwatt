@@ -971,6 +971,25 @@ nothrow @nogc:
             format_uint(node_id, nid[], 16, 16, '0');
         log.info("hello from '", from.name[], "' host='", host, "' ver=", ver, " caps=", caps,
                  node_id ? " node=" : "", node_id ? nid[] : "");
+
+        // a node's newest session supersedes any older one it re-dialled away from
+        if (node_id)
+        {
+            Array!SyncPeer superseded;
+            collect_superseded(peers[], from, node_id, superseded);
+            foreach (p; superseded[])
+            {
+                if (p.flags & ObjectFlags.dynamic)
+                {
+                    // disable, not destroy: teardown runs from the state machine next tick,
+                    // and destruction stays with the object's owner (listener sweep, operator)
+                    log.info("session '", p.name[], "' superseded by '", from.name[], "' for node ", nid[]);
+                    p.disabled(true);
+                }
+                else
+                    log.warning("peer '", p.name[], "' also carries node ", nid[], "; configured peers are not superseded");
+            }
+        }
     }
 
     void inbound_claim(SyncPeer from, uint seq, const(char)[] cluster, uint priority, const(char)[] auth, const(char)[] key)
@@ -1958,4 +1977,47 @@ CommandState sync_log_sub(Session session, const(char)[] peer, Nullable!Severity
     bool off = !severity;
     target.request_logs(off ? Severity.info : severity.value, off, tag ? tag.value : null);
     return null;
+}
+
+
+// the newest session for a node supersedes any older one carrying the same node id
+package void collect_superseded(SyncPeer[] peers, SyncPeer from, ulong node_id, ref Array!SyncPeer superseded)
+{
+    foreach (p; peers)
+        if (p !is from && p._remote_node_id == node_id && !p.disabled)
+            superseded ~= p;
+}
+
+unittest
+{
+    import urt.mem;
+
+    SyncPeer a = alloc!SyncPeer(CID(1));
+    scope(exit) free(a);
+    SyncPeer b = alloc!SyncPeer(CID(2));
+    scope(exit) free(b);
+    SyncPeer c = alloc!SyncPeer(CID(3));
+    scope(exit) free(c);
+
+    a._remote_node_id = 0xF993;
+    b._remote_node_id = 0xF993;
+    c._remote_node_id = 0;          // no hello identity (a browser): never reconciled
+
+    SyncPeer[3] peers = [a, b, c];
+    Array!SyncPeer superseded;
+
+    // the announcing session is kept; its namesake goes
+    collect_superseded(peers[], b, 0xF993, superseded);
+    assert(superseded.length == 1 && superseded[0] is a);
+
+    // a session already going down is not superseded again
+    a.disabled(true);
+    superseded.clear();
+    collect_superseded(peers[], b, 0xF993, superseded);
+    assert(superseded.length == 0);
+
+    // an identity-less peer matches nothing, and node 0 supersedes nothing
+    superseded.clear();
+    collect_superseded(peers[], c, c._remote_node_id, superseded);
+    assert(superseded.length == 0);
 }
