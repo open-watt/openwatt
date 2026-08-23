@@ -6,6 +6,7 @@ import urt.lifetime;
 import urt.log;
 import urt.map;
 import urt.mem;
+import urt.mem.reclaim : ReclaimResult;
 import urt.mem.temp;
 import urt.string;
 import urt.string.format : tconcat;
@@ -210,6 +211,8 @@ nothrow @nogc:
     static if (has_message_cache)
     void print_cache(ConsoleSession session, const(char)[] filter = "#")
     {
+        _cache_in_use = true;
+        scope (exit) _cache_in_use = false;
         if (!filter)
             filter = "#";
         if (!validate_topic_filter(filter))
@@ -264,6 +267,8 @@ nothrow @nogc:
     static if (has_message_cache)
     void read_payload(ConsoleSession session, const(char)[] topic)
     {
+        _cache_in_use = true;
+        scope (exit) _cache_in_use = false;
         if (!validate_topic_name(topic))
         {
             session.write_line("Invalid MQTT topic name");
@@ -578,6 +583,7 @@ private:
         enum max_cached_messages = 512;
         Map!(String, CachedMessage) _cache;
         Array!String _cache_order;
+        bool _cache_in_use;
 
         struct CachedMessage
         {
@@ -691,6 +697,8 @@ private:
     static if (has_message_cache)
     void store_cache(const(char)[] sender_id, const(char)[] topic, const(ubyte)[] payload, const(ubyte)[] properties, bool retain, MonoTime timestamp)
     {
+        _cache_in_use = true;
+        scope (exit) _cache_in_use = false;
         CachedMessage* existing = topic in _cache;
         if (existing)
         {
@@ -722,6 +730,31 @@ private:
         msg.retained = retain;
         msg.timestamp = timestamp;
     }
+
+    static if (has_message_cache)
+    package ReclaimResult reclaim_cache(size_t bytes_needed, out bool reclaimed)
+    {
+        reclaimed = false;
+        if (!bytes_needed || _cache_in_use)
+            return ReclaimResult.exhausted;
+        if (!_cache_order.empty)
+        {
+            String topic = _cache_order[0].move;
+            _cache_order.remove(0);
+            _cache.remove(topic[]);
+            reclaimed = true;
+            return ReclaimResult.more;
+        }
+        if (!_cache_order.ptr)
+            return ReclaimResult.exhausted;
+        Array!String storage = _cache_order.move;
+        reclaimed = true;
+        return ReclaimResult.exhausted;
+    }
+
+    static if (has_message_cache)
+    package bool has_reclaimable_cache() const pure
+        => !_cache_order.empty || _cache_order.ptr !is null;
 
     void publish_internal(Session* publisher, const(char)[] sender_id, const(char)[] topic, const(ubyte)[] payload, const(ubyte)[] properties, bool retain, MonoTime timestamp)
     {
@@ -904,4 +937,30 @@ private:
         _connections ~= c;
         log.info("MQTT client connected: ", remote);
     }
+}
+
+
+static if (has_message_cache)
+unittest
+{
+    MQTTBroker broker = alloc!MQTTBroker(CID(1));
+    scope (exit)
+    {
+        broker.shutdown();
+        free(broker);
+    }
+
+    ubyte[3] first = [1, 2, 3];
+    ubyte[2] second = [4, 5];
+    broker.store_cache("sender", "first", first[], null, false, MonoTime.init);
+    broker.store_cache("sender", "second", second[], null, false, MonoTime.init);
+    assert(broker._cache.length == 2);
+    broker._cache_in_use = true;
+    bool reclaimed;
+    assert(broker.reclaim_cache(1, reclaimed) == ReclaimResult.exhausted && !reclaimed);
+    broker._cache_in_use = false;
+    assert(broker.reclaim_cache(1, reclaimed) == ReclaimResult.more && reclaimed);
+    assert(broker._cache.length == 1);
+    assert(("first" in broker._cache) is null);
+    assert(("second" in broker._cache) !is null);
 }
