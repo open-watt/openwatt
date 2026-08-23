@@ -841,6 +841,8 @@ nothrow @nogc:
 
         if (!was_valid)
             super.destroy();    // no shutdown to run; detach and queue now
+        else
+            do_update();        // start the teardown now; an async shutdown() continues on the state machine
     }
 
     final package void set_remote_state(StateSignal signal)
@@ -938,7 +940,11 @@ protected:
             set_offline();
 
             if (_flags & ObjectFlags.temporary)
+            {
+                // destroy() drives the machine itself; dispatching below would double-run it
                 destroy();
+                return;
+            }
         }
 
         debug version (DebugStateFlow)
@@ -1646,6 +1652,37 @@ version (unittest)
             last_previous = update.previous.tstring.make_string();
         }
     }
+
+    private final class LifecycleTestObject : ActiveObject
+    {
+        enum type_name = "lifecycle-test";
+        enum collection_id = cast(CollectionType)0;
+    nothrow @nogc:
+
+        uint startups, shutdowns, holds;
+
+        this(CID id, ObjectFlags flags = ObjectFlags.none)
+        {
+            super(collection_type_info!LifecycleTestObject(), id, flags);
+        }
+
+        override CompletionStatus startup()
+        {
+            ++startups;
+            return CompletionStatus.complete;
+        }
+
+        override CompletionStatus shutdown()
+        {
+            ++shutdowns;
+            if (holds)
+            {
+                --holds;
+                return CompletionStatus.continue_;
+            }
+            return CompletionStatus.complete;
+        }
+    }
 }
 
 unittest
@@ -1822,3 +1859,56 @@ unittest
     free(proxy);
 }
 
+
+unittest
+{
+    import manager.collection : item_table;
+
+    static struct Watcher
+    {
+    nothrow @nogc:
+        StateSignal[4] seen;
+        uint count;
+        void on_signal(ActiveObject, StateSignal signal)
+        {
+            if (count < seen.length)
+                seen[count] = signal;
+            ++count;
+        }
+    }
+
+    auto table = &item_table(0);
+
+    // destroy() starts teardown immediately; the object leaves with shutdown already run
+    LifecycleTestObject o = alloc!LifecycleTestObject(table.allocate("lifecycle-o", 0));
+    table.bind(o.id, o);
+    o.do_update();
+    assert(o.running && o.startups == 1);
+
+    Watcher w;
+    o.subscribe(&w.on_signal);
+    o.destroy();
+    assert(o.shutdowns == 1);
+    assert(o._state == ActiveObject.State.destroyed);
+    assert(w.count == 2 && w.seen[0] == StateSignal.offline && w.seen[1] == StateSignal.destroyed);
+
+    // an async shutdown() continues on the state machine
+    LifecycleTestObject a = alloc!LifecycleTestObject(table.allocate("lifecycle-a", 0));
+    table.bind(a.id, a);
+    a.do_update();
+    a.holds = 1;
+    a.destroy();
+    assert(a.shutdowns == 1 && a._state == ActiveObject.State.destroying);
+    a.do_update();
+    assert(a.shutdowns == 2 && a._state == ActiveObject.State.destroyed);
+
+    // a temporary dying from running destroys itself; shutdown runs exactly once
+    LifecycleTestObject t = alloc!LifecycleTestObject(table.allocate("lifecycle-t", 0), ObjectFlags.temporary);
+    table.bind(t.id, t);
+    t.do_update();
+    assert(t.running);
+    t.restart();
+    assert(t.shutdowns == 1 && t._state == ActiveObject.State.destroyed);
+
+    table.free_pending();
+}
