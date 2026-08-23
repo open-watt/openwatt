@@ -1,15 +1,15 @@
 module manager.console.session;
 
 import urt.array;
+import urt.file;
 import urt.lifetime;
 import urt.log;
 import urt.map;
 import urt.mem;
+import urt.result;
 import urt.string;
 import urt.string.ansi;
 import urt.util;
-import urt.file;
-import urt.result;
 import urt.variant;
 
 import manager;
@@ -242,7 +242,7 @@ nothrow @nogc:
             _current_command.request_cancel();
             if (_current_command.update() < CommandCompletionState.finished)
                 return CompletionStatus.continue_;
-            allocator.freeT(_current_command);
+            free(_current_command);
             _current_command = null;
         }
 
@@ -310,7 +310,7 @@ nothrow @nogc:
 
                 echo_result(commandData.result);
                 command_finished(commandData, state);
-                allocator.freeT(commandData);
+                free(commandData);
 
                 if (_closing)
                 {
@@ -336,7 +336,7 @@ nothrow @nogc:
 
             if (_current_command.update() >= CommandCompletionState.finished)
             {
-                allocator.freeT(_current_command);
+                free(_current_command);
                 _current_command = null;
             }
             else
@@ -633,7 +633,7 @@ nothrow @nogc:
 
     void set_local(const(char)[] name, ref const Variant value)
     {
-        _session_locals[makeString(name, _console._allocator)] = value;
+        _session_locals[make_string(name)] = value;
     }
 
 protected:
@@ -747,7 +747,7 @@ protected:
         assert(size <= size_t.max, "File too large to read into memory");
         size_t file_size = cast(size_t)size;
 
-        char[] mem = cast(char[])allocator.alloc(file_size);
+        char[] mem = cast(char[])alloc(file_size);
         if (mem == null)
         {
             writeError("Error allocating memory for history");
@@ -755,7 +755,7 @@ protected:
         }
 
         scope(exit)
-            allocator.free(mem);
+            free(mem);
 
         _history_file.read(mem, file_size);
 
@@ -823,12 +823,6 @@ protected:
         }
         _history_cursor = cast(uint)_history.length;
     }
-
-    // TODO: DELETE ALL THIS ALLOCATOR RUBBISH!
-    public final NoGCAllocator allocator() pure
-        => _console._allocator;
-    final NoGCAllocator tempAllocator() pure
-        => _console._tempAllocator;
 
     void do_bell()
     {
@@ -1303,16 +1297,16 @@ private:
 
 unittest
 {
-    import urt.mem.allocator : Mallocator, defaultAllocator;
+    import urt.mem;
 
-    Console* console = Mallocator.instance.allocT!Console(null, StringLit!"test.session", Mallocator.instance);
+    Console* console = alloc!Console(null, StringLit!"test.session");
 
     SessionTestStream stream = Collection!SessionTestStream().create("session-test-stream");
     assert(stream && stream.running);
 
     auto sessions = Collection!Session();
     CID id = sessions.allocate_id("configured-session-test");
-    Session session = defaultAllocator().allocT!Session(id, ObjectFlags.none, *console);
+    Session session = alloc!Session(id, ObjectFlags.none, *console);
     session.stream(stream);
     session.profile(TerminalProfile.dumb);
     session.initial_command(StringLit!":put started");

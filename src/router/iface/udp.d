@@ -465,12 +465,12 @@ unittest
 
     // a bound station that detaches holds the binding; only an explicit clear un-binds
     {
-        import urt.mem.allocator : defaultAllocator;
+        import urt.mem;
         import router.iface.bridge : BridgeInterface;
 
-        UDPInterface u = defaultAllocator().allocT!UDPInterface(CID(1));
-        BridgeInterface b = defaultAllocator().allocT!BridgeInterface(CID(2));
-        scope(exit) { defaultAllocator().freeT(b); defaultAllocator().freeT(u); }
+        UDPInterface u = alloc!UDPInterface(CID(1));
+        BridgeInterface b = alloc!BridgeInterface(CID(2));
+        scope(exit) { free(b); free(u); }
 
         u.iface(b);
         assert(u._bound && u.iface is null);    // configured, but unresolvable: detached, not wildcard

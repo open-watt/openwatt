@@ -6,7 +6,7 @@ import urt.file : Directory, DirEntry, open, read, close;
 import urt.lifetime : move;
 import urt.log : writeWarning;
 import urt.map;
-import urt.mem.allocator;
+import urt.mem;
 import urt.mem.temp : tconcat;
 import urt.meta.enuminfo : VoidEnumInfo;
 import urt.result : StringResult;
@@ -275,7 +275,7 @@ private:
         Element* ae = is_a ? e : resolve_global_element(a_path);
         Element* be = is_a ? resolve_global_element(b_path) : e;
         ElementLink* link = g_app.create_link(ae, a_path, be, b_path);
-        children.insert(rel.makeString(g_app.allocator), link);
+        children.insert(rel.make_string(), link);
     }
 
     static const(char)[] make_full(ref char[256] buf, const(char)[] prefix, const(char)[] rel)
@@ -294,7 +294,7 @@ __gshared Application g_app = null;
 
 Application create_application()
 {
-    return defaultAllocator().allocT!Application();
+    return alloc!Application();
 }
 
 void shutdown_application()
@@ -302,7 +302,7 @@ void shutdown_application()
     foreach (m; g_app.modules)
         m.deinit();
 
-    defaultAllocator().freeT(g_app);
+    free(g_app);
 
     version (AllocTracking)
     {
@@ -356,9 +356,6 @@ nothrow @nogc:
 
     String name;
 
-    NoGCAllocator allocator;
-    NoGCAllocator temp_allocator;
-
     Array!Module modules;
 
     Console console;
@@ -392,9 +389,6 @@ nothrow @nogc:
     this()
     {
         import urt.mem;
-
-        allocator = defaultAllocator;
-        temp_allocator = temp_allocator;
 
         assert(!g_app, "Application already created!");
         g_app = this;
@@ -441,7 +435,7 @@ nothrow @nogc:
         register_intrinsic(StringLit!"energy.apparent", &apparent);
         register_intrinsic(StringLit!"energy.reactive", &reactive);
 
-        console = Console(this, StringLit!"console", Mallocator.instance);
+        console = Console(this, StringLit!"console");
 
         console.set_prompt(StringLit!"> ");
 
@@ -748,9 +742,9 @@ nothrow @nogc:
         if (!e)
             return StringResult(tconcat("element not found: ", uri.body));
 
-        ElementSignalSub s = allocator.allocT!ElementSignalSub();
+        ElementSignalSub s = alloc!ElementSignalSub();
         s.sink = sink;
-        s.path = uri.body.makeString(allocator);
+        s.path = uri.body.make_string();
         s.element = e;
         e.subscribe(&s.on_change);
         handle = s;
@@ -762,7 +756,7 @@ nothrow @nogc:
         ElementSignalSub s = cast(ElementSignalSub)handle;
         if (s.element)
             s.element.unsubscribe(&s.on_change);
-        allocator.freeT(s);
+        free(s);
     }
 
     SysTime next_run(SignalSub handle) const
@@ -1114,13 +1108,13 @@ nothrow @nogc:
             return e.profile;
         }
 
-        String filename = resolve_profile_path(_profile_path[], basename, allocator);
+        String filename = resolve_profile_path(_profile_path[], basename);
         if (filename.empty)
             return null;
-        Profile* p = load_profile(filename[], allocator);
+        Profile* p = load_profile(filename[]);
         if (!p)
             return null;
-        _profiles.insert(basename.makeString(allocator), ProfileCacheEntry(p, 1));
+        _profiles.insert(basename.make_string(), ProfileCacheEntry(p, 1));
         return p;
     }
 
@@ -1189,7 +1183,7 @@ nothrow @nogc:
 
         if (watch)
         {
-            auto view = allocator.allocT!DeviceTreeView(session, this, pattern);
+            auto view = alloc!DeviceTreeView(session, this, pattern);
             view.default_expand = expand_all;
             return view;
         }
@@ -1347,18 +1341,18 @@ nothrow @nogc:
     {
         assert((a || a_path) && (b || b_path), "Must specify `a` and `b`");
 
-        ElementLink* link = allocator.allocT!ElementLink();
+        ElementLink* link = alloc!ElementLink();
         link.alias_link = alias_link;
 
         if (a)
             link.a.set_element(a);
         else
-            link.a.set_path(a_path.makeString(allocator));
+            link.a.set_path(a_path.make_string());
 
         if (b)
             link.b.set_element(b);
         else
-            link.b.set_path(b_path.makeString(allocator));
+            link.b.set_path(b_path.make_string());
 
         if (link.resolved)
             link.resolve();
@@ -1369,9 +1363,9 @@ nothrow @nogc:
 
     ComponentLink* create_component_link(const(char)[] a, const(char)[] b)
     {
-        ComponentLink* link = allocator.allocT!ComponentLink();
-        link.a_prefix = a.makeString(allocator);
-        link.b_prefix = b.makeString(allocator);
+        ComponentLink* link = alloc!ComponentLink();
+        link.a_prefix = a.make_string();
+        link.b_prefix = b.make_string();
         component_links ~= link;
         link.populate();
         return link;
@@ -1462,7 +1456,7 @@ nothrow @nogc:
     {
         link.unlink();
         links.removeFirstSwapLast(link);
-        allocator.freeT(link);
+        free(link);
     }
 
     void destroy_component_link(ComponentLink* link)
@@ -1470,7 +1464,7 @@ nothrow @nogc:
         foreach (child; link.children.values)
             destroy_link(child);
         component_links.removeFirstSwapLast(link);
-        allocator.freeT(link);
+        free(link);
     }
 
     // /element/link commands
@@ -1498,7 +1492,7 @@ nothrow @nogc:
         else if (ae || be)
             create_link(ae, source, be, target);
         else
-            undecided_links ~= UndecidedLink(source.makeString(allocator), target.makeString(allocator));
+            undecided_links ~= UndecidedLink(source.make_string(), target.make_string());
     }
 
     void link_print(Session session)
@@ -1593,7 +1587,7 @@ private:
     {
         if (path.length == 0 || !_profiles.empty)
             return false;
-        _profile_path = path.makeString(allocator);
+        _profile_path = path.make_string();
         return true;
     }
 
@@ -1725,7 +1719,7 @@ nothrow @nogc:
         _app = app;
         if (pattern.length > 0)
         {
-            _pattern = pattern.makeString(app.allocator);
+            _pattern = pattern.make_string();
             compute_auto_expand();
         }
     }
@@ -1918,7 +1912,7 @@ Array!String device_print_suggest(bool is_value, const(char)[] name, const(char)
         foreach (f; flags)
         {
             if (f.startsWith(name))
-                result ~= f.makeString(defaultAllocator);
+                result ~= f.make_string();
         }
         return result;
     }
@@ -1944,7 +1938,7 @@ Array!String device_print_suggest(bool is_value, const(char)[] name, const(char)
             return;
         buf.resize(reset);
         buf ~= id;
-        result ~= buf[].makeString(defaultAllocator);
+        result ~= buf[].make_string();
     }
 
     if (parent_path.length == 0)
@@ -1982,7 +1976,6 @@ struct ProfileSearch
 {
 nothrow @nogc:
     const(char)[] basename;
-    NoGCAllocator allocator;
     String first;
     String second;
     bool incomplete;
@@ -1997,9 +1990,9 @@ nothrow @nogc:
     void found(const(char)[] path)
     {
         if (first.empty)
-            first = path.makeString(allocator);
+            first = path.make_string();
         else if (second.empty)
-            second = path.makeString(allocator);
+            second = path.make_string();
     }
 }
 
@@ -2017,7 +2010,7 @@ const(char)[] profile_basename(const(char)[] name) pure
     return name;
 }
 
-String resolve_profile_path(const(char)[] root, const(char)[] basename, NoGCAllocator allocator)
+String resolve_profile_path(const(char)[] root, const(char)[] basename)
 {
     if (root.length == 0 || root.length >= MaxProfilePath)
     {
@@ -2027,7 +2020,6 @@ String resolve_profile_path(const(char)[] root, const(char)[] basename, NoGCAllo
 
     ProfileSearch search;
     search.basename = basename;
-    search.allocator = allocator;
 
     char[MaxProfilePath] path = void;
     path[0 .. root.length] = root[];

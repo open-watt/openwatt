@@ -244,12 +244,12 @@ nothrow @nogc:
         }
 
         ServerMap map;
-        map.name = name.makeString(defaultAllocator());
+        map.name = name.make_string();
         map.local_address = address;
         map.universal_address = universal_address;
         map.iface = iface;
-        map.profile = profile ? profile.makeString(defaultAllocator()) : String();
-        map.model = model.makeString(defaultAllocator());
+        map.profile = profile ? profile.make_string() : String();
+        map.model = model.make_string();
 
         remote_servers[universal_address] = map;
 
@@ -305,7 +305,7 @@ nothrow @nogc:
         if (!c)
             return null;
 
-        ModbusRequestState state = g_app.allocator.allocT!ModbusRequestState(session, slave);
+        ModbusRequestState state = alloc!ModbusRequestState(session, slave);
         c.sendRequest(addr, msg, &state.response_handler, &state.error_handler);
 
         return state;
@@ -361,7 +361,7 @@ nothrow @nogc:
         if (!c)
             return null;
 
-        ModbusRequestState state = g_app.allocator.allocT!ModbusRequestState(session, slave);
+        ModbusRequestState state = alloc!ModbusRequestState(session, slave);
 
         ModbusPDU msg = createMessage_GetDeviceInformation();
         c.sendRequest(addr, msg, &state.response_handler, &state.error_handler);
@@ -449,7 +449,7 @@ nothrow @nogc:
     this(Session session, const(char)[] slave)
     {
         super(session, null);
-        this.slave = slave.makeString(defaultAllocator);
+        this.slave = slave.make_string();
     }
 
     override CommandCompletionState update()

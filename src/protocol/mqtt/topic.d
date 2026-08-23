@@ -3,7 +3,7 @@ module protocol.mqtt.topic;
 import urt.array;
 import urt.lifetime;
 import urt.map;
-import urt.mem.allocator;
+import urt.mem;
 import urt.string;
 import urt.time;
 
@@ -219,7 +219,7 @@ private:
         if (level == "+")
         {
             if (!node.plus_child)
-                node.plus_child = defaultAllocator().allocT!Node;
+                node.plus_child = alloc!Node;
             next = node.plus_child;
         }
         else
@@ -229,8 +229,8 @@ private:
                 next = *existing;
             else
             {
-                next = defaultAllocator().allocT!Node;
-                node.literal_children.insert(level.makeString(defaultAllocator()), next);
+                next = alloc!Node;
+                node.literal_children.insert(level.make_string(), next);
             }
         }
 
@@ -349,15 +349,15 @@ private:
             next = *existing;
         else
         {
-            next = defaultAllocator().allocT!Node;
-            node.literal_children.insert(level.makeString(defaultAllocator()), next);
+            next = alloc!Node;
+            node.literal_children.insert(level.make_string(), next);
         }
 
         if (sep == 0)
         {
             if (!next.retained)
-                next.retained = defaultAllocator().allocT!RetainedMessage;
-            next.retained.topic = topic_full.makeString(defaultAllocator());
+                next.retained = alloc!RetainedMessage;
+            next.retained.topic = topic_full.make_string();
             next.retained.payload = payload;
             next.retained.properties = properties;
             next.retained.flags = flags;
@@ -381,7 +381,7 @@ private:
         {
             if (next.retained)
             {
-                defaultAllocator().freeT(next.retained);
+                free(next.retained);
                 next.retained = null;
             }
             return;
@@ -447,14 +447,14 @@ private:
         foreach (kvp; node.literal_children)
         {
             clear_node_contents(kvp.value);
-            defaultAllocator().freeT(kvp.value);
+            free(kvp.value);
         }
         node.literal_children.clear();
 
         if (node.plus_child)
         {
             clear_node_contents(node.plus_child);
-            defaultAllocator().freeT(node.plus_child);
+            free(node.plus_child);
             node.plus_child = null;
         }
 
@@ -463,7 +463,7 @@ private:
 
         if (node.retained)
         {
-            defaultAllocator().freeT(node.retained);
+            free(node.retained);
             node.retained = null;
         }
     }

@@ -526,8 +526,8 @@ private Island* find_or_create_island(ref Islands islands, Bus* root)
             return island;
         }
     }
-    Island* island = defaultAllocator.allocT!Island();
-    island.id = id.makeString(defaultAllocator());
+    Island* island = alloc!Island();
+    island.id = id.make_string();
     island.root = root;
     islands ~= island;
     return island;
@@ -545,7 +545,7 @@ private bool component_contains_grid(Bus* root)
 
 private void destroy_island(Island* island)
 {
-    defaultAllocator.freeT(island);
+    free(island);
 }
 
 struct TopologyGraph
@@ -580,13 +580,13 @@ nothrow @nogc:
         boundaries.clear();
         boundary_flows.clear();
         foreach (g; groups[])
-            defaultAllocator.freeT(g);
+            free(g);
         foreach (p; ports[])
-            defaultAllocator.freeT(p);
+            free(p);
         foreach (l; links[])
-            defaultAllocator.freeT(l);
+            free(l);
         foreach (b; bus_list[])
-            defaultAllocator.freeT(b);
+            free(b);
         groups.clear();
         ports.clear();
         links.clear();
@@ -614,7 +614,7 @@ nothrow @nogc:
             name = "unknown";
         if (Bus* b = find_bus(name))
             return b;
-        Bus* b = defaultAllocator.allocT!Bus(name.makeString(defaultAllocator()));
+        Bus* b = alloc!Bus(name.make_string());
         b.contains_grid = b.id[] == "grid";
         buses.insert(b.id[], b);
         bus_list ~= b;
@@ -625,11 +625,11 @@ nothrow @nogc:
                    ubyte phase, MeterSign sign = MeterSign.normal, const(char)[] path = null,
                    const(char)[] label = null, Component component = null)
     {
-        Port* p = defaultAllocator.allocT!Port();
+        Port* p = alloc!Port();
         p.owner = owner;
-        p.id = make_port_id(owner, bus, role, path, label).makeString(defaultAllocator());
+        p.id = make_port_id(owner, bus, role, path, label).make_string();
         if (path.length != 0)
-            p.path = path.makeString(defaultAllocator());
+            p.path = path.make_string();
         p.label = label;
         p.bus = bus;
         p.role = role;
@@ -649,8 +649,8 @@ nothrow @nogc:
 
     PortGroup* add_group(const(char)[] id, PortGroupKind kind, Appliance owner = null, Link* link = null)
     {
-        PortGroup* g = defaultAllocator.allocT!PortGroup();
-        g.id = id.makeString(defaultAllocator());
+        PortGroup* g = alloc!PortGroup();
+        g.id = id.make_string();
         g.kind = kind;
         g.owner = owner;
         g.link = link;
@@ -677,9 +677,9 @@ nothrow @nogc:
                    float capacity_amps, bool closed = true, const(char)[] label = null,
                    const(char)[] kind = null, const(char)[] id = null)
     {
-        Link* l = defaultAllocator.allocT!Link();
+        Link* l = alloc!Link();
         l.owner = owner;
-        l.id = make_link_id(owner, port_a, port_b, label, id).makeString(defaultAllocator());
+        l.id = make_link_id(owner, port_a, port_b, label, id).make_string();
         l.label = label;
         l.kind = kind;
         l.a = a;
@@ -1175,7 +1175,7 @@ private:
 
             DevicePort spec;
             spec.component = c;
-            spec.path = path.makeString(defaultAllocator());
+            spec.path = path.make_string();
             spec.role = read_port_role(c);
             spec.flow = read_flow_domain(c);
             spec.circuit = read_port_circuit(a, c, path);
@@ -1209,7 +1209,7 @@ private:
             if (binding.circuit.length == 0)
                 continue;
             DevicePort spec;
-            spec.path = binding.port[].makeString(defaultAllocator());
+            spec.path = binding.port[].make_string();
             spec.circuit = binding.circuit[];
             spec.role = port_role_from_name(last_path_segment(binding.port[]));
             spec.flow = flow_for_port(binding.port[], a.kind);
@@ -1596,7 +1596,7 @@ private:
     {
         if (value.length == 0)
             return "";
-        production_strings ~= value.makeString(defaultAllocator());
+        production_strings ~= value.make_string();
         return production_strings[production_strings.length - 1][];
     }
 

@@ -6,10 +6,10 @@ import urt.encoding;
 import urt.kvp;
 import urt.lifetime;
 import urt.log;
+import urt.mem : memmove;
+import urt.mem;
 import urt.meta.enuminfo;
 import urt.string;
-import urt.mem : memmove;
-import urt.mem.allocator;
 import urt.time;
 import urt.zip;
 
@@ -265,8 +265,8 @@ nothrow @nogc:
                     size_t colon;
                     if (len > 0 && decode_buf[0 .. len].contains(':', &colon))
                     {
-                        message.username = decode_buf[0 .. colon].makeString(defaultAllocator());
-                        message.password = decode_buf[colon + 1 .. len].makeString(defaultAllocator());
+                        message.username = decode_buf[0 .. colon].make_string();
+                        message.password = decode_buf[colon + 1 .. len].make_string();
                     }
                 }
 
@@ -498,7 +498,7 @@ private:
 
         const size_t end_of_reason = msg[newline - 1] == '\r' ? newline - 1 : newline;
 
-        message.reason = msg[1 .. end_of_reason].makeString(defaultAllocator);
+        message.reason = msg[1 .. end_of_reason].make_string();
 
         msg = msg[newline + 1 .. $];
 
@@ -558,12 +558,12 @@ private:
                 return 0;
             }
 
-            message.request_target = subStr[slash..$].makeString(defaultAllocator);
+            message.request_target = subStr[slash..$].make_string();
             return 0;
         }
 
         // origin-form
-        message.request_target = request_target.makeString(defaultAllocator);
+        message.request_target = request_target.make_string();
 
         return 0;
     }
@@ -574,7 +574,7 @@ private:
         {
             const(char)[] kvp = msg.split!('&', false);
             const(char)[] key = kvp.split!('=', false);
-            message.query_params ~= HTTPParam(key.makeString(defaultAllocator), kvp.makeString(defaultAllocator));
+            message.query_params ~= HTTPParam(key.make_string(), kvp.make_string());
         }
         return 0;
     }
@@ -658,7 +658,7 @@ private:
                 const(char)[] key = line[0 .. colon];
                 const(char)[] value = line[colon + 2 .. $].trim;
 
-                message.headers ~= HTTPParam(key.makeString(defaultAllocator), value.makeString(defaultAllocator));
+                message.headers ~= HTTPParam(key.make_string(), value.make_string());
             }
         }
         return 1;
@@ -818,7 +818,7 @@ bool apply_response_encoding(ref const HTTPMessage request, ref HTTPMessage resp
         return false;
 
     response.content = compressed;
-    defaultAllocator().free(compressed);
+    free(compressed);
     response.contentLength = response.content.length;
 
     if (enc == CompressionEncoding.gzip)

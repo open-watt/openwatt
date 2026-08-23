@@ -3,6 +3,7 @@ module manager.device;
 import urt.array;
 import urt.lifetime;
 import urt.log;
+import urt.mem;
 import urt.si.unit : ScaledUnit;
 import urt.string;
 import urt.time;
@@ -258,7 +259,7 @@ nothrow @nogc:
                     break;
             }
             if (!c.bound && c.target)
-                g_app.allocator.freeT(c.target);
+                free(c.target);
         }
         computations.clear();
     }
@@ -368,7 +369,7 @@ package:
 
 Device create_device_from_profile(ref Profile profile, const(char)[] model, const(char)[] id, const(char)[] name, scope CreateElementHandler create_element_handler)
 {
-    import urt.mem.allocator;
+    import urt.mem;
     import manager;
 
     DeviceTemplate* device_template = profile.get_model_template(model);
@@ -399,9 +400,9 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
         device = *existing;
     else
     {
-        device = g_app.allocator.allocT!Device(id.makeString(g_app.allocator));
+        device = alloc!Device(id.make_string());
         if (name)
-            device.name = name.makeString(g_app.allocator);
+            device.name = name.make_string();
         is_new_device = true;
         // identity claims at birth: element lifecycle handlers fired during materialization
         // need the device's CID to allocate EIDs
@@ -423,8 +424,8 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
         }
         if (c is null)
         {
-            c = g_app.allocator.allocT!Component(comp_id.makeString(defaultAllocator()));
-            c.template_ = ct.get_template(profile).makeString(defaultAllocator());
+            c = alloc!Component(comp_id.make_string());
+            c.template_ = ct.get_template(profile).make_string();
             c.hidden = ct.is_hidden();
             c.parent = parent;
             parent.components ~= c;
@@ -456,12 +457,12 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
             bool is_new_element = (e is null);
             if (is_new_element)
             {
-                e = g_app.allocator.allocT!Element();
+                e = alloc!Element();
                 e.parent = c;
-                e.id = el_id.makeString(defaultAllocator());
-                e.name = el.get_name(profile).makeString(defaultAllocator());
-                e.desc = el.get_desc(profile).makeString(defaultAllocator());
-                e.display_unit = el.get_display_units(profile).makeString(defaultAllocator());
+                e.id = el_id.make_string();
+                e.name = el.get_name(profile).make_string();
+                e.desc = el.get_desc(profile).make_string();
+                e.display_unit = el.get_display_units(profile).make_string();
                 e.sampling_mode = el.update_frequency.freq_to_element_mode;
                 e.access = cast(manager.element.Access)el.access;
 
@@ -470,11 +471,11 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
                     if (const KnownElementTemplate* et = find_known_element(c.template_[], e.id[]))
                     {
                         if (!e.display_unit)
-                            e.display_unit = et.units.makeString(defaultAllocator());
+                            e.display_unit = et.units.make_string();
                         if (!e.name)
-                            e.name = et.name.makeString(defaultAllocator());
+                            e.name = et.name.make_string();
                         if (!e.desc)
-                            e.desc = et.desc.makeString(defaultAllocator());
+                            e.desc = et.desc.make_string();
                     }
                 }
             }
@@ -489,7 +490,7 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
                     if (!expr)
                     {
                         writeWarning("Failed to parse expression: ", expr_str);
-                        g_app.allocator.freeT(e);
+                        free(e);
                         continue;
                     }
 
@@ -498,7 +499,7 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
                     if (have_var_refs)
                     {
                         writeWarning("Element expressions can't have variable references: ", expr_str);
-                        g_app.allocator.freeT(e);
+                        free(e);
                         expr.free_expression();
                         continue;
                     }
@@ -512,7 +513,7 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
                         {
                             writeWarning("Element expression has no stable format: ", expr_str);
                             expr.free_expression();
-                            g_app.allocator.freeT(e);
+                            free(e);
                             continue;
                         }
                         e.value = value.move;
@@ -540,7 +541,7 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
                         e.access = cast(manager.element.Access)alias_desc.access;
                         const(char)[] alias_units = alias_desc.get_display_units(profile);
                         if (!(el.explicit & ElementTemplate.Explicit.units) && alias_units.length)
-                            e.display_unit = alias_units.makeString(defaultAllocator());
+                            e.display_unit = alias_units.make_string();
                         if (!(el.explicit & ElementTemplate.Explicit.frequency))
                             e.sampling_mode = alias_desc.update_frequency.freq_to_element_mode;
                         e.format = create_element_handler(device, e, alias_desc, el.index);
@@ -549,7 +550,7 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
                     }
                     if (!e.format.valid)
                     {
-                        g_app.allocator.freeT(e);
+                        free(e);
                         continue;
                     }
                     break;
@@ -633,12 +634,12 @@ void apply_default_retention(Component c)
 
 unittest
 {
-    import urt.mem : defaultAllocator;
-    import urt.string : makeString;
+    import urt.mem;
+    import urt.string : make_string;
     import urt.time : from_unix_time_ns;
 
-    Device d = defaultAllocator.allocT!Device("testdev".makeString(defaultAllocator()));
-    Component c = defaultAllocator.allocT!Component("child".makeString(defaultAllocator()));
+    Device d = alloc!Device("testdev".make_string());
+    Component c = alloc!Component("child".make_string());
     c.parent = d;
     assert(!c.is_device);
     Component as_comp = d;
@@ -649,7 +650,7 @@ unittest
     table.insert(d.id[], d);
     assert(d.cid);
 
-    Element* e = defaultAllocator.allocT!Element();
+    Element* e = alloc!Element();
     e.parent = c;
     assert(!e.eid);
     EID handle = e.ensure_eid();
@@ -659,11 +660,11 @@ unittest
     assert(table.resolve(EID(d.cid, 2)) is null);
 
     // unmounted elements have no identity to allocate
-    Element* stray = defaultAllocator.allocT!Element();
+    Element* stray = alloc!Element();
     assert(stray.ensure_eid() == EID.invalid);
 
     // deref follows element-level forwards and heals the held EID
-    Element* e2 = defaultAllocator.allocT!Element();
+    Element* e2 = alloc!Element();
     e2.parent = c;
     EID handle2 = e2.ensure_eid();
     assert(handle2.index == 2);

@@ -5,7 +5,7 @@ import urt.format.json;
 import urt.lifetime;
 import urt.log;
 import urt.map;
-import urt.mem.allocator;
+import urt.mem;
 import urt.mem.temp;
 import urt.meta.enuminfo;
 import urt.string;
@@ -61,7 +61,7 @@ nothrow @nogc:
         => _uri[];
     void uri(const(char)[] value)
     {
-        _uri = value.makeString(g_app.allocator);
+        _uri = value.make_string();
         mark_set!(typeof(this), "uri")();
     }
 
@@ -233,7 +233,7 @@ private:
         bool deferred = server.defer_response(stream);
         assert(deferred);
 
-        String origin = request.header("Origin")[].makeString(g_app.allocator);
+        String origin = request.header("Origin")[].make_string();
         stream.subscribe(&stream_state_change);
         _pending_requests ~= PendingRequest(request.http_version, stream, session, cmd, origin.move);
         return 0;
@@ -789,7 +789,7 @@ private:
             if (stream)
                 stream.unsubscribe(&stream_state_change);
             _pending_requests.remove(i);
-            s.allocator.freeT(cmd);
+            free(cmd);
             g_app.console.destroy_session(s);
 
             HTTPServer server = _server_id.get_item!HTTPServer;
@@ -840,7 +840,7 @@ nothrow @nogc:
 
     void register_api_handler(const(char)[] uri, APIHandler handler)
     {
-        _custom_handlers.insert(uri.makeString(g_app.allocator), handler);
+        _custom_handlers.insert(uri.make_string(), handler);
     }
 }
 

@@ -6,7 +6,7 @@ import urt.array;
 import urt.endian;
 import urt.hash;
 import urt.inet;
-import urt.mem.allocator : defaultAllocator;
+import urt.mem;
 import urt.time;
 
 import router.iface;
@@ -146,7 +146,7 @@ void udp_input(ref IPStack stack, ref Packet pkt)
         dgm.src_port = src_port;
         if (body_.length > 0)
         {
-            dgm.data = cast(ubyte[])defaultAllocator().alloc(body_.length);
+            dgm.data = cast(ubyte[])alloc(body_.length);
             dgm.data[] = body_[];
         }
         pcb.recv_queue ~= dgm;
@@ -221,7 +221,7 @@ void udp_free_datagram_data(ref UdpDatagram d)
 {
     if (d.data.length > 0)
     {
-        defaultAllocator().free(cast(void[])d.data);
+        free(cast(void[])d.data);
         d.data = null;
     }
 }

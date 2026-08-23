@@ -13,7 +13,7 @@ import urt.file;
 import urt.format.json;
 import urt.lifetime;
 import urt.log;
-import urt.mem.allocator;
+import urt.mem;
 import urt.string;
 import urt.time;
 import urt.variant;
@@ -152,7 +152,7 @@ nothrow @nogc:
         => _uri[];
     void uri(const(char)[] value)
     {
-        _uri = value.makeString(g_app.allocator);
+        _uri = value.make_string();
         mark_set!(typeof(this), "uri")();
         restart();
     }
@@ -779,9 +779,9 @@ private:
         }
 
         auto json = parse_json(cast(const(char)[])response.content[]);
-        _new_nonce_url = json["newNonce"].asString().makeString(defaultAllocator());
-        _new_account_url = json["newAccount"].asString().makeString(defaultAllocator());
-        _new_order_url = json["newOrder"].asString().makeString(defaultAllocator());
+        _new_nonce_url = json["newNonce"].asString().make_string();
+        _new_account_url = json["newAccount"].asString().make_string();
+        _new_order_url = json["newOrder"].asString().make_string();
 
         version (DebugCertificate)
         {
@@ -807,7 +807,7 @@ private:
             acme_error("no nonce in response");
             return 0;
         }
-        _acme_nonce = nonce.makeString(defaultAllocator());
+        _acme_nonce = nonce.make_string();
         version (DebugCertificate)
             writeDebug("Certificate '", name, "': got nonce '", _acme_nonce, "'");
 
@@ -830,7 +830,7 @@ private:
 
         const(char)[] nonce = extract_nonce(response);
         if (nonce.length > 0)
-            _acme_nonce = nonce.makeString(defaultAllocator());
+            _acme_nonce = nonce.make_string();
 
         if (response.status_code != 200 && response.status_code != 201)
         {
@@ -839,7 +839,7 @@ private:
             return 0;
         }
 
-        _acme_account_url = response.header("Location")[].makeString(defaultAllocator());
+        _acme_account_url = response.header("Location")[].make_string();
         if (_acme_account_url.empty)
         {
             acme_error("no Location header in account response");
@@ -863,7 +863,7 @@ private:
 
         const(char)[] nonce = extract_nonce(response);
         if (nonce.length > 0)
-            _acme_nonce = nonce.makeString(defaultAllocator());
+            _acme_nonce = nonce.make_string();
 
         if (response.status_code == 429)
         {
@@ -905,7 +905,7 @@ private:
         // Existing valid order - certificate already issued, just download it
         if (order_status == "valid")
         {
-            _acme_cert_url = json["certificate"].asString().makeString(defaultAllocator());
+            _acme_cert_url = json["certificate"].asString().make_string();
             if (_acme_cert_url.empty)
             {
                 acme_error("valid order has no certificate URL");
@@ -924,8 +924,8 @@ private:
             acme_error("no authorizations in order");
             return 0;
         }
-        _acme_authz_url = authz_array[0].asString().makeString(defaultAllocator());
-        _acme_finalize_url = json["finalize"].asString().makeString(defaultAllocator());
+        _acme_authz_url = authz_array[0].asString().make_string();
+        _acme_finalize_url = json["finalize"].asString().make_string();
 
         version (DebugCertificate)
         {
@@ -956,7 +956,7 @@ private:
 
         const(char)[] nonce = extract_nonce(response);
         if (nonce.length > 0)
-            _acme_nonce = nonce.makeString(defaultAllocator());
+            _acme_nonce = nonce.make_string();
 
         if (response.status_code != 200)
         {
@@ -980,8 +980,8 @@ private:
 
             if (c["type"].asString() == "http-01")
             {
-                _challenge_token = c["token"].asString().makeString(defaultAllocator());
-                _acme_challenge_url = c["url"].asString().makeString(defaultAllocator());
+                _challenge_token = c["token"].asString().make_string();
+                _acme_challenge_url = c["url"].asString().make_string();
 
                 // Compute key authorization: token.thumbprint
                 _challenge_auth = compute_key_authorization(_challenge_token[]);
@@ -1012,7 +1012,7 @@ private:
 
         const(char)[] nonce = extract_nonce(response);
         if (nonce.length > 0)
-            _acme_nonce = nonce.makeString(defaultAllocator());
+            _acme_nonce = nonce.make_string();
 
         if (response.status_code != 200)
         {
@@ -1035,7 +1035,7 @@ private:
 
         const(char)[] nonce = extract_nonce(response);
         if (nonce.length > 0)
-            _acme_nonce = nonce.makeString(defaultAllocator());
+            _acme_nonce = nonce.make_string();
 
         if (response.status_code != 200)
         {
@@ -1074,7 +1074,7 @@ private:
 
         const(char)[] nonce = extract_nonce(response);
         if (nonce.length > 0)
-            _acme_nonce = nonce.makeString(defaultAllocator());
+            _acme_nonce = nonce.make_string();
 
         if (response.status_code != 200)
         {
@@ -1091,7 +1091,7 @@ private:
 
         if (fin_status == "valid")
         {
-            _acme_cert_url = json["certificate"].asString().makeString(defaultAllocator());
+            _acme_cert_url = json["certificate"].asString().make_string();
             version (DebugCertificate)
                 writeDebug("Certificate '", name, "': cert URL=", _acme_cert_url);
             _acme_state = AcmeState.cert_pending;
@@ -1123,7 +1123,7 @@ private:
 
         const(char)[] nonce = extract_nonce(response);
         if (nonce.length > 0)
-            _acme_nonce = nonce.makeString(defaultAllocator());
+            _acme_nonce = nonce.make_string();
 
         if (response.status_code != 200)
         {
@@ -1326,7 +1326,7 @@ private:
         auto thumbprint = jwk_thumbprint();
         MutableString!0 result;
         result.concat(token, ".", thumbprint[]);
-        return result[].makeString(defaultAllocator());
+        return result[].make_string();
     }
 
     const(char)[] make_order_payload()
@@ -1407,7 +1407,7 @@ private:
         auto key_data = cast(ubyte[])load_file(key_path[]);
         if (key_data is null)
         {
-            defaultAllocator().free(cert_data);
+            free(cert_data);
             return false;
         }
 
@@ -1418,8 +1418,8 @@ private:
         if (!r)
         {
             writeWarningf("Certificate '{0}': cached certificate failed to load, err={1,08x}", name, r.system_code);
-            defaultAllocator().free(cert_data);
-            defaultAllocator().free(key_data);
+            free(cert_data);
+            free(key_data);
             return false;
         }
 
@@ -1429,8 +1429,8 @@ private:
         {
             writeWarning("Certificate '", name, "': cached certificate has expired, will re-issue");
             _certref.free_cert();
-            defaultAllocator().free(cert_data);
-            defaultAllocator().free(key_data);
+            free(cert_data);
+            free(key_data);
             return false;
         }
 
@@ -1439,8 +1439,8 @@ private:
         {
             writeWarningf("Certificate '{0}': cached private key failed to load, err={1,08x}", name, r.system_code);
             _certref.free_cert();
-            defaultAllocator().free(cert_data);
-            defaultAllocator().free(key_data);
+            free(cert_data);
+            free(key_data);
             return false;
         }
 
@@ -1450,13 +1450,13 @@ private:
             writeWarningf("Certificate '{0}': cached key/cert association failed, err={1,08x}", name, r.system_code);
             _certref.free_cert();
             _keypair.free_keypair();
-            defaultAllocator().free(cert_data);
-            defaultAllocator().free(key_data);
+            free(cert_data);
+            free(key_data);
             return false;
         }
 
-        defaultAllocator().free(cert_data);
-        defaultAllocator().free(key_data);
+        free(cert_data);
+        free(key_data);
 
         _status = CertStatus.issued;
         writeInfo("Certificate '", name, "': loaded cached ACME certificate (expires ", _expiry, ")");
@@ -1548,7 +1548,7 @@ private:
         auto url_data = cast(char[])load_file(url_path[]);
         if (url_data is null)
         {
-            defaultAllocator().free(key_data);
+            free(key_data);
             return false;
         }
 
@@ -1556,15 +1556,15 @@ private:
         if (!r)
         {
             writeWarningf("Certificate '{0}': cached ACME account key failed to load, err={1,08x}", name, r.system_code);
-            defaultAllocator().free(key_data);
-            defaultAllocator().free(cast(ubyte[])url_data);
+            free(key_data);
+            free(cast(ubyte[])url_data);
             return false;
         }
 
-        _acme_account_url = url_data[0 .. url_data.length].makeString(defaultAllocator());
+        _acme_account_url = url_data[0 .. url_data.length].make_string();
 
-        defaultAllocator().free(key_data);
-        defaultAllocator().free(cast(ubyte[])url_data);
+        free(key_data);
+        free(cast(ubyte[])url_data);
 
         version (DebugCertificate)
             writeDebug("Certificate '", name, "': loaded ACME account key + URL=", _acme_account_url);

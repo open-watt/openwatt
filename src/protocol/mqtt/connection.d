@@ -3,7 +3,7 @@ module protocol.mqtt.connection;
 import urt.array;
 import urt.lifetime;
 import urt.log;
-import urt.mem.allocator;
+import urt.mem;
 import urt.string;
 import urt.time;
 
@@ -293,7 +293,7 @@ private:
             session.will.sent = false;
             session.will.qos = pkt.will_qos;
             session.will.retain = pkt.will_retain;
-            session.will.topic = pkt.will_topic.makeString(defaultAllocator());
+            session.will.topic = pkt.will_topic.make_string();
             session.will.payload = pkt.will_payload;
             session.will.properties = pkt.will_properties;
             session.will.delay_interval = 0;   // TODO: parse WillDelayInterval from will props
@@ -461,7 +461,7 @@ private:
         InboundMessage* m = &session.pending_inbound.pushBack();
         m.packet_id = pkt.packet_id;
         m.flags = cast(ubyte)((pkt.retain ? 0x01 : 0) | (pkt.qos << 1));
-        m.topic = pkt.topic.makeString(defaultAllocator());
+        m.topic = pkt.topic.make_string();
         m.payload = pkt.payload;
         m.properties = pkt.properties;
 

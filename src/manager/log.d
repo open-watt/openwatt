@@ -2,7 +2,7 @@ module manager.log;
 
 import urt.array;
 import urt.log;
-import urt.mem : defaultAllocator;
+import urt.mem;
 import urt.mem.temp : tconcat;
 import urt.meta.nullable;
 import urt.string;
@@ -162,7 +162,7 @@ nothrow @nogc:
         while (_records_head)
         {
             StoredLogMessage* next = _records_head.next;
-            defaultAllocator().freeT(_records_head);
+            free(_records_head);
             _records_head = next;
         }
         _records_tail = null;
@@ -328,7 +328,7 @@ nothrow @nogc:
         if (max_severity)
             _history_max_severity = max_severity.value;
         if (tag)
-            _history_tag = tag.value.makeString(defaultAllocator());
+            _history_tag = tag.value.make_string();
 
         trim_history();
         recalc_ingress_filter();
@@ -381,7 +381,7 @@ private:
         if (!pending && !historical)
             return;
 
-        StoredLogMessage* record = defaultAllocator().allocT!StoredLogMessage();
+        StoredLogMessage* record = alloc!StoredLogMessage();
         if (!record)
         {
             // Can't report the failure: reporting logs, and logging allocates down this path.
@@ -438,7 +438,7 @@ private:
             record.next.previous = record.previous;
         else
             _records_tail = record.previous;
-        defaultAllocator().freeT(record);
+        free(record);
     }
 
     void recalc_ingress_filter()
@@ -846,14 +846,14 @@ CommandState log_print(Session session, Nullable!Severity level, Nullable!(const
         limit = 1;
     if (limit > LogFollowState.max_messages)
         limit = LogFollowState.max_messages;
-    return defaultAllocator().allocT!LogFollowState(session, filter, match ? match.value : null, limit, stream);
+    return alloc!LogFollowState(session, filter, match ? match.value : null, limit, stream);
 }
 
 Array!String log_print_suggest(bool is_value, const(char)[] name, const(char)[])
 {
     Array!String result;
     if (!is_value && "--stream".startsWith(name))
-        result ~= "--stream".makeString(defaultAllocator);
+        result ~= "--stream".make_string();
     return result;
 }
 
@@ -898,8 +898,8 @@ nothrow @nogc:
         super(session, null, LiveViewMode.auto_);
         assert(limit > 0 && limit <= max_messages);
         _log_module = get_module!LogModule;
-        _tag = filter.tag_prefix.makeString(defaultAllocator());
-        _match = match.makeString(defaultAllocator());
+        _tag = filter.tag_prefix.make_string();
+        _match = match.make_string();
         filter.tag_prefix = _tag[];
         _filter = filter;
         _limit = limit;
@@ -1218,11 +1218,11 @@ unittest
     const(char)[] decorated = format_log_for_session(restored, ClientFeatures.xterm);
     assert(decorated.contains("\x1b["));
 
-    auto module_ = defaultAllocator().allocT!LogModule(null);
+    auto module_ = alloc!LogModule(null);
     scope (exit)
     {
         module_.deinit();
-        defaultAllocator().freeT(module_);
+        free(module_);
     }
     module_.resize_history(2);
 

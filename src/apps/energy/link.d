@@ -55,7 +55,7 @@ nothrow @nogc:
     {
         if (_kind[] == value)
             return;
-        _kind = value.makeString(g_app.allocator);
+        _kind = value.make_string();
         mark_set!(typeof(this), "kind")();
         restart();
     }
@@ -65,7 +65,7 @@ nothrow @nogc:
     {
         if (_parent_circuit[] == value)
             return;
-        _parent_circuit = value.makeString(g_app.allocator);
+        _parent_circuit = value.make_string();
         mark_set!(typeof(this), "parent")();
         restart();
     }
@@ -75,7 +75,7 @@ nothrow @nogc:
     {
         if (_child_circuit[] == value)
             return;
-        _child_circuit = value.makeString(g_app.allocator);
+        _child_circuit = value.make_string();
         mark_set!(typeof(this), "child")();
         restart();
     }
@@ -85,7 +85,7 @@ nothrow @nogc:
     {
         if (_circuit[] == value)
             return;
-        _circuit = value.makeString(g_app.allocator);
+        _circuit = value.make_string();
         mark_set!(typeof(this), "circuit")();
         restart();
     }
@@ -96,7 +96,7 @@ nothrow @nogc:
     {
         if (_role[] == value)
             return;
-        _role = value.makeString(g_app.allocator);
+        _role = value.make_string();
         mark_set!(typeof(this), "role")();
         restart();
     }
@@ -152,7 +152,7 @@ nothrow @nogc:
             restart();
             return null;
         }
-        _meter_path = value.makeString(g_app.allocator);
+        _meter_path = value.make_string();
         _meter = resolve_component_path(value);
         mark_set!(typeof(this), [ "meter", "kind" ])();
         restart();

@@ -61,7 +61,7 @@ class Automation : ActiveObject
     const(char)[][] on() const
     {
         size_t n = _signal_uris.length + (_time.length ? 1 : 0);
-        auto buf = tempAllocator().allocArray!(const(char)[])(n);
+        auto buf = talloc_array!(const(char)[])(n);
         size_t i = 0;
         foreach (ref u; _signal_uris)
             buf[i++] = u[];
@@ -80,7 +80,7 @@ class Automation : ActiveObject
 
         _signal_uris.clear();
         foreach (uri; value)
-            _signal_uris ~= uri.makeString(g_app.allocator);
+            _signal_uris ~= uri.make_string();
         _time = String();   // an explicit on= is the full trigger set, sugar included
         mark_set!(typeof(this), "on")();
         restart();
@@ -118,7 +118,7 @@ class Automation : ActiveObject
             if (!ok)
                 return "invalid condition expression";
         }
-        _condition = value.makeString(g_app.allocator);
+        _condition = value.make_string();
         mark_set!(typeof(this), "if")();
         restart();
         return null;
@@ -426,7 +426,7 @@ private:
         {
             // trailing edge: hold the latest event and (re)start the settle window
             _pending_value = ev.value;
-            _pending_source = ev.source.makeString(g_app.allocator);
+            _pending_source = ev.source.make_string();
             if (_debounce_armed)
                 g_app.cancel(&on_debounce);
             _debounce_deadline = when + _debounce;
@@ -534,7 +534,7 @@ private:
     void arm_hold(MonoTime when, ref const SignalEvent ev)
     {
         _hold_value = ev.value;
-        _hold_source = ev.source.makeString(g_app.allocator);
+        _hold_source = ev.source.make_string();
         _hold_deadline = when + _hold;
         g_app.schedule(_hold_deadline, &on_hold);
         _hold_armed = true;
@@ -600,7 +600,7 @@ private:
         teardown_signals();
         if (_status_detail[] != reason)
         {
-            _status_detail = reason.makeString(g_app.allocator);
+            _status_detail = reason.make_string();
             log.info("waiting: ", reason);
         }
         return CompletionStatus.continue_;
@@ -638,7 +638,7 @@ private:
     {
         if (_time[] == uri)
             return;
-        _time = uri.makeString(g_app.allocator);
+        _time = uri.make_string();
         mark_set!(typeof(this), "on")();
         restart();
     }

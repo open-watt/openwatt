@@ -48,7 +48,7 @@ nothrow @nogc:
         => _adapter[];
     final void adapter(const(char)[] value)
     {
-        _adapter = value.makeString(defaultAllocator);
+        _adapter = value.make_string();
         mark_set!(typeof(this), "adapter")();
     }
 
@@ -259,10 +259,10 @@ private:
                 auto iface = Collection!LinuxRawEthernet().create(iface_name, ObjectFlags.dynamic);
                 iface.adapter = name;
                 if (description.length > 0)
-                    iface.comment = description.makeString(defaultAllocator);
+                    iface.comment = description.make_string();
             }
 
-            os_buf ~= name.makeString(defaultAllocator);
+            os_buf ~= name.make_string();
         });
 
         Array!LinuxRawEthernet gone;

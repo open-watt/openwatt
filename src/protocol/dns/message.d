@@ -3,7 +3,7 @@ module protocol.dns.message;
 import urt.array;
 import urt.endian;
 import urt.lifetime;
-import urt.mem.allocator;
+import urt.mem;
 import urt.string;
 import urt.time;
 
@@ -222,7 +222,7 @@ ptrdiff_t parse_dns_message(const(void)[] data, out DNSMessage message)
         bool prefer_unicast_response = (qclass & 0x8000) != 0;
         qclass &= 0x7FFF;
 
-        message.questions.emplaceBack(qname[].makeString(defaultAllocator()), qtype, qclass, NBNSType.unknown, prefer_unicast_response);
+        message.questions.emplaceBack(qname[].make_string(), qtype, qclass, NBNSType.unknown, prefer_unicast_response);
     }
 
     foreach (i; 0 .. header.ancount)
@@ -245,7 +245,7 @@ ptrdiff_t parse_dns_message(const(void)[] data, out DNSMessage message)
             return 0;
         Array!ubyte rdata = msg.takeFront(rdlen);
 
-        message.answers.emplaceBack(name[].makeString(defaultAllocator()), type, cls, NBNSType.unknown, flush_cache, ttl.seconds, rdata.move);
+        message.answers.emplaceBack(name[].make_string(), type, cls, NBNSType.unknown, flush_cache, ttl.seconds, rdata.move);
     }
 
     foreach (i; 0 .. header.nscount)

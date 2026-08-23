@@ -66,9 +66,9 @@ nothrow @nogc:
         g_app.register_enum!PolicyTier();
 
         init_vehicle_formats();
-        manager = defaultAllocator.allocT!EnergyManager();
+        manager = alloc!EnergyManager();
         energy_device = create_energy_device();
-        registry = defaultAllocator.allocT!ControlRegistry();
+        registry = alloc!ControlRegistry();
 
         g_app.console.register_collection!Appliance();
         g_app.console.register_collection!EnergyLink();
@@ -190,7 +190,7 @@ nothrow @nogc:
 
     CommandState live(Session session, const(Variant)[] args)
     {
-        return defaultAllocator.allocT!EnergyLiveView(session, this);
+        return alloc!EnergyLiveView(session, this);
     }
 
     Table build_island_table()
@@ -405,7 +405,7 @@ nothrow @nogc:
         }
 
         if (watch)
-            return defaultAllocator.allocT!TopologyWatchState(session, this);
+            return alloc!TopologyWatchState(session, this);
 
         build_topology_table(session).render(session);
         return null;
@@ -422,7 +422,7 @@ nothrow @nogc:
         }
 
         if (watch)
-            return defaultAllocator.allocT!CircuitWatchState(session, this);
+            return alloc!CircuitWatchState(session, this);
 
         build_circuit_table(session).render(session);
         return null;

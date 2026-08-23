@@ -2,7 +2,7 @@ module protocol.telnet;
 
 import urt.lifetime;
 import urt.map;
-import urt.mem.allocator;
+import urt.mem;
 import urt.string;
 
 import manager;
@@ -47,9 +47,9 @@ nothrow @nogc:
 //            return;
 //        }
 
-        String n = name.makeString(defaultAllocator());
+        String n = name.make_string();
 
-        TelnetServer server = defaultAllocator().allocT!TelnetServer(n.move, &g_app.console, null, port);
+        TelnetServer server = alloc!TelnetServer(n.move, &g_app.console, null, port);
         servers[server.name[]] = server;
     }
 }

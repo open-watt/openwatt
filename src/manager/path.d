@@ -167,14 +167,14 @@ unittest
     assert(match_path("*.voltage", "a.b.voltage", true));
 
     // element walk over a small tree
-    import urt.mem.allocator : defaultAllocator;
-    Component root = defaultAllocator.allocT!Component("dev".makeString(defaultAllocator()));
-    Component child = defaultAllocator.allocT!Component("battery".makeString(defaultAllocator()));
+    import urt.mem;
+    Component root = alloc!Component("dev".make_string());
+    Component child = alloc!Component("battery".make_string());
     child.parent = root;
     root.components ~= child;
     Element e1, e2;
-    e1.id = "voltage".makeString(defaultAllocator());
-    e2.id = "current".makeString(defaultAllocator());
+    e1.id = "voltage".make_string();
+    e2.id = "current".make_string();
     e1.parent = child;
     e2.parent = root;
     child.elements ~= &e1;
@@ -202,6 +202,6 @@ unittest
     walk_elements(root, "*.voltage", &h.visit, true);
     assert(h.count == 1);
 
-    defaultAllocator.freeT(child);
-    defaultAllocator.freeT(root);
+    free(child);
+    free(root);
 }

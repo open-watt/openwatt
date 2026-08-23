@@ -3,11 +3,11 @@ module protocol.ble;
 import urt.conv;
 import urt.log;
 import urt.map;
-import urt.mem.allocator;
+import urt.mem;
 import urt.string;
 import urt.time;
-import urt.uuid;
 import urt.util;
+import urt.uuid;
 
 import manager;
 import manager.collection;
@@ -203,7 +203,7 @@ nothrow @nogc:
         bool is_new = dev is null;
         if (is_new)
         {
-            dev = defaultAllocator().allocT!BLEAdvEntry;
+            dev = alloc!BLEAdvEntry;
             dev.addr = addr;
             devices[addr] = dev;
         }
@@ -349,7 +349,7 @@ private:
                     log.debug_("lost ", expired[i], " '", dev.name[], "'");
                 else
                     log.debug_("lost ", expired[i]);
-                defaultAllocator().freeT(dev);
+                free(dev);
             }
             devices.remove(expired[i]);
         }

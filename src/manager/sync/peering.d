@@ -18,7 +18,7 @@ import urt.conv : format_uint;
 import urt.inet;
 import urt.log;
 import urt.map;
-import urt.mem.allocator;
+import urt.mem;
 import urt.mem.temp : tconcat;
 import urt.meta.nullable;
 import urt.string;
@@ -132,13 +132,13 @@ nothrow @nogc:
                 _enabled = true;    // setting a role is the opt-in
         }
         if (cluster)
-            _cluster = cluster.value.makeString(defaultAllocator());
+            _cluster = cluster.value.make_string();
         if (priority)
             _priority = priority.value;
         if (claim)
-            _claim = claim.value.makeString(defaultAllocator());
+            _claim = claim.value.make_string();
         if (secret)
-            _secret = secret.value.makeString(defaultAllocator());
+            _secret = secret.value.make_string();
         if (port)
             _port = port.value;
 
@@ -281,14 +281,14 @@ nothrow @nogc:
         {
             // the TOFU handover: a factory node adopts the fleet that claims it, key and
             // all, and holds that allegiance across reboots until factory reset
-            _secret = key.makeString(defaultAllocator());
-            _allegiance_cluster = cluster.makeString(defaultAllocator());
+            _secret = key.make_string();
+            _allegiance_cluster = cluster.make_string();
             save_allegiance();
             log.notice("adopted into fleet '", cluster, "' by node ", hex_id(from._remote_node_id)[], "; allegiance persisted (/sync/peering reset returns to factory)");
         }
         else if (!bound_cluster.length && !claimed)
         {
-            _adopted_cluster = cluster.makeString(defaultAllocator());
+            _adopted_cluster = cluster.make_string();
             log.warning("claimed into cluster '", cluster, "' by '", from.name[],
                         "' with no local cluster configured; set cluster= to pin this node");
         }
@@ -482,7 +482,7 @@ private:
         crypto_random_bytes(key);
         char[64] hex = void;
         hex_encode(key[], hex[]);
-        _secret = hex[].makeString(defaultAllocator());
+        _secret = hex[].make_string();
         save_allegiance();
         log.notice("minted the fleet key for cluster '", _cluster, "'");
     }
@@ -494,15 +494,15 @@ private:
         char[] stored = cast(char[])load_file(fleet_id_path);
         if (!stored)
             return;
-        scope(exit) defaultAllocator().free(stored);
+        scope(exit) free(stored);
 
         const(char)[] s = stored;
         const(char)[] cluster = s.split!'\n';
         const(char)[] key = s.split!'\n';
         if (!key.length)
             return;
-        _secret = key.makeString(defaultAllocator());
-        _allegiance_cluster = cluster.makeString(defaultAllocator());
+        _secret = key.make_string();
+        _allegiance_cluster = cluster.make_string();
         apply_announce_state();
     }
 
@@ -540,7 +540,7 @@ private:
             if (_listener)
             {
                 // ether any-station: claims arrive over the OW ethertype from the segment
-                _listener.local_host("00:00:00:00:00:00".makeString(defaultAllocator()));
+                _listener.local_host("00:00:00:00:00:00".make_string());
                 _listener.port(_port);
             }
             else
@@ -576,7 +576,7 @@ private:
             return;
         }
         iface.iface(link.station.get);
-        iface.remote_host(tconcat(link.mac).makeString(defaultAllocator()));
+        iface.remote_host(tconcat(link.mac).make_string());
         iface.remote_port(link.sync_port);
 
         // adopting a factory node hands the fleet key over inside the claim; mint one
@@ -702,7 +702,7 @@ private:
 
 unittest
 {
-    import urt.mem.allocator : defaultAllocator;
+    import urt.mem;
 
     // the setup deadline expires attempts that never sent, not just unanswered claims
     SyncPeeringModule.ClaimAttempt a;
@@ -710,8 +710,8 @@ unittest
     a.deadline = t0 + 10.seconds;
     assert(!a.expired(t0 + 11.seconds));    // no peer: nothing to expire
 
-    a.peer = defaultAllocator().allocT!SyncPeer(CID(1));
-    scope(exit) defaultAllocator().freeT(a.peer);
+    a.peer = alloc!SyncPeer(CID(1));
+    scope(exit) free(a.peer);
     assert(!a.expired(t0));
     assert(a.expired(t0 + 11.seconds));     // unsent and stale: a dead link during setup fails over
 

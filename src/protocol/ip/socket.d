@@ -5,7 +5,7 @@ version (UseInternalIPStack):
 import urt.array;
 import urt.inet;
 import urt.map;
-import urt.mem : defaultAllocator;
+import urt.mem;
 import urt.socket;
 import urt.time;
 
@@ -84,26 +84,26 @@ SocketResult c_create(AddressFamily af, SocketType type, Protocol proto, out Soc
     if (af != AddressFamily.ipv4)
         return SocketResult.invalid_argument;     // v6 later
 
-    Slot* s = defaultAllocator().allocT!Slot();
+    Slot* s = alloc!Slot();
     s.sock_type = type;
     s.family    = af;
 
     int h = _next_handle++;
     if (type == SocketType.datagram)
     {
-        s.udp = defaultAllocator().allocT!UdpPcb();
+        s.udp = alloc!UdpPcb();
         s.udp.handle = h;
         udp_register(s.udp);
     }
     else if (type == SocketType.stream)
     {
-        s.tcp = defaultAllocator().allocT!TcpPcb();
+        s.tcp = alloc!TcpPcb();
         s.tcp.handle = h;
         tcp_assign_id(s.tcp);
     }
     else
     {
-        defaultAllocator().freeT(s);
+        free(s);
         return SocketResult.invalid_argument;     // raw later
     }
 
@@ -123,7 +123,7 @@ SocketResult c_close(Socket socket)
         udp_unregister(s.udp);
         foreach (ref dgm; s.udp.recv_queue[])
             udp_free_datagram_data(dgm);
-        defaultAllocator().freeT(s.udp);
+        free(s.udp);
     }
     else if (s.tcp)
     {
@@ -137,7 +137,7 @@ SocketResult c_close(Socket socket)
             free_pcb(s.tcp);
     }
     _slots.remove(socket.handle);
-    defaultAllocator().freeT(s);
+    free(s);
     return SocketResult.success;
 }
 
@@ -235,7 +235,7 @@ SocketResult c_accept(Socket socket, out Socket connection, InetAddress* remote)
         return SocketResult.would_block;
 
     int h = _next_handle++;
-    Slot* cs = defaultAllocator().allocT!Slot();
+    Slot* cs = alloc!Slot();
     cs.sock_type = SocketType.stream;
     cs.family    = AddressFamily.ipv4;
     cs.tcp       = child;

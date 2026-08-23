@@ -139,7 +139,7 @@ nothrow @nogc:
 
     void bind(Device energy_device, const(char)[] island_id)
     {
-        id = island_id.makeString(defaultAllocator());
+        id = island_id.make_string();
         mode.bind(account_element!String(energy_device, island_id, "mode"));
         members.bind(account_element!String(energy_device, island_id, "members"));
         solar_power.bind(account_element!float(energy_device, island_id, "account.solar.power"));
@@ -201,7 +201,7 @@ nothrow @nogc:
     {
         if (!seen || last != value)
         {
-            String s = value.makeString(defaultAllocator());
+            String s = value.make_string();
             element.value(s, ts);
             last = s;
             seen = true;

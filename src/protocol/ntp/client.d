@@ -41,7 +41,7 @@ nothrow @nogc:
     {
         if (_server[] == value)
             return;
-        _server = value.makeString(g_app.allocator);
+        _server = value.make_string();
         mark_set!(typeof(this), "server")();
         restart();
     }

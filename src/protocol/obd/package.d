@@ -889,7 +889,7 @@ private:
 
 unittest
 {
-    import urt.mem.allocator;
+    import urt.mem;
 
     // An OBDBinding allocated directly (no Application/collection harness), with the
     // transport and timer edges overridden so the test drives the scheduler.
@@ -932,8 +932,8 @@ unittest
         override void disarm_poll() {}
     }
 
-    TestBinding b = defaultAllocator().allocT!TestBinding();
-    scope (exit) defaultAllocator().freeT(b);
+    TestBinding b = alloc!TestBinding();
+    scope (exit) free(b);
 
     // one functional mode-01 element; response pids below avoid 0x0C so the
     // sampler (which needs a real Element) is never entered

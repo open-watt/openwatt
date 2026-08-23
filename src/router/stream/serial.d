@@ -1244,7 +1244,7 @@ version(Posix)
                 }
             }
             if (!still_there)
-                gone ~= p.id[].makeString(defaultAllocator);
+                gone ~= p.id[].make_string();
         }
         foreach (ref id; gone[])
             port_remove(PortKind.serial, id[]);
@@ -1300,7 +1300,7 @@ version(Posix)
     {
         auto id = tconcat("linux:serial:", path);
         port_add(PortKind.serial, id, name, path, SerialStreamModule.ModuleName, description, flags, usb);
-        seen ~= id.makeString(defaultAllocator);
+        seen ~= id.make_string();
     }
 
     PortFlags serial_port_flags(const(char)[] name) pure

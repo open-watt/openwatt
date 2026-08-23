@@ -5,8 +5,8 @@ import urt.inet;
 import urt.lifetime;
 import urt.log;
 import urt.map;
+import urt.mem;
 import urt.meta.enuminfo;
-import urt.mem.allocator;
 import urt.socket;
 import urt.string;
 import urt.string.format;
@@ -106,7 +106,7 @@ nothrow @nogc:
             }
         }
         // TODO: we should be able to promote MutableString to String!!
-        return r[].makeString(defaultAllocator());
+        return r[].make_string();
     }
     void protocols(String[] value)
     {
@@ -143,7 +143,7 @@ nothrow @nogc:
     const(char)[] doh_uri(const(char)[] value)
     {
         // TODO: property should just accept a String!
-        _doh_uri = value.makeString(defaultAllocator);
+        _doh_uri = value.make_string();
         doh_subscribe(_doh_server, _doh_server);
         mark_set!(typeof(this), "doh-uri")();
         return null;
@@ -422,9 +422,9 @@ protected:
             probe.id = 0;
             probe.flags = _mdns_probe_count < 3 ? 0 : (DNSFlags.QR | DNSFlags.AA);
 
-            String local_name = tconcat(hostname[], ".local").makeString(defaultAllocator());
-            String rev4_name = tconcat(v4_addr, ".in-addr.arpa").makeString(defaultAllocator());
-            String rev6_name = tconcat(v6_addr, ".ip6.arpa").makeString(defaultAllocator());
+            String local_name = tconcat(hostname[], ".local").make_string();
+            String rev4_name = tconcat(v4_addr, ".in-addr.arpa").make_string();
+            String rev6_name = tconcat(v6_addr, ".ip6.arpa").make_string();
 
             if (_mdns_probe_count < 3)
             {
@@ -740,5 +740,5 @@ String decode_nbns_name(const(char)[] name, out NBNSType type)
     size_t len = 15;
     while (len > 0 && tmp[len - 1] == ' ')
         --len;
-    return tmp[0 .. len].makeString(defaultAllocator());
+    return tmp[0 .. len].make_string();
 }

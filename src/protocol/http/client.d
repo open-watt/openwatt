@@ -7,7 +7,7 @@ import urt.inet;
 import urt.kvp;
 import urt.lifetime;
 import urt.log;
-import urt.mem.allocator;
+import urt.mem;
 import urt.meta;
 import urt.result;
 import urt.string;
@@ -71,7 +71,7 @@ nothrow @nogc:
         if (url.host.empty)
             return StringResult("host cannot be empty");
 
-        auto r = _conn.remote(url.host.makeString(defaultAllocator));
+        auto r = _conn.remote(url.host.make_string());
         if (r.failed)
             return r;
         _tls = tls;
@@ -103,10 +103,10 @@ nothrow @nogc:
         if (!running)
             return null;
 
-        HTTPMessage* request = defaultAllocator().allocT!HTTPMessage();
+        HTTPMessage* request = alloc!HTTPMessage();
         request.http_version = server_version;
         request.method = method;
-        request.request_target = resource.makeString(defaultAllocator);
+        request.request_target = resource.make_string();
         request.username = username.move;
         request.password = password.move;
         request.content = cast(ubyte[])content;
@@ -180,7 +180,7 @@ protected:
                     r.response_handler(empty);
                 }
                 requests.remove(i);
-                defaultAllocator().freeT(r);
+                free(r);
                 sendNext = true;
             }
             else
@@ -234,7 +234,7 @@ private:
         if (requests[0].response_handler)
             requests[0].response_handler(response);
 
-        defaultAllocator().freeT(requests[0]);
+        free(requests[0]);
         requests.popFront();
 
         if (should_close)

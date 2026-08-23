@@ -387,7 +387,7 @@ private:
 
         const(char)[] hostname = p.hostname();
         if (hostname.length > 0)
-            lease.hostname = hostname.makeString(g_app.allocator);
+            lease.hostname = hostname.make_string();
 
         send_reply(req, client_mac, offer, DhcpMessageType.offer);
     }

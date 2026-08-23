@@ -8,10 +8,10 @@ module manager.sample;
 
 import urt.conv;
 import urt.map : Map;
+import urt.mem;
 import urt.meta.enuminfo : enum_info_equal, enum_info_size, VoidEnumInfo;
-import urt.mem.allocator : defaultAllocator;
 import urt.si.unit : ScaledUnit;
-import urt.string : ieq, makeString, String;
+import urt.string : ieq, make_string, String;
 import urt.string.format : formatValue;
 import urt.typereg : TypeDetails;
 import urt.variant : Variant;
@@ -52,7 +52,7 @@ const(Constraint)* register_constraint(Constraint value)
         if (constraint_equal(*constraint, value))
             return constraint;
     }
-    Constraint* constraint = defaultAllocator().allocT!Constraint();
+    Constraint* constraint = alloc!Constraint();
     *constraint = value;
     g_constraints ~= constraint;
     return constraint;
@@ -83,14 +83,14 @@ const(VoidEnumInfo)* register_enum_info(const(char)[] name, const(VoidEnumInfo)*
         if (enum_info_equal(**e, *info))
         {
             if (owned && info !is *e)
-                defaultAllocator().free((cast(void*)info)[0 .. enum_info_size(*info)]);
+                free((cast(void*)info)[0 .. enum_info_size(*info)]);
             return *e;
         }
         // rebind; the prior definition stays alive for existing Elements
         *e = info;
         return info;
     }
-    g_enums.insert(name.makeString(defaultAllocator()), info);
+    g_enums.insert(name.make_string(), info);
     return info;
 }
 

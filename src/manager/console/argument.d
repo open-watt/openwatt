@@ -1,7 +1,7 @@
 module manager.console.argument;
 
 import urt.array;
-import urt.mem : defaultAllocator;
+import urt.mem;
 import urt.meta.enuminfo : VoidEnumInfo;
 import urt.string;
 import urt.string.ascii : to_lower;
@@ -60,7 +60,7 @@ Array!String suggest_enum_keys(const(VoidEnumInfo)* info, const(char)[] argument
         assert(key.length <= buffer.length, "Enum key too long");
         const(char)[] lower = key.to_lower(buffer[]);
         if (lower.startsWith(argument_text))
-            completions ~= lower.makeString(defaultAllocator);
+            completions ~= lower.make_string();
     }
     return completions;
 }
@@ -134,7 +134,7 @@ Array!String suggest_completion(T : const Device)(const(char)[] argument_text)
     foreach (name; g_app.devices.keys)
     {
         if (name[].startsWith(argument_text))
-            completions ~= name.makeString(defaultAllocator);
+            completions ~= name.make_string();
     }
     return completions;
 }

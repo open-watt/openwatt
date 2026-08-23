@@ -1,6 +1,7 @@
 module manager.plugin;
 
 import urt.log : Log;
+import urt.mem;
 import urt.string;
 
 import manager;
@@ -262,7 +263,7 @@ void register_module(alias mod)(Application app)
     static if (AllModules.length == 0)
         pragma(msg, "Warning: No `Module`s declared in ", mod.stringof);
     else static foreach (m; AllModules)
-        app.register_module(app.allocator.allocT!m(app));
+        app.register_module(alloc!m(app));
 }
 
 import urt.meta : AliasSeq;

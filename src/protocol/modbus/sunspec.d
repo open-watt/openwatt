@@ -3,7 +3,7 @@ module protocol.modbus.sunspec;
 import urt.array;
 import urt.lifetime;
 import urt.log;
-import urt.mem.allocator : defaultAllocator;
+import urt.mem;
 import urt.mem.temp : tconcat;
 import urt.meta : AliasSeq;
 import urt.meta.enuminfo : bitfield, VoidEnumInfo;
@@ -1026,7 +1026,7 @@ private:
             device = *existing;
         else
         {
-            device = g_app.allocator.allocT!Device(_device[].makeString(g_app.allocator));
+            device = alloc!Device(_device[].make_string());
             is_new = true;
         }
         version (DebugSunspec)
@@ -1491,11 +1491,11 @@ private:
         if (!et)
             return;
         if (e.display_unit.empty && et.units.length)
-            e.display_unit = et.units.makeString(defaultAllocator());
+            e.display_unit = et.units.make_string();
         if (e.name.empty && et.name.length)
-            e.name = et.name.makeString(defaultAllocator());
+            e.name = et.name.make_string();
         if (e.desc.empty && et.desc.length)
-            e.desc = et.desc.makeString(defaultAllocator());
+            e.desc = et.desc.make_string();
     }
 
     Component find_or_create_component(Component root, ref const ComponentDef cd)
@@ -1516,14 +1516,14 @@ private:
                 }
             if (child is null)
             {
-                child = g_app.allocator.allocT!Component(segment.makeString(defaultAllocator()));
+                child = alloc!Component(segment.make_string());
                 child.parent = parent;
                 parent.components ~= child;
             }
             parent = child;
         }
         if (cd.template_ && parent.template_.empty)
-            parent.template_ = cd.template_.makeString(defaultAllocator());
+            parent.template_ = cd.template_.make_string();
         return parent;
     }
 
@@ -1532,9 +1532,9 @@ private:
         foreach (Element* existing; c.elements)
             if (existing.id[] == id)
                 return existing;
-        Element* e = g_app.allocator.allocT!Element();
+        Element* e = alloc!Element();
         e.parent = c;
-        e.id = id.makeString(defaultAllocator());
+        e.id = id.make_string();
         c.elements ~= e;
         return e;
     }

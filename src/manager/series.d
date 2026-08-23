@@ -22,7 +22,6 @@ module manager.series;
 
 import urt.array;
 import urt.mem.alloc;
-import urt.mem.allocator : defaultAllocator;
 import urt.meta.enuminfo : enum_info, VoidEnumInfo;
 import urt.si.quantity : Quantity;
 import urt.si.unit : Nanosecond, ScaledUnit;
@@ -75,7 +74,7 @@ FormatId register_format(in DataFormat format)
             return cast(FormatId)i;
     }
     assert(g_formats.length < FormatId.invalid, "format registry full");
-    DataFormat* f = defaultAllocator().allocT!DataFormat();
+    DataFormat* f = alloc!DataFormat();
     *f = cast(DataFormat)format;
     g_formats ~= f;
     return cast(FormatId)(g_formats.length - 1);

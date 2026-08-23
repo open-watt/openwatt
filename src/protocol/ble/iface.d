@@ -5,7 +5,7 @@ import urt.endian;
 import urt.lifetime;
 import urt.log;
 import urt.map;
-import urt.mem.allocator;
+import urt.mem;
 import urt.result;
 import urt.string;
 import urt.time;
@@ -433,7 +433,7 @@ protected:
 
     final BLESession* add_session(MACAddress client, MACAddress peer, uint transport)
     {
-        auto session = defaultAllocator().allocT!BLESession;
+        auto session = alloc!BLESession;
         session.client = client;
         session.peer = peer;
         session.transport = transport;
@@ -468,7 +468,7 @@ protected:
             }
         }
 
-        defaultAllocator().freeT(session);
+        free(session);
     }
 
     // --- submit pump ---

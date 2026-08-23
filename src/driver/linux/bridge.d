@@ -215,7 +215,7 @@ private:
             return;
         }
 
-        Offload* o = defaultAllocator.allocT!Offload();
+        Offload* o = alloc!Offload();
         o.bridge = bridge;
         o.br_ifindex = br_ifindex;
         _offloads ~= o;
@@ -287,7 +287,7 @@ private:
 
         o.netdevs.clear();
         _offloads.removeSwapLast(idx);
-        defaultAllocator.freeT(o);
+        free(o);
 
         log_info(ModuleName, "bridge '", bridge.name[], "' offload torn down");
     }

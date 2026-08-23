@@ -7,7 +7,7 @@ import urt.endian;
 import urt.hash;
 import urt.inet;
 import urt.log;
-import urt.mem.allocator : defaultAllocator;
+import urt.mem;
 import urt.time;
 
 import manager.base : ActiveObject, StateSignal;
@@ -1198,7 +1198,7 @@ void spawn_child_from_listen(ref IPStack stack, TcpPcb* listener, ref const Inet
     if (listener.child_list.length >= TcpAcceptQueueMax * 2)
         return;     // refuse, drop SYN
 
-    TcpPcb* child = defaultAllocator().allocT!TcpPcb();
+    TcpPcb* child = alloc!TcpPcb();
     listener.child_list ~= child;
     tcp_register(child);                    // assigns id before any logging
 
@@ -1985,7 +1985,7 @@ public void free_pcb(TcpPcb* pcb)
     foreach (ref s; pcb.ooo_buf[])
         s.data.clear();
     pcb.ooo_buf.clear();
-    defaultAllocator().freeT(pcb);
+    free(pcb);
 }
 
 

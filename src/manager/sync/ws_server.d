@@ -69,7 +69,7 @@ nothrow @nogc:
     {
         if (_uri[] == value)
             return;
-        _uri = value.makeString(g_app.allocator);
+        _uri = value.make_string();
         mark_set!(typeof(this), "uri")();
         restart();
     }

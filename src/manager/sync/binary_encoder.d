@@ -10,7 +10,7 @@ module manager.sync.binary_encoder;
 
 import urt.array;
 import urt.log;
-import urt.mem.allocator;
+import urt.mem;
 import urt.meta.enuminfo : VoidEnumInfo;
 import urt.string;
 import urt.variant;
@@ -680,7 +680,7 @@ nothrow @nogc:
             {
                 const(char)[] pattern = r.str();
                 if (!r.fail)
-                    sync.inbound_sub(peer, pattern.makeString(defaultAllocator));
+                    sync.inbound_sub(peer, pattern.make_string());
                 break;
             }
 

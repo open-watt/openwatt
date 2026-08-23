@@ -192,7 +192,7 @@ CommandState set_exec(ref Command, Session session, Scope*, const Variant[] args
         if (auto p = na.name in *ctx.locals)
             *p = Variant(na.value);
         else
-            (*ctx.locals)[makeString(na.name, session._console._allocator)] = Variant(na.value);
+            (*ctx.locals)[make_string(na.name)] = Variant(na.value);
     }
 
     return null;
@@ -308,7 +308,7 @@ CommandState run_exec(ref Command, Session session, Scope*, const Variant[] args
                 return null;
             }
             body_ = make_script(cast(const(char)[])buf);
-            defaultAllocator().free(buf);
+            free(buf);
             break;
         }
     }
@@ -322,7 +322,7 @@ CommandState run_exec(ref Command, Session session, Scope*, const Variant[] args
         return null;
     }
 
-    return session._console._allocator.allocT!Context(
+    return alloc!Context(
         session, parent.root_scope, parent.script_scope,
         body_, parent.locals, Context.FrameKind.function_);
 }
@@ -360,7 +360,7 @@ CommandState if_exec(ref Command, Session session, Scope*, const Variant[] args,
     if (chosen.empty)
         return null;
 
-    return session._console._allocator.allocT!Context(session, parent.root_scope, parent.script_scope, chosen, parent.locals, Context.FrameKind.block);
+    return alloc!Context(session, parent.root_scope, parent.script_scope, chosen, parent.locals, Context.FrameKind.block);
 }
 
 
@@ -391,7 +391,7 @@ CommandState while_exec(ref Command, Session session, Scope*, const Variant[] ar
         return null;
     }
 
-    return session._console._allocator.allocT!WhileLoopState(session, parent, cond_body, do_body);
+    return alloc!WhileLoopState(session, parent, cond_body, do_body);
 }
 
 
@@ -424,7 +424,7 @@ nothrow @nogc:
             {
                 if (_cancelled)
                     return CommandCompletionState.cancelled;
-                current_iter = session._console._allocator.allocT!Context(
+                current_iter = alloc!Context(
                     session, parent.root_scope, parent.script_scope,
                     evaluating_cond ? cond_body : do_body, parent.locals, Context.FrameKind.block);
             }
@@ -434,7 +434,7 @@ nothrow @nogc:
                 return cs;
 
             Variant iter_result = current_iter.result.move;
-            session._console._allocator.freeT(current_iter);
+            free(current_iter);
             current_iter = null;
 
             if (evaluating_cond)
@@ -515,12 +515,12 @@ CommandState wait_exec(ref Command, Session session, Scope*, const Variant[] arg
         return null;
     }
 
-    WaitCommandState state = session._console._allocator.allocT!WaitCommandState(session, signal, timeout);
+    WaitCommandState state = alloc!WaitCommandState(session, signal, timeout);
     StringResult started = state.start();
     if (!started)
     {
         session.write_output(tconcat("Error: ", started.message), true);
-        session._console._allocator.freeT(state);
+        free(state);
         return null;
     }
     return state;
@@ -534,7 +534,7 @@ nothrow @nogc:
     this(Session session, const(char)[] signal, Duration timeout)
     {
         super(session);
-        _signal_uri = signal.makeString(g_app.allocator);
+        _signal_uri = signal.make_string();
         _timeout = timeout;
     }
 

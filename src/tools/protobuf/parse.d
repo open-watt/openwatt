@@ -99,9 +99,9 @@ ProtoSpec load_proto(const(char)[] path, const(char)[] filename) nothrow
     import urt.file;
     import urt.mem;
 
-    void[] file = load_file(path ~ filename, defaultAllocator);
+    void[] file = load_file(path ~ filename);
     assert(file, "Failed to load proto file: " ~ path ~ filename);
-    scope(exit) { defaultAllocator.free(file); }
+    scope(exit) { free(file); }
     return parse_proto(cast(string)file, null);
 }
 

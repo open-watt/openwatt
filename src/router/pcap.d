@@ -6,7 +6,7 @@ import urt.file;
 import urt.lifetime;
 import urt.log;
 import urt.map;
-import urt.mem.allocator;
+import urt.mem;
 import urt.socket : InetAddress, AddressFamily;
 import urt.string;
 import urt.system;
@@ -313,16 +313,16 @@ nothrow @nogc:
                 return;
             }
         }
-        String n = name.makeString(g_app.allocator);
+        String n = name.make_string();
 
-        PcapInterface* pcap = g_app.allocator.allocT!PcapInterface();
+        PcapInterface* pcap = alloc!PcapInterface();
         pcap.name = n.move;
         pcap.max_buffer_time = 100.msecs;
 
         if (!pcap.open_file(file))
         {
             log_info(ModuleName, "couldn't open PCAP file '", file, "'");
-            g_app.allocator.freeT(pcap);
+            free(pcap);
             return;
         }
 

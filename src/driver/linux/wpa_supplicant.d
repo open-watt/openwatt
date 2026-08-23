@@ -200,7 +200,7 @@ nothrow @nogc:
         if (got_ssid)
         {
             if (_current_ssid[] != new_ssid_view)
-                _current_ssid = new_ssid_view.makeString(defaultAllocator);
+                _current_ssid = new_ssid_view.make_string();
         }
         else
             _current_ssid = String.init;

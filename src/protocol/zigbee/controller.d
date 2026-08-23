@@ -6,7 +6,7 @@ import urt.endian;
 import urt.lifetime;
 import urt.log;
 import urt.map;
-import urt.mem.allocator;
+import urt.mem;
 import urt.mem.temp;
 import urt.result;
 import urt.string;
@@ -1425,11 +1425,11 @@ private:
                     case 2:      result.stack_ver = attr.value.as!ubyte;    break;
                     case 3:      result.hw_ver = attr.value.as!ubyte;       break;
                     case 7:      result.power_source = cast(ZCLPowerSource)attr.value.as!ubyte;          break;
-                    case 4:      result.mfg_name = attr.value.asString.makeString(defaultAllocator);     break;
-                    case 5:      result.model_name = attr.value.asString.makeString(defaultAllocator);   break;
-                    case 10:     result.product_code = attr.value.asString.makeString(defaultAllocator); break;
-                    case 11:     result.product_url = attr.value.asString.makeString(defaultAllocator);  break;
-                    case 0x4000: result.sw_build_id = attr.value.asString.makeString(defaultAllocator);  break;
+                    case 4:      result.mfg_name = attr.value.asString.make_string();     break;
+                    case 5:      result.model_name = attr.value.asString.make_string();   break;
+                    case 10:     result.product_code = attr.value.asString.make_string(); break;
+                    case 11:     result.product_url = attr.value.asString.make_string();  break;
+                    case 0x4000: result.sw_build_id = attr.value.asString.make_string();  break;
                     default:
                         break;
                 }

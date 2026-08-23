@@ -5,7 +5,8 @@ import urt.inet;
 import urt.lifetime;
 import urt.log;
 import urt.map;
-import urt.mem.allocator;
+import urt.mem;
+import urt.mem.temp;
 import urt.string;
 import urt.string.format : tconcat;
 import urt.time;
@@ -124,7 +125,7 @@ nothrow @nogc:
         _discover.clear();
         foreach (value; values)
             if (!value.empty)
-                _discover ~= value.makeString(g_app.allocator);
+                _discover ~= value.make_string();
         _ha_discovery.configure(discovery_prefixes(), running ? &discovery_publish : null);
         replay_discovery();
         mark_set!(typeof(this), "discover")();
@@ -133,7 +134,7 @@ nothrow @nogc:
 
     private const(char)[][] discovery_prefixes() const
     {
-        auto result = tempAllocator().allocArray!(const(char)[])(_discover.length);
+        auto result = talloc_array!(const(char)[])(_discover.length);
         foreach (i, ref prefix; _discover)
             result[i] = prefix[];
         return result;
@@ -391,8 +392,8 @@ nothrow @nogc:
             return s;
         }
 
-        String id = client_id.makeString(defaultAllocator());
-        Session* s = defaultAllocator().allocT!Session(id, level);
+        String id = client_id.make_string();
+        Session* s = alloc!Session(id, level);
         _sessions.insert(s.client_id[], s);
         present = false;
         return s;
@@ -403,7 +404,7 @@ nothrow @nogc:
         // Cap granted QoS until outbound QoS 1/2 ships.
         ubyte granted = 0;
 
-        String filter_str = filter.makeString(defaultAllocator());
+        String filter_str = filter.make_string();
         bool was_new = s.record_subscription(filter_str, granted, no_local, retain_as_published, retain_handling, subscription_id);
 
         Subscription sub;
@@ -504,12 +505,12 @@ protected:
         foreach (c; _connections)
         {
             c.disconnect(ReasonCode.ServerShuttingDown);
-            defaultAllocator().freeT(c);
+            free(c);
         }
         _connections.clear();
 
         foreach (kvp; _sessions)
-            defaultAllocator().freeT(kvp.value);
+            free(kvp.value);
         _sessions.clear();
 
         _trie.clear();
@@ -536,7 +537,7 @@ protected:
             if (!c.update())
             {
                 detach_and_close(c, now);
-                defaultAllocator().freeT(c);
+                free(c);
                 _connections.removeSwapLast(i);
             }
             else
@@ -704,8 +705,8 @@ private:
             _cache.remove(evict[]);
         }
 
-        String key = topic.makeString(defaultAllocator());
-        String order_key = topic.makeString(defaultAllocator());
+        String key = topic.make_string();
+        String order_key = topic.make_string();
         CachedMessage msg;
         update_cached_message(msg, sender_id, payload, properties, retain, timestamp);
         _cache.insert(key.move, msg.move);
@@ -715,7 +716,7 @@ private:
     static if (has_message_cache)
     static void update_cached_message(ref CachedMessage msg, const(char)[] sender_id, const(ubyte)[] payload, const(ubyte)[] properties, bool retain, MonoTime timestamp)
     {
-        msg.sender = sender_id ? sender_id.makeString(defaultAllocator()) : String();
+        msg.sender = sender_id ? sender_id.make_string() : String();
         msg.payload = payload;
         msg.properties = properties;
         msg.retained = retain;
@@ -760,7 +761,7 @@ private:
             return;
         foreach (ref prefix; _discover)
         {
-            String filter = tconcat(prefix[], "/#").makeString(defaultAllocator());
+            String filter = tconcat(prefix[], "/#").make_string();
             _trie.match_retained(filter[], (ref const RetainedMessage message) nothrow @nogc {
                 _ha_discovery.handle_publish(message.topic[], message.payload[], getTime());
             });
@@ -801,7 +802,7 @@ private:
         }
         clear_session_subs(s);
         _sessions.remove(s.client_id[]);
-        defaultAllocator().freeT(s);
+        free(s);
     }
 
     void clear_session_subs(Session* s)
@@ -899,7 +900,7 @@ private:
 
     void new_connection(Stream client, ref const InetAddress remote, void* user_data)
     {
-        Connection* c = defaultAllocator().allocT!Connection(this, client);
+        Connection* c = alloc!Connection(this, client);
         _connections ~= c;
         log.info("MQTT client connected: ", remote);
     }

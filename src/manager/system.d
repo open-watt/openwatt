@@ -2,7 +2,7 @@ module manager.system;
 
 import urt.array;
 import urt.log;
-import urt.mem.allocator;
+import urt.mem;
 import urt.meta.nullable;
 import urt.string;
 import urt.system;
@@ -32,7 +32,7 @@ void apply_factory_hostname()
         return;
     char[13] buf = "openwatt-0000";
     format_uint(node_id() & 0xFFFF, buf[9 .. 13], 16, 4, '0');
-    hostname = buf[].makeString(defaultAllocator());
+    hostname = buf[].make_string();
 }
 
 
@@ -71,7 +71,7 @@ ulong node_id()
             _node_id = id;
     }
     if (stored)
-        defaultAllocator().free(stored);
+        free(stored);
     if (_node_id != 0)
         return _node_id;
 
@@ -93,7 +93,7 @@ void log_level(Session session, Severity severity)
 
 void set_hostname(Session session, const(char)[] hostname)
 {
-    .hostname = hostname.makeString(defaultAllocator());
+    .hostname = hostname.make_string();
     set_log_hostname(.hostname[]);   // keep log HOSTNAME stamping in sync
 }
 
@@ -275,7 +275,7 @@ version (HasFilesystem)
 
     void fs_read(Session session, const(char)[] name)
     {
-        import urt.mem.allocator : defaultAllocator;
+        import urt.mem;
 
         void[] data = load_file(name);
         if (data is null)
@@ -284,7 +284,7 @@ version (HasFilesystem)
             return;
         }
         session.write_line(data.length, " bytes: ", cast(const(char)[])data);
-        defaultAllocator().free(data);
+        free(data);
     }
 
     void fs_ls(Session session, Nullable!(const(char)[]) path)
@@ -361,7 +361,7 @@ version (HasFilesystem)
             return null;
         }
         session.write_line("format: erasing filesystem...");
-        return session.allocator.allocT!FormatCommandState(session);
+        return alloc!FormatCommandState(session);
     }
 }
 
@@ -441,7 +441,7 @@ auto sleep(Session session, Duration duration)
         }
     }
 
-    return defaultAllocator().allocT!SleepCommandState(session, duration);
+    return alloc!SleepCommandState(session, duration);
 }
 
 private:

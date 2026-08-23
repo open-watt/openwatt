@@ -3,7 +3,7 @@ module protocol.ezsp;
 import urt.endian;
 import urt.lifetime;
 import urt.map;
-import urt.mem.allocator;
+import urt.mem;
 import urt.string;
 
 import manager;

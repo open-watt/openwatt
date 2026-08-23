@@ -190,7 +190,7 @@ private:
 
     static void assign(ref String dst, const(char)[] value)
     {
-        dst = value.length ? value.makeString(defaultAllocator) : String();
+        dst = value.length ? value.make_string() : String();
     }
 }
 

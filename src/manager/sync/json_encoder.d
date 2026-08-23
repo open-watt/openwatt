@@ -12,7 +12,7 @@ module manager.sync.json_encoder;
 import urt.array;
 import urt.format.json;
 import urt.log;
-import urt.mem.allocator;
+import urt.mem;
 import urt.meta.enuminfo : enum_key_from_value, enum_from_key, VoidEnumInfo;
 import urt.string;
 import urt.variant;
@@ -719,7 +719,7 @@ nothrow @nogc:
                     sync.inbound_model_sub(peer, json.getMember("seq").asUint(), patterns[], once && once.asBool(), from ? from.asUlong() : 0, to ? to.asUlong() : 0);
                     break;
                 }
-                sync.inbound_sub(peer, json.getMember("pattern").asString().makeString(defaultAllocator));
+                sync.inbound_sub(peer, json.getMember("pattern").asString().make_string());
                 break;
             }
 

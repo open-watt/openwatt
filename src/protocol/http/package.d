@@ -7,7 +7,7 @@ import urt.kvp;
 import urt.lifetime;
 import urt.log;
 import urt.map;
-import urt.mem.allocator;
+import urt.mem;
 import urt.meta.enuminfo;
 import urt.meta.nullable;
 import urt.string;
@@ -159,10 +159,10 @@ bool http_request(const(char)[] url,
     if (scheme.icmp("http") != 0 && scheme.icmp("https") != 0)
         return false;
 
-    HTTPOneShot one = defaultAllocator.allocT!HTTPOneShot();
+    HTTPOneShot one = alloc!HTTPOneShot();
     one.user_handler = on_response;
     one.method = method;
-    one.path = (parsed.path.empty ? "/" : parsed.path).makeString(defaultAllocator);
+    one.path = (parsed.path.empty ? "/" : parsed.path).make_string();
     if (content.length > 0)
         one.content ~= cast(const(ubyte)[])content;
     one.username = username.move;
@@ -179,12 +179,12 @@ bool http_request(const(char)[] url,
     }
     one.headers ~= HTTPParam(StringLit!"Connection", StringLit!"close");
 
-    String remote_str = tconcat(scheme, "://", parsed.host).makeString(defaultAllocator);
+    String remote_str = tconcat(scheme, "://", parsed.host).make_string();
     const(char)[] client_name = Collection!HTTPClient().generate_name("http-req");
     HTTPClient c = Collection!HTTPClient().create(client_name, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary), NamedArgument("remote", remote_str));
     if (!c)
     {
-        defaultAllocator.freeT(one);
+        free(one);
         return false;
     }
 
@@ -473,11 +473,11 @@ nothrow @nogc:
 
     HTTPRequestState request(Session session, const(char)[] url, HTTPMethod method = HTTPMethod.GET)
     {
-        HTTPRequestState state = g_app.allocator.allocT!HTTPRequestState(session);
+        HTTPRequestState state = alloc!HTTPRequestState(session);
         if (!http_request(url, &state.response_handler, method))
         {
             session.writef("HTTP request setup failed for '{0}'", url);
-            g_app.allocator.freeT(state);
+            free(state);
             return null;
         }
         return state;
@@ -562,7 +562,7 @@ nothrow @nogc:
             case StateSignal.destroyed:
                 client.unsubscribe(&on_state);
                 fire_failure();
-                defaultAllocator.freeT(this);
+                free(this);
                 break;
         }
     }
@@ -604,7 +604,7 @@ unittest
     import urt.si.quantity : VarQuantity;
     import urt.si.unit : Ampere, ScaledUnit;
 
-    HTTPModule module_ = defaultAllocator().allocT!HTTPModule(null);
+    HTTPModule module_ = alloc!HTTPModule(null);
     http_section_kind = register_profile_section("http", module_);
     http_requests_kind = register_profile_root_section("requests", module_);
 

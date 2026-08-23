@@ -87,8 +87,8 @@ struct BLEAdvEntry
                 case ADType.shortened_local_name:
                     if (name.empty && ad_data.length > 0)
                     {
-                        import urt.mem.allocator : defaultAllocator;
-                        name = (cast(const(char)[])ad_data).makeString(defaultAllocator());
+                        import urt.mem;
+                        name = (cast(const(char)[])ad_data).make_string();
                     }
                     break;
 

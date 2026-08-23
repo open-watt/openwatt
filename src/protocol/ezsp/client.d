@@ -692,10 +692,10 @@ private:
                 }
 
                 import urt.string.format : tformat;
-                import urt.mem.allocator : defaultAllocator;
+                import urt.mem;
 
                 _stack_type = cast(EZSPStackType)r.stackType;
-                _stack_version = tformat("{0}.{1}.{2}.{3}", r.stackVersion >> 12, (r.stackVersion >> 8) & 0xF, (r.stackVersion >> 4) & 0xF, r.stackVersion & 0xF).makeString(defaultAllocator());
+                _stack_version = tformat("{0}.{1}.{2}.{3}", r.stackVersion >> 12, (r.stackVersion >> 8) & 0xF, (r.stackVersion >> 4) & 0xF, r.stackVersion & 0xF).make_string();
 
                 _known_version = _requested_version;
                 _requested_version = 0;

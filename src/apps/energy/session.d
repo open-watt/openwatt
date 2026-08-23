@@ -1,10 +1,10 @@
 module apps.energy.session;
 
 import urt.map;
-import urt.mem : defaultAllocator;
-import urt.string;
+import urt.mem;
 import urt.si.quantity : Quantity;
 import urt.si.unit : KilowattHour, Percent;
+import urt.string;
 import urt.time;
 
 import apps.energy.appliance;
@@ -65,7 +65,7 @@ nothrow @nogc:
 
             if (s is null)
             {
-                sessions[a.vin.makeString(defaultAllocator())] = Session.init;
+                sessions[a.vin.make_string()] = Session.init;
                 s = a.vin in sessions;
             }
 

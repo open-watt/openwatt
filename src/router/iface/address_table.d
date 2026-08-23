@@ -1,7 +1,7 @@
 module router.iface.address_table;
 
 import urt.map;
-import urt.mem.allocator;
+import urt.mem;
 
 nothrow @nogc:
 
@@ -18,7 +18,7 @@ nothrow @nogc:
     this(ubyte cache_capacity)
     {
         size_t total = cache_capacity * (ulong.sizeof + ubyte.sizeof + ubyte.sizeof);
-        void[] block = defaultAllocator().alloc(total, ulong.alignof);
+        void[] block = alloc(total, ulong.alignof);
         ubyte* p = cast(ubyte*)block.ptr;
         _keys = cast(ulong*)p;
         p += cache_capacity * ulong.sizeof;
@@ -33,7 +33,7 @@ nothrow @nogc:
         if (_keys)
         {
             size_t total = _capacity * (ulong.sizeof + ubyte.sizeof + ubyte.sizeof);
-            defaultAllocator().free((cast(ubyte*)_keys)[0 .. total]);
+            free((cast(ubyte*)_keys)[0 .. total]);
         }
         _backing.destroy();
     }

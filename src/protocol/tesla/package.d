@@ -95,13 +95,13 @@ nothrow @nogc:
         }
         if (!master)
         {
-            String n = tconcat(_interface, "_twc").makeString(defaultAllocator());
+            String n = tconcat(_interface, "_twc").make_string();
 
-            master = defaultAllocator().allocT!TeslaTWCMaster(this, n.move, i);
+            master = alloc!TeslaTWCMaster(this, n.move, i);
             twc_masters[master.name[]] = master;
         }
 
-        String n = name.makeString(defaultAllocator());
+        String n = name.make_string();
 
         master.add_charger(n.move, id, cast(ushort)(max_current * 100));
     }

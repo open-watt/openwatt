@@ -8,7 +8,7 @@ import urt.endian;
 import urt.inet;
 import urt.lifetime;
 import urt.log;
-import urt.mem.allocator : defaultAllocator;
+import urt.mem;
 import urt.string;
 import urt.time;
 
@@ -89,7 +89,7 @@ protected:
         {
             Session* s = _sessions.popBack();
             s.close();
-            defaultAllocator().freeT(s);
+            free(s);
         }
 
         if (_server)
@@ -108,7 +108,7 @@ protected:
             int result = _sessions[i].update();
             if (result < 0)
             {
-                defaultAllocator().freeT(_sessions[i]);
+                free(_sessions[i]);
                 _sessions.remove(i);
             }
             else
@@ -126,7 +126,7 @@ private:
     void accept_connection(Stream stream, ref const InetAddress remote, void*)
     {
         log.info("new connection from ", remote);
-        _sessions.pushBack(defaultAllocator().allocT!Session(this, stream));
+        _sessions.pushBack(alloc!Session(this, stream));
     }
 
     struct Session

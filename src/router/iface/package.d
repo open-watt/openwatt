@@ -2,13 +2,14 @@ module router.iface;
 
 import urt.array;
 import urt.conv;
-import urt.map;
 import urt.lifetime;
-import urt.meta.nullable;
+import urt.map;
+import urt.mem;
 import urt.mem.ring;
 import urt.meta.enuminfo : bitfield;
-import urt.si.unit;
+import urt.meta.nullable;
 import urt.si.quantity;
+import urt.si.unit;
 import urt.string;
 import urt.string.format;
 import urt.time;
@@ -798,7 +799,7 @@ nothrow @nogc:
             session.write_line("ping is unicast; use discover to enumerate the segment");
             return null;
         }
-        return g_app.allocator.allocT!MacPingState(session, address, count ? count.value : 4);
+        return alloc!MacPingState(session, address, count ? count.value : 4);
     }
 
     static class MacPingState : CommandState
@@ -880,7 +881,7 @@ nothrow @nogc:
 
     MacDiscoverState mac_discover(Session session)
     {
-        return g_app.allocator.allocT!MacDiscoverState(session);
+        return alloc!MacDiscoverState(session);
     }
 
     static class MacDiscoverState : CommandState
@@ -962,7 +963,7 @@ nothrow @nogc:
             return String();
         }
 
-        return name.makeString(g_app.allocator);
+        return name.make_string();
     }
 
     import urt.meta.nullable;

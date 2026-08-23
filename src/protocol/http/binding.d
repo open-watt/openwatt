@@ -915,7 +915,7 @@ bool evaluate_success(ref Variant json, Expression* expr)
     if (json.isObject)
     {
         foreach (key, ref val; json)
-            locals[makeString(key, defaultAllocator())] = val;
+            locals[make_string(key)] = val;
     }
 
     EvalContext ctx;

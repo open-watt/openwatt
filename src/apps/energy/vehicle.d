@@ -39,7 +39,7 @@ VINInfo decode_vin(const(char)[] vin)
     if (vin.length != 17)
         return info;
 
-    info.manufacturer_id = vin[0 .. 3].makeString(defaultAllocator());
+    info.manufacturer_id = vin[0 .. 3].make_string();
 
     const(char)[] wmi = vin[0 .. 3];
     bool is_tesla = false;
@@ -114,12 +114,12 @@ void enrich_from_nhtsa(const(char)[] vin)
 {
     import urt.mem.temp : tconcat;
 
-    auto ctx = defaultAllocator.allocT!NHTSALookup;
-    ctx.vin = vin.makeString(defaultAllocator());
+    auto ctx = alloc!NHTSALookup;
+    ctx.vin = vin.make_string();
 
     const(char)[] url = tconcat("https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVin/", vin, "?format=json");
     if (!http_request(url, &ctx.on_response))
-        defaultAllocator.freeT(ctx);
+        free(ctx);
 }
 
 private class NHTSALookup
@@ -129,7 +129,7 @@ nothrow @nogc:
 
     int on_response(ref const HTTPMessage msg)
     {
-        scope(exit) defaultAllocator.freeT(this);
+        scope(exit) free(this);
 
         if (msg.status_code != 200 || msg.content.length == 0)
             return 0;
@@ -177,7 +177,7 @@ nothrow @nogc:
                 case "Electrification Level":  elem_path = "info.electrification"; break;
                 default: continue;
             }
-            (*v).set_element(elem_path, value.makeString(defaultAllocator()));
+            (*v).set_element(elem_path, value.make_string());
         }
 
         return 0;
@@ -205,7 +205,7 @@ void add_capacity_sample(const(char)[] vin, float estimate_kwh, float weight)
     CapacityEstimate* estimate = vin in g_capacity_estimates;
     if (!estimate)
     {
-        String key = vin.makeString(defaultAllocator());
+        String key = vin.make_string();
         estimate = &g_capacity_estimates.replace(key.move, CapacityEstimate.init);
     }
     estimate.sum_weighted += estimate_kwh * weight;
@@ -262,7 +262,7 @@ Component vehicle_for(const(char)[] vin)
     bool is_new = existing is null;
     if (is_new)
     {
-        vehicle = g_app.allocator.allocT!Device(vin.makeString(g_app.allocator));
+        vehicle = alloc!Device(vin.make_string());
         g_app.devices.insert(vehicle.id[], vehicle);
     }
     else
@@ -320,8 +320,8 @@ private Component ensure_component(Component parent, const(char)[] id, const(cha
     if (Component component = parent.find_component(id))
         return component;
 
-    Component component = g_app.allocator.allocT!Component(id.makeString(defaultAllocator()));
-    component.template_ = template_.makeString(defaultAllocator());
+    Component component = alloc!Component(id.make_string());
+    component.template_ = template_.make_string();
     parent.add_component(component);
     return component;
 }
@@ -487,7 +487,7 @@ private void materialise_vehicle(Device vehicle, const(char)[] vin, bool is_new)
         return;
 
     vehicle.set_element(vehicle_elements[element_id!"info.type"][], StringLit!"vehicle");
-    vehicle.set_element(vehicle_elements[element_id!"info.serial_number"][], vin.makeString(defaultAllocator()));
+    vehicle.set_element(vehicle_elements[element_id!"info.serial_number"][], vin.make_string());
     vehicle.set_element(vehicle_elements[element_id!"control.kind"][], StringLit!"continuous");
     vehicle.set_element(vehicle_elements[element_id!"control.direction"][], StringLit!"consume");
     vehicle.set_element(vehicle_elements[element_id!"control.unit"][], StringLit!"A");

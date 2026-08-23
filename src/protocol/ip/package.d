@@ -2,11 +2,11 @@ module protocol.ip;
 
 import urt.array;
 import urt.inet;
+import urt.log;
 import urt.mem.temp;
 import urt.socket;
 import urt.string;
 import urt.time;
-import urt.log;
 
 import manager.collection;
 import manager.console;
@@ -283,7 +283,7 @@ TCPConnection* tcp_connect(InetAddress remote, TCPRecvHandler on_recv, TCPEventH
                 ether_request_tap_all();
         }
 
-        TcpPcb* pcb = defaultAllocator().allocT!TcpPcb();
+        TcpPcb* pcb = alloc!TcpPcb();
         tcp_assign_id(pcb);
         pcb.handle = TcpEndpointOwned;     // keep tcp_tick from auto-freeing it
         if (local && local.family == remote.family)
@@ -296,7 +296,7 @@ TCPConnection* tcp_connect(InetAddress remote, TCPRecvHandler on_recv, TCPEventH
             pcb.local.port = allocate_tcp_port();
         pcb.remote = remote;
 
-        TCPConnection* c = defaultAllocator().allocT!TCPConnection();
+        TCPConnection* c = alloc!TCPConnection();
         c._pcb = pcb;
         c._remote = remote;
         c._on_recv = on_recv;
@@ -308,7 +308,7 @@ TCPConnection* tcp_connect(InetAddress remote, TCPRecvHandler on_recv, TCPEventH
         {
             pcb.conn_owner = null;
             free_pcb(pcb);
-            defaultAllocator().freeT(c);
+            free(c);
             return null;
         }
         _tcp_conns ~= c;
@@ -333,7 +333,7 @@ TCPConnection* tcp_connect(InetAddress remote, TCPRecvHandler on_recv, TCPEventH
         {
             unregister_tcp_conn(c);
             ws_closesocket(s);
-            defaultAllocator().freeT(c);
+            free(c);
             return null;
         }
         return c;
@@ -372,7 +372,7 @@ TCPConnection* tcp_connect(InetAddress remote, TCPRecvHandler on_recv, TCPEventH
         {
             unregister_tcp_conn(c);
             s.close();
-            defaultAllocator().freeT(c);
+            free(c);
             return null;
         }
         c._watched = true;
@@ -399,14 +399,14 @@ TCPListener* tcp_listen(InetAddress local, TCPAcceptHandler on_accept)
             }
         }
 
-        TcpPcb* pcb = defaultAllocator().allocT!TcpPcb();
+        TcpPcb* pcb = alloc!TcpPcb();
         tcp_assign_id(pcb);
         pcb.handle = TcpEndpointOwned;
         pcb.local = local;
         if (pcb.local.port == 0)
             pcb.local.port = allocate_tcp_port();
 
-        TCPListener* l = defaultAllocator().allocT!TCPListener();
+        TCPListener* l = alloc!TCPListener();
         l._lpcb = pcb;
         l._local = pcb.local;
         l._on_accept = on_accept;
@@ -430,14 +430,14 @@ TCPListener* tcp_listen(InetAddress local, TCPAcceptHandler on_accept)
             ws_closesocket(s);
             return null;
         }
-        TCPListener* l = defaultAllocator().allocT!TCPListener();
+        TCPListener* l = alloc!TCPListener();
         l._handle = s;
         l._local = local;
         l._on_accept = on_accept;
         if (!g_app.reactor.associate(cast(HANDLE)s) || !l.post_accept())
         {
             ws_closesocket(s);
-            defaultAllocator().freeT(l);
+            free(l);
             return null;
         }
         _tcp_listeners ~= l;
@@ -461,14 +461,14 @@ TCPListener* tcp_listen(InetAddress local, TCPAcceptHandler on_accept)
             return null;
         }
 
-        TCPListener* l = defaultAllocator().allocT!TCPListener();
+        TCPListener* l = alloc!TCPListener();
         l._socket = s;
         l._local = local;
         l._on_accept = on_accept;
         if (!g_app.reactor.watch_fd(s.handle, false, &l.on_ready))
         {
             s.close();
-            defaultAllocator().freeT(l);
+            free(l);
             return null;
         }
         l._watched = true;
@@ -490,10 +490,10 @@ UDPEndpoint* udp_open(const(InetAddress)* local, const(InetAddress)* remote, UDP
     version (UseInternalIPStack)
     {
         // The in-tree stack does UDP over v4 only; deliver datagrams inline.
-        UDPEndpoint* ep = defaultAllocator().allocT!UDPEndpoint();
+        UDPEndpoint* ep = alloc!UDPEndpoint();
         ep._on_recv = on_recv;
 
-        UdpPcb* pcb = defaultAllocator().allocT!UdpPcb();
+        UdpPcb* pcb = alloc!UdpPcb();
         if (local && local.family == AddressFamily.ipv4)
         {
             pcb.local_addr = local._a.ipv4.addr;
@@ -542,7 +542,7 @@ UDPEndpoint* udp_open(const(InetAddress)* local, const(InetAddress)* remote, UDP
                 return null;
             }
         }
-        UDPEndpoint* ep = defaultAllocator().allocT!UDPEndpoint();
+        UDPEndpoint* ep = alloc!UDPEndpoint();
         ep._handle = s;
         ep._on_recv = on_recv;
         if (remote)
@@ -553,7 +553,7 @@ UDPEndpoint* udp_open(const(InetAddress)* local, const(InetAddress)* remote, UDP
         if (!g_app.reactor.associate(cast(HANDLE)s) || !ep.post_recv())
         {
             ws_closesocket(s);
-            defaultAllocator().freeT(ep);
+            free(ep);
             return null;
         }
         _udp_eps ~= ep;
@@ -586,7 +586,7 @@ UDPEndpoint* udp_open(const(InetAddress)* local, const(InetAddress)* remote, UDP
             return null;
         }
 
-        UDPEndpoint* ep = defaultAllocator().allocT!UDPEndpoint();
+        UDPEndpoint* ep = alloc!UDPEndpoint();
         ep._socket = s;
         ep._on_recv = on_recv;
         if (connect_peer)
@@ -597,7 +597,7 @@ UDPEndpoint* udp_open(const(InetAddress)* local, const(InetAddress)* remote, UDP
         if (!g_app.reactor.watch_fd(s.handle, false, &ep.on_ready))
         {
             s.close();
-            defaultAllocator().freeT(ep);
+            free(ep);
             return null;
         }
         ep._watched = true;
@@ -623,7 +623,7 @@ private UDPEndpoint* udp_open_ether(const(InetAddress)* local, const(InetAddress
             return null;
     }
 
-    UDPEndpoint* ep = defaultAllocator().allocT!UDPEndpoint();
+    UDPEndpoint* ep = alloc!UDPEndpoint();
     ep._on_recv = on_recv;
     if (remote)
     {
@@ -635,7 +635,7 @@ private UDPEndpoint* udp_open_ether(const(InetAddress)* local, const(InetAddress
                            remote ? remote._a.ether.port : 0);
     if (!ep._ether)
     {
-        defaultAllocator().freeT(ep);
+        free(ep);
         return null;
     }
     _udp_eps ~= ep;
@@ -755,9 +755,9 @@ nothrow @nogc:
             if (total == 0)
                 return 0;
             // the overlapped send owns its buffer until the completion delivers
-            SendOp* op = defaultAllocator().allocT!SendOp();
+            SendOp* op = alloc!SendOp();
             op.io.on_complete = &send_complete;
-            op.buf = cast(ubyte[])defaultAllocator().alloc(total);
+            op.buf = cast(ubyte[])alloc(total);
             size_t off = 0;
             foreach (b; data)
             {
@@ -773,8 +773,8 @@ nothrow @nogc:
             {
                 --_outstanding;
                 _tx_pending -= op.buf.length;
-                defaultAllocator().free(op.buf);
-                defaultAllocator().freeT(op);
+                free(op.buf);
+                free(op);
                 fail(IPEvent.error);
                 return 0;
             }
@@ -1126,8 +1126,8 @@ private:
         {
             SendOp* sop = cast(SendOp*)op;
             _tx_pending -= sop.buf.length;
-            defaultAllocator().free(sop.buf);
-            defaultAllocator().freeT(sop);
+            free(sop.buf);
+            free(sop);
             --_outstanding;
             if (!_closing && !ok)
                 fail(IPEvent.error);
@@ -1692,7 +1692,7 @@ private:
                 udp_unregister(_pcb);
                 foreach (ref dgm; _pcb.recv_queue[])
                     udp_free_datagram_data(dgm);
-                defaultAllocator().freeT(_pcb);
+                free(_pcb);
                 _pcb = null;
             }
         }
@@ -2066,7 +2066,7 @@ void pump_ip_endpoints()
     {
         if (_tcp_conns[i]._closing && _tcp_conns[i].reclaimable)
         {
-            defaultAllocator().freeT(_tcp_conns[i]);
+            free(_tcp_conns[i]);
             _tcp_conns.removeSwapLast(i);
         }
     }
@@ -2074,7 +2074,7 @@ void pump_ip_endpoints()
     {
         if (_tcp_listeners[i]._closing && _tcp_listeners[i].reclaimable)
         {
-            defaultAllocator().freeT(_tcp_listeners[i]);
+            free(_tcp_listeners[i]);
             _tcp_listeners.removeSwapLast(i);
         }
     }
@@ -2083,7 +2083,7 @@ void pump_ip_endpoints()
         if (_udp_eps[i]._closing && _udp_eps[i].reclaimable)
         {
             _udp_eps[i].release();
-            defaultAllocator().freeT(_udp_eps[i]);
+            free(_udp_eps[i]);
             _udp_eps.removeSwapLast(i);
         }
     }
@@ -2127,7 +2127,7 @@ version (UseInternalIPStack)
 
     TCPConnection* register_tcp_conn_pcb(TcpPcb* pcb)
     {
-        TCPConnection* c = defaultAllocator().allocT!TCPConnection();
+        TCPConnection* c = alloc!TCPConnection();
         c._pcb = pcb;
         c._phase = TCPConnection.Phase.open;
         c._remote = pcb.remote;
@@ -2214,7 +2214,7 @@ else version (Windows)
 
     TCPConnection* register_tcp_conn(IOCP_SOCKET s, InetAddress remote)
     {
-        TCPConnection* c = defaultAllocator().allocT!TCPConnection();
+        TCPConnection* c = alloc!TCPConnection();
         c._handle = s;
         c._remote = remote;
         _tcp_conns ~= c;
@@ -2244,7 +2244,7 @@ else
 {
     TCPConnection* register_tcp_conn(Socket s, InetAddress remote)
     {
-        TCPConnection* c = defaultAllocator().allocT!TCPConnection();
+        TCPConnection* c = alloc!TCPConnection();
         c._socket = s;
         c._remote = remote;
         _tcp_conns ~= c;

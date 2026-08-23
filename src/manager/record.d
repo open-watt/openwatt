@@ -11,7 +11,7 @@ import urt.array;
 import urt.lifetime;
 import urt.log;
 import urt.map;
-import urt.mem.allocator;
+import urt.mem;
 import urt.string;
 import urt.time;
 import urt.variant;
@@ -464,7 +464,7 @@ nothrow @nogc:
             mark_assigned!(typeof(this), "dir")();
             return;
         }
-        _dir = value.makeString(g_app.allocator);
+        _dir = value.make_string();
         mark_set!(typeof(this), "dir")();
 
         // No restart: each stream detaches its store from the old file and the next
@@ -494,7 +494,7 @@ nothrow @nogc:
             mark_assigned!(typeof(this), "filter")();
             return;
         }
-        _filter = joined[].makeString(g_app.allocator);
+        _filter = joined[].make_string();
         mark_set!(typeof(this), "filter")();
 
         if (running)
@@ -630,15 +630,15 @@ private:
     void release(RecordStream* rs)
     {
         rs.close(); // seals the tail and ships what is still pending
-        defaultAllocator().freeT(rs);
+        free(rs);
     }
 
     void attach(Element* e, const(char)[] path)
     {
-        RecordStream* rs = defaultAllocator().allocT!RecordStream();
+        RecordStream* rs = alloc!RecordStream();
         rs.owner = this;
         rs.element = e;
-        rs.path = path.makeString(defaultAllocator());
+        rs.path = path.make_string();
         _streams.insert(rs.path[], rs);
         // the element self-captures; the first flush ships its standing history
     }
@@ -656,7 +656,7 @@ private:
                 fn ~= c;
         }
         fn ~= ext;
-        return fn[].makeString(defaultAllocator());
+        return fn[].make_string();
     }
 }
 
@@ -687,7 +687,7 @@ nothrow @nogc:
         foreach (i; 0 .. n)
         {
             RecordStream* rs = streams[i];
-            labels[][i] = rs.path[].makeString(defaultAllocator());
+            labels[][i] = rs.path[].make_string();
             data[][i].clear();
             query_local(*rs, t0, t1, max_points, mode, data[][i]);
         }
@@ -797,7 +797,7 @@ nothrow @nogc:
     this(Session session, const(char)[] path)
     {
         super(session);
-        _path = path.makeString(defaultAllocator());
+        _path = path.make_string();
     }
 
     override void render()
@@ -925,8 +925,8 @@ nothrow @nogc:
             Duration span = last ? last.value : 120.seconds;
             Array!String paths;
             foreach (p; path)
-                paths ~= p.makeString(defaultAllocator());
-            return defaultAllocator().allocT!GraphViewState(session, this, paths.move, span, opt, height ? height.value : 0);
+                paths ~= p.make_string();
+            return alloc!GraphViewState(session, this, paths.move, span, opt, height ? height.value : 0);
         }
 
         ulong t1 = unixTimeNs(to ? to.value : getSysTime());
@@ -938,7 +938,7 @@ nothrow @nogc:
             w = 80;
         uint h = height ? height.value : 16;
 
-        auto cmd = defaultAllocator().allocT!RecordGraphCommand(session, w, h, opt);
+        auto cmd = alloc!RecordGraphCommand(session, w, h, opt);
         cmd.fetch.begin(this, path, t0, t1, w * 2, QueryMode.graph);
         return cmd;
     }
@@ -949,7 +949,7 @@ nothrow @nogc:
         ulong span = cast(ulong)(last ? last.value : 3600.seconds).as!"nsecs";
         uint max_points = max ? max.value : 24;
 
-        auto cmd = defaultAllocator().allocT!RecordQueryCommand(session, path);
+        auto cmd = alloc!RecordQueryCommand(session, path);
         cmd.fetch.begin(this, (&path)[0 .. 1], now > span ? now - span : 0, now, max_points, QueryMode.raw);
         return cmd;
     }

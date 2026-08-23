@@ -5,7 +5,7 @@ import urt.crc;
 import urt.endian;
 import urt.lifetime;
 import urt.log;
-import urt.mem.allocator;
+import urt.mem;
 import urt.result;
 import urt.string;
 import urt.time;
@@ -688,7 +688,7 @@ private:
             msg.next = null;
         }
         else
-            msg = defaultAllocator.allocT!Message();
+            msg = alloc!Message();
         msg.send_time = MonoTime();
         return msg;
     }

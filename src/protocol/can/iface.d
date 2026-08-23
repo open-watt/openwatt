@@ -166,7 +166,7 @@ nothrow @nogc:
             return null;
         }
 
-        _device = value.makeString(defaultAllocator);
+        _device = value.make_string();
         _can_port = value.empty ? -1 : cast(byte)(value[4] - '0');
         if (!value.empty)
         {

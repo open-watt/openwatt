@@ -1,7 +1,7 @@
 module router.iface.priority_queue;
 
 import urt.array;
-import urt.mem.allocator;
+import urt.mem;
 import urt.mem.freelist;
 import urt.time;
 

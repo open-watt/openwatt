@@ -3,7 +3,7 @@ module manager.collection;
 import urt.array;
 import urt.attribute : fast_data;
 import urt.lifetime;
-import urt.mem.allocator;
+import urt.mem;
 import urt.result;
 import urt.string;
 import urt.time : Duration, MonoTime, getTime;
@@ -122,7 +122,7 @@ const(CollectionTypeInfo)* collection_type_info(Type)() nothrow @nogc
         return null; // Type.type_name must be defined
     else
     {
-        import urt.mem.allocator;
+        import urt.mem;
 
         static if (__traits(isAbstractClass, Type))
             enum create_instance = null;
@@ -130,7 +130,7 @@ const(CollectionTypeInfo)* collection_type_info(Type)() nothrow @nogc
         {
             static create(ref BaseCollection c, CID id, ObjectFlags flags)
             {
-                return defaultAllocator.allocT!Type(id, flags);
+                return alloc!Type(id, flags);
             }
             enum create_instance = &create;
         }
@@ -199,7 +199,7 @@ nothrow @nogc:
             StringResult result = item.set(arg.name, arg.value);
             if (!result)
             {
-                defaultAllocator.freeT(item);
+                free(item);
                 return null;
             }
         }
@@ -587,7 +587,7 @@ nothrow @nogc:
     package void free_pending()
     {
         foreach (item; _pending_free)
-            defaultAllocator.freeT(item);
+            free(item);
         _pending_free.clear();
     }
 

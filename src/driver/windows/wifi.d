@@ -113,7 +113,7 @@ nothrow @nogc:
         => _adapter[];
     final void adapter(const(char)[] value)
     {
-        _adapter = value.makeString(defaultAllocator);
+        _adapter = value.make_string();
         mark_set!(typeof(this), "adapter")();
     }
 
@@ -411,7 +411,7 @@ private:
             ref ssid_attr = attrs.wlanAssociationAttributes.dot11Ssid;
             const(char)[] ssid_str = cast(const(char)[])ssid_attr.ucSSID[0 .. ssid_attr.uSSIDLength];
             if (_current_ssid[] != ssid_str)
-                _current_ssid = ssid_str.makeString(defaultAllocator);
+                _current_ssid = ssid_str.make_string();
 
             const(ubyte)[6] b = attrs.wlanAssociationAttributes.dot11Bssid;
             _current_bssid = MACAddress(b[0], b[1], b[2], b[3], b[4], b[5]);
@@ -521,7 +521,7 @@ private:
 
                 auto radio = Collection!WindowsWifiRadio().create(tconcat(base, "-radio"));
                 radio.adapter = ev.name;
-                radio.comment = ev.description.makeString(defaultAllocator);
+                radio.comment = ev.description.make_string();
 
                 auto wlan = Collection!WindowsWlan().create(base);
                 wlan.radio = radio;

@@ -403,7 +403,7 @@ auto spinelDeserialise(string fmt)(const(void)[] buffer)
                     len += l;
                     ++count;
                 }
-                r[i] = cast(ArrayEl[])tempAllocator().alloc(ArrayEl.sizeof * count);
+                r[i] = cast(ArrayEl[])talloc(ArrayEl.sizeof * count);
 
                 foreach (j; 0..count)
                 {
@@ -444,6 +444,7 @@ private:
 import router.iface.mac : MACAddress;
 import urt.inet : IPv6Addr;
 import urt.mem : strlen;
+import urt.mem.temp;
 import urt.meta.tuple;
 
 size_t binaryLen(string fmt)(const(void)[] buffer)

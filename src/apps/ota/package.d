@@ -2,7 +2,7 @@ module apps.ota;
 
 import urt.lifetime;
 import urt.log;
-import urt.mem.allocator;
+import urt.mem;
 import urt.string;
 import urt.time;
 
@@ -66,7 +66,7 @@ nothrow @nogc:
         => _uri[];
     void uri(const(char)[] value)
     {
-        _uri = value.makeString(defaultAllocator);
+        _uri = value.make_string();
         mark_set!(typeof(this), "uri")();
         restart();
     }

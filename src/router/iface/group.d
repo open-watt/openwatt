@@ -1,6 +1,6 @@
 module router.iface.group;
 
-import urt.mem.allocator : defaultAllocator;
+import urt.mem;
 import urt.string;
 
 import manager;
@@ -46,7 +46,7 @@ nothrow @nogc:
         => _group[];
     void group(const(char)[] value)
     {
-        _group = value.makeString(defaultAllocator);
+        _group = value.make_string();
         mark_set!(typeof(this), "group")();
     }
 

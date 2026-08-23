@@ -1,6 +1,6 @@
 module router.iface.packet;
 
-import urt.mem.allocator;
+import urt.mem;
 import urt.time;
 
 public import router.iface.mac;
@@ -202,9 +202,9 @@ nothrow @nogc:
     uint length() const
         => _length - _offset;
 
-    Packet* clone(NoGCAllocator allocator = defaultAllocator()) const
+    Packet* clone() const
     {
-        Packet* r = cast(Packet*)allocator.alloc(Packet.sizeof + _length);
+        Packet* r = cast(Packet*)alloc(Packet.sizeof + _length);
         *r = this;
         r._flags |= 0x01; // mutable
         r._ptr = &r[1];
@@ -214,9 +214,9 @@ nothrow @nogc:
 
     // Free a Packet returned by clone(). Caller must pass the same allocator
     // that was used to clone(); defaults match.
-    void free_clone(NoGCAllocator allocator = defaultAllocator())
+    void free_clone()
     {
-        allocator.free((cast(void*)&this)[0 .. Packet.sizeof + _length]);
+        free((cast(void*)&this)[0 .. Packet.sizeof + _length]);
     }
 
     PCP pcp() const pure

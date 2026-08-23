@@ -121,7 +121,7 @@ CommandState collection_add_exec(ref Command, Session session, Scope* _scope, co
         if (!r)
         {
             session.write_line("Invalid value for property: ", arg.name, "=", arg.value, " - ", r.message);
-            defaultAllocator.freeT(item);
+            free(item);
             return null;
         }
     }
@@ -402,7 +402,7 @@ CommandState collection_print_exec(ref Command cmd, Session session, Scope* _sco
     }
 
     if (watch_mode)
-        return session._console._allocator.allocT!CollectionWatchState(session, &cmd, collection);
+        return alloc!CollectionWatchState(session, &cmd, collection);
 
     Table table;
     populate_collection_table(table, collection);
