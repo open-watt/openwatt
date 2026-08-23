@@ -513,15 +513,12 @@ private:
 
     void client_state_change(ActiveObject, StateSignal signal)
     {
-        // only `destroyed` releases ownership; an offline client is still ours,
-        // so shutdown() is what tears it down
-        if (signal == StateSignal.destroyed)
-        {
-            _subscribed = false;
-            _client = null;
-        }
-        else if (signal != StateSignal.offline)
+        if (signal != StateSignal.offline)
             return;
+
+        // the client is temporary; offline is its death
+        _subscribed = false;
+        _client = null;
         restart();
     }
 
