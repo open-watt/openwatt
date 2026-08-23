@@ -2,16 +2,19 @@ module manager.sync.peering;
 
 // The peering agent (docs/PEERING.draft.md): node-global auto-peering policy.
 //
-// role=member advertises this node as claimable, listens on the sync port (a dynamic
-// /sync/udp-server), and accepts claims arriving on the sync channel. A member accepts
-// multiple claimants from one cluster - that is the dual-authority shape - and reverts
-// to unbound when the last session dies.
+// The leaf dials. role=member sweeps the neighbour table for authorities of its fleet
+// and opens a session to each (a dynamic connected UDPInterface toward the neighbour's
+// medium address and announced sync port, plus a dynamic SyncPeer), then accepts the
+// claims that arrive on those sessions. A member accepts multiple claimants from one
+// cluster - that is the dual-authority shape - and reverts to unbound when the last
+// session dies. Failed dials back off per link.
 //
-// role=authority sweeps the neighbour table for unbound members matching the claim
-// filter, builds a transport to each (a dynamic connected UDPInterface toward the
-// neighbour's medium address and announced sync port), spawns a dynamic SyncPeer named
-// after the remote node, and sends the claim once the session is up. Rejected or
-// unanswered claims tear the pair down and back off per candidate.
+// role=authority listens on the sync port (a dynamic /sync/udp-server on the ether
+// wildcard) and claims the members that reach it and match the claim filter. It keeps
+// no dial state: a member that cannot be reached is the member's problem to retry, and
+// a node with no inbound surface - behind a NAT, or simply not listening - still joins.
+// Policy direction and transport direction are separate: the authority still decides
+// who joins its fleet, it just answers rather than dials.
 
 import urt.array;
 import urt.conv : format_uint;
@@ -63,59 +66,134 @@ nothrow @nogc:
 
     override void update()
     {
-        if (!_enabled || _role != PeerRole.authority)
+        if (!_enabled)
             return;
 
         MonoTime now = getTime();
-        foreach (kvp; _attempts[])
+
+        // The leaf dials. A member with no inbound surface - behind a NAT, or simply not
+        // listening - still reaches its fleet, and the authority keeps no per-candidate
+        // dial state for nodes that may never answer.
+        if (_role == PeerRole.member)
         {
-            ref a = kvp.value;
-            if (a.peer && !a.sent && a.peer.running)
-                try_send_claim(a, now);
-            if (a.expired(now))
+            foreach (kvp; _attempts[])
             {
-                log.warning("claim of node ", hex_id(kvp.key)[], a.sent ? " went unanswered" : " stalled in setup");
-                fail_attempt(kvp.key, a);
+                ref a = kvp.value;
+                if (a.peer && !a.claimed && a.peer.running)
+                {
+                    a.claimed = true;   // session established; a claim, if any, arrives on it
+                    a.claimed_at = now;
+                    if (NeighborLink* l = attempt_link(kvp.key, a))
+                    {
+                        l.failures = 0;
+                        l.retry_at = MonoTime();
+                    }
+                }
+                if (a.expired(now))
+                {
+                    log.warning("session to authority ", hex_id(kvp.key)[], " stalled in setup");
+                    fail_attempt(kvp.key, a);
+                }
             }
+
+            if (now < _next_sweep)
+                return;
+            _next_sweep = now + sweep_interval;
+            sweep_authorities(now);
+            return;
         }
 
+        if (_role != PeerRole.authority)
+            return;
+
+        // claims ride the sessions members open to us; nothing to dial, nothing to back off
+        prune_issued();
         if (now < _next_sweep)
             return;
         _next_sweep = now + sweep_interval;
+        claim_inbound(now);
+    }
 
+    // Every authority this node can see and is allowed to join. An adopted member talks
+    // only to its own fleet; a factory node talks to whoever answers, and the authority
+    // decides whether to keep it.
+    void sweep_authorities(MonoTime now)
+    {
         foreach (kvp; get_module!SyncDiscoveryModule.neighbors[])
         {
             ref n = kvp.value;
-            // a claimed member is NOT skipped: same-cluster members accept every authority's
-            // session (the dual-authority seat), and a restarted authority re-claims through
-            // the member's still-claimed announce; a foreign claim is refused at the member
-            if (n.role != PeerRole.member)
-                continue;
-            if (n.cluster.length && n.cluster[] != _cluster[])
-                continue;
-            if (!wildcard_match(_claim.length ? _claim[] : "*", n.name[]))
+            if (n.role != PeerRole.authority)
                 continue;
 
-            ClaimAttempt* a = kvp.key in _attempts;
-            if (a && a.peer)
-            {
-                // the member rebooted out from under a session the datagram link can't
-                // pronounce dead: it beacons unbound after our claim settled. the grace
-                // covers a pre-claim beacon still in flight.
-                if (a.claimed && !n.claimed && n.last_seen > a.claimed_at + beacon_grace)
-                    teardown_attempt(*a);
-                else
+            const(char)[] mine = bound_cluster[];
+            if (mine.length && n.cluster.length && n.cluster[] != mine)
+                continue;
+
+            if (ClaimAttempt* a = kvp.key in _attempts)
+                if (a.peer)
                     continue;
-            }
-            // a factory-fresh beacon voids link demotion: the node was reset since we
-            // failed to prove the key, and is adoptable right now
-            if (a && !n.adopted && !a.handover)
-                n.clear_link_demotion();
 
             NeighborLink* link = n.best_link(now);
             if (!link)
                 continue;
-            start_claim(kvp.key, n, *link);
+            start_session(kvp.key, n, *link);
+        }
+    }
+
+    // Claim the members that have opened a session to us and pass the filter. The beacon
+    // carries the adoption state that decides key handover, so a node we have not heard
+    // from yet waits for a later pass rather than being guessed at.
+    void claim_inbound(MonoTime now)
+    {
+        foreach (p; get_module!SyncModule.peers[])
+        {
+            if (!p.running || p._remote_role != PeerRole.member)
+                continue;
+            ulong node_id = p._remote_node_id;
+            if (!node_id || node_id in _issued)
+                continue;
+
+            Neighbor* n = node_id in get_module!SyncDiscoveryModule.neighbors;
+            if (!n)
+                continue;
+            if (!wildcard_match(_claim.length ? _claim[] : "*", n.name[]))
+                continue;
+            if (n.cluster.length && _cluster.length && n.cluster[] != _cluster[])
+                continue;
+
+            bool handover = !n.adopted;
+            if (handover && !_secret.length)
+                mint_fleet_key();
+
+            char[64] auth = void;
+            bool have_auth = false;
+            if (_secret.length)
+            {
+                if (!p._remote_nonce_set)
+                    continue;   // the claim proves the key against their hello nonce
+                have_auth = claim_auth(p._remote_nonce[], _cluster[], auth);
+            }
+
+            IssuedClaim* c = _issued.insert(node_id, IssuedClaim());
+            c.peer = p;
+            c.seq = get_module!SyncModule.alloc_seq();
+            c.sent_at = now;
+            encoder_for(p._encoder).encode_claim(p, c.seq, _cluster[], _priority, have_auth ? auth[] : null, handover ? _secret[] : null);
+            log.info("claiming node ", hex_id(node_id)[], " ('", n.name, "') over its session", handover ? " (adoption)" : "");
+        }
+    }
+
+    // An inbound session is the member's to keep alive; when it goes, so does the claim.
+    void prune_issued()
+    {
+        Array!ulong ended;
+        foreach (kvp; _issued[])
+            if (!kvp.value.peer || !kvp.value.peer.running)
+                ended ~= kvp.key;
+        foreach (id; ended[])
+        {
+            log.info("session from node ", hex_id(id)[], " ended");
+            _issued.remove(id);
         }
     }
 
@@ -348,32 +426,20 @@ nothrow @nogc:
     // res/err routing from the sync module: true when the seq belonged to a claim we sent.
     bool claim_response(SyncPeer from, uint seq, bool ok, const(char)[] code, const(char)[] text)
     {
-        foreach (kvp; _attempts[])
+        foreach (kvp; _issued[])
         {
-            ref a = kvp.value;
-            if (a.peer !is from || !a.sent || a.seq != seq || a.claimed)
+            ref c = kvp.value;
+            if (c.peer !is from || c.seq != seq || c.acked)
                 continue;
             if (ok)
             {
-                a.claimed = true;
-                a.claimed_at = getTime();
-                if (NeighborLink* l = attempt_link(kvp.key, a))
-                {
-                    l.failures = 0;
-                    l.retry_at = MonoTime();
-                }
+                c.acked = true;
                 log.info("claimed node ", hex_id(kvp.key)[], " ('", from.name[], "')");
-
-                // build the fleet surface: the member's whole device tree, armed live.
-                // the model plane is self-describing (type/add frames), so subscribing IS
-                // the enumeration, and elements appearing later stream in via the same sub.
-                const(char)[][1] patterns = ["device:**"];
-                encoder_for(from._encoder).encode_model_sub(from, get_module!SyncModule.alloc_seq(), patterns[], false);
             }
             else
             {
                 log.warning("claim of node ", hex_id(kvp.key)[], " refused: ", code, " (", text, ")");
-                fail_attempt(kvp.key, a);
+                _issued.remove(kvp.key);
             }
             return true;
         }
@@ -421,7 +487,17 @@ private:
         bool expired(MonoTime now) const pure nothrow @nogc
             => peer !is null && !claimed && now >= deadline;
     }
-    Map!(ulong, ClaimAttempt) _attempts;
+    Map!(ulong, ClaimAttempt) _attempts;   // sessions this node dials (member -> authority)
+
+    // A claim this authority sent over a session a member opened to it.
+    struct IssuedClaim
+    {
+        SyncPeer peer;
+        uint seq;
+        bool acked;
+        MonoTime sent_at;
+    }
+    Map!(ulong, IssuedClaim) _issued;
     UDPSyncServer _listener;
     MonoTime _next_sweep;
 
@@ -527,8 +603,8 @@ private:
     {
         apply_announce_state();
 
-        // members listen for the claimants' sessions; the listener dies with the role
-        bool want_listener = _enabled && _role == PeerRole.member;
+        // the authority listens; members dial it, so the leaf needs no inbound surface
+        bool want_listener = _enabled && _role == PeerRole.authority;
         if (_listener && (!want_listener || _listener.port != _port))
         {
             _listener.destroy();
@@ -547,12 +623,14 @@ private:
                 log.error("failed to create peering sync listener");
         }
 
-        if (!_enabled || _role != PeerRole.authority)
+        if (!_enabled || _role != PeerRole.member)
         {
             foreach (kvp; _attempts[])
                 teardown_attempt(kvp.value);
             _attempts.clear();
         }
+        if (!_enabled || _role != PeerRole.authority)
+            _issued.clear();
     }
 
     void apply_announce_state()
@@ -562,37 +640,31 @@ private:
         disco.local_cluster = _cluster.length ? _cluster : _allegiance_cluster.length ? _allegiance_cluster : _adopted_cluster;
         disco.local_claimed = claimed;
         disco.local_adopted = _secret.length != 0;
-        disco.local_sync_port = (_enabled && _role == PeerRole.member) ? _port : 0;
+        disco.local_sync_port = (_enabled && _role == PeerRole.authority) ? _port : 0;
     }
 
-    void start_claim(ulong node_id, ref const Neighbor n, ref NeighborLink link)
+    // Dial an authority: connected ether-UDP toward its beaconed mac:port, and a peer
+    // that introduces us. The claim, if it comes, arrives back over this session.
+    void start_session(ulong node_id, ref const Neighbor n, ref NeighborLink link)
     {
         char[16] id = hex_id(node_id);
 
-        UDPInterface iface = Collection!UDPInterface().create(tconcat("claim-", id[]), ObjectFlags.dynamic);
+        UDPInterface iface = Collection!UDPInterface().create(tconcat("auth-", id[]), ObjectFlags.dynamic);
         if (!iface)
         {
-            log.warning("failed to create claim transport for node ", id[]);
+            log.warning("failed to create session transport for authority ", id[]);
             return;
         }
         iface.iface(link.station.get);
         iface.remote_host(tconcat(link.mac).make_string());
         iface.remote_port(link.sync_port);
 
-        // adopting a factory node hands the fleet key over inside the claim; mint one
-        // the first time this fleet adopts anything
-        bool handover = !n.adopted;
-        if (handover && !_secret.length)
-            mint_fleet_key();
-
-        // the peer takes the remote node's name (the per-VIN session precedent); a collision
-        // with an existing peer (manual, or a stale attempt) falls back to the node id
         SyncPeer peer = Collection!SyncPeer().create(n.name[], ObjectFlags.dynamic);
         if (!peer)
-            peer = Collection!SyncPeer().create(tconcat("claim-", id[]), ObjectFlags.dynamic);
+            peer = Collection!SyncPeer().create(tconcat("auth-", id[]), ObjectFlags.dynamic);
         if (!peer)
         {
-            log.warning("failed to create claim peer for node ", id[]);
+            log.warning("failed to create session peer for authority ", id[]);
             iface.destroy();
             return;
         }
@@ -609,30 +681,11 @@ private:
         a.link_mac = link.mac;
         a.sent = false;
         a.claimed = false;
-        a.handover = handover;
-        // the setup window: transport up, hellos exchanged, claim away; expiry fails the link
+        a.handover = false;
+        // the setup window: transport up and hellos exchanged; expiry demotes the link
         a.deadline = getTime() + claim_timeout;
 
-        log.info("claiming node ", id[], " ('", n.name, "') at ", link.mac, ":", link.sync_port, " via ", link.station.name[], handover ? " (adoption)" : "");
-    }
-
-    // claim once the session is up; hello (with our identity) precedes it on the wire.
-    // with a secret, the claim proves it against the member's hello nonce, so the send
-    // also waits for the member's hello to arrive.
-    void try_send_claim(ref ClaimAttempt a, MonoTime now)
-    {
-        char[64] auth = void;
-        bool have_auth = false;
-        if (_secret.length)
-        {
-            if (!a.peer._remote_nonce_set)
-                return;
-            have_auth = claim_auth(a.peer._remote_nonce[], _cluster[], auth);
-        }
-        a.seq = get_module!SyncModule.alloc_seq();
-        a.sent = true;
-        a.deadline = now + claim_timeout;
-        encoder_for(a.peer._encoder).encode_claim(a.peer, a.seq, _cluster[], _priority, have_auth ? auth[] : null, a.handover ? _secret[] : null);
+        log.info("opening session to authority ", id[], " ('", n.name, "') at ", link.mac, ":", link.sync_port, " via ", link.station.name[]);
     }
 
     void claim_peer_state(ActiveObject obj, StateSignal sig)
