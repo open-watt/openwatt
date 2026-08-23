@@ -318,7 +318,7 @@ Mod get_module(Mod)()
 {
     __gshared Mod g_module_instance = null;
     if (!g_module_instance)
-        g_module_instance = cast(Mod)g_app.module_instance(Mod.ModuleName);
+        g_module_instance = cast(Mod)cast(void*)g_app.module_instance(Mod.ModuleName);
     return g_module_instance;
 }
 
@@ -574,7 +574,7 @@ nothrow @nogc:
     Mod module_instance(Mod)() pure
         if (is(Mod : Module))
     {
-        return cast(Mod)module_instance(Mod.ModuleName);
+        return cast(Mod)cast(void*)module_instance(Mod.ModuleName);
     }
 
     bool validate_login(const(char)[] username, const(char)[] password, const(char)[] service, scope AuthCallback callback)
@@ -753,7 +753,7 @@ nothrow @nogc:
 
     void unsubscribe(SignalSub handle)
     {
-        ElementSignalSub s = cast(ElementSignalSub)handle;
+        ElementSignalSub s = cast(ElementSignalSub)cast(void*)handle;
         if (s.element)
             s.element.unsubscribe(&s.on_change);
         free(s);

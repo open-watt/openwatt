@@ -153,7 +153,7 @@ DataFormat data_format_of(T)()
         static assert(false, "monotonic time is process-local; store SysTime");
     else static if (ValidUserType!U)
     {
-        alias registered = MakeTypeDetails!U;   // registration rides its shared static this
+        alias registered = MakeTypeDetails!U;
         return DataFormat(ValueType.user, SeriesKind.held, &find_type_details(TypeDetailsFor!U.type_id));
     }
     else

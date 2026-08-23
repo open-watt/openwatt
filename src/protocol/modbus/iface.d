@@ -156,7 +156,7 @@ nothrow @nogc:
         if (_protocol == ModbusProtocol.tcp && _stream)
         {
             import router.stream.serial : SerialStream;
-            if (cast(SerialStream)_stream)
+            if (dyn_cast!SerialStream(_stream))
                 log.warning("Modbus-TCP has no CRC; using TCP framing over a serial line may cause silent data corruption");
         }
 
@@ -211,7 +211,7 @@ nothrow @nogc:
             if (_protocol == ModbusProtocol.tcp)
             {
                 import router.stream.serial : SerialStream;
-                if (cast(SerialStream)_stream)
+                if (dyn_cast!SerialStream(_stream))
                     log.warning("Modbus-TCP has no CRC; using TCP framing over a serial line may cause silent data corruption");
             }
 
@@ -221,7 +221,7 @@ nothrow @nogc:
             static if (has_ip)
             {
                 import protocol.ip.tcp_stream : TCPStream;
-                auto tcpStream = cast(TCPStream)_stream;
+                auto tcpStream = dyn_cast!TCPStream(_stream);
                 if (tcpStream)
                     tcpStream.enable_keep_alive(true, seconds(10), seconds(1), 10);
             }
@@ -374,7 +374,7 @@ protected:
         if (!_support_simultaneous_requests)
         {
             import router.stream.serial : SerialStream;
-            if (auto serial = cast(SerialStream)_stream)
+            if (auto serial = dyn_cast!SerialStream(_stream))
             {
                 compute_timing(serial.baud_rate);
                 _baud_estimated = true;
@@ -932,7 +932,7 @@ private:
         // across a bridge the far-side serial bus is the bottleneck and the transport rate would wildly
         // overstate it, so report only a baud we were told or measured; native Modbus/TCP has no serial
         // segment, and there the transport rate is the honest answer
-        if (auto serial = cast(SerialStream)_stream)
+        if (auto serial = dyn_cast!SerialStream(_stream))
             set_link_speed(serial.baud_rate);
         else if (_protocol != ModbusProtocol.tcp)
             set_link_speed(_user_baud != 0 ? _user_baud : _estimated_baud);

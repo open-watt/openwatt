@@ -103,23 +103,20 @@ Item get_item(Item : BaseObject)(CID id) pure
 {
     assert(id.type_index == Item.collection_id);
     BaseObject item = item_table(Item.collection_id).get(id);
-    return cast(Item)item; // TODO: this is a D dynamic cast, but we could check our own typeinfo
+    return dyn_cast!Item(item);
 }
 
 Item get_item_by_name(Item : BaseObject)(const(char)[] id) pure
     if (!is(Item == BaseObject))
 {
     BaseObject item = item_table(Item.collection_id).get_by_name(id, Item.collection_id);
-    return cast(Item)item; // TODO: this is a D dynamic cast, but we could check our own typeinfo
+    return dyn_cast!Item(item);
 }
 
-private const(CollectionTypeInfo)* collection_super_getter(Type)() nothrow @nogc
-    => collection_type_info!Type();
-
-const(CollectionTypeInfo)* collection_type_info(Type)() nothrow @nogc
+package template CollectionTypeInfoOf(Type)
 {
     static if (!is(typeof(Type.type_name)))
-        return null; // Type.type_name must be defined
+        static assert(false, "Type.type_name must be defined");
     else
     {
         import urt.mem;
@@ -136,10 +133,7 @@ const(CollectionTypeInfo)* collection_type_info(Type)() nothrow @nogc
         }
 
         alias Root = CollectionRoot!Type;
-        static if (!is(Type == Root))
-            enum CollectionTypeInfo.GetSuperFn get_super_fn = &collection_super_getter!(CollectionSuper!Type);
-        else
-            enum CollectionTypeInfo.GetSuperFn get_super_fn = null;
+        enum bool collection_root = is(Type == Root);
 
         static if (is(typeof(Type.path) : const(char)[]))
             enum _path = Type.path;
@@ -151,32 +145,60 @@ const(CollectionTypeInfo)* collection_type_info(Type)() nothrow @nogc
         else
             enum bool _syncable = true;
 
-        __gshared const CollectionTypeInfo ti = CollectionTypeInfo(StringLit!(Type.type_name),
-                                                                   StringLit!_path,
-                                                                   Type.collection_id,
-                                                                   all_properties!Type(),
-                                                                   create_instance,
-                                                                   get_super_fn,
-                                                                   _syncable);
-        return &ti;
+        alias Super = BaseClassOf!Type;
+        static if (is(Super == BaseObject))
+            enum const(void)* dyn_parent = null;
+        else static if (is(typeof(Super.collection_id)))
+            enum const(void)* dyn_parent = &CollectionTypeInfoOf!Super.info;
+        else
+            enum const(void)* dyn_parent = &DynTypeOf!Super.info;
+
+        __gshared immutable CollectionTypeInfo info = cast(immutable)CollectionTypeInfo(DynTypeInfo(StringLit!(Type.type_name), dyn_parent),
+                                                                                        StringLit!_path,
+                                                                                        Type.collection_id,
+                                                                                        all_properties!Type(),
+                                                                                        create_instance,
+                                                                                        collection_root,
+                                                                                        _syncable);
     }
+}
+
+const(CollectionTypeInfo)* collection_type_info(Type)() nothrow @nogc
+{
+    static if (!is(typeof(Type.type_name)))
+        return null;
+    else
+        return &CollectionTypeInfoOf!Type.info;
+}
+
+package const(DynTypeInfo)* dyn_type_info(Type)() nothrow @nogc
+    if (is(Type : BaseObject) && !is(Type == BaseObject))
+{
+    static if (is(typeof(Type.collection_id)))
+        return &CollectionTypeInfoOf!Type.info.dyn_type;
+    else
+        return &DynTypeOf!Type.info;
 }
 
 struct CollectionTypeInfo
 {
     alias CreateFun = BaseObject function(ref BaseCollection collection, CID id, ObjectFlags flags = ObjectFlags.none) nothrow @nogc;
-    alias GetSuperFn = const(CollectionTypeInfo)* function() nothrow @nogc;
 
-    String type;
+    DynTypeInfo dyn_type;
+    alias dyn_type this;
     String path;
     CollectionType collection_id;
     const(Property*)[] properties;
     CreateFun create;
-    GetSuperFn get_super;
+    bool collection_root;
     bool syncable = true;
 
     bool is_abstract() const pure nothrow @nogc
         => create is null;
+
+    pragma(inline, false)
+    const(CollectionTypeInfo)* collection_super() const pure nothrow @nogc
+        => collection_root ? null : cast(const(CollectionTypeInfo)*)parent;
 }
 
 struct BaseCollection
@@ -208,7 +230,7 @@ nothrow @nogc:
         // HACK: advance the state machine synchronously so subsequent script lines
         // have a chance to work when the early startup creates things.
         // this should be removed, and replaced by a more comprehensive latent startup tolerance.
-        if (auto active = cast(ActiveObject)item)
+        if (auto active = dyn_cast!ActiveObject(item))
             active.do_update();
 
         return item;
@@ -232,14 +254,14 @@ nothrow @nogc:
 
     void update_all()
     {
-        assert(type_info.get_super is null, "update_all should only be called on root collections");
+        assert(type_info.collection_root, "update_all should only be called on root collections");
 
         enum SlowObjectUpdateMs = 50;
         ref t = table;
         // slots are stable and append-only, so items added mid-update are reached too
         for (uint slot = 1; slot <= t.slot_count; ++slot)
         {
-            if (auto active = cast(ActiveObject)t.at(slot))
+            if (auto active = dyn_cast!ActiveObject(t.at(slot)))
             {
                 MonoTime start = getTime();
                 active.do_update();
@@ -371,19 +393,19 @@ nothrow @nogc:
 
     Type create(const(char)[] name, ObjectFlags flags = ObjectFlags.none, in NamedArgument[] named_args...)
     {
-        return cast(Type)_base.create(name, flags, named_args);
+        return cast(Type)cast(void*)_base.create(name, flags, named_args);
     }
 
     Type alloc(const(char)[] name, ObjectFlags flags = ObjectFlags.none)
     {
-        return cast(Type)_base.alloc(name, flags);
+        return cast(Type)cast(void*)_base.alloc(name, flags);
     }
 
     void add(Type item)
         => _base.add(item);
 
     Type get(const(char)[] name)
-        => cast(Type)_base.get(name);
+        => cast(Type)cast(void*)_base.get(name);
 
     // iterate live objects of Type and all derived types
     auto values()
@@ -436,18 +458,10 @@ nothrow @nogc:
 
 bool type_matches(const(CollectionTypeInfo)* filter, const(CollectionTypeInfo)* element_type) nothrow @nogc
 {
-    for (const(CollectionTypeInfo)* ti = element_type; ti !is null; ti = ti.get_super ? ti.get_super() : null)
+    for (const(CollectionTypeInfo)* ti = element_type; ti !is null; ti = ti.collection_super())
         if (ti is filter)
             return true;
     return false;
-}
-
-private template BaseClassOf(T)
-{
-    static if (is(T Bases == super))
-        alias BaseClassOf = Bases[0];
-    else
-        alias BaseClassOf = void;
 }
 
 template CollectionRoot(T)
@@ -458,16 +472,6 @@ template CollectionRoot(T)
     else
         alias CollectionRoot = T;
 }
-
-template CollectionSuper(T)
-{
-    alias Super = BaseClassOf!T;
-    static if (!is(Super == BaseObject) && !is(Super == void) && is(typeof(Super.collection_id)) && Super.collection_id == T.collection_id)
-        alias CollectionSuper = Super;
-    else
-        static assert(false, T.stringof ~ " has no collection super type");
-}
-
 
 enum ObjectLifecycleEvent : ubyte
 {

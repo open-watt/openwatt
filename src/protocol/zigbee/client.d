@@ -599,7 +599,7 @@ protected:
     }
 
     final inout(ZigbeeInterface) zigbee_iface() inout pure
-        => cast(inout(ZigbeeInterface))_interface;
+        => dyn_cast!ZigbeeInterface(_interface);
 
     override bool validate() const pure
         => _interface !is null;

@@ -147,8 +147,8 @@ nothrow @nogc:
         if (!_phy_caps.valid)
             return null;  // chipset capabilities unknown -- be optimistic.
 
-        bool candidate_is_ap = cast(const(APInterface))candidate !is null;
-        bool candidate_is_sta = !candidate_is_ap && (cast(const(WLANInterface))candidate !is null);
+        bool candidate_is_ap = dyn_cast!APInterface(candidate) !is null;
+        bool candidate_is_sta = !candidate_is_ap && dyn_cast!WLANInterface(candidate) !is null;
 
         if (candidate_is_ap && !_phy_caps.supports_ap)
             return "driver does not support AP mode";
@@ -562,7 +562,7 @@ private:
 
     bool sta_providing_channel() const
     {
-        auto wlan = cast(const(LinuxWlan))bound_sta;
+        auto wlan = dyn_cast!LinuxWlan(bound_sta);
         return wlan !is null && wlan._sta.connected;
     }
 
@@ -580,7 +580,7 @@ private:
         ubyte desired = target_channel();
         foreach (base; bound_aps)
         {
-            auto ap = cast(LinuxAP)base;
+            auto ap = dyn_cast!LinuxAP(base);
             if (ap && ap.running && ap._running_channel != desired)
                 ap.restart();
         }
@@ -1188,7 +1188,7 @@ nothrow @nogc:
 
     override const(char)[] status_message() const
     {
-        auto r = cast(const(LinuxWifiRadio))radio;
+        auto r = dyn_cast!LinuxWifiRadio(radio);
         if (!r)
             return "no radio configured";
         if (super.ssid.empty)
@@ -1215,7 +1215,7 @@ protected:
     {
         if (!super.validate())
             return false;
-        auto r = cast(const(LinuxWifiRadio))radio;
+        auto r = dyn_cast!LinuxWifiRadio(radio);
         if (!r || !r.running)
             return false;
         if (r.would_accept(this) !is null)
@@ -1229,7 +1229,7 @@ protected:
         if (result != CompletionStatus.complete)
             return result;
 
-        auto r = cast(LinuxWifiRadio)radio;
+        auto r = dyn_cast!LinuxWifiRadio(radio);
         if (!r)
             return CompletionStatus.error;
 
@@ -1323,7 +1323,7 @@ protected:
         {
             if (_scan_inflight)
             {
-                if (auto r = cast(LinuxWifiRadio)radio)
+                if (auto r = dyn_cast!LinuxWifiRadio(radio))
                     r.cancel_scan();
                 _scan_inflight = false;
             }
@@ -1335,7 +1335,7 @@ protected:
         _raw.close();
         version (WifiStaKernel)
         {
-            if (auto r = cast(LinuxWifiRadio)radio)
+            if (auto r = dyn_cast!LinuxWifiRadio(radio))
                 r.clear_active_sta_channel();
         }
         // Drop our kernel netdev binding and withdraw any mirrored addresses.
@@ -1354,7 +1354,7 @@ protected:
     {
         super.update();
 
-        auto r = cast(LinuxWifiRadio)radio;
+        auto r = dyn_cast!LinuxWifiRadio(radio);
         if (!r)
             return;
 
@@ -1399,7 +1399,7 @@ protected:
 private:
     protected override const(char)[] apply_mac(ref MACAddress value)
     {
-        auto r = cast(LinuxWifiRadio)radio;
+        auto r = dyn_cast!LinuxWifiRadio(radio);
         if (!r)
             return "wifi radio is unavailable";
         int ifindex = _raw.valid ? _raw.ifindex : netlink_ifindex(r.netdev);
@@ -1437,7 +1437,7 @@ private:
     {
         if (_mtu == 0)
             return;
-        auto r = cast(LinuxWifiRadio)radio;
+        auto r = dyn_cast!LinuxWifiRadio(radio);
         if (!r)
             return;
         if (!set_adapter_mtu(r.netdev, actual_mtu))
@@ -1446,7 +1446,7 @@ private:
 
     void refresh_os_state()
     {
-        auto r = cast(LinuxWifiRadio)radio;
+        auto r = dyn_cast!LinuxWifiRadio(radio);
         if (!r)
             return;
         OSAdapterInfo info;
@@ -1493,7 +1493,7 @@ private:
         if (!peer)
             return;
 
-        auto r = cast(LinuxWifiRadio)radio;
+        auto r = dyn_cast!LinuxWifiRadio(radio);
         WifiBand link_band = _sta.freq != 0 ? band_for_freq(_sta.freq)
             : r ? r.band
             : WifiBand.any;
@@ -1566,7 +1566,7 @@ private:
             }
             else if (_sta.disconnected)
             {
-                if (auto r = cast(LinuxWifiRadio)radio)
+                if (auto r = dyn_cast!LinuxWifiRadio(radio))
                     r.clear_active_sta_channel();
                 restart();
             }
@@ -1616,7 +1616,7 @@ private:
             ubyte ch = freq_to_channel(_sta.freq);
             if (ch != 0)
             {
-                if (auto r = cast(LinuxWifiRadio)radio)
+                if (auto r = dyn_cast!LinuxWifiRadio(radio))
                     r.update_active_channel(ch);
             }
             mark_set!(typeof(this), [ "bssid", "rssi", "signal-quality" ])();
@@ -1627,7 +1627,7 @@ private:
         {
             if (!_sta.idle || _scan_inflight || super.ssid.length == 0)
                 return;
-            auto r = cast(LinuxWifiRadio)radio;
+            auto r = dyn_cast!LinuxWifiRadio(radio);
             if (!r || r.scanning)
             {
                 schedule_scan_retry(1.seconds);
@@ -1697,7 +1697,7 @@ private:
                 schedule_scan_retry(2.seconds);
                 return;
             }
-            auto r = cast(LinuxWifiRadio)radio;
+            auto r = dyn_cast!LinuxWifiRadio(radio);
             WifiBand want = r ? r.band : WifiBand.any;
             const(WifiScanResult)* best;
             foreach (ref res; results)
@@ -1754,7 +1754,7 @@ protected:
     {
         if (radio is null || ssid.empty)
             return false;
-        auto r = cast(const(LinuxWifiRadio))radio;
+        auto r = dyn_cast!LinuxWifiRadio(radio);
         if (!r || !r.running)
             return false;
         if (r.would_accept(this) !is null)
@@ -1764,7 +1764,7 @@ protected:
 
     override const(char)[] status_message() const
     {
-        auto r = cast(const(LinuxWifiRadio))radio;
+        auto r = dyn_cast!LinuxWifiRadio(radio);
         if (!r)
             return "no radio configured";
         if (ssid.empty)
@@ -1802,7 +1802,7 @@ protected:
         if (result != CompletionStatus.complete)
             return result;
 
-        auto r = cast(LinuxWifiRadio)radio;
+        auto r = dyn_cast!LinuxWifiRadio(radio);
         if (!r)
             return CompletionStatus.continue_;
         auto vif = current_vif();
@@ -1932,7 +1932,7 @@ protected:
     {
         super.update();
 
-        auto r = cast(LinuxWifiRadio)radio;
+        auto r = dyn_cast!LinuxWifiRadio(radio);
         if (!r)
             return;
 
@@ -2120,7 +2120,7 @@ private:
     // bound (transitional states; caller should retry).
     const(char)[] current_vif() const
     {
-        auto r = cast(const(LinuxWifiRadio))radio;
+        auto r = dyn_cast!LinuxWifiRadio(radio);
         return r ? r.vif_for(this) : null;
     }
 }
@@ -2363,7 +2363,7 @@ private:
             port_remove(PortKind.wifi, tconcat("linux:wifi:", r.wiphy[]));
             Array!LinuxWlan paired;
             foreach (w; Collection!LinuxWlan().values)
-                if (cast(LinuxWifiRadio)w.radio is r)
+                if (dyn_cast!LinuxWifiRadio(w.radio) is r)
                     paired ~= w;
             foreach (w; paired[])
                 Collection!LinuxWlan().remove(w);

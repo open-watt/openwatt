@@ -102,6 +102,25 @@ ifeq ($(ALLOC_TRACKING),1)
     DFLAGS := $(DFLAGS) $(VERSION_FLAG)AllocTracking
 endif
 
+ifeq ($(COMPILER),ldc)
+  ifneq ($(CONFIG),unittest)
+    # Make counts literal parentheses inside $(shell), even when quoted.
+    lparen := (
+    MODULE_CTORS := $(shell grep -rlE '(^|[^_[:alnum:]])static[[:space:]]+~?this[[:space:]]*[$(lparen)]' \
+        $(SRCDIR) $(URT_SRCDIR) --include=*.d 2>/dev/null)
+    ifneq ($(MODULE_CTORS),)
+      $(error --fno-moduleinfo would silently skip module ctors declared in: $(MODULE_CTORS))
+    endif
+    CTOR_SCAN_OK := $(shell grep -rl 'module urt.typereg;' $(URT_SRCDIR) --include=*.d 2>/dev/null)
+    ifneq ($(CTOR_SCAN_OK),)
+      DFLAGS := $(DFLAGS) --fno-moduleinfo
+      ifeq ($(NOEXCEPTIONS),1)
+        DFLAGS := $(DFLAGS) --fno-rtti
+      endif
+    endif
+  endif
+endif
+
 
 # Linux builds without the in-tree IP stack drive the kernel data plane directly.
 ifeq ($(OS),linux)

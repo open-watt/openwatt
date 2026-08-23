@@ -852,7 +852,7 @@ private:
     bool any_cert_valid()
     {
         foreach (ref c; _certificates)
-            if (auto cert = cast(Certificate)c.get())
+            if (auto cert = dyn_cast!Certificate(c.get()))
                 if (cert.is_valid)
                     return true;
         return false;

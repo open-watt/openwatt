@@ -10,7 +10,7 @@ import urt.time;
 import urt.variant;
 
 import manager;
-import manager.collection : CID, CollectionType, CollectionTypeInfo, make_cid;
+import manager.collection : CID, CollectionType, CollectionTypeInfo, DynTypeInfo, make_cid;
 import manager.component;
 import manager.element;
 import manager.expression;
@@ -24,7 +24,7 @@ alias CreateElementHandler = FormatId delegate(Device device, Element* e, ref co
                                                ubyte index) nothrow @nogc;
 
 // null create: devices are not BaseObjects; their table is g_app.devices, not g_item_tables
-__gshared const CollectionTypeInfo device_type_info = CollectionTypeInfo(StringLit!"device", StringLit!"/device", CollectionType.device, null, null, null, false);
+__gshared const CollectionTypeInfo device_type_info = CollectionTypeInfo(DynTypeInfo(StringLit!"device", null), StringLit!"/device", CollectionType.device, null, null, true, false);
 
 struct DeviceTable
 {

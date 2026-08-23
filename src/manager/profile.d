@@ -1768,13 +1768,16 @@ pure nothrow @nogc:
 
 const(KnownElementTemplate)* find_known_element(const(char)[] template_, const(char)[] id)
 {
-    if (const(KnownElementTemplate[])* elements = template_[] in g_well_known_elements)
+    foreach (ref known; g_well_known_elements)
     {
-        foreach (ref e; *elements)
+        if (template_ != known.name)
+            continue;
+        foreach (ref e; known.elements)
         {
             if (id == e.id())
                 return &e;
         }
+        break;
     }
     return null;
 }
@@ -1935,35 +1938,40 @@ template make_element_template(string id, string units, string name, string desc
     enum make_element_template = KnownElementTemplate(text.ptr, ushort(id.length), ushort(name.length), ushort(desc.length), ubyte(units.length), update_frequency);
 }
 
-// well-known element details for common Component types
-__gshared immutable KnownElementTemplate[][string] g_well_known_elements = [
-    "DeviceInfo": g_DeviceInfo_elements,
-    "DeviceStatus": g_DeviceStatus_elements,
-    "Network": g_Network_elements,
-    "Modbus": g_Modbus_elements,
-    "Ethernet": g_Ethernet_elements,
-    "Wifi": g_Wifi_elements,
-    "Cellular": g_Cellular_elements,
-    "Zigbee": g_Zigbee_elements,
-    "EnergyMeter": g_EnergyMeter_elements,
-    "Battery": g_Battery_elements,
-    "BatteryConfig": g_BatteryConfig_elements,
-    "Solar": g_Solar_elements,
-    "SolarConfig": g_SolarConfig_elements,
-    "Inverter": g_Inverter_elements,
-    "InverterConfig": g_InverterConfig_elements,
-    "EVSE": g_EVSE_elements,
-    "Port": g_Port_elements,
-    "Vehicle": g_Vehicle_elements,
-    "WaterHeater": g_WaterHeater_elements,
-    "PowerControl": g_PowerControl_elements,
-    "Switch": g_Switch_elements,
-    "ContactSensor": g_ContactSensor_elements,
-    "ModbusConfig": g_ModbusConfig_elements,
-    "EthernetConfig": g_EthernetConfig_elements,
-    "WifiConfig": g_WifiConfig_elements,
-    "CellularConfig": g_CellularConfig_elements,
-    "ZigbeeConfig": g_ZigbeeConfig_elements,
+private struct KnownElements
+{
+    string name;
+    immutable(KnownElementTemplate)[] elements;
+}
+
+__gshared immutable KnownElements[] g_well_known_elements = [
+    KnownElements("DeviceInfo", g_DeviceInfo_elements),
+    KnownElements("DeviceStatus", g_DeviceStatus_elements),
+    KnownElements("Network", g_Network_elements),
+    KnownElements("Modbus", g_Modbus_elements),
+    KnownElements("Ethernet", g_Ethernet_elements),
+    KnownElements("Wifi", g_Wifi_elements),
+    KnownElements("Cellular", g_Cellular_elements),
+    KnownElements("Zigbee", g_Zigbee_elements),
+    KnownElements("EnergyMeter", g_EnergyMeter_elements),
+    KnownElements("Battery", g_Battery_elements),
+    KnownElements("BatteryConfig", g_BatteryConfig_elements),
+    KnownElements("Solar", g_Solar_elements),
+    KnownElements("SolarConfig", g_SolarConfig_elements),
+    KnownElements("Inverter", g_Inverter_elements),
+    KnownElements("InverterConfig", g_InverterConfig_elements),
+    KnownElements("EVSE", g_EVSE_elements),
+    KnownElements("Port", g_Port_elements),
+    KnownElements("Vehicle", g_Vehicle_elements),
+    KnownElements("WaterHeater", g_WaterHeater_elements),
+    KnownElements("PowerControl", g_PowerControl_elements),
+    KnownElements("Switch", g_Switch_elements),
+    KnownElements("ContactSensor", g_ContactSensor_elements),
+    KnownElements("ModbusConfig", g_ModbusConfig_elements),
+    KnownElements("EthernetConfig", g_EthernetConfig_elements),
+    KnownElements("WifiConfig", g_WifiConfig_elements),
+    KnownElements("CellularConfig", g_CellularConfig_elements),
+    KnownElements("ZigbeeConfig", g_ZigbeeConfig_elements),
 ];
 
 __gshared immutable KnownElementTemplate[] g_DeviceInfo_elements = [

@@ -143,7 +143,7 @@ void on_arp(ref const Packet pkt, EthernetStation iface, ref NeighbourCache!IPAd
 bool is_our_ip(IPAddr ip, BaseInterface iface)
 {
     foreach (a; Collection!IPAddress().values)
-        if (cast(BaseInterface)a.iface is iface && a.address.addr == ip)
+        if (a.iface is iface && a.address.addr == ip)
             return true;
     return false;
 }

@@ -471,7 +471,7 @@ private:
     bool any_cert_valid()
     {
         foreach (ref c; _certificates)
-            if (auto cert = cast(Certificate)c.get())
+            if (auto cert = dyn_cast!Certificate(c.get()))
                 if (cert.is_valid)
                     return true;
         return false;
@@ -481,7 +481,7 @@ private:
     void push_certs_to_tls()
     {
         import protocol.tls : TLSServer;
-        if (auto tls = cast(TLSServer)_tls_server)
+        if (auto tls = dyn_cast!TLSServer(_tls_server))
             tls.set_certificate_array(_certificates[]);
     }
 
@@ -593,7 +593,7 @@ private:
         {
             foreach (ref c; _certificates)
             {
-                if (auto cert = cast(Certificate)c.get())
+                if (auto cert = dyn_cast!Certificate(c.get()))
                 {
                     if (cert.is_valid && !cert.domain[].empty)
                     {

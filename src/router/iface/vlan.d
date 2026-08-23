@@ -90,7 +90,7 @@ nothrow @nogc:
         }
         unsubscribe_parent_mac();
         _interface = value;
-        if (auto station = cast(EthernetStation)value)
+        if (auto station = dyn_cast!EthernetStation(value))
             adopt_parent_mac(station);
         else
             adopt_mac(MACAddress());
@@ -124,7 +124,7 @@ protected:
             return result;
         if (!_mac_subscribed)
         {
-            if (auto station = cast(EthernetStation)_interface.get)
+            if (auto station = dyn_cast!EthernetStation(_interface.get))
             {
                 adopt_parent_mac(station);
                 station.prop_element(prop_index!(EthernetStation, "mac")).subscribe(&parent_mac_changed);
@@ -221,7 +221,7 @@ private:
 
     void parent_mac_changed(ref const SampleUpdate)
     {
-        if (auto station = cast(EthernetStation)_interface.get)
+        if (auto station = dyn_cast!EthernetStation(_interface.get))
             adopt_parent_mac(station);
     }
 
@@ -229,7 +229,7 @@ private:
     {
         if (!_mac_subscribed)
             return;
-        if (auto station = cast(EthernetStation)_interface.get)
+        if (auto station = dyn_cast!EthernetStation(_interface.get))
             station.prop_element(prop_index!(EthernetStation, "mac")).unsubscribe(&parent_mac_changed);
         _mac_subscribed = false;
     }

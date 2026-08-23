@@ -47,7 +47,7 @@ nothrow @nogc:
     {
         if (!value)
             return StringResult("interface cannot be null");
-        ZigbeeInterface zi = cast(ZigbeeInterface)value;
+        ZigbeeInterface zi = dyn_cast!ZigbeeInterface(value);
         if (!zi)
             return StringResult("must be a zigbee interface");
         if (_interface)

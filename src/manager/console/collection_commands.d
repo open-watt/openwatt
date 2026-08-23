@@ -134,7 +134,7 @@ CommandState collection_add_exec(ref Command, Session session, Scope* _scope, co
     // HACK: advance the state machine synchronously so subsequent script lines
     // have a chance to work when the early startup creates things.
     // this should be removed, and replaced by a more comprehensive latent startup tolerance.
-    if (auto active = cast(ActiveObject)item)
+    if (auto active = dyn_cast!ActiveObject(item))
         active.do_update();
 
     return null;

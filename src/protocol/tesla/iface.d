@@ -135,7 +135,7 @@ protected:
         // reached over an RS485-to-TCP bridge the bus still runs at the TWC rate whatever the transport
         // does, so only a local serial port gets to state the rate itself
         import router.stream.serial : SerialStream;
-        auto serial = cast(SerialStream)_stream.get;
+        auto serial = dyn_cast!SerialStream(_stream.get);
         set_link_speed(serial ? serial.baud_rate : twc_baud);
     }
 

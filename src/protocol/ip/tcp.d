@@ -10,7 +10,7 @@ import urt.log;
 import urt.mem;
 import urt.time;
 
-import manager.base : ActiveObject, StateSignal;
+import manager.base : ActiveObject, StateSignal, dyn_cast;
 
 import router.iface;
 import router.iface.endpoint;
@@ -348,7 +348,7 @@ nothrow @nogc:
     {
         if (sig != StateSignal.offline)
             return;
-        auto iface = cast(BaseInterface)obj;
+        auto iface = dyn_cast!BaseInterface(obj);
         foreach (pcb; _pcbs[])
             if (pcb.route_egress is iface)
                 set_pcb_egress(pcb, null);
@@ -1395,7 +1395,7 @@ void send_segment_raw(ref IPStack stack, ref const InetAddress src, ref const In
                 s.forward(pkt);
             }
 
-            EthernetStation station = cast(EthernetStation)egress;
+            EthernetStation station = dyn_cast!EthernetStation(egress);
             if (!station && src_mac)
                 station = find_ether_station(src_mac);
             if (!station)

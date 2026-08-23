@@ -54,7 +54,7 @@ nothrow @nogc:
         });
         if (ambiguous)
             return StringResult(tconcat("object name is ambiguous: ", uri.body));
-        ActiveObject object = cast(ActiveObject)found;
+        ActiveObject object = dyn_cast!ActiveObject(found);
         if (!object)
             return StringResult(tconcat("active object not found: ", uri.body));
 
@@ -83,12 +83,12 @@ nothrow @nogc:
 
     override void unsubscribe(SignalSub handle)
     {
-        ObjectSignalSub s = cast(ObjectSignalSub)handle;
+        ObjectSignalSub s = cast(ObjectSignalSub)cast(void*)handle;
         if (s.initial_scheduled)
             g_app.cancel(&s.on_initial);
         if (s.subscribed)
         {
-            if (auto object = cast(ActiveObject)get_item(s.object_id))
+            if (auto object = dyn_cast!ActiveObject(get_item(s.object_id)))
                 object.unsubscribe(&s.on_state);
             s.subscribed = false;
         }
@@ -134,7 +134,7 @@ nothrow @nogc:
         initial_scheduled = false;
         if (!subscribed)
             return;
-        ActiveObject object = cast(ActiveObject)get_item(object_id);
+        ActiveObject object = dyn_cast!ActiveObject(get_item(object_id));
         if (!object || !object.running)
             return;
         SignalEvent event = { source: source[] };

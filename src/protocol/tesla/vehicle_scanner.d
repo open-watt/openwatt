@@ -168,7 +168,7 @@ protected:
     {
         const Secret s = _secret.get;
         return _iface !is null
-            && (cast(const(BLEInterface))_iface.get) !is null
+            && dyn_cast!BLEInterface(_iface.get) !is null
             && s !is null
             && s.kind == SecretKind.ec_p256;
     }

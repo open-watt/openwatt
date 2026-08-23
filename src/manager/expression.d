@@ -242,7 +242,7 @@ nothrow @nogc:
     {
         ty = Type.str;
         flags = Flags.allocated; // TODO: we might need to scan for variable references...
-        new(str) typeof(str)(forward!s);
+        emplace(&str, forward!s);
     }
 
     ~this()
@@ -285,7 +285,7 @@ nothrow @nogc:
         this.destroy!false();
         ty = Type.str;
         flags = Flags.allocated; // TODO: we might need to scan for variable references...
-        new(str) typeof(str)(forward!s);
+        emplace(&str, forward!s);
         s.length = 0;
     }
 

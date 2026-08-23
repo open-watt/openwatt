@@ -88,12 +88,12 @@ nothrow @nogc:
     void keepalive(bool value)
     {
         _keepalive = value;
-        if (auto tcp = cast(TCPStream)_stream)
+        if (auto tcp = dyn_cast!TCPStream(_stream))
             tcp.keepalive = value;
         static if (has_tls)
         {
             import protocol.tls : TLSStream;
-            if (auto t = cast(TLSStream)_stream)
+            if (auto t = dyn_cast!TLSStream(_stream))
                 t.keepalive = value;
         }
     }
@@ -150,26 +150,26 @@ nothrow @nogc:
                 else
                     return false;
 
-                _stream = cast(Stream)Collection!TLSStream().create(new_name, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary),
+                _stream = Collection!TLSStream().create(new_name, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary),
                     NamedArgument("remote", host_with_port), NamedArgument("keepalive", _keepalive));
             }
         }
         else if (!clean_host.empty)
         {
             if (use_port != 0)
-                _stream = cast(Stream)Collection!TCPStream().create(new_name, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary),
+                _stream = Collection!TCPStream().create(new_name, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary),
                     NamedArgument("remote", clean_host), NamedArgument("port", use_port), NamedArgument("keepalive", _keepalive));
             else
-                _stream = cast(Stream)Collection!TCPStream().create(new_name, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary),
+                _stream = Collection!TCPStream().create(new_name, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary),
                     NamedArgument("remote", clean_host), NamedArgument("keepalive", _keepalive));
         }
         else
         {
             if (use_port != 0)
-                _stream = cast(Stream)Collection!TCPStream().create(new_name, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary),
+                _stream = Collection!TCPStream().create(new_name, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary),
                     NamedArgument("remote", _addr), NamedArgument("port", use_port), NamedArgument("keepalive", _keepalive));
             else
-                _stream = cast(Stream)Collection!TCPStream().create(new_name, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary),
+                _stream = Collection!TCPStream().create(new_name, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary),
                     NamedArgument("remote", _addr), NamedArgument("keepalive", _keepalive));
         }
 

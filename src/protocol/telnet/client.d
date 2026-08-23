@@ -45,7 +45,7 @@ CommandState telnet(Session session, const(char)[] remote)
     }
 
     auto tcp_name = Collection!TCPStream().generate_name("telnet-c");
-    TCPStream tcp = cast(TCPStream)Collection!TCPStream().create(tcp_name,
+    TCPStream tcp = Collection!TCPStream().create(tcp_name,
         cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary),
         NamedArgument("remote", host),
         NamedArgument("port", port));
@@ -56,7 +56,7 @@ CommandState telnet(Session session, const(char)[] remote)
     }
 
     auto telnet_name = Collection!TelnetStream().generate_name("telnet-c");
-    TelnetStream telnet_stream = cast(TelnetStream)Collection!TelnetStream().create(telnet_name,
+    TelnetStream telnet_stream = Collection!TelnetStream().create(telnet_name,
         cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary),
         NamedArgument("transport", tcp),
         NamedArgument("role", "client"));

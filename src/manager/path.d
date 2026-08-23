@@ -93,8 +93,7 @@ bool matches_object(ref const Address a, BaseObject obj)
         return false;
     if (a.exact)
         return wildcard_match(a.ns, obj.type);
-    for (const(CollectionTypeInfo)* ti = obj._typeInfo; ti !is null;
-         ti = ti.get_super ? ti.get_super() : null)
+    for (const(CollectionTypeInfo)* ti = obj._typeInfo; ti !is null; ti = ti.collection_super())
     {
         if (wildcard_match(a.ns, ti.type[]))
             return true;

@@ -1571,7 +1571,7 @@ private:
         else if (signal == StateSignal.destroyed)
         {
             // the trunk's registry and freelist die with it; drop our claims and free directly
-            if (auto trunk = cast(CPCInterface)object)
+            if (auto trunk = dyn_cast!CPCInterface(object))
                 trunk.unsubscribe(&cpc_state_change);
             _subscribed = false;
             _bound = false;

@@ -119,9 +119,9 @@ nothrow @nogc:
         foreach (ref t; tracked[])
         {
             BaseInterface bound;
-            if (auto a = cast(IPAddress)t.obj)
+            if (auto a = dyn_cast!IPAddress(t.obj))
                 bound = a.iface;
-            else if (auto r = cast(IPRoute)t.obj)
+            else if (auto r = dyn_cast!IPRoute(t.obj))
                 bound = r.out_interface;
             if (bound is iface)
                 push(&t);
@@ -131,9 +131,9 @@ nothrow @nogc:
     void on_object_created(BaseObject obj)
     {
         bool is_route;
-        if (cast(IPAddress)obj)
+        if (dyn_cast!IPAddress(obj))
             is_route = false;
-        else if (cast(IPRoute)obj)
+        else if (dyn_cast!IPRoute(obj))
             is_route = true;
         else
             return;
@@ -170,7 +170,7 @@ nothrow @nogc:
 
     void push_address(Tracked* t)
     {
-        IPAddress a = cast(IPAddress)t.obj;
+        IPAddress a = dyn_cast!IPAddress(t.obj);
         int idx = kernel_ifindex(a.iface);
         if (idx == 0)
         {
@@ -194,7 +194,7 @@ nothrow @nogc:
 
     void push_route(Tracked* t)
     {
-        IPRoute r = cast(IPRoute)t.obj;
+        IPRoute r = dyn_cast!IPRoute(t.obj);
         if (r.blackhole)
         {
             withdraw(t);
@@ -245,7 +245,7 @@ int kernel_ifindex(const(BaseInterface) iface)
     // null covers both an unset property and a destroyed ObjectRef target
     if (iface is null)
         return 0;
-    if (auto e = cast(const(LinuxRawEthernet))iface)
+    if (auto e = dyn_cast!LinuxRawEthernet(iface))
         return netlink_ifindex(e.adapter);
     // A platform backend (e.g. the kernel-bridge offload) may have bound this
     // interface to an OS netdev directly -- a BridgeInterface resolves to its

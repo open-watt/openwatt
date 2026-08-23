@@ -206,7 +206,7 @@ nothrow @nogc:
 
         if (pkt.type == PacketType.ethernet)
         {
-            EthernetStation station = cast(EthernetStation)iface;
+            EthernetStation station = dyn_cast!EthernetStation(iface);
             debug assert(station !is null);
             if (station)
                 ethernet_ingress(pkt, station);
@@ -415,7 +415,7 @@ private:
     //       (or by a virtual on BaseInterface) to choose the framing.
     void frame_and_send(ref Packet pkt, BaseInterface out_iface, const(ubyte)[] link_addr)
     {
-        EthernetStation station = cast(EthernetStation)out_iface;
+        EthernetStation station = dyn_cast!EthernetStation(out_iface);
         if (!station || link_addr.length != 6 || pkt.data.length < 1)
             return;
         MACAddress dst;
@@ -453,7 +453,7 @@ private:
 
     void v4_send_request(IPAddr target, BaseInterface iface)
     {
-        if (EthernetStation station = cast(EthernetStation)iface)
+        if (EthernetStation station = dyn_cast!EthernetStation(iface))
             send_arp_request(target, station);
     }
 

@@ -16,12 +16,16 @@ import re
 import subprocess
 import sys
 
-# Section names, not nm's type letters: those cannot tell .data from
-# .data.rel.ro, and conflating them reports flash as RAM. Anything holding a
-# Type.init blob or a vtable lands in the latter and is flash on a target
-# that executes in place.
-RAM_SECTIONS = (".bss", ".data", ".tbss", ".tdata", ".sbss", ".sdata")
-DATA_SECTIONS = (".data", ".tdata", ".sdata")
+def classify(section):
+    s = section.lower()
+    if "rodata" in s or "rel.ro" in s:
+        return None
+    parts = set(filter(None, re.split(r"[._]+", s)))
+    if parts & {"bss", "sbss", "tbss", "noinit", "common"}:
+        return "bss"
+    if parts & {"data", "sdata", "tdata"}:
+        return "data"
+    return None
 
 
 def symbols(binary, objdump):
@@ -33,14 +37,15 @@ def symbols(binary, objdump):
         if len(f) < 5 or not f[0][:1].isdigit() and not f[0][:1] in "abcdef":
             continue
         section, size, name = f[-3], f[-2], f[-1]
-        if section not in RAM_SECTIONS:
+        kind = classify(section)
+        if kind is None:
             continue
         try:
             sz = int(size, 16)
         except ValueError:
             continue
         if sz:
-            yield sz, section, name
+            yield sz, kind, section, name
 
 
 def demangle(names, nm_cxxfilt="c++filt"):
@@ -88,33 +93,32 @@ def main():
                     help="aggregate by module instead of listing symbols")
     args = ap.parse_args()
 
-    syms = [(sz, typ, d_demangle(nm)) for sz, typ, nm in symbols(args.binary, args.objdump)]
+    syms = [(sz, kind, sec, d_demangle(nm)) for sz, kind, sec, nm in symbols(args.binary, args.objdump)]
     if not syms:
         print("no RAM symbols found (stripped binary?)", file=sys.stderr)
         return 1
 
     total = sum(s[0] for s in syms)
-    data = sum(s[0] for s in syms if s[1] in DATA_SECTIONS)
+    data = sum(s[0] for s in syms if s[1] == "data")
     bss = total - data
     print(f"static RAM in symbols: {total} bytes  (.data {data}, .bss {bss})")
     print()
 
     if args.module:
         agg = collections.defaultdict(lambda: [0, 0])
-        for sz, typ, name in syms:
+        for sz, kind, sec, name in syms:
             slot = agg[module_of(name)]
             slot[0] += sz
-            if typ in DATA_SECTIONS:
+            if kind == "data":
                 slot[1] += sz
         rows = sorted(agg.items(), key=lambda kv: kv[1][0], reverse=True)
         print(f"{'bytes':>9} {'of which .data':>14}  module")
         for mod, (sz, dsz) in rows[:args.top]:
             print(f"{sz:9} {dsz:14}  {mod}")
     else:
-        print(f"{'bytes':>9} {'sec':>5}  symbol")
-        for sz, typ, name in sorted(syms, reverse=True)[:args.top]:
-            sec = typ
-            print(f"{sz:9} {sec:>5}  {name}")
+        print(f"{'bytes':>9} {'section':>12}  symbol")
+        for sz, kind, sec, name in sorted(syms, key=lambda r: r[0], reverse=True)[:args.top]:
+            print(f"{sz:9} {sec:>12}  {name}")
     return 0
 
 

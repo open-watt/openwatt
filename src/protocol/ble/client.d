@@ -198,7 +198,7 @@ nothrow @nogc:
 protected:
 
     override bool validate() const
-        => _iface !is null && cast(bool)_peer && (cast(const(BLEInterface))_iface.get) !is null;
+        => _iface !is null && cast(bool)_peer && dyn_cast!BLEInterface(_iface.get) !is null;
 
     override CompletionStatus startup()
     {

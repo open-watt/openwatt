@@ -419,7 +419,7 @@ protected:
                 // it for the stream's rx_handler
                 if (ash_coll.get(name[]))
                     return CompletionStatus.continue_;
-                _ash = cast(ASHInterface)ash_coll.create(name[], ObjectFlags.dynamic, NamedArgument("stream", cast(Stream)_stream));
+                _ash = ash_coll.create(name[], ObjectFlags.dynamic, NamedArgument("stream", _stream));
                 if (!_ash)
                     return CompletionStatus.error;
             }
