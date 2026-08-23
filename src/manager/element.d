@@ -21,7 +21,6 @@ import urt.lifetime;
 import urt.log : writeWarning;
 import urt.mem.alloc;
 import urt.mem.allocator : defaultAllocator;
-import urt.mem.string;
 import urt.si.unit : ScaledUnit;
 import urt.string;
 import urt.time;

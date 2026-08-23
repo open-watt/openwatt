@@ -424,7 +424,7 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
         if (c is null)
         {
             c = g_app.allocator.allocT!Component(comp_id.makeString(defaultAllocator()));
-            c.template_ = ct.get_template().makeString(defaultAllocator());
+            c.template_ = ct.get_template(profile).makeString(defaultAllocator());
             c.hidden = ct.is_hidden();
             c.parent = parent;
             parent.components ~= c;
@@ -461,7 +461,7 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
                 e.id = el_id.makeString(defaultAllocator());
                 e.name = el.get_name(profile).makeString(defaultAllocator());
                 e.desc = el.get_desc(profile).makeString(defaultAllocator());
-                e.display_unit = el.display_units;
+                e.display_unit = el.get_display_units(profile).makeString(defaultAllocator());
                 e.sampling_mode = el.update_frequency.freq_to_element_mode;
                 e.access = cast(manager.element.Access)el.access;
 
@@ -538,8 +538,9 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
                     {
                         ref const(ElementDesc) alias_desc = profile.element_desc(ai);
                         e.access = cast(manager.element.Access)alias_desc.access;
-                        if (!(el.explicit & ElementTemplate.Explicit.units) && alias_desc.display_units.length)
-                            e.display_unit = alias_desc.display_units;
+                        const(char)[] alias_units = alias_desc.get_display_units(profile);
+                        if (!(el.explicit & ElementTemplate.Explicit.units) && alias_units.length)
+                            e.display_unit = alias_units.makeString(defaultAllocator());
                         if (!(el.explicit & ElementTemplate.Explicit.frequency))
                             e.sampling_mode = alias_desc.update_frequency.freq_to_element_mode;
                         e.format = create_element_handler(device, e, alias_desc, el.index);

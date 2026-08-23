@@ -7,7 +7,6 @@ import urt.hash;
 import urt.log;
 import urt.map;
 import urt.mem;
-import urt.mem.string;
 import urt.meta.enuminfo;
 import urt.si.unit : ScaledUnit;
 import urt.string;
@@ -80,7 +79,6 @@ SamplingMode freq_to_element_mode(Frequency frequency)
 struct ElementDesc
 {
 pure nothrow @nogc:
-    CacheString display_units;
     Access access = Access.read;
     Frequency update_frequency = Frequency.medium;
 
@@ -93,10 +91,14 @@ pure nothrow @nogc:
     const(char)[] get_description(ref const(Profile) profile) const
         => _description.cache_string(profile.desc_strings);
 
+    const(char)[] get_display_units(ref const(Profile) profile) const
+        => _display_units.cache_string(profile.section_strings);
+
 private:
     ubyte _kind;
     ushort _index;
     ushort _description;
+    ushort _display_units;
 }
 
 struct ProfileSize
@@ -285,8 +287,6 @@ pure nothrow @nogc:
     Access access = Access.read;
     Frequency update_frequency = Frequency.medium;
 
-    CacheString display_units;
-
     const(char)[] get_id(ref const(Profile) profile) const
         => _id.cache_string(profile.id_strings);
 
@@ -295,6 +295,9 @@ pure nothrow @nogc:
 
     const(char)[] get_desc(ref const(Profile) profile) const
         => profile.desc_strings ? _description.cache_string(profile.desc_strings) : null;
+
+    const(char)[] get_display_units(ref const(Profile) profile) const
+        => _display_units.cache_string(profile.section_strings);
 
     const(char)[] get_expression(ref const(Profile) profile) const
     {
@@ -325,6 +328,7 @@ private:
     ushort _value;
     ushort _name;
     ushort _description;
+    ushort _display_units;
     package ModelMask _model_mask;
 }
 
@@ -334,8 +338,8 @@ pure nothrow @nogc:
     const(char)[] get_id(ref const(Profile) profile) const
         => _id.cache_string(profile.id_strings);
 
-    const(char)[] get_template() const
-        => _template[];
+    const(char)[] get_template(ref const(Profile) profile) const
+        => _template.cache_string(profile.section_strings);
 
     bool is_hidden() const
         => _hidden;
@@ -376,7 +380,7 @@ pure nothrow @nogc:
 
 private:
     ushort _id;
-    CacheString _template;
+    ushort _template;
     ushort _elements;
     ushort _components;
     ushort _num_elements;
@@ -1022,6 +1026,7 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
 
                     lookup_string_len += cache_len(id.length);
                     desc_string_len += cache_len(desc.length);
+                    section_size.add_string(display_units);
                 }
 
                 if (ProfileSectionReg* s = find_profile_section(reg_item.name))
@@ -1052,7 +1057,7 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
                             break;
 
                         case "template":
-                            // add template string to string cache...
+                            section_size.add_string(cItem.value.unQuote);
                             break;
 
                         case "hidden":
@@ -1129,6 +1134,7 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
 
                                 name_string_length += cache_len(name.length);
                                 desc_string_len += cache_len(desc.length);
+                                section_size.add_string(display_units);
                             }
                             break;
 
@@ -1190,19 +1196,26 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
     profile.elements = allocator.allocArray!ElementDesc(item_count);
     profile.lookup_table = allocator.allocArray!(Profile.Lookup)(item_count);
     profile.indirections = allocator.allocArray!ushort(num_indirections);
-    profile.id_strings = allocator.allocArray!char(2 + id_string_length);
-    profile.name_strings = allocator.allocArray!char(2 + name_string_length);
-    profile.lookup_strings = allocator.allocArray!char(2 + lookup_string_len);
-    profile.expression_strings = allocator.allocArray!char(2 + expression_string_len);
-    profile.desc_strings = allocator.allocArray!char(2 + desc_string_len);
-    profile.param_strings = allocator.allocArray!char(2 + param_string_len);
+    if (id_string_length)
+        profile.id_strings = allocator.allocArray!char(2 + id_string_length);
+    if (name_string_length)
+        profile.name_strings = allocator.allocArray!char(2 + name_string_length);
+    if (lookup_string_len)
+        profile.lookup_strings = allocator.allocArray!char(2 + lookup_string_len);
+    if (expression_string_len)
+        profile.expression_strings = allocator.allocArray!char(2 + expression_string_len);
+    if (desc_string_len)
+        profile.desc_strings = allocator.allocArray!char(2 + desc_string_len);
+    if (param_string_len)
+        profile.param_strings = allocator.allocArray!char(2 + param_string_len);
 
     size_t active_sections = 0;
     foreach (n; section_counts)
         if (n)
             ++active_sections;
     profile.section_blocks = allocator.allocArray!(Profile.SectionBlock)(active_sections);
-    profile.section_strings = allocator.allocArray!char(2 + section_size.string_bytes);
+    if (section_size.string_bytes)
+        profile.section_strings = allocator.allocArray!char(2 + section_size.string_bytes);
     {
         size_t sb = 0;
         foreach (ref s; g_profile_sections)
@@ -1231,7 +1244,7 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
     }
 
     StringCacheBuilder id_cache, name_cache, lookup_cache, expr_cache, desc_cache, param_string_cache;
-    if (profile.name_strings)
+    if (profile.id_strings)
         id_cache = StringCacheBuilder(profile.id_strings);
     if (profile.name_strings)
         name_cache = StringCacheBuilder(profile.name_strings);
@@ -1345,7 +1358,7 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
                     else writeWarning("Invalid frequency value: ", freq);
                 }
                 e.update_frequency = frequency;
-                e.display_units = addString(display_units);
+                e._display_units = section_string_cache.add_string(display_units);
 
                 if (ProfileSectionReg* s = find_profile_section(reg_item.name))
                 {
@@ -1460,7 +1473,7 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
                         break;
 
                     case "template":
-                        component._template = addString(cItem.value.unQuote);
+                        component._template = section_string_cache.add_string(cItem.value.unQuote);
                         break;
 
                     case "hidden":
@@ -1592,7 +1605,8 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
                                 e._name = name_cache.add_string(name);
                             }
 
-                            e.display_units = display_units ? addString(display_units) : elem_desc ? elem_desc.display_units : CacheString();
+                            e._display_units = display_units ? section_string_cache.add_string(display_units) :
+                                elem_desc ? elem_desc._display_units : 0;
                             if (display_units)
                                 e.explicit |= ElementTemplate.Explicit.units;
                             e._description = description ? desc_cache.add_string(description) : elem_desc ? elem_desc._description : 0;
@@ -1659,12 +1673,6 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
         default:
             continue;
     }
-
-    // TODO: we seem to have over-estimated the cache lengths... investigate!
-//    debug assert (id_cache.full, "Miscalculated ID string cache size!");
-    debug assert (lookup_cache.full, "Miscalculated lookup string cache size!");
-    debug assert (name_cache.full, "Miscalculated name string cache size!");
-//    debug assert (desc_cache.full, "Miscalculated description string cache size!");
 
     return profile;
 }

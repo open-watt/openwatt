@@ -7,7 +7,6 @@ import urt.map;
 import urt.meta;
 import urt.meta.enuminfo : bitfield;
 import urt.mem.alloc : alloc, free;
-import urt.mem.string;
 import urt.mem.temp;
 import urt.variant;
 import urt.result;
@@ -284,7 +283,6 @@ nothrow @nogc:
                 assert(type_info.properties[j].name[] != p.name[], tconcat("Property '", p.name[], "' on ", type_info.type[], " shadows a base class property"));
 
         _typeInfo = type_info;
-        _type = type_info.type[].addString();
         _id = id;
 
         if (flags & ObjectFlags.remote)
@@ -318,7 +316,7 @@ nothrow @nogc:
         => _id;
 
     final const(char)[] type() const pure
-        => _type;
+        => _typeInfo.type[];
 
     final String name() const pure
     {
@@ -371,7 +369,8 @@ nothrow @nogc:
 
     // Object API...
 
-    alias log = ObjectLog!(_type, name);
+    final ObjectLog log() const
+        => ObjectLog(this);
 
     final bool is_remote() const pure nothrow @nogc
         => _is_remote;
@@ -652,7 +651,6 @@ protected:
     }
 
 private:
-    const CacheString _type; // TODO: DELETE THIS MEMBER!!!
     package CID _id;
     String _comment;
     Element* _prop_elements;
@@ -944,14 +942,14 @@ protected:
         }
 
         debug version (DebugStateFlow)
-            if (!DebugType || _type[] == DebugType)
+            if (!DebugType || type() == DebugType)
                 debug log.trace("state change: ", old, " -> ", _state);
 
         switch (_state)
         {
             case State.init_failed:
                 debug version (DebugStateFlow)
-                    if (!DebugType || _type[] == DebugType)
+                    if (!DebugType || type() == DebugType)
                         debug log.trace("init fail - retry in ", _backoff_ms, "ms");
                 goto case;
             case State.disabled:
@@ -1153,28 +1151,30 @@ private:
     CID _id;
 }
 
-template ObjectLog(alias tag, alias name)
+struct ObjectLog
 {
 nothrow @nogc:
-    void emergency(T...)(ref T args) { write_log(Severity.emergency, tag[], name[], args); }
-    void alert(T...)(ref T args) { write_log(Severity.alert, tag[], name[], args); }
-    void critical(T...)(ref T args) { write_log(Severity.critical, tag[], name[], args); }
-    void error(T...)(ref T args) { write_log(Severity.error, tag[], name[], args); }
-    void warning(T...)(ref T args) { write_log(Severity.warning, tag[], name[], args); }
-    void notice(T...)(ref T args) { write_log(Severity.notice, tag[], name[], args); }
-    void info(T...)(ref T args) { write_log(Severity.info, tag[], name[], args); }
-    void debug_(T...)(ref T args) { write_log(Severity.debug_, tag[], name[], args); }
-    void trace(T...)(ref T args) { write_log(Severity.trace, tag[], name[], args); }
+    const(BaseObject) object;
 
-    void emergencyf(T...)(const(char)[] fmt, ref T args) { write_logf(Severity.emergency, tag[], name[], fmt, args); }
-    void alertf(T...)(const(char)[] fmt, ref T args) { write_logf(Severity.alert, tag[], name[], fmt, args); }
-    void criticalf(T...)(const(char)[] fmt, ref T args) { write_logf(Severity.critical, tag[], name[], fmt, args); }
-    void errorf(T...)(const(char)[] fmt, ref T args) { write_logf(Severity.error, tag[], name[], fmt, args); }
-    void warningf(T...)(const(char)[] fmt, ref T args) { write_logf(Severity.warning, tag[], name[], fmt, args); }
-    void noticef(T...)(const(char)[] fmt, ref T args) { write_logf(Severity.notice, tag[], name[], fmt, args); }
-    void infof(T...)(const(char)[] fmt, ref T args) { write_logf(Severity.info, tag[], name[], fmt, args); }
-    void debugf(T...)(const(char)[] fmt, ref T args) { write_logf(Severity.debug_, tag[], name[], fmt, args); }
-    void tracef(T...)(const(char)[] fmt, ref T args) { write_logf(Severity.trace, tag[], name[], fmt, args); }
+    void emergency(T...)(ref T args) { write_log(Severity.emergency, object.type(), object.name()[], args); }
+    void alert(T...)(ref T args) { write_log(Severity.alert, object.type(), object.name()[], args); }
+    void critical(T...)(ref T args) { write_log(Severity.critical, object.type(), object.name()[], args); }
+    void error(T...)(ref T args) { write_log(Severity.error, object.type(), object.name()[], args); }
+    void warning(T...)(ref T args) { write_log(Severity.warning, object.type(), object.name()[], args); }
+    void notice(T...)(ref T args) { write_log(Severity.notice, object.type(), object.name()[], args); }
+    void info(T...)(ref T args) { write_log(Severity.info, object.type(), object.name()[], args); }
+    void debug_(T...)(ref T args) { write_log(Severity.debug_, object.type(), object.name()[], args); }
+    void trace(T...)(ref T args) { write_log(Severity.trace, object.type(), object.name()[], args); }
+
+    void emergencyf(T...)(const(char)[] fmt, ref T args) { write_logf(Severity.emergency, object.type(), object.name()[], fmt, args); }
+    void alertf(T...)(const(char)[] fmt, ref T args) { write_logf(Severity.alert, object.type(), object.name()[], fmt, args); }
+    void criticalf(T...)(const(char)[] fmt, ref T args) { write_logf(Severity.critical, object.type(), object.name()[], fmt, args); }
+    void errorf(T...)(const(char)[] fmt, ref T args) { write_logf(Severity.error, object.type(), object.name()[], fmt, args); }
+    void warningf(T...)(const(char)[] fmt, ref T args) { write_logf(Severity.warning, object.type(), object.name()[], fmt, args); }
+    void noticef(T...)(const(char)[] fmt, ref T args) { write_logf(Severity.notice, object.type(), object.name()[], fmt, args); }
+    void infof(T...)(const(char)[] fmt, ref T args) { write_logf(Severity.info, object.type(), object.name()[], fmt, args); }
+    void debugf(T...)(const(char)[] fmt, ref T args) { write_logf(Severity.debug_, object.type(), object.name()[], fmt, args); }
+    void tracef(T...)(const(char)[] fmt, ref T args) { write_logf(Severity.trace, object.type(), object.name()[], fmt, args); }
 }
 
 

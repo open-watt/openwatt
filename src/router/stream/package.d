@@ -7,7 +7,6 @@ import urt.inet;
 import urt.lifetime;
 import urt.log;
 import urt.map;
-import urt.mem.string;
 import urt.meta.nullable;
 import urt.result;
 import urt.string;
