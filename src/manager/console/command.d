@@ -64,14 +64,29 @@ nothrow @nogc:
     immutable(FunctionArgument)[] args;
     CustomSuggestFn custom_suggest;
 
+    // slots for the `args`/`named-args` catch-all parameters; max = the command has none
+    ushort args_offset = ushort.max;
+    ushort named_args_offset = ushort.max;
+
     version (ExcludeHelpText) {} else
         String help_text;
 }
 
 struct FunctionArgument
 {
+    alias ConvertFn = const(char)[] function(ref const Variant v, void* arg) nothrow @nogc;
+
+    enum Flags : ubyte
+    {
+        none     = 0,
+        optional = 1 << 0,  // Nullable: absence is not an error
+    }
+
     String name;
+    ConvertFn convert;
     Array!String function(const(char)[]) nothrow @nogc suggest;
+    ushort offset;          // byte offset of the parameter within the command's argument tuple
+    Flags flags;
     version (ExcludeHelpText) {} else
         String type_name;   // prefixed with '?' if the param is Nullable
 }
