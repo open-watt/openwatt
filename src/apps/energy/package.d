@@ -45,45 +45,97 @@ class EnergyAppModule : Module
     mixin DeclareModule!"apps.energy";
 nothrow @nogc:
 
-    EnergyManager* manager;
+    private EnergyApp _instance;
 
-    Device energy_device;
-
-    DailySnapshot daily;
-    Planner planner;
-    ControlRegistry registry;
-    TopologyPublisher topology_publisher;
-    ChargeSessionTracker sessions;
-
-    Array!Device subscribed_devices;
-    bool topology_dirty = true;
-    MonoTime last_topology_rebuild;
+    ref EnergyManager* manager()
+        => _instance.manager;
+    ref Device energy_device()
+        => _instance.energy_device;
+    ref DailySnapshot daily()
+        => _instance.daily;
+    ref Planner planner()
+        => _instance.planner;
+    ref ControlRegistry registry()
+        => _instance.registry;
+    ref TopologyPublisher topology_publisher()
+        => _instance.topology_publisher;
+    ref ChargeSessionTracker sessions()
+        => _instance.sessions;
+    ref Array!Device subscribed_devices()
+        => _instance.subscribed_devices;
+    ref bool topology_dirty()
+        => _instance.topology_dirty;
+    ref MonoTime last_topology_rebuild()
+        => _instance.last_topology_rebuild;
 
     override void init()
     {
         g_app.register_enum!BusType();
         g_app.register_enum!Coverage();
         g_app.register_enum!PolicyTier();
-
         init_vehicle_formats();
-        manager = alloc!EnergyManager();
-        energy_device = create_energy_device();
-        registry = alloc!ControlRegistry();
 
         g_app.console.register_collection!Appliance();
         g_app.console.register_collection!EnergyLink();
         g_app.console.register_collection!Policy();
 
+        g_app.console.register_command!(start, "start")("/apps/energy", this);
         g_app.console.register_command!(topology_print, "topology")("/apps/energy", this);
         g_app.console.register_command!(circuit_print, "circuit")("/apps/energy", this);
         g_app.console.register_command!(control_print, "control")("/apps/energy", this);
         g_app.console.register_command!(why, "why")("/apps/energy", this);
         g_app.console.register_command!(live, "live")("/apps/energy", this);
+    }
 
+    bool started() const pure
+        => _instance !is null;
+
+    void start(Session session)
+    {
+        if (started)
+        {
+            session.write_line("Energy app is already started");
+            return;
+        }
+
+        if (!create_instance())
+        {
+            session.write_line("Energy app cannot start: device 'energy' already exists");
+            return;
+        }
+
+        session.write_line("Energy app started");
+    }
+
+    private bool create_instance()
+    {
+        Device device = create_energy_device();
+        if (!device)
+            return false;
+
+        EnergyApp instance = alloc!EnergyApp();
+        instance.manager = alloc!EnergyManager();
+        instance.energy_device = device;
+        instance.registry = alloc!ControlRegistry();
+        instance.topology_dirty = true;
+        instance.last_topology_rebuild = MonoTime.init;
+        _instance = instance;
+        return true;
+    }
+
+    private bool require_started(Session session) const
+    {
+        if (started)
+            return true;
+        session.write_line("Energy app is not started; run /apps/energy/start");
+        return false;
     }
 
     override void update()
     {
+        if (!started)
+            return;
+
         auto t = getTime();
         refresh_device_subscriptions();
         log_slow_phase("refresh_device_subscriptions", getTime() - t);
@@ -185,11 +237,14 @@ nothrow @nogc:
 
     void request_topology_rebuild()
     {
-        topology_dirty = true;
+        if (started)
+            topology_dirty = true;
     }
 
     CommandState live(Session session, const(Variant)[] args)
     {
+        if (!require_started(session))
+            return null;
         return alloc!EnergyLiveView(session, this);
     }
 
@@ -240,6 +295,9 @@ nothrow @nogc:
 
     void why(Session session)
     {
+        if (!require_started(session))
+            return;
+
         import urt.mem.temp : tconcat;
         import urt.meta.enuminfo : enum_key_from_value;
         import manager.console.table;
@@ -290,6 +348,9 @@ nothrow @nogc:
 
     void control_print(Session session)
     {
+        if (!require_started(session))
+            return;
+
         import urt.mem.temp : tconcat;
         import urt.meta.enuminfo : enum_key_from_value;
         import urt.si.quantity : Amps, Watts;
@@ -396,6 +457,9 @@ nothrow @nogc:
 
     CommandState topology_print(Session session, const(Variant)[] args)
     {
+        if (!require_started(session))
+            return null;
+
         bool watch;
         foreach (a; args)
         {
@@ -413,6 +477,9 @@ nothrow @nogc:
 
     CommandState circuit_print(Session session, const(Variant)[] args)
     {
+        if (!require_started(session))
+            return null;
+
         bool watch;
         foreach (a; args)
         {
@@ -1170,6 +1237,23 @@ const(char)[] format_soc_bar(float soc)
     if (split == bar_width)
         return tconcat(green_bg, bar, reset);
     return tconcat(green_bg, bar[0 .. split], grey_bg, bar[split .. $], reset);
+}
+
+private class EnergyApp
+{
+nothrow @nogc:
+    EnergyManager* manager;
+    Device energy_device;
+
+    DailySnapshot daily;
+    Planner planner;
+    ControlRegistry registry;
+    TopologyPublisher topology_publisher;
+    ChargeSessionTracker sessions;
+
+    Array!Device subscribed_devices;
+    bool topology_dirty = true;
+    MonoTime last_topology_rebuild;
 }
 
 abstract class EnergyTableView : LiveViewState
