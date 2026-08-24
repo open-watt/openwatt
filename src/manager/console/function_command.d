@@ -311,7 +311,7 @@ const(char)[] function_command_help(ref const Command cmd, const(char)[] args)
     {
         buf ~= "\n  ";
         const(char)[] tn = a.type_name[];
-        bool optional = tn[0] == '?';
+        bool optional = tn.length && tn[0] == '?';
         if (optional)
         {
             buf ~= '[';
