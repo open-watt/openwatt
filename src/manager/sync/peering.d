@@ -189,6 +189,23 @@ nothrow @nogc:
         }
     }
 
+    // Log delegation is claim policy: the tap is (re)armed each time a member is claimed, so it
+    // survives the member reconnecting under a fresh session rather than dying with the old peer.
+    void arm_logs(SyncPeer p)
+    {
+        if (_collect_logs)
+            p.request_logs(_log_severity, false, null);
+        else
+            p.request_logs(_log_severity, true, null);
+    }
+
+    void arm_claimed_logs()
+    {
+        foreach (kvp; _issued[])
+            if (kvp.value.acked && kvp.value.peer)
+                arm_logs(kvp.value.peer);
+    }
+
     // An inbound session is the member's to keep alive; when it goes, so does the claim.
     void prune_issued()
     {
@@ -203,7 +220,7 @@ nothrow @nogc:
         }
     }
 
-    void peering_set(Session session, Nullable!bool enabled, Nullable!PeerRole role, Nullable!(const(char)[]) cluster, Nullable!uint priority, Nullable!(const(char)[]) claim, Nullable!(const(char)[]) secret, Nullable!ushort port)
+    void peering_set(Session session, Nullable!bool enabled, Nullable!PeerRole role, Nullable!(const(char)[]) cluster, Nullable!uint priority, Nullable!(const(char)[]) claim, Nullable!(const(char)[]) secret, Nullable!ushort port, Nullable!bool collect_logs, Nullable!Severity log_severity)
     {
         bool cluster_conflict = claimed && cluster && cluster.value[] != bound_cluster[];
 
@@ -225,6 +242,14 @@ nothrow @nogc:
             _secret = secret.value.make_string();
         if (port)
             _port = port.value;
+        if (collect_logs || log_severity)
+        {
+            if (collect_logs)
+                _collect_logs = collect_logs.value;
+            if (log_severity)
+                _log_severity = log_severity.value;
+            arm_claimed_logs();   // apply the change to members already claimed
+        }
 
         // config is intent; live claims that contradict it are released rather than
         // silently retained (which would admit claimants from two clusters at once)
@@ -257,6 +282,7 @@ nothrow @nogc:
         {
             session.write_line("priority: ", _priority);
             session.write_line("claim:    ", _claim.length ? _claim[] : "*");
+            session.write_line("logs:     ", _collect_logs ? severity_names[_log_severity] : "off");
             foreach (kvp; _attempts[])
             {
                 ref const a = kvp.value;
@@ -450,6 +476,7 @@ nothrow @nogc:
             {
                 c.acked = true;
                 log.info("claimed node ", hex_id(kvp.key)[], " ('", from.name[], "')");
+                arm_logs(from);
             }
             else
             {
@@ -464,6 +491,8 @@ nothrow @nogc:
 package:
     bool     _enabled;
     PeerRole _role;
+    bool     _collect_logs = true;      // an authority taps its claimed members' logs by default
+    Severity _log_severity = Severity.info;
     String   _cluster;
     uint     _priority = 100;
     String   _claim;

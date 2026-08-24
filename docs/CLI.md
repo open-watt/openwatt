@@ -868,6 +868,11 @@ authority is rejoined by its members rather than having to rediscover them. A
 member that reboots simply dials again on the way up, without waiting for a
 sweep.
 
+On a successful claim the authority also taps the member's log stream (`collect-logs`,
+default on), so a fleet's logs converge on its authority. The tap is re-armed by the claim
+itself, so it follows a member across reboots even though the session peer is recreated each
+time.
+
 | Property | Values | Default | Description |
 | --- | --- | --- | --- |
 | `enabled` | `yes`/`no` | `no` | Participate in peering; implied by setting `role`. |
@@ -877,6 +882,8 @@ sweep.
 | `claim` | path glob | `*` | Authority only: which member names to adopt. |
 | `secret` | string | empty | The fleet key, set by hand. Normally unset: the authority mints one at first adoption and hands it to each factory member inside the claim; thereafter claims prove it with an HMAC over the member's per-session hello nonce, so the key never travels again and a captured claim cannot replay. |
 | `port` | `1` to `65535` | `7000` | Authority only: sync port the session listener binds; advertised in discovery beacons so members know where to dial. |
+| `collect-logs` | `yes`/`no` | `yes` | Authority only: tap each claimed member's log stream. Re-armed on every claim, so it survives a member reconnecting under a fresh session. |
+| `log-severity` | severity | `info` | Authority only: max severity requested from claimed members' logs (`emergency`..`trace`). Raising it raises the member's own ingress level. |
 
 A factory member (no key) is adopted by the first claiming authority: the claim hands the
 fleet key over (the one trust-on-first-use moment), and the member persists its allegiance
