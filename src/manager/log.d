@@ -27,7 +27,6 @@ import router.stream;
 
 struct RetainedLogMessage
 {
-    Array!(char, 0) data;
     SysTime timestamp;
     uint tag_length;
     uint object_name_length;
@@ -35,6 +34,12 @@ struct RetainedLogMessage
     uint hostname_length;
     Severity severity;
 nothrow @nogc:
+
+    ~this()
+    {
+        if (_data)
+            free(_data[0 .. _data_capacity]);
+    }
 
     void assign(scope ref const LogMessage msg)
     {
@@ -45,12 +50,28 @@ nothrow @nogc:
         severity = msg.severity;
         timestamp = msg.timestamp;
 
-        data.clear();
-        data.reserve(tag_length + object_name_length + message_length + hostname_length);
-        data ~= msg.tag;
-        data ~= msg.object_name;
-        data ~= msg.message;
-        data ~= msg.hostname;
+        uint total = tag_length + object_name_length + message_length + hostname_length;
+        if (total > _data_capacity)
+        {
+            if (_data)
+                free(_data[0 .. _data_capacity]);
+            _data = cast(char*)alloc(total, MemFlags.slow).ptr;
+            _data_capacity = total;
+        }
+        size_t o = 0;
+        _data[o .. o + tag_length] = msg.tag[];            o += tag_length;
+        _data[o .. o + object_name_length] = msg.object_name[]; o += object_name_length;
+        _data[o .. o + message_length] = msg.message[];    o += message_length;
+        _data[o .. o + hostname_length] = msg.hostname[];
+    }
+
+    void clear()
+    {
+        if (_data)
+            free(_data[0 .. _data_capacity]);
+        _data = null;
+        _data_capacity = 0;
+        tag_length = object_name_length = message_length = hostname_length = 0;
     }
 
     LogMessage message()
@@ -59,15 +80,19 @@ nothrow @nogc:
         size_t object_end = tag_end + object_name_length;
         size_t message_end = object_end + message_length;
         size_t hostname_end = message_end + hostname_length;
-        assert(hostname_end == data.length);
+        assert(hostname_end <= _data_capacity);
 
         return LogMessage(severity,
-                          data[0 .. tag_end],
-                          data[tag_end .. object_end],
-                          data[object_end .. message_end],
-                          data[message_end .. hostname_end],
+                          _data[0 .. tag_end],
+                          _data[tag_end .. object_end],
+                          _data[object_end .. message_end],
+                          _data[message_end .. hostname_end],
                           timestamp);
     }
+
+private:
+    uint _data_capacity;
+    char* _data;
 }
 
 struct LogConsumerHandle
@@ -391,7 +416,7 @@ private:
         if (!pending && !historical)
             return;
 
-        StoredLogMessage* record = alloc!StoredLogMessage();
+        StoredLogMessage* record = alloc!StoredLogMessage(MemFlags.slow);
         if (!record)
         {
             // Can't report the failure: reporting logs, and logging allocates down this path.
@@ -1160,7 +1185,7 @@ private:
         if (_count == _limit)
         {
             slot = _head;
-            _messages[slot].data.clear();
+            _messages[slot].clear();
             _head = (_head + 1) % _limit;
             ++_dropped;
         }
