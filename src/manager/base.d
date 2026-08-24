@@ -780,10 +780,13 @@ nothrow @nogc:
     {
         if (value)
         {
+            bool was_running = _state == State.running;
             _state |= _disabled;
             _state &= ~_start;
             if (_state & _valid)
                 _state |= _stop;
+            if (was_running)
+                set_offline();
         }
         else
             _state &= ~_disabled;
@@ -1982,6 +1985,22 @@ unittest
     table.bind(o.id, o);
     o.do_update();
     assert(o.running && o.startups == 1);
+
+    // disabling a running object announces offline, like every other exit from running
+    LifecycleTestObject d = alloc!LifecycleTestObject(table.allocate("lifecycle-d", 0));
+    table.bind(d.id, d);
+    d.do_update();
+    assert(d.running);
+
+    Watcher wd;
+    d.subscribe(&wd.on_signal);
+    d.disabled(true);
+    assert(wd.count == 1 && wd.seen[0] == StateSignal.offline);
+    assert(d._state == ActiveObject.State.stopping);
+    d.do_update();
+    assert(d.shutdowns == 1 && wd.count == 1);
+    d.destroy();
+    assert(wd.count == 2 && wd.seen[1] == StateSignal.destroyed);
 
     Watcher w;
     o.subscribe(&w.on_signal);

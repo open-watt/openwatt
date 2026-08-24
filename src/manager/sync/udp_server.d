@@ -177,7 +177,7 @@ private:
         // transport() clears the binding; its initial hello retries once bound.
         peer.transport(_iface);
         peer.bind_remote(src);
-        peer.subscribe_transport();
+        peer.subscribe(&on_peer_state);
         _peers ~= Spawned(src, peer, getTime());
 
         debug log.info("peer appeared from ", src, " -> ", peer.name[]);
@@ -194,11 +194,50 @@ private:
             if (all || now - _peers[i].last_rx >= _timeout)
             {
                 debug log.info("removing peer ", _peers[i].peer.name[]);
-                _peers[i].peer.destroy();
-                _peers.remove(i);
+                _peers[i].peer.destroy();   // on_peer_state drops the entry
             }
             else
                 ++i;
         }
     }
+
+    // whoever destroys a spawned peer, the source table follows
+    void on_peer_state(ActiveObject peer, StateSignal signal)
+    {
+        if (signal != StateSignal.destroyed)
+            return;
+        foreach (i, ref s; _peers[])
+        {
+            if (s.peer is peer)
+            {
+                _peers.remove(i);
+                return;
+            }
+        }
+    }
+}
+
+
+unittest
+{
+    import urt.mem;
+
+    UDPSyncServer server = alloc!UDPSyncServer(CID(1));
+    scope(exit) free(server);
+    SyncPeer p1 = alloc!SyncPeer(CID(2));
+    scope(exit) free(p1);
+    SyncPeer p2 = alloc!SyncPeer(CID(3));
+    scope(exit) free(p2);
+
+    MonoTime now = getTime();
+    server._peers ~= UDPSyncServer.Spawned(InetAddress(IPAddr(10, 0, 0, 1), 1), p1, now);
+    server._peers ~= UDPSyncServer.Spawned(InetAddress(IPAddr(10, 0, 0, 2), 2), p2, now);
+
+    // destruction drops the right entry, whoever destroyed the peer
+    server.on_peer_state(p1, StateSignal.destroyed);
+    assert(server._peers.length == 1 && server._peers[0].peer is p2);
+
+    // a repeat signal for a gone peer is a no-op
+    server.on_peer_state(p1, StateSignal.destroyed);
+    assert(server._peers.length == 1 && server._peers[0].peer is p2);
 }

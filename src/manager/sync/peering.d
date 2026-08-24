@@ -79,6 +79,12 @@ nothrow @nogc:
             foreach (kvp; _attempts[])
             {
                 ref a = kvp.value;
+                if (a.dead)
+                {
+                    log.info("session to node ", hex_id(kvp.key)[], " died");
+                    fail_attempt(kvp.key, a);
+                    continue;
+                }
                 if (a.peer && !a.claimed && a.peer.running)
                 {
                     a.claimed = true;   // session established; a claim, if any, arrives on it
@@ -404,6 +410,15 @@ nothrow @nogc:
     // Sync module calls this as a peer detaches; the claim dies with the session.
     void peer_detached(SyncPeer p)
     {
+        foreach (kvp; _issued[])
+        {
+            if (kvp.value.peer is p)
+            {
+                log.info("session from node ", hex_id(kvp.key)[], " ended");
+                _issued.remove(kvp.key);
+                break;
+            }
+        }
         foreach (i, ref c; _claimants[])
         {
             if (c.peer is p)
@@ -480,6 +495,7 @@ private:
         uint seq;
         bool sent;
         bool claimed;
+        bool dead;
         bool handover;   // target beacons un-adopted: the claim carries the fleet key
         MonoTime deadline;
         MonoTime claimed_at;
@@ -690,6 +706,22 @@ private:
 
     void claim_peer_state(ActiveObject obj, StateSignal sig)
     {
+        if (sig == StateSignal.destroyed)
+        {
+            // destroyed by its owner; only record it - destroying the iface here would fire
+            // its offline back into the half-dead peer, so update() reaps the attempt instead
+            foreach (kvp; _attempts[])
+            {
+                ref a = kvp.value;
+                if (a.peer is obj)
+                {
+                    a.peer = null;
+                    a.dead = true;
+                    return;
+                }
+            }
+            return;
+        }
         if (sig != StateSignal.offline)
             return;
         foreach (kvp; _attempts[])
@@ -697,8 +729,10 @@ private:
             ref a = kvp.value;
             if (a.peer is obj && a.claimed)
             {
-                log.info("session to node ", hex_id(kvp.key)[], " died");
-                fail_attempt(kvp.key, a);
+                // the decision is terminal: deregister now so no further signals arrive,
+                // and leave the teardown to update()
+                a.peer.unsubscribe(&claim_peer_state);
+                a.dead = true;
                 return;
             }
         }
@@ -708,7 +742,7 @@ private:
     {
         // transport dies first (the ws-server precedent): its offline signal reaches a
         // still-live peer, which handles it with a restart; a destroyed peer would assert
-        if (a.peer)
+        if (a.peer && !a.dead)
             a.peer.unsubscribe(&claim_peer_state);
         if (a.iface)
         {
@@ -722,6 +756,7 @@ private:
         }
         a.sent = false;
         a.claimed = false;
+        a.dead = false;
     }
 
     // the link the attempt went through, if the neighbour still lists it
@@ -773,4 +808,57 @@ unittest
 
     a.claimed = true;
     assert(!a.expired(t0 + 11.seconds));    // a live claim never expires here
+}
+
+unittest
+{
+    import urt.mem;
+
+    SyncPeeringModule m = alloc!SyncPeeringModule(null);
+    scope(exit) free(m);
+    SyncPeer p1 = alloc!SyncPeer(CID(1));
+    scope(exit) free(p1);
+    SyncPeer p2 = alloc!SyncPeer(CID(2));
+    scope(exit) free(p2);
+
+    m._issued.insert(0xA, SyncPeeringModule.IssuedClaim(p1, 1));
+    m._issued.insert(0xB, SyncPeeringModule.IssuedClaim(p2, 2));
+
+    // a detaching peer takes its issued claim with it, and only its own
+    m.peer_detached(p1);
+    assert((0xA in m._issued) is null);
+    assert((0xB in m._issued) && (0xB in m._issued).peer is p2);
+
+    m.peer_detached(p1);
+    assert(m._issued.length == 1);
+}
+
+unittest
+{
+    import urt.mem;
+
+    SyncPeeringModule m = alloc!SyncPeeringModule(null);
+    scope(exit) free(m);
+    SyncPeer p = alloc!SyncPeer(CID(1));
+    scope(exit) free(p);
+
+    SyncPeeringModule.ClaimAttempt* a = m._attempts.insert(0xA, SyncPeeringModule.ClaimAttempt());
+    a.peer = p;
+    a.claimed = true;
+    p.subscribe(&m.claim_peer_state);
+
+    // offline records the death and deregisters; nothing is torn down inside the signal
+    m.claim_peer_state(p, StateSignal.offline);
+    assert(a.dead && a.peer is p);
+    p.subscribe(&m.claim_peer_state);   // asserts if the handler had not removed itself
+    p.unsubscribe(&m.claim_peer_state);
+
+    // destruction by the peer's owner drops the ref and leaves the reap to update()
+    a.dead = false;
+    m.claim_peer_state(p, StateSignal.destroyed);
+    assert(a.dead && a.peer is null);
+
+    // signals for a peer no attempt holds are no-ops
+    m.claim_peer_state(p, StateSignal.destroyed);
+    assert(m._attempts.length == 1);
 }
