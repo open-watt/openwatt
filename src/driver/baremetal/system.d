@@ -10,8 +10,16 @@ void system_reboot()
     log_notice("system", "system_reboot: not implemented on this platform");
 }
 
-// TODO: BL808 and kin carry eFuse chip ids; wire them through when those ports need identity
-ulong unique_device_id() => 0;
+ulong unique_device_id()
+{
+    version (Bouffalo)
+    {
+        import urt.driver.bl_common.identity : chip_unique_id;
+        return chip_unique_id();
+    }
+    else
+        return 0;
+}
 
 bool   reboot_pending() => false;
 bool   ota_supported() => false;

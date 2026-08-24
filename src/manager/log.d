@@ -189,6 +189,9 @@ nothrow @nogc:
             consumer.filter = filter;
             consumer.active = true;
             recalc_ingress_filter();
+
+            retire_bootstrap_log_sink();
+
             return LogConsumerHandle(cast(int)i);
         }
         return LogConsumerHandle.init;
