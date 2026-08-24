@@ -26,6 +26,28 @@ ulong unique_device_id()
 
 bool reboot_pending() => false;
 
+// Why the chip came up. A restart that never reached the panic handler leaves no
+// core dump, so without this a brownout and a clean reboot look identical.
+const(char)[] reset_reason()
+{
+    switch (esp_reset_reason())
+    {
+        case 1:  return "power-on";
+        case 2:  return "external pin";
+        case 3:  return "software";
+        case 4:  return "panic";
+        case 5:  return "interrupt watchdog";
+        case 6:  return "task watchdog";
+        case 7:  return "other watchdog";
+        case 8:  return "deep sleep wake";
+        case 9:  return "brownout";
+        case 10: return "sdio";
+        case 11: return "usb";
+        case 12: return "jtag";
+        default: return "unknown";
+    }
+}
+
 bool ota_supported() => true;
 
 size_t ota_partition_size()
@@ -85,6 +107,7 @@ private struct esp_partition_t
 private extern (C)
 {
     void esp_restart();
+    int esp_reset_reason();
     int esp_efuse_mac_get_default(ubyte* mac);
     const(esp_partition_t)* esp_ota_get_next_update_partition(const(esp_partition_t)* start);
     int esp_ota_begin(const(esp_partition_t)* p, size_t image_size, ref uint handle);

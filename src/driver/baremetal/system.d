@@ -21,6 +21,9 @@ ulong unique_device_id()
         return 0;
 }
 
+// no reset-reason source on this platform
+const(char)[] reset_reason() => null;
+
 bool   reboot_pending() => false;
 bool   ota_supported() => false;
 size_t ota_partition_size() => 0;
