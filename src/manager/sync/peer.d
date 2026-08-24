@@ -246,15 +246,19 @@ nothrow @nogc:
         return idx << 1;
     }
 
+    // announced handles are sender-side, dense and ascending: a new one extends the table by exactly one
+    bool adoptable(SyncHandle handle) const pure
+        => (handle & 1) == 0 && (handle >> 1) <= _adopted.length;
+
     void adopt(SyncHandle handle, EID local)
     {
-        if (handle & 1)
+        if (!adoptable(handle))
         {
-            log.warning("peer '", name[], "' announced a receiver-side handle ", handle);
+            log.warning("peer '", name[], "' announced an unusable handle ", handle);
             return;
         }
         size_t idx = cast(size_t)(handle >> 1);
-        while (_adopted.length <= idx)
+        if (idx == _adopted.length)
             _adopted ~= EID.invalid;
         if (_adopted[idx] && _adopted[idx] != local)
         {
@@ -1175,4 +1179,30 @@ unittest
     ubyte[SyncPeer.pre_start_max_bytes + 1] big;
     c.deliver_frame(big[]);
     assert(c._pre_start.empty && c._pre_start_overflow);
+}
+
+unittest
+{
+    SyncPeer p = alloc!SyncPeer(CID(1));
+    scope(exit) free(p);
+
+    // announced handles extend the table by one; a sparse one can't size it
+    assert(p.adoptable(0));
+    assert(!p.adoptable(2));
+    assert(!p.adoptable(1));
+    assert(!p.adoptable(ulong.max - 1));
+
+    p.adopt(0, EID(CID(2)));
+    assert(p._adopted.length == 1);
+    assert(p.adoptable(2));
+
+    p.adopt(ulong.max - 1, EID(CID(3)));
+    assert(p._adopted.length == 1);
+
+    // an announcement that can't be resolved still advances, and resolves later
+    p.adopt(2, EID.invalid);
+    assert(p._adopted.length == 2);
+    assert(p.adoptable(4));
+    p.adopt(2, EID(CID(4)));
+    assert(p._adopted[1] == EID(CID(4)));
 }

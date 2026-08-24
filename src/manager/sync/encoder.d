@@ -101,8 +101,9 @@ bool value_type_from_name(const(char)[] s, out ValueType t)
     return false;
 }
 
+// user formats can't intern at the receiver: no TypeDetails travel on the wire
 bool wire_serialisable(ref const DataFormat f) pure
-    => f.clock is null && (f.type != ValueType.user || f.user_type.variant !is null);
+    => f.clock is null && f.type != ValueType.user;
 
 // Reset frames carry no value - the contract is that the receiver knows the
 // init value from the type's properties. This assert proves the contract holds
