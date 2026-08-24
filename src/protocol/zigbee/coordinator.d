@@ -355,7 +355,7 @@ private:
                        && set_configuration(ezsp, EzspConfigId.APPLICATION_ZDO_FLAGS, cast(EmberZdoConfigurationFlags)(EmberZdoConfigurationFlags.APP_HANDLES_UNSUPPORTED_ZDO_REQUESTS | EmberZdoConfigurationFlags.APP_RECEIVES_SUPPORTED_ZDO_REQUESTS))
 
         // TODO: do we need/want any of these?
-                       && set_configuration(ezsp, EzspConfigId.INDIRECT_TRANSMISSION_TIMEOUT, 300) // >= 300
+                       && set_configuration(ezsp, EzspConfigId.INDIRECT_TRANSMISSION_TIMEOUT, 7680) // a sleepy child must be able to poll within this, or the frame is dropped
                        && set_configuration(ezsp, EzspConfigId.MAX_END_DEVICE_CHILDREN, 32) // >= 16
                        && set_configuration(ezsp, EzspConfigId.KEY_TABLE_SIZE, 8)
                        && set_configuration(ezsp, EzspConfigId.ADDRESS_TABLE_SIZE, 16)
@@ -369,6 +369,7 @@ private:
 //                     && set_policy(ezsp, EzspPolicyId.APP_KEY_REQUEST, EzspDecisionId.ALLOW_APP_KEY_REQUESTS)
                        && set_policy(ezsp, EzspPolicyId.BINDING_MODIFICATION, EzspDecisionId.ALLOW_BINDING_MODIFICATION)
                        && set_policy(ezsp, EzspPolicyId.MESSAGE_CONTENTS_IN_CALLBACK, EzspDecisionId.MESSAGE_TAG_AND_CONTENTS_IN_CALLBACK)
+                       && set_policy(ezsp, EzspPolicyId.POLL_HANDLER, EzspDecisionId.POLL_HANDLER_CALLBACK)
 //                     && set_policy(ezsp, EzspPolicyId.UNICAST_REPLIES, EzspDecisionId.HOST_WILL_SUPPLY_REPLY)
                        && set_policy(ezsp, EzspPolicyId.UNICAST_REPLIES, EzspDecisionId.HOST_WILL_NOT_SUPPLY_REPLY);
         if (!configured)
@@ -605,6 +606,7 @@ private:
 //                    nm.parent_id = _node_id; // TODO: is the coordinator the parent, or it's preferred router?
                     nm.desc.type = cast(NodeType)child.value.childData.type;
                     nm.via = _interface;
+                    arm_extended_timeout(*nm);
                 }
             }
         }
@@ -751,6 +753,7 @@ private:
         auto n = get_module!ZigbeeProtocolModule.attach_node(EUI64(childData.eui64), pan_id, childData.id);
         n.parent_id = _node_id;
         n.desc.type = cast(NodeType)childData.type;
+        arm_extended_timeout(*n);
 //        n.via = _interface; // TODO: should we set `via` for a local node?
 
         // TODO: do we want to record phy/power/timeout/remaining?
@@ -783,6 +786,7 @@ private:
         if (joining)
         {
             n.parent_id = _node_id;
+            arm_extended_timeout(*n);
             log.debugf("child join - {0, 04x} [{1}] {2}", child_id, eui, child_type);
         }
         else

@@ -236,6 +236,7 @@ struct NodeMap
     bool device_created;
     MonoTime retry_after;
     ubyte interview_failures;
+    bool extended_timeout;
 
     ubyte lqi;
     byte rssi;
@@ -521,6 +522,14 @@ nothrow @nogc:
         if (n)
             return *n;
         return null;
+    }
+
+    void note_awake(NodeMap* node)
+    {
+        if (!node || node.initialised == 0xFF)
+            return;
+        foreach (ZigbeeController c; Collection!ZigbeeController().values)
+            c.node_awake(node);
     }
 
     void discover_node(BaseInterface via, ushort pan_id, ushort id)

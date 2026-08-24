@@ -765,6 +765,10 @@ private:
             }
         }
 
+        // any frame at all proves the node is awake right now; this is the widest wake vector we have
+        if (n)
+            mod_zb.note_awake(n);
+
         version (DebugZigbeeMessageFlow)
             writeDebugf("Zigbee: APS recv ({0, 03}) - {1, 04x}:{2, 02x}<-{3, 04x}:{4, 02x} [{5}:{6, 04x}] - [{7}]", hdr.counter, hdr.dst, hdr.dst_endpoint, hdr.src, hdr.src_endpoint, profile_name(hdr.profile_id), hdr.cluster_id, cast(void[])message);
         version (DebugZigbeeLatency)
@@ -783,6 +787,7 @@ private:
             auto n = mod_zb.attach_node(EUI64(eui64[]), _coordinator.pan_id, sender);
             n.last_seen = getSysTime(); // NOTE: we're here because we received a message
             n.via = this;
+            mod_zb.note_awake(n);
         }
         else
             mod_zb.discover_node(this, _coordinator.pan_id, sender);
