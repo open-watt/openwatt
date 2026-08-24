@@ -147,15 +147,32 @@ nothrow @nogc:
     int transmit_frame(const(ubyte)[] frame, bool is_text = false, TxQueue queue = TxQueue.control)
     {
         if (!_transport || !_transport.running)
+        {
+            _send_failed = true;
             return -1;
+        }
         if (!sublayer_armed)
-            return raw_tx(frame, is_text);
+        {
+            int r = raw_tx(frame, is_text);
+            if (r < 0)
+            {
+                _send_failed = true;
+                // control has no gap semantics: a refusal invalidates the session
+                if (queue == TxQueue.control && (_state == State.running || _state == State.starting))
+                {
+                    log.warning("peer '", name[], "' control frame refused; restarting session");
+                    restart();
+                }
+            }
+            return r;
+        }
 
         if (queue == TxQueue.control)
         {
             if (_resend.length >= max_unacked)
             {
                 log.warning("peer '", name[], "' control queue overflow; restarting session");
+                _send_failed = true;
                 restart();
                 return -1;
             }
@@ -406,10 +423,30 @@ protected:
         if (!_transport || !_transport.running)
             return CompletionStatus.continue_;
 
+        if (_pre_start_overflow)
+        {
+            _pre_start_overflow = false;
+            return CompletionStatus.error;   // gapped intake; establish from a fresh exchange
+        }
+
         subscribe_transport();
 
+        uint gen = begin_burst();
         encoder_for(_encoder).encode_hello(this);
+        if (!send_ok(gen))
+            return CompletionStatus.continue_;   // the refusal restarted us; a session without hello must not run
         get_module!SyncModule.attach_peer(this);
+
+        // frames that arrived before the session existed join it now, in arrival order
+        while (!_pre_start.empty)
+        {
+            Array!ubyte held = _pre_start[0].move;
+            _pre_start.remove(0);
+            _pre_start_bytes -= held.length;
+            deliver_frame(held[]);
+            if (_state != State.starting)
+                return CompletionStatus.continue_;   // a refusal tore this fresh session down
+        }
 
         if (_want_logs)
             encoder_for(_encoder).encode_log_sub(this, _want_log_severity, false, _want_log_tag[]);
@@ -554,9 +591,28 @@ package:
     size_t control_window_free()
         => !sublayer_armed ? size_t.max : (_resend.length >= max_unacked ? 0 : max_unacked - _resend.length);
 
+    // burst protocol: begin_burst, send, check send_ok after every send; refusal or teardown ends it
+    uint begin_burst()
+    {
+        // a condemned session stays failed until its replacement session starts
+        if (_state == State.running || _state == State.starting)
+            _send_failed = false;
+        return _session_gen;
+    }
+
+    bool send_ok(uint gen) const pure
+        => !_send_failed && _session_gen == gen;
+
     uint             _intro_table;
     uint             _intro_slot;
     bool             _introducing;
+    Array!(Array!ubyte) _pre_start;      // frames held until the session can process them
+    uint             _pre_start_bytes;
+    bool             _pre_start_overflow;
+    enum pre_start_max = 8;
+    enum pre_start_max_bytes = 8192;
+    bool             _send_failed;
+    uint             _session_gen;       // bumped by detach_peer; a burst spanning it is dead
 
     ubyte            _remote_caps;       // hello negotiation; 0 = no hello received
     ulong            _remote_node_id;    // hello identity; 0 = peer announced none
@@ -700,22 +756,27 @@ private:
         return _transport.forward(p);
     }
 
+    // a dispatched frame may restart the session and clear the hold, so each frame is taken
+    // out before dispatch and the hold is re-read afterwards
     void drain_reorder()
     {
-        bool advanced = true;
-        while (advanced)
+        for (;;)
         {
-            advanced = false;
+            size_t next = size_t.max;
             foreach (i, ref h; _reorder[])
             {
-                if (h.seq != cast(ubyte)(_rx_delivered + 1))
-                    continue;
-                _rx_delivered = h.seq;
-                encoder_for(_encoder).decode_and_dispatch(this, h.payload[]);
-                _reorder.remove(i);
-                advanced = true;
-                break;
+                if (h.seq == cast(ubyte)(_rx_delivered + 1))
+                {
+                    next = i;
+                    break;
+                }
             }
+            if (next == size_t.max)
+                return;
+            HeldFrame h = _reorder[next].move;
+            _reorder.remove(next);
+            _rx_delivered = h.seq;
+            encoder_for(_encoder).decode_and_dispatch(this, h.payload[]);
         }
     }
 
@@ -842,6 +903,31 @@ private:
     {
         if (disabled)
             return;
+        // frames are processed only inside a session; pre-start arrivals wait for startup to drain them
+        if (_state != State.starting && _state != State.running)
+        {
+            if (_pre_start_overflow)
+                return;
+            if (_pre_start.length < pre_start_max && _pre_start_bytes + frame.length <= pre_start_max_bytes)
+            {
+                Array!ubyte held;
+                held ~= frame[];
+                _pre_start ~= held.move;
+                _pre_start_bytes += frame.length;
+            }
+            else
+            {
+                // an unparsed drop may be control traffic, and this transport may not
+                // retransmit: the whole prospective session is gapped, so refuse it
+                log.warning("peer '", name[], "' pre-start frames overflowed; refusing the session");
+                _pre_start.clear();
+                _pre_start_bytes = 0;
+                _pre_start_overflow = true;
+                if (flags & ObjectFlags.dynamic)
+                    disabled(true);   // reaped by the spawning server; the client reconnects fresh
+            }
+            return;
+        }
         if (!sublayer_armed)
         {
             encoder_for(_encoder).decode_and_dispatch(this, frame);
@@ -1039,4 +1125,54 @@ unittest
     assert(!peer._time_authority_from_claim);
     peer.revoke_claim_time_authority();
     assert(peer.time_authority);
+}
+
+unittest
+{
+    import urt.mem;
+
+    SyncPeer a = alloc!SyncPeer(CID(1));
+    scope(exit) free(a);
+    SyncPeer b = alloc!SyncPeer(CID(2));
+    scope(exit) free(b);
+
+    // a refused transmit fails only its own peer's burst
+    uint ga = a.begin_burst();
+    uint gb = b.begin_burst();
+    ubyte[3] frame = [1, 2, 3];
+    assert(a.transmit_frame(frame[]) < 0);   // no transport
+    assert(!a.send_ok(ga));
+    assert(b.send_ok(gb));
+
+    // a condemned session keeps its failure: begin_burst does not revive a detached peer
+    // (revival happens only in a starting/running state, which startup() provides)
+    a._send_failed = true;                   // detach_peer condemns...
+    ++a._session_gen;                        // ...and bumps the generation
+    ga = a.begin_burst();
+    assert(!a.send_ok(ga));
+    ga = a.begin_burst();
+    assert(!a.send_ok(ga));                  // and it stays condemned across bursts
+
+    // a teardown under an open burst on a live peer still ends it
+    uint gb2 = b.begin_burst();
+    assert(b.send_ok(gb2));
+    ++b._session_gen;
+    assert(!b.send_ok(gb2));
+
+    // frames arriving before the session starts are held unprocessed; overflowing the
+    // bound discards the intake and condemns the prospective session
+    foreach (i; 0 .. SyncPeer.pre_start_max)
+        b.deliver_frame(frame[]);
+    assert(b._pre_start.length == SyncPeer.pre_start_max && !b._pre_start_overflow);
+    b.deliver_frame(frame[]);
+    assert(b._pre_start.empty && b._pre_start_overflow);
+    b.deliver_frame(frame[]);
+    assert(b._pre_start.empty);   // a condemned intake accepts nothing further
+
+    // the byte bound condemns too: one oversized frame on a fresh peer
+    SyncPeer c = alloc!SyncPeer(CID(3));
+    scope(exit) free(c);
+    ubyte[SyncPeer.pre_start_max_bytes + 1] big;
+    c.deliver_frame(big[]);
+    assert(c._pre_start.empty && c._pre_start_overflow);
 }

@@ -191,7 +191,7 @@ private:
         size_t i = 0;
         while (i < _peers.length)
         {
-            if (all || now - _peers[i].last_rx >= _timeout)
+            if (all || now - _peers[i].last_rx >= _timeout || _peers[i].peer.disabled)
             {
                 debug log.info("removing peer ", _peers[i].peer.name[]);
                 _peers[i].peer.destroy();   // on_peer_state drops the entry

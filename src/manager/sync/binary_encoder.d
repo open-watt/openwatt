@@ -315,8 +315,7 @@ nothrow @nogc:
     {
         begin_frame(Verb.log);
         _buf.put_str(line);
-        send_frame(peer, TxQueue.log);
-        return !_last_drop;
+        return send_frame(peer, TxQueue.log) >= 0;
     }
 
     // Outbound: time sync
@@ -996,6 +995,7 @@ nothrow @nogc:
 
     override void tick_dirty(SyncPeer peer)
     {
+        uint gen = peer.begin_burst();
         foreach (obj; peer._bound[])
         {
             if (obj._is_remote)
@@ -1028,7 +1028,7 @@ nothrow @nogc:
                     encode_reset(peer, obj.id, p.name[], 0);
                 }
 
-                if (_last_drop)
+                if (!peer.send_ok(gen))
                 {
                     ss.props_dirty &= ~sent_bits;
                     return;
@@ -1041,7 +1041,6 @@ nothrow @nogc:
 
 private:
     Array!ubyte _buf;
-    bool _last_drop;
 
     void begin_frame(Verb verb)
     {
@@ -1049,15 +1048,16 @@ private:
         _buf ~= verb;
     }
 
-    void send_frame(SyncPeer peer, TxQueue queue = TxQueue.control)
+    int send_frame(SyncPeer peer, TxQueue queue = TxQueue.control)
     {
-        _last_drop = peer.transmit_frame(_buf[], false, queue) < 0;
-        if (_last_drop)
+        int r = peer.transmit_frame(_buf[], false, queue);
+        if (r < 0)
         {
             // event-driven encodes (state/cmd/result/error/sub/...) have no retry path!!
             // a drop here means the peer permanently misses this event.
             log.warning("dropped frame to peer (", _buf.length, "B): verb=", enum_key_name!Verb(cast(Verb)_buf[0]));
         }
+        return r;
     }
 }
 
