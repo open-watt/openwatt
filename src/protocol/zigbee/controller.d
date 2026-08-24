@@ -1131,6 +1131,7 @@ private:
         // request power descriptor
         if (!(node.initialised & 0x02))
         {
+            req_buffer[0] = 0;
             r = try_thrice(() => _endpoint.zdo_request(node.id, ZDOCluster.power_desc_req, req_buffer[0..3], zdo_res, PCP.bk));
             if (r != ZigbeeResult.success || zdo_res.status != ZDOStatus.success)
                 return fail("power_desc_req failed");
@@ -1152,6 +1153,7 @@ private:
         // request active endpoints
         if (!(node.initialised & 0x04))
         {
+            req_buffer[0] = 0;
             r = try_thrice(() => _endpoint.zdo_request(node.id, ZDOCluster.active_ep_req, req_buffer[0..3], zdo_res, PCP.bk));
             if (r != ZigbeeResult.success || zdo_res.status != ZDOStatus.success)
                 return fail("active_ep_req failed");
@@ -1185,9 +1187,9 @@ private:
                     continue;
 
                 // request simple descriptor
+                req_buffer[0] = 0;
                 req_buffer[1..3] = node.id.nativeToLittleEndian;
                 req_buffer[3] = ep.endpoint;
-            try_again:
                 r = try_thrice(() => _endpoint.zdo_request(node.id, ZDOCluster.simple_desc_req, req_buffer[0..4], zdo_res, PCP.bk));
                 if (r != ZigbeeResult.success || zdo_res.status != ZDOStatus.success)
                     return fail("simple_desc_req failed");
@@ -1201,10 +1203,7 @@ private:
                 if (length < 10)
                     return fail("response too short");
                 if (msg[3] != ep.endpoint)
-                {
-                    // this seems like a stale response; why did we receive response to an earlier request?
-                    goto try_again;
-                }
+                    return fail("simple_desc_req endpoint mismatch");
 
                 ep.profile_id = msg[4..6].littleEndianToNative!ushort;
                 ep.device_id = msg[6..8].littleEndianToNative!ushort;
