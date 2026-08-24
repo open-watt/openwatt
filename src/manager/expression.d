@@ -1137,7 +1137,7 @@ private Expression* parse_unary_exp(ref Parser parser)
             return null;
         if (op == '+')
             return expr;
-        Type ty = op ? Type.neg : Type.not;
+        Type ty = op == '-' ? Type.neg : Type.not;
         return try_fold(ty, expr, null);
     }
     return parse_postfix_exp(parser);
@@ -1518,6 +1518,17 @@ unittest
     assert(e.cmd_list_source() == "/print hello");
 
     EvalContext ctx;
+
+    // unary operators: '!' is logical, '-' is numeric
+    text = "!1";
+    assert(parse_expression(text).as_bool == false);
+    text = "!0";
+    assert(parse_expression(text).as_bool == true);
+    text = "-3";
+    assert(parse_expression(text).as_num == VarQuantity(-3));
+
+    text = "{ /print hello }";
+    e = parse_primary_exp(text);
     Variant v = e.evaluate(ctx);
     assert(v.isUser!Script);
 
