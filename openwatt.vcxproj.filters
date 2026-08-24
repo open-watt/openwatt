@@ -1143,6 +1143,9 @@
     <DCompile Include="third_party\urt\src\urt\driver\bl_common\hbn.d">
       <Filter>third_party\urt\driver\bl_common</Filter>
     </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl_common\identity.d">
+      <Filter>third_party\urt\driver\bl_common</Filter>
+    </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\bl808_m0\start.d">
       <Filter>third_party\urt\driver\bl808_m0</Filter>
     </DCompile>
