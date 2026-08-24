@@ -1656,7 +1656,14 @@ nothrow @nogc:
         // the requester is expecting. Already-bound + seq=0 collapses to a
         // no-op - used by the subscription auto-bind path which is idempotent.
         if (!already_bound || seq != 0)
-            encoder_for(peer._encoder).encode_bind(peer, obj, seq);
+        {
+            SyncEncoder enc = encoder_for(peer._encoder);
+            // a sub can arrive before attach_peer's registry walk (ws clients speak at accept
+            // time), so the first cite introduces; the walk skips handles that already exist
+            if (peer.handle_of(obj) == SyncPeer.invalid_handle)
+                enc.encode_add_name(peer, obj);
+            enc.encode_bind(peer, obj, seq);
+        }
     }
 
     void unbind_from_peer(SyncPeer peer, BaseObject obj, uint seq = 0)
