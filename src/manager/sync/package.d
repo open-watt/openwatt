@@ -448,20 +448,25 @@ nothrow @nogc:
     {
         // Reserves local identity for the peer's announced name and binds their
         // session handle to it. No proxy yet - bind is what materialises one.
+        if (!from.adoptable(handle))
+        {
+            log.warning("sync: add_name from '", from.name[], "' with unusable handle ", handle);
+            return;
+        }
+        // an accepted handle always advances the table, even when the name can't be
+        // reserved, or every handle behind it reads as sparse
+        EID local = EID.invalid;
         auto rt = type in g_app.types;
         if (!rt)
-        {
             log.warning("sync: add_name from '", from.name[], "' with unknown type '", type, "'");
-            return;
-        }
-        if (rt.type_info.is_abstract)
-        {
+        else if (rt.type_info.is_abstract)
             log.warning("sync: add_name from '", from.name[], "' for abstract type '", type, "'");
-            return;
+        else
+        {
+            ubyte type_idx = cast(ubyte)rt.type_info.collection_id;
+            local = EID(item_table(type_idx).reserve(name, type_idx));
         }
-        ubyte type_idx = cast(ubyte)rt.type_info.collection_id;
-        CID local = item_table(type_idx).reserve(name, type_idx);
-        from.adopt(handle, EID(local));
+        from.adopt(handle, local);
     }
 
     // Inbound: mirror lifecycle
@@ -1129,6 +1134,12 @@ nothrow @nogc:
             log.warning("sync: type frame with unknown value type '", wf.type, "'");
             return;
         }
+        if (vt == ValueType.user)
+        {
+            // the wire carries no TypeDetails, so user_type would alias the union's unit bits
+            log.warning("sync: type frame cites a user type, which has no wire representation");
+            return;
+        }
         const(SeriesKind)* kind = enum_from_key!SeriesKind(wf.series);
         if (!kind)
         {
@@ -1162,6 +1173,11 @@ nothrow @nogc:
             f = DataFormat(vt, *kind);
         f.count = wf.count;
         f.rate = wf.rate;
+        if (!f.stride_fits)
+        {
+            log.warning("sync: format record stride exceeds 255 bytes");
+            return;
+        }
 
         if (f.is_scalar && (!wf.min.isNull || !wf.max.isNull || !wf.step.isNull))
         {
@@ -1212,6 +1228,11 @@ nothrow @nogc:
 
     void inbound_model_add(SyncPeer from, SyncHandle handle, const(char)[] path, const(char)[] node_class, uint ft, const(char)[] access, const(char)[] mode, Variant* v, ulong t_ms)
     {
+        if (!from.adoptable(handle))
+        {
+            log.warning("sync: add from '", from.name[], "' with unusable handle ", handle);
+            return;
+        }
         // the handle is announced even when the node fails to materialise: it must
         // advance the announced high-water regardless, or vals citing it read as
         // still-in-flight and stall the data queue behind a node that never comes

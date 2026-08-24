@@ -379,6 +379,16 @@ nothrow @nogc:
     bool is_wide() const pure
         => count != 0 && !is_scalar && (type != ValueType.user || user_type.pod);
 
+    // a record must address within a 255-byte stride; wire formats are checked before they intern
+    bool stride_fits() const pure
+    {
+        if (count == 0)
+            return true;
+        if (type == ValueType.user)
+            return user_type && user_type.size * count <= ubyte.max;
+        return g_type_stride[type] * count <= ubyte.max;
+    }
+
     ubyte stride() const pure
     {
         if (count == 0)
