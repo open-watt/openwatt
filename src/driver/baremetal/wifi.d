@@ -408,13 +408,23 @@ private:
     }
     __gshared PumpSweep _pump_sweep;
 
+    // Lands on the next loop iteration so a chain of work slices cannot starve scheduled events.
+    void request_wifi_pump_deferred()
+    {
+        if (!_wifi.is_open || g_app is null)
+            return;
+        if (!cas(&_wifi_pump_pending, 0u, 1u))
+            return;
+        g_app.schedule(getTime(), &_pump_sweep.event);
+    }
+
     void request_wifi_pump()
     {
         if (!_wifi.is_open || g_app is null)
             return;
         if (!cas(&_wifi_pump_pending, 0u, 1u))
             return;
-        if (!g_app.post_event(&_pump_sweep.event, getTime(), EventPriority.control))
+        if (!g_app.post_event(&_pump_sweep.event, getTime(), EventPriority.bulk))
         {
             atomicStore!(MemoryOrder.release)(_wifi_pump_pending, 0u);
             atomicStore!(MemoryOrder.release)(_wifi_pump_retry, 1u);
@@ -429,7 +439,7 @@ private:
             return;
 
         bool queued;
-        g_app.post_event_from_isr(&_pump_sweep.event, EventPriority.control, queued);
+        g_app.post_event_from_isr(&_pump_sweep.event, EventPriority.bulk, queued);
         if (!queued)
         {
             atomicStore!(MemoryOrder.release)(_wifi_pump_pending, 0u);
@@ -471,7 +481,7 @@ private:
         if (hw_ch != 0)
             set_active_channel(hw_ch);
         if (pending)
-            request_wifi_pump();
+            request_wifi_pump_deferred();
     }
 
     static void wifi_event_dispatch(Wifi wifi, WifiEvent event, const(void)* data) nothrow @nogc
