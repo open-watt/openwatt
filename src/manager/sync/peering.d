@@ -151,42 +151,7 @@ nothrow @nogc:
     // from yet waits for a later pass rather than being guessed at.
     void claim_inbound(MonoTime now)
     {
-        foreach (p; get_module!SyncModule.peers[])
-        {
-            if (!p.running || p._remote_role != PeerRole.member)
-                continue;
-            ulong node_id = p._remote_node_id;
-            if (!node_id || node_id in _issued)
-                continue;
-
-            Neighbor* n = node_id in get_module!SyncDiscoveryModule.neighbors;
-            if (!n)
-                continue;
-            if (!wildcard_match(_claim.length ? _claim[] : "*", n.name[]))
-                continue;
-            if (n.cluster.length && _cluster.length && n.cluster[] != _cluster[])
-                continue;
-
-            bool handover = !n.adopted;
-            if (handover && !_secret.length)
-                mint_fleet_key();
-
-            char[64] auth = void;
-            bool have_auth = false;
-            if (_secret.length)
-            {
-                if (!p._remote_nonce_set)
-                    continue;   // the claim proves the key against their hello nonce
-                have_auth = claim_auth(p._remote_nonce[], _cluster[], auth);
-            }
-
-            IssuedClaim* c = _issued.insert(node_id, IssuedClaim());
-            c.peer = p;
-            c.seq = get_module!SyncModule.alloc_seq();
-            c.sent_at = now;
-            encoder_for(p._encoder).encode_claim(p, c.seq, _cluster[], _priority, have_auth ? auth[] : null, handover ? _secret[] : null);
-            log.info("claiming node ", hex_id(node_id)[], " ('", n.name, "') over its session", handover ? " (adoption)" : "");
-        }
+        get_module!SyncModule.each_running_peer((SyncPeer p) { claim_over(p, now); });
     }
 
     // Log delegation is claim policy: the tap is (re)armed each time a member is claimed, so it
@@ -204,6 +169,43 @@ nothrow @nogc:
         foreach (kvp; _issued[])
             if (kvp.value.acked && kvp.value.peer)
                 arm_logs(kvp.value.peer);
+    }
+
+    void claim_over(SyncPeer p, MonoTime now)
+    {
+        if (!p.running || p._remote_role != PeerRole.member)
+            return;
+        ulong node_id = p._remote_node_id;
+        if (!node_id || node_id in _issued)
+            return;
+
+        Neighbor* n = node_id in get_module!SyncDiscoveryModule.neighbors;
+        if (!n)
+            return;
+        if (!wildcard_match(_claim.length ? _claim[] : "*", n.name[]))
+            return;
+        if (n.cluster.length && _cluster.length && n.cluster[] != _cluster[])
+            return;
+
+        bool handover = !n.adopted;
+        if (handover && !_secret.length)
+            mint_fleet_key();
+
+        char[64] auth = void;
+        bool have_auth = false;
+        if (_secret.length)
+        {
+            if (!p._remote_nonce_set)
+                return;   // the claim proves the key against their hello nonce
+            have_auth = claim_auth(p._remote_nonce[], _cluster[], auth);
+        }
+
+        IssuedClaim* c = _issued.insert(node_id, IssuedClaim());
+        c.peer = p;
+        c.seq = get_module!SyncModule.alloc_seq();
+        c.sent_at = now;
+        encoder_for(p._encoder).encode_claim(p, c.seq, _cluster[], _priority, have_auth ? auth[] : null, handover ? _secret[] : null);
+        log.info("claiming node ", hex_id(node_id)[], " ('", n.name, "') over its session", handover ? " (adoption)" : "");
     }
 
     // An inbound session is the member's to keep alive; when it goes, so does the claim.

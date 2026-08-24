@@ -303,8 +303,7 @@ nothrow @nogc:
         begin_frame("log");
         _buf.append(",\"msg\":");
         write_str(line);
-        send_frame(peer, TxQueue.log);
-        return !_last_drop;
+        return send_frame(peer, TxQueue.log) >= 0;
     }
 
     override void encode_enum(SyncPeer peer, const(char)[] type_name, ref const Variant members, uint seq)
@@ -983,6 +982,7 @@ nothrow @nogc:
 
     override void tick_dirty(SyncPeer peer)
     {
+        uint gen = peer.begin_burst();
         foreach (obj; peer._bound[])
         {
             if (obj._is_remote)
@@ -1015,7 +1015,7 @@ nothrow @nogc:
                     encode_reset(peer, obj.id, p.name[], 0);
                 }
 
-                if (_last_drop)
+                if (!peer.send_ok(gen))
                 {
                     ss.props_dirty &= ~sent_bits;
                     return;
@@ -1028,7 +1028,6 @@ nothrow @nogc:
 
 private:
     Array!char _buf;
-    bool _last_drop;
 
     void begin_frame(const(char)[] kind)
     {
@@ -1036,17 +1035,18 @@ private:
         _buf.append("{\"kind\":\"", kind, "\"");
     }
 
-    void send_frame(SyncPeer peer, TxQueue queue = TxQueue.control)
+    int send_frame(SyncPeer peer, TxQueue queue = TxQueue.control)
     {
         _buf ~= '}';
-        _last_drop = peer.transmit_frame(cast(const(ubyte)[])_buf[], true, queue) < 0;
-        if (_last_drop)
+        int r = peer.transmit_frame(cast(const(ubyte)[])_buf[], true, queue);
+        if (r < 0)
         {
             // event-driven encodes (state/cmd/result/error/sub/...) have no retry path!!
             // a drop here means the peer permanently misses this event.
             const preview = _buf.length < 200 ? _buf.length : 200;
             log.warning("dropped frame to peer (", _buf.length, "B): ", cast(const(char)[])_buf[0 .. preview], _buf.length > 200 ? "..." : "");
         }
+        return r;
     }
 
     void write_str(const(char)[] s)

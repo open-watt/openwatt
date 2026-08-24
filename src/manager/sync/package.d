@@ -32,10 +32,6 @@ module manager.sync;
 //
 // Structural concerns worth eyeballing under real traffic:
 //
-//   - Pending-forward leaks on peer disconnect: detach_peer cleans entries
-//     where the *origin* is gone, but not entries routed *to* a departing
-//     authority. No TTL either - an unresponsive authority leaves entries
-//     forever.
 //   - No loop defense for multi-hop rings. inbound_bind skips `from` in its
 //     re-fan (kills A↔B echoes), but a longer cycle (A→B→C→A) isn't defended.
 //     Star topologies are fine; arbitrary graphs aren't.
@@ -112,6 +108,7 @@ struct PendingForward
     SyncPeer    origin;       // peer that originated the request
     uint        origin_seq;   // seq assigned by origin peer
     PendingKind kind;
+    SyncPeer    dest;         // authoritative peer the request was forwarded to
 }
 
 // Inbound command running locally on behalf of a peer. When execute() returns
@@ -175,16 +172,7 @@ nothrow @nogc:
             Collection!WebSocketSyncServer().update_all();
         Collection!SyncPeer().update_all();
 
-        foreach (p; peers[])
-        {
-            if (p._introducing)
-            {
-                pump_introductions(p);
-                continue;
-            }
-            encoder_for(p._encoder).tick_dirty(p);
-            p.flush_logs();
-        }
+        each_running_peer((SyncPeer p) { tick_peer(p); });
 
         // Live model feeds: drain the per-tick dirty sweep into per-peer pending
         // sets, then flush coalesced latest values.
@@ -244,40 +232,7 @@ nothrow @nogc:
                         p._pending_vals ~= node;
                 }
             });
-            foreach (p; peers[])
-            {
-                if (p._pending_vals.empty)
-                    continue;
-                SyncEncoder enc = encoder_for(p._encoder);
-                foreach (node; p._pending_vals[])
-                {
-                    Element* e = resolve_element(node);
-                    SyncHandle h = p.handle_of(node);
-                    if (!e || h == SyncPeer.invalid_handle)
-                        continue;
-                    if (e.data_format.kind == SeriesKind.point)
-                    {
-                        // events deliver every occurrence (mode `all`); the cursor clamps
-                        // past eviction and reports lost
-                        ulong* next = node.raw in p._live_nodes;
-                        if (!next || !e.has_history)
-                            continue;
-                        auto c = e.open_series_cursor(*next);
-                        for (;;)
-                        {
-                            RecordBlock blk = c.next(256);
-                            if (!blk.count)
-                                break;
-                            enc.encode_val_block(p, h, blk);
-                        }
-                        *next = c.position;
-                        e.close_series_cursor(c);
-                    }
-                    else
-                        enc.encode_val(p, h, e);
-                }
-                p._pending_vals.clear();
-            }
+            each_running_peer((SyncPeer p) { flush_pending_vals(p); });
         }
 
         poll_time_authorities();
@@ -312,12 +267,82 @@ nothrow @nogc:
         pump_introductions(p);
     }
 
+    // removal-safe walk for transmitting bodies: a refused send may detach the peer under it
+    void each_running_peer(scope void delegate(SyncPeer p) nothrow @nogc fn)
+    {
+        for (size_t i = 0; i < peers.length; )
+        {
+            SyncPeer p = peers[i];
+            if (p.running)
+                fn(p);
+            if (i < peers.length && peers[i] is p)
+                ++i;
+        }
+    }
+
+    void tick_peer(SyncPeer p)
+    {
+        if (p._introducing)
+        {
+            pump_introductions(p);
+            return;
+        }
+        encoder_for(p._encoder).tick_dirty(p);
+        p.flush_logs();
+    }
+
+    void flush_pending_vals(SyncPeer p)
+    {
+        if (p._pending_vals.empty)
+            return;
+        SyncEncoder enc = encoder_for(p._encoder);
+        uint gen = p.begin_burst();
+        foreach (node; p._pending_vals[])
+        {
+            Element* e = resolve_element(node);
+            SyncHandle h = p.handle_of(node);
+            if (!e || h == SyncPeer.invalid_handle)
+                continue;
+            if (e.data_format.kind == SeriesKind.point)
+            {
+                // events deliver every occurrence (mode `all`); the cursor clamps
+                // past eviction and reports lost
+                ulong* next = node.raw in p._live_nodes;
+                if (!next || !e.has_history)
+                    continue;
+                ulong committed = *next;
+                auto c = e.open_series_cursor(committed);
+                for (;;)
+                {
+                    RecordBlock blk = c.next(256);
+                    if (!blk.count)
+                        break;
+                    enc.encode_val_block(p, h, blk);
+                    if (!p.send_ok(gen))
+                        break;
+                    committed = c.position;
+                }
+                // position commits only past accepted sends, and the send may have torn the
+                // session down and freed the map entry, so look it up again
+                if (ulong* live = node.raw in p._live_nodes)
+                    *live = committed;
+                e.close_series_cursor(c);
+            }
+            else
+                enc.encode_val(p, h, e);
+            if (!p.send_ok(gen))
+                return;   // the session went down under the burst; its pending set went with it
+        }
+        p._pending_vals.clear();
+    }
+
     void pump_introductions(SyncPeer p)
     {
         if (!p._introducing)
             return;
 
         SyncEncoder enc = encoder_for(p._encoder);
+        uint gen = p.begin_burst();
         while (p.control_window_free() > SyncPeer.control_reserve)
         {
             BaseObject obj = next_object(p._intro_table, p._intro_slot);
@@ -331,6 +356,8 @@ nothrow @nogc:
             if (p.handle_of(obj) != SyncPeer.invalid_handle)
                 continue;   // the lifecycle hook announced it while the walk was paused
             enc.encode_add_name(p, obj);
+            if (!p.send_ok(gen))
+                return;
         }
     }
 
@@ -353,6 +380,8 @@ nothrow @nogc:
 
     void detach_peer(SyncPeer p)
     {
+        ++p._session_gen;   // any burst spanning this teardown is dead, even if its sends succeeded
+        p._send_failed = true;   // condemned until the replacement session's startup
         get_module!SyncPeeringModule.peer_detached(p);
 
         // Destroy proxies we held on this peer's behalf.
@@ -380,14 +409,25 @@ nothrow @nogc:
         p._live_nodes.clear();
         p._pending_vals.clear();
 
-        // Drop pending forwards where this peer was the origin; we can't route
-        // a response back to a gone peer.
+        // forwards die with either endpoint; a dead destination answers the origin with err
         Array!uint doomed;
+        Array!PendingForward stranded;
         foreach (kvp; pending_forwards[])
-            if (kvp.value.origin is p)
+        {
+            if (kvp.value.origin is p || kvp.value.dest is p)
+            {
                 doomed ~= kvp.key;
+                if (kvp.value.origin !is p)
+                    stranded ~= kvp.value;
+            }
+        }
         foreach (k; doomed[])
             pending_forwards.remove(k);
+        foreach (ref f; stranded[])
+        {
+            if (f.origin.running)
+                encoder_for(f.origin._encoder).encode_error(f.origin, f.origin_seq, "authority detached");
+        }
 
         debug foreach (ref cmd; pending_inbound_cmds)
             assert(cmd.peer !is p, "detach with in-flight inbound commands; shutdown must drain them first");
@@ -502,10 +542,9 @@ nothrow @nogc:
         // Hub-of-hubs: tell our other subscribers about this newly-materialized
         // proxy. add_name first (they may not know it), then bind to any
         // whose subscription patterns match.
-        foreach (p; peers[])
-        {
+        each_running_peer((SyncPeer p) {
             if (p is from)
-                continue;
+                return;
             encoder_for(p._encoder).encode_add_name(p, proxy);
             foreach (ref pat; p._subscriptions[])
             {
@@ -515,7 +554,7 @@ nothrow @nogc:
                     break;
                 }
             }
-        }
+        });
     }
 
     void inbound_unbind(SyncPeer from, CID target, uint seq)
@@ -640,7 +679,7 @@ nothrow @nogc:
             // drives our proxy teardown.
             SyncPeer auth = *pp;
             uint local_seq = alloc_seq();
-            pending_forwards[local_seq] = PendingForward(from, seq, PendingKind.destroy);
+            pending_forwards[local_seq] = PendingForward(from, seq, PendingKind.destroy, auth);
             encoder_for(auth._encoder).encode_destroy(auth, target, local_seq);
             return;
         }
@@ -670,10 +709,9 @@ nothrow @nogc:
             ao.set_remote_state(sig);
 
         // Fan out to our bound peers (hub-of-hubs).
-        foreach (p; peers[])
-        {
+        each_running_peer((SyncPeer p) {
             if (p is from)
-                continue;
+                return;
             foreach (bound; p._bound[])
             {
                 if (bound is proxy)
@@ -682,7 +720,7 @@ nothrow @nogc:
                     break;
                 }
             }
-        }
+        });
     }
 
     // Inbound: property sync
@@ -740,7 +778,7 @@ nothrow @nogc:
             // Proxy owned by a different peer - forward to the authority.
             SyncPeer auth = *pp;
             uint local_seq = alloc_seq();
-            pending_forwards[local_seq] = PendingForward(from, seq, PendingKind.set);
+            pending_forwards[local_seq] = PendingForward(from, seq, PendingKind.set, auth);
             encoder_for(auth._encoder).encode_set(auth, target, prop, value, local_seq);
             return;
         }
@@ -808,7 +846,7 @@ nothrow @nogc:
             // Proxy of another peer - forward to authority.
             SyncPeer auth = *pp;
             uint local_seq = alloc_seq();
-            pending_forwards[local_seq] = PendingForward(from, seq, PendingKind.reset);
+            pending_forwards[local_seq] = PendingForward(from, seq, PendingKind.reset, auth);
             encoder_for(auth._encoder).encode_reset(auth, target, prop, local_seq);
             return;
         }
@@ -905,14 +943,16 @@ nothrow @nogc:
 
         // Walk local authoritative syncable objects; bind any that match.
         SyncPeer peer = from;
+        bool dead = false;
         foreach_object((BaseObject obj) nothrow @nogc {
-            if (!obj._typeInfo.syncable)
+            if (dead || !obj._typeInfo.syncable)
                 return;
             if (obj._is_remote)
                 return;
             if (!pattern_matches(pat, obj))
                 return;
-            bind_to_peer(peer, obj);
+            if (!bind_to_peer(peer, obj))
+                dead = true;
         });
     }
 
@@ -1000,6 +1040,7 @@ nothrow @nogc:
     void inbound_model_sub(SyncPeer from, uint seq, const(char[])[] patterns, bool once, ulong from_ms = 0, ulong to_ms = 0)
     {
         SyncEncoder enc = encoder_for(from._encoder);
+        uint gen = from.begin_burst();
         foreach (pat; patterns)
         {
             Address a = Address.parse(pat);
@@ -1037,12 +1078,16 @@ nothrow @nogc:
                 if (match_path(a.subject, dev.id[]))
                     introduce_device(from, enc, dev);
                 walk_elements(dev, a.subject, (Element* e, const(char)[] path) {
+                    if (!from.send_ok(gen))
+                        return;
                     if (arm)
                         track_live(from, e);
-                    send_element(from, enc, e, path);
-                    if (from_ms)
-                        send_backfill(from, enc, e, from_ms, to_ms);
+                    send_element(from, enc, e, path, gen);
+                    if (from_ms && from.send_ok(gen))
+                        send_backfill(from, enc, e, from_ms, to_ms, gen);
                 });
+                if (!from.send_ok(gen))
+                    return;   // the session went down under the burst; nothing more can be answered
             }
         }
         enc.encode_res(from, seq);
@@ -1437,21 +1482,19 @@ nothrow @nogc:
         if (delta_ns == 0)
             return;
         ++_timebase_version;
-        foreach (p; peers[])
-        {
+        each_running_peer((SyncPeer p) {
             if (!p._time_subordinate || p is _applying_push)
-                continue;
+                return;
             encoder_for(p._encoder).encode_time_push(p, _timebase_version, delta_ns);
-        }
+        });
     }
 
     void poll_time_authorities()
     {
         MonoTime now = getTime();
-        foreach (p; peers[])
-        {
+        each_running_peer((SyncPeer p) {
             if (!p._time_authority)
-                continue;
+                return;
             if (p._time_seq != 0)
             {
                 if (now - p._time_t1 > time_response_timeout)
@@ -1459,11 +1502,11 @@ nothrow @nogc:
                     p._time_seq = 0;
                     p._next_time_poll = now + time_retry_interval;
                 }
-                continue;
+                return;
             }
             if (now >= p._next_time_poll)
                 send_time_req(p);
-        }
+        });
     }
 
     void send_time_req(SyncPeer p)
@@ -1477,8 +1520,7 @@ nothrow @nogc:
 
     void fan_out_add_name(BaseObject obj)
     {
-        foreach (p; peers[])
-            encoder_for(p._encoder).encode_add_name(p, obj);
+        each_running_peer((SyncPeer p) { encoder_for(p._encoder).encode_add_name(p, obj); });
     }
 
     void fan_out_state(BaseObject obj, StateSignal sig)
@@ -1488,8 +1530,7 @@ nothrow @nogc:
         // cares about, regardless of whether the upstream destroyed the object
         // or the peer just stopped tracking it.
         assert(sig != StateSignal.destroyed, "fan_out_state: destroyed is not sent on the wire");
-        foreach (p; peers[])
-        {
+        each_running_peer((SyncPeer p) {
             foreach (bound; p._bound[])
             {
                 if (bound is obj)
@@ -1498,7 +1539,7 @@ nothrow @nogc:
                     break;
                 }
             }
-        }
+        });
     }
 
     // Emits unbind to every peer that has `obj` bound. `correlate` + `corr_seq`
@@ -1508,18 +1549,17 @@ nothrow @nogc:
     // echo unbind back to them.
     void fan_out_unbind(BaseObject obj, SyncPeer correlate = null, uint corr_seq = 0, SyncPeer exclude = null)
     {
-        foreach (p; peers[])
-        {
+        each_running_peer((SyncPeer p) {
             if (p is exclude)
-                continue;
+                return;
             bool has = false;
             foreach (bound; p._bound[])
                 if (bound is obj) { has = true; break; }
             if (!has)
-                continue;
+                return;
             uint s = (p is correlate) ? corr_seq : 0;
             unbind_from_peer(p, obj, s);
-        }
+        });
     }
 
     // Fan a reset echo to every bound peer. Same correlate/exclude semantics
@@ -1528,10 +1568,9 @@ nothrow @nogc:
     {
         ulong mask = ulong(1) << prop_index;
         debug assert_reset_matches_init(obj, *obj.properties()[prop_index]);
-        foreach (p; peers[])
-        {
+        each_running_peer((SyncPeer p) {
             if (p is exclude)
-                continue;
+                return;
             foreach (bound; p._bound[])
             {
                 if (bound is obj)
@@ -1545,7 +1584,7 @@ nothrow @nogc:
                     break;
                 }
             }
-        }
+        });
     }
 
     // Fan a set echo to every bound peer. `correlate` + `correlate_seq` go
@@ -1555,10 +1594,9 @@ nothrow @nogc:
     void echo_set(BaseObject obj, size_t prop_index, SyncPeer correlate, uint correlate_seq, SyncPeer exclude = null)
     {
         ulong mask = ulong(1) << prop_index;
-        foreach (p; peers[])
-        {
+        each_running_peer((SyncPeer p) {
             if (p is exclude)
-                continue;
+                return;
             foreach (bound; p._bound[])
             {
                 if (bound is obj)
@@ -1574,7 +1612,7 @@ nothrow @nogc:
                     break;
                 }
             }
-        }
+        });
     }
 
     // Local object lifecycle hooks (registered in init)
@@ -1602,8 +1640,7 @@ nothrow @nogc:
         fan_out_add_name(obj);
 
         // Auto-bind to any peer whose active subscription patterns match.
-        foreach (p; peers[])
-        {
+        each_running_peer((SyncPeer p) {
             foreach (ref pat; p._subscriptions[])
             {
                 if (pattern_matches(pat[], obj))
@@ -1612,7 +1649,7 @@ nothrow @nogc:
                     break;
                 }
             }
-        }
+        });
     }
 
     void on_object_state(ActiveObject obj, StateSignal sig)
@@ -1638,8 +1675,12 @@ nothrow @nogc:
     // will echo future property changes. Backed by a per-peer sync_state slot
     // chained onto obj._sync_slot; encoders read that slot in tick_dirty.
 
-    void bind_to_peer(SyncPeer peer, BaseObject obj, uint seq = 0)
+    bool bind_to_peer(SyncPeer peer, BaseObject obj, uint seq = 0)
     {
+        uint gen = peer.begin_burst();
+        if (!peer.send_ok(gen))
+            return false;   // condemned session; no bookkeeping may survive into its replacement
+
         bool already_bound = false;
         foreach (bound; peer._bound[])
             if (bound is obj) { already_bound = true; break; }
@@ -1661,9 +1702,14 @@ nothrow @nogc:
             // a sub can arrive before attach_peer's registry walk (ws clients speak at accept
             // time), so the first cite introduces; the walk skips handles that already exist
             if (peer.handle_of(obj) == SyncPeer.invalid_handle)
+            {
                 enc.encode_add_name(peer, obj);
+                if (!peer.send_ok(gen))
+                    return false;
+            }
             enc.encode_bind(peer, obj, seq);
         }
+        return peer.send_ok(gen);
     }
 
     void unbind_from_peer(SyncPeer peer, BaseObject obj, uint seq = 0)
@@ -1749,7 +1795,7 @@ nothrow @nogc:
         enc.encode_add(to, h, tconcat("device:", dev.id[]), "device", 0, null);
     }
 
-    void send_element(SyncPeer to, SyncEncoder enc, Element* e, const(char)[] path)
+    void send_element(SyncPeer to, SyncEncoder enc, Element* e, const(char)[] path, uint gen)
     {
         import urt.mem.temp : tconcat;
         import manager.sample : enum_info_name;
@@ -1780,12 +1826,20 @@ nothrow @nogc:
                 return;
             }
             if (!to.enum_seen(fmt.enum_info))
+            {
                 enc.encode_type_enum(to, ename, fmt.enum_info);
+                if (!to.send_ok(gen))
+                    return;
+            }
         }
         bool first;
         uint ft = to.ft_of(e.format, first);
         if (first)
+        {
             enc.encode_type_format(to, ft, *fmt);
+            if (!to.send_ok(gen))
+                return;
+        }
         h = to.introduce(node);
         enc.encode_add(to, h, tconcat("device:", path), "element", ft, e);
     }
@@ -1796,7 +1850,7 @@ nothrow @nogc:
     // over gap-free where the backfill ends. The series spans its full recorded history
     // (disk-evicted buckets reconstitute through the store), so from_ms is honoured as
     // far as history exists.
-    void send_backfill(SyncPeer to, SyncEncoder enc, Element* e, ulong from_ms, ulong to_ms)
+    void send_backfill(SyncPeer to, SyncEncoder enc, Element* e, ulong from_ms, ulong to_ms, uint gen)
     {
         import urt.time : from_unix_time_ns;
 
@@ -1823,11 +1877,15 @@ nothrow @nogc:
                     --blk.count;
                 if (blk.count)
                     enc.encode_val_block(to, h, blk);
+                if (!to.send_ok(gen))
+                    return;
                 if (blk.count < full)
                     break;
             }
             else
                 enc.encode_val_block(to, h, blk);
+                if (!to.send_ok(gen))
+                    return;
         }
     }
 
@@ -1909,20 +1967,19 @@ nothrow @nogc:
             return;
         const(char)[] path = buf[0 .. len];
 
-        foreach (p; peers[])
-        {
+        each_running_peer((SyncPeer p) {
             if (authored_by(p, dev))
-                continue;
+                return;
             foreach (ref pat; p._model_subs[])
             {
                 Address a = Address.parse(pat[]);
                 if (!a.valid || !wildcard_match(a.ns, "device") || !match_path(a.subject, path))
                     continue;
                 track_live(p, e);
-                send_element(p, encoder_for(p._encoder), e, path);
+                send_element(p, encoder_for(p._encoder), e, path, p.begin_burst());
                 break;
             }
-        }
+        });
     }
 
     Device find_or_create_remote_device(const(char)[] id)
