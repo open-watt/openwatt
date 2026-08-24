@@ -10,8 +10,6 @@ void system_reboot()
     esp_restart();
 }
 
-// Chip-burned identity: the eFuse factory MAC is unique per chip and survives reflash,
-// so it is the node identity on this platform; storage never enters into it.
 ulong unique_device_id()
 {
     ubyte[8] mac = 0;
@@ -20,7 +18,10 @@ ulong unique_device_id()
     ulong id = 0;
     foreach (b; mac[0 .. 6])
         id = (id << 8) | b;
-    return id;
+
+    import urt.hash : fnv1a64;
+    ulong folded = fnv1a64(cast(const(ubyte)[])(&id)[0 .. 1]);
+    return folded ? folded : id;
 }
 
 bool reboot_pending() => false;

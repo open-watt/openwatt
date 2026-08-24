@@ -36,9 +36,6 @@ void apply_factory_hostname()
 }
 
 
-// Stable node identity for peering: random 64-bit id, generated on first boot and
-// persisted in conf/node.id (the one piece of peering state outside startup.conf).
-// Discovery and claims key on this; hostname is display only.
 ulong node_id()
 {
     import urt.conv : format_uint, parse_uint;
@@ -47,42 +44,45 @@ ulong node_id()
     if (_node_id != 0)
         return _node_id;
 
-    // a chip-burned hardware id wins where the platform has one (micros: identity
-    // survives reflash, no storage needed); computers carry the software id below
     {
         import driver.system : unique_device_id;
         ulong hw = unique_device_id();
         if (hw)
         {
-            import urt.hash : fnv1a64;
-            _node_id = fnv1a64(cast(const(ubyte)[])(&hw)[0 .. 1]);
-            if (_node_id == 0)
-                _node_id = hw;
+            _node_id = hw;
             return _node_id;
         }
     }
 
-    char[] stored = cast(char[])load_file(node_id_path);
-    if (stored.length >= 16)
+    version (Embedded)
     {
-        size_t taken;
-        ulong id = parse_uint(stored[0 .. 16], &taken, 16);
-        if (taken == 16 && id != 0)
-            _node_id = id;
+        log_warning("system", "no hardware device id on this platform; peering identity unavailable");
+        return 0;
     }
-    if (stored)
-        free(stored);
-    if (_node_id != 0)
+    else
+    {
+        char[] stored = cast(char[])load_file(node_id_path);
+        if (stored.length >= 16)
+        {
+            size_t taken;
+            ulong id = parse_uint(stored[0 .. 16], &taken, 16);
+            if (taken == 16 && id != 0)
+                _node_id = id;
+        }
+        if (stored)
+            free(stored);
+        if (_node_id != 0)
+            return _node_id;
+
+        _node_id = generate_node_id();
+
+        char[17] buf = void;
+        format_uint(_node_id, buf[0 .. 16], 16, 16, '0');
+        buf[16] = '\n';
+        if (save_file(node_id_path, buf[]).failed)
+            log_warning("system", "couldn't persist node id to ", node_id_path, "; identity is ephemeral this boot");
         return _node_id;
-
-    _node_id = generate_node_id();
-
-    char[17] buf = void;
-    format_uint(_node_id, buf[0 .. 16], 16, 16, '0');
-    buf[16] = '\n';
-    if (save_file(node_id_path, buf[]).failed)
-        log_warning("system", "couldn't persist node id to ", node_id_path, "; identity is ephemeral this boot");
-    return _node_id;
+    }
 }
 
 
