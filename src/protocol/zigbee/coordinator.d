@@ -632,9 +632,15 @@ private:
             }
         }
 
-        // the NCP lost its extended timeout table in the reset that brought us here
+        // the NCP lost its extended timeout table in the reset that brought us here; issue these
+        // synchronously so a large fleet cannot outrun the command queue
         foreach (ref n; mod_zb.nodes_by_eui)
-            arm_extended_timeout(n.value);
+        {
+            if (!n.value.available || n.value.pan_id != pan_id || n.value.desc.type != NodeType.sleepy_end_device)
+                continue;
+            if (!ezsp.request!EZSP_SetExtendedTimeout(n.value.eui.b, true).ok)
+                return false;
+        }
 
         return true;
     }
