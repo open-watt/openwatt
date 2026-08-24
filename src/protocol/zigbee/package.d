@@ -523,6 +523,14 @@ nothrow @nogc:
         return null;
     }
 
+    void note_awake(NodeMap* node)
+    {
+        if (!node || node.initialised == 0xFF)
+            return;
+        foreach (ZigbeeController c; Collection!ZigbeeController().values)
+            c.node_awake(node);
+    }
+
     void discover_node(BaseInterface via, ushort pan_id, ushort id)
     {
         if (find_node(pan_id, id))

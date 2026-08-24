@@ -566,6 +566,16 @@ nothrow @nogc:
     final bool is_network_up() const pure
         => zigbee_iface()._network_status == EmberStatus.NETWORK_UP;
 
+    final void arm_extended_timeout(ref NodeMap node)
+    {
+        if (node.desc.type != NodeType.sleepy_end_device)
+            return;
+        ZigbeeInterface i = zigbee_iface();
+        if (!i || !i.ezsp_client)
+            return;
+        i.ezsp_client.send_command!EZSP_SetExtendedTimeout(null, node.eui.b, true);
+    }
+
 protected:
 
     final void set_eui(EUI64 value)
