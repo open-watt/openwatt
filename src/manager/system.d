@@ -111,7 +111,7 @@ Array!String sysinfo_suggest(bool, const(char)[] arg_name, const(char)[]) nothro
 {
     import urt.string : startsWith;
 
-    __gshared const String[13] properties = [
+    __gshared const String[15] properties = [
         StringLit!"hostname",
         StringLit!"node-id",
         StringLit!"os",
@@ -124,7 +124,9 @@ Array!String sysinfo_suggest(bool, const(char)[] arg_name, const(char)[]) nothro
         StringLit!"ext-used",
         StringLit!"ext-peak",
         StringLit!"ext-largest",
-        StringLit!"uptime"
+        StringLit!"uptime",
+        StringLit!"time",
+        StringLit!"reset-reason"
     ];
 
     Array!String completions;
@@ -176,6 +178,7 @@ void sysinfo(Session session, const(Variant)[] args)
                 session.write_pool_line(p);
         }
         session.write_line("Uptime:   ", seconds(getAppTime().as!"seconds"));
+        session.write_line("Time:     ", getDateTime(), wall_time_set() ? "" : "  (unsynchronised)");
         if (const(char)[] reason = reset_reason())
             session.write_line("Reset:    ", reason);
     }
@@ -214,6 +217,8 @@ void sysinfo(Session session, const(Variant)[] args)
             session.write_line(info.pools[1].largest_free.format_bytes());
         else if (icmp(prop, "uptime") == 0)
             session.write_line(seconds(getAppTime().as!"seconds"));
+        else if (icmp(prop, "time") == 0)
+            session.write_line(getDateTime());
         else if (icmp(prop, "reset-reason") == 0)
             session.write_line(reset_reason());
         else
