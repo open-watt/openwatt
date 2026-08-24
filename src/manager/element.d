@@ -1012,7 +1012,7 @@ private:
     {
         void** p = cast(void**)_latest.raw.ptr;
         if (!*p)
-            *p = alloc(record.length).ptr;      // stride is fixed per format; allocated once
+            *p = alloc(record.length, MemFlags.slow).ptr;      // stride is fixed per format; allocated once
         (cast(ubyte*)*p)[0 .. record.length] = cast(const(ubyte)[])record;
     }
 
@@ -1107,7 +1107,7 @@ private:
                 cap *= 2;
             if (cap > text_heap_limit)
                 cap = text_heap_limit;
-            b.heap = b.heap ? realloc(b.heap[0 .. b.heap_capacity], cap).ptr : alloc(cap).ptr;
+            b.heap = b.heap ? realloc(b.heap[0 .. b.heap_capacity], cap, 8, MemFlags.slow).ptr : alloc(cap, MemFlags.slow).ptr;
             b.heap_capacity = cap;
         }
         ushort* p = cast(ushort*)(cast(ubyte*)b.heap + b.heap_used);
@@ -1322,9 +1322,9 @@ private:
         *b = Bucket.init;
         b.format = format;
         b.capacity = capacity;
-        b.samples = alloc(capacity * data_format.stride).ptr;
+        b.samples = alloc(capacity * data_format.stride, MemFlags.slow).ptr;
         if (!data_format.regular)
-            b.offsets = cast(uint*)alloc(capacity * uint.sizeof).ptr;
+            b.offsets = cast(uint*)alloc(capacity * uint.sizeof, MemFlags.slow).ptr;
         return b;
     }
 

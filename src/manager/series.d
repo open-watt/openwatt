@@ -757,7 +757,7 @@ nothrow @nogc:
         uint offs_bytes = b.offsets ? b.count * cast(uint)uint.sizeof : 0;
         uint rec_bytes = b.count * fmt.stride;
         uint total = offs_bytes + rec_bytes + b.heap_used;
-        void[] img = alloc(total);
+        void[] img = alloc(total, MemFlags.slow);
         ubyte* p = cast(ubyte*)img.ptr;
         p[0 .. offs_bytes] = (cast(const(ubyte)*)b.offsets)[0 .. offs_bytes];
         p[offs_bytes .. offs_bytes + rec_bytes] = (cast(const(ubyte)*)b.samples)[0 .. rec_bytes];
@@ -794,7 +794,7 @@ nothrow @nogc:
         {
             if (!g_codecs[i].match || !g_codecs[i].match(*fmt, blk))
                 continue;
-            void[] dst = alloc(img.length);
+            void[] dst = alloc(img.length, MemFlags.slow);
             ptrdiff_t packed_size = g_codecs[i].pack(blk, img, dst);
             if (packed_size > 0 && packed_size < img.length)
             {
@@ -832,7 +832,7 @@ nothrow @nogc:
             if (!b.file_offset || !container)
                 return false;
             debug assert(b.packed_bytes, "flushed bucket lost its payload size");
-            fetched = alloc(b.packed_bytes);
+            fetched = alloc(b.packed_bytes, MemFlags.slow);
             if (!container.read_payload(*b, fetched))
             {
                 free(fetched);
@@ -852,7 +852,7 @@ nothrow @nogc:
                 free(fetched);
             return false;
         }
-        void[] img = alloc(total);
+        void[] img = alloc(total, MemFlags.slow);
         bool ok = g_codecs[b.codec - first_registered_codec].unpack(encoded, *fmt, b.count,
                                                                     irregular, b.heap_used, img);
         if (fetched)
