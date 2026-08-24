@@ -3,6 +3,7 @@ module manager.log;
 import urt.array;
 import urt.log;
 import urt.mem;
+import urt.mem.reclaim;
 import urt.mem.temp : tconcat;
 import urt.meta.nullable;
 import urt.string;
@@ -109,6 +110,7 @@ class LogModule : Module
 nothrow @nogc:
 
     enum max_consumers = 16;
+    enum history_reclaim_willingness = 128;
     version (Tiny)
     {
         enum delivery_queue_size = 32;
@@ -144,6 +146,9 @@ nothrow @nogc:
         resize_history(_history_limit);
         _ingress_sink = register_log_sink(&ingress, cast(void*)this, LogFilter(Severity.trace));
         recalc_ingress_filter();
+
+        bool registered = register_reclaimer(&reclaim_history, history_reclaim_willingness, false);
+        debug assert(registered, "log history reclaimer registration failed");
     }
 
     override void update()
@@ -154,6 +159,7 @@ nothrow @nogc:
 
     override void deinit()
     {
+        unregister_reclaimer(&reclaim_history);
         if (_ingress_sink.valid)
         {
             unregister_log_sink(_ingress_sink);
@@ -354,6 +360,7 @@ private:
     uint _history_limit = default_history_messages;
     Severity _history_max_severity = Severity.info;
     Severity _global_max_severity = Severity.trace;
+    bool _history_reading;
 
     static void ingress(void* context, scope ref const LogMessage msg)
     {
@@ -529,6 +536,26 @@ private:
         while (_history_count)
             drop_oldest_history();
         _history_head = null;
+    }
+
+    ReclaimResult reclaim_history(size_t)
+    {
+        if (_history_reading)
+            return ReclaimResult.exhausted;
+        StoredLogMessage* record = _history_head;
+        while (record)
+        {
+            StoredLogMessage* next = next_historical(record.next);
+            if (!record.pending)
+            {
+                drop_history(record);
+                while (next && next.pending)
+                    next = next_historical(next.next);
+                return next ? ReclaimResult.more : ReclaimResult.exhausted;
+            }
+            record = next;
+        }
+        return ReclaimResult.exhausted;
     }
 }
 
@@ -908,6 +935,8 @@ nothrow @nogc:
 
         if (_log_module.history_enabled)
         {
+            _log_module._history_reading = true;
+            scope (exit) _log_module._history_reading = false;
             LogHistoryCursor cursor;
             LogMessage msg;
             while (_log_module.next_history(cursor, msg))
@@ -1283,6 +1312,13 @@ unittest
     cursor = LogHistoryCursor.init;
     assert(module_.next_history(cursor, delivered));
     assert(delivered.message == "history-error");
+
+    module_._history_reading = true;
+    assert(module_.reclaim_history(1) == ReclaimResult.exhausted);
+    module_._history_reading = false;
+    assert(module_.reclaim_history(1) == ReclaimResult.exhausted);
+    assert(module_.history_count == 0);
+    assert(module_._records_head is null);
 
     module_.clear_history();
     assert(module_._records_head is null);

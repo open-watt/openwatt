@@ -6,6 +6,7 @@ import urt.lifetime;
 import urt.log;
 import urt.map;
 import urt.mem;
+import urt.mem.reclaim;
 import urt.result;
 import urt.string;
 import urt.string.ansi;
@@ -113,6 +114,7 @@ nothrow @nogc:
     enum path = "/console/session";
     enum collection_id = CollectionType.console_session;
     enum syncable = false;
+    enum max_history_entries = 50;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
@@ -765,7 +767,10 @@ protected:
             // take the next line
             const(char)[] line = buff.split!('\n', false);
             if (!line.empty)
+            {
                 _history ~= MutableString!0(line);
+                trim_history();
+            }
         }
         _history_cursor = cast(uint)_history.length;
     }
@@ -781,8 +786,7 @@ protected:
         if (!line.empty && (_history.empty || line[] != _history[$-1][]))
         {
             _history.pushBack(MutableString!0(line));
-            if (_history.length > 50)
-                _history.popFront();
+            trim_history();
 
             if (_history_file.is_open)
             {
@@ -1058,6 +1062,48 @@ private:
         }
     }
 
+    ReclaimResult reclaim_history(size_t bytes_needed, out bool reclaimed)
+    {
+        reclaimed = false;
+        if (!bytes_needed)
+            return ReclaimResult.exhausted;
+        foreach (i, ref entry; _history[])
+        {
+            if (!entry.ptr || entry.capacity + 4 < bytes_needed)
+                continue;
+            size_t count = i + 1;
+            _history.remove(0, count);
+            _history_cursor = _history_cursor >= count ? _history_cursor - cast(uint)count : 0;
+            reclaimed = true;
+            return ReclaimResult.more;
+        }
+
+        bool satisfied = _history.ptr && _history.capacity * MutableString!0.sizeof >= bytes_needed;
+        // Moving into locals is the back door to free the backing allocations on scope exit.
+        Array!(MutableString!0) history = _history.move;
+        reclaimed = history.ptr !is null;
+        _history_cursor = 0;
+        if (satisfied)
+            return _history_head.ptr ? ReclaimResult.more : ReclaimResult.exhausted;
+
+        MutableString!0 head = _history_head.move;
+        reclaimed |= head.ptr !is null;
+        return ReclaimResult.exhausted;
+    }
+
+    bool has_reclaimable_history() const pure
+        => _history.ptr !is null || _history_head.ptr !is null;
+
+    void trim_history()
+    {
+        while (_history.length > max_history_entries)
+        {
+            _history.popFront();
+            if (_history_cursor > 0)
+                --_history_cursor;
+        }
+    }
+
     void handle_tab_completion()
     {
         if (_suggestion_pending)
@@ -1251,11 +1297,38 @@ nothrow @nogc:
     {
         g_app.register_enum!TerminalProfile();
         g_app.console.register_collection!Session();
+
+        bool registered = register_reclaimer(&reclaim_history, 180, false);
+        debug assert(registered, "console history reclaimer registration failed");
+    }
+
+    override void deinit()
+    {
+        unregister_reclaimer(&reclaim_history);
     }
 
     override void update()
     {
         Collection!Session().update_all();
+    }
+
+private:
+    ReclaimResult reclaim_history(size_t bytes_needed)
+    {
+        foreach (session; Collection!Session().values)
+        {
+            bool reclaimed;
+            ReclaimResult result = session.reclaim_history(bytes_needed, reclaimed);
+            if (!reclaimed)
+                continue;
+            if (result == ReclaimResult.more)
+                return result;
+            foreach (remaining; Collection!Session().values)
+                if (remaining.has_reclaimable_history())
+                    return ReclaimResult.more;
+            return ReclaimResult.exhausted;
+        }
+        return ReclaimResult.exhausted;
     }
 }
 
@@ -1316,6 +1389,16 @@ unittest
     assert(session.running);
     assert(session.attached());
     assert(cast(const(char)[])stream.output == "started\r\n");
+
+    session.add_to_history("one");
+    session.add_to_history("two");
+    session.add_to_history("three");
+    session.history_prev();
+    assert(session._buffer[] == "three");
+    bool reclaimed;
+    assert(session.reclaim_history(size_t.max, reclaimed) == ReclaimResult.exhausted && reclaimed);
+    assert(session._history.empty);
+    assert(session._history_cursor == 0);
 
     session.destroy();
     sessions.update_all();

@@ -1,6 +1,7 @@
 module protocol.mqtt;
 
 import urt.mem;
+import urt.mem.reclaim;
 import urt.meta.nullable;
 import urt.string;
 
@@ -45,6 +46,20 @@ nothrow @nogc:
         g_app.console.register_command!(local_publish, "publish")("/protocol/mqtt/broker", this);
 
         g_app.console.register_command!(client_publish, "publish")("/protocol/mqtt/client", this);
+
+        static if (has_message_cache)
+        {
+            bool registered = register_reclaimer(&reclaim_cache, 160, false);
+            debug assert(registered, "MQTT cache reclaimer registration failed");
+        }
+    }
+
+    override void deinit()
+    {
+        static if (has_message_cache)
+        {
+            unregister_reclaimer(&reclaim_cache);
+        }
     }
 
     uint element_size(uint)
@@ -239,6 +254,27 @@ nothrow @nogc:
     }
 
 private:
+    static if (has_message_cache)
+    {
+        ReclaimResult reclaim_cache(size_t bytes_needed)
+        {
+            foreach (broker; Collection!MQTTBroker().values)
+            {
+                bool reclaimed;
+                ReclaimResult result = broker.reclaim_cache(bytes_needed, reclaimed);
+                if (!reclaimed)
+                    continue;
+                if (result == ReclaimResult.more)
+                    return result;
+                foreach (remaining; Collection!MQTTBroker().values)
+                    if (remaining.has_reclaimable_cache())
+                        return ReclaimResult.more;
+                return ReclaimResult.exhausted;
+            }
+            return ReclaimResult.exhausted;
+        }
+    }
+
     MQTTBroker resolve_broker(Session session, Nullable!MQTTBroker broker)
     {
         if (broker)

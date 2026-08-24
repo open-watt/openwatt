@@ -20,6 +20,7 @@ import urt.array;
 import urt.lifetime;
 import urt.log : writeWarning;
 import urt.mem.alloc;
+import urt.mem.reclaim : ReclaimResult;
 import urt.si.unit : ScaledUnit;
 import urt.string;
 import urt.time;
@@ -742,6 +743,7 @@ public:
             void[] mem = alloc(SeriesStore.sizeof);
             (cast(ubyte[])mem)[] = 0;
             _history = cast(SeriesStore*)mem.ptr;
+            g_historical_elements ~= &this;
 
             // a held register value becomes record 0; the store owns it from here and the
             // register releases, so only one of the two ever holds the value
@@ -857,6 +859,7 @@ public:
         release_register();
         if (_history)
         {
+            g_historical_elements.removeFirstSwapLast(&this);
             foreach (b; _history.buckets)
                 _history.free_bucket(b);
             destroy!false(*_history);
@@ -1297,6 +1300,22 @@ private:
         }
     }
 
+    bool reclaim_oldest_history_bucket()
+    {
+        if (!_history || _history.buckets.length < 2)
+            return false;
+        Bucket* front = _history.buckets[0];
+        if (!front.sealed || front.refs)
+            return false;
+        _history.free_bucket(front);
+        _history.buckets.remove(0);
+        return true;
+    }
+
+    bool can_reclaim_oldest_history_bucket() const pure
+        => _history && _history.buckets.length >= 2
+            && _history.buckets[0].sealed && !_history.buckets[0].refs;
+
     Bucket* alloc_bucket(uint capacity)
     {
         Bucket* b = cast(Bucket*)alloc(Bucket.sizeof).ptr;
@@ -1326,6 +1345,20 @@ package:
 
 __gshared Array!(Element*) g_dirty_elements;
 
+ReclaimResult reclaim_element_history(size_t)
+{
+    foreach (e; g_historical_elements[])
+    {
+        if (!e.reclaim_oldest_history_bucket())
+            continue;
+        foreach (remaining; g_historical_elements[])
+            if (remaining.can_reclaim_oldest_history_bucket())
+                return ReclaimResult.more;
+        return ReclaimResult.exhausted;
+    }
+    return ReclaimResult.exhausted;
+}
+
 void signal_element_lifecycle(Element* e, ElementLifecycleEvent event)
 {
     foreach (h; _on_element_lifecycle[])
@@ -1337,6 +1370,7 @@ void signal_element_lifecycle(Element* e, ElementLifecycleEvent event)
 private:
 
 __gshared Array!ElementLifecycleHandler _on_element_lifecycle;
+__gshared Array!(Element*) g_historical_elements;
 __gshared uint g_feed_listeners;
 __gshared uint g_commit_depth;
 __gshared Array!SampleUpdate g_pending_updates;
@@ -1460,6 +1494,7 @@ unittest
     Variant wrong_type = Variant("volts");
     assert(ce.try_set(wrong_type) == "incompatible value");
     assert(ce.latest_record.f64_ == 3.0);
+    n.teardown();
 }
 
 
@@ -1636,6 +1671,15 @@ unittest
     e.write_record((cast(const(void)*)&rv)[0 .. 8], from_unix_time_ns(14_000));
     assert(e.record_count == 7);
     assert(e.latest_record.f64_ == 7.0);
+
+    Cursor protected_cursor = e.open_series_cursor(0);
+    assert(protected_cursor.next(1).count == 1);
+    assert(!e.reclaim_oldest_history_bucket());
+    e.close_series_cursor(protected_cursor);
+    assert(e.reclaim_oldest_history_bucket());
+    assert(e.bucket_count == 1);
+    assert(e.latest_record.f64_ == 7.0);
+    e.teardown();
 
     // text: records are u16 heap offsets; repeated values share one dedup'd heap entry
     enum long_str = "a string much too long for any embedding tricks";

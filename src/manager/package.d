@@ -7,6 +7,7 @@ import urt.lifetime : move;
 import urt.log : writeWarning;
 import urt.map;
 import urt.mem;
+import urt.mem.reclaim;
 import urt.mem.temp : tconcat;
 import urt.meta.enuminfo : VoidEnumInfo;
 import urt.result : StringResult;
@@ -393,6 +394,9 @@ nothrow @nogc:
         assert(!g_app, "Application already created!");
         g_app = this;
 
+        bool reclaimer_registered = register_reclaimer(&reclaim_element_history, 32, false);
+        debug assert(reclaimer_registered, "element history reclaimer registration failed");
+
         bool reactor_ok = _wake_event.init();
         g_priority_events.init();
         g_bulk_events.init();
@@ -522,6 +526,7 @@ nothrow @nogc:
         import manager.sample.codec : clear_encoding_registry;
         import urt.time : unsubscribe_clock_change;
         clear_encoding_registry();
+        unregister_reclaimer(&reclaim_element_history);
         unsubscribe_clock_change(&notify_wallclock_change);
         _wake_event.destroy();
         g_app = null;

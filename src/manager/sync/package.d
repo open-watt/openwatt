@@ -61,7 +61,7 @@ import manager.base;
 import manager.collection;
 import manager.component : Component;
 import manager.device : Device;
-import manager.element : Access, add_feed_listener, Element, ElementLifecycleEvent,
+import manager.element : Access, add_feed_listener, Cursor, Element, ElementLifecycleEvent,
                          register_element_lifecycle_handler, remove_feed_listener, SamplingMode, sweep_dirty;
 import manager.id : EID;
 import manager.path : Address, match_path, pattern_matches, walk_elements;
@@ -1801,10 +1801,12 @@ nothrow @nogc:
         ulong idx = e.index_for_time(from_unix_time_ns(from_ms * 1_000_000));
         if (idx == ulong.max)
             return;
+        Cursor cursor = e.open_series_cursor(idx);
+        scope (exit) e.close_series_cursor(cursor);
         SysTime to_t = to_ms ? from_unix_time_ns(to_ms * 1_000_000) : SysTime();
         for (;;)
         {
-            RecordBlock blk = e.read_records(idx, 256);
+            RecordBlock blk = cursor.next(256);
             if (!blk.count)
                 break;
             if (to_ms)
@@ -1819,7 +1821,6 @@ nothrow @nogc:
             }
             else
                 enc.encode_val_block(to, h, blk);
-            idx = blk.first_index + blk.count;
         }
     }
 
