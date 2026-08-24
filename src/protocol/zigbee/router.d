@@ -131,6 +131,9 @@ protected:
     {
         version (DebugZigbee)
             log.debugf("receive poll request from {0,04x} - transmit_expected: {1}", childId, transmitExpected);
+
+        ZigbeeProtocolModule mod_zb = get_module!ZigbeeProtocolModule;
+        mod_zb.note_awake(mod_zb.find_node(pan_id, childId));
     }
 
 
@@ -203,6 +206,7 @@ protected:
                 else version (DebugZigbee)
                     log.debugf("device announce: {0, 04x} [{1}] - type={2}", id, eui, type);
                 n.desc.type = type;
+                arm_extended_timeout(*n);
 
                 // Tuya multi-endpoint devices need a basic cluster read on every
                 // rejoin to activate per-endpoint command routing. If the device
@@ -216,6 +220,7 @@ protected:
                             if (0xFFFE in basic.attributes)
                                 n.initialised &= ~0xC0;
                 }
+                mod_zb.note_awake(n);
                 return ZDOReply.intentionally_none;
 
             default:
