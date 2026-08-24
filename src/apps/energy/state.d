@@ -25,6 +25,9 @@ nothrow @nogc:
 
 Device create_energy_device()
 {
+    if ("energy" in g_app.devices)
+        return null;
+
     Device d = alloc!Device(StringLit!"energy");
     d.hidden = true;
 
