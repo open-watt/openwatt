@@ -236,7 +236,6 @@ struct NodeMap
     bool device_created;
     MonoTime retry_after;
     ubyte interview_failures;
-    bool extended_timeout;
 
     ubyte lqi;
     byte rssi;

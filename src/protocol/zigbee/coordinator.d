@@ -606,7 +606,6 @@ private:
 //                    nm.parent_id = _node_id; // TODO: is the coordinator the parent, or it's preferred router?
                     nm.desc.type = cast(NodeType)child.value.childData.type;
                     nm.via = _interface;
-                    arm_extended_timeout(*nm);
                 }
             }
         }
@@ -632,6 +631,11 @@ private:
 //                nm.parent_id = _node_id; // TODO: is the coordinator the parent, or it's preferred router?
             }
         }
+
+        // the NCP lost its extended timeout table in the reset that brought us here
+        foreach (ref n; mod_zb.nodes_by_eui)
+            arm_extended_timeout(n.value);
+
         return true;
     }
 

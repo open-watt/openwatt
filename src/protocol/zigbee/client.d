@@ -566,16 +566,16 @@ nothrow @nogc:
     final bool is_network_up() const pure
         => zigbee_iface()._network_status == EmberStatus.NETWORK_UP;
 
-    // a sleepy node only hears us in the window it polls its parent; without this the stack retries
-    // at the normal interval and the unicast expires before the node ever wakes
+    // without this the stack retries at the normal interval and the unicast expires before the node wakes;
+    // the NCP holds it in volatile state, so it is re-issued at every sync rather than cached
     final void arm_extended_timeout(ref NodeMap node)
     {
-        if (node.extended_timeout || node.desc.type != NodeType.sleepy_end_device)
+        if (node.desc.type != NodeType.sleepy_end_device)
             return;
         ZigbeeInterface i = zigbee_iface();
         if (!i || !i.ezsp_client)
             return;
-        node.extended_timeout = i.ezsp_client.send_command!EZSP_SetExtendedTimeout(null, node.eui.b, true);
+        i.ezsp_client.send_command!EZSP_SetExtendedTimeout(null, node.eui.b, true);
     }
 
 protected:
