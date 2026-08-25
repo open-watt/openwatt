@@ -654,7 +654,7 @@ protected:
                 version (DebugZigbee)
                     log.warningf("ZDO request {0, 04x} with seq {1} timed out", req.cluster, req.seq);
 
-                abort_zdo_request_at(i, ZigbeeResult.timeout);
+                abort_zdo_request_at(i, req.delivery_failed ? ZigbeeResult.failed : ZigbeeResult.timeout);
             }
             else
                 ++i;
@@ -674,7 +674,7 @@ protected:
                 version (DebugZigbee)
                     log.warningf("ZCL request {0, 04x} with seq {1} timed out", req.cluster, req.seq);
 
-                abort_zcl_request_at(i, ZigbeeResult.timeout);
+                abort_zcl_request_at(i, req.delivery_failed ? ZigbeeResult.failed : ZigbeeResult.timeout);
             }
             else
                 ++i;
@@ -918,6 +918,7 @@ private:
         void* user_data;
         BaseInterface iface;
         bool awaiting_response;
+        bool delivery_failed;
 
     private:
         void progress_callback(int, MessageState state) nothrow @nogc
@@ -935,6 +936,7 @@ private:
                 // the frame may still be waiting at the node's parent; hold on for the answer
                 deadline = getTime() + zigbee_indirect_grace;
                 awaiting_response = true;
+                delivery_failed = true;
             }
             else
             {
@@ -960,6 +962,7 @@ private:
         void* user_data;
         BaseInterface iface;
         bool awaiting_response;
+        bool delivery_failed;
 
     private:
         void progress_callback(int, MessageState state) nothrow @nogc
@@ -977,6 +980,7 @@ private:
                 // the frame may still be waiting at the node's parent; hold on for the answer
                 deadline = getTime() + zigbee_indirect_grace;
                 awaiting_response = true;
+                delivery_failed = true;
             }
             else
             {

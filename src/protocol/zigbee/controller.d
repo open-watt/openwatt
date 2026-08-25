@@ -1093,6 +1093,20 @@ private:
         log.warning("no fingerprint match for node ", node.eui);
     }
 
+    // a timeout means the node acked the frame and then failed to answer: it is awake and the reply
+    // was lost, so try again. a delivery failure means it never heard us, and repeating is pure noise
+    ZigbeeResult try_thrice(scope ZigbeeResult delegate() nothrow @nogc fn)
+    {
+        ZigbeeResult res;
+        for (size_t attempt = 0; attempt < 3; ++attempt)
+        {
+            res = fn();
+            if (res != ZigbeeResult.timeout)
+                break;
+        }
+        return res;
+    }
+
     bool do_node_interview(NodeMap* node)
     {
         version (DebugZigbeeController)
@@ -1137,7 +1151,7 @@ private:
         {
             req_buffer[0] = 0;
             req_buffer[1..3] = node.id.nativeToLittleEndian;
-            r = _endpoint.zdo_request(node.id, ZDOCluster.node_desc_req, req_buffer[0..3], zdo_res, PCP.ee);
+            r = try_thrice(() => _endpoint.zdo_request(node.id, ZDOCluster.node_desc_req, req_buffer[0..3], zdo_res, PCP.ee));
             if (r != ZigbeeResult.success || zdo_res.status != ZDOStatus.success)
                 return fail("node_desc_req failed");
 
@@ -1203,7 +1217,7 @@ private:
         {
             req_buffer[0] = 0;
             req_buffer[1..3] = node.id.nativeToLittleEndian;
-            r = _endpoint.zdo_request(node.id, ZDOCluster.power_desc_req, req_buffer[0..3], zdo_res, PCP.bk);
+            r = try_thrice(() => _endpoint.zdo_request(node.id, ZDOCluster.power_desc_req, req_buffer[0..3], zdo_res, PCP.bk));
             if (r != ZigbeeResult.success || zdo_res.status != ZDOStatus.success)
                 return fail("power_desc_req failed");
 
@@ -1227,7 +1241,7 @@ private:
         {
             req_buffer[0] = 0;
             req_buffer[1..3] = node.id.nativeToLittleEndian;
-            r = _endpoint.zdo_request(node.id, ZDOCluster.active_ep_req, req_buffer[0..3], zdo_res, PCP.bk);
+            r = try_thrice(() => _endpoint.zdo_request(node.id, ZDOCluster.active_ep_req, req_buffer[0..3], zdo_res, PCP.bk));
             if (r != ZigbeeResult.success || zdo_res.status != ZDOStatus.success)
                 return fail("active_ep_req failed");
 
@@ -1264,7 +1278,7 @@ private:
                 req_buffer[0] = 0;
                 req_buffer[1..3] = node.id.nativeToLittleEndian;
                 req_buffer[3] = ep.endpoint;
-                r = _endpoint.zdo_request(node.id, ZDOCluster.simple_desc_req, req_buffer[0..4], zdo_res, PCP.bk);
+                r = try_thrice(() => _endpoint.zdo_request(node.id, ZDOCluster.simple_desc_req, req_buffer[0..4], zdo_res, PCP.bk));
                 if (r != ZigbeeResult.success || zdo_res.status != ZDOStatus.success)
                     return fail("simple_desc_req failed");
 
@@ -1339,7 +1353,7 @@ private:
                         // try request extended attributes first, then normal if that fails
                         if (support_extended_attributes)
                         {
-                            r = _endpoint.zcl_request(node.id, ep.endpoint, ep.profile_id, c.cluster_id, ZCLCommand.discover_attributes_extended, 0, req_buffer[0..3], zcl_res, PCP.bk);
+                            r = try_thrice(() => _endpoint.zcl_request(node.id, ep.endpoint, ep.profile_id, c.cluster_id, ZCLCommand.discover_attributes_extended, 0, req_buffer[0..3], zcl_res, PCP.bk));
                             if (r != ZigbeeResult.success)
                                 return fail("discover_attributes_extended failed");
                             if (zcl_res.hdr.command == ZCLCommand.default_response)
@@ -1351,7 +1365,7 @@ private:
                         }
                         if (!support_extended_attributes)
                         {
-                            r = _endpoint.zcl_request(node.id, ep.endpoint, ep.profile_id, c.cluster_id, ZCLCommand.discover_attributes, 0, req_buffer[0..3], zcl_res, PCP.bk);
+                            r = try_thrice(() => _endpoint.zcl_request(node.id, ep.endpoint, ep.profile_id, c.cluster_id, ZCLCommand.discover_attributes, 0, req_buffer[0..3], zcl_res, PCP.bk));
                             if (r != ZigbeeResult.success)
                                 return fail("discover_attributes failed");
                         }
@@ -1465,7 +1479,7 @@ private:
             req_buffer[i*2..i*2 + 2][0..2] = basic_attributes[i].nativeToLittleEndian;
 
         // read basic attributes
-        ZigbeeResult r = _endpoint.zcl_request(node_id, ep.endpoint, 0x0104, 0, ZCLCommand.read_attributes, 0, req_buffer[0 .. basic_attributes.length*2], zcl_res, PCP.bk);
+        ZigbeeResult r = try_thrice(() => _endpoint.zcl_request(node_id, ep.endpoint, 0x0104, 0, ZCLCommand.read_attributes, 0, req_buffer[0 .. basic_attributes.length*2], zcl_res, PCP.bk));
         if (r != ZigbeeResult.success)
             return BasicReadResult.transport;
         if (zcl_res.hdr.command == ZCLCommand.default_response)
