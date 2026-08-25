@@ -1163,7 +1163,13 @@ private bool unbox_scalar_value(ref const Variant v, ref const DataFormat fmt, o
             if (!td.variant)
                 return false;
             s.raw[] = 0;
-            return td.variant(s.raw.ptr, *cast(Variant*)&v, false);
+            if (td.variant(s.raw.ptr, *cast(Variant*)&v, false))
+                return true;
+            // the wire and console carry user values in string form; parse is the inverse
+            if (!v.isString || !td.stringify)
+                return false;
+            const(char)[] str = v.asString;
+            return td.stringify(s.raw.ptr, cast(char[])str, false, null, null) == str.length;
         }
 
         case char_:
