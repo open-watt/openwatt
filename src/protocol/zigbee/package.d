@@ -8,6 +8,7 @@ import urt.log;
 import urt.map;
 import urt.mem;
 import urt.mem.temp : tconcat, tformat;
+import urt.meta.enuminfo : enum_key_from_value;
 import urt.meta.nullable;
 import urt.string;
 import urt.time;
@@ -543,9 +544,19 @@ nothrow @nogc:
         foreach (ref n; unknown_nodes)
         {
             if (n.pan_id == pan_id && n.id == id)
+            {
+                note_work(); // it just spoke, so probe again while it is awake
                 return;
+            }
         }
         unknown_nodes.pushBack(UnknownNode(via, pan_id, id));
+        note_work();
+    }
+
+    void note_work()
+    {
+        foreach (ZigbeeController c; Collection!ZigbeeController().values)
+            c.work_pending();
     }
 
     // some useful tools zigbee...
@@ -618,17 +629,33 @@ nothrow @nogc:
             t.add_row();
             t.cell(tconcat(n.eui));
             t.cell(n.available ? tconcat(tformat("{0,04x}", n.id)) : "-");
-            t.cell(tconcat(n.desc.type));
+            t.cell(enum_key_from_value!NodeType(n.desc.type));
             t.cell(state);
             t.cell(interview.length ? interview : "-");
             t.cell(n.interview_failures ? tconcat(n.interview_failures) : "-");
-            t.cell(n.device ? n.device.name[] : "-");
+            t.cell(n.device ? n.device.id[] : "-");
             t.cell(n.lqi ? tconcat(n.lqi) : "-");
             t.cell(n.rssi ? tconcat(n.rssi) : "-");
             t.cell(n.last_seen == SysTime() ? "-" : tconcat((now_sys - n.last_seen).as!"seconds", "s"));
         }
 
         t.render(session);
+
+        if (unknown_nodes.length == 0)
+            return;
+
+        // a node we have heard from but cannot yet name; it has no entry above to reason about
+        session.write_line();
+        Table u;
+        u.add_column("unresolved");
+        u.add_column("state");
+        foreach (ref unk; unknown_nodes)
+        {
+            u.add_row();
+            u.cell(tconcat(tformat("{0,04x}", unk.id)));
+            u.cell(unk.scanning ? "probing" : "pending");
+        }
+        u.render(session);
     }
 
     // /protocol/zigbee/read command

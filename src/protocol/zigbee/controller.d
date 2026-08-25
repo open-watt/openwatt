@@ -98,6 +98,12 @@ nothrow @nogc:
 
     // API...
 
+    // something outside the node table needs the scheduler to look again
+    void work_pending()
+    {
+        arm_timer(getTime());
+    }
+
     void node_awake(NodeMap* node)
     {
         if (node.initialised == 0xFF)
@@ -244,7 +250,7 @@ protected:
     // there can only ever be one of these outstanding
     void arm_timer(MonoTime when)
     {
-        if (when == MonoTime())
+        if (when == MonoTime() || !running)
             return;
         if (_timer_armed)
         {
@@ -294,6 +300,7 @@ protected:
 
                     zb_mod.unknown_nodes.remove(i);
                 }
+                arm_timer(getTime());
                 return;
             }
         }
@@ -1098,13 +1105,13 @@ private:
         ubyte[128] req_buffer = void;
 
         node.woke_during_scan = false;
-        const ubyte entry_initialised = node.initialised;
+        bool progressed;
 
         bool fail(const(char)[] reason = "failed")
         {
             import urt.util : min;
             node.scan_in_progress = false;
-            if (node.initialised != entry_initialised)
+            if (progressed)
                 node.interview_failures = 0;
             node.interview_failures = cast(ubyte)min(node.interview_failures + 1, 5);
             uint backoff_secs = 2u << node.interview_failures;
@@ -1136,6 +1143,7 @@ private:
 
             if (!zdo_res.message[].parse_node_desc(node))
                 return fail("invalid response");
+            progressed = true;
         }
 /+
         // how do we know if we should do the IAS thing?
@@ -1171,6 +1179,7 @@ private:
                     ep.dynamic = false;
                     cluster.dynamic = false;
                     node.initialised |= 0xC0;
+                    progressed = true;
                 }
                 else
                 {
@@ -1210,6 +1219,7 @@ private:
             node.power.batt_level = g_power_levels[msg[3] >> 6];
 
             node.initialised |= 0x02;
+            progressed = true;
         }
 
         // request active endpoints
@@ -1239,6 +1249,7 @@ private:
             }
 
             node.initialised |= 0x04;
+            progressed = true;
         }
 
         // discover clusters for each endpoint
@@ -1294,6 +1305,7 @@ private:
                 }
 
                 ep.initialised |= 0x01;
+                progressed = true;
             }
 
             node.initialised |= 0x08;
@@ -1391,6 +1403,7 @@ private:
                     }
 
                     c.initialised |= 0x01;
+                    progressed = true;
                 }
 
                 ep.initialised |= 0x02;
