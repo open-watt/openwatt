@@ -241,6 +241,8 @@ struct NodeMap
     MonoTime retry_after;
     ubyte interview_failures;
     ubyte prime_attempts;
+    ubyte ias_attempts;
+    bool ias_enrolled;
 
     ubyte lqi;
     byte rssi;

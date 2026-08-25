@@ -860,6 +860,8 @@ private:
                     }
                     else if (cmd == ZCLCommand.ias_zone_enroll_request)
                     {
+                        if (nm)
+                            nm.ias_enrolled = true; // it asked, so the cie address reached it
                         ubyte[2] enroll_response = [0x00, 0x00];
                         _endpoint.send_zcl_response(aps.src, aps.src_endpoint, aps.profile_id,
                             aps.cluster_id, ZCLCommand.ias_zone_enroll_response, zcl,
@@ -1306,6 +1308,36 @@ private:
         }
     }
 
+    // an unenrolled ias zone ignores reads of its status and only pushes on change. writing our
+    // address enrols it, and a device that enrols generally pushes its current state straight away.
+    void enroll_ias(NodeMap* node)
+    {
+        if (node.ias_enrolled || node.ias_attempts >= 3)
+            return;
+
+        foreach (ref SampleElement e; _sample_elements.values)
+        {
+            if (e.eui != node.eui || e.cluster != 0x0500)
+                continue;
+
+            ++node.ias_attempts;
+
+            ubyte[11] req = void;
+            const ubyte[2] attr = ushort(0x0010).nativeToLittleEndian; // IAS_CIE_Address
+            req[0 .. 2] = attr[];
+            req[2] = 0xF0; // ieee address
+            req[3 .. 11] = _endpoint.node.eui.b[];
+
+            // no response is expected from a zone that has not enrolled yet
+            _endpoint.send_zcl_message(node.id, e.endpoint, 0x0104, 0x0500,
+                                       ZCLCommand.write_attributes_no_response,
+                                       ZCLControlFlags.disable_default_response, req[], PCP.ca);
+            version (DebugZigbeeController)
+                log.debugf("enrolling ias zone on {0,04x}:{1,02x}", node.id, e.endpoint);
+            return;
+        }
+    }
+
     // the zone status is one real attribute that every ias element is decoded from
     bool prime_zone_status(NodeMap* node, ubyte endpoint)
     {
@@ -1461,6 +1493,7 @@ private:
                         create_device(*node);
                         replay_known_attributes(*node);
                     }
+                    enroll_ias(node);
                     prime_elements(node);
                 }
                 else
