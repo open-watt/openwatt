@@ -245,7 +245,11 @@ nothrow @nogc:
         ubyte[] msg = cast(ubyte[])message;
 
         if (msg[0] == 0)
+        {
+            if (_seq == 0)
+                _seq = 1; // zero is the caller's "unset" sentinel, so it is never issued
             msg[0] = _seq++;
+        }
 
         ZDORequest* req = null;
         MessageCallback progress = null;

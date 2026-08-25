@@ -1132,6 +1132,7 @@ private:
         if (!(node.initialised & 0x02))
         {
             req_buffer[0] = 0;
+            req_buffer[1..3] = node.id.nativeToLittleEndian;
             r = try_thrice(() => _endpoint.zdo_request(node.id, ZDOCluster.power_desc_req, req_buffer[0..3], zdo_res, PCP.bk));
             if (r != ZigbeeResult.success || zdo_res.status != ZDOStatus.success)
                 return fail("power_desc_req failed");
@@ -1154,6 +1155,7 @@ private:
         if (!(node.initialised & 0x04))
         {
             req_buffer[0] = 0;
+            req_buffer[1..3] = node.id.nativeToLittleEndian;
             r = try_thrice(() => _endpoint.zdo_request(node.id, ZDOCluster.active_ep_req, req_buffer[0..3], zdo_res, PCP.bk));
             if (r != ZigbeeResult.success || zdo_res.status != ZDOStatus.success)
                 return fail("active_ep_req failed");
