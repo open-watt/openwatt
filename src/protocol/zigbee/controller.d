@@ -92,6 +92,8 @@ nothrow @nogc:
     {
         _auto_create_devices = value;
         mark_set!(typeof(this), "auto-create")();
+        if (value)
+            arm_timer(getTime());
     }
 
     // API...
@@ -101,13 +103,19 @@ nothrow @nogc:
         if (node.initialised == 0xFF)
             return;
         if (node.scan_in_progress)
+        {
             node.woke_during_scan = true;
-        else if (node.retry_after != MonoTime())
+            return;
+        }
+        if (node.retry_after != MonoTime())
         {
             node.retry_after = MonoTime();
             version (DebugZigbeeController)
                 log.debugf("node {0,04x} is awake; resuming interview", node.id);
         }
+        // this runs inside a receive callback; let the interview start off the timer instead of
+        // re-entering the transmit path from here
+        arm_timer(getTime());
     }
 
 protected:
@@ -123,8 +131,20 @@ protected:
         return _endpoint.running ? CompletionStatus.complete : CompletionStatus.continue_;
     }
 
+    override void online()
+    {
+        super.online();
+        pump();
+    }
+
     override CompletionStatus shutdown()
     {
+        if (_timer_armed)
+        {
+            g_app.cancel(&timer_expired);
+            _timer_armed = false;
+        }
+
         // abort any outstanding interviews
         while (!_promises.empty)
         {
@@ -146,31 +166,17 @@ protected:
         return CompletionStatus.complete;
     }
 
-    override void update()
+    // every path that can create interview work ends here: a node was heard from, an attempt
+    // finished, or a backoff came due
+    void pump()
     {
-        // we need to populate our database of devices with detail...
+        if (!running)
+            return;
 
-        ZigbeeProtocolModule zb = get_module!ZigbeeProtocolModule();
-
-        MonoTime now = getTime();
-
-        size_t i;
-        for (i = 0; i < tuya_dedup.length; )
-        {
-            if (now - tuya_dedup[i].last > 2.seconds || now - tuya_dedup[i].first > 10.seconds)
-                tuya_dedup.remove(i);
-            else
-                ++i;
-        }
-
-        for (i = 0; i < _promises.length; )
+        for (size_t i = 0; i < _promises.length; )
         {
             if (_promises[i].finished)
             {
-                if (!_promises[i].result)
-                {
-                    // TODO: anything on failure? retry? reason why?
-                }
                 free_promise(_promises[i]);
                 _promises.remove(i);
             }
@@ -179,9 +185,17 @@ protected:
         }
 
         if (!_endpoint.node.is_network_up)
+        {
+            // TODO: the interface has no state signal to subscribe to, so look again shortly;
+            //       this only runs while the network is down
+            arm_timer(getTime() + 1.seconds);
             return;
+        }
 
-        // update all the nodes...
+        ZigbeeProtocolModule zb = get_module!ZigbeeProtocolModule();
+        MonoTime now = getTime();
+        MonoTime next;
+
         foreach (ref NodeMap nm; zb.nodes_by_eui.values)
         {
             if (!nm.available)
@@ -194,17 +208,24 @@ protected:
                     create_device(nm);
             }
 
-            if (nm.initialised < 0xFF && !nm.scan_in_progress && _promises.length < MaxFibers)
-            {
-                if (nm.retry_after != MonoTime() && now < nm.retry_after)
-                    continue;
+            if (nm.initialised == 0xFF || nm.scan_in_progress)
+                continue;
 
-                nm.scan_in_progress = true;
-                _promises.pushBack(async(&do_node_interview, &nm));
+            if (nm.retry_after != MonoTime() && now < nm.retry_after)
+            {
+                if (next == MonoTime() || nm.retry_after < next)
+                    next = nm.retry_after;
+                continue;
             }
+
+            if (_promises.length >= MaxFibers)
+                continue; // a finishing attempt pumps again, which picks this node up
+
+            nm.scan_in_progress = true;
+            _promises.pushBack(async(&do_node_interview, &nm));
         }
 
-        foreach (j, ref unk; get_module!ZigbeeProtocolModule.unknown_nodes)
+        foreach (ref unk; zb.unknown_nodes)
         {
             if (!unk.scanning)
             {
@@ -215,6 +236,31 @@ protected:
 
         // TODO: periodically read the software/build id's
         //       if they change (firmware update) we should re-interview the device to rebuild it's detail map
+
+        arm_timer(next);
+    }
+
+    // a single timer for the earliest deadline; g_app.cancel() matches on delegate identity, so
+    // there can only ever be one of these outstanding
+    void arm_timer(MonoTime when)
+    {
+        if (when == MonoTime())
+            return;
+        if (_timer_armed)
+        {
+            if (_timer_at <= when)
+                return;
+            g_app.cancel(&timer_expired);
+        }
+        _timer_armed = true;
+        _timer_at = when;
+        g_app.schedule(when, &timer_expired);
+    }
+
+    void timer_expired(MonoTime)
+    {
+        _timer_armed = false;
+        pump();
     }
 
     void probe_response(ZigbeeResult result, ZDOStatus status, const(ubyte)[] message, void* user_data)
@@ -331,6 +377,8 @@ private:
 
     ObjectRef!ZigbeeEndpoint _endpoint;
     Array!(Promise!bool*) _promises;
+    MonoTime _timer_at;
+    bool _timer_armed;
 
     Array!NodeMap discover_nodes;
     Array!TuyaDedup tuya_dedup;
@@ -799,14 +847,24 @@ private:
 
                     // Tuya messages are spammy!
                     MonoTime now = getTime();
-                    foreach (ref dedup; tuya_dedup)
+                    bool duplicate = false;
+                    for (size_t d = 0; d < tuya_dedup.length; )
                     {
+                        ref dedup = tuya_dedup[d];
+                        if (now - dedup.last > 2.seconds || now - dedup.first > 10.seconds)
+                        {
+                            tuya_dedup.remove(d);
+                            continue;
+                        }
                         if (dedup.node == aps.src && dedup.tag == tuya_seq)
                         {
                             dedup.last = now;
-                            return; // suppress duplicate application data; scope(exit) still ACKs it
+                            duplicate = true;
                         }
+                        ++d;
                     }
+                    if (duplicate)
+                        return; // suppress duplicate application data; scope(exit) still ACKs it
                     tuya_dedup.pushBack(TuyaDedup(now, now, aps.src, tuya_seq));
 
                     switch (cmd) with (ZCLCommand)
@@ -1059,6 +1117,7 @@ private:
             }
             else
                 node.retry_after = getTime() + backoff_secs.seconds;
+            arm_timer(getTime());
             version (DebugZigbeeController)
                 log.warningf("interview FAILED for device {0,04x}! result = {1} - {2} (retry in {3}s)", node.id, r, reason, backoff_secs);
             return false;
@@ -1365,6 +1424,7 @@ private:
         node.woke_during_scan = false;
         node.interview_failures = 0;
         node.retry_after = MonoTime();
+        arm_timer(getTime());
 
         return true;
     }

@@ -696,6 +696,33 @@ service 0000FFF0-0000-1000-8000-00805F9B34FB  handles 0x0008-0xFFFF
   0x000D  0x000C  -       --CW----  0000FFF2-0000-1000-8000-00805F9B34FB
 ```
 
+### `/protocol/zigbee/nodes`
+
+Prints the Zigbee node table: every node the coordinator has learned about,
+and how far its interview has progressed. This is distinct from
+`/protocol/zigbee/node/print`, which lists the configured `zb-node` objects
+(the local coordinator and routers) rather than discovered nodes.
+
+```
+/protocol/zigbee/nodes
+```
+
+| Column | Description |
+| --- | --- |
+| `eui` | The node's permanent IEEE address. |
+| `id` | Short network address, or `-` when the node is not currently attached. |
+| `type` | Node type, from the device's own capability report or an observed data poll. |
+| `state` | `ready` once interviewed, `scanning` while an attempt is in flight (`scanning*` if the node spoke during it), `retry <n>s` while backing off, `pending` when due, `offline` when detached. |
+| `interview` | Stages completed, one letter each: `n` node descriptor, `p` power descriptor, `e` endpoints, `c` clusters, `a` attributes, `b` basic read attempted, `B` basic info read. Shows `complete` when fully interviewed. |
+| `fails` | Consecutive failed interview attempts; drives the retry backoff. |
+| `device` | The `Device` created for this node, if any. |
+| `lqi` / `rssi` | Link quality and signal strength from the last frame received. |
+| `seen` | Age of the last frame received from the node. |
+
+A sleepy end device is only reachable in the brief window it is awake, so a
+node sitting in `retry` with a rising `fails` count and an old `seen` age is
+waiting to be heard from rather than being actively unreachable.
+
 ### `/protocol/http/server`
 
 An HTTP server provides the listener and shared policy for its registered

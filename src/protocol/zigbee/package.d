@@ -7,6 +7,7 @@ import urt.lifetime;
 import urt.log;
 import urt.map;
 import urt.mem;
+import urt.mem.temp : tconcat, tformat;
 import urt.meta.nullable;
 import urt.string;
 import urt.time;
@@ -17,6 +18,7 @@ import manager.collection;
 import manager.config : ConfItem;
 import manager.console.command;
 import manager.console.session;
+import manager.console.table;
 import manager.device;
 import manager.plugin;
 import manager.profile;
@@ -322,6 +324,7 @@ nothrow @nogc:
         g_app.console.register_collection!ZigbeeController();
 
         g_app.console.register_command!scan("/protocol/zigbee", this);
+        g_app.console.register_command!(nodes_print, "nodes")("/protocol/zigbee", this);
         g_app.console.register_command!(zcl_read, "read")("/protocol/zigbee", this);
         g_app.console.register_command!(zcl_write, "write")("/protocol/zigbee", this);
     }
@@ -454,6 +457,7 @@ nothrow @nogc:
         n.id = id;
         n.pan_id = pan_id;
         nodes_by_pan.insert((cast(uint)pan_id << 16) | id, n);
+        note_awake(n);
         return n;
     }
 
@@ -561,6 +565,70 @@ nothrow @nogc:
         c.set_message_handler(&state.message_handler);
         c.send_command!EZSP_StartScan(&state.start_scan, energy_scan ? EzspNetworkScanType.ENERGY_SCAN : EzspNetworkScanType.ACTIVE_SCAN, 0x07FFF800, energy_scan ? 1 : 3);
         return state;
+    }
+
+    // /protocol/zigbee/nodes command
+    void nodes_print(Session session)
+    {
+        if (nodes_by_eui.length == 0)
+        {
+            session.write_line("No zigbee nodes");
+            return;
+        }
+
+        MonoTime now = getTime();
+        SysTime now_sys = getSysTime();
+
+        Table t;
+        t.add_column("eui");
+        t.add_column("id");
+        t.add_column("type");
+        t.add_column("state");
+        t.add_column("interview");
+        t.add_column("fails", Table.TextAlign.right);
+        t.add_column("device");
+        t.add_column("lqi", Table.TextAlign.right);
+        t.add_column("rssi", Table.TextAlign.right);
+        t.add_column("seen", Table.TextAlign.right);
+
+        foreach (ref NodeMap n; nodes_by_eui.values)
+        {
+            const(char)[] state;
+            if (!n.available)
+                state = "offline";
+            else if (n.initialised == 0xFF)
+                state = "ready";
+            else if (n.scan_in_progress)
+                state = n.woke_during_scan ? "scanning*" : "scanning";
+            else if (n.retry_after != MonoTime() && now < n.retry_after)
+                state = tconcat("retry ", (n.retry_after - now).as!"seconds", "s");
+            else
+                state = "pending";
+
+            // one letter per interview stage; see docs/CLI.md
+            const(char)[] interview = n.initialised == 0xFF ? "complete" :
+                tconcat((n.initialised & 0x01) ? "n" : "",
+                        (n.initialised & 0x02) ? "p" : "",
+                        (n.initialised & 0x04) ? "e" : "",
+                        (n.initialised & 0x08) ? "c" : "",
+                        (n.initialised & 0x10) ? "a" : "",
+                        (n.initialised & 0x40) ? "b" : "",
+                        (n.initialised & 0x80) ? "B" : "");
+
+            t.add_row();
+            t.cell(tconcat(n.eui));
+            t.cell(n.available ? tconcat(tformat("{0,04x}", n.id)) : "-");
+            t.cell(tconcat(n.desc.type));
+            t.cell(state);
+            t.cell(interview.length ? interview : "-");
+            t.cell(n.interview_failures ? tconcat(n.interview_failures) : "-");
+            t.cell(n.device ? n.device.name[] : "-");
+            t.cell(n.lqi ? tconcat(n.lqi) : "-");
+            t.cell(n.rssi ? tconcat(n.rssi) : "-");
+            t.cell(n.last_seen == SysTime() ? "-" : tconcat((now_sys - n.last_seen).as!"seconds", "s"));
+        }
+
+        t.render(session);
     }
 
     // /protocol/zigbee/read command
