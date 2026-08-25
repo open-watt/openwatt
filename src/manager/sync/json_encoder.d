@@ -37,6 +37,8 @@ final class JsonEncoder : SyncEncoder
 {
 nothrow @nogc:
 
+    alias log = Log!"sync.json";
+
     SyncModule sync;
 
     this(SyncModule sync)
@@ -590,7 +592,7 @@ nothrow @nogc:
         Variant json = parse_json(cast(char[])cast(const(char)[])frame);
         if (!json.isObject)
         {
-            log.warning("sync/json: frame is not a JSON object");
+            log.warning("frame is not a JSON object");
             return true;
         }
 
@@ -599,7 +601,7 @@ nothrow @nogc:
         void bad(const(char)[] name)
         {
             if (!bad_frame)
-                log.warning("sync/json: bad or missing field '", name, "'");
+                log.warning("bad or missing field '", name, "'");
             bad_frame = true;
         }
         uint require_uint(ref Variant obj, const(char)[] name)
@@ -682,7 +684,7 @@ nothrow @nogc:
         const(char)[] kind_str = require_str(json, "kind");
         if (bad_frame || kind_str.length == 0)
         {
-            log.warning("sync/json: frame missing 'kind' field");
+            log.warning("frame missing 'kind' field");
             return true;
         }
 
@@ -767,7 +769,7 @@ nothrow @nogc:
                 const(StateSignal)* sig = enum_from_key!StateSignal(sig_str);
                 if (!sig || *sig == StateSignal.destroyed)
                 {
-                    log.warning("sync/json: bad state signal: ", sig_str);
+                    log.warning("bad state signal: ", sig_str);
                     break;
                 }
                 sync.inbound_state(peer, target, *sig);
@@ -1103,7 +1105,7 @@ nothrow @nogc:
             case "history":
                 // node-to-node history recall isn't wired up yet - no outbound
                 // requester exists to correlate this response with.
-                log.info("sync/json: inbound history frame from '", peer.name[], "' - ignored");
+                log.info("inbound history frame from '", peer.name[], "' - ignored");
                 break;
 
             case "enum":
@@ -1129,7 +1131,7 @@ nothrow @nogc:
                     const(Severity)* sv = enum_from_key!Severity(sev_str);
                     if (!sv)
                     {
-                        log.warning("sync/json: unknown log_sub severity: ", sev_str);
+                        log.warning("unknown log_sub severity: ", sev_str);
                         break;
                     }
                     sev = *sv;
@@ -1147,7 +1149,7 @@ nothrow @nogc:
                     msg_v = json.getMember("payload"); // tolerate older browser clients
                 if (!msg_v || !msg_v.isString)
                 {
-                    log.warning("sync/json: log missing string 'msg'");
+                    log.warning("log missing string 'msg'");
                     break;
                 }
                 sync.inbound_log(peer, msg_v.asString());
@@ -1184,7 +1186,7 @@ nothrow @nogc:
             }
 
             default:
-                log.warning("sync/json: unknown kind: ", kind_str);
+                log.warning("unknown kind: ", kind_str);
                 break;
         }
         return true;

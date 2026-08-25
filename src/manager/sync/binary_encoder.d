@@ -77,6 +77,8 @@ final class BinaryEncoder : SyncEncoder
 {
 nothrow @nogc:
 
+    alias log = Log!"sync.bin";
+
     SyncModule sync;
 
     this(SyncModule sync)
@@ -533,7 +535,7 @@ nothrow @nogc:
             return true;
         if (frame[0] > Verb.max)
         {
-            log.warning("sync/bin: unknown verb ", frame[0]);
+            log.warning("unknown verb ", frame[0]);
             return true;
         }
         Verb verb = cast(Verb)frame[0];
@@ -619,7 +621,7 @@ nothrow @nogc:
                     break;
                 if (sig > StateSignal.offline)
                 {
-                    log.warning("sync/bin: bad state signal ", sig);
+                    log.warning("bad state signal ", sig);
                     break;
                 }
                 sync.inbound_state(peer, target, cast(StateSignal)sig);
@@ -725,7 +727,7 @@ nothrow @nogc:
             case Verb.history:
                 // node-to-node history recall isn't wired up yet - no outbound
                 // requester exists to correlate this response with.
-                log.info("sync/bin: inbound history frame from '", peer.name[], "' - ignored");
+                log.info("inbound history frame from '", peer.name[], "' - ignored");
                 break;
 
             case Verb.log_sub:
@@ -737,7 +739,7 @@ nothrow @nogc:
                 bool off = sev == 0xFF;
                 if (!off && sev > Severity.max)
                 {
-                    log.warning("sync/bin: bad log_sub severity ", sev);
+                    log.warning("bad log_sub severity ", sev);
                     break;
                 }
                 sync.inbound_log_sub(peer, off ? Severity.info : cast(Severity)sev, off, tag);
@@ -984,7 +986,7 @@ nothrow @nogc:
         }
 
         if (r.fail)
-            log.warning("sync/bin: truncated or malformed '", enum_key_name!Verb(verb), "' frame from '", peer.name[], "'");
+            log.warning("truncated or malformed '", enum_key_name!Verb(verb), "' frame from '", peer.name[], "'");
         return true;
     }
 
