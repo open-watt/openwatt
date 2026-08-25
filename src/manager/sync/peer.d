@@ -587,7 +587,26 @@ package:
     Array!BaseObject _authoritative;     // proxies we hold on this peer's behalf
     Array!EID        _introduced;        // handle table: nodes we announced (slot = handle >> 1)
     Array!EID        _adopted;           // handle table: local ids for names the peer announced
+    uint[max_unknown_types] _unknown_types;   // hashed type names this peer announced that we lack
+    ubyte            _unknown_type_count;
     SyncEncoderKind  _encoder = SyncEncoderKind.binary;
+
+    // a peer that carries a type we lack announces every object of it; warn once per type.
+    // the name is hashed, never retained: it is peer-controlled and unbounded on the wire
+    bool first_sighting_of_unknown_type(const(char)[] type)
+    {
+        import urt.hash : fnv1a;
+        uint h = fnv1a(cast(const(ubyte)[])type);
+        foreach (t; _unknown_types[0 .. _unknown_type_count])
+            if (t == h)
+                return false;
+        if (_unknown_type_count == max_unknown_types)
+            return false;
+        _unknown_types[_unknown_type_count++] = h;
+        return true;
+    }
+
+    enum max_unknown_types = 8;
 
     // bulk walks stop short of the window's end so the session's other control frames always find room
     enum control_reserve = 16;
@@ -1205,4 +1224,27 @@ unittest
     assert(p.adoptable(4));
     p.adopt(2, EID(CID(4)));
     assert(p._adopted[1] == EID(CID(4)));
+}
+
+unittest
+{
+    SyncPeer p = alloc!SyncPeer(CID(1));
+    scope(exit) free(p);
+
+    assert(p.first_sighting_of_unknown_type("wifi-ap"));
+    assert(!p.first_sighting_of_unknown_type("wifi-ap"));
+    assert(p.first_sighting_of_unknown_type("usb-serial"));
+
+    // a peer cannot grow the table, whatever it announces
+    foreach (i; 0 .. 16)
+        p.first_sighting_of_unknown_type(tconcat("type", i));
+    assert(p._unknown_type_count == SyncPeer.max_unknown_types);
+
+    p._unknown_type_count = 0;
+    assert(p.first_sighting_of_unknown_type("wifi-ap"));
+
+    // a name the wire allows but String cannot hold is hashed like any other
+    char[40_000] huge = 'x';
+    assert(p.first_sighting_of_unknown_type(huge[]));
+    assert(!p.first_sighting_of_unknown_type(huge[]));
 }

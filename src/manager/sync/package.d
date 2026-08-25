@@ -395,6 +395,7 @@ nothrow @nogc:
         p._subscriptions.clear();
         p._introduced.clear();
         p._adopted.clear();
+        p._unknown_type_count = 0;
         p._remote_caps = 0;
         p.reset_sublayer();           // seq spaces are session state
         p._remote_nonce_set = false;
@@ -450,7 +451,7 @@ nothrow @nogc:
         // session handle to it. No proxy yet - bind is what materialises one.
         if (!from.adoptable(handle))
         {
-            log.warning("sync: add_name from '", from.name[], "' with unusable handle ", handle);
+            log.warning("add_name from '", from.name[], "' with unusable handle ", handle);
             return;
         }
         // an accepted handle always advances the table, even when the name can't be
@@ -458,9 +459,12 @@ nothrow @nogc:
         EID local = EID.invalid;
         auto rt = type in g_app.types;
         if (!rt)
-            log.warning("sync: add_name from '", from.name[], "' with unknown type '", type, "'");
+        {
+            if (from.first_sighting_of_unknown_type(type))
+                log.warning("add_name from '", from.name[], "' with unknown type '", type, "'");
+        }
         else if (rt.type_info.is_abstract)
-            log.warning("sync: add_name from '", from.name[], "' for abstract type '", type, "'");
+            log.warning("add_name from '", from.name[], "' for abstract type '", type, "'");
         else
         {
             ubyte type_idx = cast(ubyte)rt.type_info.collection_id;
@@ -484,20 +488,21 @@ nothrow @nogc:
             auto rt = type in g_app.types;
             if (!rt)
             {
-                log.warning("sync: bind from '", from.name[], "' for unknown type '", type, "' - cannot materialize proxy for CID ", target.raw);
+                if (from.first_sighting_of_unknown_type(type))
+                    log.warning("bind from '", from.name[], "' for unknown type '", type, "' - cannot materialize proxy for CID ", target.raw);
                 return;
             }
             const(CollectionTypeInfo)* ti = rt.type_info;
             if (ti.is_abstract)
             {
-                log.warning("sync: bind from '", from.name[], "' for abstract type '", type, "'");
+                log.warning("bind from '", from.name[], "' for abstract type '", type, "'");
                 return;
             }
 
             const(char)[] name = get_id(target)[];
             if (name.length == 0)
             {
-                log.warning("sync: bind from '", from.name[], "' for CID ", target.raw, " with no prior add_name");
+                log.warning("bind from '", from.name[], "' for CID ", target.raw, " with no prior add_name");
                 return;
             }
 
@@ -505,7 +510,7 @@ nothrow @nogc:
             proxy = coll.alloc(name, ObjectFlags.remote);
             if (!proxy)
             {
-                log.warning("sync: bind from '", from.name[], "' - alloc failed for '", name, "' (", type, ")");
+                log.warning("bind from '", from.name[], "' - alloc failed for '", name, "' (", type, ")");
                 return;
             }
             coll.add(proxy);
@@ -519,12 +524,12 @@ nothrow @nogc:
             // Authority should still be `from`; warn if it's drifted.
             auto pp = target in authority;
             if (!pp || *pp !is from)
-                log.warning("sync: bind re-announce for '", proxy.name[], "' from a different peer than current authority");
+                log.warning("bind re-announce for '", proxy.name[], "' from a different peer than current authority");
         }
         else
         {
             // Bind targeting a local authoritative object - protocol violation.
-            log.warning("sync: bind from '", from.name[], "' targeting our local '", proxy.name[], "' - ignoring");
+            log.warning("bind from '", from.name[], "' targeting our local '", proxy.name[], "' - ignoring");
             return;
         }
 
@@ -567,13 +572,13 @@ nothrow @nogc:
         BaseObject proxy = get_item(target);
         if (!proxy)
         {
-            log.warning("sync: unbind from '", from.name[], "' for unknown CID ", target.raw);
+            log.warning("unbind from '", from.name[], "' for unknown CID ", target.raw);
             return;
         }
         auto pp = target in authority;
         if (!pp || *pp !is from)
         {
-            log.warning("sync: unbind from '", from.name[], "' for '", proxy.name[], "' which they don't own");
+            log.warning("unbind from '", from.name[], "' for '", proxy.name[], "' which they don't own");
             return;
         }
 
@@ -706,7 +711,7 @@ nothrow @nogc:
         BaseObject proxy = get_item(target);
         if (!proxy)
         {
-            log.warning("sync: state from '", from.name[], "' for unknown CID ", target.raw);
+            log.warning("state from '", from.name[], "' for unknown CID ", target.raw);
             return;
         }
 
@@ -736,7 +741,7 @@ nothrow @nogc:
         BaseObject obj = get_item(target);
         if (!obj)
         {
-            log.warning("sync: set from '", from.name[], "' for unknown CID ", target.raw);
+            log.warning("set from '", from.name[], "' for unknown CID ", target.raw);
             if (seq)
                 encoder_for(from._encoder).encode_error(from, seq, "unknown target");
             return;
@@ -752,7 +757,7 @@ nothrow @nogc:
             auto r = obj.set(prop, v);
             if (r.failed)
             {
-                log.warning("sync: proxy set failed for '", obj.name[], ".", prop, "': ", r.message);
+                log.warning("proxy set failed for '", obj.name[], ".", prop, "': ", r.message);
                 return;
             }
 
@@ -811,7 +816,7 @@ nothrow @nogc:
         BaseObject obj = get_item(target);
         if (!obj)
         {
-            log.warning("sync: reset from '", from.name[], "' for unknown CID ", target.raw);
+            log.warning("reset from '", from.name[], "' for unknown CID ", target.raw);
             if (seq)
                 encoder_for(from._encoder).encode_error(from, seq, "unknown target");
             return;
@@ -880,7 +885,7 @@ nothrow @nogc:
         LogMessage msg;
         if (!parse_syslog(line, msg))
         {
-            log.warning("sync: malformed log frame from '", from.name[], "'");
+            log.warning("malformed log frame from '", from.name[], "'");
             return;
         }
         // Arrival identity, not hostname, prevents a relayed record echoing to
@@ -919,7 +924,7 @@ nothrow @nogc:
         auto pf = seq in pending_forwards;
         if (!pf)
         {
-            log.warning("sync: result from '", from.name[], "' for unknown seq=", seq);
+            log.warning("result from '", from.name[], "' for unknown seq=", seq);
             return;
         }
         encoder_for(pf.origin._encoder).encode_result(pf.origin, pf.origin_seq, v, out_text);
@@ -931,7 +936,7 @@ nothrow @nogc:
         auto pf = seq in pending_forwards;
         if (!pf)
         {
-            log.warning("sync: error from '", from.name[], "' for unknown seq=", seq, ": ", text);
+            log.warning("error from '", from.name[], "' for unknown seq=", seq, ": ", text);
             return;
         }
         encoder_for(pf.origin._encoder).encode_error(pf.origin, pf.origin_seq, text);
@@ -1125,25 +1130,25 @@ nothrow @nogc:
 
         if (ft in from._ft_recv)
         {
-            log.warning("sync: peer '", from.name[], "' re-interned ft ", ft);
+            log.warning("peer '", from.name[], "' re-interned ft ", ft);
             return;
         }
         ValueType vt;
         if (!value_type_from_name(wf.type, vt))
         {
-            log.warning("sync: type frame with unknown value type '", wf.type, "'");
+            log.warning("type frame with unknown value type '", wf.type, "'");
             return;
         }
         if (vt == ValueType.user)
         {
             // the wire carries no TypeDetails, so user_type would alias the union's unit bits
-            log.warning("sync: type frame cites a user type, which has no wire representation");
+            log.warning("type frame cites a user type, which has no wire representation");
             return;
         }
         const(SeriesKind)* kind = enum_from_key!SeriesKind(wf.series);
         if (!kind)
         {
-            log.warning("sync: type frame with unknown series kind '", wf.series, "'");
+            log.warning("type frame with unknown series kind '", wf.series, "'");
             return;
         }
 
@@ -1153,7 +1158,7 @@ nothrow @nogc:
             const(VoidEnumInfo)* ei = find_enum_info(wf.enum_name);
             if (!ei)
             {
-                log.warning("sync: format cites unknown enum '", wf.enum_name, "'");
+                log.warning("format cites unknown enum '", wf.enum_name, "'");
                 return;
             }
             f = DataFormat(vt, *kind, ei);
@@ -1164,7 +1169,7 @@ nothrow @nogc:
             float pre_scale;
             if (su.parse_unit(wf.unit, pre_scale) <= 0)
             {
-                log.warning("sync: format with unparsable unit '", wf.unit, "'");
+                log.warning("format with unparsable unit '", wf.unit, "'");
                 return;
             }
             f = DataFormat(vt, *kind, su);
@@ -1175,7 +1180,7 @@ nothrow @nogc:
         f.rate = wf.rate;
         if (!f.stride_fits)
         {
-            log.warning("sync: format record stride exceeds 255 bytes");
+            log.warning("format record stride exceeds 255 bytes");
             return;
         }
 
@@ -1195,7 +1200,7 @@ nothrow @nogc:
                     c.has |= bit;
                 }
                 else
-                    log.warning("sync: format constraint value out of range for its own type");
+                    log.warning("format constraint value out of range for its own type");
             }
             take(wf.min, c.min, Constraint.Has.min);
             take(wf.max, c.max, Constraint.Has.max);
@@ -1213,7 +1218,7 @@ nothrow @nogc:
 
         if (!members.isObject)
         {
-            log.warning("sync: enum type frame without members");
+            log.warning("enum type frame without members");
             return;
         }
         Array!(const(char)[]) keys;
@@ -1230,7 +1235,7 @@ nothrow @nogc:
     {
         if (!from.adoptable(handle))
         {
-            log.warning("sync: add from '", from.name[], "' with unusable handle ", handle);
+            log.warning("add from '", from.name[], "' with unusable handle ", handle);
             return;
         }
         // the handle is announced even when the node fails to materialise: it must
@@ -1246,7 +1251,7 @@ nothrow @nogc:
         Address a = Address.parse(path);
         if (!a.valid || a.ns[] != "device")
         {
-            log.warning("sync: add with unsupported path '", path, "'");
+            log.warning("add with unsupported path '", path, "'");
             return EID.invalid;
         }
         const(char)[] rest = a.subject;
@@ -1260,13 +1265,13 @@ nothrow @nogc:
             return EID(dev.cid);
         if (node_class[] != "element" || rest.empty)
         {
-            log.warning("sync: add with unsupported class '", node_class, "' at '", path, "'");
+            log.warning("add with unsupported class '", node_class, "' at '", path, "'");
             return EID.invalid;
         }
         FormatId* pf = ft in from._ft_recv;
         if (!pf)
         {
-            log.warning("sync: add cites unknown ft ", ft);
+            log.warning("add cites unknown ft ", ft);
             return EID.invalid;
         }
         Element* e = dev.find_or_create_element(rest, *pf);
@@ -1366,7 +1371,7 @@ nothrow @nogc:
         {
             if (!from.handle_announced(handle))
                 return false;
-            log.debug_("sync: val for dead handle ", handle);
+            log.debug_("val for dead handle ", handle);
             return true;
         }
         e.value(value, t_ms ? from_unix_time_ns(t_ms * 1_000_000) : getSysTime());
@@ -1377,14 +1382,14 @@ nothrow @nogc:
     {
         if (get_module!SyncPeeringModule.claim_response(from, seq, true, null, null))
             return;
-        log.info("sync: model burst complete from '", from.name[], "' seq=", seq);
+        log.info("model burst complete from '", from.name[], "' seq=", seq);
     }
 
     void inbound_err(SyncPeer from, uint seq, const(char)[] code, const(char)[] text)
     {
         if (get_module!SyncPeeringModule.claim_response(from, seq, false, code, text))
             return;
-        log.warning("sync: err from '", from.name[], "' seq=", seq, " code=", code, ": ", text);
+        log.warning("err from '", from.name[], "' seq=", seq, " code=", code, ": ", text);
     }
 
     void inbound_history_req(SyncPeer from, const(char)[] path, ulong from_ms, ulong to_ms, uint max_points, uint seq)
@@ -1435,7 +1440,7 @@ nothrow @nogc:
     {
         // TODO: resolve pending_forwards[seq] for PendingKind.enum_req (outbound
         // enum requests aren't yet wired - no callback mechanism on this side).
-        log.info("sync: inbound enum '", type_name, "' from '", from.name[], "' seq=", seq);
+        log.info("inbound enum '", type_name, "' from '", from.name[], "' seq=", seq);
     }
 
     // Inbound: time sync
@@ -1455,7 +1460,7 @@ nothrow @nogc:
     {
         if (!from._time_authority)
         {
-            log.warning("sync: time_resp from non-authority '", from.name[], "'");
+            log.warning("time_resp from non-authority '", from.name[], "'");
             return;
         }
         if (from._time_seq == 0 || seq != from._time_seq)
@@ -1473,14 +1478,14 @@ nothrow @nogc:
         from._next_time_poll = t4 + time_poll_interval;
 
         set_utc_time(cast(ulong)corrected); // on_clock_step fans the resulting step to our subordinates
-        log.info("sync: clock synced from authority '", from.name[], "'");
+        log.info("clock synced from authority '", from.name[], "'");
     }
 
     void inbound_time_push(SyncPeer from, uint ver, long delta_ns)
     {
         if (!from._time_authority)
         {
-            log.warning("sync: time_push from non-authority '", from.name[], "'");
+            log.warning("time_push from non-authority '", from.name[], "'");
             return;
         }
         if (!wall_time_set() || ver > from._last_authority_version + 1)
@@ -1826,7 +1831,7 @@ nothrow @nogc:
         const(DataFormat)* fmt = e.data_format;
         if (!wire_serialisable(*fmt))
         {
-            log.debug_("sync: skipping unserialisable element ", path);
+            log.debug_("skipping unserialisable element ", path);
             return;
         }
         EID node = e.ensure_eid();
@@ -1843,7 +1848,7 @@ nothrow @nogc:
             const(char)[] ename = enum_info_name(fmt.enum_info);
             if (!ename)
             {
-                log.warning("sync: element ", path, " cites an unregistered enum - skipped");
+                log.warning("element ", path, " cites an unregistered enum - skipped");
                 return;
             }
             if (!to.enum_seen(fmt.enum_info))
@@ -2009,7 +2014,7 @@ nothrow @nogc:
         {
             if (!(*d).remote)
             {
-                log.warning("sync: remote device '", id, "' collides with a local device - ignored");
+                log.warning("remote device '", id, "' collides with a local device - ignored");
                 return null;
             }
             return *d;
