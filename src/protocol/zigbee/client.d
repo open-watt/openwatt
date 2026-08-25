@@ -358,8 +358,8 @@ nothrow @nogc:
         {
             version (DebugZigbee)
                 log.tracef("zdo TIMEOUT ->{0,04x} [zdo:{1,04x}] at {2}", dst, cluster, ev.timeout.elapsed);
-            abort_zdo_request(tag, ZigbeeResult.timeout);
-            return ZigbeeResult.timeout;
+            abort_zdo_request(tag, ZigbeeResult.failed);
+            return ZigbeeResult.failed;
         }
         else if (data.result != ZigbeeResult.success)
         {
@@ -519,8 +519,8 @@ nothrow @nogc:
         {
             version (DebugZigbee)
                 log.tracef("zcl TIMEOUT ->{0,04x}:{1} [:{2,04x}] after {3}", dst, dst_endpoint, cluster, ev.timeout.elapsed);
-            abort_zcl_request(tag, ZigbeeResult.timeout);
-            return ZigbeeResult.timeout;
+            abort_zcl_request(tag, ZigbeeResult.failed);
+            return ZigbeeResult.failed;
         }
         else if (data.result != ZigbeeResult.success)
         {
