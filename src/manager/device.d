@@ -48,6 +48,13 @@ nothrow @nogc:
         return d ? d.element_ids.get(eid.index) : null;
     }
 
+    inout(Device) container(CID cid) inout pure
+    {
+        if (cid.type_index != CollectionType.device)
+            return null;
+        return _machine.get(cid.slot);
+    }
+
     auto values() => _machine.values();
     auto keys() => _machine.names();
 

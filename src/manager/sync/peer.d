@@ -566,6 +566,18 @@ protected:
     }
 
 package:
+    struct PendingSub
+    {
+        String pattern;
+        uint   res_seq;
+        ulong  from_ms;
+        ulong  to_ms;
+        bool   arm;
+        uint   device_cursor;
+        uint   element_cursor;
+        bool   device_sent;
+    }
+
     void grant_claim_time_authority()
     {
         if (_time_authority)
@@ -662,6 +674,13 @@ package:
     Array!String     _model_subs;        // armed live model patterns
     Map!(ulong, ulong) _live_nodes;      // EID.raw of armed nodes -> next unsent record index (point series)
     Array!EID        _pending_vals;      // dirty matched nodes awaiting this tick's flush
+
+    Array!PendingSub _pending_subs;
+    Array!EID        _pending_live;
+    bool             _live_rescan;
+    uint             _rescan_cursor;
+    enum max_pending_subs = 8;
+    enum max_pending_live = 64;
 
     bool     _time_authority;
     bool     _time_authority_from_claim;
