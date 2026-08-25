@@ -35,6 +35,9 @@ enum Duration zigbee_response_timeout = 2.seconds;
 // a failed delivery may still sit in the parent's indirect queue (held 7.68s from send, failure
 // reported at ~4.8s), so the answer can trail the failure by a few seconds
 enum Duration zigbee_indirect_grace = 4.seconds;
+// hearing from a node proves it is awake now, so anything pending on it is cut to about one round
+// trip rather than waiting out a deadline chosen while it may have been asleep
+enum Duration zigbee_awake_grace = 300.msecs;
 enum Duration zigbee_delivery_deadline = 200.msecs;
 
 
@@ -259,7 +262,7 @@ nothrow @nogc:
         if (response_handler && (cluster & 0x8000) == 0)
         {
             req = _zdo_request_pool.alloc();
-            *req = ZDORequest(msg[0], cluster, -1, getTime(), response_handler, user_data, null);
+            *req = ZDORequest(dst, msg[0], cluster, -1, getTime(), response_handler, user_data, null);
             _zdo_requests.pushBack(req);
             progress = &req.progress_callback;
         }
@@ -403,7 +406,7 @@ nothrow @nogc:
         if (response_handler && (hdr.control & ZCLControlFlags.response) == 0)
         {
             req = _zcl_request_pool.alloc();
-            *req = ZCLRequest(hdr.seq, dst_endpoint, cluster, -1, getTime(), response_handler, user_data, null);
+            *req = ZCLRequest(dst, hdr.seq, dst_endpoint, cluster, -1, getTime(), response_handler, user_data, null);
             _zcl_requests.pushBack(req);
             progress = &req.progress_callback;
         }
@@ -681,10 +684,27 @@ protected:
         }
     }
 
+    void note_peer_activity(ushort src)
+    {
+        MonoTime cut = getTime() + zigbee_awake_grace;
+        foreach (req; _zdo_requests[])
+        {
+            if (req.dst == src && req.awaiting_response && req.deadline > cut)
+                req.deadline = cut;
+        }
+        foreach (req; _zcl_requests[])
+        {
+            if (req.dst == src && req.awaiting_response && req.deadline > cut)
+                req.deadline = cut;
+        }
+    }
+
     void incoming_packet(ref const Packet p, BaseInterface iface, PacketDirection dir, void*)
     {
         // TODO: we should enhance the PACKET FILTER to do this work!
         ref aps = p.hdr!APSFrame;
+
+        note_peer_activity(aps.src);
 
         const(ubyte)[] data = cast(ubyte[])p.data;
 
@@ -910,6 +930,7 @@ private:
 
     struct ZDORequest
     {
+        ushort dst;
         ubyte seq;
         ushort cluster;
         int tag;
@@ -952,6 +973,7 @@ private:
 
     struct ZCLRequest
     {
+        ushort dst;
         ubyte seq;
         ubyte endpoint;
         ushort cluster;
