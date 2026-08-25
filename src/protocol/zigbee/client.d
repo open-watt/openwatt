@@ -32,6 +32,9 @@ version = DebugZigbee;
 nothrow @nogc:
 
 enum Duration zigbee_response_timeout = 2.seconds;
+// a failed delivery may still sit in the parent's indirect queue (held 7.68s from send, failure
+// reported at ~4.8s), so the answer can trail the failure by a few seconds
+enum Duration zigbee_indirect_grace = 4.seconds;
 enum Duration zigbee_delivery_deadline = 200.msecs;
 
 
@@ -646,7 +649,7 @@ protected:
                 _zdo_requests.remove(i);
                 _zdo_request_pool.free(req);
             }
-            else if (req.awaiting_response && now - req.request_time > zigbee_response_timeout)
+            else if (req.awaiting_response && now > req.deadline)
             {
                 version (DebugZigbee)
                     log.warningf("ZDO request {0, 04x} with seq {1} timed out", req.cluster, req.seq);
@@ -666,7 +669,7 @@ protected:
                 _zcl_requests.remove(i);
                 _zcl_request_pool.free(req);
             }
-            else if (req.awaiting_response && now - req.request_time > zigbee_response_timeout)
+            else if (req.awaiting_response && now > req.deadline)
             {
                 version (DebugZigbee)
                     log.warningf("ZCL request {0, 04x} with seq {1} timed out", req.cluster, req.seq);
@@ -910,7 +913,7 @@ private:
         ubyte seq;
         ushort cluster;
         int tag;
-        MonoTime request_time;
+        MonoTime deadline;
         ZDOResponseHandler response_handler;
         void* user_data;
         BaseInterface iface;
@@ -924,7 +927,13 @@ private:
             tag = -1;
             if (state == MessageState.complete)
             {
-                request_time = getTime();
+                deadline = getTime() + zigbee_response_timeout;
+                awaiting_response = true;
+            }
+            else if (state == MessageState.failed)
+            {
+                // the frame may still be waiting at the node's parent; hold on for the answer
+                deadline = getTime() + zigbee_indirect_grace;
                 awaiting_response = true;
             }
             else
@@ -932,8 +941,7 @@ private:
                 if (response_handler)
                 {
                     ZigbeeResult r = state == MessageState.timeout || state == MessageState.expired ? ZigbeeResult.timeout :
-                                     state == MessageState.aborted ? ZigbeeResult.aborted :
-                                     ZigbeeResult.failed;
+                                     ZigbeeResult.aborted;
                     response_handler(r, ZDOStatus.success, null, user_data);
                 }
                 response_handler = null;
@@ -947,7 +955,7 @@ private:
         ubyte endpoint;
         ushort cluster;
         int tag;
-        MonoTime request_time;
+        MonoTime deadline;
         ZCLResponseHandler response_handler;
         void* user_data;
         BaseInterface iface;
@@ -961,7 +969,13 @@ private:
             tag = -1;
             if (state == MessageState.complete)
             {
-                request_time = getTime();
+                deadline = getTime() + zigbee_response_timeout;
+                awaiting_response = true;
+            }
+            else if (state == MessageState.failed)
+            {
+                // the frame may still be waiting at the node's parent; hold on for the answer
+                deadline = getTime() + zigbee_indirect_grace;
                 awaiting_response = true;
             }
             else
@@ -969,8 +983,7 @@ private:
                 if (response_handler)
                 {
                     ZigbeeResult r = state == MessageState.timeout || state == MessageState.expired ? ZigbeeResult.timeout :
-                                     state == MessageState.aborted ? ZigbeeResult.aborted :
-                                     ZigbeeResult.failed;
+                                     ZigbeeResult.aborted;
                     response_handler(r, null, null, user_data);
                 }
                 response_handler = null;

@@ -233,6 +233,7 @@ struct NodeMap
 
     ubyte initialised;
     bool scan_in_progress;
+    bool woke_during_scan;
     bool device_created;
     MonoTime retry_after;
     ubyte interview_failures;

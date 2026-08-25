@@ -133,7 +133,18 @@ protected:
             log.debugf("receive poll request from {0,04x} - transmit_expected: {1}", childId, transmitExpected);
 
         ZigbeeProtocolModule mod_zb = get_module!ZigbeeProtocolModule;
-        mod_zb.note_awake(mod_zb.find_node(pan_id, childId));
+        NodeMap* n = mod_zb.find_node(pan_id, childId);
+        if (n)
+        {
+            // only a sleepy child polls; classify an unknown node from its behaviour rather than
+            // waiting on a node descriptor exchange that needs this classification to succeed
+            if (n.desc.type == NodeType.unknown)
+            {
+                n.desc.type = NodeType.sleepy_end_device;
+                arm_extended_timeout(*n);
+            }
+            mod_zb.note_awake(n);
+        }
     }
 
 

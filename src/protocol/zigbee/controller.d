@@ -98,11 +98,16 @@ nothrow @nogc:
 
     void node_awake(NodeMap* node)
     {
-        if (node.initialised == 0xFF || node.retry_after == MonoTime())
+        if (node.initialised == 0xFF)
             return;
-        node.retry_after = MonoTime();
-        version (DebugZigbeeController)
-            log.debugf("node {0,04x} is awake; resuming interview", node.id);
+        if (node.scan_in_progress)
+            node.woke_during_scan = true;
+        else if (node.retry_after != MonoTime())
+        {
+            node.retry_after = MonoTime();
+            version (DebugZigbeeController)
+                log.debugf("node {0,04x} is awake; resuming interview", node.id);
+        }
     }
 
 protected:
@@ -182,6 +187,13 @@ protected:
             if (!nm.available)
                 continue;
 
+            if (_auto_create_devices && !nm.device_created && (nm.initialised & 0x80))
+            {
+                nm.device_created = true;
+                if (nm.desc.type != NodeType.coordinator)
+                    create_device(nm);
+            }
+
             if (nm.initialised < 0xFF && !nm.scan_in_progress && _promises.length < MaxFibers)
             {
                 if (nm.retry_after != MonoTime() && now < nm.retry_after)
@@ -189,13 +201,6 @@ protected:
 
                 nm.scan_in_progress = true;
                 _promises.pushBack(async(&do_node_interview, &nm));
-            }
-
-            if (_auto_create_devices && !nm.device_created && (nm.initialised & 0x80))
-            {
-                nm.device_created = true;
-                if (nm.desc.type != NodeType.coordinator)
-                    create_device(nm);
             }
         }
 
@@ -1023,20 +1028,6 @@ private:
         log.warning("no fingerprint match for node ", node.eui);
     }
 
-    // a little helper to try a request up to 3 times with a delay
-    ZigbeeResult try_thrice(scope ZigbeeResult delegate() nothrow @nogc fn)
-    {
-        ZigbeeResult res;
-        for (size_t attempt = 0; attempt < 3; ++attempt)
-        {
-            res = fn();
-            if (res != ZigbeeResult.timeout)
-                break;
-//            sleep(100.msecs); // timeout already implemented a fairly long wait?
-        }
-        return res;
-    }
-
     bool do_node_interview(NodeMap* node)
     {
         version (DebugZigbeeController)
@@ -1048,13 +1039,26 @@ private:
         const(ubyte)[] msg = void;
         ubyte[128] req_buffer = void;
 
+        node.woke_during_scan = false;
+        const ubyte entry_initialised = node.initialised;
+
         bool fail(const(char)[] reason = "failed")
         {
             import urt.util : min;
             node.scan_in_progress = false;
+            if (node.initialised != entry_initialised)
+                node.interview_failures = 0;
             node.interview_failures = cast(ubyte)min(node.interview_failures + 1, 5);
             uint backoff_secs = 2u << node.interview_failures;
-            node.retry_after = getTime() + backoff_secs.seconds;
+            if (node.woke_during_scan)
+            {
+                // it spoke while this attempt was failing; it is awake now, so go again immediately
+                node.woke_during_scan = false;
+                node.retry_after = MonoTime();
+                backoff_secs = 0;
+            }
+            else
+                node.retry_after = getTime() + backoff_secs.seconds;
             version (DebugZigbeeController)
                 log.warningf("interview FAILED for device {0,04x}! result = {1} - {2} (retry in {3}s)", node.id, r, reason, backoff_secs);
             return false;
@@ -1067,7 +1071,7 @@ private:
         {
             req_buffer[0] = 0;
             req_buffer[1..3] = node.id.nativeToLittleEndian;
-            r = try_thrice(() => _endpoint.zdo_request(node.id, ZDOCluster.node_desc_req, req_buffer[0..3], zdo_res, PCP.ee));
+            r = _endpoint.zdo_request(node.id, ZDOCluster.node_desc_req, req_buffer[0..3], zdo_res, PCP.ee);
             if (r != ZigbeeResult.success || zdo_res.status != ZDOStatus.success)
                 return fail("node_desc_req failed");
 
@@ -1090,8 +1094,6 @@ private:
         // try request basic cluster
         if (!(node.initialised & 0xC0))
         {
-            node.initialised |= 0x40; // this is an eager attempt; either way this goes, we won't try again
-
             ref ep = node.get_endpoint(1);
             if (ep.profile_id == 0 || ep.profile_id == 0x0104)
             {
@@ -1101,24 +1103,22 @@ private:
                 bool create_cluster = 0 !in ep.clusters;
                 ref cluster = ep.get_cluster(0);
 
-                StringResult result;
-                foreach (i; 0..3)
+                BasicReadResult result = read_basic_info(node.id, ep, node.basic_info);
+                if (result == BasicReadResult.success)
                 {
-                    result = read_basic_info(node.id, ep, node.basic_info);
-                    if (result.succeeded)
-                    {
-                        if (!node.device_created)
-                            log.infof("interviewing device {0,04x}: {1} \"{2}\" {3} {4}", node.id, node.desc.type, node.get_fingerprint()[], node.basic_info.product_code[], node.basic_info.product_url[]);
+                    if (!node.device_created)
+                        log.infof("interviewing device {0,04x}: {1} \"{2}\" {3} {4}", node.id, node.desc.type, node.get_fingerprint()[], node.basic_info.product_code[], node.basic_info.product_url[]);
 
-                        ep.dynamic = false;
-                        cluster.dynamic = false;
-                        node.initialised |= 0x80;
-                        break;
-                    }
+                    ep.dynamic = false;
+                    cluster.dynamic = false;
+                    node.initialised |= 0xC0;
                 }
-
-                if (result.failed)
+                else
                 {
+                    // an answered refusal won't change on a retry; a transport failure might just mean it was asleep
+                    if (result != BasicReadResult.transport)
+                        node.initialised |= 0x40;
+
                     // this was created for the prospective attempt; we'll clean it up
                     if (create_cluster)
                         ep.clusters.remove(0);
@@ -1126,6 +1126,8 @@ private:
                         node.endpoints.remove(1);
                 }
             }
+            else
+                node.initialised |= 0x40; // no plausible endpoint to ask
         }
 
         // request power descriptor
@@ -1133,7 +1135,7 @@ private:
         {
             req_buffer[0] = 0;
             req_buffer[1..3] = node.id.nativeToLittleEndian;
-            r = try_thrice(() => _endpoint.zdo_request(node.id, ZDOCluster.power_desc_req, req_buffer[0..3], zdo_res, PCP.bk));
+            r = _endpoint.zdo_request(node.id, ZDOCluster.power_desc_req, req_buffer[0..3], zdo_res, PCP.bk);
             if (r != ZigbeeResult.success || zdo_res.status != ZDOStatus.success)
                 return fail("power_desc_req failed");
 
@@ -1156,7 +1158,7 @@ private:
         {
             req_buffer[0] = 0;
             req_buffer[1..3] = node.id.nativeToLittleEndian;
-            r = try_thrice(() => _endpoint.zdo_request(node.id, ZDOCluster.active_ep_req, req_buffer[0..3], zdo_res, PCP.bk));
+            r = _endpoint.zdo_request(node.id, ZDOCluster.active_ep_req, req_buffer[0..3], zdo_res, PCP.bk);
             if (r != ZigbeeResult.success || zdo_res.status != ZDOStatus.success)
                 return fail("active_ep_req failed");
 
@@ -1192,7 +1194,7 @@ private:
                 req_buffer[0] = 0;
                 req_buffer[1..3] = node.id.nativeToLittleEndian;
                 req_buffer[3] = ep.endpoint;
-                r = try_thrice(() => _endpoint.zdo_request(node.id, ZDOCluster.simple_desc_req, req_buffer[0..4], zdo_res, PCP.bk));
+                r = _endpoint.zdo_request(node.id, ZDOCluster.simple_desc_req, req_buffer[0..4], zdo_res, PCP.bk);
                 if (r != ZigbeeResult.success || zdo_res.status != ZDOStatus.success)
                     return fail("simple_desc_req failed");
 
@@ -1266,7 +1268,7 @@ private:
                         // try request extended attributes first, then normal if that fails
                         if (support_extended_attributes)
                         {
-                            r = try_thrice(() => _endpoint.zcl_request(node.id, ep.endpoint, ep.profile_id, c.cluster_id, ZCLCommand.discover_attributes_extended, 0, req_buffer[0..3], zcl_res, PCP.bk));
+                            r = _endpoint.zcl_request(node.id, ep.endpoint, ep.profile_id, c.cluster_id, ZCLCommand.discover_attributes_extended, 0, req_buffer[0..3], zcl_res, PCP.bk);
                             if (r != ZigbeeResult.success)
                                 return fail("discover_attributes_extended failed");
                             if (zcl_res.hdr.command == ZCLCommand.default_response)
@@ -1278,7 +1280,7 @@ private:
                         }
                         if (!support_extended_attributes)
                         {
-                            r = try_thrice(() => _endpoint.zcl_request(node.id, ep.endpoint, ep.profile_id, c.cluster_id, ZCLCommand.discover_attributes, 0, req_buffer[0..3], zcl_res, PCP.bk));
+                            r = _endpoint.zcl_request(node.id, ep.endpoint, ep.profile_id, c.cluster_id, ZCLCommand.discover_attributes, 0, req_buffer[0..3], zcl_res, PCP.bk);
                             if (r != ZigbeeResult.success)
                                 return fail("discover_attributes failed");
                         }
@@ -1321,10 +1323,12 @@ private:
                     // if we have a basic cluster, read basic info here so we have it as early as possible
                     if (!(node.initialised & 0x80) && ep.profile_id == 0x0104 && c.cluster_id == 0)
                     {
-                        StringResult result = read_basic_info(node.id, ep, node.basic_info);
-                        if (!result)
-                            return fail(result.message);
-                        node.initialised |= 0x80;
+                        BasicReadResult result = read_basic_info(node.id, ep, node.basic_info);
+                        if (result == BasicReadResult.transport)
+                            return fail("basic read failed");
+                        if (result == BasicReadResult.success)
+                            node.initialised |= 0x80;
+                        // a refusal leaves the default fingerprint; auto-create will report it
                     }
 
                     c.initialised |= 0x01;
@@ -1358,22 +1362,28 @@ private:
 
         node.initialised = 0xFF; // fully initialised
         node.scan_in_progress = false;
+        node.woke_during_scan = false;
         node.interview_failures = 0;
         node.retry_after = MonoTime();
 
         return true;
     }
 
-    StringResult read_basic_info(ushort node_id, ref NodeMap.Endpoint ep, out NodeMap.BasicInfo result)
+    enum BasicReadResult : ubyte
+    {
+        success,
+        transport, // the exchange never completed; the node may simply have been asleep
+        refused,   // the device answered and declined; asking again will not change it
+        malformed,
+    }
+
+    BasicReadResult read_basic_info(ushort node_id, ref NodeMap.Endpoint ep, out NodeMap.BasicInfo result)
     {
         ZCLResponse zcl_res;
         ubyte[128] req_buffer = void;
 
-        if (ep.profile_id != 0x0104)
-            return StringResult("endpoint does not use the Home Automation profile");
-
-        if (0 !in ep.clusters)
-            return StringResult("endpoint does not have basic cluster");
+        if (ep.profile_id != 0x0104 || 0 !in ep.clusters)
+            return BasicReadResult.refused;
         ref NodeMap.Cluster basic = ep.clusters[0];
 
         // read from the basic cluster
@@ -1382,19 +1392,15 @@ private:
             req_buffer[i*2..i*2 + 2][0..2] = basic_attributes[i].nativeToLittleEndian;
 
         // read basic attributes
-        ZigbeeResult r = try_thrice(() => _endpoint.zcl_request(node_id, ep.endpoint, 0x0104, 0, ZCLCommand.read_attributes, 0, req_buffer[0 .. basic_attributes.length*2], zcl_res, PCP.bk));
+        ZigbeeResult r = _endpoint.zcl_request(node_id, ep.endpoint, 0x0104, 0, ZCLCommand.read_attributes, 0, req_buffer[0 .. basic_attributes.length*2], zcl_res, PCP.bk);
         if (r != ZigbeeResult.success)
-            return StringResult("request failed");
+            return BasicReadResult.transport;
         if (zcl_res.hdr.command == ZCLCommand.default_response)
-        {
-            if (zcl_res.message[1] != ZCLStatus.unsup_cluster_command)
-                return StringResult("default response failure");
-            return StringResult.success; // apparently the basic cluster doesn't want to provide any info...? (TODO: should we try another endpoint?)
-        }
+            return BasicReadResult.refused; // TODO: should we try another endpoint?
 
         const(ubyte)[] msg = zcl_res.message[];
         if (msg.length < basic_attributes.length*3)
-            return StringResult("response too short");
+            return BasicReadResult.malformed;
 
         SysTime now = getSysTime();
 
@@ -1446,7 +1452,7 @@ private:
             }
         }
 
-        return StringResult.success;
+        return BasicReadResult.success;
     }
 }
 
