@@ -25,8 +25,8 @@ bool boot_config_trusted()
         uint failures = read_counter();
         if (failures >= max_config_boot_failures)
         {
-            log_warning("system", "filesystem config ignored after ", failures,
-                        " failed boots; falling back to the built-in config");
+            log_warning("system", "startup config ignored after ", failures,
+                        " failed boots; falling back to default config");
             return false;
         }
         write_counter(failures + 1);

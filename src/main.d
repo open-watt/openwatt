@@ -133,7 +133,7 @@ int main(string[] args)
     // Config layering:
     //   1. process defaults - generated CLI commands
     //   2. system.conf      - the platform itself; always applies
-    //   3. default.conf     - bring-up state, used only when there is no startup.conf
+    //   3. default.conf     - filesystem or built-in fallback when there is no startup.conf
     //      or startup.conf  - regular configuration (--config overrides path)
     //   4. user.conf        - personal overrides
     //   5. process session  - generated CLI commands
@@ -167,8 +167,11 @@ int main(string[] args)
     {
         trust_config = false;
         retire_config(config_path);
+        retire_config("startup.conf");
     }
     char[] conf = trust_config ? cast(char[])load_file(config_path) : null;
+    if (conf is null && trust_config && !config_path_explicit)
+        conf = cast(char[])load_file("startup.conf");
 
     version (CoreDump)
     {
@@ -208,8 +211,20 @@ int main(string[] args)
     }
     else if (!config_path_explicit)
     {
-        static if (default_conf.length > 0)
+        char[] fallback_conf = cast(char[])load_file("conf/default.conf");
+        if (fallback_conf is null)
+            fallback_conf = cast(char[])load_file("default.conf");
+        if (fallback_conf !is null)
         {
+            log_info("system", "using default.conf from the filesystem");
+            combined_config ~= fallback_conf;
+            combined_config ~= '\n';
+            free(fallback_conf);
+            loaded_configuration = true;
+        }
+        else static if (default_conf.length > 0)
+        {
+            log_info("system", "using built-in default.conf");
             combined_config ~= default_conf;
             combined_config ~= '\n';
             loaded_configuration = true;
@@ -233,7 +248,8 @@ int main(string[] args)
 
     if (!loaded_configuration)
     {
-        log_error("system", "No configuration loaded (tried system.conf, ", config_path, ", user.conf)");
+        log_error("system", "No configuration loaded (tried system.conf, ", config_path,
+                  ", startup.conf, conf/default.conf, default.conf, user.conf)");
         if (!interactive_mode)
             return -1;
     }
