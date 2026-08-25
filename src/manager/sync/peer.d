@@ -630,8 +630,8 @@ package:
     Array!(Array!ubyte) _pre_start;      // frames held until the session can process them
     uint             _pre_start_bytes;
     bool             _pre_start_overflow;
-    enum pre_start_max = 8;
-    enum pre_start_max_bytes = 8192;
+    enum pre_start_max = max_unacked;
+    enum pre_start_max_bytes = 64 * 1024;
     bool             _send_failed;
     uint             _session_gen;       // bumped by detach_peer; a burst spanning it is dead
 
