@@ -456,6 +456,8 @@ nothrow @nogc:
                 c.acked = true;
                 log.info("claimed node ", hex_id(kvp.key)[], " ('", from.name[], "')");
                 arm_logs(from);
+                const(char)[][1] patterns = ["device:**"];
+                encoder_for(from._encoder).encode_model_sub(from, get_module!SyncModule.alloc_seq(), patterns[], false);
             }
             else
             {
