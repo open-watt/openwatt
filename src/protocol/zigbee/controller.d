@@ -326,6 +326,54 @@ protected:
             element.subscribe(&on_samples);
     }
 
+    final void apply_zone_status(EUI64 eui, ubyte endpoint, ushort cluster, ushort zone_status, ubyte zone_id, ushort delay)
+    {
+        static immutable ushort[7] bit_attrs = [ 0xFC00, 0xFC01, 0xFC02, 0xFC03, 0xFC06, 0xFC07, 0xFC09 ];
+        static immutable ushort[7] bit_masks = [ 1, 2, 4, 8, 0x40, 0x80, 0x200 ];
+        foreach (i; 0 .. bit_attrs.length)
+        {
+            if (SampleElement* e = find_sample_element(eui, endpoint, cluster, bit_attrs[i]))
+                e.element.value = (zone_status & bit_masks[i]) != 0;
+        }
+        if (SampleElement* e = find_sample_element(eui, endpoint, cluster, 0xFC10))
+            e.element.value = zone_id;
+        if (SampleElement* e = find_sample_element(eui, endpoint, cluster, 0xFC20))
+            e.element.value = delay;
+    }
+
+    // the murmur that woke us carries the node's state, and it arrives before the device exists.
+    // that state is already on the node map, so apply it rather than waiting to be told again.
+    final void replay_known_attributes(ref NodeMap node)
+    {
+        foreach (ref ep; node.endpoints.values)
+        {
+            foreach (ref NodeMap.Cluster c; ep.clusters.values)
+            {
+                if (c.cluster_id == 0x0500)
+                {
+                    if (NodeMap.Attribute* zs = 2 in c.attributes)
+                    {
+                        ubyte zone_id;
+                        ushort delay;
+                        if (NodeMap.Attribute* a = 0xFC10 in c.attributes)
+                            zone_id = a.value.as!ubyte;
+                        if (NodeMap.Attribute* a = 0xFC20 in c.attributes)
+                            delay = a.value.as!ushort;
+                        apply_zone_status(node.eui, ep.endpoint, c.cluster_id, zs.value.as!ushort, zone_id, delay);
+                    }
+                }
+
+                foreach (ref NodeMap.Attribute a; c.attributes.values)
+                {
+                    if (a.last_updated == SysTime())
+                        continue;
+                    if (SampleElement* e = find_sample_element(node.eui, ep.endpoint, c.cluster_id, a.attribute_id))
+                        e.element.value = a.value;
+                }
+            }
+        }
+    }
+
     final SampleElement* find_sample_element(EUI64 eui, ubyte endpoint, ushort cluster, ushort attribute, ushort manufacturer = 0)
     {
         ulong[2] key = make_sample_key(eui, endpoint, cluster, attribute, manufacturer);
@@ -793,25 +841,7 @@ private:
                             attr_delay.value = delay;
                             attr_delay.last_updated = now;
 
-                            // update runtime elements
-                            if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC00))
-                                e.element.value = (zone_status & 1) != 0;
-                            if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC01))
-                                e.element.value = (zone_status & 2) != 0;
-                            if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC02))
-                                e.element.value = (zone_status & 4) != 0;
-                            if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC03))
-                                e.element.value = (zone_status & 8) != 0;
-                            if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC06))
-                                e.element.value = (zone_status & 0x40) != 0;
-                            if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC07))
-                                e.element.value = (zone_status & 0x80) != 0;
-                            if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC09))
-                                e.element.value = (zone_status & 0x200) != 0;
-                            if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC10))
-                                e.element.value = zone_id;
-                            if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC20))
-                                e.element.value = delay;
+                            apply_zone_status(nm.eui, aps.src_endpoint, aps.cluster_id, zone_status, zone_id, delay);
                         }
 
                         version (DebugZigbeeController)
@@ -1342,6 +1372,7 @@ private:
                     {
                         node.device_created = true;
                         create_device(*node);
+                        replay_known_attributes(*node);
                     }
                     prime_elements(node);
                 }
