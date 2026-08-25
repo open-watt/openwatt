@@ -1167,6 +1167,22 @@ private:
             if (probe.cluster == 0 || probe.cluster == 0xEF00)
                 continue;
 
+            // the ias zone elements are bits we decode out of one real attribute; asking for the
+            // synthetic ids the profile maps would just be answered unsupported
+            if (probe.cluster == 0x0500)
+            {
+                if (!prime_zone_status(node, probe.endpoint))
+                    continue;
+                ushort tag_ias = cast(ushort)((probe.endpoint << 8) | 0xFF);
+                bool dup;
+                foreach (i; 0 .. seen)
+                    if (seen_ep_cluster[i] == tag_ias)
+                        dup = true;
+                if (!dup && seen < seen_ep_cluster.length)
+                    seen_ep_cluster[seen++] = tag_ias;
+                continue;
+            }
+
             ushort tag = cast(ushort)((probe.endpoint << 8) | (probe.cluster & 0xFF));
             bool done;
             foreach (i; 0 .. seen)
@@ -1184,6 +1200,8 @@ private:
                     continue;
                 if (e.element.record_update() != SysTime())
                     continue; // it has reported since; nothing to ask about
+                if (e.attribute >= 0xFC00)
+                    continue; // a profile-synthetic id decoded from a real attribute; the node has no such thing
                 if (n + 2 > req.length)
                     break;
                 req[n .. n + 2] = e.attribute.nativeToLittleEndian;
@@ -1286,6 +1304,34 @@ private:
                 node.initialised |= 0x04;
             }
         }
+    }
+
+    // the zone status is one real attribute that every ias element is decoded from
+    bool prime_zone_status(NodeMap* node, ubyte endpoint)
+    {
+        if (SampleElement* any = find_sample_element(node.eui, endpoint, 0x0500, 0xFC00))
+            if (any.element.record_update() != SysTime())
+                return false;
+
+        ubyte[2] req = void;
+        req[0..2] = ushort(0x0002).nativeToLittleEndian;
+        ZCLResponse res;
+        ZigbeeResult r = _endpoint.zcl_request(node.id, endpoint, 0x0104, 0x0500,
+                                               ZCLCommand.read_attributes, 0, req[], res, PCP.bk);
+        if (r != ZigbeeResult.success || res.hdr.command != ZCLCommand.read_attributes_response)
+            return false;
+
+        const(ubyte)[] msg = res.message[];
+        if (msg.length < 6 || msg[0..2].littleEndianToNative!ushort != 0x0002 || msg[2] != 0)
+            return false;
+
+        ushort zone_status = msg[4..6].littleEndianToNative!ushort;
+        ref NodeMap.Cluster c = node.get_cluster(endpoint, 0x0500);
+        ref NodeMap.Attribute a = c.get_attribute(2);
+        a.value = zone_status;
+        a.last_updated = getSysTime();
+        apply_zone_status(node.eui, endpoint, 0x0500, zone_status, 0, 0);
+        return true;
     }
 
     // an element the node has never reported, on a node we can only talk to while it is awake
