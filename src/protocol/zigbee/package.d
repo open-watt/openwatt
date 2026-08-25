@@ -240,6 +240,7 @@ struct NodeMap
     bool device_created;
     MonoTime retry_after;
     ubyte interview_failures;
+    ubyte prime_attempts;
 
     ubyte lqi;
     byte rssi;

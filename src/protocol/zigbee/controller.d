@@ -212,8 +212,18 @@ protected:
                     create_device(nm);
             }
 
-            if (nm.initialised == 0xFF || nm.scan_in_progress)
+            if (nm.scan_in_progress)
                 continue;
+
+            if (nm.initialised == 0xFF)
+            {
+                if (nm.device_created && _promises.length < MaxFibers && needs_priming(nm))
+                {
+                    nm.scan_in_progress = true;
+                    _promises.pushBack(async(&do_prime_node, &nm));
+                }
+                continue;
+            }
 
             if (nm.retry_after != MonoTime() && now < nm.retry_after)
             {
@@ -1172,6 +1182,8 @@ private:
             {
                 if (e.eui != node.eui || e.endpoint != probe.endpoint || e.cluster != probe.cluster)
                     continue;
+                if (e.element.record_update() != SysTime())
+                    continue; // it has reported since; nothing to ask about
                 if (n + 2 > req.length)
                     break;
                 req[n .. n + 2] = e.attribute.nativeToLittleEndian;
@@ -1217,12 +1229,18 @@ private:
     // back on one wake (~4ms apart), so ask for whatever is still missing in one go.
     void prefetch_descriptors(NodeMap* node)
     {
-        ZDOQuery[3] q;
+        // two, not three: at three the node's own responses arrived behind our queued questions, so
+        // our acks were late and it retransmitted every answer three times
+        enum max_parallel = 2;
+
+        ZDOQuery[max_parallel] q;
         size_t n;
         size_t i_node = size_t.max, i_power = size_t.max, i_eps = size_t.max;
 
         void want(ushort cluster, ref size_t slot)
         {
+            if (n == max_parallel)
+                return;
             slot = n;
             q[n].cluster = cluster;
             const ubyte[2] id = node.id.nativeToLittleEndian;
@@ -1268,6 +1286,29 @@ private:
                 node.initialised |= 0x04;
             }
         }
+    }
+
+    // an element the node has never reported, on a node we can only talk to while it is awake
+    final bool needs_priming(ref NodeMap node)
+    {
+        if (node.desc.type != NodeType.sleepy_end_device || node.prime_attempts >= 3)
+            return false;
+        foreach (ref SampleElement e; _sample_elements.values)
+        {
+            if (e.eui != node.eui || e.cluster == 0 || e.cluster == 0xEF00)
+                continue;
+            if (e.element.record_update() == SysTime())
+                return true;
+        }
+        return false;
+    }
+
+    bool do_prime_node(NodeMap* node)
+    {
+        ++node.prime_attempts;
+        prime_elements(node);
+        node.scan_in_progress = false;
+        return true;
     }
 
     bool do_node_interview(NodeMap* node)
