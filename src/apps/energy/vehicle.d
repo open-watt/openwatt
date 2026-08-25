@@ -269,6 +269,7 @@ Component vehicle_for(const(char)[] vin)
         vehicle = *existing;
 
     vehicle.template_ = StringLit!"Vehicle";
+    vehicle.universal = true;
     materialise_vehicle(vehicle, vin, is_new);
     return vehicle;
 }

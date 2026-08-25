@@ -223,6 +223,7 @@ nothrow @nogc:
 
     CID cid;                            // unset until DeviceTable.insert stamps it
     bool remote;                        // materialized from a sync peer; never announced back
+    bool universal;                     // id names a global identity (VIN, EUI); a mirror merges with it
     IndexTable!(Element*) element_ids;
 
     Array!Computation computations;
