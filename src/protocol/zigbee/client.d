@@ -245,7 +245,11 @@ nothrow @nogc:
         ubyte[] msg = cast(ubyte[])message;
 
         if (msg[0] == 0)
+        {
+            if (_seq == 0)
+                _seq = 1; // zero is the caller's "unset" sentinel, so it is never issued
             msg[0] = _seq++;
+        }
 
         ZDORequest* req = null;
         MessageCallback progress = null;
@@ -637,6 +641,8 @@ protected:
             ZDORequest* req = _zdo_requests[i];
             if (!req.response_handler)
             {
+                // the send failed; a sleepy node may still answer long after we gave up
+                _aborted_zdo[_aborted_zdo_pos++ & 7] = AbortedZDOMsg(req.seq, req.cluster);
                 _zdo_requests.remove(i);
                 _zdo_request_pool.free(req);
             }
@@ -656,6 +662,7 @@ protected:
             ZCLRequest* req = _zcl_requests[i];
             if (!req.response_handler)
             {
+                _aborted_zcl[_aborted_zcl_pos++ & 7] = AbortedZCLMsg(req.seq, req.endpoint, req.cluster);
                 _zcl_requests.remove(i);
                 _zcl_request_pool.free(req);
             }
