@@ -169,28 +169,28 @@ ifdef BOARD_CONFIG_DIR
     ifeq ($(wildcard $(BOARD_CONFIG_DIR)/system.conf),)
         $(error BOARD='$(BOARD)' is missing $(BOARD_CONFIG_DIR)/system.conf)
     endif
-    DFLAGS := $(DFLAGS) -J $(BOARD_CONFIG_DIR)
+    CONF_DIR := $(BOARD_CONFIG_DIR)
     # system.conf is baked into the D object, so boards need isolated outputs.
     OBJDIR    := obj/$(BUILDNAME)_$(BOARD)_$(CONFIG)$(BUILD_VARIANT_SUFFIX)
     TARGETDIR := bin/$(BUILDNAME)_$(BOARD)_$(CONFIG)$(BUILD_VARIANT_SUFFIX)
 else ifeq ($(PLATFORM),esp32)
-    DFLAGS := $(DFLAGS) -J platforms/esp32
+    CONF_DIR := platforms/esp32
 else ifeq ($(PLATFORM),esp32-s2)
-    DFLAGS := $(DFLAGS) -J platforms/esp32s2
+    CONF_DIR := platforms/esp32s2
 else ifeq ($(PLATFORM),esp32-s3)
-    DFLAGS := $(DFLAGS) -J platforms/esp32s3
+    CONF_DIR := platforms/esp32s3
 else ifeq ($(PLATFORM),esp32-c2)
-    DFLAGS := $(DFLAGS) -J platforms/esp32c2
+    CONF_DIR := platforms/esp32c2
 else ifeq ($(PLATFORM),esp32-c3)
-    DFLAGS := $(DFLAGS) -J platforms/esp32c3
+    CONF_DIR := platforms/esp32c3
 else ifeq ($(PLATFORM),esp32-c5)
-    DFLAGS := $(DFLAGS) -J platforms/esp32c5
+    CONF_DIR := platforms/esp32c5
 else ifeq ($(PLATFORM),esp32-c6)
-    DFLAGS := $(DFLAGS) -J platforms/esp32c6
+    CONF_DIR := platforms/esp32c6
 else ifeq ($(PLATFORM),esp32-h2)
-    DFLAGS := $(DFLAGS) -J platforms/esp32h2
+    CONF_DIR := platforms/esp32h2
 else ifeq ($(PLATFORM),esp32-p4)
-    DFLAGS := $(DFLAGS) -J platforms/esp32p4
+    CONF_DIR := platforms/esp32p4
 endif
 
 ifneq ($(BUILD_VARIANT_SUFFIX),)
@@ -201,23 +201,30 @@ ifneq ($(BUILD_VARIANT_SUFFIX),)
 endif
 ifeq ($(PLATFORM),bl808)
   ifeq ($(PROCESSOR),c906)
-    DFLAGS := $(DFLAGS) -J platforms/bl808
+    CONF_DIR := platforms/bl808
   else ifeq ($(PROCESSOR),e907)
-    DFLAGS := $(DFLAGS) -J platforms/bl808_m0
+    CONF_DIR := platforms/bl808_m0
   endif
 endif
 ifeq ($(PLATFORM),bl618)
-    DFLAGS := $(DFLAGS) -J platforms/bl618
+    CONF_DIR := platforms/bl618
 endif
 ifeq ($(PLATFORM),rp2350)
-    DFLAGS := $(DFLAGS) -J platforms/rp2350
+    CONF_DIR := platforms/rp2350
 endif
 ifdef STM32_VARIANT
-    DFLAGS := $(DFLAGS) -J platforms/stm32
+    CONF_DIR := platforms/stm32
 endif
 ifneq ($(filter bk7231n bk7231t,$(PLATFORM)),)
     BK_PLATFORM_DIR := platforms/bk7231
-    DFLAGS := $(DFLAGS) -J $(BK_PLATFORM_DIR)/$(PLATFORM)
+    CONF_DIR := $(BK_PLATFORM_DIR)/$(PLATFORM)
+endif
+
+# system.conf and default.conf are string-imported into the D object, so they are
+# real prerequisites: without this an edit to either silently yields a stale binary.
+ifdef CONF_DIR
+    DFLAGS := $(DFLAGS) -J $(CONF_DIR)
+    CONF_SOURCES := $(wildcard $(CONF_DIR)/system.conf $(CONF_DIR)/default.conf)
 endif
 
 # RouterOS marker drives container packaging at the end of $(TARGET) build
@@ -311,7 +318,7 @@ endif
 
 FLAGSTAMP = $(OBJDIR)/build.flags
 
-$(TARGET): $(SOURCES) $(BAREMETAL_OBJS) $(VENDOR_OBJS) $(BK_BEKEN_LIB)
+$(TARGET): $(SOURCES) $(CONF_SOURCES) $(BAREMETAL_OBJS) $(VENDOR_OBJS) $(BK_BEKEN_LIB)
 
 # -- BK7231 FreeRTOS build (must come after $(TARGET) so it doesn't become default goal)
 
