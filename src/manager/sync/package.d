@@ -1134,20 +1134,15 @@ nothrow @nogc:
             return;
         }
 
-        // a declined format tombstones its ft so the adds citing it skip quietly
+        // Every seen ft is interned or tombstoned before dependent adds arrive.
         FormatId reg = FormatId.invalid;
         scope(exit) from._ft_recv.insert(ft, reg);
 
         ValueType vt;
-        if (!value_type_from_name(wf.type, vt))
+        const(char)[] user_name;
+        if (!value_type_from_wire(wf.type, vt, user_name))
         {
             log.warning("type frame with unknown value type '", wf.type, "'");
-            return;
-        }
-        if (vt == ValueType.user)
-        {
-            // the wire carries no TypeDetails, so user_type would alias the union's unit bits
-            log.warning("type frame cites a user type, which has no wire representation");
             return;
         }
         const(SeriesKind)* kind = enum_from_key!SeriesKind(wf.series);
@@ -1158,7 +1153,31 @@ nothrow @nogc:
         }
 
         DataFormat f;
-        if (wf.enum_name.length)
+        if (vt == ValueType.user)
+        {
+            import urt.typereg : find_type_by_name, TypeDetails;
+
+            if (wf.enum_name.length || wf.unit.length)
+            {
+                log.warning("user type frame carrying a unit or enum - malformed");
+                return;
+            }
+            immutable(TypeDetails)* td = find_type_by_name(user_name);
+            if (!td)
+            {
+                if (from.first_sighting(user_name))
+                    log.warning("format cites user type '", user_name, "', which this node lacks");
+                return;
+            }
+            if (td.variant is null || !td.text_round_trip)
+            {
+                if (from.first_sighting(user_name))
+                    log.warning("format cites user type '", user_name, "', which cannot cross a text wire");
+                return;
+            }
+            f = DataFormat(vt, *kind, td);
+        }
+        else if (wf.enum_name.length)
         {
             const(VoidEnumInfo)* ei = find_enum_info(wf.enum_name);
             if (!ei)
@@ -1186,6 +1205,12 @@ nothrow @nogc:
         if (!f.stride_fits)
         {
             log.warning("format record stride exceeds 255 bytes");
+            return;
+        }
+        if (vt == ValueType.user && !f.is_scalar)
+        {
+            if (from.first_sighting(user_name))
+                log.warning("format cites a wide or vector user type, which has no decode path");
             return;
         }
 
@@ -1287,7 +1312,6 @@ nothrow @nogc:
         Element* e = dev.find_element(rest);
         if (e)
         {
-            // an existing element keeps its format and attributes; only values land on it
             if (e.format != *pf && !value_compatible(*format_info(*pf), *e.data_format))
             {
                 log.warning("add for '", path, "' conflicts with the existing element's format - skipped");

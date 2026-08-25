@@ -587,12 +587,10 @@ package:
     Array!BaseObject _authoritative;     // proxies we hold on this peer's behalf
     Array!EID        _introduced;        // handle table: nodes we announced (slot = handle >> 1)
     Array!EID        _adopted;           // handle table: local ids for names the peer announced
-    uint[max_warned_names] _warned_names;     // hashed names this peer announced that we refused
+    uint[max_warned_names] _warned_names;
     ubyte            _warned_name_count;
     SyncEncoderKind  _encoder = SyncEncoderKind.binary;
 
-    // a refused name repeats per object or per burst, so warn once; the name is hashed
-    // rather than retained, being peer-controlled and unbounded on the wire
     bool first_sighting(const(char)[] name)
     {
         import urt.hash : fnv1a;
@@ -1229,7 +1227,6 @@ unittest
     assert(!p.first_sighting("wifi-ap"));
     assert(p.first_sighting("usb-serial"));
 
-    // a peer cannot grow the table, whatever it announces
     foreach (i; 0 .. 16)
         p.first_sighting(tconcat("type", i));
     assert(p._warned_name_count == SyncPeer.max_warned_names);
@@ -1237,7 +1234,6 @@ unittest
     p._warned_name_count = 0;
     assert(p.first_sighting("wifi-ap"));
 
-    // a name the wire allows but String cannot hold is hashed like any other
     char[40_000] huge = 'x';
     assert(p.first_sighting(huge[]));
     assert(!p.first_sighting(huge[]));
