@@ -942,8 +942,7 @@ private:
             {
                 if (response_handler)
                 {
-                    ZigbeeResult r = state == MessageState.timeout || state == MessageState.expired ? ZigbeeResult.timeout :
-                                     ZigbeeResult.aborted;
+                    ZigbeeResult r = state == MessageState.aborted ? ZigbeeResult.aborted : ZigbeeResult.failed;
                     response_handler(r, ZDOStatus.success, null, user_data);
                 }
                 response_handler = null;
@@ -986,8 +985,7 @@ private:
             {
                 if (response_handler)
                 {
-                    ZigbeeResult r = state == MessageState.timeout || state == MessageState.expired ? ZigbeeResult.timeout :
-                                     ZigbeeResult.aborted;
+                    ZigbeeResult r = state == MessageState.aborted ? ZigbeeResult.aborted : ZigbeeResult.failed;
                     response_handler(r, null, null, user_data);
                 }
                 response_handler = null;

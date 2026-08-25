@@ -232,6 +232,8 @@ nothrow @nogc:
 
     override void update()
     {
+        super.update(); // the request reap lives there, and the coordinator owns the requests
+
         if (_destroying)
         {
             if (_init_promise.state != PromiseState.pending)

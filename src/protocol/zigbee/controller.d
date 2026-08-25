@@ -289,6 +289,7 @@ protected:
                     {
                         version (DebugZigbeeController)
                             log.warningf("probe_response id mismatch for unknown node {0,04x}", unk.id);
+                        arm_timer(getTime());
                         return;
                     }
 
@@ -1199,7 +1200,10 @@ private:
                 {
                     // an answered refusal won't change on a retry; a transport failure might just mean it was asleep
                     if (result != BasicReadResult.transport)
+                    {
                         node.initialised |= 0x40;
+                        progressed = true;
+                    }
 
                     // this was created for the prospective attempt; we'll clean it up
                     if (create_cluster)
