@@ -59,6 +59,16 @@ struct ZDOResponse
     Array!ubyte message;
 }
 
+// one independent question in a batch; each carries its own buffer so each gets its own sequence
+struct ZDOQuery
+{
+    ushort cluster;
+    ubyte[8] request;
+    ubyte request_len;
+    ZigbeeResult result = ZigbeeResult.pending;
+    ZDOResponse response;
+}
+
 struct ZCLResponse
 {
     ZCLHeader hdr;
@@ -372,6 +382,76 @@ nothrow @nogc:
         else version (DebugZigbee)
             log.tracef("zdo response <-{0,04x} [zdo:{1,04x}] after {2}", dst, cluster, ev.timeout.elapsed);
         return data.result;
+    }
+
+    // independent questions are asked together: a sleepy node's window fits far more overlapped
+    // questions than serial round trips, and the interface already allows several in flight
+    final void zdo_request_batch(ushort dst, ZDOQuery[] queries, PCP pcp = PCP.be)
+    {
+        debug assert(is_in_fibre(), "zdo_request_batch() must be called from a fibre context");
+
+        if (aborting())
+        {
+            foreach (ref q; queries)
+                q.result = ZigbeeResult.aborted;
+            return;
+        }
+
+        static struct Batch
+        {
+            YieldZB e;
+            ZDOQuery[] queries;
+            uint outstanding;
+
+            void respond(ZigbeeResult r, ZDOStatus status, const(ubyte)[] message, void* user_data) nothrow @nogc
+            {
+                if (r == ZigbeeResult.pending)
+                {
+                    e.timeout.reset();
+                    return;
+                }
+                size_t i = cast(size_t)user_data;
+                queries[i].result = r;
+                if (r == ZigbeeResult.success)
+                {
+                    queries[i].response.status = status;
+                    queries[i].response.message = message;
+                }
+                if (--outstanding == 0)
+                    e.finished = true;
+            }
+        }
+
+        auto ev = InPlace!YieldZB(Default);
+        auto batch = Batch(ev, queries, 0);
+        ev.timeout = Timer(10.seconds);
+
+        int[8] tags = -1;
+        foreach (i, ref q; queries)
+        {
+            q.request[0] = 0; // each question needs its own sequence
+            int tag = send_zdo_message(dst, q.cluster, q.request[0 .. q.request_len], pcp, &batch.respond, cast(void*)i);
+            if (tag < 0)
+            {
+                q.result = ZigbeeResult.failed;
+                continue;
+            }
+            tags[i] = tag;
+            ++batch.outstanding;
+        }
+
+        if (batch.outstanding == 0)
+            return;
+
+        YieldResult y = yield(ev);
+        foreach (i, ref q; queries)
+        {
+            if (q.result != ZigbeeResult.pending)
+                continue;
+            q.result = y == YieldResult.aborted ? ZigbeeResult.aborted : ZigbeeResult.failed;
+            if (tags[i] >= 0)
+                abort_zdo_request(tags[i], q.result);
+        }
     }
 
     final int send_zcl_message(EUI64 eui, ubyte dst_endpoint, ubyte src_endpoint, ushort profile, ushort cluster, ZCLCommand command, ubyte flags, const(void)[] payload, PCP pcp = PCP.be, ZCLResponseHandler response_handler = null, void* user_data = null)
@@ -1227,6 +1307,9 @@ nothrow @nogc:
 
     ZigbeeResult zdo_request(ushort dst, ushort cluster, void[] message, out ZDOResponse response, PCP pcp = PCP.be)
         => _node.zdo_request(dst, cluster, message, response, pcp);
+
+    void zdo_request_batch(ushort dst, ZDOQuery[] queries, PCP pcp = PCP.be)
+        => _node.zdo_request_batch(dst, queries, pcp);
 
     int send_zcl_message(ushort dst, ubyte endpoint, ushort profile, ushort cluster, ZCLCommand command, ubyte flags, const(void)[] payload, PCP pcp = PCP.be, ZCLResponseHandler response_handler = null, void* user_data = null)
         => _node.send_zcl_message(dst, endpoint, _endpoint, profile, cluster, command, flags, payload, pcp, response_handler, user_data);

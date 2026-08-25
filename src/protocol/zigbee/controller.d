@@ -109,18 +109,16 @@ nothrow @nogc:
         if (node.initialised == 0xFF)
             return;
         if (node.scan_in_progress)
-        {
             node.woke_during_scan = true;
-            return;
-        }
-        if (node.retry_after != MonoTime())
+        else if (node.retry_after != MonoTime())
         {
             node.retry_after = MonoTime();
             version (DebugZigbeeController)
                 log.debugf("node {0,04x} is awake; resuming interview", node.id);
         }
-        // this runs inside a receive callback; let the interview start off the timer instead of
-        // re-entering the transmit path from here
+        // always schedule: an attempt already running does not stop the device this node already
+        // identified itself as from being published. this runs inside a receive callback, so let
+        // the pass happen off the timer rather than re-entering the transmit path from here
         arm_timer(getTime());
     }
 
@@ -1108,6 +1106,140 @@ private:
         return res;
     }
 
+    // a sleepy node only volunteers a report when something changes, so an element it has never
+    // reported stays empty indefinitely. while it is awake and its profile is known, ask outright.
+    // mains-powered nodes are polled periodically and need none of this.
+    void prime_elements(NodeMap* node)
+    {
+        if (node.desc.type != NodeType.sleepy_end_device)
+            return;
+
+        ushort[8] seen_ep_cluster = void;
+        size_t seen;
+        ubyte[128] req = void;
+        ZCLResponse res;
+
+        foreach (ref SampleElement probe; _sample_elements.values)
+        {
+            if (probe.eui != node.eui)
+                continue;
+            // the basic cluster is read during the interview, and tuya datapoints are not readable
+            if (probe.cluster == 0 || probe.cluster == 0xEF00)
+                continue;
+
+            ushort tag = cast(ushort)((probe.endpoint << 8) | (probe.cluster & 0xFF));
+            bool done;
+            foreach (i; 0 .. seen)
+                if (seen_ep_cluster[i] == tag)
+                    done = true;
+            if (done || seen == seen_ep_cluster.length)
+                continue;
+            seen_ep_cluster[seen++] = tag;
+
+            // gather every attribute the profile maps on this endpoint and cluster into one read
+            size_t n;
+            foreach (ref SampleElement e; _sample_elements.values)
+            {
+                if (e.eui != node.eui || e.endpoint != probe.endpoint || e.cluster != probe.cluster)
+                    continue;
+                if (n + 2 > req.length)
+                    break;
+                req[n .. n + 2] = e.attribute.nativeToLittleEndian;
+                n += 2;
+            }
+            if (n == 0)
+                continue;
+
+            ushort profile = node.get_endpoint(probe.endpoint).profile_id;
+            if (profile == 0)
+                profile = 0x0104;
+
+            ZigbeeResult r = _endpoint.zcl_request(node.id, probe.endpoint, profile, probe.cluster,
+                                                   ZCLCommand.read_attributes, 0, req[0 .. n], res, PCP.bk);
+            if (r != ZigbeeResult.success || res.hdr.command != ZCLCommand.read_attributes_response)
+                continue;
+
+            SysTime now = getSysTime();
+            const(ubyte)[] msg = res.message[];
+            while (msg.length >= 3)
+            {
+                ushort attr_id = msg[0..2].littleEndianToNative!ushort;
+                ubyte st = msg[2];
+                msg = msg[3 .. $];
+                if (st != 0)
+                    continue; // unsupported attribute; the rest of the response is still good
+                if (msg.length < 1)
+                    break;
+                ZCLDataType dt = cast(ZCLDataType)msg[0];
+                Variant v;
+                ptrdiff_t taken = get_zcl_value(dt, msg[1 .. $], v);
+                if (taken < 0)
+                    break;
+                if (SampleElement* e = find_sample_element(node.eui, probe.endpoint, probe.cluster, attr_id))
+                    write_decoded_sample(*e, v, msg[1 .. 1 + taken], now);
+                msg = msg[1 + taken .. $];
+            }
+        }
+    }
+
+    // node, power and active-endpoint descriptors do not depend on each other. asked serially each
+    // waits its own poll cycle (~110ms measured); queued together the parent delivers them back to
+    // back on one wake (~4ms apart), so ask for whatever is still missing in one go.
+    void prefetch_descriptors(NodeMap* node)
+    {
+        ZDOQuery[3] q;
+        size_t n;
+        size_t i_node = size_t.max, i_power = size_t.max, i_eps = size_t.max;
+
+        void want(ushort cluster, ref size_t slot)
+        {
+            slot = n;
+            q[n].cluster = cluster;
+            const ubyte[2] id = node.id.nativeToLittleEndian;
+            q[n].request[1 .. 3] = id[];
+            q[n].request_len = 3;
+            ++n;
+        }
+
+        if (!(node.initialised & 0x01)) want(ZDOCluster.node_desc_req, i_node);
+        if (!(node.initialised & 0x02)) want(ZDOCluster.power_desc_req, i_power);
+        if (!(node.initialised & 0x04)) want(ZDOCluster.active_ep_req, i_eps);
+        if (n < 2)
+            return; // nothing to gain over the sequential path
+
+        _endpoint.zdo_request_batch(node.id, q[0 .. n], PCP.ee);
+
+        bool answered(size_t i)
+            => i != size_t.max && q[i].result == ZigbeeResult.success && q[i].response.status == ZDOStatus.success;
+
+        if (answered(i_node))
+            q[i_node].response.message[].parse_node_desc(node);
+
+        if (answered(i_power))
+        {
+            const(ubyte)[] msg = q[i_power].response.message[];
+            if (msg.length >= 4 && msg[0..2].littleEndianToNative!ushort == node.id)
+            {
+                node.power.current_mode = cast(CurrentPowerMode)(msg[2] & 0x0F);
+                node.power.available_sources = msg[2] >> 4;
+                node.power.current_source = msg[3] & 0x0F;
+                node.power.batt_level = g_power_levels[msg[3] >> 6];
+                node.initialised |= 0x02;
+            }
+        }
+
+        if (answered(i_eps))
+        {
+            const(ubyte)[] msg = q[i_eps].response.message[];
+            if (msg.length >= 3 && msg[0..2].littleEndianToNative!ushort == node.id && msg.length >= 3 + msg[2])
+            {
+                foreach (i; 0 .. msg[2])
+                    node.get_endpoint(msg[3 + i]).dynamic = false;
+                node.initialised |= 0x04;
+            }
+        }
+    }
+
     bool do_node_interview(NodeMap* node)
     {
         version (DebugZigbeeController)
@@ -1146,6 +1278,14 @@ private:
         }
 
         debug assert(node.eui != EUI64());
+
+        // anything this answers is skipped below; anything it does not falls through unchanged
+        if ((node.initialised & 0x07) != 0x07)
+        {
+            prefetch_descriptors(node);
+            if (node.initialised & 0x01)
+                progressed = true;
+        }
 
         // request node descriptor
         if (!(node.initialised & 0x01))
@@ -1195,6 +1335,15 @@ private:
                     cluster.dynamic = false;
                     node.initialised |= 0xC0;
                     progressed = true;
+
+                    // the profile's elements are what make the node usable, so publish before
+                    // going further, then fill them in while it is still awake
+                    if (_auto_create_devices && !node.device_created && node.desc.type != NodeType.coordinator)
+                    {
+                        node.device_created = true;
+                        create_device(*node);
+                    }
+                    prime_elements(node);
                 }
                 else
                 {

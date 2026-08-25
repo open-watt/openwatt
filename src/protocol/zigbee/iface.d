@@ -1,6 +1,7 @@
 module protocol.zigbee.iface;
 
 import urt.array;
+import urt.async : async_update;
 import urt.endian;
 import urt.lifetime;
 import urt.log;
@@ -28,7 +29,7 @@ import router.iface.packet;
 import router.iface.priority_queue;
 
 //version = DebugZigbeeMessageFlow;
-//version = DebugZigbeeLatency;
+version = DebugZigbeeLatency;
 
 nothrow @nogc:
 
@@ -437,6 +438,7 @@ private:
     bool _subscribed;
     bool _counter_pending;
     ubyte _max_in_flight = 3;
+    bool _pumping_fibres;
 
     MonoTime _last_ping;
     MonoTime _ezsp_offline_since;
@@ -774,6 +776,15 @@ private:
             writeDebugf("ZBLAT rx    t={0} src={1,04x} ep={2,02x} cl={3,04x}", zblat_us(), hdr.src, hdr.src_endpoint, hdr.cluster_id);
 
         incoming_packet(p);
+
+        // a fibre waiting on this response would otherwise idle until the next reactor pass, which
+        // measures ~15ms; against a ~100ms round trip inside a wake window that is worth reclaiming
+        if (!_pumping_fibres)
+        {
+            _pumping_fibres = true;
+            async_update();
+            _pumping_fibres = false;
+        }
     }
 
     void lookup_eui_response(void* user_data, EmberStatus status, EmberEUI64 eui64)
