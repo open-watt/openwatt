@@ -587,26 +587,26 @@ package:
     Array!BaseObject _authoritative;     // proxies we hold on this peer's behalf
     Array!EID        _introduced;        // handle table: nodes we announced (slot = handle >> 1)
     Array!EID        _adopted;           // handle table: local ids for names the peer announced
-    uint[max_unknown_types] _unknown_types;   // hashed type names this peer announced that we lack
-    ubyte            _unknown_type_count;
+    uint[max_warned_names] _warned_names;     // hashed names this peer announced that we refused
+    ubyte            _warned_name_count;
     SyncEncoderKind  _encoder = SyncEncoderKind.binary;
 
-    // a peer that carries a type we lack announces every object of it; warn once per type.
-    // the name is hashed, never retained: it is peer-controlled and unbounded on the wire
-    bool first_sighting_of_unknown_type(const(char)[] type)
+    // a refused name repeats per object or per burst, so warn once; the name is hashed
+    // rather than retained, being peer-controlled and unbounded on the wire
+    bool first_sighting(const(char)[] name)
     {
         import urt.hash : fnv1a;
-        uint h = fnv1a(cast(const(ubyte)[])type);
-        foreach (t; _unknown_types[0 .. _unknown_type_count])
+        uint h = fnv1a(cast(const(ubyte)[])name);
+        foreach (t; _warned_names[0 .. _warned_name_count])
             if (t == h)
                 return false;
-        if (_unknown_type_count == max_unknown_types)
+        if (_warned_name_count == max_warned_names)
             return false;
-        _unknown_types[_unknown_type_count++] = h;
+        _warned_names[_warned_name_count++] = h;
         return true;
     }
 
-    enum max_unknown_types = 8;
+    enum max_warned_names = 16;
 
     // bulk walks stop short of the window's end so the session's other control frames always find room
     enum control_reserve = 16;
@@ -1224,27 +1224,21 @@ unittest
     assert(p.adoptable(4));
     p.adopt(2, EID(CID(4)));
     assert(p._adopted[1] == EID(CID(4)));
-}
 
-unittest
-{
-    SyncPeer p = alloc!SyncPeer(CID(1));
-    scope(exit) free(p);
-
-    assert(p.first_sighting_of_unknown_type("wifi-ap"));
-    assert(!p.first_sighting_of_unknown_type("wifi-ap"));
-    assert(p.first_sighting_of_unknown_type("usb-serial"));
+    assert(p.first_sighting("wifi-ap"));
+    assert(!p.first_sighting("wifi-ap"));
+    assert(p.first_sighting("usb-serial"));
 
     // a peer cannot grow the table, whatever it announces
     foreach (i; 0 .. 16)
-        p.first_sighting_of_unknown_type(tconcat("type", i));
-    assert(p._unknown_type_count == SyncPeer.max_unknown_types);
+        p.first_sighting(tconcat("type", i));
+    assert(p._warned_name_count == SyncPeer.max_warned_names);
 
-    p._unknown_type_count = 0;
-    assert(p.first_sighting_of_unknown_type("wifi-ap"));
+    p._warned_name_count = 0;
+    assert(p.first_sighting("wifi-ap"));
 
     // a name the wire allows but String cannot hold is hashed like any other
     char[40_000] huge = 'x';
-    assert(p.first_sighting_of_unknown_type(huge[]));
-    assert(!p.first_sighting_of_unknown_type(huge[]));
+    assert(p.first_sighting(huge[]));
+    assert(!p.first_sighting(huge[]));
 }

@@ -61,8 +61,8 @@ import manager.element : Access, add_feed_listener, Cursor, Element, ElementLife
                          register_element_lifecycle_handler, remove_feed_listener, SamplingMode, sweep_dirty;
 import manager.id : EID;
 import manager.path : Address, match_path, pattern_matches, walk_elements;
-import manager.series : Constraint, DataFormat, FormatId, RecordBlock, register_format, Scalar, SeriesKind,
-                        unbox_scalar, valid, ValueType;
+import manager.series : Constraint, DataFormat, format_info, FormatId, RecordBlock, register_format, Scalar,
+                        SeriesKind, unbox_scalar, valid, value_compatible, ValueType;
 import manager.console;
 import manager.console.command : CommandState, CommandCompletionState;
 import manager.console.session;
@@ -395,7 +395,7 @@ nothrow @nogc:
         p._subscriptions.clear();
         p._introduced.clear();
         p._adopted.clear();
-        p._unknown_type_count = 0;
+        p._warned_name_count = 0;
         p._remote_caps = 0;
         p.reset_sublayer();           // seq spaces are session state
         p._remote_nonce_set = false;
@@ -460,7 +460,7 @@ nothrow @nogc:
         auto rt = type in g_app.types;
         if (!rt)
         {
-            if (from.first_sighting_of_unknown_type(type))
+            if (from.first_sighting(type))
                 log.warning("add_name from '", from.name[], "' with unknown type '", type, "'");
         }
         else if (rt.type_info.is_abstract)
@@ -488,7 +488,7 @@ nothrow @nogc:
             auto rt = type in g_app.types;
             if (!rt)
             {
-                if (from.first_sighting_of_unknown_type(type))
+                if (from.first_sighting(type))
                     log.warning("bind from '", from.name[], "' for unknown type '", type, "' - cannot materialize proxy for CID ", target.raw);
                 return;
             }
@@ -1133,6 +1133,11 @@ nothrow @nogc:
             log.warning("peer '", from.name[], "' re-interned ft ", ft);
             return;
         }
+
+        // a declined format tombstones its ft so the adds citing it skip quietly
+        FormatId reg = FormatId.invalid;
+        scope(exit) from._ft_recv.insert(ft, reg);
+
         ValueType vt;
         if (!value_type_from_name(wf.type, vt))
         {
@@ -1209,7 +1214,7 @@ nothrow @nogc:
                 f.constraint = register_constraint(c);
         }
 
-        from._ft_recv.insert(ft, register_format(f));
+        reg = register_format(f);
     }
 
     void inbound_type_enum(SyncPeer from, const(char)[] name, ref Variant members)
@@ -1257,7 +1262,7 @@ nothrow @nogc:
         const(char)[] rest = a.subject;
         const(char)[] dev_id = rest.split!'.';
 
-        Device dev = find_or_create_remote_device(dev_id);
+        Device dev = find_or_create_remote_device(from, dev_id);
         if (!dev)
             return EID.invalid;
 
@@ -1274,24 +1279,42 @@ nothrow @nogc:
             log.warning("add cites unknown ft ", ft);
             return EID.invalid;
         }
-        Element* e = dev.find_or_create_element(rest, *pf);
-        if (!e)
+        if (!(*pf).valid)
+        {
+            log.debug_("add for declined ft ", ft, " at '", path, "'");
             return EID.invalid;
-        if (e.data_format.kind == SeriesKind.point && !e.has_history)
-        {
-            // a mirror event log retains the same window the authority's default gives
-            e.retention(256, 16_384);
-            e.retention(3600.seconds);
         }
-        if (access.length)
+        Element* e = dev.find_element(rest);
+        if (e)
         {
-            if (const(Access)* acc = enum_from_key!Access(access))
-                e.access = *acc;
+            // an existing element keeps its format and attributes; only values land on it
+            if (e.format != *pf && !value_compatible(*format_info(*pf), *e.data_format))
+            {
+                log.warning("add for '", path, "' conflicts with the existing element's format - skipped");
+                return EID.invalid;
+            }
         }
-        if (mode.length)
+        else
         {
-            if (const(SamplingMode)* m = enum_from_key!SamplingMode(mode))
-                e.sampling_mode = *m;
+            e = dev.find_or_create_element(rest, *pf);
+            if (!e)
+                return EID.invalid;
+            if (e.data_format.kind == SeriesKind.point && !e.has_history)
+            {
+                // a mirror event log retains the same window the authority's default gives
+                e.retention(256, 16_384);
+                e.retention(3600.seconds);
+            }
+            if (access.length)
+            {
+                if (const(Access)* acc = enum_from_key!Access(access))
+                    e.access = *acc;
+            }
+            if (mode.length)
+            {
+                if (const(SamplingMode)* m = enum_from_key!SamplingMode(mode))
+                    e.sampling_mode = *m;
+            }
         }
         if (v && !v.isNull)
             e.value(*v, t_ms ? from_unix_time_ns(t_ms * 1_000_000) : getSysTime());
@@ -2008,13 +2031,14 @@ nothrow @nogc:
         });
     }
 
-    Device find_or_create_remote_device(const(char)[] id)
+    Device find_or_create_remote_device(SyncPeer from, const(char)[] id)
     {
         if (Device* d = id in g_app.devices)
         {
             if (!(*d).remote)
             {
-                log.warning("remote device '", id, "' collides with a local device - ignored");
+                if (from.first_sighting(id))
+                    log.warning("remote device '", id, "' collides with a local device - ignored");
                 return null;
             }
             return *d;
@@ -2025,20 +2049,26 @@ nothrow @nogc:
         return dev;
     }
 
-    // Helpers
-
     uint alloc_seq()
     {
         uint s = ++next_seq;
-        if (s == 0) s = ++next_seq;  // skip reserved zero on wrap
+        if (s == 0)
+            s = ++next_seq;
         return s;
     }
 }
 
 
+package void collect_superseded(SyncPeer[] peers, SyncPeer from, ulong node_id, ref Array!SyncPeer superseded)
+{
+    foreach (p; peers)
+        if (p !is from && p._remote_node_id == node_id && !p.disabled)
+            superseded ~= p;
+}
+
+
 private:
 
-// /sync/model-sub peer=<peer> pattern=<address> [once=no] - model read; once=no arms a live feed
 void sync_model_sub(Session session, SyncPeer peer, const(char)[] pattern, Nullable!bool once)
 {
     SyncModule mod = get_module!SyncModule;
@@ -2046,7 +2076,6 @@ void sync_model_sub(Session session, SyncPeer peer, const(char)[] pattern, Nulla
     encoder_for(peer._encoder).encode_model_sub(peer, mod.alloc_seq(), patterns[], !once || once.value);
 }
 
-// /sync/log-sub peer=<name> [severity=<sev>] [tag=<prefix>]
 CommandState sync_log_sub(Session session, const(char)[] peer, Nullable!Severity severity, Nullable!(const(char)[]) tag)
 {
     SyncModule mod = get_module!SyncModule;
@@ -2070,14 +2099,6 @@ CommandState sync_log_sub(Session session, const(char)[] peer, Nullable!Severity
     return null;
 }
 
-
-// the newest session for a node supersedes any older one carrying the same node id
-package void collect_superseded(SyncPeer[] peers, SyncPeer from, ulong node_id, ref Array!SyncPeer superseded)
-{
-    foreach (p; peers)
-        if (p !is from && p._remote_node_id == node_id && !p.disabled)
-            superseded ~= p;
-}
 
 unittest
 {
