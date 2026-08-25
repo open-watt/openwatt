@@ -287,6 +287,7 @@ nothrow @nogc:
             pump_introductions(p);
             return;
         }
+        pump_model_intro(p);
         encoder_for(p._encoder).tick_dirty(p);
         p.flush_logs();
     }
@@ -361,6 +362,45 @@ nothrow @nogc:
         }
     }
 
+    // The model burst mirrors pump_introductions: adds are control frames, so they
+    // drain against window headroom rather than flooding the session.
+    void pump_model_intro(SyncPeer p)
+    {
+        if (p._pending_intro.empty)
+            return;
+        SyncEncoder enc = encoder_for(p._encoder);
+        uint gen = p.begin_burst();
+        while (p._pending_intro_head < p._pending_intro.length)
+        {
+            if (p.control_window_free() <= SyncPeer.control_reserve)
+                return;
+            auto pi = p._pending_intro[p._pending_intro_head];
+            ++p._pending_intro_head;
+            if (!pi.node)
+                enc.encode_res(p, pi.res_seq);
+            else if (pi.node.index == 0)
+            {
+                if (Device dev = g_app.devices.container(pi.node.container))
+                    introduce_device(p, enc, dev);
+            }
+            else if (Element* e = resolve_element(pi.node))
+            {
+                char[256] buf = void;
+                ptrdiff_t len = e.full_path(buf);
+                if (len > 0 && len <= buf.length)
+                {
+                    send_element(p, enc, e, buf[0 .. len], gen);
+                    if (pi.from_ms && p.send_ok(gen))
+                        send_backfill(p, enc, e, pi.from_ms, pi.to_ms, gen);
+                }
+            }
+            if (!p.send_ok(gen))
+                return;   // the session died under the burst; detach cleared the queue
+        }
+        p._pending_intro.clear();
+        p._pending_intro_head = 0;
+    }
+
     // Peer teardown: request cancellation of the peer's in-flight inbound commands;
     // the update() drain reaps them (delivering results while the transport lasts).
     // True while any remain, so the peer's shutdown() can wait on it.
@@ -409,6 +449,8 @@ nothrow @nogc:
         p._model_subs.clear();
         p._live_nodes.clear();
         p._pending_vals.clear();
+        p._pending_intro.clear();
+        p._pending_intro_head = 0;
 
         // forwards die with either endpoint; a dead destination answers the origin with err
         Array!uint doomed;
@@ -1050,7 +1092,6 @@ nothrow @nogc:
     void inbound_model_sub(SyncPeer from, uint seq, const(char[])[] patterns, bool once, ulong from_ms = 0, ulong to_ms = 0)
     {
         SyncEncoder enc = encoder_for(from._encoder);
-        uint gen = from.begin_burst();
         foreach (pat; patterns)
         {
             Address a = Address.parse(pat);
@@ -1086,21 +1127,18 @@ nothrow @nogc:
                 if (!dev.cid || authored_by(from, dev))
                     continue;
                 if (match_path(a.subject, dev.id[]))
-                    introduce_device(from, enc, dev);
+                    from._pending_intro ~= SyncPeer.PendingIntro(EID(dev.cid));
                 walk_elements(dev, a.subject, (Element* e, const(char)[] path) {
-                    if (!from.send_ok(gen))
-                        return;
                     if (arm)
                         track_live(from, e);
-                    send_element(from, enc, e, path, gen);
-                    if (from_ms && from.send_ok(gen))
-                        send_backfill(from, enc, e, from_ms, to_ms, gen);
+                    EID node = e.ensure_eid();
+                    if (node)
+                        from._pending_intro ~= SyncPeer.PendingIntro(node, 0, from_ms, to_ms);
                 });
-                if (!from.send_ok(gen))
-                    return;   // the session went down under the burst; nothing more can be answered
             }
         }
-        enc.encode_res(from, seq);
+        from._pending_intro ~= SyncPeer.PendingIntro(EID.invalid, seq);
+        pump_model_intro(from);
     }
 
     void inbound_model_unsub(SyncPeer from, const(char[])[] patterns)
@@ -2002,7 +2040,11 @@ nothrow @nogc:
                 if (!a.valid || !wildcard_match(a.ns, "device") || !match_path(a.subject, path))
                     continue;
                 track_live(p, e);
-                send_element(p, encoder_for(p._encoder), e, path, p.begin_burst());
+                if (EID node = e.ensure_eid())
+                {
+                    p._pending_intro ~= SyncPeer.PendingIntro(node);
+                    pump_model_intro(p);
+                }
                 break;
             }
         });

@@ -665,6 +665,16 @@ package:
     Map!(ulong, ulong) _live_nodes;      // EID.raw of armed nodes -> next unsent record index (point series)
     Array!EID        _pending_vals;      // dirty matched nodes awaiting this tick's flush
 
+    struct PendingIntro
+    {
+        EID node;       // invalid = burst-complete marker carrying res_seq
+        uint res_seq;
+        ulong from_ms;
+        ulong to_ms;
+    }
+    Array!PendingIntro _pending_intro;   // model adds awaiting control-window headroom
+    size_t _pending_intro_head;
+
     bool     _time_authority;
     bool     _time_authority_from_claim;
     bool     _time_subordinate;
