@@ -438,6 +438,9 @@
     <DCompile Include="src\manager\sync\binary_encoder.d">
       <Filter>src\manager\sync</Filter>
     </DCompile>
+    <DCompile Include="src\manager\sync\console.d">
+      <Filter>src\manager\sync</Filter>
+    </DCompile>
     <DCompile Include="src\manager\sync\discovery.d">
       <Filter>src\manager\sync</Filter>
     </DCompile>

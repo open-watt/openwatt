@@ -16,6 +16,7 @@ import urt.time;
 import manager;
 import manager.base;
 import manager.collection;
+import manager.console.session : Session;
 import manager.device : Device;
 import manager.element : Access, Element;
 import manager.id : EID;
@@ -48,9 +49,10 @@ enum SyncCaps : ubyte
     console = 1 << 3,
     logs    = 1 << 4,
     time    = 1 << 5,
+    console_session = 1 << 6,
 }
 
-enum ubyte local_sync_caps = SyncCaps.objects | SyncCaps.model | SyncCaps.history | SyncCaps.console | SyncCaps.logs | SyncCaps.time;
+enum ubyte local_sync_caps = SyncCaps.objects | SyncCaps.model | SyncCaps.history | SyncCaps.console | SyncCaps.logs | SyncCaps.time | SyncCaps.console_session;
 
 // reliability sublayer classification; values are the wire kind byte
 enum TxQueue : ubyte
@@ -759,6 +761,9 @@ package:
     bool     _want_logs;
     Severity _want_log_severity;
     String   _want_log_tag;
+
+    Session _console_session;
+    uint _console_seq;
 
 private:
     PeerBinding model_binding(Device device)

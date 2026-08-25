@@ -17,6 +17,7 @@ import urt.variant;
 
 import manager.base;
 import manager.collection;
+import manager.console.session : ClientFeatures;
 import manager.element : Element;
 import manager.record : Sample;
 import manager.series : Constraint, DataFormat, RecordBlock, Scalar, SeriesKind, ValueType;
@@ -70,6 +71,7 @@ enum Verb : ubyte
     suggest,
     suggestions,
     claim,
+    console,
 }
 
 
@@ -244,6 +246,31 @@ nothrow @nogc:
         _buf.put_varint(suggestions.length);
         foreach (ref suggestion; suggestions)
             _buf.put_str(suggestion[]);
+        send_frame(peer);
+    }
+
+    override void encode_console(SyncPeer peer, uint seq, SyncConsoleEvent event, const(char)[] data = null, SyncConsoleTerminal terminal = SyncConsoleTerminal())
+    {
+        begin_frame(Verb.console);
+        _buf.put_varint(seq);
+        _buf ~= event;
+        final switch (event)
+        {
+            case SyncConsoleEvent.open:
+            case SyncConsoleEvent.terminal:
+                _buf.put_varint(terminal.width);
+                _buf.put_varint(terminal.height);
+                _buf.put_varint(ushort(terminal.features));
+                _buf.put_str(terminal.type);
+                break;
+            case SyncConsoleEvent.input:
+            case SyncConsoleEvent.output:
+                _buf.put_str(data);
+                break;
+            case SyncConsoleEvent.close:
+            case SyncConsoleEvent.closed:
+                break;
+        }
         send_frame(peer);
     }
 
@@ -999,6 +1026,43 @@ nothrow @nogc:
                     break;
                 foreach (i; 0 .. count)
                     r.str();
+                break;
+            }
+
+            case Verb.console:
+            {
+                uint seq = cast(uint)r.varint();
+                ubyte event_value = r.u8();
+                if (event_value > SyncConsoleEvent.max)
+                    r.fail = true;
+                if (r.fail)
+                    break;
+
+                SyncConsoleEvent event = cast(SyncConsoleEvent)event_value;
+                const(char)[] data;
+                SyncConsoleTerminal terminal;
+                final switch (event)
+                {
+                    case SyncConsoleEvent.open:
+                    case SyncConsoleEvent.terminal:
+                        ulong width = r.varint();
+                        ulong height = r.varint();
+                        ulong features = r.varint();
+                        const(char)[] terminal_type = r.str();
+                        if (width > ushort.max || height > ushort.max || features > ushort.max)
+                            r.fail = true;
+                        terminal = SyncConsoleTerminal(cast(ushort)width, cast(ushort)height, cast(ClientFeatures)features, terminal_type);
+                        break;
+                    case SyncConsoleEvent.input:
+                    case SyncConsoleEvent.output:
+                        data = r.str();
+                        break;
+                    case SyncConsoleEvent.close:
+                    case SyncConsoleEvent.closed:
+                        break;
+                }
+                if (!r.fail)
+                    sync.inbound_console(peer, seq, event, data, terminal);
                 break;
             }
         }
