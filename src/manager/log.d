@@ -829,9 +829,20 @@ void retire_bootstrap_log_sink()
 }
 
 
+// a record relayed from another node is stamped with its origin; local records are not
+const(char)[] origin_of(scope ref const LogMessage msg)
+{
+    import manager.system : hostname;
+    if (msg.hostname.length == 0 || msg.hostname[] == hostname[])
+        return null;
+    return msg.hostname;
+}
+
 const(char)[] format_log_line(scope ref const LogMessage msg)
 {
     auto sev = severity_styles[msg.severity];
+    const(char)[] origin = origin_of(msg);
+    const(char)[] origin_pad = origin.length ? " " : "";
     enum reset = "\x1b[0m";
 
     if (msg.tag.length > 0)
@@ -846,24 +857,26 @@ const(char)[] format_log_line(scope ref const LogMessage msg)
         size_t pad = tag_width > msg.tag.length ? tag_width - msg.tag.length + 1 : 1;
 
         if (msg.object_name.length > 0)
-            return tconcat(sev.badge, ' ', tag_fg, msg.tag, pad_buf[0 .. pad], sev.color, '\'', msg.object_name, "': ", msg.message, reset);
+            return tconcat(sev.badge, ' ', origin, origin_pad, tag_fg, msg.tag, pad_buf[0 .. pad], sev.color, '\'', msg.object_name, "': ", msg.message, reset);
         else
-            return tconcat(sev.badge, ' ', tag_fg, msg.tag, sev.color, pad_buf[0 .. pad], msg.message, reset);
+            return tconcat(sev.badge, ' ', origin, origin_pad, tag_fg, msg.tag, sev.color, pad_buf[0 .. pad], msg.message, reset);
     }
     else
-        return tconcat(sev.badge, ' ', sev.color, msg.message, reset);
+        return tconcat(sev.badge, ' ', origin, origin_pad, sev.color, msg.message, reset);
 }
 
 const(char)[] format_log_text(scope ref const LogMessage msg)
 {
     const(char)[] severity = severity_names[msg.severity];
+    const(char)[] origin = origin_of(msg);
+    const(char)[] origin_pad = origin.length ? " " : "";
     if (msg.tag.length > 0)
     {
         if (msg.object_name.length > 0)
-            return tconcat('[', severity, "] ", msg.tag, " '", msg.object_name, "': ", msg.message);
-        return tconcat('[', severity, "] ", msg.tag, ": ", msg.message);
+            return tconcat('[', severity, "] ", origin, origin_pad, msg.tag, " '", msg.object_name, "': ", msg.message);
+        return tconcat('[', severity, "] ", origin, origin_pad, msg.tag, ": ", msg.message);
     }
-    return tconcat('[', severity, "] ", msg.message);
+    return tconcat('[', severity, "] ", origin, origin_pad, msg.message);
 }
 
 const(char)[] format_log_for_session(scope ref const LogMessage msg, ClientFeatures features)
@@ -1270,7 +1283,14 @@ unittest
     assert(restored.timestamp == SysTime(123));
 
     const(char)[] plain = format_log_for_session(restored, ClientFeatures.vt100);
-    assert(plain == "[Warning] test 'object': hello");
+    assert(plain == "[Warning] host test 'object': hello");
+
+    // a record this node produced itself carries no origin
+    import manager.system : hostname;
+    String was = hostname;
+    hostname = StringLit!"host";
+    assert(format_log_for_session(restored, ClientFeatures.vt100) == "[Warning] test 'object': hello");
+    hostname = was;
 
     const(char)[] decorated = format_log_for_session(restored, ClientFeatures.xterm);
     assert(decorated.contains("\x1b["));
