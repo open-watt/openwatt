@@ -909,7 +909,6 @@ nothrow @nogc:
     override void update()
     {
         Collection!SmartEVSE().update_all();
-        Collection!SmartEVSEBinding().update_all();
         if (_hardware_ready)
             display_update(g_display);
     }
