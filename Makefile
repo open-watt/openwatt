@@ -499,6 +499,10 @@ ifdef ESP_PROJECT_DIR
         ESP_RELEASE_SDKCONFIG := platforms/esp32-common/sdkconfig.release.defaults
         ESP_SDKCONFIG_DEFAULTS := $(ESP_SDKCONFIG_DEFAULTS);$(abspath $(ESP_RELEASE_SDKCONFIG))
     endif
+    ifeq ($(NOEXCEPTIONS),1)
+        ESP_NOEH_SDKCONFIG := platforms/esp32-common/sdkconfig.noexceptions.defaults
+        ESP_SDKCONFIG_DEFAULTS := $(ESP_SDKCONFIG_DEFAULTS);$(abspath $(ESP_NOEH_SDKCONFIG))
+    endif
     ifdef BOARD_CONFIG_DIR
         ESP_BOARD_SDKCONFIG := $(wildcard $(BOARD_CONFIG_DIR)/sdkconfig.defaults)
         ifeq ($(ESP_BOARD_SDKCONFIG),)
