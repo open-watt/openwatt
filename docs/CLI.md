@@ -712,7 +712,7 @@ and how far its interview has progressed. This is distinct from
 | `eui` | The node's permanent IEEE address. |
 | `id` | Short network address, or `-` when the node is not currently attached. |
 | `type` | Node type, from the device's own capability report or an observed data poll. |
-| `state` | `ready` once interviewed, `scanning` while an attempt is in flight (`scanning*` if the node spoke during it), `retry <n>s` while backing off, `pending` when due, `offline` when detached. |
+| `state` | `ready` once interviewed, `scanning` while an attempt is in flight (`scanning*` if the node spoke during it), `retry <n>s` while backing off, `wake` when a sleepy node is waiting to be heard from rather than retried on a clock, `pending` when due, `offline` when detached. |
 | `interview` | Stages completed, one letter each: `n` node descriptor, `p` power descriptor, `e` endpoints, `c` clusters, `a` attributes, `b` basic read attempted, `B` basic info read. Shows `complete` when fully interviewed. |
 | `fails` | Consecutive failed interview attempts; drives the retry backoff. |
 | `device` | The `Device` created for this node, if any. |

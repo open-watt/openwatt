@@ -38,6 +38,9 @@ nothrow @nogc:
 
 enum MaxFibers = 2;
 
+// a retry deadline that no clock will reach: only hearing from the node clears it
+enum MonoTime wake_only = MonoTime(ulong.max);
+
 
 class ZigbeeController : ActiveObject
 {
@@ -227,7 +230,7 @@ protected:
 
             if (nm.retry_after != MonoTime() && now < nm.retry_after)
             {
-                if (next == MonoTime() || nm.retry_after < next)
+                if (nm.retry_after != wake_only && (next == MonoTime() || nm.retry_after < next))
                     next = nm.retry_after;
                 continue;
             }
@@ -1416,6 +1419,13 @@ private:
                 // it spoke while this attempt was failing; it is awake now, so go again immediately
                 node.woke_during_scan = false;
                 node.retry_after = MonoTime();
+                backoff_secs = 0;
+            }
+            else if (node.desc.type == NodeType.sleepy_end_device)
+            {
+                // it cannot be reached on a schedule, so a timed retry only spends airtime talking
+                // at something asleep; the next thing we hear from it is the only useful moment
+                node.retry_after = wake_only;
                 backoff_secs = 0;
             }
             else

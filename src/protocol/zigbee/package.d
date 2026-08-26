@@ -615,7 +615,7 @@ nothrow @nogc:
             else if (n.scan_in_progress)
                 state = n.woke_during_scan ? "scanning*" : "scanning";
             else if (n.retry_after != MonoTime() && now < n.retry_after)
-                state = tconcat("retry ", (n.retry_after - now).as!"seconds", "s");
+                state = n.retry_after == wake_only ? "wake" : tconcat("retry ", (n.retry_after - now).as!"seconds", "s");
             else
                 state = "pending";
 
