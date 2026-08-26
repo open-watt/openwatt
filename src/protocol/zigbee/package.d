@@ -163,6 +163,36 @@ struct NodeMap
         bool has_cluster(ushort cluster_id) const pure
             => (cluster_id in clusters) !is null;
 
+        bool has_ias_zone() const pure
+            => (initialised & ias_profile_mask) != 0 || has_cluster(0x0500);
+
+        ubyte ias_attempts() const pure
+            => (initialised & ias_attempts_mask) >> 4;
+
+        bool ias_enrolled() const pure
+            => (initialised & ias_enrolled_mask) != 0;
+
+        void reset_ias_enrollment()
+        {
+            initialised &= ~(ias_attempts_mask | ias_enrolled_mask);
+        }
+
+        void mark_ias_profile()
+        {
+            initialised |= ias_profile_mask;
+        }
+
+        void note_ias_attempt()
+        {
+            if (ias_attempts < 3)
+                initialised += 0x10;
+        }
+
+        void mark_ias_enrolled()
+        {
+            initialised |= ias_enrolled_mask;
+        }
+
         ref Cluster get_cluster(ushort cluster_id)
         {
             Cluster* cluster = cluster_id in clusters;
@@ -173,6 +203,12 @@ struct NodeMap
 
         ref Attribute get_attribute(ushort cluster_id, ushort attribute_id)
             => get_cluster(cluster_id).get_attribute(attribute_id);
+
+    private:
+        // Endpoint interview state occupies bits 0 and 1.
+        enum ubyte ias_attempts_mask = 0x30;
+        enum ubyte ias_enrolled_mask = 0x40;
+        enum ubyte ias_profile_mask = 0x80;
     }
 
     struct Cluster
@@ -234,13 +270,14 @@ struct NodeMap
     ushort parent_id = 0xFFFE;
     ubyte initialised;
     ubyte interview_failures;
+    MonoTime retry_after;
+    ubyte prime_attempts;
     ubyte lqi;
     byte rssi;
     bool discovered;
     bool scan_in_progress;
     bool woke_during_scan;
     bool device_created;
-    MonoTime retry_after;
 
     NodeDescriptor desc;
     PowerDescriptor power;
@@ -537,7 +574,7 @@ nothrow @nogc:
 
     void note_awake(NodeMap* node)
     {
-        if (!node || node.initialised == 0xFF)
+        if (!node)
             return;
         foreach (ZigbeeController c; Collection!ZigbeeController().values)
             c.node_awake(node);
