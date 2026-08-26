@@ -1163,99 +1163,18 @@ private bool unbox_scalar_value(ref const Variant v, ref const DataFormat fmt, o
             if (!td.variant)
                 return false;
             s.raw[] = 0;
-            return td.variant(s.raw.ptr, *cast(Variant*)&v, false);
+            if (td.variant(s.raw.ptr, *cast(Variant*)&v, false))
+                return true;
+            if (!v.isString || !td.stringify)
+                return false;
+            const(char)[] str = v.asString;
+            return td.stringify(s.raw.ptr, cast(char[])str, false, null, null) == str.length;
         }
 
         case char_:
             return false;
     }
 }
-
-
-unittest
-{
-    ClockDomain clock;
-    clock.nominal_rate = 1_000;
-    clock.add_anchor(10, SysTime(100));
-    clock.add_anchor(20, SysTime(200));
-    assert(clock.anchors.length == 1);
-    assert(clock.anchors[0].index == 20 && clock.anchors[0].observed == SysTime(200));
-
-    // count multiplies stride; 0 is a dynamic handle and scalar records require count == 1
-    DataFormat f = DataFormat(ValueType.s32, SeriesKind.held);
-    assert(f.stride == 4 && f.is_scalar);
-    f.count = 8;
-    assert(f.stride == 32 && !f.is_scalar);
-    DataFormat s = DataFormat(ValueType.char_, SeriesKind.held);
-    s.count = 0;
-    assert(s.stride == 2 && !s.is_scalar && s.is_text);
-
-    // heap entries: len-prefixed, 2-aligned; views resolve through the offset
-    assert(heap_entry_bytes(3) == 6 && heap_entry_bytes(4) == 6 && heap_entry_bytes(0) == 2);
-    ushort[7] mini = [3, 0, 0, 5, 0, 0, 0];
-    (cast(char*)mini.ptr)[2 .. 5] = "abc";
-    (cast(char*)mini.ptr)[8 .. 13] = "hello";
-    assert(cast(const(char)[])heap_view(mini.ptr, 0) == "abc");
-    assert(cast(const(char)[])heap_view(mini.ptr, 6) == "hello");
-
-    int v = -5;
-    assert(box_record(&v, DataFormat(ValueType.s32, SeriesKind.held)).asLong == -5);
-
-    // trivial user pods ride the Scalar register and box through their variant marshal
-    import urt.time : from_unix_time_ns, SysTime;
-    import urt.typereg : find_type_by_name;
-    const(TypeDetails)* dt = find_type_by_name("dt");
-    assert(dt && dt.pod && dt.size == 8 && dt.variant);
-    DataFormat fdt = DataFormat(ValueType.user, SeriesKind.held, dt);
-    assert(fdt.is_scalar && fdt.stride == 8);
-    SysTime t = from_unix_time_ns(1_700_000_000_000_000_000);
-    Variant bt = box_record(&t, fdt);
-    assert(bt.isUser!SysTime && bt.as!SysTime == t);
-    Scalar sc;
-    assert(unbox_scalar(bt, fdt, sc));
-    assert(*cast(SysTime*)sc.raw.ptr == t);
-
-    DataFormat u16 = DataFormat(ValueType.u16, SeriesKind.held);
-    DataFormat u32 = DataFormat(ValueType.u32, SeriesKind.sampled);
-    assert(value_compatible(u16, u32));
-    Variant small = Variant(ushort(65_000));
-    assert(unbox_scalar(small, u32, sc) && sc.u == 65_000);
-    Variant large = Variant(100_000U);
-    assert(!unbox_scalar(large, u16, sc));
-    Variant negative = Variant(-1);
-    assert(!unbox_scalar(negative, u16, sc));
-    Constraint range;
-    range.min = Scalar.of(ushort(10));
-    range.max = Scalar.of(ushort(20));
-    range.has = Constraint.Has.min | Constraint.Has.max;
-    u16.constraint = &range;
-    Variant inside = Variant(ushort(15));
-    Variant outside = Variant(ushort(21));
-    Variant under = Variant(ushort(5));
-    assert(unbox_scalar(inside, u16, sc));
-    assert(!unbox_scalar(outside, u16, sc));
-    assert(unbox_scalar_checked(outside, u16, sc) == "above maximum");
-    assert(unbox_scalar_checked(under, u16, sc) == "below minimum");
-    assert(unbox_scalar_checked(negative, u16, sc) == "incompatible value");
-
-    import urt.si.unit : Ampere, Volt;
-    DataFormat amps = DataFormat(ValueType.u16, SeriesKind.held, ScaledUnit(Ampere));
-    DataFormat milliamps = DataFormat(ValueType.u16, SeriesKind.held, ScaledUnit(Ampere, -3));
-    DataFormat volts = DataFormat(ValueType.u16, SeriesKind.held, ScaledUnit(Volt));
-    assert(value_compatible(amps, milliamps));
-    assert(!value_compatible(amps, volts));
-    Variant one_amp = Variant(Quantity!ushort(1_000, ScaledUnit(Ampere, -3)));
-    assert(unbox_scalar(one_amp, amps, sc) && sc.u == 1);
-
-    enum ModeA : ushort { off, on }
-    enum ModeB : ushort { off, on }
-    import urt.meta.enuminfo : enum_info;
-    DataFormat mode_a = DataFormat(ValueType.u16, SeriesKind.held, enum_info!ModeA.make_void());
-    DataFormat mode_b = DataFormat(ValueType.u16, SeriesKind.held, enum_info!ModeB.make_void());
-    assert(value_compatible(mode_a, mode_a));
-    assert(!value_compatible(mode_a, mode_b));
-}
-
 
 private:
 
@@ -1398,4 +1317,93 @@ bool unbox_double(ref const Variant v, ref const DataFormat fmt, out double d)
     else
         return false;
     return d == d; // reject NaN
+}
+
+
+unittest
+{
+    import urt.meta.enuminfo : enum_info;
+    import urt.si.unit : Ampere, Volt;
+    import urt.time : from_unix_time_ns, SysTime;
+    import urt.typereg : find_type_by_name;
+
+    ClockDomain clock;
+    clock.nominal_rate = 1_000;
+    clock.add_anchor(10, SysTime(100));
+    clock.add_anchor(20, SysTime(200));
+    assert(clock.anchors.length == 1);
+    assert(clock.anchors[0].index == 20 && clock.anchors[0].observed == SysTime(200));
+
+    DataFormat f = DataFormat(ValueType.s32, SeriesKind.held);
+    assert(f.stride == 4 && f.is_scalar);
+    f.count = 8;
+    assert(f.stride == 32 && !f.is_scalar);
+    DataFormat s = DataFormat(ValueType.char_, SeriesKind.held);
+    s.count = 0;
+    assert(s.stride == 2 && !s.is_scalar && s.is_text);
+
+    assert(heap_entry_bytes(3) == 6 && heap_entry_bytes(4) == 6 && heap_entry_bytes(0) == 2);
+    ushort[7] mini = [3, 0, 0, 5, 0, 0, 0];
+    (cast(char*)mini.ptr)[2 .. 5] = "abc";
+    (cast(char*)mini.ptr)[8 .. 13] = "hello";
+    assert(cast(const(char)[])heap_view(mini.ptr, 0) == "abc");
+    assert(cast(const(char)[])heap_view(mini.ptr, 6) == "hello");
+
+    int v = -5;
+    assert(box_record(&v, DataFormat(ValueType.s32, SeriesKind.held)).asLong == -5);
+
+    const(TypeDetails)* dt = find_type_by_name("dt");
+    assert(dt && dt.pod && dt.size == 8 && dt.variant);
+    DataFormat fdt = DataFormat(ValueType.user, SeriesKind.held, dt);
+    assert(fdt.is_scalar && fdt.stride == 8);
+    SysTime t = from_unix_time_ns(1_700_000_000_000_000_000);
+    Variant bt = box_record(&t, fdt);
+    assert(bt.isUser!SysTime && bt.as!SysTime == t);
+    Scalar sc;
+    assert(unbox_scalar(bt, fdt, sc));
+    assert(*cast(SysTime*)sc.raw.ptr == t);
+    char[64] text;
+    ptrdiff_t text_len = bt.toString(text, null, null);
+    assert(text_len > 0);
+    Variant ts = Variant(cast(const(char)[])text[0 .. text_len]);
+    assert(unbox_scalar(ts, fdt, sc));
+    assert(*cast(SysTime*)sc.raw.ptr == t);
+
+    DataFormat u16 = DataFormat(ValueType.u16, SeriesKind.held);
+    DataFormat u32 = DataFormat(ValueType.u32, SeriesKind.sampled);
+    assert(value_compatible(u16, u32));
+    Variant small = Variant(ushort(65_000));
+    assert(unbox_scalar(small, u32, sc) && sc.u == 65_000);
+    Variant large = Variant(100_000U);
+    assert(!unbox_scalar(large, u16, sc));
+    Variant negative = Variant(-1);
+    assert(!unbox_scalar(negative, u16, sc));
+    Constraint range;
+    range.min = Scalar.of(ushort(10));
+    range.max = Scalar.of(ushort(20));
+    range.has = Constraint.Has.min | Constraint.Has.max;
+    u16.constraint = &range;
+    Variant inside = Variant(ushort(15));
+    Variant outside = Variant(ushort(21));
+    Variant under = Variant(ushort(5));
+    assert(unbox_scalar(inside, u16, sc));
+    assert(!unbox_scalar(outside, u16, sc));
+    assert(unbox_scalar_checked(outside, u16, sc) == "above maximum");
+    assert(unbox_scalar_checked(under, u16, sc) == "below minimum");
+    assert(unbox_scalar_checked(negative, u16, sc) == "incompatible value");
+
+    DataFormat amps = DataFormat(ValueType.u16, SeriesKind.held, ScaledUnit(Ampere));
+    DataFormat milliamps = DataFormat(ValueType.u16, SeriesKind.held, ScaledUnit(Ampere, -3));
+    DataFormat volts = DataFormat(ValueType.u16, SeriesKind.held, ScaledUnit(Volt));
+    assert(value_compatible(amps, milliamps));
+    assert(!value_compatible(amps, volts));
+    Variant one_amp = Variant(Quantity!ushort(1_000, ScaledUnit(Ampere, -3)));
+    assert(unbox_scalar(one_amp, amps, sc) && sc.u == 1);
+
+    enum ModeA : ushort { off, on }
+    enum ModeB : ushort { off, on }
+    DataFormat mode_a = DataFormat(ValueType.u16, SeriesKind.held, enum_info!ModeA.make_void());
+    DataFormat mode_b = DataFormat(ValueType.u16, SeriesKind.held, enum_info!ModeB.make_void());
+    assert(value_compatible(mode_a, mode_a));
+    assert(!value_compatible(mode_a, mode_b));
 }

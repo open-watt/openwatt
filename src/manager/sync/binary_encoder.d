@@ -401,7 +401,7 @@ nothrow @nogc:
 
         begin_frame(Verb.type_format);
         _buf.put_varint(ft);
-        _buf.put_str(value_type_name(fmt.type));
+        _buf.put_str(wire_type_name(fmt));
         _buf.put_str(enum_key_name!SeriesKind(fmt.kind));
         _buf ~= fmt.count;
         _buf.put_varint(fmt.rate);

@@ -438,7 +438,8 @@ nothrow @nogc:
 
         begin_frame("type");
         _buf.append(",\"ft\":", ft);
-        _buf.append(",\"format\":{\"type\":\"", value_type_name(fmt.type), '\"');
+        _buf ~= ",\"format\":{\"type\":";
+        write_str(wire_type_name(fmt));
         _buf.append(",\"series\":\"", enum_key_from_value!SeriesKind(fmt.kind), '\"');
         if (fmt.count != 1)
             _buf.append(",\"count\":", fmt.count);

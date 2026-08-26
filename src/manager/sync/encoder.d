@@ -26,7 +26,7 @@ import manager.collection : CID;
 import manager.element : Element;
 import manager.expression : NamedArgument;
 import manager.record : Sample;
-import manager.series : DataFormat, RecordBlock, ValueType;
+import manager.series : DataFormat, RecordBlock, SeriesKind, ValueType;
 import manager.sync.peer;
 
 
@@ -101,9 +101,33 @@ bool value_type_from_name(const(char)[] s, out ValueType t)
     return false;
 }
 
-// user formats can't intern at the receiver: no TypeDetails travel on the wire
 bool wire_serialisable(ref const DataFormat f) pure
-    => f.clock is null && f.type != ValueType.user;
+    => f.clock is null && (f.type != ValueType.user || (f.is_scalar && f.user_type.name.length &&
+                           f.user_type.variant !is null && f.user_type.text_round_trip));
+
+const(char)[] wire_type_name(ref const DataFormat f)
+{
+    import urt.mem.temp : tconcat;
+
+    if (f.type == ValueType.user)
+        return tconcat("user:", f.user_type.name);
+    return value_type_name(f.type);
+}
+
+bool value_type_from_wire(const(char)[] s, out ValueType t, out const(char)[] user_name)
+{
+    const(char)[] tail = s;
+    const(char)[] base = tail.split!':';
+    if (base[] == "user")
+    {
+        if (tail.empty)
+            return false;
+        t = ValueType.user;
+        user_name = tail;
+        return true;
+    }
+    return tail.empty && value_type_from_name(base, t);
+}
 
 // Reset frames carry no value - the contract is that the receiver knows the
 // init value from the type's properties. This assert proves the contract holds
@@ -259,4 +283,27 @@ nothrow @nogc:
     // Clears the dirty bits on emit.
 
     abstract void tick_dirty(SyncPeer peer);
+}
+
+
+unittest
+{
+    ValueType t;
+    const(char)[] name;
+    assert(value_type_from_wire("u16", t, name) && t == ValueType.u16 && name.empty);
+    assert(value_type_from_wire("user:SysTime", t, name) && t == ValueType.user && name[] == "SysTime");
+    assert(!value_type_from_wire("user", t, name));
+    assert(!value_type_from_wire("user:", t, name));
+    assert(!value_type_from_wire("u16:extra", t, name));
+    assert(!value_type_from_wire("mystery", t, name));
+
+    import urt.typereg : find_type_by_name;
+
+    auto dt = find_type_by_name("dt");
+    assert(dt);
+    DataFormat user = DataFormat(ValueType.user, SeriesKind.held, dt);
+    assert(wire_serialisable(user));
+    assert(wire_type_name(user)[] == "user:dt");
+    user.count = 2;
+    assert(!wire_serialisable(user));
 }
