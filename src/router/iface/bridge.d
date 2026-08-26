@@ -1,10 +1,8 @@
 module router.iface.bridge;
 
 import urt.array;
-import urt.endian;
 import urt.log;
 import urt.map;
-import urt.mem;
 import urt.mem;
 import urt.meta.nullable;
 import urt.string;
@@ -268,7 +266,7 @@ nothrow @nogc:
 
         // Promisc surfaces frames the kernel already switched among its own ports
         // (a sniffer is attached): feed subscribers, nothing else to do.
-        ulong dst = get_network_dst_address(packet);
+        ulong dst = destination_address(packet);
         if (!dst.is_multicast_address)
         {
             int dp = _address_table.get(dst);
@@ -279,7 +277,7 @@ nothrow @nogc:
             }
         }
 
-        ulong src = get_network_src_address(packet);
+        ulong src = source_address(packet);
         if (!src.is_multicast_address)
             _address_table.insert(src, _cpu_port);
 
@@ -303,44 +301,14 @@ nothrow @nogc:
 
         if (_vlan_filtering)
         {
-            ushort src_vlan;
-
-            if (packet.type == PacketType.ethernet && packet.eth.ether_type == EtherType.vlan)
+            if (!classify_vlan(packet, _bridge_port))
             {
-                if (packet.vlan != 0)
-                {
-                    debug assert(false, "packet with pre-processed vlan shouldn't carry vlan tag!");
-                    return -1;
-                }
-
-                // parse vlan from frame...
-                assert(false, "TODO");
-//                packet.vlan = tag;
-//                src_vlan = tag & 0x0FFF;
-            }
-            else
-                src_vlan = packet.vlan & 0x0FFF;
-
-            if (src_vlan == 0)
-            {
-                if (_bridge_port.pvid == 0)
-                {
-                    // don't admit untagged
-                    add_tx_drop();
-                    return -1;
-                }
-                packet.vlan |= _bridge_port.pvid;
-            }
-            else if (src_vlan != _bridge_port.pvid && _bridge_port.ingress_filtering)
-            {
-                // check if bridge port is a vlan member?
-                assert(false, "TODO");
-
-                packet.vlan |= src_vlan;
+                add_tx_drop();
+                return -1;
             }
         }
 
-        ulong src = get_network_src_address(packet);
+        ulong src = source_address(packet);
         if (!src.is_multicast_address)
             _address_table.insert(src, _local_port);
 
@@ -479,7 +447,7 @@ protected:
     // Decapped exotic traffic enters the exotic switching domain at the attachment.
     final override void station_deliver(ref Packet inner)
     {
-        ulong src_address = get_network_src_address(inner);
+        ulong src_address = source_address(inner);
         if (!src_address.is_multicast_address)
             _address_table.insert(src_address, _attach_port);
 
@@ -519,7 +487,6 @@ protected:
         debug assert(!_members[src_port].offloaded, "offloaded member should be RX-idled");
         ref const BridgePort port = _members[src_port];
         ulong src_address;
-        ushort src_vlan = 0;
 
         // check for link-local frames (bridges must not forward link-local frames)
         if (packet.eth.dst.is_link_local && packet.type == PacketType.ethernet)
@@ -531,38 +498,11 @@ protected:
 
         if (_vlan_filtering)
         {
-            if (packet.type == PacketType.ethernet && packet.eth.ether_type == VlanTag._8100)
-            {
-                if (packet.data.length < 4)
-                    goto drop_packet;
-
-                // strip the vlan tag
-                auto tag = cast(const(ushort)*)packet.data.ptr;
-                src_vlan = loadBigEndian(tag++);
-                packet.eth.ether_type = loadBigEndian(tag);
-                packet._offset += 4;
-
-                if ((src_vlan & 0x0FFF) == 0)
-                {
-                    // VID=0 priority-tagged: adopt PVID for vid, preserve PCP
-                    src_vlan = (src_vlan & 0xF000) | port.pvid;
-                }
-                else if (port.ingress_filtering)
-                {
-                    // TODO: check if port is a member of tag_vlan...
-                    assert(false, "TODO");
-                }
-            }
-            else
-                src_vlan = (packet.vlan & 0xF000) | port.pvid;
-
-            // port was configured to drop untagged frames (PVID = 0)
-            if (src_vlan == 0)
+            if (!classify_vlan(packet, port))
                 goto drop_packet;
-            packet.vlan = src_vlan;
         }
 
-        src_address = get_network_src_address(packet);
+        src_address = source_address(packet);
         if (!src_address.is_multicast_address)
             _address_table.insert(src_address, src_port);
 
@@ -572,7 +512,7 @@ protected:
         {
             if (packet.type == PacketType.ethernet)
             {
-                ulong dst_address = get_network_dst_address(packet);
+                ulong dst_address = destination_address(packet);
                 int dst_port = _address_table.get(dst_address);
                 if (dst_port >= 0)
                 {
@@ -684,6 +624,59 @@ private:
     TagTracking* _tracking_active;
     TagAllocator _bridge_tags;
 
+    bool classify_vlan(ref Packet packet, ref const BridgePort port)
+    {
+        if (packet.has_inline_vlan_tag && !packet.promote_vlan_tag())
+            return false;
+
+        bool tagged = packet.vlan_tag != VlanTag.none;
+        ushort vid = packet.vid;
+        if (!tagged && vid != 0)
+            return true;
+        if (!tagged || vid == 0)
+        {
+            if (port.pvid == 0)
+                return false;
+            packet.vlan = (packet.vlan & 0xF000) | port.pvid;
+            return true;
+        }
+        if (vid != port.pvid && port.ingress_filtering)
+            assert(false, "TODO");
+        return true;
+    }
+
+    bool prepare_egress(ref Packet packet, ref const BridgePort port)
+    {
+        if (packet.vid != port.pvid)
+        {
+            assert(false, "TODO");
+            return false;
+        }
+        if (port.untagged_egress)
+            packet.consume_vlan_tag();
+        else if (packet.type == PacketType.ethernet && packet.vlan_tag == VlanTag.none)
+            packet.vlan_tag = VlanTag._8100;
+        return true;
+    }
+
+    ulong source_address(ref const Packet packet)
+    {
+        if (_vlan_filtering || packet.vlan_tag == VlanTag.none)
+            return get_network_src_address(packet);
+        Packet untagged = packet;
+        untagged.vlan &= 0xF000;
+        return get_network_src_address(untagged);
+    }
+
+    ulong destination_address(ref const Packet packet)
+    {
+        if (_vlan_filtering || packet.vlan_tag == VlanTag.none)
+            return get_network_dst_address(packet);
+        Packet untagged = packet;
+        untagged.vlan &= 0xF000;
+        return get_network_dst_address(untagged);
+    }
+
     // an exotic address is ours if it lives behind a software-domain port (a local
     // endpoint or an exotic member), not across the ethernet domain
     bool software_domain_port(ubyte port)
@@ -707,14 +700,14 @@ private:
         if (vlan == _bridge_port.pvid)
         {
             if (_bridge_port.untagged_egress)
-                packet.vlan &= 0xF000;
+                packet.consume_vlan_tag();
             incoming_packet(packet);
             return;
         }
         // walk inherited _vlans Array for the matching sub-iface
         foreach (vif; _vlans[])
         {
-            if (vif.vlan == vlan)
+            if (vif.vlan == vlan && (packet.vlan_tag == VlanTag.none || vif.tag == packet.vlan_tag))
             {
                 vif.vlan_incoming(packet);
                 return;
@@ -730,7 +723,7 @@ private:
 
         bool is_eth = packet.type == PacketType.ethernet;
 
-        ulong address = get_network_dst_address(packet);
+        ulong address = destination_address(packet);
         if (!address.is_multicast_address)
         {
             int dst_port = _address_table.get(address);
@@ -740,9 +733,7 @@ private:
                     return;
 
                 if (dst_port == _local_port)
-                {
                     local_dispatch(packet);
-                }
                 else if (dst_port == _attach_port)
                 {
                     // exotic packet crossing to the ethernet domain
@@ -765,16 +756,8 @@ private:
                 {
                     if (_vlan_filtering)
                     {
-                        if (packet.vlan == _members[dst_port].pvid)
-                        {
-                            if (_members[dst_port].untagged_egress)
-                                packet.vlan &= 0xF000; // should we leave the pcp bits in-tact?
-                        }
-                        else
-                        {
-                            // TODO: check if bridge port is a vlan member?
-                            assert(false);
-                        }
+                        if (!prepare_egress(packet, _members[dst_port]))
+                            return;
                     }
 
                     if (_members[dst_port].iface.forward(packet) < 0)
@@ -793,21 +776,14 @@ private:
             if (eth_member != is_eth)
                 continue;
 
+            Packet outgoing = packet;
             if (_vlan_filtering)
             {
-                if (packet.vlan == member.pvid)
-                {
-                    if (member.untagged_egress)
-                        packet.vlan &= 0xF000; // should we leave the pcp bits in-tact?
-                }
-                else
-                {
-                    // check if bridge port is a vlan member?
-                    assert(false);
-                }
+                if (!prepare_egress(outgoing, member))
+                    continue;
             }
 
-            if (member.iface.forward(packet) < 0)
+            if (member.iface.forward(outgoing) < 0)
                 add_tx_drop();
         }
 
@@ -817,7 +793,6 @@ private:
             // when the frame came from there). The kernel floods among the netdev members.
             if (_cpu.active && src_port != _cpu_port)
                 _cpu.send(packet);
-            // ethernet local delivery is the attachment itself
             if (src_port != _local_port && src_port != _attach_port)
                 local_dispatch(packet);
         }
@@ -895,7 +870,7 @@ private:
         TagTracking* tracking = alloc_tracking();
         bool any_succeeded = false;
 
-        ulong address = get_network_dst_address(packet);
+        ulong address = destination_address(packet);
         if (!address.is_multicast_address)
         {
             int dst_port = _address_table.get(address);
@@ -936,15 +911,10 @@ private:
                     return -1;
                 }
 
-                if (_vlan_filtering)
+                if (_vlan_filtering && !prepare_egress(packet, _members[dst_port]))
                 {
-                    if (packet.vlan == _members[dst_port].pvid)
-                    {
-                        if (_members[dst_port].untagged_egress)
-                            packet.vlan &= 0xF000;
-                    }
-                    else
-                        assert(false, "TODO");
+                    recycle_tracking(tracking);
+                    return -1;
                 }
 
                 int tag = _members[dst_port].iface.forward(packet, &tracking.on_port_callback);
@@ -969,18 +939,11 @@ private:
             if (!member.iface.running || member.offloaded || eth_member != is_eth)
                 continue;
 
-            if (_vlan_filtering)
-            {
-                if (packet.vlan == member.pvid)
-                {
-                    if (member.untagged_egress)
-                        packet.vlan &= 0xF000;
-                }
-                else
-                    assert(false, "TODO");
-            }
+            Packet outgoing = packet;
+            if (_vlan_filtering && !prepare_egress(outgoing, member))
+                continue;
 
-            int tag = member.iface.forward(packet, &tracking.on_port_callback);
+            int tag = member.iface.forward(outgoing, &tracking.on_port_callback);
             if (tag > 0)
             {
                 tracking.port_tags.pushBack(PortTag(member.iface, tag));

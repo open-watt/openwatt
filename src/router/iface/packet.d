@@ -1,5 +1,6 @@
 module router.iface.packet;
 
+import urt.endian;
 import urt.mem;
 import urt.time;
 
@@ -48,7 +49,31 @@ enum EtherType : ushort
     lldp    = 0x88CC,   // Link Layer Discovery Protocol (LLDP)
     hpgp    = 0x88E1,   // HomePlug Green PHY (HPGP)
     cfm     = 0x8902,   // IEEE 802.1ag / ITU-T Y.1731 Connectivity Fault Management
+    _9100   = 0x9100,
+    _9200   = 0x9200,
+    _9300   = 0x9300,
 }
+
+enum VlanTag : ubyte
+{
+    none,
+    _8100,
+    _88a8,
+    _9100,
+    _9200,
+    _9300,
+}
+
+VlanTag vlan_tag_from_tpid(ushort tpid) pure
+{
+    foreach (i, candidate; vlan_tpids)
+        if (candidate == tpid)
+            return cast(VlanTag)i;
+    return VlanTag.none;
+}
+
+ushort vlan_tpid(VlanTag tag) pure
+    => vlan_tpids[tag];
 
 // Bit 15 of the OW encapsulation type field marks control-plane messages;
 // otherwise the field is the PacketType of the encapsulated frame.
@@ -168,7 +193,7 @@ nothrow @nogc:
     ref T init(T)(void[] payload, MonoTime create_time = getTime())
     {
         ref T r = init!T(cast(const)payload, create_time);
-        _flags |= 0x01; // mutable
+        _flags |= mutable_flag;
         return r;
     }
 
@@ -184,8 +209,7 @@ nothrow @nogc:
 
     void* alloc_prefix(size_t bytes)
     {
-        // check we have mutable header bytes
-        if (!(_flags & 0x01) || _offset < bytes)
+        if (!(_flags & mutable_flag) || _offset < bytes)
             return null;
         _offset -= cast(ubyte)bytes;
         return cast(void*)_ptr + _offset;
@@ -206,7 +230,7 @@ nothrow @nogc:
     {
         Packet* r = cast(Packet*)alloc(Packet.sizeof + _length);
         *r = this;
-        r._flags |= 0x01; // mutable
+        r._flags |= mutable_flag;
         r._ptr = &r[1];
         cast(void[])r._ptr[0 .. _length] = _ptr[0 .. _length];
         return r;
@@ -236,6 +260,65 @@ nothrow @nogc:
     ushort vid() const pure
         => vlan & 0x0FFF;
 
+    VlanTag vlan_tag() const pure
+        => cast(VlanTag)(_flags & vlan_tag_mask);
+
+    void vlan_tag(VlanTag value) pure
+    {
+        assert(value <= VlanTag._9300);
+        _flags = cast(ubyte)((_flags & ~vlan_tag_mask) | value);
+    }
+
+    bool set_vlan_tag(ushort tpid) pure
+    {
+        VlanTag tag = vlan_tag_from_tpid(tpid);
+        if (tag == VlanTag.none && tpid != 0)
+            return false;
+        vlan_tag = tag;
+        return true;
+    }
+
+    bool has_inline_vlan_tag() const pure
+        => vlan_tag == VlanTag.none &&
+           type == PacketType.ethernet &&
+           vlan_tag_from_tpid(eth.ether_type) != VlanTag.none;
+
+    bool promote_vlan_tag()
+    {
+        if (vlan_tag != VlanTag.none)
+            return true;
+        VlanTag tag = type == PacketType.ethernet ? vlan_tag_from_tpid(eth.ether_type) : VlanTag.none;
+        if (tag == VlanTag.none || data.length < 4)
+            return false;
+        const(ushort)* tci = cast(const(ushort)*)data.ptr;
+        vlan = loadBigEndian(tci);
+        eth.ether_type = loadBigEndian(tci + 1);
+        _offset += 4;
+        vlan_tag = tag;
+        return true;
+    }
+
+    bool consume_priority_tags()
+    {
+        if (has_inline_vlan_tag && !promote_vlan_tag())
+            return false;
+        while (vlan_tag != VlanTag.none && vid == 0)
+        {
+            consume_vlan_tag();
+            if (!has_inline_vlan_tag)
+                break;
+            if (!promote_vlan_tag())
+                return false;
+        }
+        return true;
+    }
+
+    void consume_vlan_tag() pure
+    {
+        vlan &= 0xF000;
+        vlan_tag = VlanTag.none;
+    }
+
     // monotonic; a packet is a physical event, not a wall-clock label. Project to SysTime only at record boundaries (element values, pcap, logs).
     MonoTime creation_time; // time received, or time of call to send
     union {
@@ -246,10 +329,14 @@ nothrow @nogc:
     ushort vlan;
 
 package:
-    ubyte _flags; // tag type, mutable alloc, etc...
+    ubyte _flags;
     ubyte _offset;
     ushort _length;
     const(void)* _ptr;
+
+private:
+    enum ubyte vlan_tag_mask = 7;
+    enum ubyte mutable_flag = 1 << 3;
 }
 
 struct RawFrame
@@ -370,6 +457,7 @@ static assert(Wifi80211.sizeof == 24);
 
 private:
 
+immutable ushort[6] vlan_tpids = [0, EtherType.vlan, EtherType.qinq, EtherType._9100, EtherType._9200, EtherType._9300];
 __gshared PacketCodec[PacketType.count] g_packet_codecs = [ PacketCodec(), PacketCodec(&Ethernet.extract_src, &Ethernet.extract_dst, &Ethernet.is_multicast) ];
 
 ref const(PacketCodec) packet_codec(PacketType type) pure
@@ -378,4 +466,51 @@ ref const(PacketCodec) packet_codec(PacketType type) pure
         => g_packet_codecs[ty];
     alias FP = ref const(PacketCodec) function(PacketType) pure nothrow @nogc;
     return (cast(FP)&impl)(type);
+}
+
+
+unittest
+{
+    ubyte[8] payload = [0x00, 0x03, 0x08, 0x00, 1, 2, 3, 4];
+    Packet packet;
+    ref eth = packet.init!Ethernet(payload[]);
+    eth.ether_type = vlan_tpid(VlanTag._8100);
+    packet.pcp = PCP.vo;
+
+    assert(packet.vlan_tag == VlanTag.none);
+    assert(packet.has_inline_vlan_tag);
+    assert(packet.promote_vlan_tag());
+    assert(packet.vlan_tag == VlanTag._8100);
+    assert(packet.vid == 3);
+    assert(packet.pcp == PCP.be);
+    assert(packet.eth.ether_type == EtherType.ip4);
+    assert(cast(const(ubyte)[])packet.data == payload[4 .. $]);
+
+    packet.consume_vlan_tag();
+    assert(packet.vlan_tag == VlanTag.none);
+    assert(packet.vlan == 0);
+
+    packet.vlan = 0xA000;
+    packet.vlan_tag = VlanTag._88a8;
+    assert(packet.promote_vlan_tag());
+    assert(packet.vlan == 0xA000);
+    assert(packet.vlan_tag == VlanTag._88a8);
+
+    packet.consume_vlan_tag();
+    eth.ether_type = vlan_tpid(VlanTag._8100);
+    packet.data = payload[];
+    assert(packet.pcp == PCP.vo);
+    packet.vlan_tag = VlanTag._88a8;
+    assert(packet.consume_priority_tags());
+    assert(packet.pcp == PCP.be);
+    assert(packet.vid == 3);
+    assert(packet.vlan_tag == VlanTag._8100);
+
+    packet.vlan = 0xA000;
+    packet.vlan_tag = VlanTag._8100;
+    eth.ether_type = EtherType.ip4;
+    assert(packet.consume_priority_tags());
+    assert(packet.pcp == PCP.vo);
+    assert(packet.vid == 0);
+    assert(packet.vlan_tag == VlanTag.none);
 }
