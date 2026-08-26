@@ -836,7 +836,9 @@ private:
             uint wire_len;
             MonoTime ts;
             ubyte pkttype;
-            int r = _monitor_raw.poll_ll(data, wire_len, ts, pkttype);
+            ushort vlan_tci;
+            ushort vlan_tpid;
+            int r = _monitor_raw.poll_ll(data, wire_len, ts, pkttype, vlan_tci, vlan_tpid);
             if (r == 0)
                 break;
             if (r < 0)
@@ -1581,10 +1583,12 @@ private:
         uint wire_len;
         MonoTime ts;
         ubyte pkttype;
+        ushort vlan_tci;
+        ushort vlan_tpid;
 
         while (true)
         {
-            int res = _raw.poll_ll(data, wire_len, ts, pkttype);
+            int res = _raw.poll_ll(data, wire_len, ts, pkttype, vlan_tci, vlan_tpid);
             if (res <= 0)
                 break;
 
@@ -1594,7 +1598,7 @@ private:
                 continue;
             }
 
-            if (data.length >= 14 && data[12] == 0x88 && data[13] == 0x8e)
+            if (vlan_tpid == 0 && data.length >= 14 && data[12] == 0x88 && data[13] == 0x8e)
             {
                 if (pkttype == PACKET_OUTGOING)
                     continue;
@@ -1603,7 +1607,7 @@ private:
                     continue;
             }
 
-            incoming_ethernet_frame(data, ts);
+            incoming_ethernet_frame(data, ts, vlan_tci, vlan_tpid);
         }
     }
 
@@ -2052,10 +2056,12 @@ private:
         uint wire_len;
         MonoTime ts;
         ubyte pkttype;
+        ushort vlan_tci;
+        ushort vlan_tpid;
 
         while (true)
         {
-            int res = _raw.poll_ll(data, wire_len, ts, pkttype);
+            int res = _raw.poll_ll(data, wire_len, ts, pkttype, vlan_tci, vlan_tpid);
             if (res <= 0)
                 break;
 
@@ -2065,7 +2071,7 @@ private:
                 continue;
             }
 
-            if (data.length >= 14 && data[12] == 0x88 && data[13] == 0x8e)
+            if (vlan_tpid == 0 && data.length >= 14 && data[12] == 0x88 && data[13] == 0x8e)
             {
                 if (pkttype == PACKET_OUTGOING)
                     continue;
@@ -2074,7 +2080,7 @@ private:
                     continue;
             }
 
-            incoming_ethernet_frame(data, ts);
+            incoming_ethernet_frame(data, ts, vlan_tci, vlan_tpid);
         }
     }
 

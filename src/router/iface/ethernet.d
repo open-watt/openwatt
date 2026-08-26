@@ -21,6 +21,29 @@ import router.iface.endpoint : ether_neighbour_learn;
 nothrow @nogc:
 
 
+size_t encode_ethernet_header(ref const Packet packet, ubyte[] buffer)
+{
+    VlanTag tag = packet.vlan_tag;
+    if (tag == VlanTag.none && packet.vid != 0 && !packet.has_inline_vlan_tag)
+        tag = VlanTag._8100;
+    size_t required = 14 + (tag != VlanTag.none ? 4 : 0);
+    if (packet.type != PacketType.ethernet || buffer.length < required)
+        return 0;
+
+    Ethernet* eth = cast(Ethernet*)buffer.ptr;
+    eth.dst = packet.eth.dst;
+    eth.src = packet.eth.src;
+    ushort* ether_type = &eth.ether_type;
+    if (tag != VlanTag.none)
+    {
+        storeBigEndian(ether_type++, vlan_tpid(tag));
+        storeBigEndian(ether_type++, packet.vlan);
+    }
+    storeBigEndian(ether_type, packet.eth.ether_type);
+    return required;
+}
+
+
 abstract class EthernetStation : BaseInterface
 {
     alias Properties = AliasSeq!(Prop!("cfm-level", cfm_level),
@@ -152,10 +175,12 @@ protected:
 
     override void ingress(ref Packet packet)
     {
-        // vlan-tagged OW frames are not intercepted here: a VLAN sub-interface is the
-        // station for its vlan, and the vlan demux in dispatch() routes tagged frames
-        // to it. No sub-interface configured = not attached to that segment.
-        if (packet.type == PacketType.ethernet && packet.eth.ether_type == EtherType.ow)
+        if (!packet.consume_priority_tags())
+        {
+            add_rx_drop();
+            return;
+        }
+        if (packet.type == PacketType.ethernet && packet.vlan_tag == VlanTag.none && packet.eth.ether_type == EtherType.ow)
         {
             if (packet.eth.src == mac)
                 return; // capture echo of our own transmission
@@ -165,7 +190,7 @@ protected:
                 add_rx_drop();
             return;
         }
-        if (packet.type == PacketType.ethernet && packet.eth.ether_type == EtherType.cfm && packet.eth.src != mac)
+        if (packet.type == PacketType.ethernet && packet.vlan_tag == VlanTag.none && packet.eth.ether_type == EtherType.cfm && packet.eth.src != mac)
         {
             if (packet.eth.dst == mac || packet.eth.dst.is_multicast)
                 cfm_ingress(packet);
@@ -269,6 +294,7 @@ protected:
         eth.dst = resolve(get_network_dst_address(packet));
         eth.ether_type = EtherType.ow;
         wrapped.vlan = packet.vlan;
+        wrapped.vlan_tag = packet.vlan_tag;
         medium_tx(wrapped);
         return true;
     }
@@ -308,6 +334,7 @@ protected:
         Packet inner;
         inner.creation_time = packet.creation_time;
         inner.vlan = packet.vlan;
+        inner.vlan_tag = packet.vlan_tag;
         inner.data = content[5 + hdr_len .. 5 + hdr_len + data_len];
         if (codec.decode(inner, content[5 .. 5 + hdr_len]) <= 0)
             return false;
@@ -350,17 +377,11 @@ protected:
     {
         if (packet.type == PacketType.ethernet)
         {
-            struct Header
-            {
-                MACAddress dst;
-                MACAddress src;
-                ubyte[2] type;
-            }
-            Header h;
-            h.dst = packet.eth.dst;
-            h.src = packet.eth.src;
-            h.type = nativeToBigEndian(packet.eth.ether_type);
-            sink((cast(ubyte*)&h)[0 .. Header.sizeof]);
+            ubyte[18] header = void;
+            size_t header_len = encode_ethernet_header(packet, header[]);
+            if (header_len == 0)
+                return;
+            sink(header[0 .. header_len]);
             sink(packet.data);
             return;
         }
@@ -374,17 +395,17 @@ protected:
         MACAddress remote = station_of(outgoing ? get_network_dst_address(packet) : get_network_src_address(packet));
 
         ubyte[18] hdr = void;
-        Ethernet* eth = cast(Ethernet*)hdr.ptr;
+        Packet wrapped;
+        ref eth = wrapped.init!Ethernet(null, packet.creation_time);
         eth.dst = outgoing ? remote : mac;
         eth.src = outgoing ? mac : remote;
-        ushort* ethertype = &eth.ether_type;
-        if (packet.vlan)
-        {
-            storeBigEndian(ethertype++, ushort(EtherType.vlan));
-            storeBigEndian(ethertype++, packet.vlan);
-        }
-        storeBigEndian(ethertype++, ushort(EtherType.ow));
-        sink(hdr[0 .. cast(ubyte*)ethertype - hdr.ptr]);
+        eth.ether_type = EtherType.ow;
+        wrapped.vlan = packet.vlan;
+        wrapped.vlan_tag = packet.vlan_tag;
+        size_t header_len = encode_ethernet_header(wrapped, hdr[]);
+        if (header_len == 0)
+            return;
+        sink(hdr[0 .. header_len]);
 
         ubyte[1518] buffer = void;
         ptrdiff_t len = build_ow_payload(packet, *codec, buffer);
@@ -799,7 +820,7 @@ protected:
 //        mark_set!(typeof(this), "max-l2mtu")();
     }
 
-    final void incoming_ethernet_frame(const(ubyte)[] data, MonoTime ts)
+    final void incoming_ethernet_frame(const(ubyte)[] data, MonoTime ts, ushort vlan_tci = 0, ushort vlan_tpid = 0)
     {
         if (data.length < 14)
         {
@@ -815,7 +836,17 @@ protected:
         eth.ether_type = data[12 .. 14].bigEndianToNative!ushort;
         packet._offset = 14;
 
-        if (eth.ether_type == 0x88E5) // MACsec
+        if (vlan_tpid != 0)
+        {
+            if (!packet.set_vlan_tag(vlan_tpid))
+            {
+                add_rx_drop();
+                return;
+            }
+            packet.vlan = vlan_tci;
+        }
+
+        if (packet.vlan_tag == VlanTag.none && eth.ether_type == 0x88E5) // MACsec
         {
             // TODO: handle MACsec frames?
             //       is this handled at the interface, or forwarded to a bridge if we are slave?
@@ -824,7 +855,7 @@ protected:
         }
 
         // the packet accounts only payload bytes; account the link-layer overhead here
-        _status.rx_bytes += data.length - packet.length;
+        _status.rx_bytes += data.length - packet.length + (vlan_tpid != 0 ? 4 : 0);
         incoming_packet(packet);
     }
 
@@ -833,26 +864,20 @@ protected:
     {
         debug assert(packet.type == PacketType.ethernet, "medium_tx expects an ethernet packet");
 
-        ubyte[1518] buffer = void; // 1500 IP + 14 ETH + 4 VLAN. TODO: jumbos / double-tag.
+        ubyte[1522] buffer = void;
 
-        Ethernet* eth = cast(Ethernet*)buffer.ptr;
-        eth.dst = packet.eth.dst;
-        eth.src = packet.eth.src;
-        ushort* ethertype = &eth.ether_type;
-
-        // if there should be a vlan header
-        if (packet.vlan)
+        size_t header_len = encode_ethernet_header(packet, buffer[]);
+        if (header_len == 0)
         {
-            storeBigEndian(ethertype++, ushort(EtherType.vlan));
-            storeBigEndian(ethertype++, packet.vlan);
+            add_tx_drop();
+            return;
         }
-        storeBigEndian(ethertype++, packet.eth.ether_type);
 
-        // write the payload...
-        ubyte* payload = cast(ubyte*)ethertype;
+        ubyte* payload = buffer.ptr + header_len;
         if (packet.data.length > buffer.sizeof - (payload - buffer.ptr))
         {
-            log.warning("egress buffer too small: payload=", packet.data.length, " avail=", buffer.sizeof - (payload - buffer.ptr), " vlan=", packet.vlan, " etype=", packet.eth.ether_type);
+            log.warning("egress buffer too small: payload=", packet.data.length, " avail=", buffer.sizeof - (payload - buffer.ptr),
+                        " vlan=", packet.vlan, " etype=", packet.eth.ether_type);
             add_tx_drop();
             return;
         }
@@ -896,4 +921,25 @@ unittest
     assert(report[0 .. 4].bigEndianToNative!uint == 0x12345678);
     assert(report[4] == hostname.length);
     assert(cast(const(char)[])report[5 .. offset] == hostname[]);
+
+    Packet tagged;
+    ref eth = tagged.init!Ethernet(null);
+    eth.dst = MACAddress.broadcast;
+    eth.src = MACAddress(0, 1, 2, 3, 4, 5);
+    eth.ether_type = EtherType.ip4;
+    tagged.vlan = 0xA003;
+    tagged.vlan_tag = VlanTag._88a8;
+    ubyte[18] header = void;
+    assert(encode_ethernet_header(tagged, header[]) == 18);
+    assert(header[12 .. 18] == [0x88, 0xA8, 0xA0, 0x03, 0x08, 0x00]);
+
+    tagged.vlan = 0;
+    tagged.vlan_tag = VlanTag._8100;
+    assert(encode_ethernet_header(tagged, header[]) == 18);
+    assert(header[12 .. 18] == [0x81, 0x00, 0, 0, 0x08, 0x00]);
+
+    tagged.vlan = 3;
+    tagged.vlan_tag = VlanTag.none;
+    assert(encode_ethernet_header(tagged, header[]) == 18);
+    assert(header[12 .. 18] == [0x81, 0x00, 0, 3, 0x08, 0x00]);
 }

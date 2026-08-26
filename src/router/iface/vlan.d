@@ -15,16 +15,6 @@ import router.iface.ethernet;
 nothrow @nogc:
 
 
-enum VlanTag : ushort
-{
-    _8100 = 0x8100, // standard 802.1Q customer tag
-    _88a8 = 0x88a8, // 802.1ad provider/service tag
-    _9100 = 0x9100, // legacy Cisco-style Q-in-Q
-    _9200 = 0x9200, // alternate legacy Q-in-Q
-    _9300 = 0x9300, // another legacy Q-in-Q variant
-}
-
-
 class VLANInterface : EthernetStation
 {
     alias Properties = AliasSeq!(Prop!("interface", iface),
@@ -63,10 +53,15 @@ nothrow @nogc:
 
     VlanTag tag() const
         => _tag;
-    void tag(VlanTag value)
+    const(char)[] tag(VlanTag value)
     {
+        if (value == VlanTag.none)
+            return "invalid vlan tag";
+        if (value == _tag)
+            return null;
         _tag = value;
         mark_set!(typeof(this), "tag")();
+        return null;
     }
 
     inout(BaseInterface) iface() inout pure
@@ -115,7 +110,7 @@ nothrow @nogc:
 protected:
 
     override bool validate() const
-        => _interface !is null && _vlan != 0;
+        => _interface !is null && _vlan != 0 && _tag != VlanTag.none;
 
     override CompletionStatus startup()
     {
@@ -154,8 +149,9 @@ protected:
 
     final override void medium_tx(ref Packet packet)
     {
-        debug assert((packet.vlan & 0xFFF) == 0, "packet already has a vlan tag");
+        debug assert(packet.vid == 0 && packet.vlan_tag == VlanTag.none, "packet already has a vlan tag");
         packet.vlan = (packet.vlan & 0xF000) | (_vlan & 0xFFF);
+        packet.vlan_tag = _tag;
 
         if (_interface.forward(packet) < 0)
             add_tx_drop();
@@ -178,8 +174,9 @@ protected:
             return -1;
         }
 
-        debug assert((packet.vlan & 0xFFF) == 0, "packet already has a vlan tag");
+        debug assert(packet.vid == 0 && packet.vlan_tag == VlanTag.none, "packet already has a vlan tag");
         packet.vlan = (packet.vlan & 0xF000) | (_vlan & 0xFFF);
+        packet.vlan_tag = _tag;
 
         foreach (ref sub; _subscribers[0 .. _num_subscribers])
         {
@@ -196,8 +193,9 @@ protected:
 package:
     final void vlan_incoming(ref Packet packet)
     {
-        assert((packet.vlan & 0xFFF) == _vlan, "received packet for wrong vlan!");
-        packet.vlan &= 0xF000; // should we clear the p-bits too?
+        assert(packet.vid == _vlan, "received packet for wrong vlan!");
+        assert(packet.vlan_tag == VlanTag.none || packet.vlan_tag == _tag, "received packet with wrong vlan tag!");
+        packet.consume_vlan_tag();
         incoming_packet(packet);
     }
 

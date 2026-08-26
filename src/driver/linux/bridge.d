@@ -31,7 +31,7 @@ import manager.plugin;
 
 import router.iface;
 import router.iface.bridge;
-import router.iface.ethernet : EthernetInterface;
+import router.iface.ethernet : EthernetInterface, encode_ethernet_header;
 
 import driver.linux.ethernet : LinuxRawEthernet;
 import driver.linux.netlink_write;
@@ -85,21 +85,12 @@ private:
             if (packet.type != PacketType.ethernet)
                 return -1;
 
-            // Mirror EthernetInterface.medium_tx. TODO: factor out a shared
-            // framing helper so this isn't a second copy.
-            ubyte[1518] buffer = void;
-            Ethernet* eth = cast(Ethernet*)buffer.ptr;
-            eth.dst = packet.eth.dst;
-            eth.src = packet.eth.src;
-            ushort* ethertype = &eth.ether_type;
-            if (packet.vlan)
-            {
-                storeBigEndian(ethertype++, ushort(EtherType.vlan));
-                storeBigEndian(ethertype++, packet.vlan);
-            }
-            storeBigEndian(ethertype++, packet.eth.ether_type);
+            ubyte[1522] buffer = void;
+            size_t header_len = encode_ethernet_header(packet, buffer[]);
+            if (header_len == 0)
+                return -1;
 
-            ubyte* payload = cast(ubyte*)ethertype;
+            ubyte* payload = buffer.ptr + header_len;
             size_t avail = buffer.sizeof - (payload - buffer.ptr);
             if (packet.data.length > avail)
                 return -1;
@@ -327,7 +318,9 @@ private:
             uint wire_len;
             MonoTime ts;
             ubyte pkttype;
-            int res = o.cpu.poll_ll(data, wire_len, ts, pkttype);
+            ushort vlan_tci;
+            ushort vlan_tpid;
+            int res = o.cpu.poll_ll(data, wire_len, ts, pkttype, vlan_tci, vlan_tpid);
             if (res <= 0)
                 break;
 
@@ -346,6 +339,12 @@ private:
             eth.dst = mac_hdr.dst;
             eth.src = mac_hdr.src;
             eth.ether_type = loadBigEndian(&mac_hdr.ether_type);
+            if (vlan_tpid != 0)
+            {
+                if (!packet.set_vlan_tag(vlan_tpid))
+                    continue;
+                packet.vlan = vlan_tci;
+            }
 
             o.bridge.cpu_port_incoming(packet);
         }

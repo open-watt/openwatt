@@ -210,11 +210,10 @@ nothrow @nogc:
     //          -1 = error -- caller can read last_recv_error.system_code for errno
     // pkttype exposes sll_pkttype so the caller can drop PACKET_OUTGOING echoes
     // of frames transmitted on the netdev (its own sendto injections included).
-    int poll_ll(out const(ubyte)[] data, out uint wire_len, out MonoTime timestamp, out ubyte pkttype)
+    int poll_ll(out const(ubyte)[] data, out uint wire_len, out MonoTime timestamp, out ubyte pkttype, out ushort vlan_tci, out ushort vlan_tpid)
     {
-        // AF_PACKET receives hardware-stripped VLAN tags only through PACKET_AUXDATA.
         sockaddr_ll sll;
-        iovec iov = iovec(rx_buf.ptr + 4, rx_buf.length - 4);
+        iovec iov = iovec(rx_buf.ptr, rx_buf.length);
         size_t[32] control = void;
         msghdr msg;
         msg.msg_name = &sll;
@@ -236,12 +235,10 @@ nothrow @nogc:
         if (n == 0)
             return 0;
 
-        size_t offset = 4;
         size_t len = cast(size_t)n;
-        if (restore_vlan_tag(rx_buf[], len, msg))
-            offset = 0;
+        read_vlan_tag(msg, vlan_tci, vlan_tpid);
 
-        data = rx_buf[offset .. offset + len];
+        data = rx_buf[0 .. len];
         wire_len = cast(uint)len;
         timestamp = getTime();
         pkttype = sll.sll_pkttype;
@@ -380,22 +377,14 @@ const(tpacket_auxdata)* packet_auxdata(ref const msghdr msg)
     return null;
 }
 
-bool restore_vlan_tag(ubyte[] buffer, ref size_t len, ref const msghdr msg)
+bool read_vlan_tag(ref const msghdr msg, out ushort tci, out ushort tpid)
 {
-    if (len < 12 || buffer.length < len + 4)
-        return false;
     const(tpacket_auxdata)* aux = packet_auxdata(msg);
     if (!aux || !(aux.tp_status & TP_STATUS_VLAN_VALID))
         return false;
 
-    ushort tpid = aux.tp_status & TP_STATUS_VLAN_TPID_VALID ? aux.tp_vlan_tpid : 0x8100;
-    foreach (i; 0 .. 12)
-        buffer[i] = buffer[i + 4];
-    buffer[12] = cast(ubyte)(tpid >> 8);
-    buffer[13] = cast(ubyte)tpid;
-    buffer[14] = cast(ubyte)(aux.tp_vlan_tci >> 8);
-    buffer[15] = cast(ubyte)aux.tp_vlan_tci;
-    len += 4;
+    tci = aux.tp_vlan_tci;
+    tpid = aux.tp_status & TP_STATUS_VLAN_TPID_VALID ? aux.tp_vlan_tpid : 0x8100;
     return true;
 }
 
@@ -424,28 +413,19 @@ unittest
     msg.msg_control = control.ptr;
     msg.msg_controllen = header.cmsg_len;
 
-    ubyte[14] untagged = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 0x08, 0x00];
-    ubyte[64] frame;
-    frame[4 .. 18] = untagged[];
-    size_t len = untagged.length;
-    assert(restore_vlan_tag(frame[], len, msg));
-    assert(len == 18);
-    ubyte[6] dot1q = [0x81, 0x00, 0xA1, 0x23, 0x08, 0x00];
-    assert(frame[0 .. 12] == untagged[0 .. 12]);
-    assert(frame[12 .. 18] == dot1q[]);
+    ushort tci;
+    ushort tpid;
+    assert(read_vlan_tag(msg, tci, tpid));
+    assert(tci == 0xA123);
+    assert(tpid == 0x8100);
 
-    frame[] = 0;
-    frame[4 .. 18] = untagged[];
-    len = untagged.length;
     aux.tp_status |= TP_STATUS_VLAN_TPID_VALID;
-    assert(restore_vlan_tag(frame[], len, msg));
-    ubyte[6] dot1ad = [0x88, 0xA8, 0xA1, 0x23, 0x08, 0x00];
-    assert(frame[12 .. 18] == dot1ad[]);
+    assert(read_vlan_tag(msg, tci, tpid));
+    assert(tci == 0xA123);
+    assert(tpid == 0x88A8);
 
-    frame[] = 0;
-    frame[4 .. 18] = untagged[];
-    len = untagged.length;
     header.cmsg_len = msg.msg_controllen + 1;
-    assert(!restore_vlan_tag(frame[], len, msg));
-    assert(len == untagged.length);
+    assert(!read_vlan_tag(msg, tci, tpid));
+    assert(tci == 0);
+    assert(tpid == 0);
 }

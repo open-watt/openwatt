@@ -163,7 +163,7 @@ nothrow @nogc:
                     return false;
             }
         }
-        if (vlan && p.vlan != vlan)
+        if (vlan && p.vid != vlan)
             return false;
         return true;
     }
@@ -564,37 +564,44 @@ protected:
 
     final void dispatch(ref Packet packet)
     {
-        import urt.endian : loadBigEndian;
-
         debug assert(_master is null, "dispatch() on a slaved interface; ingress must enter via incoming_packet()");
 
         add_rx_frame(packet.length);
+
+        if (packet.has_inline_vlan_tag && !packet.promote_vlan_tag())
+        {
+            add_rx_drop();
+            return;
+        }
+
         fire_subscribers(packet);
 
-        // check for vlan tagged packets. fancy mask catches all possible vlan tags while rejecting all common ethertypes.
-        if (packet.type == PacketType.ethernet && (packet.eth.ether_type & 0xE457) == 0x8000)
+        while (packet.vlan_tag != VlanTag.none)
         {
-            if (packet.data.length < 4)
+            ushort vid = packet.vid;
+            if (vid == 0)
             {
-                add_rx_drop();
-                return;
+                packet.consume_vlan_tag();
+                if (!packet.has_inline_vlan_tag)
+                    break;
+                if (!packet.promote_vlan_tag())
+                {
+                    add_rx_drop();
+                    return;
+                }
+                continue;
             }
 
-            ushort tag = packet.eth.ether_type;
-            const tci_ptr = cast(ushort*)packet.data.ptr;
-            ushort tci = loadBigEndian(tci_ptr);
-            ushort vid = tci & 0xFFF;
-
-            if (vid != 0 && _vlans.length > 0)
+            if (_vlans.length > 0)
             {
                 auto v = _vlans[].ptr;
                 VLANInterface vif = v[0];
-                if (vif.vlan == vid && vif.tag == tag)
+                if (vif.vlan == vid && vif.tag == packet.vlan_tag)
                     goto got_vlan;
                 foreach (i; 1 .. _vlans.length)
                 {
                     vif = v[i];
-                    if (vif.vlan == vid && vif.tag == tag)
+                    if (vif.vlan == vid && vif.tag == packet.vlan_tag)
                     {
                         v[i] = v[i-1];
                         v[i-1] = vif;
@@ -604,20 +611,15 @@ protected:
                 goto no_vlan;
 
             got_vlan:
-                packet.eth.ether_type = loadBigEndian(tci_ptr + 1);
-                packet._offset += 4;
-                packet.vlan = vid | (tci & 0xF000);
                 vif.vlan_incoming(packet);
                 return;
 
             no_vlan:
+                add_rx_drop();
+                return;
             }
-            else if (vid == 0 && tag == VlanTag._8100)
-            {
-                packet.eth.ether_type = loadBigEndian(tci_ptr + 1);
-                packet._offset += 4;
-                packet.vlan = tci & 0xF000;
-            }
+            add_rx_drop();
+            return;
         }
 
         if (auto handler = _frame_handlers[packet.type])

@@ -143,10 +143,12 @@ nothrow @nogc:
         uint wire_len;
         MonoTime ts;
         ubyte pkttype;
+        ushort vlan_tci;
+        ushort vlan_tpid;
 
         while (true)
         {
-            int res = _raw.poll_ll(data, wire_len, ts, pkttype);
+            int res = _raw.poll_ll(data, wire_len, ts, pkttype, vlan_tci, vlan_tpid);
             if (res == 0)
                 break;
             if (res < 0)
@@ -161,7 +163,7 @@ nothrow @nogc:
                 continue;
             }
 
-            incoming_ethernet_frame(data, ts);
+            incoming_ethernet_frame(data, ts, vlan_tci, vlan_tpid);
         }
     }
 
