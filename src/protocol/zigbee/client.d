@@ -32,6 +32,12 @@ version = DebugZigbee;
 nothrow @nogc:
 
 enum Duration zigbee_response_timeout = 2.seconds;
+// a failed delivery may still sit in the parent's indirect queue (held 7.68s from send, failure
+// reported at ~4.8s), so the answer can trail the failure by a few seconds
+enum Duration zigbee_indirect_grace = 4.seconds;
+// hearing from a node proves it is awake now, so anything pending on it is cut to about one round
+// trip rather than waiting out a deadline chosen while it may have been asleep
+enum Duration zigbee_awake_grace = 300.msecs;
 enum Duration zigbee_delivery_deadline = 200.msecs;
 
 
@@ -256,7 +262,7 @@ nothrow @nogc:
         if (response_handler && (cluster & 0x8000) == 0)
         {
             req = _zdo_request_pool.alloc();
-            *req = ZDORequest(msg[0], cluster, -1, getTime(), response_handler, user_data, null);
+            *req = ZDORequest(dst, msg[0], cluster, -1, getTime(), response_handler, user_data, null);
             _zdo_requests.pushBack(req);
             progress = &req.progress_callback;
         }
@@ -355,8 +361,8 @@ nothrow @nogc:
         {
             version (DebugZigbee)
                 log.tracef("zdo TIMEOUT ->{0,04x} [zdo:{1,04x}] at {2}", dst, cluster, ev.timeout.elapsed);
-            abort_zdo_request(tag, ZigbeeResult.timeout);
-            return ZigbeeResult.timeout;
+            abort_zdo_request(tag, ZigbeeResult.failed);
+            return ZigbeeResult.failed;
         }
         else if (data.result != ZigbeeResult.success)
         {
@@ -400,7 +406,7 @@ nothrow @nogc:
         if (response_handler && (hdr.control & ZCLControlFlags.response) == 0)
         {
             req = _zcl_request_pool.alloc();
-            *req = ZCLRequest(hdr.seq, dst_endpoint, cluster, -1, getTime(), response_handler, user_data, null);
+            *req = ZCLRequest(dst, hdr.seq, dst_endpoint, cluster, -1, getTime(), response_handler, user_data, null);
             _zcl_requests.pushBack(req);
             progress = &req.progress_callback;
         }
@@ -516,8 +522,8 @@ nothrow @nogc:
         {
             version (DebugZigbee)
                 log.tracef("zcl TIMEOUT ->{0,04x}:{1} [:{2,04x}] after {3}", dst, dst_endpoint, cluster, ev.timeout.elapsed);
-            abort_zcl_request(tag, ZigbeeResult.timeout);
-            return ZigbeeResult.timeout;
+            abort_zcl_request(tag, ZigbeeResult.failed);
+            return ZigbeeResult.failed;
         }
         else if (data.result != ZigbeeResult.success)
         {
@@ -646,12 +652,12 @@ protected:
                 _zdo_requests.remove(i);
                 _zdo_request_pool.free(req);
             }
-            else if (req.awaiting_response && now - req.request_time > zigbee_response_timeout)
+            else if (req.awaiting_response && now > req.deadline)
             {
                 version (DebugZigbee)
                     log.warningf("ZDO request {0, 04x} with seq {1} timed out", req.cluster, req.seq);
 
-                abort_zdo_request_at(i, ZigbeeResult.timeout);
+                abort_zdo_request_at(i, req.delivery_failed ? ZigbeeResult.failed : ZigbeeResult.timeout);
             }
             else
                 ++i;
@@ -666,15 +672,30 @@ protected:
                 _zcl_requests.remove(i);
                 _zcl_request_pool.free(req);
             }
-            else if (req.awaiting_response && now - req.request_time > zigbee_response_timeout)
+            else if (req.awaiting_response && now > req.deadline)
             {
                 version (DebugZigbee)
                     log.warningf("ZCL request {0, 04x} with seq {1} timed out", req.cluster, req.seq);
 
-                abort_zcl_request_at(i, ZigbeeResult.timeout);
+                abort_zcl_request_at(i, req.delivery_failed ? ZigbeeResult.failed : ZigbeeResult.timeout);
             }
             else
                 ++i;
+        }
+    }
+
+    void note_peer_activity(ushort src)
+    {
+        MonoTime cut = getTime() + zigbee_awake_grace;
+        foreach (req; _zdo_requests[])
+        {
+            if (req.dst == src && req.awaiting_response && req.deadline > cut)
+                req.deadline = cut;
+        }
+        foreach (req; _zcl_requests[])
+        {
+            if (req.dst == src && req.awaiting_response && req.deadline > cut)
+                req.deadline = cut;
         }
     }
 
@@ -682,6 +703,8 @@ protected:
     {
         // TODO: we should enhance the PACKET FILTER to do this work!
         ref aps = p.hdr!APSFrame;
+
+        note_peer_activity(aps.src);
 
         const(ubyte)[] data = cast(ubyte[])p.data;
 
@@ -907,14 +930,16 @@ private:
 
     struct ZDORequest
     {
+        ushort dst;
         ubyte seq;
         ushort cluster;
         int tag;
-        MonoTime request_time;
+        MonoTime deadline;
         ZDOResponseHandler response_handler;
         void* user_data;
         BaseInterface iface;
         bool awaiting_response;
+        bool delivery_failed;
 
     private:
         void progress_callback(int, MessageState state) nothrow @nogc
@@ -924,16 +949,21 @@ private:
             tag = -1;
             if (state == MessageState.complete)
             {
-                request_time = getTime();
+                deadline = getTime() + zigbee_response_timeout;
                 awaiting_response = true;
+            }
+            else if (state == MessageState.failed)
+            {
+                // the frame may still be waiting at the node's parent; hold on for the answer
+                deadline = getTime() + zigbee_indirect_grace;
+                awaiting_response = true;
+                delivery_failed = true;
             }
             else
             {
                 if (response_handler)
                 {
-                    ZigbeeResult r = state == MessageState.timeout || state == MessageState.expired ? ZigbeeResult.timeout :
-                                     state == MessageState.aborted ? ZigbeeResult.aborted :
-                                     ZigbeeResult.failed;
+                    ZigbeeResult r = state == MessageState.aborted ? ZigbeeResult.aborted : ZigbeeResult.failed;
                     response_handler(r, ZDOStatus.success, null, user_data);
                 }
                 response_handler = null;
@@ -943,15 +973,17 @@ private:
 
     struct ZCLRequest
     {
+        ushort dst;
         ubyte seq;
         ubyte endpoint;
         ushort cluster;
         int tag;
-        MonoTime request_time;
+        MonoTime deadline;
         ZCLResponseHandler response_handler;
         void* user_data;
         BaseInterface iface;
         bool awaiting_response;
+        bool delivery_failed;
 
     private:
         void progress_callback(int, MessageState state) nothrow @nogc
@@ -961,16 +993,21 @@ private:
             tag = -1;
             if (state == MessageState.complete)
             {
-                request_time = getTime();
+                deadline = getTime() + zigbee_response_timeout;
                 awaiting_response = true;
+            }
+            else if (state == MessageState.failed)
+            {
+                // the frame may still be waiting at the node's parent; hold on for the answer
+                deadline = getTime() + zigbee_indirect_grace;
+                awaiting_response = true;
+                delivery_failed = true;
             }
             else
             {
                 if (response_handler)
                 {
-                    ZigbeeResult r = state == MessageState.timeout || state == MessageState.expired ? ZigbeeResult.timeout :
-                                     state == MessageState.aborted ? ZigbeeResult.aborted :
-                                     ZigbeeResult.failed;
+                    ZigbeeResult r = state == MessageState.aborted ? ZigbeeResult.aborted : ZigbeeResult.failed;
                     response_handler(r, null, null, user_data);
                 }
                 response_handler = null;
@@ -1190,7 +1227,6 @@ nothrow @nogc:
 
     ZigbeeResult zdo_request(ushort dst, ushort cluster, void[] message, out ZDOResponse response, PCP pcp = PCP.be)
         => _node.zdo_request(dst, cluster, message, response, pcp);
-
     int send_zcl_message(ushort dst, ubyte endpoint, ushort profile, ushort cluster, ZCLCommand command, ubyte flags, const(void)[] payload, PCP pcp = PCP.be, ZCLResponseHandler response_handler = null, void* user_data = null)
         => _node.send_zcl_message(dst, endpoint, _endpoint, profile, cluster, command, flags, payload, pcp, response_handler, user_data);
 
