@@ -232,16 +232,15 @@ struct NodeMap
     ushort pan_id = 0xFFFF; // not joined
     ushort id = 0xFFFE; // not online
     ushort parent_id = 0xFFFE;
-    bool discovered;
-
     ubyte initialised;
-    bool scan_in_progress;
-    bool device_created;
-    MonoTime retry_after;
     ubyte interview_failures;
-
     ubyte lqi;
     byte rssi;
+    bool discovered;
+    bool scan_in_progress;
+    bool woke_during_scan;
+    bool device_created;
+    MonoTime retry_after;
 
     NodeDescriptor desc;
     PowerDescriptor power;
@@ -457,6 +456,7 @@ nothrow @nogc:
         n.id = id;
         n.pan_id = pan_id;
         nodes_by_pan.insert((cast(uint)pan_id << 16) | id, n);
+        note_awake(n);
         return n;
     }
 
@@ -550,9 +550,19 @@ nothrow @nogc:
         foreach (ref n; unknown_nodes)
         {
             if (n.pan_id == pan_id && n.id == id)
+            {
+                note_work(); // it just spoke, so probe again while it is awake
                 return;
+            }
         }
         unknown_nodes.pushBack(UnknownNode(via, pan_id, id));
+        note_work();
+    }
+
+    void note_work()
+    {
+        foreach (ZigbeeController c; Collection!ZigbeeController().values)
+            c.work_pending();
     }
 
     // some useful tools zigbee...
@@ -627,9 +637,9 @@ nothrow @nogc:
                 else if (n.initialised == 0xFF)
                     state = "ready";
                 else if (n.scan_in_progress)
-                    state = "scanning";
+                    state = n.woke_during_scan ? "scanning*" : "scanning";
                 else if (n.retry_after != MonoTime() && now < n.retry_after)
-                    state = tconcat("retry ", (n.retry_after - now).as!"seconds", "s");
+                    state = n.retry_after == wake_only ? "wake" : tconcat("retry ", (n.retry_after - now).as!"seconds", "s");
                 else
                     state = "pending";
                 t.cell(state);
