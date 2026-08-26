@@ -89,15 +89,14 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        platform: [bl808, bl808_m0, bl618, rp2350]  # stm4xx, stm7xx -- no linker script yet
+        platform: [bl808, bl808_m0, rp2350]  # stm4xx, stm7xx -- no linker script yet
         include:
           - platform: bl808
             toolchain: riscv64-unknown-elf
+          # Also the coverage for bl618: platforms/bl618 is the shared E907 driver pool.
           - platform: bl808_m0
             toolchain: riscv64-unknown-elf
             make_args: PROCESSOR=e907
-          - platform: bl618
-            toolchain: riscv64-unknown-elf
           - platform: rp2350
             toolchain: arm-none-eabi
           # - platform: stm4xx
@@ -133,8 +132,10 @@ jobs:
     strategy:
       matrix:
         target:
-          - { name: esp32,    arch: xtensa }  # LX6
-          - { name: esp32-s3, arch: xtensa }  # LX7
+          # Where a board ships on the chip, build the board: one job covers the
+          # platform and the deployed configuration.
+          - { name: esp32,    arch: xtensa, board: smartevse-v30 }                # LX6
+          - { name: esp32-s3, arch: xtensa, board: waveshare-esp32-s3-rs485-can }  # LX7
           - { name: esp32-c5, arch: riscv  }
           - { name: esp32-c6, arch: riscv  }
           - { name: esp32-p4, arch: riscv  }  # RV32IMAFDCV
@@ -144,6 +145,10 @@ jobs:
       BUILD_FIRMWARE: ${{ github.ref == 'refs/heads/release' || github.event_name == 'workflow_dispatch' }}
       IDF_REF: v6.0
       IDF_TARGETS: esp32,esp32s3,esp32c5,esp32c6,esp32p4
+      # A board selects its own platform; bare platforms build the devkit reference config.
+      MAKE_TARGET: ${{ matrix.target.board && format('BOARD={0}', matrix.target.board) || format('PLATFORM={0}', matrix.target.name) }}
+      BIN_DIR: bin/${{ matrix.target.name }}${{ matrix.target.board && format('_{0}', matrix.target.board) || '' }}_release
+      ARTIFACT: firmware_${{ matrix.target.board || format('{0}_devkit', matrix.target.name) }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -163,7 +168,7 @@ jobs:
           packages: gcc-riscv64-unknown-elf picolibc-riscv64-unknown-elf
 
       - name: Build
-        run: make PLATFORM=${{ matrix.target.name }} CONFIG=unittest
+        run: make $MAKE_TARGET CONFIG=unittest
 
       # One IDF install serves every target here, so all these jobs share a cache entry.
       - name: Setup ESP-IDF
@@ -177,16 +182,17 @@ jobs:
       # Embedded is release-only; a unittest image overflows flash.
       - name: Build firmware
         if: ${{ env.BUILD_FIRMWARE == 'true' }}
-        run: make esp-idf-build PLATFORM=${{ matrix.target.name }} CONFIG=release
+        run: make esp-idf-build $MAKE_TARGET CONFIG=release
 
-      # Devkit config, not a board build: flashing this to a deployed unit strands it.
+      # A _devkit artifact carries the reference-board config; flashing one to a
+      # deployed unit strands it. Board artifacts are the flashable ones.
       - name: Upload firmware
         if: ${{ env.BUILD_FIRMWARE == 'true' }}
         uses: actions/upload-artifact@v4
         with:
-          name: firmware_${{ matrix.target.name }}_devkit
+          name: ${{ env.ARTIFACT }}
           path: |
-            bin/${{ matrix.target.name }}_release/openwatt.bin
-            bin/${{ matrix.target.name }}_release/bootloader.bin
-            bin/${{ matrix.target.name }}_release/partition-table.bin
-            bin/${{ matrix.target.name }}_release/ota_data_initial.bin
+            ${{ env.BIN_DIR }}/openwatt.bin
+            ${{ env.BIN_DIR }}/bootloader.bin
+            ${{ env.BIN_DIR }}/partition-table.bin
+            ${{ env.BIN_DIR }}/ota_data_initial.bin
