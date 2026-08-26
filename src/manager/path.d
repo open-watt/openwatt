@@ -105,15 +105,25 @@ bool pattern_matches(const(char)[] pattern, BaseObject obj)
     => matches_object(Address.parse(pattern), obj);
 
 alias ElementVisitor = void delegate(Element* e, const(char)[] path) nothrow @nogc;
+alias ElementProbe = bool delegate(Element* e, const(char)[] path) nothrow @nogc;
 
-// Walks the component tree visiting elements whose dotted path (rooted at root.id)
-// matches the pattern.
-void walk_elements(Component root, const(char)[] pattern, scope ElementVisitor visit,
-                   bool star_descends = false)
+void walk_elements(Component root, const(char)[] pattern, scope ElementVisitor visit, bool star_descends = false)
+{
+    walk_elements_until(root, pattern, (Element* e, const(char)[] path)
+    {
+        visit(e, path);
+        return true;
+    }, star_descends);
+}
+
+bool walk_elements_until(Component root, const(char)[] pattern, scope ElementProbe probe, bool star_descends = false)
 {
     MutableString!0 path;
+    bool complete = true;
     void walk(Component c)
     {
+        if (!complete)
+            return;
         size_t reset = path.length;
         if (reset)
             path ~= '.';
@@ -122,15 +132,22 @@ void walk_elements(Component root, const(char)[] pattern, scope ElementVisitor v
         foreach (Element* e; c.elements)
         {
             path.append('.', e.id[]);
-            if (match_path(pattern, path[], star_descends))
-                visit(e, path[]);
+            if (match_path(pattern, path[], star_descends) && !probe(e, path[]))
+                complete = false;
             path.erase(base, path.length - base);
+            if (!complete)
+                break;
         }
         foreach (Component child; c.components)
+        {
+            if (!complete)
+                break;
             walk(child);
+        }
         path.erase(reset, path.length - reset);
     }
     walk(root);
+    return complete;
 }
 
 

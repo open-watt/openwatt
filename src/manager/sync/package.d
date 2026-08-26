@@ -60,7 +60,7 @@ import manager.device : Device;
 import manager.element : Access, add_feed_listener, Cursor, Element, ElementLifecycleEvent,
                          register_element_lifecycle_handler, remove_feed_listener, SamplingMode, sweep_dirty;
 import manager.id : EID;
-import manager.path : Address, match_path, pattern_matches, walk_elements;
+import manager.path : Address, match_path, pattern_matches, walk_elements, walk_elements_until;
 import manager.series : Constraint, DataFormat, format_info, FormatId, RecordBlock, register_format, Scalar,
                         SeriesKind, unbox_scalar, valid, value_compatible, ValueType;
 import manager.console;
@@ -287,6 +287,7 @@ nothrow @nogc:
             pump_introductions(p);
             return;
         }
+        pump_model_intro(p);
         encoder_for(p._encoder).tick_dirty(p);
         p.flush_logs();
     }
@@ -361,6 +362,107 @@ nothrow @nogc:
         }
     }
 
+    void pump_model_intro(SyncPeer p)
+    {
+        pump_live_rescan(p);
+        if (p._pending_subs.empty && p._pending_live.empty)
+            return;
+        SyncEncoder enc = encoder_for(p._encoder);
+        uint gen = p.begin_burst();
+
+        while (!p._pending_live.empty)
+        {
+            if (p.control_window_free() <= SyncPeer.control_reserve)
+                return;
+            EID node = p._pending_live[0];
+            p._pending_live.remove(0);
+            if (Element* e = resolve_element(node))
+            {
+                char[256] buf = void;
+                ptrdiff_t len = e.full_path(buf);
+                if (len > 0 && len <= buf.length)
+                    introduce_element(p, enc, e, buf[0 .. len], gen, true, 0, 0);
+            }
+            if (!p.send_ok(gen))
+                return;
+        }
+
+        while (!p._pending_subs.empty)
+        {
+            ref sub = p._pending_subs[0];
+            bool starved = false;
+
+            uint device_index = 0;
+            foreach (dev; g_app.devices.values)
+            {
+                if (device_index < sub.device_cursor)
+                {
+                    ++device_index;
+                    continue;
+                }
+                if (!dev.cid || authored_by(p, dev))
+                {
+                    ++device_index;
+                    ++sub.device_cursor;
+                    continue;
+                }
+
+                if (!sub.device_sent)
+                {
+                    if (p.control_window_free() <= SyncPeer.control_reserve)
+                    {
+                        starved = true;
+                        break;
+                    }
+                    if (match_path(sub.pattern[], dev.id[]))
+                        introduce_device(p, enc, dev);
+                    if (!p.send_ok(gen))
+                        return;
+                    sub.device_sent = true;
+                }
+
+                uint match_index = 0;
+                bool complete = walk_elements_until(dev, sub.pattern[], (Element* e, const(char)[] path)
+                {
+                    if (match_index++ < sub.element_cursor)
+                        return true;
+                    if (p.control_window_free() <= SyncPeer.control_reserve)
+                        return false;
+                    if (sub.arm)
+                        track_live(p, e);
+                    introduce_element(p, enc, e, path, gen, sub.arm, sub.from_ms, sub.to_ms);
+                    ++sub.element_cursor;
+                    return p.send_ok(gen);
+                });
+                if (!p.send_ok(gen))
+                    return;
+                if (!complete)
+                {
+                    starved = true;
+                    break;
+                }
+
+                ++device_index;
+                ++sub.device_cursor;
+                sub.element_cursor = 0;
+                sub.device_sent = false;
+            }
+
+            if (starved)
+                return;
+
+            if (sub.res_seq)
+            {
+                if (p.control_window_free() <= SyncPeer.control_reserve)
+                    return;
+                enc.encode_res(p, sub.res_seq);
+                if (!p.send_ok(gen))
+                    return;
+            }
+            p._pending_subs.remove(0);
+        }
+    }
+
     // Peer teardown: request cancellation of the peer's in-flight inbound commands;
     // the update() drain reaps them (delivering results while the transport lasts).
     // True while any remain, so the peer's shutdown() can wait on it.
@@ -409,6 +511,10 @@ nothrow @nogc:
         p._model_subs.clear();
         p._live_nodes.clear();
         p._pending_vals.clear();
+        p._pending_subs.clear();
+        p._pending_live.clear();
+        p._live_rescan = false;
+        p._rescan_cursor = 0;
 
         // forwards die with either endpoint; a dead destination answers the origin with err
         Array!uint doomed;
@@ -1050,7 +1156,9 @@ nothrow @nogc:
     void inbound_model_sub(SyncPeer from, uint seq, const(char[])[] patterns, bool once, ulong from_ms = 0, ulong to_ms = 0)
     {
         SyncEncoder enc = encoder_for(from._encoder);
-        uint gen = from.begin_burst();
+
+        Array!(const(char)[]) to_arm;
+        Array!(SyncPeer.PendingSub) staged;
         foreach (pat; patterns)
         {
             Address a = Address.parse(pat);
@@ -1060,47 +1168,60 @@ nothrow @nogc:
                 return;
             }
 
-            // arm the pattern for the live feed; a re-sub of an armed pattern just re-serves
-            bool arm = !once;
-            if (arm)
+            if (!once)
             {
+                bool armed = false;
                 foreach (ref p; from._model_subs[])
                 {
                     if (p[] == pat)
                     {
-                        arm = false;
+                        armed = true;
                         break;
                     }
                 }
-                if (arm)
+                foreach (ref p; to_arm[])
                 {
-                    from._model_subs ~= pat.make_string();
-                    add_feed_listener();
+                    if (p[] == pat)
+                    {
+                        armed = true;
+                        break;
+                    }
                 }
+                if (!armed)
+                    to_arm ~= pat;
             }
 
             if (!wildcard_match(a.ns, "device"))
                 continue;   // only the device namespace is served so far
-            foreach (dev; g_app.devices.values)
-            {
-                if (!dev.cid || authored_by(from, dev))
-                    continue;
-                if (match_path(a.subject, dev.id[]))
-                    introduce_device(from, enc, dev);
-                walk_elements(dev, a.subject, (Element* e, const(char)[] path) {
-                    if (!from.send_ok(gen))
-                        return;
-                    if (arm)
-                        track_live(from, e);
-                    send_element(from, enc, e, path, gen);
-                    if (from_ms && from.send_ok(gen))
-                        send_backfill(from, enc, e, from_ms, to_ms, gen);
-                });
-                if (!from.send_ok(gen))
-                    return;   // the session went down under the burst; nothing more can be answered
-            }
+            SyncPeer.PendingSub req;
+            req.pattern = a.subject.make_string();
+            req.from_ms = from_ms;
+            req.to_ms = to_ms;
+            req.arm = !once;
+            staged ~= req.move;
         }
-        enc.encode_res(from, seq);
+
+        if (from._pending_subs.length + staged.length > SyncPeer.max_pending_subs)
+        {
+            enc.encode_err(from, seq, "busy", "too many model subs in flight");
+            return;
+        }
+
+        foreach (pat; to_arm[])
+        {
+            from._model_subs ~= pat.make_string();
+            add_feed_listener();
+        }
+
+        if (staged.empty)
+        {
+            enc.encode_res(from, seq);
+            return;
+        }
+        staged[staged.length - 1].res_seq = seq;
+        foreach (ref req; staged[])
+            from._pending_subs ~= req.move;
+        pump_model_intro(from);
     }
 
     void inbound_model_unsub(SyncPeer from, const(char[])[] patterns)
@@ -1120,7 +1241,10 @@ nothrow @nogc:
             }
         }
         if (removed)
+        {
+            from._rescan_cursor = 0;
             rebuild_live_nodes(from);
+        }
     }
 
     void inbound_type_format(SyncPeer from, uint ft, ref const WireFormat wf)
@@ -1952,14 +2076,91 @@ nothrow @nogc:
                     enc.encode_val_block(to, h, blk);
                 if (!to.send_ok(gen))
                     return;
+                commit_backfill(to, e, blk);
                 if (blk.count < full)
                     break;
             }
             else
+            {
                 enc.encode_val_block(to, h, blk);
                 if (!to.send_ok(gen))
                     return;
+                commit_backfill(to, e, blk);
+            }
         }
+    }
+
+    void commit_backfill(SyncPeer to, Element* e, ref const RecordBlock blk)
+    {
+        if (ulong* live = e.ensure_eid().raw in to._live_nodes)
+            *live = blk.first_index + blk.count;
+    }
+
+    void introduce_element(SyncPeer p, SyncEncoder enc, Element* e, const(char)[] path, uint gen,
+                           bool arm, ulong from_ms, ulong to_ms)
+    {
+        send_element(p, enc, e, path, gen);
+        if (from_ms && p.send_ok(gen))
+            send_backfill(p, enc, e, from_ms, to_ms, gen);
+        if (arm && e.data_format.kind == SeriesKind.point && p.send_ok(gen))
+            mark_pending_val(p, e);
+    }
+
+    void mark_pending_val(SyncPeer p, Element* e)
+    {
+        EID node = e.ensure_eid();
+        if (!node)
+            return;
+        foreach (n; p._pending_vals[])
+            if (n == node)
+                return;
+        p._pending_vals ~= node;
+    }
+
+    void queue_live_intro(SyncPeer p, EID node)
+    {
+        if (p._pending_live.length >= SyncPeer.max_pending_live)
+        {
+            p._live_rescan = true;
+            p._rescan_cursor = 0;
+            return;
+        }
+        foreach (n; p._pending_live[])
+            if (n == node)
+                return;
+        p._pending_live ~= node;
+    }
+
+    void pump_live_rescan(SyncPeer p)
+    {
+        if (!p._live_rescan || !p._pending_live.empty)
+            return;
+        while (p._rescan_cursor < p._model_subs.length)
+        {
+            if (p._pending_subs.length >= SyncPeer.max_pending_subs)
+                return;
+            Address a = Address.parse(p._model_subs[p._rescan_cursor][]);
+            ++p._rescan_cursor;
+            if (!a.valid || !wildcard_match(a.ns, "device"))
+                continue;
+            bool queued = false;
+            foreach (ref req; p._pending_subs[])
+            {
+                if (req.pattern[] == a.subject)
+                {
+                    queued = true;
+                    break;
+                }
+            }
+            if (queued)
+                continue;
+            SyncPeer.PendingSub req;
+            req.pattern = a.subject.make_string();
+            req.arm = true;
+            p._pending_subs ~= req.move;
+        }
+        p._rescan_cursor = 0;
+        p._live_rescan = false;
     }
 
     // true when this peer announced the device; its mirror is never served back to it,
@@ -2049,7 +2250,8 @@ nothrow @nogc:
                 if (!a.valid || !wildcard_match(a.ns, "device") || !match_path(a.subject, path))
                     continue;
                 track_live(p, e);
-                send_element(p, encoder_for(p._encoder), e, path, p.begin_burst());
+                if (EID node = e.ensure_eid())
+                    queue_live_intro(p, node);
                 break;
             }
         });
