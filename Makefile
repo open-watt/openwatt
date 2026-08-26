@@ -548,8 +548,15 @@ endif
 
 ifeq ($(XTENSA_TWO_STAGE),1)
 ESP_LINK_OBJ := $(TARGET).o
+# IDF backtraces on Xtensa use the window-ABI walker, so the DWARF tables have no
+# reader once exceptions are off; llc emits them for the whole app if asked.
+ifeq ($(NOEXCEPTIONS),1)
+    XTENSA_EH_FLAGS := --exception-model=default
+else
+    XTENSA_EH_FLAGS := --emit-dwarf-unwind=always --exception-model=dwarf
+endif
 $(ESP_LINK_OBJ): $(TARGET)
-	"$(ESPRESSIF_LLC)" -O2 -mtriple=xtensa-none-elf --emulated-tls --mtext-section-literals --function-sections --data-sections --emit-dwarf-unwind=always --exception-model=dwarf $(XTENSA_MATTR) --filetype=obj $< -o $@
+	"$(ESPRESSIF_LLC)" -O2 -mtriple=xtensa-none-elf --emulated-tls --mtext-section-literals --function-sections --data-sections $(XTENSA_EH_FLAGS) $(XTENSA_MATTR) --filetype=obj $< -o $@
 else
 ESP_LINK_OBJ := $(TARGET)
 endif
