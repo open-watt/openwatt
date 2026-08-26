@@ -211,7 +211,8 @@ protected:
             if (!unk.scanning)
             {
                 unk.scanning = true;
-                send_ieee_request(unk.id, PCP.ca, &probe_response, cast(void*)cast(size_t)unk.id);
+                if (send_ieee_request(unk.id, PCP.ca, &probe_response, cast(void*)cast(size_t)unk.id) < 0)
+                    unk.scanning = false;
             }
         }
 

@@ -891,7 +891,7 @@ nothrow @nogc:
     ushort cluster_id;
     Array!ushort requested;
     Array!ushort remaining;
-    Array!int tags;
+    Array!int handles;
     Array!Variant results;
 
     this(Session session, ZigbeeEndpoint source, ushort dst, ubyte endpoint_id, ushort cluster_id, const(ushort)[] attrs)
@@ -909,7 +909,7 @@ nothrow @nogc:
 
     void send_requests()
     {
-        tags.clear();
+        handles.clear();
         enum max_attrs_per_request = 20;
         ubyte[max_attrs_per_request * 2] req_buffer = void;
 
@@ -923,13 +923,19 @@ nothrow @nogc:
             for (size_t j = 0; j < chunk; ++j)
                 req_buffer[j*2 .. j*2+2][0..2] = remaining[i+j].nativeToLittleEndian;
 
-            int tag = source.send_zcl_message(dst, endpoint_id, source.profile_id, cluster_id,
-                ZCLCommand.read_attributes, 0, req_buffer[0 .. chunk*2],
-                PCP.be, &response_handler, null);
-            if (tag >= 0)
-                tags.pushBack(tag);
-            ++pending;
+            int handle = source.send_zcl_message(dst, endpoint_id, source.profile_id, cluster_id, ZCLCommand.read_attributes, 0, req_buffer[0 .. chunk*2], PCP.be, &response_handler, null);
+            if (handle > 0)
+            {
+                handles.pushBack(handle);
+                ++pending;
+            }
             i += chunk;
+        }
+
+        if (pending == 0)
+        {
+            session.write_line("ZCL read could not be submitted");
+            state = CommandCompletionState.error;
         }
     }
 
@@ -957,9 +963,9 @@ nothrow @nogc:
 
     void abort_pending()
     {
-        foreach (tag; tags[])
-            source.abort_zcl_request(tag);
-        tags.clear();
+        foreach (handle; handles[])
+            source.abort_zcl_request(handle);
+        handles.clear();
     }
 
     void response_handler(ZigbeeResult result, const ZCLHeader* hdr, const(ubyte)[] message, void*) nothrow @nogc
@@ -1042,7 +1048,7 @@ nothrow @nogc:
         if (--pending > 0)
             return;
 
-        tags.clear();
+        handles.clear();
 
         if (state >= CommandCompletionState.cancel_requested)
             return;
@@ -1163,7 +1169,7 @@ nothrow @nogc:
     ushort attribute_id;
     Variant write_value;
     ZCLDataType data_type;
-    int pending_tag = -1;
+    int pending_handle = -1;
 
     this(Session session, ZigbeeEndpoint source, NodeMap* node, ubyte endpoint_id, ushort cluster_id, ushort attribute_id, ref const Variant write_value, ZCLDataType data_type)
     {
@@ -1202,10 +1208,10 @@ nothrow @nogc:
 
     void abort_pending()
     {
-        if (pending_tag >= 0)
+        if (pending_handle > 0)
         {
-            source.abort_zcl_request(pending_tag);
-            pending_tag = -1;
+            source.abort_zcl_request(pending_handle);
+            pending_handle = -1;
         }
     }
 
@@ -1213,8 +1219,14 @@ nothrow @nogc:
     {
         ubyte[2] read_buf = void;
         read_buf[0..2] = attribute_id.nativeToLittleEndian;
-        pending_tag = source.send_zcl_message(node.id, endpoint_id, source.profile_id, cluster_id,
-            ZCLCommand.read_attributes, 0, read_buf[], PCP.be, &read_response_handler, null);
+        int handle = source.send_zcl_message(node.id, endpoint_id, source.profile_id, cluster_id, ZCLCommand.read_attributes, 0, read_buf[], PCP.be, &read_response_handler, null);
+        if (handle < 0)
+        {
+            session.write_line("ZCL read (type discovery) could not be submitted");
+            state = CommandCompletionState.error;
+            return;
+        }
+        pending_handle = handle;
     }
 
     void send_write()
@@ -1232,14 +1244,19 @@ nothrow @nogc:
             return;
         }
 
-        pending_tag = source.send_zcl_message(node.id, endpoint_id, source.profile_id, cluster_id,
-            ZCLCommand.write_attributes, 0, write_buffer[0 .. 3 + val_len],
-            PCP.vo, &write_response_handler, null);
+        int handle = source.send_zcl_message(node.id, endpoint_id, source.profile_id, cluster_id, ZCLCommand.write_attributes, 0, write_buffer[0 .. 3 + val_len], PCP.vo, &write_response_handler, null);
+        if (handle < 0)
+        {
+            session.write_line("ZCL write could not be submitted");
+            state = CommandCompletionState.error;
+            return;
+        }
+        pending_handle = handle;
     }
 
     void read_response_handler(ZigbeeResult result, const ZCLHeader* hdr, const(ubyte)[] message, void*)
     {
-        pending_tag = -1;
+        pending_handle = -1;
 
         if (state >= CommandCompletionState.cancel_requested)
             return;
@@ -1299,7 +1316,7 @@ nothrow @nogc:
 
     void write_response_handler(ZigbeeResult result, const ZCLHeader* hdr, const(ubyte)[] message, void*)
     {
-        pending_tag = -1;
+        pending_handle = -1;
 
         if (state >= CommandCompletionState.cancel_requested)
             return;
