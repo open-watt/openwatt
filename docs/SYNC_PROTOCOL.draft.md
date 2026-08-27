@@ -254,8 +254,9 @@ stimulate the follow-up principle 4 forbids. `class` is `device` / `element` / `
 components never appear. `peer` is the hexadecimal owner of a peer-local device and is omitted for
 the global namespace.
 
-Deliberate asymmetry: `v` is the *latest* value even under a `from` subscription -- backfill
-arrives as `val` frames behind it, so a UI paints instantly and fills the chart as history streams.
+Under a `from` subscription, `add` binds the handle without a value, chronological backfill follows,
+and the latest value closes the burst. This keeps last-write conflict handling from rejecting the
+older records before they enter the mirror.
 
 ### 6. `move` -- `{h, path}`
 

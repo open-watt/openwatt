@@ -247,8 +247,7 @@ nothrow @nogc:
     // form 2: a named type's dictionary, pushed before the first format that cites it
     abstract void encode_type_enum(SyncPeer peer, const(char)[] name, const(VoidEnumInfo)* info);
 
-    // e is null for container nodes (class "device"); ft cites a session format id
-    abstract void encode_add(SyncPeer peer, SyncHandle h, const(char)[] path, const(char)[] node_class, uint ft, Element* e, ulong peer_id);
+    abstract void encode_add(SyncPeer peer, SyncHandle h, const(char)[] path, const(char)[] node_class, uint ft, Element* e, ulong peer_id, bool include_value = true);
 
     abstract void encode_val(SyncPeer peer, SyncHandle h, Element* e);
     abstract void encode_val_block(SyncPeer peer, SyncHandle h, ref const RecordBlock blk);

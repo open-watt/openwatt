@@ -493,7 +493,7 @@ nothrow @nogc:
         send_frame(peer);
     }
 
-    override void encode_add(SyncPeer peer, SyncHandle h, const(char)[] path, const(char)[] node_class, uint ft, Element* e, ulong peer_id)
+    override void encode_add(SyncPeer peer, SyncHandle h, const(char)[] path, const(char)[] node_class, uint ft, Element* e, ulong peer_id, bool include_value = true)
     {
         import urt.time : unix_time_ns;
         import manager.element : Access;
@@ -515,7 +515,7 @@ nothrow @nogc:
             _buf.append(",\"ft\":", ft);
             if (e.access != Access.read)
                 _buf.append(",\"access\":\"", enum_key_from_value!Access(e.access), '\"');
-            if (e.data_format.kind != SeriesKind.point)
+            if (include_value && e.data_format.kind != SeriesKind.point)
             {
                 // events retain no value; occurrences replay via `from`
                 Variant v = e.value;
@@ -1027,7 +1027,7 @@ nothrow @nogc:
                 else for (size_t i = 0; i < smp.length(); ++i)
                 {
                     ref Variant pair = (*smp)[i];
-                    if (!pair.isArray || pair.length() < 2 || !pair[0].isUlong)
+                    if (!pair.isArray || pair.length() != 2 || !pair[0].isUlong)
                     {
                         bad("s");
                         break;

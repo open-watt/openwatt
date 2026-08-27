@@ -439,7 +439,7 @@ nothrow @nogc:
         send_frame(peer);
     }
 
-    override void encode_add(SyncPeer peer, SyncHandle h, const(char)[] path, const(char)[] node_class, uint ft, Element* e, ulong peer_id)
+    override void encode_add(SyncPeer peer, SyncHandle h, const(char)[] path, const(char)[] node_class, uint ft, Element* e, ulong peer_id, bool include_value = true)
     {
         import urt.time : unix_time_ns;
         import manager.element : Access;
@@ -457,7 +457,7 @@ nothrow @nogc:
 
             Variant v;
             ulong t_ms = 0;
-            if (e.data_format.kind != SeriesKind.point)
+            if (include_value && e.data_format.kind != SeriesKind.point)
             {
                 // events retain no value; occurrences replay via backfill
                 v = e.value;
