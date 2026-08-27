@@ -1,6 +1,7 @@
 module router.iface.packet;
 
 import urt.mem;
+import urt.mem.pagepool;
 import urt.time;
 
 public import router.iface.mac;
@@ -204,7 +205,10 @@ nothrow @nogc:
 
     Packet* clone() const
     {
-        Packet* r = cast(Packet*)alloc(Packet.sizeof + _length);
+        void[] page = page_alloc_for(Packet.sizeof + _length);
+        if (!page.ptr)
+            return null;
+        Packet* r = cast(Packet*)page.ptr;
         *r = this;
         r._flags |= 0x01; // mutable
         r._ptr = &r[1];
@@ -212,11 +216,10 @@ nothrow @nogc:
         return r;
     }
 
-    // Free a Packet returned by clone(). Caller must pass the same allocator
-    // that was used to clone(); defaults match.
+    // Free a Packet returned by clone().
     void free_clone()
     {
-        free((cast(void*)&this)[0 .. Packet.sizeof + _length]);
+        page_free(&this);
     }
 
     PCP pcp() const pure
@@ -250,6 +253,32 @@ package:
     ubyte _offset;
     ushort _length;
     const(void)* _ptr;
+}
+
+// Room reserved ahead of the payload so link/network/transport headers can be
+// prepended in place by alloc_prefix. _offset is a ubyte, so 255 is the ceiling.
+enum ubyte packet_headroom = 128;
+
+// A Packet owning `payload` bytes of its own, written in place rather than copied
+// in. Returns null when the pool is exhausted; release with free_clone().
+Packet* alloc_packet(T)(size_t payload, ubyte headroom = packet_headroom)
+{
+    if (payload + headroom > ushort.max)
+        return null;
+
+    void[] page = page_alloc_for(Packet.sizeof + headroom + payload);
+    if (!page.ptr)
+        return null;
+
+    Packet* p = cast(Packet*)page.ptr;
+    *p = Packet.init;
+    p.creation_time = getTime();
+    p.type = T.Type;
+    p._flags = 0x01;     // mutable, so alloc_prefix will work
+    p._offset = headroom;
+    p._length = cast(ushort)(headroom + payload);
+    p._ptr = &p[1];
+    return p;
 }
 
 struct RawFrame

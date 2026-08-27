@@ -394,6 +394,11 @@ nothrow @nogc:
         assert(!g_app, "Application already created!");
         g_app = this;
 
+        // Before any interface exists: packets are cloned from these.
+        import urt.mem.pagepool : page_pool_init;
+        bool pool_ready = page_pool_init();
+        debug assert(pool_ready, "page pool initialisation failed");
+
         bool reclaimer_registered = register_reclaimer(&reclaim_element_history, 32, false);
         debug assert(reclaimer_registered, "element history reclaimer registration failed");
 

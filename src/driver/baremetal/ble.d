@@ -670,7 +670,10 @@ private:
         f.dst = req.src;
         f.kind = BLEFrameKind.att;
         f.code = pdu[0];
-        _emu_responses ~= p.clone();
+        Packet* response = p.clone();
+        if (!response)
+            return;
+        _emu_responses ~= response;
 
         import protocol.ble : BLEModule;
         get_module!BLEModule.request_service();
