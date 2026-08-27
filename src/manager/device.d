@@ -464,21 +464,27 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
         model_bit = ModelMask.max;
 
     Device device;
-    bool is_new_device = false;
     if (Device existing = g_app.devices.find(id, peer_id))
     {
         device = existing;
         assert(device.private_ == private_, "device visibility conflict");
+        if (!device.name && name)
+            device.name = name.make_string();
     }
     else
     {
         device = alloc!Device(id.make_string(), peer_id, private_);
         if (name)
             device.name = name.make_string();
-        is_new_device = true;
-        // identity claims at birth: element lifecycle handlers fired during materialization
-        // need the device's CID to allocate EIDs
         g_app.devices.insert(device);
+    }
+
+    bool has_computation(Element* target, ComputationKind kind)
+    {
+        foreach (ref computation; device.computations)
+            if (computation.target is target && computation.kind == kind)
+                return true;
+        return false;
     }
 
     Component find_or_create_component(Component parent, ref ComponentTemplate ct)
@@ -501,6 +507,13 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
             c.hidden = ct.is_hidden();
             c.parent = parent;
             parent.components ~= c;
+        }
+        else
+        {
+            if (!c.template_)
+                c.template_ = ct.get_template(profile).make_string();
+            if (ct.is_hidden())
+                c.hidden = true;
         }
 
         foreach (ref child; ct.components(profile))
@@ -535,34 +548,44 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
                 e.name = el.get_name(profile).make_string();
                 e.desc = el.get_desc(profile).make_string();
                 e.display_unit = el.get_display_units(profile).make_string();
-                e.sampling_mode = el.update_frequency.freq_to_element_mode;
                 e.access = cast(manager.element.Access)el.access;
-
-                if (!e.name || !e.desc || !e.display_unit)
+            }
+            else
+            {
+                e.access = cast(manager.element.Access)(e.access | cast(manager.element.Access)el.access);
+                if (!e.name)
+                    e.name = el.get_name(profile).make_string();
+                if (!e.desc)
+                    e.desc = el.get_desc(profile).make_string();
+                if (!e.display_unit)
+                    e.display_unit = el.get_display_units(profile).make_string();
+            }
+            e.sampling_mode = el.update_frequency.freq_to_element_mode;
+            if (!e.name || !e.desc || !e.display_unit)
+            {
+                if (const KnownElementTemplate* et = find_known_element(c.template_[], e.id[]))
                 {
-                    if (const KnownElementTemplate* et = find_known_element(c.template_[], e.id[]))
-                    {
-                        if (!e.display_unit)
-                            e.display_unit = et.units.make_string();
-                        if (!e.name)
-                            e.name = et.name.make_string();
-                        if (!e.desc)
-                            e.desc = et.desc.make_string();
-                    }
+                    if (!e.display_unit)
+                        e.display_unit = et.units.make_string();
+                    if (!e.name)
+                        e.name = et.name.make_string();
+                    if (!e.desc)
+                        e.desc = et.desc.make_string();
                 }
             }
 
             final switch (el.type) with (ElementTemplate.Type)
             {
                 case expression:
-                    if (!is_new_element)
+                    if (has_computation(e, ComputationKind.expression))
                         break;
                     const(char)[] expr_str = el.get_expression(profile);
                     Expression* expr = parse_expression(expr_str);
                     if (!expr)
                     {
                         writeWarning("Failed to parse expression: ", expr_str);
-                        free(e);
+                        if (is_new_element)
+                            free(e);
                         continue;
                     }
 
@@ -571,8 +594,9 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
                     if (have_var_refs)
                     {
                         writeWarning("Element expressions can't have variable references: ", expr_str);
-                        free(e);
                         expr.free_expression();
+                        if (is_new_element)
+                            free(e);
                         continue;
                     }
 
@@ -580,15 +604,21 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
                     {
                         EvalContext ctx;
                         Variant value = expr.evaluate(ctx);
-                        e.format = expr.infer_format(ctx);
-                        if (!e.format.valid || value.isNull)
+                        FormatId expression_format = expr.infer_format(ctx);
+                        if (!expression_format.valid || value.isNull)
                         {
                             writeWarning("Element expression has no stable format: ", expr_str);
                             expr.free_expression();
-                            free(e);
+                            if (is_new_element)
+                                free(e);
                             continue;
                         }
-                        e.value = value.move;
+                        if (is_new_element)
+                            e.format = expression_format;
+                        else
+                            assert(e.format == expression_format || value_compatible(*format_info(expression_format), *e.data_format), "element path reused with an incompatible format");
+                        if (e.record_update() == SysTime())
+                            e.value = value.move;
                         e.sampling_mode = SamplingMode.constant;
                         expr.free_expression();
                     }
@@ -605,22 +635,29 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
                     break;
 
                 case map:
-                    if (!is_new_element)
-                        break;
+                    FormatId mapped_format;
                     foreach (ai; profile.element_aliases(el.element_index))
                     {
                         ref const(ElementDesc) alias_desc = profile.element_desc(ai);
-                        e.access = cast(manager.element.Access)alias_desc.access;
+                        e.access = cast(manager.element.Access)(
+                            e.access | cast(manager.element.Access)alias_desc.access);
                         const(char)[] alias_units = alias_desc.get_display_units(profile);
-                        if (!(el.explicit & ElementTemplate.Explicit.units) && alias_units.length)
+                        if (is_new_element && !(el.explicit & ElementTemplate.Explicit.units) && alias_units.length)
                             e.display_unit = alias_units.make_string();
                         if (!(el.explicit & ElementTemplate.Explicit.frequency))
                             e.sampling_mode = alias_desc.update_frequency.freq_to_element_mode;
-                        e.format = create_element_handler(device, e, alias_desc, el.index);
-                        if (e.format.valid)
+                        mapped_format = create_element_handler(device, e, alias_desc, el.index);
+                        if (mapped_format.valid)
                             break;
                     }
-                    if (!e.format.valid)
+                    if (mapped_format.valid)
+                    {
+                        if (is_new_element)
+                            e.format = mapped_format;
+                        else
+                            assert(e.format == mapped_format || value_compatible(*format_info(mapped_format), *e.data_format), "element path reused with an incompatible format");
+                    }
+                    else if (is_new_element)
                     {
                         free(e);
                         continue;
@@ -628,7 +665,7 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
                     break;
 
                 case sum:
-                    if (!is_new_element)
+                    if (has_computation(e, ComputationKind.accumulator))
                         break;
                     Computation comp;
                     comp.kind = ComputationKind.accumulator;
@@ -641,7 +678,7 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
                     break;
 
                 case alias_:
-                    if (!is_new_element)
+                    if (has_computation(e, ComputationKind.alias_))
                         break;
                     Computation comp;
                     comp.kind = ComputationKind.alias_;
@@ -713,6 +750,7 @@ unittest
     Device d = alloc!Device(StringLit!"testdev");
     Component c = alloc!Component(StringLit!"child");
     c.parent = d;
+    d.components ~= c;
     assert(!c.is_device);
     Component as_comp = d;
     assert(as_comp.is_device);
