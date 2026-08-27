@@ -6,6 +6,7 @@ import urt.lifetime;
 import urt.log;
 import urt.map;
 import urt.mem;
+import urt.mem.pagepool;
 import urt.mem.temp;
 import urt.meta.enuminfo;
 import urt.string;
@@ -85,6 +86,13 @@ protected:
 
     override CompletionStatus shutdown()
     {
+        if (_schema_cleanup_scheduled)
+        {
+            g_app.cancel(&finish_schema);
+            _schema_cleanup_scheduled = false;
+        }
+        cleanup_schema(false);
+
         foreach (ref req; _pending_requests)
             req.command.request_cancel();
         update_pending_requests(false);
@@ -101,10 +109,119 @@ protected:
     }
 
 private:
-    CID _server_id;
-    String _uri;
+    static struct SchemaTx
+    {
+    nothrow @nogc:
 
-    HTTPServer.RequestHandler _default_handler;
+        Page* produce(Stream, size_t requested)
+        {
+            if (complete)
+            {
+                owner.schema_finished(&this, true);
+                return null;
+            }
+            if (!header_sent)
+                return produce_header(requested);
+
+            if (sent == pending.length)
+                prepare_pending();
+
+            size_t terminal_size = closed ? final_chunk_size : 0;
+            size_t page_size = requested < max_page_size ? requested : max_page_size;
+            size_t minimum = chunk_framing + 1 + terminal_size;
+            if (page_size < minimum)
+                page_size = minimum;
+
+            size_t take = pending.length - sent;
+            size_t room = page_size - chunk_framing - terminal_size;
+            if (take > room)
+                take = room;
+
+            Page* page = page_alloc(page_size);
+            if (!page)
+            {
+                owner.schema_finished(&this, false);
+                return null;
+            }
+
+            char[] output = cast(char[])page.data;
+            size_t length = write_chunk(output, pending[sent .. sent + take]);
+            sent += take;
+            if (closed && sent == pending.length)
+            {
+                output[length .. length + final_chunk_size] = "0\r\n\r\n";
+                length += final_chunk_size;
+                complete = true;
+            }
+            page.length = cast(ushort)length;
+            return page;
+        }
+
+    private:
+        enum max_page_size = 1600;
+        enum chunk_framing = 8;
+        enum final_chunk_size = 5;
+
+        APIManager owner;
+        Stream stream;
+        typeof(g_app.types.values()) types;
+        Array!char pending;
+        size_t sent;
+        bool header_sent;
+        bool opened;
+        bool wrote_type;
+        bool closed;
+        bool complete;
+
+        Page* produce_header(size_t requested)
+        {
+            size_t take = pending.length - sent;
+            if (take > max_page_size)
+                take = max_page_size;
+            if (take > requested)
+                take = requested;
+
+            Page* page = page_alloc(take);
+            if (!page)
+            {
+                owner.schema_finished(&this, false);
+                return null;
+            }
+            (cast(char[])page.data)[] = pending[sent .. sent + take];
+            sent += take;
+            if (sent == pending.length)
+            {
+                pending.clear();
+                sent = 0;
+                header_sent = true;
+            }
+            return page;
+        }
+
+        void prepare_pending()
+        {
+            pending.clear();
+            sent = 0;
+            if (!opened)
+            {
+                pending ~= '{';
+                opened = true;
+            }
+            if (!types.empty)
+            {
+                if (wrote_type)
+                    pending ~= ',';
+                wrote_type = true;
+                emit_collection(pending, types.front);
+                types.popFront();
+            }
+            else
+            {
+                pending ~= '}';
+                closed = true;
+            }
+        }
+    }
 
     struct PendingRequest
     {
@@ -114,6 +231,12 @@ private:
         CommandState command;
         String origin;
     }
+
+    CID _server_id;
+    String _uri;
+    HTTPServer.RequestHandler _default_handler;
+    SchemaTx* _schema;
+    bool _schema_cleanup_scheduled;
     Array!PendingRequest _pending_requests;
 
     int handle_request(ref const HTTPMessage request, ref Stream stream, const(ubyte)[] leftover)
@@ -273,80 +396,116 @@ private:
 
     int handle_schema(ref const HTTPMessage request, ref Stream stream)
     {
-        Array!char json;
-        json.reserve(4096);
-        json ~= '{';
-
-        bool first_col = true;
-        foreach (col; g_app.types.values)
+        if (_schema)
+            return reject_schema(request, stream);
+        if (request.http_version != HTTPVersion.V1_1)
         {
-            if (!first_col)
-                json ~= ',';
-            first_col = false;
-
-            bool is_collection = col.type_info.collection_root;
-            json.append('\"', col.type_info.type[], "\":{\"collection_id\":", cast(uint)col.type_info.collection_id, ",\"path\":\"", col.path[], '\"');
-            if (col.type_info.is_abstract)
-                json ~= ",\"abstract\":true";
-            if (is_collection)
-                json ~= ",\"collection\":true";
-            json ~= ",\"properties\":{";
-
-            bool first_prop = true;
-            foreach (prop; col.type_info.properties)
-            {
-                if (!first_prop)
-                    json ~= ',';
-                first_prop = false;
-
-                json.append('\"', prop.name[], "\":{\"access\":\"");
-                if (prop.get && prop.set)
-                    json ~= "rw";
-                else if (prop.get)
-                    json ~= "r";
-                else if (prop.set)
-                    json ~= "w";
-                json ~= '\"';
-
-                if (!prop.type[0].empty)
-                {
-                    json ~= ",\"type\":[";
-                    json.append('\"', prop.type[0][], '\"');
-                    if (!prop.type[1].empty)
-                        json.append(",\"", prop.type[1][], '\"');
-                    json ~= ']';
-                }
-
-                if (prop.category)
-                    json.append(",\"category\":\"", prop.category[], '\"');
-
-                if (prop.flags)
-                {
-                    json ~= ",\"flags\":\"";
-                    if (prop.flags & 1) json ~= 'A';
-                    if (prop.flags & 2) json ~= 'D';
-                    if (prop.flags & 4) json ~= 'H';
-                    json ~= '\"';
-                }
-
-                if (prop.init_val)
-                {
-                    Variant def = prop.init_val();
-                    json ~= ",\"default\":";
-                    size_t n = def.write_json(null);
-                    def.write_json(json.extend(n));
-                }
-
-                json ~= '}';
-            }
-            json ~= "}}";
+            HTTPMessage response = create_response(request.http_version, 505, StringLit!"application/json", "{\"error\":\"HTTP/1.1 required\"}");
+            add_cors(response, request);
+            stream.write(response.format_message()[]);
+            return 0;
         }
-        json ~= '}';
+        if (!stream.supports_tx_pages)
+            return reject_schema(request, stream, "{\"error\":\"schema streaming unavailable\"}");
 
-        HTTPMessage response = create_response(request.http_version, 200, StringLit!"application/json", json[]);
+        HTTPMessage head;
+        head.http_version = request.http_version;
+        head.status_code = 200;
+        head.reason = status_text(200);
+        head.timestamp = getSysTime();
+        head.headers ~= HTTPParam(StringLit!"Content-Type", StringLit!"application/json");
+        head.headers ~= HTTPParam(StringLit!"Transfer-Encoding", StringLit!"chunked");
+        add_cors(head, request);
+
+        SchemaTx* tx = alloc!SchemaTx();
+        if (!tx)
+            return reject_schema(request, stream, "{\"error\":\"schema streaming unavailable\"}");
+        tx.owner = this;
+        tx.stream = stream;
+        tx.types = g_app.types.values;
+        tx.pending = format_message_head(head);
+        if (tx.pending.empty)
+        {
+            free(tx);
+            return -1;
+        }
+
+        HTTPServer server = _server_id.get_item!HTTPServer;
+        if (!server)
+        {
+            free(tx);
+            return -1;
+        }
+        if (!server.defer_response(stream))
+        {
+            free(tx);
+            return -1;
+        }
+        _schema = tx;
+        stream.subscribe(&schema_stream_state_change);
+        if (!stream.tx_handler(&tx.produce))
+            schema_finished(tx, false);
+        return 0;
+    }
+
+    int reject_schema(ref const HTTPMessage request, ref Stream stream, const(void)[] content = "{\"error\":\"schema transfer in progress\"}")
+    {
+        HTTPMessage response = create_response(request.http_version, 503, StringLit!"application/json", content);
         add_cors(response, request);
         stream.write(response.format_message()[]);
         return 0;
+    }
+
+    void schema_finished(SchemaTx* tx, bool complete)
+    {
+        if (_schema !is tx)
+            return;
+        tx.complete = complete;
+        if (!_schema_cleanup_scheduled)
+        {
+            g_app.schedule(getTime(), &finish_schema);
+            _schema_cleanup_scheduled = true;
+        }
+    }
+
+    void finish_schema(MonoTime)
+    {
+        _schema_cleanup_scheduled = false;
+        cleanup_schema(true);
+    }
+
+    void cleanup_schema(bool resume)
+    {
+        SchemaTx* tx = _schema;
+        if (!tx)
+            return;
+        _schema = null;
+
+        Stream stream = tx.stream;
+        bool complete = tx.complete;
+        if (stream)
+        {
+            stream.release_tx_handler(&tx.produce);
+            stream.unsubscribe(&schema_stream_state_change);
+        }
+        free(tx);
+
+        HTTPServer server = _server_id.get_item!HTTPServer;
+        if (resume && complete && stream && stream.running && server && server.resume_response(stream))
+            return;
+        if (stream && stream.running)
+            stream.destroy();
+    }
+
+    void schema_stream_state_change(ActiveObject object, StateSignal signal)
+    {
+        if (signal != StateSignal.offline || !_schema || _schema.stream !is object)
+            return;
+
+        _schema.stream.release_tx_handler(&_schema.produce);
+        _schema.stream.unsubscribe(&schema_stream_state_change);
+        _schema.stream = null;
+        schema_finished(_schema, false);
     }
 
     int handle_enum(ref const HTTPMessage request, ref Stream stream, const(char)[] name)
@@ -848,3 +1007,111 @@ nothrow @nogc:
 private:
 
 __gshared immutable string[4] g_access_strings = [ "", "r", "w", "rw" ];
+
+void emit_collection(ref Array!char json, ref const Application.RegisteredType col)
+{
+    bool is_collection = col.type_info.collection_root;
+    json.append('\"', col.type_info.type[], "\":{\"collection_id\":", cast(uint)col.type_info.collection_id, ",\"path\":\"", col.path[], '\"');
+    if (col.type_info.is_abstract)
+        json ~= ",\"abstract\":true";
+    if (is_collection)
+        json ~= ",\"collection\":true";
+    json ~= ",\"properties\":{";
+
+    bool first_prop = true;
+    foreach (prop; col.type_info.properties)
+    {
+        if (!first_prop)
+            json ~= ',';
+        first_prop = false;
+
+        json.append('\"', prop.name[], "\":{\"access\":\"");
+        if (prop.get && prop.set)
+            json ~= "rw";
+        else if (prop.get)
+            json ~= "r";
+        else if (prop.set)
+            json ~= "w";
+        json ~= '\"';
+
+        if (!prop.type[0].empty)
+        {
+            json ~= ",\"type\":[";
+            json.append('\"', prop.type[0][], '\"');
+            if (!prop.type[1].empty)
+                json.append(",\"", prop.type[1][], '\"');
+            json ~= ']';
+        }
+
+        if (prop.category)
+            json.append(",\"category\":\"", prop.category[], '\"');
+
+        if (prop.flags)
+        {
+            json ~= ",\"flags\":\"";
+            if (prop.flags & 1)
+                json ~= 'A';
+            if (prop.flags & 2)
+                json ~= 'D';
+            if (prop.flags & 4)
+                json ~= 'H';
+            json ~= '\"';
+        }
+
+        if (prop.init_val)
+        {
+            Variant def = prop.init_val();
+            json ~= ",\"default\":";
+            size_t n = def.write_json(null);
+            def.write_json(json.extend(n));
+        }
+
+        json ~= '}';
+    }
+    json ~= "}}";
+}
+
+size_t write_chunk(char[] dst, const(char)[] data)
+{
+    char[4] digits = void;
+    size_t d = 0;
+    size_t v = data.length;
+    while (v)
+    {
+        const ubyte nib = v & 0xF;
+        digits[d++] = cast(char)(nib < 10 ? '0' + nib : 'a' + nib - 10);
+        v >>= 4;
+    }
+    if (d == 0)
+        digits[d++] = '0';
+
+    size_t n = 0;
+    while (d)
+        dst[n++] = digits[--d];
+    dst[n++] = '\r';
+    dst[n++] = '\n';
+    dst[n .. n + data.length] = data[];
+    n += data.length;
+    dst[n++] = '\r';
+    dst[n++] = '\n';
+    return n;
+}
+
+
+unittest
+{
+    bool owns_pool = page_pool_init();
+    scope (exit) if (owns_pool) page_pool_deinit();
+
+    APIManager.SchemaTx tx;
+    tx.header_sent = true;
+
+    Page* page = tx.produce(null, 1);
+    assert(page && cast(const(char)[])page.data == "1\r\n{\r\n");
+    page_free(page);
+
+    page = tx.produce(null, 1);
+    assert(page && cast(const(char)[])page.data == "1\r\n}\r\n0\r\n\r\n");
+    assert(tx.complete);
+    page_free(page);
+}
