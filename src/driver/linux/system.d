@@ -49,6 +49,7 @@ bool reboot_pending() => g_reboot;
 // The supervisor relaunches this process; the reason it stopped is in its log,
 // not in anything the new process can read.
 const(char)[] reset_reason() => null;
+bool reset_was_software() => false;
 
 bool ota_supported() => true;
 
