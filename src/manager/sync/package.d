@@ -101,6 +101,7 @@ enum PendingKind : ubyte
     enum_req,
     set,
     reset,
+    model_set,
 }
 
 struct PendingForward
@@ -108,7 +109,7 @@ struct PendingForward
     SyncPeer    origin;       // peer that originated the request
     uint        origin_seq;   // seq assigned by origin peer
     PendingKind kind;
-    SyncPeer    dest;         // authoritative peer the request was forwarded to
+    SyncPeer    dest;
 }
 
 // Inbound command running locally on behalf of a peer. When execute() returns
@@ -541,7 +542,12 @@ nothrow @nogc:
         foreach (ref f; stranded[])
         {
             if (f.origin.running)
-                encoder_for(f.origin._encoder).encode_error(f.origin, f.origin_seq, "authority detached");
+            {
+                if (f.kind == PendingKind.model_set)
+                    encoder_for(f.origin._encoder).encode_err(f.origin, f.origin_seq, "not_authoritative", "writer detached");
+                else
+                    encoder_for(f.origin._encoder).encode_error(f.origin, f.origin_seq, "authority detached");
+            }
         }
 
         debug foreach (ref cmd; pending_inbound_cmds)
@@ -1511,9 +1517,18 @@ nothrow @nogc:
             return;
         }
 
-        if (!has_local_writer(e))
+        bool local_writer;
+        SyncPeer writer = remote_writer(e, from, local_writer);
+        if (!local_writer)
         {
-            enc.encode_err(from, seq, "not_authoritative", "no writable local provider");
+            if (!writer)
+            {
+                enc.encode_err(from, seq, "not_authoritative", "no writable provider");
+                return;
+            }
+            uint local_seq = alloc_seq();
+            pending_forwards[local_seq] = PendingForward(from, seq, PendingKind.model_set, writer);
+            encoder_for(writer._encoder).encode_model_set(writer, local_seq, writer.handle_of(e.ensure_eid()), *value);
             return;
         }
         if (const(char)[] error = e.try_set(*value))
@@ -1545,8 +1560,21 @@ nothrow @nogc:
         return true;
     }
 
-    void inbound_res(SyncPeer from, uint seq)
+    void inbound_res(SyncPeer from, uint seq, Variant* value)
     {
+        if (PendingForward* forward = seq in pending_forwards)
+        {
+            if (forward.kind == PendingKind.model_set && forward.dest is from)
+            {
+                SyncEncoder enc = encoder_for(forward.origin._encoder);
+                if (value)
+                    enc.encode_res(forward.origin, forward.origin_seq, *value);
+                else
+                    enc.encode_res(forward.origin, forward.origin_seq);
+                pending_forwards.remove(seq);
+                return;
+            }
+        }
         if (get_module!SyncPeeringModule.claim_response(from, seq, true, null, null))
             return;
         log.info("model burst complete from '", from.name[], "' seq=", seq);
@@ -1554,6 +1582,15 @@ nothrow @nogc:
 
     void inbound_err(SyncPeer from, uint seq, const(char)[] code, const(char)[] text)
     {
+        if (PendingForward* forward = seq in pending_forwards)
+        {
+            if (forward.kind == PendingKind.model_set && forward.dest is from)
+            {
+                encoder_for(forward.origin._encoder).encode_err(forward.origin, forward.origin_seq, code, text);
+                pending_forwards.remove(seq);
+                return;
+            }
+        }
         if (get_module!SyncPeeringModule.claim_response(from, seq, false, code, text))
             return;
         log.warning("err from '", from.name[], "' seq=", seq, " code=", code, ": ", text);
@@ -2272,12 +2309,13 @@ nothrow @nogc:
         });
     }
 
-    bool has_local_writer(Element* e)
+    SyncPeer remote_writer(Element* e, SyncPeer exclude, out bool local_writer)
     {
         EID eid = e.ensure_eid();
         Device device = g_app.devices.container(eid.container);
         if (!device)
-            return false;
+            return null;
+        SyncPeer writer;
         foreach (entry; e.binding_entries)
         {
             if (entry == Element.binding_end)
@@ -2286,11 +2324,22 @@ nothrow @nogc:
             {
                 ubyte index = Element.binding_index(entry);
                 assert(index < device.bindings.length);
-                if (!device.binding_is_peer(index) && (Element.binding_access(entry) & Access.write))
-                    return true;
+                if (!device.binding_is_peer(index))
+                {
+                    if (Element.binding_access(entry) & Access.write)
+                        local_writer = true;
+                    continue;
+                }
+                SyncPeer peer = cast(SyncPeer)cast(void*)device.bindings[index];
+                if (peer is exclude || !peer.running || !(Element.binding_access(entry) & Access.write))
+                    continue;
+                if (peer.handle_of(eid) == SyncPeer.invalid_handle)
+                    continue;
+                if (!writer || peer._remote_node_id > writer._remote_node_id)
+                    writer = peer;
             }
         }
-        return false;
+        return writer;
     }
 
     void merge_remote_value(Element* e, ref Variant value, ulong t_ms)

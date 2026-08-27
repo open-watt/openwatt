@@ -394,6 +394,17 @@ nothrow @nogc:
         send_frame(peer);
     }
 
+    override void encode_model_set(SyncPeer peer, uint seq, SyncHandle h, ref const Variant value)
+    {
+        begin_frame(Verb.model_set);
+        _buf.put_varint(seq);
+        _buf.put_varint(h);
+        _buf.put_str(null);
+        _buf ~= ubyte(0);
+        _buf.put_variant(value);
+        send_frame(peer);
+    }
+
     override void encode_type_format(SyncPeer peer, uint ft, ref const DataFormat fmt)
     {
         import urt.mem.temp : tconcat;
@@ -954,9 +965,9 @@ nothrow @nogc:
             case Verb.res:
             {
                 uint seq = cast(uint)r.varint();
-                r.variant();
+                Variant v = r.variant();
                 if (!r.fail)
-                    sync.inbound_res(peer, seq);
+                    sync.inbound_res(peer, seq, v.isNull ? null : &v);
                 break;
             }
 
