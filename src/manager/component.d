@@ -152,7 +152,7 @@ nothrow @nogc:
             }
         }
 
-        Element* e = alloc!Element();
+        Element* e = alloc_element();
         e.format = format;
         e.parent = this;
         elements ~= e;

@@ -1532,7 +1532,7 @@ private:
         foreach (Element* existing; c.elements)
             if (existing.id[] == id)
                 return existing;
-        Element* e = alloc!Element();
+        Element* e = alloc_element();
         e.parent = c;
         e.id = id.make_string();
         c.elements ~= e;

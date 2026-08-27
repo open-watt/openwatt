@@ -272,7 +272,7 @@ private:
                 return e;
             }
         }
-        Element* e = alloc!Element();
+        Element* e = alloc_element();
         e.parent = parent;
         e.id = id.make_string();
         e.format = format;

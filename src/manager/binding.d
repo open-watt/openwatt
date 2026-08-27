@@ -18,7 +18,6 @@ import manager.profile;
 
 nothrow @nogc:
 
-
 abstract class ProtocolBinding : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("device", device));
@@ -51,11 +50,19 @@ nothrow @nogc:
 
 protected:
     String _device;
+    Device _bound_device;
 
-    // build the binding device tree
     bool materialise()
     {
         return true;
+    }
+
+    void detach_device()
+    {
+        if (!_bound_device)
+            return;
+        _bound_device.detach_binding(this);
+        _bound_device = null;
     }
 }
 
@@ -83,6 +90,19 @@ protected:
     abstract const(char)[] profile_name() const pure;
     abstract const(char)[] model_name() const pure;
     abstract FormatId add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte index);
+
+    final FormatId attach_element(Device device, Element* element, ref const ElementDesc desc, ubyte index)
+    {
+        FormatId format = add_handler(device, element, desc, index);
+        if (format.valid)
+        {
+            if (_bound_device && _bound_device !is device)
+                _bound_device.detach_binding(this);
+            _bound_device = device;
+            device.attach_binding(this, element, cast(manager.element.Access)desc.access);
+        }
+        return format;
+    }
 
     override StringResult set_unknown_property(scope const(char)[] property, ref const Variant value)
     {
@@ -142,10 +162,11 @@ protected:
 
         // add_handler reads _profile_data during device creation
         _profile_data = profile;
-        Device device = create_device_from_profile(*_profile_data, model_name(), _device[], null, &add_handler);
+        Device device = create_device_from_profile(*_profile_data, model_name(), _device[], null, &attach_element);
         if (!device)
         {
             writeWarning(name, ": failed to materialise device '", _device, "'");
+            detach_device();
             g_app.release_profile(_profile_data);
             _profile_data = null;
             return false;
@@ -156,6 +177,7 @@ protected:
 
     override CompletionStatus shutdown()
     {
+        detach_device();
         // release, don't free: the registry retains the parse (element descs and
         // expressions on surviving devices borrow its strings), and the next startup
         // re-acquires the live copy and re-materialises subclass element state

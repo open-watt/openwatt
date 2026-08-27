@@ -118,7 +118,7 @@ unittest
 
     static void add_num(Component c, const(char)[] id, float value, ScaledUnit unit)
     {
-        Element* e = alloc!Element();
+        Element* e = alloc_element();
         e.id = id.make_string();
         e.format = register_format(DataFormat(ValueType.f64, SeriesKind.held, unit));
         e.value = Variant(Quantity!double(value, unit));

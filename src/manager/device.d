@@ -12,6 +12,7 @@ import urt.time;
 import urt.variant;
 
 import manager;
+import manager.base : ActiveObject;
 import manager.collection : CID, CollectionType, CollectionTypeInfo, DynTypeInfo, make_cid;
 import manager.component;
 import manager.element;
@@ -291,7 +292,64 @@ nothrow @nogc:
     bool remote;                        // materialized from a sync peer; never announced back
     IndexTable!(Element*) element_ids;
 
+    Array!ActiveObject bindings;
+
     Array!Computation computations;
+
+    ubyte attach_binding(ActiveObject binding, Element* element, manager.element.Access access, bool peer = false)
+    {
+        assert(binding);
+        EID eid = element.ensure_eid();
+        assert(cid && eid.container == cid, "binding element belongs to another device");
+        ubyte index;
+        for (; index < bindings.length; ++index)
+            if (bindings[index] is binding)
+            {
+                assert(binding_is_peer(index) == peer);
+                break;
+            }
+        if (index == bindings.length)
+        {
+            for (index = 0; index < bindings.length; ++index)
+                if (!bindings[index])
+                    break;
+            if (index == bindings.length)
+            {
+                assert(bindings.length < Element.max_bindings, "device has too many bindings");
+                bindings ~= binding;
+            }
+            else
+                bindings.ptr[index] = binding;
+            if (peer)
+                _peer_binding_mask |= cast(ubyte)(1 << index);
+            else
+                _peer_binding_mask &= cast(ubyte)~(1 << index);
+        }
+        element.attach_binding(index, access);
+        return index;
+    }
+
+    void detach_binding(ActiveObject binding)
+    {
+        ubyte index;
+        for (; index < bindings.length; ++index)
+            if (bindings[index] is binding)
+                break;
+        if (index == bindings.length)
+            return;
+        ushort count = element_ids.index_count;
+        for (uint element_index = 1; element_index <= count; ++element_index)
+        {
+            Element* element = element_ids.get(cast(ushort)element_index);
+            if (element)
+                element.detach_binding(index);
+        }
+        bindings.ptr[index] = null;
+        _peer_binding_mask &= cast(ubyte)~(1 << index);
+    }
+
+    bool binding_is_peer(ubyte index) const pure
+        => index < bindings.length && (_peer_binding_mask & (1 << index)) != 0;
 
     void clear_computations()
     {
@@ -434,6 +492,7 @@ package:
 private:
     ulong _peer_id;
     bool _private;
+    ubyte _peer_binding_mask;
 }
 
 Device create_device_from_profile(ref Profile profile, const(char)[] model, const(char)[] id, const(char)[] name, scope CreateElementHandler create_element_handler, ulong peer_id = 0, bool private_ = false)
@@ -542,7 +601,7 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
             bool is_new_element = (e is null);
             if (is_new_element)
             {
-                e = alloc!Element();
+                e = alloc_element();
                 e.parent = c;
                 e.id = el_id.make_string();
                 e.name = el.get_name(profile).make_string();
@@ -747,6 +806,21 @@ unittest
     import urt.string : make_string;
     import urt.time : from_unix_time_ns;
 
+    import manager.base : ObjectFlags;
+    import manager.collection : collection_type_info, item_table;
+
+    static final class TestBinding : ActiveObject
+    {
+        enum type_name = "test-binding";
+        enum collection_id = cast(CollectionType)0;
+    nothrow @nogc:
+
+        this(CID id, ObjectFlags flags = ObjectFlags.none)
+        {
+            super(collection_type_info!TestBinding, id, flags);
+        }
+    }
+
     Device d = alloc!Device(StringLit!"testdev");
     Component c = alloc!Component(StringLit!"child");
     c.parent = d;
@@ -776,12 +850,12 @@ unittest
 
     Component local_component = alloc!Component(StringLit!"child");
     local_component.parent = local_device;
-    Element* local_element = alloc!Element();
+    Element* local_element = alloc_element();
     local_element.parent = local_component;
     EID local_handle = local_element.ensure_eid();
     assert(local_handle.container == local_device.cid);
 
-    Element* e = alloc!Element();
+    Element* e = alloc_element();
     e.parent = c;
     assert(!e.eid);
     EID handle = e.ensure_eid();
@@ -791,11 +865,11 @@ unittest
     assert(table.resolve(EID(d.cid, 2)) is null);
 
     // unmounted elements have no identity to allocate
-    Element* stray = alloc!Element();
+    Element* stray = alloc_element();
     assert(stray.ensure_eid() == EID.invalid);
 
     // deref follows element-level forwards and heals the held EID
-    Element* e2 = alloc!Element();
+    Element* e2 = alloc_element();
     e2.parent = c;
     EID handle2 = e2.ensure_eid();
     assert(handle2.index == 2);
@@ -803,6 +877,86 @@ unittest
     d.element_ids.forward(1, 2);
     ushort idx = handle.index;          // a stale holder still at index 1
     assert(d.element_ids.deref(idx) is e2 && idx == 2);
+
+    Device binding_device = alloc!Device(StringLit!"binding-test");
+    table.insert(binding_device);
+    Component binding_component = alloc!Component(StringLit!"binding-component");
+    binding_component.parent = binding_device;
+    binding_device.components ~= binding_component;
+    Element* binding_element1 = alloc_element();
+    Element* binding_element2 = alloc_element();
+    Element* binding_element3 = alloc_element();
+    Element* unbound_element = alloc_element();
+    binding_element1.parent = binding_component;
+    binding_element2.parent = binding_component;
+    binding_element3.parent = binding_component;
+    unbound_element.parent = binding_component;
+    binding_component.elements ~= binding_element1;
+    binding_component.elements ~= binding_element2;
+    binding_component.elements ~= binding_element3;
+    binding_component.elements ~= unbound_element;
+    unbound_element.access = manager.element.Access.write;
+    unbound_element.ensure_eid();
+
+    auto binding_table = &item_table(0);
+    TestBinding[4] test_bindings;
+    test_bindings[0] = alloc!TestBinding(binding_table.allocate("binding-0", 0), ObjectFlags.disabled);
+    test_bindings[1] = alloc!TestBinding(binding_table.allocate("binding-1", 0), ObjectFlags.disabled);
+    test_bindings[2] = alloc!TestBinding(binding_table.allocate("binding-2", 0), ObjectFlags.disabled);
+    test_bindings[3] = alloc!TestBinding(binding_table.allocate("binding-3", 0), ObjectFlags.disabled);
+    foreach (binding; test_bindings)
+        binding_table.bind(binding.id, binding);
+    scope(exit)
+    {
+        foreach (binding; test_bindings)
+            binding.destroy();
+        binding_table.free_pending();
+    }
+    alias ElementAccess = manager.element.Access;
+    foreach (index, binding; test_bindings)
+        binding_device.attach_binding(binding, binding_element1, ElementAccess.read, index == 3);
+    binding_device.attach_binding(test_bindings[1], binding_element2, manager.element.Access.write);
+    binding_device.attach_binding(test_bindings[1], binding_element2, manager.element.Access.read);
+    binding_device.attach_binding(test_bindings[2], binding_element3, manager.element.Access.read);
+    binding_device.attach_binding(test_bindings[3], binding_element2, manager.element.Access.read, true);
+    enum read0 = Element.binding_entry(0, ElementAccess.read);
+    enum read1 = Element.binding_entry(1, ElementAccess.read);
+    enum read2 = Element.binding_entry(2, ElementAccess.read);
+    enum read3 = Element.binding_entry(3, ElementAccess.read);
+    enum write1 = Element.binding_entry(1, ElementAccess.write);
+    enum read_write1 = Element.binding_entry(1, ElementAccess.read_write);
+    assert(Element.binding_index(read_write1) == 1);
+    assert(Element.binding_access(read_write1) == ElementAccess.read_write);
+    foreach (index, binding; test_bindings)
+        assert(binding_device.bindings[index] is binding);
+    assert(!binding_device.binding_is_peer(0) && binding_device.binding_is_peer(3));
+    assert(binding_element1.binding_entries[] == [read0, read1, read2, read3]);
+    assert(binding_element2.binding_entries[] == [read_write1, read3, ubyte.max, ubyte.max]);
+    assert(binding_element2.access == ElementAccess.read_write);
+    binding_device.detach_binding(test_bindings[1]);
+    assert(binding_device.bindings.length == 4 && !binding_device.bindings[1]);
+    assert(binding_element1.binding_entries[] == [read0, Element.binding_destroyed, read2, read3]);
+    assert(binding_element2.binding_entries[] == [Element.binding_destroyed, read3, ubyte.max, ubyte.max]);
+    assert(binding_element2.access == ElementAccess.read);
+    assert(unbound_element.access == ElementAccess.write);
+    binding_device.attach_binding(test_bindings[1], binding_element3, manager.element.Access.read);
+    binding_device.attach_binding(test_bindings[1], binding_element1, manager.element.Access.write);
+    assert(binding_device.bindings[1] is test_bindings[1]);
+    assert(binding_element1.binding_entries[] == [read0, write1, read2, read3]);
+    assert(binding_element1.access == ElementAccess.read_write);
+    foreach (binding; test_bindings)
+        binding_device.detach_binding(binding);
+    foreach (binding; binding_device.bindings)
+        assert(!binding);
+    assert(!binding_device.binding_is_peer(3));
+    ubyte[Element.max_bindings] destroyed_bindings = Element.binding_destroyed;
+    assert(binding_element1.binding_entries[] == destroyed_bindings[]);
+    assert(binding_element1.access == ElementAccess.none);
+    assert(unbound_element.access == ElementAccess.write);
+    binding_device.attach_binding(test_bindings[0], binding_element1, ElementAccess.read, true);
+    assert(binding_device.binding_is_peer(0));
+    binding_device.detach_binding(test_bindings[0]);
+    assert(!binding_device.binding_is_peer(0));
 
     // A committed batch reaches an accumulator as every sample, not only the tip.
     static immutable DataFormat f64_sampled = DataFormat(ValueType.f64, SeriesKind.sampled);

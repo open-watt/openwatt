@@ -215,6 +215,14 @@ struct Element
 {
 nothrow @nogc:
 
+    enum max_bindings = 4;
+    enum binding_index_mask = max_bindings - 1;
+    enum binding_access_shift = 2;
+    enum binding_destroyed = ubyte.max - 1;
+    enum binding_end = ubyte.max;
+    static assert(max_bindings == 1 << binding_access_shift);
+    static assert(FormatId.invalid == ushort.max);
+
     String id;
     String name;
     String desc;
@@ -225,12 +233,6 @@ nothrow @nogc:
     package EID _eid;
 
     Component parent;
-
-    // access, sampling_mode and Flags share one byte: it sits in the alignment hole before
-    // `format`, so a separate flags byte would cost 8. Hand-packed because DMD's
-    // -preview=bitfields silently drops `|=` and `&=` on bitfield members (LDC honours them).
-    private ubyte _status;
-    private FormatId _format = FormatId.invalid;    // paired with _status to fill one slot
 
     static assert(Access.max <= 3 && SamplingMode.max <= 7 && Flags.min >= 1 << 5,
                   "the status byte is full");
@@ -442,56 +444,6 @@ nothrow @nogc:
         return update_typed_series(v, timestamp, who);
     }
 
-    private const(char)[] update_typed_series(ref const Variant v, SysTime timestamp, Subscriber who)
-    {
-        if (data_format.is_text)
-        {
-            if (!v.isString)
-                return "incompatible value";
-            store_sample(v.asString(), timestamp, who);
-            return null;
-        }
-        if (data_format.is_wide)
-        {
-            if (v.isBuffer)
-            {
-                const(void)[] b = v.asBuffer;
-                if (b.length == data_format.stride)
-                {
-                    store_record(b, timestamp, who);
-                    return null;
-                }
-            }
-            return "incompatible value";
-        }
-        Scalar s;
-        if (const(char)[] error = unbox_scalar_checked(v, *data_format, s))
-            return error;
-        store_record(s.raw[0 .. data_format.stride], timestamp, who);
-        return null;
-    }
-
-    // boxed value/previous only serve subscriber payloads; unwatched elements never box
-    private void prepare_before(ref SampleUpdate update)
-    {
-        if (!_subs)
-            return;
-        update.previous = record_value();
-        update.previous_timestamp = last_update;
-    }
-
-    private void prepare_after(ref SampleUpdate update)
-    {
-        SysTime t = record_update;
-        if (t > last_update)
-            last_update = t;
-        update.timestamp = t;
-        if (!_subs)
-            return;
-        update.value = record_value();
-        update.value_ready = true;
-    }
-
     void force_update(SysTime timestamp)
     {
         if (timestamp <= last_update)
@@ -530,17 +482,17 @@ nothrow @nogc:
 public:
 
     FormatId format() const pure
-        => _format;
+        => _format ? cast(FormatId)(_format - 1) : FormatId.invalid;
 
     // the format decides how _latest is read, so a change has to hand the register over:
     // a text register holds an owned String, and releasing scalar bytes as one corrupts the heap
     void format(FormatId value)
     {
-        if (value == _format)
+        if (value == format)
             return;
         release_register();
         _latest.raw[] = 0;
-        _format = value;
+        _format = value.valid ? cast(ushort)(value + 1) : 0;
     }
 
     const(DataFormat)* data_format() const pure
@@ -874,13 +826,82 @@ public:
         }
     }
 
+package:
+    void attach_binding(ubyte index, Access binding_access)
+    {
+        assert(index < max_bindings && binding_access <= Access.max);
+        foreach (ref binding; _bindings)
+        {
+            if (binding < binding_destroyed && binding_index(binding) == index)
+            {
+                binding |= cast(ubyte)(binding_access << binding_access_shift);
+                access = cast(Access)(access | binding_access);
+                return;
+            }
+        }
+        foreach (ref binding; _bindings)
+        {
+            if (binding >= binding_destroyed)
+            {
+                binding = binding_entry(index, binding_access);
+                access = cast(Access)(access | binding_access);
+                return;
+            }
+        }
+        assert(false, "element has too many bindings");
+    }
+
+    void detach_binding(ubyte index)
+    {
+        bool detached;
+        foreach (ref binding; _bindings)
+            if (binding < binding_destroyed && binding_index(binding) == index)
+            {
+                binding = binding_destroyed;
+                detached = true;
+            }
+        if (!detached)
+            return;
+        Access combined;
+        foreach (binding; _bindings)
+        {
+            if (binding == binding_end)
+                break;
+            if (binding < binding_destroyed)
+                combined = cast(Access)(combined | binding_access(binding));
+        }
+        access = combined;
+    }
+
+    static ubyte binding_entry(ubyte index, Access access) pure
+        => cast(ubyte)(index | (access << binding_access_shift));
+
+    static ubyte binding_index(ubyte binding) pure
+        => binding & binding_index_mask;
+
+    static Access binding_access(ubyte binding) pure
+        => cast(Access)((binding >> binding_access_shift) & Access.max);
+
+    const(ubyte)[] binding_entries() const pure
+        => _bindings[];
+
+    void initialize_bindings()
+    {
+        _bindings[] = binding_end;
+    }
+
 private:
-    // the top three bits of _status; access and sampling_mode own the low five
     enum Flags : ubyte
     {
         gap_open     = 1 << 5,
         dirty_listed = 1 << 6,
     }
+
+    ubyte[max_bindings] _bindings;
+
+    // DMD drops bitfield compound assignments, so pack these into Element's alignment hole.
+    ubyte _status;
+    ushort _format;
 
     Scalar _latest;
     SysTime _last_update;
@@ -890,6 +911,56 @@ private:
     enum bucket_capacity = 256; // TODO: scale with rate (target a time span, not a record count)
     enum text_bucket_capacity = 64;     // text series are low-rate; keep resident buckets small
     enum text_heap_limit = 0x1_0000;    // u16 record offsets address the bucket heap
+
+    const(char)[] update_typed_series(ref const Variant v, SysTime timestamp, Subscriber who)
+    {
+        if (data_format.is_text)
+        {
+            if (!v.isString)
+                return "incompatible value";
+            store_sample(v.asString(), timestamp, who);
+            return null;
+        }
+        if (data_format.is_wide)
+        {
+            if (v.isBuffer)
+            {
+                const(void)[] b = v.asBuffer;
+                if (b.length == data_format.stride)
+                {
+                    store_record(b, timestamp, who);
+                    return null;
+                }
+            }
+            return "incompatible value";
+        }
+        Scalar s;
+        if (const(char)[] error = unbox_scalar_checked(v, *data_format, s))
+            return error;
+        store_record(s.raw[0 .. data_format.stride], timestamp, who);
+        return null;
+    }
+
+    // Boxed values only serve subscriber payloads; unwatched elements never box.
+    void prepare_before(ref SampleUpdate update)
+    {
+        if (!_subs)
+            return;
+        update.previous = record_value();
+        update.previous_timestamp = last_update;
+    }
+
+    void prepare_after(ref SampleUpdate update)
+    {
+        SysTime t = record_update;
+        if (t > last_update)
+            last_update = t;
+        update.timestamp = t;
+        if (!_subs)
+            return;
+        update.value = record_value();
+        update.value_ready = true;
+    }
 
     void check_sample_type(T)(size_t value_count, size_t record_count) const
     {
@@ -1340,6 +1411,26 @@ private:
     }
 }
 
+bool sample_to_double(ref const Variant v, out double value)
+{
+    if (v.isBool)
+        value = v.asBool ? 1 : 0;
+    else if (v.isQuantity)
+        value = v.asQuantity!double().normalise().value;
+    else if (v.isNumber)
+        value = v.asDouble;
+    else
+        return false;
+    return value == value; // reject NaN
+}
+
+Element* alloc_element()
+{
+    Element* element = alloc!Element();
+    element.initialize_bindings();
+    return element;
+}
+
 
 package:
 
@@ -1418,22 +1509,6 @@ void deliver(ref SampleUpdate update)
         s = next;
     }
 }
-
-public:
-
-bool sample_to_double(ref const Variant v, out double value)
-{
-    if (v.isBool)
-        value = v.asBool ? 1 : 0;
-    else if (v.isQuantity)
-        value = v.asQuantity!double().normalise().value;
-    else if (v.isNumber)
-        value = v.asDouble;
-    else
-        return false;
-    return value == value; // reject NaN
-}
-
 
 unittest
 {
