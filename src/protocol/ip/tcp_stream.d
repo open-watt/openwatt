@@ -16,7 +16,6 @@ import manager.collection;
 import manager.console;
 
 import protocol.ip;
-import protocol.ip.tcp : TcpSendBufSize;
 
 import router.iface : BaseInterface;
 public import router.stream;
@@ -261,12 +260,7 @@ nothrow @nogc:
         => _conn ? _conn.tx_backlog : 0;
 
     override size_t tx_space() const
-    {
-        if (!_conn)
-            return 0;
-        const size_t queued = _conn.tx_backlog;
-        return queued >= TcpSendBufSize ? 0 : TcpSendBufSize - queued;
-    }
+        => _conn ? _conn.tx_space : 0;
 
 
 private:

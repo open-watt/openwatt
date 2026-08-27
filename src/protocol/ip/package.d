@@ -664,6 +664,17 @@ nothrow @nogc:
             return null;
     }
 
+    // room send() will take right now, before it would queue without bound
+    size_t tx_space() const pure
+    {
+        version (UseInternalIPStack)
+            enum size_t ceiling = TcpSendBufSize;
+        else
+            enum size_t ceiling = max_tx;
+        const size_t queued = tx_backlog;
+        return queued >= ceiling ? 0 : ceiling - queued;
+    }
+
     // bytes accepted by send() but not yet handed to the network
     size_t tx_backlog() const pure
     {
