@@ -259,6 +259,7 @@ enum IPEvent : ubyte
 private static immutable ubyte[6] zero_mac;
 
 alias TCPRecvHandler   = void delegate(TCPConnection* conn, const(void)[] data, MonoTime rx_time) nothrow @nogc;
+alias TCPSentHandler   = void delegate(TCPConnection* conn) nothrow @nogc;
 alias TCPEventHandler  = void delegate(TCPConnection* conn, IPEvent event) nothrow @nogc;
 alias TCPAcceptHandler = void delegate(TCPListener* listener, TCPConnection* conn, MonoTime rx_time) nothrow @nogc;
 alias UDPRecvHandler   = void delegate(UDPEndpoint* ep, const(void)[] data, ref const InetAddress from, MonoTime rx_time) nothrow @nogc;
@@ -687,6 +688,11 @@ nothrow @nogc:
         _on_event = handler;
     }
 
+    void sent_handler(TCPSentHandler handler)
+    {
+        _on_sent = handler;
+    }
+
     version (UseInternalIPStack)
     {
         InetAddress local()
@@ -925,6 +931,7 @@ private:
     TCPRecvHandler _on_recv;
     TCPEventHandler _on_event;
     Array!ubyte _tx;
+    TCPSentHandler _on_sent;
 
     enum size_t max_tx = 256 * 1024;
 
@@ -971,7 +978,11 @@ private:
                         if (_pcb.fin_seen && _pcb.recv_buf.length == 0)
                             fail(IPEvent.closed);
                         else
+                        {
                             flush_tx();
+                            if (_on_sent)
+                                _on_sent(&this);
+                        }
                     }
                     break;
                 case Phase.dead:

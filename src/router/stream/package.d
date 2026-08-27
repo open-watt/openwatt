@@ -41,6 +41,11 @@ alias RecvHandler = void delegate(Stream source, const(void)[] data, MonoTime rx
 // Passive observer of a stream's raw byte traffic in both directions; does not consume the data.
 alias TapHandler = void delegate(Stream source, bool tx, const(void)[] data, MonoTime time) nothrow @nogc;
 
+// Handed a writable slice of the stream's own send queue; fills what it can and
+// returns the byte count. Called again as the queue drains, so a producer never
+// needs a buffer of its own.
+alias SendHandler = size_t delegate(Stream source, void[] buffer) nothrow @nogc;
+
 
 enum StreamOptions : ubyte
 {
@@ -204,6 +209,23 @@ nothrow @nogc:
             _incoming = null;
     }
 
+    // Installing a handler calls it straight away when the stream is already idle, so a
+    // producer starts transmitting without needing a priming write of its own.
+    final void tx_handler(SendHandler handler)
+    {
+        _outgoing = handler;
+        if (_outgoing)
+            pump_tx();
+    }
+    final SendHandler tx_handler() const pure
+        => _outgoing;
+
+    final void release_tx_handler(SendHandler handler)
+    {
+        if (_outgoing is handler)
+            _outgoing = null;
+    }
+
     // Passive taps observe raw traffic without consuming it (unlike the single-owner rx_handler),
     // so any number can attach - used by the /stream/tap sniffer.
     final void add_tap(TapHandler h)
@@ -233,6 +255,10 @@ nothrow @nogc:
     // transfers. Streams that transmit synchronously (or can't tell) report no backlog.
     size_t tx_backlog() const
         => 0;
+
+    // bytes write() will accept right now. Streams that transmit synchronously take anything.
+    size_t tx_space() const
+        => size_t.max;
 
     ptrdiff_t pending()
         => _rx_buffer.length;
@@ -278,6 +304,44 @@ nothrow @nogc:
     }
 
 protected:
+
+    // Subclasses call this once queued bytes have gone out and write() can take more.
+    final void notify_tx_ready()
+    {
+        if (_outgoing)
+            pump_tx();
+    }
+
+    // Offered in bounded slices so a stream reporting unbounded space does not ask a
+    // producer for an unbounded buffer.
+    enum size_t tx_slice_max = 4096;
+
+    final void pump_tx()
+    {
+        size_t space = tx_space();
+        if (space == 0)
+            return;
+        if (space > tx_slice_max)
+            space = tx_slice_max;
+
+        void[] buffer = tx_acquire(space);
+        if (buffer.length == 0)
+            return;
+        tx_commit(_outgoing(this, buffer));
+    }
+
+    // Hand out room from the send queue and keep whatever the producer filled.
+    void[] tx_acquire(size_t size)
+    {
+        _tx_scratch.resize(size);
+        return cast(void[])_tx_scratch[];
+    }
+
+    void tx_commit(size_t written)
+    {
+        if (written)
+            write(cast(const(void)[])_tx_scratch[0 .. written]);
+    }
     StreamStatus _status;
     StreamOptions _options;
 
@@ -296,6 +360,8 @@ protected:
     void[] _send_buffer;
 
     RecvHandler _incoming;
+    SendHandler _outgoing;
+    Array!ubyte _tx_scratch;
     Array!ubyte _rx_buffer;
     Array!TapHandler _taps;
 

@@ -16,6 +16,7 @@ import manager.collection;
 import manager.console;
 
 import protocol.ip;
+import protocol.ip.tcp : TcpSendBufSize;
 
 import router.iface : BaseInterface;
 public import router.stream;
@@ -178,6 +179,7 @@ nothrow @nogc:
             _conn = tcp_connect(_remote, &on_data, &on_event);
             if (_conn is null)
                 return CompletionStatus.continue_;     // no route / refused outright; retry later
+            _conn.sent_handler(&on_sent);
             if (_keep_enable)
                 _conn.enable_keepalive(_keep_enable, _keep_idle, _keep_interval, _keep_count);
         }
@@ -258,6 +260,15 @@ nothrow @nogc:
     override size_t tx_backlog() const
         => _conn ? _conn.tx_backlog : 0;
 
+    override size_t tx_space() const
+    {
+        if (!_conn)
+            return 0;
+        const size_t queued = _conn.tx_backlog;
+        return queued >= TcpSendBufSize ? 0 : TcpSendBufSize - queued;
+    }
+
+
 private:
     TCPConnection* _conn;
     InetAddress _remote;
@@ -270,6 +281,9 @@ private:
     int _keep_count = 10;
     Duration _keep_idle;
     Duration _keep_interval;
+
+    void on_sent(TCPConnection* conn)
+        => notify_tx_ready();
 
     void on_data(TCPConnection* conn, const(void)[] data, MonoTime rx_time)
     {
@@ -426,6 +440,7 @@ protected:
         stream._link = 1;
         conn.recv_handler(&stream.on_data);
         conn.event_handler(&stream.on_event);
+        conn.sent_handler(&stream.on_sent);
         stream.set_state(State.running);
         Collection!TCPStream().add(stream);
         return stream;
