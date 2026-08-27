@@ -19,6 +19,7 @@ ulong unique_device_id() => 0;
 
 // no reset-reason source on this platform
 const(char)[] reset_reason() => null;
+bool reset_was_software() => false;
 
 bool   reboot_pending() => false;
 bool   ota_supported() => false;
