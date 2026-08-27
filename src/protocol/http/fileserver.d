@@ -980,8 +980,8 @@ private:
     {
     nothrow @nogc:
         enum stream_threshold = 64 * 1024;  // buffer smaller responses (they remain compressible)
-        enum chunk_size = 16 * 1024;
-        enum backlog_high = 64 * 1024;      // stop pumping while this much is queued on the stream
+        enum chunk_size = 2 * 1024;         // lands on the reactor stack; ESP32 gives that task 16K total
+        enum backlog_high = 8 * 1024;       // the stream buffer doubles to hold this; 64K did not fit ESP32 heap
         FileServer owner;
         Stream stream;
         File file;
