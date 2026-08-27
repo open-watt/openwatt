@@ -16,6 +16,8 @@ import urt.time;
 import manager;
 import manager.base;
 import manager.collection;
+import manager.device : Device;
+import manager.element : Access, Element;
 import manager.id : EID;
 import manager.log;
 import manager.series : FormatId;
@@ -608,6 +610,35 @@ package:
         bool   device_sent;
     }
 
+    void attach_model_element(Device device, Element* element, Access access)
+    {
+        PeerBinding binding = model_binding(device);
+        if (!binding)
+        {
+            binding = alloc!PeerBinding(this, device);
+            _model_bindings ~= binding;
+        }
+        binding.attach(element, access);
+        EID eid = element.ensure_eid();
+        _live_nodes.remove(eid.raw);
+        foreach (i, pending; _pending_vals[])
+            if (pending == eid)
+            {
+                _pending_vals.remove(i);
+                break;
+            }
+    }
+
+    void detach_model_bindings()
+    {
+        foreach (binding; _model_bindings)
+        {
+            binding.detach();
+            free(binding);
+        }
+        _model_bindings.clear();
+    }
+
     void grant_claim_time_authority()
     {
         if (_time_authority)
@@ -730,6 +761,14 @@ package:
     String   _want_log_tag;
 
 private:
+    PeerBinding model_binding(Device device)
+    {
+        foreach (binding; _model_bindings)
+            if (binding.device is device)
+                return binding;
+        return null;
+    }
+
     void set_time_authority(bool value)
     {
         if (_time_authority == value)
@@ -1186,6 +1225,64 @@ private:
 
     bool owns_udp_endpoint() const pure
         => (_peer_flags & PeerFlags.owns_udp_endpoint) != 0;
+
+    Array!PeerBinding _model_bindings;
+}
+
+
+private:
+
+final class PeerBinding
+{
+nothrow @nogc:
+
+    this(SyncPeer peer, Device device)
+    {
+        _peer = peer;
+        _device = device;
+    }
+
+    inout(Device) device() inout pure
+        => _device;
+
+    void attach(Element* element, Access access)
+    {
+        EID eid = element.ensure_eid();
+        assert(eid.container == _device.cid);
+        ubyte index = _device.attach_binding(_peer, element, access, true);
+        if (_binding_index == ubyte.max)
+            _binding_index = index;
+        else
+            assert(_binding_index == index);
+    }
+
+    Access access(Element* element)
+    {
+        EID eid = element.ensure_eid();
+        if (eid.container != _device.cid || _binding_index == ubyte.max || _binding_index >= _device.bindings.length)
+            return Access.none;
+        if (_device.bindings[_binding_index] !is _peer)
+            return Access.none;
+        foreach (entry; element.binding_entries)
+        {
+            if (entry == Element.binding_end)
+                break;
+            if (entry < Element.binding_destroyed && Element.binding_index(entry) == _binding_index)
+                return Element.binding_access(entry);
+        }
+        return Access.none;
+    }
+
+    void detach()
+    {
+        _device.detach_binding(_peer);
+        _binding_index = ubyte.max;
+    }
+
+private:
+    SyncPeer _peer;
+    Device _device;
+    ubyte _binding_index = ubyte.max;
 }
 
 
@@ -1267,6 +1364,10 @@ unittest
 
 unittest
 {
+    import manager.component : Component;
+    import manager.device : DeviceTable;
+    import manager.element : alloc_element;
+
     SyncPeer p = alloc!SyncPeer(CID(1));
     scope(exit) free(p);
 
@@ -1304,4 +1405,30 @@ unittest
     char[40_000] huge = 'x';
     assert(p.first_sighting(huge[]));
     assert(!p.first_sighting(huge[]));
+
+    Device device = alloc!Device(StringLit!"peer-binding-test");
+    DeviceTable devices;
+    devices.insert(device);
+    Component component = alloc!Component(StringLit!"status");
+    component.parent = device;
+    device.components ~= component;
+    Element* element = alloc_element();
+    element.parent = component;
+    component.elements ~= element;
+
+    EID eid = element.ensure_eid();
+    p._live_nodes.insert(eid.raw, 0);
+    p._pending_vals ~= eid;
+    p.attach_model_element(device, element, Access.read);
+    assert(!p._live_nodes.exists(eid.raw) && p._pending_vals.empty);
+    p.attach_model_element(device, element, Access.write);
+    PeerBinding binding = p.model_binding(device);
+    assert(device.bindings.length == 1 && device.bindings[0] is p);
+    assert(device.binding_is_peer(0));
+    enum relation = Element.binding_entry(0, Access.read_write);
+    assert(element.binding_entries[] == [relation, ubyte.max, ubyte.max, ubyte.max]);
+    assert(binding.access(element) == Access.read_write);
+    p.detach_model_bindings();
+    assert(device.bindings.length == 1 && !device.bindings[0]);
+    assert(element.binding_entries[] == [Element.binding_destroyed, ubyte.max, ubyte.max, ubyte.max]);
 }

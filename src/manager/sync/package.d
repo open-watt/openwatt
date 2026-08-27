@@ -58,7 +58,7 @@ import manager.collection;
 import manager.component : Component;
 import manager.device : Device;
 import manager.element : Access, add_feed_listener, Cursor, Element, ElementLifecycleEvent,
-                         register_element_lifecycle_handler, remove_feed_listener, SamplingMode, sweep_dirty;
+                         register_element_lifecycle_handler, remove_feed_listener, sweep_dirty;
 import manager.id : EID;
 import manager.path : Address, match_path, pattern_matches, walk_elements, walk_elements_until;
 import manager.series : Constraint, DataFormat, format_info, FormatId, RecordBlock, register_format, Scalar,
@@ -378,6 +378,8 @@ nothrow @nogc:
             p._pending_live.remove(0);
             if (Element* e = resolve_element(node))
             {
+                if (authored_by(p, e))
+                    continue;
                 char[256] buf = void;
                 ptrdiff_t len = e.full_path(buf);
                 if (len > 0 && len <= buf.length)
@@ -400,7 +402,7 @@ nothrow @nogc:
                     ++device_index;
                     continue;
                 }
-                if (!dev.cid || dev.private_ || authored_by(p, dev))
+                if (!dev.cid || dev.private_)
                 {
                     ++device_index;
                     ++sub.device_cursor;
@@ -426,6 +428,11 @@ nothrow @nogc:
                 {
                     if (match_index++ < sub.element_cursor)
                         return true;
+                    if (authored_by(p, e))
+                    {
+                        ++sub.element_cursor;
+                        return true;
+                    }
                     if (p.control_window_free() <= SyncPeer.control_reserve)
                         return false;
                     if (sub.arm)
@@ -506,6 +513,7 @@ nothrow @nogc:
         p._next_ft = 0;
         p._enums_sent.clear();
         p._ft_recv.clear();
+        p.detach_model_bindings();
         foreach (ref pat; p._model_subs[])
             remove_feed_listener();
         p._model_subs.clear();
@@ -1385,20 +1393,18 @@ nothrow @nogc:
         register_enum_info(name, make_enum_info(name, keys[], values[]));
     }
 
-    void inbound_model_add(SyncPeer from, SyncHandle handle, const(char)[] path, const(char)[] node_class, uint ft, const(char)[] access, const(char)[] mode, Variant* v, ulong t_ms)
+    void inbound_model_add(SyncPeer from, SyncHandle handle, const(char)[] path, const(char)[] node_class, uint ft, const(char)[] access, Variant* v, ulong t_ms, ulong peer_id)
     {
         if (!from.adoptable(handle))
         {
             log.warning("add from '", from.name[], "' with unusable handle ", handle);
             return;
         }
-        // the handle is announced even when the node fails to materialise: it must
-        // advance the announced high-water regardless, or vals citing it read as
-        // still-in-flight and stall the data queue behind a node that never comes
-        from.adopt(handle, materialise_add(from, path, node_class, ft, access, mode, v, t_ms));
+        // Failed materialisation must still advance the announced handle high-water.
+        from.adopt(handle, materialise_add(from, path, node_class, ft, access, v, t_ms, peer_id));
     }
 
-    EID materialise_add(SyncPeer from, const(char)[] path, const(char)[] node_class, uint ft, const(char)[] access, const(char)[] mode, Variant* v, ulong t_ms)
+    EID materialise_add(SyncPeer from, const(char)[] path, const(char)[] node_class, uint ft, const(char)[] access, Variant* v, ulong t_ms, ulong peer_id)
     {
         import urt.time : from_unix_time_ns;
 
@@ -1411,7 +1417,7 @@ nothrow @nogc:
         const(char)[] rest = a.subject;
         const(char)[] dev_id = rest.split!'.';
 
-        Device dev = find_or_create_remote_device(from, dev_id);
+        Device dev = find_or_create_device(dev_id, peer_id);
         if (!dev)
             return EID.invalid;
 
@@ -1434,7 +1440,7 @@ nothrow @nogc:
             return EID.invalid;
         }
         Element* e = dev.find_element(rest);
-        if (e)
+        if (e && e.format.valid)
         {
             if (e.format != *pf && !value_compatible(*format_info(*pf), *e.data_format))
             {
@@ -1453,20 +1459,18 @@ nothrow @nogc:
                 e.retention(256, 16_384);
                 e.retention(3600.seconds);
             }
-            if (access.length)
-            {
-                if (const(Access)* acc = enum_from_key!Access(access))
-                    e.access = *acc;
-            }
-            if (mode.length)
-            {
-                if (const(SamplingMode)* m = enum_from_key!SamplingMode(mode))
-                    e.sampling_mode = *m;
-            }
+        }
+        Access remote_access = Access.read;
+        if (access.length)
+        {
+            if (const(Access)* acc = enum_from_key!Access(access))
+                remote_access = *acc;
         }
         if (v && !v.isNull)
             e.value(*v, t_ms ? from_unix_time_ns(t_ms * 1_000_000) : getSysTime());
-        return e.ensure_eid();
+        EID eid = e.ensure_eid();
+        from.attach_model_element(dev, e, remote_access);
+        return eid;
     }
 
     // Element write. `res {seq, value}` carries the applied value; any further
@@ -1498,16 +1502,6 @@ nothrow @nogc:
             return;
         }
 
-        Component c = e.parent;
-        while (c && !c.is_device)
-            c = c.parent;
-        Device dev = cast(Device)cast(void*)c;    // extern(C++) has no dynamic cast; is_device checked above
-        if (dev && dev.remote)
-        {
-            // routing a mirror write to its authority is not built yet
-            enc.encode_err(from, seq, "not_authoritative", "element belongs to a remote device");
-            return;
-        }
         if (!(e.access & Access.write))
         {
             enc.encode_err(from, seq, "access_denied", "read-only element");
@@ -1516,6 +1510,12 @@ nothrow @nogc:
         if (!value || value.isNull)
         {
             enc.encode_err(from, seq, "bad_value", "set requires a value");
+            return;
+        }
+
+        if (!has_local_writer(e))
+        {
+            enc.encode_err(from, seq, "not_authoritative", "no writable local provider");
             return;
         }
         if (const(char)[] error = e.try_set(*value))
@@ -1989,7 +1989,7 @@ nothrow @nogc:
         if (to.handle_of(node) != SyncPeer.invalid_handle)
             return;
         SyncHandle h = to.introduce(node);
-        enc.encode_add(to, h, tconcat("device:", dev.id[]), "device", 0, null);
+        enc.encode_add(to, h, tconcat("device:", dev.id[]), "device", 0, null, dev.peer_id);
     }
 
     void send_element(SyncPeer to, SyncEncoder enc, Element* e, const(char)[] path, uint gen)
@@ -2007,6 +2007,9 @@ nothrow @nogc:
         }
         EID node = e.ensure_eid();
         if (!node)
+            return;
+        Device device = g_app.devices.container(node.container);
+        if (!device)
             return;
         SyncHandle h = to.handle_of(node);
         if (h != SyncPeer.invalid_handle)
@@ -2038,15 +2041,9 @@ nothrow @nogc:
                 return;
         }
         h = to.introduce(node);
-        enc.encode_add(to, h, tconcat("device:", path), "element", ft, e);
+        enc.encode_add(to, h, tconcat("device:", path), "element", ft, e, device.peer_id);
     }
 
-    // Backfill behind the add: the add already carried the latest value, history streams
-    // as val blocks after it so a UI paints instantly and fills the chart. Served
-    // synchronously within the burst; nothing can interleave, so a live sub's feed takes
-    // over gap-free where the backfill ends. The series spans its full recorded history
-    // (disk-evicted buckets reconstitute through the store), so from_ms is honoured as
-    // far as history exists.
     void send_backfill(SyncPeer to, SyncEncoder enc, Element* e, ulong from_ms, ulong to_ms, uint gen)
     {
         import urt.time : from_unix_time_ns;
@@ -2163,12 +2160,25 @@ nothrow @nogc:
         p._live_rescan = false;
     }
 
-    // true when this peer announced the device; its mirror is never served back to it,
-    // but is served to other peers (hub fan-out)
-    bool authored_by(SyncPeer p, Device dev)
+    bool authored_by(SyncPeer peer, Element* element)
     {
-        SyncHandle h = p.handle_of(EID(dev.cid));
-        return h != SyncPeer.invalid_handle && (h & 1);
+        EID eid = element.ensure_eid();
+        Device device = g_app.devices.container(eid.container);
+        if (!device)
+            return false;
+        foreach (entry; element.binding_entries)
+        {
+            if (entry == Element.binding_end)
+                break;
+            if (entry < Element.binding_destroyed)
+            {
+                ubyte index = Element.binding_index(entry);
+                assert(index < device.bindings.length);
+                if (device.binding_is_peer(index) && device.bindings[index] is peer)
+                    return true;
+            }
+        }
+        return false;
     }
 
     // arms a node for the live feed; several patterns may match one node, within one sub or
@@ -2196,9 +2206,11 @@ nothrow @nogc:
                 continue;
             foreach (dev; g_app.devices.values)
             {
-                if (!dev.cid || dev.private_ || authored_by(from, dev))
+                if (!dev.cid || dev.private_)
                     continue;
                 walk_elements(dev, a.subject, (Element* e, const(char)[] path) {
+                    if (authored_by(from, e))
+                        return;
                     EID node = e.ensure_eid();
                     if (!node)
                         return;
@@ -2242,7 +2254,7 @@ nothrow @nogc:
         const(char)[] path = buf[0 .. len];
 
         each_running_peer((SyncPeer p) {
-            if (authored_by(p, dev))
+            if (authored_by(p, e))
                 return;
             foreach (ref pat; p._model_subs[])
             {
@@ -2257,20 +2269,32 @@ nothrow @nogc:
         });
     }
 
-    Device find_or_create_remote_device(SyncPeer from, const(char)[] id)
+    bool has_local_writer(Element* e)
     {
-        if (Device* d = id in g_app.devices)
+        EID eid = e.ensure_eid();
+        Device device = g_app.devices.container(eid.container);
+        if (!device)
+            return false;
+        foreach (entry; e.binding_entries)
         {
-            if (!(*d).remote)
+            if (entry == Element.binding_end)
+                break;
+            if (entry < Element.binding_destroyed)
             {
-                if (from.first_sighting(id))
-                    log.warning("remote device '", id, "' collides with a local device - ignored");
-                return null;
+                ubyte index = Element.binding_index(entry);
+                assert(index < device.bindings.length);
+                if (!device.binding_is_peer(index) && (Element.binding_access(entry) & Access.write))
+                    return true;
             }
-            return *d;
         }
-        Device dev = alloc!Device(id.make_string());
-        dev.remote = true;
+        return false;
+    }
+
+    Device find_or_create_device(const(char)[] id, ulong peer_id)
+    {
+        if (Device device = g_app.devices.find(id, peer_id))
+            return device;
+        Device dev = alloc!Device(id.make_string(), peer_id);
         g_app.devices.insert(dev);
         return dev;
     }

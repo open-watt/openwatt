@@ -493,23 +493,28 @@ nothrow @nogc:
         send_frame(peer);
     }
 
-    override void encode_add(SyncPeer peer, SyncHandle h, const(char)[] path, const(char)[] node_class, uint ft, Element* e)
+    override void encode_add(SyncPeer peer, SyncHandle h, const(char)[] path, const(char)[] node_class, uint ft, Element* e, ulong peer_id)
     {
         import urt.time : unix_time_ns;
-        import manager.element : Access, SamplingMode;
+        import manager.element : Access;
 
         begin_frame("add");
         _buf.append(",\"h\":", h);
         _buf ~= ",\"path\":";
         write_str(path);
         _buf.append(",\"class\":\"", node_class, '\"');
+        if (peer_id)
+        {
+            import urt.conv : format_uint;
+            char[16] id = void;
+            format_uint(peer_id, id[], 16, 16, '0');
+            _buf.append(",\"peer\":\"", id[], '\"');
+        }
         if (e)
         {
             _buf.append(",\"ft\":", ft);
             if (e.access != Access.read)
                 _buf.append(",\"access\":\"", enum_key_from_value!Access(e.access), '\"');
-            if (e.sampling_mode != SamplingMode.manual)
-                _buf.append(",\"mode\":\"", enum_key_from_value!SamplingMode(e.sampling_mode), '\"');
             if (e.data_format.kind != SeriesKind.point)
             {
                 // events retain no value; occurrences replay via `from`
@@ -1001,10 +1006,15 @@ nothrow @nogc:
                 const(char)[] cls = require_str(json, "class");
                 uint ft = optional_uint(json, "ft", uint.max);
                 const(char)[] access = optional_str(json, "access");
-                const(char)[] mode = optional_str(json, "mode");
                 ulong t = optional_ulong(json, "t");
+                ulong peer_id;
+                if (const(char)[] owner = optional_str(json, "peer"))
+                {
+                    if (!parse_peer_id(owner, peer_id))
+                        bad("peer");
+                }
                 if (!bad_frame)
-                    sync.inbound_model_add(peer, h, path, cls, ft, access, mode, json.getMember("v"), t);
+                    sync.inbound_model_add(peer, h, path, cls, ft, access, json.getMember("v"), t, peer_id);
                 break;
             }
 
@@ -1287,6 +1297,14 @@ private:
         v.write_json(_buf.extend(n));
     }
 
+    static bool parse_peer_id(const(char)[] text, out ulong peer_id) pure
+    {
+        import urt.conv : parse_uint;
+        size_t taken;
+        peer_id = parse_uint(text, &taken, 16);
+        return peer_id && taken == text.length;
+    }
+
     void write_variant(ref const Variant v)
     {
         size_t n = v.write_json(null);
@@ -1349,8 +1367,6 @@ private:
     }
 }
 
-
-
 unittest
 {
     // pins the range-checked predicate semantics the decoder gates every as*() behind
@@ -1376,4 +1392,11 @@ unittest
     assert(!e.isUint && e.isUlong && e.isLong);
 
     assert(v.getMember("missing") is null);
+
+    ulong peer_id;
+    assert(JsonEncoder.parse_peer_id("0123456789abcdef", peer_id));
+    assert(peer_id == 0x0123_4567_89AB_CDEF);
+    assert(!JsonEncoder.parse_peer_id("", peer_id));
+    assert(!JsonEncoder.parse_peer_id("123xyz", peer_id));
+    assert(!JsonEncoder.parse_peer_id("0000000000000000", peer_id));
 }

@@ -439,10 +439,10 @@ nothrow @nogc:
         send_frame(peer);
     }
 
-    override void encode_add(SyncPeer peer, SyncHandle h, const(char)[] path, const(char)[] node_class, uint ft, Element* e)
+    override void encode_add(SyncPeer peer, SyncHandle h, const(char)[] path, const(char)[] node_class, uint ft, Element* e, ulong peer_id)
     {
         import urt.time : unix_time_ns;
-        import manager.element : Access, SamplingMode;
+        import manager.element : Access;
 
         begin_frame(Verb.add);
         _buf.put_varint(h);
@@ -453,7 +453,7 @@ nothrow @nogc:
         {
             _buf.put_varint(ft);
             _buf.put_str(e.access != Access.read ? enum_key_name!Access(e.access) : null);
-            _buf.put_str(e.sampling_mode != SamplingMode.manual ? enum_key_name!SamplingMode(e.sampling_mode) : null);
+            _buf.put_str(null); // Version 1 reserved this slot for sampling mode.
 
             Variant v;
             ulong t_ms = 0;
@@ -467,6 +467,7 @@ nothrow @nogc:
             _buf.put_variant(v);
             _buf.put_varint(t_ms);
         }
+        _buf.put_varint(peer_id);
         send_frame(peer);
     }
 
@@ -897,19 +898,25 @@ nothrow @nogc:
                 const(char)[] node_class = r.str();
                 bool has_element = r.u8() != 0;
                 uint ft = uint.max;
-                const(char)[] access, mode;
+                const(char)[] access;
                 Variant v;
                 ulong t_ms = 0;
+                ulong peer_id;
                 if (has_element)
                 {
                     ft = cast(uint)r.varint();
                     access = r.str();
-                    mode = r.str();
+                    r.str();
                     v = r.variant();
                     t_ms = r.varint();
                 }
+                if (r.more())
+                    peer_id = r.varint();
                 if (!r.fail)
-                    sync.inbound_model_add(peer, h, path, node_class, ft, access, mode, v.isNull ? null : &v, t_ms);
+                {
+                    Variant* value = v.isNull ? null : &v;
+                    sync.inbound_model_add(peer, h, path, node_class, ft, access, value, t_ms, peer_id);
+                }
                 break;
             }
 
@@ -947,7 +954,7 @@ nothrow @nogc:
             case Verb.res:
             {
                 uint seq = cast(uint)r.varint();
-                r.variant();   // optional value - inbound_res doesn't take one (same as JSON)
+                r.variant();
                 if (!r.fail)
                     sync.inbound_res(peer, seq);
                 break;
@@ -1401,4 +1408,14 @@ unittest
     Reader t = Reader(buf[0 .. 3]);
     t.variant();
     assert(t.fail);
+
+    Reader old_add = Reader(null);
+    ulong peer_id = old_add.more ? old_add.varint() : 0;
+    assert(peer_id == 0 && !old_add.fail);
+
+    buf.clear();
+    buf.put_varint(0x0123_4567_89AB_CDEF);
+    Reader scoped_add = Reader(buf[]);
+    peer_id = scoped_add.more ? scoped_add.varint() : 0;
+    assert(peer_id == 0x0123_4567_89AB_CDEF && !scoped_add.fail);
 }
