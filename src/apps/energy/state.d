@@ -20,24 +20,21 @@ import manager.collection;
 import manager.component;
 import manager.device;
 import manager.element;
+import manager.system : node_id;
 
 nothrow @nogc:
 
 Device create_energy_device()
 {
-    if ("energy" in g_app.devices)
+    ulong peer_id = node_id();
+    if (!peer_id || g_app.devices.find("energy", peer_id))
         return null;
 
-    Device d = alloc!Device(StringLit!"energy");
+    Device d = alloc!Device(StringLit!"energy", peer_id);
     d.hidden = true;
 
-    d.add_component(alloc!Component(StringLit!"topology"));
-    d.add_component(alloc!Component(StringLit!"circuit"));
-    d.add_component(alloc!Component(StringLit!"islands"));
-    d.add_component(alloc!Component(StringLit!"policy"));
-    d.add_component(alloc!Component(StringLit!"allocation"));
-    d.add_component(alloc!Component(StringLit!"control_path"));
-    d.add_component(alloc!Component(StringLit!"config"));
+    foreach (ref id; energy_component_ids)
+        d.add_component(alloc!Component(id));
 
     g_app.devices.insert(d);
     d.notify(ComponentEvent.tree_changed);
@@ -958,3 +955,16 @@ private void publish_meter_value(Device energy, const(char)[] base, const(char)[
     energy.set_element(tconcat(base, name), value);
     energy.set_element(tconcat(base, name, "_source"), provenance_name(data.source(field)).make_string());
 }
+
+
+private:
+
+__gshared const String[7] energy_component_ids = [
+    StringLit!"topology",
+    StringLit!"circuit",
+    StringLit!"islands",
+    StringLit!"policy",
+    StringLit!"allocation",
+    StringLit!"control_path",
+    StringLit!"config",
+];
