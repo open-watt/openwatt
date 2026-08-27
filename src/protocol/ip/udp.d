@@ -84,6 +84,21 @@ void udp_unregister(UdpPcb* pcb)
     }
 }
 
+bool udp_bind_available(UdpPcb* self, IPAddr address, ushort port)
+{
+    foreach (pcb; _pcbs[])
+    {
+        if (pcb is self || pcb.local_port != port)
+            continue;
+        if (udp_bindings_overlap(pcb.local_addr, address))
+            return false;
+    }
+    return true;
+}
+
+bool udp_bindings_overlap(IPAddr a, IPAddr b) pure
+    => a == IPAddr.any || b == IPAddr.any || a == b;
+
 
 // Demux a locally-delivered v4 UDP datagram to a matching PCB.
 // pkt.data is the entire IP datagram.
@@ -118,18 +133,24 @@ void udp_input(ref IPStack stack, ref Packet pkt, BaseInterface iface, bool grou
     ushort dst_port = u.dst_port.bigEndianToNative!ushort;
     ushort src_port = u.src_port.bigEndianToNative!ushort;
     IPAddr dst = IPAddr(ip.dst);
+    bool multicast = dst.is_multicast;
+    bool broadcast = is_broadcast_for_interface(iface, dst);
     bool delivered;
 
     foreach (pcb; _pcbs[])
     {
         if (pcb.local_port != dst_port)
             continue;
-        bool multicast = dst.is_multicast;
         if (multicast)
         {
             if (pcb.multicast_group != dst)
                 continue;
             if (pcb.outbound_interface != IPAddr.any && !interface_has_address(iface, pcb.outbound_interface))
+                continue;
+        }
+        else if (broadcast)
+        {
+            if (pcb.local_addr != IPAddr.any || pcb.connected)
                 continue;
         }
         else if (pcb.local_addr != IPAddr.any && pcb.local_addr != dst)
@@ -148,14 +169,18 @@ void udp_input(ref IPStack stack, ref Packet pkt, BaseInterface iface, bool grou
             {
                 pcb.owner.deliver(IPAddr(ip.src), src_port, body_, pkt.creation_time);
                 delivered = true;
-                if (!multicast)
+                if (!multicast && !broadcast)
                     return;
                 continue;
             }
         }
 
         if (pcb.recv_queue.length >= UdpPcb.max_queued)
-            return;     // queue full, drop newest
+        {
+            if (!multicast && !broadcast)
+                return;
+            continue;
+        }
 
         UdpDatagram dgm;
         dgm.src_addr = IPAddr(ip.src);
@@ -167,7 +192,7 @@ void udp_input(ref IPStack stack, ref Packet pkt, BaseInterface iface, bool grou
         }
         pcb.recv_queue ~= dgm;
         delivered = true;
-        if (!multicast)
+        if (!multicast && !broadcast)
             return;
     }
 
@@ -185,8 +210,14 @@ bool udp_output(ref IPStack stack, IPAddr src_addr, ushort src_port, IPAddr dst_
     size_t total = IPv4Header.sizeof + UdpHeader.sizeof + payload.length;
     if (total > max_size)
         return false;
+    if (src_addr == IPAddr.any)
+    {
+        IPAddr selected = stack.select_source_v4(dst_addr);
+        if (selected != IPAddr.any)
+            src_addr = selected;
+    }
 
-    ubyte[max_size] buf = void;
+    align(size_t.sizeof) ubyte[max_size] buf = void;
 
     auto ip = cast(IPv4Header*)buf.ptr;
     ip.ver_ihl  = 0x45;
@@ -222,13 +253,21 @@ bool udp_output(ref IPStack stack, IPAddr src_addr, ushort src_port, IPAddr dst_
 
     Packet pkt;
     pkt.init!RawFrame(buf[0 .. total]);
-    if (dst_addr.is_multicast && src_addr != IPAddr.any)
+    if (src_addr != IPAddr.any)
     {
         BaseInterface iface = interface_for_address(src_addr);
-        if (!iface)
-            return false;
-        stack.output_v4_routed(pkt, iface, dst_addr);
-        return true;
+        if (dst_addr.is_multicast)
+        {
+            if (!iface)
+                return false;
+            stack.output_v4_routed(pkt, iface, dst_addr);
+            return true;
+        }
+        if (iface && is_broadcast_for_interface(iface, dst_addr))
+        {
+            stack.output_v4_routed(pkt, iface, dst_addr);
+            return true;
+        }
     }
     stack.output_v4(pkt);
     return true;
@@ -255,7 +294,6 @@ void udp_free_datagram_data(ref UdpDatagram d)
 
 
 private:
-
 ushort pseudo_header_checksum(IPAddr src, IPAddr dst, ubyte protocol, ushort transport_length) pure
 {
     ubyte[12] ph = void;
@@ -265,4 +303,15 @@ ushort pseudo_header_checksum(IPAddr src, IPAddr dst, ubyte protocol, ushort tra
     ph[9]      = protocol;
     ph[10..12] = transport_length.nativeToBigEndian;
     return internet_checksum(ph[]);
+}
+
+
+unittest
+{
+    IPAddr a = IPAddr(192, 168, 0, 10);
+    IPAddr b = IPAddr(192, 168, 0, 11);
+    assert(udp_bindings_overlap(IPAddr.any, a));
+    assert(udp_bindings_overlap(a, IPAddr.any));
+    assert(udp_bindings_overlap(a, a));
+    assert(!udp_bindings_overlap(a, b));
 }

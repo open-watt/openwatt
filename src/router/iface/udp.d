@@ -13,7 +13,6 @@ module router.iface.udp;
 // ip-less tiers get the interface too. With the ip stack linked, udp_open dispatches every family;
 // without it, the interface lowers straight onto the ether datagram service and carries ether peers.
 //
-// TODO: broadcast tx needs SO_BROADCAST; UDPEndpoint exposes no broadcast enable yet
 // TODO: l2mtu assumes a 1500-byte link MTU; query the real path MTU from the endpoint when it can report one
 // TODO: raw-frame compatibility. rx delivers UDPFrame, so PacketFilter(raw) consumers that sit happily on
 //   ASH or a CPCEndpoint see nothing here (tx already accepts raw). Reconcile along CPC's trunk/leaf split:
@@ -113,8 +112,6 @@ nothrow @nogc:
         mark_set!(typeof(this), "max-l2mtu")();
     }
 
-    // Properties...
-
     final inout(EthernetStation) iface() inout pure
         => _iface.get;
     final void iface(EthernetStation value)
@@ -174,6 +171,14 @@ nothrow @nogc:
             return;
         _remote_port = value;
         mark_set!(typeof(this), "remote-port")();
+        restart();
+    }
+
+    final void configure_broadcast(bool value)
+    {
+        if (_broadcast == value)
+            return;
+        _broadcast = value;
         restart();
     }
 
@@ -265,6 +270,13 @@ protected:
                     return CompletionStatus.error;
                 }
             }
+            if (_broadcast && !_ep.enable_broadcast())
+            {
+                log.error("failed to enable UDP broadcast");
+                _ep.close();
+                _ep = null;
+                return CompletionStatus.error;
+            }
         }
         else
         {
@@ -275,19 +287,11 @@ protected:
                 return CompletionStatus.error;
             }
             EthernetStation station = bind_station;
-            if (!station && have_local && !local.addr_any)
-            {
-                station = find_ether_station(MACAddress(local._a.ether.addr));
-                if (!station)
-                {
-                    log.error("no ethernet station with address ", local);
-                    return CompletionStatus.error;
-                }
-            }
             bool connected = have_remote && !multidrop;
             _ether = ether_open(station, have_local ? local.port : 0, &on_ether_recv,
                                 connected ? MACAddress(_remote._a.ether.addr) : MACAddress(),
-                                connected ? _remote._a.ether.port : 0);
+                                connected ? _remote._a.ether.port : 0,
+                                have_local ? MACAddress(local._a.ether.addr) : MACAddress());
             if (!_ether)
             {
                 log.error("failed to open ether datagram endpoint");
@@ -405,6 +409,7 @@ private:
     String _remote_host;
     ushort _local_port;
     ushort _remote_port;
+    bool _broadcast;
     InetAddress _remote;
     static if (has_ip)
         UDPEndpoint* _ep;
@@ -471,12 +476,11 @@ unittest
     assert(f.address == v6);
 
     static immutable ubyte[6] kMac = [0x02, 0x13, 0x37, 0xAA, 0xBB, 0x64];
-    InetAddress em = InetAddress(kMac, 7000);
+    InetAddress em = InetAddress(kMac, 4826);
     f.address = em;
-    assert(f.family == AddressFamily.ether && f.port == 7000);
+    assert(f.family == AddressFamily.ether && f.port == 4826);
     assert(f.address == em);
 
-    // a bound station that detaches holds the binding; only an explicit clear un-binds
     {
         import urt.mem;
         import router.iface.bridge : BridgeInterface;

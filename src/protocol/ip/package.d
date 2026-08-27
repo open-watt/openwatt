@@ -1,6 +1,7 @@
 module protocol.ip;
 
 import urt.array;
+import urt.endian;
 import urt.inet;
 import urt.log;
 import urt.mem.temp;
@@ -43,7 +44,7 @@ version(Windows)
     import driver.windows.wifi : WindowsWifiRadio, WindowsWlan;
 }
 else version (Posix)
-    import urt.internal.os : IPPROTO_IP, IP_MULTICAST_IF, os_setsockopt = setsockopt;
+    import urt.internal.os : IPPROTO_IP, IP_MULTICAST_IF, SOL_SOCKET, SO_BROADCAST, os_setsockopt = setsockopt;
 
 nothrow @nogc:
 
@@ -491,6 +492,8 @@ UDPEndpoint* udp_open(const(InetAddress)* local, const(InetAddress)* remote, UDP
 
     version (UseInternalIPStack)
     {
+        if ((local && local.family != AddressFamily.ipv4) || (remote && remote.family != AddressFamily.ipv4))
+            return null;
         // The in-tree stack does UDP over v4 only; deliver datagrams inline.
         UDPEndpoint* ep = alloc!UDPEndpoint();
         ep._on_recv = on_recv;
@@ -503,6 +506,12 @@ UDPEndpoint* udp_open(const(InetAddress)* local, const(InetAddress)* remote, UDP
         }
         if (pcb.local_port == 0)
             pcb.local_port = allocate_udp_port();
+        if (!udp_bind_available(pcb, pcb.local_addr, pcb.local_port))
+        {
+            free(pcb);
+            free(ep);
+            return null;
+        }
         if (remote && remote.family == AddressFamily.ipv4)
         {
             pcb.remote_addr = remote._a.ipv4.addr;
@@ -573,7 +582,20 @@ UDPEndpoint* udp_open(const(InetAddress)* local, const(InetAddress)* remote, UDP
         if (create_socket(af, SocketType.datagram, Protocol.udp, s).failed)
             return null;
         s.set_socket_option(SocketOption.non_blocking, true);
-
+        if (af == AddressFamily.ipv6)
+        {
+            enum int IPPROTO_IPV6_ = 41;
+            version (linux)
+                enum int IPV6_V6ONLY_ = 26;
+            else
+                enum int IPV6_V6ONLY_ = 27;
+            int yes = 1;
+            if (os_setsockopt(s.handle, IPPROTO_IPV6_, IPV6_V6ONLY_, &yes, cast(uint)yes.sizeof) != 0)
+            {
+                s.close();
+                return null;
+            }
+        }
         InetAddress bind_addr = local ? *local : (af == AddressFamily.ipv6 ? InetAddress(IPv6Addr.any, 0) : InetAddress(IPAddr.any, 0));
         if (s.bind(bind_addr).failed)
         {
@@ -608,8 +630,7 @@ UDPEndpoint* udp_open(const(InetAddress)* local, const(InetAddress)* remote, UDP
     }
 }
 
-// a null local or the zero mac is a wildcard bind: every segment, egress by learned neighbour;
-// an explicit station binds one segment (a mac cannot: a vlan shares its parent's address)
+// A MAC address may belong to multiple segments; only an explicit station restricts the bind to one.
 private UDPEndpoint* udp_open_ether(const(InetAddress)* local, const(InetAddress)* remote, UDPRecvHandler on_recv, EthernetStation station)
 {
     if (local && local.family != AddressFamily.ether)
@@ -618,12 +639,7 @@ private UDPEndpoint* udp_open_ether(const(InetAddress)* local, const(InetAddress
         return null;
 
     ushort local_port = local ? local.port : 0;
-    if (!station && local && !local.addr_any)
-    {
-        station = find_ether_station(MACAddress(local._a.ether.addr));
-        if (!station)
-            return null;
-    }
+    MACAddress local_address = local ? MACAddress(local._a.ether.addr) : MACAddress();
 
     UDPEndpoint* ep = alloc!UDPEndpoint();
     ep._on_recv = on_recv;
@@ -634,7 +650,7 @@ private UDPEndpoint* udp_open_ether(const(InetAddress)* local, const(InetAddress
     }
     ep._ether = ether_open(station, local_port, &ep.on_ether_recv,
                            remote ? MACAddress(remote._a.ether.addr) : MACAddress(),
-                           remote ? remote._a.ether.port : 0);
+                           remote ? remote._a.ether.port : 0, local_address);
     if (!ep._ether)
     {
         free(ep);
@@ -1556,6 +1572,24 @@ nothrow @nogc:
         }
     }
 
+    bool enable_broadcast()
+    {
+        if (_ether)
+            return true;
+        version (UseInternalIPStack)
+            return true;
+        else version (Windows)
+        {
+            int yes = 1;
+            return ws_setsockopt(_handle, SOL_SOCKET_, SO_BROADCAST_, &yes, cast(int)yes.sizeof) == 0;
+        }
+        else
+        {
+            int yes = 1;
+            return os_setsockopt(_socket.handle, SOL_SOCKET, SO_BROADCAST, &yes, cast(uint)yes.sizeof) == 0;
+        }
+    }
+
     // Send to the connected remote (set at open). Returns bytes sent, or 0.
     version (UseInternalIPStack)
     {
@@ -2246,7 +2280,7 @@ else version (Windows)
     enum int WSA_AF_INET = 2, WSA_SOCK_STREAM = 1, WSA_SOCK_DGRAM = 2;
     enum int WSA_IPPROTO_IP = 0, WSA_IPPROTO_TCP = 6, WSA_IPPROTO_UDP = 17;
     enum int WSA_IP_MULTICAST_IF = 9, WSA_IP_ADD_MEMBERSHIP = 12;
-    enum int SOL_SOCKET_ = 0xffff, SO_REUSEADDR_ = 0x0004, SO_ERROR_ = 0x1007;
+    enum int SOL_SOCKET_ = 0xffff, SO_REUSEADDR_ = 0x0004, SO_BROADCAST_ = 0x0020, SO_ERROR_ = 0x1007;
 
     // raw winsock; pragma(mangle) keeps the common names from clashing with urt.socket's exports
     enum uint WSA_FLAG_OVERLAPPED = 0x01;
@@ -2259,8 +2293,6 @@ else version (Windows)
     pragma(mangle, "WSAGetLastError") extern(Windows) int ws_lasterror() nothrow @nogc;
     pragma(mangle, "setsockopt")  extern(Windows) int ws_setsockopt(IOCP_SOCKET, int, int, const(void)*, int) nothrow @nogc;
     pragma(mangle, "getsockopt")  extern(Windows) int ws_getsockopt(IOCP_SOCKET, int, int, void*, int*) nothrow @nogc;
-    pragma(mangle, "htons")       extern(Windows) ushort ws_htons(ushort) nothrow @nogc;
-
     enum int WSA_IO_PENDING = 997;
 
     pragma(mangle, "getpeername") extern(Windows) int ws_getpeername(IOCP_SOCKET, void*, int*) nothrow @nogc;
@@ -2275,7 +2307,7 @@ else version (Windows)
     {
         sockaddr_in sa;
         sa.sin_family = cast(short)WSA_AF_INET;
-        sa.sin_port = ws_htons(a._a.ipv4.port);
+        storeBigEndian(&sa.sin_port, a._a.ipv4.port);
         sa.sin_addr.s_addr = a._a.ipv4.addr.address;   // octets in memory order == network order
         return sa;
     }
@@ -2284,7 +2316,7 @@ else version (Windows)
     {
         IPAddr ip;
         ip.address = sa.sin_addr.s_addr;
-        return InetAddress(ip, ws_htons(sa.sin_port));   // htons is its own inverse (16-bit swap)
+        return InetAddress(ip, loadBigEndian(&sa.sin_port));
     }
 
 
