@@ -115,6 +115,11 @@ nothrow @nogc:
 
         QueuedFrame* frame = _pool.alloc();
         frame.packet = packet.clone();
+        if (!frame.packet)
+        {
+            _pool.free(frame);
+            return -1;
+        }
         frame.callback = callback;
         frame.enqueue_time = getTime();
         frame.deadline_after = policy ? policy.deadline_after : 0;
