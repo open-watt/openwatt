@@ -74,6 +74,27 @@ private:
 }
 
 
+BaseInterface interface_for_address(IPAddr address)
+{
+    if (!address)
+        return null;
+    foreach (configured; Collection!IPAddress().values)
+        if (configured.address.addr == address)
+            return configured.iface;
+    return null;
+}
+
+bool interface_has_address(BaseInterface iface, IPAddr address)
+{
+    if (!iface || !address)
+        return false;
+    foreach (configured; Collection!IPAddress().values)
+        if (configured.iface is iface && configured.address.addr == address)
+            return true;
+    return false;
+}
+
+
 private:
 
 void bump_route_generation()

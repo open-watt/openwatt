@@ -219,6 +219,7 @@
     <DCompile Include="src\protocol\ip\client.d" />
     <DCompile Include="src\protocol\ip\firewall.d" />
     <DCompile Include="src\protocol\ip\icmp.d" />
+    <DCompile Include="src\protocol\ip\igmp.d" />
     <DCompile Include="src\protocol\ip\neighbour.d" />
     <DCompile Include="src\protocol\ip\package.d" />
     <DCompile Include="src\protocol\ip\pool.d" />
