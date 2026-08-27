@@ -607,11 +607,13 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
                 e.name = el.get_name(profile).make_string();
                 e.desc = el.get_desc(profile).make_string();
                 e.display_unit = el.get_display_units(profile).make_string();
-                e.access = cast(manager.element.Access)el.access;
+                if (el.type != ElementTemplate.Type.map)
+                    e.access = cast(manager.element.Access)el.access;
             }
             else
             {
-                e.access = cast(manager.element.Access)(e.access | cast(manager.element.Access)el.access);
+                if (el.type != ElementTemplate.Type.map)
+                    e.access = cast(manager.element.Access)(e.access | cast(manager.element.Access)el.access);
                 if (!e.name)
                     e.name = el.get_name(profile).make_string();
                 if (!e.desc)
@@ -698,8 +700,6 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
                     foreach (ai; profile.element_aliases(el.element_index))
                     {
                         ref const(ElementDesc) alias_desc = profile.element_desc(ai);
-                        e.access = cast(manager.element.Access)(
-                            e.access | cast(manager.element.Access)alias_desc.access);
                         const(char)[] alias_units = alias_desc.get_display_units(profile);
                         if (is_new_element && !(el.explicit & ElementTemplate.Explicit.units) && alias_units.length)
                             e.display_unit = alias_units.make_string();

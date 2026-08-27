@@ -655,6 +655,7 @@ nothrow @nogc:
     override CompletionStatus shutdown()
     {
         teardown_node();
+        detach_device();
         stripes.clear();
         foreach (ref ch; _chains)
             ch.scan_buffer.clear();
@@ -1028,7 +1029,9 @@ private:
         {
             device = alloc!Device(_device);
             is_new = true;
+            g_app.devices.insert(device);
         }
+        _bound_device = device;
         version (DebugSunspec)
             log.tracef("materialise: device '{0}' ({1}) from {2} model(s)", _device[], is_new ? "new" : "existing", _models_chain.length);
 
@@ -1153,9 +1156,6 @@ private:
         }
 
         materialise_network(device);
-
-        if (is_new)
-            g_app.devices.insert(device);
 
         device.notify(ComponentEvent.tree_changed);
         device.notify(ComponentEvent.online);
@@ -1323,7 +1323,7 @@ private:
         }
 
         Element* e = ensure_element(target, fd.id);
-        e.access = fd.access;
+        _bound_device.attach_binding(this, e, fd.access);
         populate_element_metadata(e, target.template_[], fd.id);
         if (fd.freq != Frequency.constant && fd.freq != Frequency.configuration && element_already_sampled(e, out_fields))
         {

@@ -142,6 +142,7 @@ protected:
                 return false;
             _dev = *p;
         }
+        _bound_device = _dev;
         return true;
     }
 
@@ -334,6 +335,7 @@ private:
                 bool known_unit;
                 entry.format = sensor_format(res.unit_of_measurement[], entry.pre_scale, known_unit);
                 Element* e = _dev.find_or_create_element(tconcat("sensors.", id), entry.format);
+                _bound_device.attach_binding(this, e, manager.element.Access.read);
                 e.name = res.name.move;
                 entry.element = e;
                 if (!known_unit)

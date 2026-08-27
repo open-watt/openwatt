@@ -84,7 +84,7 @@ nothrow @nogc:
                 return CompletionStatus.continue_;
         }
 
-        if (_target_current && _target_current.access != Access.read)
+        if (_target_current)
         {
             _target_current.subscribe(&on_target_current_change);
             _subscribed = true;
@@ -103,7 +103,8 @@ nothrow @nogc:
         _master = null;
         _target_current = null;
         _elements.clear();
-        _built = false;    // materialise() must rebuild _elements next startup
+        detach_device();
+        _built = false;
         return CompletionStatus.complete;
     }
 
@@ -157,6 +158,7 @@ protected:
             device = alloc!Device(_device);
             g_app.devices.insert(device);
         }
+        _bound_device = device;
 
         Component info = find_or_create_component(device, "info", "DeviceInfo");
         set_constant(info, "type", "evse");
@@ -209,17 +211,6 @@ protected:
 
 private:
 
-    ushort _slave_id;
-
-    TeslaTWCMaster _master;
-    ubyte _charger_index;
-
-    bool _subscribed;
-    bool _built;
-
-    Element* _target_current;
-    Array!SampleElement _elements;
-
     enum SampleKind : ubyte
     {
         setpoint,
@@ -248,11 +239,26 @@ private:
         SampleKind kind;
     }
 
+    ushort _slave_id;
+
+    TeslaTWCMaster _master;
+    ubyte _charger_index;
+
+    bool _subscribed;
+    bool _built;
+
+    Element* _target_current;
+    Array!SampleElement _elements;
+
     Component find_or_create_component(Component parent, const(char)[] id, const(char)[] template_)
     {
         foreach (c; parent.components)
             if (c.id[] == id)
+            {
+                if (!c.template_)
+                    c.template_ = template_.make_string();
                 return c;
+            }
         Component c = alloc!Component(id.make_string());
         c.template_ = template_.make_string();
         c.parent = parent;
@@ -260,15 +266,19 @@ private:
         return c;
     }
 
-    Element* find_or_create_element(Component parent, const(char)[] id, FormatId format,
-                                    Access access = Access.read)
+    Element* find_or_create_element(Component parent, const(char)[] id, FormatId format, Access access = Access.none)
     {
         foreach (e; parent.elements)
         {
             if (e.id[] == id)
             {
-                assert(e.format == format || value_compatible(*format_info(format), *e.data_format),
-                       "Tesla element format mismatch");
+                if (!e.format.valid)
+                    e.format = format;
+                else
+                    assert(e.format == format || value_compatible(*format_info(format), *e.data_format),
+                           "Tesla element format mismatch");
+                if (access != Access.none)
+                    e.access = cast(Access)(e.access | access);
                 return e;
             }
         }
@@ -284,8 +294,9 @@ private:
 
     Element* add_sample(Component parent, const(char)[] id, SampleKind kind, FormatId format, Access access = Access.read)
     {
-        Element* e = find_or_create_element(parent, id, format, access);
+        Element* e = find_or_create_element(parent, id, format);
         _elements ~= SampleElement(e, format, kind);
+        _bound_device.attach_binding(this, e, access);
         return e;
     }
 
@@ -326,8 +337,8 @@ private:
 
     void set_constant(T)(Component parent, const(char)[] id, T value)
     {
-        Element* e = find_or_create_element(parent, id, register_value_format(value));
-        if (e.sampling_mode != SamplingMode.constant)
+        Element* e = find_or_create_element(parent, id, register_value_format(value), Access.read);
+        if (e.record_update() == SysTime())
         {
             e.value(value);
             e.sampling_mode = SamplingMode.constant;

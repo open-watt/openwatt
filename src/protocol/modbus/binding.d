@@ -30,8 +30,6 @@ import router.iface.packet : PCP, pcp_priority_map;
 //version = DebugModbusBinding;
 //version = DebugModbusBindingRegs;
 
-private alias Access = manager.element.Access;
-
 nothrow @nogc:
 
 struct ElementDesc_Modbus
@@ -357,7 +355,7 @@ protected:
             }
             const(char)[] serve_model = _model_name_explicit[];
             _current_pass = Pass.serve;
-            create_device_from_profile(*_serve_profile_data, serve_model, _device[], null, &add_handler);
+            create_device_from_profile(*_serve_profile_data, serve_model, _device[], null, &attach_element);
         }
 
         return true;
@@ -376,22 +374,40 @@ protected:
         SampleDesc sample_desc = desc_by_index(mb.desc);
         const(DataFormat)* fmt = sample_desc.fmt;
 
-        if (_current_pass != Pass.serve && fmt.is_scalar)
-        {
+        if (!e.format.valid)
             e.format = sample_desc.format;
+        if (_current_pass != Pass.serve && fmt.is_scalar && e.record_update() == SysTime())
+        {
             manager.series.Scalar zero;
             zero.raw[] = 0;
             e.value = box_record(zero.raw.ptr, *fmt);
         }
 
         add_register_entry(e, desc, mb, sample_desc);
-        return _current_pass == Pass.serve ? FormatId.invalid : sample_desc.format;
+        return sample_desc.format;
     }
-
-
 private:
 
     enum Pass : ubyte { primary, serve }
+
+    alias Access = manager.element.Access;
+
+    struct SampleElement
+    {
+        MonoTime lastUpdate;
+        ushort register;
+        ubyte regKind;
+        ubyte flags; // 1 - in-flight (poll), 2 - constant-sampled, 4 - dirty (write pending), 8 - in-flight (write)
+        ushort sampleTimeMs;
+        PCP pcp;
+        bool dei;
+        Element* element;
+        ubyte length;
+        SampleDesc desc;
+        Access access;
+        ubyte seqLen() const pure nothrow @nogc
+            => regKind < cast(ubyte)RegisterType.input_register ? 1 : cast(ubyte)(length / 2);
+    }
 
     ObjectRef!ModbusNode _node;
     String _slave_name;
@@ -411,29 +427,13 @@ private:
     bool _elements_subscribed;
     bool _has_dirty;
 
-    Array!SampleElement elements;          // poll map (or shared single map)
-    Array!SampleElement serve_elements;    // separate serve map when profile= differs from slave.profile
+    Array!SampleElement elements;
+    Array!SampleElement serve_elements;
     ushort retryTime = 500;
     bool needsSort = true;
 
     version (DebugModbusBinding)
         ubyte _diag_counter;
-
-    struct SampleElement
-    {
-        MonoTime lastUpdate;
-        ushort register;
-        ubyte regKind;
-        ubyte flags; // 1 - in-flight (poll), 2 - constant-sampled, 4 - dirty (write pending), 8 - in-flight (write)
-        ushort sampleTimeMs;
-        PCP pcp;
-        bool dei;
-        Element* element;
-        ubyte length;
-        SampleDesc desc;
-        ubyte seqLen() const pure nothrow @nogc
-            => regKind < cast(ubyte)RegisterType.input_register ? 1 : cast(ubyte)(length / 2);
-    }
 
     void add_register_entry(Element* element, ref const ElementDesc desc, ref const ElementDesc_Modbus reg_info,
                             SampleDesc sample_desc)
@@ -445,6 +445,7 @@ private:
         e.regKind = reg_info.reg_type;
         e.length = reg_info.length;
         e.desc = sample_desc;
+        e.access = cast(Access)desc.access;
         if (_current_pass == Pass.primary)
         {
             switch (desc.update_frequency)
@@ -797,7 +798,7 @@ private:
         SampleElement* ent = find_serve_entry(cast(ubyte)RegisterType.holding_register, reg);
         if (!ent || ent.seqLen != 1)
             return ExceptionCode.illegal_data_address;
-        if (!(ent.element.access & Access.write))
+        if (!(ent.access & Access.write))
             return ExceptionCode.illegal_function;
 
         if (!sample_element(*ent, req.data[2 .. 2 + ent.length], getSysTime()))
@@ -830,7 +831,7 @@ private:
             ushort end = cast(ushort)(ent.register + ent.seqLen);
             if (end > cast(uint)start + count)
                 continue;
-            if (!(ent.element.access & Access.write))
+            if (!(ent.access & Access.write))
                 return ExceptionCode.illegal_function;
             any_overlap = true;
         }
@@ -870,7 +871,7 @@ private:
         SampleElement* ent = find_serve_entry(cast(ubyte)RegisterType.coil, reg);
         if (!ent)
             return ExceptionCode.illegal_data_address;
-        if (!(ent.element.access & Access.write))
+        if (!(ent.access & Access.write))
             return ExceptionCode.illegal_function;
 
         ent.element.value(Variant(raw == 0xFF00), getSysTime());
@@ -898,7 +899,7 @@ private:
                 continue;
             if (ent.register < start || ent.register >= cast(uint)start + count)
                 continue;
-            if (!(ent.element.access & Access.write))
+            if (!(ent.access & Access.write))
                 return ExceptionCode.illegal_function;
             any_overlap = true;
         }
@@ -943,7 +944,7 @@ private:
         {
             if (ent.regKind != cast(ubyte)RegisterType.holding_register && ent.regKind != cast(ubyte)RegisterType.coil)
                 continue;
-            if (!(ent.element.access & Access.write))
+            if (!(ent.access & Access.write))
                 continue;
             ent.element.subscribe(&element_changed);
         }
@@ -958,7 +959,7 @@ private:
         {
             if (ent.regKind != cast(ubyte)RegisterType.holding_register && ent.regKind != cast(ubyte)RegisterType.coil)
                 continue;
-            if (!(ent.element.access & Access.write))
+            if (!(ent.access & Access.write))
                 continue;
             ent.element.unsubscribe(&element_changed);
         }

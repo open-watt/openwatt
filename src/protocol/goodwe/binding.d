@@ -186,7 +186,11 @@ protected:
         if (elements.length == 0)
         {
             if (AA55Client c = _client.get)
-                device.set_element("status.network.ip.address", c.get_address());
+            {
+                Element* address = device.find_element("status.network.ip.address");
+                if (!address || address.record_update() == SysTime())
+                    device.set_element("status.network.ip.address", c.get_address());
+            }
         }
 
         import protocol.goodwe : aa55_section_kind;
@@ -199,8 +203,9 @@ protected:
 
         SampleDesc sd = desc_by_index(aa55.desc);
         const(DataFormat)* fmt = sd.fmt;
-        e.format = sd.format;
-        if (fmt.is_scalar)
+        if (!e.format.valid)
+            e.format = sd.format;
+        if (fmt.is_scalar && e.record_update() == SysTime())
         {
             Scalar z;
             z.raw[] = 0;

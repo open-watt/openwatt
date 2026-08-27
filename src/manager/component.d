@@ -146,8 +146,11 @@ nothrow @nogc:
         {
             if (e.id[] == id[])
             {
-                assert(e.format == format || value_compatible(*format_info(format), *e.data_format),
-                       "element path reused with an incompatible format");
+                if (!e.format.valid)
+                    e.format = format;
+                else
+                    assert(e.format == format || value_compatible(*format_info(format), *e.data_format),
+                           "element path reused with an incompatible format");
                 return e;
             }
         }
@@ -217,3 +220,16 @@ private:
 }
 
 
+unittest
+{
+    Component component = alloc!Component(StringLit!"component");
+    Element* element = alloc_element();
+    element.id = StringLit!"value";
+    element.parent = component;
+    component.elements ~= element;
+
+    FormatId format = register_value_format!uint();
+    assert(!element.format.valid);
+    assert(component.find_or_create_element("value", format) is element);
+    assert(element.format == format);
+}

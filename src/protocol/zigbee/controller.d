@@ -114,6 +114,8 @@ protected:
     {
         if (!_zigbee_profile)
             _zigbee_profile = g_app.acquire_profile("zigbee");
+        foreach (ref sample; _sample_elements.values)
+            attach_model_element(sample.element, sample.access);
 
         return _endpoint.running ? CompletionStatus.complete : CompletionStatus.continue_;
     }
@@ -137,6 +139,11 @@ protected:
         }
 
         tuya_dedup.clear();
+        foreach (ref sample; _sample_elements.values)
+            sample.element.unsubscribe(&on_samples);
+        foreach (device; _bound_devices)
+            device.detach_binding(this);
+        _bound_devices.clear();
 
         return CompletionStatus.complete;
     }
@@ -256,6 +263,7 @@ protected:
         if (zb.desc != ushort.max)
             sd = desc_by_index(zb.desc);
         SampleElement* se = _sample_elements.insert(key, SampleElement(element, sd));
+        se.access = cast(manager.element.Access)desc.access;
         se.eui = eui;
         se.endpoint = endpoint;
         se.cluster = zb.cluster_id;
@@ -264,9 +272,6 @@ protected:
         se.length = zb.length;
         se.tuya_type = zb.tuya_type;
         _sample_elements_by_element.insert(element, se);
-
-        if (element.access & manager.element.Access.write)
-            element.subscribe(&on_samples);
     }
 
     final SampleElement* find_sample_element(EUI64 eui, ubyte endpoint, ushort cluster, ushort attribute, ushort manufacturer = 0)
@@ -289,10 +294,18 @@ protected:
 
 private:
 
+    enum ZCLReply : ubyte
+    {
+        default_,
+        sent,
+        none,
+    }
+
     struct SampleElement
     {
         Element* element;
         SampleDesc desc;
+        manager.element.Access access;
         EUI64 eui;
         ubyte endpoint;
         ushort cluster;
@@ -310,16 +323,9 @@ private:
         ushort tag;
     }
 
-    enum ZCLReply : ubyte
-    {
-        default_,
-        sent,
-        none,
-    }
-
-    // TODO: I'd prefer if we used a sorted array...
     Map!(ulong[2], SampleElement) _sample_elements;
     Map!(Element*, SampleElement*) _sample_elements_by_element;
+    Array!Device _bound_devices;
 
     bool _auto_create_devices;
     ushort tuya_txn_id = 1;
@@ -331,6 +337,28 @@ private:
     Array!TuyaDedup tuya_dedup;
 
     Profile* _zigbee_profile;
+
+    void attach_model_element(Element* element, manager.element.Access access)
+    {
+        Component component = element.parent;
+        while (component && !component.is_device)
+            component = component.parent;
+        if (!component)
+            return;
+        Device device = cast(Device)cast(void*)component;
+        if (access & manager.element.Access.write)
+            element.subscribe(&on_samples);
+        foreach (bound; _bound_devices)
+        {
+            if (bound is device)
+            {
+                device.attach_binding(this, element, access);
+                return;
+            }
+        }
+        _bound_devices ~= device;
+        device.attach_binding(this, element, access);
+    }
 
     ulong[2] make_sample_key(EUI64 eui, ubyte endpoint, ushort cluster, ushort attribute, ushort manufacturer = 0)
     {
@@ -877,8 +905,8 @@ private:
 
     void set_value(ref SampleElement e, ref const Variant val, SysTime timestamp)
     {
-        if (!(e.element.access & manager.element.Access.write))
-            return; // attribute is read-only!
+        if (!(e.access & manager.element.Access.write))
+            return;
 
         switch (e.cluster)
         {
@@ -947,8 +975,10 @@ private:
                     if (zb.desc == ushort.max)
                         return FormatId.invalid;
                     SampleDesc sample_desc = desc_by_index(zb.desc);
-                    e.format = sample_desc.format;
+                    if (!e.format.valid)
+                        e.format = sample_desc.format;
                     add_sample_element(e, node.eui, desc, zb, endpoint);
+                    attach_model_element(e, cast(manager.element.Access)desc.access);
 
                     if (zb.cluster_id == 0x0000) // basic cluster
                     {
