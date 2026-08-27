@@ -13,6 +13,7 @@ import router.iface;
 import router.iface.packet;
 
 import protocol.ip : IPv4Header, IPProtocol;
+import protocol.ip.address;
 import protocol.ip.icmp;
 import protocol.ip.stack;
 
@@ -45,6 +46,8 @@ struct UdpPcb
     ushort  local_port;     // 0 = unbound
     IPAddr  remote_addr;    // 0.0.0.0 = unconnected
     ushort  remote_port;    // 0 = unconnected
+    IPAddr  multicast_group;
+    IPAddr  outbound_interface;
     bool    connected;
 
     Array!UdpDatagram recv_queue;
@@ -84,7 +87,7 @@ void udp_unregister(UdpPcb* pcb)
 
 // Demux a locally-delivered v4 UDP datagram to a matching PCB.
 // pkt.data is the entire IP datagram.
-void udp_input(ref IPStack stack, ref Packet pkt)
+void udp_input(ref IPStack stack, ref Packet pkt, BaseInterface iface, bool group_destination)
 {
     if (pkt.data.length < IPv4Header.sizeof + UdpHeader.sizeof)
         return;
@@ -114,12 +117,22 @@ void udp_input(ref IPStack stack, ref Packet pkt)
 
     ushort dst_port = u.dst_port.bigEndianToNative!ushort;
     ushort src_port = u.src_port.bigEndianToNative!ushort;
+    IPAddr dst = IPAddr(ip.dst);
+    bool delivered;
 
     foreach (pcb; _pcbs[])
     {
         if (pcb.local_port != dst_port)
             continue;
-        if (pcb.local_addr != IPAddr.any && pcb.local_addr != ip.dst)
+        bool multicast = dst.is_multicast;
+        if (multicast)
+        {
+            if (pcb.multicast_group != dst)
+                continue;
+            if (pcb.outbound_interface != IPAddr.any && !interface_has_address(iface, pcb.outbound_interface))
+                continue;
+        }
+        else if (pcb.local_addr != IPAddr.any && pcb.local_addr != dst)
             continue;
         if (pcb.connected)
         {
@@ -134,7 +147,10 @@ void udp_input(ref IPStack stack, ref Packet pkt)
             if (pcb.owner)
             {
                 pcb.owner.deliver(IPAddr(ip.src), src_port, body_, pkt.creation_time);
-                return;
+                delivered = true;
+                if (!multicast)
+                    return;
+                continue;
             }
         }
 
@@ -150,10 +166,13 @@ void udp_input(ref IPStack stack, ref Packet pkt)
             dgm.data[] = body_[];
         }
         pcb.recv_queue ~= dgm;
-        return;
+        delivered = true;
+        if (!multicast)
+            return;
     }
 
-    icmp_send_error(stack, IcmpType.dest_unreachable, IcmpDestUnreachableCode.port, pkt);
+    if (!delivered && !group_destination)
+        icmp_send_error(stack, IcmpType.dest_unreachable, IcmpDestUnreachableCode.port, pkt);
 }
 
 
@@ -203,6 +222,14 @@ bool udp_output(ref IPStack stack, IPAddr src_addr, ushort src_port, IPAddr dst_
 
     Packet pkt;
     pkt.init!RawFrame(buf[0 .. total]);
+    if (dst_addr.is_multicast && src_addr != IPAddr.any)
+    {
+        BaseInterface iface = interface_for_address(src_addr);
+        if (!iface)
+            return false;
+        stack.output_v4_routed(pkt, iface, dst_addr);
+        return true;
+    }
     stack.output_v4(pkt);
     return true;
 }

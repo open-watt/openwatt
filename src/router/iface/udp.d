@@ -13,7 +13,7 @@ module router.iface.udp;
 // ip-less tiers get the interface too. With the ip stack linked, udp_open dispatches every family;
 // without it, the interface lowers straight onto the ether datagram service and carries ether peers.
 //
-// TODO: broadcast tx needs SO_BROADCAST and multicast rx needs a group join; UDPEndpoint exposes neither yet
+// TODO: broadcast tx needs SO_BROADCAST; UDPEndpoint exposes no broadcast enable yet
 // TODO: l2mtu assumes a 1500-byte link MTU; query the real path MTU from the endpoint when it can report one
 // TODO: raw-frame compatibility. rx delivers UDPFrame, so PacketFilter(raw) consumers that sit happily on
 //   ASH or a CPCEndpoint see nothing here (tx already accepts raw). Reconcile along CPC's trunk/leaf split:
@@ -251,6 +251,19 @@ protected:
             {
                 log.error("failed to open UDP endpoint");
                 return CompletionStatus.error;
+            }
+            if (_remote.family == AddressFamily.ipv4 && _remote._a.ipv4.addr.is_multicast)
+            {
+                IPAddr local_address = IPAddr.any;
+                if (have_local && local.family == AddressFamily.ipv4)
+                    local_address = local._a.ipv4.addr;
+                if (!_ep.join(_remote._a.ipv4.addr, local_address))
+                {
+                    log.error("failed to join multicast group ", _remote._a.ipv4.addr);
+                    _ep.close();
+                    _ep = null;
+                    return CompletionStatus.error;
+                }
             }
         }
         else

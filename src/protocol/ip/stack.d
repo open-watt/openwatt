@@ -21,6 +21,7 @@ import protocol.ip.address;
 import protocol.ip.arp;
 import protocol.ip.firewall;
 import protocol.ip.icmp;
+import protocol.ip.igmp;
 import protocol.ip.neighbour;
 import protocol.ip.route;
 import protocol.ip.tcp;
@@ -92,7 +93,7 @@ nothrow @nogc:
     {
         if (firewall_v4.run(HookPoint.output, pkt) == Verdict.drop)
             return;
-        RouteResult r = RouteResult(RouteResult.Kind.forward, egress, next_hop, 1);
+        RouteResult r = RouteResult(RouteResult.Kind.forward, egress, next_hop, 0);
         dispatch(pkt, r, firewall_v4);
     }
 
@@ -109,7 +110,10 @@ nothrow @nogc:
         neighbour_v4.tick(now);
         neighbour_v6.tick(now);
         version (UseInternalIPStack)
+        {
+            igmp_update(this, now);
             tcp_tick(this, now);
+        }
     }
 
     IPAddr select_source_v4(IPAddr dst)
@@ -282,11 +286,12 @@ private:
         if (firewall_v4.run(HookPoint.prerouting, pkt) == Verdict.drop)
             return;
 
-        bool non_forwardable = is_non_forwardable_v4_dst(IPAddr(ip.dst), iface);
-        if (non_forwardable)
-            return;
-
-        RouteResult r = route_lookup_v4(pkt);
+        bool group_destination = is_multicast_or_broadcast_v4(IPAddr(ip.dst), iface);
+        RouteResult r;
+        if (group_destination)
+            r = RouteResult(RouteResult.Kind.local, iface, IPAddr(ip.dst), 0);
+        else
+            r = route_lookup_v4(pkt);
         dispatch(pkt, r, firewall_v4);
     }
 
@@ -316,7 +321,7 @@ private:
             case RouteResult.Kind.local:
                 if (fw.run(HookPoint.input, pkt) == Verdict.drop)
                     return;
-                deliver_local(pkt);
+                deliver_local(pkt, r.out_iface);
                 return;
             case RouteResult.Kind.forward:
             {
@@ -361,7 +366,7 @@ private:
         return false;
     }
 
-    bool is_non_forwardable_v4_dst(IPAddr dst, BaseInterface iface)
+    bool is_multicast_or_broadcast_v4(IPAddr dst, BaseInterface iface)
     {
         if (dst == IPAddr.broadcast || dst.is_multicast())
             return true;
@@ -400,6 +405,19 @@ private:
         version (DebugIPEgress)
             log.trace("egress if=", out_iface.name, " next_hop=", next_hop, " (", pkt.length, ") [ ", pkt.data[0 .. 24 < pkt.length ? 24 : pkt.length], 24 < pkt.length ? " ... ]" : " ]");
 
+        if (next_hop.is_multicast())
+        {
+            MACAddress destination;
+            destination.b[0] = 0x01;
+            destination.b[1] = 0x00;
+            destination.b[2] = 0x5E;
+            destination.b[3] = next_hop.b[1] & 0x7F;
+            destination.b[4] = next_hop.b[2];
+            destination.b[5] = next_hop.b[3];
+            frame_and_send(pkt, out_iface, destination.b[]);
+            return;
+        }
+
         const(ubyte)[] link_addr = neighbour_v4.resolve(next_hop, out_iface, pkt);
         if (link_addr is null)
         {
@@ -425,7 +443,7 @@ private:
         station.send(dst, pkt.data, etype);
     }
 
-    void deliver_local(ref Packet pkt)
+    void deliver_local(ref Packet pkt, BaseInterface iface = null)
     {
         if (pkt.data.length < IPv4Header.sizeof)
             return;
@@ -433,16 +451,23 @@ private:
         if (ip.version_ != 4)
             return;     // v6 path not yet wired
 
+        bool group_destination = iface && is_multicast_or_broadcast_v4(IPAddr(ip.dst), iface);
+        if (group_destination && ip.protocol != IPProtocol.igmp && ip.protocol != IPProtocol.udp)
+            return;
+
         switch (ip.protocol)
         {
             case IPProtocol.icmp:
                 .icmp_input(this, pkt);
                 break;
+            case IPProtocol.igmp:
+                .igmp_input(pkt, iface);
+                break;
             case IPProtocol.tcp:
                 .tcp_input(this, pkt);
                 break;
             case IPProtocol.udp:
-                .udp_input(this, pkt);
+                .udp_input(this, pkt, iface, group_destination);
                 break;
             default:
                 icmp_send_error(this, IcmpType.dest_unreachable, IcmpDestUnreachableCode.protocol, pkt);

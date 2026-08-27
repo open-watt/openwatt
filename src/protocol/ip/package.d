@@ -23,6 +23,7 @@ import protocol.ip.tcp_stream;
 
 version (UseInternalIPStack)
 {
+    import protocol.ip.igmp;
     import protocol.ip.udp;
     import protocol.ip.tcp : TcpPcb, TcpState, tcp_assign_id, tcp_send_data, tcp_consume_data, tcp_close, free_pcb,
         native_tcp_connect = tcp_connect, native_tcp_listen = tcp_listen;
@@ -41,6 +42,8 @@ version(Windows)
     import driver.windows.ethernet : WindowsPcapEthernet;
     import driver.windows.wifi : WindowsWifiRadio, WindowsWlan;
 }
+else version (Posix)
+    import urt.internal.os : IPPROTO_IP, IP_MULTICAST_IF, os_setsockopt = setsockopt;
 
 nothrow @nogc:
 
@@ -99,9 +102,7 @@ nothrow @nogc:
 //     fast-fail and wait for app-level timeout. (med)
 //   - No "connected UDP" semantics: after connect() we still accept packets
 //     from any peer rather than filtering. [small] (low)
-//   - No IGMP. Multicast joins aren't signalled to the upstream switch /
-//     router; we just listen on the wire. Works on dumb L2; fails on
-//     IGMP-snooping switches. (med — mDNS, SSDP, multicast Modbus)
+//   - IGMPv2 only. IGMPv3 source filters are not represented by the socket API.
 //
 // ICMP (protocol/ip/icmp.d)
 //   - frag_needed not generated when forwarding oversized DF=1 packets.
@@ -223,6 +224,7 @@ nothrow @nogc:
 enum IPProtocol : ubyte
 {
     icmp = 1,
+    igmp = 2,
     tcp  = 6,
     udp  = 17,
 }
@@ -1487,6 +1489,73 @@ nothrow @nogc:
         return null;
     }
 
+    bool join(IPAddr group, IPAddr interface_ = IPAddr.any)
+    {
+        if (_ether || !group.is_multicast)
+            return false;
+        version (UseInternalIPStack)
+        {
+            IPAddr selected = interface_;
+            if (selected == IPAddr.any)
+                selected = _pcb.local_addr != IPAddr.any ? _pcb.local_addr : _stack_ptr.select_source_v4(group);
+            if (!selected)
+                return false;
+            if (_pcb.multicast_group == group && _pcb.outbound_interface == selected)
+                return true;
+            IPAddr previous_interface = _pcb.outbound_interface;
+            if (!outbound_interface(selected))
+                return false;
+            if (!igmp_join(*_stack_ptr, group, selected))
+            {
+                _pcb.outbound_interface = previous_interface;
+                return false;
+            }
+            if (_pcb.multicast_group)
+                igmp_leave(*_stack_ptr, _pcb.multicast_group, previous_interface);
+            _pcb.multicast_group = group;
+            return true;
+        }
+        else version (Windows)
+        {
+            IPv4Membership membership = IPv4Membership(group.address, interface_.address);
+            if (ws_setsockopt(_handle, WSA_IPPROTO_IP, WSA_IP_MULTICAST_IF, &interface_.address, cast(int)interface_.address.sizeof) != 0)
+                return false;
+            if (ws_setsockopt(_handle, WSA_IPPROTO_IP, WSA_IP_ADD_MEMBERSHIP, &membership, cast(int)membership.sizeof) != 0)
+                return false;
+            return true;
+        }
+        else
+        {
+            MulticastGroup membership = MulticastGroup(group, interface_);
+            if (os_setsockopt(_socket.handle, IPPROTO_IP, IP_MULTICAST_IF, &interface_.address, cast(uint)interface_.address.sizeof) != 0)
+                return false;
+            if (_socket.set_socket_option(SocketOption.multicast, membership).failed)
+                return false;
+            return true;
+        }
+    }
+
+    bool outbound_interface(IPAddr interface_)
+    {
+        if (_ether || interface_ == IPAddr.any)
+            return false;
+        version (UseInternalIPStack)
+        {
+            if (!interface_for_address(interface_))
+                return false;
+            _pcb.outbound_interface = interface_;
+            return true;
+        }
+        else
+        {
+            uint address = interface_.address;
+            version (Windows)
+                return ws_setsockopt(_handle, WSA_IPPROTO_IP, WSA_IP_MULTICAST_IF, &address, cast(int)address.sizeof) == 0;
+            else
+                return os_setsockopt(_socket.handle, IPPROTO_IP, IP_MULTICAST_IF, &address, cast(uint)address.sizeof) == 0;
+        }
+    }
+
     // Send to the connected remote (set at open). Returns bytes sent, or 0.
     version (UseInternalIPStack)
     {
@@ -1503,8 +1572,9 @@ nothrow @nogc:
                 return 0;
             if (_ether)
                 return _ether.send(data);
-            if (!udp_output(*_stack_ptr, _pcb.local_addr, _pcb.local_port,
-                            v4_addr(_remote), port_of(_remote), cast(const(ubyte)[])data))
+            IPAddr remote = v4_addr(_remote);
+            IPAddr local = remote.is_multicast && _pcb.outbound_interface ? _pcb.outbound_interface : _pcb.local_addr;
+            if (!udp_output(*_stack_ptr, local, _pcb.local_port, remote, port_of(_remote), cast(const(ubyte)[])data))
                 return 0;
             return data.length;
         }
@@ -1520,8 +1590,9 @@ nothrow @nogc:
                 const(InetAddress.Ether)* e = to.as_ether;
                 return e ? _ether.sendto(MACAddress(e.addr), e.port, data) : 0;
             }
-            if (!udp_output(*_stack_ptr, _pcb.local_addr, _pcb.local_port,
-                            v4_addr(to), port_of(to), cast(const(ubyte)[])data))
+            IPAddr remote = v4_addr(to);
+            IPAddr local = remote.is_multicast && _pcb.outbound_interface ? _pcb.outbound_interface : _pcb.local_addr;
+            if (!udp_output(*_stack_ptr, local, _pcb.local_port, remote, port_of(to), cast(const(ubyte)[])data))
                 return 0;
             return data.length;
         }
@@ -1689,6 +1760,8 @@ private:
         {
             if (_pcb)
             {
+                if (_pcb.multicast_group)
+                    igmp_leave(*_stack_ptr, _pcb.multicast_group, _pcb.outbound_interface);
                 udp_unregister(_pcb);
                 foreach (ref dgm; _pcb.recv_queue[])
                     udp_free_datagram_data(dgm);
@@ -2153,6 +2226,7 @@ else version (Windows)
     alias IOCP_SOCKET = size_t;
     struct WSABUF { uint len; ubyte* buf; }     // ULONG len; CHAR* buf
     struct IOCP_GUID { uint Data1; ushort Data2, Data3; ubyte[8] Data4; }
+    struct IPv4Membership { uint group; uint interface_; }
 
     extern (Windows) int WSARecv (IOCP_SOCKET, WSABUF*, uint, uint*, uint*, OVERLAPPED*, void*) nothrow @nogc;
     extern (Windows) int WSASend (IOCP_SOCKET, WSABUF*, uint, uint*, uint,  OVERLAPPED*, void*) nothrow @nogc;
@@ -2169,7 +2243,9 @@ else version (Windows)
     __gshared immutable IOCP_GUID WSAID_ACCEPTEX  = IOCP_GUID(0xb5367df1, 0xcbac, 0x11cf, [0x95,0xca,0x00,0x80,0x5f,0x48,0xa1,0x92]);
 
     enum IOCP_SOCKET INVALID_SOCKET = ~IOCP_SOCKET(0);
-    enum int WSA_AF_INET = 2, WSA_SOCK_STREAM = 1, WSA_SOCK_DGRAM = 2, WSA_IPPROTO_TCP = 6, WSA_IPPROTO_UDP = 17;
+    enum int WSA_AF_INET = 2, WSA_SOCK_STREAM = 1, WSA_SOCK_DGRAM = 2;
+    enum int WSA_IPPROTO_IP = 0, WSA_IPPROTO_TCP = 6, WSA_IPPROTO_UDP = 17;
+    enum int WSA_IP_MULTICAST_IF = 9, WSA_IP_ADD_MEMBERSHIP = 12;
     enum int SOL_SOCKET_ = 0xffff, SO_REUSEADDR_ = 0x0004, SO_ERROR_ = 0x1007;
 
     // raw winsock; pragma(mangle) keeps the common names from clashing with urt.socket's exports
