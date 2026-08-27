@@ -435,25 +435,28 @@
     <DCompile Include="src\manager\signal.d">
       <Filter>src\manager</Filter>
     </DCompile>
+    <DCompile Include="src\manager\sync\binary_encoder.d">
+      <Filter>src\manager\sync</Filter>
+    </DCompile>
     <DCompile Include="src\manager\sync\discovery.d">
       <Filter>src\manager\sync</Filter>
     </DCompile>
     <DCompile Include="src\manager\sync\encoder.d">
       <Filter>src\manager\sync</Filter>
     </DCompile>
-    <DCompile Include="src\manager\sync\binary_encoder.d">
-      <Filter>src\manager\sync</Filter>
-    </DCompile>
     <DCompile Include="src\manager\sync\json_encoder.d">
-      <Filter>src\manager\sync</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\sync\peering.d">
       <Filter>src\manager\sync</Filter>
     </DCompile>
     <DCompile Include="src\manager\sync\package.d">
       <Filter>src\manager\sync</Filter>
     </DCompile>
     <DCompile Include="src\manager\sync\peer.d">
+      <Filter>src\manager\sync</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\sync\peering.d">
+      <Filter>src\manager\sync</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\sync\udp_bind.d">
       <Filter>src\manager\sync</Filter>
     </DCompile>
     <DCompile Include="src\manager\sync\udp_server.d">
