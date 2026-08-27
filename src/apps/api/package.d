@@ -105,6 +105,7 @@ private:
     String _uri;
 
     HTTPServer.RequestHandler _default_handler;
+    SchemaTX* _schema;
 
     struct PendingRequest
     {
@@ -271,83 +272,115 @@ private:
         stream.write(response.format_message()[]);
     }
 
+    // The schema describes every registered type, so it runs to tens of KB on a
+    // heap measured in single-digit KB. It is synthesised one collection at a
+    // time, straight into whatever room the stream offers, and resumes when the
+    // queue drains -- nothing larger than one collection is ever resident.
     int handle_schema(ref const HTTPMessage request, ref Stream stream)
     {
-        Array!char json;
-        json.reserve(4096);
-        json ~= '{';
+        if (_schema)
+            return reject_schema(request, stream);
 
-        bool first_col = true;
-        foreach (col; g_app.types.values)
-        {
-            if (!first_col)
-                json ~= ',';
-            first_col = false;
+        HTTPMessage head;
+        head.http_version = HTTPVersion.V1_1;
+        head.status_code = 200;
+        head.reason = status_text(200);
+        head.timestamp = getSysTime();
+        head.headers ~= HTTPParam(StringLit!"Content-Type", StringLit!"application/json");
+        head.headers ~= HTTPParam(StringLit!"Transfer-Encoding", StringLit!"chunked");
+        add_cors(head, request);
+        stream.write(format_message_head(head)[]);
 
-            bool is_collection = col.type_info.collection_root;
-            json.append('\"', col.type_info.type[], "\":{\"collection_id\":", cast(uint)col.type_info.collection_id, ",\"path\":\"", col.path[], '\"');
-            if (col.type_info.is_abstract)
-                json ~= ",\"abstract\":true";
-            if (is_collection)
-                json ~= ",\"collection\":true";
-            json ~= ",\"properties\":{";
+        _schema = alloc!SchemaTX();
+        _schema.owner = this;
+        _schema.stream = stream;
+        _schema.types = g_app.types.values;
+        stream.tx_handler(&_schema.produce);
+        return 0;
+    }
 
-            bool first_prop = true;
-            foreach (prop; col.type_info.properties)
-            {
-                if (!first_prop)
-                    json ~= ',';
-                first_prop = false;
-
-                json.append('\"', prop.name[], "\":{\"access\":\"");
-                if (prop.get && prop.set)
-                    json ~= "rw";
-                else if (prop.get)
-                    json ~= "r";
-                else if (prop.set)
-                    json ~= "w";
-                json ~= '\"';
-
-                if (!prop.type[0].empty)
-                {
-                    json ~= ",\"type\":[";
-                    json.append('\"', prop.type[0][], '\"');
-                    if (!prop.type[1].empty)
-                        json.append(",\"", prop.type[1][], '\"');
-                    json ~= ']';
-                }
-
-                if (prop.category)
-                    json.append(",\"category\":\"", prop.category[], '\"');
-
-                if (prop.flags)
-                {
-                    json ~= ",\"flags\":\"";
-                    if (prop.flags & 1) json ~= 'A';
-                    if (prop.flags & 2) json ~= 'D';
-                    if (prop.flags & 4) json ~= 'H';
-                    json ~= '\"';
-                }
-
-                if (prop.init_val)
-                {
-                    Variant def = prop.init_val();
-                    json ~= ",\"default\":";
-                    size_t n = def.write_json(null);
-                    def.write_json(json.extend(n));
-                }
-
-                json ~= '}';
-            }
-            json ~= "}}";
-        }
-        json ~= '}';
-
-        HTTPMessage response = create_response(request.http_version, 200, StringLit!"application/json", json[]);
+    int reject_schema(ref const HTTPMessage request, ref Stream stream)
+    {
+        HTTPMessage response = create_response(request.http_version, 503, StringLit!"application/json",
+                                               "{\"error\":\"schema transfer in progress\"}");
         add_cors(response, request);
         stream.write(response.format_message()[]);
         return 0;
     }
+
+    void finish_schema(SchemaTX* tx)
+    {
+        if (_schema is tx)
+            _schema = null;
+        free(tx);
+    }
+
+    static struct SchemaTX
+    {
+    nothrow @nogc:
+        // chunk framing: up to four hex digits, CRLF, and the CRLF that closes it
+        enum size_t framing = 8;
+
+        APIManager owner;
+        Stream stream;
+        typeof(g_app.types.values()) types;
+        Array!char pending;     // one collection, being fed out
+        size_t sent;            // how much of it has gone
+        bool opened;
+        bool closed;
+
+        size_t produce(Stream s, void[] buffer)
+        {
+            if (closed || buffer.length <= framing)
+                return 0;
+
+            char[] out_buf = cast(char[])buffer;
+            size_t room = buffer.length - framing;
+
+            if (sent == pending.length)
+            {
+                pending.clear();
+                sent = 0;
+                if (!opened)
+                {
+                    pending ~= '{';
+                    opened = true;
+                }
+                if (!types.empty)
+                {
+                    if (pending.length > 1 || opened && pending.length == 0)
+                        pending ~= ',';
+                    emit_collection(pending, types.front);
+                    types.popFront();
+                }
+                else
+                {
+                    pending ~= '}';
+                    closed = true;
+                }
+            }
+
+            size_t take = pending.length - sent;
+            if (take > room)
+                take = room;
+
+            size_t n = write_chunk(out_buf, pending[sent .. sent + take]);
+            sent += take;
+
+            if (closed && sent == pending.length)
+            {
+                // the terminating zero-length chunk rides along when it fits
+                if (out_buf.length - n >= 5)
+                {
+                    out_buf[n .. n + 5] = "0\r\n\r\n";
+                    n += 5;
+                }
+                owner.finish_schema(&this);
+            }
+            return n;
+        }
+    }
+
 
     int handle_enum(ref const HTTPMessage request, ref Stream stream, const(char)[] name)
     {
@@ -848,3 +881,92 @@ nothrow @nogc:
 private:
 
 __gshared immutable string[4] g_access_strings = [ "", "r", "w", "rw" ];
+
+// One registered type's schema, appended whole -- the unit the producer resumes on.
+private void emit_collection(ref Array!char json, ref const Application.RegisteredType col)
+{
+
+        bool is_collection = col.type_info.collection_root;
+        json.append('\"', col.type_info.type[], "\":{\"collection_id\":", cast(uint)col.type_info.collection_id, ",\"path\":\"", col.path[], '\"');
+        if (col.type_info.is_abstract)
+            json ~= ",\"abstract\":true";
+        if (is_collection)
+            json ~= ",\"collection\":true";
+        json ~= ",\"properties\":{";
+
+        bool first_prop = true;
+        foreach (prop; col.type_info.properties)
+        {
+            if (!first_prop)
+                json ~= ',';
+            first_prop = false;
+
+            json.append('\"', prop.name[], "\":{\"access\":\"");
+            if (prop.get && prop.set)
+                json ~= "rw";
+            else if (prop.get)
+                json ~= "r";
+            else if (prop.set)
+                json ~= "w";
+            json ~= '\"';
+
+            if (!prop.type[0].empty)
+            {
+                json ~= ",\"type\":[";
+                json.append('\"', prop.type[0][], '\"');
+                if (!prop.type[1].empty)
+                    json.append(",\"", prop.type[1][], '\"');
+                json ~= ']';
+            }
+
+            if (prop.category)
+                json.append(",\"category\":\"", prop.category[], '\"');
+
+            if (prop.flags)
+            {
+                json ~= ",\"flags\":\"";
+                if (prop.flags & 1) json ~= 'A';
+                if (prop.flags & 2) json ~= 'D';
+                if (prop.flags & 4) json ~= 'H';
+                json ~= '\"';
+            }
+
+            if (prop.init_val)
+            {
+                Variant def = prop.init_val();
+                json ~= ",\"default\":";
+                size_t n = def.write_json(null);
+                def.write_json(json.extend(n));
+            }
+
+            json ~= '}';
+        }
+        json ~= "}}";
+}
+
+// Frame `data` as a single HTTP chunk in `dst`, returning the bytes used.
+private size_t write_chunk(char[] dst, const(char)[] data)
+{
+    char[4] digits = void;
+    size_t d = 0;
+    size_t v = data.length;
+    while (v)
+    {
+        const ubyte nib = v & 0xF;
+        digits[d++] = cast(char)(nib < 10 ? '0' + nib : 'a' + nib - 10);
+        v >>= 4;
+    }
+    if (d == 0)
+        digits[d++] = '0';
+
+    size_t n = 0;
+    while (d)
+        dst[n++] = digits[--d];
+    dst[n++] = '\r';
+    dst[n++] = '\n';
+    dst[n .. n + data.length] = data[];
+    n += data.length;
+    dst[n++] = '\r';
+    dst[n++] = '\n';
+    return n;
+}

@@ -327,7 +327,13 @@ protected:
         void[] buffer = tx_acquire(space);
         if (buffer.length == 0)
             return;
-        tx_commit(_outgoing(this, buffer));
+
+        // Nothing offered means release me: a producer that is finished never comes
+        // back, and one that is merely dry re-subscribes when it has more.
+        size_t written = _outgoing(this, buffer);
+        tx_commit(written);
+        if (written == 0)
+            _outgoing = null;
     }
 
     // Hand out room from the send queue and keep whatever the producer filled.
