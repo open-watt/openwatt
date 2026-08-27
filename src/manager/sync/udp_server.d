@@ -1,31 +1,25 @@
 module manager.sync.udp_server;
 
-// /sync/udp-server: the datagram listener from SYNC_TRANSPORTS.draft.md. Owns a wildcard
-// multi-drop UDPInterface on the configured port and spawns a dynamic SyncPeer for the
-// first datagram from each unknown source. The server holds the transport's only packet
-// subscription and routes frames to peers by source address; spawned peers are bound to
-// their source (bind_remote) so their tx is UDPFrame-addressed back to it.
-// Datagram links have no death signal: peers whose source goes quiet are swept after the
-// idle timeout, and a re-appearing source simply spawns a fresh peer.
-
 import urt.array;
+import urt.endian : loadLittleEndian, storeLittleEndian;
+import urt.format.json : parse_json;
 import urt.inet;
-import urt.lifetime;
 import urt.log;
 import urt.mem.temp : tconcat;
 import urt.meta : AliasSeq;
-import urt.string;
 import urt.time;
+import urt.variant;
 
 import manager;
 import manager.base;
 import manager.collection;
+import manager.sync.binary_encoder : Verb;
 import manager.sync.encoder;
 import manager.sync.peer;
+import manager.sync.udp_bind;
 
 import router.iface;
-import router.iface.packet;
-import router.iface.udp;
+import router.iface.endpoint : UDPEndpoint;
 
 nothrow @nogc:
 
@@ -35,10 +29,11 @@ alias log = Log!"sync.udp-server";
 
 class UDPSyncServer : ActiveObject
 {
-    alias Properties = AliasSeq!(Prop!("port",       port),
-                                 Prop!("local-host", local_host),
-                                 Prop!("encoder",    encoder),
-                                 Prop!("timeout",    timeout));
+    alias Properties = AliasSeq!(Prop!("bind", bind),
+                                 Prop!("interface", interfaces),
+                                 Prop!("port", port),
+                                 Prop!("encoder", encoder),
+                                 Prop!("timeout", timeout));
 nothrow @nogc:
 
     enum type_name = "sync-udp";
@@ -50,7 +45,23 @@ nothrow @nogc:
         super(collection_type_info!UDPSyncServer, id, flags);
     }
 
-    // Properties
+    final inout(InetAddress)[] bind() inout pure
+        => _bind[];
+    final void bind(const(InetAddress)[] value)
+    {
+        replace_udp_bind(_bind, value);
+        mark_set!(typeof(this), "bind")();
+        restart();
+    }
+
+    final inout(ObjectRef!BaseInterface)[] interfaces() inout pure
+        => _interfaces[];
+    final void interfaces(BaseInterface[] value...)
+    {
+        replace_udp_interfaces(_interfaces, value);
+        mark_set!(typeof(this), "interface")();
+        restart();
+    }
 
     final ushort port() const pure
         => _port;
@@ -60,19 +71,6 @@ nothrow @nogc:
             return;
         _port = value;
         mark_set!(typeof(this), "port")();
-        restart();
-    }
-
-    // The bind address selects the family: empty is the IP wildcard, the zero mac
-    // ("00:00:00:00:00:00") is ether's any-station, hearing OW-ethertype datagrams.
-    final ref const(String) local_host() const pure
-        => _local_host;
-    final void local_host(String value)
-    {
-        if (value == _local_host)
-            return;
-        _local_host = value.move;
-        mark_set!(typeof(this), "local-host")();
         restart();
     }
 
@@ -100,89 +98,121 @@ nothrow @nogc:
 protected:
 
     override bool validate() const pure
-        => _port != 0;
+        => (_bind.length || _interfaces.length) && _port != 0;
 
     override CompletionStatus startup()
     {
-        _iface = Collection!UDPInterface().create(tconcat(name[], "-udp"), ObjectFlags.dynamic);
-        if (!_iface)
+        bool refreshed = refresh_endpoints();
+        if (!refreshed && !_endpoint_set.endpoints.length)
             return CompletionStatus.error;
-
-        if (!_local_host.empty)
-            _iface.local_host(_local_host);
-        _iface.local_port(_port);
-        _iface.subscribe(&on_packet, PacketFilter(PacketType.udp, PacketDirection.incoming));
-
+        if (!_endpoint_set.any_open())
+            return CompletionStatus.continue_;
         return CompletionStatus.complete;
     }
 
     override CompletionStatus shutdown()
     {
-        // transport dies first: its offline signal reaches still-live peers, which handle
-        // it with a restart; sweeping them first would fire the signal into destroyed objects
-        if (_iface)
-        {
-            _iface.unsubscribe(&on_packet);
-            _iface.destroy();
-            _iface = null;
-        }
-
+        close_endpoints();
         sweep_peers(true);
-
         return CompletionStatus.complete;
     }
 
     override void update()
     {
+        refresh_endpoints();
+        if (!_endpoint_set.any_open())
+        {
+            restart();
+            return;
+        }
         sweep_peers(false);
     }
 
 private:
-    ushort          _port = 4712;
-    String          _local_host;
-    SyncEncoderKind _encoder = SyncEncoderKind.binary;
-    Duration        _timeout = 300.seconds;
-    UDPInterface    _iface;
-    uint            _next_conn_id;
+
+    enum max_inbound_peers = 16;
 
     struct Spawned
     {
+        UDPEndpoint* endpoint;
         InetAddress addr;
         SyncPeer peer;
         MonoTime last_rx;
     }
-    Array!Spawned _peers;
 
-    void on_packet(ref const Packet p, BaseInterface, PacketDirection, void*) nothrow @nogc
+    Array!InetAddress _bind;
+    Array!(ObjectRef!BaseInterface) _interfaces;
+    UDPEndpointSet _endpoint_set;
+    Array!Spawned _peers;
+    Duration _timeout = 300.seconds;
+    uint _next_conn_id;
+    ushort _port = default_sync_port;
+    SyncEncoderKind _encoder = SyncEncoderKind.binary;
+
+    bool refresh_endpoints()
     {
-        InetAddress src = p.hdr!UDPFrame.address;
-        foreach (ref s; _peers[])
+        UDPEndpointHooks hooks = endpoint_hooks();
+        return _endpoint_set.refresh(_bind[], _interfaces[], _port, hooks);
+    }
+
+    void close_endpoints()
+    {
+        UDPEndpointHooks hooks = endpoint_hooks();
+        _endpoint_set.close(hooks);
+    }
+
+    UDPEndpointHooks endpoint_hooks()
+    {
+        return UDPEndpointHooks(null, &remove_endpoint, &on_datagram);
+    }
+
+    void on_datagram(UDPEndpoint* endpoint, const(void)[] data, ref const InetAddress src, MonoTime rx_time)
+    {
+        if (Spawned* spawned = find_peer(endpoint, src))
         {
-            if (s.addr == src)
-            {
-                s.last_rx = getTime();
-                s.peer.deliver_frame(cast(const(ubyte)[])p.data);
-                return;
-            }
+            spawned.last_rx = rx_time;
+            spawned.peer.deliver_frame(cast(const(ubyte)[])data);
+            return;
         }
+        if (_peers.length >= max_inbound_peers || !is_initial_sync_datagram(cast(const(ubyte)[])data))
+            return;
 
         const(char)[] peer_name = tconcat(name[], ++_next_conn_id);
-        SyncPeer peer = Collection!SyncPeer().create(peer_name, ObjectFlags.dynamic);
+        ObjectFlags peer_flags = cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary);
+        SyncPeer peer = Collection!SyncPeer().create(peer_name, peer_flags);
         if (!peer)
         {
             log.warning("failed to create sync peer for ", src);
             return;
         }
         peer.encoder(_encoder);
-        // transport() clears the binding; its initial hello retries once bound.
-        peer.transport(_iface);
-        peer.bind_remote(src);
+        peer.bind_udp_endpoint(endpoint, src);
         peer.subscribe(&on_peer_state);
-        _peers ~= Spawned(src, peer, getTime());
+        _peers ~= Spawned(endpoint, src, peer, rx_time);
 
         debug log.info("peer appeared from ", src, " -> ", peer.name[]);
 
-        peer.deliver_frame(cast(const(ubyte)[])p.data);
+        peer.deliver_frame(cast(const(ubyte)[])data);
+    }
+
+    void remove_endpoint(UDPEndpoint* endpoint)
+    {
+        size_t i;
+        while (i < _peers.length)
+        {
+            if (_peers[i].endpoint is endpoint)
+                _peers[i].peer.destroy();
+            else
+                ++i;
+        }
+    }
+
+    Spawned* find_peer(UDPEndpoint* endpoint, ref const InetAddress addr)
+    {
+        foreach (ref peer; _peers[])
+            if (peer.endpoint is endpoint && peer.addr == addr)
+                return &peer;
+        return null;
     }
 
     void sweep_peers(bool all)
@@ -194,14 +224,13 @@ private:
             if (all || now - _peers[i].last_rx >= _timeout || _peers[i].peer.disabled)
             {
                 debug log.info("removing peer ", _peers[i].peer.name[]);
-                _peers[i].peer.destroy();   // on_peer_state drops the entry
+                _peers[i].peer.destroy();
             }
             else
                 ++i;
         }
     }
 
-    // whoever destroys a spawned peer, the source table follows
     void on_peer_state(ActiveObject peer, StateSignal signal)
     {
         if (signal != StateSignal.destroyed)
@@ -215,12 +244,28 @@ private:
             }
         }
     }
+
+    bool is_initial_sync_datagram(scope const(ubyte)[] data) const
+    {
+        if (data.length < 12)
+            return false;
+        const(uint)* sessions = cast(const(uint)*)data.ptr;
+        if (loadLittleEndian(sessions) == 0 || loadLittleEndian(sessions + 1) != 0 || data[8] != TxQueue.control || data[9] != 1 || data[10] != 0)
+            return false;
+
+        if (_encoder == SyncEncoderKind.binary)
+            return data[11] == ubyte(Verb.hello);
+        Variant json = parse_json(cast(const(char)[])data[11 .. $]);
+        Variant* kind = json.isObject ? json.getMember("kind") : null;
+        return kind && kind.isString && kind.asString == "hello";
+    }
 }
 
 
 unittest
 {
     import urt.mem;
+    import router.iface.bridge : BridgeInterface;
 
     UDPSyncServer server = alloc!UDPSyncServer(CID(1));
     scope(exit) free(server);
@@ -229,15 +274,46 @@ unittest
     SyncPeer p2 = alloc!SyncPeer(CID(3));
     scope(exit) free(p2);
 
-    MonoTime now = getTime();
-    server._peers ~= UDPSyncServer.Spawned(InetAddress(IPAddr(10, 0, 0, 1), 1), p1, now);
-    server._peers ~= UDPSyncServer.Spawned(InetAddress(IPAddr(10, 0, 0, 2), 2), p2, now);
+    BridgeInterface i1 = alloc!BridgeInterface(CID(4));
+    scope(exit) free(i1);
+    BridgeInterface i2 = alloc!BridgeInterface(CID(5));
+    scope(exit) free(i2);
+    InetAddress[3] bindings = [InetAddress(IPAddr.any, 0), InetAddress(IPAddr.any, 0), InetAddress(IPv6Addr.loopback, 4826)];
+    server.bind(bindings[]);
+    assert(server.bind.length == 2);
+    assert(server.validate());
+    server.interfaces(i1, i2, i1);
+    assert(server._interfaces.length == 2);
 
-    // destruction drops the right entry, whoever destroyed the peer
+    align(size_t.sizeof) ubyte[64] initial = void;
+    initial[] = 0;
+    assert(!server.is_initial_sync_datagram(initial));
+    storeLittleEndian(cast(uint*)initial.ptr, uint(1));
+    initial[9] = 1;
+    initial[11] = ubyte(Verb.hello);
+    assert(server.is_initial_sync_datagram(initial));
+    initial[11] = ubyte(Verb.val);
+    assert(!server.is_initial_sync_datagram(initial));
+
+    server._encoder = SyncEncoderKind.json;
+    enum hello = `{"ver":1, "kind" : "hello"}`;
+    initial[11 .. 11 + hello.length] = cast(const(ubyte)[])hello;
+    assert(server.is_initial_sync_datagram(initial[0 .. 11 + hello.length]));
+
+    MonoTime now = getTime();
+    InetAddress remote = InetAddress(IPAddr(10, 0, 0, 1), 1);
+    UDPEndpoint* e1 = alloc!UDPEndpoint();
+    scope(exit) free(e1);
+    UDPEndpoint* e2 = alloc!UDPEndpoint();
+    scope(exit) free(e2);
+    server._peers ~= UDPSyncServer.Spawned(e1, remote, p1, now);
+    server._peers ~= UDPSyncServer.Spawned(e2, remote, p2, now);
+    assert(server.find_peer(e1, remote).peer is p1);
+    assert(server.find_peer(e2, remote).peer is p2);
+
     server.on_peer_state(p1, StateSignal.destroyed);
     assert(server._peers.length == 1 && server._peers[0].peer is p2);
 
-    // a repeat signal for a gone peer is a no-op
     server.on_peer_state(p1, StateSignal.destroyed);
     assert(server._peers.length == 1 && server._peers[0].peer is p2);
 }

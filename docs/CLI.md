@@ -777,29 +777,30 @@ preflights and normal responses use the effective policy.
 
 ### `/sync/udp-server`
 
-A datagram sync listener: it owns a wildcard multi-drop `/interface/udp` on
-the configured port and spawns a dynamic `/sync/peer` for the first datagram
-from each unknown source. The server routes received frames to its peers by
-source address, and each spawned peer transmits addressed back to its source.
-Datagram links carry no death signal, so a peer whose source goes quiet is
-swept after the idle timeout; a re-appearing source simply spawns afresh.
-It listens on UDP port `4712` unless `port` is set.
-
-The peering agent creates one of these (named `peering`) for `role=member`;
-explicit instances serve hand-wired datagram sync.
+A datagram sync listener owns one UDP endpoint per selected local endpoint. It
+spawns a dynamic `/sync/peer` for the first datagram from each unknown
+`(local endpoint, remote endpoint)` pair, and each peer replies through the
+endpoint that received it. Datagram links carry no death signal, so a peer whose
+source goes quiet is swept after the idle timeout and a reappearing source
+simply spawns afresh.
 
 | Property | Values | Default | Description |
 | --- | --- | --- | --- |
-| `port` | `1` to `65535` | `4712` | Port the listener binds. |
-| `local-host` | host, address or MAC | empty | Bind address, selecting the family: empty is the IP wildcard; the zero MAC (`00:00:00:00:00:00`) is ether's any-station, hearing OpenWatt-ethertype datagrams. |
+| `bind` | endpoint list | empty | Exact local endpoints; an omitted port uses `port`. |
+| `interface` | interface list | empty | Bind AF_ETHERNET and every configured IP endpoint on these interfaces. |
+| `port` | `1` to `65535` | `4826` | Port used by named interfaces and bind entries that omit one. |
 | `encoder` | `json`, `binary` | `binary` | Encoding for spawned peers. |
 | `timeout` | duration | `5m` | Idle time after which a silent peer is swept. |
+
+At least one of `bind` or `interface` is required. The server is Running while
+at least one local endpoint is open; other configured endpoints can appear or
+disappear independently.
 
 ### `/sync/peer`
 
 `transport` binds a peer to an existing interface. Alternatively, `remote`
-creates a dynamic, temporary UDP interface owned by the peer; it is destroyed
-with the peer. The last of `transport` and `remote` set wins.
+opens a connected UDP endpoint owned by the peer. The last of `transport` and
+`remote` set wins.
 
 | Property | Values | Description |
 | --- | --- | --- |
@@ -881,7 +882,7 @@ time.
 | `priority` | number | `100` | Authority election precedence; lower wins, node-id breaks ties. |
 | `claim` | path glob | `*` | Authority only: which member names to adopt. |
 | `secret` | string | empty | The fleet key, set by hand. Normally unset: the authority mints one at first adoption and hands it to each factory member inside the claim; thereafter claims prove it with an HMAC over the member's per-session hello nonce, so the key never travels again and a captured claim cannot replay. |
-| `port` | `1` to `65535` | `7000` | Authority only: sync port the session listener binds; advertised in discovery beacons so members know where to dial. |
+| `port` | `1` to `65535` | `4826` | Authority only: sync port the session listener binds; advertised in discovery beacons so members know where to dial. |
 | `collect-logs` | `yes`/`no` | `yes` | Authority only: tap each claimed member's log stream. Re-armed on every claim, so it survives a member reconnecting under a fresh session. |
 | `log-severity` | severity | `info` | Authority only: max severity requested from claimed members' logs (`emergency`..`trace`). Raising it raises the member's own ingress level. |
 

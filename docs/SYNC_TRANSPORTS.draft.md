@@ -82,7 +82,7 @@ config directly -- no stream underneath. Byte streams are the ones needing an ad
 **Outbound/symmetric** links are one command:
 
 ```
-/sync/peer add name=pi remote=192.168.0.8:4712 encoder=binary
+/sync/peer add name=pi remote=192.168.0.8:4826 encoder=binary
 ```
 
 **Inbound/server** roles are listeners that spawn dynamic peers on accept, one collection per
@@ -112,43 +112,24 @@ shmem and RS485 default binary; ws stays json for browsers.
 
 ## UDP (phase 1)
 
-### UDPInterface -- built upstream
+### UDP endpoints -- built upstream
 
-[`router/iface/udp.d`](../src/router/iface/udp.d) landed independently and covers this: an
-event-driven endpoint (`udp_open`, reactor-delivered receive, no polling), one datagram per
-packet, `local-port=` + `remote=<addr:port>` configured on the interface itself, unicast
-(connected, rx filtered to the peer) or multi-drop (unconnected, per-frame peer addressing).
-IP fragmentation covers frames past link MTU -- fine on a wired LAN, degrades on lossy paths;
-max_frame chunking is the proper fix.
+[`router/iface/endpoint.d`](../src/router/iface/endpoint.d) provides the direct datagram API.
+An explicitly configured peer owns a connected endpoint. A UDP server owns unconnected listener
+endpoints and its spawned peers borrow the receiving endpoint plus the remote source address.
+This lets several peers share one socket without creating peer sub-interfaces or routing packets
+through `BaseInterface`.
 
-### Framing: sync consumes UDPFrame -- SETTLED
-
-The interface delivers `UDPFrame` on rx (peer address per frame) while `SyncPeer` subscribes
-`PacketFilter(PacketType.raw)`, so sync over UDP transmits and never receives. The tempting fix
-was to make connected mode deliver `RawFrame` and present a drop-in raw pipe. **Rejected.**
-A packet type that changes with a mode forces every multi-mode consumer to branch on it, and it
-can never serve multicast, where a group has many senders and the per-frame source is the only
-way to tell publishers apart.
-
-`UDPFrame` stays, and the sync peer learns to read it. The decisive argument is that the paths
-diverge anyway: UDP is neither ordered nor reliable while ASH, CPC and shmem are both, so a UDP
-peer needs the control-plane reliability layer that the others must not pay for. Once the code
-path is separate on those grounds, the delivery struct differing costs nothing.
-`InterfaceCaps.reliable`/`.ordered` is the switch: the peer reads its transport's caps and arms
-the layer only where the link doesn't already promise the guarantee.
-
-The peer therefore subscribes by transport capability rather than assuming `raw`, which is also
-what lets one peer sit on a multi-drop segment later without another framing change.
+UDP is neither ordered nor reliable while ASH, CPC and shmem are both, so direct UDP peers arm
+the control-plane reliability layer unconditionally. Interface-backed peers still use
+`InterfaceCaps.reliable` and `InterfaceCaps.ordered`.
 
 ```
-/sync/peer add name=pi remote=192.168.0.8:4712 encoder=binary
+/sync/peer add name=pi remote=192.168.0.8:4826 encoder=binary
 ```
 
-Multi-drop sync (several peers on one socket) still wants the peer-sub-interface shape from
-udp.d's TODO: sub-interfaces bound to a multi-drop trunk, each presenting one peer, spawned on
-first datagram from an unknown source. That is precisely the `/sync/udp-server` listener
-described above, so the two land together -- and with `UDPFrame` throughout, that work no longer
-has to re-open framing.
+The `/sync/udp-server` listener creates a peer only for an initial hello from an unknown source
+and routes subsequent datagrams by `(local endpoint, remote address)`.
 
 ### Reliability split (phase 2) -- BUILT
 
@@ -287,28 +268,21 @@ legacy device forces it; default is a uniform bus.
 
 ## Build order
 
-0. ~~UDPInterface~~ -- done upstream ([router/iface/udp.d](../src/router/iface/udp.d)).
-1. ~~Sync reads UDPFrame~~ -- done: the peer takes raw and UDPFrame delivery alike; a
-   `bind_remote` peer on a multi-drop transport is fed by its listener (the server holds the
-   transport's only packet subscription and routes by source) and transmits UDPFrame-addressed.
-   `/sync/udp-server` (from phase 5) landed with it, as the peering claim listener. Validated
-   two-node binary sync end to end (veth pair, ether-family datagrams, claim exchange).
+0. ~~Direct UDP endpoints~~ -- done upstream ([router/iface/endpoint.d](../src/router/iface/endpoint.d)).
+1. ~~Sync over direct UDP endpoints~~ -- done: explicit peers own connected endpoints;
+   `/sync/udp-server` owns listener endpoints and routes datagrams to borrowing peers by source.
 2. **Backpressure contract**: transmit-is-enqueue, PCP/DEI classification of control vs data.
    Reads `InterfaceCaps` to know what the link already promises.
 3. **Shmem ring** (with the BL808 work): sibling class, binary encoder's original target.
 4. **CPC endpoint transport** + **RS485 envelope**: RS485 benefits from the mux/seq conventions
    the others settle.
-5. ~~UDP reliability layer~~ -- done (see Reliability split above). Remaining: **peer sub-interfaces** /
-   `/sync/udp-server`, then **multicast**.
+5. ~~UDP reliability layer~~ -- done (see Reliability split above). Remaining: **multicast**.
 
 Order of 2 vs 5a is flexible: the UDP control-plane layer may *be* the backpressure contract's
 first implementation.
 
 ## Open questions
 
-- Where the UDP reliable layer lives: inside UDPInterface (link property `reliable=yes`), a
-  wrapper interface, or peer-level. Leaning link-level wrapper so the peer stays
-  transport-blind.
 - `max_frame`-driven chunking in the encoders: needed before small-MTU links (CPC payload,
   RS485 response windows) carry model bursts.
 - RS485 slave-to-slave traffic: hub through the master (star, matches current sync topology) or

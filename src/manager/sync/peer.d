@@ -84,14 +84,14 @@ nothrow @nogc:
     // Properties
 
     final inout(BaseInterface) transport() inout pure
-        => owns_udp_endpoint ? null : _transport.get;
+        => uses_udp_endpoint ? null : _transport.get;
     final void transport(BaseInterface value)
     {
-        if (!owns_udp_endpoint && _transport is value)
+        if (!uses_udp_endpoint && _transport is value)
             return;
         detach_transport();
         close_udp_endpoint();
-        _peer_flags &= ~PeerFlags.owns_udp_endpoint;
+        _peer_flags &= ~(PeerFlags.uses_udp_endpoint | PeerFlags.owns_udp_endpoint);
         _transport = value;
         _remote = InetAddress();
         _peer_flags &= ~PeerFlags.remote_bound;
@@ -106,13 +106,13 @@ nothrow @nogc:
     {
         if (value.family == AddressFamily.unspecified || value.addr_any || value.port == 0)
             return "remote needs a non-wildcard address and port";
-        if (value == _remote)
+        if (uses_udp_endpoint && owns_udp_endpoint && value == _remote)
             return null;
 
         detach_transport();
         close_udp_endpoint();
         _transport = null;
-        _peer_flags |= PeerFlags.owns_udp_endpoint;
+        _peer_flags |= PeerFlags.uses_udp_endpoint | PeerFlags.owns_udp_endpoint;
         _remote = value;
         _peer_flags &= ~PeerFlags.remote_bound;
         _remote_addr = InetAddress();
@@ -150,6 +150,18 @@ nothrow @nogc:
     {
         remote(endpoint.remote);
         _udp_endpoint = endpoint;
+    }
+
+    package void bind_udp_endpoint(UDPEndpoint* endpoint, ref const InetAddress remote)
+    {
+        assert(endpoint);
+        detach_transport();
+        close_udp_endpoint();
+        _peer_flags |= PeerFlags.uses_udp_endpoint;
+        _peer_flags &= ~(PeerFlags.owns_udp_endpoint | PeerFlags.remote_bound);
+        _udp_endpoint = endpoint;
+        _remote = remote;
+        _remote_addr = InetAddress();
     }
 
     // Unreliable links wrap every frame with source/destination sessions and a kind.
@@ -414,14 +426,14 @@ nothrow @nogc:
 protected:
 
     override bool validate() const pure
-        => owns_udp_endpoint || _transport !is null;
+        => uses_udp_endpoint || _transport !is null;
 
     // Idempotent; WS-spawned peers call this at accept time, because the client's
     // first frames can arrive before our first startup tick and unsubscribed
     // packets are dropped.
     package void subscribe_transport()
     {
-        if (owns_udp_endpoint || (_peer_flags & PeerFlags.transport_subscribed) || !_transport)
+        if (uses_udp_endpoint || (_peer_flags & PeerFlags.transport_subscribed) || !_transport)
             return;
         // a remote-bound peer shares a multi-drop transport: its server routes rx by source
         // (deliver_frame). the interface holds few subscriber slots, so per-peer packet
@@ -474,7 +486,7 @@ protected:
     // the transport's state matters to a live session only: the subscription is the running window
     override void online()
     {
-        if (owns_udp_endpoint)
+        if (uses_udp_endpoint)
             return;
         if (BaseInterface transport = _transport)
         {
@@ -752,7 +764,8 @@ private:
         transport_state_subscribed = 1 << 1,
         remote_bound               = 1 << 2,
         ctl_ack_pending            = 1 << 3,
-        owns_udp_endpoint          = 1 << 4,
+        uses_udp_endpoint          = 1 << 4,
+        owns_udp_endpoint          = 1 << 5,
     }
 
     struct SentFrame
@@ -808,13 +821,13 @@ private:
     bool sublayer_armed()
     {
         enum promised = InterfaceCaps.reliable | InterfaceCaps.ordered;
-        return owns_udp_endpoint || (_transport.caps & promised) != promised;
+        return uses_udp_endpoint || (_transport.caps & promised) != promised;
     }
 
     int raw_tx(const(ubyte)[] bytes, bool is_text)
     {
-        if (owns_udp_endpoint)
-            return _udp_endpoint.send(bytes) == bytes.length ? 0 : -1;
+        if (uses_udp_endpoint)
+            return _udp_endpoint.sendto(bytes, _remote) == bytes.length ? 0 : -1;
 
         Packet p;
         if (_peer_flags & PeerFlags.remote_bound)
@@ -945,7 +958,7 @@ private:
     }
 
     bool transport_ready()
-        => owns_udp_endpoint ? _udp_endpoint !is null : _transport && _transport.running;
+        => uses_udp_endpoint ? _udp_endpoint !is null : _transport && _transport.running;
 
     bool create_remote_endpoint()
     {
@@ -955,9 +968,10 @@ private:
 
     void close_udp_endpoint()
     {
-        if (owns_udp_endpoint && _udp_endpoint)
+        if (uses_udp_endpoint && _udp_endpoint)
         {
-            _udp_endpoint.close();
+            if (owns_udp_endpoint)
+                _udp_endpoint.close();
             _udp_endpoint = null;
         }
     }
@@ -1166,6 +1180,9 @@ private:
         if (sig == StateSignal.offline)
             restart();
     }
+
+    bool uses_udp_endpoint() const pure
+        => (_peer_flags & PeerFlags.uses_udp_endpoint) != 0;
 
     bool owns_udp_endpoint() const pure
         => (_peer_flags & PeerFlags.owns_udp_endpoint) != 0;

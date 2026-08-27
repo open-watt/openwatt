@@ -36,6 +36,7 @@ import manager.sync : SyncModule;
 import manager.sync.discovery;
 import manager.sync.encoder : encoder_for, SyncEncoderKind;
 import manager.sync.peer : SyncPeer;
+import manager.sync.udp_bind : default_sync_port;
 import manager.sync.udp_server : UDPSyncServer;
 
 import router.iface;
@@ -46,9 +47,6 @@ nothrow @nogc:
 
 
 alias log = Log!"peering";
-
-enum ushort default_sync_port = 7000;
-
 
 class SyncPeeringModule : Module
 {
@@ -662,8 +660,8 @@ private:
             _listener = Collection!UDPSyncServer().create("peering", ObjectFlags.dynamic);
             if (_listener)
             {
-                // ether any-station: claims arrive over the OW ethertype from the segment
-                _listener.local_host(StringLit!"00:00:00:00:00:00");
+                InetAddress[1] bind = [InetAddress(MACAddress().b, 0)];
+                _listener.bind(bind[]);
                 _listener.port(_port);
             }
             else
