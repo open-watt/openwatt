@@ -98,10 +98,13 @@ nothrow @nogc:
 protected:
 
     override bool validate() const pure
-        => (_bind.length || _interfaces.length) && _port != 0;
+        => _slave || ((_bind.length || _interfaces.length) && _port != 0);
 
     override CompletionStatus startup()
     {
+        if (_slave)
+            return CompletionStatus.complete;
+
         bool refreshed = refresh_endpoints();
         if (!refreshed && !_endpoint_set.endpoints.length)
             return CompletionStatus.error;
@@ -119,13 +122,53 @@ protected:
 
     override void update()
     {
-        refresh_endpoints();
-        if (!_endpoint_set.any_open())
+        if (!_slave)
         {
-            restart();
-            return;
+            refresh_endpoints();
+            if (!_endpoint_set.any_open())
+            {
+                restart();
+                return;
+            }
         }
         sweep_peers(false);
+    }
+
+package:
+
+    void configure_slave()
+    {
+        _slave = true;
+    }
+
+    void accepting(bool value)
+    {
+        assert(_slave);
+        if (_accepting == value)
+            return;
+        _accepting = value;
+        if (!value)
+            sweep_peers(true);
+    }
+
+    void receive(UDPEndpoint* endpoint, const(void)[] data, ref const InetAddress src, MonoTime rx_time)
+    {
+        assert(_slave);
+        if (_accepting && running)
+            on_datagram(endpoint, data, src, rx_time);
+    }
+
+    void remove_endpoint(UDPEndpoint* endpoint)
+    {
+        assert(_slave);
+        size_t i;
+        while (i < _peers.length)
+        {
+            if (_peers[i].endpoint is endpoint)
+                _peers[i].peer.destroy();
+            else
+                ++i;
+        }
     }
 
 private:
@@ -145,6 +188,8 @@ private:
     UDPEndpointSet _endpoint_set;
     Array!Spawned _peers;
     Duration _timeout = 300.seconds;
+    bool _slave;
+    bool _accepting = true;
     uint _next_conn_id;
     ushort _port = default_sync_port;
     SyncEncoderKind _encoder = SyncEncoderKind.binary;
@@ -163,7 +208,7 @@ private:
 
     UDPEndpointHooks endpoint_hooks()
     {
-        return UDPEndpointHooks(null, &remove_endpoint, &on_datagram);
+        return UDPEndpointHooks(null, null, &remove_endpoint, &on_datagram);
     }
 
     void on_datagram(UDPEndpoint* endpoint, const(void)[] data, ref const InetAddress src, MonoTime rx_time)
@@ -193,18 +238,6 @@ private:
         debug log.info("peer appeared from ", src, " -> ", peer.name[]);
 
         peer.deliver_frame(cast(const(ubyte)[])data);
-    }
-
-    void remove_endpoint(UDPEndpoint* endpoint)
-    {
-        size_t i;
-        while (i < _peers.length)
-        {
-            if (_peers[i].endpoint is endpoint)
-                _peers[i].peer.destroy();
-            else
-                ++i;
-        }
     }
 
     Spawned* find_peer(UDPEndpoint* endpoint, ref const InetAddress addr)
@@ -278,12 +311,18 @@ unittest
     scope(exit) free(i1);
     BridgeInterface i2 = alloc!BridgeInterface(CID(5));
     scope(exit) free(i2);
+    UDPSyncServer child = alloc!UDPSyncServer(CID(6));
+    scope(exit) free(child);
     InetAddress[3] bindings = [InetAddress(IPAddr.any, 0), InetAddress(IPAddr.any, 0), InetAddress(IPv6Addr.loopback, 4826)];
     server.bind(bindings[]);
     assert(server.bind.length == 2);
     assert(server.validate());
     server.interfaces(i1, i2, i1);
     assert(server._interfaces.length == 2);
+
+    child.configure_slave();
+    assert(child._slave && child.validate());
+    child.accepting(false);
 
     align(size_t.sizeof) ubyte[64] initial = void;
     initial[] = 0;

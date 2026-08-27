@@ -37,10 +37,12 @@ struct UDPBoundEndpoint
 }
 
 alias UDPBindingConfigure = bool delegate(UDPEndpoint* endpoint, ref const UDPBindEndpoint binding) nothrow @nogc;
+alias UDPBindingInclude = bool delegate(ref const UDPBindEndpoint binding) nothrow @nogc;
 alias UDPEndpointRemove = void delegate(UDPEndpoint* endpoint) nothrow @nogc;
 
 struct UDPEndpointHooks
 {
+    UDPBindingInclude include;
     UDPBindingConfigure configure;
     UDPEndpointRemove remove;
     UDPRecvHandler receive;
@@ -55,6 +57,10 @@ nothrow @nogc:
     bool refresh(const(InetAddress)[] bind, const(ObjectRef!BaseInterface)[] interfaces, ushort port, ref UDPEndpointHooks hooks)
     {
         collect_udp_bindings(bind, interfaces, port, _desired);
+        if (hooks.include)
+            for (size_t i = _desired.length; i-- > 0; )
+                if (!hooks.include(_desired[i]))
+                    _desired.removeSwapLast(i);
         size_t i;
         while (i < endpoints.length)
         {
