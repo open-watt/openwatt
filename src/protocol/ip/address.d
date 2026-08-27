@@ -33,7 +33,6 @@ nothrow @nogc:
         bump_route_generation();
     }
 
-    // Properties
     IPNetworkAddress address() const pure
     {
         return _address;
@@ -94,8 +93,26 @@ bool interface_has_address(BaseInterface iface, IPAddr address)
     return false;
 }
 
+bool interface_has_broadcast(BaseInterface iface, IPAddr address)
+{
+    if (!iface)
+        return false;
+    if (address == IPAddr.broadcast)
+        return true;
+    foreach (configured; Collection!IPAddress().values)
+    {
+        if (configured.iface !is iface)
+            continue;
+        if (is_broadcast(configured.address, address))
+            return true;
+    }
+    return false;
+}
 
 private:
+
+bool is_broadcast(IPNetworkAddress network, IPAddr address) pure
+    => network.prefix_len < 31 && (network.get_network() | ~network.net_mask()) == address;
 
 void bump_route_generation()
 {
@@ -104,4 +121,12 @@ void bump_route_generation()
         import protocol.ip.stack : bump = bump_route_generation;
         bump();
     }
+}
+
+
+unittest
+{
+    assert(is_broadcast(IPNetworkAddress(IPAddr(192, 168, 1, 20), 24), IPAddr(192, 168, 1, 255)));
+    assert(!is_broadcast(IPNetworkAddress(IPAddr(192, 168, 1, 20), 24), IPAddr(192, 168, 1, 20)));
+    assert(!is_broadcast(IPNetworkAddress(IPAddr(192, 168, 1, 20), 31), IPAddr(192, 168, 1, 21)));
 }

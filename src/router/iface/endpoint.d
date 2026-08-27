@@ -145,17 +145,29 @@ void ensure_ether_tap(EthernetStation station)
 }
 
 
-// a null iface is a wildcard bind: every segment, egress by learned neighbour
+// An interface binds one segment. Without one, a zero local address binds every segment and an
+// exact address binds every station that owns it.
 EtherEndpoint* ether_open(EthernetStation iface, ushort port, EtherRecvHandler on_recv,
-                          MACAddress remote = MACAddress(), ushort remote_port = 0)
+                          MACAddress remote = MACAddress(), ushort remote_port = 0,
+                          MACAddress local = MACAddress())
 {
     if (on_recv is null)
         return null;
     if (cast(bool)remote != (remote_port != 0))
         return null;
+    if (iface && local && iface.mac != local)
+        return null;
+    if (!iface && local && !find_ether_station(local))
+        return null;
+
+    if (port == 0)
+        port = allocate_ephemeral(iface, local);
+    if (port == 0 || !ether_bind_available(iface, local, port))
+        return null;
 
     EtherEndpoint* ep = alloc!EtherEndpoint();
-    ep._local_port = port ? port : allocate_ephemeral();
+    ep._local = local ? local : (iface ? iface.mac : MACAddress());
+    ep._local_port = port;
     ep._remote = remote;
     ep._remote_port = remote_port;
     ep._on_recv = on_recv;
@@ -164,11 +176,13 @@ EtherEndpoint* ether_open(EthernetStation iface, ushort port, EtherRecvHandler o
         ep._iface = iface;
         ensure_ether_tap(iface);
     }
-    else
+    else if (!local)
     {
         ep._wildcard = true;
         ether_request_tap_all();
     }
+    else
+        ether_request_tap_all();
     _ether_eps ~= ep;
     return ep;
 }
@@ -193,7 +207,7 @@ nothrow @nogc:
     MACAddress local()
     {
         EthernetStation i = _iface.get;
-        return i ? i.mac : MACAddress();
+        return i ? i.mac : _local;
     }
 
     // TODO: interfaces that filter multicast in hardware need an add-address hook
@@ -233,9 +247,22 @@ nothrow @nogc:
         if (!_wildcard)
         {
             EthernetStation i = _iface.get;
-            if (!i || !i.running)
-                return 0;
-            return emit(i, dst, frame) ? data.length : 0;
+            if (i)
+            {
+                if (!i.running)
+                    return 0;
+                return emit(i, dst, frame) ? data.length : 0;
+            }
+            if (EthernetStation learned = ether_neighbour_lookup(dst))
+                if (learned.mac == _local)
+                    return emit(learned, dst, frame) ? data.length : 0;
+            bool sent;
+            foreach_ether_station((EthernetStation station)
+            {
+                if (station.running && station.mac == _local && emit(station, dst, frame))
+                    sent = true;
+            });
+            return sent ? data.length : 0;
         }
 
         if (EthernetStation i = ether_neighbour_lookup(dst))
@@ -258,6 +285,7 @@ private:
     ObjectRef!EthernetStation _iface;
     EtherRecvHandler _on_recv;
     Array!MACAddress _groups;
+    MACAddress _local;
     MACAddress _remote;
     ushort _remote_port;
     ushort _local_port;
@@ -281,8 +309,12 @@ private:
     {
         if (_closing)
             return;
-        if (!_wildcard && _iface.get !is station)
-            return;
+        if (!_wildcard)
+        {
+            EthernetStation bound_iface = _iface.get;
+            if (bound_iface ? bound_iface !is station : station.mac != _local)
+                return;
+        }
 
         const(ubyte)[] seg = cast(const(ubyte)[])p.data;
         if (seg.length < UdpSegHeader.sizeof)
@@ -427,11 +459,48 @@ __gshared EtherTcpInput g_ether_tcp_input;
 __gshared bool _tap_all;
 __gshared ushort _next_ephemeral = 49_152;
 
-ushort allocate_ephemeral()
+bool ether_bind_available(EthernetStation iface, MACAddress local, ushort port)
 {
-    ushort port = _next_ephemeral;
-    _next_ephemeral = port == 0xFFFF ? 49_152 : cast(ushort)(port + 1);
-    return port;
+    foreach (ep; _ether_eps[])
+    {
+        if (ep._closing || ep._local_port != port)
+            continue;
+        EthernetStation bound_iface = ep._iface.get;
+        if (bound_iface && iface)
+        {
+            if (bound_iface is iface)
+                return false;
+            continue;
+        }
+        MACAddress existing = bound_iface ? bound_iface.mac : ep._local;
+        MACAddress requested = iface ? iface.mac : local;
+        if (ether_addresses_overlap(existing, requested))
+            return false;
+    }
+    return true;
+}
+
+bool ether_addresses_overlap(MACAddress a, MACAddress b) pure
+    => !a || !b || a == b;
+
+ushort allocate_ephemeral(EthernetStation iface, MACAddress local)
+{
+    foreach (_; 0 .. 16_384)
+    {
+        ushort port = _next_ephemeral;
+        _next_ephemeral = port == 0xFFFF ? 49_152 : cast(ushort)(port + 1);
+        if (ether_bind_available(iface, local, port))
+            return port;
+    }
+    return 0;
+}
+
+version (unittest)
+private struct TestEtherSink
+{
+    void recv(EtherEndpoint*, const(void)[], MACAddress, ushort, MonoTime) nothrow @nogc
+    {
+    }
 }
 
 
@@ -456,4 +525,18 @@ unittest
     assert(EtherTransport.extract_dst(packet) == EtherTransport.extract_dst(decoded));
     assert(EtherTransport.extract_dst(packet) >> 60 == ulong(PacketType.ether_transport));
     assert(MACAddress.from_ul(EtherTransport.extract_dst(packet)) == t.dst);
+
+    MACAddress local_a = MACAddress(0x02, 0, 0, 0, 0, 1);
+    MACAddress local_b = MACAddress(0x02, 0, 0, 0, 0, 2);
+    assert(ether_addresses_overlap(MACAddress(), local_a));
+    assert(ether_addresses_overlap(local_a, MACAddress()));
+    assert(ether_addresses_overlap(local_a, local_a));
+    assert(!ether_addresses_overlap(local_a, local_b));
+
+    TestEtherSink sink;
+    EtherEndpoint* wildcard = ether_open(null, 61_234, &sink.recv);
+    assert(wildcard);
+    assert(!ether_open(null, 61_234, &sink.recv));
+    wildcard.close();
+    update_ether_endpoints();
 }

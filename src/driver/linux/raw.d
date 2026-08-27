@@ -111,8 +111,8 @@ nothrow @nogc:
 
     StringResult open(const(char)[] adapter_name, bool promisc = true)
     {
-        ushort protocol = ETH_P_ALL;
-        protocol = loadBigEndian(&protocol);
+        ushort protocol;
+        (cast(ubyte*)&protocol)[0 .. 2] = nativeToBigEndian(cast(ushort)ETH_P_ALL);
         fd = socket(AF_PACKET, SOCK_RAW, protocol);
         if (fd < 0)
             return StringResult(tconcat("socket(AF_PACKET, SOCK_RAW) failed: errno=", errno_result().system_code));

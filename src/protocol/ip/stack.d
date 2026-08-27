@@ -368,21 +368,8 @@ private:
 
     bool is_multicast_or_broadcast_v4(IPAddr dst, BaseInterface iface)
     {
-        if (dst == IPAddr.broadcast || dst.is_multicast())
+        if (dst.is_multicast() || interface_has_broadcast(iface, dst))
             return true;
-
-        foreach (a; Collection!IPAddress().values)
-        {
-            if (a.iface !is iface)
-                continue;
-            ubyte plen = a.address.prefix_len;
-            if (plen >= 31)
-                continue;
-            IPAddr bcast = a.address.get_network() | ~a.address.net_mask();
-            if (dst == bcast)
-                return true;
-        }
-
         return false;
     }
 
@@ -414,6 +401,13 @@ private:
             destination.b[3] = next_hop.b[1] & 0x7F;
             destination.b[4] = next_hop.b[2];
             destination.b[5] = next_hop.b[3];
+            frame_and_send(pkt, out_iface, destination.b[]);
+            return;
+        }
+        if (interface_has_broadcast(out_iface, next_hop))
+        {
+            MACAddress destination;
+            destination.b[] = 0xFF;
             frame_and_send(pkt, out_iface, destination.b[]);
             return;
         }
