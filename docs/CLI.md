@@ -631,6 +631,31 @@ is the functional broadcast). Mode `0x22` pids are 16-bit UDS data identifiers.
 /binding/obd/add name=car device=mg profile=j1979
 ```
 
+### `/binding/smartevse`
+
+Bridges the SmartEVSE board object (`/driver/boards/smartevse`) into a Device:
+charge control, EVSE state, protection and diagnostics as elements. When a
+`radio` is configured the binding also explores the WLAN interfaces bound to
+that radio and maintains `status.network.wifi` (station) and
+`status.network.wifi.ap` on the device, which the board's front panel renders
+on its network page.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `evse` | smartevse name | required | Board object to bridge. |
+| `device` | device name | required | Device to create or populate. |
+| `radio` | WiFi interface name | empty | Radio explored for station/AP network status. |
+
+```text
+/driver/boards/smartevse/add name=evse current=60
+/binding/smartevse/add name=evse evse=evse device=smartevse radio=wifi1
+```
+
+The front panel cycles between status, network, and diagnostics pages with the
+left/right buttons; the middle button returns to the status page. Any button
+wakes the backlight, the display returns to the status page after 30 seconds
+and the backlight turns off after 5 minutes of inactivity.
+
 ### `/protocol/ble/device`
 
 | Command | Syntax | Description |

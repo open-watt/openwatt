@@ -2,26 +2,35 @@ module driver.boards.smartevse.binding;
 
 version (SmartEVSE):
 
+import urt.inet : IPAddr;
 import urt.mem.alloc : alloc;
 import urt.meta : AliasSeq;
 import urt.si.quantity : Quantity;
 import urt.si.unit : Celsius, ScaledUnit, Volt;
 import urt.string;
-import urt.time : getSysTime;
+import urt.string.format : tconcat;
+import urt.time : MonoTime, getSysTime;
 
 import manager : g_app;
-import manager.base : ActiveObject, CompletionStatus, ObjectFlags, ObjectRef, Prop, StateSignal;
+import manager.base : ActiveObject, CompletionStatus, ObjectFlags, ObjectRef, Prop, StateSignal, dyn_cast;
 import manager.binding : ProtocolBinding;
-import manager.collection : CID, collection_type_info;
+import manager.collection : CID, Collection, collection_type_info;
 import manager.component : Component, ComponentEvent;
 import manager.device : Device;
 import manager.element : Access, Element, SampleUpdate, SamplingMode;
 import manager.series : DataFormat, SeriesKind, ValueType, register_format, register_value_format;
 
+import router.iface : BaseInterface;
+import router.iface.mac : MACAddress;
+import router.iface.wifi : APInterface, WiFiInterface, WLANBaseInterface, WLANInterface;
+
+import protocol.ip.address : IPAddress;
+
 import driver.boards.smartevse : DeciAmps, SmartEVSE, SmartEVSEADCCalibration,
                                 SmartEVSEButton, SmartEVSEChange, SmartEVSEContactor2Mode,
                                 SmartEVSEPilot, SmartEVSEState;
 import driver.boards.smartevse.display : display_height, display_width;
+import driver.boards.smartevse.screen : ScreenLinkState, ScreenNetworkInfo, screen_set_network;
 
 nothrow @nogc:
 
@@ -31,7 +40,8 @@ alias MilliVolts = Quantity!(uint, ScaledUnit(Volt, -3));
 
 class SmartEVSEBinding : ProtocolBinding
 {
-    alias Properties = AliasSeq!(Prop!("evse", evse));
+    alias Properties = AliasSeq!(Prop!("evse", evse),
+                                 Prop!("radio", radio));
 nothrow @nogc:
 
     enum type_name = "smartevse-binding";
@@ -55,6 +65,22 @@ nothrow @nogc:
         restart();
     }
 
+    final inout(WiFiInterface) radio() inout pure
+        => _radio.get;
+
+    final void radio(WiFiInterface value)
+    {
+        if (_radio.get is value)
+            return;
+        _radio = value;
+        mark_set!(typeof(this), "radio")();
+    }
+
+    void heartbeat(MonoTime)
+    {
+        refresh_network();
+    }
+
     final override bool validate() const pure
         => _evse.get !is null && !_device.empty;
 
@@ -74,6 +100,7 @@ nothrow @nogc:
 
         publish(SmartEVSEChange.all);
         publish_online();
+        refresh_network();
         _device_instance.notify(ComponentEvent.online);
         return CompletionStatus.complete;
     }
@@ -174,9 +201,12 @@ protected:
 private:
 
     ObjectRef!SmartEVSE _evse;
+    ObjectRef!WiFiInterface _radio;
     Device _device_instance;
+    ScreenNetworkInfo _network;
     bool _built;
     bool _subscribed;
+    bool _network_components;
 
     Element* _online;
     Element* _setpoint;
@@ -285,6 +315,109 @@ private:
         _backlight.unsubscribe(&element_changed);
         _frame.unsubscribe(&element_changed);
         _subscribed = false;
+    }
+
+    void refresh_network()
+    {
+        WiFiInterface radio = _radio.get;
+        if (!radio || !_built)
+            return;
+
+        ScreenNetworkInfo info;
+        info.channel = radio.active_channel ? radio.active_channel : radio.channel;
+        if (WLANBaseInterface sta = radio.bound_sta)
+        {
+            info.sta_state = sta.running ? ScreenLinkState.up : ScreenLinkState.down;
+            info.sta_ssid_len = copy_ssid(info.sta_ssid, sta.ssid);
+            info.sta_mac = sta.mac;
+            info.sta_ip = interface_address(sta);
+            if (auto wlan = dyn_cast!WLANInterface(sta))
+                info.sta_rssi = cast(byte)wlan.rssi;
+        }
+        if (APInterface ap = radio.bound_ap)
+        {
+            info.ap_state = ap.running ? ScreenLinkState.up : ScreenLinkState.down;
+            info.ap_ssid_len = copy_ssid(info.ap_ssid, ap.ssid);
+            info.ap_mac = ap.mac;
+            info.ap_ip = interface_address(ap);
+            info.ap_clients = radio.ap_client_count;
+        }
+
+        if (info == _network)
+            return;
+
+        publish_network(info);
+        _network = info;
+        screen_set_network(info);
+    }
+
+    void publish_network(ref const ScreenNetworkInfo info)
+    {
+        Device dev = _device_instance;
+        if (!_network_components)
+        {
+            Component status = find_or_create_component(dev, "status", "DeviceStatus");
+            Component network = find_or_create_component(status, "network", "Network");
+            Component wifi = find_or_create_component(network, "wifi", "Wifi");
+            find_or_create_component(wifi, "ap", "WifiAP");
+            dev.set_element("status.network.mode", StringLit!"wifi");
+            g_app.request_rebind();
+            dev.notify(ComponentEvent.tree_changed);
+            _network_components = true;
+        }
+
+        auto ts = getSysTime();
+        if (info.sta_state != _network.sta_state)
+            dev.set_element("status.network.wifi.status", sta_status_name(info.sta_state), ts);
+        if (info.sta_ssid != _network.sta_ssid)
+            dev.set_element("status.network.wifi.ssid", info.sta_ssid[0 .. info.sta_ssid_len], ts);
+        if (info.sta_mac != _network.sta_mac)
+        {
+            MACAddress mac = info.sta_mac;
+            dev.set_element("status.network.wifi.mac_address", mac, ts);
+        }
+        if (info.sta_ip != _network.sta_ip)
+            dev.set_element("status.network.wifi.ip_address", tconcat(info.sta_ip), ts);
+        if (info.sta_rssi != _network.sta_rssi)
+            dev.set_element("status.network.wifi.rssi", cast(int)info.sta_rssi, ts);
+        if (info.channel != _network.channel)
+            dev.set_element("status.network.wifi.channel", cast(uint)info.channel, ts);
+
+        if (info.ap_state != _network.ap_state)
+            dev.set_element("status.network.wifi.ap.status",
+                            info.ap_state == ScreenLinkState.up ? StringLit!"up" : StringLit!"down", ts);
+        if (info.ap_ssid != _network.ap_ssid)
+            dev.set_element("status.network.wifi.ap.ssid", info.ap_ssid[0 .. info.ap_ssid_len], ts);
+        if (info.ap_mac != _network.ap_mac)
+        {
+            MACAddress mac = info.ap_mac;
+            dev.set_element("status.network.wifi.ap.mac_address", mac, ts);
+        }
+        if (info.ap_ip != _network.ap_ip)
+            dev.set_element("status.network.wifi.ap.ip_address", tconcat(info.ap_ip), ts);
+        if (info.ap_clients != _network.ap_clients)
+            dev.set_element("status.network.wifi.ap.stations", cast(uint)info.ap_clients, ts);
+    }
+
+    static ubyte copy_ssid(ref char[32] dest, const(char)[] ssid)
+    {
+        size_t len = ssid.length < dest.length ? ssid.length : dest.length;
+        dest[0 .. len] = ssid[0 .. len];
+        return cast(ubyte)len;
+    }
+
+    static const(char)[] sta_status_name(ScreenLinkState state)
+        => state == ScreenLinkState.up ? "connected"
+         : state == ScreenLinkState.down ? "connecting" : "none";
+
+    static IPAddr interface_address(BaseInterface iface)
+    {
+        foreach (address; Collection!IPAddress().values)
+        {
+            if (address.iface is iface)
+                return address.address.addr;
+        }
+        return IPAddr();
     }
 
     void hardware_changed(SmartEVSE, uint changes)

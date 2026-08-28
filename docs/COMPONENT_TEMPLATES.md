@@ -137,6 +137,9 @@ Can be nested for grouped parameters. Standard network sub-components:
 - `link_speed: Mbps` - Link speed
 
 ### wifi: Wifi
+The `wifi` component describes the station (client) role. A device that also runs its own
+access point nests a `WifiAP` sub-component beside the station fields; a device running
+AP+STA concurrently populates both.
 - `status: enum/string` - Connection status
 - `ssid: string` - Connected network SSID
 - `rssi: dBm` - Signal strength
@@ -144,6 +147,14 @@ Can be nested for grouped parameters. Standard network sub-components:
 - `channel: integer` - Wi-Fi channel
 - `mac_address: string` - MAC address
 - `ip_address: string` - IPv4 address
+
+### wifi.ap: WifiAP
+- `status: enum/string` - AP state: up, down
+- `ssid: string` - SSID being beaconed
+- `channel: integer` - Wi-Fi channel
+- `mac_address: string` - BSSID the AP presents
+- `ip_address: string` - Address the AP serves (where clients reach the device)
+- `stations: integer` - Associated client count
 
 ### bluetooth: Bluetooth
 - `status: enum/string` - Connection status
