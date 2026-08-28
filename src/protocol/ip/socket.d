@@ -159,10 +159,15 @@ SocketResult c_bind(Socket socket, ref const InetAddress address)
     if (!s.udp)
         return SocketResult.invalid_argument;
 
-    s.udp.local_addr = address._a.ipv4.addr;
+    if (s.udp.local_port != 0)
+        return SocketResult.invalid_argument;
+    IPAddr local_addr = address._a.ipv4.addr;
     ushort port = address._a.ipv4.port;
     if (port == 0)
-        port = allocate_ephemeral();
+        port = allocate_udp_ephemeral(s.udp, local_addr);
+    if (port == 0 || !udp_bind_available(s.udp, local_addr, port))
+        return SocketResult.address_in_use;
+    s.udp.local_addr = local_addr;
     s.udp.local_port = port;
     return SocketResult.success;
 }
@@ -213,13 +218,28 @@ SocketResult c_connect(Socket socket, ref const InetAddress address)
     if (s.udp)
     {
         if (s.udp.local_port == 0)
-            s.udp.local_port = allocate_ephemeral();
+        {
+            s.udp.local_port = allocate_udp_ephemeral(s.udp, s.udp.local_addr);
+            if (s.udp.local_port == 0)
+                return SocketResult.address_in_use;
+        }
         s.udp.remote_addr = address._a.ipv4.addr;
         s.udp.remote_port = address._a.ipv4.port;
         s.udp.connected   = true;
         return SocketResult.success;
     }
     return SocketResult.invalid_argument;
+}
+
+ushort allocate_udp_ephemeral(UdpPcb* pcb, IPAddr address)
+{
+    foreach (_; 0 .. 16_384)
+    {
+        ushort port = allocate_ephemeral();
+        if (udp_bind_available(pcb, address, port))
+            return port;
+    }
+    return 0;
 }
 
 SocketResult c_accept(Socket socket, out Socket connection, InetAddress* remote)
