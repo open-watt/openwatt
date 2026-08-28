@@ -89,6 +89,9 @@ nothrow @nogc:
 
     final ref Wifi wifi() pure { return _wifi; }
 
+    override ubyte ap_client_count() const
+        => _ap_clients;
+
     override bool scanning() const
         => _scanning;
 
@@ -331,6 +334,7 @@ private:
     Wifi _wifi;
     ubyte _num_ap;
     ubyte _num_client;
+    ubyte _ap_clients;
     bool _mode_update_pending;
     bool _mode_update_warned;
     ScanHandler _scan_handler;
@@ -551,15 +555,18 @@ private:
             case WifiEvent.sta_stopped:         sta_started = false; break;
             case WifiEvent.sta_connected:       ++sta_connected_seq; break;
             case WifiEvent.sta_disconnected:    ++sta_disconnected_seq; break;
-            case WifiEvent.ap_started:          ++ap_started_seq; break;
-            case WifiEvent.ap_stopped:          ++ap_stopped_seq; break;
+            case WifiEvent.ap_started:          ++ap_started_seq; _ap_clients = 0; break;
+            case WifiEvent.ap_stopped:          ++ap_stopped_seq; _ap_clients = 0; break;
             case WifiEvent.ap_sta_connected:
+                ++_ap_clients;
                 if (data !is null)
                     log.info("STA ", MACAddress((cast(ubyte*)data)[0 .. 6]), " joined AP");
                 else
                     log.info("STA joined AP");
                 break;
             case WifiEvent.ap_sta_disconnected:
+                if (_ap_clients)
+                    --_ap_clients;
                 if (data !is null)
                     log.info("STA ", MACAddress((cast(ubyte*)data)[0 .. 6]), " left AP");
                 else

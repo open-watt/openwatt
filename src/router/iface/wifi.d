@@ -319,6 +319,16 @@ nothrow @nogc:
 
     bool scanning() const { return false; }
 
+    final inout(WLANBaseInterface) bound_sta() inout pure
+        => _bound_sta;
+    final inout(APInterface)[] bound_aps() inout pure
+        => _bound_aps[];
+    final inout(APInterface) bound_ap() inout pure
+        => _bound_aps.length > 0 ? _bound_aps[0] : null;
+
+    ubyte ap_client_count() const
+        => 0;
+
 protected:
 
     override bool validate() const
@@ -374,13 +384,6 @@ protected:
     void on_tx_power_changed() {}
 
     void on_monitor_changed(bool enabled) {}
-
-    final inout(WLANBaseInterface) bound_sta() inout pure
-        => _bound_sta;
-    final inout(APInterface)[] bound_aps() inout pure
-        => _bound_aps[];
-    final inout(APInterface) bound_ap() inout pure
-        => _bound_aps.length > 0 ? _bound_aps[0] : null;
 
     override ushort pcap_type() const
         => 127; // LINKTYPE_IEEE802_11_RADIOTAP
