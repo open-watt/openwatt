@@ -1,0 +1,3 @@
+# Applied when NOEXCEPTIONS=1. The platform defaults enable C++ exceptions for
+# the D exception mechanism, which such a build does not have.
+CONFIG_COMPILER_CXX_EXCEPTIONS=n
