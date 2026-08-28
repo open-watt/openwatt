@@ -178,6 +178,7 @@ nothrow @nogc:
             _conn = tcp_connect(_remote, &on_data, &on_event);
             if (_conn is null)
                 return CompletionStatus.continue_;     // no route / refused outright; retry later
+            _conn.tx_ready_handler(&on_tx_ready);
             if (_keep_enable)
                 _conn.enable_keepalive(_keep_enable, _keep_idle, _keep_interval, _keep_count);
         }
@@ -258,6 +259,20 @@ nothrow @nogc:
     override size_t tx_backlog() const
         => _conn ? _conn.tx_backlog : 0;
 
+    override size_t tx_request() const
+        => _conn ? _conn.tx_request : 0;
+
+protected:
+    override bool queue_tx_page(void[] page)
+    {
+        if (!_conn || !_conn.send_page(page))
+            return false;
+        add_tx_bytes(page.length);
+        if (_logging)
+            write_to_log(false, page);
+        return true;
+    }
+
 private:
     TCPConnection* _conn;
     InetAddress _remote;
@@ -270,6 +285,9 @@ private:
     int _keep_count = 10;
     Duration _keep_idle;
     Duration _keep_interval;
+
+    void on_tx_ready(TCPConnection* conn)
+        => notify_tx_ready();
 
     void on_data(TCPConnection* conn, const(void)[] data, MonoTime rx_time)
     {
@@ -426,6 +444,7 @@ protected:
         stream._link = 1;
         conn.recv_handler(&stream.on_data);
         conn.event_handler(&stream.on_event);
+        conn.tx_ready_handler(&stream.on_tx_ready);
         stream.set_state(State.running);
         Collection!TCPStream().add(stream);
         return stream;

@@ -393,8 +393,6 @@ nothrow @nogc:
         }
         else
         {
-            // raw readiness watch; interest is EPOLLOUT while want_write (a connecting socket),
-            // EPOLLIN otherwise. errors are always reported; the handler must act on them.
             bool watch_fd(int fd, bool want_write, IoReadyHandler on_ready)
             {
                 if (_epoll < 0)
@@ -405,7 +403,7 @@ nothrow @nogc:
                 e.file = fd;
                 e.on_ready = on_ready;
                 epoll_event ev;
-                ev.events = want_write ? EPOLLOUT : EPOLLIN;
+                ev.events = EPOLLIN | (want_write ? EPOLLOUT : 0);
                 ev.data.ptr = e;
                 if (epoll_ctl(_epoll, EPOLL_CTL_ADD, fd, &ev) != 0)
                 {
@@ -416,7 +414,6 @@ nothrow @nogc:
                 return true;
             }
 
-            // a connected socket moves from write-wait to read
             void modify_fd(int fd, bool want_write)
             {
                 foreach (e; _watches[])
@@ -424,7 +421,7 @@ nothrow @nogc:
                     if (e.file != fd || e.dead)
                         continue;
                     epoll_event ev;
-                    ev.events = want_write ? EPOLLOUT : EPOLLIN;
+                    ev.events = EPOLLIN | (want_write ? EPOLLOUT : 0);
                     ev.data.ptr = e;
                     epoll_ctl(_epoll, EPOLL_CTL_MOD, fd, &ev);
                     return;

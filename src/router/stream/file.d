@@ -126,6 +126,9 @@ nothrow @nogc:
         return total;
     }
 
+    override size_t tx_request() const
+        => _tx.is_open ? 1600 : 0;
+
     override ptrdiff_t pending()
         => 0;
 
