@@ -86,6 +86,7 @@
     <DCompile Include="src\driver\boards\smartevse\hardware.d" />
     <DCompile Include="src\driver\boards\smartevse\package.d" />
     <DCompile Include="src\driver\boards\smartevse\pins.d" />
+    <DCompile Include="src\driver\boards\smartevse\screen.d" />
     <DCompile Include="src\driver\font\render.d" />
     <DCompile Include="src\driver\font\small.d" />
     <DCompile Include="src\driver\rtc\pcf85063.d" />

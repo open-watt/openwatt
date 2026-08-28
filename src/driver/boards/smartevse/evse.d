@@ -457,7 +457,6 @@ void hardware_offline()
     SetCPDuty(1024);
     pilot_sample_periodically(Hardware, PWM_100);
     setPilot(false);
-    // The module-owned display path will render "Offline" here once ported.
 }
 
 

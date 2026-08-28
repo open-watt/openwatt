@@ -158,20 +158,15 @@ import manager.plugin : DeclareModule, Module;
 import driver.boards.smartevse.display;
 import driver.boards.smartevse.binding : SmartEVSEBinding;
 import driver.boards.smartevse.hardware;
+import driver.boards.smartevse.screen;
 
+public import driver.boards.smartevse.display : SmartEVSEButton;
 public import driver.boards.smartevse.evse;
 
 nothrow @nogc:
 
 
 alias DeciAmps = Quantity!(ushort, ScaledUnit(Ampere, -1));
-
-struct SmartEVSEButton
-{
-    enum ubyte left   = 1 << 0;
-    enum ubyte middle = 1 << 1;
-    enum ubyte right  = 1 << 2;
-}
 
 struct SmartEVSEChange
 {
@@ -562,6 +557,7 @@ protected:
         setState(STATE_A);
         setAccess(1);
         arm_control_tick(getTime() + msecs(10));
+        screen_set_claimed(true);
         sync_status(changes);
         return CompletionStatus.complete;
     }
@@ -594,6 +590,7 @@ protected:
         _active_hardware_owner = null;
         hardware_offline();
         _hardware_owner = _hardware_module;
+        screen_set_claimed(false);
         if (!_rcm_fault)
             sync_status(changes);
         return CompletionStatus.complete;
@@ -610,6 +607,7 @@ private:
     bool _rcm_monitor;
     bool _rcm_input;
     bool _tick_armed;
+    bool _backlight_state;
     DeciAmps _current = DeciAmps(MIN_CURRENT * 10);
     DeciAmps _max_current = DeciAmps(MAX_CURRENT);
     DeciAmps _pp_max_current = DeciAmps(130);
@@ -733,11 +731,9 @@ private:
         arm_control_tick(next);
     }
 
-    // display_buttons reports released bits and refuses while the panel bus is busy; invert to
-    // pressed here so a busy sample reads as no-change rather than a phantom release.
     void sample_buttons()
     {
-        ubyte pressed = (~display_buttons(g_display)) & 0x7;
+        ubyte pressed = screen_buttons();
         if (pressed == _buttons)
             return;
         _buttons = pressed;
@@ -843,6 +839,12 @@ private:
             mark_set!(typeof(this), "contactor2")();
             changes |= SmartEVSEChange.contactor2;
         }
+        bool next_backlight = display_backlight(g_display);
+        if (_backlight_state != next_backlight)
+        {
+            _backlight_state = next_backlight;
+            changes |= SmartEVSEChange.backlight;
+        }
 
         notify_changes(changes);
     }
@@ -851,6 +853,15 @@ private:
     {
         if (!changes)
             return;
+        enum screen_visible = SmartEVSEChange.state | SmartEVSEChange.stopped | SmartEVSEChange.current
+                            | SmartEVSEChange.max_current | SmartEVSEChange.pp_max_current
+                            | SmartEVSEChange.effective_current | SmartEVSEChange.temperature
+                            | SmartEVSEChange.temperature_fault | SmartEVSEChange.rcm_fault
+                            | SmartEVSEChange.contactor1 | SmartEVSEChange.contactor2;
+        if (changes & (SmartEVSEChange.state | SmartEVSEChange.rcm_fault))
+            screen_wake();
+        else if (changes & screen_visible)
+            screen_notify();
         for (size_t i = 0; i < _change_handlers.length; )
         {
             SmartEVSEChangeHandler handler = _change_handlers[i];
@@ -891,6 +902,7 @@ nothrow @nogc:
         }
         hardware_offline();
         _hardware_ready = true;
+        screen_init();
     }
 
     override void deinit()
@@ -898,6 +910,7 @@ nothrow @nogc:
         _active_hardware_owner = null;
         if (_hardware_ready)
         {
+            screen_close();
             hardware_offline();
             hardware_shutdown();
         }

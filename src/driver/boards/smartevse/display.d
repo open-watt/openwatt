@@ -22,6 +22,13 @@ enum uint display_width = 128;
 enum uint display_height = 64;
 enum uint display_pages = display_height / 8;
 
+struct SmartEVSEButton
+{
+    enum ubyte left   = 1 << 0;
+    enum ubyte middle = 1 << 1;
+    enum ubyte right  = 1 << 2;
+}
+
 // = void: a plain global lands in .data and pays flash for 2KB of buffer image.
 __gshared SmartEVSEDisplay g_display = void;
 
