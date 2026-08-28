@@ -77,7 +77,7 @@ ubyte[] encode_announce(ref const NodeAnnounce a, ubyte[] buffer)
         return true;
     }
 
-    ubyte[8] id = void;
+    align(8) ubyte[8] id = void;
     storeBigEndian(cast(ulong*)id.ptr, a.node_id);
     if (!put(AnnounceTag.node_id, id))
         return null;
@@ -93,7 +93,7 @@ ubyte[] encode_announce(ref const NodeAnnounce a, ubyte[] buffer)
         put(AnnounceTag.flags, (&a.flags)[0 .. 1]);
     if (a.sync_port)
     {
-        ubyte[2] port = void;
+        align(2) ubyte[2] port = void;
         storeBigEndian(cast(ushort*)port.ptr, a.sync_port);
         put(AnnounceTag.sync_port, port);
     }

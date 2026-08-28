@@ -52,14 +52,24 @@ struct UDPFrame
 nothrow @nogc:
     enum Type = PacketType.udp;
 
-    ubyte[16] addr;
+    // A word view alongside the bytes: slicing a ubyte[] erases alignment, so
+    // aligned paths go through addr32 and move 4 bytes at a time.
+    union
+    {
+        ubyte[16] addr;
+        uint[4] addr32;
+    }
     ushort port;
     AddressFamily family = AddressFamily.unspecified;
 
     InetAddress address() const
     {
         if (family == AddressFamily.ipv4)
-            return InetAddress(IPAddr(addr[0 .. 4]), port);
+        {
+            IPAddr ip;
+            ip.address = addr32[0];
+            return InetAddress(ip, port);
+        }
         if (family == AddressFamily.ipv6)
         {
             IPv6Addr a;
