@@ -1155,7 +1155,7 @@ private:
         materialise_network(device);
 
         if (is_new)
-            g_app.devices.insert(device.id[], device);
+            g_app.devices.insert(device);
 
         device.notify(ComponentEvent.tree_changed);
         device.notify(ComponentEvent.online);

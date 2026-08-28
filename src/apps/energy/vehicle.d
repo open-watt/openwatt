@@ -263,7 +263,7 @@ Component vehicle_for(const(char)[] vin)
     if (is_new)
     {
         vehicle = alloc!Device(vin.make_string());
-        g_app.devices.insert(vehicle.id[], vehicle);
+        g_app.devices.insert(vehicle);
     }
     else
         vehicle = *existing;

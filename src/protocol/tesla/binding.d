@@ -155,7 +155,7 @@ protected:
         else
         {
             device = alloc!Device(_device);
-            g_app.devices.insert(device.id[], device);
+            g_app.devices.insert(device);
         }
 
         Component info = find_or_create_component(device, "info", "DeviceInfo");

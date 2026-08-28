@@ -39,7 +39,7 @@ Device create_energy_device()
     d.add_component(alloc!Component(StringLit!"control_path"));
     d.add_component(alloc!Component(StringLit!"config"));
 
-    g_app.devices.insert(d.id[], d);
+    g_app.devices.insert(d);
     d.notify(ComponentEvent.tree_changed);
     d.notify(ComponentEvent.online);
 

@@ -44,7 +44,7 @@ nothrow @nogc:
         if (!_device.empty && _device[] !in g_app.devices)
         {
             Device d = alloc!Device(_device);
-            g_app.devices.insert(d.id[], d);
+            g_app.devices.insert(d);
         }
         restart();
     }

@@ -454,7 +454,7 @@ private:
             return null;
 
         Device device = alloc!Device(id.move);
-        g_app.devices.insert(device.id[], device);
+        g_app.devices.insert(device);
 
         HADevice* record = &_devices.pushBack();
         record.identity = identity.make_string();

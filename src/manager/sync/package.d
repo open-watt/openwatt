@@ -400,7 +400,7 @@ nothrow @nogc:
                     ++device_index;
                     continue;
                 }
-                if (!dev.cid || authored_by(p, dev))
+                if (!dev.cid || dev.private_ || authored_by(p, dev))
                 {
                     ++device_index;
                     ++sub.device_cursor;
@@ -2196,7 +2196,7 @@ nothrow @nogc:
                 continue;
             foreach (dev; g_app.devices.values)
             {
-                if (!dev.cid || authored_by(from, dev))
+                if (!dev.cid || dev.private_ || authored_by(from, dev))
                     continue;
                 walk_elements(dev, a.subject, (Element* e, const(char)[] path) {
                     EID node = e.ensure_eid();
@@ -2232,7 +2232,7 @@ nothrow @nogc:
         if (!c)
             return;
         Device dev = cast(Device)cast(void*)c;    // extern(C++) has no dynamic cast; is_device checked above
-        if (!dev.cid)
+        if (!dev.cid || dev.private_)
             return;
 
         char[256] buf = void;
@@ -2271,7 +2271,7 @@ nothrow @nogc:
         }
         Device dev = alloc!Device(id.make_string());
         dev.remote = true;
-        g_app.devices.insert(dev.id[], dev);
+        g_app.devices.insert(dev);
         return dev;
     }
 

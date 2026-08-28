@@ -1,6 +1,8 @@
 module manager.device;
 
+import urt.algorithm;
 import urt.array;
+import urt.hash;
 import urt.lifetime;
 import urt.log;
 import urt.mem;
@@ -20,8 +22,7 @@ import manager.profile;
 nothrow @nogc:
 
 
-alias CreateElementHandler = FormatId delegate(Device device, Element* e, ref const ElementDesc desc,
-                                               ubyte index) nothrow @nogc;
+alias CreateElementHandler = FormatId delegate(Device device, Element* e, ref const ElementDesc desc, ubyte index) nothrow @nogc;
 
 // null create: devices are not BaseObjects; their table is g_app.devices, not g_item_tables
 __gshared const CollectionTypeInfo device_type_info = CollectionTypeInfo(DynTypeInfo(StringLit!"device", null), StringLit!"/device", CollectionType.device, null, null, true, false);
@@ -33,10 +34,38 @@ nothrow @nogc:
     Device* opBinaryRight(string op : "in")(const(char)[] name)
         => _machine.lookup(name);
 
-    void insert(const(char)[] name, Device device)
+    Device find(const(char)[] name, ulong peer_id) pure
     {
-        uint slot = _machine.claim(name, device);
-        debug assert(slot, "device name already in use");
+        if (!peer_id)
+            return _machine.get(_machine.find(name));
+        ulong hash = identity_hash(name, peer_id);
+        for (size_t index = binary_search!(compare_local_device, true)(_local_devices[], hash); index < _local_devices.length && _local_devices[index].hash == hash; ++index)
+        {
+            Device device = _local_devices[index].device;
+            if (device.peer_id == peer_id && device.id[] == name)
+                return device;
+        }
+        return null;
+    }
+
+    void insert(Device device)
+    {
+        debug assert(device);
+        const(char)[] name = device.id[];
+        debug assert(device.peer_id || !device.private_);
+        debug assert(find(name, device.peer_id) is null, "device identity already in use");
+
+        uint slot;
+        if (device.peer_id)
+        {
+            slot = _machine.claim_unindexed(name, device);
+            ulong hash = identity_hash(name, device.peer_id);
+            size_t index = binary_search!(compare_local_device, true)(_local_devices[], hash);
+            _local_devices.insert(index, LocalDevice(hash, device));
+        }
+        else
+            slot = _machine.claim(name, device);
+        debug assert(slot, "device identity already in use");
         device.cid = make_cid(CollectionType.device, slot);
     }
 
@@ -61,13 +90,28 @@ nothrow @nogc:
     size_t length()
     {
         size_t n = 0;
-        foreach (d; _machine.values())
+        foreach (device; _machine.values())
             ++n;
         return n;
     }
 
 package:
     IdAllocator!Device _machine;
+
+private:
+    struct LocalDevice
+    {
+        ulong hash;
+        Device device;
+    }
+
+    static ulong identity_hash(const(char)[] name, ulong peer_id) pure
+        => fnv1a64(cast(const(ubyte)[])name, peer_id);
+
+    static int compare_local_device(ref LocalDevice device, ulong hash) pure
+        => device.hash < hash ? -1 : device.hash > hash ? 1 : 0;
+
+    Array!LocalDevice _local_devices;
 }
 
 enum ComputationKind : ubyte
@@ -215,13 +259,28 @@ class Device : Component
 extern(D):
 nothrow @nogc:
 
-    this(String id)
+    this(String id, ulong peer_id = 0, bool private_ = false)
     {
+        assert(peer_id || !private_);
         super(id.move);
+        _peer_id = peer_id;
+        _private = private_;
     }
 
     override bool is_device() const pure
         => true;
+
+    ulong peer_id() const pure
+        => _peer_id;
+
+    bool global() const pure
+        => _peer_id == 0;
+
+    bool local() const pure
+        => _peer_id != 0;
+
+    bool private_() const pure
+        => _private;
 
     ~this()
     {
@@ -372,9 +431,12 @@ package:
         apply_default_retention(element.parent);
     }
 
+private:
+    ulong _peer_id;
+    bool _private;
 }
 
-Device create_device_from_profile(ref Profile profile, const(char)[] model, const(char)[] id, const(char)[] name, scope CreateElementHandler create_element_handler)
+Device create_device_from_profile(ref Profile profile, const(char)[] model, const(char)[] id, const(char)[] name, scope CreateElementHandler create_element_handler, ulong peer_id = 0, bool private_ = false)
 {
     import urt.mem;
     import manager;
@@ -403,17 +465,20 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
 
     Device device;
     bool is_new_device = false;
-    if (Device* existing = id in g_app.devices)
-        device = *existing;
+    if (Device existing = g_app.devices.find(id, peer_id))
+    {
+        device = existing;
+        assert(device.private_ == private_, "device visibility conflict");
+    }
     else
     {
-        device = alloc!Device(id.make_string());
+        device = alloc!Device(id.make_string(), peer_id, private_);
         if (name)
             device.name = name.make_string();
         is_new_device = true;
         // identity claims at birth: element lifecycle handlers fired during materialization
         // need the device's CID to allocate EIDs
-        g_app.devices.insert(device.id[], device);
+        g_app.devices.insert(device);
     }
 
     Component find_or_create_component(Component parent, ref ComponentTemplate ct)
@@ -654,8 +719,29 @@ unittest
 
     // element identity: indices allocate lazily against the device's table once it registers
     DeviceTable table;
-    table.insert(d.id[], d);
+    table.insert(d);
     assert(d.cid);
+
+    Device local_device = alloc!Device(StringLit!"testdev", 0xA1);
+    Device private_device = alloc!Device(StringLit!"testdev", 0xB2, true);
+    table.insert(local_device);
+    table.insert(private_device);
+    assert(table.length == 3);
+    assert(*("testdev" in table) is d);
+    assert(table.find("testdev", 0xA1) is local_device);
+    assert(table.find("testdev", 0xB2) is private_device);
+    assert(table.find("testdev", 0xC3) is null);
+    assert(d.global && !d.local && !d.private_);
+    assert(!local_device.global && local_device.local && !local_device.private_);
+    assert(private_device.local && private_device.private_);
+    assert(d.cid != local_device.cid && local_device.cid != private_device.cid);
+
+    Component local_component = alloc!Component(StringLit!"child");
+    local_component.parent = local_device;
+    Element* local_element = alloc!Element();
+    local_element.parent = local_component;
+    EID local_handle = local_element.ensure_eid();
+    assert(local_handle.container == local_device.cid);
 
     Element* e = alloc!Element();
     e.parent = c;

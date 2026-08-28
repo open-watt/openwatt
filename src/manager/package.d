@@ -605,26 +605,24 @@ nothrow @nogc:
         return false;
     }
 
-    Device find_device(const(char)[] device_id) pure
+    Device find_device(const(char)[] device_id, ulong peer_id = 0) pure
     {
-        if (Device* d = device_id[] in devices)
-            return *d;
+        return devices.find(device_id, peer_id);
+    }
+
+    Component find_component(const(char)[] name, ulong peer_id = 0) pure
+    {
+        const(char)[] device_name = name.split!'.';
+        if (Device d = devices.find(device_name, peer_id))
+            return name.empty ? d : d.find_component(name);
         return null;
     }
 
-    Component find_component(const(char)[] name) pure
+    Element* find_element(const(char)[] name, ulong peer_id = 0) pure
     {
         const(char)[] device_name = name.split!'.';
-        if (Device* d = device_name[] in devices)
-            return name.empty ? *d : (*d).find_component(name);
-        return null;
-    }
-
-    Element* find_element(const(char)[] name) pure
-    {
-        const(char)[] device_name = name.split!'.';
-        if (Device* d = device_name[] in devices)
-            return name.empty ? null : (*d).find_element(name);
+        if (Device d = devices.find(device_name, peer_id))
+            return name.empty ? null : d.find_element(name);
         return null;
     }
 
