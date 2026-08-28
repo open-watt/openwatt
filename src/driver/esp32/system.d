@@ -48,6 +48,8 @@ const(char)[] reset_reason()
     }
 }
 
+bool reset_was_software() => esp_reset_reason() == 3;
+
 bool ota_supported() => true;
 
 size_t ota_partition_size()

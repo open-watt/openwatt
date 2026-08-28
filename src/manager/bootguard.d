@@ -3,6 +3,8 @@ module manager.bootguard;
 // Counted in NVS, not on the filesystem this may have to roll back. Cutting
 // power a few times in a row is therefore also the manual factory reset.
 
+import driver.system : reset_was_software;
+
 import urt.driver.nvs;
 import urt.log;
 import urt.result : SizeResult;
@@ -29,7 +31,9 @@ bool boot_config_trusted()
                         " failed boots; falling back to default config");
             return false;
         }
-        write_counter(failures + 1);
+        // Power cycles still count; cutting power repeatedly is the factory reset.
+        if (!reset_was_software())
+            write_counter(failures + 1);
         return true;
     }
 }
