@@ -289,7 +289,7 @@ version (HasFilesystem)
         void[] data = load_file(name);
         if (data is null)
         {
-            session.write_line("read failed / not found: '", name, "'");
+            session.write_line("read failed / not found: '", name, "' (backend error ", Fs.last_error(), ")");
             return;
         }
         session.write_line(data.length, " bytes: ", cast(const(char)[])data);
