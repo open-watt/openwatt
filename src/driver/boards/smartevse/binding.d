@@ -9,7 +9,7 @@ import urt.si.quantity : Quantity;
 import urt.si.unit : Celsius, ScaledUnit, Volt;
 import urt.string;
 import urt.string.format : tconcat;
-import urt.time : MonoTime, getSysTime;
+import urt.time : Duration, MonoTime, getSysTime, getTime, seconds;
 
 import manager : g_app;
 import manager.base : ActiveObject, CompletionStatus, ObjectFlags, ObjectRef, Prop, StateSignal, dyn_cast;
@@ -37,6 +37,8 @@ nothrow @nogc:
 
 alias DegreesC = Quantity!(short, Celsius);
 alias MilliVolts = Quantity!(uint, ScaledUnit(Volt, -3));
+
+private enum Duration network_poll = 1.seconds;
 
 class SmartEVSEBinding : ProtocolBinding
 {
@@ -76,10 +78,6 @@ nothrow @nogc:
         mark_set!(typeof(this), "radio")();
     }
 
-    void heartbeat(MonoTime)
-    {
-        refresh_network();
-    }
 
     final override bool validate() const pure
         => _evse.get !is null && !_device.empty;
@@ -101,12 +99,18 @@ nothrow @nogc:
         publish(SmartEVSEChange.all);
         publish_online();
         refresh_network();
+        arm_network_poll(getTime() + network_poll);
         _device_instance.notify(ComponentEvent.online);
         return CompletionStatus.complete;
     }
 
     override CompletionStatus shutdown()
     {
+        if (_polling)
+        {
+            g_app.cancel(&network_tick);
+            _polling = false;
+        }
         unsubscribe();
         if (_device_instance)
             _device_instance.notify(ComponentEvent.offline);
@@ -207,6 +211,7 @@ private:
     bool _built;
     bool _subscribed;
     bool _network_components;
+    bool _polling;
 
     Element* _online;
     Element* _setpoint;
@@ -315,6 +320,24 @@ private:
         _backlight.unsubscribe(&element_changed);
         _frame.unsubscribe(&element_changed);
         _subscribed = false;
+    }
+
+    void arm_network_poll(MonoTime when)
+    {
+        g_app.schedule(when, &network_tick);
+        _polling = true;
+    }
+
+    void network_tick(MonoTime scheduled)
+    {
+        _polling = false;
+        if (!running)
+            return;
+        refresh_network();
+
+        MonoTime next = scheduled + network_poll;
+        MonoTime now = getTime();
+        arm_network_poll(next <= now ? now + network_poll : next);
     }
 
     void refresh_network()
