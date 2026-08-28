@@ -176,6 +176,14 @@ nothrow @nogc:
         return id;
     }
 
+    package(manager) uint claim_unindexed(const(char)[] name, T obj)
+    {
+        debug assert(obj !is null);
+        uint id = allocate_slot(name);
+        _slots[][id] = cast(size_t)cast(void*)obj;
+        return id;
+    }
+
     void bind(uint id, T obj)
     {
         debug assert(obj !is null);
@@ -327,6 +335,14 @@ private:
 
     uint allocate(const(char)[] name)
     {
+        uint id = allocate_slot(name);
+        String s = _slot_names[id];
+        _names.insert(s.move, id);
+        return id;
+    }
+
+    uint allocate_slot(const(char)[] name)
+    {
         if (_slots.empty)
         {
             _slots ~= 0;
@@ -336,7 +352,6 @@ private:
         _slots ~= 0;
         String s = name.make_string();
         _slot_names ~= s;
-        _names.insert(s.move, id);
         return id;
     }
 
@@ -440,6 +455,10 @@ unittest
 
     // creating at a live name is a duplicate error
     assert(m.claim("motor", &b) == 0);
+
+    uint local = m.claim_unindexed("motor", &b);
+    assert(local != held && m.get(local) is &b);
+    assert(m.find("motor") == held && m.name_of(local) == "motor");
 
     // rename: held ids follow the object with no repair; the old name dies
     assert(m.rename(held, "motor", "pump"));
