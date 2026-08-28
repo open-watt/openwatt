@@ -2,6 +2,7 @@ module driver.boards.smartevse.binding;
 
 version (SmartEVSE):
 
+import urt.mem.alloc : alloc;
 import urt.meta : AliasSeq;
 import urt.si.quantity : Quantity;
 import urt.si.unit : Celsius, ScaledUnit, Volt;
