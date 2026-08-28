@@ -163,13 +163,14 @@
     <DCompile Include="src\manager\secret.d" />
     <DCompile Include="src\manager\signal.d" />
     <DCompile Include="src\manager\sample\spec.d" />
+    <DCompile Include="src\manager\sync\binary_encoder.d" />
     <DCompile Include="src\manager\sync\discovery.d" />
     <DCompile Include="src\manager\sync\encoder.d" />
-    <DCompile Include="src\manager\sync\binary_encoder.d" />
     <DCompile Include="src\manager\sync\json_encoder.d" />
-    <DCompile Include="src\manager\sync\peering.d" />
     <DCompile Include="src\manager\sync\package.d" />
     <DCompile Include="src\manager\sync\peer.d" />
+    <DCompile Include="src\manager\sync\peering.d" />
+    <DCompile Include="src\manager\sync\udp_bind.d" />
     <DCompile Include="src\manager\sync\udp_server.d" />
     <DCompile Include="src\manager\sync\ws_server.d" />
     <DCompile Include="src\manager\syslog.d" />
