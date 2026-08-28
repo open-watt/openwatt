@@ -6,6 +6,7 @@ import urt.file;
 import urt.lifetime;
 import urt.log;
 import urt.mem;
+import urt.mem.pagepool;
 import urt.mem.temp : tconcat;
 import urt.string;
 import urt.time;
@@ -190,11 +191,16 @@ protected:
             if (s)
                 s.destroy();
         }
+        if (_download_cleanup_scheduled)
+        {
+            g_app.cancel(&finish_downloads);
+            _download_cleanup_scheduled = false;
+        }
         while (!_downloads.empty)
         {
             Download* d = _downloads[_downloads.length - 1];
             Stream s = d.stream;
-            finish_download(d);
+            cleanup_download(d, false);
             if (s)
                 s.destroy();
         }
@@ -211,17 +217,159 @@ protected:
         return CompletionStatus.complete;
     }
 
-    override void update()
+private:
+    static struct Upload
     {
-        for (size_t i = 0; i < _downloads.length; )
+    nothrow @nogc:
+
+        int on_chunk(ref const HTTPMessage request, const(ubyte)[] chunk, bool final_chunk, ref Stream s)
         {
-            // on completion the entry is swap-removed; the same index then holds the next candidate
-            if (!_downloads[i].pump())
-                ++i;
+            if (!final_chunk)
+            {
+                if (error)
+                    return 0;
+                size_t written;
+                Result r = file.write(chunk, written);
+                if (!r || written != chunk.length)
+                {
+                    writeWarning("fileserver: write '", tmp[], "' failed: ", r.system_code);
+                    error = 500;
+                    discard();
+                }
+                return 0;
+            }
+
+            ushort status = error ? error : commit();
+            FileServer o = owner;
+            o.send_status(request.http_version, s, status, request);
+            o.finish_upload(&this);
+            return 0;
+        }
+
+    private:
+        FileServer owner;
+        Stream stream;
+        File file;
+        Array!char target;
+        Array!char tmp;
+        ushort error;
+        bool replaced;
+
+        ushort commit()
+        {
+            file.close();
+            if (replaced)
+                delete_file(target[]);
+            Result mv = rename_file(tmp[], target[]);
+            if (!mv)
+            {
+                writeWarning("fileserver: could not swap '", tmp[], "' into place: ", mv.system_code);
+                return 500;
+            }
+            writeInfo("fileserver: stored '", target[], "'");
+            return replaced ? 200 : 201;
+        }
+
+        void discard()
+        {
+            if (file.is_open)
+            {
+                file.close();
+                delete_file(tmp[]);
+            }
+        }
+
+        void stream_state(ActiveObject, StateSignal signal)
+        {
+            if (signal == StateSignal.offline)
+                owner.finish_upload(&this);
         }
     }
 
-private:
+    static struct Download
+    {
+    nothrow @nogc:
+
+        Page* produce(Stream, size_t requested)
+        {
+            if (!head.empty)
+                return produce_head(requested);
+            if (remaining == 0)
+            {
+                owner.download_finished(&this, true);
+                return null;
+            }
+
+            size_t take = remaining < requested ? cast(size_t)remaining : requested;
+            if (take > max_page_size)
+                take = max_page_size;
+            Page* page = page_alloc(take);
+            if (!page)
+            {
+                owner.download_finished(&this, false);
+                return null;
+            }
+
+            size_t got;
+            Result r = file.read(page.data, got);
+            if (!r || got != take)
+            {
+                page_free(page);
+                writeWarning("fileserver: transfer failed mid-body, dropping connection");
+                owner.download_finished(&this, false);
+                return null;
+            }
+            remaining -= got;
+            return page;
+        }
+
+    private:
+        enum buffer_threshold = 8 * 1024;
+        enum max_page_size = 1600;
+
+        FileServer owner;
+        Stream stream;
+        File file;
+        Array!char head;
+        ulong remaining;
+        size_t head_sent;
+        bool finished;
+        bool successful;
+
+        Page* produce_head(size_t requested)
+        {
+            size_t take = head.length - head_sent;
+            if (take > requested)
+                take = requested;
+            if (take > max_page_size)
+                take = max_page_size;
+            Page* page = page_alloc(take);
+            if (!page)
+            {
+                owner.download_finished(&this, false);
+                return null;
+            }
+            (cast(char[])page.data)[] = head[head_sent .. head_sent + take];
+            head_sent += take;
+            if (head_sent == head.length)
+            {
+                head.clear();
+                head_sent = 0;
+            }
+            return page;
+        }
+
+        void stream_state(ActiveObject, StateSignal signal)
+        {
+            if (signal != StateSignal.offline)
+                return;
+            stream.release_tx_handler(&produce);
+            stream.unsubscribe(&stream_state);
+            stream = null;
+            owner.download_finished(&this, false);
+        }
+    }
+
     ObjectRef!HTTPServer _server;
     String _uri;
     String _root;
@@ -233,6 +381,7 @@ private:
         uint _lock_seq;
     Array!(Upload*) _uploads;
     Array!(Download*) _downloads;
+    bool _download_cleanup_scheduled;
 
     void remove_handlers(HTTPServer server)
     {
@@ -462,10 +611,14 @@ private:
             return true;
         }
 
-        if (size > Download.stream_threshold)
+        if (size > Download.buffer_threshold)
         {
-            // head first with the known length, then the body is pumped from update() as the
-            // stream's tx queue drains, so the file is never resident in memory at once
+            if (!stream.supports_tx_pages)
+            {
+                f.close();
+                return send_status(ver, stream, 503, request) >= 0;
+            }
+
             HTTPMessage response;
             response.http_version = ver;
             response.status_code = 200;
@@ -474,16 +627,30 @@ private:
             response.headers ~= HTTPParam(StringLit!"Content-Type", mime_type(fs_path));
             response.headers ~= HTTPParam(StringLit!"Content-Length", tconcat(size).make_string());
             add_cors(response, request);
-            stream.write(format_message_head(response)[]);
 
             Download* d = alloc!Download();
+            if (!d)
+            {
+                f.close();
+                return send_status(ver, stream, 503, request) >= 0;
+            }
             d.owner = this;
             d.stream = stream;
             d.file = f;
             d.remaining = size;
+            d.head = format_message_head(response);
+            HTTPServer server = _server.get;
+            if (d.head.empty || !server || !server.defer_response(stream))
+            {
+                d.file.close();
+                free(d);
+                return send_status(ver, stream, 503, request) >= 0;
+            }
+
             stream.subscribe(&d.stream_state);
             _downloads ~= d;
-            d.pump();
+            if (!stream.tx_handler(&d.produce))
+                download_finished(d, false);
             return true;
         }
 
@@ -549,6 +716,8 @@ private:
         }
 
         Upload* u = alloc!Upload();
+        if (!u)
+            return null;
         u.owner = this;
         u.stream = stream;
         u.error = status;
@@ -899,134 +1068,51 @@ private:
         free(u);
     }
 
-    void finish_download(Download* d)
+    void download_finished(Download* d, bool successful)
     {
+        d.finished = true;
+        d.successful = successful;
+        if (!_download_cleanup_scheduled)
+        {
+            g_app.schedule(getTime(), &finish_downloads);
+            _download_cleanup_scheduled = true;
+        }
+    }
+
+    void finish_downloads(MonoTime)
+    {
+        _download_cleanup_scheduled = false;
+        for (size_t i = 0; i < _downloads.length; )
+        {
+            Download* d = _downloads[i];
+            if (!d.finished)
+                ++i;
+            else
+                cleanup_download(d, true);
+        }
+    }
+
+    void cleanup_download(Download* d, bool resume)
+    {
+        Stream stream = d.stream;
+        bool successful = d.successful;
         if (d.file.is_open)
             d.file.close();
-        if (d.stream)
-            d.stream.unsubscribe(&d.stream_state);
+        if (stream)
+        {
+            stream.release_tx_handler(&d.produce);
+            stream.unsubscribe(&d.stream_state);
+        }
         _downloads.removeFirstSwapLast(d);
         free(d);
+
+        HTTPServer server = _server.get;
+        if (resume && successful && stream && stream.running && server && server.resume_response(stream))
+            return;
+        if (stream && stream.running)
+            stream.destroy();
     }
 
-    static struct Upload
-    {
-    nothrow @nogc:
-        FileServer owner;
-        Stream stream;
-        File file;
-        Array!char target;
-        Array!char tmp;
-        ushort error;   // pending failure status; the body is drained and this is reported at the end
-        bool replaced;
-
-        int on_chunk(ref const HTTPMessage request, const(ubyte)[] chunk, bool final_chunk, ref Stream s)
-        {
-            if (!final_chunk)
-            {
-                if (error)
-                    return 0;
-                size_t written;
-                Result r = file.write(chunk, written);
-                if (!r || written != chunk.length)
-                {
-                    writeWarning("fileserver: write '", tmp[], "' failed: ", r.system_code);
-                    error = 500;
-                    discard();
-                }
-                return 0;
-            }
-
-            ushort status = error ? error : commit();
-            FileServer o = owner;
-            o.send_status(request.http_version, s, status, request);
-            o.finish_upload(&this);
-            return 0;
-        }
-
-        ushort commit()
-        {
-            file.close();
-            if (replaced)
-                delete_file(target[]);
-            Result mv = rename_file(tmp[], target[]);
-            if (!mv)
-            {
-                writeWarning("fileserver: could not swap '", tmp[], "' into place: ", mv.system_code);
-                return 500;
-            }
-            writeInfo("fileserver: stored '", target[], "'");
-            return replaced ? 200 : 201;
-        }
-
-        void discard()
-        {
-            if (file.is_open)
-            {
-                file.close();
-                delete_file(tmp[]);
-            }
-        }
-
-        void stream_state(ActiveObject, StateSignal signal)
-        {
-            // the connection died mid-body; the temporary is discarded, the target untouched
-            if (signal != StateSignal.online)
-                owner.finish_upload(&this);
-        }
-    }
-
-    static struct Download
-    {
-    nothrow @nogc:
-        enum stream_threshold = 64 * 1024;  // buffer smaller responses (they remain compressible)
-        enum chunk_size = 16 * 1024;
-        enum backlog_high = 64 * 1024;      // stop pumping while this much is queued on the stream
-        FileServer owner;
-        Stream stream;
-        File file;
-        ulong remaining;
-
-        // returns true when the transfer completed or died (and this context was freed)
-        bool pump()
-        {
-            while (true)
-            {
-                if (!stream.running || remaining == 0)
-                {
-                    owner.finish_download(&this);
-                    return true;
-                }
-                if (stream.tx_backlog() >= backlog_high)
-                    return false;
-
-                ubyte[chunk_size] buf = void;
-                size_t take = remaining < chunk_size ? cast(size_t)remaining : chunk_size;
-                size_t got;
-                Result r = file.read(buf[0 .. take], got);
-                if (r && got == take && stream.write(buf[0 .. got]) == cast(ptrdiff_t)got)
-                {
-                    remaining -= got;
-                    continue;
-                }
-
-                // the Content-Length is already promised; drop the connection so the client
-                // sees a broken transfer rather than a silently short file
-                writeWarning("fileserver: transfer failed mid-body, dropping connection");
-                Stream s = stream;
-                FileServer o = owner;
-                o.finish_download(&this);
-                s.destroy();
-                return true;
-            }
-        }
-
-        void stream_state(ActiveObject, StateSignal signal)
-        {
-            if (signal != StateSignal.online)
-                owner.finish_download(&this);
-        }
-    }
 }
 
 
