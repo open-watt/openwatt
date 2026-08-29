@@ -6,7 +6,8 @@ version (SmartEVSE):
 
 import urt.inet : IPAddr;
 import urt.string.format : tconcat;
-import urt.time : MonoTime, getTime, msecs, seconds;
+import urt.system : get_cpu_load, get_sysinfo;
+import urt.time : DateTime, MonoTime, getAppTime, getDateTime, getTime, msecs, seconds, wall_time_set;
 
 import manager : g_app;
 
@@ -171,6 +172,7 @@ void render(MonoTime now)
         case 2:  draw_diagnostics(); break;
         default: draw_status();      break;
     }
+    draw_footer();
     g_display.dirty = true;
 }
 
@@ -184,6 +186,25 @@ void header(const(char)[] title)
     line(0, title);
     const(char)[] marker = tconcat(g_screen.page + 1, '/', screen_pages);
     display_text(g_display, display_width - text_width(marker), 0, marker);
+}
+
+void draw_footer()
+{
+    char[8] clock = "--:--:--";
+    if (wall_time_set())
+    {
+        DateTime now = getDateTime();
+        clock[0] = char('0' + now.hour / 10);
+        clock[1] = char('0' + now.hour % 10);
+        clock[3] = char('0' + now.minute / 10);
+        clock[4] = char('0' + now.minute % 10);
+        clock[6] = char('0' + now.second / 10);
+        clock[7] = char('0' + now.second % 10);
+    }
+    line(7, clock[]);
+
+    const(char)[] uptime = tconcat(seconds(getAppTime().as!"seconds"));
+    display_text(g_display, display_width - text_width(uptime), 7 * font_small_height, uptime);
 }
 
 const(char)[] deci_amps(uint deci)
@@ -240,28 +261,26 @@ void draw_network()
     const ScreenNetworkInfo* n = &g_screen.network;
     if (n.sta_state == ScreenLinkState.none)
         line(1, "WiFi: not configured");
+    else if (n.sta_state == ScreenLinkState.down)
+        line(1, tconcat("WiFi ... ", n.sta_ssid[0 .. n.sta_ssid_len]));
     else
     {
-        line(1, tconcat("WiFi: ", n.sta_state == ScreenLinkState.up ? "connected" : "connecting"));
-        line(2, tconcat(' ', n.sta_ssid[0 .. n.sta_ssid_len]));
-        if (n.sta_state == ScreenLinkState.up)
-        {
-            line(3, tconcat(' ', n.sta_ip));
-            line(4, tconcat(' ', n.sta_rssi, "dBm  ch", n.channel));
-        }
+        line(1, tconcat("WiFi ", n.sta_ssid[0 .. n.sta_ssid_len]));
+        line(2, tconcat(' ', n.sta_ip));
+        line(3, tconcat(' ', n.sta_rssi, "dBm  ch", n.channel));
     }
 
     if (n.ap_state != ScreenLinkState.none)
     {
-        line(5, tconcat("AP: ", n.ap_ssid[0 .. n.ap_ssid_len],
+        line(4, tconcat("AP ", n.ap_ssid[0 .. n.ap_ssid_len],
                         n.ap_state == ScreenLinkState.up ? "" : " (down)"));
         if (n.ap_state == ScreenLinkState.up)
-            line(6, tconcat(' ', n.ap_ip, "  ", n.ap_clients, " sta"));
+            line(5, tconcat(' ', n.ap_ip, "  ", n.ap_clients, " sta"));
     }
 
     MACAddress mac = n.sta_state != ScreenLinkState.none ? n.sta_mac : n.ap_mac;
     if (mac != MACAddress())
-        line(7, tconcat("MAC ", mac));
+        line(6, tconcat(mac));
 }
 
 void draw_diagnostics()
@@ -271,7 +290,13 @@ void draw_diagnostics()
     line(2, tconcat("PP ", PPVoltageMV, "mV  cable ", MaxCapacity, 'A'));
     line(3, tconcat("Temp ", TemperatureVoltageMV, "mV  ", temperature_c(), 'C'));
     line(4, tconcat("PWM ", CurrentPWM, "/1024"));
-    line(5, tconcat("C1 ", Contactor1 ? "on" : "off", "  C2 ", Contactor2 ? "on" : "off"));
-    if (ChargeDelay || ActivationMode != 255)
-        line(6, tconcat("Delay ", ChargeDelay, "s  Act ", ActivationMode));
+    if (ChargeDelay)
+        line(5, tconcat("C1 ", Contactor1 ? "on" : "off", " C2 ", Contactor2 ? "on" : "off",
+                        " Dly ", ChargeDelay, 's'));
+    else
+        line(5, tconcat("C1 ", Contactor1 ? "on" : "off", "  C2 ", Contactor2 ? "on" : "off"));
+
+    auto info = get_sysinfo();
+    line(6, tconcat("RAM ", info.pools[0].used >> 10, '/', info.pools[0].total >> 10,
+                    "K CPU ", get_cpu_load(), '%'));
 }

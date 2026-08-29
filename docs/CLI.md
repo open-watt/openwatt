@@ -654,7 +654,9 @@ on its network page.
 The front panel cycles between status, network, and diagnostics pages with the
 left/right buttons; the middle button returns to the status page. Any button
 wakes the backlight, the display returns to the status page after 30 seconds
-and the backlight turns off after 5 minutes of inactivity.
+and the backlight turns off after 5 minutes of inactivity. Every page carries a
+footer with the wall clock (`--:--:--` until the time is synchronised) and
+uptime; the diagnostics page also reports RAM use and CPU load.
 
 ### `/protocol/ble/device`
 
