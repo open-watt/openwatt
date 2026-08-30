@@ -750,6 +750,16 @@ protected: // TODO: should probably be private?
     Array!VLANInterface _vlans;
 }
 
+BaseInterface interface_for_kernel_index(int index)
+{
+    if (index == 0)
+        return null;
+    foreach (iface; Collection!BaseInterface().values)
+        if (iface.kernel_ifindex == index)
+            return iface;
+    return null;
+}
+
 
 class InterfaceModule : Module
 {

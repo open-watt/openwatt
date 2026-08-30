@@ -27,7 +27,7 @@ import manager.sync.discovery : PeerRole;
 import manager.sync.encoder;
 
 import router.iface;
-import router.iface.endpoint : UDPEndpoint, udp_open;
+import router.iface.endpoint : UDPEndpoint, UDPReceiveInfo, udp_open;
 import router.iface.packet;
 import router.iface.udp : UDPFrame;
 
@@ -1209,7 +1209,7 @@ private:
         deliver_frame(cast(const(ubyte)[])p.data);
     }
 
-    package void on_udp_receive(UDPEndpoint*, const(void)[] data, ref const InetAddress, MonoTime) nothrow @nogc
+    package void on_udp_receive(UDPEndpoint*, const(void)[] data, ref const UDPReceiveInfo) nothrow @nogc
     {
         deliver_frame(cast(const(ubyte)[])data);
     }

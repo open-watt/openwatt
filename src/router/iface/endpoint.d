@@ -66,7 +66,15 @@ bool parse_ow_transport(ref const Packet packet, out ubyte protocol, out const(u
 }
 
 
-alias UDPRecvHandler = void delegate(UDPEndpoint* ep, const(void)[] data, ref const InetAddress src, MonoTime rx_time) nothrow @nogc;
+struct UDPReceiveInfo
+{
+    InetAddress source;
+    InetAddress destination;
+    MonoTime rx_time;
+    BaseInterface ingress;
+}
+
+alias UDPRecvHandler = void delegate(UDPEndpoint* ep, const(void)[] data, ref const UDPReceiveInfo info) nothrow @nogc;
 alias EtherTcpInput = void function(MACAddress src, MACAddress dst, const(void)[] segment, MonoTime rx_time) nothrow @nogc;
 
 struct UdpHeader
@@ -489,8 +497,12 @@ nothrow @nogc:
             if (packet.eth.dst != station.mac && !packet.eth.dst.is_broadcast && !(packet.eth.dst.is_multicast && joined))
                 return;
 
-            InetAddress src = InetAddress(packet.eth.src.b, loadBigEndian(&udp.src_port));
-            udp_deliver(owner, segment[UdpHeader.sizeof .. length], src, packet.creation_time);
+            UDPReceiveInfo info;
+            info.source = InetAddress(packet.eth.src.b, loadBigEndian(&udp.src_port));
+            info.destination = InetAddress(packet.eth.dst.b, _local_port);
+            info.rx_time = packet.creation_time;
+            info.ingress = station;
+            udp_deliver(owner, segment[UdpHeader.sizeof .. length], info);
         }
 
     private:
@@ -556,11 +568,11 @@ nothrow @nogc:
 }
 
 
-void udp_deliver(UDPEndpoint* endpoint, const(void)[] data, ref const InetAddress src, MonoTime rx_time)
+void udp_deliver(UDPEndpoint* endpoint, const(void)[] data, ref const UDPReceiveInfo info)
 {
-    if (!endpoint || endpoint._closing || (endpoint._connected && src != endpoint._remote))
+    if (!endpoint || endpoint._closing || (endpoint._connected && info.source != endpoint._remote))
         return;
-    endpoint._on_recv(endpoint, data, src, rx_time);
+    endpoint._on_recv(endpoint, data, info);
 }
 
 
@@ -659,18 +671,25 @@ unittest
 
     struct TestEtherSink
     {
+        BaseInterface expected_ingress;
         size_t received;
-        ubyte[4] payload;
         MACAddress source;
+        MACAddress destination;
         ushort source_port;
+        ushort destination_port;
+        ubyte[4] payload;
+        bool ingress_matches;
 
-        void recv(UDPEndpoint*, const(void)[] data, ref const InetAddress src, MonoTime) nothrow @nogc
+        void recv(UDPEndpoint*, const(void)[] data, ref const UDPReceiveInfo info) nothrow @nogc
         {
             ++received;
             assert(data.length == payload.length);
             payload[] = cast(const(ubyte)[])data;
-            source = MACAddress(src._a.ether.addr);
-            source_port = src._a.ether.port;
+            source = MACAddress(info.source._a.ether.addr);
+            destination = MACAddress(info.destination._a.ether.addr);
+            source_port = info.source._a.ether.port;
+            destination_port = info.destination._a.ether.port;
+            ingress_matches = info.ingress is expected_ingress;
         }
 
         void input(ref Packet packet, BaseInterface iface) nothrow @nogc
@@ -741,6 +760,7 @@ nothrow @nogc:
 
     TestEtherStation station = alloc!TestEtherStation(CID(0xF001));
     BridgeInterface master = alloc!BridgeInterface(CID(0xF002));
+    sink.expected_ingress = station;
     InetAddress station_local = InetAddress(station.mac.b, 500);
     UDPEndpoint* bound = udp_open(&station_local, null, &sink.recv, station);
     assert(bound);
@@ -751,6 +771,7 @@ nothrow @nogc:
     unregister_frame_handler(PacketType.ethernet);
     assert(sink.received == 1 && sink.payload == [1, 2, 3, 4]);
     assert(sink.source == eth.src && sink.source_port == 49_152);
+    assert(sink.destination == eth.dst && sink.destination_port == 500 && sink.ingress_matches);
 
     bound.close();
     update_udp_endpoints();

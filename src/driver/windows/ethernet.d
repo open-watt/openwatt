@@ -83,6 +83,7 @@ nothrow @nogc:
     override CompletionStatus shutdown()
     {
         _pcap.close();
+        set_kernel_ifindex(0);
         return super.shutdown();
     }
 
@@ -139,6 +140,7 @@ private:
         OSAdapterInfo info;
         if (!query_adapter(_adapter[], info))
             return;
+        set_kernel_ifindex(int(info.if_index));
         if (info.mac != MACAddress())
             adopt_mac(info.mac);
         AdapterChange c = apply_os_adapter_info(this, _l2mtu, _max_l2mtu, _status, info);

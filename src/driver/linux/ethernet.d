@@ -77,6 +77,7 @@ nothrow @nogc:
             ubyte[6] hw = void;
             if (_raw.read_mac(_adapter[], hw))
                 adopt_mac(MACAddress(hw));
+            set_kernel_ifindex(_raw.ifindex);
         }
 
         SysTime now = getSysTime();
@@ -94,6 +95,7 @@ nothrow @nogc:
     override CompletionStatus shutdown()
     {
         _raw.close();
+        set_kernel_ifindex(0);
         return super.shutdown();
     }
 

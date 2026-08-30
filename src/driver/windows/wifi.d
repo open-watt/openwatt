@@ -313,6 +313,7 @@ protected:
     override CompletionStatus shutdown()
     {
         _pcap.close();
+        set_kernel_ifindex(0);
         clear_os_state();
         return super.shutdown();
     }
@@ -438,6 +439,7 @@ private:
         OSAdapterInfo info;
         if (!query_adapter(r.adapter, info))
             return;
+        set_kernel_ifindex(int(info.if_index));
         if (info.mac != MACAddress())
             adopt_mac(info.mac);
         // note the sysfs/iphlpapi path carries no link speed: iphlpapi's figure is fabricated for a

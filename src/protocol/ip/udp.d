@@ -158,7 +158,7 @@ void udp_input(ref IPStack stack, ref Packet pkt, BaseInterface iface, bool grou
         {
             if (pcb.owner)
             {
-                pcb.owner.deliver(IPAddr(ip.src), src_port, body_, pkt.creation_time);
+                pcb.owner.deliver(IPAddr(ip.src), src_port, dst, dst_port, iface, body_, pkt.creation_time);
                 delivered = true;
                 if (!multicast && !broadcast)
                     return;
