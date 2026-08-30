@@ -101,6 +101,7 @@ nothrow @nogc:
             return "stream cannot be null";
         if (value is _stream)
             return null;
+        release_tx_ready();
         if (_conn.get !is null)
             _conn.stop();
         _stream = value;
@@ -305,6 +306,7 @@ nothrow @nogc:
 
         if (_handshake_state == HandshakeState.completed)
         {
+            subscribe_tx_ready();
             if (_selected_cert)
                 log.info("HTTPS session on ", _stream.name, " cert='", _selected_cert.name, "'");
             else
@@ -328,6 +330,7 @@ nothrow @nogc:
 
     final override CompletionStatus shutdown()
     {
+        release_tx_ready();
         version (MbedTLS)
         {
             free_mbedtls_contexts();
@@ -619,6 +622,33 @@ nothrow @nogc:
         return 0;
     }
 
+    final override size_t tx_request() const
+    {
+        if (_handshake_state != HandshakeState.completed)
+            return 0;
+        if (auto stream = _stream.get)
+            return stream.tx_request;
+        return 0;
+    }
+
+    final override bool supports_tx_pages() const
+    {
+        if (auto stream = _stream.get)
+            return stream.supports_tx_pages;
+        return _conn.has_remote;
+    }
+
+    final override void tx_ready_handler(TxReadyHandler handler)
+    {
+        _tx_observer = handler;
+    }
+
+    final override void release_tx_ready_handler(TxReadyHandler handler)
+    {
+        if (_tx_observer is handler)
+            _tx_observer = null;
+    }
+
     final override ptrdiff_t pending()
         => _app_buffer.length;
 
@@ -640,7 +670,33 @@ private:
     ObjectRef!Stream _stream;
     Array!ubyte _receive_buffer;
     Array!ubyte _app_buffer;
+    TxReadyHandler _tx_observer;
     SysTime _handshake_start;
+    bool _tx_ready_subscribed;
+
+    void subscribe_tx_ready()
+    {
+        if (_tx_ready_subscribed || !_stream.supports_tx_pages)
+            return;
+        _stream.tx_ready_handler(&tx_ready);
+        _tx_ready_subscribed = true;
+    }
+
+    void release_tx_ready()
+    {
+        if (!_tx_ready_subscribed)
+            return;
+        if (auto stream = _stream.get)
+            stream.release_tx_ready_handler(&tx_ready);
+        _tx_ready_subscribed = false;
+    }
+
+    void tx_ready(Stream)
+    {
+        notify_tx_ready();
+        if (_tx_observer)
+            _tx_observer(this);
+    }
 
     void incoming_message(const(void)[] message)
     {

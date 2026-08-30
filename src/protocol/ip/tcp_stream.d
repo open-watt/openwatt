@@ -262,6 +262,20 @@ nothrow @nogc:
     override size_t tx_request() const
         => _conn ? _conn.tx_request : 0;
 
+    override bool supports_tx_pages() const
+        => true;
+
+    override void tx_ready_handler(TxReadyHandler handler)
+    {
+        _tx_ready = handler;
+    }
+
+    override void release_tx_ready_handler(TxReadyHandler handler)
+    {
+        if (_tx_ready is handler)
+            _tx_ready = null;
+    }
+
 protected:
     override bool queue_tx_page(void[] page)
     {
@@ -275,6 +289,7 @@ protected:
 
 private:
     TCPConnection* _conn;
+    TxReadyHandler _tx_ready;
     InetAddress _remote;
     ushort _port;
     SysTime _last_retry;
@@ -287,7 +302,11 @@ private:
     Duration _keep_interval;
 
     void on_tx_ready(TCPConnection* conn)
-        => notify_tx_ready();
+    {
+        notify_tx_ready();
+        if (_tx_ready)
+            _tx_ready(this);
+    }
 
     void on_data(TCPConnection* conn, const(void)[] data, MonoTime rx_time)
     {

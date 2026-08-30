@@ -497,18 +497,6 @@ nothrow @nogc:
             return null;
     }
 
-    size_t tx_space() const pure
-    {
-        if (_phase != Phase.open)
-            return 0;
-        version (UseInternalIPStack)
-            enum size_t ceiling = TcpSendBufSize;
-        else
-            enum size_t ceiling = max_tx;
-        size_t queued = tx_backlog;
-        return queued < ceiling ? ceiling - queued : 0;
-    }
-
     size_t tx_request() const pure
     {
         if (_phase != Phase.open)
@@ -553,7 +541,7 @@ nothrow @nogc:
                 return 0;
             total += buffer.length;
         }
-        if (total == 0 || total > tx_space())
+        if (_phase != Phase.open || total == 0)
             return 0;
 
         void[] page = page_alloc_for(total);
@@ -575,7 +563,7 @@ nothrow @nogc:
 
     bool send_page(void[] page)
     {
-        if (!page.ptr || page.length == 0 || page.length > tx_space())
+        if (_phase != Phase.open || !page.ptr || page.length == 0)
             return false;
 
         version (Windows)
@@ -737,7 +725,6 @@ nothrow @nogc:
 
 private:
     enum Phase : ubyte { connecting, open, dead }
-    enum size_t max_tx = 256 * 1024;
     enum size_t max_tx_refill = 16 * 1024;
 
     struct TxPage
@@ -977,8 +964,9 @@ private:
         bool post_send(SendOp* op)
         {
             op.io.ov = OVERLAPPED.init;
-            WSABUF wb = WSABUF(cast(uint)(op.page.length - op.offset),
-                               cast(ubyte*)op.page.ptr + op.offset);
+            size_t remaining = op.page.length - op.offset;
+            uint length = remaining < uint.max ? cast(uint)remaining : uint.max;
+            WSABUF wb = WSABUF(length, cast(ubyte*)op.page.ptr + op.offset);
             uint sent;
             ++_outstanding;
             if (WSASend(_handle, &wb, 1, &sent, 0, &op.io.ov, null) != 0 &&

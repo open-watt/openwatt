@@ -62,6 +62,11 @@ nothrow @nogc:
     {
         if (_inner.get is value)
             return;
+        if (_tx_ready_subscribed)
+        {
+            _inner.release_tx_ready_handler(&tx_ready);
+            _tx_ready_subscribed = false;
+        }
         if (_subscribed)
         {
             _inner.unsubscribe(&inner_state_change);
@@ -317,6 +322,25 @@ nothrow @nogc:
     override ulong rx_link_speed() const
         => _inner ? _inner.rx_link_speed : 0;
 
+    override size_t tx_backlog() const
+        => _inner ? _inner.tx_backlog : 0;
+
+    override size_t tx_request() const
+        => _inner ? _inner.tx_request : 0;
+
+    override bool supports_tx_pages() const
+        => _inner && _inner.supports_tx_pages;
+
+    override void tx_ready_handler(TxReadyHandler handler)
+    {
+        _tx_observer = handler;
+    }
+
+    override void release_tx_ready_handler(TxReadyHandler handler)
+    {
+        if (_tx_observer is handler)
+            _tx_observer = null;
+    }
 
 protected:
 
@@ -359,12 +383,22 @@ protected:
 
         _inner.subscribe(&inner_state_change);
         _subscribed = true;
+        if (_inner.supports_tx_pages)
+        {
+            _inner.tx_ready_handler(&tx_ready);
+            _tx_ready_subscribed = true;
+        }
 
         return CompletionStatus.complete;
     }
 
     override CompletionStatus shutdown()
     {
+        if (_tx_ready_subscribed)
+        {
+            _inner.release_tx_ready_handler(&tx_ready);
+            _tx_ready_subscribed = false;
+        }
         if (_subscribed)
         {
             _inner.unsubscribe(&inner_state_change);
@@ -385,7 +419,9 @@ private:
     TerminalChannel _terminal;
     Array!char _terminal_type;
     Array!ubyte _tail;
+    TxReadyHandler _tx_observer;
     bool _subscribed;
+    bool _tx_ready_subscribed;
     bool _terminal_aware;
     TelnetRole _role;
 
@@ -394,6 +430,13 @@ private:
     ulong _client_state;
     ulong _client_state_req;
 
+    void tx_ready(Stream)
+    {
+        notify_tx_ready();
+        if (_tx_observer)
+            _tx_observer(this);
+    }
+
     void inner_state_change(ActiveObject, StateSignal signal)
     {
         if (signal != StateSignal.offline)
@@ -401,6 +444,11 @@ private:
 
         if (_inner && (_inner.flags & ObjectFlags.temporary))
         {
+            if (_tx_ready_subscribed)
+            {
+                _inner.release_tx_ready_handler(&tx_ready);
+                _tx_ready_subscribed = false;
+            }
             _inner.unsubscribe(&inner_state_change);
             _subscribed = false;
             _inner = null;
