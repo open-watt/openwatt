@@ -19,6 +19,7 @@ import urt.variant;
 
 import manager.base;
 import manager.collection;
+import manager.console.session : ClientFeatures;
 import manager.element : Element;
 import manager.record : Sample;
 import manager.series : Constraint, DataFormat, RecordBlock, Scalar, SeriesKind, ValueType;
@@ -224,6 +225,30 @@ nothrow @nogc:
             write_str(s[]);
         }
         _buf.append("]");
+        send_frame(peer);
+    }
+
+    override void encode_console(SyncPeer peer, uint seq, SyncConsoleEvent event, const(char)[] data = null, SyncConsoleTerminal terminal = SyncConsoleTerminal())
+    {
+        begin_frame("console");
+        _buf.append(",\"seq\":", seq, ",\"event\":\"", enum_key_from_value!SyncConsoleEvent(event), '"');
+        final switch (event)
+        {
+            case SyncConsoleEvent.open:
+            case SyncConsoleEvent.terminal:
+                _buf.append(",\"width\":", terminal.width, ",\"height\":", terminal.height,
+                            ",\"features\":", ushort(terminal.features), ",\"terminal\":");
+                write_str(terminal.type);
+                break;
+            case SyncConsoleEvent.input:
+            case SyncConsoleEvent.output:
+                _buf ~= ",\"data\":";
+                write_str(data);
+                break;
+            case SyncConsoleEvent.close:
+            case SyncConsoleEvent.closed:
+                break;
+        }
         send_frame(peer);
     }
 
@@ -851,6 +876,44 @@ nothrow @nogc:
                 const(char)[] text = optional_str(json, "text");
                 if (!bad_frame)
                     sync.inbound_suggest(peer, seq, text);
+                break;
+            }
+
+            case "console":
+            {
+                uint seq = require_uint(json, "seq");
+                const(char)[] event_text = require_str(json, "event");
+                const(SyncConsoleEvent)* event_value = enum_from_key!SyncConsoleEvent(event_text);
+                if (!event_value)
+                    bad("event");
+                if (bad_frame)
+                    break;
+
+                SyncConsoleEvent event = *event_value;
+                const(char)[] data;
+                SyncConsoleTerminal terminal;
+                final switch (event)
+                {
+                    case SyncConsoleEvent.open:
+                    case SyncConsoleEvent.terminal:
+                        uint width = require_uint(json, "width");
+                        uint height = require_uint(json, "height");
+                        uint features = require_uint(json, "features");
+                        const(char)[] terminal_type = optional_str(json, "terminal");
+                        if (width > ushort.max || height > ushort.max || features > ushort.max)
+                            bad("terminal state");
+                        terminal = SyncConsoleTerminal(cast(ushort)width, cast(ushort)height, cast(ClientFeatures)features, terminal_type);
+                        break;
+                    case SyncConsoleEvent.input:
+                    case SyncConsoleEvent.output:
+                        data = require_str(json, "data");
+                        break;
+                    case SyncConsoleEvent.close:
+                    case SyncConsoleEvent.closed:
+                        break;
+                }
+                if (!bad_frame)
+                    sync.inbound_console(peer, seq, event, data, terminal);
                 break;
             }
 

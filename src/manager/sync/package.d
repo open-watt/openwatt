@@ -72,6 +72,7 @@ import manager.log;
 import manager.syslog;
 import manager.system : hostname;
 import manager.sync.binary_encoder;
+import manager.sync.console;
 import manager.sync.discovery : PeerRole;
 import manager.sync.encoder;
 import manager.sync.json_encoder;
@@ -132,6 +133,7 @@ nothrow @nogc:
     Map!(CID, SyncPeer)        authority;         // only remote auth; absence = local
     Map!(uint, PendingForward) pending_forwards;
     Array!PendingInboundCmd    pending_inbound_cmds;
+    Map!(uint, PendingSyncConsole) pending_sync_consoles;
     uint                       next_seq;
     uint                       _timebase_version;  // our version as a clock authority
     SyncPeer                   _applying_push;     // peer whose delta push we're applying
@@ -152,6 +154,7 @@ nothrow @nogc:
 
         g_app.console.register_command!(sync_log_sub, "log-sub")("/sync", this);
         g_app.console.register_command!(sync_model_sub, "model-sub")("/sync", this);
+        g_app.console.register_command!(sync_console, "console")("/sync", this);
 
         set_log_hostname(hostname[]);
 
@@ -524,6 +527,27 @@ nothrow @nogc:
         p._pending_live.clear();
         p._live_rescan = false;
         p._rescan_cursor = 0;
+
+        if (p._console_session)
+        {
+            SyncConsoleStream stream = dyn_cast!SyncConsoleStream(p._console_session.stream);
+            if (stream)
+                stream.detach_peer();
+            g_app.console.destroy_session(p._console_session);
+            p._console_session = null;
+            p._console_seq = 0;
+        }
+
+        Array!uint pending_console;
+        foreach (kvp; pending_sync_consoles[])
+            if (kvp.value.peer is p)
+                pending_console ~= kvp.key;
+        foreach (seq; pending_console[])
+        {
+            PendingSyncConsole pending = pending_sync_consoles[seq];
+            pending_sync_consoles.remove(seq);
+            pending.handler(seq, null, true);
+        }
 
         // forwards die with either endpoint; a dead destination answers the origin with err
         Array!uint doomed;
@@ -1024,7 +1048,6 @@ nothrow @nogc:
         CommandState cmd = g_app.console.execute(session, text, result);
         if (cmd is null)
         {
-            // Completed synchronously (or failed to parse).
             encoder_for(from._encoder).encode_result(from, seq, result, session.takeOutput()[]);
             g_app.console.destroy_session(session);
             return;
@@ -1037,6 +1060,94 @@ nothrow @nogc:
         Array!String suggestions = g_app.console.suggest(text, g_app.console.root);
         MutableString!0 completed = g_app.console.complete(text, g_app.console.root);
         encoder_for(from._encoder).encode_suggestions(from, seq, suggestions[], completed[]);
+    }
+
+    void inbound_console(SyncPeer from, uint seq, SyncConsoleEvent event, const(char)[] data, SyncConsoleTerminal terminal)
+    {
+        if (!seq)
+            return;
+        final switch (event)
+        {
+            case SyncConsoleEvent.open:
+            {
+                SyncEncoder encoder = encoder_for(from._encoder);
+                if (from._console_session)
+                {
+                    encoder.encode_console(from, seq, SyncConsoleEvent.output, "console already open\r\n");
+                    encoder.encode_console(from, seq, SyncConsoleEvent.closed);
+                    return;
+                }
+
+                auto streams = Collection!SyncConsoleStream();
+                const(char)[] name = streams.generate_name("sync-console");
+                enum flags = cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary);
+                SyncConsoleStream stream = streams.create(name, flags, NamedArgument("peer", from), NamedArgument("sequence", seq));
+                if (!stream)
+                {
+                    encoder.encode_console(from, seq, SyncConsoleEvent.closed);
+                    return;
+                }
+                stream.set_terminal_state(terminal);
+                stream.terminal_channel().pending_events = TerminalEvents.none;
+
+                Session session = g_app.console.createSession!Session(stream);
+                if (!session)
+                {
+                    stream.destroy();
+                    encoder.encode_console(from, seq, SyncConsoleEvent.closed);
+                    return;
+                }
+                from._console_session = session;
+                from._console_seq = seq;
+                session.show_prompt(true);
+                break;
+            }
+            case SyncConsoleEvent.input:
+            {
+                if (!from._console_session || from._console_seq != seq)
+                    return;
+                SyncConsoleStream stream = dyn_cast!SyncConsoleStream(from._console_session.stream);
+                if (stream)
+                    stream.receive_input(data);
+                break;
+            }
+            case SyncConsoleEvent.output:
+            {
+                PendingSyncConsole* pending = seq in pending_sync_consoles;
+                if (pending && pending.peer is from)
+                    pending.handler(seq, data, false);
+                break;
+            }
+            case SyncConsoleEvent.terminal:
+            {
+                if (!from._console_session || from._console_seq != seq)
+                    return;
+                SyncConsoleStream stream = dyn_cast!SyncConsoleStream(from._console_session.stream);
+                if (stream)
+                    stream.set_terminal_state(terminal);
+                break;
+            }
+            case SyncConsoleEvent.close:
+            {
+                if (!from._console_session || from._console_seq != seq)
+                    return;
+                SyncConsoleStream stream = dyn_cast!SyncConsoleStream(from._console_session.stream);
+                if (stream)
+                    stream.close_from_peer();
+                g_app.console.destroy_session(from._console_session);
+                break;
+            }
+            case SyncConsoleEvent.closed:
+            {
+                PendingSyncConsole* pending = seq in pending_sync_consoles;
+                if (!pending || pending.peer !is from)
+                    return;
+                PendingSyncConsole request = *pending;
+                pending_sync_consoles.remove(seq);
+                request.handler(seq, null, true);
+                break;
+            }
+        }
     }
 
     void inbound_result(SyncPeer from, uint seq, ref const Variant v, const(char)[] out_text)
@@ -2365,12 +2476,68 @@ nothrow @nogc:
         return dev;
     }
 
+    bool has_open_console(SyncPeer peer)
+    {
+        foreach (pending; pending_sync_consoles.values)
+            if (pending.peer is peer)
+                return true;
+        return false;
+    }
+
+    uint open_console(SyncPeer peer, ushort width, ushort height, ClientFeatures features, const(char)[] terminal_type, SyncConsoleHandler handler)
+    {
+        if (!peer || !peer.running || handler is null || has_open_console(peer))
+            return 0;
+        uint seq = alloc_seq();
+        pending_sync_consoles[seq] = PendingSyncConsole(peer, handler);
+        encoder_for(peer._encoder).encode_console(peer, seq, SyncConsoleEvent.open, null, SyncConsoleTerminal(width, height, features, terminal_type));
+        return (seq in pending_sync_consoles) !is null ? seq : 0;
+    }
+
+    void send_console_input(SyncPeer peer, uint seq, const(char)[] data)
+    {
+        PendingSyncConsole* pending = seq in pending_sync_consoles;
+        if (pending && pending.peer is peer && data.length)
+            encoder_for(peer._encoder).encode_console(peer, seq, SyncConsoleEvent.input, data);
+    }
+
+    void update_console_terminal(SyncPeer peer, uint seq, ushort width, ushort height, ClientFeatures features, const(char)[] terminal_type)
+    {
+        PendingSyncConsole* pending = seq in pending_sync_consoles;
+        if (pending && pending.peer is peer)
+            encoder_for(peer._encoder).encode_console(peer, seq, SyncConsoleEvent.terminal, null, SyncConsoleTerminal(width, height, features, terminal_type));
+    }
+
+    void close_console(SyncPeer peer, uint seq)
+    {
+        PendingSyncConsole* pending = seq in pending_sync_consoles;
+        if (!pending || pending.peer !is peer)
+            return;
+        pending_sync_consoles.remove(seq);
+        if (peer.running)
+            encoder_for(peer._encoder).encode_console(peer, seq, SyncConsoleEvent.close);
+    }
+
+    void console_stream_closed(SyncPeer peer, uint seq, bool notify)
+    {
+        if (!peer || peer._console_seq != seq)
+            return;
+        peer._console_session = null;
+        peer._console_seq = 0;
+        if (notify && peer.running)
+            encoder_for(peer._encoder).encode_console(peer, seq, SyncConsoleEvent.closed);
+    }
+
     uint alloc_seq()
     {
-        uint s = ++next_seq;
-        if (s == 0)
-            s = ++next_seq;
-        return s;
+        for (;;)
+        {
+            uint s = ++next_seq;
+            if (s == 0)
+                continue;
+            if ((s in pending_forwards) is null && (s in pending_sync_consoles) is null)
+                return s;
+        }
     }
 }
 

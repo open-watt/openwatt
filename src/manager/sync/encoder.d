@@ -23,6 +23,7 @@ import urt.variant;
 
 import manager.base;
 import manager.collection : CID;
+import manager.console.session : ClientFeatures;
 import manager.element : Element;
 import manager.expression : NamedArgument;
 import manager.record : Sample;
@@ -44,6 +45,24 @@ enum SyncEncoderKind : ubyte
 
 enum uint model_protocol_version = 1;
 enum uint max_frame_size = 65_536;
+
+enum SyncConsoleEvent : ubyte
+{
+    open,
+    input,
+    output,
+    terminal,
+    close,
+    closed,
+}
+
+struct SyncConsoleTerminal
+{
+    ushort width;
+    ushort height;
+    ClientFeatures features;
+    const(char)[] type;
+}
 
 // Set at SyncModule.init() once singleton encoders exist.
 __gshared SyncEncoder[SyncEncoderKind.max + 1] g_encoders;
@@ -200,6 +219,8 @@ nothrow @nogc:
     // the candidate tokens plus the line extended by their common prefix.
     abstract void encode_suggest(SyncPeer peer, uint seq, const(char)[] text);
     abstract void encode_suggestions(SyncPeer peer, uint seq, const(String)[] suggestions, const(char)[] completed);
+
+    abstract void encode_console(SyncPeer peer, uint seq, SyncConsoleEvent event, const(char)[] data = null, SyncConsoleTerminal terminal = SyncConsoleTerminal());
 
     abstract void encode_sub(SyncPeer peer, const(char)[] pattern);
     abstract void encode_unsub(SyncPeer peer, const(char)[] pattern);

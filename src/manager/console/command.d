@@ -324,6 +324,15 @@ nothrow @nogc:
             _waiting_on.request_cancel();
     }
 
+    override bool consumes_input() const pure
+        => _waiting_on !is null && _waiting_on.consumes_input();
+
+    override void receive_input(const(char)[] data)
+    {
+        if (_waiting_on)
+            _waiting_on.receive_input(data);
+    }
+
 private:
     State _state = State.next_stmt;
     size_t _stmt = 0;
