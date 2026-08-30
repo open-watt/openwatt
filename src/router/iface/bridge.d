@@ -147,6 +147,8 @@ nothrow @nogc:
         assert(iface !is this, "Cannot add a bridge to itself!");
         assert(_members.length < _cpu_port, "Too many _members in the bridge!"); // member indices live below the pseudo-ports
         assert(!(iface.flags & ObjectFlags.slave), "Interface is already slaved!");
+        if (iface.flags & ObjectFlags.temporary)
+            return false;
 
         ubyte port = cast(ubyte)_members.length;
         if (!iface.set_master(this, port))
@@ -187,6 +189,7 @@ nothrow @nogc:
         if (running)
             update_link_speed();
 
+        iface.restart();
         return true;
     }
 
@@ -445,7 +448,7 @@ protected:
     }
 
     // Decapped exotic traffic enters the exotic switching domain at the attachment.
-    final override void station_deliver(ref Packet inner)
+    final override void station_deliver_exotic(ref Packet inner)
     {
         ulong src_address = source_address(inner);
         if (!src_address.is_multicast_address)

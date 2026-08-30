@@ -264,7 +264,6 @@ private static immutable ubyte[6] zero_mac;
 alias TCPRecvHandler   = void delegate(TCPConnection* conn, const(void)[] data, MonoTime rx_time) nothrow @nogc;
 alias TCPEventHandler  = void delegate(TCPConnection* conn, IPEvent event) nothrow @nogc;
 alias TCPAcceptHandler = void delegate(TCPListener* listener, TCPConnection* conn, MonoTime rx_time) nothrow @nogc;
-alias UDPRecvHandler   = void delegate(UDPEndpoint* ep, const(void)[] data, ref const InetAddress from, MonoTime rx_time) nothrow @nogc;
 
 TCPConnection* tcp_connect(InetAddress remote, TCPRecvHandler on_recv, TCPEventHandler on_event = null, const(InetAddress)* local = null)
 {
@@ -274,16 +273,12 @@ TCPConnection* tcp_connect(InetAddress remote, TCPRecvHandler on_recv, TCPEventH
             return null;     // TODO: ipv6
         if (remote.family == AddressFamily.ether)
         {
-            // unbound floods the SYN, so the reply must be heard on every segment
             if (local && local.family == AddressFamily.ether && !local.addr_any)
             {
                 EthernetStation station = find_ether_station(MACAddress(local._a.ether.addr));
                 if (!station)
                     return null;
-                ensure_ether_tap(station);
             }
-            else
-                ether_request_tap_all();
         }
 
         TcpPcb* pcb = alloc!TcpPcb();
@@ -391,14 +386,11 @@ TCPListener* tcp_listen(InetAddress local, TCPAcceptHandler on_accept)
             return null;     // TODO: ipv6
         if (local.family == AddressFamily.ether)
         {
-            if (local.addr_any)
-                ether_request_tap_all();    // any-listener: accept on every segment
-            else
+            if (!local.addr_any)
             {
                 EthernetStation station = find_ether_station(MACAddress(local._a.ether.addr));
                 if (!station)
                     return null;
-                ensure_ether_tap(station);
             }
         }
 
@@ -482,184 +474,6 @@ TCPListener* tcp_listen(InetAddress local, TCPAcceptHandler on_accept)
 
 TCPListener* tcp_listen(ushort port, TCPAcceptHandler on_accept)
     => tcp_listen(InetAddress(IPAddr.any, port), on_accept);
-
-// `local` binds a receive address/port (null binds any:ephemeral);
-// when `remote` is set, send() targets it and the endpoint only delivers datagrams from that peer
-UDPEndpoint* udp_open(const(InetAddress)* local, const(InetAddress)* remote, UDPRecvHandler on_recv, EthernetStation ether_station = null)
-{
-    if ((local && local.family == AddressFamily.ether) || (remote && remote.family == AddressFamily.ether))
-        return udp_open_ether(local, remote, on_recv, ether_station);
-
-    version (UseInternalIPStack)
-    {
-        if ((local && local.family != AddressFamily.ipv4) || (remote && remote.family != AddressFamily.ipv4))
-            return null;
-        // The in-tree stack does UDP over v4 only; deliver datagrams inline.
-        UDPEndpoint* ep = alloc!UDPEndpoint();
-        ep._on_recv = on_recv;
-
-        UdpPcb* pcb = alloc!UdpPcb();
-        if (local && local.family == AddressFamily.ipv4)
-        {
-            pcb.local_addr = local._a.ipv4.addr;
-            pcb.local_port = local._a.ipv4.port;
-        }
-        if (pcb.local_port == 0)
-            pcb.local_port = allocate_udp_port();
-        if (!udp_bind_available(pcb, pcb.local_addr, pcb.local_port))
-        {
-            free(pcb);
-            free(ep);
-            return null;
-        }
-        if (remote && remote.family == AddressFamily.ipv4)
-        {
-            pcb.remote_addr = remote._a.ipv4.addr;
-            pcb.remote_port = remote._a.ipv4.port;
-            pcb.connected = true;
-            ep._remote = *remote;
-            ep._connected = true;
-        }
-        pcb.owner = ep;
-        ep._pcb = pcb;
-        udp_register(pcb);
-        _udp_eps ~= ep;
-        return ep;
-    }
-    else version (Windows)
-    {
-        if (local && local.family != AddressFamily.ipv4)
-            return null;
-        if (remote && remote.family != AddressFamily.ipv4)
-            return null;
-        IOCP_SOCKET s = ws_socket(WSA_AF_INET, WSA_SOCK_DGRAM, WSA_IPPROTO_UDP, null, 0, WSA_FLAG_OVERLAPPED);
-        if (s == INVALID_SOCKET)
-            return null;
-        sockaddr_in la;
-        la.sin_family = cast(short)WSA_AF_INET;
-        if (local)
-            la = to_sockaddr_in(*local);
-        if (ws_bind(s, &la, cast(int)sockaddr_in.sizeof) != 0)
-        {
-            ws_closesocket(s);
-            return null;
-        }
-        if (remote)
-        {
-            sockaddr_in ra = to_sockaddr_in(*remote);
-            if (ws_connect(s, &ra, cast(int)sockaddr_in.sizeof) != 0)
-            {
-                ws_closesocket(s);
-                return null;
-            }
-        }
-        UDPEndpoint* ep = alloc!UDPEndpoint();
-        ep._handle = s;
-        ep._on_recv = on_recv;
-        if (remote)
-        {
-            ep._remote = *remote;
-            ep._connected = true;
-        }
-        if (!g_app.reactor.associate(cast(HANDLE)s) || !ep.post_recv())
-        {
-            ws_closesocket(s);
-            free(ep);
-            return null;
-        }
-        _udp_eps ~= ep;
-        return ep;
-    }
-    else
-    {
-        AddressFamily af = AddressFamily.ipv4;
-        if (local && (local.family == AddressFamily.ipv4 || local.family == AddressFamily.ipv6))
-            af = local.family;
-        else if (remote && (remote.family == AddressFamily.ipv4 || remote.family == AddressFamily.ipv6))
-            af = remote.family;
-
-        Socket s;
-        if (create_socket(af, SocketType.datagram, Protocol.udp, s).failed)
-            return null;
-        s.set_socket_option(SocketOption.non_blocking, true);
-        if (af == AddressFamily.ipv6)
-        {
-            enum int IPPROTO_IPV6_ = 41;
-            version (linux)
-                enum int IPV6_V6ONLY_ = 26;
-            else
-                enum int IPV6_V6ONLY_ = 27;
-            int yes = 1;
-            if (os_setsockopt(s.handle, IPPROTO_IPV6_, IPV6_V6ONLY_, &yes, cast(uint)yes.sizeof) != 0)
-            {
-                s.close();
-                return null;
-            }
-        }
-        InetAddress bind_addr = local ? *local : (af == AddressFamily.ipv6 ? InetAddress(IPv6Addr.any, 0) : InetAddress(IPAddr.any, 0));
-        if (s.bind(bind_addr).failed)
-        {
-            s.close();
-            return null;
-        }
-
-        bool connect_peer = remote && (remote.family == AddressFamily.ipv4 || remote.family == AddressFamily.ipv6);
-        if (connect_peer && s.connect(*remote).failed)
-        {
-            s.close();
-            return null;
-        }
-
-        UDPEndpoint* ep = alloc!UDPEndpoint();
-        ep._socket = s;
-        ep._on_recv = on_recv;
-        if (connect_peer)
-        {
-            ep._remote = *remote;
-            ep._connected = true;
-        }
-        if (!g_app.reactor.watch_fd(s.handle, false, &ep.on_ready))
-        {
-            s.close();
-            free(ep);
-            return null;
-        }
-        ep._watched = true;
-        _udp_eps ~= ep;
-        return ep;
-    }
-}
-
-// A MAC address may belong to multiple segments; only an explicit station restricts the bind to one.
-private UDPEndpoint* udp_open_ether(const(InetAddress)* local, const(InetAddress)* remote, UDPRecvHandler on_recv, EthernetStation station)
-{
-    if (local && local.family != AddressFamily.ether)
-        return null;
-    if (remote && remote.family != AddressFamily.ether)
-        return null;
-
-    ushort local_port = local ? local.port : 0;
-    MACAddress local_address = local ? MACAddress(local._a.ether.addr) : MACAddress();
-
-    UDPEndpoint* ep = alloc!UDPEndpoint();
-    ep._on_recv = on_recv;
-    if (remote)
-    {
-        ep._remote = *remote;
-        ep._connected = true;
-    }
-    ep._ether = ether_open(station, local_port, &ep.on_ether_recv,
-                           remote ? MACAddress(remote._a.ether.addr) : MACAddress(),
-                           remote ? remote._a.ether.port : 0, local_address);
-    if (!ep._ether)
-    {
-        free(ep);
-        return null;
-    }
-    _udp_eps ~= ep;
-    return ep;
-}
-
 
 struct TCPConnection
 {
@@ -1482,24 +1296,155 @@ private:
 }
 
 
-struct UDPEndpoint
+struct IPUDPState
 {
 nothrow @nogc:
-    InetAddress remote() const pure
-        => _remote;
-
-    // interface datagrams egress through; null when the endpoint is multi-drop or the OS owns the route
-    BaseInterface egress_iface()
+    bool open(UDPEndpoint* owner, const(InetAddress)* local, const(InetAddress)* remote)
     {
-        if (_ether)
-            return _ether.iface;
         version (UseInternalIPStack)
         {
-            if (_stack_ptr && _remote.family == AddressFamily.ipv4)
+            if ((local && local.family != AddressFamily.ipv4) || (remote && remote.family != AddressFamily.ipv4))
+                return false;
+
+            UdpPcb* pcb = alloc!UdpPcb();
+            if (local)
             {
-                RouteResult r = _stack_ptr.route_lookup_v4_dst(v4_addr(_remote));
-                if (r.kind == RouteResult.Kind.forward)
-                    return r.out_iface;
+                pcb.local_addr = local._a.ipv4.addr;
+                pcb.local_port = local._a.ipv4.port;
+            }
+            if (pcb.local_port == 0)
+                pcb.local_port = allocate_udp_port();
+            if (!udp_bind_available(pcb, pcb.local_addr, pcb.local_port))
+            {
+                free(pcb);
+                return false;
+            }
+            if (remote)
+            {
+                pcb.remote_addr = remote._a.ipv4.addr;
+                pcb.remote_port = remote._a.ipv4.port;
+                pcb.connected = true;
+            }
+            _owner = owner;
+            pcb.owner = &this;
+            _pcb = pcb;
+            udp_register(pcb);
+            return true;
+        }
+        else version (Windows)
+        {
+            if (local && local.family != AddressFamily.ipv4)
+                return false;
+            if (remote && remote.family != AddressFamily.ipv4)
+                return false;
+            IOCP_SOCKET socket = ws_socket(WSA_AF_INET, WSA_SOCK_DGRAM, WSA_IPPROTO_UDP, null, 0, WSA_FLAG_OVERLAPPED);
+            if (socket == INVALID_SOCKET)
+                return false;
+            sockaddr_in address;
+            address.sin_family = cast(short)WSA_AF_INET;
+            if (local)
+                address = to_sockaddr_in(*local);
+            if (ws_bind(socket, &address, cast(int)sockaddr_in.sizeof) != 0)
+            {
+                ws_closesocket(socket);
+                return false;
+            }
+            if (remote)
+            {
+                sockaddr_in peer = to_sockaddr_in(*remote);
+                if (ws_connect(socket, &peer, cast(int)sockaddr_in.sizeof) != 0)
+                {
+                    ws_closesocket(socket);
+                    return false;
+                }
+            }
+            _owner = owner;
+            _handle = socket;
+            if (!g_app.reactor.associate(cast(HANDLE)socket) || !post_recv())
+            {
+                ws_closesocket(socket);
+                _handle = INVALID_SOCKET;
+                return false;
+            }
+            return true;
+        }
+        else
+        {
+            if ((local && local.family != AddressFamily.ipv4 && local.family != AddressFamily.ipv6) || (remote && remote.family != AddressFamily.ipv4 && remote.family != AddressFamily.ipv6))
+                return false;
+            AddressFamily family = AddressFamily.ipv4;
+            if (local && (local.family == AddressFamily.ipv4 || local.family == AddressFamily.ipv6))
+                family = local.family;
+            else if (remote && (remote.family == AddressFamily.ipv4 || remote.family == AddressFamily.ipv6))
+                family = remote.family;
+
+            Socket socket;
+            if (create_socket(family, SocketType.datagram, Protocol.udp, socket).failed)
+                return false;
+            socket.set_socket_option(SocketOption.non_blocking, true);
+            if (family == AddressFamily.ipv6)
+            {
+                enum int IPPROTO_IPV6_ = 41;
+                version (linux)
+                    enum int IPV6_V6ONLY_ = 26;
+                else
+                    enum int IPV6_V6ONLY_ = 27;
+                int yes = 1;
+                if (os_setsockopt(socket.handle, IPPROTO_IPV6_, IPV6_V6ONLY_, &yes, cast(uint)yes.sizeof) != 0)
+                {
+                    socket.close();
+                    return false;
+                }
+            }
+            InetAddress bind_address = local ? *local : (family == AddressFamily.ipv6 ? InetAddress(IPv6Addr.any, 0) : InetAddress(IPAddr.any, 0));
+            if (socket.bind(bind_address).failed)
+            {
+                socket.close();
+                return false;
+            }
+            if (remote && socket.connect(*remote).failed)
+            {
+                socket.close();
+                return false;
+            }
+
+            _owner = owner;
+            _socket = socket;
+            if (!g_app.reactor.watch_fd(socket.handle, false, &on_ready))
+            {
+                socket.close();
+                _socket = null;
+                return false;
+            }
+            _watched = true;
+            return true;
+        }
+    }
+
+    InetAddress local_address()
+    {
+        version (UseInternalIPStack)
+            return _pcb ? InetAddress(_pcb.local_addr, _pcb.local_port) : InetAddress();
+        else version (Windows)
+            return InetAddress();
+        else
+        {
+            InetAddress address;
+            if (_socket)
+                _socket.get_socket_name(address);
+            return address;
+        }
+    }
+
+    BaseInterface egress_iface(InetAddress remote)
+    {
+        version (UseInternalIPStack)
+        {
+            if (_stack_ptr && remote.family == AddressFamily.ipv4)
+            {
+                RouteResult route = _stack_ptr.route_lookup_v4_dst(v4_addr(remote));
+                if (route.kind == RouteResult.Kind.forward)
+                    return route.out_iface;
             }
         }
         return null;
@@ -1507,7 +1452,7 @@ nothrow @nogc:
 
     bool join(IPAddr group, IPAddr interface_ = IPAddr.any)
     {
-        if (_ether || !group.is_multicast)
+        if (!group.is_multicast)
             return false;
         version (UseInternalIPStack)
         {
@@ -1553,7 +1498,7 @@ nothrow @nogc:
 
     bool outbound_interface(IPAddr interface_)
     {
-        if (_ether || interface_ == IPAddr.any)
+        if (interface_ == IPAddr.any)
             return false;
         version (UseInternalIPStack)
         {
@@ -1574,8 +1519,6 @@ nothrow @nogc:
 
     bool enable_broadcast()
     {
-        if (_ether)
-            return true;
         version (UseInternalIPStack)
             return true;
         else version (Windows)
@@ -1590,111 +1533,43 @@ nothrow @nogc:
         }
     }
 
-    // Send to the connected remote (set at open). Returns bytes sent, or 0.
-    version (UseInternalIPStack)
+    ptrdiff_t sendto(scope const(void)[] data, InetAddress dst)
     {
-        InetAddress local()
+        version (UseInternalIPStack)
         {
-            if (_ether)
-                return InetAddress(_ether.local.b, _ether.local_port);
-            return _pcb ? InetAddress(_pcb.local_addr, _pcb.local_port) : InetAddress();
-        }
-
-        ptrdiff_t send(scope const(void)[] data)
-        {
-            if (_closing || !_connected)
-                return 0;
-            if (_ether)
-                return _ether.send(data);
-            IPAddr remote = v4_addr(_remote);
+            IPAddr remote = v4_addr(dst);
             IPAddr local = remote.is_multicast && _pcb.outbound_interface ? _pcb.outbound_interface : _pcb.local_addr;
-            if (!udp_output(*_stack_ptr, local, _pcb.local_port, remote, port_of(_remote), cast(const(ubyte)[])data))
+            if (!udp_output(*_stack_ptr, local, _pcb.local_port, remote, port_of(dst), cast(const(ubyte)[])data))
                 return 0;
             return data.length;
         }
-
-        ptrdiff_t sendto(scope const(void)[] data, InetAddress to)
+        else version (Windows)
         {
-            if (_closing)
-                return 0;
-            if (_connected)
-                return to == _remote ? send(data) : 0;   // connected: the peer is the only destination
-            if (_ether)
-            {
-                const(InetAddress.Ether)* e = to.as_ether;
-                return e ? _ether.sendto(MACAddress(e.addr), e.port, data) : 0;
-            }
-            IPAddr remote = v4_addr(to);
-            IPAddr local = remote.is_multicast && _pcb.outbound_interface ? _pcb.outbound_interface : _pcb.local_addr;
-            if (!udp_output(*_stack_ptr, local, _pcb.local_port, remote, port_of(to), cast(const(ubyte)[])data))
-                return 0;
-            return data.length;
-        }
-
-        void close()
-        {
-            if (_closing)
-                return;
-            if (_ether)
-            {
-                _ether.close();
-                _ether = null;
-            }
-            if (_pcb)
-                _pcb.owner = null;     // stop delivery; pcb torn down by release() on sweep
-            _closing = true;
-        }
-    }
-    else version (Windows)
-    {
-        InetAddress local()
-        {
-            if (_ether)
-                return InetAddress(_ether.local.b, _ether.local_port);
-            return InetAddress();   // TODO: getsockname
-        }
-
-        ptrdiff_t send(scope const(void)[] data)
-        {
-            if (_closing || !_connected)
-                return 0;
-            if (_ether)
-                return _ether.send(data);
-            if (_handle == INVALID_SOCKET || data.length == 0)
-                return 0;
-            sockaddr_in to = to_sockaddr_in(_remote);
-            int n = ws_sendto(_handle, data.ptr, cast(int)data.length, 0, &to, cast(int)sockaddr_in.sizeof);
-            return n > 0 ? n : 0;
-        }
-
-        ptrdiff_t sendto(scope const(void)[] data, InetAddress dst)
-        {
-            if (_closing)
-                return 0;
-            if (_connected)
-                return dst == _remote ? send(data) : 0;   // connected: the peer is the only destination
-            if (_ether)
-            {
-                const(InetAddress.Ether)* e = dst.as_ether;
-                return e ? _ether.sendto(MACAddress(e.addr), e.port, data) : 0;
-            }
             if (_handle == INVALID_SOCKET || data.length == 0)
                 return 0;
             sockaddr_in to = to_sockaddr_in(dst);
-            int n = ws_sendto(_handle, data.ptr, cast(int)data.length, 0, &to, cast(int)sockaddr_in.sizeof);
-            return n > 0 ? n : 0;
+            int sent = ws_sendto(_handle, data.ptr, cast(int)data.length, 0, &to, cast(int)sockaddr_in.sizeof);
+            return sent > 0 ? sent : 0;
         }
-
-        void close()
+        else
         {
-            if (_closing)
-                return;
-            _closing = true;
-            if (_ether)
-            {
-                _ether.close();
-                _ether = null;
-            }
+            size_t sent;
+            if (_socket.sendto(&dst, &sent, data).failed)
+                return 0;
+            return sent;
+        }
+    }
+
+    void close()
+    {
+        _closing = true;
+        version (UseInternalIPStack)
+        {
+            if (_pcb)
+                _pcb.owner = null;
+        }
+        else version (Windows)
+        {
             if (_handle != INVALID_SOCKET)
             {
                 CancelIoEx(cast(HANDLE)_handle, null);
@@ -1702,58 +1577,8 @@ nothrow @nogc:
                 _handle = INVALID_SOCKET;
             }
         }
-    }
-    else
-    {
-        InetAddress local()
+        else
         {
-            if (_ether)
-                return InetAddress(_ether.local.b, _ether.local_port);
-            InetAddress a;
-            if (_socket)
-                _socket.get_socket_name(a);
-            return a;
-        }
-
-        ptrdiff_t send(scope const(void)[] data)
-        {
-            if (_closing || !_connected)
-                return 0;
-            if (_ether)
-                return _ether.send(data);
-            size_t sent;
-            if (_socket.sendto(&_remote, &sent, data).failed)
-                return 0;
-            return sent;
-        }
-
-        ptrdiff_t sendto(scope const(void)[] data, InetAddress to)
-        {
-            if (_closing)
-                return 0;
-            if (_connected)
-                return to == _remote ? send(data) : 0;   // connected: the peer is the only destination
-            if (_ether)
-            {
-                const(InetAddress.Ether)* e = to.as_ether;
-                return e ? _ether.sendto(MACAddress(e.addr), e.port, data) : 0;
-            }
-            size_t sent;
-            if (_socket.sendto(&to, &sent, data).failed)
-                return 0;
-            return sent;
-        }
-
-        void close()
-        {
-            if (_closing)
-                return;
-            _closing = true;
-            if (_ether)
-            {
-                _ether.close();
-                _ether = null;
-            }
             if (_watched)
             {
                 g_app.unwatch_io(_socket.handle);
@@ -1767,30 +1592,24 @@ nothrow @nogc:
         }
     }
 
+    bool reclaimable() const
+        => backend_reclaimable();
+
+    void release()
+        => backend_release();
+
 private:
     bool _closing;
-    bool _connected;
-    InetAddress _remote;
-    UDPRecvHandler _on_recv;
-    EtherEndpoint* _ether;
-
-    void on_ether_recv(EtherEndpoint*, const(void)[] data, MACAddress src, ushort src_port, MonoTime rx_time)
-    {
-        if (_on_recv)
-        {
-            InetAddress from = InetAddress(src.b, src_port);
-            _on_recv(&this, data, from, rx_time);
-        }
-    }
+    UDPEndpoint* _owner;
 
     version (UseInternalIPStack)
     {
         UdpPcb* _pcb;
 
-        bool reclaimable() const
+        bool backend_reclaimable() const
             => true;
 
-        void release()
+        void backend_release()
         {
             if (_pcb)
             {
@@ -1806,11 +1625,8 @@ private:
 
         package(protocol.ip) void deliver(IPAddr src, ushort sport, const(ubyte)[] data, MonoTime rx_time)
         {
-            if (_on_recv)
-            {
-                InetAddress from = InetAddress(src, sport);
-                _on_recv(&this, data, from, rx_time);
-            }
+            InetAddress from = InetAddress(src, sport);
+            udp_deliver(_owner, data, from, rx_time);
         }
     }
     else version (Windows)
@@ -1827,9 +1643,9 @@ private:
         int  _outstanding;
         RecvFromOp _recv;
 
-        void release() {}
+        void backend_release() {}
 
-        bool reclaimable() const
+        bool backend_reclaimable() const
             => _outstanding == 0;
 
         bool post_recv()
@@ -1854,10 +1670,10 @@ private:
             --_outstanding;
             if (_closing)
                 return;
-            if (ok && bytes > 0 && _on_recv)
+            if (ok && bytes > 0)
             {
                 InetAddress from = from_sockaddr_in(_recv.from);
-                _on_recv(&this, _recv.buf[0 .. bytes], from, getTime());
+                udp_deliver(_owner, _recv.buf[0 .. bytes], from, getTime());
             }
             if (!_closing)
                 post_recv();    // transient errors / empty datagrams: keep the socket armed
@@ -1868,9 +1684,9 @@ private:
         Socket _socket;
         bool _watched;
 
-        void release() {}
+        void backend_release() {}
 
-        bool reclaimable() const
+        bool backend_reclaimable() const
             => true;
 
         void on_ready(IoReady ready)
@@ -1884,8 +1700,7 @@ private:
                 Result r = _socket.recvfrom(_udp_scratch[], MsgFlags.none, &from, &got);
                 if (r.failed || got == 0)
                     return;     // would-block, or a transient error udp just shrugs off
-                if (_on_recv)
-                    _on_recv(&this, _udp_scratch[0 .. got], from, getTime());
+                udp_deliver(_owner, _udp_scratch[0 .. got], from, getTime());
             }
         }
     }
@@ -1950,8 +1765,6 @@ nothrow @nogc:
                 c.close();
             foreach (l; _tcp_listeners[])
                 l.close();
-            foreach (u; _udp_eps[])
-                u.close();
             pump_ip_endpoints();
         }
     }
@@ -2124,7 +1937,6 @@ private:
 
 __gshared Array!(TCPConnection*) _tcp_conns;
 __gshared Array!(TCPListener*)   _tcp_listeners;
-__gshared Array!(UDPEndpoint*)   _udp_eps;
 
 
 bool tcp_conn_registered(TCPConnection* c)
@@ -2183,15 +1995,6 @@ void pump_ip_endpoints()
         {
             free(_tcp_listeners[i]);
             _tcp_listeners.removeSwapLast(i);
-        }
-    }
-    for (size_t i = _udp_eps.length; i-- > 0; )
-    {
-        if (_udp_eps[i]._closing && _udp_eps[i].reclaimable)
-        {
-            _udp_eps[i].release();
-            free(_udp_eps[i]);
-            _udp_eps.removeSwapLast(i);
         }
     }
 }
