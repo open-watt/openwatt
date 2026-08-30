@@ -38,9 +38,9 @@ import manager.sync.encoder : encoder_for, SyncEncoderKind;
 import manager.sync.peer : SyncPeer;
 import manager.sync.udp_server : UDPSyncServer;
 
+import router.iface;
 import router.iface.endpoint : UDPEndpoint, udp_open;
 import router.iface.ethernet : EthernetStation;
-import router.iface.mac : MACAddress;
 
 nothrow @nogc:
 
@@ -520,8 +520,9 @@ private:
     struct ClaimAttempt
     {
         SyncPeer peer;
-        ObjectRef!EthernetStation link_station;  // the link this attempt went through; demoted on failure
-        MACAddress link_mac;
+        ObjectRef!BaseInterface link_iface;
+        InetAddress link_local;
+        InetAddress link_remote;
         uint seq;
         bool sent;
         bool claimed;
@@ -689,12 +690,9 @@ private:
         disco.local_sync_port = (_enabled && _role == PeerRole.authority) ? _port : 0;
     }
 
-    // Dial an authority: connected ether-UDP toward its beaconed mac:port, and a peer
-    // that introduces us. The claim, if it comes, arrives back over this session.
     void start_session(ulong node_id, ref const Neighbor n, ref NeighborLink link)
     {
         char[16] id = hex_id(node_id);
-
         SyncPeer peer = Collection!SyncPeer().create(n.name[], ObjectFlags.dynamic);
         if (!peer)
             peer = Collection!SyncPeer().create(tconcat("auth-", id[]), ObjectFlags.dynamic);
@@ -703,11 +701,11 @@ private:
             log.warning("failed to create session peer for authority ", id[]);
             return;
         }
-        InetAddress remote = InetAddress(link.mac.b, link.sync_port);
-        EthernetStation station = link.station.get;
-        UDPEndpoint* endpoint;
-        if (station)
-            endpoint = udp_open(null, &remote, &peer.on_udp_receive, station);
+        BaseInterface link_iface = link.iface.get;
+        EthernetStation station;
+        if (link.remote.family == AddressFamily.ether)
+            station = dyn_cast!EthernetStation(link_iface);
+        UDPEndpoint* endpoint = udp_open(&link.local, &link.remote, &peer.on_udp_receive, station);
         if (!endpoint)
         {
             log.warning("failed to create session transport for authority ", id[]);
@@ -722,15 +720,16 @@ private:
         if (!a)
             a = _attempts.insert(node_id, ClaimAttempt());
         a.peer = peer;
-        a.link_station = link.station;
-        a.link_mac = link.mac;
+        a.link_iface = link.iface;
+        a.link_local = link.local;
+        a.link_remote = link.remote;
         a.sent = false;
         a.claimed = false;
         a.handover = false;
         // the setup window: transport up and hellos exchanged; expiry demotes the link
         a.deadline = getTime() + claim_timeout;
 
-        log.info("opening session to authority ", id[], " ('", n.name, "') at ", link.mac, ":", link.sync_port, " via ", link.station.name[]);
+        log.info("opening session to authority ", id[], " ('", n.name, "') at ", link.remote, " via ", link_iface ? link_iface.name[] : "ip");
     }
 
     void claim_peer_state(ActiveObject obj, StateSignal sig)
@@ -788,7 +787,7 @@ private:
             return null;
         foreach (ref l; n.links[])
         {
-            if (l.is_link(a.link_station, a.link_mac))
+            if (l.is_link(a.link_iface, a.link_local, a.link_remote))
                 return &l;
         }
         return null;

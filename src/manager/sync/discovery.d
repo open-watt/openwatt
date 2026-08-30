@@ -9,6 +9,7 @@ module manager.sync.discovery;
 import urt.array;
 import urt.conv : format_uint;
 import urt.endian;
+import urt.inet;
 import urt.log;
 import urt.map;
 import urt.mem;
@@ -22,6 +23,7 @@ import manager.collection;
 import manager.console;
 import manager.plugin;
 
+import router.iface;
 import router.iface.ethernet;
 import router.iface.mac;
 
@@ -146,20 +148,18 @@ bool decode_announce(scope return const(ubyte)[] tlv, out NodeAnnounce a)
 
 enum neighbor_max_age = 600.seconds;
 
-// one way to reach a neighbour: the (station, address) pair a beacon arrived through
 struct NeighborLink
 {
 nothrow @nogc:
-    ObjectRef!EthernetStation station;
-    MACAddress mac;
-    ushort sync_port;   // sync reach via this medium; 0 = not listening here
+    ObjectRef!BaseInterface iface;
+    InetAddress local;
+    InetAddress remote;
     ubyte failures;     // claim failures through this link; drives retry_at
     MonoTime retry_at;
     MonoTime last_seen;
 
-    // identity by stable ref: detached refs must not collapse, and parent/vlan stations share a mac
-    bool is_link(ref const ObjectRef!EthernetStation station, MACAddress mac) const pure
-        => this.station == station && this.mac == mac;
+    bool is_link(ref const ObjectRef!BaseInterface iface, ref const InetAddress local, ref const InetAddress remote) const pure
+        => this.iface == iface && this.local.same_addr(local) && this.remote.same_addr(remote);
 }
 
 struct Neighbor
@@ -180,18 +180,20 @@ nothrow @nogc:
     bool adopted() const pure
         => (flags & AnnounceFlags.adopted) != 0;
 
-    NeighborLink* touch_link(EthernetStation station, MACAddress mac, ushort sync_port, MonoTime now)
+    NeighborLink* touch_link(BaseInterface iface, InetAddress local, InetAddress remote, MonoTime now)
     {
+        ObjectRef!BaseInterface iface_ref = iface;
         foreach (ref l; links[])
         {
-            if (l.station.get is station && l.mac == mac)
+            if (l.iface == iface_ref && l.local.same_addr(local) && l.remote.same_addr(remote))
             {
-                l.sync_port = sync_port;
+                l.local.port = local.port;
+                l.remote.port = remote.port;
                 l.last_seen = now;
                 return &l;
             }
         }
-        links ~= NeighborLink(ObjectRef!EthernetStation(station), mac, sync_port);
+        links ~= NeighborLink(iface_ref, local, remote);
         links[links.length - 1].last_seen = now;
         return &links[links.length - 1];
     }
@@ -221,15 +223,18 @@ nothrow @nogc:
         ulong best_speed = 0;
         foreach (ref l; links[])
         {
-            EthernetStation s = l.station.get;
-            if (!s || !s.running || !l.sync_port)
+            BaseInterface iface = l.iface.get;
+            if (!l.remote.port)
+                continue;
+            if (l.remote.family == AddressFamily.ether && (!iface || !iface.running))
                 continue;
             if (now - l.last_seen >= neighbor_max_age || now < l.retry_at)
                 continue;
-            if (!best || link_prefers(s.tx_link_speed, l.last_seen, best_speed, best.last_seen))
+            ulong speed = iface && iface.running ? iface.tx_link_speed : 0;
+            if (!best || link_prefers(speed, l.last_seen, best_speed, best.last_seen))
             {
                 best = &l;
-                best_speed = s.tx_link_speed;
+                best_speed = speed;
             }
         }
         return best;
@@ -410,8 +415,9 @@ nothrow @nogc:
                                " age=", now - n.last_seen);
             foreach (ref l; n.links[])
             {
-                EthernetStation s = l.station.get;
-                session.write_line("    via=", s ? s.name[] : "(gone)", " mac=", l.mac, " port=", l.sync_port, " age=", now - l.last_seen);
+                BaseInterface iface = l.iface.get;
+                const(char)[] via = iface ? iface.name[] : l.remote.family == AddressFamily.ether ? "(gone)" : "ip";
+                session.write_line("    via=", via, " remote=", l.remote, " age=", now - l.last_seen);
             }
         }
     }
@@ -443,7 +449,9 @@ private:
         n.last_seen = getTime();
 
         size_t known = n.links.length;
-        n.touch_link(station, src, a.sync_port, n.last_seen);
+        InetAddress local = InetAddress(station.mac.b, local_sync_port);
+        InetAddress remote = InetAddress(src.b, a.sync_port);
+        n.touch_link(station, local, remote, n.last_seen);
         if (known && n.links.length > known)
             log.debug_("node '", a.name, "' also reachable via ", station.name[], " (", src, ")");
     }
@@ -479,58 +487,62 @@ unittest
     MonoTime t0 = MonoTime() + 1000.seconds;
     MACAddress mac_a = MACAddress(0x02, 0, 0, 0, 0, 1);
     MACAddress mac_b = MACAddress(0x02, 0, 0, 0, 0, 2);
+    InetAddress local = InetAddress(mac_b.b, 7000);
+    InetAddress remote_a = InetAddress(mac_a.b, 7000);
+    InetAddress remote_b = InetAddress(mac_b.b, 7000);
 
     Neighbor n;
-    n.touch_link(null, mac_a, 7000, t0);
+    n.touch_link(null, local, remote_a, t0);
     assert(n.links.length == 1);
 
-    // a repeat beacon refreshes the link rather than duplicating it
-    n.touch_link(null, mac_a, 7001, t0 + 10.seconds);
+    local.port = 7001;
+    remote_a.port = 7002;
+    n.touch_link(null, local, remote_a, t0 + 10.seconds);
     assert(n.links.length == 1);
-    assert(n.links[0].sync_port == 7001 && n.links[0].last_seen == t0 + 10.seconds);
+    assert(n.links[0].local.port == 7001 && n.links[0].remote.port == 7002);
+    assert(n.links[0].last_seen == t0 + 10.seconds);
 
-    // a different source address is an independent link
-    n.touch_link(null, mac_b, 7000, t0 + 100.seconds);
+    n.touch_link(null, local, remote_b, t0 + 100.seconds);
     assert(n.links.length == 2);
 
-    // demotion clears wholesale on a factory-fresh beacon
     n.links[0].failures = 3;
     n.links[0].retry_at = t0 + 500.seconds;
     n.clear_link_demotion();
     assert(n.links[0].failures == 0 && n.links[0].retry_at == MonoTime());
 
-    // links expire independently
     n.prune_links(t0 + 10.seconds + neighbor_max_age);
-    assert(n.links.length == 1 && n.links[0].mac == mac_b);
+    assert(n.links.length == 1 && n.links[0].remote.same_addr(remote_b));
 
-    // no live station behind a link, no candidate
     assert(n.best_link(t0 + 200.seconds) is null);
 
-    // link identity survives detach: same mac through two stations must not collapse
     {
         import urt.mem;
         import router.iface.bridge : BridgeInterface;
 
         BridgeInterface s1 = alloc!BridgeInterface(CID(1));
         BridgeInterface s2 = alloc!BridgeInterface(CID(2));
-        scope(exit) { free(s2); free(s1); }
+        scope(exit)
+        {
+            free(s2);
+            free(s1);
+        }
 
         NeighborLink l;
-        l.station = s1;
-        l.mac = mac_a;
-        ObjectRef!EthernetStation r1 = s1;
-        ObjectRef!EthernetStation r2 = s2;
-        ObjectRef!EthernetStation r_none;
+        l.iface = s1;
+        l.local = local;
+        l.remote = remote_a;
+        ObjectRef!BaseInterface r1 = s1;
+        ObjectRef!BaseInterface r2 = s2;
+        ObjectRef!BaseInterface r_none;
         assert(r1.get is null && r2.get is null);   // neither is in the collection table
-        assert( l.is_link(r1, mac_a));
-        assert(!l.is_link(r2, mac_a));
-        assert(!l.is_link(r1, mac_b));
-        assert(!l.is_link(r_none, mac_a));
+        assert(l.is_link(r1, local, remote_a));
+        assert(!l.is_link(r2, local, remote_a));
+        assert(!l.is_link(r1, local, remote_b));
+        assert(!l.is_link(r_none, local, remote_a));
     }
 
-    // preference: speed first, freshness breaks ties
-    assert( Neighbor.link_prefers(1000, t0, 100, t0 + 50.seconds));
+    assert(Neighbor.link_prefers(1000, t0, 100, t0 + 50.seconds));
     assert(!Neighbor.link_prefers(100, t0 + 50.seconds, 1000, t0));
-    assert( Neighbor.link_prefers(100, t0 + 50.seconds, 100, t0));
+    assert(Neighbor.link_prefers(100, t0 + 50.seconds, 100, t0));
     assert(!Neighbor.link_prefers(100, t0, 100, t0 + 50.seconds));
 }
