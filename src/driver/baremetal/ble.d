@@ -664,13 +664,15 @@ private:
     // mid-iteration.
     void emu_respond(ref BLEFrame req, const(ubyte)[] pdu)
     {
-        Packet p;
-        ref f = p.init!BLEFrame(pdu);
+        Packet* response = alloc_packet!BLEFrame(pdu);
+        if (!response)
+            return;
+        ref f = response.hdr!BLEFrame;
         f.src = req.dst;
         f.dst = req.src;
         f.kind = BLEFrameKind.att;
         f.code = pdu[0];
-        _emu_responses ~= p.clone();
+        _emu_responses ~= response;
 
         import protocol.ble : BLEModule;
         get_module!BLEModule.request_service();

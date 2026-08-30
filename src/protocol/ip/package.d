@@ -26,7 +26,7 @@ version (UseInternalIPStack)
 {
     import protocol.ip.igmp;
     import protocol.ip.udp;
-    import protocol.ip.tcp : TcpPcb, TcpState, tcp_assign_id, tcp_send_data, tcp_consume_data, tcp_close, free_pcb,
+    import protocol.ip.tcp : TcpPcb, TcpState, TcpSendBufSize, tcp_assign_id, tcp_send_data, tcp_consume_data, tcp_close, free_pcb,
         native_tcp_connect = tcp_connect, native_tcp_listen = tcp_listen;
 
     public import protocol.ip.stack : IPStack;

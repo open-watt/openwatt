@@ -2,6 +2,7 @@ module router.iface.packet;
 
 import urt.endian;
 import urt.mem;
+import urt.mem.pagepool;
 import urt.time;
 
 public import router.iface.mac;
@@ -214,12 +215,34 @@ nothrow @nogc:
     const(void)[] data() const @property
         => _ptr[_offset .. _length];
 
-    void* alloc_prefix(size_t bytes)
+    // null unless the packet owns its payload
+    void[] payload() @property
+    {
+        if (!(_flags & mutable_flag))
+            return null;
+        return (cast(void*)_ptr)[_offset .. _length];
+    }
+
+    void truncate(size_t length)
+    {
+        assert(_offset + length <= _length, "Cannot grow a packet by truncating it");
+        _length = cast(ushort)(_offset + length);
+    }
+
+    void[] alloc_prefix(size_t bytes)
     {
         if (!(_flags & mutable_flag) || _offset < bytes)
             return null;
         _offset -= cast(ubyte)bytes;
-        return cast(void*)_ptr + _offset;
+        return (cast(void*)_ptr)[_offset .. _offset + bytes];
+    }
+
+    bool consume_prefix(size_t bytes)
+    {
+        if (_offset + bytes > _length)
+            return false;
+        _offset += cast(ubyte)bytes;
+        return true;
     }
 
     void data(const(void[]) payload) @property
@@ -235,7 +258,10 @@ nothrow @nogc:
 
     Packet* clone() const
     {
-        Packet* r = cast(Packet*)alloc(Packet.sizeof + _length);
+        void[] page = page_alloc_for(Packet.sizeof + _length);
+        if (!page.ptr)
+            return null;
+        Packet* r = cast(Packet*)page.ptr;
         *r = this;
         r._flags |= mutable_flag;
         r._ptr = &r[1];
@@ -243,11 +269,9 @@ nothrow @nogc:
         return r;
     }
 
-    // Free a Packet returned by clone(). Caller must pass the same allocator
-    // that was used to clone(); defaults match.
     void free_clone()
     {
-        free((cast(void*)&this)[0 .. Packet.sizeof + _length]);
+        page_free(&this);
     }
 
     PCP pcp() const pure
@@ -344,6 +368,39 @@ package:
 private:
     enum ubyte vlan_tag_mask = 7;
     enum ubyte mutable_flag = 1 << 3;
+}
+
+// _offset is a ubyte, so 255 is the ceiling.
+enum ubyte packet_headroom = 128;
+
+Packet* alloc_packet(T)(size_t payload, ubyte headroom = packet_headroom)
+{
+    if (payload + headroom > ushort.max)
+        return null;
+
+    void[] page = page_alloc_for(Packet.sizeof + headroom + payload);
+    if (!page.ptr)
+        return null;
+
+    // `Packet.init` names the init!T member template, not the default value
+    Packet blank;
+    Packet* p = cast(Packet*)page.ptr;
+    *p = blank;
+    p.creation_time = getTime();
+    p.type = T.Type;
+    p._flags = 0x01;     // mutable, so alloc_prefix will work
+    p._offset = headroom;
+    p._length = cast(ushort)(headroom + payload);
+    p._ptr = &p[1];
+    return p;
+}
+
+Packet* alloc_packet(T)(const(void)[] payload, ubyte headroom = packet_headroom)
+{
+    Packet* p = alloc_packet!T(payload.length, headroom);
+    if (p)
+        p.payload[] = cast(void[])payload[];
+    return p;
 }
 
 struct RawFrame
