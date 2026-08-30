@@ -837,6 +837,7 @@ disappear independently.
 | `bind` | endpoint list | empty | Exact local endpoints; an omitted port uses `port`. |
 | `interface` | interface list | empty | Bind AF_ETHERNET and every configured IPv4 endpoint on these interfaces. |
 | `port` | `1` to `65535` | `4826` | Peer service port used by named interfaces and bind entries that omit one. Discovery and inbound sync share this socket. |
+| `multicast` | `true` or `false` | `true` | Use `239.255.79.87` for IPv4 discovery. False uses directed or limited broadcast. |
 | `interval` | duration | `30s` | Beacon cadence. |
 
 At least one of `bind` or `interface` is required.
@@ -851,8 +852,10 @@ At least one of `bind` or `interface` is required.
 
 The last example binds `0.0.0.0:6667` and `192.168.0.10:1234`.
 
-An exact IPv4 bind uses its interface's directed broadcast when available;
-a wildcard bind uses `255.255.255.255`.
+IPv4 uses multicast by default. The domain owns one wildcard socket per port and
+joins the group on every selected local address, so multiple interfaces do not
+require address reuse. `multicast=false` uses each exact bind's directed
+broadcast when available; a wildcard bind uses `255.255.255.255`.
 
 ### `/sync/neighbor`
 

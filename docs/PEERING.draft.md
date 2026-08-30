@@ -64,9 +64,13 @@ discovers by function code, not by socket, so it cannot express itself as a bind
 
 The domain's `port=` defaults to `4826` and supplies the peer service port for `interface=` and
 every `bind=` entry whose `InetAddress.port` is zero. A port written in a `bind=` entry always wins.
-The domain creates one socket for each resulting address. Ordinary socket bind rules reject
-overlapping wildcard and specific listeners; discovery does not reproduce those rules or enable
-address reuse.
+Ether beacons use the normal OpenWatt Ethernet UDP transport. IPv4 uses the `239.255.79.87`
+multicast group by default; `multicast=false` uses directed or limited broadcast instead. One
+wildcard socket owns each multicast port and joins every selected local address without address
+reuse. The internal IP stack announces those memberships with IGMPv2.
+Broadcast and Ethernet discovery create one socket for each resulting address. Ordinary socket
+bind rules reject overlapping wildcard and specific listeners; discovery does not reproduce those
+rules or enable address reuse.
 
 Each discovery domain exclusively owns one dynamic, temporary `/sync/udp-server`. The domain
 demultiplexes its datagrams and hands session frames to that child, so the child opens no sockets
@@ -216,8 +220,7 @@ authority; the authority-authority link carries coordination only, never fleet s
    refuses unauthenticated claims; an authority with a secret waits for the member's hello
    before claiming]
 6. Dual-authority: authority-authority session, election, membership exchange.
-7. Later domains: UDP multicast for routed segments, modbus function-code discovery per the
-   L2/L3 trajectory.
+7. Later domains: modbus function-code discovery per the L2/L3 trajectory.
 
 ## Adoption
 

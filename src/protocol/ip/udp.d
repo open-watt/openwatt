@@ -42,6 +42,7 @@ struct UdpPcb
     bool    connected;
 
     Array!UdpDatagram recv_queue;
+    Array!IPAddr multicast_interfaces;
     enum size_t max_queued = 16;
 
     version (UseInternalIPStack)
@@ -136,7 +137,16 @@ void udp_input(ref IPStack stack, ref Packet pkt, BaseInterface iface, bool grou
         {
             if (pcb.multicast_group != dst)
                 continue;
-            if (pcb.outbound_interface != IPAddr.any && !interface_has_address(iface, pcb.outbound_interface))
+            bool joined;
+            foreach (local; pcb.multicast_interfaces[])
+            {
+                if (interface_has_address(iface, local))
+                {
+                    joined = true;
+                    break;
+                }
+            }
+            if (!joined)
                 continue;
         }
         else if (broadcast)

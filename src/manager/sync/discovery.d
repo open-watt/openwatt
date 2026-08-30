@@ -28,7 +28,7 @@ import router.iface.ethernet;
 import router.iface.mac;
 
 static if (has_ip)
-    import protocol.ip.address : IPAddress;
+    import protocol.ip.address : IPAddress, interface_has_address;
 
 nothrow @nogc:
 
@@ -145,6 +145,7 @@ class UDPDiscovery : ActiveObject
     alias Properties = AliasSeq!(Prop!("bind", bind),
                                  Prop!("interface", interfaces),
                                  Prop!("port", port),
+                                 Prop!("multicast", multicast),
                                  Prop!("interval", interval));
 nothrow @nogc:
 
@@ -183,6 +184,17 @@ nothrow @nogc:
             return;
         _port = value;
         mark_set!(typeof(this), "port")();
+        restart();
+    }
+
+    final bool multicast() const pure
+        => _multicast;
+    final void multicast(bool value)
+    {
+        if (_multicast == value)
+            return;
+        _multicast = value;
+        mark_set!(typeof(this), "multicast")();
         restart();
     }
 
@@ -241,10 +253,15 @@ protected:
     }
 
 private:
+    static if (has_ip)
+        enum IPAddr discovery_ipv4_group = IPAddr(239, 255, 79, 87);
+
     Array!InetAddress _bind;
     Array!(ObjectRef!BaseInterface) _interfaces;
+    Array!UDPBindEndpoint _multicast_bindings;
     UDPEndpointSet _endpoint_set;
     UDPSyncServer _server;
+    bool _multicast = true;
     ushort _port = default_discovery_port;
     Duration _interval = 30.seconds;
     MonoTime _next_announce;
@@ -289,6 +306,16 @@ private:
             {
                 if (endpoint.binding.local.family != AddressFamily.ipv4)
                     continue;
+                if (_multicast)
+                {
+                    InetAddress destination = InetAddress(discovery_ipv4_group, endpoint.binding.local.port);
+                    foreach_multicast_local(endpoint.binding.local.port, (IPAddr local)
+                    {
+                        if (local == IPAddr.any || endpoint.endpoint.outbound_interface(local))
+                            endpoint.endpoint.sendto(tlv, destination);
+                    });
+                    continue;
+                }
                 InetAddress destination = discovery_destination(endpoint.binding);
                 if (destination.family == AddressFamily.ipv4)
                     endpoint.endpoint.sendto(tlv, destination);
@@ -317,9 +344,118 @@ private:
 
     bool configure_endpoint(UDPEndpoint* endpoint, ref const UDPBindEndpoint binding)
     {
-        if (binding.local.family == AddressFamily.ipv4)
-            return endpoint.enable_broadcast();
+        static if (has_ip)
+            if (binding.local.family == AddressFamily.ipv4)
+            {
+                if (_multicast)
+                {
+                    bool joined;
+                    bool success = true;
+                    foreach_multicast_local(binding.local.port, (IPAddr local)
+                    {
+                        joined = true;
+                        success = endpoint.join(discovery_ipv4_group, local) && success;
+                    });
+                    return joined && success;
+                }
+                return endpoint.enable_broadcast();
+            }
         return true;
+    }
+
+    static if (has_ip)
+    {
+        bool prepare_multicast_bindings(ref Array!UDPBindEndpoint bindings)
+        {
+            size_t i;
+            while (i < bindings.length)
+            {
+                UDPBindEndpoint binding = bindings[i];
+                if (!supports_family(binding.local.family))
+                {
+                    bindings.remove(i);
+                    continue;
+                }
+                if (binding.local.family != AddressFamily.ipv4 || !binding.local.addr_any)
+                {
+                    ++i;
+                    continue;
+                }
+                bool expanded;
+                foreach (configured; Collection!IPAddress().values)
+                {
+                    BaseInterface iface = configured.iface;
+                    if (!iface || !iface.running)
+                        continue;
+                    UDPBindEndpoint candidate = UDPBindEndpoint(ObjectRef!BaseInterface(iface), InetAddress(configured.address.addr, binding.local.port));
+                    if (expanded)
+                        bindings ~= candidate;
+                    else
+                    {
+                        bindings[i].iface = candidate.iface;
+                        bindings[i].local = candidate.local;
+                    }
+                    expanded = true;
+                }
+                ++i;
+            }
+
+            deduplicate_bindings(bindings);
+
+            bool changed = bindings[] != _multicast_bindings[];
+            if (changed)
+            {
+                _multicast_bindings.clear();
+                foreach (binding; bindings[])
+                    _multicast_bindings ~= binding;
+            }
+            foreach (ref binding; bindings[])
+            {
+                if (binding.local.family == AddressFamily.ipv4)
+                {
+                    binding.iface = ObjectRef!BaseInterface();
+                    binding.local._a.ipv4.addr = IPAddr.any;
+                }
+            }
+            deduplicate_bindings(bindings);
+            return changed;
+        }
+
+        static void deduplicate_bindings(ref Array!UDPBindEndpoint bindings)
+        {
+            for (size_t i = bindings.length; i-- > 0; )
+                foreach (ref earlier; bindings[0 .. i])
+                    if (bindings[i] == earlier)
+                    {
+                        bindings.remove(i);
+                        break;
+                    }
+        }
+
+        void foreach_multicast_local(ushort port, scope void delegate(IPAddr) nothrow @nogc sink)
+        {
+            foreach (ref binding; _multicast_bindings[])
+                if (binding.local.family == AddressFamily.ipv4 && binding.local.port == port)
+                    sink(binding.local._a.ipv4.addr);
+        }
+
+        InetAddress selected_local(IPAddr destination, BaseInterface ingress, ushort port, bool group)
+        {
+            foreach (ref binding; _multicast_bindings[])
+            {
+                if (binding.local.family != AddressFamily.ipv4 || binding.local.port != port)
+                    continue;
+                IPAddr local = binding.local._a.ipv4.addr;
+                if (group)
+                {
+                    if (local == IPAddr.any || (binding.iface && binding.iface.get is ingress) || interface_has_address(ingress, local))
+                        return InetAddress(local, port);
+                }
+                else if (local == IPAddr.any || local == destination)
+                    return InetAddress(destination, port);
+            }
+            return InetAddress();
+        }
     }
 
     void close_endpoints()
@@ -330,7 +466,11 @@ private:
 
     UDPEndpointHooks endpoint_hooks()
     {
-        return UDPEndpointHooks(&include_endpoint, &configure_endpoint, &remove_endpoint, &on_datagram);
+        static if (has_ip)
+            UDPBindingsPrepare prepare = _multicast ? &prepare_multicast_bindings : null;
+        else
+            UDPBindingsPrepare prepare;
+        return UDPEndpointHooks(prepare, &include_endpoint, &configure_endpoint, &remove_endpoint, &on_datagram);
     }
 
     void remove_endpoint(UDPEndpoint* endpoint)
@@ -381,8 +521,24 @@ private:
             if (bound.endpoint !is endpoint)
                 continue;
             BaseInterface iface = info.ingress ? info.ingress : bound.binding.iface.get;
-            if (is_announce_datagram(cast(const(ubyte)[])data))
-                get_module!SyncDiscoveryModule.receive_announce(iface, bound.binding.local, info.source, cast(const(ubyte)[])data, info.rx_time);
+            const(ubyte)[] datagram = cast(const(ubyte)[])data;
+            bool announce = is_announce_datagram(datagram);
+            static if (has_ip)
+            {
+                if (_multicast && bound.binding.local.family == AddressFamily.ipv4)
+                {
+                    IPAddr destination = info.destination._a.ipv4.addr;
+                    bool group = destination == discovery_ipv4_group;
+                    InetAddress local = selected_local(destination, iface, bound.binding.local.port, group);
+                    if (announce && local.family == AddressFamily.ipv4)
+                        get_module!SyncDiscoveryModule.receive_announce(iface, local, info.source, datagram, info.rx_time);
+                    else if (!announce && !group && local.family == AddressFamily.ipv4 && _server)
+                        _server.receive(endpoint, data, info);
+                    return;
+                }
+            }
+            if (announce)
+                get_module!SyncDiscoveryModule.receive_announce(iface, bound.binding.local, info.source, datagram, info.rx_time);
             else if (_server)
                 _server.receive(endpoint, data, info);
             return;
@@ -768,13 +924,31 @@ unittest
             assert(bindings.length == 2);
             assert(bindings[0].local == InetAddress(IPAddr(192, 168, 1, 1), default_discovery_port));
             assert(bindings[1].local == InetAddress(IPv6Addr.loopback, default_discovery_port));
+            assert(domain.multicast);
             assert(domain.include_endpoint(bindings[0]));
             assert(!domain.include_endpoint(bindings[1]));
+            assert(domain.prepare_multicast_bindings(bindings));
+            assert(domain._multicast_bindings.length == 1);
+            assert(domain._multicast_bindings[0].local == InetAddress(IPAddr(192, 168, 1, 1), default_discovery_port));
+            assert(bindings.length == 1);
+            assert(bindings[0].local == InetAddress(IPAddr.any, default_discovery_port));
+            collect_udp_bindings(domain._bind[], domain._interfaces[], domain.port, bindings);
+            assert(!domain.prepare_multicast_bindings(bindings));
 
-            UDPBindEndpoint wildcard_binding = UDPBindEndpoint(ObjectRef!BaseInterface(),
-                                                               InetAddress(IPAddr.any, 6667));
-            assert(UDPDiscovery.discovery_destination(wildcard_binding) ==
-                   InetAddress(IPAddr.broadcast, 6667));
+            InetAddress[3] multicast_bind = [InetAddress(IPAddr(192, 168, 1, 1), 0),
+                                             InetAddress(IPAddr(192, 168, 1, 2), 0),
+                                             InetAddress(IPAddr(192, 168, 1, 3), 1234)];
+            domain.bind(multicast_bind[]);
+            collect_udp_bindings(domain._bind[], domain._interfaces[], domain.port, bindings);
+            assert(domain.prepare_multicast_bindings(bindings));
+            assert(domain._multicast_bindings.length == 3);
+            assert(bindings.length == 2);
+
+            domain.multicast(false);
+            assert(domain.include_endpoint(bindings[0]));
+
+            UDPBindEndpoint wildcard_binding = UDPBindEndpoint(ObjectRef!BaseInterface(), InetAddress(IPAddr.any, 6667));
+            assert(UDPDiscovery.discovery_destination(wildcard_binding) == InetAddress(IPAddr.broadcast, 6667));
         }
 
         InetAddress[1] only_ipv6 = [InetAddress(IPv6Addr.loopback, 0)];

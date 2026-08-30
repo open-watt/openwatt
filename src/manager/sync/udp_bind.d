@@ -38,10 +38,12 @@ struct UDPBoundEndpoint
 
 alias UDPBindingConfigure = bool delegate(UDPEndpoint* endpoint, ref const UDPBindEndpoint binding) nothrow @nogc;
 alias UDPBindingInclude = bool delegate(ref const UDPBindEndpoint binding) nothrow @nogc;
+alias UDPBindingsPrepare = bool delegate(ref Array!UDPBindEndpoint bindings) nothrow @nogc;
 alias UDPEndpointRemove = void delegate(UDPEndpoint* endpoint) nothrow @nogc;
 
 struct UDPEndpointHooks
 {
+    UDPBindingsPrepare prepare;
     UDPBindingInclude include;
     UDPBindingConfigure configure;
     UDPEndpointRemove remove;
@@ -57,6 +59,28 @@ nothrow @nogc:
     bool refresh(const(InetAddress)[] bind, const(ObjectRef!BaseInterface)[] interfaces, ushort port, ref UDPEndpointHooks hooks)
     {
         collect_udp_bindings(bind, interfaces, port, _desired);
+        if (hooks.prepare && hooks.prepare(_desired))
+            close(hooks);
+        return refresh_desired(hooks);
+    }
+
+    void close(ref UDPEndpointHooks hooks)
+    {
+        while (endpoints.length)
+            remove(endpoints.length - 1, hooks);
+        _retry_at = MonoTime();
+    }
+
+    bool any_open() const pure
+        => endpoints.length != 0;
+
+private:
+
+    Array!UDPBindEndpoint _desired;
+    MonoTime _retry_at;
+
+    bool refresh_desired(ref UDPEndpointHooks hooks)
+    {
         if (hooks.include)
             for (size_t i = _desired.length; i-- > 0; )
                 if (!hooks.include(_desired[i]))
@@ -94,21 +118,6 @@ nothrow @nogc:
             _retry_at = MonoTime();
         return created;
     }
-
-    void close(ref UDPEndpointHooks hooks)
-    {
-        while (endpoints.length)
-            remove(endpoints.length - 1, hooks);
-        _retry_at = MonoTime();
-    }
-
-    bool any_open() const pure
-        => endpoints.length != 0;
-
-private:
-
-    Array!UDPBindEndpoint _desired;
-    MonoTime _retry_at;
 
     bool has_binding(ref const UDPBindEndpoint binding) const
     {
