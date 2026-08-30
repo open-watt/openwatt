@@ -1340,6 +1340,12 @@ nothrow @nogc:
             IOCP_SOCKET socket = ws_socket(WSA_AF_INET, WSA_SOCK_DGRAM, WSA_IPPROTO_UDP, null, 0, WSA_FLAG_OVERLAPPED);
             if (socket == INVALID_SOCKET)
                 return false;
+            int receive_info = 1;
+            if (g_recv_msg is null || ws_setsockopt(socket, WSA_IPPROTO_IP, WSA_IP_PKTINFO, &receive_info, int.sizeof) != 0)
+            {
+                ws_closesocket(socket);
+                return false;
+            }
             sockaddr_in address;
             address.sin_family = cast(short)WSA_AF_INET;
             if (local)
@@ -1358,8 +1364,16 @@ nothrow @nogc:
                     return false;
                 }
             }
+            sockaddr_in bound;
+            int bound_length = sockaddr_in.sizeof;
+            if (ws_getsockname(socket, &bound, &bound_length) != 0)
+            {
+                ws_closesocket(socket);
+                return false;
+            }
             _owner = owner;
             _handle = socket;
+            _local = from_sockaddr_in(bound);
             if (!g_app.reactor.associate(cast(HANDLE)socket) || !post_recv())
             {
                 ws_closesocket(socket);
@@ -1382,6 +1396,15 @@ nothrow @nogc:
             if (create_socket(family, SocketType.datagram, Protocol.udp, socket).failed)
                 return false;
             socket.set_socket_option(SocketOption.non_blocking, true);
+            version (linux)
+            {
+                SocketOption receive_info = family == AddressFamily.ipv6 ? SocketOption.ipv6_pktinfo : SocketOption.ip_pktinfo;
+                if (socket.set_socket_option(receive_info, true).failed)
+                {
+                    socket.close();
+                    return false;
+                }
+            }
             if (family == AddressFamily.ipv6)
             {
                 enum int IPPROTO_IPV6_ = 41;
@@ -1407,6 +1430,11 @@ nothrow @nogc:
                 socket.close();
                 return false;
             }
+            if (socket.get_socket_name(_local).failed)
+            {
+                socket.close();
+                return false;
+            }
 
             _owner = owner;
             _socket = socket;
@@ -1426,14 +1454,9 @@ nothrow @nogc:
         version (UseInternalIPStack)
             return _pcb ? InetAddress(_pcb.local_addr, _pcb.local_port) : InetAddress();
         else version (Windows)
-            return InetAddress();
+            return _local;
         else
-        {
-            InetAddress address;
-            if (_socket)
-                _socket.get_socket_name(address);
-            return address;
-        }
+            return _local;
     }
 
     BaseInterface egress_iface(InetAddress remote)
@@ -1623,10 +1646,14 @@ private:
             }
         }
 
-        package(protocol.ip) void deliver(IPAddr src, ushort sport, const(ubyte)[] data, MonoTime rx_time)
+        package(protocol.ip) void deliver(IPAddr src, ushort sport, IPAddr dst, ushort dport, BaseInterface ingress, const(ubyte)[] data, MonoTime rx_time)
         {
-            InetAddress from = InetAddress(src, sport);
-            udp_deliver(_owner, data, from, rx_time);
+            UDPReceiveInfo info;
+            info.source = InetAddress(src, sport);
+            info.destination = InetAddress(dst, dport);
+            info.rx_time = rx_time;
+            info.ingress = ingress;
+            udp_deliver(_owner, data, info);
         }
     }
     else version (Windows)
@@ -1635,11 +1662,14 @@ private:
         {
             IoOp io;
             sockaddr_in from;
-            int from_len = cast(int)sockaddr_in.sizeof;
+            WSABUF buffer;
+            WSAMSG message;
+            ubyte[64] control;
             ubyte[64 * 1024] buf;
         }
 
         IOCP_SOCKET _handle = INVALID_SOCKET;
+        InetAddress _local;
         int  _outstanding;
         RecvFromOp _recv;
 
@@ -1652,12 +1682,16 @@ private:
         {
             _recv.io.ov = OVERLAPPED.init;
             _recv.io.on_complete = &recv_complete;
-            _recv.from_len = cast(int)sockaddr_in.sizeof;
-            WSABUF wb = WSABUF(cast(uint)_recv.buf.length, _recv.buf.ptr);
-            uint flags, recvd;
+            _recv.buffer = WSABUF(uint(_recv.buf.length), _recv.buf.ptr);
+            _recv.message.name = &_recv.from;
+            _recv.message.namelen = sockaddr_in.sizeof;
+            _recv.message.lpBuffers = &_recv.buffer;
+            _recv.message.dwBufferCount = 1;
+            _recv.message.Control = WSABUF(uint(_recv.control.length), _recv.control.ptr);
+            _recv.message.dwFlags = 0;
+            uint recvd;
             ++_outstanding;
-            if (WSARecvFrom(_handle, &wb, 1, &recvd, &flags, cast(void*)&_recv.from, &_recv.from_len, &_recv.io.ov, null) != 0 &&
-                ws_lasterror() != WSA_IO_PENDING)
+            if (g_recv_msg(_handle, &_recv.message, &recvd, &_recv.io.ov, null) != 0 && ws_lasterror() != WSA_IO_PENDING)
             {
                 --_outstanding;
                 return false;
@@ -1672,8 +1706,24 @@ private:
                 return;
             if (ok && bytes > 0)
             {
-                InetAddress from = from_sockaddr_in(_recv.from);
-                udp_deliver(_owner, _recv.buf[0 .. bytes], from, getTime());
+                uint interface_index;
+                InetAddress destination = _local;
+                if (_recv.message.Control.len >= control_data_offset + IN_PKTINFO.sizeof)
+                {
+                    WSACMSGHDR* header = cast(WSACMSGHDR*)_recv.message.Control.buf;
+                    if (header.length >= control_data_offset + IN_PKTINFO.sizeof && header.level == WSA_IPPROTO_IP && header.type == WSA_IP_PKTINFO)
+                    {
+                        IN_PKTINFO* packet_info = cast(IN_PKTINFO*)(_recv.message.Control.buf + control_data_offset);
+                        destination._a.ipv4.addr.address = packet_info.address;
+                        interface_index = packet_info.interface_index;
+                    }
+                }
+                UDPReceiveInfo info;
+                info.source = from_sockaddr_in(_recv.from);
+                info.destination = destination;
+                info.rx_time = getTime();
+                info.ingress = interface_for_kernel_index(int(interface_index));
+                udp_deliver(_owner, _recv.buf[0 .. bytes], info);
             }
             if (!_closing)
                 post_recv();    // transient errors / empty datagrams: keep the socket armed
@@ -1682,6 +1732,7 @@ private:
     else
     {
         Socket _socket;
+        InetAddress _local;
         bool _watched;
 
         void backend_release() {}
@@ -1697,10 +1748,27 @@ private:
             {
                 size_t got;
                 InetAddress from;
-                Result r = _socket.recvfrom(_udp_scratch[], MsgFlags.none, &from, &got);
+                InetAddress destination = _local;
+                uint interface_index;
+                version (linux)
+                    Result r = _socket.recvfrom(_udp_scratch[], MsgFlags.none, &from, &got, &destination, &interface_index);
+                else
+                    Result r = _socket.recvfrom(_udp_scratch[], MsgFlags.none, &from, &got);
                 if (r.failed || got == 0)
                     return;     // would-block, or a transient error udp just shrugs off
-                udp_deliver(_owner, _udp_scratch[0 .. got], from, getTime());
+                if (destination.family == AddressFamily.unspecified)
+                    destination = _local;
+                else
+                    destination.port = _local.port;
+                UDPReceiveInfo info;
+                info.source = from;
+                info.destination = destination;
+                info.rx_time = getTime();
+                version (linux)
+                    info.ingress = interface_for_kernel_index(int(interface_index));
+                else if (destination.family == AddressFamily.ipv4)
+                    info.ingress = interface_for_address(v4_addr(destination));
+                udp_deliver(_owner, _udp_scratch[0 .. got], info);
             }
         }
     }
@@ -2062,6 +2130,26 @@ else version (Windows)
 
     alias IOCP_SOCKET = size_t;
     struct WSABUF { uint len; ubyte* buf; }     // ULONG len; CHAR* buf
+    struct WSAMSG
+    {
+        void* name;
+        int namelen;
+        WSABUF* lpBuffers;
+        uint dwBufferCount;
+        WSABUF Control;
+        uint dwFlags;
+    }
+    struct WSACMSGHDR
+    {
+        size_t length;
+        int level;
+        int type;
+    }
+    struct IN_PKTINFO
+    {
+        uint address;
+        uint interface_index;
+    }
     struct IOCP_GUID { uint Data1; ushort Data2, Data3; ubyte[8] Data4; }
     struct IPv4Membership { uint group; uint interface_; }
 
@@ -2071,6 +2159,7 @@ else version (Windows)
 
     alias LPFN_CONNECTEX = extern(Windows) int function(IOCP_SOCKET, const(void)*, int, const(void)*, uint, uint*, OVERLAPPED*) nothrow @nogc;
     alias LPFN_ACCEPTEX  = extern(Windows) int function(IOCP_SOCKET, IOCP_SOCKET, void*, uint, uint, uint, uint*, OVERLAPPED*) nothrow @nogc;
+    alias LPFN_RECVMSG   = extern(Windows) int function(IOCP_SOCKET, WSAMSG*, uint*, OVERLAPPED*, void*) nothrow @nogc;
 
     enum uint SIO_GET_EXTENSION_FUNCTION_POINTER = 0xC8000006;
     enum int  SO_UPDATE_CONNECT_CONTEXT = 0x7010;
@@ -2078,12 +2167,14 @@ else version (Windows)
 
     __gshared immutable IOCP_GUID WSAID_CONNECTEX = IOCP_GUID(0x25a207b9, 0xddf3, 0x4660, [0x8e,0xe9,0x76,0xe5,0x8c,0x74,0x06,0x3e]);
     __gshared immutable IOCP_GUID WSAID_ACCEPTEX  = IOCP_GUID(0xb5367df1, 0xcbac, 0x11cf, [0x95,0xca,0x00,0x80,0x5f,0x48,0xa1,0x92]);
+    __gshared immutable IOCP_GUID WSAID_RECVMSG  = IOCP_GUID(0xf689d7c8, 0x6f1f, 0x436b, [0x8a,0x53,0xe5,0x4f,0xe3,0x51,0xc3,0x22]);
 
     enum IOCP_SOCKET INVALID_SOCKET = ~IOCP_SOCKET(0);
     enum int WSA_AF_INET = 2, WSA_SOCK_STREAM = 1, WSA_SOCK_DGRAM = 2;
     enum int WSA_IPPROTO_IP = 0, WSA_IPPROTO_TCP = 6, WSA_IPPROTO_UDP = 17;
-    enum int WSA_IP_MULTICAST_IF = 9, WSA_IP_ADD_MEMBERSHIP = 12;
+    enum int WSA_IP_MULTICAST_IF = 9, WSA_IP_ADD_MEMBERSHIP = 12, WSA_IP_PKTINFO = 19;
     enum int SOL_SOCKET_ = 0xffff, SO_REUSEADDR_ = 0x0004, SO_BROADCAST_ = 0x0020, SO_ERROR_ = 0x1007;
+    enum size_t control_data_offset = (WSACMSGHDR.sizeof + size_t.alignof - 1) & ~(size_t.alignof - 1);
 
     // raw winsock; pragma(mangle) keeps the common names from clashing with urt.socket's exports
     enum uint WSA_FLAG_OVERLAPPED = 0x01;
@@ -2099,11 +2190,11 @@ else version (Windows)
     enum int WSA_IO_PENDING = 997;
 
     pragma(mangle, "getpeername") extern(Windows) int ws_getpeername(IOCP_SOCKET, void*, int*) nothrow @nogc;
+    pragma(mangle, "getsockname") extern(Windows) int ws_getsockname(IOCP_SOCKET, void*, int*) nothrow @nogc;
     pragma(mangle, "sendto")      extern(Windows) int ws_sendto(IOCP_SOCKET, const(void)*, int, int, const(void)*, int) nothrow @nogc;
-    extern(Windows) int WSARecvFrom(IOCP_SOCKET, WSABUF*, uint, uint*, uint*, void*, int*, OVERLAPPED*, void*) nothrow @nogc;
-
     __gshared LPFN_CONNECTEX g_connect_ex;
     __gshared LPFN_ACCEPTEX  g_accept_ex;
+    __gshared LPFN_RECVMSG   g_recv_msg;
 
     // build a v4 sockaddr_in from an InetAddress (IOCP TCP/UDP is v4-only for now)
     sockaddr_in to_sockaddr_in(ref const InetAddress a) nothrow @nogc
@@ -2146,8 +2237,16 @@ else version (Windows)
         IOCP_GUID ax = WSAID_ACCEPTEX;
         WSAIoctl(s, SIO_GET_EXTENSION_FUNCTION_POINTER, cast(void*)&ax, cast(uint)IOCP_GUID.sizeof, cast(void*)&g_accept_ex, cast(uint)g_accept_ex.sizeof, &bytes, null, null);
         ws_closesocket(s);
-        if (g_connect_ex is null || g_accept_ex is null)
-            writeError("IOCPWorker: failed to resolve ConnectEx/AcceptEx");
+
+        s = ws_socket(WSA_AF_INET, WSA_SOCK_DGRAM, WSA_IPPROTO_UDP, null, 0, WSA_FLAG_OVERLAPPED);
+        if (s != INVALID_SOCKET)
+        {
+            IOCP_GUID rx = WSAID_RECVMSG;
+            WSAIoctl(s, SIO_GET_EXTENSION_FUNCTION_POINTER, cast(void*)&rx, uint(IOCP_GUID.sizeof), cast(void*)&g_recv_msg, uint(g_recv_msg.sizeof), &bytes, null, null);
+            ws_closesocket(s);
+        }
+        if (g_connect_ex is null || g_accept_ex is null || g_recv_msg is null)
+            writeError("IOCPWorker: failed to resolve socket extension functions");
     }
 
 }

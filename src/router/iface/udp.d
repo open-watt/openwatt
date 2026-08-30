@@ -397,10 +397,10 @@ private:
         return InetAddress(IPAddr.any, port);
     }
 
-    void on_recv(UDPEndpoint*, const(void)[] data, ref const InetAddress from, MonoTime rx_time)
+    void on_recv(UDPEndpoint*, const(void)[] data, ref const UDPReceiveInfo info)
     {
         Packet packet;
-        packet.init!UDPFrame(data, rx_time).address = from;
+        packet.init!UDPFrame(data, info.rx_time).address = info.source;
         incoming_packet(packet);
     }
 }

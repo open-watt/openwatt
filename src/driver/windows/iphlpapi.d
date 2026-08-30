@@ -173,6 +173,7 @@ struct OSAdapterInfo
 {
     bool valid;
     MACAddress mac;
+    uint if_index;
     uint mtu;
     ConnectionStatus connection = ConnectionStatus.unknown;
     ulong tx_link_speed;    // bps
@@ -225,6 +226,7 @@ bool query_adapter(const(char)[] adapter_name, out OSAdapterInfo info)
 
         if (p.PhysicalAddressLength >= 6)
             info.mac.b[] = p.PhysicalAddress[0 .. 6];
+        info.if_index       = p.IfIndex;
         info.mtu            = p.Mtu;
         info.connection     = map_oper_status(p.OperStatus);
         // 0xFFFFFFFFFFFFFFFF is iphlpapi's "unknown link speed" sentinel.

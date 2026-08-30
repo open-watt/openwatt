@@ -19,7 +19,7 @@ import manager.sync.peer;
 import manager.sync.udp_bind;
 
 import router.iface;
-import router.iface.endpoint : UDPEndpoint;
+import router.iface.endpoint : UDPEndpoint, UDPReceiveInfo;
 
 nothrow @nogc:
 
@@ -166,11 +166,11 @@ private:
         return UDPEndpointHooks(null, &remove_endpoint, &on_datagram);
     }
 
-    void on_datagram(UDPEndpoint* endpoint, const(void)[] data, ref const InetAddress src, MonoTime rx_time)
+    void on_datagram(UDPEndpoint* endpoint, const(void)[] data, ref const UDPReceiveInfo info)
     {
-        if (Spawned* spawned = find_peer(endpoint, src))
+        if (Spawned* spawned = find_peer(endpoint, info.source))
         {
-            spawned.last_rx = rx_time;
+            spawned.last_rx = info.rx_time;
             spawned.peer.deliver_frame(cast(const(ubyte)[])data);
             return;
         }
@@ -182,15 +182,15 @@ private:
         SyncPeer peer = Collection!SyncPeer().create(peer_name, peer_flags);
         if (!peer)
         {
-            log.warning("failed to create sync peer for ", src);
+            log.warning("failed to create sync peer for ", info.source);
             return;
         }
         peer.encoder(_encoder);
-        peer.bind_udp_endpoint(endpoint, src);
+        peer.bind_udp_endpoint(endpoint, info.source);
         peer.subscribe(&on_peer_state);
-        _peers ~= Spawned(endpoint, src, peer, rx_time);
+        _peers ~= Spawned(endpoint, info.source, peer, info.rx_time);
 
-        debug log.info("peer appeared from ", src, " -> ", peer.name[]);
+        debug log.info("peer appeared from ", info.source, " -> ", peer.name[]);
 
         peer.deliver_frame(cast(const(ubyte)[])data);
     }
