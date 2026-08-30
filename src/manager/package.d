@@ -1144,12 +1144,6 @@ nothrow @nogc:
         import manager.device : create_device_from_profile;
         import manager.element : Element;
 
-        if (id in devices)
-        {
-            session.write_line("Device '", id, "' already exists");
-            return;
-        }
-
         // acquired for the device's lifetime; never released
         Profile* profile = acquire_profile(_profile);
         if (!profile)

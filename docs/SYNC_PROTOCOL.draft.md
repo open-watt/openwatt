@@ -20,8 +20,8 @@ deferrals are recorded in the commit messages on the way past; the notable ones:
   not enforce Constraint either, so they land together.
 - Echo suppression for `set` writers is not implemented; the writer receives its own change
   back through the feed in addition to the `res` ack (benign under mode `latest`).
-- Mirrored devices are served to peers other than their author (hub fan-out); the author is
-  recognized by holding the device on an adopted handle. Star topologies only, as before.
+- Peer-contributed elements are served to peers other than their contributor (hub fan-out);
+  element binding membership identifies the contributor. Star topologies only, as before.
 
 ## Implementation status (2026-07-31, first pass)
 
@@ -246,12 +246,13 @@ Formats with no wire representation (user types pending name binding, domain-clo
 pending clock anchors) are declined with `err {code:"unserialisable"}` -- shared verdict with
 [`ows.container_serialisable()`](../src/manager/ows.d#L50), not a second opinion.
 
-### 5. `add` -- `{h, path, class, ft|sig, access?, mode?, v?, t?}`
+### 5. `add` -- `{h, path, class, peer?, ft|sig, access?, v?, t?}`
 
 Four jobs in one: binds handle to path, announces existence, cites schema (`ft` for
 elements/events, `sig` for methods), and carries current value + timestamp. Each omission would
 stimulate the follow-up principle 4 forbids. `class` is `device` / `element` / `event` / `method`;
-components never appear.
+components never appear. `peer` is the hexadecimal owner of a peer-local device and is omitted for
+the global namespace.
 
 Deliberate asymmetry: `v` is the *latest* value even under a `from` subscription -- backfill
 arrives as `val` frames behind it, so a UI paints instantly and fills the chart as history streams.

@@ -248,11 +248,9 @@ bandwidth-constrained medium forces it.
 
 ## Open questions
 
-- Device-id collisions across the fleet: every node runs its own `energy` device, so a member's
-  mirror of it is refused at the authority (a remote device never overwrites a local one) and is
-  simply absent from the fleet surface. Fine for the bench; the fleet eventually wants per-node
-  namespacing of mirrored devices (e.g. a node-scoped prefix), which also affects how automations
-  address remote elements.
+- Matching global device ids merge and their schemas and access are unioned. Peer-local devices
+  retain their owning peer namespace, and private devices never enter the sync surface. A future
+  scope flag should distinguish read-only and read-write peer-local exports.
 
 - Empty `cluster=` on a member: accept any claimant is convenient on the bench and spooky in the
   field. Current position: accept but log loudly; refuse whenever a secret is configured.
