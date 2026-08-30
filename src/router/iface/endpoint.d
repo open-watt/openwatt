@@ -74,7 +74,7 @@ struct UDPReceiveInfo
     BaseInterface ingress;
 }
 
-alias UDPRecvHandler = void delegate(UDPEndpoint* ep, const(void)[] data, ref const UDPReceiveInfo info) nothrow @nogc;
+alias UDPRecvHandler = void delegate(UDPEndpoint* ep, const(void)[] data, ref UDPReceiveInfo info) nothrow @nogc;
 alias EtherTcpInput = void function(MACAddress src, MACAddress dst, const(void)[] segment, MonoTime rx_time) nothrow @nogc;
 
 struct UdpHeader
@@ -568,7 +568,7 @@ nothrow @nogc:
 }
 
 
-void udp_deliver(UDPEndpoint* endpoint, const(void)[] data, ref const UDPReceiveInfo info)
+void udp_deliver(UDPEndpoint* endpoint, const(void)[] data, ref UDPReceiveInfo info)
 {
     if (!endpoint || endpoint._closing || (endpoint._connected && info.source != endpoint._remote))
         return;
@@ -680,7 +680,7 @@ unittest
         ubyte[4] payload;
         bool ingress_matches;
 
-        void recv(UDPEndpoint*, const(void)[] data, ref const UDPReceiveInfo info) nothrow @nogc
+        void recv(UDPEndpoint*, const(void)[] data, ref UDPReceiveInfo info) nothrow @nogc
         {
             ++received;
             assert(data.length == payload.length);

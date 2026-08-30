@@ -151,11 +151,11 @@ package:
             sweep_peers(true);
     }
 
-    void receive(UDPEndpoint* endpoint, const(void)[] data, ref const InetAddress src, MonoTime rx_time)
+    void receive(UDPEndpoint* endpoint, const(void)[] data, ref UDPReceiveInfo info)
     {
         assert(_slave);
         if (_accepting && running)
-            on_datagram(endpoint, data, src, rx_time);
+            on_datagram(endpoint, data, info);
     }
 
     void remove_endpoint(UDPEndpoint* endpoint)
@@ -211,7 +211,7 @@ private:
         return UDPEndpointHooks(null, null, &remove_endpoint, &on_datagram);
     }
 
-    void on_datagram(UDPEndpoint* endpoint, const(void)[] data, ref const UDPReceiveInfo info)
+    void on_datagram(UDPEndpoint* endpoint, const(void)[] data, ref UDPReceiveInfo info)
     {
         if (Spawned* spawned = find_peer(endpoint, info.source))
         {

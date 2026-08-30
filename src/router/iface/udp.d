@@ -397,7 +397,7 @@ private:
         return InetAddress(IPAddr.any, port);
     }
 
-    void on_recv(UDPEndpoint*, const(void)[] data, ref const UDPReceiveInfo info)
+    void on_recv(UDPEndpoint*, const(void)[] data, ref UDPReceiveInfo info)
     {
         Packet packet;
         packet.init!UDPFrame(data, info.rx_time).address = info.source;
