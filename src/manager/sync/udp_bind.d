@@ -2,16 +2,15 @@ module manager.sync.udp_bind;
 
 import urt.array;
 import urt.inet;
-import urt.mem.temp : tconcat;
+import urt.time;
 
 import manager.base;
 import manager.collection;
 import manager.features;
 
 import router.iface;
-import router.iface.endpoint : foreach_ether_station;
+import router.iface.endpoint : UDPEndpoint, UDPRecvHandler, foreach_ether_station, udp_open;
 import router.iface.ethernet;
-import router.iface.udp;
 
 static if (has_ip)
     import protocol.ip.address : IPAddress;
@@ -31,29 +30,29 @@ struct UDPBindEndpoint
         => local == rhs.local && (local.family != AddressFamily.ether || iface == rhs.iface);
 }
 
-struct UDPEndpoint
+struct UDPBoundEndpoint
 {
     UDPBindEndpoint binding;
-    UDPInterface transport;
+    UDPEndpoint* endpoint;
 }
 
-alias UDPBindingConfigure = bool delegate(UDPInterface transport, ref UDPBindEndpoint binding) nothrow @nogc;
-alias UDPTransportRemove = void delegate(UDPInterface transport) nothrow @nogc;
+alias UDPBindingConfigure = bool delegate(UDPEndpoint* endpoint, ref const UDPBindEndpoint binding) nothrow @nogc;
+alias UDPEndpointRemove = void delegate(UDPEndpoint* endpoint) nothrow @nogc;
 
 struct UDPEndpointHooks
 {
     UDPBindingConfigure configure;
-    UDPTransportRemove remove;
-    InterfaceSubscriber.PacketHandler packet;
+    UDPEndpointRemove remove;
+    UDPRecvHandler receive;
 }
 
 struct UDPEndpointSet
 {
 nothrow @nogc:
 
-    Array!UDPEndpoint endpoints;
+    Array!UDPBoundEndpoint endpoints;
 
-    bool refresh(BaseObject owner, const(InetAddress)[] bind, const(ObjectRef!BaseInterface)[] interfaces, ushort port, ref UDPEndpointHooks hooks)
+    bool refresh(const(InetAddress)[] bind, const(ObjectRef!BaseInterface)[] interfaces, ushort port, ref UDPEndpointHooks hooks)
     {
         collect_udp_bindings(bind, interfaces, port, _desired);
         size_t i;
@@ -75,8 +74,18 @@ nothrow @nogc:
         }
 
         bool created = true;
+        MonoTime now = getTime();
         foreach (ref binding; _desired[])
-            created = ensure(owner, binding, hooks) && created;
+        {
+            if (has_binding(binding))
+                continue;
+            if (now < _retry_at || !ensure(binding, hooks))
+                created = false;
+        }
+        if (!created && now >= _retry_at)
+            _retry_at = now + 1.seconds;
+        else if (created)
+            _retry_at = MonoTime();
         return created;
     }
 
@@ -84,46 +93,52 @@ nothrow @nogc:
     {
         while (endpoints.length)
             remove(endpoints.length - 1, hooks);
+        _retry_at = MonoTime();
     }
 
-    bool any_running() const
-    {
-        foreach (ref endpoint; endpoints[])
-            if (endpoint.transport.running)
-                return true;
-        return false;
-    }
+    bool any_open() const pure
+        => endpoints.length != 0;
 
 private:
 
     Array!UDPBindEndpoint _desired;
-    uint _next_id;
+    MonoTime _retry_at;
 
-    bool ensure(BaseObject owner, ref UDPBindEndpoint binding, ref UDPEndpointHooks hooks)
+    bool has_binding(ref const UDPBindEndpoint binding) const
     {
         foreach (ref endpoint; endpoints[])
             if (endpoint.binding == binding)
                 return true;
-        UDPInterface transport = Collection!UDPInterface().create(tconcat(owner.name[], "-endpoint-", ++_next_id), ObjectFlags.dynamic);
-        if (!transport)
-            return false;
-        if (hooks.configure && !hooks.configure(transport, binding))
+        return false;
+    }
+
+    bool ensure(ref UDPBindEndpoint binding, ref UDPEndpointHooks hooks)
+    {
+        EthernetStation station;
+        if (binding.local.family == AddressFamily.ether && binding.iface)
         {
-            transport.destroy();
+            station = dyn_cast!EthernetStation(binding.iface.get);
+            if (!station)
+                return false;
+        }
+        UDPEndpoint* endpoint = udp_open(&binding.local, null, hooks.receive, station);
+        if (!endpoint)
+            return false;
+        if (hooks.configure && !hooks.configure(endpoint, binding))
+        {
+            endpoint.close();
             return false;
         }
-        transport.subscribe(hooks.packet, PacketFilter(PacketType.udp, PacketDirection.incoming));
-        endpoints.emplaceBack(binding, transport);
+        endpoints.emplaceBack(binding, endpoint);
         return true;
     }
 
     void remove(size_t index, ref UDPEndpointHooks hooks)
     {
-        UDPEndpoint endpoint = endpoints[index];
-        endpoint.transport.unsubscribe(hooks.packet);
+        UDPBoundEndpoint endpoint = endpoints[index];
         if (hooks.remove)
-            hooks.remove(endpoint.transport);
-        endpoint.transport.destroy();
+            hooks.remove(endpoint.endpoint);
+        endpoint.endpoint.close();
         endpoints.removeSwapLast(index);
     }
 }
@@ -226,23 +241,6 @@ void add_binding(ref Array!UDPBindEndpoint result, BaseInterface iface, InetAddr
 }
 
 
-version (unittest)
-private class TestUDPInterface : UDPInterface
-{
-nothrow @nogc:
-
-    this(CID id)
-    {
-        super(id);
-    }
-
-    override bool running() const pure
-        => online;
-
-    bool online;
-}
-
-
 unittest
 {
     import urt.mem;
@@ -267,18 +265,4 @@ unittest
     assert(bindings[1].local == InetAddress(IPv6Addr.any, 6667));
     assert(bindings[2].local == InetAddress(IPAddr(192, 168, 0, 10), 1234));
 
-    TestUDPInterface transport_a = alloc!TestUDPInterface(CID(102));
-    scope(exit) free(transport_a);
-    TestUDPInterface transport_b = alloc!TestUDPInterface(CID(103));
-    scope(exit) free(transport_b);
-    UDPEndpointSet endpoint_set;
-    endpoint_set.endpoints.emplaceBack(UDPBindEndpoint(), transport_a);
-    endpoint_set.endpoints.emplaceBack(UDPBindEndpoint(), transport_b);
-    assert(!endpoint_set.any_running());
-    transport_a.online = true;
-    assert(endpoint_set.any_running());
-    transport_a.online = false;
-    assert(!endpoint_set.any_running());
-    transport_b.online = true;
-    assert(endpoint_set.any_running());
 }
