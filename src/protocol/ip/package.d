@@ -1484,19 +1484,19 @@ nothrow @nogc:
                 selected = _pcb.local_addr != IPAddr.any ? _pcb.local_addr : _stack_ptr.select_source_v4(group);
             if (!selected)
                 return false;
-            if (_pcb.multicast_group == group && _pcb.outbound_interface == selected)
-                return true;
-            IPAddr previous_interface = _pcb.outbound_interface;
+            if (_pcb.multicast_group && _pcb.multicast_group != group)
+                return false;
+            foreach (joined; _pcb.multicast_interfaces[])
+            {
+                if (joined == selected)
+                    return outbound_interface(selected);
+            }
             if (!outbound_interface(selected))
                 return false;
             if (!igmp_join(*_stack_ptr, group, selected))
-            {
-                _pcb.outbound_interface = previous_interface;
                 return false;
-            }
-            if (_pcb.multicast_group)
-                igmp_leave(*_stack_ptr, _pcb.multicast_group, previous_interface);
             _pcb.multicast_group = group;
+            _pcb.multicast_interfaces ~= selected;
             return true;
         }
         else version (Windows)
@@ -1636,8 +1636,8 @@ private:
         {
             if (_pcb)
             {
-                if (_pcb.multicast_group)
-                    igmp_leave(*_stack_ptr, _pcb.multicast_group, _pcb.outbound_interface);
+                foreach (local; _pcb.multicast_interfaces[])
+                    igmp_leave(*_stack_ptr, _pcb.multicast_group, local);
                 udp_unregister(_pcb);
                 foreach (ref dgm; _pcb.recv_queue[])
                     udp_free_datagram_data(dgm);

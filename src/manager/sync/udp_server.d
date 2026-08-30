@@ -208,7 +208,7 @@ private:
 
     UDPEndpointHooks endpoint_hooks()
     {
-        return UDPEndpointHooks(null, null, &remove_endpoint, &on_datagram);
+        return UDPEndpointHooks(null, null, null, &remove_endpoint, &on_datagram);
     }
 
     void on_datagram(UDPEndpoint* endpoint, const(void)[] data, ref UDPReceiveInfo info)
