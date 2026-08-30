@@ -768,7 +768,9 @@ nothrow @nogc:
 
     override void init()
     {
-        register_packet_codec!EtherTransport();
+        version (UseInternalIPStack) {}
+        else
+            register_frame_handler(PacketType.ethernet, &on_ethernet_frame);
 
         g_app.console.register_collection!InterfaceGroup();
         g_app.console.register_collection!UDPInterface();
@@ -782,10 +784,19 @@ nothrow @nogc:
         g_app.console.register_command!(mac_discover, "discover")("/interface/ethernet", this);
     }
 
+    override void deinit()
+    {
+        version (UseInternalIPStack) {}
+        else
+            unregister_frame_handler(PacketType.ethernet);
+
+        close_udp_endpoints();
+    }
+
     override void update()
     {
         Collection!BaseInterface().update_all();
-        update_ether_endpoints();
+        update_udp_endpoints();
         expire_mac_probes();
     }
 
@@ -1036,6 +1047,13 @@ nothrow @nogc:
         }
     }
 +/
+
+private:
+    void on_ethernet_frame(ref Packet packet, BaseInterface iface)
+    {
+        if (packet.eth.ether_type == EtherType.ow)
+            ether_transport_input(packet, iface);
+    }
 }
 
 

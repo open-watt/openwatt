@@ -92,7 +92,7 @@ enum TcpOptionKind : ubyte
 
 enum size_t TcpDefaultMss     = 536;        // RFC 1122 minimum
 enum size_t TcpEthernetMss    = 1460;       // 1500 - 20 IP - 20 TCP
-enum size_t ether_transport_overhead = 5 + 13;  // ow framing + ether-transport header
+enum size_t ow_transport_overhead = ow_transport_header_size;
 enum size_t TcpSendBufSize    = 8192;
 enum size_t TcpRecvBufSize    = 8192;
 enum size_t TcpAcceptQueueMax = 16;
@@ -1314,7 +1314,7 @@ void send_segment_raw(ref IPStack stack, ref const InetAddress src, ref const In
     if (total > max_packet)
         return;
 
-    ubyte[max_packet] buf = void;
+    align(size_t.sizeof) ubyte[max_packet] buf = void;
 
     auto t = cast(TcpHeader*)(buf.ptr + reserve);
     t.src_port = nativeToBigEndian(src.port);
@@ -1377,6 +1377,9 @@ void send_segment_raw(ref IPStack stack, ref const InetAddress src, ref const In
         {
             MACAddress src_mac = MACAddress(src._a.ether.addr);
             MACAddress dst_mac = MACAddress(dst._a.ether.addr);
+            ubyte[] ow = buf[reserve - ow_transport_header_size .. total];
+            if (!write_ow_transport_header(ow, TransportProto.tcp, tcp_total))
+                return;
 
             // the checksum covers the pseudo-header, so it is computed per emission
             void emit(EthernetStation s)
@@ -1388,10 +1391,10 @@ void send_segment_raw(ref IPStack stack, ref const InetAddress src, ref const In
                 t.checksum = nativeToBigEndian(cc);
 
                 Packet pkt;
-                ref h = pkt.init!EtherTransport(buf[reserve .. total]);
+                ref h = pkt.init!Ethernet(ow);
                 h.dst = dst_mac;
                 h.src = use_src;
-                h.protocol = TransportProto.tcp;
+                h.ether_type = EtherType.ow;
                 s.forward(pkt);
             }
 
@@ -1832,7 +1835,7 @@ void refresh_route(ref IPStack stack, TcpPcb* pcb)
 
         ushort link_mss = TcpEthernetMss;
         uint mtu = station.actual_mtu;
-        enum uint ether_tcp_overhead = ether_transport_overhead + TcpHeader.sizeof;
+        enum uint ether_tcp_overhead = ow_transport_overhead + TcpHeader.sizeof;
         if (mtu > ether_tcp_overhead)
         {
             uint cap = mtu - ether_tcp_overhead;

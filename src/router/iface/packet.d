@@ -28,7 +28,6 @@ enum PacketType : ushort
     cpc         = 11,
     i2c         = 12,
     udp         = 13,
-    ether_transport = 14,
     obd         = 15,
     count
 }
@@ -75,10 +74,18 @@ VlanTag vlan_tag_from_tpid(ushort tpid) pure
 ushort vlan_tpid(VlanTag tag) pure
     => vlan_tpids[tag];
 
-// Bit 15 of the OW encapsulation type field marks control-plane messages;
-// otherwise the field is the PacketType of the encapsulated frame.
-// Control messages use hdr_len = 0 and carry their body in the payload.
+// The top two bits select how to interpret the OW discriminator. Zero carries
+// an exotic PacketType, 01 carries an IP protocol number in the low byte, and
+// 10 carries an OWControl value. 11 is reserved.
+enum ushort ow_class_mask = 0xC000;
+enum ushort ow_transport_flag = 0x4000;
 enum ushort ow_control_flag = 0x8000;
+
+bool is_ow_transport(ushort discriminator) pure
+    => (discriminator & 0xFF00) == ow_transport_flag;
+
+ushort ow_transport_discriminator(ubyte protocol) pure
+    => ow_transport_flag | protocol;
 
 enum OWControl : ushort
 {

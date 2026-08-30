@@ -12,6 +12,7 @@ import urt.time;
 import manager.collection;
 
 import router.iface;
+import router.iface.endpoint : ether_transport_input;
 import router.iface.ethernet;
 import router.iface.mac;
 import router.iface.packet;
@@ -245,6 +246,9 @@ private:
                 break;
             case EtherType.ip6:
                 ingress_v6(pkt, iface);
+                break;
+            case EtherType.ow:
+                ether_transport_input(pkt, iface);
                 break;
             default:
                 break;  // not an L3 frame we care about; another subscriber may handle it

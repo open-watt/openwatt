@@ -14,7 +14,6 @@ import manager.console;
 import manager.plugin;
 
 import router.iface;
-import router.iface.endpoint : ether_neighbour_learn;
 
 //version = DebugEthernetFlow;
 
@@ -147,9 +146,7 @@ protected:
     // Egress seam toward the segment; takes a fully-formed ethernet packet.
     abstract void medium_tx(ref Packet packet);
 
-    // Where locally-decapped exotic traffic enters: standalone = local delivery;
-    // Bridge redirects this into its exotic switching domain.
-    void station_deliver(ref Packet inner)
+    void station_deliver_exotic(ref Packet inner)
     {
         dispatch(inner);
     }
@@ -283,7 +280,7 @@ protected:
         if (!is_network_multicast_address(src))
             _local_addresses[src] = getTime();
 
-        ubyte[1518] buffer = void;
+        align(size_t.sizeof) ubyte[1518] buffer = void;
         ptrdiff_t len = build_ow_payload(packet, *codec, buffer);
         if (len <= 0)
             return false;
@@ -306,13 +303,11 @@ protected:
         if (content.length < 5)
             return false;
 
-        // any ow frame proves its sender is reachable via this station
-        ether_neighbour_learn(packet.eth.src, this);
         ushort wire_type = loadBigEndian(cast(const(ushort)*)content.ptr);
         ushort data_len = loadBigEndian(cast(const(ushort)*)(content.ptr + 2));
         ubyte hdr_len = content[4];
 
-        if (wire_type & ow_control_flag)
+        if ((wire_type & ow_class_mask) == ow_control_flag)
         {
             if (content.length < 5 + data_len)
                 return false;
@@ -320,6 +315,15 @@ protected:
             station_control(cast(OWControl)wire_type, content[5 .. 5 + data_len], packet.eth.src, !packet.eth.dst.is_multicast);
             return true;
         }
+
+        if (is_ow_transport(wire_type))
+        {
+            dispatch(packet);
+            return true;
+        }
+
+        if (wire_type & ow_class_mask)
+            return false;
 
         if (content.length < 5 + hdr_len + data_len)
             return false;
@@ -338,13 +342,12 @@ protected:
         inner.data = content[5 + hdr_len .. 5 + hdr_len + data_len];
         if (codec.decode(inner, content[5 .. 5 + hdr_len]) <= 0)
             return false;
-
         // learn the station carrying the inner src so replies can unicast
         learn(get_network_src_address(inner), packet.eth.src);
 
         // the inner packet accounts where it terminates; the encap overhead counts here
         _status.rx_bytes += packet.length - inner.length;
-        station_deliver(inner);
+        station_deliver_exotic(inner);
         return true;
     }
 
@@ -457,9 +460,6 @@ private:
     // an unknown unicast also fires who_has; the frame still floods, so delivery never waits on the reply
     MACAddress resolve(ulong address)
     {
-        // mac-transport addresses ARE wire addresses; identity, no resolution needed
-        if (address >> 60 == ulong(PacketType.ether_transport))
-            return MACAddress.from_ul(address);
         if (is_network_multicast_address(address))
             return MACAddress.broadcast;
         if (auto r = address in _neighbours)
