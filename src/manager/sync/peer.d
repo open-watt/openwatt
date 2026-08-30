@@ -1,6 +1,7 @@
 module manager.sync.peer;
 
 import urt.array;
+import urt.endian : storeLittleEndian;
 import urt.inet;
 import urt.lifetime : move;
 import urt.log;
@@ -8,9 +9,8 @@ import urt.map;
 import urt.mem;
 import urt.mem.temp : tconcat;
 import urt.meta : AliasSeq;
-import urt.meta.enuminfo : VoidEnumInfo;
+import urt.meta.enuminfo : bitfield, VoidEnumInfo;
 import urt.string;
-import urt.string.format : tstring;
 import urt.time;
 
 import manager;
@@ -25,8 +25,9 @@ import manager.sync.discovery : PeerRole;
 import manager.sync.encoder;
 
 import router.iface;
+import router.iface.endpoint : UDPEndpoint, udp_open;
 import router.iface.packet;
-import router.iface.udp : UDPFrame, UDPInterface;
+import router.iface.udp : UDPFrame;
 
 nothrow @nogc:
 
@@ -75,19 +76,25 @@ nothrow @nogc:
         super(collection_type_info!SyncPeer, id, flags);
     }
 
+    ~this()
+    {
+        close_udp_endpoint();
+    }
+
     // Properties
 
     final inout(BaseInterface) transport() inout pure
-        => _transport;
+        => owns_udp_endpoint ? null : _transport.get;
     final void transport(BaseInterface value)
     {
-        if (_transport is value && !_owned_transport)
+        if (!owns_udp_endpoint && _transport is value)
             return;
         detach_transport();
-        destroy_owned_transport();
+        close_udp_endpoint();
+        _peer_flags &= ~PeerFlags.owns_udp_endpoint;
         _transport = value;
         _remote = InetAddress();
-        _remote_bound = false;
+        _peer_flags &= ~PeerFlags.remote_bound;
         _remote_addr = InetAddress();
         mark_set!(typeof(this), [ "transport", "remote" ])();
         restart();
@@ -103,10 +110,11 @@ nothrow @nogc:
             return null;
 
         detach_transport();
-        destroy_owned_transport();
+        close_udp_endpoint();
         _transport = null;
+        _peer_flags |= PeerFlags.owns_udp_endpoint;
         _remote = value;
-        _remote_bound = false;
+        _peer_flags &= ~PeerFlags.remote_bound;
         _remote_addr = InetAddress();
         mark_set!(typeof(this), [ "transport", "remote" ])();
         restart();
@@ -135,7 +143,13 @@ nothrow @nogc:
     void bind_remote(ref const InetAddress addr)
     {
         _remote_addr = addr;
-        _remote_bound = true;
+        _peer_flags |= PeerFlags.remote_bound;
+    }
+
+    package void adopt_udp_endpoint(UDPEndpoint* endpoint)
+    {
+        remote(endpoint.remote);
+        _udp_endpoint = endpoint;
     }
 
     // Unreliable links wrap every frame with source/destination sessions and a kind.
@@ -146,7 +160,7 @@ nothrow @nogc:
 
     int transmit_frame(const(ubyte)[] frame, bool is_text = false, TxQueue queue = TxQueue.control)
     {
-        if (!_transport || !_transport.running)
+        if (!transport_ready)
         {
             _send_failed = true;
             return -1;
@@ -179,7 +193,7 @@ nothrow @nogc:
             begin_header(TxQueue.control);
             _rel_buf ~= ++_tx_seq;
             _rel_buf ~= _rx_delivered;
-            _ctl_ack_pending = false;
+            _peer_flags &= ~PeerFlags.ctl_ack_pending;
             _rel_buf ~= frame[];
 
             SentFrame s;
@@ -352,7 +366,7 @@ nothrow @nogc:
         _want_logs = !off;
         _want_log_severity = max_severity;
         _want_log_tag = tag.make_string();
-        if (_transport && _transport.running)
+        if (transport_ready)
             encoder_for(_encoder).encode_log_sub(this, max_severity, off, tag);
     }
 
@@ -400,31 +414,31 @@ nothrow @nogc:
 protected:
 
     override bool validate() const pure
-        => _transport !is null || _remote.family != AddressFamily.unspecified;
+        => owns_udp_endpoint || _transport !is null;
 
     // Idempotent; WS-spawned peers call this at accept time, because the client's
     // first frames can arrive before our first startup tick and unsubscribed
     // packets are dropped.
     package void subscribe_transport()
     {
-        if (_transport_subscribed || !_transport)
+        if (owns_udp_endpoint || (_peer_flags & PeerFlags.transport_subscribed) || !_transport)
             return;
         // a remote-bound peer shares a multi-drop transport: its server routes rx by source
         // (deliver_frame). the interface holds few subscriber slots, so per-peer packet
         // subscriptions must not scale with peers.
-        if (_remote_bound)
+        if (_peer_flags & PeerFlags.remote_bound)
             return;
         // unknown = all types; the handler takes raw and udp frames, so one peer object
         // sits on connected pipes and datagram transports alike
         _transport.subscribe(&on_transport_packet, PacketFilter(PacketType.unknown, PacketDirection.incoming));
-        _transport_subscribed = true;
+        _peer_flags |= PeerFlags.transport_subscribed;
     }
 
     override CompletionStatus startup()
     {
-        if (!_transport && _remote.family != AddressFamily.unspecified && !create_remote_transport())
+        if (owns_udp_endpoint && !_udp_endpoint && !create_remote_endpoint())
             return CompletionStatus.error;
-        if (!_transport || !_transport.running)
+        if (!transport_ready)
             return CompletionStatus.continue_;
 
         if (_pre_start_overflow)
@@ -460,10 +474,12 @@ protected:
     // the transport's state matters to a live session only: the subscription is the running window
     override void online()
     {
+        if (owns_udp_endpoint)
+            return;
         if (BaseInterface transport = _transport)
         {
             transport.subscribe(&on_transport_state);
-            _transport_state_subscribed = true;
+            _peer_flags |= PeerFlags.transport_state_subscribed;
         }
     }
 
@@ -479,7 +495,9 @@ protected:
 
         get_module!SyncModule.detach_peer(this);
         detach_transport();
-        destroy_owned_transport();
+        // Session restarts retain their transport, as externally owned interfaces do.
+        if (_state == State.stopping || _state == State.destroying)
+            close_udp_endpoint();
 
         // Peer-derived tap state dies with the stream; the desire to receive
         // (_want_*) persists so a reconnect re-subscribes.
@@ -489,7 +507,7 @@ protected:
 
     override void update()
     {
-        if (!_transport || !_transport.running || !sublayer_armed)
+        if (!transport_ready || !sublayer_armed)
             return;
 
         MonoTime now = getTime();
@@ -540,7 +558,7 @@ protected:
             encoder_for(_encoder).encode_log(this, tconcat("[sync: ", lost, " log lines lost]"));
         }
 
-        if (_ctl_ack_pending || _queues[0].ack_pending || _queues[1].ack_pending)
+        if ((_peer_flags & PeerFlags.ctl_ack_pending) || _queues[0].ack_pending || _queues[1].ack_pending)
         {
             begin_header(wire_ack);
             _rel_buf ~= _rx_delivered;
@@ -548,7 +566,7 @@ protected:
             _rel_buf ~= _queues[0].rx_seen;
             _rel_buf ~= _queues[1].rx_epoch;
             _rel_buf ~= _queues[1].rx_seen;
-            _ctl_ack_pending = false;
+            _peer_flags &= ~PeerFlags.ctl_ack_pending;
             _queues[0].ack_pending = false;
             _queues[1].ack_pending = false;
             raw_tx(_rel_buf[], false);
@@ -727,6 +745,16 @@ private:
 
     enum ubyte wire_ack = 3;   // TxQueue values are the other kind bytes
 
+    @bitfield enum PeerFlags : ushort
+    {
+        none                       = 0,
+        transport_subscribed       = 1 << 0,
+        transport_state_subscribed = 1 << 1,
+        remote_bound               = 1 << 2,
+        ctl_ack_pending            = 1 << 3,
+        owns_udp_endpoint          = 1 << 4,
+    }
+
     struct SentFrame
     {
         ubyte seq;
@@ -759,12 +787,11 @@ private:
         Array!DataEntry backlog;   // unacked payloads, oldest first; every send refolds them all
     }
 
-    ObjectRef!BaseInterface _transport;
-    ObjectRef!UDPInterface  _owned_transport;
-    bool                    _transport_subscribed;
-    bool                    _transport_state_subscribed;
-    bool                    _remote_bound;
-    bool                    _ctl_ack_pending;
+    union
+    {
+        ObjectRef!BaseInterface _transport;
+        UDPEndpoint* _udp_endpoint;
+    }
     InetAddress             _remote_addr;
     InetAddress             _remote;
     ubyte[16]               _local_nonce;
@@ -772,6 +799,7 @@ private:
     uint                    _rx_session;
     ubyte                   _tx_seq;         // last sequence assigned
     ubyte                   _rx_delivered;   // cumulative in-order delivered
+    PeerFlags               _peer_flags;
     Array!SentFrame         _resend;
     Array!HeldFrame         _reorder;
     Array!ubyte             _rel_buf;
@@ -780,13 +808,16 @@ private:
     bool sublayer_armed()
     {
         enum promised = InterfaceCaps.reliable | InterfaceCaps.ordered;
-        return (_transport.caps & promised) != promised;
+        return owns_udp_endpoint || (_transport.caps & promised) != promised;
     }
 
     int raw_tx(const(ubyte)[] bytes, bool is_text)
     {
+        if (owns_udp_endpoint)
+            return _udp_endpoint.send(bytes) == bytes.length ? 0 : -1;
+
         Packet p;
-        if (_remote_bound)
+        if (_peer_flags & PeerFlags.remote_bound)
             p.init!UDPFrame(bytes).address = _remote_addr;
         else
         {
@@ -870,7 +901,7 @@ private:
     static uint make_session_id()
     {
         import urt.crypto.random : crypto_random_bytes;
-        ubyte[4] b = void;
+        align(size_t.sizeof) ubyte[4] b = void;
         uint id = 0;
         while (id == 0)
         {
@@ -882,10 +913,7 @@ private:
 
     static void put_u32(ref Array!ubyte buf, uint v)
     {
-        buf ~= cast(ubyte)v;
-        buf ~= cast(ubyte)(v >> 8);
-        buf ~= cast(ubyte)(v >> 16);
-        buf ~= cast(ubyte)(v >> 24);
+        storeLittleEndian(cast(uint*)buf.extend(uint.sizeof).ptr, v);
     }
 
     void clear_log_sink()
@@ -900,42 +928,37 @@ private:
     void detach_transport()
     {
         release_transport_state();
-        if (!_transport_subscribed)
+        if (!(_peer_flags & PeerFlags.transport_subscribed))
             return;
         if (BaseInterface transport = _transport)
             transport.unsubscribe(&on_transport_packet);
-        _transport_subscribed = false;
+        _peer_flags &= ~PeerFlags.transport_subscribed;
     }
 
     void release_transport_state()
     {
-        if (!_transport_state_subscribed)
+        if (!(_peer_flags & PeerFlags.transport_state_subscribed))
             return;
         if (BaseInterface transport = _transport)
             transport.unsubscribe(&on_transport_state);
-        _transport_state_subscribed = false;
+        _peer_flags &= ~PeerFlags.transport_state_subscribed;
     }
 
-    bool create_remote_transport()
-    {
-        const(char)[] transport_name = Collection!UDPInterface().generate_name(tconcat(name[], "-udp"));
-        UDPInterface transport = Collection!UDPInterface().create(transport_name, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary));
-        if (!transport)
-            return false;
+    bool transport_ready()
+        => owns_udp_endpoint ? _udp_endpoint !is null : _transport && _transport.running;
 
-        transport.remote_host(tstring(_remote).make_string());
-        transport.remote_port(_remote.port);
-        _owned_transport = transport;
-        _transport = transport;
-        return true;
+    bool create_remote_endpoint()
+    {
+        _udp_endpoint = udp_open(null, &_remote, &on_udp_receive);
+        return _udp_endpoint !is null;
     }
 
-    void destroy_owned_transport()
+    void close_udp_endpoint()
     {
-        if (UDPInterface transport = _owned_transport)
+        if (owns_udp_endpoint && _udp_endpoint)
         {
-            _owned_transport = null;
-            transport.destroy();
+            _udp_endpoint.close();
+            _udp_endpoint = null;
         }
     }
 
@@ -1075,7 +1098,7 @@ private:
         ubyte dist = cast(ubyte)(seq - _rx_delivered);
         if (dist == 0 || dist >= 128)
         {
-            _ctl_ack_pending = true;   // duplicate; our ack was lost
+            _peer_flags |= PeerFlags.ctl_ack_pending; // duplicate; our ack was lost
             return;
         }
         if (dist == 1)
@@ -1083,7 +1106,7 @@ private:
             _rx_delivered = seq;
             // raised before dispatch: a response transmitted from inside the decode
             // piggybacks the ack and lowers it again
-            _ctl_ack_pending = true;
+            _peer_flags |= PeerFlags.ctl_ack_pending;
             encoder_for(_encoder).decode_and_dispatch(this, frame);
             drain_reorder();
         }
@@ -1110,7 +1133,7 @@ private:
         _rx_session = 0;
         _tx_seq = 0;
         _rx_delivered = 0;
-        _ctl_ack_pending = false;
+        _peer_flags &= ~PeerFlags.ctl_ack_pending;
         foreach (ref q; _queues)
         {
             q.backlog.clear();
@@ -1133,11 +1156,19 @@ private:
         deliver_frame(cast(const(ubyte)[])p.data);
     }
 
+    package void on_udp_receive(UDPEndpoint*, const(void)[] data, ref const InetAddress, MonoTime) nothrow @nogc
+    {
+        deliver_frame(cast(const(ubyte)[])data);
+    }
+
     void on_transport_state(ActiveObject, StateSignal sig) nothrow @nogc
     {
         if (sig == StateSignal.offline)
             restart();
     }
+
+    bool owns_udp_endpoint() const pure
+        => (_peer_flags & PeerFlags.owns_udp_endpoint) != 0;
 }
 
 

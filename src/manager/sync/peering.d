@@ -3,8 +3,8 @@ module manager.sync.peering;
 // The peering agent (docs/PEERING.draft.md): node-global auto-peering policy.
 //
 // The leaf dials. role=member sweeps the neighbour table for authorities of its fleet
-// and opens a session to each (a dynamic connected UDPInterface toward the neighbour's
-// medium address and announced sync port, plus a dynamic SyncPeer), then accepts the
+// and opens a session to each (a connected UDP endpoint toward the neighbour's medium
+// address and announced sync port, owned by a dynamic SyncPeer), then accepts the
 // claims that arrive on those sessions. A member accepts multiple claimants from one
 // cluster - that is the dual-authority shape - and reverts to unbound when the last
 // session dies. Failed dials back off per link.
@@ -38,9 +38,9 @@ import manager.sync.encoder : encoder_for, SyncEncoderKind;
 import manager.sync.peer : SyncPeer;
 import manager.sync.udp_server : UDPSyncServer;
 
+import router.iface.endpoint : UDPEndpoint, udp_open;
 import router.iface.ethernet : EthernetStation;
 import router.iface.mac : MACAddress;
-import router.iface.udp : UDPInterface;
 
 nothrow @nogc:
 
@@ -520,7 +520,6 @@ private:
     struct ClaimAttempt
     {
         SyncPeer peer;
-        UDPInterface iface;
         ObjectRef!EthernetStation link_station;  // the link this attempt went through; demoted on failure
         MACAddress link_mac;
         uint seq;
@@ -696,26 +695,26 @@ private:
     {
         char[16] id = hex_id(node_id);
 
-        UDPInterface iface = Collection!UDPInterface().create(tconcat("auth-", id[]), ObjectFlags.dynamic);
-        if (!iface)
-        {
-            log.warning("failed to create session transport for authority ", id[]);
-            return;
-        }
-        iface.iface(link.station.get);
-        iface.remote_host(tconcat(link.mac).make_string());
-        iface.remote_port(link.sync_port);
-
         SyncPeer peer = Collection!SyncPeer().create(n.name[], ObjectFlags.dynamic);
         if (!peer)
             peer = Collection!SyncPeer().create(tconcat("auth-", id[]), ObjectFlags.dynamic);
         if (!peer)
         {
             log.warning("failed to create session peer for authority ", id[]);
-            iface.destroy();
             return;
         }
-        peer.transport(iface);
+        InetAddress remote = InetAddress(link.mac.b, link.sync_port);
+        EthernetStation station = link.station.get;
+        UDPEndpoint* endpoint;
+        if (station)
+            endpoint = udp_open(null, &remote, &peer.on_udp_receive, station);
+        if (!endpoint)
+        {
+            log.warning("failed to create session transport for authority ", id[]);
+            peer.destroy();
+            return;
+        }
+        peer.adopt_udp_endpoint(endpoint);
         peer.encoder(SyncEncoderKind.binary);
         peer.subscribe(&claim_peer_state);
 
@@ -723,7 +722,6 @@ private:
         if (!a)
             a = _attempts.insert(node_id, ClaimAttempt());
         a.peer = peer;
-        a.iface = iface;
         a.link_station = link.station;
         a.link_mac = link.mac;
         a.sent = false;
@@ -739,8 +737,7 @@ private:
     {
         if (sig == StateSignal.destroyed)
         {
-            // destroyed by its owner; only record it - destroying the iface here would fire
-            // its offline back into the half-dead peer, so update() reaps the attempt instead
+            // Signal callbacks cannot destroy their source; update() reaps the attempt.
             foreach (kvp; _attempts[])
             {
                 ref a = kvp.value;
@@ -771,15 +768,8 @@ private:
 
     void teardown_attempt(ref ClaimAttempt a)
     {
-        // transport dies first (the ws-server precedent): its offline signal reaches a
-        // still-live peer, which handles it with a restart; a destroyed peer would assert
         if (a.peer && !a.dead)
             a.peer.unsubscribe(&claim_peer_state);
-        if (a.iface)
-        {
-            a.iface.destroy();
-            a.iface = null;
-        }
         if (a.peer)
         {
             a.peer.destroy();
