@@ -158,10 +158,9 @@ nothrow @nogc:
         Element* e = (*dev).find_or_create_element(
             _element_path.empty ? "state" : _element_path[], format);
         if (_element is null)
-        {
-            e.access = Access.read;
             e.sampling_mode = SamplingMode.report;
-        }
+        _bound_device = *dev;
+        _bound_device.attach_binding(this, e, Access.read);
         _element = e;
         return true;
     }
@@ -204,6 +203,8 @@ nothrow @nogc:
             _sampler.close();
             if (_element)
                 _element.mark_gap();
+            _element = null;
+            detach_device();
             return CompletionStatus.complete;
         }
 

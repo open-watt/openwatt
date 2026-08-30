@@ -265,8 +265,9 @@ protected:
 
         SampleDesc sd = desc_by_index(obd.desc);
         const(DataFormat)* fmt = sd.fmt;
-        e.format = sd.format;
-        if (fmt.is_scalar)
+        if (!e.format.valid)
+            e.format = sd.format;
+        if (fmt.is_scalar && e.record_update() == SysTime())
         {
             Scalar z;
             z.raw[] = 0;

@@ -7,7 +7,7 @@ import urt.meta : AliasSeq;
 import urt.si.quantity : Quantity;
 import urt.si.unit : Celsius, ScaledUnit, Volt;
 import urt.string;
-import urt.time : getSysTime;
+import urt.time : getSysTime, SysTime;
 
 import manager : g_app;
 import manager.base : ActiveObject, CompletionStatus, ObjectFlags, ObjectRef, Prop, StateSignal;
@@ -83,6 +83,8 @@ nothrow @nogc:
         unsubscribe();
         if (_device_instance)
             _device_instance.notify(ComponentEvent.offline);
+        detach_device();
+        _built = false;
         return CompletionStatus.complete;
     }
 
@@ -97,6 +99,7 @@ protected:
         if (!found)
             return false;
         _device_instance = *found;
+        _bound_device = _device_instance;
 
         Component info = find_or_create_component(_device_instance, "info", "DeviceInfo");
         set_constant(info, "type", "evse");
@@ -228,8 +231,8 @@ private:
                             SamplingMode mode = SamplingMode.report)
     {
         Element* element = parent.find_or_create_element(id, register_value_format!T());
-        element.access = access;
         element.sampling_mode = mode;
+        _bound_device.attach_binding(this, element, access);
         return element;
     }
 
@@ -238,15 +241,15 @@ private:
         DataFormat format = DataFormat(ValueType.u8, SeriesKind.held);
         format.count = 0;
         Element* element = parent.find_or_create_element(id, register_format(format));
-        element.access = access;
         element.sampling_mode = SamplingMode.report;
+        _bound_device.attach_binding(this, element, access);
         return element;
     }
 
     void set_constant(T)(Component parent, const(char)[] id, auto ref T value)
     {
         Element* element = parent.find_or_create_element(id, register_value_format(value));
-        if (element.sampling_mode != SamplingMode.constant)
+        if (element.record_update() == SysTime())
         {
             element.value(value);
             element.sampling_mode = SamplingMode.constant;
