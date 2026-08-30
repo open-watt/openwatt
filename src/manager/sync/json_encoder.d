@@ -432,6 +432,16 @@ nothrow @nogc:
         send_frame(peer);
     }
 
+    override void encode_model_set(SyncPeer peer, uint seq, SyncHandle h, ref const Variant value)
+    {
+        begin_frame("set");
+        _buf.append(",\"seq\":", seq);
+        _buf.append(",\"h\":", h);
+        _buf ~= ",\"value\":";
+        write_variant(value);
+        send_frame(peer);
+    }
+
     override void encode_type_format(SyncPeer peer, uint ft, ref const DataFormat fmt)
     {
         import manager.sample : enum_info_name;
@@ -1048,7 +1058,7 @@ nothrow @nogc:
             {
                 uint seq = require_uint(json, "seq");
                 if (!bad_frame)
-                    sync.inbound_res(peer, seq);
+                    sync.inbound_res(peer, seq, json.getMember("value"));
                 break;
             }
 

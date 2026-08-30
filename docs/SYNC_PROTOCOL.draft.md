@@ -287,7 +287,8 @@ frames, binary packs many handles per tick.
 
 One verb for element writes and object property writes, because id.d erases that distinction
 (properties are element projections). Path form serves one-shot writers with no session binding.
-Honours `Access` and `Constraint` at the authority.
+Honours `Access` and `Constraint` at a writable provider. A mirror forwards the request to a peer
+that advertised write access and returns that peer's applied value or error.
 
 **`reset:true` replaces the built `reset` verb**, and carries no value -- `value:null` cannot mean
 "restore default" because null is a legitimate value here ([`from_variant` for

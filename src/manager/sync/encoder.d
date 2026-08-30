@@ -241,6 +241,7 @@ nothrow @nogc:
     abstract void encode_claim(SyncPeer peer, uint seq, const(char)[] cluster, uint priority, const(char)[] auth, const(char)[] key);
 
     abstract void encode_model_sub(SyncPeer peer, uint seq, const(char[])[] patterns, bool once);
+    abstract void encode_model_set(SyncPeer peer, uint seq, SyncHandle h, ref const Variant value);
 
     // form 1: intern a format under a session ft id
     abstract void encode_type_format(SyncPeer peer, uint ft, ref const DataFormat fmt);
