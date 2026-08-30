@@ -1,21 +1,5 @@
 module manager.sync.peering;
 
-// The peering agent (docs/PEERING.draft.md): node-global auto-peering policy.
-//
-// The leaf dials. role=member sweeps the neighbour table for authorities of its fleet
-// and opens a session to each (a connected UDP endpoint toward the neighbour's medium
-// address and announced sync port, owned by a dynamic SyncPeer), then accepts the
-// claims that arrive on those sessions. A member accepts multiple claimants from one
-// cluster - that is the dual-authority shape - and reverts to unbound when the last
-// session dies. Failed dials back off per link.
-//
-// role=authority listens on the sync port (a dynamic /sync/udp-server on the ether
-// wildcard) and claims the members that reach it and match the claim filter. It keeps
-// no dial state: a member that cannot be reached is the member's problem to retry, and
-// a node with no inbound surface - behind a NAT, or simply not listening - still joins.
-// Policy direction and transport direction are separate: the authority still decides
-// who joins its fleet, it just answers rather than dials.
-
 import urt.array;
 import urt.conv : format_uint;
 import urt.inet;
@@ -36,8 +20,6 @@ import manager.sync : SyncModule;
 import manager.sync.discovery;
 import manager.sync.encoder : encoder_for, SyncEncoderKind;
 import manager.sync.peer : SyncPeer;
-import manager.sync.udp_bind : default_sync_port;
-import manager.sync.udp_server : UDPSyncServer;
 
 import router.iface;
 import router.iface.endpoint : UDPEndpoint, udp_open;
@@ -220,7 +202,7 @@ nothrow @nogc:
         }
     }
 
-    void peering_set(Session session, Nullable!bool enabled, Nullable!PeerRole role, Nullable!(const(char)[]) cluster, Nullable!uint priority, Nullable!(const(char)[]) claim, Nullable!(const(char)[]) secret, Nullable!ushort port, Nullable!bool collect_logs, Nullable!Severity log_severity)
+    void peering_set(Session session, Nullable!bool enabled, Nullable!PeerRole role, Nullable!(const(char)[]) cluster, Nullable!uint priority, Nullable!(const(char)[]) claim, Nullable!(const(char)[]) secret, Nullable!bool collect_logs, Nullable!Severity log_severity)
     {
         bool cluster_conflict = claimed && cluster && cluster.value[] != bound_cluster[];
 
@@ -240,8 +222,6 @@ nothrow @nogc:
             _claim = claim.value.make_string();
         if (secret)
             _secret = secret.value.make_string();
-        if (port)
-            _port = port.value;
         if (collect_logs || log_severity)
         {
             if (collect_logs)
@@ -292,7 +272,6 @@ nothrow @nogc:
         }
         if (_role == PeerRole.member)
         {
-            session.write_line("port:     ", _port);
             if (_allegiance_cluster.length)
                 session.write_line("fleet:    ", _allegiance_cluster[], " (adopted; /sync/peering reset returns to factory)");
             session.write_line("state:    ", claimed ? "claimed" : "unbound");
@@ -497,7 +476,6 @@ package:
     uint     _priority = 100;
     String   _claim;
     String   _secret;
-    ushort   _port = default_sync_port;
 
     struct Claimant
     {
@@ -543,7 +521,7 @@ private:
         MonoTime sent_at;
     }
     Map!(ulong, IssuedClaim) _issued;
-    UDPSyncServer _listener;
+
     MonoTime _next_sweep;
 
     void release_claimants()
@@ -648,26 +626,6 @@ private:
     {
         apply_announce_state();
 
-        // the authority listens; members dial it, so the leaf needs no inbound surface
-        bool want_listener = _enabled && _role == PeerRole.authority;
-        if (_listener && (!want_listener || _listener.port != _port))
-        {
-            _listener.destroy();
-            _listener = null;
-        }
-        if (want_listener && !_listener)
-        {
-            _listener = Collection!UDPSyncServer().create("peering", ObjectFlags.dynamic);
-            if (_listener)
-            {
-                InetAddress[1] bind = [InetAddress(MACAddress().b, 0)];
-                _listener.bind(bind[]);
-                _listener.port(_port);
-            }
-            else
-                log.error("failed to create peering sync listener");
-        }
-
         if (!_enabled || _role != PeerRole.member)
         {
             foreach (kvp; _attempts[])
@@ -685,7 +643,6 @@ private:
         disco.local_cluster = _cluster.length ? _cluster : _allegiance_cluster.length ? _allegiance_cluster : _adopted_cluster;
         disco.local_claimed = claimed;
         disco.local_adopted = _secret.length != 0;
-        disco.local_sync_port = (_enabled && _role == PeerRole.authority) ? _port : 0;
     }
 
     void start_session(ulong node_id, ref const Neighbor n, ref NeighborLink link)
@@ -703,7 +660,9 @@ private:
         EthernetStation station;
         if (link.remote.family == AddressFamily.ether)
             station = dyn_cast!EthernetStation(link_iface);
-        UDPEndpoint* endpoint = udp_open(&link.local, &link.remote, &peer.on_udp_receive, station);
+        InetAddress local = link.local;
+        local.port = 0;
+        UDPEndpoint* endpoint = udp_open(&local, &link.remote, &peer.on_udp_receive, station);
         if (!endpoint)
         {
             log.warning("failed to create session transport for authority ", id[]);
@@ -810,73 +769,64 @@ unittest
 {
     import urt.mem;
 
-    // the setup deadline expires attempts that never sent, not just unanswered claims
-    SyncPeeringModule.ClaimAttempt a;
-    MonoTime t0 = MonoTime() + 100.seconds;
-    a.deadline = t0 + 10.seconds;
-    assert(!a.expired(t0 + 11.seconds));    // no peer: nothing to expire
+    {
+        SyncPeeringModule.ClaimAttempt a;
+        MonoTime t0 = MonoTime() + 100.seconds;
+        a.deadline = t0 + 10.seconds;
+        assert(!a.expired(t0 + 11.seconds));
 
-    a.peer = alloc!SyncPeer(CID(1));
-    scope(exit) free(a.peer);
-    assert(!a.expired(t0));
-    assert(a.expired(t0 + 11.seconds));     // unsent and stale: a dead link during setup fails over
+        a.peer = alloc!SyncPeer(CID(1));
+        scope(exit) free(a.peer);
+        assert(!a.expired(t0));
+        assert(a.expired(t0 + 11.seconds));
 
-    a.sent = true;
-    assert(a.expired(t0 + 11.seconds));     // sent and unanswered: same path
+        a.sent = true;
+        assert(a.expired(t0 + 11.seconds));
 
-    a.claimed = true;
-    assert(!a.expired(t0 + 11.seconds));    // a live claim never expires here
-}
+        a.claimed = true;
+        assert(!a.expired(t0 + 11.seconds));
+    }
 
-unittest
-{
-    import urt.mem;
+    {
+        SyncPeeringModule m = alloc!SyncPeeringModule(null);
+        scope(exit) free(m);
+        SyncPeer p1 = alloc!SyncPeer(CID(1));
+        scope(exit) free(p1);
+        SyncPeer p2 = alloc!SyncPeer(CID(2));
+        scope(exit) free(p2);
 
-    SyncPeeringModule m = alloc!SyncPeeringModule(null);
-    scope(exit) free(m);
-    SyncPeer p1 = alloc!SyncPeer(CID(1));
-    scope(exit) free(p1);
-    SyncPeer p2 = alloc!SyncPeer(CID(2));
-    scope(exit) free(p2);
+        m._issued.insert(0xA, SyncPeeringModule.IssuedClaim(p1, 1));
+        m._issued.insert(0xB, SyncPeeringModule.IssuedClaim(p2, 2));
 
-    m._issued.insert(0xA, SyncPeeringModule.IssuedClaim(p1, 1));
-    m._issued.insert(0xB, SyncPeeringModule.IssuedClaim(p2, 2));
+        m.peer_detached(p1);
+        assert((0xA in m._issued) is null);
+        assert((0xB in m._issued) && (0xB in m._issued).peer is p2);
 
-    // a detaching peer takes its issued claim with it, and only its own
-    m.peer_detached(p1);
-    assert((0xA in m._issued) is null);
-    assert((0xB in m._issued) && (0xB in m._issued).peer is p2);
+        m.peer_detached(p1);
+        assert(m._issued.length == 1);
+    }
 
-    m.peer_detached(p1);
-    assert(m._issued.length == 1);
-}
+    {
+        SyncPeeringModule m = alloc!SyncPeeringModule(null);
+        scope(exit) free(m);
+        SyncPeer p = alloc!SyncPeer(CID(1));
+        scope(exit) free(p);
 
-unittest
-{
-    import urt.mem;
+        SyncPeeringModule.ClaimAttempt* a = m._attempts.insert(0xA, SyncPeeringModule.ClaimAttempt());
+        a.peer = p;
+        a.claimed = true;
+        p.subscribe(&m.claim_peer_state);
 
-    SyncPeeringModule m = alloc!SyncPeeringModule(null);
-    scope(exit) free(m);
-    SyncPeer p = alloc!SyncPeer(CID(1));
-    scope(exit) free(p);
+        m.claim_peer_state(p, StateSignal.offline);
+        assert(a.dead && a.peer is p);
+        p.subscribe(&m.claim_peer_state);
+        p.unsubscribe(&m.claim_peer_state);
 
-    SyncPeeringModule.ClaimAttempt* a = m._attempts.insert(0xA, SyncPeeringModule.ClaimAttempt());
-    a.peer = p;
-    a.claimed = true;
-    p.subscribe(&m.claim_peer_state);
+        a.dead = false;
+        m.claim_peer_state(p, StateSignal.destroyed);
+        assert(a.dead && a.peer is null);
 
-    // offline records the death and deregisters; nothing is torn down inside the signal
-    m.claim_peer_state(p, StateSignal.offline);
-    assert(a.dead && a.peer is p);
-    p.subscribe(&m.claim_peer_state);   // asserts if the handler had not removed itself
-    p.unsubscribe(&m.claim_peer_state);
-
-    // destruction by the peer's owner drops the ref and leaves the reap to update()
-    a.dead = false;
-    m.claim_peer_state(p, StateSignal.destroyed);
-    assert(a.dead && a.peer is null);
-
-    // signals for a peer no attempt holds are no-ops
-    m.claim_peer_state(p, StateSignal.destroyed);
-    assert(m._attempts.length == 1);
+        m.claim_peer_state(p, StateSignal.destroyed);
+        assert(m._attempts.length == 1);
+    }
 }

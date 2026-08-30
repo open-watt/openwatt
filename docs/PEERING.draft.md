@@ -14,10 +14,10 @@ nodes and cannot survive address churn. The pieces that exist:
 
 - OW control-plane echo (`echo_req`/`echo_reply` + identify) and broadcast sweeps -- a mac-layer
   ping that can already enumerate stations on a segment.
-- `UDPInterface` with an ether backend -- a sync-capable datagram transport that rides a bare MAC
+- `UDPEndpoint` with an ether backend -- a sync-capable datagram endpoint that rides a bare MAC
   address on IP-less builds, or ordinary UDP where IP exists.
-- `SyncPeer` + the hub, transport-blind behind `BaseInterface`, with the ws-server precedent of a
-  listener spawning `dynamic` peers and sweeping them when their transport dies.
+- `SyncPeer` + the hub, with the ws-server precedent of a listener spawning `dynamic` peers and
+  sweeping them when their endpoint dies.
 
 Auto-peering is the layer that connects them: discovery finds candidates, a claim handshake forms
 the relationship, and the peering agent owns the lifecycle.
@@ -44,19 +44,41 @@ mac-ping identify reply carries name + node-id (resolving the placeholder-hostna
 
 Three surfaces, all existing conventions:
 
-**Discovery domains -- per-medium collections, the binding pattern.** Each protocol that can
-discover neighbours registers a collection under `/sync/discover/<medium>`, as bindings live at
-`/binding/<proto>`. Instances are the opt-in: no domain configured, no beacons, no responses.
+**Discovery -- one domain, bound to a list of local endpoints.** A domain takes `bind=`, a list
+of InetAddrs, and beacons from each AF_ETHERNET or IPv4 entry. Each supported address is passed
+unchanged to its socket except that `port=` fills an omitted port. `interface=` resolves to
+AF_ETHERNET and every configured IPv4 endpoint on the named interfaces. The station identity
+distinguishes Ethernet paths when a VLAN sub-interface shares its parent's address.
 
 ```
-/sync/discover/ether add name=lan interface=ether1
-/sync/discover/udp   add name=site port=7001 multicast=...   # future: routed segments
-/sync/discover/modbus add name=bus1 interface=mb1            # future: vendor fc discovery
+/sync/discover/udp add name=fleet bind=00:00:00:00:00:00   # every ether station
+/sync/discover/udp add name=iot   bind=28:84:85:54:FB:08   # every station owning it
+/sync/discover/udp add name=lan   interface=ether1,vlan20  # named stations
+/sync/discover/udp add name=site  bind=0.0.0.0             # every IPv4 interface
+/sync/discover/udp add name=mixed bind=0.0.0.0,192.168.0.10:1234 port=6667
+/sync/discover/modbus add name=bus1 interface=mb1          # future: vendor fc discovery
 ```
 
-Each is an ActiveObject holding its interface via ObjectRef, subscribing to state signals,
-restarting when the medium bounces. The medium details (control frames, function codes) live
-with the protocol; the sync module only sees the domain interface.
+Only media that are not datagram-addressable keep a medium-specific collection; a modbus bus
+discovers by function code, not by socket, so it cannot express itself as a bind address.
+
+The domain's `port=` defaults to `4826` and supplies the peer service port for `interface=` and
+every `bind=` entry whose `InetAddress.port` is zero. A port written in a `bind=` entry always wins.
+The domain creates one socket for each resulting address. Ordinary socket bind rules reject
+overlapping wildcard and specific listeners; discovery does not reproduce those rules or enable
+address reuse.
+
+Each discovery domain exclusively owns one dynamic, temporary `/sync/udp-server`. The domain
+demultiplexes its datagrams and hands session frames to that child, so the child opens no sockets
+and has no independent endpoint configuration. An explicitly added `/sync/udp-server` is instead
+a free-standing listener: it uses the same `bind=`, `interface=`, and `port=` language, owns every
+resolved endpoint, and remains online while any one is live. A collision only fails startup when
+it leaves the server with no usable endpoint.
+
+Superseded: a per-medium collection per datagram medium, each holding one `interface=` ObjectRef.
+It made every segment a separate opt-in that had to be remembered, and the failure was silent --
+an authority beaconing only on its untagged station is invisible to a member on a VLAN leg, which
+reports `0 authorities` and never dials, with nothing logged on either side.
 
 **The peering agent -- a singleton `/sync/peering`.** Role is node-global:
 
@@ -86,17 +108,17 @@ domain, address, role, claim state, last-seen.
 Two modes per domain, both cheap:
 
 - **Announce (steady state):** unbound members and authorities beacon periodically
-  (`OWControl.announce`, TLV body: node-id, name, role, cluster, claim state, sync reach). Slow
+  (UDP TLV body: node-id, name, role, cluster, claim state). Slow
   cadence (default 30s), faster for a minute after a state change. Authorities passively populate
   the neighbour table; a state change (claimed, released) propagates within a beacon.
 - **Probe (on demand):** the broadcast identify sweep, for active scans and for an authority that
   just started and does not want to wait a beacon interval.
 
-Discovery yields a *medium address*; the peer needs a *transport*. Each domain owns a
-`make_transport(candidate)` factory: the ether domain spins up a dynamic `UDPInterface` on the
-ether backend targeting the neighbour's MAC and the well-known sync port; an RS485 domain would
-yield the RTU-envelope adapter. The peering agent stays transport-blind, same seam as
-`SyncPeer.transport`.
+Discovery yields the source endpoint and receiving interface. The peering agent creates a
+connected `UDPEndpoint` in the endpoint's address family and binds the receiving Ethernet
+station when the endpoint is AF_ETHERNET. Each discovery domain owns one dynamic sync server;
+the domain hands session frames from all of its transports to that child, so discovery and sync
+share the exact sockets and a member dials the source endpoint from which it heard the beacon.
 
 ## Links and reachability
 
@@ -109,7 +131,7 @@ A neighbour holds identity once (node-id, name, cluster, role, claim state) and 
 **links**, one per `(interface, address)` pair a beacon arrived through. The pair is indivisible:
 an address alone does not identify a path (a modbus address is meaningless without its bus, a MAC
 is ambiguous across segments -- and since stations adopt their driver's address, a VLAN leg shares
-its parent's MAC). The sync port rides per link, since it is announced per medium. A multi-homed
+its parent's MAC). The source port is the shared discovery and sync service port. A multi-homed
 node (say, an ethernet leg and a wifi leg, plus an RS485 drop later) contributes one link each;
 every fabric member populates the table symmetrically, so member-initiated traffic picks paths by
 the same rules.
@@ -182,7 +204,7 @@ authority; the authority-authority link carries coordination only, never fleet s
    hello carries identity (node-id, role, cluster); claim rides the channel, answered res/err;
    multiple claimants from one cluster accepted (the dual-authority seat); last-detach reverts
    to unbound]
-4. Authority side: claim filter, transport factory via UDPInterface-over-ether, dynamic peer
+4. Authority side: claim filter, endpoint factory via UDP-over-ether, dynamic peer
    spawn/sweep. [done: sweep every 5s over the neighbour table; per-candidate exponential
    backoff; members listen via a dynamic /sync/udp-server; a claimed member is still claimed
    by an authority with no session to it (the dual-authority seat doubles as restart

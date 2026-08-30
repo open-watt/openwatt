@@ -784,6 +784,11 @@ endpoint that received it. Datagram links carry no death signal, so a peer whose
 source goes quiet is swept after the idle timeout and a reappearing source
 simply spawns afresh.
 
+Every UDP discovery domain creates one dynamic, temporary server as its
+exclusive child. That child uses the discovery domain's endpoints directly
+and has no independent endpoint configuration. Instances added explicitly
+serve hand-wired datagram sync and always own their sockets.
+
 | Property | Values | Default | Description |
 | --- | --- | --- | --- |
 | `bind` | endpoint list | empty | Exact local endpoints; an omitted port uses `port`. |
@@ -792,9 +797,9 @@ simply spawns afresh.
 | `encoder` | `json`, `binary` | `binary` | Encoding for spawned peers. |
 | `timeout` | duration | `5m` | Idle time after which a silent peer is swept. |
 
-At least one of `bind` or `interface` is required. The server is Running while
-at least one local endpoint is open; other configured endpoints can appear or
-disappear independently.
+At least one of `bind` or `interface` is required for an explicit server. The
+server is Running while at least one local endpoint is open; other configured
+endpoints can appear or disappear independently.
 
 ### `/sync/peer`
 
@@ -806,31 +811,60 @@ opens a connected UDP endpoint owned by the peer. The last of `transport` and
 | --- | --- | --- |
 | `remote` | `address:port`, `[ipv6]:port`, `[mac]:port` | Remote UDP peer. The address and port are both required. |
 
-### `/sync/discover/ether`
+### `/sync/discover/udp`
 
-An ether discovery domain beacons this node's peering identity (node-id, name,
-role, cluster, claim state) over the OpenWatt ethertype on one ethernet
-station, and feeds received beacons into the neighbour table. Domains are the
-per-medium opt-in: no domain configured, no beacons sent or consumed on that
-medium.
+A discovery domain beacons this node's peering identity (node-id, name, role,
+cluster, claim state) from each address it binds, feeds received beacons into
+the neighbour table, and creates one dynamic sync server over the same
+endpoints. Domains are the opt-in: no domain configured, no beacons or inbound
+sync accepted on that segment.
+
+`bind` takes one or more local endpoints and beacons from each. The domain's
+`port` fills only entries whose `InetAddress.port` is zero; an explicit port in
+an entry always wins. AF_ETHERNET and IPv4 entries are passed directly to
+socket bind; other families are not discovery sources. Wildcard overlap,
+duplicate listeners, and address availability therefore use the UDP stack's
+normal bind rules, with address reuse disabled.
+
+`interface` selects one or more named interfaces and listens on AF_ETHERNET and
+every configured IPv4 endpoint. It also selects VLANs unambiguously when they
+share their parent's MAC address. The domain is Running while at least one
+resolved endpoint is Running; other configured endpoints can appear or
+disappear independently.
 
 | Property | Values | Default | Description |
 | --- | --- | --- | --- |
-| `interface` | ethernet station name | required | Segment to beacon on. |
+| `bind` | endpoint list | empty | Exact local endpoints; an omitted port uses `port`. |
+| `interface` | interface list | empty | Bind AF_ETHERNET and every configured IPv4 endpoint on these interfaces. |
+| `port` | `1` to `65535` | `4826` | Peer service port used by named interfaces and bind entries that omit one. Discovery and inbound sync share this socket. |
 | `interval` | duration | `30s` | Beacon cadence. |
+
+At least one of `bind` or `interface` is required.
+
+```text
+/sync/discover/udp add name=fleet bind=00:00:00:00:00:00
+/sync/discover/udp add name=iot bind=[28:84:85:54:FB:08]:7100
+/sync/discover/udp add name=lan interface=ether1,vlan20 port=7100
+/sync/discover/udp add name=site bind=0.0.0.0
+/sync/discover/udp add name=multi bind=0.0.0.0,192.168.0.10:1234 port=6667
+```
+
+The last example binds `0.0.0.0:6667` and `192.168.0.10:1234`.
+
+An exact IPv4 bind uses its interface's directed broadcast when available;
+a wildcard bind uses `255.255.255.255`.
 
 ### `/sync/neighbor`
 
 `print` lists every node heard through any discovery domain: node-id, name,
 role, cluster, claim state, and the age of its last beacon, followed by one
-line per link: the station a beacon arrived on, the source address, and the
-sync port announced for that medium. A multi-homed node shows one link per
-(station, address) pair it beacons through; the peering agent claims via the
-most preferable live link. Nodes and links age out after 10 minutes of
-silence.
+line per link: the interface a beacon arrived on, the source endpoint, and its
+age. A multi-homed node shows one link per (interface, address) pair it beacons
+through; the peering agent claims via the most preferable live link. Nodes and
+links age out after 10 minutes of silence.
 
 ```text
-/sync/discover/ether add name=lan interface=ether1
+/sync/discover/udp add name=lan interface=ether1,vlan20
 /sync/neighbor print
 ```
 
@@ -847,15 +881,16 @@ shape); a claim naming a second cluster is refused. Claims are runtime state:
 when the last claimant's session dies the member reverts to unbound and is
 re-claimed within a beacon interval.
 
-An `authority` listens for members' sessions on the sync port: a dynamic
-`/sync/udp-server` named `peering`, bound to the ether wildcard, created and
-destroyed with the role. Its port rides the discovery beacons, so a member
-learns where to connect without configuration.
+An `authority` listens for members' sessions through every active discovery
+endpoint. Each discovery domain owns one dynamic sync server and demultiplexes
+announcements from session frames before handing the latter to its child. The
+child opens no sockets; the endpoint set follows the discovery interfaces and
+addresses as they appear or disappear.
 
 A `member` sweeps the neighbour table every few seconds and opens a session to
-each authority of its fleet: it builds a dynamic connected `/interface/udp`
-from that authority's most preferable live link (bound to the station the
-beacon arrived on, toward its address and beaconed port) and spawns a dynamic
+each authority of its fleet: it opens a connected UDP endpoint from that
+authority's most preferable live link (bound to the address and station on
+which the beacon arrived, toward its source address and port) and spawns a dynamic
 `/sync/peer` named after the remote node. The leaf dials because it is the end
 that can: a member behind a NAT, or with no inbound surface at all, still joins
 its fleet. The authority claims the members that reach it and match the
@@ -882,7 +917,6 @@ time.
 | `priority` | number | `100` | Authority election precedence; lower wins, node-id breaks ties. |
 | `claim` | path glob | `*` | Authority only: which member names to adopt. |
 | `secret` | string | empty | The fleet key, set by hand. Normally unset: the authority mints one at first adoption and hands it to each factory member inside the claim; thereafter claims prove it with an HMAC over the member's per-session hello nonce, so the key never travels again and a captured claim cannot replay. |
-| `port` | `1` to `65535` | `4826` | Authority only: sync port the session listener binds; advertised in discovery beacons so members know where to dial. |
 | `collect-logs` | `yes`/`no` | `yes` | Authority only: tap each claimed member's log stream. Re-armed on every claim, so it survives a member reconnecting under a fresh session. |
 | `log-severity` | severity | `info` | Authority only: max severity requested from claimed members' logs (`emergency`..`trace`). Raising it raises the member's own ingress level. |
 

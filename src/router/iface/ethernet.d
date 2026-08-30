@@ -103,13 +103,6 @@ nothrow @nogc:
         return null;
     }
 
-    // OW announce: broadcast a peering beacon carrying this node's identity TLVs.
-    // Received announces are delivered to the registered sink (set_announce_sink).
-    final void announce(scope const(ubyte)[] tlv)
-    {
-        station_send_control(OWControl.announce, MACAddress.broadcast, tlv);
-    }
-
 protected:
 
     this(const CollectionTypeInfo* typeInfo, CID id, ObjectFlags flags = ObjectFlags.none)
@@ -664,11 +657,6 @@ private:
                 return;
             }
 
-            case OWControl.announce:
-                if (_announce_sink && src != mac)
-                    _announce_sink(this, src, content);
-                return;
-
             default:
                 return;
         }
@@ -712,15 +700,6 @@ enum ubyte cfm_tlv_sender_id = 1;
 
 alias MacPingHandler = void delegate(MACAddress from, Duration rtt, scope const(char)[] identity) nothrow @nogc;
 alias MacDiscoverHandler = void delegate(MACAddress from, scope const(char)[] identity, scope const(ulong)[] addresses) nothrow @nogc;
-alias AnnounceSink = void delegate(EthernetStation station, MACAddress src, scope const(ubyte)[] tlv) nothrow @nogc;
-
-// One consumer: the peering/discovery service. Announces arriving before (or without)
-// registration are dropped at the station.
-void set_announce_sink(AnnounceSink sink)
-{
-    _announce_sink = sink;
-}
-
 void mac_ping_cancel(uint txid)
 {
     foreach (i, ref p; _pending_pings[])
@@ -799,7 +778,6 @@ private __gshared Array!PendingPing _pending_pings;
 private __gshared uint _next_ping_txid = 1;
 private __gshared Array!PendingSweep _pending_sweeps;
 private __gshared uint _next_sweep_txid = 1;
-private __gshared AnnounceSink _announce_sink;
 
 
 abstract class EthernetInterface : EthernetStation

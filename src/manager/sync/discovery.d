@@ -1,11 +1,5 @@
 module manager.sync.discovery;
 
-// Peering discovery (docs/PEERING.draft.md): per-medium beacon domains announce this
-// node's identity and populate a node-id-keyed neighbour table. The ether domain rides
-// the OW announce control frame; other media (udp multicast, modbus) register their own
-// domain collections later. The peering agent feeds the local announce state (role,
-// cluster, claim) and consumes the table to find claim candidates.
-
 import urt.array;
 import urt.conv : format_uint;
 import urt.endian;
@@ -13,19 +7,28 @@ import urt.inet;
 import urt.log;
 import urt.map;
 import urt.mem;
+import urt.mem.temp : tconcat;
 import urt.meta : AliasSeq;
 import urt.string;
 import urt.time;
+import urt.variant;
 
 import manager;
 import manager.base;
 import manager.collection;
 import manager.console;
+import manager.features;
 import manager.plugin;
+import manager.sync.udp_bind;
+import manager.sync.udp_server;
 
 import router.iface;
+import router.iface.endpoint : UDPEndpoint;
 import router.iface.ethernet;
 import router.iface.mac;
+
+static if (has_ip)
+    import protocol.ip.address : IPAddress;
 
 nothrow @nogc:
 
@@ -38,115 +41,6 @@ enum PeerRole : ubyte
     member,
     authority,
 }
-
-enum AnnounceTag : ubyte
-{
-    node_id   = 1,  // u64 BE, mandatory
-    name      = 2,  // utf8
-    role      = 3,  // u8 PeerRole
-    cluster   = 4,  // utf8
-    flags     = 5,  // u8 AnnounceFlags
-    sync_port = 6,  // u16 BE, sync channel reach on this medium
-}
-
-enum AnnounceFlags : ubyte
-{
-    claimed = 1 << 0,
-    adopted = 1 << 1,   // holds fleet allegiance (cluster + key); claims must prove the key
-}
-
-struct NodeAnnounce
-{
-    ulong node_id;
-    const(char)[] name;
-    const(char)[] cluster;
-    PeerRole role;
-    ubyte flags;
-    ushort sync_port;
-}
-
-ubyte[] encode_announce(ref const NodeAnnounce a, ubyte[] buffer)
-{
-    size_t offset;
-    bool put(AnnounceTag tag, scope const(ubyte)[] value)
-    {
-        if (value.length > 255 || offset + 2 + value.length > buffer.length)
-            return false;
-        buffer[offset++] = tag;
-        buffer[offset++] = cast(ubyte)value.length;
-        buffer[offset .. offset + value.length] = value[];
-        offset += value.length;
-        return true;
-    }
-
-    ubyte[8] id = void;
-    storeBigEndian(cast(ulong*)id.ptr, a.node_id);
-    if (!put(AnnounceTag.node_id, id))
-        return null;
-    put(AnnounceTag.name, cast(const(ubyte)[])a.name);
-    if (a.role != PeerRole.none)
-    {
-        ubyte role = a.role;
-        put(AnnounceTag.role, (&role)[0 .. 1]);
-    }
-    if (a.cluster.length)
-        put(AnnounceTag.cluster, cast(const(ubyte)[])a.cluster);
-    if (a.flags)
-        put(AnnounceTag.flags, (&a.flags)[0 .. 1]);
-    if (a.sync_port)
-    {
-        ubyte[2] port = void;
-        storeBigEndian(cast(ushort*)port.ptr, a.sync_port);
-        put(AnnounceTag.sync_port, port);
-    }
-    return buffer[0 .. offset];
-}
-
-bool decode_announce(scope return const(ubyte)[] tlv, out NodeAnnounce a)
-{
-    while (tlv.length >= 2)
-    {
-        AnnounceTag tag = cast(AnnounceTag)tlv[0];
-        size_t len = tlv[1];
-        if (tlv.length < 2 + len)
-            return false;
-        const(ubyte)[] value = tlv[2 .. 2 + len];
-        tlv = tlv[2 + len .. $];
-
-        switch (tag)
-        {
-            case AnnounceTag.node_id:
-                if (len != 8)
-                    return false;
-                a.node_id = loadBigEndian(cast(const(ulong)*)value.ptr);
-                break;
-            case AnnounceTag.name:
-                a.name = cast(const(char)[])value;
-                break;
-            case AnnounceTag.role:
-                if (len == 1 && value[0] <= PeerRole.max)
-                    a.role = cast(PeerRole)value[0];
-                break;
-            case AnnounceTag.cluster:
-                a.cluster = cast(const(char)[])value;
-                break;
-            case AnnounceTag.flags:
-                if (len == 1)
-                    a.flags = value[0];
-                break;
-            case AnnounceTag.sync_port:
-                if (len == 2)
-                    a.sync_port = loadBigEndian(cast(const(ushort)*)value.ptr);
-                break;
-            default:
-                break;  // unknown tags are forward compatibility, skip
-        }
-    }
-    return a.node_id != 0;
-}
-
-
-enum neighbor_max_age = 600.seconds;
 
 struct NeighborLink
 {
@@ -246,36 +140,49 @@ nothrow @nogc:
 }
 
 
-class EtherDiscovery : ActiveObject
+class UDPDiscovery : ActiveObject
 {
-    alias Properties = AliasSeq!(Prop!("interface", iface),
-                                 Prop!("interval",  interval));
+    alias Properties = AliasSeq!(Prop!("bind", bind),
+                                 Prop!("interface", interfaces),
+                                 Prop!("port", port),
+                                 Prop!("interval", interval));
 nothrow @nogc:
 
-    enum type_name = "ether-discovery";
-    enum path = "/sync/discover/ether";
+    enum type_name = "udp-discovery";
+    enum path = "/sync/discover/udp";
     enum collection_id = CollectionType.sync_discovery;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
-        super(collection_type_info!EtherDiscovery, id, flags);
+        super(collection_type_info!UDPDiscovery, id, flags);
     }
 
-    // Properties
-
-    final inout(EthernetStation) iface() inout pure
-        => _iface;
-    final void iface(EthernetStation value)
+    final inout(InetAddress)[] bind() inout pure
+        => _bind[];
+    final void bind(const(InetAddress)[] value)
     {
-        if (_iface.get is value)
-            return;
-        if (_subscribed)
-        {
-            _iface.unsubscribe(&iface_state_change);
-            _subscribed = false;
-        }
-        _iface = value;
+        replace_udp_bind(_bind, value);
+        mark_set!(typeof(this), "bind")();
+        restart();
+    }
+
+    final inout(ObjectRef!BaseInterface)[] interfaces() inout pure
+        => _interfaces[];
+    final void interfaces(BaseInterface[] value...)
+    {
+        replace_udp_interfaces(_interfaces, value);
         mark_set!(typeof(this), "interface")();
+        restart();
+    }
+
+    final ushort port() const pure
+        => _port;
+    final void port(ushort value)
+    {
+        if (_port == value)
+            return;
+        _port = value;
+        mark_set!(typeof(this), "port")();
         restart();
     }
 
@@ -292,59 +199,196 @@ nothrow @nogc:
 protected:
 
     override bool validate() const pure
-        => _iface !is null && _interval > Duration.zero;
+    {
+        bool source = _interfaces.length != 0;
+        foreach (ref address; _bind[])
+            source = source || supports_family(address.family);
+        return source && _port != 0 && _interval > Duration.zero;
+    }
 
     override CompletionStatus startup()
     {
-        EthernetStation i = _iface.get;
-        if (!i || !i.running)
+        bool refreshed = refresh_endpoints();
+        if (!refreshed && !_endpoint_set.any_open())
+            return CompletionStatus.error;
+        if (!_endpoint_set.any_open())
             return CompletionStatus.continue_;
-
-        i.subscribe(&iface_state_change);
-        _subscribed = true;
+        if (!ensure_server())
+            return CompletionStatus.error;
         send_announce();
         return CompletionStatus.complete;
     }
 
     override CompletionStatus shutdown()
     {
-        if (_subscribed)
-        {
-            _iface.unsubscribe(&iface_state_change);
-            _subscribed = false;
-        }
+        close_server();
+        close_endpoints();
         return super.shutdown();
     }
 
     override void update()
     {
+        refresh_endpoints();
+        if (!_endpoint_set.any_open())
+        {
+            restart();
+            return;
+        }
+        if (ensure_server())
+            _server.accepting(get_module!SyncDiscoveryModule.local_role == PeerRole.authority);
         if (getTime() >= _next_announce)
             send_announce();
     }
 
 private:
-    ObjectRef!EthernetStation _iface;
-    bool     _subscribed;
+    Array!InetAddress _bind;
+    Array!(ObjectRef!BaseInterface) _interfaces;
+    UDPEndpointSet _endpoint_set;
+    UDPSyncServer _server;
+    ushort _port = default_discovery_port;
     Duration _interval = 30.seconds;
     MonoTime _next_announce;
+
+    static if (has_ip)
+    {
+        static InetAddress discovery_destination(ref const UDPBindEndpoint binding)
+        {
+            if (binding.local.addr_any)
+                return InetAddress(IPAddr.broadcast, binding.local.port);
+            const(BaseInterface) bound_iface = binding.iface.get;
+            foreach (configured; Collection!IPAddress().values)
+            {
+                if (configured.address.addr != binding.local._a.ipv4.addr ||
+                    (bound_iface && configured.iface !is bound_iface))
+                    continue;
+                if (configured.address.prefix_len >= 31)
+                    return InetAddress();
+                return InetAddress(configured.address.get_network() | ~configured.address.net_mask(),
+                                   binding.local.port);
+            }
+            return InetAddress(IPAddr.broadcast, binding.local.port);
+        }
+    }
 
     void send_announce()
     {
         _next_announce = getTime() + _interval;
-        EthernetStation i = _iface.get;
-        if (!i || !i.running)
-            return;
-        ubyte[192] buf = void;
+        align(size_t.sizeof) ubyte[192] buf = void;
         ubyte[] tlv = get_module!SyncDiscoveryModule.build_local_announce(buf);
-        if (tlv)
-            i.announce(tlv);
+        if (!tlv)
+            return;
+
+        foreach (ref endpoint; _endpoint_set.endpoints[])
+        {
+            if (endpoint.binding.local.family == AddressFamily.ether)
+            {
+                endpoint.endpoint.sendto(tlv, InetAddress(MACAddress.broadcast.b, endpoint.binding.local.port));
+                continue;
+            }
+            static if (has_ip)
+            {
+                if (endpoint.binding.local.family != AddressFamily.ipv4)
+                    continue;
+                InetAddress destination = discovery_destination(endpoint.binding);
+                if (destination.family == AddressFamily.ipv4)
+                    endpoint.endpoint.sendto(tlv, destination);
+            }
+        }
     }
 
-    void iface_state_change(ActiveObject, StateSignal signal)
+    bool refresh_endpoints()
     {
-        if (signal == StateSignal.offline)
-            restart();
+        UDPEndpointHooks hooks = endpoint_hooks();
+        return _endpoint_set.refresh(_bind[], _interfaces[], _port, hooks);
     }
+
+    bool include_endpoint(ref const UDPBindEndpoint binding)
+        => supports_family(binding.local.family);
+
+    static bool supports_family(AddressFamily family) pure
+    {
+        if (family == AddressFamily.ether)
+            return true;
+        static if (has_ip)
+            return family == AddressFamily.ipv4;
+        else
+            return false;
+    }
+
+    bool configure_endpoint(UDPEndpoint* endpoint, ref const UDPBindEndpoint binding)
+    {
+        if (binding.local.family == AddressFamily.ipv4)
+            return endpoint.enable_broadcast();
+        return true;
+    }
+
+    void close_endpoints()
+    {
+        UDPEndpointHooks hooks = endpoint_hooks();
+        _endpoint_set.close(hooks);
+    }
+
+    UDPEndpointHooks endpoint_hooks()
+    {
+        return UDPEndpointHooks(&include_endpoint, &configure_endpoint, &remove_endpoint, &on_datagram);
+    }
+
+    void remove_endpoint(UDPEndpoint* endpoint)
+    {
+        if (_server)
+            _server.remove_endpoint(endpoint);
+    }
+
+    bool ensure_server()
+    {
+        if (_server)
+            return true;
+        auto servers = Collection!UDPSyncServer();
+        const(char)[] server_name = servers.generate_name(tconcat(name[], "-sync"));
+        UDPSyncServer server = servers.create(server_name, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary));
+        if (!server)
+        {
+            log.error("failed to create sync server for discovery domain '", name, "'");
+            return false;
+        }
+        server.configure_slave();
+        server.accepting(get_module!SyncDiscoveryModule.local_role == PeerRole.authority);
+        server.subscribe(&server_state_change);
+        _server = server;
+        return true;
+    }
+
+    void close_server()
+    {
+        if (!_server)
+            return;
+        UDPSyncServer server = _server;
+        _server = null;
+        server.unsubscribe(&server_state_change);
+        server.destroy();
+    }
+
+    void server_state_change(ActiveObject server, StateSignal signal)
+    {
+        if (signal == StateSignal.destroyed && server is _server)
+            _server = null;
+    }
+
+    void on_datagram(UDPEndpoint* endpoint, const(void)[] data, ref const InetAddress from, MonoTime rx_time)
+    {
+        foreach (ref bound; _endpoint_set.endpoints[])
+        {
+            if (bound.endpoint !is endpoint)
+                continue;
+            BaseInterface iface = bound.binding.iface.get;
+            if (is_announce_datagram(cast(const(ubyte)[])data))
+                get_module!SyncDiscoveryModule.receive_announce(iface, bound.binding.local, from, cast(const(ubyte)[])data, rx_time);
+            else if (_server)
+                _server.receive(endpoint, data, from, rx_time);
+            return;
+        }
+    }
+
 }
 
 
@@ -355,23 +399,20 @@ nothrow @nogc:
 
     Map!(ulong, Neighbor) neighbors;
 
-    // Local announce state; fed by the peering agent, identity comes from /system.
     PeerRole local_role;
     String   local_cluster;
     bool     local_claimed;
     bool     local_adopted;
-    ushort   local_sync_port;
 
     override void init()
     {
-        g_app.console.register_collection!EtherDiscovery();
+        g_app.console.register_collection!UDPDiscovery();
         g_app.console.register_command!(neighbor_print, "print")("/sync/neighbor", this);
-        set_announce_sink(&on_announce);
     }
 
     override void update()
     {
-        Collection!EtherDiscovery().update_all();
+        Collection!UDPDiscovery().update_all();
 
         MonoTime now = getTime();
         ulong[8] expired = void;
@@ -397,7 +438,6 @@ nothrow @nogc:
         a.cluster = local_cluster[];
         a.role = local_role;
         a.flags = cast(ubyte)((local_claimed ? AnnounceFlags.claimed : 0) | (local_adopted ? AnnounceFlags.adopted : 0));
-        a.sync_port = local_sync_port;
         return encode_announce(a, buffer);
     }
 
@@ -409,10 +449,7 @@ nothrow @nogc:
             ref n = kvp.value;
             char[16] id = void;
             format_uint(n.node_id, id[], 16, 16, '0');
-            session.write_line(id[], "  ", n.name[], "  role=", role_name(n.role),
-                               n.cluster.length ? " cluster=" : "", n.cluster[],
-                               " state=", n.claimed ? "claimed" : "unbound",
-                               " age=", now - n.last_seen);
+            session.write_line(id[], "  ", n.name[], "  role=", role_name(n.role), n.cluster.length ? " cluster=" : "", n.cluster[], " state=", n.claimed ? "claimed" : "unbound", " age=", now - n.last_seen);
             foreach (ref l; n.links[])
             {
                 BaseInterface iface = l.iface.get;
@@ -424,7 +461,7 @@ nothrow @nogc:
 
 private:
 
-    void on_announce(EthernetStation station, MACAddress src, scope const(ubyte)[] tlv)
+    void receive_announce(BaseInterface iface, InetAddress local, InetAddress from, scope const(ubyte)[] tlv, MonoTime rx_time)
     {
         import manager.system : node_id;
 
@@ -438,7 +475,7 @@ private:
         if (!n)
         {
             n = neighbors.insert(a.node_id, Neighbor(a.node_id));
-            log.info("node '", a.name, "' appeared via ", station.name[], " (", src, ")");
+            log.info("node '", a.name, "' appeared via ", iface ? iface.name[] : "ip", " (", from, ")");
         }
         if (n.name[] != a.name)
             n.name = a.name.make_string();
@@ -446,14 +483,12 @@ private:
             n.cluster = a.cluster.make_string();
         n.role = a.role;
         n.flags = a.flags;
-        n.last_seen = getTime();
+        n.last_seen = rx_time;
 
         size_t known = n.links.length;
-        InetAddress local = InetAddress(station.mac.b, local_sync_port);
-        InetAddress remote = InetAddress(src.b, a.sync_port);
-        n.touch_link(station, local, remote, n.last_seen);
+        n.touch_link(iface, local, from, n.last_seen);
         if (known && n.links.length > known)
-            log.debug_("node '", a.name, "' also reachable via ", station.name[], " (", src, ")");
+            log.debug_("node '", a.name, "' also reachable via ", iface ? iface.name[] : "ip", " (", from, ")");
     }
 }
 
@@ -482,16 +517,135 @@ bool role_from_name(const(char)[] s, out PeerRole role)
 }
 
 
+private:
+
+enum AnnounceTag : ubyte
+{
+    node_id = 1,
+    name = 2,
+    role = 3,
+    cluster = 4,
+    flags = 5,
+}
+
+enum AnnounceFlags : ubyte
+{
+    claimed = 1 << 0,
+    adopted = 1 << 1,
+}
+
+enum neighbor_max_age = 600.seconds;
+
+alias default_discovery_port = default_sync_port;
+
+struct NodeAnnounce
+{
+    ulong node_id;
+    const(char)[] name;
+    const(char)[] cluster;
+    PeerRole role;
+    ubyte flags;
+}
+
+// Byte 8 cannot be a sync queue, so the shared port can distinguish announcements without parsing them.
+static immutable ubyte[10] announce_magic = [ 'O', 'W', 'D', 'I', 'S', 'C', 1, 0, 0xFF, 0 ];
+
+ubyte[] encode_announce(ref const NodeAnnounce a, ubyte[] buffer)
+{
+    if (buffer.length < announce_magic.length)
+        return null;
+    buffer[0 .. announce_magic.length] = announce_magic[];
+    size_t offset = announce_magic.length;
+    bool put(AnnounceTag tag, scope const(ubyte)[] value)
+    {
+        if (value.length > 255 || offset + 2 + value.length > buffer.length)
+            return false;
+        buffer[offset++] = tag;
+        buffer[offset++] = cast(ubyte)value.length;
+        buffer[offset .. offset + value.length] = value[];
+        offset += value.length;
+        return true;
+    }
+
+    if (offset + 10 > buffer.length)
+        return null;
+    buffer[offset++] = AnnounceTag.node_id;
+    buffer[offset++] = 8;
+    buffer[offset .. offset + 4] = uint(a.node_id >> 32).nativeToBigEndian;
+    buffer[offset + 4 .. offset + 8] = (cast(uint)a.node_id).nativeToBigEndian;
+    offset += 8;
+    if (!put(AnnounceTag.name, cast(const(ubyte)[])a.name))
+        return null;
+    if (a.role != PeerRole.none)
+    {
+        ubyte role = a.role;
+        if (!put(AnnounceTag.role, (&role)[0 .. 1]))
+            return null;
+    }
+    if (a.cluster.length && !put(AnnounceTag.cluster, cast(const(ubyte)[])a.cluster))
+        return null;
+    if (a.flags && !put(AnnounceTag.flags, (&a.flags)[0 .. 1]))
+        return null;
+    return buffer[0 .. offset];
+}
+
+bool decode_announce(scope return const(ubyte)[] tlv, out NodeAnnounce a)
+{
+    if (!is_announce_datagram(tlv))
+        return false;
+    tlv = tlv[announce_magic.length .. $];
+    while (tlv.length >= 2)
+    {
+        AnnounceTag tag = cast(AnnounceTag)tlv[0];
+        size_t len = tlv[1];
+        if (tlv.length < 2 + len)
+            return false;
+        const(ubyte)[] value = tlv[2 .. 2 + len];
+        tlv = tlv[2 + len .. $];
+
+        switch (tag)
+        {
+            case AnnounceTag.node_id:
+                if (len != 8)
+                    return false;
+                a.node_id = value[0 .. 8].bigEndianToNative!ulong;
+                break;
+            case AnnounceTag.name:
+                a.name = cast(const(char)[])value;
+                break;
+            case AnnounceTag.role:
+                if (len != 1 || value[0] > PeerRole.max)
+                    return false;
+                a.role = cast(PeerRole)value[0];
+                break;
+            case AnnounceTag.cluster:
+                a.cluster = cast(const(char)[])value;
+                break;
+            case AnnounceTag.flags:
+                if (len != 1)
+                    return false;
+                a.flags = value[0];
+                break;
+            default:
+                break;
+        }
+    }
+    return tlv.empty && a.node_id != 0;
+}
+
+bool is_announce_datagram(scope const(ubyte)[] data) pure
+    => data.length >= announce_magic.length && data[0 .. announce_magic.length] == announce_magic[];
+
+
 unittest
 {
     MonoTime t0 = MonoTime() + 1000.seconds;
     MACAddress mac_a = MACAddress(0x02, 0, 0, 0, 0, 1);
     MACAddress mac_b = MACAddress(0x02, 0, 0, 0, 0, 2);
-    InetAddress local = InetAddress(mac_b.b, 7000);
-    InetAddress remote_a = InetAddress(mac_a.b, 7000);
-    InetAddress remote_b = InetAddress(mac_b.b, 7000);
+    InetAddress remote_a = InetAddress(mac_a.b, default_discovery_port);
 
     Neighbor n;
+    InetAddress local = InetAddress(mac_b.b, default_discovery_port);
     n.touch_link(null, local, remote_a, t0);
     assert(n.links.length == 1);
 
@@ -502,7 +656,7 @@ unittest
     assert(n.links[0].local.port == 7001 && n.links[0].remote.port == 7002);
     assert(n.links[0].last_seen == t0 + 10.seconds);
 
-    n.touch_link(null, local, remote_b, t0 + 100.seconds);
+    n.touch_link(null, local, InetAddress(mac_b.b, default_discovery_port), t0 + 100.seconds);
     assert(n.links.length == 2);
 
     n.links[0].failures = 3;
@@ -511,7 +665,7 @@ unittest
     assert(n.links[0].failures == 0 && n.links[0].retry_at == MonoTime());
 
     n.prune_links(t0 + 10.seconds + neighbor_max_age);
-    assert(n.links.length == 1 && n.links[0].remote.same_addr(remote_b));
+    assert(n.links.length == 1 && n.links[0].remote.same_addr(InetAddress(mac_b.b, 0)));
 
     assert(n.best_link(t0 + 200.seconds) is null);
 
@@ -530,19 +684,106 @@ unittest
         NeighborLink l;
         l.iface = s1;
         l.local = local;
-        l.remote = remote_a;
+        l.remote = InetAddress(mac_a.b, default_discovery_port);
         ObjectRef!BaseInterface r1 = s1;
         ObjectRef!BaseInterface r2 = s2;
         ObjectRef!BaseInterface r_none;
+        InetAddress remote_link_a = InetAddress(mac_a.b, default_discovery_port);
+        InetAddress remote_link_b = InetAddress(mac_b.b, default_discovery_port);
         assert(r1.get is null && r2.get is null);   // neither is in the collection table
-        assert(l.is_link(r1, local, remote_a));
-        assert(!l.is_link(r2, local, remote_a));
-        assert(!l.is_link(r1, local, remote_b));
-        assert(!l.is_link(r_none, local, remote_a));
+        assert(l.is_link(r1, local, remote_link_a));
+        assert(!l.is_link(r2, local, remote_link_a));
+        assert(!l.is_link(r1, local, remote_link_b));
+        assert(!l.is_link(r_none, local, remote_link_a));
     }
 
     assert(Neighbor.link_prefers(1000, t0, 100, t0 + 50.seconds));
     assert(!Neighbor.link_prefers(100, t0 + 50.seconds, 1000, t0));
     assert(Neighbor.link_prefers(100, t0 + 50.seconds, 100, t0));
     assert(!Neighbor.link_prefers(100, t0, 100, t0 + 50.seconds));
+
+    {
+        NodeAnnounce sent;
+        sent.node_id = 0x0102030405060708;
+        sent.name = "peer";
+        sent.role = PeerRole.authority;
+        align(size_t.sizeof) ubyte[64] buffer = void;
+        ubyte[] encoded = encode_announce(sent, buffer);
+        assert(is_announce_datagram(encoded));
+        NodeAnnounce received;
+        assert(decode_announce(encoded, received));
+        assert(received.node_id == sent.node_id && received.name == sent.name && received.role == sent.role);
+        encoded[0] ^= 1;
+        assert(!is_announce_datagram(encoded));
+        assert(!decode_announce(encoded, received));
+
+        encoded = encode_announce(sent, buffer);
+        assert(!decode_announce(encoded[0 .. $ - 1], received));
+        buffer[encoded.length] = 0;
+        assert(!decode_announce(buffer[0 .. encoded.length + 1], received));
+
+        ubyte[12] short_buffer = void;
+        assert(!encode_announce(sent, short_buffer));
+    }
+
+    {
+        import urt.mem;
+        import router.iface.bridge : BridgeInterface;
+
+        UDPDiscovery domain = alloc!UDPDiscovery(CID(3));
+        BridgeInterface s1 = alloc!BridgeInterface(CID(4));
+        BridgeInterface s2 = alloc!BridgeInterface(CID(5));
+        scope(exit)
+        {
+            free(s2);
+            free(s1);
+            free(domain);
+        }
+
+        assert(s1.prop_element(prop_index!(EthernetStation, "mac")).try_write(mac_a) is null);
+        assert(s2.prop_element(prop_index!(EthernetStation, "mac")).try_write(mac_a) is null);
+
+        Variant ether = Variant("02:00:00:00:00:01");
+        assert(domain.set("bind", ether));
+        assert(domain._bind[0] == InetAddress(mac_a.b, 0));
+        assert(bind_port(domain._bind[0], domain.port) == default_discovery_port);
+
+        domain.port(1234);
+        assert(bind_port(domain._bind[0], domain.port) == 1234);
+        domain.port(default_discovery_port);
+
+        InetAddress wildcard = InetAddress(MACAddress().b, 1234);
+        domain.bind((&wildcard)[0 .. 1]);
+        assert(bind_port(domain._bind[0], domain.port) == 1234);
+
+        const(char)[][2] bind_text = ["192.168.1.1", "[::1]"];
+        Variant ip_bind = Variant(bind_text[]);
+        assert(domain.set("bind", ip_bind));
+        assert(domain.bind.length == 2);
+        assert(domain.bind[1] == InetAddress(IPv6Addr.loopback, 0));
+        static if (has_ip)
+        {
+            Array!UDPBindEndpoint bindings;
+            collect_udp_bindings(domain._bind[], domain._interfaces[], domain.port, bindings);
+            assert(bindings.length == 2);
+            assert(bindings[0].local == InetAddress(IPAddr(192, 168, 1, 1), default_discovery_port));
+            assert(bindings[1].local == InetAddress(IPv6Addr.loopback, default_discovery_port));
+            assert(domain.include_endpoint(bindings[0]));
+            assert(!domain.include_endpoint(bindings[1]));
+
+            UDPBindEndpoint wildcard_binding = UDPBindEndpoint(ObjectRef!BaseInterface(),
+                                                               InetAddress(IPAddr.any, 6667));
+            assert(UDPDiscovery.discovery_destination(wildcard_binding) ==
+                   InetAddress(IPAddr.broadcast, 6667));
+        }
+
+        InetAddress[1] only_ipv6 = [InetAddress(IPv6Addr.loopback, 0)];
+        domain.bind(only_ipv6[]);
+        assert(!domain.validate());
+
+        const(InetAddress)[] no_addresses;
+        domain.bind(no_addresses);
+        domain.interfaces(s1, s2, s1);
+        assert(domain._interfaces.length == 2);
+    }
 }
