@@ -1209,7 +1209,7 @@ private:
         deliver_frame(cast(const(ubyte)[])p.data);
     }
 
-    package void on_udp_receive(UDPEndpoint*, const(void)[] data, ref const UDPReceiveInfo) nothrow @nogc
+    package void on_udp_receive(UDPEndpoint*, const(void)[] data, ref UDPReceiveInfo) nothrow @nogc
     {
         deliver_frame(cast(const(ubyte)[])data);
     }

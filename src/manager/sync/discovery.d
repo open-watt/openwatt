@@ -23,7 +23,7 @@ import manager.sync.udp_bind;
 import manager.sync.udp_server;
 
 import router.iface;
-import router.iface.endpoint : UDPEndpoint;
+import router.iface.endpoint : UDPEndpoint, UDPReceiveInfo;
 import router.iface.ethernet;
 import router.iface.mac;
 
@@ -374,17 +374,17 @@ private:
             _server = null;
     }
 
-    void on_datagram(UDPEndpoint* endpoint, const(void)[] data, ref const InetAddress from, MonoTime rx_time)
+    void on_datagram(UDPEndpoint* endpoint, const(void)[] data, ref UDPReceiveInfo info)
     {
         foreach (ref bound; _endpoint_set.endpoints[])
         {
             if (bound.endpoint !is endpoint)
                 continue;
-            BaseInterface iface = bound.binding.iface.get;
+            BaseInterface iface = info.ingress ? info.ingress : bound.binding.iface.get;
             if (is_announce_datagram(cast(const(ubyte)[])data))
-                get_module!SyncDiscoveryModule.receive_announce(iface, bound.binding.local, from, cast(const(ubyte)[])data, rx_time);
+                get_module!SyncDiscoveryModule.receive_announce(iface, bound.binding.local, info.source, cast(const(ubyte)[])data, info.rx_time);
             else if (_server)
-                _server.receive(endpoint, data, from, rx_time);
+                _server.receive(endpoint, data, info);
             return;
         }
     }
