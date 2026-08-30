@@ -706,6 +706,7 @@ private:
             if (!p.elem_format)
                 continue;
             ref Element e = _prop_elements[i];
+            e.initialize_bindings();
             e.id = p.name;
             e._eid = _id.element(cast(ushort)(i + 1)); // element index 0 is the container
             e.format = p.elem_format();

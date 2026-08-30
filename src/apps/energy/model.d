@@ -148,7 +148,7 @@ unittest
 
     static Element* elem(double value, ScaledUnit unit)
     {
-        Element* e = alloc!Element();
+        Element* e = alloc_element();
         e.id = StringLit!"e";
         e.format = register_format(DataFormat(ValueType.f64, SeriesKind.held, unit));
         e.value = Variant(Quantity!double(value, unit));
@@ -157,7 +157,7 @@ unittest
 
     static Element* bare(double value)
     {
-        Element* e = alloc!Element();
+        Element* e = alloc_element();
         e.id = StringLit!"e";
         e.format = register_value_format(value);
         e.value = Variant(value);
@@ -188,7 +188,7 @@ unittest
     assert(read_in_unit(null, Percent) != read_in_unit(null, Percent));
 
     // register_value_format reads a static unit from the type, not the value.
-    Element* typed = alloc!Element();
+    Element* typed = alloc_element();
     typed.id = StringLit!"soc_floor";
     typed.format = register_value_format!(Quantity!(double, Percent))();
     typed.value = Variant(Quantity!(double, Percent)(50));
