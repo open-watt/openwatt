@@ -1406,8 +1406,6 @@ nothrow @nogc:
 
     EID materialise_add(SyncPeer from, const(char)[] path, const(char)[] node_class, uint ft, const(char)[] access, Variant* v, ulong t_ms, ulong peer_id)
     {
-        import urt.time : from_unix_time_ns;
-
         Address a = Address.parse(path);
         if (!a.valid || a.ns[] != "device")
         {
@@ -1467,7 +1465,7 @@ nothrow @nogc:
                 remote_access = *acc;
         }
         if (v && !v.isNull)
-            e.value(*v, t_ms ? from_unix_time_ns(t_ms * 1_000_000) : getSysTime());
+            merge_remote_value(e, *v, t_ms);
         EID eid = e.ensure_eid();
         from.attach_model_element(dev, e, remote_access);
         return eid;
@@ -1534,8 +1532,6 @@ nothrow @nogc:
     // the queue behind it.
     bool inbound_val(SyncPeer from, SyncHandle handle, ref Variant value, ulong t_ms)
     {
-        import urt.time : from_unix_time_ns;
-
         EID node = from.node_of(handle);
         Element* e = resolve_element(node);
         if (!e)
@@ -1545,7 +1541,7 @@ nothrow @nogc:
             log.debug_("val for dead handle ", handle);
             return true;
         }
-        e.value(value, t_ms ? from_unix_time_ns(t_ms * 1_000_000) : getSysTime());
+        merge_remote_value(e, value, t_ms);
         return true;
     }
 
@@ -1992,7 +1988,7 @@ nothrow @nogc:
         enc.encode_add(to, h, tconcat("device:", dev.id[]), "device", 0, null, dev.peer_id);
     }
 
-    void send_element(SyncPeer to, SyncEncoder enc, Element* e, const(char)[] path, uint gen)
+    void send_element(SyncPeer to, SyncEncoder enc, Element* e, const(char)[] path, uint gen, bool include_value = true)
     {
         import urt.mem.temp : tconcat;
         import manager.sample : enum_info_name;
@@ -2014,7 +2010,8 @@ nothrow @nogc:
         SyncHandle h = to.handle_of(node);
         if (h != SyncPeer.invalid_handle)
         {
-            enc.encode_val(to, h, e);
+            if (include_value)
+                enc.encode_val(to, h, e);
             return;
         }
         if (fmt.desc == DataFormat.Desc.enum_)
@@ -2041,7 +2038,7 @@ nothrow @nogc:
                 return;
         }
         h = to.introduce(node);
-        enc.encode_add(to, h, tconcat("device:", path), "element", ft, e, device.peer_id);
+        enc.encode_add(to, h, tconcat("device:", path), "element", ft, e, device.peer_id, include_value);
     }
 
     void send_backfill(SyncPeer to, SyncEncoder enc, Element* e, ulong from_ms, ulong to_ms, uint gen)
@@ -2093,12 +2090,18 @@ nothrow @nogc:
             *live = blk.first_index + blk.count;
     }
 
-    void introduce_element(SyncPeer p, SyncEncoder enc, Element* e, const(char)[] path, uint gen,
-                           bool arm, ulong from_ms, ulong to_ms)
+    void introduce_element(SyncPeer p, SyncEncoder enc, Element* e, const(char)[] path, uint gen, bool arm, ulong from_ms, ulong to_ms)
     {
-        send_element(p, enc, e, path, gen);
-        if (from_ms && p.send_ok(gen))
+        bool backfill = from_ms && e.has_history;
+        send_element(p, enc, e, path, gen, !backfill);
+        if (backfill && p.send_ok(gen))
             send_backfill(p, enc, e, from_ms, to_ms, gen);
+        if (backfill && e.data_format.kind != SeriesKind.point && p.send_ok(gen))
+        {
+            SyncHandle h = p.handle_of(e.ensure_eid());
+            if (h != SyncPeer.invalid_handle)
+                enc.encode_val(p, h, e);
+        }
         if (arm && e.data_format.kind == SeriesKind.point && p.send_ok(gen))
             mark_pending_val(p, e);
     }
@@ -2290,6 +2293,20 @@ nothrow @nogc:
         return false;
     }
 
+    void merge_remote_value(Element* e, ref Variant value, ulong t_ms)
+    {
+        import urt.time : from_unix_time_ns;
+
+        if (t_ms > max_model_time_ms)
+            return;
+        SysTime timestamp = t_ms ? from_unix_time_ns(t_ms * 1_000_000) : getSysTime();
+        SysTime current = e.record_update();
+        if (!model_value_is_newer(current, t_ms, timestamp))
+            return;
+
+        e.value(value, timestamp);
+    }
+
     Device find_or_create_device(const(char)[] id, ulong peer_id)
     {
         if (Device device = g_app.devices.find(id, peer_id))
@@ -2318,6 +2335,15 @@ package void collect_superseded(SyncPeer[] peers, SyncPeer from, ulong node_id, 
 
 
 private:
+
+enum max_model_time_ms = ulong.max / 1_000_000;
+
+bool model_value_is_newer(SysTime current, ulong t_ms, SysTime timestamp) pure
+{
+    import urt.time : unix_time_ns;
+
+    return current == SysTime() || (t_ms ? t_ms > unix_time_ns(current) / 1_000_000 : timestamp > current);
+}
 
 void sync_model_sub(Session session, SyncPeer peer, const(char)[] pattern, Nullable!bool once)
 {
@@ -2382,4 +2408,10 @@ unittest
     superseded.clear();
     collect_superseded(peers[], c, c._remote_node_id, superseded);
     assert(superseded.length == 0);
+
+    SysTime current = from_unix_time_ns(1_999_999);
+    assert(!model_value_is_newer(current, 1, from_unix_time_ns(1_000_000)));
+    assert(model_value_is_newer(current, 2, from_unix_time_ns(2_000_000)));
+    assert(!model_value_is_newer(current, 0, current));
+    assert(model_value_is_newer(current, 0, current + nsecs(1_000)));
 }
