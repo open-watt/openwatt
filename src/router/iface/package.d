@@ -70,6 +70,7 @@ enum MessageState
     in_flight,
     complete,
     failed,
+    delivery_failed,
     aborted,
     timeout,
     expired,

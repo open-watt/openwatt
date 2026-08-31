@@ -232,6 +232,8 @@ nothrow @nogc:
 
     override void update()
     {
+        super.update();
+
         if (_destroying)
         {
             if (_init_promise.state != PromiseState.pending)

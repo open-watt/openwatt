@@ -316,11 +316,11 @@ protected:
                 }
 
                 writeWarning("Zigbee: raw NWK transmit is not implemented");
-                return ZigbeeResult.unsupported;
+                return -1;
 
             default:
                 add_tx_drop();
-                return ZigbeeResult.unsupported;
+                return -1;
         }
 
         Packet p = packet;
@@ -583,7 +583,7 @@ private:
                 writeDebugf("Zigbee: APS unsolicited message sent ({0,03}) - {1, 04x}:{2, 02x}->{3, 04x}:{4, 02x} [{5}:{6, 04x}] - [{7}]", message_tag, _coordinator.node_id, aps_frame.sourceEndpoint, index_or_destination, aps_frame.destinationEndpoint, profile_name(aps_frame.profileId), aps_frame.clusterId, cast(void[])message);
         }
 
-        _queue.complete(message_tag, status == EmberStatus.SUCCESS ? MessageState.complete : MessageState.failed);
+        _queue.complete(message_tag, status == EmberStatus.SUCCESS ? MessageState.complete : MessageState.delivery_failed);
         send_queued_messages();
     }
 
