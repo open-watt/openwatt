@@ -61,6 +61,10 @@ ifeq ($(PLATFORM),bl808)
     HEADLESS ?= 1
   endif
 endif
+ifneq ($(filter bk7231n bk7231t,$(PLATFORM)),)
+    FEATURES ?= switch
+    HEADLESS ?= 1
+endif
 
 # -- Defaults ------------------------------------------------------------
 
