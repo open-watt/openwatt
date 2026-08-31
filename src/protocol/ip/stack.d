@@ -26,6 +26,7 @@ import protocol.ip.icmp;
 import protocol.ip.icmp6;
 import protocol.ip.igmp;
 import protocol.ip.mld;
+import protocol.ip.nd;
 import protocol.ip.neighbour;
 import protocol.ip.route;
 import protocol.ip.tcp;
@@ -85,7 +86,8 @@ nothrow @nogc:
         neighbour_v4.drain        = &v4_drain;
         static if (has_ipv6)
         {
-            neighbour_v6.drain = &v6_drain;
+            neighbour_v6.send_request = &v6_send_request;
+            neighbour_v6.drain        = &v6_drain;
         }
     }
 
@@ -137,6 +139,7 @@ nothrow @nogc:
         }
         static if (has_ipv6)
         {
+            nd_update(this, now);
             neighbour_v6.tick(now);
             mld_update(this, now);
         }
@@ -231,16 +234,22 @@ nothrow @nogc:
 
     IPv6Addr select_source_v6(IPv6Addr dst, BaseInterface iface_hint)
     {
+        if (dst.is_link_local || dst.is_multicast)
+        {
+            if (iface_hint)
+                return link_local_of(iface_hint);
+            return IPv6Addr.any;
+        }
+
         RouteResult6 r = route_lookup_v6_dst(dst, iface_hint);
         if (r.kind == RouteResult6.Kind.local)
             return dst;
         if (r.kind != RouteResult6.Kind.forward || !r.out_iface)
             return IPv6Addr.any;
-        // TODO: RFC 6724 source selection; for now first address on the egress interface.
         foreach (a; Collection!IPv6Address().values)
-            if (a.iface is r.out_iface)
+            if (a.iface is r.out_iface && !a.address.addr.is_link_local)
                 return a.address.addr;
-        return IPv6Addr.any;
+        return link_local_of(r.out_iface);
     }
 
     RouteResult6 route_lookup_v6_dst(IPv6Addr dst, BaseInterface iface_hint = null)
@@ -338,9 +347,11 @@ nothrow @nogc:
         // TODO: raw_ip tunnel handler -> register for PacketType.raw (peek IP version byte)
     }
 
-    // Diagnostics access to the neighbour cache (for /protocol/ip/neighbour print).
     ref inout(NeighbourCache!IPAddr) neighbour_v4_cache() inout pure return
         => neighbour_v4;
+    static if (has_ipv6)
+    ref inout(NeighbourCache!IPv6Addr) neighbour_v6_cache() inout pure return
+        => neighbour_v6;
 
 private:
 
@@ -454,15 +465,12 @@ private:
             return;
         }
 
-        foreach (a; Collection!IPv6Address().values)
+        if (is_our_ip_v6(dst, iface))
         {
-            if (a.iface is iface && a.address.addr == dst)
-            {
-                if (firewall_v6.run(HookPoint.input, pkt) == Verdict.drop)
-                    return;
-                deliver_local_v6(pkt, iface);
+            if (firewall_v6.run(HookPoint.input, pkt) == Verdict.drop)
                 return;
-            }
+            deliver_local_v6(pkt, iface);
+            return;
         }
 
         // Link-local scope never crosses the link, in either address.
@@ -605,8 +613,10 @@ private:
                 .icmp6_input(this, pkt, l4_offset, iface);
                 break;
             case IPProtocol.tcp:
+                // TODO: v6 TCP delivery into the transport engine
+                break;
             case IPProtocol.udp:
-                // Transport and control-protocol delivery land in later layers.
+                // TODO: v6 UDP delivery
                 break;
             case IPProtocol.no_next:
                 break;
@@ -817,6 +827,12 @@ private:
 
     static if (has_ipv6)
     {
+        void v6_send_request(IPv6Addr target, BaseInterface iface)
+        {
+            if (EthernetStation station = dyn_cast!EthernetStation(iface))
+                send_neighbour_solicit(this, target, station);
+        }
+
         void v6_drain(ref Packet pkt, BaseInterface iface, const(ubyte)[] link_addr)
         {
             frame_and_send(pkt, iface, link_addr);

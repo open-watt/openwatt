@@ -31,13 +31,14 @@ struct NeighbourEntry(IP)
     IP ip;
     BaseInterface iface;
     ubyte[16] link_addr;        // MAC (6) or EUI-64 (8) etc.
+    MonoTime last_confirmed;
+    MonoTime last_request;
+    Packet*[pending_queue_depth] pending;
     ubyte link_addr_len;
     NeighbourState state;
-    MonoTime last_confirmed;
-    MonoTime last_request;      // when we last sent a resolution request
     ubyte retry_count;
     ubyte pending_count;
-    Packet*[pending_queue_depth] pending;
+    bool is_router;
 }
 
 struct NeighbourCache(IP)
@@ -57,8 +58,6 @@ nothrow @nogc:
     SendRequestDg send_request;
     DrainDg       drain;
 
-    // Insert or refresh an entry from observed traffic (ARP reply, ND NA, gratuitous, etc).
-    // If the entry was incomplete and had a queued packet, drain it.
     void learn(IP ip, BaseInterface iface, const(ubyte)[] link_addr)
     {
         if (link_addr.length == 0 || link_addr.length > 16)
@@ -88,6 +87,80 @@ nothrow @nogc:
         n.state                    = NeighbourState.reachable;
         n.last_confirmed           = now;
         _entries ~= n;
+    }
+
+    void observe(IP ip, BaseInterface iface, const(ubyte)[] link_addr)
+    {
+        if (link_addr.length == 0 || link_addr.length > 16)
+            return;
+
+        if (auto e = find(ip, iface))
+        {
+            bool changed = e.link_addr_len != link_addr.length || e.link_addr[0 .. e.link_addr_len] != link_addr;
+            if (changed || e.state == NeighbourState.incomplete || e.state == NeighbourState.failed)
+            {
+                e.link_addr[0 .. link_addr.length] = link_addr[];
+                e.link_addr_len = cast(ubyte)link_addr.length;
+                e.state = NeighbourState.stale;
+                e.retry_count = 0;
+            }
+            drain_pending(*e);
+            return;
+        }
+
+        NeighbourEntry!IP entry;
+        entry.ip = ip;
+        entry.iface = iface;
+        entry.link_addr[0 .. link_addr.length] = link_addr[];
+        entry.link_addr_len = cast(ubyte)link_addr.length;
+        entry.state = NeighbourState.stale;
+        entry.last_request = getTime();
+        _entries ~= entry;
+    }
+
+    bool advertise(IP ip, BaseInterface iface, const(ubyte)[] link_addr, bool router, bool solicited, bool override_)
+    {
+        NeighbourEntry!IP* entry = find(ip, iface);
+        if (!entry)
+            return false;
+        if (entry.state == NeighbourState.incomplete)
+        {
+            if (link_addr.length == 0 || link_addr.length > entry.link_addr.length)
+                return false;
+            entry.link_addr[0 .. link_addr.length] = link_addr[];
+            entry.link_addr_len = cast(ubyte)link_addr.length;
+            entry.state = solicited ? NeighbourState.reachable : NeighbourState.stale;
+        }
+        else if (link_addr.length)
+        {
+            if (link_addr.length > entry.link_addr.length)
+                return false;
+            bool changed = entry.link_addr_len != link_addr.length || entry.link_addr[0 .. entry.link_addr_len] != link_addr;
+            if (changed && !override_)
+            {
+                if (entry.state == NeighbourState.reachable)
+                    entry.state = NeighbourState.stale;
+                entry.is_router = router;
+                return true;
+            }
+            if (changed)
+            {
+                entry.link_addr[0 .. link_addr.length] = link_addr[];
+                entry.link_addr_len = cast(ubyte)link_addr.length;
+                entry.state = solicited ? NeighbourState.reachable : NeighbourState.stale;
+            }
+            else if (solicited)
+                entry.state = NeighbourState.reachable;
+        }
+        else if (solicited)
+            entry.state = NeighbourState.reachable;
+
+        entry.is_router = router;
+        entry.retry_count = 0;
+        if (solicited)
+            entry.last_confirmed = getTime();
+        drain_pending(*entry);
+        return true;
     }
 
     NeighbourEntry!IP* find(IP ip, BaseInterface iface)
@@ -255,5 +328,30 @@ private:
     }
 
     Array!(NeighbourEntry!IP) _entries;
-    ulong _pending_overflow;        // diagnostic: total packets dropped by single-slot pending queue
+    ulong _pending_overflow;
+}
+
+
+unittest
+{
+    NeighbourCache!IPv6Addr cache;
+    IPv6Addr address = IPv6Addr(0xFE80, 0, 0, 0, 0, 0, 0, 1);
+    ubyte[6] first = [ 0, 1, 2, 3, 4, 5 ];
+    ubyte[6] second = [ 6, 7, 8, 9, 10, 11 ];
+
+    assert(!cache.advertise(address, null, first[], false, true, true));
+    cache.observe(address, null, first[]);
+    assert(cache.entries[0].state == NeighbourState.stale);
+
+    assert(cache.advertise(address, null, first[], true, true, true));
+    assert(cache.entries[0].state == NeighbourState.reachable);
+    assert(cache.entries[0].is_router);
+
+    assert(cache.advertise(address, null, second[], false, false, false));
+    assert(cache.entries[0].state == NeighbourState.stale);
+    assert(cache.entries[0].link_addr[0 .. first.length] == first[]);
+
+    assert(cache.advertise(address, null, second[], false, false, true));
+    assert(cache.entries[0].state == NeighbourState.stale);
+    assert(cache.entries[0].link_addr[0 .. second.length] == second[]);
 }

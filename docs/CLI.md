@@ -703,7 +703,9 @@ stack is used by default and these collections only take effect when built with
 `USE_INTERNAL_IP_STACK=1`; embedded targets always use the in-tree stack.
 
 IPv4 and IPv6 are configured through parallel collections: `address`/`address6`,
-`route`/`route6`, `pool`/`pool6`.
+`route`/`route6`, `pool`/`pool6`. Every running Ethernet interface forms an
+EUI-64 link-local address, verifies it with DAD, and publishes it as a dynamic
+`address6` entry. Manual entries are only needed for global or ULA addressing.
 
 `/protocol/ip/address` and `/protocol/ip/address6` properties:
 
@@ -722,10 +724,16 @@ IPv4 and IPv6 are configured through parallel collections: `address`/`address6`,
 | `blackhole` | `yes`/`no` | Silently discard matching traffic. |
 | `distance` | `0` to `255` | Route preference; lower wins. |
 
+| Command | Description |
+| --- | --- |
+| `/protocol/ip/neighbour/print` | Show the IPv4 neighbour (ARP) cache: address, MAC, reachability state, retries, interface. |
+| `/protocol/ip/neighbour6/print` | Show the IPv6 neighbour (ND) cache in the same shape. |
+
 ```
 /protocol/ip/address/add address=192.168.1.10/24 interface=eth0
 /protocol/ip/address6/add address=2001:db8:1::10/64 interface=eth0
 /protocol/ip/route6/add destination=::/0 gateway=fe80::1 out-interface=eth0
+/protocol/ip/neighbour6/print
 ```
 
 ### `/protocol/http/server`

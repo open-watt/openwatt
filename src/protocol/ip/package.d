@@ -2080,6 +2080,10 @@ nothrow @nogc:
             import protocol.ip.tcp : tcp_print;
             g_app.console.register_command!(tcp_print, "print")("/protocol/ip/tcp", this);
             g_app.console.register_command!(neighbour_v4_print, "print")("/protocol/ip/neighbour", this);
+            static if (has_ipv6)
+            {
+                g_app.console.register_command!(neighbour_v6_print, "print")("/protocol/ip/neighbour6", this);
+            }
         }
         else version (Windows)
             load_socket_extensions();
@@ -2110,6 +2114,45 @@ nothrow @nogc:
         if (entries.length == 0)
         {
             session.write_line("No IPv4 neighbour entries");
+            return;
+        }
+
+        Table t;
+        t.add_column("ip");
+        t.add_column("mac");
+        t.add_column("state");
+        t.add_column("rtry", Table.TextAlign.right);
+        t.add_column("iface");
+
+        foreach (ref e; entries)
+        {
+            MACAddress mac;
+            if (e.link_addr_len >= 6)
+                mac.b[] = e.link_addr[0 .. 6];
+
+            t.add_row();
+            t.cell(tconcat(e.ip));
+            t.cell(tconcat(mac));
+            t.cell(tconcat(e.state));
+            t.cell(tconcat(e.retry_count));
+            t.cell(e.iface ? e.iface.name[] : "");
+        }
+
+        t.render(session);
+    }
+
+    version (UseInternalIPStack)
+    static if (has_ipv6)
+    void neighbour_v6_print(Session session)
+    {
+        import urt.mem.temp : tconcat;
+        import manager.console.table : Table;
+        import router.iface.mac : MACAddress;
+
+        auto entries = _stack.neighbour_v6_cache.entries;
+        if (entries.length == 0)
+        {
+            session.write_line("No IPv6 neighbour entries");
             return;
         }
 
