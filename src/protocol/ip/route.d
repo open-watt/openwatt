@@ -99,6 +99,7 @@ nothrow @nogc:
     {
         _distance = value;
         mark_set!(typeof(this), "distance")();
+        bump_route_generation();
     }
 
 protected:
@@ -201,6 +202,7 @@ nothrow @nogc:
     {
         _distance = value;
         mark_set!(typeof(this), "distance")();
+        bump_route_generation();
     }
 
 protected:

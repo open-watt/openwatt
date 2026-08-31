@@ -696,6 +696,38 @@ service 0000FFF0-0000-1000-8000-00805F9B34FB  handles 0x0008-0xFFFF
   0x000D  0x000C  -       --CW----  0000FFF2-0000-1000-8000-00805F9B34FB
 ```
 
+### `/protocol/ip/*`
+
+IP configuration for the in-tree network stack. On desktop hosts the kernel's
+stack is used by default and these collections only take effect when built with
+`USE_INTERNAL_IP_STACK=1`; embedded targets always use the in-tree stack.
+
+IPv4 and IPv6 are configured through parallel collections: `address`/`address6`,
+`route`/`route6`, `pool`/`pool6`.
+
+`/protocol/ip/address` and `/protocol/ip/address6` properties:
+
+| Property | Values | Description |
+| --- | --- | --- |
+| `address` | `addr/prefix` (e.g. `192.168.1.10/24`, `2001:db8::5/64`) | Address and on-link prefix to bind. |
+| `interface` | interface name | Interface the address lives on. |
+
+`/protocol/ip/route` and `/protocol/ip/route6` properties:
+
+| Property | Values | Description |
+| --- | --- | --- |
+| `destination` | `network/prefix` (`0.0.0.0/0`, `::/0` for default) | Destination network. |
+| `gateway` | IP address | Next-hop; mutually exclusive with `blackhole`. A link-local IPv6 gateway also needs `out-interface`. |
+| `out-interface` | interface name | Egress interface for directly-attached destinations. |
+| `blackhole` | `yes`/`no` | Silently discard matching traffic. |
+| `distance` | `0` to `255` | Route preference; lower wins. |
+
+```
+/protocol/ip/address/add address=192.168.1.10/24 interface=eth0
+/protocol/ip/address6/add address=2001:db8:1::10/64 interface=eth0
+/protocol/ip/route6/add destination=::/0 gateway=fe80::1 out-interface=eth0
+```
+
 ### `/protocol/http/server`
 
 An HTTP server provides the listener and shared policy for its registered
