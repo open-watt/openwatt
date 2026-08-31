@@ -43,7 +43,7 @@ jobs:
       - name: Setup D Compiler
         uses: dlang-community/setup-dlang@v2
         with:
-          compiler: ${{ matrix.compiler == 'dmd' && 'dmd-master' || matrix.compiler }}
+          compiler: ${{ matrix.compiler }}
 
       # Linux needs mbedtls for TLS/crypto support
       - name: Install mbedtls (Linux)
@@ -93,7 +93,6 @@ jobs:
         include:
           - platform: bl808
             toolchain: riscv64-unknown-elf
-          # Also the coverage for bl618: platforms/bl618 is the shared E907 driver pool.
           - platform: bl808_m0
             toolchain: riscv64-unknown-elf
             make_args: PROCESSOR=e907
