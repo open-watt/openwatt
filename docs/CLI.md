@@ -744,6 +744,25 @@ DHCPv6 rides beside SLAAC: addresses and delegated prefixes come from DHCPv6,
 while the default route always comes from Router Advertisements because DHCPv6
 does not carry routes.
 
+#### Client
+
+`/protocol/dhcp/client6` requests a host address (`IA_NA`) and/or a delegated
+prefix (`IA_PD`). A bound address appears as a dynamic `address6`; a delegated
+prefix appears as a dynamic `pool6` under `pool-name`, ready for downstream
+consumers to draw from.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `interface` | interface name | | Interface to solicit on. |
+| `request-address` | `yes`/`no` | `yes` | Request an `IA_NA` host address. |
+| `request-prefix` | `yes`/`no` | `no` | Request an `IA_PD` delegated prefix. |
+| `pool-name` | name | `<name>.pd` | Name of the dynamic pool created for the delegated prefix. |
+| `delegation-length` | `1` to `64` | `64` | `delegation-length` applied to the created pool. |
+
+```
+/protocol/dhcp/client6/add name=wan interface=eth0 request-prefix=true pool-name=site
+```
+
 ### `/protocol/http/server`
 
 An HTTP server provides the listener and shared policy for its registered
