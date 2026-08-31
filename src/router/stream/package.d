@@ -42,9 +42,8 @@ alias RecvHandler = void delegate(Stream source, const(void)[] data, MonoTime rx
 // Passive observer of a stream's raw byte traffic in both directions; does not consume the data.
 alias TapHandler = void delegate(Stream source, bool tx, const(void)[] data, MonoTime time) nothrow @nogc;
 
-// A returned page transfers to the sink; null releases the producer.
+// A returned page transfers to the sink; null disarms until tx_handler() re-arms it.
 alias SendHandler = Page* delegate(Stream sink, size_t requested) nothrow @nogc;
-alias TxReadyHandler = void delegate(Stream sink) nothrow @nogc;
 
 
 enum StreamOptions : ubyte
@@ -179,7 +178,7 @@ nothrow @nogc:
         _status.link_status_change_time = getSysTime();
         _last_bitrate_sample = MonoTime.init;   // next heartbeat establishes the rate baseline
         mark_set!(typeof(this), [ "link-status", "last-status-change-time" ])();
-        notify_tx_ready();
+        tx_handler_changed();
     }
 
     override void offline()
@@ -215,8 +214,7 @@ nothrow @nogc:
         if (handler && !supports_tx_pages)
             return false;
         _outgoing = handler;
-        if (_outgoing && !_pumping_tx)
-            pump_tx();
+        tx_handler_changed();
         return true;
     }
     final SendHandler tx_handler() const pure
@@ -225,12 +223,11 @@ nothrow @nogc:
     final void release_tx_handler(SendHandler handler)
     {
         if (_outgoing is handler)
+        {
             _outgoing = null;
+            tx_handler_changed();
+        }
     }
-
-    void tx_ready_handler(TxReadyHandler handler) {}
-
-    void release_tx_ready_handler(TxReadyHandler handler) {}
 
     // Passive taps observe raw traffic without consuming it (unlike the single-owner rx_handler),
     // so any number can attach - used by the /stream/tap sniffer.
@@ -267,9 +264,6 @@ nothrow @nogc:
 
     bool supports_tx_pages() const
         => false;
-
-    package(router) final bool submit_tx_page(Page* page)
-        => supports_tx_pages && queue_tx_page(page);
 
     ptrdiff_t pending()
         => _rx_buffer.length;
@@ -316,10 +310,27 @@ nothrow @nogc:
 
 protected:
 
-    final void notify_tx_ready()
+    void tx_handler_changed()
     {
         if (_outgoing && !_pumping_tx)
             pump_tx();
+    }
+
+    final Page* request_tx_page(size_t requested)
+    {
+        while (_outgoing)
+        {
+            SendHandler handler = _outgoing;
+            Page* page = handler(this, requested);
+            if (page)
+                return page;
+            if (_outgoing is handler)
+            {
+                _outgoing = null;
+                break;
+            }
+        }
+        return null;
     }
 
     final void pump_tx()
@@ -330,22 +341,16 @@ protected:
         size_t requested = tx_request();
         while (_outgoing && requested != 0)
         {
-            SendHandler handler = _outgoing;
-            Page* page = handler(this, requested);
+            Page* page = request_tx_page(requested);
             if (!page)
-            {
-                if (_outgoing is handler)
-                    _outgoing = null;
-                continue;
-            }
+                break;
 
             debug assert(page.length != 0);
-            size_t length = page.length;
-            if (length == 0 || !queue_tx_page(page))
+            if (page.length == 0 || !queue_tx_page(page))
             {
                 page_free(page);
-                if (_outgoing is handler)
-                    _outgoing = null;
+                _outgoing = null;
+                break;
             }
             else
                 requested = tx_request();
@@ -529,23 +534,10 @@ unittest
         override bool supports_tx_pages() const
             => supported;
 
-        override void tx_ready_handler(TxReadyHandler handler)
-        {
-            _observer = handler;
-        }
-
-        override void release_tx_ready_handler(TxReadyHandler handler)
-        {
-            if (_observer is handler)
-                _observer = null;
-        }
-
         void grant(size_t space)
         {
             _space += space;
-            notify_tx_ready();
-            if (_observer)
-                _observer(this);
+            pump_tx();
         }
 
         void reset()
@@ -568,7 +560,6 @@ unittest
 
     private:
         size_t _space;
-        TxReadyHandler _observer;
     }
 
     struct TestTxProducer
@@ -611,18 +602,6 @@ unittest
         ubyte next;
         bool release;
         SendHandler replacement;
-    }
-
-    struct TestTxObserver
-    {
-    nothrow @nogc:
-
-        void ready(Stream)
-        {
-            ++calls;
-        }
-
-        size_t calls;
     }
 
     bool owns_pool = page_pool_init();
@@ -674,11 +653,16 @@ unittest
     stream.tx_handler(&releasing.produce);
     assert(releasing.calls == 1 && stream.output.length == 2 && stream.tx_handler is null);
 
-    TestTxObserver observer;
-    stream.tx_ready_handler(&observer.ready);
+    stream.reset();
+    TestTxProducer sleeping;
     stream.grant(1);
-    assert(observer.calls == 1);
-    stream.release_tx_ready_handler(&observer.ready);
+    stream.tx_handler(&sleeping.produce);
+    assert(sleeping.calls == 1 && stream.tx_handler is null);
+    stream.grant(1);
+    assert(sleeping.calls == 1);
+    sleeping.remaining = 1;
+    stream.tx_handler(&sleeping.produce);
+    assert(sleeping.calls == 3 && stream.output.length == 1 && stream.tx_handler is null);
 
     stream.supported = false;
     assert(!stream.tx_handler(&first.produce));

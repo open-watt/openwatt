@@ -4,6 +4,7 @@ import urt.endian;
 import urt.mem;
 import urt.mem.pagepool;
 import urt.time;
+import urt.util : align_down;
 
 public import router.iface.mac;
 
@@ -468,7 +469,7 @@ Packet* attach_packet(Page* page)
     {
         size_t base = cast(size_t)page;
         size_t end = base + page.capacity;
-        size_t address = (end - Packet.sizeof) & ~(Packet.alignof - 1);
+        size_t address = (end - Packet.sizeof).align_down(Packet.alignof);
         offset = address - base;
         if (offset < ushort.sizeof || page.offset + page.length > offset - ushort.sizeof)
             return null;

@@ -36,11 +36,8 @@ nothrow @nogc:
     {
         if (_tx is value)
             return;
-        if (_tx_ready_subscribed)
-        {
-            _tx.release_tx_ready_handler(&tx_ready);
-            _tx_ready_subscribed = false;
-        }
+        if (_tx)
+            _tx.release_tx_handler(&provide_tx_page);
         if (_tx_subscribed)
         {
             _tx.unsubscribe(&stream_state_change);
@@ -81,17 +78,6 @@ nothrow @nogc:
 
     override bool supports_tx_pages() const
         => _tx && _tx.supports_tx_pages;
-
-    override void tx_ready_handler(TxReadyHandler handler)
-    {
-        _tx_observer = handler;
-    }
-
-    override void release_tx_ready_handler(TxReadyHandler handler)
-    {
-        if (_tx_observer is handler)
-            _tx_observer = null;
-    }
 
     override ptrdiff_t read(void[] buffer)
     {
@@ -153,11 +139,7 @@ protected:
         {
             _tx.subscribe(&stream_state_change);
             _tx_subscribed = true;
-            if (_tx.supports_tx_pages)
-            {
-                _tx.tx_ready_handler(&tx_ready);
-                _tx_ready_subscribed = true;
-            }
+            tx_handler_changed();
         }
         if (_rx)
         {
@@ -173,32 +155,32 @@ protected:
         return CompletionStatus.complete;
     }
 
-    override bool queue_tx_page(Page* page)
+    override void tx_handler_changed()
     {
-        if (_logging)
-            return super.queue_tx_page(page);
-
         Stream stream = _tx.get;
-        size_t length = page.length;
-        if (!stream || !stream.submit_tx_page(page))
-            return false;
-        add_tx_bytes(length);
-        return true;
+        if (!stream || !stream.running)
+            return;
+        if (tx_handler)
+            stream.tx_handler(&provide_tx_page);
+        else
+            stream.release_tx_handler(&provide_tx_page);
     }
 
 private:
     ObjectRef!Stream _tx;
     ObjectRef!Stream _rx;
-    TxReadyHandler _tx_observer;
     bool _tx_subscribed;
     bool _rx_subscribed;
-    bool _tx_ready_subscribed;
 
-    void tx_ready(Stream)
+    Page* provide_tx_page(Stream, size_t requested)
     {
-        notify_tx_ready();
-        if (_tx_observer)
-            _tx_observer(this);
+        Page* page = request_tx_page(requested);
+        if (!page)
+            return null;
+        add_tx_bytes(page.length);
+        if (_logging)
+            write_to_log(false, page.data);
+        return page;
     }
 
     void stream_state_change(ActiveObject, StateSignal signal)
@@ -212,11 +194,8 @@ private:
 
     void unsubscribe()
     {
-        if (_tx_ready_subscribed)
-        {
-            _tx.release_tx_ready_handler(&tx_ready);
-            _tx_ready_subscribed = false;
-        }
+        if (_tx)
+            _tx.release_tx_handler(&provide_tx_page);
         if (_tx_subscribed)
         {
             _tx.unsubscribe(&stream_state_change);

@@ -179,7 +179,7 @@ nothrow @nogc:
             _conn = tcp_connect(_remote, &on_data, &on_event);
             if (_conn is null)
                 return CompletionStatus.continue_;     // no route / refused outright; retry later
-            _conn.tx_ready_handler(&on_tx_ready);
+            tx_handler_changed();
             if (_keep_enable)
                 _conn.enable_keepalive(_keep_enable, _keep_idle, _keep_interval, _keep_count);
         }
@@ -266,33 +266,20 @@ nothrow @nogc:
     override bool supports_tx_pages() const
         => true;
 
-    override void tx_ready_handler(TxReadyHandler handler)
-    {
-        _tx_ready = handler;
-    }
-
-    override void release_tx_ready_handler(TxReadyHandler handler)
-    {
-        if (_tx_ready is handler)
-            _tx_ready = null;
-    }
-
 protected:
-    override bool queue_tx_page(Page* page)
-    {
-        if (_logging)
-            return super.queue_tx_page(page);
 
-        size_t length = page.length;
-        if (!_conn || !_conn.send_page(page))
-            return false;
-        add_tx_bytes(length);
-        return true;
+    override void tx_handler_changed()
+    {
+        if (!_conn)
+            return;
+        if (tx_handler)
+            _conn.tx_handler(&provide_tx_page);
+        else
+            _conn.release_tx_handler(&provide_tx_page);
     }
 
 private:
     TCPConnection* _conn;
-    TxReadyHandler _tx_ready;
     InetAddress _remote;
     ushort _port;
     SysTime _last_retry;
@@ -304,11 +291,15 @@ private:
     Duration _keep_idle;
     Duration _keep_interval;
 
-    void on_tx_ready(TCPConnection* conn)
+    Page* provide_tx_page(TCPConnection*, size_t requested)
     {
-        notify_tx_ready();
-        if (_tx_ready)
-            _tx_ready(this);
+        Page* page = request_tx_page(requested);
+        if (!page)
+            return null;
+        add_tx_bytes(page.length);
+        if (_logging)
+            write_to_log(false, page.data);
+        return page;
     }
 
     void on_data(TCPConnection* conn, const(void)[] data, MonoTime rx_time)
@@ -332,6 +323,7 @@ private:
     {
         if (_conn)
         {
+            _conn.release_tx_handler(&provide_tx_page);
             _conn.close();
             _conn = null;
         }
@@ -466,7 +458,6 @@ protected:
         stream._link = 1;
         conn.recv_handler(&stream.on_data);
         conn.event_handler(&stream.on_event);
-        conn.tx_ready_handler(&stream.on_tx_ready);
         stream.set_state(State.running);
         Collection!TCPStream().add(stream);
         return stream;

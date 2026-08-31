@@ -263,7 +263,7 @@ enum IPEvent : ubyte
 private static immutable ubyte[6] zero_mac;
 
 alias TCPRecvHandler = void delegate(TCPConnection* conn, const(void)[] data, MonoTime rx_time) nothrow @nogc;
-alias TCPTxReadyHandler = void delegate(TCPConnection* conn) nothrow @nogc;
+alias TCPSendHandler = Page* delegate(TCPConnection* conn, size_t requested) nothrow @nogc;
 alias TCPEventHandler = void delegate(TCPConnection* conn, IPEvent event) nothrow @nogc;
 alias TCPAcceptHandler = void delegate(TCPListener* listener, TCPConnection* conn, MonoTime rx_time) nothrow @nogc;
 
@@ -511,7 +511,10 @@ nothrow @nogc:
 
     size_t tx_backlog() const pure
     {
-        return _tx_bytes;
+        version (UseInternalIPStack)
+            return _tx_bytes + (_pcb ? _pcb.send_buf.length : 0);
+        else
+            return _tx_bytes;
     }
 
     void recv_handler(TCPRecvHandler handler)
@@ -527,9 +530,16 @@ nothrow @nogc:
         _on_event = handler;
     }
 
-    void tx_ready_handler(TCPTxReadyHandler handler)
+    void tx_handler(TCPSendHandler handler)
     {
-        _on_tx_ready = handler;
+        _outgoing = handler;
+        service_tx();
+    }
+
+    void release_tx_handler(TCPSendHandler handler)
+    {
+        if (_outgoing is handler)
+            _outgoing = null;
     }
 
     ptrdiff_t send(const(void[])[] data...)
@@ -563,8 +573,7 @@ nothrow @nogc:
                 size_t copied = bytes - output_offset;
                 if (copied > available)
                     copied = available;
-                page.data[output_offset .. output_offset + copied] =
-                    input[input_offset .. input_offset + copied];
+                page.data[output_offset .. output_offset + copied] = input[input_offset .. input_offset + copied];
                 output_offset += copied;
                 input_offset += copied;
                 if (input_offset == input.length)
@@ -677,6 +686,7 @@ nothrow @nogc:
             }
             _phase = Phase.dead;
             _closing = true;
+            _outgoing = null;
             clear_tx();
         }
     }
@@ -708,6 +718,7 @@ nothrow @nogc:
             _on_recv = null;
             _on_event = null;
             _phase = Phase.dead;
+            _outgoing = null;
             if (_handle != INVALID_SOCKET)
             {
                 CancelIoEx(cast(HANDLE)_handle, null);
@@ -753,6 +764,7 @@ nothrow @nogc:
                 return;
             _closing = true;
             _phase = Phase.dead;
+            _outgoing = null;
             detach_watch();
             if (_socket)
             {
@@ -784,13 +796,15 @@ private:
     Page* _tx_head;
     Page* _tx_tail;
     size_t _tx_bytes;
-    TCPTxReadyHandler _on_tx_ready;
+    TCPSendHandler _outgoing;
+    bool _servicing_tx;
 
     void fail(IPEvent ev)
     {
         if (_phase == Phase.dead)
             return;
         _phase = Phase.dead;
+        _outgoing = null;
         clear_tx();
         TCPEventHandler handler = _on_event;
         _on_recv = null;
@@ -832,6 +846,35 @@ private:
         _tx_tail = null;
     }
 
+    void service_tx()
+    {
+        if (_servicing_tx || _phase != Phase.open)
+            return;
+        _servicing_tx = true;
+        scope (exit) _servicing_tx = false;
+
+        size_t requested = tx_request();
+        while (_outgoing && requested != 0)
+        {
+            TCPSendHandler handler = _outgoing;
+            Page* page = handler(&this, requested);
+            if (!page)
+            {
+                if (_outgoing is handler)
+                    _outgoing = null;
+                continue;
+            }
+            if (page.length == 0 || !send_page(page))
+            {
+                page_free(page);
+                if (_outgoing is handler)
+                    _outgoing = null;
+                break;
+            }
+            requested = tx_request();
+        }
+    }
+
     version (UseInternalIPStack)
     {
         TcpPcb* _pcb;
@@ -865,8 +908,7 @@ private:
                         else
                         {
                             flush_tx();
-                            if (_on_tx_ready && tx_request() != 0)
-                                _on_tx_ready(&this);
+                            service_tx();
                         }
                     }
                     break;
@@ -881,6 +923,7 @@ private:
             _remote = _pcb.remote;
             if (_on_event)
                 _on_event(&this, IPEvent.connected);
+            service_tx();
         }
 
         package(protocol.ip) void queue_service()
@@ -982,7 +1025,10 @@ private:
             if (_on_event)
                 _on_event(&this, IPEvent.connected);
             if (!_closing)
+            {
+                service_tx();
                 post_recv();
+            }
         }
 
         bool post_recv()
@@ -1064,8 +1110,7 @@ private:
             bool active = !_closing && _phase == Phase.open;
             if (sop.page.length != 0 && active && post_send(sop))
             {
-                if (_on_tx_ready && tx_request() != 0)
-                    _on_tx_ready(&this);
+                service_tx();
                 return;
             }
 
@@ -1090,8 +1135,7 @@ private:
                 sop.page.next = null;
                 if (post_send(sop))
                 {
-                    if (_on_tx_ready && tx_request() != 0)
-                        _on_tx_ready(&this);
+                    service_tx();
                     return;
                 }
 
@@ -1105,8 +1149,8 @@ private:
 
             free(sop);
             _send = null;
-            if (active && _on_tx_ready && tx_request() != 0)
-                _on_tx_ready(&this);
+            if (active)
+                service_tx();
         }
     }
     else
@@ -1151,6 +1195,7 @@ private:
                         _socket.set_socket_option(SocketOption.tcp_no_delay, _no_delay);
                     if (_on_event)
                         _on_event(&this, IPEvent.connected);
+                    service_tx();
                 }
                 return;
             }
@@ -1170,8 +1215,7 @@ private:
                 if (_closing || _phase != Phase.open)
                     return;
                 g_app.reactor.modify_fd(_socket.handle, _tx_head !is null);
-                if (_on_tx_ready && tx_request() != 0)
-                    _on_tx_ready(&this);
+                service_tx();
             }
         }
 
