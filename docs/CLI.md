@@ -798,9 +798,28 @@ and retries. Retaining local configuration does not establish upstream reachabil
 
 ### DHCPv6
 
-The DHCPv6 message codec is present, but there are no DHCPv6 client, server,
-or lease commands yet. Future DHCPv6 address/prefix configuration will coexist
-with Router Advertisement discovery of default routers.
+The DHCPv6 message codec and client are present; there are no server or lease
+commands yet. DHCPv6 address and prefix configuration coexists with Router
+Advertisement discovery of default routers.
+
+#### Client
+
+`/protocol/dhcp/client6` requests a host address (`IA_NA`) and/or a delegated
+prefix (`IA_PD`). A bound address appears as a dynamic `address6`; a delegated
+prefix appears as a dynamic `pool6` under `pool-name`, ready for downstream
+consumers to draw from. Only built with the in-tree IP stack; on desktop hosts
+the kernel's own client owns the lease.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `interface` | interface name | | Interface to solicit on. |
+| `request-address` | `yes`/`no` | `yes` | Request an `IA_NA` host address. |
+| `request-prefix` | `yes`/`no` | `no` | Request an `IA_PD` delegated prefix. |
+| `pool-name` | name | `<name>.pd` | Name of the dynamic pool created for the delegated prefix. |
+
+```
+/protocol/dhcp/client6/add name=wan interface=eth0 request-prefix=true pool-name=site
+```
 
 ### Linux kernel data plane (`/system/linux`, `/system/netlink`)
 
