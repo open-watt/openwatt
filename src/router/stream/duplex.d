@@ -1,5 +1,6 @@
 module router.stream.duplex;
 
+import urt.mem.page;
 import urt.mem.temp;
 import urt.string;
 import urt.string.format;
@@ -35,6 +36,8 @@ nothrow @nogc:
     {
         if (_tx is value)
             return;
+        if (_tx)
+            _tx.release_tx_handler(&provide_tx_page);
         if (_tx_subscribed)
         {
             _tx.unsubscribe(&stream_state_change);
@@ -66,6 +69,15 @@ nothrow @nogc:
         => _tx ? _tx.tx_link_speed : 0;
     override ulong rx_link_speed() const
         => _rx ? _rx.rx_link_speed : 0;
+
+    override size_t tx_backlog() const
+        => _tx ? _tx.tx_backlog : 0;
+
+    override size_t tx_request() const
+        => _tx ? _tx.tx_request : 0;
+
+    override bool supports_tx_pages() const
+        => _tx && _tx.supports_tx_pages;
 
     override ptrdiff_t read(void[] buffer)
     {
@@ -127,6 +139,7 @@ protected:
         {
             _tx.subscribe(&stream_state_change);
             _tx_subscribed = true;
+            tx_handler_changed();
         }
         if (_rx)
         {
@@ -142,11 +155,33 @@ protected:
         return CompletionStatus.complete;
     }
 
+    override void tx_handler_changed()
+    {
+        Stream stream = _tx.get;
+        if (!stream || !stream.running)
+            return;
+        if (tx_handler)
+            stream.tx_handler(&provide_tx_page);
+        else
+            stream.release_tx_handler(&provide_tx_page);
+    }
+
 private:
     ObjectRef!Stream _tx;
     ObjectRef!Stream _rx;
     bool _tx_subscribed;
     bool _rx_subscribed;
+
+    Page* provide_tx_page(Stream, size_t requested)
+    {
+        Page* page = request_tx_page(requested);
+        if (!page)
+            return null;
+        add_tx_bytes(page.length);
+        if (_logging)
+            write_to_log(false, page.data);
+        return page;
+    }
 
     void stream_state_change(ActiveObject, StateSignal signal)
     {
@@ -159,6 +194,8 @@ private:
 
     void unsubscribe()
     {
+        if (_tx)
+            _tx.release_tx_handler(&provide_tx_page);
         if (_tx_subscribed)
         {
             _tx.unsubscribe(&stream_state_change);

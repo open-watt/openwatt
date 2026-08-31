@@ -36,6 +36,7 @@ else
 import urt.array;
 import urt.log;
 import urt.mem;
+import urt.mem.pagepool;
 import urt.mem.temp;
 import urt.socket;
 import urt.string;
@@ -101,6 +102,7 @@ nothrow @nogc:
             return "stream cannot be null";
         if (value is _stream)
             return null;
+        release_tx_service();
         if (_conn.get !is null)
             _conn.stop();
         _stream = value;
@@ -305,6 +307,7 @@ nothrow @nogc:
 
         if (_handshake_state == HandshakeState.completed)
         {
+            tx_handler_changed();
             if (_selected_cert)
                 log.info("HTTPS session on ", _stream.name, " cert='", _selected_cert.name, "'");
             else
@@ -328,6 +331,8 @@ nothrow @nogc:
 
     final override CompletionStatus shutdown()
     {
+        release_tx_service();
+        free_pending_tx();
         version (MbedTLS)
         {
             free_mbedtls_contexts();
@@ -619,6 +624,22 @@ nothrow @nogc:
         return 0;
     }
 
+    final override size_t tx_request() const
+    {
+        if (_handshake_state != HandshakeState.completed)
+            return 0;
+        if (auto stream = _stream.get)
+            return stream.tx_request;
+        return 0;
+    }
+
+    final override bool supports_tx_pages() const
+    {
+        if (auto stream = _stream.get)
+            return stream.supports_tx_pages;
+        return _conn.has_remote;
+    }
+
     final override ptrdiff_t pending()
         => _app_buffer.length;
 
@@ -631,6 +652,17 @@ nothrow @nogc:
 
 protected:
 
+    final override void tx_handler_changed()
+    {
+        Stream stream = _stream.get;
+        if (!stream)
+            return;
+        if ((tx_handler || _tx_pending) && running && _handshake_state == HandshakeState.completed)
+            stream.tx_handler(&provide_tx_page);
+        else
+            stream.release_tx_handler(&provide_tx_page);
+    }
+
 private:
     IPClient _conn;
     bool _close_notify = false;
@@ -640,7 +672,68 @@ private:
     ObjectRef!Stream _stream;
     Array!ubyte _receive_buffer;
     Array!ubyte _app_buffer;
+    Page* _tx_pending;
     SysTime _handshake_start;
+
+    void release_tx_service()
+    {
+        if (auto stream = _stream.get)
+            stream.release_tx_handler(&provide_tx_page);
+    }
+
+    Page* provide_tx_page(Stream, size_t requested)
+    {
+        if (_tx_pending)
+            return take_pending_tx();
+
+        Page* input = request_tx_page(requested);
+        if (!input)
+            return null;
+
+        size_t input_length = input.length;
+        if (_logging)
+            write_to_log(false, input.data);
+
+        Page* output;
+        version (MbedTLS)
+            output = encrypt_page_mbedtls(input);
+        else version (Windows)
+            output = encrypt_page_schannel(input);
+        if (!output)
+        {
+            tx_handler(null);
+            _handshake_state = HandshakeState.failed;
+            restart();
+            return null;
+        }
+        add_tx_bytes(input_length);
+        _tx_pending = output;
+        return take_pending_tx();
+    }
+
+    Page* take_pending_tx()
+    {
+        Page* page = _tx_pending;
+        _tx_pending = page.next;
+        page.next = null;
+        return page;
+    }
+
+    void free_pending_tx()
+    {
+        free_page_chain(_tx_pending);
+        _tx_pending = null;
+    }
+
+    static void free_page_chain(Page* page)
+    {
+        while (page)
+        {
+            Page* next = page.next;
+            page_free(page);
+            page = next;
+        }
+    }
 
     void incoming_message(const(void)[] message)
     {
@@ -692,8 +785,58 @@ private:
 
     version (MbedTLS)
     {
+        enum size_t tx_page_payload = 1600;
+
         mbedtls_ssl_context* _ssl;
         mbedtls_ssl_config* _ssl_conf;
+        Page* _tx_output_head;
+        Page* _tx_output_tail;
+        size_t _tx_output_page_limit;
+        size_t _tx_output_headroom;
+        size_t _tx_output_tailroom;
+        bool _capturing_tx;
+        bool _tx_output_failed;
+
+        Page* encrypt_page_mbedtls(Page* input)
+        {
+            _tx_output_headroom = input.headroom;
+            _tx_output_tailroom = input.tailroom;
+            _capturing_tx = true;
+            _tx_output_failed = false;
+            const(ubyte)[] remaining = cast(const(ubyte)[])input.data;
+            while (remaining.length)
+            {
+                int written = mbedtls_ssl_write(_ssl, remaining.ptr, remaining.length);
+                if (written <= 0)
+                {
+                    free_page_chain(_tx_output_head);
+                    clear_tx_output();
+                    page_free(input);
+                    return null;
+                }
+                remaining = remaining[written .. $];
+            }
+            Page* output = _tx_output_head;
+            if (_tx_output_failed || !output)
+            {
+                free_page_chain(output);
+                output = null;
+            }
+            clear_tx_output();
+            page_free(input);
+            return output;
+        }
+
+        void clear_tx_output()
+        {
+            _tx_output_head = null;
+            _tx_output_tail = null;
+            _tx_output_page_limit = 0;
+            _tx_output_headroom = 0;
+            _tx_output_tailroom = 0;
+            _capturing_tx = false;
+            _tx_output_failed = false;
+        }
 
         void init_mbedtls_context(bool is_server, Certificate cert)
         {
@@ -805,6 +948,97 @@ private:
     {
         CredHandle _credentials;
         CtxtHandle _context;
+
+        Page* encrypt_page_schannel(Page* input)
+        {
+            SecPkgContext_StreamSizes sizes;
+            auto status = QueryContextAttributesA(&_context, SECPKG_ATTR_STREAM_SIZES, &sizes);
+            if (status != SEC_E_OK || sizes.cbMaximumMessage == 0)
+            {
+                page_free(input);
+                return null;
+            }
+
+            size_t input_length = input.length;
+            if (input_length <= sizes.cbMaximumMessage && input.headroom >= sizes.cbHeader && input.tailroom >= sizes.cbTrailer)
+            {
+                input.offset -= cast(ushort)sizes.cbHeader;
+                input.length += cast(ushort)(sizes.cbHeader + sizes.cbTrailer);
+                if (!encrypt_schannel_record(input, input_length, sizes))
+                {
+                    page_free(input);
+                    return null;
+                }
+                return input;
+            }
+
+            const(ubyte)[] plaintext = cast(const(ubyte)[])input.data;
+            size_t position;
+            Page* head;
+            Page* tail;
+            while (position != input_length)
+            {
+                size_t length = input_length - position;
+                if (length > sizes.cbMaximumMessage)
+                    length = sizes.cbMaximumMessage;
+                size_t output_length = sizes.cbHeader + length + sizes.cbTrailer;
+                Page* output = page_alloc(output_length, size_t.sizeof, input.headroom, input.tailroom);
+                if (!output)
+                {
+                    free_page_chain(head);
+                    page_free(input);
+                    return null;
+                }
+                (cast(ubyte[])output.data)[sizes.cbHeader .. sizes.cbHeader + length] = plaintext[position .. position + length];
+                if (!encrypt_schannel_record(output, length, sizes))
+                {
+                    page_free(output);
+                    free_page_chain(head);
+                    page_free(input);
+                    return null;
+                }
+                if (tail)
+                    tail.next = output;
+                else
+                    head = output;
+                tail = output;
+                position += length;
+            }
+            page_free(input);
+            return head;
+        }
+
+        bool encrypt_schannel_record(Page* output, size_t input_length,
+                                     ref const SecPkgContext_StreamSizes sizes)
+        {
+            ubyte[] encrypted = cast(ubyte[])output.data;
+            SecBuffer[4] buffers;
+            buffers[0].pvBuffer = encrypted.ptr;
+            buffers[0].cbBuffer = sizes.cbHeader;
+            buffers[0].BufferType = SECBUFFER_STREAM_HEADER;
+            buffers[1].pvBuffer = encrypted.ptr + sizes.cbHeader;
+            buffers[1].cbBuffer = cast(ULONG)input_length;
+            buffers[1].BufferType = SECBUFFER_DATA;
+            buffers[2].pvBuffer = encrypted.ptr + sizes.cbHeader + input_length;
+            buffers[2].cbBuffer = sizes.cbTrailer;
+            buffers[2].BufferType = SECBUFFER_STREAM_TRAILER;
+            buffers[3].BufferType = SECBUFFER_EMPTY;
+
+            SecBufferDesc descriptor;
+            descriptor.ulVersion = SECBUFFER_VERSION;
+            descriptor.cBuffers = buffers.length;
+            descriptor.pBuffers = buffers.ptr;
+            auto status = EncryptMessage(&_context, 0, &descriptor, 0);
+            if (status != SEC_E_OK)
+                return false;
+
+            size_t data_offset = buffers[0].cbBuffer;
+            memmove(encrypted.ptr + data_offset, buffers[1].pvBuffer, buffers[1].cbBuffer);
+            size_t trailer_offset = data_offset + buffers[1].cbBuffer;
+            memmove(encrypted.ptr + trailer_offset, buffers[2].pvBuffer, buffers[2].cbBuffer);
+            output.length = cast(ushort)(trailer_offset + buffers[2].cbBuffer);
+            return true;
+        }
 
         void init_context(bool is_server, const(CERT_CONTEXT)* pCertContext)
         {
@@ -1143,6 +1377,40 @@ version (MbedTLS)
     extern(C) int tls_bio_send(void* ctx, const(ubyte)* buf, size_t len) nothrow @nogc
     {
         auto self = cast(TLSStream)ctx;
+        if (self._capturing_tx)
+        {
+            size_t consumed;
+            while (consumed != len)
+            {
+                if (!self._tx_output_tail || self._tx_output_tail.length == self._tx_output_page_limit)
+                {
+                    size_t capacity = len - consumed;
+                    if (capacity > TLSStream.tx_page_payload)
+                        capacity = TLSStream.tx_page_payload;
+                    Page* page = page_alloc(0, size_t.sizeof, self._tx_output_headroom, capacity + self._tx_output_tailroom);
+                    if (!page)
+                    {
+                        self._tx_output_failed = true;
+                        return -1;
+                    }
+                    if (self._tx_output_tail)
+                        self._tx_output_tail.next = page;
+                    else
+                        self._tx_output_head = page;
+                    self._tx_output_tail = page;
+                    self._tx_output_page_limit = capacity;
+                }
+
+                size_t copied = self._tx_output_page_limit - self._tx_output_tail.length;
+                if (copied > len - consumed)
+                    copied = len - consumed;
+                size_t offset = self._tx_output_tail.length;
+                self._tx_output_tail.length += cast(ushort)copied;
+                (cast(ubyte[])self._tx_output_tail.data)[offset .. offset + copied] = buf[consumed .. consumed + copied];
+                consumed += copied;
+            }
+            return cast(int)len;
+        }
         ptrdiff_t n = self._stream.write(buf[0 .. len]);
         if (n > 0)
             return cast(int)n;
@@ -1150,6 +1418,7 @@ version (MbedTLS)
             return MBEDTLS_ERR_SSL_WANT_WRITE;
         return -1;
     }
+
 }
 
 version (Windows)

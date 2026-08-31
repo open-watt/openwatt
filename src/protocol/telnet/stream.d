@@ -3,6 +3,7 @@ module protocol.telnet.stream;
 import urt.array;
 import urt.log;
 import urt.mem;
+import urt.mem.pagepool;
 import urt.string;
 
 import manager.base;
@@ -62,6 +63,8 @@ nothrow @nogc:
     {
         if (_inner.get is value)
             return;
+        if (_inner)
+            _inner.release_tx_handler(&provide_tx_page);
         if (_subscribed)
         {
             _inner.unsubscribe(&inner_state_change);
@@ -317,6 +320,14 @@ nothrow @nogc:
     override ulong rx_link_speed() const
         => _inner ? _inner.rx_link_speed : 0;
 
+    override size_t tx_backlog() const
+        => _inner ? _inner.tx_backlog : 0;
+
+    override size_t tx_request() const
+        => _inner ? _inner.tx_request : 0;
+
+    override bool supports_tx_pages() const
+        => _inner && _inner.supports_tx_pages;
 
 protected:
 
@@ -359,12 +370,16 @@ protected:
 
         _inner.subscribe(&inner_state_change);
         _subscribed = true;
+        tx_handler_changed();
 
         return CompletionStatus.complete;
     }
 
     override CompletionStatus shutdown()
     {
+        if (_inner)
+            _inner.release_tx_handler(&provide_tx_page);
+        free_pending_tx();
         if (_subscribed)
         {
             _inner.unsubscribe(&inner_state_change);
@@ -380,11 +395,25 @@ protected:
         return CompletionStatus.complete;
     }
 
+    override void tx_handler_changed()
+    {
+        Stream stream = _inner.get;
+        if (!stream || !stream.running)
+            return;
+        if (tx_handler || _tx_pending)
+            stream.tx_handler(&provide_tx_page);
+        else
+            stream.release_tx_handler(&provide_tx_page);
+    }
+
 private:
+    enum size_t tx_page_payload = 1600;
+
     ObjectRef!Stream _inner;
     TerminalChannel _terminal;
     Array!char _terminal_type;
     Array!ubyte _tail;
+    Page* _tx_pending;
     bool _subscribed;
     bool _terminal_aware;
     TelnetRole _role;
@@ -394,6 +423,114 @@ private:
     ulong _client_state;
     ulong _client_state_req;
 
+    Page* provide_tx_page(Stream, size_t requested)
+    {
+        if (_tx_pending)
+            return take_pending_tx();
+
+        Page* page = request_tx_page(requested);
+        if (!page)
+            return null;
+
+        size_t input_length = page.length;
+        const(ubyte)[] input = cast(const(ubyte)[])page.data;
+        add_tx_bytes(input_length);
+        if (_logging)
+            write_to_log(false, input);
+        size_t escaped_length = input_length;
+        foreach (b; input)
+            escaped_length += b == NVT.IAC;
+
+        if (escaped_length != input_length)
+        {
+            if (escaped_length - input_length <= page.tailroom)
+            {
+                ubyte[] storage = (cast(ubyte*)page)[0 .. page.capacity];
+                size_t source = page.offset + input_length;
+                size_t destination = page.offset + escaped_length;
+                while (source != destination)
+                {
+                    ubyte b = storage[--source];
+                    storage[--destination] = b;
+                    if (b == NVT.IAC)
+                        storage[--destination] = b;
+                }
+                page.length = cast(ushort)escaped_length;
+            }
+            else
+            {
+                size_t input_position;
+                bool repeat;
+                size_t output_position;
+                Page* head;
+                Page* tail;
+                while (output_position != escaped_length)
+                {
+                    size_t length = escaped_length - output_position;
+                    if (length > tx_page_payload)
+                        length = tx_page_payload;
+                    Page* output = page_alloc(length, size_t.sizeof, page.headroom, page.tailroom);
+                    if (!output)
+                    {
+                        free_page_chain(head);
+                        page_free(page);
+                        tx_handler(null);
+                        return null;
+                    }
+                    if (tail)
+                        tail.next = output;
+                    else
+                        head = output;
+                    tail = output;
+
+                    ubyte[] bytes = cast(ubyte[])output.data;
+                    foreach (ref b; bytes)
+                    {
+                        ubyte value = input[input_position];
+                        b = value;
+                        if (value == NVT.IAC && !repeat)
+                            repeat = true;
+                        else
+                        {
+                            repeat = false;
+                            ++input_position;
+                        }
+                    }
+                    output_position += length;
+                }
+                page_free(page);
+                _tx_pending = head;
+                page = take_pending_tx();
+            }
+        }
+
+        return page;
+    }
+
+    Page* take_pending_tx()
+    {
+        Page* page = _tx_pending;
+        _tx_pending = page.next;
+        page.next = null;
+        return page;
+    }
+
+    void free_pending_tx()
+    {
+        free_page_chain(_tx_pending);
+        _tx_pending = null;
+    }
+
+    static void free_page_chain(Page* page)
+    {
+        while (page)
+        {
+            Page* next = page.next;
+            page_free(page);
+            page = next;
+        }
+    }
+
     void inner_state_change(ActiveObject, StateSignal signal)
     {
         if (signal != StateSignal.offline)
@@ -401,6 +538,7 @@ private:
 
         if (_inner && (_inner.flags & ObjectFlags.temporary))
         {
+            _inner.release_tx_handler(&provide_tx_page);
             _inner.unsubscribe(&inner_state_change);
             _subscribed = false;
             _inner = null;

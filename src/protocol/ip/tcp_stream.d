@@ -5,6 +5,7 @@ import urt.conv;
 import urt.io;
 import urt.log;
 import urt.mem;
+import urt.mem.page;
 import urt.meta.nullable;
 import urt.socket;
 import urt.string;
@@ -178,6 +179,7 @@ nothrow @nogc:
             _conn = tcp_connect(_remote, &on_data, &on_event);
             if (_conn is null)
                 return CompletionStatus.continue_;     // no route / refused outright; retry later
+            tx_handler_changed();
             if (_keep_enable)
                 _conn.enable_keepalive(_keep_enable, _keep_idle, _keep_interval, _keep_count);
         }
@@ -258,6 +260,24 @@ nothrow @nogc:
     override size_t tx_backlog() const
         => _conn ? _conn.tx_backlog : 0;
 
+    override size_t tx_request() const
+        => _conn ? _conn.tx_request : 0;
+
+    override bool supports_tx_pages() const
+        => true;
+
+protected:
+
+    override void tx_handler_changed()
+    {
+        if (!_conn)
+            return;
+        if (tx_handler)
+            _conn.tx_handler(&provide_tx_page);
+        else
+            _conn.release_tx_handler(&provide_tx_page);
+    }
+
 private:
     TCPConnection* _conn;
     InetAddress _remote;
@@ -270,6 +290,17 @@ private:
     int _keep_count = 10;
     Duration _keep_idle;
     Duration _keep_interval;
+
+    Page* provide_tx_page(TCPConnection*, size_t requested)
+    {
+        Page* page = request_tx_page(requested);
+        if (!page)
+            return null;
+        add_tx_bytes(page.length);
+        if (_logging)
+            write_to_log(false, page.data);
+        return page;
+    }
 
     void on_data(TCPConnection* conn, const(void)[] data, MonoTime rx_time)
     {
@@ -292,6 +323,7 @@ private:
     {
         if (_conn)
         {
+            _conn.release_tx_handler(&provide_tx_page);
             _conn.close();
             _conn = null;
         }
