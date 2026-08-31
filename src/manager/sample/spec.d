@@ -411,6 +411,12 @@ unittest
         && d.layout.container_bytes == 2);
     assert(compile_spec("u3@5", modbus_context, ScaledUnit(), 1, null, null, d));
     assert(d.layout.bit_width == 3 && d.layout.bit_offset == 5 && d.layout.container_bytes == 2);
+    assert(compile_spec("bool@9", stream_le_context, ScaledUnit(), 1, null, null, d));
+    assert(d.layout.container_bytes == 2);
+    immutable ubyte[2] zone_status = [ 0x09, 0x02 ];
+    bool battery_defect;
+    assert(sample_record(zone_status, d, (cast(void*)&battery_defect)[0 .. bool.sizeof]));
+    assert(battery_defect);
 
     // enum via resolver; bf shares the path
     enum Mode : ushort { off = 0, eco = 1 }
