@@ -744,6 +744,25 @@ DHCPv6 rides beside SLAAC: addresses and delegated prefixes come from DHCPv6,
 while the default route always comes from Router Advertisements because DHCPv6
 does not carry routes.
 
+#### Server
+
+`/protocol/dhcp/server6` leases host addresses and delegates sub-prefixes from
+one `pool6`. Dynamic `/protocol/dhcp/lease6` entries track the bindings by
+client DUID and expire on their advertised lifetimes.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `interface` | interface name | | Interface to serve on. |
+| `pool` | `pool6` name | | Pool supplying addresses and delegable prefixes. |
+| `lease-time` | duration | `1d` | Valid lifetime granted to clients. |
+| `dns` | IPv6 addresses | empty | DNS servers offered (option 23). |
+
+```
+/protocol/ip/pool6/add name=lan prefix="fd00:60::" prefix-length=48 delegation-length=60
+/protocol/dhcp/server6/add name=srv interface=eth1 pool=lan dns="fd00:60::53"
+/protocol/dhcp/lease6/print
+```
+
 ### `/protocol/http/server`
 
 An HTTP server provides the listener and shared policy for its registered
