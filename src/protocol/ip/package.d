@@ -13,6 +13,7 @@ import urt.time;
 import manager.collection;
 import manager.console;
 import manager.console.session : Session;
+import manager.features : has_ipv6;
 import manager.plugin;
 import manager.reactor;
 import manager : EventPriority, g_app;
@@ -225,10 +226,16 @@ nothrow @nogc:
 
 enum IPProtocol : ubyte
 {
-    icmp = 1,
-    igmp = 2,
-    tcp  = 6,
-    udp  = 17,
+    hopopt     = 0,     // v6 hop-by-hop options extension header
+    icmp       = 1,
+    igmp       = 2,
+    tcp        = 6,
+    udp        = 17,
+    ipv6_route = 43,    // v6 routing extension header
+    ipv6_frag  = 44,    // v6 fragment extension header
+    icmp6      = 58,
+    no_next    = 59,
+    ipv6_opts  = 60,    // v6 destination options extension header
 }
 
 struct IPv4Header
@@ -250,6 +257,46 @@ nothrow @nogc:
         => ver_ihl >> 4;
     ubyte ihl() const pure
         => ver_ihl & 0x0F;
+}
+
+struct IPv6Header
+{
+nothrow @nogc:
+
+    ubyte[4] ver_tc_flow;   // 4b version, 8b traffic class, 20b flow label
+    ubyte[2] payload_length;
+    IPProtocol next_header;
+    ubyte hop_limit;
+    ubyte[16] src;
+    ubyte[16] dst;
+
+    ubyte version_() const pure
+        => ver_tc_flow[0] >> 4;
+
+    IPv6Addr src_addr() const pure
+        => load_ipv6_address(src.ptr);
+    IPv6Addr dst_addr() const pure
+        => load_ipv6_address(dst.ptr);
+
+    void src_addr(IPv6Addr a) pure
+        => store_ipv6_address(src.ptr, a);
+    void dst_addr(IPv6Addr a) pure
+        => store_ipv6_address(dst.ptr, a);
+}
+static assert(IPv6Header.sizeof == 40);
+
+IPv6Addr load_ipv6_address(const(ubyte)* source) pure
+{
+    IPv6Addr address;
+    foreach (i; 0 .. 8)
+        address.s[i] = loadBigEndian(cast(const(ushort)*)source + i);
+    return address;
+}
+
+void store_ipv6_address(ubyte* destination, IPv6Addr address) pure
+{
+    foreach (i; 0 .. 8)
+        storeBigEndian(cast(ushort*)destination + i, address.s[i]);
 }
 
 
@@ -1980,8 +2027,13 @@ nothrow @nogc:
     {
         g_app.console.register_collection!IPAddress();
         g_app.console.register_collection!IPPool();
-        g_app.console.register_collection!IPv6Pool();
         g_app.console.register_collection!IPRoute();
+        static if (has_ipv6)
+        {
+            g_app.console.register_collection!IPv6Address();
+            g_app.console.register_collection!IPv6Pool();
+            g_app.console.register_collection!IPv6Route();
+        }
         g_app.console.register_collection!TCPStream();
         g_app.console.register_collection!TCPServer();
 
@@ -2167,8 +2219,13 @@ nothrow @nogc:
 
         Collection!IPAddress().update_all();
         Collection!IPPool().update_all();
-        Collection!IPv6Pool().update_all();
         Collection!IPRoute().update_all();
+        static if (has_ipv6)
+        {
+            Collection!IPv6Address().update_all();
+            Collection!IPv6Pool().update_all();
+            Collection!IPv6Route().update_all();
+        }
         Collection!TCPServer().update_all();
 
         version (UseInternalIPStack)
