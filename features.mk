@@ -44,6 +44,11 @@
 #
 #   IPV6            IPV6=0 drops the IPv6 side of the in-tree IP stack and
 #                   its address, route, and pool collections. Defaults to 1.
+#
+#   GATEWAY         The router-role axis. GATEWAY=0 builds a plain node:
+#                   no transit forwarding and no DHCP server or leases.
+#                   DHCP clients and diagnostics stay. Defaults to 1, except
+#                   TINY targets which default to 0.
 # =======================================================================
 
 # -- Per-platform defaults -----------------------------------------------
@@ -65,14 +70,18 @@ MODBUS ?= 1
 HTTP_CLIENT ?= 1
 HTTP_FILESERVER ?= 1
 IPV6 ?= 1
+ifeq ($(TINY),1)
+  GATEWAY ?= 0
+endif
+GATEWAY ?= 1
 
 # -- Validate ------------------------------------------------------------
 
 ifeq ($(filter $(FEATURES),switch switch-ip switch-http switch-https full),)
     $(error Unknown FEATURES='$(FEATURES)'; valid: switch | switch-ip | switch-http | switch-https | full)
 endif
-ifneq ($(filter-out 0 1,$(MODBUS) $(HTTP_CLIENT) $(HTTP_FILESERVER) $(IPV6)),)
-    $(error MODBUS, HTTP_CLIENT, HTTP_FILESERVER and IPV6 must be 0 or 1)
+ifneq ($(filter-out 0 1,$(MODBUS) $(HTTP_CLIENT) $(HTTP_FILESERVER) $(IPV6) $(GATEWAY)),)
+    $(error MODBUS, HTTP_CLIENT, HTTP_FILESERVER, IPV6 and GATEWAY must be 0 or 1)
 endif
 
 # -- Source-tree subset per preset ---------------------------------------
@@ -103,6 +112,9 @@ ifeq ($(HTTP_FILESERVER),0)
 endif
 ifeq ($(IPV6),0)
     FEATURE_DFLAGS += $(VERSION_FLAG)NoIPv6
+endif
+ifeq ($(GATEWAY),0)
+    FEATURE_DFLAGS += $(VERSION_FLAG)NoGateway
 endif
 
 # -- D version flags per preset ------------------------------------------

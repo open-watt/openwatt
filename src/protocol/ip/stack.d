@@ -10,6 +10,7 @@ import urt.log;
 import urt.time;
 
 import manager.collection;
+import manager.features : has_gateway;
 
 import router.iface;
 import router.iface.endpoint : ether_transport_input;
@@ -296,7 +297,7 @@ private:
             r = RouteResult(RouteResult.Kind.local, iface, IPAddr(ip.dst), 0);
         else
             r = route_lookup_v4(pkt);
-        dispatch(pkt, r, firewall_v4);
+        dispatch(pkt, r, firewall_v4, true);
     }
 
     void ingress_v6(ref Packet pkt, BaseInterface iface)
@@ -311,7 +312,7 @@ private:
         // TODO: RouteResult r = route_lookup_v6(pkt); dispatch(pkt, r, firewall_v6);
     }
 
-    void dispatch(ref Packet pkt, ref RouteResult r, ref FirewallChains fw)
+    void dispatch(ref Packet pkt, ref RouteResult r, ref FirewallChains fw, bool transit = false)
     {
         final switch (r.kind)
         {
@@ -329,6 +330,9 @@ private:
                 return;
             case RouteResult.Kind.forward:
             {
+                static if (!has_gateway)
+                    if (transit)
+                        return;
                 if (pkt.data.length < IPv4Header.sizeof)
                     return;
                 auto ip = cast(IPv4Header*)pkt.data.ptr;
