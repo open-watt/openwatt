@@ -7,6 +7,7 @@ import urt.inet;
 import urt.log;
 import urt.mem.pagepool;
 import urt.mem.temp;
+import urt.meta.nullable;
 import urt.socket;
 import urt.string;
 import urt.time;
@@ -2083,6 +2084,7 @@ nothrow @nogc:
             static if (has_ipv6)
             {
                 g_app.console.register_command!(neighbour_v6_print, "print")("/protocol/ip/neighbour6", this);
+                g_app.console.register_command!(ping6, "ping6")("/protocol/ip", this);
             }
         }
         else version (Windows)
@@ -2178,6 +2180,100 @@ nothrow @nogc:
         }
 
         t.render(session);
+    }
+
+    version (UseInternalIPStack)
+    static if (has_ipv6)
+    {
+        Ping6State ping6(Session session, IPv6Addr address, Nullable!uint count, Nullable!BaseInterface iface)
+        {
+            BaseInterface scope_iface = iface ? iface.value : null;
+            if (address == IPv6Addr.any)
+            {
+                session.write_line("ping6 requires a destination address");
+                return null;
+            }
+            if ((address.is_link_local || address.is_multicast) && !scope_iface)
+            {
+                session.write_line("scoped destinations need iface=<interface>");
+                return null;
+            }
+            return g_app.allocator.allocT!Ping6State(&_stack, session, address, count ? count.value : 4, scope_iface);
+        }
+
+        static class Ping6State : CommandState
+        {
+        nothrow @nogc:
+
+            CommandCompletionState state = CommandCompletionState.in_progress;
+
+            this(IPStack* stack, Session session, IPv6Addr dst, uint count, BaseInterface iface)
+            {
+                super(session, null);
+                this.stack = stack;
+                this.dst = dst;
+                this.iface = iface;
+                this.count = count ? count : 1;
+                send_round();
+            }
+
+            override CommandCompletionState update()
+            {
+                import protocol.ip.icmp6 : icmp6_echo_cancel;
+
+                if (state == CommandCompletionState.cancel_requested)
+                {
+                    icmp6_echo_cancel(seq);
+                    state = CommandCompletionState.cancelled;
+                    return state;
+                }
+                if (getTime() - last_send >= 1.seconds)
+                {
+                    icmp6_echo_cancel(seq);
+                    if (sent >= count)
+                    {
+                        session.write_line(replies, " replies for ", sent, " requests");
+                        state = CommandCompletionState.finished;
+                    }
+                    else
+                        send_round();
+                }
+                return state;
+            }
+
+            override void request_cancel()
+            {
+                if (state == CommandCompletionState.in_progress)
+                    state = CommandCompletionState.cancel_requested;
+            }
+
+        private:
+            IPStack* stack;
+            IPv6Addr dst;
+            BaseInterface iface;
+            MonoTime last_send;
+            uint count;
+            uint sent;
+            uint replies;
+            ushort seq;
+
+            void send_round()
+            {
+                import protocol.ip.icmp6 : icmp6_echo_send;
+
+                ++sent;
+                last_send = getTime();
+                seq = icmp6_echo_send(*stack, dst, iface, &on_reply);
+                if (seq == 0)
+                    session.write_line("no source address or route for ", dst);
+            }
+
+            void on_reply(IPv6Addr from, Duration rtt)
+            {
+                ++replies;
+                session.write_line("reply from ", from, ": time=", rtt);
+            }
+        }
     }
 
     version(Windows)
