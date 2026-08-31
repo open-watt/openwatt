@@ -448,7 +448,7 @@ private:
                 ubyte[] storage = (cast(ubyte*)page)[0 .. page.capacity];
                 size_t source = page.offset + input_length;
                 size_t destination = page.offset + escaped_length;
-                while (source != page.offset)
+                while (source != destination)
                 {
                     ubyte b = storage[--source];
                     storage[--destination] = b;
