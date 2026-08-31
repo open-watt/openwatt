@@ -41,6 +41,9 @@
 #   MODBUS, HTTP_CLIENT, HTTP_FILESERVER
 #                   Optional components within a feature tier. Each defaults
 #                   to 1 and may be disabled by a constrained BOARD profile.
+#
+#   IPV6            IPV6=0 drops the IPv6 side of the in-tree IP stack and
+#                   its address, route, and pool collections. Defaults to 1.
 # =======================================================================
 
 # -- Per-platform defaults -----------------------------------------------
@@ -61,14 +64,15 @@ HEADLESS ?= 0
 MODBUS ?= 1
 HTTP_CLIENT ?= 1
 HTTP_FILESERVER ?= 1
+IPV6 ?= 1
 
 # -- Validate ------------------------------------------------------------
 
 ifeq ($(filter $(FEATURES),switch switch-ip switch-http switch-https full),)
     $(error Unknown FEATURES='$(FEATURES)'; valid: switch | switch-ip | switch-http | switch-https | full)
 endif
-ifneq ($(filter-out 0 1,$(MODBUS) $(HTTP_CLIENT) $(HTTP_FILESERVER)),)
-    $(error MODBUS, HTTP_CLIENT and HTTP_FILESERVER must be 0 or 1)
+ifneq ($(filter-out 0 1,$(MODBUS) $(HTTP_CLIENT) $(HTTP_FILESERVER) $(IPV6)),)
+    $(error MODBUS, HTTP_CLIENT, HTTP_FILESERVER and IPV6 must be 0 or 1)
 endif
 
 # -- Source-tree subset per preset ---------------------------------------
@@ -96,6 +100,9 @@ ifeq ($(HTTP_CLIENT),0)
 endif
 ifeq ($(HTTP_FILESERVER),0)
     FEATURE_DFLAGS += $(VERSION_FLAG)NoHTTPFileServer
+endif
+ifeq ($(IPV6),0)
+    FEATURE_DFLAGS += $(VERSION_FLAG)NoIPv6
 endif
 
 # -- D version flags per preset ------------------------------------------

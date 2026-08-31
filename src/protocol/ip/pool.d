@@ -9,6 +9,7 @@ import urt.string;
 import manager;
 import manager.base;
 import manager.collection;
+import manager.features : has_ipv6;
 
 nothrow @nogc:
 
@@ -189,6 +190,7 @@ private:
 }
 
 
+static if (has_ipv6)
 class IPv6Pool : BaseObject
 {
     alias Properties = AliasSeq!(Prop!("prefix", prefix),
