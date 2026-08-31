@@ -8,6 +8,7 @@ import urt.digest.sha;
 import urt.lifetime : move;
 import urt.log;
 import urt.result;
+import urt.si;
 import urt.string;
 import urt.time;
 
@@ -34,6 +35,8 @@ import router.iface.packet;
 import tools.protobuf;
 
 nothrow @nogc:
+
+enum Bar = ScaledUnit(Pascal, 5);
 
 enum VehicleCommandKind : ubyte
 {
@@ -109,43 +112,32 @@ nothrow @nogc:
     ref const(TeslaClimateState) climate_state() const pure => _climate_state;
 
     bool refresh_charge_state()
-        => send_signed_action(TeslaDomain.infotainment, build_action_get_charge_state()[],
-                              VehicleCommandKind.get_charge_state);
+        => send_signed_action(TeslaDomain.infotainment, build_action_get_charge_state()[], VehicleCommandKind.get_charge_state);
 
     bool refresh_climate_state()
-        => send_signed_action(TeslaDomain.infotainment, build_action_get_climate_state()[],
-                              VehicleCommandKind.get_climate_state);
+        => send_signed_action(TeslaDomain.infotainment, build_action_get_climate_state()[], VehicleCommandKind.get_climate_state);
 
     bool refresh_vehicle_state()
-        => send_signed_action(TeslaDomain.infotainment, build_action_get_vehicle_state()[],
-                              VehicleCommandKind.get_vehicle_state);
+        => send_signed_action(TeslaDomain.infotainment, build_action_get_vehicle_state()[], VehicleCommandKind.get_vehicle_state);
 
     bool charging_start()
-        => send_signed_action(TeslaDomain.infotainment, build_action_charging_start_stop(true)[],
-                              VehicleCommandKind.charging_start);
+        => send_signed_action(TeslaDomain.infotainment, build_action_charging_start_stop(true)[], VehicleCommandKind.charging_start);
     bool charging_stop()
-        => send_signed_action(TeslaDomain.infotainment, build_action_charging_start_stop(false)[],
-                              VehicleCommandKind.charging_stop);
+        => send_signed_action(TeslaDomain.infotainment, build_action_charging_start_stop(false)[], VehicleCommandKind.charging_stop);
 
     bool set_charging_amps(int amps)
-        => send_signed_action(TeslaDomain.infotainment, build_action_set_charging_amps(amps)[],
-                              VehicleCommandKind.set_charging_amps);
+        => send_signed_action(TeslaDomain.infotainment, build_action_set_charging_amps(amps)[], VehicleCommandKind.set_charging_amps);
 
     bool climate_power(bool enabled)
-        => send_signed_action(TeslaDomain.infotainment, build_action_climate_power(enabled)[],
-                              VehicleCommandKind.climate_power);
+        => send_signed_action(TeslaDomain.infotainment, build_action_climate_power(enabled)[], VehicleCommandKind.climate_power);
 
     bool climate_temperature(float celsius)
-        => send_signed_action(TeslaDomain.infotainment,
-                              build_action_climate_temperature(celsius, celsius)[],
-                              VehicleCommandKind.climate_temperature);
+        => send_signed_action(TeslaDomain.infotainment, build_action_climate_temperature(celsius, celsius)[], VehicleCommandKind.climate_temperature);
 
     bool schedule_charging(bool enabled, TimeOfDay start)
     {
         int minutes_after_midnight = cast(int)start.hour * 60 + start.minute;
-        return send_signed_action(TeslaDomain.infotainment,
-                                  build_action_schedule_charging(enabled, minutes_after_midnight)[],
-                                  VehicleCommandKind.schedule_charging);
+        return send_signed_action(TeslaDomain.infotainment, build_action_schedule_charging(enabled, minutes_after_midnight)[], VehicleCommandKind.schedule_charging);
     }
 
     MonoTime last_seen() const pure
@@ -165,8 +157,7 @@ package:
         if (_peer == peer)
             return;
 
-        log.info("Tesla vehicle '", name[], "' changed BLE address from ", _peer,
-                 " to ", peer, ", reconnecting");
+        log.info("Tesla vehicle '", name[], "' changed BLE address from ", _peer, " to ", peer, ", reconnecting");
         _peer = peer;
         restart();
     }
@@ -200,9 +191,7 @@ protected:
             BaseInterface iface = _scanner.iface;
             if (!iface)
                 return CompletionStatus.continue_;
-            _client = Collection!BLEClient().create(Collection!BLEClient().generate_name(name[]),
-                cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary),
-                NamedArgument("interface", iface), NamedArgument("peer", _peer));
+            _client = Collection!BLEClient().create(Collection!BLEClient().generate_name(name[]), cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary), NamedArgument("interface", iface), NamedArgument("peer", _peer));
             if (_client is null)
                 return CompletionStatus.continue_;
         }
@@ -602,8 +591,7 @@ private:
         }
         crypto_random_bytes(_request_uuid[]);
 
-        Array!ubyte msg = build_session_info_request(domain, sec1[],
-                                                    _routing_address[], _request_uuid[]);
+        Array!ubyte msg = build_session_info_request(domain, sec1[], _routing_address[], _request_uuid[]);
         _last_request_time = getTime();
         return write_tesla_frame(msg[]);
     }
@@ -670,16 +658,14 @@ private:
             }
 
             Array!ubyte plaintext;
-            if (!decrypt_routable_response(r, _aes_key[], name[],
-                                           pending.request_tag[], plaintext))
+            if (!decrypt_routable_response(r, _aes_key[], name[], pending.request_tag[], plaintext))
             {
                 log.error("vehicle response authentication failed for VIN '", name[], "'");
                 return;
             }
             if (!pending.response_window.accept(r.response_counter))
             {
-                log.warning("replayed vehicle response counter ", r.response_counter,
-                            " for VIN '", name[], "'");
+                log.warning("replayed vehicle response counter ", r.response_counter, " for VIN '", name[], "'");
                 return;
             }
 
@@ -722,8 +708,7 @@ private:
 
         if (info.public_key.length != 65 || info.epoch.length != _epoch.length)
         {
-            log.error("vehicle SessionInfo has malformed key/epoch lengths ",
-                      info.public_key.length, "/", info.epoch.length);
+            log.error("vehicle SessionInfo has malformed key/epoch lengths ", info.public_key.length, "/", info.epoch.length);
             return;
         }
 
@@ -756,8 +741,7 @@ private:
     {
         if (r.has_status && r.signed_message_fault != 0)
         {
-            log.warning("vehicle ", vehicle_command_names[cast(size_t)kind], " protocol error ",
-                        r.signed_message_fault, " for VIN '", name[], "'");
+            log.warning("vehicle ", vehicle_command_names[cast(size_t)kind], " protocol error ", r.signed_message_fault, " for VIN '", name[], "'");
             return;
         }
         if (payload.length == 0)
@@ -775,14 +759,10 @@ private:
             ref status = response.action_status.value;
             if (status.result.present && status.result.value != 0)
             {
-                if (status.result_reason.present
-                    && status.result_reason.value.plain_text.present)
-                    log.warning("vehicle rejected ", vehicle_command_names[cast(size_t)kind], " for VIN '",
-                                name[], "': ",
-                                status.result_reason.value.plain_text.value[]);
+                if (status.result_reason.present && status.result_reason.value.plain_text.present)
+                    log.warning("vehicle rejected ", vehicle_command_names[cast(size_t)kind], " for VIN '", name[], "': ", status.result_reason.value.plain_text.value[]);
                 else
-                    log.warning("vehicle rejected ", vehicle_command_names[cast(size_t)kind], " for VIN '",
-                                name[], "' with result ", status.result.value);
+                    log.warning("vehicle rejected ", vehicle_command_names[cast(size_t)kind], " for VIN '", name[], "' with result ", status.result.value);
                 return;
             }
 
@@ -791,8 +771,7 @@ private:
                       || kind == VehicleCommandKind.get_vehicle_state;
             if (!query)
             {
-                log.info("vehicle accepted ", vehicle_command_names[cast(size_t)kind],
-                         " for VIN '", name[], "'");
+                log.info("vehicle accepted ", vehicle_command_names[cast(size_t)kind], " for VIN '", name[], "'");
                 return;
             }
         }
@@ -833,9 +812,7 @@ private:
         }
     }
 
-    PendingCommand* reserve_pending_command(const(ubyte)[] uuid,
-                                            const(ubyte)[] request_tag,
-                                            VehicleCommandKind kind)
+    PendingCommand* reserve_pending_command(const(ubyte)[] uuid, const(ubyte)[] request_tag, VehicleCommandKind kind)
     {
         assert(uuid.length == 16);
         assert(request_tag.length == 16);
@@ -881,9 +858,9 @@ private:
         v.set_element("last_seen", now, now);
 
         if (cs.battery_level.present)
-            v.set_element("battery.soc", cs.battery_level.value, now);
+            v.set_element("battery.soc", Quantity!(int, Percent)(cs.battery_level.value), now);
         if (cs.usable_battery_level.present)
-            v.set_element("battery.usable_soc", cs.usable_battery_level.value, now);
+            v.set_element("battery.usable_soc", Quantity!(int, Percent)(cs.usable_battery_level.value), now);
 
         if (cs.charging_state.present)
         {
@@ -900,14 +877,13 @@ private:
                 v.set_element("charging.enabled", false, now, &vehicle_control_change);
         }
         if (cs.minutes_to_full_charge.present)
-            v.set_element("minutes_to_full", cs.minutes_to_full_charge.value, now);
+            v.set_element("minutes_to_full", Quantity!(int, Minute)(cs.minutes_to_full_charge.value), now);
         if (cs.charge_limit_soc.present)
-            v.set_element("charging.target_soc", cs.charge_limit_soc.value, now);
+            v.set_element("charging.target_soc", Quantity!(int, Percent)(cs.charge_limit_soc.value), now);
         if (cs.scheduled_charging_pending.present)
             v.set_element("charging.scheduled", cs.scheduled_charging_pending.value, now);
         if (cs.scheduled_charging_start_time_minutes.present)
-            v.set_element("charging.schedule_time",
-                          cast(int)cs.scheduled_charging_start_time_minutes.value, now);
+            v.set_element("charging.schedule_time", cast(int)cs.scheduled_charging_start_time_minutes.value, now);
         if (cs.charge_port_open.present)
         {
             v.set_element("charging.port_open", cs.charge_port_open.value, now);
@@ -915,18 +891,18 @@ private:
         }
 
         if (cs.charger_voltage.present)
-            v.set_element("meter.voltage", cs.charger_voltage.value, now);
+            v.set_element("meter.voltage", Quantity!(int, ScaledUnits.volt)(cs.charger_voltage.value), now);
         if (cs.charger_actual_current.present)
-            v.set_element("meter.current", cs.charger_actual_current.value, now);
+            v.set_element("meter.current", Quantity!(int, ScaledUnits.ampere)(cs.charger_actual_current.value), now);
         if (cs.charger_power.present)
-            v.set_element("meter.power", cs.charger_power.value * 1000, now);
+            v.set_element("meter.power", Quantity!(int, ScaledUnits.watt)(cs.charger_power.value * 1000), now);
         if (cs.charge_energy_added.present)
-            v.set_element("meter.import", cs.charge_energy_added.value, now);
+            v.set_element("meter.import", Quantity!(float, KilowattHour)(cs.charge_energy_added.value), now);
 
         if (cs.charge_current_request_max.present)
-            v.set_element("control.max", cs.charge_current_request_max.value, now);
+            v.set_element("control.max", Quantity!(int, ScaledUnits.ampere)(cs.charge_current_request_max.value), now);
         if (cs.charging_amps.present)
-            v.set_element("control.setpoint", cs.charging_amps.value, now, &vehicle_control_change);
+            v.set_element("control.setpoint", Quantity!(int, ScaledUnits.ampere)(cs.charging_amps.value), now, &vehicle_control_change);
 
         if (cs.battery_level.present && cs.charge_energy_added.present)
             capacity_sample(cs.battery_level.value, cs.charge_energy_added.value);
@@ -942,21 +918,19 @@ private:
         v.set_element("connected", true, now);
         v.set_element("last_seen", now, now);
         if (climate.inside_temperature.present)
-            v.set_element("hvac.temperature", climate.inside_temperature.value, now);
+            v.set_element("hvac.temperature", Quantity!(float, Celsius)(climate.inside_temperature.value), now);
         if (climate.outside_temperature.present)
-            v.set_element("hvac.outside_temperature", climate.outside_temperature.value, now);
+            v.set_element("hvac.outside_temperature", Quantity!(float, Celsius)(climate.outside_temperature.value), now);
         if (climate.driver_temperature.present)
-            v.set_element("hvac.target_temperature", climate.driver_temperature.value, now,
-                          &vehicle_control_change);
+            v.set_element("hvac.target_temperature", Quantity!(float, Celsius)(climate.driver_temperature.value), now, &vehicle_control_change);
         if (climate.passenger_temperature.present)
-            v.set_element("hvac.passenger_target_temperature",
-                          climate.passenger_temperature.value, now);
+            v.set_element("hvac.passenger_target_temperature", Quantity!(float, Celsius)(climate.passenger_temperature.value), now);
         if (climate.fan_speed.present)
             v.set_element("hvac.fan_speed", climate.fan_speed.value, now);
         if (climate.min_temperature.present)
-            v.set_element("hvac.min_temperature", climate.min_temperature.value, now);
+            v.set_element("hvac.min_temperature", Quantity!(float, Celsius)(climate.min_temperature.value), now);
         if (climate.max_temperature.present)
-            v.set_element("hvac.max_temperature", climate.max_temperature.value, now);
+            v.set_element("hvac.max_temperature", Quantity!(float, Celsius)(climate.max_temperature.value), now);
         if (climate.climate_on.present)
         {
             v.set_element("hvac.power", climate.climate_on.value, now, &vehicle_control_change);
@@ -970,48 +944,35 @@ private:
         if (climate.battery_heater.present)
             v.set_element("hvac.battery.heating", climate.battery_heater.value, now);
         if (climate.steering_wheel_heat_level.present)
-            v.set_element("hvac.steering_wheel.heating_level",
-                          climate.steering_wheel_heat_level.value, now);
+            v.set_element("hvac.steering_wheel.heating_level", climate.steering_wheel_heat_level.value, now);
         else if (climate.steering_wheel_heater.present)
             v.set_element("hvac.steering_wheel.heater", climate.steering_wheel_heater.value, now);
         if (climate.seat_front_left_heating.present)
-            v.set_element("hvac.seats.front_left.heating_level",
-                          climate.seat_front_left_heating.value, now);
+            v.set_element("hvac.seats.front_left.heating_level", climate.seat_front_left_heating.value, now);
         if (climate.seat_front_right_heating.present)
-            v.set_element("hvac.seats.front_right.heating_level",
-                          climate.seat_front_right_heating.value, now);
+            v.set_element("hvac.seats.front_right.heating_level", climate.seat_front_right_heating.value, now);
         if (climate.seat_rear_left_heating.present)
-            v.set_element("hvac.seats.rear_left.heating_level",
-                          climate.seat_rear_left_heating.value, now);
+            v.set_element("hvac.seats.rear_left.heating_level", climate.seat_rear_left_heating.value, now);
         if (climate.seat_rear_center_heating.present)
-            v.set_element("hvac.seats.rear_center.heating_level",
-                          climate.seat_rear_center_heating.value, now);
+            v.set_element("hvac.seats.rear_center.heating_level", climate.seat_rear_center_heating.value, now);
         if (climate.seat_rear_right_heating.present)
-            v.set_element("hvac.seats.rear_right.heating_level",
-                          climate.seat_rear_right_heating.value, now);
+            v.set_element("hvac.seats.rear_right.heating_level", climate.seat_rear_right_heating.value, now);
         if (climate.seat_rear_left_back_heating.present)
-            v.set_element("hvac.seats.rear_left_back.heating_level",
-                          climate.seat_rear_left_back_heating.value, now);
+            v.set_element("hvac.seats.rear_left_back.heating_level", climate.seat_rear_left_back_heating.value, now);
         if (climate.seat_rear_right_back_heating.present)
-            v.set_element("hvac.seats.rear_right_back.heating_level",
-                          climate.seat_rear_right_back_heating.value, now);
+            v.set_element("hvac.seats.rear_right_back.heating_level", climate.seat_rear_right_back_heating.value, now);
         if (climate.seat_third_row_left_heating.present)
-            v.set_element("hvac.seats.third_row_left.heating_level",
-                          climate.seat_third_row_left_heating.value, now);
+            v.set_element("hvac.seats.third_row_left.heating_level", climate.seat_third_row_left_heating.value, now);
         if (climate.seat_third_row_right_heating.present)
-            v.set_element("hvac.seats.third_row_right.heating_level",
-                          climate.seat_third_row_right_heating.value, now);
+            v.set_element("hvac.seats.third_row_right.heating_level", climate.seat_third_row_right_heating.value, now);
         if (climate.seat_front_left_cooling.present)
-            v.set_element("hvac.seats.front_left.cooling_level",
-                          climate.seat_front_left_cooling.value, now);
+            v.set_element("hvac.seats.front_left.cooling_level", climate.seat_front_left_cooling.value, now);
         if (climate.seat_front_right_cooling.present)
-            v.set_element("hvac.seats.front_right.cooling_level",
-                          climate.seat_front_right_cooling.value, now);
+            v.set_element("hvac.seats.front_right.cooling_level", climate.seat_front_right_cooling.value, now);
         if (climate.defrost_mode.present)
             v.set_element("hvac.defrost", defrost_name(defrost_mode_kind(climate.defrost_mode.value)), now);
         if (climate.climate_keeper_mode.present)
-            v.set_element("hvac.climate_keeper_mode",
-                          climate_keeper_name(climate_keeper_mode_kind(climate.climate_keeper_mode.value)), now);
+            v.set_element("hvac.climate_keeper_mode", climate_keeper_name(climate_keeper_mode_kind(climate.climate_keeper_mode.value)), now);
     }
 
     void publish_drive_state(ref const TeslaDriveState drive)
@@ -1027,13 +988,12 @@ private:
         {
             float speed_mph = drive.speed_float.present
                 ? drive.speed_float.value : drive.speed.value;
-            v.set_element("drive.speed", speed_mph * 1.609344f, now);
+            v.set_element("drive.speed", Quantity!(float, ScaledUnits.kilometre_per_hour)(speed_mph * 1.609344f), now);
         }
         if (drive.power.present)
-            v.set_element("drive.power", drive.power.value, now);
+            v.set_element("drive.power", Quantity!(int, Kilowatt)(drive.power.value), now);
         if (drive.odometer_hundredths_mile.present)
-            v.set_element("drive.odometer",
-                          drive.odometer_hundredths_mile.value * 0.01609344f, now);
+            v.set_element("drive.odometer", Quantity!(float, Kilometre)(drive.odometer_hundredths_mile.value * 0.01609344f), now);
     }
 
     void publish_location_state(ref const TeslaLocationState location)
@@ -1044,13 +1004,13 @@ private:
 
         SysTime now = getSysTime();
         if (location.latitude.present)
-            v.set_element("location.latitude", location.latitude.value, now);
+            v.set_element("location.latitude", Quantity!(float, Degree)(location.latitude.value), now);
         if (location.longitude.present)
-            v.set_element("location.longitude", location.longitude.value, now);
+            v.set_element("location.longitude", Quantity!(float, Degree)(location.longitude.value), now);
         if (location.heading.present)
-            v.set_element("location.heading", location.heading.value, now);
+            v.set_element("location.heading", Quantity!(uint, Degree)(location.heading.value), now);
         if (location.accuracy.present)
-            v.set_element("location.accuracy", location.accuracy.value, now);
+            v.set_element("location.accuracy", Quantity!(float, ScaledUnits.metre)(location.accuracy.value), now);
     }
 
     void publish_closures_state(ref const TeslaClosuresState closures)
@@ -1086,25 +1046,21 @@ private:
 
         SysTime now = getSysTime();
         if (tyres.front_left_pressure.present)
-            v.set_element("tyres.front_left.pressure", tyres.front_left_pressure.value, now);
+            v.set_element("tyres.front_left.pressure", Quantity!(float, Bar)(tyres.front_left_pressure.value), now);
         if (tyres.front_right_pressure.present)
-            v.set_element("tyres.front_right.pressure", tyres.front_right_pressure.value, now);
+            v.set_element("tyres.front_right.pressure", Quantity!(float, Bar)(tyres.front_right_pressure.value), now);
         if (tyres.rear_left_pressure.present)
-            v.set_element("tyres.rear_left.pressure", tyres.rear_left_pressure.value, now);
+            v.set_element("tyres.rear_left.pressure", Quantity!(float, Bar)(tyres.rear_left_pressure.value), now);
         if (tyres.rear_right_pressure.present)
-            v.set_element("tyres.rear_right.pressure", tyres.rear_right_pressure.value, now);
+            v.set_element("tyres.rear_right.pressure", Quantity!(float, Bar)(tyres.rear_right_pressure.value), now);
         if (tyres.front_left_hard_warning.present || tyres.front_left_soft_warning.present)
-            v.set_element("tyres.front_left.warning",
-                          tyres.front_left_hard_warning.value || tyres.front_left_soft_warning.value, now);
+            v.set_element("tyres.front_left.warning", tyres.front_left_hard_warning.value || tyres.front_left_soft_warning.value, now);
         if (tyres.front_right_hard_warning.present || tyres.front_right_soft_warning.present)
-            v.set_element("tyres.front_right.warning",
-                          tyres.front_right_hard_warning.value || tyres.front_right_soft_warning.value, now);
+            v.set_element("tyres.front_right.warning", tyres.front_right_hard_warning.value || tyres.front_right_soft_warning.value, now);
         if (tyres.rear_left_hard_warning.present || tyres.rear_left_soft_warning.present)
-            v.set_element("tyres.rear_left.warning",
-                          tyres.rear_left_hard_warning.value || tyres.rear_left_soft_warning.value, now);
+            v.set_element("tyres.rear_left.warning", tyres.rear_left_hard_warning.value || tyres.rear_left_soft_warning.value, now);
         if (tyres.rear_right_hard_warning.present || tyres.rear_right_soft_warning.present)
-            v.set_element("tyres.rear_right.warning",
-                          tyres.rear_right_hard_warning.value || tyres.rear_right_soft_warning.value, now);
+            v.set_element("tyres.rear_right.warning", tyres.rear_right_hard_warning.value || tyres.rear_right_soft_warning.value, now);
     }
 
     Component vehicle_for_update()
@@ -1182,8 +1138,7 @@ private:
         _cap.energy_anchor = energy_added;
     }
 
-    bool send_signed_action(TeslaDomain domain, const(ubyte)[] plaintext,
-                            VehicleCommandKind kind)
+    bool send_signed_action(TeslaDomain domain, const(ubyte)[] plaintext, VehicleCommandKind kind)
     {
         if (_phase != Phase.ready)
         {
@@ -1209,8 +1164,7 @@ private:
 
         enum uint flags = encrypt_response_mask;
 
-        Array!ubyte meta = build_signed_command_metadata(domain, name[], _epoch[],
-                                                         expires_at, _counter, flags);
+        Array!ubyte meta = build_signed_command_metadata(domain, name[], _epoch[], expires_at, _counter, flags);
 
         SHA256Context sha;
         sha_init(sha);
@@ -1238,9 +1192,7 @@ private:
         ubyte[16] uuid = void;
         crypto_random_bytes(uuid[]);
 
-        Array!ubyte msg = build_signed_routable_message(domain, ciphertext[], signer_sec1[],
-                                                        _epoch[], nonce[], _counter, expires_at,
-                                                        tag[], _routing_address[], uuid[], flags);
+        Array!ubyte msg = build_signed_routable_message(domain, ciphertext[], signer_sec1[], _epoch[], nonce[], _counter, expires_at, tag[], _routing_address[], uuid[], flags);
         PendingCommand* pending = reserve_pending_command(uuid[], tag[], kind);
         if (pending is null)
         {
