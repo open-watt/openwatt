@@ -3,7 +3,7 @@ module manager.features;
 // Feature gating booleans. Default is "everything on" so fresh builds,
 // IDE/IDE-launched builds (Visual Studio), and tools that don't go
 // through features.mk get a full standalone build. To drop a feature,
-// pass -version=NoSwitch / NoAll / NoIP / NoTLS / NoHTTP.
+// pass -version=NoSwitch / NoAll / NoIP / NoTLS / NoHTTP / NoIPv6.
 //
 // The has_* enums let code compose features with static if -- D's
 // version (...) clause is non-composable.
@@ -19,6 +19,7 @@ version (NoECSecret) enum has_ec_secret = false; else enum has_ec_secret = true;
 version (NoHTTPClient) enum has_http_client = false; else enum has_http_client = true;
 version (NoHTTPFileServer) enum has_http_file_server = false; else enum has_http_file_server = true;
 version (NoModbus) enum has_modbus = false; else enum has_modbus = true;
+version (NoIPv6)   enum has_ipv6   = false; else enum has_ipv6 = has_ip;
 version (HasAPI)   enum has_api    = true; else version (NoAll) enum has_api = false; else enum has_api = true;
 version (HasOTA)   enum has_ota    = true; else version (NoAll) enum has_ota = false; else enum has_ota = true;
 

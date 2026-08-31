@@ -53,6 +53,7 @@ make CONFIG=unittest                    # Build with unit tests enabled
 - `OS`: Target OS (`windows`, `linux`, `freertos`) - usually auto-detected
 - `FEATURES`: `switch` (L2 fabric only) or `full` (default; protocols+apps+devices+tools). `minimal` is deferred. See [features.mk](features.mk).
 - `HEADLESS`: `0` (default) or `1`. Orthogonal to FEATURES; strips human-facing CLI affordances. Auto-set with BL808 e907.
+- `IPV6`: `1` (default) or `0`. `IPV6=0` drops the IPv6 side of the in-tree IP stack and its address, route, and pool collections.
 - `TINY`: `0`/`1`, set by [third_party/urt/platforms.mk](third_party/urt/platforms.mk) for <~350KB-RAM / <2MB-flash targets. Forces `-Oz` under LDC, strips verbose strings, drops heavy helpers.
 
 **Output directories:**
