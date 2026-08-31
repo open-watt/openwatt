@@ -490,8 +490,12 @@ client/lease/server collection IDs have no implementations or commands. These
 are feature follow-ups, outside the retrospective merge fixes; choose the first
 role from a concrete deployment need before implementing or advertising it.
 
-- **Client**: decide whether the deployment needs address assignment, prefix
-  delegation or both, then implement the client lifecycle and configuration.
+- **Client** (`/protocol/dhcp/client6`, IA_NA + IA_PD): landed. Remaining gaps: during a
+  prefix renumbering overlap only the freshest delegated prefix reaches the pool, so the
+  downstream `ra` withdraws the old /64 outright instead of advertising it deprecated
+  alongside the new one; a NoBinding reply
+  restarts from Solicit rather than sending a fresh Request; DNS servers from the ORO are
+  ignored; replies are not checked against the interface's own link-local destination.
 - **Server and leases**: define address/prefix allocation and lease policy,
   then implement the server and lease collections.
 - **Relay**: define the required relay deployment and supported message forms,
@@ -603,6 +607,13 @@ this is what remains.
   control plane, and make the mirror re-evaluate its peer binding.
 
 ## Infrastructure
+
+- **Unsubscribe during packet dispatch walks a stale slice**: `BaseInterface.fire_subscribers`
+  and `send` iterate `_subscribers[0 .. _num_subscribers]` captured before the loop, and
+  `unsubscribe` swap-removes into that range. A handler that calls `restart()` (the dhcp6
+  client's declined-reply path, any offline handler) unsubscribes and re-subscribes inside the
+  walk, so the moved-in and re-added entries can receive the same packet again. Snapshot the
+  subscriber set or defer removals until the walk ends.
 
 - **Make clock-sensitive unittests hermetic**: tests that leave a `MonoTime` member at
   `MonoTime.init` and then compare it against a real `getTime()` only pass once the monotonic
