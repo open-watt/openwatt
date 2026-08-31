@@ -7,6 +7,8 @@ import urt.lifetime;
 import urt.log;
 import urt.map;
 import urt.mem;
+import urt.mem.temp : tconcat, tformat;
+import urt.meta.enuminfo : enum_key_from_value;
 import urt.meta.nullable;
 import urt.string;
 import urt.time;
@@ -17,6 +19,7 @@ import manager.collection;
 import manager.config : ConfItem;
 import manager.console.command;
 import manager.console.session;
+import manager.console.table;
 import manager.device;
 import manager.plugin;
 import manager.profile;
@@ -321,6 +324,7 @@ nothrow @nogc:
         g_app.console.register_collection!ZigbeeController();
 
         g_app.console.register_command!scan("/protocol/zigbee", this);
+        g_app.console.register_command!(nodes_print, "nodes")("/protocol/zigbee", this);
         g_app.console.register_command!(zcl_read, "read")("/protocol/zigbee", this);
         g_app.console.register_command!(zcl_write, "write")("/protocol/zigbee", this);
     }
@@ -497,6 +501,14 @@ nothrow @nogc:
                 kvp.value.scan_in_progress = false;
             }
         }
+
+        for (size_t i = 0; i < unknown_nodes.length; )
+        {
+            if (unknown_nodes[i].via is iface)
+                unknown_nodes.remove(i);
+            else
+                ++i;
+        }
     }
 
     void remove_all_nodes(BaseInterface iface)
@@ -560,6 +572,98 @@ nothrow @nogc:
         c.set_message_handler(&state.message_handler);
         c.send_command!EZSP_StartScan(&state.start_scan, energy_scan ? EzspNetworkScanType.ENERGY_SCAN : EzspNetworkScanType.ACTIVE_SCAN, 0x07FFF800, energy_scan ? 1 : 3);
         return state;
+    }
+
+    void nodes_print(Session session)
+    {
+        if (nodes_by_eui.length == 0 && unknown_nodes.length == 0)
+        {
+            session.write_line("No zigbee nodes");
+            return;
+        }
+
+        if (nodes_by_eui.length != 0)
+        {
+            MonoTime now = getTime();
+            SysTime now_sys = getSysTime();
+            Table t;
+            t.add_column("eui");
+            t.add_column("interface");
+            t.add_column("pan");
+            t.add_column("id");
+            t.add_column("type");
+            t.add_column("state");
+            t.add_column("interview");
+            t.add_column("fails", Table.TextAlign.right);
+            t.add_column("device");
+            t.add_column("lqi", Table.TextAlign.right);
+            t.add_column("rssi", Table.TextAlign.right);
+            t.add_column("seen", Table.TextAlign.right);
+
+            foreach (ref NodeMap n; nodes_by_eui.values)
+            {
+                char[7] interview_buffer = void;
+                size_t interview_length;
+                foreach (i, stage; "npeca")
+                    if (n.initialised & (1 << i))
+                        interview_buffer[interview_length++] = stage;
+                if (n.initialised & 0x40)
+                    interview_buffer[interview_length++] = 'b';
+                if (n.initialised & 0x80)
+                    interview_buffer[interview_length++] = 'B';
+                const(char)[] interview = n.initialised == 0xFF ? "complete" : interview_buffer[0 .. interview_length];
+                bool seen = n.last_seen != SysTime();
+
+                t.add_row();
+                t.cell(tconcat(n.eui));
+                t.cell(n.available && n.via ? n.via.name[] : "-");
+                t.cell(n.pan_id == 0xFFFF ? "-" : tformat("{0,04x}", n.pan_id));
+                t.cell(n.available ? tformat("{0,04x}", n.id) : "-");
+                t.cell(enum_key_from_value!NodeType(n.desc.type));
+
+                const(char)[] state;
+                if (!n.available)
+                    state = "offline";
+                else if (n.initialised == 0xFF)
+                    state = "ready";
+                else if (n.scan_in_progress)
+                    state = "scanning";
+                else if (n.retry_after != MonoTime() && now < n.retry_after)
+                    state = tconcat("retry ", (n.retry_after - now).as!"seconds", "s");
+                else
+                    state = "pending";
+                t.cell(state);
+
+                t.cell(interview.length ? interview : "-");
+                t.cell(n.interview_failures ? tconcat(n.interview_failures) : "-");
+                t.cell(n.device ? n.device.id[] : "-");
+                t.cell(seen ? tconcat(n.lqi) : "-");
+                t.cell(seen ? tconcat(n.rssi) : "-");
+                t.cell(seen ? tconcat((now_sys - n.last_seen).as!"seconds", "s") : "-");
+            }
+
+            t.render(session);
+        }
+
+        if (unknown_nodes.length == 0)
+            return;
+
+        if (nodes_by_eui.length != 0)
+            session.write_line();
+        Table u;
+        u.add_column("interface");
+        u.add_column("pan");
+        u.add_column("unresolved id");
+        u.add_column("state");
+        foreach (ref unk; unknown_nodes)
+        {
+            u.add_row();
+            u.cell(unk.via ? unk.via.name[] : "-");
+            u.cell(tformat("{0,04x}", unk.pan_id));
+            u.cell(tformat("{0,04x}", unk.id));
+            u.cell(unk.scanning ? "probing" : "pending");
+        }
+        u.render(session);
     }
 
     // /protocol/zigbee/read command
