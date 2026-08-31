@@ -1138,6 +1138,52 @@ private:
         return res;
     }
 
+    // Two simultaneous requests use the wake window without delaying acknowledgements; three
+    // caused the node to retransmit every response.
+    void prefetch_descriptors(NodeMap* node)
+    {
+        enum max_parallel = 2;
+
+        ZDOQuery[max_parallel] q;
+        size_t n;
+        size_t i_node = size_t.max;
+        size_t i_power = size_t.max;
+        size_t i_eps = size_t.max;
+
+        void want(ushort cluster, ref size_t slot)
+        {
+            if (n == max_parallel)
+                return;
+            slot = n;
+            q[n].cluster = cluster;
+            const ubyte[2] id = node.id.nativeToLittleEndian;
+            q[n].request[1 .. 3] = id[];
+            q[n].request_len = 3;
+            ++n;
+        }
+
+        if (!(node.initialised & 0x01))
+            want(ZDOCluster.node_desc_req, i_node);
+        if (!(node.initialised & 0x02))
+            want(ZDOCluster.power_desc_req, i_power);
+        if (!(node.initialised & 0x04))
+            want(ZDOCluster.active_ep_req, i_eps);
+        if (n < 2)
+            return;
+
+        _endpoint.zdo_request_batch(node.id, q[0 .. n], PCP.ee);
+
+        bool answered(size_t i)
+            => i != size_t.max && q[i].result == ZigbeeResult.success && q[i].response.status == ZDOStatus.success;
+
+        if (answered(i_node))
+            q[i_node].response.message[].parse_node_desc(node);
+        if (answered(i_power))
+            q[i_power].response.message[].parse_power_desc(node);
+        if (answered(i_eps))
+            q[i_eps].response.message[].parse_active_eps(node);
+    }
+
     bool do_node_interview(NodeMap* node)
     {
         version (DebugZigbeeController)
@@ -1185,6 +1231,14 @@ private:
         }
 
         debug assert(node.eui != EUI64());
+
+        if ((node.initialised & 0x07) != 0x07)
+        {
+            ubyte initialised = node.initialised;
+            prefetch_descriptors(node);
+            if (node.initialised != initialised)
+                progressed = true;
+        }
 
         // request node descriptor
         if (!(node.initialised & 0x01))
@@ -1263,18 +1317,8 @@ private:
             if (r != ZigbeeResult.success || zdo_res.status != ZDOStatus.success)
                 return fail("power_desc_req failed");
 
-            msg = zdo_res.message[];
-            if (msg.length < 4)
-                return fail("response too short");
-            if (msg[0..2].littleEndianToNative!ushort != node.id)
-                return fail("id mismatch");
-
-            node.power.current_mode = cast(CurrentPowerMode)(msg[2] & 0x0F);
-            node.power.available_sources = msg[2] >> 4;
-            node.power.current_source = msg[3] & 0x0F;
-            node.power.batt_level = g_power_levels[msg[3] >> 6];
-
-            node.initialised |= 0x02;
+            if (!zdo_res.message[].parse_power_desc(node))
+                return fail("invalid power descriptor");
             progressed = true;
         }
 
@@ -1287,24 +1331,8 @@ private:
             if (r != ZigbeeResult.success || zdo_res.status != ZDOStatus.success)
                 return fail("active_ep_req failed");
 
-            msg = zdo_res.message[];
-            if (msg.length < 3)
-                return fail("response too short");
-            if (msg[0..2].littleEndianToNative!ushort != node.id)
-                return fail("id mismatch");
-
-            ubyte num_eps = msg[2];
-            if (msg.length < 3 + num_eps)
-                return fail("response too short");
-
-            foreach (i; 0 .. num_eps)
-            {
-                ubyte endpoint = msg[3 + i];
-                ref ep = node.get_endpoint(endpoint);
-                ep.dynamic = false;
-            }
-
-            node.initialised |= 0x04;
+            if (!zdo_res.message[].parse_active_eps(node))
+                return fail("invalid active endpoint list");
             progressed = true;
         }
 
@@ -1611,8 +1639,6 @@ unittest
 }
 
 private:
-
-__gshared immutable ubyte[4] g_power_levels = [ 0, 33, 66, 100 ];
 
 struct TuyaDP
 {
