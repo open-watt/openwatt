@@ -130,7 +130,7 @@ protected:
     {
         if (!_zigbee_profile)
             _zigbee_profile = g_app.acquire_profile("zigbee");
-        foreach (ref sample; _sample_elements.values)
+        foreach (ref sample; _sample_elements_by_element.values)
             attach_model_element(sample.element, sample.access);
 
         return _endpoint.running ? CompletionStatus.complete : CompletionStatus.continue_;
@@ -167,7 +167,7 @@ protected:
         }
 
         tuya_dedup.clear();
-        foreach (ref sample; _sample_elements.values)
+        foreach (ref sample; _sample_elements_by_element.values)
             sample.element.unsubscribe(&on_samples);
         foreach (device; _bound_devices)
             device.detach_binding(this);
@@ -316,12 +316,11 @@ protected:
 
     final void add_sample_element(Element* element, EUI64 eui, ref const ElementDesc desc, ref const ElementDesc_Zigbee zb, ubyte endpoint)
     {
-        ulong[2] key = make_sample_key(eui, endpoint, zb.cluster_id, zb.attribute_id, zb.manufacturer_code);
-        assert(key !in _sample_elements, "TODO: support element duplicates?");
         SampleDesc sd;
         if (zb.desc != ushort.max)
             sd = desc_by_index(zb.desc);
-        SampleElement* se = _sample_elements.insert(key, SampleElement(element, sd));
+        assert(element !in _sample_elements_by_element, "element already bound");
+        SampleElement* se = _sample_elements_by_element.insert(element, SampleElement(element, sd));
         se.access = cast(manager.element.Access)desc.access;
         se.eui = eui;
         se.endpoint = endpoint;
@@ -330,13 +329,25 @@ protected:
         se.manufacturer = zb.manufacturer_code;
         se.length = zb.length;
         se.tuya_type = zb.tuya_type;
-        _sample_elements_by_element.insert(element, se);
+
+        ulong[2] key = make_sample_key(eui, endpoint, zb.cluster_id, zb.attribute_id, zb.manufacturer_code);
+        if (SampleElement** head = key in _sample_elements)
+        {
+            SampleElement* tail = *head;
+            while (tail.next)
+                tail = tail.next;
+            tail.next = se;
+        }
+        else
+            _sample_elements.insert(key, se);
     }
 
+    // A wire value may feed several elements, so callers walk the chain.
     final SampleElement* find_sample_element(EUI64 eui, ubyte endpoint, ushort cluster, ushort attribute, ushort manufacturer = 0)
     {
         ulong[2] key = make_sample_key(eui, endpoint, cluster, attribute, manufacturer);
-        return key in _sample_elements;
+        SampleElement** head = key in _sample_elements;
+        return head ? *head : null;
     }
 
     final SampleElement* find_sample_element_tuya(EUI64 eui, ubyte endpoint, ushort dp)
@@ -346,9 +357,8 @@ protected:
     {
         if (!update.value_ready)
             return;
-        SampleElement** pse = update.element in _sample_elements_by_element;
-        if (pse)
-            set_value(**pse, update.value, update.timestamp);
+        if (SampleElement* se = update.element in _sample_elements_by_element)
+            set_value(*se, update.value, update.timestamp);
     }
 
 private:
@@ -372,6 +382,7 @@ private:
         ushort manufacturer;
         ubyte length;
         TuyaDataType tuya_type;
+        SampleElement* next;
     }
 
     struct TuyaDedup
@@ -382,8 +393,9 @@ private:
         ushort tag;
     }
 
-    Map!(ulong[2], SampleElement) _sample_elements;
-    Map!(Element*, SampleElement*) _sample_elements_by_element;
+    // _sample_elements_by_element owns; the chains below point into it, so it must never remove
+    Map!(Element*, SampleElement) _sample_elements_by_element;
+    Map!(ulong[2], SampleElement*) _sample_elements;
     Array!Device _bound_devices;
 
     bool _auto_create_devices;
@@ -751,7 +763,7 @@ private:
                         attr.last_updated = now; // TODO: this timestamp should come from the packet! but we lost that here...
 
                         // update runtime element
-                        if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, attr_id, zcl.manufacturer_code))
+                        for (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, attr_id, zcl.manufacturer_code); e; e = e.next)
                         {
                             Variant v = attr.value;
                             write_decoded_sample(*e, v, payload[3 .. 3 + taken], cast(SysTime)timestamp);
@@ -824,23 +836,23 @@ private:
                             attr_delay.last_updated = now;
 
                             // update runtime elements
-                            if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC00))
+                            for (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC00); e; e = e.next)
                                 e.element.value = (zone_status & 1) != 0;
-                            if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC01))
+                            for (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC01); e; e = e.next)
                                 e.element.value = (zone_status & 2) != 0;
-                            if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC02))
+                            for (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC02); e; e = e.next)
                                 e.element.value = (zone_status & 4) != 0;
-                            if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC03))
+                            for (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC03); e; e = e.next)
                                 e.element.value = (zone_status & 8) != 0;
-                            if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC06))
+                            for (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC06); e; e = e.next)
                                 e.element.value = (zone_status & 0x40) != 0;
-                            if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC07))
+                            for (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC07); e; e = e.next)
                                 e.element.value = (zone_status & 0x80) != 0;
-                            if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC09))
+                            for (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC09); e; e = e.next)
                                 e.element.value = (zone_status & 0x200) != 0;
-                            if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC10))
+                            for (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC10); e; e = e.next)
                                 e.element.value = zone_id;
-                            if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC20))
+                            for (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC20); e; e = e.next)
                                 e.element.value = delay;
                         }
 
@@ -929,7 +941,7 @@ private:
                             if (nm)
                             {
                                 nm.tuya_datapoints[dp.dp_id] = v;
-                                if (SampleElement* e = find_sample_element_tuya(nm.eui, aps.src_endpoint, dp.dp_id))
+                                for (SampleElement* e = find_sample_element_tuya(nm.eui, aps.src_endpoint, dp.dp_id); e; e = e.next)
                                     write_decoded_sample(*e, v, dp.dp_data, cast(SysTime)timestamp);
                             }
                             return;
