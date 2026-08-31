@@ -43,7 +43,7 @@ alias RecvHandler = void delegate(Stream source, const(void)[] data, MonoTime rx
 alias TapHandler = void delegate(Stream source, bool tx, const(void)[] data, MonoTime time) nothrow @nogc;
 
 // A returned page transfers to the sink; null releases the producer.
-alias SendHandler = void[] delegate(Stream sink, size_t requested) nothrow @nogc;
+alias SendHandler = Page* delegate(Stream sink, size_t requested) nothrow @nogc;
 alias TxReadyHandler = void delegate(Stream sink) nothrow @nogc;
 
 
@@ -268,7 +268,7 @@ nothrow @nogc:
     bool supports_tx_pages() const
         => false;
 
-    package(router) final bool submit_tx_page(void[] page)
+    package(router) final bool submit_tx_page(Page* page)
         => supports_tx_pages && queue_tx_page(page);
 
     ptrdiff_t pending()
@@ -331,8 +331,8 @@ protected:
         while (_outgoing && requested != 0)
         {
             SendHandler handler = _outgoing;
-            void[] page = handler(this, requested);
-            if (!page.ptr)
+            Page* page = handler(this, requested);
+            if (!page)
             {
                 if (_outgoing is handler)
                     _outgoing = null;
@@ -342,7 +342,7 @@ protected:
             debug assert(page.length != 0);
             if (page.length == 0 || !queue_tx_page(page))
             {
-                page_free(page.ptr);
+                page_free(page);
                 if (_outgoing is handler)
                     _outgoing = null;
             }
@@ -353,12 +353,12 @@ protected:
         }
     }
 
-    bool queue_tx_page(void[] page)
+    bool queue_tx_page(Page* page)
     {
-        ptrdiff_t written = write(cast(const(void)[])page);
+        ptrdiff_t written = write(cast(const(void)[])page.data);
         if (written != page.length)
             return false;
-        page_free(page.ptr);
+        page_free(page);
         return true;
     }
     StreamStatus _status;
@@ -559,11 +559,11 @@ unittest
         bool supported = true;
 
     protected:
-        override bool queue_tx_page(void[] page)
+        override bool queue_tx_page(Page* page)
         {
-            output ~= cast(const(ubyte)[])page;
+            output ~= cast(const(ubyte)[])page.data;
             _space = page.length < _space ? _space - page.length : 0;
-            page_free(page.ptr);
+            page_free(page);
             return true;
         }
 
@@ -576,7 +576,7 @@ unittest
     {
     nothrow @nogc:
 
-        void[] produce(Stream stream, size_t requested)
+        Page* produce(Stream stream, size_t requested)
         {
             ++calls;
             if (replacement)
@@ -594,11 +594,11 @@ unittest
                 n = remaining < block_size ? remaining : block_size;
             else if (n > max_page)
                 n = max_page;
-            void[] page = page_alloc_for(n);
-            if (!page.ptr)
+            Page* page = page_alloc(n);
+            if (!page)
                 return null;
             foreach (i; 0 .. n)
-                (cast(ubyte[])page)[i] = next++;
+                (cast(ubyte[])page.data)[i] = next++;
             remaining -= n;
             if (release)
                 stream.release_tx_handler(&produce);

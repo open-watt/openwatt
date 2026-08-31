@@ -537,33 +537,56 @@ nothrow @nogc:
         size_t total;
         foreach (buffer; data)
         {
-            if (buffer.length > size_t.max - total)
+            if (buffer.length > cast(size_t)ptrdiff_t.max - total)
                 return 0;
             total += buffer.length;
         }
         if (_phase != Phase.open || total == 0)
             return 0;
 
-        void[] page = page_alloc_for(total);
-        if (!page.ptr)
-            return 0;
-        size_t offset;
-        foreach (buffer; data)
+        size_t accepted;
+        size_t input_index;
+        size_t input_offset;
+        while (accepted < total)
         {
-            page[offset .. offset + buffer.length] = cast(const(void)[])buffer;
-            offset += buffer.length;
+            size_t remaining = total - accepted;
+            size_t bytes = remaining < max_page_data ? remaining : max_page_data;
+            Page* page = page_alloc(bytes);
+            if (!page)
+                break;
+
+            size_t output_offset;
+            while (output_offset < bytes)
+            {
+                const(void)[] input = data[input_index];
+                size_t available = input.length - input_offset;
+                size_t copied = bytes - output_offset;
+                if (copied > available)
+                    copied = available;
+                page.data[output_offset .. output_offset + copied] =
+                    input[input_offset .. input_offset + copied];
+                output_offset += copied;
+                input_offset += copied;
+                if (input_offset == input.length)
+                {
+                    ++input_index;
+                    input_offset = 0;
+                }
+            }
+
+            if (!send_page(page))
+            {
+                page_free(page);
+                break;
+            }
+            accepted += bytes;
         }
-        if (!send_page(page))
-        {
-            page_free(page.ptr);
-            return 0;
-        }
-        return total;
+        return cast(ptrdiff_t)accepted;
     }
 
-    bool send_page(void[] page)
+    bool send_page(Page* page)
     {
-        if (_phase != Phase.open || !page.ptr || page.length == 0)
+        if (_phase != Phase.open || !page || page.length == 0)
             return false;
 
         version (Windows)
@@ -584,8 +607,13 @@ nothrow @nogc:
         }
         else
         {
-            bool empty = _tx.length == 0;
-            _tx ~= TxPage(page);
+            bool empty = _tx_head is null;
+            page.next = null;
+            if (_tx_tail)
+                _tx_tail.next = page;
+            else
+                _tx_head = page;
+            _tx_tail = page;
             _tx_bytes += page.length;
             version (UseInternalIPStack)
             {
@@ -726,12 +754,7 @@ nothrow @nogc:
 private:
     enum Phase : ubyte { connecting, open, dead }
     enum size_t max_tx_refill = 16 * 1024;
-
-    struct TxPage
-    {
-        void[] page;
-        size_t offset;
-    }
+    enum size_t max_page_data = ushort.max - Page.sizeof - (size_t.sizeof - 1);
 
     Phase _phase;
     bool _closing;
@@ -745,7 +768,8 @@ private:
     InetAddress _remote;
     TCPRecvHandler _on_recv;
     TCPEventHandler _on_event;
-    Array!TxPage _tx;
+    Page* _tx_head;
+    Page* _tx_tail;
     size_t _tx_bytes;
     TCPTxReadyHandler _on_tx_ready;
 
@@ -766,28 +790,33 @@ private:
     {
         while (bytes != 0)
         {
-            ref page = _tx[0];
-            size_t remaining = page.page.length - page.offset;
+            Page* page = _tx_head;
+            size_t remaining = page.length;
             size_t consumed = bytes < remaining ? bytes : remaining;
-            page.offset += consumed;
+            page.offset += cast(ushort)consumed;
+            page.length -= cast(ushort)consumed;
             _tx_bytes -= consumed;
             bytes -= consumed;
-            if (page.offset == page.page.length)
+            if (page.length == 0)
             {
-                page_free(page.page.ptr);
-                _tx.remove(0);
+                _tx_head = page.next;
+                if (!_tx_head)
+                    _tx_tail = null;
+                page_free(page);
             }
         }
     }
 
     void clear_tx()
     {
-        foreach (ref page; _tx[])
+        while (_tx_head)
         {
-            _tx_bytes -= page.page.length - page.offset;
-            page_free(page.page.ptr);
+            Page* page = _tx_head;
+            _tx_head = page.next;
+            _tx_bytes -= page.length;
+            page_free(page);
         }
-        _tx.clear();
+        _tx_tail = null;
     }
 
     version (UseInternalIPStack)
@@ -873,10 +902,9 @@ private:
         {
             if (_pcb is null)
                 return;
-            while (_tx.length > 0)
+            while (_tx_head)
             {
-                ref page = _tx[0];
-                const(ubyte)[] data = cast(const(ubyte)[])page.page[page.offset .. $];
+                const(ubyte)[] data = cast(const(ubyte)[])_tx_head.data;
                 size_t n = tcp_send_data(*_stack_ptr, _pcb, data);
                 if (n == 0)
                     break;     // send buffer full; drained on a later pump
@@ -889,8 +917,7 @@ private:
         struct SendOp
         {
             IoOp io;
-            void[] page;
-            size_t offset;
+            Page* page;
         }
         struct RecvOp { IoOp io; ubyte[16 * 1024] buf; }
 
@@ -964,9 +991,9 @@ private:
         bool post_send(SendOp* op)
         {
             op.io.ov = OVERLAPPED.init;
-            size_t remaining = op.page.length - op.offset;
+            size_t remaining = op.page.length;
             uint length = remaining < uint.max ? cast(uint)remaining : uint.max;
-            WSABUF wb = WSABUF(length, cast(ubyte*)op.page.ptr + op.offset);
+            WSABUF wb = WSABUF(length, cast(ubyte*)op.page.data.ptr);
             uint sent;
             ++_outstanding;
             if (WSASend(_handle, &wb, 1, &sent, 0, &op.io.ov, null) != 0 &&
@@ -1003,30 +1030,31 @@ private:
         {
             SendOp* sop = cast(SendOp*)op;
             --_outstanding;
-            size_t remaining = sop.page.length - sop.offset;
+            size_t remaining = sop.page.length;
             debug assert(bytes <= remaining);
             if (!ok || bytes == 0 || bytes > remaining)
             {
                 _tx_bytes -= remaining;
-                page_free(sop.page.ptr);
+                page_free(sop.page);
                 free(sop);
                 if (!_closing)
                     fail(IPEvent.error);
                 return;
             }
 
-            sop.offset += bytes;
+            sop.page.offset += cast(ushort)bytes;
+            sop.page.length -= cast(ushort)bytes;
             _tx_bytes -= bytes;
-            if (sop.offset != sop.page.length && !_closing && post_send(sop))
+            if (sop.page.length != 0 && !_closing && post_send(sop))
             {
                 if (_on_tx_ready && tx_request() != 0)
                     _on_tx_ready(&this);
                 return;
             }
 
-            remaining = sop.page.length - sop.offset;
+            remaining = sop.page.length;
             _tx_bytes -= remaining;
-            page_free(sop.page.ptr);
+            page_free(sop.page);
             free(sop);
             if (remaining != 0 && !_closing)
             {
@@ -1097,7 +1125,7 @@ private:
                 flush_tx();
                 if (_closing || _phase != Phase.open)
                     return;
-                g_app.reactor.modify_fd(_socket.handle, _tx.length != 0);
+                g_app.reactor.modify_fd(_socket.handle, _tx_head !is null);
                 if (_on_tx_ready && tx_request() != 0)
                     _on_tx_ready(&this);
             }
@@ -1128,10 +1156,9 @@ private:
 
         void flush_tx()
         {
-            while (_tx.length > 0)
+            while (_tx_head)
             {
-                ref page = _tx[0];
-                const(void)[] data = page.page[page.offset .. $];
+                const(void)[] data = _tx_head.data;
                 size_t sent;
                 Result r = _socket.send(MsgFlags.none, &sent, data);
                 if (r.failed && r.socket_result != SocketResult.would_block)

@@ -212,25 +212,52 @@ nothrow @nogc:
     }
 
     const(void)[] data() const @property
-        => _ptr[_offset .. _length];
+    {
+        if (_flags & page_flag)
+            return page.data;
+        return _ptr[_offset .. _length];
+    }
 
     // null unless the packet owns its payload
     void[] payload() @property
     {
         if (!(_flags & mutable_flag))
             return null;
+        if (_flags & page_flag)
+            return page.data;
         return (cast(void*)_ptr)[_offset .. _length];
     }
 
     void truncate(size_t length)
     {
+        if (_flags & page_flag)
+        {
+            assert(length <= page.length, "Cannot grow a packet by truncating it");
+            page.length = cast(ushort)length;
+            return;
+        }
         assert(_offset + length <= _length, "Cannot grow a packet by truncating it");
         _length = cast(ushort)(_offset + length);
     }
 
     void[] alloc_prefix(size_t bytes)
     {
-        if (!(_flags & mutable_flag) || _offset < bytes)
+        if (!(_flags & mutable_flag))
+            return null;
+        if (_flags & page_flag)
+        {
+            Page* p = page;
+            size_t packet_offset = packet_page_offset;
+            size_t floor = Page.sizeof;
+            if (packet_offset < p.offset)
+                floor = packet_offset + Packet.sizeof;
+            if (bytes > p.offset || p.offset - bytes < floor)
+                return null;
+            p.offset -= cast(ushort)bytes;
+            p.length += cast(ushort)bytes;
+            return p.data[0 .. bytes];
+        }
+        if (_offset < bytes)
             return null;
         _offset -= cast(ubyte)bytes;
         return (cast(void*)_ptr)[_offset .. _offset + bytes];
@@ -238,6 +265,15 @@ nothrow @nogc:
 
     bool consume_prefix(size_t bytes)
     {
+        if (_flags & page_flag)
+        {
+            Page* p = page;
+            if (bytes > p.length)
+                return false;
+            p.offset += cast(ushort)bytes;
+            p.length -= cast(ushort)bytes;
+            return true;
+        }
         if (_offset + bytes > _length)
             return false;
         _offset += cast(ubyte)bytes;
@@ -247,30 +283,45 @@ nothrow @nogc:
     void data(const(void[]) payload) @property
     {
         assert(payload.length <= ushort.max, "Payload too large");
+        if (_flags & page_flag)
+        {
+            Page* p = page;
+            size_t offset = cast(size_t)payload.ptr - cast(size_t)p;
+            assert(offset <= p.capacity && payload.length <= p.capacity - offset);
+            p.offset = cast(ushort)offset;
+            p.length = cast(ushort)payload.length;
+            return;
+        }
         _ptr = payload.ptr;
         _offset = 0;
         _length = cast(ushort)payload.length;
     }
 
     uint length() const
-        => _length - _offset;
+        => (_flags & page_flag) ? page.length : _length - _offset;
 
     Packet* clone() const
     {
-        void[] page = page_alloc_for(Packet.sizeof + _length);
-        if (!page.ptr)
+        const(void)[] source = data;
+        Page* p = page_alloc(source.length, size_t.sizeof, packet_prefix_size + packet_headroom);
+        if (!p)
             return null;
-        Packet* r = cast(Packet*)page.ptr;
+        Packet* r = attach_packet(p);
+        if (!r)
+        {
+            page_free(p);
+            return null;
+        }
         *r = this;
-        r._flags |= mutable_flag;
-        r._ptr = &r[1];
-        cast(void[])r._ptr[0 .. _length] = _ptr[0 .. _length];
+        r._flags |= mutable_flag | page_flag;
+        r.page.data[] = source;
         return r;
     }
 
     void free_clone()
     {
-        page_free(&this);
+        assert(_flags & page_flag);
+        page_free(page);
     }
 
     PCP pcp() const pure
@@ -323,7 +374,7 @@ nothrow @nogc:
         const(ushort)* tci = cast(const(ushort)*)data.ptr;
         vlan = loadBigEndian(tci);
         eth.ether_type = loadBigEndian(tci + 1);
-        _offset += 4;
+        consume_prefix(4);
         vlan_tag = tag;
         return true;
     }
@@ -367,6 +418,16 @@ package:
 private:
     enum ubyte vlan_tag_mask = 7;
     enum ubyte mutable_flag = 1 << 3;
+    enum ubyte page_flag = 1 << 4;
+
+    Page* page() const
+    {
+        ushort offset = packet_page_offset;
+        return cast(Page*)(cast(void*)&this - offset);
+    }
+
+    ushort packet_page_offset() const
+        => (cast(const(ushort)*)&this)[-1];
 }
 
 // _offset is a ubyte, so 255 is the ceiling.
@@ -374,23 +435,18 @@ enum ubyte packet_headroom = 128;
 
 Packet* alloc_packet(T)(size_t payload, ubyte headroom = packet_headroom)
 {
-    if (payload + headroom > ushort.max)
+    Page* page = page_alloc(payload, size_t.sizeof, packet_prefix_size + headroom);
+    if (!page)
         return null;
 
-    void[] page = page_alloc_for(Packet.sizeof + headroom + payload);
-    if (!page.ptr)
+    Packet* p = attach_packet(page);
+    if (!p)
+    {
+        page_free(page);
         return null;
-
-    // `Packet.init` names the init!T member template, not the default value
-    Packet blank;
-    Packet* p = cast(Packet*)page.ptr;
-    *p = blank;
+    }
     p.creation_time = getTime();
     p.type = T.Type;
-    p._flags = 0x01;     // mutable, so alloc_prefix will work
-    p._offset = headroom;
-    p._length = cast(ushort)(headroom + payload);
-    p._ptr = &p[1];
     return p;
 }
 
@@ -400,6 +456,31 @@ Packet* alloc_packet(T)(const(void)[] payload, ubyte headroom = packet_headroom)
     if (p)
         p.payload[] = cast(void[])payload[];
     return p;
+}
+
+Packet* attach_packet(Page* page)
+{
+    if (!page)
+        return null;
+
+    size_t offset = packet_page_start;
+    if (page.offset < packet_page_start + Packet.sizeof)
+    {
+        size_t base = cast(size_t)page;
+        size_t end = base + page.capacity;
+        size_t address = (end - Packet.sizeof) & ~(Packet.alignof - 1);
+        offset = address - base;
+        if (offset < ushort.sizeof || page.offset + page.length > offset - ushort.sizeof)
+            return null;
+        page.capacity = cast(ushort)(offset - ushort.sizeof);
+    }
+
+    Packet* packet = cast(Packet*)(cast(void*)page + offset);
+    (cast(ushort*)packet)[-1] = cast(ushort)offset;
+    Packet blank;
+    *packet = blank;
+    packet._flags = Packet.mutable_flag | Packet.page_flag;
+    return packet;
 }
 
 struct RawFrame
@@ -520,6 +601,11 @@ static assert(Wifi80211.sizeof == 24);
 
 private:
 
+enum ushort packet_page_start = 8;
+enum ushort packet_prefix_size = ushort.sizeof + Packet.sizeof;
+static assert(packet_page_start == Page.sizeof + ushort.sizeof);
+static assert(packet_page_start % Packet.alignof == 0);
+
 immutable ushort[6] vlan_tpids = [0, EtherType.vlan, EtherType.qinq, EtherType._9100, EtherType._9200, EtherType._9300];
 __gshared PacketCodec[PacketType.count] g_packet_codecs = [ PacketCodec(), PacketCodec(&Ethernet.extract_src, &Ethernet.extract_dst, &Ethernet.is_multicast) ];
 
@@ -534,6 +620,29 @@ ref const(PacketCodec) packet_codec(PacketType type) pure
 
 unittest
 {
+    bool owns_pool = page_pool_init();
+    scope(exit) if (owns_pool) page_pool_deinit();
+
+    Packet* owned = alloc_packet!RawFrame(4);
+    assert(owned && owned.packet_page_offset == packet_page_start);
+    assert(owned.page.offset == packet_page_start + Packet.sizeof + packet_headroom);
+    assert(owned.data.length == 4);
+    ushort data_offset = owned.page.offset;
+    assert(owned.alloc_prefix(4).length == 4);
+    assert(owned.page.offset == data_offset - 4 && owned.data.length == 8);
+    assert(owned.consume_prefix(4));
+    assert(owned.page.offset == data_offset && owned.data.length == 4);
+    owned.free_clone();
+
+    Page* raw = page_alloc(16);
+    assert(raw);
+    ushort old_capacity = raw.capacity;
+    Packet* attached = attach_packet(raw);
+    assert(attached && attached.packet_page_offset > raw.offset + raw.length);
+    assert(raw.capacity == attached.packet_page_offset - ushort.sizeof);
+    assert(raw.capacity < old_capacity && attached.data.length == 16);
+    attached.free_clone();
+
     ubyte[8] payload = [0x00, 0x03, 0x08, 0x00, 1, 2, 3, 4];
     Packet packet;
     ref eth = packet.init!Ethernet(payload[]);

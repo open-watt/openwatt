@@ -1,5 +1,6 @@
 module router.stream.duplex;
 
+import urt.mem.page;
 import urt.mem.temp;
 import urt.string;
 import urt.string.format;
@@ -172,7 +173,7 @@ protected:
         return CompletionStatus.complete;
     }
 
-    override bool queue_tx_page(void[] page)
+    override bool queue_tx_page(Page* page)
     {
         if (_logging)
             return super.queue_tx_page(page);

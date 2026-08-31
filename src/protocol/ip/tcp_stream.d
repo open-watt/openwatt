@@ -5,6 +5,7 @@ import urt.conv;
 import urt.io;
 import urt.log;
 import urt.mem;
+import urt.mem.page;
 import urt.meta.nullable;
 import urt.socket;
 import urt.string;
@@ -277,13 +278,15 @@ nothrow @nogc:
     }
 
 protected:
-    override bool queue_tx_page(void[] page)
+    override bool queue_tx_page(Page* page)
     {
+        if (_logging)
+            return super.queue_tx_page(page);
+
+        size_t length = page.length;
         if (!_conn || !_conn.send_page(page))
             return false;
-        add_tx_bytes(page.length);
-        if (_logging)
-            write_to_log(false, page);
+        add_tx_bytes(length);
         return true;
     }
 
