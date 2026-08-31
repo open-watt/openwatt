@@ -218,6 +218,9 @@ protected:
                     log.debugf("device announce: {0, 04x} [{1}] - type={2}", id, eui, type);
                 n.desc.type = type;
                 arm_extended_timeout(*n);
+                n.prime_attempts = 0;
+                foreach (ref ep; n.endpoints.values)
+                    ep.reset_ias_enrollment();
 
                 // Tuya multi-endpoint devices need a basic cluster read on every
                 // rejoin to activate per-endpoint command routing. If the device

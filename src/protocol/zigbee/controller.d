@@ -106,7 +106,7 @@ nothrow @nogc:
 
     void node_awake(NodeMap* node)
     {
-        if (node.initialised == 0xFF)
+        if (node.initialised == 0xFF && !needs_priming(*node))
             return;
         if (node.scan_in_progress)
             node.woke_during_scan = true;
@@ -219,13 +219,20 @@ protected:
             if (nm.scan_in_progress)
                 continue;
 
-            if (nm.initialised == 0xFF)
-                continue;
-
             if (nm.retry_after != MonoTime() && now < nm.retry_after)
             {
                 if (nm.retry_after != wake_only && (next == MonoTime() || nm.retry_after < next))
                     next = nm.retry_after;
+                continue;
+            }
+
+            if (nm.initialised == 0xFF)
+            {
+                if (nm.device_created && _promises.length < MaxFibers && needs_priming(nm))
+                {
+                    nm.scan_in_progress = true;
+                    _promises.pushBack(async(&do_prime_node, &nm));
+                }
                 continue;
             }
 
@@ -470,6 +477,41 @@ private:
         ubyte[256] record = void;
         if (fmt.stride <= record.length && sample_record(wire, e.desc, record[0 .. fmt.stride]))
             e.element.value(box_record(record.ptr, *fmt), timestamp, &on_samples);
+    }
+
+    void apply_zone_status(EUI64 eui, ubyte endpoint, ushort cluster, ushort zone_status)
+    {
+        static immutable ushort[7] bit_attrs = [ 0xFC00, 0xFC01, 0xFC02, 0xFC03, 0xFC06, 0xFC07, 0xFC09 ];
+        static immutable ushort[7] bit_masks = [ 1, 2, 4, 8, 0x40, 0x80, 0x200 ];
+        foreach (i; 0 .. bit_attrs.length)
+        {
+            if (SampleElement* e = find_sample_element(eui, endpoint, cluster, bit_attrs[i]))
+                e.element.value = (zone_status & bit_masks[i]) != 0;
+        }
+    }
+
+    void replay_known_attributes(ref NodeMap node)
+    {
+        foreach (ref ep; node.endpoints.values)
+        {
+            foreach (ref NodeMap.Cluster c; ep.clusters.values)
+            {
+                if (c.cluster_id == 0x0500)
+                {
+                    NodeMap.Attribute* zone_status = 2 in c.attributes;
+                    if (zone_status && zone_status.last_updated != SysTime())
+                        apply_zone_status(node.eui, ep.endpoint, c.cluster_id, zone_status.value.as!ushort);
+                }
+
+                foreach (ref NodeMap.Attribute a; c.attributes.values)
+                {
+                    if (a.last_updated == SysTime())
+                        continue;
+                    if (SampleElement* e = find_sample_element(node.eui, ep.endpoint, c.cluster_id, a.attribute_id))
+                        e.element.value = a.value;
+                }
+            }
+        }
     }
 
     ZigbeeResult ieee_request(ushort dst, out EUI64 eui, PCP pcp = PCP.be)
@@ -823,21 +865,7 @@ private:
                             attr_delay.value = delay;
                             attr_delay.last_updated = now;
 
-                            // update runtime elements
-                            if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC00))
-                                e.element.value = (zone_status & 1) != 0;
-                            if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC01))
-                                e.element.value = (zone_status & 2) != 0;
-                            if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC02))
-                                e.element.value = (zone_status & 4) != 0;
-                            if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC03))
-                                e.element.value = (zone_status & 8) != 0;
-                            if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC06))
-                                e.element.value = (zone_status & 0x40) != 0;
-                            if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC07))
-                                e.element.value = (zone_status & 0x80) != 0;
-                            if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC09))
-                                e.element.value = (zone_status & 0x200) != 0;
+                            apply_zone_status(nm.eui, aps.src_endpoint, aps.cluster_id, zone_status);
                             if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC10))
                                 e.element.value = zone_id;
                             if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC20))
@@ -850,6 +878,14 @@ private:
                     }
                     else if (cmd == ZCLCommand.ias_zone_enroll_request)
                     {
+                        if (nm)
+                        {
+                            ref ep = nm.get_endpoint(aps.src_endpoint);
+                            if (ep.profile_id == 0)
+                                ep.profile_id = aps.profile_id;
+                            ep.get_cluster(aps.cluster_id);
+                            ep.mark_ias_enrolled();
+                        }
                         ubyte[2] enroll_response = [0x00, 0x00];
                         _endpoint.send_zcl_response(aps.src, aps.src_endpoint, aps.profile_id,
                             aps.cluster_id, ZCLCommand.ias_zone_enroll_response, zcl,
@@ -1138,6 +1174,193 @@ private:
         return res;
     }
 
+    // Sleepy nodes only report changes, so read still-empty profile elements while they are awake.
+    void prime_elements(NodeMap* node)
+    {
+        if (node.desc.type != NodeType.sleepy_end_device)
+            return;
+
+        align(size_t.sizeof) ubyte[128] req = void;
+        ZCLResponse res;
+
+        foreach (ref probe_key; _sample_elements.keys)
+        {
+            ref SampleElement probe = _sample_elements[probe_key];
+            if (!element_needs_prime_read(probe, *node))
+                continue;
+
+            bool first = true;
+            foreach (ref other_key; _sample_elements.keys)
+            {
+                if (other_key[0] != probe_key[0])
+                    continue;
+                if ((other_key[1] >> 16) != (probe_key[1] >> 16))
+                    continue;
+                if (other_key[1] >= probe_key[1])
+                    continue;
+                if (!element_needs_prime_read(_sample_elements[other_key], *node))
+                    continue;
+                first = false;
+                break;
+            }
+            if (!first)
+                continue;
+
+            ushort profile = 0x0104;
+            if (NodeMap.Endpoint* ep = probe.endpoint in node.endpoints)
+                if (ep.profile_id)
+                    profile = ep.profile_id;
+
+            if (probe.cluster == 0x0500)
+            {
+                prime_zone_status(node, probe.endpoint, profile);
+                continue;
+            }
+
+            size_t n;
+            foreach (ref SampleElement e; _sample_elements.values)
+            {
+                if (e.endpoint != probe.endpoint || e.cluster != probe.cluster || !element_needs_prime_read(e, *node))
+                    continue;
+                if (n + ushort.sizeof > req.length)
+                    break;
+                storeLittleEndian(cast(ushort*)(req.ptr + n), e.attribute);
+                n += ushort.sizeof;
+            }
+            if (n == 0)
+                continue;
+
+            ZigbeeResult r = _endpoint.zcl_request(node.id, probe.endpoint, profile, probe.cluster, ZCLCommand.read_attributes, 0, req[0 .. n], res, PCP.bk);
+            if (r != ZigbeeResult.success || res.hdr.command != ZCLCommand.read_attributes_response)
+                continue;
+
+            SysTime now = getSysTime();
+            const(ubyte)[] msg = res.message[];
+            while (msg.length >= 3)
+            {
+                ushort attr_id = msg[0..2].littleEndianToNative!ushort;
+                ubyte status = msg[2];
+                msg = msg[3 .. $];
+                if (status != ZCLStatus.success)
+                    continue;
+                if (msg.length == 0)
+                    break;
+                ZCLDataType type = cast(ZCLDataType)msg[0];
+                Variant value;
+                ptrdiff_t taken = get_zcl_value(type, msg[1 .. $], value);
+                if (taken < 0)
+                    break;
+                if (SampleElement* e = find_sample_element(node.eui, probe.endpoint, probe.cluster, attr_id))
+                    write_decoded_sample(*e, value, msg[1 .. 1 + taken], now);
+                msg = msg[1 + taken .. $];
+            }
+        }
+    }
+
+    void enroll_ias(NodeMap* node, bool retry = false)
+    {
+        foreach (ref SampleElement e; _sample_elements.values)
+        {
+            if (e.eui != node.eui || e.cluster != 0x0500)
+                continue;
+            ref ep = node.get_endpoint(e.endpoint);
+            if (ep.profile_id == 0)
+                ep.profile_id = 0x0104;
+            ep.mark_ias_profile();
+        }
+
+        align(size_t.sizeof) ubyte[11] req = void;
+        storeLittleEndian(cast(ushort*)req.ptr, ushort(0x0010));
+        req[2] = ubyte(ZCLDataType.ieee_address);
+        req[3 .. 11] = _endpoint.node.eui.b[];
+
+        foreach (ref ep; node.endpoints.values)
+        {
+            if (!ep.has_ias_zone || ep.ias_enrolled || ep.ias_attempts >= 3)
+                continue;
+            if (!retry && ep.ias_attempts != 0)
+                continue;
+
+            ushort profile = ep.profile_id ? ep.profile_id : 0x0104;
+            int tag = _endpoint.send_zcl_message(node.id, ep.endpoint, profile, 0x0500,
+                ZCLCommand.write_attributes_no_response, ZCLControlFlags.disable_default_response,
+                req[], PCP.ca);
+            if (tag < 0)
+                continue;
+            ep.note_ias_attempt();
+            version (DebugZigbeeController)
+                log.debugf("enrolling ias zone on {0,04x}:{1,02x}", node.id, ep.endpoint);
+        }
+    }
+
+    void prime_zone_status(NodeMap* node, ubyte endpoint, ushort profile)
+    {
+        align(size_t.sizeof) ubyte[2] req = void;
+        storeLittleEndian(cast(ushort*)req.ptr, ushort(0x0002));
+        ZCLResponse res;
+        ZigbeeResult r = _endpoint.zcl_request(node.id, endpoint, profile, 0x0500, ZCLCommand.read_attributes, 0, req[], res, PCP.bk);
+        if (r != ZigbeeResult.success || res.hdr.command != ZCLCommand.read_attributes_response)
+            return;
+
+        const(ubyte)[] msg = res.message[];
+        if (msg.length < 6 || loadLittleEndian(cast(const ushort*)msg.ptr) != 0x0002 || msg[2] != ZCLStatus.success || msg[3] != ZCLDataType.bitmap16)
+            return;
+
+        ushort zone_status = loadLittleEndian(cast(const ushort*)(msg.ptr + 4));
+        if (NodeMap.Endpoint* ep = endpoint in node.endpoints)
+        {
+            if (NodeMap.Cluster* cluster = 0x0500 in ep.clusters)
+            {
+                ref NodeMap.Attribute a = cluster.get_attribute(2);
+                a.value = zone_status;
+                a.last_updated = getSysTime();
+            }
+        }
+        apply_zone_status(node.eui, endpoint, 0x0500, zone_status);
+    }
+
+    bool element_needs_prime_read(ref SampleElement e, ref NodeMap node)
+    {
+        if (e.eui != node.eui || e.manufacturer != 0 || e.cluster == 0 || e.cluster == 0xEF00)
+            return false;
+        if (e.cluster != 0x0500 && e.attribute >= 0xFC00)
+            return false;
+        return e.element.record_update() == SysTime();
+    }
+
+    bool needs_priming(ref NodeMap node)
+    {
+        if (node.desc.type != NodeType.sleepy_end_device)
+            return false;
+        foreach (ref ep; node.endpoints.values)
+            if (ep.has_ias_zone && !ep.ias_enrolled && ep.ias_attempts < 3)
+                return true;
+        foreach (ref SampleElement e; _sample_elements.values)
+            if (node.prime_attempts < 3 && element_needs_prime_read(e, node))
+                return true;
+        return false;
+    }
+
+    bool do_prime_node(NodeMap* node)
+    {
+        node.woke_during_scan = false;
+        scope(exit)
+        {
+            node.scan_in_progress = false;
+            node.retry_after = needs_priming(*node) ? (node.woke_during_scan ? MonoTime() : wake_only) : MonoTime();
+            node.woke_during_scan = false;
+            arm_timer(getTime());
+        }
+
+        enroll_ias(node, true);
+        if (node.prime_attempts < 3)
+        {
+            ++node.prime_attempts;
+            prime_elements(node);
+        }
+        return true;
+    }
+
     bool do_node_interview(NodeMap* node)
     {
         version (DebugZigbeeController)
@@ -1199,19 +1422,6 @@ private:
                 return fail("invalid response");
             progressed = true;
         }
-/+
-        // how do we know if we should do the IAS thing?
-        if (node.desc.type == NodeType.sleepy_end_device)
-        {
-            // maybe IAS stuff?
-            req_buffer[0..2] = ushort(0x0010).nativeToLittleEndian;
-            req_buffer[2] = 0xF0;
-            req_buffer[3..11] = _endpoint.node.eui.b[];
-            int tag = _endpoint.send_zcl_message(node.id, 1, 0x0104, 0x0500, ZCLCommand.write_attributes_no_response, ZCLControlFlags.disable_default_response, req_buffer[0..11], PCP.ca);
-            if (tag < 0)
-                return fail("IAS subscribe failed");
-        }
-+/
         // try request basic cluster
         if (!(node.initialised & 0xC0))
         {
@@ -1234,6 +1444,16 @@ private:
                     cluster.dynamic = false;
                     node.initialised |= 0xC0;
                     progressed = true;
+
+                    // Publish once identified so the remaining wake window can populate the device.
+                    if (_auto_create_devices && !node.device_created && node.desc.type != NodeType.coordinator)
+                    {
+                        node.device_created = true;
+                        create_device(*node);
+                        replay_known_attributes(*node);
+                    }
+                    enroll_ias(node);
+                    prime_elements(node);
                 }
                 else
                 {
@@ -1264,16 +1484,13 @@ private:
                 return fail("power_desc_req failed");
 
             msg = zdo_res.message[];
-            if (msg.length < 4)
-                return fail("response too short");
-            if (msg[0..2].littleEndianToNative!ushort != node.id)
-                return fail("id mismatch");
+            if (msg.length < 4 || loadLittleEndian(cast(const ushort*)msg.ptr) != node.id)
+                return fail("invalid power descriptor");
 
             node.power.current_mode = cast(CurrentPowerMode)(msg[2] & 0x0F);
             node.power.available_sources = msg[2] >> 4;
             node.power.current_source = msg[3] & 0x0F;
             node.power.batt_level = g_power_levels[msg[3] >> 6];
-
             node.initialised |= 0x02;
             progressed = true;
         }
@@ -1288,22 +1505,14 @@ private:
                 return fail("active_ep_req failed");
 
             msg = zdo_res.message[];
-            if (msg.length < 3)
-                return fail("response too short");
-            if (msg[0..2].littleEndianToNative!ushort != node.id)
-                return fail("id mismatch");
+            if (msg.length < 3 || loadLittleEndian(cast(const ushort*)msg.ptr) != node.id)
+                return fail("invalid active endpoint list");
 
-            ubyte num_eps = msg[2];
-            if (msg.length < 3 + num_eps)
-                return fail("response too short");
-
-            foreach (i; 0 .. num_eps)
-            {
-                ubyte endpoint = msg[3 + i];
-                ref ep = node.get_endpoint(endpoint);
-                ep.dynamic = false;
-            }
-
+            ubyte num_endpoints = msg[2];
+            if (msg.length < 3 + num_endpoints)
+                return fail("invalid active endpoint list");
+            foreach (endpoint; msg[3 .. 3 + num_endpoints])
+                node.get_endpoint(endpoint).dynamic = false;
             node.initialised |= 0x04;
             progressed = true;
         }
@@ -1365,6 +1574,7 @@ private:
             }
 
             node.initialised |= 0x08;
+            enroll_ias(node);
         }
 
         // for each endpoint...
