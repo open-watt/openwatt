@@ -38,6 +38,7 @@ nothrow @nogc:
 
 enum MaxFibers = 2;
 
+enum MonoTime wake_only = MonoTime(ulong.max);
 
 class ZigbeeController : ActiveObject
 {
@@ -92,17 +93,32 @@ nothrow @nogc:
     {
         _auto_create_devices = value;
         mark_set!(typeof(this), "auto-create")();
+        if (value)
+            arm_timer(getTime());
     }
 
     // API...
 
+    void work_pending()
+    {
+        arm_timer(getTime());
+    }
+
     void node_awake(NodeMap* node)
     {
-        if (node.initialised == 0xFF || node.retry_after == MonoTime())
+        if (node.initialised == 0xFF)
             return;
-        node.retry_after = MonoTime();
-        version (DebugZigbeeController)
-            log.debugf("node {0,04x} is awake; resuming interview", node.id);
+        if (node.scan_in_progress)
+            node.woke_during_scan = true;
+        else if (node.retry_after != MonoTime())
+        {
+            node.retry_after = MonoTime();
+            version (DebugZigbeeController)
+                log.debugf("node {0,04x} is awake; resuming interview", node.id);
+        }
+        // This runs inside receive dispatch, so defer the scheduler pass to avoid re-entering
+        // the transmit path. The pass also publishes any identity learned by an active interview.
+        arm_timer(getTime());
     }
 
 protected:
@@ -120,8 +136,20 @@ protected:
         return _endpoint.running ? CompletionStatus.complete : CompletionStatus.continue_;
     }
 
+    override void online()
+    {
+        super.online();
+        pump();
+    }
+
     override CompletionStatus shutdown()
     {
+        if (_timer_armed)
+        {
+            g_app.cancel(&timer_expired);
+            _timer_armed = false;
+        }
+
         // abort any outstanding interviews
         while (!_promises.empty)
         {
@@ -148,31 +176,15 @@ protected:
         return CompletionStatus.complete;
     }
 
-    override void update()
+    void pump()
     {
-        // we need to populate our database of devices with detail...
+        if (!running)
+            return;
 
-        ZigbeeProtocolModule zb = get_module!ZigbeeProtocolModule();
-
-        MonoTime now = getTime();
-
-        size_t i;
-        for (i = 0; i < tuya_dedup.length; )
-        {
-            if (now - tuya_dedup[i].last > 2.seconds || now - tuya_dedup[i].first > 10.seconds)
-                tuya_dedup.remove(i);
-            else
-                ++i;
-        }
-
-        for (i = 0; i < _promises.length; )
+        for (size_t i = 0; i < _promises.length; )
         {
             if (_promises[i].finished)
             {
-                if (!_promises[i].result)
-                {
-                    // TODO: anything on failure? retry? reason why?
-                }
                 free_promise(_promises[i]);
                 _promises.remove(i);
             }
@@ -181,22 +193,21 @@ protected:
         }
 
         if (!_endpoint.node.is_network_up)
+        {
+            // TODO: the interface has no state signal to subscribe to, so look again shortly;
+            //       this only runs while the network is down
+            arm_timer(getTime() + 1.seconds);
             return;
+        }
 
-        // update all the nodes...
+        ZigbeeProtocolModule zb = get_module!ZigbeeProtocolModule();
+        MonoTime now = getTime();
+        MonoTime next;
+
         foreach (ref NodeMap nm; zb.nodes_by_eui.values)
         {
             if (!nm.available)
                 continue;
-
-            if (nm.initialised < 0xFF && !nm.scan_in_progress && _promises.length < MaxFibers)
-            {
-                if (nm.retry_after != MonoTime() && now < nm.retry_after)
-                    continue;
-
-                nm.scan_in_progress = true;
-                _promises.pushBack(async(&do_node_interview, &nm));
-            }
 
             if (_auto_create_devices && !nm.device_created && (nm.initialised & 0x80))
             {
@@ -204,20 +215,67 @@ protected:
                 if (nm.desc.type != NodeType.coordinator)
                     create_device(nm);
             }
+
+            if (nm.scan_in_progress)
+                continue;
+
+            if (nm.initialised == 0xFF)
+                continue;
+
+            if (nm.retry_after != MonoTime() && now < nm.retry_after)
+            {
+                if (nm.retry_after != wake_only && (next == MonoTime() || nm.retry_after < next))
+                    next = nm.retry_after;
+                continue;
+            }
+
+            if (_promises.length >= MaxFibers)
+                continue; // a finishing attempt pumps again, which picks this node up
+
+            nm.scan_in_progress = true;
+            _promises.pushBack(async(&do_node_interview, &nm));
         }
 
-        foreach (j, ref unk; get_module!ZigbeeProtocolModule.unknown_nodes)
+        foreach (ref unk; zb.unknown_nodes)
         {
             if (!unk.scanning)
             {
                 unk.scanning = true;
                 if (send_ieee_request(unk.id, PCP.ca, &probe_response, cast(void*)cast(size_t)unk.id) < 0)
+                {
                     unk.scanning = false;
+                    MonoTime retry = now + 1.seconds;
+                    if (next == MonoTime() || retry < next)
+                        next = retry;
+                }
             }
         }
 
         // TODO: periodically read the software/build id's
         //       if they change (firmware update) we should re-interview the device to rebuild it's detail map
+
+        arm_timer(next);
+    }
+
+    void arm_timer(MonoTime when)
+    {
+        if (when == MonoTime() || !running)
+            return;
+        if (_timer_armed)
+        {
+            if (_timer_at <= when)
+                return;
+            g_app.cancel(&timer_expired);
+        }
+        _timer_armed = true;
+        _timer_at = when;
+        g_app.schedule(when, &timer_expired);
+    }
+
+    void timer_expired(MonoTime)
+    {
+        _timer_armed = false;
+        pump();
     }
 
     void probe_response(ZigbeeResult result, ZDOStatus status, const(ubyte)[] message, void* user_data)
@@ -329,10 +387,12 @@ private:
     Array!Device _bound_devices;
 
     bool _auto_create_devices;
+    bool _timer_armed;
     ushort tuya_txn_id = 1;
 
     ObjectRef!ZigbeeEndpoint _endpoint;
     Array!(Promise!bool*) _promises;
+    MonoTime _timer_at;
 
     Array!NodeMap discover_nodes;
     Array!TuyaDedup tuya_dedup;
@@ -823,14 +883,24 @@ private:
 
                     // Tuya messages are spammy!
                     MonoTime now = getTime();
-                    foreach (ref dedup; tuya_dedup)
+                    bool duplicate = false;
+                    for (size_t d = 0; d < tuya_dedup.length; )
                     {
+                        ref dedup = tuya_dedup[d];
+                        if (now - dedup.last > 2.seconds || now - dedup.first > 10.seconds)
+                        {
+                            tuya_dedup.remove(d);
+                            continue;
+                        }
                         if (dedup.node == aps.src && dedup.tag == tuya_seq)
                         {
                             dedup.last = now;
-                            return; // suppress duplicate application data; scope(exit) still ACKs it
+                            duplicate = true;
                         }
+                        ++d;
                     }
+                    if (duplicate)
+                        return; // suppress duplicate application data; scope(exit) still ACKs it
                     tuya_dedup.pushBack(TuyaDedup(now, now, aps.src, tuya_seq));
 
                     switch (cmd) with (ZCLCommand)
@@ -1054,7 +1124,8 @@ private:
         log.warning("no fingerprint match for node ", node.eui);
     }
 
-    // a little helper to try a request up to 3 times with a delay
+    // a timeout means the node acked the frame and then failed to answer: it is awake and the reply
+    // was lost, so try again. a delivery failure means it never heard us, and repeating is pure noise
     ZigbeeResult try_thrice(scope ZigbeeResult delegate() nothrow @nogc fn)
     {
         ZigbeeResult res;
@@ -1063,7 +1134,6 @@ private:
             res = fn();
             if (res != ZigbeeResult.timeout)
                 break;
-//            sleep(100.msecs); // timeout already implemented a fairly long wait?
         }
         return res;
     }
@@ -1079,13 +1149,36 @@ private:
         const(ubyte)[] msg = void;
         ubyte[128] req_buffer = void;
 
+        node.woke_during_scan = false;
+        scope(exit)
+        {
+            node.scan_in_progress = false;
+            node.woke_during_scan = false;
+            arm_timer(getTime());
+        }
+        bool progressed;
+
         bool fail(const(char)[] reason = "failed")
         {
             import urt.util : min;
-            node.scan_in_progress = false;
+            if (progressed)
+                node.interview_failures = 0;
             node.interview_failures = cast(ubyte)min(node.interview_failures + 1, 5);
             uint backoff_secs = 2u << node.interview_failures;
-            node.retry_after = getTime() + backoff_secs.seconds;
+            if (node.woke_during_scan)
+            {
+                node.retry_after = MonoTime();
+                backoff_secs = 0;
+            }
+            else if (node.desc.type == NodeType.sleepy_end_device)
+            {
+                // it cannot be reached on a schedule, so a timed retry only spends airtime talking
+                // at something asleep; the next thing we hear from it is the only useful moment
+                node.retry_after = wake_only;
+                backoff_secs = 0;
+            }
+            else
+                node.retry_after = getTime() + backoff_secs.seconds;
             version (DebugZigbeeController)
                 log.warningf("interview FAILED for device {0,04x}! result = {1} - {2} (retry in {3}s)", node.id, r, reason, backoff_secs);
             return false;
@@ -1104,6 +1197,7 @@ private:
 
             if (!zdo_res.message[].parse_node_desc(node))
                 return fail("invalid response");
+            progressed = true;
         }
 /+
         // how do we know if we should do the IAS thing?
@@ -1121,8 +1215,6 @@ private:
         // try request basic cluster
         if (!(node.initialised & 0xC0))
         {
-            node.initialised |= 0x40; // this is an eager attempt; either way this goes, we won't try again
-
             ref ep = node.get_endpoint(1);
             if (ep.profile_id == 0 || ep.profile_id == 0x0104)
             {
@@ -1132,24 +1224,25 @@ private:
                 bool create_cluster = 0 !in ep.clusters;
                 ref cluster = ep.get_cluster(0);
 
-                StringResult result;
-                foreach (i; 0..3)
+                BasicReadResult result = read_basic_info(node.id, ep, node.basic_info);
+                if (result == BasicReadResult.success)
                 {
-                    result = read_basic_info(node.id, ep, node.basic_info);
-                    if (result.succeeded)
-                    {
-                        if (!node.device_created)
-                            log.infof("interviewing device {0,04x}: {1} \"{2}\" {3} {4}", node.id, node.desc.type, node.get_fingerprint()[], node.basic_info.product_code[], node.basic_info.product_url[]);
+                    if (!node.device_created)
+                        log.infof("interviewing device {0,04x}: {1} \"{2}\" {3} {4}", node.id, node.desc.type, node.get_fingerprint()[], node.basic_info.product_code[], node.basic_info.product_url[]);
 
-                        ep.dynamic = false;
-                        cluster.dynamic = false;
-                        node.initialised |= 0x80;
-                        break;
-                    }
+                    ep.dynamic = false;
+                    cluster.dynamic = false;
+                    node.initialised |= 0xC0;
+                    progressed = true;
                 }
-
-                if (result.failed)
+                else
                 {
+                    if (result == BasicReadResult.refused)
+                    {
+                        node.initialised |= 0x40;
+                        progressed = true;
+                    }
+
                     // this was created for the prospective attempt; we'll clean it up
                     if (create_cluster)
                         ep.clusters.remove(0);
@@ -1157,6 +1250,8 @@ private:
                         node.endpoints.remove(1);
                 }
             }
+            else
+                node.initialised |= 0x40; // no plausible endpoint to ask
         }
 
         // request power descriptor
@@ -1180,6 +1275,7 @@ private:
             node.power.batt_level = g_power_levels[msg[3] >> 6];
 
             node.initialised |= 0x02;
+            progressed = true;
         }
 
         // request active endpoints
@@ -1209,6 +1305,7 @@ private:
             }
 
             node.initialised |= 0x04;
+            progressed = true;
         }
 
         // discover clusters for each endpoint
@@ -1264,6 +1361,7 @@ private:
                 }
 
                 ep.initialised |= 0x01;
+                progressed = true;
             }
 
             node.initialised |= 0x08;
@@ -1352,13 +1450,22 @@ private:
                     // if we have a basic cluster, read basic info here so we have it as early as possible
                     if (!(node.initialised & 0x80) && ep.profile_id == 0x0104 && c.cluster_id == 0)
                     {
-                        StringResult result = read_basic_info(node.id, ep, node.basic_info);
-                        if (!result)
-                            return fail(result.message);
-                        node.initialised |= 0x80;
+                        BasicReadResult result = read_basic_info(node.id, ep, node.basic_info);
+                        if (result == BasicReadResult.transport)
+                            return fail("basic read failed");
+                        if (result == BasicReadResult.malformed)
+                        {
+                            // Retrying the same bad reply within this wake window would spin.
+                            node.woke_during_scan = false;
+                            return fail("invalid basic response");
+                        }
+                        if (result == BasicReadResult.success)
+                            node.initialised |= 0x80;
+                        // a refusal leaves the default fingerprint; auto-create will report it
                     }
 
                     c.initialised |= 0x01;
+                    progressed = true;
                 }
 
                 ep.initialised |= 0x02;
@@ -1388,23 +1495,27 @@ private:
         }
 
         node.initialised = 0xFF; // fully initialised
-        node.scan_in_progress = false;
         node.interview_failures = 0;
         node.retry_after = MonoTime();
 
         return true;
     }
 
-    StringResult read_basic_info(ushort node_id, ref NodeMap.Endpoint ep, out NodeMap.BasicInfo result)
+    enum BasicReadResult : ubyte
+    {
+        success,
+        transport,
+        refused,
+        malformed,
+    }
+
+    BasicReadResult read_basic_info(ushort node_id, ref NodeMap.Endpoint ep, out NodeMap.BasicInfo result)
     {
         ZCLResponse zcl_res;
         ubyte[128] req_buffer = void;
 
-        if (ep.profile_id != 0x0104)
-            return StringResult("endpoint does not use the Home Automation profile");
-
-        if (0 !in ep.clusters)
-            return StringResult("endpoint does not have basic cluster");
+        if (ep.profile_id != 0x0104 || 0 !in ep.clusters)
+            return BasicReadResult.refused;
         ref NodeMap.Cluster basic = ep.clusters[0];
 
         // read from the basic cluster
@@ -1415,17 +1526,13 @@ private:
         // read basic attributes
         ZigbeeResult r = try_thrice(() => _endpoint.zcl_request(node_id, ep.endpoint, 0x0104, 0, ZCLCommand.read_attributes, 0, req_buffer[0 .. basic_attributes.length*2], zcl_res, PCP.bk));
         if (r != ZigbeeResult.success)
-            return StringResult("request failed");
+            return BasicReadResult.transport;
         if (zcl_res.hdr.command == ZCLCommand.default_response)
-        {
-            if (zcl_res.message[1] != ZCLStatus.unsup_cluster_command)
-                return StringResult("default response failure");
-            return StringResult.success; // apparently the basic cluster doesn't want to provide any info...? (TODO: should we try another endpoint?)
-        }
+            return BasicReadResult.refused;
 
         const(ubyte)[] msg = zcl_res.message[];
         if (msg.length < basic_attributes.length*3)
-            return StringResult("response too short");
+            return BasicReadResult.malformed;
 
         SysTime now = getSysTime();
 
@@ -1436,15 +1543,11 @@ private:
             ubyte status = msg[i + 2];
             i += 3;
             if (status != 0)
-            {
-                if (status == ZCLStatus.unsupported_attribute)
-                    continue; // TODO: should we zero-out the attribute value?
-//                return fail("read attribute fail");
-                continue; // also just skip on other errors? or maybe we should bail (maybe we fell off the parsing rails?)
-            }
+                continue;
 
+            if (i == msg.length)
+                return BasicReadResult.malformed;
             ref NodeMap.Attribute attr = basic.get_attribute(attr_id);
-            attr.last_updated = now;
 
             ZCLDataType data_type = cast(ZCLDataType)msg[i++];
             version (DebugZigbeeController)
@@ -1455,10 +1558,12 @@ private:
             attr.data_type = data_type;
 
             ptrdiff_t taken = get_zcl_value(attr.data_type, msg[i .. $], attr.value);
+            if (taken < 0)
+                return BasicReadResult.malformed;
+            attr.last_updated = now;
+            i += taken;
             if (taken > 0)
             {
-                i += taken;
-
                 switch (attr_id)
                 {
                     case 0:      result.zcl_ver = attr.value.as!ubyte;      break;
@@ -1477,7 +1582,7 @@ private:
             }
         }
 
-        return StringResult.success;
+        return BasicReadResult.success;
     }
 }
 
