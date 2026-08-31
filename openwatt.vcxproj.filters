@@ -825,6 +825,9 @@
     <DCompile Include="src\protocol\dhcp\message.d">
       <Filter>src\protocol\dhcp</Filter>
     </DCompile>
+    <DCompile Include="src\protocol\dhcp\message6.d">
+      <Filter>src\protocol\dhcp</Filter>
+    </DCompile>
     <DCompile Include="src\protocol\dhcp\option.d">
       <Filter>src\protocol\dhcp</Filter>
     </DCompile>

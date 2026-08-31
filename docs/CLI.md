@@ -722,11 +722,27 @@ IPv4 and IPv6 are configured through parallel collections: `address`/`address6`,
 | `blackhole` | `yes`/`no` | Silently discard matching traffic. |
 | `distance` | `0` to `255` | Route preference; lower wins. |
 
+`/protocol/ip/pool6` describes a v6 allocation prefix serving two shapes at
+once: individual host addresses (DHCPv6 `IA_NA`) and delegated sub-prefixes
+(DHCPv6 `IA_PD`) of `delegation-length` carved from the same prefix.
+
+| Property | Values | Description |
+| --- | --- | --- |
+| `prefix` | IPv6 address | The pool's covering prefix. |
+| `prefix-length` | `1` to `128` | Length of the covering prefix. |
+| `delegation-length` | `prefix-length+1` to `64` | Size of delegated sub-prefixes; unset disables delegation. |
+
 ```
 /protocol/ip/address/add address=192.168.1.10/24 interface=eth0
 /protocol/ip/address6/add address=2001:db8:1::10/64 interface=eth0
 /protocol/ip/route6/add destination=::/0 gateway=fe80::1 out-interface=eth0
 ```
+
+### DHCPv6
+
+DHCPv6 rides beside SLAAC: addresses and delegated prefixes come from DHCPv6,
+while the default route always comes from Router Advertisements because DHCPv6
+does not carry routes.
 
 ### `/protocol/http/server`
 
