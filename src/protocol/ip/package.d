@@ -591,19 +591,31 @@ nothrow @nogc:
 
         version (Windows)
         {
+            if (_send)
+            {
+                page.next = null;
+                if (_tx_tail)
+                    _tx_tail.next = page;
+                else
+                    _tx_head = page;
+                _tx_tail = page;
+                _tx_bytes += page.length;
+                return true;
+            }
+
             SendOp* op = alloc!SendOp();
             if (!op)
                 return false;
             op.io.on_complete = &send_complete;
             op.page = page;
-            _tx_bytes += page.length;
             if (!post_send(op))
             {
-                _tx_bytes -= page.length;
                 free(op);
                 fail(IPEvent.error);
                 return false;
             }
+            _send = op;
+            _tx_bytes += page.length;
         }
         else
         {
@@ -702,6 +714,7 @@ nothrow @nogc:
                 ws_closesocket(_handle);
                 _handle = INVALID_SOCKET;
             }
+            clear_tx();
             // freed by the pump sweep once the cancelled ops' completions drain
         }
     }
@@ -923,6 +936,7 @@ private:
 
         IOCP_SOCKET _handle = INVALID_SOCKET;
         int  _outstanding;   // overlapped ops in flight; freed by the pump sweep once they drain
+        SendOp* _send;
         IoOp _connect_op;
         RecvOp _recv;
 
@@ -1029,6 +1043,7 @@ private:
         void send_complete(IoOp* op, bool ok, uint bytes, uint)
         {
             SendOp* sop = cast(SendOp*)op;
+            debug assert(sop is _send);
             --_outstanding;
             size_t remaining = sop.page.length;
             debug assert(bytes <= remaining);
@@ -1037,6 +1052,7 @@ private:
                 _tx_bytes -= remaining;
                 page_free(sop.page);
                 free(sop);
+                _send = null;
                 if (!_closing)
                     fail(IPEvent.error);
                 return;
@@ -1045,7 +1061,8 @@ private:
             sop.page.offset += cast(ushort)bytes;
             sop.page.length -= cast(ushort)bytes;
             _tx_bytes -= bytes;
-            if (sop.page.length != 0 && !_closing && post_send(sop))
+            bool active = !_closing && _phase == Phase.open;
+            if (sop.page.length != 0 && active && post_send(sop))
             {
                 if (_on_tx_ready && tx_request() != 0)
                     _on_tx_ready(&this);
@@ -1055,13 +1072,40 @@ private:
             remaining = sop.page.length;
             _tx_bytes -= remaining;
             page_free(sop.page);
-            free(sop);
-            if (remaining != 0 && !_closing)
+            if (remaining != 0)
             {
+                free(sop);
+                _send = null;
+                if (active)
+                    fail(IPEvent.error);
+                return;
+            }
+
+            if (active && _tx_head)
+            {
+                sop.page = _tx_head;
+                _tx_head = sop.page.next;
+                if (!_tx_head)
+                    _tx_tail = null;
+                sop.page.next = null;
+                if (post_send(sop))
+                {
+                    if (_on_tx_ready && tx_request() != 0)
+                        _on_tx_ready(&this);
+                    return;
+                }
+
+                _tx_bytes -= sop.page.length;
+                page_free(sop.page);
+                free(sop);
+                _send = null;
                 fail(IPEvent.error);
                 return;
             }
-            if (!_closing && _on_tx_ready && tx_request() != 0)
+
+            free(sop);
+            _send = null;
+            if (active && _on_tx_ready && tx_request() != 0)
                 _on_tx_ready(&this);
         }
     }

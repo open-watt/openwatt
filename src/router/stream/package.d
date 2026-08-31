@@ -340,16 +340,15 @@ protected:
             }
 
             debug assert(page.length != 0);
-            if (page.length == 0 || !queue_tx_page(page))
+            size_t length = page.length;
+            if (length == 0 || !queue_tx_page(page))
             {
                 page_free(page);
                 if (_outgoing is handler)
                     _outgoing = null;
             }
-            else if (page.length >= requested)
-                requested = tx_request();
             else
-                requested -= page.length;
+                requested = tx_request();
         }
     }
 
