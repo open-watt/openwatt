@@ -2,6 +2,7 @@ module protocol.ip;
 
 import urt.array;
 import urt.endian;
+import urt.hash;
 import urt.inet;
 import urt.log;
 import urt.mem.pagepool;
@@ -9,6 +10,7 @@ import urt.mem.temp;
 import urt.socket;
 import urt.string;
 import urt.time;
+import urt.util : is_aligned;
 
 import manager.collection;
 import manager.console;
@@ -299,6 +301,28 @@ void store_ipv6_address(ubyte* destination, IPv6Addr address) pure
         storeBigEndian(cast(ushort*)destination + i, address.s[i]);
 }
 
+ushort pseudo_header_checksum_v6(ref const(ubyte)[16] source, ref const(ubyte)[16] destination, uint length, IPProtocol protocol) pure
+{
+    align(uint.sizeof) ubyte[40] pseudo_header = void;
+    debug assert(is_aligned!(uint.sizeof)(pseudo_header.ptr));
+    pseudo_header[0 .. 16] = source[];
+    pseudo_header[16 .. 32] = destination[];
+    storeBigEndian(cast(uint*)(pseudo_header.ptr + 32), length);
+    storeBigEndian(cast(uint*)(pseudo_header.ptr + 36), ubyte(protocol));
+    return internet_checksum(pseudo_header[]);
+}
+
+MACAddress ipv6_multicast_mac(IPv6Addr address) pure
+{
+    MACAddress mac;
+    mac.b[0] = 0x33;
+    mac.b[1] = 0x33;
+    mac.b[2] = cast(ubyte)(address.s[6] >> 8);
+    mac.b[3] = cast(ubyte)address.s[6];
+    mac.b[4] = cast(ubyte)(address.s[7] >> 8);
+    mac.b[5] = cast(ubyte)address.s[7];
+    return mac;
+}
 
 enum IPEvent : ubyte
 {

@@ -939,7 +939,13 @@
     <DCompile Include="src\protocol\ip\icmp.d">
       <Filter>src\protocol\ip</Filter>
     </DCompile>
+    <DCompile Include="src\protocol\ip\icmp6.d">
+      <Filter>src\protocol\ip</Filter>
+    </DCompile>
     <DCompile Include="src\protocol\ip\igmp.d">
+      <Filter>src\protocol\ip</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ip\mld.d">
       <Filter>src\protocol\ip</Filter>
     </DCompile>
     <DCompile Include="src\protocol\ip\neighbour.d">
