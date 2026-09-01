@@ -43,7 +43,10 @@ At startup, if `conf/config.conf` exists it is loaded INSTEAD of `conf/startup.c
 precedence over the saved configuration. Delete `conf/config.conf` to fall back to the startup script.
 
 Secrets are never written in plaintext when hashed: a hashed `/secret` exports its password as a
-`hash:<algo>:<salt>:<hash>` literal which reloads directly into the same salt and hash.
+`hash:<algo>:<salt>:<hash>` literal which reloads directly into the same salt and hash. Outbound use
+(such as a WiFi PSK) is preserved by `conf/secret.store`, a local hash -> plaintext side file which is
+never exported or synced; the config remains valid without it, but secrets that must be SENT (rather
+than verified) are unusable until the password is re-typed at the console, which repopulates the store.
 
 Config mutations after boot (any collection `add`/`remove`/`set`/`reset`) mark the running configuration
 dirty. `/system/sysinfo` shows this as `Config: modified` or `Config: saved`, and `/system/sysinfo

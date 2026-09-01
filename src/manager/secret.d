@@ -136,6 +136,14 @@ nothrow @nogc:
         set_password(cast(ubyte[])value, _function);
     }
 
+    // recoverable secret material for outbound use (wifi psk etc); empty when only the hash is known
+    const(char)[] plaintext() const pure
+    {
+        if (_function == HashFunction.plain_text)
+            return cast(const(char)[])_hash[];
+        return cast(const(char)[])_plaintext[];
+    }
+
     HashFunction algorithm() const pure
         => _function;
     void algorithm(HashFunction value)
@@ -150,9 +158,14 @@ nothrow @nogc:
             // we can re-hash a plaintext password
             set_password(_hash[], value);
         }
+        else if (!_plaintext.empty)
+        {
+            Array!ubyte keep = _plaintext[];
+            set_password(keep[], value);
+        }
         else
         {
-            // the password we already store is not plaintext, we must discard it
+            // the stored password is not plaintext and not recoverable, we must discard it
             _function = value;
             _salt[] = 0;
             _hash = null;
@@ -327,6 +340,7 @@ private:
     HashFunction _function = HashFunction.plain_text; // TODO: not a great default! :P
     ubyte[16] _salt;
     Array!ubyte _hash;
+    Array!ubyte _plaintext;     // retained for outbound use; persisted in the side store, never in config
 
     static if (has_ec_secret)
     {
@@ -345,14 +359,22 @@ private:
     void set_password(ubyte[] password, HashFunction hash_function)
     {
         if (hash_function == HashFunction.plain_text)
+        {
             _salt[] = 0;
+            _plaintext = null;
+        }
         else
         {
             for (size_t i = 0; i < 16; i += uint.sizeof)
                 *cast(uint*)&_salt[i] = rand();
+            // copy before _hash is replaced: the re-hash path passes a slice of the old _hash
+            Array!ubyte keep = password[];
+            _plaintext = keep.move;
         }
         _function = hash_function;
         _hash = hash_password(password, _salt[], hash_function);
+        if (hash_function != HashFunction.plain_text)
+            store_secret_material(_hash[], _plaintext[]);
         mark_set!(typeof(this), [ "password", "algorithm" ])();
     }
 
@@ -392,6 +414,7 @@ private:
         _function = fn;
         _salt = salt;
         _hash = hash.move;
+        _plaintext = lookup_secret_material(_hash[]);
         mark_set!(typeof(this), [ "password", "algorithm" ])();
         return true;
     }
@@ -498,6 +521,104 @@ void secure_zero(ubyte[] buffer)
         volatileStore(&b, ubyte(0));
 }
 
+
+// hash -> plaintext side store: lets hashed exports stay usable for outbound secrets.
+// Lives beside the config, is never exported or synced, and losing it only costs
+// outbound use until someone re-types the password.
+enum secret_store_file = "conf/secret.store";
+
+Array!ubyte lookup_secret_material(const(ubyte)[] hash)
+{
+    load_secret_store();
+    String key = tconcat_hex(hash).make_string();
+    if (Array!ubyte* p = key in g_secret_store)
+    {
+        Array!ubyte r = (*p)[];
+        return r.move;
+    }
+    return Array!ubyte();
+}
+
+void store_secret_material(const(ubyte)[] hash, const(ubyte)[] plain)
+{
+    load_secret_store();
+    String key = tconcat_hex(hash).make_string();
+    if (Array!ubyte* p = key in g_secret_store)
+    {
+        if ((*p)[] == plain[])
+            return;
+        *p = plain[];
+    }
+    else
+    {
+        Array!ubyte v = plain[];
+        g_secret_store.insert(key.move, v.move);
+    }
+    write_secret_store();
+}
+
+private:
+
+__gshared Map!(String, Array!ubyte) g_secret_store;
+__gshared bool g_secret_store_loaded;
+
+const(char)[] tconcat_hex(const(ubyte)[] bytes)
+{
+    import urt.mem.temp : talloc;
+    import urt.string.ascii : hex_digits;
+
+    char[] buf = cast(char[])talloc(bytes.length*2);
+    foreach (i, b; bytes)
+    {
+        buf[i*2] = hex_digits[b >> 4];
+        buf[i*2 + 1] = hex_digits[b & 0xF];
+    }
+    return buf;
+}
+
+void load_secret_store()
+{
+    if (g_secret_store_loaded)
+        return;
+    g_secret_store_loaded = true;
+
+    char[] data = cast(char[])load_file(secret_store_file);
+    if (data is null)
+        return;
+
+    const(char)[] text = data;
+    while (!text.empty)
+    {
+        const(char)[] line = text.split!'\n';
+        if (line.empty)
+            continue;
+        const(char)[] key = line.split!':';
+        if (key.empty || line.empty || (line.length & 1))
+            continue;
+        Array!ubyte plain;
+        plain.resize(line.length / 2);
+        if (!parse_hex_bytes(line, plain[]))
+            continue;
+        g_secret_store.insert(key.make_string(), plain.move);
+    }
+    free(cast(void[])data);
+}
+
+void write_secret_store()
+{
+    import urt.string.ascii : hex_digits;
+
+    MutableString!0 buf;
+    foreach (ref kvp; g_secret_store[])
+    {
+        buf.append(kvp.key[], ':');
+        foreach (b; kvp.value[])
+            buf.append(hex_digits[b >> 4], hex_digits[b & 0xF]);
+        buf.append('\n');
+    }
+    if (!save_file(secret_store_file, cast(const(void)[])buf[]))
+        log_warning("secret", "could not write '", secret_store_file, "'");
+}
 
 const(char)[] hash_function_name(HashFunction fn) pure
 {
