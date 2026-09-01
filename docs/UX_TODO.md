@@ -115,3 +115,14 @@ through them and remove sections as they are absorbed.
 - Worth surfacing in UI: on Linux an AP currently reads legacy `11g` on 2.4 GHz or `11a` on
   5/6 GHz, because both AP backends run the BSS non-HT, so clients are capped at 54 Mbit/s
   no matter what the radio can do. That is real, not a reporting artifact.
+
+## 2026-09-02: saved config and a config-dirty flag for a Save button
+
+- The running configuration can now be saved (`/system/config/save`) and is loaded in place of
+  startup.conf on the next boot.
+- `/system/sysinfo config-dirty` returns `true`/`false`: whether config has been modified since boot
+  or the last save. The human `sysinfo` output shows it as `Config: modified|saved`.
+- Suggested UX: poll it alongside the existing sysinfo health poll and show a Save button (invoking
+  `/system/config/save`) whenever it reads `true`. It clears on a successful save to the default path.
+- Dirtiness is event-based, not a diff: setting a property back to its old value still reads dirty
+  until saved. Saving is always safe and idempotent.
