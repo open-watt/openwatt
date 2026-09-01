@@ -42,8 +42,17 @@ nothrow @nogc:
     }
 
     // Properties...
-    ref const(String) remote() const pure
-        => _host;
+    const(char)[] remote() const
+    {
+        if (!_host.empty)
+            return _host[];
+        if (_remote.family != AddressFamily.unknown && _remote.family != AddressFamily.unspecified)
+        {
+            import urt.mem.temp : tconcat;
+            return tconcat(_remote);
+        }
+        return null;
+    }
     void remote(InetAddress value)
     {
         // apply explicit port if assigned
@@ -100,6 +109,7 @@ nothrow @nogc:
         => _keep_enable;
     void keepalive(bool value)
     {
+        mark_set!(typeof(this), "keepalive")();
         if (_keep_enable == value)
             return;
         enable_keep_alive(value);
@@ -214,13 +224,13 @@ nothrow @nogc:
         super.update();
     }
 
+    // programmatic tuning by owners (modbus etc); only the property setter marks user config
     final void enable_keep_alive(bool enable, Duration keep_idle = seconds(10), Duration keep_interval = seconds(1), int keep_count = 10)
     {
         _keep_enable = enable;
         _keep_idle = keep_idle;
         _keep_interval = keep_interval;
         _keep_count = keep_count;
-        mark_set!(typeof(this), "keepalive")();
         if (_conn)
             _conn.enable_keepalive(enable, keep_idle, keep_interval, keep_count);
     }
