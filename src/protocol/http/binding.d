@@ -301,7 +301,10 @@ private:
     void state_change(ActiveObject obj, StateSignal signal)
     {
         if (signal == StateSignal.offline)
+        {
+            set_device_online(false);
             restart();
+        }
     }
 
     // TODO: DELETE THIS QUEUE THING; IT'S A HACK, HTTPClient NEEDS TO RETURN A HANDLE
@@ -742,25 +745,34 @@ private:
                 // TODO: parse Location URL, compare to client, handle case 3
                 log.warning("redirect to '", location, "' - not yet implemented");
             }
+            report_poll(false);
             return 0;
         }
 
         if (response.status_code < 200 || response.status_code >= 300)
         {
             log.warning("request returned status ", response.status_code);
+            report_poll(false);
             return 0;
         }
 
         if (response.content.length == 0 || rs is null)
+        {
+            report_poll(true);
             return 0;
+        }
 
         ref const HTTPRequestDesc req = get_http_request(*_profile_data, req_idx);
 
         if (req.parse_mode == HTTPRequestDesc.ParseMode.none)
+        {
+            report_poll(true);
             return 0;
+        }
 
         if (req.parse_mode == HTTPRequestDesc.ParseMode.regex)
         {
+            report_poll(true);
             foreach (ref se; _elements[])
             {
                 ref const HTTPElementDesc http = _profile_data.get_section!HTTPElementDesc(http_section_kind, se.http_index);
@@ -794,9 +806,12 @@ private:
             if (!evaluate_success(json, rs.success_expr))
             {
                 log.warning("success check failed for request");
+                report_poll(false);
                 return 0;
             }
         }
+
+        report_poll(true);
 
         Variant* data = &json;
         const(char)[] root_path = rs.resolved_root_path ? rs.resolved_root_path[] : req.get_root_path(*_profile_data);

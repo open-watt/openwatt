@@ -255,7 +255,10 @@ private:
     void state_change(ActiveObject obj, StateSignal signal)
     {
         if (signal == StateSignal.offline)
+        {
+            set_device_online(false);
             restart();
+        }
     }
 
     void response_handler(bool success, ref const AA55Request request, MonoTime response_time, const(ubyte)[] response, void* user_data)
@@ -265,6 +268,7 @@ private:
             if (e.control == request.control_code && e.fn == request.function_code)
                 e.flags &= 0xFE; // clear in-flight flag
         }
+        report_poll(success);
         if (!success)
         {
             version (DebugGoodWeBinding)

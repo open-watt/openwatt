@@ -74,6 +74,7 @@ nothrow @nogc:
         publish(SmartEVSEChange.all);
         publish_online();
         _device_instance.notify(ComponentEvent.materialised);
+        set_device_online(true);
         return CompletionStatus.complete;
     }
 
@@ -81,8 +82,8 @@ nothrow @nogc:
     {
         unsubscribe();
         if (_device_instance)
-            _device_instance.notify(ComponentEvent.offline);
-        return CompletionStatus.complete;
+            set_device_online(false);
+        return super.shutdown();
     }
 
 protected:

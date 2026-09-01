@@ -667,7 +667,7 @@ nothrow @nogc:
         _in_flight = false;
         _failed = false;
         _scan_eol = false;
-        return CompletionStatus.complete;
+        return super.shutdown();
     }
 
     override void update()
@@ -1559,6 +1559,7 @@ private:
         {
             version (DebugSunspec)
                 log.tracef("read at {0}+{1}: exception 0x{2,02x}", first, count, resp.data.length >= 1 ? resp.data[0] : 0);
+            report_poll(false);
             return;
         }
         ushort byte_count = resp.data[0];
@@ -1566,8 +1567,10 @@ private:
         {
             version (DebugSunspec)
                 log.tracef("read at {0}+{1}: malformed response", first, count);
+            report_poll(false);
             return;
         }
+        report_poll(true);
         if (!st)
             return;
 
@@ -1649,6 +1652,7 @@ private:
     {
         if (ty == ModbusErrorType.Retrying)
             return;
+        report_poll(false);
         ushort first = (cast(ushort)req.data[0] << 8) | req.data[1];
         ushort count = (cast(ushort)req.data[2] << 8) | req.data[3];
         bool is_full;

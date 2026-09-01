@@ -515,6 +515,7 @@ private:
             log.warningf("exception from {0} for fc={1} reg={2} count={3}: {4} ({5})",
                 uni_addr, cast(ubyte)request.function_code, first, count, ex_name ? ex_name : "unknown", ex);
             release_in_flight(kind, first, count);
+            report_poll(false);
             return;
         }
         if (response.function_code != request.function_code)
@@ -522,6 +523,7 @@ private:
             log.warningf("function code mismatch from {0} expected={1} got={2}",
                 uni_addr, cast(ubyte)request.function_code, cast(ubyte)response.function_code);
             release_in_flight(kind, first, count);
+            report_poll(false);
             return;
         }
         if (response.data.length == 0)
@@ -529,6 +531,7 @@ private:
             log.warningf("empty response from {0} for fc={1} reg={2} count={3}",
                 uni_addr, cast(ubyte)request.function_code, first, count);
             release_in_flight(kind, first, count);
+            report_poll(false);
             return;
         }
         ushort response_bytes = response.data[0];
@@ -537,6 +540,7 @@ private:
             log.warningf("truncated response from {0} for fc={1} reg={2} count={3}: PDU byte_count={4} but only {5} data bytes in frame",
                 uni_addr, cast(ubyte)request.function_code, first, count, response_bytes, response.data.length - 1);
             release_in_flight(kind, first, count);
+            report_poll(false);
             return;
         }
         if ((kind < 2 && response_bytes * 8 != count.align_up(8)) || (kind > 2 && response_bytes / 2 != count))
@@ -544,8 +548,11 @@ private:
             log.warningf("short response from {0} for fc={1} reg={2} count={3}: got {4} bytes (expected {5})",
                 uni_addr, cast(ubyte)request.function_code, first, count, response_bytes, count*2);
             release_in_flight(kind, first, count);
+            report_poll(false);
             return;
         }
+
+        report_poll(true);
 
         version (DebugModbusBinding)
             log.tracef("Response: {0}, [{1}{2,04x}:{3}] - {4}", uni_addr, kind, first, count, response_time - request_time);
@@ -638,6 +645,9 @@ private:
 
     void error_handler(ModbusErrorType errorType, ref const ModbusPDU request, MonoTime request_time)
     {
+        if (errorType != ModbusErrorType.Retrying)
+            report_poll(false);
+
         ubyte kind = request.function_code == FunctionCode.read_holding_registers ? 4 :
                      request.function_code == FunctionCode.read_input_registers ? 3 :
                      request.function_code == FunctionCode.read_discrete_inputs ? 1 :
