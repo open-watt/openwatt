@@ -141,6 +141,7 @@ nothrow @nogc:
             return false;
 
         response.headers ~= HTTPParam(StringLit!"Access-Control-Allow-Origin", *allowed);
+        response.headers ~= HTTPParam(StringLit!"Access-Control-Allow-Credentials", StringLit!"true");
         response.headers ~= HTTPParam(StringLit!"Vary", StringLit!"Origin");
         return true;
     }

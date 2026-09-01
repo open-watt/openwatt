@@ -537,7 +537,7 @@ private:
         if (add_cors(response, request))
         {
             response.headers ~= HTTPParam(StringLit!"Access-Control-Allow-Methods", allow);
-            response.headers ~= HTTPParam(StringLit!"Access-Control-Allow-Headers", StringLit!"Content-Type, Depth, Destination, Overwrite");
+            response.headers ~= HTTPParam(StringLit!"Access-Control-Allow-Headers", StringLit!"Authorization, Content-Type, Depth, Destination, Overwrite");
             response.headers ~= HTTPParam(StringLit!"Access-Control-Max-Age", StringLit!"86400");
         }
         stream.write(response.format_message()[]);
