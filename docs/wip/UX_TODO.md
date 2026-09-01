@@ -229,6 +229,16 @@ through them and remove sections as they are absorbed.
 - Rendering a quantity from `u` alone is enough; there is no need to reduce to base units.
   `Wh` is joules scaled by 3600, so a client that normalises will get joules, never
   seconds.
+## 2026-09-02: saved config and a config-dirty flag for a Save button
+
+- The running configuration can now be saved (`/system/config/save`) and is loaded in place of
+  startup.conf on the next boot.
+- `/system/sysinfo config-dirty` returns `true`/`false`: whether config has been modified since boot
+  or the last save. The human `sysinfo` output shows it as `Config: modified|saved`.
+- Suggested UX: poll it alongside the existing sysinfo health poll and show a Save button (invoking
+  `/system/config/save`) whenever it reads `true`. It clears on a successful save to the default path.
+- Dirtiness is event-based, not a diff: setting a property back to its old value still reads dirty
+  until saved. Saving is always safe and idempotent.
 
 ## 2026-09-08: energy element tree slimming, itemised with the frontend
 
