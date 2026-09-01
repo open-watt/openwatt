@@ -45,6 +45,10 @@ precedence over the saved configuration. Delete `conf/config.conf` to fall back 
 Secrets are never written in plaintext when hashed: a hashed `/secret` exports its password as a
 `hash:<algo>:<salt>:<hash>` literal which reloads directly into the same salt and hash.
 
+Config mutations after boot (any collection `add`/`remove`/`set`/`reset`) mark the running configuration
+dirty. `/system/sysinfo` shows this as `Config: modified` or `Config: saved`, and `/system/sysinfo
+config-dirty` returns the bare boolean for UX clients polling health; saving to the default path clears it.
+
 ### Common Commands
 
 Here are some of the common commands used in the `conf/startup.conf` file:

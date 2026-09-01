@@ -61,7 +61,11 @@ void config_save(Session session, Nullable!(const(char)[]) file)
     const(char)[] path = file ? file.value : saved_config_file;
     Result r = save_file(path, cast(const(void)[])buf[]);
     if (r)
+    {
+        if (path == saved_config_file)
+            g_app.config_dirty = false;
         session.write_line("saved configuration to '", path, "' (", buf.length, " bytes)");
+    }
     else
         session.write_line("failed to save configuration to '", path, "'");
 }

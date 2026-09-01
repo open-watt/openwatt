@@ -11,7 +11,7 @@ import urt.variant : Variant;
 
 import driver.system : system_reboot, reset_reason;
 
-import manager : get_module;
+import manager : get_module, g_app;
 import manager.console.session;
 import manager.console.function_command : TabComplete;
 import manager.log;
@@ -111,7 +111,8 @@ Array!String sysinfo_suggest(bool, const(char)[] arg_name, const(char)[]) nothro
 {
     import urt.string : startsWith;
 
-    __gshared const String[13] properties = [
+    __gshared const String[14] properties = [
+        StringLit!"config-dirty",
         StringLit!"hostname",
         StringLit!"node-id",
         StringLit!"os",
@@ -176,6 +177,7 @@ void sysinfo(Session session, const(Variant)[] args)
                 session.write_pool_line(p);
         }
         session.write_line("Uptime:   ", seconds(getAppTime().as!"seconds"));
+        session.write_line("Config:   ", g_app.config_dirty ? "modified" : "saved");
         if (const(char)[] reason = reset_reason())
             session.write_line("Reset:    ", reason);
     }
@@ -188,7 +190,9 @@ void sysinfo(Session session, const(Variant)[] args)
         }
 
         const(char)[] prop = arg.asString;
-        if (icmp(prop, "hostname") == 0)
+        if (icmp(prop, "config-dirty") == 0)
+            session.write_line(g_app.config_dirty);
+        else if (icmp(prop, "hostname") == 0)
             session.write_line(hostname[]);
         else if (icmp(prop, "node-id") == 0)
             session.write_line(format_node_id());

@@ -10,6 +10,7 @@ import urt.string.ansi;
 import urt.time;
 import urt.variant;
 
+import manager : g_app;
 import manager.base;
 import manager.collection;
 import manager.console;
@@ -126,6 +127,7 @@ CommandState collection_add_exec(ref Command, Session session, Scope* _scope, co
         }
     }
     collection.add(item);
+    g_app.config_dirty = true;
 
     // TODO: maybe something better? perhaps a virtual on the object which lets it supply a creation message?
     //       how do we know what properties are relevant for the create logs?
@@ -169,6 +171,7 @@ CommandState collection_remove_exec(ref Command, Session session, Scope* _scope,
     }
 
     item.destroy();
+    g_app.config_dirty = true;
     return null;
 }
 
@@ -261,7 +264,9 @@ CommandState collection_set_exec(ref Command, Session session, Scope* _scope, co
         foreach (ref arg; named_args)
         {
             StringResult r = item.set(arg.name, arg.value);
-            if (!r)
+            if (r)
+                g_app.config_dirty = true;
+            else
             {
                 session.write_line("Set '", arg.name, "\' failed: ", r.message);
                 // TODO: should we bail out at first error, or try and set the rest?
@@ -329,6 +334,7 @@ CommandState collection_reset_exec(ref Command, Session session, Scope* _scope, 
         foreach (i; collection.values)
             reset_item(i, args[0 .. $]);
     }
+    g_app.config_dirty = true;
     return null;
 }
 

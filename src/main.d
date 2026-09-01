@@ -366,6 +366,9 @@ void finish_startup(ref Session startup_session, bool interactive_mode, ref Obje
     startup_session = null;
     retire_bootstrap_log_sink();
 
+    // the boot config is the baseline; only post-boot mutations count as divergence
+    g_app.config_dirty = false;
+
     version (AllocProfile)
     {
         import urt.mem.profile.log : alloc_profile_mark;
