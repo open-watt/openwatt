@@ -474,7 +474,14 @@ nothrow @nogc:
 protected:
 
     override bool validate() const
-        => _radio !is null && !_ssid.empty;
+    {
+        if (_radio is null || _ssid.empty)
+            return false;
+        // a secret whose material is unrecoverable must not fall back to an open network
+        if (_secret && _secret.allow_service("wifi") && _secret.plaintext.empty)
+            return false;
+        return true;
+    }
 
     override const(char)[] status_message() const pure
     {
@@ -546,7 +553,7 @@ protected:
         {
             if (!_secret.allow_service("wifi"))
                 return null;
-            return _secret.password;
+            return _secret.plaintext;
         }
         return null;
     }
