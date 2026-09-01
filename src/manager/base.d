@@ -587,10 +587,25 @@ nothrow @nogc:
     final Variant get_config()
         => gather();
 
-    final MutableString!0 export_config() const pure
+    // append the add command which would recreate this object
+    final void export_config(ref MutableString!0 buf, const(char)[] path)
     {
-        // TODO: this should return a string that contains the command which would recreate this object...
-        return MutableString!0();
+        buf.append(path, "/add name=", name[]);
+        foreach (i, p; properties())
+        {
+            if (!p.get || !p.set || p.read_only)
+                continue;
+            if (!(_props_set & (1uL << i)))
+                continue;
+            if (p.name[] == "name" || p.name[] == "type" || p.name[] == "flags")
+                continue;
+            Variant v = p.get(this, *p);
+            if (v.isNull)
+                continue;
+            buf.append(' ', p.name[], '=');
+            append_config_value(buf, v);
+        }
+        buf.append('\n');
     }
 
     final int opCmp(const BaseObject rhs) const pure
@@ -1372,6 +1387,52 @@ template MaterialProperties(Type)
         return r;
     }
     __gshared const MaterialProperties = _make();
+}
+
+// values must re-lex as a single argument token: strings quote when they contain
+// reserved characters, arrays emit the bare comma-list form (JSON brackets don't parse)
+void append_config_value(ref MutableString!0 buf, ref const Variant v)
+{
+    import urt.string.ascii : is_alpha_numeric;
+
+    if (v.isArray)
+    {
+        foreach (i; 0 .. v.length)
+        {
+            if (i > 0)
+                buf.append(',');
+            append_config_value(buf, v[i]);
+        }
+        return;
+    }
+    if (v.isString)
+    {
+        const(char)[] s = v.asString;
+        bool quote = s.empty;
+        foreach (c; s)
+        {
+            if (is_alpha_numeric(c) || c == '.' || c == '-' || c == '_' || c == ':' || c == '/' || c == '@' || c == '+' || c == '|' || c == '*')
+                continue;
+            quote = true;
+            break;
+        }
+        if (quote)
+        {
+            // TODO: '$' inside quotes still triggers interpolation at load; needs a lexer-side answer
+            buf.append('"');
+            foreach (c; s)
+            {
+                if (c == '"' || c == '\\')
+                    buf.append('\\');
+                buf.append(c);
+            }
+            buf.append('"');
+        }
+        else
+            buf.append(s);
+        return;
+    }
+    buf.append(v);
 }
 
 // '*' always, 'd' default, 'h' hidden

@@ -429,6 +429,9 @@
     <DCompile Include="src\manager\record.d">
       <Filter>src\manager</Filter>
     </DCompile>
+    <DCompile Include="src\manager\saved_config.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
     <DCompile Include="src\manager\secret.d">
       <Filter>src\manager</Filter>
     </DCompile>

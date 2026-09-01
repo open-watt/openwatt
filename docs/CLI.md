@@ -29,6 +29,22 @@ The CLI is organized into a few top-level categories, each managing a different 
 
 Each of these top-level commands has its own set of sub-commands for more specific configuration.
 
+### Saved Configuration
+
+The running configuration can be saved and restored:
+
+- `/system/config/export`: Prints the running configuration as a script of `add` commands, one per
+  explicitly-configured object. Only properties that were explicitly set are emitted; dynamic, temporary,
+  and remote (synced) objects are skipped.
+- `/system/config/save [file=<path>]`: Writes the same script to a file, `conf/config.conf` by default.
+
+At startup, if `conf/config.conf` exists it is loaded INSTEAD of `conf/startup.conf` (the platform's
+`system.conf` and `user.conf` layers still apply). An explicit `--config` on the command line takes
+precedence over the saved configuration. Delete `conf/config.conf` to fall back to the startup script.
+
+Secrets are never written in plaintext when hashed: a hashed `/secret` exports its password as a
+`hash:<algo>:<salt>:<hash>` literal which reloads directly into the same salt and hash.
+
 ### Common Commands
 
 Here are some of the common commands used in the `conf/startup.conf` file:

@@ -14,6 +14,7 @@ import manager.collection;
 import manager.console.session : Session, default_console_session_name;
 import manager.log : default_log_sink_name, format_log_text,
                      retire_bootstrap_log_sink, set_bootstrap_log_sink;
+import manager.saved_config : saved_config_file;
 
 import driver.watchdog;
 
@@ -167,8 +168,19 @@ int main(string[] args)
     {
         trust_config = false;
         retire_config(config_path);
+        retire_config(saved_config_file);
     }
-    char[] conf = trust_config ? cast(char[])load_file(config_path) : null;
+
+    // a saved config is preferred over the startup script
+    char[] conf = null;
+    bool using_saved_config = false;
+    if (trust_config && !config_path_explicit)
+    {
+        conf = cast(char[])load_file(saved_config_file);
+        using_saved_config = conf !is null;
+    }
+    if (trust_config && conf is null)
+        conf = cast(char[])load_file(config_path);
 
     version (CoreDump)
     {
@@ -199,7 +211,9 @@ int main(string[] args)
 
     if (conf !is null)
     {
-        static if (default_conf.length > 0)
+        if (using_saved_config)
+            log_info("system", "using saved configuration '", saved_config_file, "'; startup script skipped");
+        else static if (default_conf.length > 0)
             log_info("system", "using startup.conf from the filesystem; bring-up defaults skipped");
         combined_config ~= conf;
         combined_config ~= '\n';
