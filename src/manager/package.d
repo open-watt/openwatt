@@ -387,6 +387,9 @@ nothrow @nogc:
     Map!(String, RegisteredType) types;
     Array!String type_order;    // registration order; module init order is dependency-plausible for export
 
+    // running config has diverged from what the next boot would load; cleared at boot-complete and on save
+    bool config_dirty;
+
     // database...
 
     this()
