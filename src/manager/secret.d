@@ -99,16 +99,40 @@ nothrow @nogc:
                                      Prop!("algorithm", algorithm),
                                      Prop!("services", services));
 
-    const(char)[] password() const pure
+    const(char)[] password() const
     {
         if (_function == HashFunction.plain_text)
             return cast(char[])_hash[];
-        assert(false, "TODO: generate MCF string for hashed passwords?");
-        // $algo$param$salt$hash
-        return null;
+        if (_hash.empty)
+            return null;
+
+        import urt.mem.temp : talloc;
+        import urt.string.ascii : hex_digits;
+
+        // colon-separated rather than MCF '$' form: '$' triggers interpolation in the console lexer
+        const(char)[] algo = hash_function_name(_function);
+        char[] buf = cast(char[])talloc(7 + algo.length + _salt.length*2 + _hash.length*2);
+        size_t o = 0;
+        buf[o .. o + 5] = "hash:"; o += 5;
+        buf[o .. o + algo.length] = algo[]; o += algo.length;
+        buf[o++] = ':';
+        foreach (b; _salt[])
+        {
+            buf[o++] = hex_digits[b >> 4];
+            buf[o++] = hex_digits[b & 0xF];
+        }
+        buf[o++] = ':';
+        foreach (b; _hash[])
+        {
+            buf[o++] = hex_digits[b >> 4];
+            buf[o++] = hex_digits[b & 0xF];
+        }
+        return buf[0 .. o];
     }
     void password(const(char)[] value)
     {
+        if (try_set_mcf(value))
+            return;
         set_password(cast(ubyte[])value, _function);
     }
 
@@ -332,6 +356,46 @@ private:
         mark_set!(typeof(this), [ "password", "algorithm" ])();
     }
 
+    // accepts the hash:algo:salt:hash form the password getter emits, so exports reload
+    bool try_set_mcf(const(char)[] value)
+    {
+        if (value.length < 6 || value[0 .. 5] != "hash:")
+            return false;
+        const(char)[] rest = value[5 .. $];
+        size_t sep = 0;
+        while (sep < rest.length && rest[sep] != ':')
+            ++sep;
+        if (sep == rest.length)
+            return false;
+
+        HashFunction fn;
+        if (rest[0 .. sep] == hash_function_name(HashFunction.sha1))
+            fn = HashFunction.sha1;
+        else if (rest[0 .. sep] == hash_function_name(HashFunction.sha256))
+            fn = HashFunction.sha256;
+        else
+            return false;
+
+        rest = rest[sep + 1 .. $];
+        sep = 0;
+        while (sep < rest.length && rest[sep] != ':')
+            ++sep;
+        if (sep != _salt.length*2 || rest.length <= sep + 1)
+            return false;
+
+        ubyte[16] salt;
+        Array!ubyte hash;
+        hash.resize((rest.length - sep - 1) / 2);
+        if (!parse_hex_bytes(rest[0 .. sep], salt[]) || !parse_hex_bytes(rest[sep + 1 .. $], hash[]))
+            return false;
+
+        _function = fn;
+        _salt = salt;
+        _hash = hash.move;
+        mark_set!(typeof(this), [ "password", "algorithm" ])();
+        return true;
+    }
+
     static if (has_ec_secret)
     void maybe_load_key()
     {
@@ -434,6 +498,42 @@ void secure_zero(ubyte[] buffer)
         volatileStore(&b, ubyte(0));
 }
 
+
+const(char)[] hash_function_name(HashFunction fn) pure
+{
+    final switch (fn)
+    {
+        case HashFunction.plain_text: return "plain";
+        case HashFunction.sha1:       return "sha1";
+        case HashFunction.sha256:     return "sha256";
+    }
+}
+
+bool parse_hex_bytes(const(char)[] text, ubyte[] bytes) pure
+{
+    if (text.length != bytes.length*2)
+        return false;
+    foreach (i, ref b; bytes)
+    {
+        int hi = hex_value(text[i*2]);
+        int lo = hex_value(text[i*2 + 1]);
+        if (hi < 0 || lo < 0)
+            return false;
+        b = cast(ubyte)((hi << 4) | lo);
+    }
+    return true;
+}
+
+private int hex_value(char c) pure
+{
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'a' && c <= 'f')
+        return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F')
+        return c - 'A' + 10;
+    return -1;
+}
 
 Array!ubyte hash_password(const ubyte[] password, const ubyte[] salt, HashFunction hash_function)
 {
