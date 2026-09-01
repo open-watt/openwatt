@@ -997,6 +997,7 @@ private:
                     return;
                 }
                 node.device = device;
+                node.seen(); // the interview just completed, so the node is demonstrably talking
 
                 // set a bunch of status data
                 device.set_element("status.network.mode", StringLit!"zigbee");

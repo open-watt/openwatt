@@ -706,13 +706,16 @@ private:
         if (status == EmberDeviceUpdate.DEVICE_LEFT)
         {
             log.debugf("TC left - {0, 04x} {1}", new_node_id, eui);
+            if (NodeMap* left = mod_zb.find_node(eui))
+                if (left.device)
+                    left.device.set_online(cast(void*)left, false);
             mod_zb.detach_node(pan_id, new_node_id);
             return;
         }
 
         auto n = mod_zb.attach_node(eui, pan_id, new_node_id);
         n.parent_id = parent_of_new_node_id; // TODO: should we be concerned if we don't know who the parent is?
-        n.last_seen = getSysTime();
+        n.seen();
 //        n.via = _interface; // TODO: should we set `via` for a local node?
 
         log.debugf("TC join - {0,04x} [{1}] (parent: {2,04x}) {3}", new_node_id, eui, parent_of_new_node_id, status);
@@ -790,7 +793,7 @@ private:
 
         auto n = mod_zb.attach_node(eui, pan_id, child_id);
         n.desc.type = cast(NodeType)child_type;
-        n.last_seen = getSysTime();
+        n.seen();
 //        n.via = _interface; // TODO: should we set `via` for a local node?
 
         if (joining)

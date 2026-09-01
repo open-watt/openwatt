@@ -747,7 +747,7 @@ private:
         }
         else
         {
-            n.last_seen = getSysTime();
+            n.seen();
             n.lqi = last_hop_lqi;
             n.rssi = last_hop_rssi;
 
@@ -784,7 +784,7 @@ private:
         if (status == EmberStatus.SUCCESS)
         {
             auto n = mod_zb.attach_node(EUI64(eui64[]), _coordinator.pan_id, sender);
-            n.last_seen = getSysTime(); // NOTE: we're here because we received a message
+            n.seen(); // we're here because we received a message
             n.via = this;
             mod_zb.note_awake(n);
         }
