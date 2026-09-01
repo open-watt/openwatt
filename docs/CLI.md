@@ -825,6 +825,15 @@ automatically: each one gets a charger record, a dynamic `/binding/tesla/twc`
 entry, and a Device, all named for the slave's 16-bit bus id (e.g. `twc_6820`).
 No slave addresses are configured on the master.
 
+The bus allows one master. On startup the master listens for a few seconds
+before claiming the bus, and stands by if another master is heard - snooping
+the slaves' replies so devices stay populated read-only - then takes over once
+that master has been silent for ~15s. Hearing another master while active
+stands down immediately. Our bus id is the low 16 bits of the node id; a master
+frame carrying our own id while we are silent is an id collision with another
+node, reported as a config error that fails the master. The status message
+names the situation throughout.
+
 | Property | Access | Values | Default | Description |
 | --- | --- | --- | --- | --- |
 | `interface` | read/write | interface name | required | The `tesla-twc` interface carrying the bus. |

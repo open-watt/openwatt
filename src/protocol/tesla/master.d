@@ -30,9 +30,7 @@ nothrow @nogc:
 alias CentiAmps = Quantity!(ushort, ScaledUnit(Ampere, -2));
 
 
-// Runs the TWC master role on a bus. Slaves that answer the link-ready
-// announcement are adopted as chargers, and each discovered charger spawns a
-// TeslaTWCBinding (and Device) named for its 16-bit bus id, e.g. `twc_14fd`.
+// each slave discovered on the bus spawns a TeslaTWCBinding (and Device) named twc_<bus id>
 class TeslaTWCMaster : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("interface", iface));
@@ -149,8 +147,10 @@ nothrow @nogc:
     {
         super(collection_type_info!TeslaTWCMaster, id, flags);
 
-        static ubyte id_counter = 0;
-        _id_on_bus = cast(ushort)(0x7770 + id_counter++);
+        import manager.system : node_id;
+        _id_on_bus = cast(ushort)node_id();
+        if (_id_on_bus == 0 || _id_on_bus == TWCFrame.broadcast)
+            _id_on_bus = 0x7777;
     }
 
     // Properties
@@ -173,8 +173,14 @@ nothrow @nogc:
 
     override const(char)[] status_message() const
     {
+        if (_state == State.init_failed || _state == State.failure)
+            return super.status_message();
         if (!_iface || !_iface.running)
             return "Waiting for interface";
+        if (_role == BusRole.listening)
+            return "Listening for other masters";
+        if (_role == BusRole.standby)
+            return _standby_status ? _standby_status : "Standing by: another master on bus";
         return super.status_message();
     }
 
@@ -188,16 +194,48 @@ protected:
         if (!i || !i.running)
             return CompletionStatus.continue_;
 
-        import urt.crc;
-        _sig = cast(ubyte)calculate_crc!(Algorithm.crc32_iso_hdlc)(i.name[]);
+        MonoTime now = getTime();
 
-        i.subscribe(&incoming_packet, PacketFilter(type: PacketType.tesla_twc));
-        i.subscribe(&iface_state_change);
-        _subscribed = true;
+        if (!_subscribed)
+        {
+            import urt.crc;
+            _sig = cast(ubyte)calculate_crc!(Algorithm.crc32_iso_hdlc)(i.name[]);
 
-        _announced = false;
-        _last_link_status = LinkStatus.down;
-        g_app.schedule(getTime() + tick_interval, &tick);
+            i.subscribe(&incoming_packet, PacketFilter(type: PacketType.tesla_twc));
+            i.subscribe(&iface_state_change);
+            _subscribed = true;
+
+            _role = BusRole.listening;
+            _listen_deadline = now + listen_window;
+        }
+
+        if (_collision)
+        {
+            _collision = false;
+            _listen_deadline = now + listen_window;
+            log.error("config error: another master on the bus uses our id ", tformat("{0,04x}", _id_on_bus));
+            _fail_reason = "config error: id collision on bus";
+            return CompletionStatus.error;
+        }
+
+        // the listen window only counts link-up time; a dead bus proves nothing
+        if (i.status.link_status != LinkStatus.up)
+        {
+            _listen_deadline = now + listen_window;
+            return CompletionStatus.continue_;
+        }
+        if (now < _listen_deadline)
+            return CompletionStatus.continue_;
+
+        if (_other_master_heard != MonoTime() && now - _other_master_heard < takeover_timeout)
+            _role = BusRole.standby;
+        else
+        {
+            _role = BusRole.active;
+            _round_robin_index = -10;
+        }
+
+        g_app.schedule(now + tick_interval, &tick);
         return CompletionStatus.complete;
     }
 
@@ -231,10 +269,8 @@ package:
         if (!c)
         {
             c = add_charger(slave_id);
-            // optimistic adoption: heartbeat immediately rather than wait for
-            // SlaveLinkReady; a present slave answers heartbeats, and LinkReady
-            // merely refines device_max_current/sig whenever it arrives
-            if (_announced)
+            // a present slave answers heartbeats without waiting for SlaveLinkReady, which only refines device_max_current
+            if (_role == BusRole.active)
                 c.link_ready = true;
         }
         c.binding = binding;
@@ -263,18 +299,39 @@ package:
 
 private:
     enum Duration tick_interval = 400.msecs;
+    enum Duration listen_window = 5.seconds;
+    enum Duration takeover_silence = 15.seconds;
+    enum Duration echo_grace = 2.seconds;
+
+    enum BusRole : ubyte
+    {
+        listening,
+        active,
+        standby
+    }
 
     ObjectRef!BaseInterface _iface;
     bool _subscribed;
 
     ushort _id_on_bus;
     ubyte _sig;
-    bool _announced;
-    LinkStatus _last_link_status = LinkStatus.down;
+    BusRole _role;
+    bool _collision;
+
+    ushort _other_master;
+    MonoTime _other_master_heard;
+    MonoTime _listen_deadline;
+    MonoTime _last_tx;
+    char[44] _status_buf;
+    const(char)[] _standby_status;
 
     byte _round_robin_index;
 
     Array!Charger _chargers;
+
+    // two of ours standing off would otherwise take over in lockstep and collide forever
+    Duration takeover_timeout() const pure
+        => takeover_silence + msecs((_id_on_bus & 0xF) * 400);
 
     Charger* add_charger(ushort slave_id)
     {
@@ -282,7 +339,7 @@ private:
         c.id = slave_id;
         c.name = tformat("twc_{0,04x}", slave_id).make_string();
         c.target_current = ushort.max;
-        c.hard_max_current = 3200; // until a binding adopts and states its ceiling
+        c.hard_max_current = TeslaTWCBinding.default_max_current;
         return c;
     }
 
@@ -312,20 +369,18 @@ private:
         g_app.schedule(scheduled + tick_interval, &tick);
 
         BaseInterface i = _iface.get;
-        if (!i)
+        if (!i || i.status.link_status != LinkStatus.up)
             return;
-        LinkStatus link_status = i.status.link_status;
-        if (link_status != _last_link_status && link_status == LinkStatus.up && !_announced)
+
+        if (_role == BusRole.standby)
         {
-            // announce master presence on first bring-up only; on a link flap we just resume
-            // heartbeating - a slave that actually rebooted re-announces itself, and waiting
-            // for SlaveLinkReady costs the slave's own master-loss timeout (minutes)
-            _announced = true;
+            if (scheduled - _other_master_heard < takeover_timeout)
+                return;
+            log.info("master ", tformat("{0,04x}", _other_master), " silent; taking over the bus");
+            _role = BusRole.active;
             _round_robin_index = -10;
+            write_status();
         }
-        _last_link_status = link_status;
-        if (link_status != LinkStatus.up)
-            return;
 
         // we will immitate the bootup sequence... but I don't really know why?
         // I can't really see evidence the slaves care about this!
@@ -456,6 +511,7 @@ private:
 
     void send_twc_message(ushort dst, const(void)[] message)
     {
+        _last_tx = getTime();
         Packet p;
         ref TWCFrame twc = p.init!TWCFrame(message[]);
         twc.src = _id_on_bus;
@@ -476,6 +532,35 @@ private:
         TWCMessage msg;
         if (!parse_twc_message(cast(ubyte[])p.data, msg))
             return;
+
+        if (is_master_message(msg.type))
+        {
+            if (msg.sender == _id_on_bus)
+            {
+                // our own id heard while we are silent, and past any late echo of our last frames, is
+                // another node configured with it
+                if (_role != BusRole.active && getTime() - _last_tx > echo_grace)
+                {
+                    _collision = true;
+                    if (running)
+                        restart();
+                }
+                return;
+            }
+            if (msg.sender != _other_master)
+            {
+                _other_master = msg.sender;
+                _standby_status = format(_status_buf, "Standing by: master {0,04x} on bus", _other_master);
+            }
+            _other_master_heard = getTime();
+            if (_role == BusRole.active)
+            {
+                log.warning("another master ", tformat("{0,04x}", msg.sender), " on the bus; standing down");
+                _role = BusRole.standby;
+                write_status();
+            }
+            return;
+        }
 
         Charger* slave = find_charger(msg.sender);
         if (!slave)
@@ -589,7 +674,9 @@ private:
                     break;
             }
         }
-        else if (twc.dst == _id_on_bus && msg.type == TWCMessageType.SlaveHeartbeat)
+        // in standby, snooping the slaves' replies to the active master keeps the model fresh
+        else if (msg.type == TWCMessageType.SlaveHeartbeat &&
+                 (twc.dst == _id_on_bus || (_role == BusRole.standby && twc.dst == _other_master)))
         {
             // record heartbeat response state...
             slave.state = msg.heartbeat.state;

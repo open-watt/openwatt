@@ -84,6 +84,10 @@ struct TWCMessage
     }
 }
 
+// slave-originated messages are the 0xFDxx family; everything else is a master's
+bool is_master_message(TWCMessageType type) pure
+    => cast(uint)type <= TWCMessageType.max && (g_message_code[type] >> 8) != 0xFD;
+
 bool parse_twc_message(const(ubyte)[] data, out TWCMessage msg)
 {
     ushort cmd = data[0..2].bigEndianToNative!ushort;

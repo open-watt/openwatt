@@ -40,6 +40,7 @@ nothrow @nogc:
 
     enum type_name = "twc-binding";
     enum path = "/binding/tesla/twc";
+    enum ushort default_max_current = 3200;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
@@ -256,8 +257,6 @@ private:
         FormatId format;
         SampleKind kind;
     }
-
-    enum ushort default_max_current = 3200;
 
     ushort _slave_id;
     ushort _max_current = default_max_current;
