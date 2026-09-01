@@ -115,3 +115,16 @@ through them and remove sections as they are absorbed.
 - Worth surfacing in UI: on Linux an AP currently reads legacy `11g` on 2.4 GHz or `11a` on
   5/6 GHz, because both AP backends run the BSS non-HT, so clients are capped at 54 Mbit/s
   no matter what the radio can do. That is real, not a reporting artifact.
+
+## 2026-09-01: `Wh` is an energy unit, not a duration
+
+- An element carrying watt-hours (a TWC's `status.lifetime_energy`, a meter's `import`)
+  arrives over sync as `"unit":"Wh"` in its type frame, and each value as
+  `{"q":394167000,"u":"Wh"}`. Both were verified against the encoders and the unit parser
+  round-trips `Wh` back to watt-hours exactly, so a client showing this as a time is
+  reading the unit wrong on its own side.
+- The likely trap is tokenising the suffix and finding `h` for hours. Units are whole
+  symbols: match `Wh`, `kWh`, `MWh`, `varh`, `VAh` before any single-letter fallback.
+- Rendering a quantity from `u` alone is enough; there is no need to reduce to base units.
+  `Wh` is joules scaled by 3600, so a client that normalises will get joules, never
+  seconds.

@@ -206,7 +206,7 @@ protected:
         set_constant(control, "kind", "continuous");
         set_constant(control, "direction", "consume");
         set_constant(control, "unit", "A");
-        set_constant(control, "step", 1);
+        set_constant(control, "step", CentiAmps(100));
         set_constant(control, "min", CentiAmps(500));
         set_constant(control, "can_disable", false);
         _target_current = add_sample(control, "setpoint", SampleKind.setpoint, centiamps_format(), Access.read_write);
