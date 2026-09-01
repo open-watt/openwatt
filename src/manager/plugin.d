@@ -166,6 +166,9 @@ void register_modules(Application app)
 
     static if (has_all)
     {
+        import driver.power.regulator;
+        register_module!(driver.power.regulator)(app);
+
         import driver.rtc.pcf85063;
         register_module!(driver.rtc.pcf85063)(app);
 
