@@ -10,6 +10,7 @@ import urt.socket;
 import urt.string;
 import urt.string.format;
 import urt.time;
+import urt.variant : Variant;
 
 import manager.base;
 import manager.collection;
@@ -42,16 +43,16 @@ nothrow @nogc:
     }
 
     // Properties...
-    const(char)[] remote() const
+    Variant remote() const
     {
         if (!_host.empty)
-            return _host[];
+            return Variant(_host[]);
         if (_remote.family != AddressFamily.unknown && _remote.family != AddressFamily.unspecified)
         {
-            import urt.mem.temp : tconcat;
-            return tconcat(_remote);
+            InetAddress a = _remote;
+            return Variant(a);
         }
-        return null;
+        return Variant();
     }
     void remote(InetAddress value)
     {
