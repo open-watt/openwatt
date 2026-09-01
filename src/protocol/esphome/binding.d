@@ -173,11 +173,16 @@ private:
     void state_change(ActiveObject obj, StateSignal signal)
     {
         if (signal == StateSignal.offline)
+        {
+            set_device_online(false);
             restart();
+        }
     }
 
     void message_handler(uint msg_type, const(ubyte)[] frame)
     {
+        note_activity();
+
         switch (msg_type)
         {
             case DeviceInfoResponse.id:

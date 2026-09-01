@@ -336,11 +336,17 @@ private:
     void state_change(ActiveObject obj, StateSignal signal)
     {
         if (signal == StateSignal.offline)
+        {
+            set_device_online(false);
             restart();
+        }
     }
 
-    void on_publish(const(char)[] sender, const(char)[] topic, const(ubyte)[] payload, MonoTime timestamp)
+    void on_publish(const(char)[] sender, const(char)[] topic, const(ubyte)[] payload, MonoTime timestamp, bool replayed)
     {
+        if (!replayed)
+            note_activity();
+
         if (payload.empty)
             return;
 

@@ -513,8 +513,9 @@ private:
         MonoTime now = getTime();
         foreach (ref s; _subscriptions)
         {
+            // brokers set the retain bit only on retained-replay deliveries (retain-as-published is not requested)
             if (topic_matches_filter(pkt.topic, s.filter[]))
-                s.callback(_host[], pkt.topic, pkt.payload, now);
+                s.callback(_host[], pkt.topic, pkt.payload, now, pkt.retain);
         }
 
         if (pkt.qos == 1)

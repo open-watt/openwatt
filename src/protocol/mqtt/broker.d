@@ -153,7 +153,7 @@ nothrow @nogc:
 
         const(char)[] filter_slice = topic_filter[];
         _trie.match_retained(filter_slice, (ref const RetainedMessage rm) nothrow @nogc {
-            callback(null, rm.topic[], rm.payload[], getTime());
+            callback(null, rm.topic[], rm.payload[], getTime(), true);
         });
     }
 
@@ -772,7 +772,7 @@ private:
                 return;
             if (sub.callback !is null)
             {
-                sub.callback(sender_id, topic, payload, timestamp);
+                sub.callback(sender_id, topic, payload, timestamp, false);
                 return;
             }
             Session* s = cast(Session*)sub.subscriber;
