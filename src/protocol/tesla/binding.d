@@ -104,7 +104,7 @@ nothrow @nogc:
         _target_current = null;
         _elements.clear();
         _built = false;    // materialise() must rebuild _elements next startup
-        return CompletionStatus.complete;
+        return super.shutdown();
     }
 
     override void update()

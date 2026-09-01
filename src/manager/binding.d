@@ -7,6 +7,7 @@ import urt.mem.temp : tconcat;
 import urt.meta : AliasSeq;
 import urt.result;
 import urt.string;
+import urt.time;
 import urt.variant;
 
 import manager;
@@ -21,7 +22,8 @@ nothrow @nogc:
 
 abstract class ProtocolBinding : ActiveObject
 {
-    alias Properties = AliasSeq!(Prop!("device", device));
+    alias Properties = AliasSeq!(Prop!("device", device),
+                                 Prop!("offline-timeout", offline_timeout));
 nothrow @nogc:
 
     enum type_name = "binding";
@@ -39,6 +41,9 @@ nothrow @nogc:
     {
         if (value == _device)
             return;
+        if (Device d = device_object())
+            d.remove_online_source(cast(void*)this);
+        _poll_failures = 0;
         _device = value.move;
         mark_set!(typeof(this), "device")();
         if (!_device.empty && _device[] !in g_app.devices)
@@ -49,13 +54,99 @@ nothrow @nogc:
         restart();
     }
 
+    final Device device_object()
+    {
+        if (Device* d = _device[] in g_app.devices)
+            return *d;
+        return null;
+    }
+
+    // silence longer than this marks the device offline; zero disables the watchdog
+    final Duration offline_timeout() const pure
+        => _quiet_limit;
+    final void offline_timeout(Duration value)
+    {
+        _quiet_limit = value;
+        mark_set!(typeof(this), "offline-timeout")();
+    }
+
 protected:
     String _device;
+    ubyte _poll_failures;
+    bool _quiet_armed;
+    Duration _quiet_limit;
+    MonoTime _last_activity;
+
+    enum offline_after = 3;                     // consecutive poll failures
+    enum offline_grace = dur!"seconds"(30);     // and no successful sample within this window
 
     // build the binding device tree
     bool materialise()
     {
         return true;
+    }
+
+    final void note_activity()
+    {
+        _last_activity = getTime();
+        set_device_online(true);
+        if (_quiet_limit > Duration.zero && !_quiet_armed)
+        {
+            g_app.schedule(_last_activity + _quiet_limit, &quiet_check);
+            _quiet_armed = true;
+        }
+    }
+
+    final void report_poll(bool success)
+    {
+        if (success)
+        {
+            _poll_failures = 0;
+            note_activity();
+        }
+        else if (_poll_failures != ubyte.max && ++_poll_failures >= offline_after &&
+                 getTime() - _last_activity >= offline_grace)
+            set_device_online(false);
+    }
+
+    final void set_device_online(bool online)
+    {
+        if (Device d = device_object())
+            d.set_online(cast(void*)this, online);
+    }
+
+    // an online verdict is sticky across restarts; retract it only when leaving service
+    override CompletionStatus shutdown()
+    {
+        if (_quiet_armed)
+        {
+            g_app.cancel(&quiet_check);
+            _quiet_armed = false;
+        }
+        if (disabled)
+        {
+            _poll_failures = 0;
+            if (Device d = device_object())
+                d.remove_online_source(cast(void*)this);
+        }
+        return CompletionStatus.complete;
+    }
+
+private:
+    void quiet_check(MonoTime)
+    {
+        _quiet_armed = false;
+        if (_quiet_limit <= Duration.zero)
+            return;
+        MonoTime deadline = _last_activity + _quiet_limit;
+        MonoTime now = getTime();
+        if (now < deadline)
+        {
+            g_app.schedule(deadline, &quiet_check);
+            _quiet_armed = true;
+            return;
+        }
+        set_device_online(false);
     }
 }
 
@@ -164,6 +255,6 @@ protected:
             g_app.release_profile(_profile_data);
             _profile_data = null;
         }
-        return CompletionStatus.complete;
+        return super.shutdown();
     }
 }

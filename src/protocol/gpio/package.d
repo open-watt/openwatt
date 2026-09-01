@@ -204,7 +204,7 @@ nothrow @nogc:
             _sampler.close();
             if (_element)
                 _element.mark_gap();
-            return CompletionStatus.complete;
+            return super.shutdown();
         }
 
         override void update()

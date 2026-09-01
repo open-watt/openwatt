@@ -605,6 +605,22 @@ A WLAN interface is one station association bound to a WiFi radio.
 | `rssi` | read-only | dBm | `0` | Received signal strength; `0` means unavailable. |
 | `signal-quality` | read-only | `0` to `100` | `0` | Normalized signal quality. |
 
+### `/binding` common properties
+
+Every binding tracks whether its device is reachable and mirrors the verdict
+into the device's `status.online` element: polling bindings mark the device
+offline once three consecutive polls have failed (timeouts, exceptions, and
+malformed or error responses all count) and no poll has succeeded for thirty
+seconds, and online again on the first successful sample. A partially failing
+device stays online while any of its data still samples; the dead elements
+simply stop updating. Event-driven bindings mark the device online on incoming
+data and offline when their transport drops.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `device` | device name | required | Device to create or populate. |
+| `offline-timeout` | duration | `0` (disabled; `30s` for CAN) | Marks the device offline when no data has arrived for this long, even while the transport stays up. |
+
 ### `/binding/obd`
 
 An OBD binding polls a vehicle through an OBD interface and materialises the
