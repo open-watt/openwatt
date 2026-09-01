@@ -17,8 +17,9 @@ nothrow @nogc:
 
 enum ComponentEvent : ubyte
 {
-    online,         // tree is populated/ready for consumers
-    offline,        // backing source disconnected
+    materialised,   // tree is populated/ready for consumers
+    online,         // backing source reachable
+    offline,        // backing source unreachable
     tree_changed,   // structure (children/elements) mutated
     destroyed,
 }

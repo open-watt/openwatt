@@ -508,6 +508,6 @@ private void materialise_vehicle(Device vehicle, const(char)[] vin, bool is_new)
         vehicle.set_element(vehicle_elements[element_id!"info.model_year"][], vi.model_year);
 
     vehicle.notify(ComponentEvent.tree_changed);
-    vehicle.notify(ComponentEvent.online);
+    vehicle.notify(ComponentEvent.materialised);
     enrich_from_nhtsa(vin);
 }

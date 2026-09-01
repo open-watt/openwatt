@@ -41,7 +41,7 @@ Device create_energy_device()
 
     g_app.devices.insert(d.id[], d);
     d.notify(ComponentEvent.tree_changed);
-    d.notify(ComponentEvent.online);
+    d.notify(ComponentEvent.materialised);
 
     return d;
 }

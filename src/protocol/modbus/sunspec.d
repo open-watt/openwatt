@@ -1158,7 +1158,7 @@ private:
             g_app.devices.insert(device.id[], device);
 
         device.notify(ComponentEvent.tree_changed);
-        device.notify(ComponentEvent.online);
+        device.notify(ComponentEvent.materialised);
         return true;
     }
 

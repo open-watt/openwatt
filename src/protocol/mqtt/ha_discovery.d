@@ -424,7 +424,7 @@ private:
         if (!record.announced)
         {
             record.announced = true;
-            record.device.notify(ComponentEvent.online);
+            record.device.notify(ComponentEvent.materialised);
         }
     }
 

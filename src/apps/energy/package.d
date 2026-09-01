@@ -221,7 +221,7 @@ nothrow @nogc:
             topology_dirty = true;
             return;
         }
-        if (event == ComponentEvent.tree_changed || event == ComponentEvent.online)
+        if (event == ComponentEvent.tree_changed || event == ComponentEvent.materialised)
             topology_dirty = true;
     }
 

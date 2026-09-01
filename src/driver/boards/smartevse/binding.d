@@ -73,7 +73,7 @@ nothrow @nogc:
 
         publish(SmartEVSEChange.all);
         publish_online();
-        _device_instance.notify(ComponentEvent.online);
+        _device_instance.notify(ComponentEvent.materialised);
         return CompletionStatus.complete;
     }
 
