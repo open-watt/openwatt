@@ -23,62 +23,72 @@ import protocol.ip.tcp_stream;
 nothrow @nogc:
 
 
-class TelnetServer
+class TelnetServer : ActiveObject
 {
+    alias Properties = AliasSeq!(Prop!("port", port));
 nothrow @nogc:
 
-    const String name;
+    enum type_name = "telnet-server";
+    enum path = "/protocol/telnet/server";
+    enum collection_id = CollectionType.telnet_server;
 
-    this(String name, Console* console, BaseInterface iface, ushort port)
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
-        this.name = name.move;
-        _console = console;
-
-        const(char)[] server_name = Collection!TCPServer().generate_name(this.name[]);
-
-        m_server = Collection!TCPServer().create(server_name, ObjectFlags.dynamic);
-        m_server.port = port;
-        m_server.set_connection_callback(&acceptConnection, null);
+        super(collection_type_info!TelnetServer, id, flags);
     }
 
-    ~this()
+    ushort port() const pure
+        => _port;
+    final void port(ushort value)
     {
-        m_server.destroy();
+        if (_port == value)
+            return;
+        _port = value;
+        mark_set!(typeof(this), "port")();
+        restart();
+    }
 
-        while (!m_sessions.empty)
+    override bool validate() const
+        => _port != 0;
+
+    override CompletionStatus startup()
+    {
+        const(char)[] server_name = Collection!TCPServer().generate_name(name[]);
+        _server = Collection!TCPServer().create(server_name, ObjectFlags.dynamic);
+        if (!_server)
+            return CompletionStatus.error;
+        _server.port = _port;
+        _server.set_connection_callback(&accept_connection, null);
+        return CompletionStatus.complete;
+    }
+
+    override CompletionStatus shutdown()
+    {
+        if (_server)
         {
-            Session session = m_sessions[$ - 1];
-            m_sessions.popBack();
+            _server.destroy();
+            _server = null;
+        }
+
+        while (!_sessions.empty)
+        {
+            Session session = _sessions[$ - 1];
+            _sessions.popBack();
             session.unsubscribe(&session_state_change);
             if (!(session.flags & ObjectFlags.disabled))
-                _console.destroy_session(session);
+                g_app.console.destroy_session(session);
         }
+        return CompletionStatus.complete;
     }
 
-    /// Add a listening port to the server.
-    /// Multiple ports may be registered for a server. Different ports may bind to different console instances, or trigger different login scripts on session creation.
-    /// For instance, a port may be assigned where new session instances execute the `log` command and the session effectively becomes a remote log stream.
-    /// \param console
-    ///  The console instance that new telnet sessions will be bound to.
-    /// \param listenPort
-    ///  A listening port for the telnet server.
-    /// \param loginScript
-    ///  A script to be executed on creation of new sessions connecting to this port.
-    /// \returns Returns `true` if the new port was registered successfully.
-    final bool addListenPort(Console* console, ushort listenPort, const(char)[] loginScript)
+private:
+    ushort _port;
+    TCPServer _server;
+    Array!Session _sessions;
+
+    void accept_connection(Stream client, ref const InetAddress remote, void* user_data)
     {
-        return false;
-    }
-
-package:
-    Console* _console;
-    TCPServer m_server;
-
-    Array!Session m_sessions;
-
-    void acceptConnection(Stream client, ref const InetAddress remote, void* user_data)
-    {
-        const(char)[] stream_name = Collection!Stream().generate_name(this.name[]);
+        const(char)[] stream_name = Collection!Stream().generate_name(name[]);
 
         TelnetStream telnet_stream = Collection!TelnetStream().create(stream_name, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary), NamedArgument("transport", client));
         if (telnet_stream is null)
@@ -87,12 +97,12 @@ package:
             return;
         }
 
-        Session session = _console.createSession!Session(telnet_stream);
+        Session session = g_app.console.createSession!Session(telnet_stream);
         session.show_prompt(true);
         session.load_history(".telnet_history");
 
         session.subscribe(&session_state_change);
-        m_sessions ~= session;
+        _sessions ~= session;
     }
 
     void session_state_change(ActiveObject object, StateSignal signal)
@@ -102,6 +112,6 @@ package:
 
         Session session = dyn_cast!Session(object);
         session.unsubscribe(&session_state_change);
-        m_sessions.removeFirstSwapLast(session);
+        _sessions.removeFirstSwapLast(session);
     }
 }

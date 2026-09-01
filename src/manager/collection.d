@@ -77,6 +77,7 @@ enum CollectionType : ubyte
     log_sink,
     console_session,
     smartevse,
+    telnet_server,
     count
 }
 
