@@ -21,6 +21,7 @@ import protocol.tesla.twc;
 
 import router.iface;
 import router.iface.packet;
+import router.stream;
 
 //version = DebugTWCMaster;
 
@@ -33,7 +34,8 @@ alias CentiAmps = Quantity!(ushort, ScaledUnit(Ampere, -2));
 // each slave discovered on the bus spawns a TeslaTWCBinding (and Device) named twc_<bus id>
 class TeslaTWCMaster : ActiveObject
 {
-    alias Properties = AliasSeq!(Prop!("interface", iface));
+    alias Properties = AliasSeq!(Prop!("interface", iface),
+                                 Prop!("stream", stream));
 nothrow @nogc:
 
     enum type_name = "tesla-twc-master";
@@ -159,15 +161,23 @@ nothrow @nogc:
         => _iface;
     void iface(BaseInterface value)
     {
-        if (_iface.get is value)
+        if (!_stream && _iface.get is value)
             return;
-        if (_subscribed)
-        {
-            _iface.unsubscribe(&incoming_packet);
-            _iface.unsubscribe(&iface_state_change);
-            _subscribed = false;
-        }
+        release_iface();
         _iface = value;
+        mark_set!(typeof(this), "interface")();
+        restart();
+    }
+
+    inout(Stream) stream() inout pure
+        => _stream;
+    void stream(Stream value)
+    {
+        if (_stream.get is value)
+            return;
+        release_iface();
+        _stream = value;
+        mark_set!(typeof(this), "stream")();
         restart();
     }
 
@@ -186,10 +196,24 @@ nothrow @nogc:
 
 protected:
     override bool validate() const pure
-        => _iface !is null;
+        => _iface !is null || _stream !is null;
 
     override CompletionStatus startup()
     {
+        if (_stream && !_iface)
+        {
+            const(char)[] n = Collection!BaseInterface().generate_name(name[]);
+            TeslaInterface ti = Collection!TeslaInterface().alloc(n, ObjectFlags.dynamic);
+            if (!ti)
+            {
+                log.error("could not create TWC interface '", n, "'");
+                return CompletionStatus.error;
+            }
+            ti.stream = _stream.get;
+            Collection!TeslaInterface().add(ti);
+            _iface = ti;
+        }
+
         BaseInterface i = _iface.get;
         if (!i || !i.running)
             return CompletionStatus.continue_;
@@ -247,6 +271,13 @@ protected:
             _iface.unsubscribe(&incoming_packet);
             _iface.unsubscribe(&iface_state_change);
             _subscribed = false;
+        }
+        // the stream-mode interface is ours; startup makes a fresh one
+        if (_stream)
+        {
+            if (BaseInterface i = _iface.get)
+                i.destroy();
+            _iface = null;
         }
         // chargers survive a restart; adopted slaves resume heartbeating immediately
         return CompletionStatus.complete;
@@ -311,6 +342,7 @@ private:
     }
 
     ObjectRef!BaseInterface _iface;
+    ObjectRef!Stream _stream;
     bool _subscribed;
 
     ushort _id_on_bus;
@@ -332,6 +364,18 @@ private:
     // two of ours standing off would otherwise take over in lockstep and collide forever
     Duration takeover_timeout() const pure
         => takeover_silence + msecs((_id_on_bus & 0xF) * 400);
+
+    // only the stream-mode interface is ours to destroy; a user's is merely released
+    void release_iface()
+    {
+        if (_stream)
+        {
+            if (BaseInterface i = _iface.get)
+                i.destroy();
+        }
+        _iface = null;
+        _stream = null;
+    }
 
     Charger* add_charger(ushort slave_id)
     {

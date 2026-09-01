@@ -837,10 +837,18 @@ names the situation throughout.
 | Property | Access | Values | Default | Description |
 | --- | --- | --- | --- | --- |
 | `interface` | read/write | interface name | required | The `tesla-twc` interface carrying the bus. |
+| `stream` | read/write | stream name | required | Byte stream carrying the bus; the master creates and owns a `tesla-twc` interface over it. |
+
+`interface` and `stream` are mutually exclusive: setting either replaces the
+other, and the interface created for a `stream` is destroyed with the master.
+Naming a stream is the short form, and is all that a bus of its own needs;
+name an interface instead when it is shared, bridged, or captured.
 
 ```text
-/interface/tesla-twc add name=shed_twc stream=shed
-/protocol/tesla/twc add name=twc0 interface=shed_twc
+/protocol/tesla/twc add name=shed stream=shed_rs485
+
+/interface/tesla-twc add name=shed_twc stream=shed_rs485
+/protocol/tesla/twc add name=shed interface=shed_twc
 ```
 
 ### `/binding/tesla/twc`
