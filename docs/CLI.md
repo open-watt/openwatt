@@ -696,6 +696,22 @@ service 0000FFF0-0000-1000-8000-00805F9B34FB  handles 0x0008-0xFFFF
   0x000D  0x000C  -       --CW----  0000FFF2-0000-1000-8000-00805F9B34FB
 ```
 
+### `/protocol/goodwe/aa55`
+
+An AA55 client speaks the GoodWe serial protocol over UDP to an inverter's
+WiFi/LAN kit. On startup it performs the register handshake, then read requests
+are queued and issued one at a time, paced by `interval`.
+
+| Property | Access | Values | Default | Description |
+| --- | --- | --- | --- | --- |
+| `remote` | read/write | hostname or IP, optional `:port` | required | Inverter address; the port defaults to 8899. |
+| `interval` | read/write | duration | `400ms` | Minimum delay between consecutive requests. |
+
+```
+/protocol/goodwe/aa55/add name=solar remote=192.168.1.20
+/binding/goodwe/add name=solar device=solar client=solar profile=gwxx48es model=gw5048es
+```
+
 ### `/protocol/http/server`
 
 An HTTP server provides the listener and shared policy for its registered

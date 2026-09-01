@@ -263,7 +263,10 @@ private:
         foreach (ref e; elements)
         {
             if (e.control == request.control_code && e.fn == request.function_code)
-                e.flags &= 0xFE; // clear in-flight flag
+            {
+                e.flags &= 0xFE;
+                e.last_update = response_time;
+            }
         }
         if (!success)
         {

@@ -345,7 +345,8 @@ private:
 
 class AA55Client : ActiveObject
 {
-    alias Properties = AliasSeq!(Prop!("remote", remote));
+    alias Properties = AliasSeq!(Prop!("remote", remote),
+                                 Prop!("interval", interval));
 nothrow @nogc:
 
     enum type_name = "aa55";
@@ -386,6 +387,14 @@ nothrow @nogc:
         return null;
     }
 
+    Duration interval() const pure
+        => _interval;
+    void interval(Duration value)
+    {
+        _interval = value < Duration() ? Duration() : value;
+        mark_set!(typeof(this), "interval")();
+    }
+
     // API
 
     bool read_in_flight(GoodWeFunctionCode function_code)
@@ -393,6 +402,11 @@ nothrow @nogc:
         foreach (ref req; _pending_requests)
         {
             if (req.control_code == GoodWeControlCode.read && req.function_code == function_code)
+                return true;
+        }
+        foreach (ref q; _request_queue)
+        {
+            if (q.req.control_code == GoodWeControlCode.read && q.req.function_code == function_code)
                 return true;
         }
         return false;
@@ -410,16 +424,21 @@ nothrow @nogc:
             // TODO: if callback or user_data is different, push it on the list
             return true;
         }
+        if (data.length > QueuedRequest.data.sizeof)
+            return false;
 
-        AA55Request req;
-        req.source_addr = _source_addr;
-        req.dest_addr = 0x7F;
-        req.control_code = control_code;
-        req.function_code = function_code;
-        req.callback = callback;
-        req.user_data = user_data;
+        QueuedRequest* q = &_request_queue.pushBack();
+        q.req.source_addr = _source_addr;
+        q.req.dest_addr = 0x7F;
+        q.req.control_code = control_code;
+        q.req.function_code = function_code;
+        q.req.callback = callback;
+        q.req.user_data = user_data;
+        q.data_len = cast(ubyte)data.length;
+        q.data[0 .. data.length] = data[];
 
-        return send_request_internal(req, data);
+        dispatch_queue();
+        return true;
     }
 
 protected:
@@ -499,13 +518,10 @@ protected:
                 send_request_internal(req, null);
             }
 
-            version (DebugAA55)
-            {
-                if (_host)
-                    writeInfo("aa55: '", name, "' begin handshake with ", _host[]);
-                else
-                    writeInfo("aa55: '", name, "' begin handshake with ", _remote);
-            }
+            if (_host)
+                log.info("begin handshake with ", _host[]);
+            else
+                log.info("begin handshake with ", _remote);
         }
 
         if (now - _last_activity >= 10.seconds)
@@ -523,8 +539,12 @@ protected:
         foreach (ref req; _pending_requests)
             req.callback(false, req, now, null, req.user_data);
         _pending_requests.clear();
+        foreach (ref q; _request_queue)
+            q.req.callback(false, q.req, now, null, q.req.user_data);
+        _request_queue.clear();
 
         _last_activity = MonoTime();
+        _last_send = MonoTime();
         _inverter_addr = 0x7F;
         _handshake_in_progress = false;
         _active = false;
@@ -534,23 +554,22 @@ protected:
 
     override void update()
     {
-        // Check watchdog
-        if (getTime() - _last_activity >= 10.seconds)
+        MonoTime now = getTime();
+
+        if (_last_send != MonoTime() && _last_send > _last_activity && now - _last_activity >= 10.seconds)
         {
-            version (DebugAA55)
-                writeWarning("aa55: '", name, "' timeout, restarting...");
+            log.warning("no response for 10s, restarting (tx: ", _tx_requests, ", rx: ", _rx_responses, ", timeouts: ", _timeouts, ")");
             restart();
             return;
         }
 
-        // Timeout requests...
-        MonoTime now = getTime();
         for (size_t i = 0; i < _pending_requests.length; )
         {
             ref req = _pending_requests[i];
 
             if (now - req.request_time >= 1500.msecs)
             {
+                ++_timeouts;
                 version (DebugAA55)
                     writeWarning("aa55: '", name, "' request timeout after ", (now - req.request_time).as!"msecs", "ms");
 
@@ -560,6 +579,8 @@ protected:
             else
                 ++i;
         }
+
+        dispatch_queue();
     }
 
 package:
@@ -647,6 +668,7 @@ package:
             version (DebugAA55)
                 writeInfo("aa55: '", name, "' received response after ", elapsed.as!"msecs", "ms");
 
+            ++_rx_responses;
             AA55Request t = _pending_requests[i];
             _pending_requests.remove(i);
 
@@ -682,8 +704,22 @@ private:
     ubyte _inverter_addr = 0x7F;
 
     MonoTime _last_activity;
+    MonoTime _last_send;
+    Duration _interval = msecs(400);
+
+    uint _tx_requests;
+    uint _rx_responses;
+    uint _timeouts;
+
+    struct QueuedRequest
+    {
+        AA55Request req;
+        ubyte data_len;
+        ubyte[24] data;
+    }
 
     Array!AA55Request _pending_requests;
+    Array!QueuedRequest _request_queue;
 
     // device details
     String firmware_version;
@@ -733,12 +769,27 @@ private:
             return false;
 
         req.request_time = getTime();
+        _last_send = req.request_time;
+        ++_tx_requests;
         _pending_requests ~= req;
 
         version (DebugAA55)
             writeDebug("aa55: '", name, "' sent request: control=", req.control_code, " function=", req.function_code, " len=", data.length);
 
         return true;
+    }
+
+    void dispatch_queue()
+    {
+        if (_request_queue.length == 0 || _pending_requests.length > 0)
+            return;
+        if (_last_send != MonoTime() && getTime() - _last_send < _interval)
+            return;
+
+        QueuedRequest q = _request_queue[0];
+        _request_queue.remove(0);
+        if (!send_request_internal(q.req, q.data[0 .. q.data_len]))
+            q.req.callback(false, q.req, getTime(), null, q.req.user_data);
     }
 
     void offline_response(bool success, ref const AA55Request request, MonoTime response_time, const(ubyte)[] response, void* user_data)
