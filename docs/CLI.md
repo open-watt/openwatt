@@ -815,6 +815,44 @@ preflights and normal responses use the effective policy.
 /protocol/http/fileserver add name=files http-server=webserver uri=/files root="conf" access=webdav allowed-origin=http://192.168.0.5:8080
 ```
 
+### `/protocol/tesla/twc`
+
+A TWC master runs the Tesla Wall Connector (Gen2) master role on an RS485 bus
+reached through a `/interface/tesla-twc` interface. It announces itself, then
+round-robins heartbeats and status requests across the chargers on the bus.
+Slaves that answer the announcement with a link-ready message are discovered
+automatically: each one gets a charger record, a dynamic `/binding/tesla/twc`
+entry, and a Device, all named for the slave's 16-bit bus id (e.g. `twc_6820`).
+No slave addresses are configured on the master.
+
+| Property | Access | Values | Default | Description |
+| --- | --- | --- | --- | --- |
+| `interface` | read/write | interface name | required | The `tesla-twc` interface carrying the bus. |
+
+```text
+/interface/tesla-twc add name=shed_twc stream=shed
+/protocol/tesla/twc add name=twc0 interface=shed_twc
+```
+
+### `/binding/tesla/twc`
+
+Bridges one TWC charger to the Device tree. Normally spawned by the master on
+discovery; adding one manually pre-adopts a known slave id so heartbeating
+starts without waiting for the slave to announce. Until a car asks to charge,
+the offered current is the station maximum; writing the `setpoint` element
+(grid.control.setpoint) adjusts the target current.
+
+| Property | Access | Values | Default | Description |
+| --- | --- | --- | --- | --- |
+| `device` | read/write | device name | required | Device to create or populate. |
+| `master` | read/write | TWC master name | required | The `/protocol/tesla/twc` master owning the bus. |
+| `slave_id` | read/write | 16-bit id | required | The charger's TWC bus id. |
+| `max-current` | read/write | amps | device max | Clamp on the offered charge current. |
+
+```text
+/binding/tesla/twc add name=twc_6820 device=twc_6820 master=twc0 slave_id=0x6820 max-current=25
+```
+
 ### `/sync/udp-server`
 
 A datagram sync listener owns one UDP endpoint per selected local endpoint. It

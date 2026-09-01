@@ -33,7 +33,9 @@ nothrow @nogc:
 
 class TeslaTWCBinding : ProtocolBinding
 {
-    alias Properties = AliasSeq!(Prop!("slave_id", slave_id));
+    alias Properties = AliasSeq!(Prop!("master", master),
+                                 Prop!("slave_id", slave_id),
+                                 Prop!("max-current", max_current));
 nothrow @nogc:
 
     enum type_name = "twc-binding";
@@ -44,50 +46,64 @@ nothrow @nogc:
         super(collection_type_info!TeslaTWCBinding, id, flags);
     }
 
+    final inout(TeslaTWCMaster) master() inout pure
+        => _master;
+    final void master(TeslaTWCMaster value)
+    {
+        if (_master.get is value)
+            return;
+        detach();
+        _master = value;
+        mark_set!(typeof(this), "master")();
+        restart();
+    }
+
     final ushort slave_id() const pure
         => _slave_id;
     final void slave_id(ushort value)
     {
         if (_slave_id == value)
             return;
+        detach();
         _slave_id = value;
         mark_set!(typeof(this), "slave_id")();
         restart();
     }
 
+    final float max_current() const pure
+        => _max_current / 100.0f;
+    final void max_current(float value)
+    {
+        ushort ca = value > 0 ? cast(ushort)(value * 100) : 0;
+        if (_max_current == ca)
+            return;
+        _max_current = ca;
+        mark_set!(typeof(this), "max-current")();
+        restart();
+    }
+
     final override bool validate() const pure
     {
-        return !_device.empty && _slave_id != 0;
+        return !_device.empty && _slave_id != 0 && _master !is null;
     }
 
     override CompletionStatus startup()
     {
+        TeslaTWCMaster m = _master.get;
+        if (!m || !m.running)
+            return CompletionStatus.continue_;
+
         if (!materialise())
             return CompletionStatus.error;
 
-        if (!_master)
-        {
-            auto tesla_mod = get_module!TeslaProtocolModule;
-            outer: foreach (twc; tesla_mod.twc_masters.values)
-            {
-                foreach (i, ref c; twc.chargers)
-                {
-                    if (_slave_id == c.id)
-                    {
-                        _master = twc;
-                        _charger_index = cast(ubyte)i;
-                        break outer;
-                    }
-                }
-            }
-            if (!_master)
-                return CompletionStatus.continue_;
-        }
+        m.adopt(_slave_id, this, _max_current);
+        _master.subscribe(&master_state_change);
+        _subscribed = true;
 
         if (_target_current)
         {
             _target_current.subscribe(&on_target_current_change);
-            _subscribed = true;
+            _elem_subscribed = true;
         }
 
         return CompletionStatus.complete;
@@ -95,12 +111,12 @@ nothrow @nogc:
 
     override CompletionStatus shutdown()
     {
-        if (_subscribed)
+        if (_elem_subscribed)
         {
             _target_current.unsubscribe(&on_target_current_change);
-            _subscribed = false;
+            _elem_subscribed = false;
         }
-        _master = null;
+        detach();
         _target_current = null;
         _elements.clear();
         detach_device();
@@ -108,20 +124,16 @@ nothrow @nogc:
         return CompletionStatus.complete;
     }
 
-    override void update()
+package:
+    void push_samples(ref TeslaTWCMaster.Charger charger)
     {
-        if (!_master)
-            return;
-
-        TeslaTWCMaster.Charger* charger = &_master.chargers[_charger_index];
         SysTime timestamp = getSysTime();
 
-        // TODO: user can write to target_current; we just push the master's view here
         foreach (ref e; _elements)
         {
             final switch (e.kind)
             {
-                case SampleKind.setpoint:        write_sample(e, charger.target_current, timestamp);                                      break;
+                case SampleKind.setpoint:        write_sample(e, charger.charge_current, timestamp);                                      break;
                 case SampleKind.state:           write_sample(e, cast(ubyte)charger.charger_state, timestamp);                            break;
                 case SampleKind.twc_state:       write_sample(e, cast(ubyte)charger.state, timestamp);                                    break;
                 case SampleKind.max:             write_sample(e, charger.max_current, timestamp);                                         break;
@@ -240,11 +252,12 @@ private:
     }
 
     ushort _slave_id;
+    ushort _max_current;
 
-    TeslaTWCMaster _master;
-    ubyte _charger_index;
+    ObjectRef!TeslaTWCMaster _master;
 
     bool _subscribed;
+    bool _elem_subscribed;
     bool _built;
 
     Element* _target_current;
@@ -345,13 +358,31 @@ private:
         }
     }
 
+    void detach()
+    {
+        if (_subscribed)
+        {
+            _master.unsubscribe(&master_state_change);
+            _subscribed = false;
+        }
+        if (TeslaTWCMaster m = _master.get)
+            m.detach(_slave_id, this);
+    }
+
+    void master_state_change(ActiveObject, StateSignal signal)
+    {
+        if (signal == StateSignal.offline)
+            restart();
+    }
+
     void on_target_current_change(ref const SampleUpdate update)
     {
-        if (!_master || update.element !is _target_current || !update.value_ready)
+        TeslaTWCMaster m = _master.get;
+        if (!m || update.element !is _target_current || !update.value_ready)
             return;
-        TeslaTWCMaster.Charger* charger = &_master.chargers[_charger_index];
-        charger.target_current = (cast(CentiAmps)update.value.asQuantity()).value;
+        ushort target = (cast(CentiAmps)update.value.asQuantity()).value;
+        m.set_target_current(_slave_id, target);
         version (DebugTWCBinding)
-            log.trace("set target current: ", charger.target_current);
+            log.trace("set target current: ", target);
     }
 }
