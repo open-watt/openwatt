@@ -70,11 +70,13 @@ nothrow @nogc:
         restart();
     }
 
-    final float max_current() const pure
-        => _max_current / 100.0f;
-    final void max_current(float value)
+    final Amps max_current() const pure
+        => Amps(_max_current / 100.0f);
+    final void max_current(Amps value)
     {
-        ushort ca = value > 0 ? cast(ushort)(value * 100) : 0;
+        ushort ca = (cast(CentiAmps)value).value;
+        if (ca == 0)
+            ca = default_max_current;
         if (_max_current == ca)
             return;
         _max_current = ca;
@@ -101,10 +103,10 @@ nothrow @nogc:
         _subscribed = true;
 
         if (_target_current)
-        {
             _target_current.subscribe(&on_target_current_change);
-            _elem_subscribed = true;
-        }
+        if (_max_limit)
+            _max_limit.subscribe(&on_max_current_change);
+        _elem_subscribed = true;
 
         return CompletionStatus.complete;
     }
@@ -113,11 +115,15 @@ nothrow @nogc:
     {
         if (_elem_subscribed)
         {
-            _target_current.unsubscribe(&on_target_current_change);
+            if (_target_current)
+                _target_current.unsubscribe(&on_target_current_change);
+            if (_max_limit)
+                _max_limit.unsubscribe(&on_max_current_change);
             _elem_subscribed = false;
         }
         detach();
         _target_current = null;
+        _max_limit = null;
         _elements.clear();
         detach_device();
         _built = false;
@@ -133,10 +139,10 @@ package:
         {
             final switch (e.kind)
             {
-                case SampleKind.setpoint:        write_sample(e, charger.charge_current, timestamp);                                      break;
+                case SampleKind.setpoint:        write_sample(e, charger.charge_current, timestamp, &on_target_current_change);          break;
                 case SampleKind.state:           write_sample(e, cast(ubyte)charger.charger_state, timestamp);                            break;
                 case SampleKind.twc_state:       write_sample(e, cast(ubyte)charger.state, timestamp);                                    break;
-                case SampleKind.max:             write_sample(e, charger.max_current, timestamp);                                         break;
+                case SampleKind.max:             write_sample(e, charger.max_current, timestamp, &on_max_current_change);                break;
                 case SampleKind.current:         write_sample(e, (charger.flags & 2) ? charger.current : ushort(0), timestamp);            break;
                 case SampleKind.voltage1:        write_sample(e, (charger.flags & 2) ? charger.voltage1 : ushort(0), timestamp);           break;
                 case SampleKind.voltage2:        write_sample(e, (charger.flags & 2) ? charger.voltage2 : ushort(0), timestamp);           break;
@@ -203,7 +209,7 @@ protected:
         set_constant(control, "min", CentiAmps(500));
         set_constant(control, "can_disable", false);
         _target_current = add_sample(control, "setpoint", SampleKind.setpoint, centiamps_format(), Access.read_write);
-        add_sample(control, "max", SampleKind.max, centiamps_format());
+        _max_limit = add_sample(control, "max", SampleKind.max, centiamps_format(), Access.read_write);
 
         Component meter = find_or_create_component(grid, "meter", "EnergyMeter");
         set_constant(meter, "type", "three-phase");
@@ -251,8 +257,10 @@ private:
         SampleKind kind;
     }
 
+    enum ushort default_max_current = 3200;
+
     ushort _slave_id;
-    ushort _max_current;
+    ushort _max_current = default_max_current;
 
     ObjectRef!TeslaTWCMaster _master;
 
@@ -261,6 +269,7 @@ private:
     bool _built;
 
     Element* _target_current;
+    Element* _max_limit;
     Array!SampleElement _elements;
 
     Component find_or_create_component(Component parent, const(char)[] id, const(char)[] template_)
@@ -329,22 +338,22 @@ private:
         return register_format(format);
     }
 
-    void write_sample(T)(ref SampleElement sample, T value, SysTime timestamp)
+    void write_sample(T)(ref SampleElement sample, T value, SysTime timestamp, Subscriber who = null)
     {
         static if (is(T : const(char)[]))
         {
             if (sample.element.format == sample.format)
-                sample.element.write_sample(value, timestamp);
+                sample.element.write_sample(value, timestamp, who);
             else
-                sample.element.value(value, timestamp);
+                sample.element.value(value, timestamp, who);
         }
         else
         {
             const(void)[] record = (cast(const(void)*)&value)[0 .. T.sizeof];
             if (sample.element.format == sample.format)
-                sample.element.write_record(record, timestamp);
+                sample.element.write_record(record, timestamp, who);
             else
-                sample.element.value(box_record(record.ptr, *format_info(sample.format)), timestamp);
+                sample.element.value(box_record(record.ptr, *format_info(sample.format)), timestamp, who);
         }
     }
 
@@ -384,5 +393,16 @@ private:
         m.set_target_current(_slave_id, target);
         version (DebugTWCBinding)
             log.trace("set target current: ", target);
+    }
+
+    void on_max_current_change(ref const SampleUpdate update)
+    {
+        TeslaTWCMaster m = _master.get;
+        if (!m || update.element !is _max_limit || !update.value_ready)
+            return;
+        ushort limit = (cast(CentiAmps)update.value.asQuantity()).value;
+        m.set_max_current(_slave_id, limit);
+        version (DebugTWCBinding)
+            log.trace("set max current: ", limit);
     }
 }

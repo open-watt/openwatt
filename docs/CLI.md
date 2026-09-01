@@ -838,19 +838,23 @@ No slave addresses are configured on the master.
 
 Bridges one TWC charger to the Device tree. Normally spawned by the master on
 discovery; adding one manually pre-adopts a known slave id so heartbeating
-starts without waiting for the slave to announce. Until a car asks to charge,
-the offered current is the station maximum; writing the `setpoint` element
-(grid.control.setpoint) adjusts the target current.
+starts without waiting for the slave to announce. Charge control lives on the
+device's `grid.control` PowerControl: `setpoint` adjusts the target current,
+and `max` caps the offered current at runtime. The operating ceiling is always
+the least of the `max-current` property, the `max` element, and the charger's
+own maximum; a slave-mode TWC enforces no limit of its own, so the property is
+the installer's hard ceiling for the circuit.
 
 | Property | Access | Values | Default | Description |
 | --- | --- | --- | --- | --- |
 | `device` | read/write | device name | required | Device to create or populate. |
 | `master` | read/write | TWC master name | required | The `/protocol/tesla/twc` master owning the bus. |
 | `slave_id` | read/write | 16-bit id | required | The charger's TWC bus id. |
-| `max-current` | read/write | amps | device max | Clamp on the offered charge current. |
+| `max-current` | read/write | amps | 32 | Hard ceiling on the offered current; `control.max` can only lower it. |
 
 ```text
-/binding/tesla/twc add name=twc_6820 device=twc_6820 master=twc0 slave_id=0x6820 max-current=25
+/binding/tesla/twc add name=twc_6820 device=twc_6820 master=twc0 slave_id=0x6820 max-current=25A
+/element/set twc_6820.grid.control.max 20A
 ```
 
 ### `/sync/udp-server`

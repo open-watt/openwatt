@@ -77,7 +77,8 @@ nothrow @nogc:
         bool verify_presence;
         ubyte verify_zero_count;
 
-        ushort specified_max_current; // a configured charge limit; 0 = no limit beyond the device's own
+        ushort hard_max_current;      // the binding's configured ceiling; control.max can only lower it
+        ushort specified_max_current; // a runtime charge limit from control.max; 0 = none
         ushort device_max_current;    // the maximum current supported by the charger
         ushort target_current;        // the current we're trying to charge with
         ushort charge_current_target; // the current the car is requesting
@@ -101,12 +102,15 @@ nothrow @nogc:
         enum ushort min_current = 500;
 
         // device_max_current arrives in SlaveLinkReady; until then the configured
-        // limit stands alone so optimistically-adopted chargers have a valid clamp
+        // limits stand alone so optimistically-adopted chargers have a valid clamp
         ushort max_current() const pure
         {
-            if (!specified_max_current)
-                return device_max_current;
-            return device_max_current ? min(device_max_current, specified_max_current) : specified_max_current;
+            ushort m = hard_max_current;
+            if (device_max_current && (!m || device_max_current < m))
+                m = device_max_current;
+            if (specified_max_current && (!m || specified_max_current < m))
+                m = specified_max_current;
+            return m;
         }
 
         ushort charge_current() const pure
@@ -221,7 +225,7 @@ package:
         return null;
     }
 
-    Charger* adopt(ushort slave_id, TeslaTWCBinding binding, ushort specified_max)
+    Charger* adopt(ushort slave_id, TeslaTWCBinding binding, ushort hard_max)
     {
         Charger* c = find_charger(slave_id);
         if (!c)
@@ -234,7 +238,7 @@ package:
                 c.link_ready = true;
         }
         c.binding = binding;
-        c.specified_max_current = specified_max;
+        c.hard_max_current = hard_max;
         return c;
     }
 
@@ -249,6 +253,12 @@ package:
     {
         if (Charger* c = find_charger(slave_id))
             c.target_current = current;
+    }
+
+    void set_max_current(ushort slave_id, ushort current)
+    {
+        if (Charger* c = find_charger(slave_id))
+            c.specified_max_current = current;
     }
 
 private:
@@ -272,6 +282,7 @@ private:
         c.id = slave_id;
         c.name = tformat("twc_{0,04x}", slave_id).make_string();
         c.target_current = ushort.max;
+        c.hard_max_current = 3200; // until a binding adopts and states its ceiling
         return c;
     }
 

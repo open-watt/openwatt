@@ -1207,7 +1207,9 @@ replace the `Port`; it only describes control.
   - `percent` - 0-100% of an external reference
   - `nameplate_fraction` - 0-1 of `max`
 - `min: num` - Minimum non-zero setpoint (in `unit`). Below this the device is effectively off.
-- `max: num` - Maximum allowable setpoint (in `unit`).
+- `max: num` - Maximum allowable setpoint (in `unit`). Writable where the
+  integration supports capping; reads back the effective ceiling, which never
+  exceeds the device's own maximum.
 - `step: num` - Resolution of setpoint changes (in `unit`); e.g. 1 A for an EVSE.
 - `measured: alias` - Reference (`@path`) to the element carrying actual current
   consumption or production, typically a neighbouring `EnergyMeter`'s `power`.
