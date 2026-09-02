@@ -78,6 +78,17 @@ nothrow @nogc:
             _tls_server.port = _tls_port;
     }
 
+    const(char)[][] certificates() const
+    {
+        auto buf = talloc_array!(const(char)[])(_certificates.length);
+        size_t n = 0;
+        foreach (ref c; _certificates)
+        {
+            if (c)
+                buf[n++] = c.name[];
+        }
+        return buf[0 .. n];
+    }
     void certificates(Certificate[] value)
     {
         if (_cert_subscribed)

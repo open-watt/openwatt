@@ -92,17 +92,17 @@ class Automation : ActiveObject
     void schedule(Duration value)
     {
         set_time(tconcat("every:", value));
-        mark_set!(typeof(this), "schedule")();
+        mark_set!(typeof(this), [ "schedule", "on" ])();
     }
     void at(TimeOfDay value)
     {
         set_time(tconcat("at:", value));
-        mark_set!(typeof(this), "at")();
+        mark_set!(typeof(this), [ "at", "on" ])();
     }
     void when(SysTime value)
     {
         set_time(tconcat("when:", value));
-        mark_set!(typeof(this), "when")();
+        mark_set!(typeof(this), [ "when", "on" ])();
     }
 
     const(char)[] condition() const { return _condition[]; }
