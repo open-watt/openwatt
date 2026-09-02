@@ -192,6 +192,7 @@
     <DCompile Include="src\protocol\dhcp\client.d" />
     <DCompile Include="src\protocol\dhcp\lease.d" />
     <DCompile Include="src\protocol\dhcp\message.d" />
+    <DCompile Include="src\protocol\dhcp\message6.d" />
     <DCompile Include="src\protocol\dhcp\option.d" />
     <DCompile Include="src\protocol\dhcp\package.d" />
     <DCompile Include="src\protocol\dhcp\server.d" />
