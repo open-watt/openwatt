@@ -1405,6 +1405,14 @@ void append_config_value(ref MutableString!0 buf, ref const Variant v)
         }
         return;
     }
+    {
+        import manager.expression : Script;
+        if (v.isUser!Script)
+        {
+            buf.append('{', v.asUser!Script.source, '}');
+            return;
+        }
+    }
     if (v.isString)
     {
         const(char)[] s = v.asString;

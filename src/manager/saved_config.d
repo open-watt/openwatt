@@ -19,6 +19,11 @@ enum saved_config_file = "conf/config.conf";
 // emit add commands which recreate every explicitly-configured object
 void export_all(ref MutableString!0 buf)
 {
+    import manager.system : hostname, hostname_explicit;
+
+    if (hostname_explicit)
+        buf.append("/system/set-hostname hostname=", hostname[], "\n");
+
     foreach (ref type_name; g_app.type_order)
     {
         auto t = type_name in g_app.types;

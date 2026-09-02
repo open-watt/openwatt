@@ -257,7 +257,12 @@ int main(string[] args)
     {
         import urt.lifetime : move;
         if (!g_app.console.execute_script(startup_session, combined_config.move))
+        {
+            // move a broken saved config aside so the next boot reaches startup.conf
+            if (using_saved_config)
+                retire_config(saved_config_file);
             return -1;
+        }
         startup_pending = !startup_session.is_idle();
     }
 
