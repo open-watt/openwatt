@@ -120,11 +120,9 @@ nothrow @nogc:
             restart();
             return null;
         }
-        Component c = resolve_component_path(value);
-        if (c is null)
-            return tconcat("device not found: ", value);
+        // a discovered or mirrored device may not exist yet; resolve_refs() binds it when it appears
         _device_path = value.make_string();
-        _device = c;
+        _device = resolve_component_path(value);
         mark_set!(typeof(this), [ "device", "kind" ])();
         restart();
         return null;
@@ -141,11 +139,8 @@ nothrow @nogc:
             restart();
             return null;
         }
-        Component c = resolve_component_path(value);
-        if (c is null)
-            return tconcat("meter not found: ", value);
         _meter_path = value.make_string();
-        _meter = c;
+        _meter = resolve_component_path(value);
         mark_set!(typeof(this), "meter")();
         restart();
         return null;
@@ -176,11 +171,8 @@ nothrow @nogc:
             restart();
             return null;
         }
-        Component c = resolve_component_path(value);
-        if (c is null)
-            return tconcat("state not found: ", value);
         _state_path = value.make_string();
-        _state = c;
+        _state = resolve_component_path(value);
         mark_set!(typeof(this), "state")();
         restart();
         return null;
@@ -189,6 +181,18 @@ nothrow @nogc:
     Component device_ref() pure { return _device; }
     Component meter_ref() pure { return _meter; }
     Component state_ref() pure { return _state; }
+
+    bool resolve_refs()
+    {
+        bool bound = false;
+        if (_device is null && _device_path.length && (_device = resolve_component_path(_device_path[])) !is null)
+            bound = true;
+        if (_meter is null && _meter_path.length && (_meter = resolve_component_path(_meter_path[])) !is null)
+            bound = true;
+        if (_state is null && _state_path.length && (_state = resolve_component_path(_state_path[])) !is null)
+            bound = true;
+        return bound;
+    }
 
     MeterData meter_data;
 
