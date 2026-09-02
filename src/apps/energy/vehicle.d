@@ -6,6 +6,7 @@ import urt.log : writeError;
 import urt.map;
 import urt.mem;
 import urt.meta : Alias;
+import urt.si.unit;
 import urt.string;
 import urt.time : SysTime;
 
@@ -16,6 +17,7 @@ import manager.collection;
 import manager.component;
 import manager.device;
 import manager.element;
+import manager.series;
 
 import protocol.http;
 import protocol.http.message;
@@ -25,11 +27,21 @@ nothrow @nogc:
 
 void init_vehicle_formats()
 {
-    vehicle_element_formats[VehicleElementType.string_] = register_value_format!String();
-    vehicle_element_formats[VehicleElementType.int_] = register_value_format!int();
-    vehicle_element_formats[VehicleElementType.bool_] = register_value_format!bool();
-    vehicle_element_formats[VehicleElementType.float_] = register_value_format!float();
-    vehicle_element_formats[VehicleElementType.time] = register_value_format!SysTime();
+    foreach (i, ref f; vehicle_element_formats)
+    {
+        DataFormat fmt;
+        final switch (vehicle_element_types[i]) with (VehicleElementType)
+        {
+            case string_: fmt = data_format_of!String(); break;
+            case int_:    fmt = data_format_of!int(); break;
+            case bool_:   fmt = data_format_of!bool(); break;
+            case float_:  fmt = data_format_of!float(); break;
+            case time:    fmt = data_format_of!SysTime(); break;
+        }
+        if (vehicle_element_units[i] != none)
+            fmt = DataFormat(fmt.type, SeriesKind.held, vehicle_element_units[i]);
+        f = register_format(fmt);
+    }
 }
 
 void add_capacity_sample(const(char)[] vin, float estimate_kwh, float weight)
@@ -148,7 +160,7 @@ struct CapacityEstimate
         => weight_total > 0 ? sum_weighted / weight_total : float.nan;
 }
 
-__gshared FormatId[VehicleElementType.max + 1] vehicle_element_formats;
+__gshared FormatId[vehicle_elements.length] vehicle_element_formats;
 __gshared Map!(String, CapacityEstimate) g_capacity_estimates;
 
 static immutable vehicle_components = make_table!([
@@ -281,9 +293,26 @@ __gshared const String[12] nhtsa_element_ids = [
     StringLit!"info.electrification",
 ];
 
+enum none = ScaledUnit.init;
+
+static immutable ScaledUnit[vehicle_elements.length] vehicle_element_units =
+[
+    none, none, none, none, none, none, none, none, none, none, none, none, ScaledUnits.minute, none,
+    ScaledUnits.percent, none, none, none, ScaledUnits.percent, ScaledUnits.percent, ScaledUnits.kilowatt_hour,
+    none, ScaledUnits.volt, ScaledUnits.ampere, ScaledUnits.watt, ScaledUnits.kilowatt_hour, none, none, none, none,
+    ScaledUnits.ampere, ScaledUnits.ampere, ScaledUnits.ampere, ScaledUnits.ampere, none, none, none,
+    ScaledUnits.celsius, ScaledUnits.celsius, ScaledUnits.celsius, ScaledUnits.celsius, ScaledUnits.celsius,
+    ScaledUnits.celsius, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none,
+    ScaledUnits.kilometre_per_hour, ScaledUnits.kilowatt, ScaledUnits.kilometre, ScaledUnits.degree,
+    ScaledUnits.degree, ScaledUnits.degree, ScaledUnits.metre, ScaledUnit(Pascal, 5), ScaledUnit(Pascal, 5),
+    ScaledUnit(Pascal, 5), ScaledUnit(Pascal, 5), none, none, none, none,
+];
+
+
 static assert(VehicleElementType.sizeof == 1);
 static assert(vehicle_components.length % 2 == 0);
 static assert(vehicle_elements.length == vehicle_element_types.length);
+static assert(vehicle_elements.length == vehicle_element_units.length);
 
 void materialise_vehicle(Device vehicle, const(char)[] vin, bool changed)
 {
@@ -291,7 +320,7 @@ void materialise_vehicle(Device vehicle, const(char)[] vin, bool changed)
         ensure_component(vehicle, vehicle_components[i * 2][], vehicle_components[i * 2 + 1][], changed);
 
     foreach (i; 0 .. vehicle_elements.length)
-        define_element(vehicle, vehicle_elements[i][], vehicle_element_formats[vehicle_element_types[i]], changed);
+        define_element(vehicle, vehicle_elements[i][], vehicle_element_formats[i], changed);
 
     changed |= set_default(vehicle, vehicle_elements[element_id!"info.type"][], StringLit!"vehicle");
     Element* serial = vehicle.find_element(vehicle_elements[element_id!"info.serial_number"][]);
