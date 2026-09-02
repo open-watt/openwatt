@@ -722,6 +722,20 @@ IPv4 and IPv6 are configured through parallel collections: `address`/`address6`,
 | `blackhole` | `yes`/`no` | Silently discard matching traffic. |
 | `distance` | `0` to `255` | Route preference; lower wins. |
 
+`/protocol/ip/pool6` describes a v6 allocation prefix serving two shapes at
+once: delegated sub-prefixes (DHCPv6 `IA_PD`) of any width down to `/64`,
+best-fit packed so mixed sizes and static reservations coexist, and individual
+host addresses (DHCPv6 `IA_NA`) issued from `/64`s the pool draws for itself.
+A pool's prefix is configured directly, or carved out of a parent pool: with
+`pool=` set, the pool acquires a `prefix-length`-wide prefix from the parent at
+startup and re-reserves the same prefix across restarts.
+
+| Property | Values | Description |
+| --- | --- | --- |
+| `prefix` | IPv6 address | The pool's covering prefix. Mutually exclusive with `pool`. |
+| `prefix-length` | `1` to `64` | Length of the covering prefix; with `pool=`, the width requested from the parent. |
+| `pool` | pool name | Parent pool to draw this pool's prefix from. Mutually exclusive with `prefix`. |
+
 ```
 /protocol/ip/address/add address=192.168.1.10/24 interface=eth0
 /protocol/ip/address6/add address=2001:db8:1::10/64 interface=eth0
