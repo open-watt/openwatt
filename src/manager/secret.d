@@ -173,17 +173,18 @@ nothrow @nogc:
         }
     }
 
-    // should we return an array of strings instead of a comma-separated list?
-    String services() const
+    const(char)[][] services() const
     {
-        MutableString!0 r;
+        import urt.mem.temp : talloc_array;
+
+        auto buf = talloc_array!(const(char)[])(_services.length);
+        size_t n = 0;
         foreach (s; _services[])
         {
             if (s.value.enable)
-                r.concat(r.length > 0 ? "," : "", s.key);
+                buf[n++] = s.key[];
         }
-        // TODO: we should be able to promote MutableString to String!!
-        return r[].make_string();
+        return buf[0 .. n];
     }
     void services(String[] value)
     {

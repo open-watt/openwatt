@@ -126,13 +126,14 @@ nothrow @nogc:
         restart();
     }
 
-    const(ubyte)[] password() const pure
-        => _password[];
-    void password(const(ubyte)[] value)
+    // TODO: should migrate to an ObjectRef!Secret like wifi's secret=
+    const(char)[] password() const pure
+        => cast(const(char)[])_password[];
+    void password(const(char)[] value)
     {
-        if (value == _password[])
+        if (cast(const(ubyte)[])value == _password[])
             return;
-        _password = value;
+        _password = cast(const(ubyte)[])value;
         mark_set!(typeof(this), "password")();
         restart();
     }

@@ -138,10 +138,21 @@ nothrow @nogc:
         _certificates.clear();
         if (value)
             _certificates.emplaceBack(value);
-        mark_set!(typeof(this), "certificate")();
+        mark_set!(typeof(this), "certificates")();
         restart();
     }
 
+    const(char)[][] certificates() const
+    {
+        auto buf = talloc_array!(const(char)[])(_certificates.length);
+        size_t n = 0;
+        foreach (ref c; _certificates)
+        {
+            if (c)
+                buf[n++] = c.name[];
+        }
+        return buf[0 .. n];
+    }
     void certificates(Certificate[] value...)
     {
         _certificates.clear();
@@ -952,16 +963,27 @@ nothrow @nogc:
         super(collection_type_info!TLSServer, id, flags);
     }
 
-    void certificate(ActiveObject value)
+    void certificate(Certificate value)
     {
         _certificates.clear();
         if (value)
             _certificates.emplaceBack(value);
-        mark_set!(typeof(this), "certificate")();
+        mark_set!(typeof(this), "certificates")();
         restart();
     }
 
-    void certificates(ActiveObject[] value...)
+    const(char)[][] certificates() const
+    {
+        auto buf = talloc_array!(const(char)[])(_certificates.length);
+        size_t n = 0;
+        foreach (ref c; _certificates)
+        {
+            if (c)
+                buf[n++] = c.name[];
+        }
+        return buf[0 .. n];
+    }
+    void certificates(Certificate[] value...)
     {
         _certificates.clear();
         _certificates.reserve(value.length);
@@ -1028,7 +1050,7 @@ protected:
 
 private:
 
-    Array!(ObjectRef!ActiveObject) _certificates;
+    Array!(ObjectRef!Certificate) _certificates;
 }
 
 
