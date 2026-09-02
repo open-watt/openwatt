@@ -91,9 +91,12 @@ void log_level(Session session, Severity severity)
     get_module!LogModule.set_max_severity(severity);
 }
 
+__gshared bool hostname_explicit;
+
 void set_hostname(Session session, const(char)[] hostname)
 {
     .hostname = hostname.make_string();
+    hostname_explicit = true;
     set_log_hostname(.hostname[]);   // keep log HOSTNAME stamping in sync
 }
 
