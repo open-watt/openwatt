@@ -3,6 +3,26 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-09-09: IPv6 pools and retained parent allocations
+
+- `/protocol/ip/pool6.prefix` is now an IPv6 network (`address/length`), with
+  type `ipv6nwk`. Remove `prefix-length` controls and combine existing values
+  into this single property. Valid configured lengths are 1..64; `::/0` is unset.
+- Add the `pool` parent selector. Create a child with `pool=<parent>` and
+  `prefix=::/56`. A nonzero prefix address written to the authority selects static
+  mode and clears the parent; `::/length` changes the requested width while
+  keeping the parent. Clearing `pool` retains the current network as static.
+- Display the authoritative `prefix` received in sync snapshots and updates,
+  including acquisitions and renumbering. Applying a prefix echo to a proxy
+  must preserve its parent selection; do not interpret that echo as a user edit.
+- Pool6 now exposes ActiveObject `running` and `status`. Parent loss does not
+  imply child loss: the child retains its prefix and reservations, and stays
+  online if exact reclamation succeeds after parent recovery or recreation.
+  Failed reclamation takes the child and descendant pools offline to reacquire;
+  clear dependent address views on their own lifecycle events.
+- Continue keeping DHCPv6 client/server/lease controls unavailable. This change
+  provides the allocator, not operational DHCPv6 roles.
+
 ## 2026-09-08: retrospective merge reconciliation
 
 - Appliance `device`, `meter`, and `state` paths may be accepted before the

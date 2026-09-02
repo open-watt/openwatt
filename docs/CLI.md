@@ -753,12 +753,43 @@ EUI-64 link-local address, verifies it with DAD, and publishes it as a dynamic
 | `/protocol/ip/neighbour/print` | Show the IPv4 neighbour (ARP) cache: address, MAC, reachability state, retries, interface. |
 | `/protocol/ip/neighbour6/print` | Show the IPv6 neighbour (ND) cache in the same shape. |
 
+`/protocol/ip/pool6` allocates mixed-width sub-prefixes down to `/64` and
+individual host addresses from `/64`s it reserves for itself. Best-fit
+allocation packs around existing reservations. Static host reservations accept
+any nonzero 64-bit interface ID; automatic issuance uses IDs 1..65535 per `/64`.
+These allocator APIs are available for future DHCPv6 integration; the DHCPv6
+client, server and lease collections are not implemented.
+
+A pool's `prefix` is one IPv6 network, including its length. Configure a static
+pool with `prefix=fd00:12:34::/48`, or request a `/56` from a parent with
+`pool=upstream prefix=::/56`. Once acquired, `prefix` reports the actual network.
+Setting a nonzero prefix address selects static mode and clears `pool`; setting
+`pool` selects parent mode and retains the current prefix as a preferred range.
+`prefix=::/60` changes the requested length while retaining the configured parent.
+
+A running child keeps its prefix, host reservations and delegated ranges when
+its parent goes offline or is removed. It continues serving its local allocation
+space. When the parent returns, including recreation under the same name, it
+first reserves the child's exact existing range. Success preserves the child's
+running state and all reservations. Failure restarts the child and its descendant
+pools, invalidates downstream consumers through their offline signals, and
+attempts a new allocation. If no range is available, the child remains offline
+and retries. Retaining local configuration does not establish upstream reachability.
+
+| Property | Values | Description |
+| --- | --- | --- |
+| `prefix` | IPv6 network (`address/length`) | Static or acquired network. Valid lengths are 1..64; `::/length` requests a width from the configured parent. `::/0` clears the length and leaves the pool unconfigured. |
+| `pool` | pool name | Parent pool to acquire from. Clearing it retains the current prefix as a static range. |
+| `running`, `status` | read-only | Pool lifecycle state. A child can remain running while its parent is unavailable. |
+
 ```
 /protocol/ip/address/add address=192.168.1.10/24 interface=eth0
 /protocol/ip/address6/add address=2001:db8:1::10/64 interface=eth0
 /protocol/ip/route6/add destination=::/0 gateway=fe80::1 out-interface=eth0
 /protocol/ip/neighbour6/print
 /ping address=fe80::1 iface=eth0
+/protocol/ip/pool6/add name=upstream prefix=fd00:12:34::/48
+/protocol/ip/pool6/add name=site pool=upstream prefix=::/56
 ```
 
 ### DHCPv6
