@@ -736,6 +736,12 @@ EUI-64 link-local address, verifies it with DAD, and publishes it as a dynamic
 /protocol/ip/neighbour6/print
 ```
 
+### DHCPv6
+
+DHCPv6 rides beside SLAAC: addresses and delegated prefixes come from DHCPv6,
+while the default route always comes from Router Advertisements because DHCPv6
+does not carry routes.
+
 ### `/protocol/http/server`
 
 An HTTP server provides the listener and shared policy for its registered
