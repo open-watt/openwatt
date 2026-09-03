@@ -58,7 +58,7 @@ import manager.collection;
 import manager.component : Component;
 import manager.device : Device;
 import manager.element : Access, add_feed_listener, Cursor, Element, ElementLifecycleEvent,
-                         register_element_lifecycle_handler, remove_feed_listener, sweep_dirty;
+                         register_element_lifecycle_handler, remove_feed_listener, SampleUpdate, sweep_dirty;
 import manager.id : EID;
 import manager.path : Address, match_path, pattern_matches, walk_elements, walk_elements_until;
 import manager.series : Constraint, DataFormat, format_info, FormatId, RecordBlock, register_format, Scalar,
@@ -103,6 +103,7 @@ enum PendingKind : ubyte
     set,
     reset,
     model_set,
+    local_set,
 }
 
 struct PendingForward
@@ -557,7 +558,7 @@ nothrow @nogc:
             if (kvp.value.origin is p || kvp.value.dest is p)
             {
                 doomed ~= kvp.key;
-                if (kvp.value.origin !is p)
+                if (kvp.value.origin && kvp.value.origin !is p)
                     stranded ~= kvp.value;
             }
         }
@@ -1585,6 +1586,9 @@ nothrow @nogc:
             merge_remote_value(e, *v, t_ms);
         EID eid = e.ensure_eid();
         from.attach_model_element(dev, e, remote_access);
+
+        if (remote_access & Access.write)
+            e.subscribe(&on_mirror_write);
         return eid;
     }
 
@@ -1675,6 +1679,11 @@ nothrow @nogc:
     {
         if (PendingForward* forward = seq in pending_forwards)
         {
+            if (forward.kind == PendingKind.local_set && forward.dest is from)
+            {
+                pending_forwards.remove(seq);
+                return;
+            }
             if (forward.kind == PendingKind.model_set && forward.dest is from)
             {
                 SyncEncoder enc = encoder_for(forward.origin._encoder);
@@ -1695,6 +1704,12 @@ nothrow @nogc:
     {
         if (PendingForward* forward = seq in pending_forwards)
         {
+            if (forward.kind == PendingKind.local_set && forward.dest is from)
+            {
+                log.warning("write to '", from.name[], "' refused: ", code, " (", text, ")");
+                pending_forwards.remove(seq);
+                return;
+            }
             if (forward.kind == PendingKind.model_set && forward.dest is from)
             {
                 encoder_for(forward.origin._encoder).encode_err(forward.origin, forward.origin_seq, code, text);
@@ -2464,7 +2479,51 @@ nothrow @nogc:
         if (!model_value_is_newer(current, t_ms, timestamp))
             return;
 
-        e.value(value, timestamp);
+        // written as the forwarding subscriber so the authority's own data never echoes back
+        e.value(value, timestamp, &on_mirror_write);
+    }
+
+    // TODO: a mirrored element must not store a local write; it offers the write to the authority and adopts only
+    // what the authority applies. This function is the interim: the value is already in the local series when it
+    // runs (Element has no gate ahead of the store), so a refusal cannot be reverted and the mirror can show a
+    // setpoint nobody honours. Every case below must be handled before this is finished:
+    //
+    //  1. Local write, authority reachable: a write gate ahead of the store (try_write consults the element's
+    //     writable binding; a remote binding forwards and returns without storing). Nothing lands locally.
+    //  2. Authority applies: its val feed and its res both carry the applied value; adopt through merge_remote_value
+    //     with the authority's timestamp, never the mirror clock (a local stamp can reject the confirmation on skew).
+    //     Adopting from the res needs the element resolvable from PendingForward (an EID, not a pointer).
+    //  3. Authority refuses (err): nothing to revert once 1 is in; surface the refusal (log now, element status
+    //     later) so the writer learns the value was not taken.
+    //  4. Samples during the round trip: already safe, the res is ordered after every val the authority emitted
+    //     before applying and before every val after, on the same session. No back-door needed.
+    //  5. Authority unreachable: retain the write as tentative per element (value + local change time), outside
+    //     the series; flush when the authority's peer attaches. model_set must carry the write's timestamp so the
+    //     flush is judged newer-wins against samples the authority took meanwhile; a rejected flush is answered by
+    //     the authority's own value through the feed. A peer detaching with a forward in flight (the sweep in
+    //     detach_peer) re-enters this state instead of dropping the write.
+    //  6. Several writes while unreachable: keep the latest per element. A node producing a sample series into
+    //     an element is its authority, not a mirror; that is an ownership arrangement, not retention.
+    void on_mirror_write(ref const SampleUpdate update)
+    {
+        if (!update.value_ready)
+            return;
+        Element* e = cast(Element*)update.element;
+        bool local_writer;
+        SyncPeer writer = remote_writer(e, null, local_writer);
+        if (local_writer)
+            return;
+        if (!writer)
+        {
+            log.warning("write to '", e.id[], "' dropped: authority unreachable");
+            return;
+        }
+        SyncHandle h = writer.handle_of(e.ensure_eid());
+        if (h == SyncPeer.invalid_handle)
+            return;
+        uint seq = alloc_seq();
+        pending_forwards[seq] = PendingForward(null, 0, PendingKind.local_set, writer);
+        encoder_for(writer._encoder).encode_model_set(writer, seq, h, update.value);
     }
 
     Device find_or_create_device(const(char)[] id, ulong peer_id)
