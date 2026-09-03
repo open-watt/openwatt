@@ -159,23 +159,27 @@ Array!ubyte build_action_get_charge_state()
     return encode(action);
 }
 
+// one category per request; the vehicle rejects a combined query with RESPONSE_MTU_EXCEEDED
+Array!ubyte build_action_get_vehicle_category(uint category)
+{
+    TeslaAction action;
+    ref request = action.vehicle_action.ensure().get_vehicle_data.ensure();
+    switch (category)
+    {
+        case 0:  request.get_drive_state.ensure(); break;
+        case 1:  request.get_location_state.ensure(); break;
+        case 2:  request.get_closures_state.ensure(); break;
+        default: request.get_tire_pressure_state.ensure(); break;
+    }
+    return encode(action);
+}
+
 Array!ubyte build_action_get_climate_state()
 {
     TeslaAction action;
     action.vehicle_action.ensure()
           .get_vehicle_data.ensure()
           .get_climate_state.ensure();
-    return encode(action);
-}
-
-Array!ubyte build_action_get_vehicle_state()
-{
-    TeslaAction action;
-    ref request = action.vehicle_action.ensure().get_vehicle_data.ensure();
-    request.get_drive_state.ensure();
-    request.get_location_state.ensure();
-    request.get_closures_state.ensure();
-    request.get_tire_pressure_state.ensure();
     return encode(action);
 }
 
@@ -414,7 +418,10 @@ unittest
 
     assert(build_action_get_charge_state()[] == HexDecode!"12040a021200");
     assert(build_action_get_climate_state()[] == HexDecode!"12040a021a00");
-    assert(build_action_get_vehicle_state()[] == HexDecode!"120a0a0822003a0042007200");
+    assert(build_action_get_vehicle_category(0)[] == HexDecode!"12040a022200");
+    assert(build_action_get_vehicle_category(1)[] == HexDecode!"12040a023a00");
+    assert(build_action_get_vehicle_category(2)[] == HexDecode!"12040a024200");
+    assert(build_action_get_vehicle_category(3)[] == HexDecode!"12040a027200");
     assert(build_action_charging_start_stop(true)[] == HexDecode!"120432021200");
     assert(build_action_charging_start_stop(false)[] == HexDecode!"120432022a00");
     assert(build_action_set_charging_amps(16)[] == HexDecode!"1205da02020810");

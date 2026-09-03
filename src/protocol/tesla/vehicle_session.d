@@ -118,7 +118,11 @@ nothrow @nogc:
         => send_signed_action(TeslaDomain.infotainment, build_action_get_climate_state()[], VehicleCommandKind.get_climate_state);
 
     bool refresh_vehicle_state()
-        => send_signed_action(TeslaDomain.infotainment, build_action_get_vehicle_state()[], VehicleCommandKind.get_vehicle_state);
+    {
+        bool sent = send_signed_action(TeslaDomain.infotainment, build_action_get_vehicle_category(_vehicle_category)[], VehicleCommandKind.get_vehicle_state);
+        _vehicle_category = (_vehicle_category + 1) % 4;
+        return sent;
+    }
 
     bool charging_start()
         => send_signed_action(TeslaDomain.infotainment, build_action_charging_start_stop(true)[], VehicleCommandKind.charging_start);
@@ -232,6 +236,7 @@ protected:
         _routing_address[] = 0;
         _request_uuid[] = 0;
         _counter = 0;
+        _vehicle_category = 0;
         _pending_commands[] = PendingCommand.init;
         _charge_state = TeslaChargeState.init;
         _climate_state = TeslaClimateState.init;
@@ -351,7 +356,7 @@ private:
     enum Duration poll_charging = 2.seconds;
     enum Duration poll_idle = 30.seconds;
     enum Duration climate_poll_interval = 60.seconds;
-    enum Duration vehicle_poll_interval = 60.seconds;
+    enum Duration vehicle_poll_interval = 15.seconds;
 
     TeslaVehicleScanner _scanner;
     MACAddress _peer;
@@ -488,6 +493,7 @@ private:
     TeslaClimateState _climate_state;
     bool _has_charge_state;
     bool _has_climate_state;
+    ubyte _vehicle_category;
 
     struct CapacitySamplerState
     {
