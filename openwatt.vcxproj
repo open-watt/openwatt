@@ -224,6 +224,7 @@
     <DCompile Include="src\protocol\ip\icmp6.d" />
     <DCompile Include="src\protocol\ip\igmp.d" />
     <DCompile Include="src\protocol\ip\mld.d" />
+    <DCompile Include="src\protocol\ip\nd.d" />
     <DCompile Include="src\protocol\ip\neighbour.d" />
     <DCompile Include="src\protocol\ip\package.d" />
     <DCompile Include="src\protocol\ip\pool.d" />

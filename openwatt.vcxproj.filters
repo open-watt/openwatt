@@ -948,6 +948,9 @@
     <DCompile Include="src\protocol\ip\mld.d">
       <Filter>src\protocol\ip</Filter>
     </DCompile>
+    <DCompile Include="src\protocol\ip\nd.d">
+      <Filter>src\protocol\ip</Filter>
+    </DCompile>
     <DCompile Include="src\protocol\ip\neighbour.d">
       <Filter>src\protocol\ip</Filter>
     </DCompile>
