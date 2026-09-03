@@ -175,6 +175,9 @@ protected:
         if (_state != State.starting && _state != State.running)
             return super.status_message();
 
+        if (_fault)
+            return _fault;
+
         final switch (_phase)
         {
             case Phase.connecting:
@@ -219,6 +222,7 @@ protected:
 
     override CompletionStatus shutdown()
     {
+        _auth_failures = 0;
         unsubscribe_vehicle_controls();
         if (_subscribed)
         {
@@ -471,6 +475,10 @@ private:
 
     ubyte[16] _aes_key;
     ubyte[65] _vehicle_pubkey;
+    enum ubyte auth_failure_limit = 3;
+    ubyte _auth_failures;
+    const(char)[] _fault;
+
     ubyte[16] _epoch;
     uint _counter;
     MonoTime _epoch_start;
@@ -658,7 +666,11 @@ private:
             if (!r.has_response_signature)
             {
                 if (r.protobuf_message.length)
-                    log.warning("discarding unauthenticated vehicle response for VIN '", name[], "'");
+                {
+                    log.warning("discarding unauthenticated vehicle response for VIN '", name[], "': ",
+                                cast(void[])r.protobuf_message);
+                    note_auth_failure("Vehicle replies unauthenticated");
+                }
                 return;
             }
 
@@ -673,6 +685,7 @@ private:
             if (!decrypt_routable_response(r, _aes_key[], name[], pending.request_tag[], plaintext))
             {
                 log.error("vehicle response authentication failed for VIN '", name[], "'");
+                note_auth_failure("Vehicle responses fail authentication");
                 return;
             }
             if (!pending.response_window.accept(r.response_counter))
@@ -681,10 +694,22 @@ private:
                 return;
             }
 
+            _auth_failures = 0;
+            _fault = null;
             handle_command_response(r, plaintext[], pending.kind);
             *pending = PendingCommand.init;
             return;
         }
+    }
+
+    void note_auth_failure(const(char)[] reason)
+    {
+        if (++_auth_failures < auth_failure_limit)
+            return;
+        _fault = reason;
+        _auth_failures = 0;
+        log.warning("session unusable for VIN '", name[], "': ", reason, "; re-establishing");
+        restart();
     }
 
     void handle_session_info_response(ref const RoutableResponse r)
