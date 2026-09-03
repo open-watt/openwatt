@@ -1132,6 +1132,8 @@ private bool unbox_scalar_value(ref const Variant v, ref const DataFormat fmt, o
         case u8, u16, u32, u64:
         case s8, s16, s32, s64:
         {
+            if (!v.isNumber)
+                return false;
             if (fmt.desc != DataFormat.Desc.quantity || v.asQuantity!double().unit == fmt.unit)
                 return store_integer(v, fmt.type, s);
             double d;
@@ -1396,7 +1398,11 @@ unittest
     DataFormat milliamps = DataFormat(ValueType.u16, SeriesKind.held, ScaledUnit(Ampere, -3));
     DataFormat volts = DataFormat(ValueType.u16, SeriesKind.held, ScaledUnit(Volt));
     assert(value_compatible(amps, milliamps));
+
     assert(!value_compatible(amps, volts));
+    Variant mistyped = Variant(true);
+    assert(!unbox_scalar(mistyped, amps, sc));
+    assert(!unbox_scalar(Variant(), amps, sc));
     Variant one_amp = Variant(Quantity!ushort(1_000, ScaledUnit(Ampere, -3)));
     assert(unbox_scalar(one_amp, amps, sc) && sc.u == 1);
 
