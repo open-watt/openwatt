@@ -372,6 +372,7 @@ private:
 
     ubyte[16] _routing_address;
     ubyte[16] _request_uuid;
+    TeslaDomain _info_domain;
     MonoTime _last_request_time;
     MonoTime _last_poll_time;
     MonoTime _last_climate_poll_time;
@@ -596,6 +597,7 @@ private:
             _routing_seeded = true;
         }
         crypto_random_bytes(_request_uuid[]);
+        _info_domain = domain;
 
         Array!ubyte msg = build_session_info_request(domain, sec1[], _routing_address[], _request_uuid[]);
         _last_request_time = getTime();
@@ -688,6 +690,8 @@ private:
     void handle_session_info_response(ref const RoutableResponse r)
     {
         if (r.request_uuid.length == 16 && r.request_uuid[] != _request_uuid[])
+            return;
+        if (r.has_from_domain && r.from_domain != _info_domain)
             return;
 
         // Untrusted SessionInfo replies have no HMAC tag.
