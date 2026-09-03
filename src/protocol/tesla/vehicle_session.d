@@ -635,6 +635,10 @@ private:
             return;
         }
 
+        // the vehicle broadcasts unsolicited VCSEC status to domain 0; only replies carry our routing address
+        if (!r.addressed_to(_routing_address[]))
+            return;
+
         if (_phase == Phase.session_info_xchg || _phase == Phase.awaiting_approval || _phase == Phase.info_xchg)
         {
             handle_session_info_response(r);

@@ -296,6 +296,14 @@ nothrow @nogc:
     TeslaDomain from_domain() const pure
         => cast(TeslaDomain)(has_from_domain ? message.from_destination.value.domain.value : 0);
 
+    bool addressed_to(const(ubyte)[] routing_address) const pure
+    {
+        if (!message.to_destination.present)
+            return false;
+        ref dest = message.to_destination.value;
+        return dest.routing_address.present && dest.routing_address.value[] == routing_address;
+    }
+
     bool has_status() const pure
         => message.signed_message_status.present;
     uint signed_message_fault() const pure
