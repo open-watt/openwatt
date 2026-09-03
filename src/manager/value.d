@@ -320,6 +320,19 @@ const(char[]) from_variant(ref const Variant v, out Duration r) nothrow @nogc
 {
     if (v.isDuration)
         r = v.asDuration;
+    else if (v.isQuantity)
+    {
+        // The expression parser reads unit-suffixed numbers (600s, 2h) as
+        // quantities; accept the time-dimensioned ones. Note that a bare `m`
+        // suffix is metres, so minutes must be quoted: "10m".
+        import urt.si.quantity : Seconds;
+        VarQuantity q = v.asQuantity;
+        Seconds s;
+        if (!q.isCompatible(s))
+            return "Invalid duration value";
+        s = cast(Seconds)q;
+        r = (cast(long)(s.value * 1000.0)).msecs;
+    }
     else if (v.isString)
     {
         const(char)[] s = v.asString;
