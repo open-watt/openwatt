@@ -18,12 +18,14 @@ import router.iface.ethernet;
 import router.iface.mac;
 import router.iface.packet;
 
-import protocol.ip : IPv4Header, IPv6Header, IPProtocol;
+import protocol.ip : IPv4Header, IPv6Header, IPProtocol, ipv6_multicast_mac;
 import protocol.ip.address;
 import protocol.ip.arp;
 import protocol.ip.firewall;
 import protocol.ip.icmp;
+import protocol.ip.icmp6;
 import protocol.ip.igmp;
+import protocol.ip.mld;
 import protocol.ip.neighbour;
 import protocol.ip.route;
 import protocol.ip.tcp;
@@ -134,7 +136,10 @@ nothrow @nogc:
             tcp_tick(this, now);
         }
         static if (has_ipv6)
+        {
             neighbour_v6.tick(now);
+            mld_update(this, now);
+        }
     }
 
     IPAddr select_source_v4(IPAddr dst)
@@ -440,7 +445,14 @@ private:
             return;
 
         if (dst.is_multicast)
+        {
+            if (!mld_accepts(dst, iface))
+                return;
+            if (firewall_v6.run(HookPoint.input, pkt) == Verdict.drop)
+                return;
+            deliver_local_v6(pkt, iface);
             return;
+        }
 
         foreach (a; Collection!IPv6Address().values)
         {
@@ -563,7 +575,11 @@ private:
             log.trace("egress6 if=", out_iface.name, " next_hop=", next_hop, " (", pkt.length, ")");
 
         if (next_hop.is_multicast)
+        {
+            MACAddress mac = ipv6_multicast_mac(next_hop);
+            frame_and_send(pkt, out_iface, mac.b[]);
             return;
+        }
 
         const(ubyte)[] link_addr = neighbour_v6.resolve(next_hop, out_iface, pkt);
         if (link_addr is null)
@@ -586,6 +602,8 @@ private:
         switch (proto)
         {
             case IPProtocol.icmp6:
+                .icmp6_input(this, pkt, l4_offset, iface);
+                break;
             case IPProtocol.tcp:
             case IPProtocol.udp:
                 // Transport and control-protocol delivery land in later layers.
