@@ -23,7 +23,7 @@ module manager.series;
 import urt.array;
 import urt.mem.alloc;
 import urt.meta.enuminfo : enum_info, VoidEnumInfo;
-import urt.si.quantity : Quantity;
+import urt.si.quantity : Quantity, parse_quantity, VarQuantity;
 import urt.si.unit : Nanosecond, ScaledUnit;
 import urt.string : String;
 import urt.time;
@@ -1107,6 +1107,14 @@ private bool unbox_scalar_value(ref const Variant v, ref const DataFormat fmt, o
         return true;
     }
 
+    if (v.isString && is_scalar_type(fmt.type))
+    {
+        Variant parsed;
+        if (!parse_scalar_text(v.asString, fmt, parsed))
+            return false;
+        return unbox_scalar_value(parsed, fmt, s);
+    }
+
     if (fmt.desc == DataFormat.Desc.quantity)
     {
         // wrong dimensions never store; unitless numbers adopt the format's unit
@@ -1258,6 +1266,42 @@ Variant box_int(long v, ref const DataFormat fmt)
 Variant box_float(double v, ref const DataFormat fmt)
     => fmt.desc == DataFormat.Desc.quantity ? Variant(Quantity!double(v, fmt.unit)) : Variant(v);
 
+bool parse_scalar_text(const(char)[] text, ref const DataFormat fmt, out Variant parsed)
+{
+    if (fmt.desc == DataFormat.Desc.enum_)
+    {
+        const(VoidEnumInfo)* ei = fmt.enum_info;
+        if (ei.bitfield)
+        {
+            bool ok;
+            long flags = ei.parse_flags(text, ok);
+            if (!ok)
+                return false;
+            parsed = Variant(flags, ei);
+            return true;
+        }
+        parsed = ei.value_for(text);
+        return !parsed.isNull;
+    }
+    if (fmt.type == ValueType.bool_)
+    {
+        if (text == "true" || text == "1")
+            parsed = Variant(true);
+        else if (text == "false" || text == "0")
+            parsed = Variant(false);
+        else
+            return false;
+        return true;
+    }
+
+    size_t taken;
+    VarQuantity q = parse_quantity(text, &taken);
+    if (taken == 0 || taken != text.length)
+        return false;
+    parsed = Variant(q);
+    return true;
+}
+
 bool store_integer(ref const Variant v, ValueType type, out Scalar s)
 {
     final switch (type) with (ValueType)
@@ -1406,10 +1450,26 @@ unittest
     Variant one_amp = Variant(Quantity!ushort(1_000, ScaledUnit(Ampere, -3)));
     assert(unbox_scalar(one_amp, amps, sc) && sc.u == 1);
 
+    Variant text_amps = Variant("1000mA");
+    assert(unbox_scalar(text_amps, amps, sc) && sc.u == 1);
+    DataFormat volts_f32 = DataFormat(ValueType.f32, SeriesKind.held, ScaledUnit(Volt));
+    Variant text_volts = Variant("234.5V");
+    assert(unbox_scalar(text_volts, volts_f32, sc) && sc.f32_ > 234.4f && sc.f32_ < 234.6f);
+    Variant text_bare = Variant("42");
+    assert(unbox_scalar(text_bare, amps, sc) && sc.u == 42);
+    Variant text_wrong = Variant("5V");
+    assert(!unbox_scalar(text_wrong, amps, sc));
+    Variant text_junk = Variant("12Ax");
+    assert(!unbox_scalar(text_junk, amps, sc));
+
     enum ModeA : ushort { off, on }
     enum ModeB : ushort { off, on }
     DataFormat mode_a = DataFormat(ValueType.u16, SeriesKind.held, enum_info!ModeA.make_void());
     DataFormat mode_b = DataFormat(ValueType.u16, SeriesKind.held, enum_info!ModeB.make_void());
+    Variant text_mode = Variant("on");
+    assert(unbox_scalar(text_mode, mode_a, sc) && sc.u == 1);
+    Variant text_no_mode = Variant("sideways");
+    assert(!unbox_scalar(text_no_mode, mode_a, sc));
     assert(value_compatible(mode_a, mode_a));
     assert(!value_compatible(mode_a, mode_b));
 }
