@@ -193,6 +193,7 @@ nothrow @nogc:
 
     void refresh_device_subscriptions()
     {
+        bool new_device = false;
         foreach (Device d; g_app.devices.values)
         {
             if (d is energy_device)
@@ -201,9 +202,16 @@ nothrow @nogc:
                 continue;
             subscribed_devices ~= d;
             d.subscribe(&on_device_event);
+            new_device = true;
             // TODO: device tree change should mark dependent appliances dirty
             //       so registry.resync_all only re-synthesizes affected controls.
         }
+
+        // a newly-present device may satisfy an appliance that referenced it before it existed
+        if (new_device)
+            foreach (a; Collection!Appliance().values)
+                if (a.resolve_refs())
+                    topology_dirty = true;
     }
 
     void on_device_event(Component c, ComponentEvent event)
