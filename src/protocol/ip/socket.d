@@ -9,6 +9,10 @@ import urt.mem;
 import urt.socket;
 import urt.time;
 
+import manager.features : has_ipv6;
+
+import router.iface : BaseInterface, interface_for_kernel_index;
+
 import protocol.ip.stack;
 import protocol.ip.tcp;
 import protocol.ip.udp;
@@ -81,8 +85,8 @@ ushort allocate_ephemeral()
 
 SocketResult c_create(AddressFamily af, SocketType type, Protocol proto, out Socket socket)
 {
-    if (af != AddressFamily.ipv4)
-        return SocketResult.invalid_argument;     // v6 later
+    if (!family_supported(af))
+        return SocketResult.invalid_argument;
 
     Slot* s = alloc!Slot();
     s.sock_type = type;
@@ -92,6 +96,7 @@ SocketResult c_create(AddressFamily af, SocketType type, Protocol proto, out Soc
     if (type == SocketType.datagram)
     {
         s.udp = alloc!UdpPcb();
+        s.udp.family = af;
         s.udp.handle = h;
         udp_register(s.udp);
     }
@@ -146,7 +151,7 @@ SocketResult c_bind(Socket socket, ref const InetAddress address)
     auto s = lookup(socket);
     if (!s)
         return SocketResult.invalid_socket;
-    if (address.family != AddressFamily.ipv4)
+    if (address.family != s.family)
         return SocketResult.invalid_argument;
 
     if (s.tcp)
@@ -161,6 +166,21 @@ SocketResult c_bind(Socket socket, ref const InetAddress address)
 
     if (s.udp.local_port != 0)
         return SocketResult.invalid_argument;
+    static if (has_ipv6)
+    {
+        if (address.family == AddressFamily.ipv6)
+        {
+            IPv6Addr local_addr6 = address._a.ipv6.addr;
+            ushort port6 = address.port;
+            if (port6 == 0)
+                port6 = allocate_udp_ephemeral(s.udp, local_addr6);
+            if (port6 == 0 || !udp_bind_available(s.udp, local_addr6, port6))
+                return SocketResult.address_in_use;
+            s.udp.local_addr6 = local_addr6;
+            s.udp.local_port = port6;
+            return SocketResult.success;
+        }
+    }
     IPAddr local_addr = address._a.ipv4.addr;
     ushort port = address._a.ipv4.port;
     if (port == 0)
@@ -192,11 +212,13 @@ SocketResult c_connect(Socket socket, ref const InetAddress address)
     auto s = lookup(socket);
     if (!s)
         return SocketResult.invalid_socket;
-    if (address.family != AddressFamily.ipv4)
+    if (address.family != s.family)
         return SocketResult.invalid_argument;
 
     if (s.tcp)
     {
+        if (address.family != AddressFamily.ipv4)
+            return SocketResult.invalid_argument;
         if (s.tcp.state != TcpState.closed)
             return SocketResult.already_connected;
         if (s.tcp.local.family == AddressFamily.unspecified)
@@ -219,19 +241,30 @@ SocketResult c_connect(Socket socket, ref const InetAddress address)
     {
         if (s.udp.local_port == 0)
         {
-            s.udp.local_port = allocate_udp_ephemeral(s.udp, s.udp.local_addr);
+            s.udp.local_port = allocate_udp_ephemeral(s.udp);
             if (s.udp.local_port == 0)
                 return SocketResult.address_in_use;
         }
-        s.udp.remote_addr = address._a.ipv4.addr;
-        s.udp.remote_port = address._a.ipv4.port;
+        static if (has_ipv6)
+        {
+            if (address.family == AddressFamily.ipv6)
+                s.udp.remote_addr6 = address._a.ipv6.addr;
+            else
+                s.udp.remote_addr = address._a.ipv4.addr;
+        }
+        else
+            s.udp.remote_addr = address._a.ipv4.addr;
+        s.udp.remote_port = address.port;
         s.udp.connected   = true;
         return SocketResult.success;
     }
     return SocketResult.invalid_argument;
 }
 
-ushort allocate_udp_ephemeral(UdpPcb* pcb, IPAddr address)
+bool family_supported(AddressFamily af) pure
+    => af == AddressFamily.ipv4 || (has_ipv6 && af == AddressFamily.ipv6);
+
+ushort allocate_udp_ephemeral(Addr)(UdpPcb* pcb, Addr address)
 {
     foreach (_; 0 .. 16_384)
     {
@@ -240,6 +273,36 @@ ushort allocate_udp_ephemeral(UdpPcb* pcb, IPAddr address)
             return port;
     }
     return 0;
+}
+
+ushort allocate_udp_ephemeral(UdpPcb* pcb)
+{
+    static if (has_ipv6)
+    {
+        if (pcb.family == AddressFamily.ipv6)
+            return allocate_udp_ephemeral(pcb, pcb.local_addr6);
+    }
+    return allocate_udp_ephemeral(pcb, pcb.local_addr);
+}
+
+InetAddress udp_local(UdpPcb* pcb)
+{
+    static if (has_ipv6)
+    {
+        if (pcb.family == AddressFamily.ipv6)
+            return InetAddress(pcb.local_addr6, pcb.local_port);
+    }
+    return InetAddress(pcb.local_addr, pcb.local_port);
+}
+
+InetAddress udp_remote(UdpPcb* pcb)
+{
+    static if (has_ipv6)
+    {
+        if (pcb.family == AddressFamily.ipv6)
+            return InetAddress(pcb.remote_addr6, pcb.remote_port);
+    }
+    return InetAddress(pcb.remote_addr, pcb.remote_port);
 }
 
 SocketResult c_accept(Socket socket, out Socket connection, InetAddress* remote)
@@ -312,20 +375,15 @@ SocketResult c_sendmsg(Socket socket, const(InetAddress)* addr, MsgFlags flags, 
     if (!s.udp)
         return SocketResult.invalid_argument;
 
-    IPAddr dst_addr;
-    ushort dst_port;
+    InetAddress dst;
     if (addr)
     {
-        if (addr.family != AddressFamily.ipv4)
+        if (addr.family != s.family)
             return SocketResult.invalid_argument;
-        dst_addr = addr._a.ipv4.addr;
-        dst_port = addr._a.ipv4.port;
+        dst = *addr;
     }
     else if (s.udp.connected)
-    {
-        dst_addr = s.udp.remote_addr;
-        dst_port = s.udp.remote_port;
-    }
+        dst = udp_remote(s.udp);
     else
         return SocketResult.invalid_argument;
 
@@ -341,9 +399,24 @@ SocketResult c_sendmsg(Socket socket, const(InetAddress)* addr, MsgFlags flags, 
     }
 
     if (s.udp.local_port == 0)
-        s.udp.local_port = allocate_ephemeral();
+        s.udp.local_port = allocate_udp_ephemeral(s.udp);
 
-    if (!udp_output(*_stack, s.udp.local_addr, s.udp.local_port, dst_addr, dst_port, gather[0 .. total]))
+    bool sent;
+    static if (has_ipv6)
+    {
+        if (dst.family == AddressFamily.ipv6)
+        {
+            BaseInterface iface = s.udp.outbound_iface6.get;
+            if (!iface && dst._a.ipv6.scopeId)
+                iface = interface_for_kernel_index(cast(int)dst._a.ipv6.scopeId);
+            sent = udp_output6(*_stack, s.udp.local_addr6, s.udp.local_port, dst._a.ipv6.addr, dst.port, iface, gather[0 .. total]);
+        }
+        else
+            sent = udp_output(*_stack, s.udp.local_addr, s.udp.local_port, dst._a.ipv4.addr, dst.port, gather[0 .. total]);
+    }
+    else
+        sent = udp_output(*_stack, s.udp.local_addr, s.udp.local_port, dst._a.ipv4.addr, dst.port, gather[0 .. total]);
+    if (!sent)
         return SocketResult.failure;
 
     if (bytes_sent)
@@ -397,7 +470,7 @@ SocketResult c_recvfrom(Socket socket, void[] buffer, MsgFlags flags, InetAddres
     if (bytes_received)
         *bytes_received = n;
     if (from)
-        *from = InetAddress(d.src_addr, d.src_port);
+        *from = d.src;
 
     udp_free_datagram_data(d);
     return SocketResult.success;
@@ -512,7 +585,7 @@ SocketResult c_get_peer_name(Socket socket, out InetAddress addr)
     }
     if (s.udp && s.udp.connected)
     {
-        addr = InetAddress(s.udp.remote_addr, s.udp.remote_port);
+        addr = udp_remote(s.udp);
         return SocketResult.success;
     }
     return SocketResult.invalid_argument;
@@ -530,7 +603,7 @@ SocketResult c_get_socket_name(Socket socket, out InetAddress addr)
     }
     if (s.udp)
     {
-        addr = InetAddress(s.udp.local_addr, s.udp.local_port);
+        addr = udp_local(s.udp);
         return SocketResult.success;
     }
     return SocketResult.invalid_argument;
