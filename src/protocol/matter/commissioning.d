@@ -341,7 +341,7 @@ unittest
     import urt.crypto.ecdsa;
     import protocol.matter.fabric;
 
-    ubyte[256] buf;
+    ubyte[1024] buf;
     ptrdiff_t len = encode_arm_fail_safe(buf[], 60, 1);
     assert(len > 0);
     len = encode_commissioning_complete(buf[]);
