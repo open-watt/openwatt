@@ -6,6 +6,7 @@ version (UseInternalIPStack):
 import urt.array;
 import urt.endian;
 import urt.hash;
+import urt.inet;
 import urt.log;
 import urt.time;
 
