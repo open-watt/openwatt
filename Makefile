@@ -43,6 +43,10 @@ ifeq ($(PLATFORM),esp32-s2)
     TINY ?= 0
 endif
 
+ifneq ($(filter bk7231n bk7231t,$(PLATFORM)),)
+    RAM_IMAGE ?= deflate
+endif
+
 include $(URT_DIR)/platforms.mk
 include features.mk
 
@@ -267,7 +271,7 @@ ifdef BAREMETAL_DIR
     DFLAGS := $(DFLAGS) -L-T$(BAREMETAL_LD)
   endif
 
-  # BK7231: link SDK (FreeRTOS + drivers + lwIP) + WiFi/BLE blobs
+  # BK7231: link vendor runtime, drivers and WiFi/BLE blobs
   ifneq ($(filter bk7231n bk7231t,$(PLATFORM)),)
     BK_SDK_ROOT  ?= ../OpenBK7231T_App
     BK_BEKEN_LIB := $(BK_PLATFORM_DIR)/build/$(PLATFORM)/libbeken.a
@@ -302,7 +306,7 @@ endif
 # Bare-metal startup files (compiled with cross-GCC)
 
 ifdef BAREMETAL_DIR
-BAREMETAL_OBJS := $(patsubst %.S,$(OBJDIR)/%.o,$(patsubst %.c,$(OBJDIR)/%.o,$(BAREMETAL_SRCS)))
+BAREMETAL_OBJS := $(patsubst %.s,$(OBJDIR)/%.o,$(patsubst %.S,$(OBJDIR)/%.o,$(patsubst %.c,$(OBJDIR)/%.o,$(BAREMETAL_SRCS))))
 BAREMETAL_CFLAGS := $(BAREMETAL_CFLAGS) -ffreestanding -O2
 
 $(OBJDIR)/%.o: $(BAREMETAL_DIR)/%.S
@@ -312,21 +316,26 @@ $(OBJDIR)/%.o: $(BAREMETAL_DIR)/%.S
 $(OBJDIR)/%.o: $(BAREMETAL_DIR)/%.c
 	@mkdir -p $(OBJDIR)
 	$(BAREMETAL_GCC) $(BAREMETAL_CFLAGS) -c -o $@ $<
+
+$(OBJDIR)/%.o: $(BAREMETAL_DIR)/%.s
+	@mkdir -p $(OBJDIR)
+	$(BAREMETAL_GCC) $(BAREMETAL_CFLAGS) -c -o $@ $<
 endif
 
 # -- Main target -------------------------------------------------------
 
 FLAGSTAMP = $(OBJDIR)/build.flags
 
-$(TARGET): $(SOURCES) $(CONF_SOURCES) $(BAREMETAL_OBJS) $(VENDOR_OBJS) $(BK_BEKEN_LIB)
+$(TARGET): $(SOURCES) $(CONF_SOURCES) $(BAREMETAL_OBJS) $(VENDOR_OBJS) $(BAREMETAL_LD) \
+    $(BK_BEKEN_LIB) $(if $(RAM_IMAGE),$(RAM_IMAGE_PACKER))
 
-# -- BK7231 FreeRTOS build (must come after $(TARGET) so it doesn't become default goal)
+# -- BK7231 SDK build (must come after $(TARGET) so it doesn't become default goal)
 
 ifneq ($(filter bk7231n bk7231t,$(PLATFORM)),)
 .PHONY: bk7231-sdk bk7231-clean
 
 bk7231-sdk:
-	$(MAKE) -C $(BK_PLATFORM_DIR) PLATFORM=$(PLATFORM) $(if $(BK_SDK_ROOT),BK_SDK_ROOT=$(BK_SDK_ROOT))
+	$(MAKE) -C $(BK_PLATFORM_DIR) PLATFORM=$(PLATFORM) $(if $(BK_SDK_ROOT),BK_SDK_ROOT=$(abspath $(BK_SDK_ROOT)))
 
 bk7231-clean:
 	$(MAKE) -C $(BK_PLATFORM_DIR) clean
@@ -354,6 +363,7 @@ ifeq ($(PLATFORM),bl618)
 endif
 ifneq ($(filter bk7231n bk7231t,$(PLATFORM)),)
 	arm-none-eabi-objcopy -O binary -R .bss -R .tbss -R '.tbss.*' -R .ARM.attributes -R '.debug*' $(TARGET) $(TARGETDIR)/fw.bin
+	python3 $(RAM_IMAGE_PACKER) --nm $(BAREMETAL_NM) --format $(RAM_IMAGE) $(TARGET) $(TARGETDIR)/fw.bin
 endif
 ifeq ($(PLATFORM),rp2350)
 	arm-none-eabi-objcopy -O binary -R .bss -R .tbss -R '.tbss.*' -R .ARM.attributes -R '.debug*' $(TARGET) $(TARGETDIR)/fw.bin

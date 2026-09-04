@@ -1098,6 +1098,21 @@
     <DCompile Include="third_party\urt\src\urt\driver\bk7231\uart.d">
       <Filter>third_party\urt\driver\bk7231</Filter>
     </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bk7231\identity.d">
+      <Filter>third_party\urt\driver\bk7231</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bk7231\pbuf.d">
+      <Filter>third_party\urt\driver\bk7231</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bk7231\trng.d">
+      <Filter>third_party\urt\driver\bk7231</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bk7231\wifi.d">
+      <Filter>third_party\urt\driver\bk7231</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bk7231\sdk_stubs.d">
+      <Filter>third_party\urt\driver\bk7231</Filter>
+    </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\bl618\irq.d">
       <Filter>third_party\urt\driver\bl618</Filter>
     </DCompile>
