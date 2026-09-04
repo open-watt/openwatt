@@ -7,7 +7,7 @@ import urt.hash;
 import urt.inet;
 import urt.time;
 
-import protocol.ip : IPv6Header, IPProtocol;
+import protocol.ip : IPv6Header, IPProtocol, load_ipv6_address, pseudo_header_checksum_v6, store_ipv6_address;
 
 import router.iface;
 import router.iface.ethernet;
@@ -17,11 +17,11 @@ import router.iface.packet;
 nothrow @nogc:
 
 
-enum ushort Dhcp6ClientPort = 546;
-enum ushort Dhcp6ServerPort = 547;
+enum ushort dhcp6_client_port = 546;
+enum ushort dhcp6_server_port = 547;
 
 // ff02::1:2, all DHCP relay agents and servers
-enum IPv6Addr Dhcp6Multicast = IPv6Addr(0xFF02, 0, 0, 0, 0, 0, 1, 2);
+enum IPv6Addr dhcp6_multicast = IPv6Addr(0xFF02, 0, 0, 0, 0, 0, 1, 2);
 
 enum Dhcp6MsgType : ubyte
 {
@@ -68,12 +68,12 @@ enum Dhcp6Status : ushort
 
 
 // DUID-LL (RFC 8415 11.4): type 3, hardware type 1 (ethernet), MAC.
-enum size_t DuidLLSize = 10;
-enum size_t MaxDuidSize = 130;
+enum size_t duid_ll_size = 10;
+enum size_t max_duid_size = 130;
 
-ubyte[DuidLLSize] duid_ll(MACAddress mac) pure
+ubyte[duid_ll_size] duid_ll(MACAddress mac) pure
 {
-    ubyte[DuidLLSize] d;
+    ubyte[duid_ll_size] d;
     d[0] = 0;
     d[1] = 3;
     d[2] = 0;
@@ -107,12 +107,12 @@ struct IaPrefix
 }
 
 
-enum size_t Dhcp6BuildBufSize = 1280;
+enum size_t dhcp6_build_buf_size = 1280;
 
 struct Dhcp6Build
 {
 nothrow @nogc:
-    ubyte[Dhcp6BuildBufSize] buf = void;
+    ubyte[dhcp6_build_buf_size] buf = void;
     size_t offset;
 
     enum size_t payload_start = IPv6Header.sizeof + UdpHeader.sizeof;
@@ -135,8 +135,6 @@ nothrow @nogc:
         offset += data.length;
     }
 
-    // Nested options (IA_NA / IA_PD) are opened, filled, then closed to
-    // backpatch the length.
     size_t begin_option(Dhcp6Option code)
     {
         buf[offset .. offset + 2] = nativeToBigEndian(ushort(code));
@@ -158,11 +156,8 @@ nothrow @nogc:
 
     void put_addr(IPv6Addr a)
     {
-        foreach (i; 0 .. 8)
-        {
-            buf[offset++] = cast(ubyte)(a.s[i] >> 8);
-            buf[offset++] = cast(ubyte)a.s[i];
-        }
+        store_ipv6_address(buf.ptr + offset, a);
+        offset += 16;
     }
 
     size_t begin_ia(Dhcp6Option code, uint iaid, uint t1, uint t2)
@@ -220,8 +215,6 @@ nothrow @nogc:
         end_option(body_);
     }
 
-    // Frame with IPv6 + UDP and hand to the interface. The v6 UDP checksum is
-    // mandatory.
     void transmit(EthernetStation iface, IPv6Addr src, IPv6Addr dst, MACAddress eth_dst,
                   ushort src_port, ushort dst_port)
     {
@@ -242,7 +235,7 @@ nothrow @nogc:
         u.dst_port = nativeToBigEndian(dst_port);
         u.length = nativeToBigEndian(cast(ushort)udp_len);
         u.checksum[] = 0;
-        ushort pseudo = pseudo_header_checksum_v6_udp(ip.src, ip.dst, cast(uint)udp_len);
+        ushort pseudo = pseudo_header_checksum_v6(ip.src, ip.dst, cast(uint)udp_len, IPProtocol.udp);
         ushort cc = internet_checksum(frame[IPv6Header.sizeof .. $], pseudo);
         if (cc == 0)
             cc = 0xFFFF;
@@ -270,7 +263,6 @@ nothrow @nogc:
     uint txid;
     const(ubyte)[] options;
 
-    // Splits a DHCPv6 payload (msg-type + txid + options); false if truncated.
     bool init(const(ubyte)[] payload)
     {
         if (payload.length < 4)
@@ -333,7 +325,7 @@ nothrow @nogc:
         const(ubyte)[] v;
         if (!find_in(ia.options, Dhcp6Option.ia_addr, v) || v.length < 24)
             return false;
-        r.addr = read_addr6(v[0 .. 16]);
+        r.addr = load_ipv6_address(v.ptr);
         r.preferred = v[16 .. 20].bigEndianToNative!uint;
         r.valid = v[20 .. 24].bigEndianToNative!uint;
         return true;
@@ -347,11 +339,11 @@ nothrow @nogc:
         r.preferred = v[0 .. 4].bigEndianToNative!uint;
         r.valid = v[4 .. 8].bigEndianToNative!uint;
         r.prefix_len = v[8];
-        r.prefix = read_addr6(v[9 .. 25]);
+        r.prefix = load_ipv6_address(v.ptr + 9);
         return true;
     }
 
-    // Status of the message, or of one IA's sub-options. Missing = success.
+    // a missing status option means success
     static Dhcp6Status status_of(const(ubyte)[] opts)
     {
         const(ubyte)[] v;
@@ -359,26 +351,6 @@ nothrow @nogc:
             return Dhcp6Status.success;
         return cast(Dhcp6Status)v[0 .. 2].bigEndianToNative!ushort;
     }
-}
-
-
-IPv6Addr read_addr6(const(ubyte)[] b) pure
-{
-    IPv6Addr a;
-    foreach (i; 0 .. 8)
-        a.s[i] = cast(ushort)(b[i*2] << 8 | b[i*2 + 1]);
-    return a;
-}
-
-ushort pseudo_header_checksum_v6_udp(ref const(ubyte)[16] src, ref const(ubyte)[16] dst, uint udp_len) pure
-{
-    ubyte[40] ph = void;
-    ph[0 .. 16] = src[];
-    ph[16 .. 32] = dst[];
-    ph[32 .. 36] = udp_len.nativeToBigEndian;
-    ph[36 .. 39] = 0;
-    ph[39] = IPProtocol.udp;
-    return internet_checksum(ph[]);
 }
 
 
