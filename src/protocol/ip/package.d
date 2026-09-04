@@ -31,6 +31,8 @@ version (UseInternalIPStack)
 {
     import protocol.ip.igmp;
     import protocol.ip.udp;
+    static if (has_ipv6)
+        import protocol.ip.mld : mld_join, mld_leave;
     import protocol.ip.tcp : TcpPcb, TcpState, TcpSendBufSize, tcp_assign_id, tcp_send_data, tcp_consume_data, tcp_close, free_pcb,
         native_tcp_connect = tcp_connect, native_tcp_listen = tcp_listen;
 
@@ -1561,26 +1563,46 @@ nothrow @nogc:
     {
         version (UseInternalIPStack)
         {
-            if ((local && local.family != AddressFamily.ipv4) || (remote && remote.family != AddressFamily.ipv4))
+            AddressFamily family = AddressFamily.ipv4;
+            if (local)
+                family = local.family;
+            else if (remote)
+                family = remote.family;
+            if (family != AddressFamily.ipv4 && (!has_ipv6 || family != AddressFamily.ipv6))
+                return false;
+            if ((local && local.family != family) || (remote && remote.family != family))
                 return false;
 
             UdpPcb* pcb = alloc!UdpPcb();
-            if (local)
-            {
-                pcb.local_addr = local._a.ipv4.addr;
-                pcb.local_port = local._a.ipv4.port;
-            }
+            pcb.family = family;
+            pcb.local_port = local ? local.port : 0;
             if (pcb.local_port == 0)
                 pcb.local_port = allocate_udp_port();
-            if (!udp_bind_available(pcb, pcb.local_addr, pcb.local_port))
+            bool available;
+            if (family == AddressFamily.ipv4)
+            {
+                if (local)
+                    pcb.local_addr = local._a.ipv4.addr;
+                available = udp_bind_available(pcb, pcb.local_addr, pcb.local_port);
+            }
+            else static if (has_ipv6)
+            {
+                if (local)
+                    pcb.local_addr6 = local._a.ipv6.addr;
+                available = udp_bind_available(pcb, pcb.local_addr6, pcb.local_port);
+            }
+            if (!available)
             {
                 free(pcb);
                 return false;
             }
             if (remote)
             {
-                pcb.remote_addr = remote._a.ipv4.addr;
-                pcb.remote_port = remote._a.ipv4.port;
+                if (family == AddressFamily.ipv4)
+                    pcb.remote_addr = remote._a.ipv4.addr;
+                else static if (has_ipv6)
+                    pcb.remote_addr6 = remote._a.ipv6.addr;
+                pcb.remote_port = remote.port;
                 pcb.connected = true;
             }
             _owner = owner;
@@ -1710,7 +1732,16 @@ nothrow @nogc:
     InetAddress local_address()
     {
         version (UseInternalIPStack)
-            return _pcb ? InetAddress(_pcb.local_addr, _pcb.local_port) : InetAddress();
+        {
+            if (!_pcb)
+                return InetAddress();
+            static if (has_ipv6)
+            {
+                if (_pcb.family == AddressFamily.ipv6)
+                    return InetAddress(_pcb.local_addr6, _pcb.local_port);
+            }
+            return InetAddress(_pcb.local_addr, _pcb.local_port);
+        }
         else version (Windows)
             return _local;
         else
@@ -1726,6 +1757,15 @@ nothrow @nogc:
                 RouteResult route = _stack_ptr.route_lookup_v4_dst(v4_addr(remote));
                 if (route.kind == RouteResult.Kind.forward)
                     return route.out_iface;
+            }
+            static if (has_ipv6)
+            {
+                if (_stack_ptr && remote.family == AddressFamily.ipv6)
+                {
+                    RouteResult6 route = _stack_ptr.route_lookup_v6_dst(remote._a.ipv6.addr, _pcb.outbound_iface6.get);
+                    if (route.kind == RouteResult6.Kind.forward)
+                        return route.out_iface;
+                }
             }
         }
         return null;
@@ -1777,6 +1817,68 @@ nothrow @nogc:
         }
     }
 
+    static if (has_ipv6)
+    {
+        bool join(IPv6Addr group, BaseInterface iface)
+        {
+            if (!group.is_multicast || !iface)
+                return false;
+            version (UseInternalIPStack)
+            {
+                if (udp_joined(_pcb, group, iface))
+                    return true;
+                if (!mld_join(*_stack_ptr, group, iface))
+                    return false;
+                _pcb.groups6 ~= UdpGroup6(group, ObjectRef!BaseInterface(iface));
+                if (!_pcb.outbound_iface6)
+                    _pcb.outbound_iface6 = iface;
+                return true;
+            }
+            else version (linux)
+            {
+                if (!_socket || iface.kernel_ifindex == 0)
+                    return false;
+                struct ipv6_mreq
+                {
+                    ubyte[16] address;
+                    uint ifindex;
+                }
+                ipv6_mreq membership;
+                foreach (i, word; group.s)
+                {
+                    membership.address[i * 2] = cast(ubyte)(word >> 8);
+                    membership.address[i * 2 + 1] = cast(ubyte)word;
+                }
+                membership.ifindex = cast(uint)iface.kernel_ifindex;
+                enum int IPPROTO_IPV6_ = 41, IPV6_ADD_MEMBERSHIP_ = 20;
+                return os_setsockopt(_socket.handle, IPPROTO_IPV6_, IPV6_ADD_MEMBERSHIP_, &membership, cast(uint)membership.sizeof) == 0;
+            }
+            else
+                return false;
+        }
+
+        bool outbound_interface(BaseInterface iface)
+        {
+            if (!iface)
+                return false;
+            version (UseInternalIPStack)
+            {
+                _pcb.outbound_iface6 = iface;
+                return true;
+            }
+            else version (linux)
+            {
+                if (!_socket || iface.kernel_ifindex == 0)
+                    return false;
+                uint index = cast(uint)iface.kernel_ifindex;
+                enum int IPPROTO_IPV6_ = 41, IPV6_MULTICAST_IF_ = 17;
+                return os_setsockopt(_socket.handle, IPPROTO_IPV6_, IPV6_MULTICAST_IF_, &index, cast(uint)index.sizeof) == 0;
+            }
+            else
+                return false;
+        }
+    }
+
     bool outbound_interface(IPAddr interface_)
     {
         if (interface_ == IPAddr.any)
@@ -1818,6 +1920,18 @@ nothrow @nogc:
     {
         version (UseInternalIPStack)
         {
+            static if (has_ipv6)
+            {
+                if (dst.family == AddressFamily.ipv6)
+                {
+                    BaseInterface iface = _pcb.outbound_iface6.get;
+                    if (!iface && dst._a.ipv6.scopeId)
+                        iface = interface_for_kernel_index(cast(int)dst._a.ipv6.scopeId);
+                    if (!udp_output6(*_stack_ptr, _pcb.local_addr6, _pcb.local_port, dst._a.ipv6.addr, dst.port, iface, cast(const(ubyte)[])data))
+                        return 0;
+                    return data.length;
+                }
+            }
             IPAddr remote = v4_addr(dst);
             IPAddr local = remote.is_multicast && _pcb.outbound_interface ? _pcb.outbound_interface : _pcb.local_addr;
             if (!udp_output(*_stack_ptr, local, _pcb.local_port, remote, port_of(dst), cast(const(ubyte)[])data))
@@ -1896,6 +2010,12 @@ private:
             {
                 foreach (local; _pcb.multicast_interfaces[])
                     igmp_leave(*_stack_ptr, _pcb.multicast_group, local);
+                static if (has_ipv6)
+                {
+                    foreach (ref membership; _pcb.groups6[])
+                        if (BaseInterface iface = membership.iface.get)
+                            mld_leave(*_stack_ptr, membership.group, iface);
+                }
                 udp_unregister(_pcb);
                 foreach (ref dgm; _pcb.recv_queue[])
                     udp_free_datagram_data(dgm);
@@ -1904,11 +2024,11 @@ private:
             }
         }
 
-        package(protocol.ip) void deliver(IPAddr src, ushort sport, IPAddr dst, ushort dport, BaseInterface ingress, const(ubyte)[] data, MonoTime rx_time)
+        package(protocol.ip) void deliver(ref InetAddress src, ref InetAddress dst, BaseInterface ingress, const(ubyte)[] data, MonoTime rx_time)
         {
             UDPReceiveInfo info;
-            info.source = InetAddress(src, sport);
-            info.destination = InetAddress(dst, dport);
+            info.source = src;
+            info.destination = dst;
             info.rx_time = rx_time;
             info.ingress = ingress;
             udp_deliver(_owner, data, info);

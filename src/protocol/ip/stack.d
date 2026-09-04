@@ -647,7 +647,7 @@ private:
                 // TODO: v6 TCP delivery into the transport engine
                 break;
             case IPProtocol.udp:
-                // TODO: v6 UDP delivery
+                .udp_input6(this, pkt, l4_offset, iface);
                 break;
             case IPProtocol.no_next:
                 break;
