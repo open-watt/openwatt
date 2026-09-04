@@ -414,7 +414,8 @@ void ra_router(EthernetStation iface, IPv6Addr router, ushort lifetime, MonoTime
 IPv6Route create_default_route(EthernetStation iface, IPv6Addr router)
 {
     const(char)[] name = Collection!IPv6Route().generate_name(tconcat(iface.name[], ".ra"));
-    return Collection!IPv6Route().create(name, ObjectFlags.dynamic, NamedArgument("destination", IPv6NetworkAddress(IPv6Addr.any, 0)), NamedArgument("gateway", router), NamedArgument("out-interface", cast(BaseInterface)iface));
+    return Collection!IPv6Route().create(name, ObjectFlags.dynamic, NamedArgument("destination", IPv6NetworkAddress(IPv6Addr.any, 0)),
+                                         NamedArgument("gateway", router), NamedArgument("out-interface", cast(BaseInterface)iface));
 }
 
 void ra_prefix(ref IPStack stack, EthernetStation iface, const(ubyte)[] option, MonoTime now)
