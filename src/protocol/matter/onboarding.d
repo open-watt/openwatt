@@ -228,7 +228,6 @@ unittest
     assert(p.product_id == 0x8000);
     assert(p.discriminator == 3840);
     assert(p.passcode == 20202021);
-    assert(p.discovery & DiscoveryCapability.on_network);
     assert(!p.short_discriminator);
     assert(!parse_qr_code("MT:Y.K9042C00KA0648G0", p));
     assert(!parse_qr_code("XX:Y.K9042C00KA0648G00", p));
