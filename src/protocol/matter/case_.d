@@ -470,7 +470,7 @@ bool generate_ephemeral(ref ubyte[32] private_key, ref ubyte[65] public_key)
     return false;
 }
 
-bool ecdh(ref const ubyte[32] private_key, const(ubyte)[] peer_public, ref ubyte[32] shared)
+bool ecdh(ref const ubyte[32] private_key, const(ubyte)[] peer_public, ref ubyte[32] secret)
 {
     P256Point peer;
     if (!peer.from_bytes(peer_public))
@@ -479,7 +479,7 @@ bool ecdh(ref const ubyte[32] private_key, const(ubyte)[] peer_public, ref ubyte
     P256Point p = point_mul(d, peer);
     if (p.infinity)
         return false;
-    p.x.to_bytes(shared[]);
+    p.x.to_bytes(secret[]);
     return true;
 }
 
@@ -553,7 +553,7 @@ bool decode_tbe(const(ubyte)[] data, out const(ubyte)[] noc, out const(ubyte)[] 
     return noc.length != 0 && signature.length == 64;
 }
 
-bool derive_session_keys(ref const ubyte[16] ipk, ref const SHA256Context transcript, ref const ubyte[32] shared, ref SessionKeys keys)
+bool derive_session_keys(ref const ubyte[16] ipk, ref const SHA256Context transcript, ref const ubyte[32] secret, ref SessionKeys keys)
 {
     SHA256Context t = transcript;
     ubyte[32] transcript_hash = sha_finalise(t);
@@ -561,7 +561,7 @@ bool derive_session_keys(ref const ubyte[16] ipk, ref const SHA256Context transc
     salt[0 .. 16] = ipk[];
     salt[16 .. 48] = transcript_hash[];
     ubyte[48] okm = void;
-    if (!hkdf_sha256(salt[], shared[], "SessionKeys", okm[]))
+    if (!hkdf_sha256(salt[], secret[], "SessionKeys", okm[]))
         return false;
     keys.i2r[] = okm[0 .. 16];
     keys.r2i[] = okm[16 .. 32];
