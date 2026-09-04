@@ -78,7 +78,11 @@ struct MatterCert
     const(ubyte)[] authority_key_id;
     const(ubyte)[] signature;
     ushort key_usage;
+    ubyte[6] extended_key_usage;
+    ubyte extended_key_usage_count;
     bool is_ca;
+    bool has_basic_constraints;
+    bool has_key_usage;
     bool has_path_len;
     ubyte path_len;
 
@@ -278,6 +282,7 @@ bool decode_extensions(ref TLVReader r, ref MatterCert cert)
             case basic_constraints:
                 if (r.type != TLVType.structure)
                     return false;
+                cert.has_basic_constraints = true;
                 while (r.next() && r.type != TLVType.end_of_container)
                 {
                     if (r.tag.is_context(1))
@@ -298,6 +303,18 @@ bool decode_extensions(ref TLVReader r, ref MatterCert cert)
             case key_usage:
                 if (!r.get(cert.key_usage))
                     return false;
+                cert.has_key_usage = true;
+                break;
+            case extended_key_usage:
+                if (r.type != TLVType.array)
+                    return false;
+                while (r.next() && r.type != TLVType.end_of_container)
+                {
+                    ubyte purpose;
+                    if (!r.get(purpose) || purpose == 0 || purpose > 6 || cert.extended_key_usage_count >= cert.extended_key_usage.length)
+                        return false;
+                    cert.extended_key_usage[cert.extended_key_usage_count++] = purpose;
+                }
                 break;
             case subject_key_id:
                 if (!is_bytes(r.type) || r.as_bytes.length != 20)
@@ -350,6 +367,10 @@ unittest
     w.put(TLVTag.context(1), false);
     w.end_container();
     w.put(TLVTag.context(MatterExtensionTag.key_usage), cast(ubyte)1);
+    w.start_array(TLVTag.context(MatterExtensionTag.extended_key_usage));
+    w.put(TLVTag.anonymous, cast(ubyte)2);
+    w.put(TLVTag.anonymous, cast(ubyte)1);
+    w.end_container();
     w.put(TLVTag.context(MatterExtensionTag.subject_key_id), skid[]);
     w.put(TLVTag.context(MatterExtensionTag.authority_key_id), akid[]);
     w.end_container();
@@ -362,7 +383,8 @@ unittest
     assert(noc.subject.fabric_id == 0x2906C908D115D362 && noc.subject.node_id == 0xDEDEDEDE00010001);
     assert(noc.subject.noc_cat_count == 1 && noc.subject.noc_cats[0] == 0xABCD0002);
     assert(noc.issuer.has_rcac_id && noc.issuer.rcac_id == 0xCACACACA00000001);
-    assert(!noc.is_ca && noc.key_usage == 1);
+    assert(!noc.is_ca && noc.has_basic_constraints && noc.has_key_usage && noc.key_usage == 1);
+    assert(noc.extended_key_usage_count == 2 && noc.extended_key_usage[0] == 2 && noc.extended_key_usage[1] == 1);
     assert(noc.serial == serial[] && noc.public_key == key[] && noc.signature == sig[]);
     assert(noc.subject_key_id == skid[] && noc.authority_key_id == akid[]);
     assert(!noc.self_signed);
