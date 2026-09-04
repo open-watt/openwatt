@@ -536,5 +536,32 @@ unittest
         assert(!parse_udp6(buffer[0 .. total], IPv6Header.sizeof, src_port, dst_port, body_));
 
         assert(write_udp6(buffer[0 .. 8], src, 1, dst, 2, payload[]) == 0);
+
+        IPStack stack;
+        UdpPcb pcb;
+        pcb.family = AddressFamily.ipv6;
+        pcb.local_port = 5540;
+        udp_register(&pcb);
+        assert(!udp_bind_available(null, IPv6Addr.any, 5540));
+        assert(udp_bind_available(null, IPv6Addr.any, 5541));
+        assert(udp_bind_available(null, IPAddr.any, 5540));
+
+        Packet pkt;
+        total = write_udp6(buffer[], src, 4000, IPv6AddrLit!"fe80::2", 5540, payload[]);
+        pkt.init!RawFrame(buffer[0 .. total]);
+        udp_input6(stack, pkt, IPv6Header.sizeof, null);
+        assert(pcb.recv_queue.length == 1);
+        assert(pcb.recv_queue[0].src == InetAddress(src, 4000) && pcb.recv_queue[0].data == payload[]);
+
+        total = write_udp6(buffer[], src, 4000, IPv6AddrLit!"fe80::2", 5541, payload[]);
+        pkt.init!RawFrame(buffer[0 .. total]);
+        udp_input6(stack, pkt, IPv6Header.sizeof, null);
+        total = write_udp6(buffer[], src, 4000, dst, 5540, payload[]);
+        pkt.init!RawFrame(buffer[0 .. total]);
+        udp_input6(stack, pkt, IPv6Header.sizeof, null);
+        assert(pcb.recv_queue.length == 1);
+
+        udp_free_datagram_data(pcb.recv_queue[0]);
+        udp_unregister(&pcb);
     }
 }
