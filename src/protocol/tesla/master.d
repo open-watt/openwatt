@@ -4,31 +4,43 @@ import urt.array;
 import urt.endian;
 import urt.lifetime;
 import urt.log;
+import urt.si;
 import urt.string;
+import urt.string.format;
 import urt.time;
 import urt.util;
 
+import manager;
+import manager.base;
+import manager.collection;
+
 import protocol.tesla;
+import protocol.tesla.binding;
 import protocol.tesla.iface;
 import protocol.tesla.twc;
 
 import router.iface;
 import router.iface.packet;
-
-import manager;
+import router.stream;
 
 //version = DebugTWCMaster;
 
 nothrow @nogc:
 
 
-import urt.si;
 alias CentiAmps = Quantity!(ushort, ScaledUnit(Ampere, -2));
 
 
-class TeslaTWCMaster
+// each slave discovered on the bus spawns a TeslaTWCBinding (and Device) named twc_<bus id>
+class TeslaTWCMaster : ActiveObject
 {
+    alias Properties = AliasSeq!(Prop!("interface", iface),
+                                 Prop!("stream", stream));
 nothrow @nogc:
+
+    enum type_name = "tesla-twc-master";
+    enum path = "/protocol/tesla/twc";
+    enum collection_id = CollectionType.tesla_twc;
 
     enum ChargerState : ubyte
     {
@@ -45,6 +57,8 @@ nothrow @nogc:
     nothrow @nogc:
         String name;
         ushort id;
+
+        TeslaTWCBinding binding;
 
         ubyte req_seq;
         bool link_ready;
@@ -63,9 +77,10 @@ nothrow @nogc:
         bool verify_presence;
         ubyte verify_zero_count;
 
-        ushort specified_max_current; // the maximum current we're allowed to charge with
+        ushort hard_max_current;      // the binding's configured ceiling; control.max can only lower it
+        ushort specified_max_current; // a runtime charge limit from control.max; 0 = none
         ushort device_max_current;    // the maximum current supported by the charger
-        ushort target_current;       // the current we're trying to charge with
+        ushort target_current;        // the current we're trying to charge with
         ushort charge_current_target; // the current the car is requesting
 
         ushort current;
@@ -87,14 +102,21 @@ nothrow @nogc:
         enum ushort min_current = 500;
 
         // device_max_current arrives in SlaveLinkReady; until then the configured
-        // limit stands alone so optimistically-adopted chargers have a valid clamp
-        ushort max_current()
-            => device_max_current ? min(device_max_current, specified_max_current) : specified_max_current;
+        // limits stand alone so optimistically-adopted chargers have a valid clamp
+        ushort max_current() const pure
+        {
+            ushort m = hard_max_current;
+            if (device_max_current && (!m || device_max_current < m))
+                m = device_max_current;
+            if (specified_max_current && (!m || specified_max_current < m))
+                m = specified_max_current;
+            return m;
+        }
 
-        ushort charge_current()
+        ushort charge_current() const pure
             => max(min_current, min(max_current, target_current));
 
-        ChargerState charger_state()
+        ChargerState charger_state() const pure
         {
             switch (state)
             {
@@ -121,131 +143,323 @@ nothrow @nogc:
                     return ChargerState.unknown;
             }
         }
-
     }
 
-    TeslaProtocolModule m;
-
-    String name;
-    BaseInterface iface;
-    LinkStatus last_link_status = LinkStatus.down;
-
-    MonoTime last_action;
-
-    ushort id;
-    ubyte sig;
-    bool announced;
-
-    byte round_robin_index;
-
-    Array!Charger chargers;
-
-
-    this(TeslaProtocolModule m, String name, BaseInterface iface)
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
-        this.name = name.move;
-        this.iface = iface;
+        super(collection_type_info!TeslaTWCMaster, id, flags);
 
-        static ubyte id_counter = 0;
-        this.id = 0x7770 + id_counter++;
-
-        import urt.crc;
-        this.sig = cast(ubyte)calculate_crc!(Algorithm.crc32_iso_hdlc)(iface.name[]);
-
-        iface.subscribe(&incoming_packet, PacketFilter(type: PacketType.tesla_twc));
+        import manager.system : node_id;
+        _id_on_bus = cast(ushort)node_id();
+        if (_id_on_bus == 0 || _id_on_bus == TWCFrame.broadcast)
+            _id_on_bus = 0x7777;
     }
 
-    ~this()
+    // Properties
+
+    inout(BaseInterface) iface() inout pure
+        => _iface;
+    void iface(BaseInterface value)
     {
+        if (!_stream && _iface.get is value)
+            return;
+        release_iface();
+        _iface = value;
+        mark_set!(typeof(this), "interface")();
+        restart();
     }
 
-    void add_charger(String name, ushort twc_id, ushort max_current)
+    inout(Stream) stream() inout pure
+        => _stream;
+    void stream(Stream value)
     {
-        Charger* charger = &chargers.pushBack();
-
-        charger.name = name.move;
-        charger.id = twc_id;
-
-        charger.specified_max_current = max_current;
-        charger.target_current = max_current;
-
+        if (_stream.get is value)
+            return;
+        release_iface();
+        _stream = value;
+        mark_set!(typeof(this), "stream")();
+        restart();
     }
 
-    Charger* find_charger(const(char)[] name)
+    override const(char)[] status_message() const
     {
-        foreach (ref c; chargers)
+        if (_state == State.init_failed || _state == State.failure)
+            return super.status_message();
+        if (!_iface || !_iface.running)
+            return "Waiting for interface";
+        if (_role == BusRole.listening)
+            return "Listening for other masters";
+        if (_role == BusRole.standby)
+            return _standby_status ? _standby_status : "Standing by: another master on bus";
+        return super.status_message();
+    }
+
+protected:
+    override bool validate() const pure
+        => _iface !is null || _stream !is null;
+
+    override CompletionStatus startup()
+    {
+        if (_stream && !_iface)
         {
-            if (c.name[] == name[])
+            const(char)[] n = Collection!BaseInterface().generate_name(name[]);
+            TeslaInterface ti = Collection!TeslaInterface().alloc(n, ObjectFlags.dynamic);
+            if (!ti)
+            {
+                log.error("could not create TWC interface '", n, "'");
+                return CompletionStatus.error;
+            }
+            ti.stream = _stream.get;
+            Collection!TeslaInterface().add(ti);
+            _iface = ti;
+        }
+
+        BaseInterface i = _iface.get;
+        if (!i || !i.running)
+            return CompletionStatus.continue_;
+
+        MonoTime now = getTime();
+
+        if (!_subscribed)
+        {
+            import urt.crc;
+            _sig = cast(ubyte)calculate_crc!(Algorithm.crc32_iso_hdlc)(i.name[]);
+
+            i.subscribe(&incoming_packet, PacketFilter(type: PacketType.tesla_twc));
+            i.subscribe(&iface_state_change);
+            _subscribed = true;
+
+            _role = BusRole.listening;
+            _listen_deadline = now + listen_window;
+        }
+
+        if (_collision)
+        {
+            _collision = false;
+            _listen_deadline = now + listen_window;
+            log.error("config error: another master on the bus uses our id ", tformat("{0,04x}", _id_on_bus));
+            _fail_reason = "config error: id collision on bus";
+            return CompletionStatus.error;
+        }
+
+        // the listen window only counts link-up time; a dead bus proves nothing
+        if (i.status.link_status != LinkStatus.up)
+        {
+            _listen_deadline = now + listen_window;
+            return CompletionStatus.continue_;
+        }
+        if (now < _listen_deadline)
+            return CompletionStatus.continue_;
+
+        if (_other_master_heard != MonoTime() && now - _other_master_heard < takeover_timeout)
+            _role = BusRole.standby;
+        else
+        {
+            _role = BusRole.active;
+            _round_robin_index = -10;
+        }
+
+        g_app.schedule(now + tick_interval, &tick);
+        return CompletionStatus.complete;
+    }
+
+    override CompletionStatus shutdown()
+    {
+        g_app.cancel(&tick);
+        if (_subscribed)
+        {
+            _iface.unsubscribe(&incoming_packet);
+            _iface.unsubscribe(&iface_state_change);
+            _subscribed = false;
+        }
+        // the stream-mode interface is ours; startup makes a fresh one
+        if (_stream)
+        {
+            if (BaseInterface i = _iface.get)
+                i.destroy();
+            _iface = null;
+        }
+        // chargers survive a restart; adopted slaves resume heartbeating immediately
+        return CompletionStatus.complete;
+    }
+
+package:
+    Charger* find_charger(ushort slave_id)
+    {
+        foreach (ref c; _chargers)
+        {
+            if (c.id == slave_id)
                 return &c;
         }
         return null;
     }
 
-    int set_target_current(const(char)[] name, ushort current)
+    Charger* adopt(ushort slave_id, TeslaTWCBinding binding, ushort hard_max)
     {
-        Charger* c = find_charger(name);
-        if (c)
+        Charger* c = find_charger(slave_id);
+        if (!c)
         {
-            c.target_current = min(current, c.max_current);
-            return c.target_current;
+            c = add_charger(slave_id);
+            // a present slave answers heartbeats without waiting for SlaveLinkReady, which only refines device_max_current
+            if (_role == BusRole.active)
+                c.link_ready = true;
         }
-        return -1;
+        c.binding = binding;
+        c.hard_max_current = hard_max;
+        return c;
     }
 
-    void update()
+    void detach(ushort slave_id, TeslaTWCBinding binding)
     {
-        LinkStatus link_status = iface.status.link_status;
-        if (link_status != last_link_status && link_status == LinkStatus.up && !announced)
+        Charger* c = find_charger(slave_id);
+        if (c && c.binding is binding)
+            c.binding = null;
+    }
+
+    void set_target_current(ushort slave_id, ushort current)
+    {
+        if (Charger* c = find_charger(slave_id))
+            c.target_current = current;
+    }
+
+    void set_max_current(ushort slave_id, ushort current)
+    {
+        if (Charger* c = find_charger(slave_id))
+            c.specified_max_current = current;
+    }
+
+private:
+    enum Duration tick_interval = 400.msecs;
+    enum Duration listen_window = 5.seconds;
+    enum Duration takeover_silence = 15.seconds;
+    enum Duration echo_grace = 2.seconds;
+
+    enum BusRole : ubyte
+    {
+        listening,
+        active,
+        standby
+    }
+
+    ObjectRef!BaseInterface _iface;
+    ObjectRef!Stream _stream;
+    bool _subscribed;
+
+    ushort _id_on_bus;
+    ubyte _sig;
+    BusRole _role;
+    bool _collision;
+
+    ushort _other_master;
+    MonoTime _other_master_heard;
+    MonoTime _listen_deadline;
+    MonoTime _last_tx;
+    char[44] _status_buf;
+    const(char)[] _standby_status;
+
+    byte _round_robin_index;
+
+    Array!Charger _chargers;
+
+    // two of ours standing off would otherwise take over in lockstep and collide forever
+    Duration takeover_timeout() const pure
+        => takeover_silence + msecs((_id_on_bus & 0xF) * 400);
+
+    // only the stream-mode interface is ours to destroy; a user's is merely released
+    void release_iface()
+    {
+        if (_stream)
         {
-            // announce master presence on first bring-up only; on a link flap we just resume
-            // heartbeating - a slave that actually rebooted re-announces itself, and waiting
-            // for SlaveLinkReady costs the slave's own master-loss timeout (minutes)
-            announced = true;
-            round_robin_index = -10;
-            last_action = MonoTime();
+            if (BaseInterface i = _iface.get)
+                i.destroy();
         }
-        last_link_status = link_status;
-        if (link_status != LinkStatus.up)
+        _iface = null;
+        _stream = null;
+    }
+
+    Charger* add_charger(ushort slave_id)
+    {
+        Charger* c = &_chargers.pushBack();
+        c.id = slave_id;
+        c.name = tformat("twc_{0,04x}", slave_id).make_string();
+        c.target_current = ushort.max;
+        c.hard_max_current = TeslaTWCBinding.default_max_current;
+        return c;
+    }
+
+    Charger* discover(ushort slave_id)
+    {
+        Charger* c = add_charger(slave_id);
+        log.info("discovered charger '", c.name[], "' on bus");
+
+        if (!Collection!TeslaTWCBinding().get(c.name[]))
+        {
+            TeslaTWCBinding b = Collection!TeslaTWCBinding().alloc(c.name[], ObjectFlags.dynamic);
+            if (b)
+            {
+                b.master = this;
+                b.slave_id = slave_id;
+                b.device = c.name;
+                Collection!TeslaTWCBinding().add(b);
+            }
+            else
+                log.error("could not spawn binding for charger '", c.name[], "' (name collision?)");
+        }
+        return c;
+    }
+
+    void tick(MonoTime scheduled)
+    {
+        g_app.schedule(scheduled + tick_interval, &tick);
+
+        BaseInterface i = _iface.get;
+        if (!i || i.status.link_status != LinkStatus.up)
             return;
 
-        MonoTime now = getTime();
-        if (now < last_action + 400.msecs)
-            return;
-        last_action = now;
+        if (_role == BusRole.standby)
+        {
+            if (scheduled - _other_master_heard < takeover_timeout)
+                return;
+            log.info("master ", tformat("{0,04x}", _other_master), " silent; taking over the bus");
+            _role = BusRole.active;
+            _round_robin_index = -10;
+            write_status();
+        }
 
         // we will immitate the bootup sequence... but I don't really know why?
         // I can't really see evidence the slaves care about this!
-        if (round_robin_index < 0)
+        if (_round_robin_index < 0)
         {
             ubyte[15] message = 0;
-            message[0..2] = ushort(round_robin_index++ < -5 ? 0xFCE1 : 0xFBE2).nativeToBigEndian;
-            message[2..4] = id.nativeToBigEndian;
-            message[4] = sig;
+            message[0..2] = ushort(_round_robin_index++ < -5 ? 0xFCE1 : 0xFBE2).nativeToBigEndian;
+            message[2..4] = _id_on_bus.nativeToBigEndian;
+            message[4] = _sig;
             send_twc_message(TWCFrame.broadcast, message[]);
 
-            // optimistic adoption: heartbeat configured chargers immediately rather than wait
-            // for SlaveLinkReady; a present slave answers heartbeats, and LinkReady merely
-            // refines device_max_current/sig whenever it arrives
-            if (round_robin_index == 0)
+            // adopted chargers heartbeat immediately rather than wait for SlaveLinkReady
+            if (_round_robin_index == 0)
             {
-                foreach (ref c; chargers)
+                foreach (ref c; _chargers)
                     c.link_ready = true;
             }
             return;
         }
 
-        // iterate through the ready chargers...
-        Charger* c = &chargers[round_robin_index++];
-        if (round_robin_index >= chargers.length)
-            round_robin_index = 0;
+        if (_chargers.empty)
+            return;
 
-        while (!c.link_ready)
+        // iterate through the ready chargers...
+        Charger* c = &_chargers[_round_robin_index++];
+        if (_round_robin_index >= _chargers.length)
+            _round_robin_index = 0;
+
+        if (!c.link_ready)
             return; // TODO: preferably, advance to the next charger...
         if (c.heartbeat_received != c.heartbeat_sent)
             c.req_seq = 0; // send heartbeats until the device responds
 
         ubyte[15] message = 0;
-        message[2..4] = id.nativeToBigEndian;
+        message[2..4] = _id_on_bus.nativeToBigEndian;
         message[4..6] = c.id.nativeToBigEndian;
 
         // command selection logic...
@@ -341,187 +555,223 @@ nothrow @nogc:
 
     void send_twc_message(ushort dst, const(void)[] message)
     {
+        _last_tx = getTime();
         Packet p;
         ref TWCFrame twc = p.init!TWCFrame(message[]);
-        twc.src = id;
+        twc.src = _id_on_bus;
         twc.dst = dst;
-        iface.forward(p);
+        _iface.forward(p);
     }
 
-    void incoming_packet(ref const Packet p, BaseInterface iface, PacketDirection dir, void* user_data) nothrow @nogc
+    void iface_state_change(ActiveObject, StateSignal signal)
+    {
+        if (signal == StateSignal.offline)
+            restart();
+    }
+
+    void incoming_packet(ref const Packet p, BaseInterface iface, PacketDirection dir, void* user_data)
     {
         ref const twc = p.hdr!TWCFrame;
 
         TWCMessage msg;
-        if (parse_twc_message(cast(ubyte[])p.data, msg))
+        if (!parse_twc_message(cast(ubyte[])p.data, msg))
+            return;
+
+        if (is_master_message(msg.type))
         {
-            Charger* slave;
-            foreach (ref c; chargers)
+            if (msg.sender == _id_on_bus)
             {
-                if (c.id == msg.sender)
+                // our own id heard while we are silent, and past any late echo of our last frames, is
+                // another node configured with it
+                if (_role != BusRole.active && getTime() - _last_tx > echo_grace)
                 {
-                    slave = &c;
-                    break;
+                    _collision = true;
+                    if (running)
+                        restart();
                 }
-            }
-            if (!slave)
-            {
-                // a device on the bus that was never registered (or another master)
                 return;
             }
-
-            if (twc.dst == TWCFrame.broadcast)
+            if (msg.sender != _other_master)
             {
-                switch (msg.type)
-                {
-                    case TWCMessageType.SlaveLinkReady:
-                        // always refresh: with optimistic adoption this may arrive while we're
-                        // already heartbeating (slave rebooted, or first contact after our boot)
-                        slave.sig_byte = msg.link_ready.signature;
-                        slave.device_max_current = msg.link_ready.amps;
-                        if (!slave.link_ready)
-                        {
-                            slave.link_ready = true;
-                            slave.heartbeat_sent = 0;
-                            slave.heartbeat_received = 0;
-                        }
-                        break;
-                    case TWCMessageType.ChargeInfo:
-                        slave.lifetime_energy = msg.charge_info.lifetime_energy;
-                        slave.voltage1 = msg.charge_info.voltage1;
-                        slave.voltage2 = msg.charge_info.voltage2;
-                        slave.voltage3 = msg.charge_info.voltage3;
-                        // the current in this message is more closely temporally aligned, but it's only 500mA precision
+                _other_master = msg.sender;
+                _standby_status = format(_status_buf, "Standing by: master {0,04x} on bus", _other_master);
+            }
+            _other_master_heard = getTime();
+            if (_role == BusRole.active)
+            {
+                log.warning("another master ", tformat("{0,04x}", msg.sender), " on the bus; standing down");
+                _role = BusRole.standby;
+                write_status();
+            }
+            return;
+        }
+
+        Charger* slave = find_charger(msg.sender);
+        if (!slave)
+        {
+            // only a slave's link-ready announcement introduces a new charger;
+            // anything else is another master, or chatter we can't attribute
+            if (twc.dst != TWCFrame.broadcast || msg.type != TWCMessageType.SlaveLinkReady)
+                return;
+            slave = discover(msg.sender);
+        }
+
+        if (twc.dst == TWCFrame.broadcast)
+        {
+            switch (msg.type)
+            {
+                case TWCMessageType.SlaveLinkReady:
+                    // always refresh: with optimistic adoption this may arrive while we're
+                    // already heartbeating (slave rebooted, or first contact after our boot)
+                    slave.sig_byte = msg.link_ready.signature;
+                    slave.device_max_current = msg.link_ready.amps;
+                    if (!slave.link_ready)
+                    {
+                        slave.link_ready = true;
+                        slave.heartbeat_sent = 0;
+                        slave.heartbeat_received = 0;
+                    }
+                    break;
+                case TWCMessageType.ChargeInfo:
+                    slave.lifetime_energy = msg.charge_info.lifetime_energy;
+                    slave.voltage1 = msg.charge_info.voltage1;
+                    slave.voltage2 = msg.charge_info.voltage2;
+                    slave.voltage3 = msg.charge_info.voltage3;
+                    // the current in this message is more closely temporally aligned, but it's only 500mA precision
 //                        slave.power1 = cast(ushort)(msg.charge_info.voltage1 * msg.charge_info.current / 2);
 //                        slave.power2 = cast(ushort)(msg.charge_info.voltage2 * msg.charge_info.current / 2);
 //                        slave.power3 = cast(ushort)(msg.charge_info.voltage3 * msg.charge_info.current / 2);
-                        // the current we recorded is half a second old, but it's 10mA precision
-                        slave.power1 = cast(ushort)(msg.charge_info.voltage1 * slave.current / 100);
-                        slave.power2 = cast(ushort)(msg.charge_info.voltage2 * slave.current / 100);
-                        slave.power3 = cast(ushort)(msg.charge_info.voltage3 * slave.current / 100);
-                        slave.total_power = cast(ushort)(slave.power1 + slave.power2 + slave.power3);
-                        slave.flags |= 0x2;
-                        break;
-                    case TWCMessageType._FDEC:
-                        break;
-                    case TWCMessageType.TWCSerialNumber:
-                        slave.serial_number[0..11] = msg.sn[0..11];
-                        slave.flags |= 0x4;
-                        break;
-                    case TWCMessageType.VIN1:
-                        if (slave.verify_presence)
+                    // the current we recorded is half a second old, but it's 10mA precision
+                    slave.power1 = cast(ushort)(msg.charge_info.voltage1 * slave.current / 100);
+                    slave.power2 = cast(ushort)(msg.charge_info.voltage2 * slave.current / 100);
+                    slave.power3 = cast(ushort)(msg.charge_info.voltage3 * slave.current / 100);
+                    slave.total_power = cast(ushort)(slave.power1 + slave.power2 + slave.power3);
+                    slave.flags |= 0x2;
+                    break;
+                case TWCMessageType._FDEC:
+                    break;
+                case TWCMessageType.TWCSerialNumber:
+                    slave.serial_number[0..11] = msg.sn[0..11];
+                    slave.flags |= 0x4;
+                    break;
+                case TWCMessageType.VIN1:
+                    if (slave.verify_presence)
+                    {
+                        if (*cast(uint*)msg.vin.ptr == 0)
                         {
-                            if (*cast(uint*)msg.vin.ptr == 0)
+                            if (++slave.verify_zero_count >= 3)
                             {
-                                if (++slave.verify_zero_count >= 3)
-                                {
-                                    debug writeDebug("Car disconnected from ", slave.name);
-                                    slave.flags &= 0xF;
-                                    slave.vin[] = 0;
-                                    slave.vin_attempts = 0;
-                                    slave.verify_presence = false;
-                                    slave.verify_zero_count = 0;
-                                }
-                            }
-                            else
-                            {
-                                if (slave.vin[0..7] != msg.vin[])
-                                {
-                                    // a different car since we last looked; recollect the rest
-                                    slave.vin[0..7] = msg.vin[];
-                                    slave.flags = cast(ubyte)((slave.flags | 0x20) & ~0xC0);
-                                    slave.vin_attempts = 0;
-                                }
+                                debug writeDebug("Car disconnected from ", slave.name);
+                                slave.flags &= 0xF;
+                                slave.vin[] = 0;
+                                slave.vin_attempts = 0;
                                 slave.verify_presence = false;
                                 slave.verify_zero_count = 0;
                             }
-                            break;
-                        }
-                        slave.vin[0..7] = msg.vin[];
-                        if (*cast(uint*)msg.vin.ptr == 0)
-                        {
-                            ++slave.vin_attempts;
-                            slave.req_seq = 0;
                         }
                         else
-                            slave.flags |= 0x20;
-                        break;
-                    case TWCMessageType.VIN2:
-                        slave.vin[7..14] = msg.vin[];
-                        if (*cast(uint*)msg.vin.ptr == 0)
                         {
-                            ++slave.vin_attempts;
-                            slave.req_seq = 0;
-                        }
-                        else
-                            slave.flags |= 0x40;
-                        break;
-                    case TWCMessageType.VIN3:
-                        slave.vin[14..17] = msg.vin[0..3];
-                        if (*cast(uint*)msg.vin.ptr == 0)
-                        {
-                            ++slave.vin_attempts;
-                            slave.req_seq = 0;
-                        }
-                        else
-                            slave.flags |= 0x80;
-                        break;
-                    default:
-                        // unexpected message?
-//                        debug writeWarning("Unexpected message!");
-                        break;
-                }
-            }
-            else if (twc.dst == id && msg.type == TWCMessageType.SlaveHeartbeat)
-            {
-                // record heartbeat response state...
-                slave.state = msg.heartbeat.state;
-                slave.charge_current_target = msg.heartbeat.current;
-                slave.current = msg.heartbeat.current_in_use;
-
-                slave.flags |= 0x1;
-
-                // Ready+0A is ambiguous: unplugged, or a plugged car that went to sleep.
-                // With VIN evidence on record we hold presence and verify by re-polling VIN1;
-                // without any VIN we have nothing to verify against, so treat it as unplugged.
-                if (msg.heartbeat.state == TWCState.Ready && msg.heartbeat.current == 0)
-                {
-                    if (slave.flags & 0xE0)
-                    {
-                        if (!slave.verify_presence)
-                        {
-                            slave.verify_presence = true;
+                            if (slave.vin[0..7] != msg.vin[])
+                            {
+                                // a different car since we last looked; recollect the rest
+                                slave.vin[0..7] = msg.vin[];
+                                slave.flags = cast(ubyte)((slave.flags | 0x20) & ~0xC0);
+                                slave.vin_attempts = 0;
+                            }
+                            slave.verify_presence = false;
                             slave.verify_zero_count = 0;
                         }
+                        break;
                     }
-                    else if (slave.flags & 0x10)
+                    slave.vin[0..7] = msg.vin[];
+                    if (*cast(uint*)msg.vin.ptr == 0)
                     {
-                        debug writeDebug("Car disconnected from ", slave.name);
-                        slave.flags &= 0xF;
-                        slave.vin_attempts = 0;
+                        ++slave.vin_attempts;
+                        slave.req_seq = 0;
                     }
-                }
-                else
-                {
-                    debug if ((slave.flags & 0x10) == 0)
-                        writeDebug("Car connected to ", slave.name);
+                    else
+                        slave.flags |= 0x20;
+                    break;
+                case TWCMessageType.VIN2:
+                    slave.vin[7..14] = msg.vin[];
+                    if (*cast(uint*)msg.vin.ptr == 0)
+                    {
+                        ++slave.vin_attempts;
+                        slave.req_seq = 0;
+                    }
+                    else
+                        slave.flags |= 0x40;
+                    break;
+                case TWCMessageType.VIN3:
+                    slave.vin[14..17] = msg.vin[0..3];
+                    if (*cast(uint*)msg.vin.ptr == 0)
+                    {
+                        ++slave.vin_attempts;
+                        slave.req_seq = 0;
+                    }
+                    else
+                        slave.flags |= 0x80;
+                    break;
+                default:
+                    // unexpected message?
+//                        debug writeWarning("Unexpected message!");
+                    break;
+            }
+        }
+        // in standby, snooping the slaves' replies to the active master keeps the model fresh
+        else if (msg.type == TWCMessageType.SlaveHeartbeat &&
+                 (twc.dst == _id_on_bus || (_role == BusRole.standby && twc.dst == _other_master)))
+        {
+            // record heartbeat response state...
+            slave.state = msg.heartbeat.state;
+            slave.charge_current_target = msg.heartbeat.current;
+            slave.current = msg.heartbeat.current_in_use;
 
-                    slave.flags |= 0x10;
-                    if (slave.verify_presence)
+            slave.flags |= 0x1;
+
+            // Ready+0A is ambiguous: unplugged, or a plugged car that went to sleep.
+            // With VIN evidence on record we hold presence and verify by re-polling VIN1;
+            // without any VIN we have nothing to verify against, so treat it as unplugged.
+            if (msg.heartbeat.state == TWCState.Ready && msg.heartbeat.current == 0)
+            {
+                if (slave.flags & 0xE0)
+                {
+                    if (!slave.verify_presence)
                     {
-                        slave.verify_presence = false;
+                        slave.verify_presence = true;
                         slave.verify_zero_count = 0;
                     }
                 }
-
-                slave.heartbeat_received = slave.heartbeat_sent;
-                if (slave.heartbeat_received >= 128)
+                else if (slave.flags & 0x10)
                 {
-                    // handle graceful overflow...
-                    slave.heartbeat_sent -= slave.heartbeat_received;
-                    slave.heartbeat_received = 0;
+                    debug writeDebug("Car disconnected from ", slave.name);
+                    slave.flags &= 0xF;
+                    slave.vin_attempts = 0;
                 }
             }
+            else
+            {
+                debug if ((slave.flags & 0x10) == 0)
+                    writeDebug("Car connected to ", slave.name);
+
+                slave.flags |= 0x10;
+                if (slave.verify_presence)
+                {
+                    slave.verify_presence = false;
+                    slave.verify_zero_count = 0;
+                }
+            }
+
+            slave.heartbeat_received = slave.heartbeat_sent;
+            if (slave.heartbeat_received >= 128)
+            {
+                // handle graceful overflow...
+                slave.heartbeat_sent -= slave.heartbeat_received;
+                slave.heartbeat_received = 0;
+            }
         }
+
+        if (slave.binding)
+            slave.binding.push_samples(*slave);
     }
 }

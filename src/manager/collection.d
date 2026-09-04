@@ -79,6 +79,7 @@ enum CollectionType : ubyte
     log_sink,
     console_session,
     smartevse,
+    tesla_twc,
     count
 }
 

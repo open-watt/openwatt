@@ -815,6 +815,65 @@ preflights and normal responses use the effective policy.
 /protocol/http/fileserver add name=files http-server=webserver uri=/files root="conf" access=webdav allowed-origin=http://192.168.0.5:8080
 ```
 
+### `/protocol/tesla/twc`
+
+A TWC master runs the Tesla Wall Connector (Gen2) master role on an RS485 bus
+reached through a `/interface/tesla-twc` interface. It announces itself, then
+round-robins heartbeats and status requests across the chargers on the bus.
+Slaves that answer the announcement with a link-ready message are discovered
+automatically: each one gets a charger record, a dynamic `/binding/tesla/twc`
+entry, and a Device, all named for the slave's 16-bit bus id (e.g. `twc_6820`).
+No slave addresses are configured on the master.
+
+The bus allows one master. On startup the master listens for a few seconds
+before claiming the bus, and stands by if another master is heard - snooping
+the slaves' replies so devices stay populated read-only - then takes over once
+that master has been silent for ~15s. Hearing another master while active
+stands down immediately. Our bus id is the low 16 bits of the node id; a master
+frame carrying our own id while we are silent is an id collision with another
+node, reported as a config error that fails the master. The status message
+names the situation throughout.
+
+| Property | Access | Values | Default | Description |
+| --- | --- | --- | --- | --- |
+| `interface` | read/write | interface name | required | The `tesla-twc` interface carrying the bus. |
+| `stream` | read/write | stream name | required | Byte stream carrying the bus; the master creates and owns a `tesla-twc` interface over it. |
+
+`interface` and `stream` are mutually exclusive: setting either replaces the
+other, and the interface created for a `stream` is destroyed with the master.
+Naming a stream is the short form, and is all that a bus of its own needs;
+name an interface instead when it is shared, bridged, or captured.
+
+```text
+/protocol/tesla/twc add name=shed stream=shed_rs485
+
+/interface/tesla-twc add name=shed_twc stream=shed_rs485
+/protocol/tesla/twc add name=shed interface=shed_twc
+```
+
+### `/binding/tesla/twc`
+
+Bridges one TWC charger to the Device tree. Normally spawned by the master on
+discovery; adding one manually pre-adopts a known slave id so heartbeating
+starts without waiting for the slave to announce. Charge control lives on the
+device's `grid.control` PowerControl: `setpoint` adjusts the target current,
+and `max` caps the offered current at runtime. The operating ceiling is always
+the least of the `max-current` property, the `max` element, and the charger's
+own maximum; a slave-mode TWC enforces no limit of its own, so the property is
+the installer's hard ceiling for the circuit.
+
+| Property | Access | Values | Default | Description |
+| --- | --- | --- | --- | --- |
+| `device` | read/write | device name | required | Device to create or populate. |
+| `master` | read/write | TWC master name | required | The `/protocol/tesla/twc` master owning the bus. |
+| `slave_id` | read/write | 16-bit id | required | The charger's TWC bus id. |
+| `max-current` | read/write | amps | 32 | Hard ceiling on the offered current; `control.max` can only lower it. |
+
+```text
+/binding/tesla/twc add name=twc_6820 device=twc_6820 master=twc0 slave_id=0x6820 max-current=25A
+/element/set twc_6820.grid.control.max 20A
+```
+
 ### `/sync/udp-server`
 
 A datagram sync listener owns one UDP endpoint per selected local endpoint. It
