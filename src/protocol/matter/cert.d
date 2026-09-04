@@ -179,6 +179,49 @@ bool decode_matter_cert(const(ubyte)[] data, out MatterCert cert)
     return r.type == TLVType.end_of_container && have_key && have_sig && have_subject && have_issuer;
 }
 
+// Encodes every field the decoder reads; signature may be empty while the certificate is unsigned.
+ptrdiff_t encode_matter_cert(ref const MatterCert cert, ubyte[] buffer)
+{
+    TLVWriter w = TLVWriter(buffer);
+    w.start_structure();
+    w.put(TLVTag.context(MatterCertTag.serial), cert.serial);
+    w.put(TLVTag.context(MatterCertTag.signature_algorithm), cast(ubyte)1);
+    encode_dn(w, TLVTag.context(MatterCertTag.issuer), cert.issuer);
+    w.put(TLVTag.context(MatterCertTag.not_before), cert.not_before);
+    w.put(TLVTag.context(MatterCertTag.not_after), cert.not_after);
+    encode_dn(w, TLVTag.context(MatterCertTag.subject), cert.subject);
+    w.put(TLVTag.context(MatterCertTag.public_key_algorithm), cast(ubyte)1);
+    w.put(TLVTag.context(MatterCertTag.curve), cast(ubyte)1);
+    w.put(TLVTag.context(MatterCertTag.public_key), cert.public_key);
+    w.start_list(TLVTag.context(MatterCertTag.extensions));
+    if (cert.has_basic_constraints)
+    {
+        w.start_structure(TLVTag.context(MatterExtensionTag.basic_constraints));
+        w.put(TLVTag.context(1), cert.is_ca);
+        if (cert.has_path_len)
+            w.put(TLVTag.context(2), cert.path_len);
+        w.end_container();
+    }
+    if (cert.has_key_usage)
+        w.put(TLVTag.context(MatterExtensionTag.key_usage), cert.key_usage);
+    if (cert.extended_key_usage_count)
+    {
+        w.start_array(TLVTag.context(MatterExtensionTag.extended_key_usage));
+        foreach (i; 0 .. cert.extended_key_usage_count)
+            w.put(TLVTag.anonymous, cert.extended_key_usage[i]);
+        w.end_container();
+    }
+    if (cert.subject_key_id.length)
+        w.put(TLVTag.context(MatterExtensionTag.subject_key_id), cert.subject_key_id);
+    if (cert.authority_key_id.length)
+        w.put(TLVTag.context(MatterExtensionTag.authority_key_id), cert.authority_key_id);
+    w.end_container();
+    w.put(TLVTag.context(MatterCertTag.signature), cert.signature);
+    if (!w.end_container() || w.overflow)
+        return -1;
+    return w.length;
+}
+
 // Chain rule: a NOC is issued by an ICAC or RCAC, an ICAC by an RCAC, an RCAC by itself.
 bool issued_by(ref const MatterCert cert, ref const MatterCert issuer)
 {
@@ -210,6 +253,24 @@ bool issued_by(ref const MatterCert cert, ref const MatterCert issuer)
 
 
 private:
+
+void encode_dn(ref TLVWriter w, TLVTag tag, ref const MatterDn dn)
+{
+    w.start_list(tag);
+    if (dn.common_name.length)
+        w.put(TLVTag.context(MatterDnTag.common_name), dn.common_name);
+    if (dn.has_node_id)
+        w.put(TLVTag.context(MatterDnTag.node_id), dn.node_id);
+    if (dn.has_icac_id)
+        w.put(TLVTag.context(MatterDnTag.icac_id), dn.icac_id);
+    if (dn.has_rcac_id)
+        w.put(TLVTag.context(MatterDnTag.rcac_id), dn.rcac_id);
+    if (dn.has_fabric_id)
+        w.put(TLVTag.context(MatterDnTag.fabric_id), dn.fabric_id);
+    foreach (i; 0 .. dn.noc_cat_count)
+        w.put(TLVTag.context(MatterDnTag.noc_cat), dn.noc_cats[i]);
+    w.end_container();
+}
 
 bool decode_dn(ref TLVReader r, out MatterDn dn)
 {
@@ -390,7 +451,8 @@ unittest
     assert(!noc.self_signed);
 
     // a root that could have issued it
-    w = TLVWriter(buf[]);
+    ubyte[512] root_buf;
+    w = TLVWriter(root_buf[]);
     w.start_structure();
     w.put(TLVTag.context(MatterCertTag.serial), serial[]);
     w.put(TLVTag.context(MatterCertTag.signature_algorithm), cast(ubyte)1);
@@ -421,6 +483,14 @@ unittest
     assert(issued_by(noc, rcac));
     assert(issued_by(rcac, rcac));
     assert(!issued_by(rcac, noc));
+
+    // the encoder reproduces what the decoder read
+    ubyte[512] again;
+    ptrdiff_t again_len = encode_matter_cert(noc, again[]);
+    assert(again_len > 0);
+    MatterCert noc2;
+    assert(decode_matter_cert(again[0 .. again_len], noc2));
+    assert(noc2.subject.node_id == noc.subject.node_id && noc2.signature == noc.signature && noc2.extended_key_usage_count == 2);
 
     // truncated input and a missing signature are rejected
     MatterCert bad;
