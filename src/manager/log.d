@@ -958,8 +958,16 @@ class LogFollowState : LiveViewState
 {
 nothrow @nogc:
 
-    enum default_max_messages = 256;
-    enum max_messages = 1024;
+    version (Tiny)
+    {
+        enum default_max_messages = 64;
+        enum max_messages = 256;
+    }
+    else
+    {
+        enum default_max_messages = 256;
+        enum max_messages = 1024;
+    }
 
     this(Session session, LogFilter filter, const(char)[] match, uint limit, bool stream)
     {
@@ -994,6 +1002,8 @@ nothrow @nogc:
                 if (get_message(i, msg))
                     write_stream_message(msg);
             }
+            _messages.clear();
+            _count = 0;
             _stream_ready = true;
         }
         _consumer = _log_module.register_consumer(filter);
@@ -1194,6 +1204,12 @@ private:
 
     void push(scope ref const LogMessage msg)
     {
+        if (_stream_ready)
+        {
+            write_stream_message(msg);
+            return;
+        }
+
         uint slot;
         if (_count == _limit)
         {
@@ -1209,9 +1225,7 @@ private:
             ++_count;
         }
         _messages[slot].assign(msg);
-        if (_stream_ready)
-            write_stream_message(msg);
-        else if (!_stream)
+        if (!_stream)
             request_redraw();
     }
 
