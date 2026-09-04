@@ -171,6 +171,7 @@ nothrow @nogc:
                 break;
             case TLVTagControl.fully_qualified_6:
             case TLVTagControl.fully_qualified_8:
+            {
                 uint v, p;
                 if (!read_uint(pos, 2, v) || !read_uint(pos, 2, p) || !read_uint(pos, control & 0x20 ? 4 : 2, tag.number))
                     return false;
@@ -178,6 +179,7 @@ nothrow @nogc:
                 tag.vendor = cast(ushort)v;
                 tag.profile = cast(ushort)p;
                 break;
+            }
         }
 
         _payload = null;
@@ -207,21 +209,26 @@ nothrow @nogc:
                     return false;
                 break;
             case float32:
+            {
                 if (!read_uint(pos, 4, _uvalue))
                     return false;
                 uint bits = cast(uint)_uvalue;
                 _fvalue = *cast(float*)&bits;
                 break;
+            }
             case float64:
+            {
                 ulong bits;
                 if (!read_uint(pos, 8, bits))
                     return false;
                 _fvalue = *cast(double*)&bits;
                 break;
+            }
             case utf8_1, bytes_1:
             case utf8_2, bytes_2:
             case utf8_4, bytes_4:
             case utf8_8, bytes_8:
+            {
                 ulong len;
                 if (!read_uint(pos, 1 << ((type - utf8_1) & 3), len))
                     return false;
@@ -230,6 +237,7 @@ nothrow @nogc:
                 _payload = _data[pos .. pos + cast(size_t)len];
                 pos += cast(size_t)len;
                 break;
+            }
             case structure, array, list:
                 ++_depth;
                 break;
