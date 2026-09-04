@@ -88,6 +88,8 @@
     <DCompile Include="src\driver\boards\smartevse\pins.d" />
     <DCompile Include="src\driver\font\render.d" />
     <DCompile Include="src\driver\font\small.d" />
+    <DCompile Include="src\driver\power\hardware.d" />
+    <DCompile Include="src\driver\power\regulator.d" />
     <DCompile Include="src\driver\rtc\pcf85063.d" />
     <DCompile Include="src\driver\esp32\system.d" />
     <DCompile Include="src\driver\esp32\idf_log_bridge.d" />

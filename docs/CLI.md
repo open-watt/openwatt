@@ -815,6 +815,50 @@ preflights and normal responses use the effective policy.
 /protocol/http/fileserver add name=files http-server=webserver uri=/files root="conf" access=webdav allowed-origin=http://192.168.0.5:8080
 ```
 
+### `/driver/power/regulator`
+
+Drives an AC power controller module (triac/SSR stage with a PSM gate input
+and a zero-cross detect output) from two GPIO pins, regulating a resistive
+load between zero and full power. All firing decisions run in interrupt
+context off the zero-cross edge, so regulation and the droop response ride
+through a stalled main loop; a hardware-timer watchdog forces the gate off if
+zero-cross edges stop. The regulator materialises a Device exposing writable
+`control.level`, `control.mode`, and `control.enable` elements plus
+`status.frequency`, `status.online`, and `status.fault`.
+
+`burst_fire` mode conducts whole mains cycles (never a DC-injecting half
+cycle), distributing them evenly across the repeat `window`; it is the right
+mode behind an inverter, where phase-angle chop feeds the inverter harmonics
+it handles poorly. `phase_angle` mode delays the gate within each half cycle
+for continuous sub-cycle resolution and a steady per-cycle draw that meters
+exactly; commanded level is linearised so 50% commands 50% power in both
+modes. A droop curve, when configured, turns the regulator into a
+frequency-following dump load for grid-forming inverters: output rises
+linearly from zero at `droop-start` to `level` at `droop-full`, holds there
+at higher frequency, and sheds below the start point, re-evaluated every
+half cycle.
+
+| Property | Access | Values | Default | Description |
+| --- | --- | --- | --- | --- |
+| `device` | read/write | device name | required | Device to create or populate. |
+| `psm-pin` | read/write | GPIO number | required | Gate drive output to the controller's PSM input. |
+| `zc-pin` | read/write | GPIO number | required | Zero-cross detect input. |
+| `psm-invert` | read/write | boolean | `false` | Drive the gate active-low. |
+| `zc-edge` | read/write | `rising`, `falling`, `change` | `rising` | Zero-cross input edge; `change` suits square-wave polarity outputs. |
+| `zc-pull` | read/write | `none`, `up`, `down` | `none` | Pull on the zero-cross input (open-collector detectors need `up`). |
+| `mode` | read/write | `burst_fire`, `phase_angle` | `burst_fire` | Firing strategy; switchable at runtime. |
+| `level` | read/write | `0` to `100` | `0` | Target power in percent; the ceiling when a droop curve is set. |
+| `enable` | read/write | boolean | `true` | Master gate; disabled holds the output off without losing the level. |
+| `window` | read/write | `1` to `1000` | `50` | Burst repeat window in full mains cycles; bounds the longest off-run at low levels. |
+| `droop-start` | read/write | hertz | `0` (disabled) | Frequency at and below which droop output is zero. |
+| `droop-full` | read/write | hertz | `0` (disabled) | Frequency at which droop output reaches `level`. |
+| `frequency` | read only | hertz | | Measured mains frequency from the zero-cross stream. |
+| `applied-level` | read only | percent | | Level the engine is currently firing, after droop. |
+| `zc-ok` | read only | boolean | | Zero-cross edges are arriving and frequency lock is held. |
+
+```text
+/driver/power/regulator/add name=dump device=dump-load psm-pin=25 zc-pin=26 level=100 droop-start=50.2 droop-full=52
+```
 ### `/sync/udp-server`
 
 A datagram sync listener owns one UDP endpoint per selected local endpoint. It
