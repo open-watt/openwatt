@@ -583,7 +583,8 @@ unittest
     assert(w.data == [0x0C, 0x06, 'H', 'e', 'l', 'l', 'o', '!']);
 
     w = TLVWriter(buf[]);
-    assert(w.put(TLVTag.anonymous, cast(const(ubyte)[])[0x00, 0x01, 0x02, 0x03, 0x04]));
+    static immutable ubyte[5] octets = [0x00, 0x01, 0x02, 0x03, 0x04];
+    assert(w.put(TLVTag.anonymous, octets[]));
     assert(w.data == [0x10, 0x05, 0x00, 0x01, 0x02, 0x03, 0x04]);
 
     w = TLVWriter(buf[]);
@@ -639,11 +640,14 @@ unittest
     assert(r.next() && r.as_utf8 == "abc");
 
     // truncated input and overflow are rejected
-    r = TLVReader(cast(const(ubyte)[])[0x05, 0x40]);
+    static immutable ubyte[2] short_int = [0x05, 0x40];
+    static immutable ubyte[4] short_str = [0x0C, 0x06, 0x48, 0x69];
+    static immutable ubyte[1] stray_end = [0x18];
+    r = TLVReader(short_int[]);
     assert(!r.next());
-    r = TLVReader(cast(const(ubyte)[])[0x0C, 0x06, 'H', 'i']);
+    r = TLVReader(short_str[]);
     assert(!r.next());
-    r = TLVReader(cast(const(ubyte)[])[0x18]);
+    r = TLVReader(stray_end[]);
     assert(!r.next());
 
     ubyte[3] small;
