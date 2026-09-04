@@ -34,21 +34,22 @@ cut: commission over IP (on-network, using the QR/manual pairing code) instead.
 - [x] P-256 point arithmetic in D (`urt.crypto.p256`, affine, not constant-time; Jacobian
       coordinates are the next optimisation, each affine add costs a field inversion).
 - [x] SPAKE2+ (`urt.crypto.spake2p`, Matter profile, M/N decompressed at use).
-- [ ] Sigma (CASE) needs ECDSA verify (backend has sign only; add verify) and X.509 chain validation
-      against the Matter PAA/PAI/DAC and operational CA structure.
+- [x] ECDSA sign/verify in D (`urt.crypto.ecdsa`, RFC 6979 nonces). Matter TLV certificates
+      (`cert.d`) re-encoded to DER for signature checks (`x509.d`). PAA/PAI/DAC attestation
+      chain validation is still to do.
 
 ### 3. Discovery
 - [ ] mDNS responder + querier as a `protocol/dns` service on UDP 5353, IPv6 ff02::fb.
 - [ ] DNS-SD service registration/browse API: `_matterc._udp` (commissionable), `_matter._tcp`
-      (operational), `_matterd._udp` (commissioner). TXT records: D, CM, VP, DN, SII, SAI, T.
+      (operational), `_matterd._udp` (commissioner). Name and TXT codecs done in `discovery.d`.
 - [ ] Commissioner side: browse `_matter._tcp` for operational node `<fabric-id>-<node-id>`.
 
 ### 4. Session layer (`protocol/matter/session.d`, `exchange.d`)
 - [x] Secured message protection (`session.d`: nonce layout, AES-CCM, PASE key derivation).
-- [ ] Exchange manager: exchange ids, initiator/responder, reliable messaging (MRP) with ack, retry
-      backoff, standalone ack. Timers via `g_app.schedule`.
+- [x] Exchange table and MRP retransmit/ack state (`exchange.d`), clock-driven; reactor timer
+      wiring still to do.
 - [x] PASE: SPAKE2+ over PBKDFParamRequest/Response, Pake1/2/3 (`pase.d`, both roles).
-- [ ] CASE: Sigma1/2/3 with fabric, NOC, IPK. Session resumption optional.
+- [x] CASE: Sigma1/2/3 with fabric, NOC, IPK (`case_.d`, both roles). Resumption not done.
 
 ### 5. Interaction Model (`protocol/matter/im.d`)
 - [x] Read/Subscribe/Report/Write/Invoke request and response TLV structures (`im.d`).
@@ -71,8 +72,8 @@ for the classic clusters (OnOff 0x0006, LevelControl 0x0008, ColorControl 0x0300
   (Descriptor, BridgedDeviceBasicInformation, plus mapped clusters).
 
 ### 7. Fabric and operational credentials
-- [ ] Fabric table (fabric id, node id, root CA, IPK, NOC) persisted through the existing config
-      persistence. Commissioner needs a root CA keypair and NOC issuance (DER builder already exists).
+- [~] `FabricInfo` (`fabric.d`) holds one membership with IPK derivation and destination id;
+      persistence, the fabric table and NOC issuance from a CSR are still to do.
 - [ ] Commissioning flow: ArmFailSafe, CSRRequest, AddTrustedRootCertificate, AddNOC,
       CommissioningComplete, then switch to CASE.
 
