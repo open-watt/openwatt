@@ -42,6 +42,7 @@ enum CollectionType : ubyte
     ip_address6,
     ip_pool,
     ip_pool6,
+    ip_ra,
     ip_route,
     ip_route6,
     mb_node,

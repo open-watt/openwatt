@@ -228,6 +228,7 @@
     <DCompile Include="src\protocol\ip\neighbour.d" />
     <DCompile Include="src\protocol\ip\package.d" />
     <DCompile Include="src\protocol\ip\pool.d" />
+    <DCompile Include="src\protocol\ip\ra.d" />
     <DCompile Include="src\protocol\ip\route.d" />
     <DCompile Include="src\protocol\ip\socket.d" />
     <DCompile Include="src\protocol\ip\linux_mirror.d" />
