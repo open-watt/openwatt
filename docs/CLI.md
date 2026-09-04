@@ -734,12 +734,14 @@ EUI-64 link-local address, verifies it with DAD, and publishes it as a dynamic
 | --- | --- |
 | `/protocol/ip/neighbour/print` | Show the IPv4 neighbour (ARP) cache: address, MAC, reachability state, retries, interface. |
 | `/protocol/ip/neighbour6/print` | Show the IPv6 neighbour (ND) cache in the same shape. |
+| `/protocol/ip/ping6 address=<address> [count=<count>] [iface=<interface>]` | Send ICMPv6 echo requests. Link-local and multicast destinations require `iface`. |
 
 ```
 /protocol/ip/address/add address=192.168.1.10/24 interface=eth0
 /protocol/ip/address6/add address=2001:db8:1::10/64 interface=eth0
 /protocol/ip/route6/add destination=::/0 gateway=fe80::1 out-interface=eth0
 /protocol/ip/neighbour6/print
+/protocol/ip/ping6 address=fe80::1 iface=eth0
 ```
 
 ### `/protocol/http/server`
