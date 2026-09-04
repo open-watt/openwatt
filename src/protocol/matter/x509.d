@@ -214,7 +214,7 @@ ptrdiff_t encode_time(uint matter_seconds, ubyte[] output)
         return der_tlv(output, 0x18, forever);
     }
     ulong unix = cast(ulong)matter_epoch_unix + matter_seconds;
-    DateTime dt = unix_ns_to_datetime(unix * 1_000_000_000);
+    DateTime dt = get_date_time(from_unix_time_ns(unix * 1_000_000_000));
     if (dt.year < 2050)
         return der_utctime(output, dt);
 
