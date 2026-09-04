@@ -24,18 +24,16 @@ cut: commission over IP (on-network, using the QR/manual pairing code) instead.
 
 ### 1. Codecs (no dependencies, fully unit-testable)
 - [x] Matter TLV reader/writer (`protocol/matter/tlv.d`).
-- [ ] Message header + payload header codec (session id, message counter, exchange id, protocol
-      id/opcode, flags), message counter window.
-- [ ] Pairing code / onboarding payload decode (manual 11/21-digit code, QR base-38).
+- [x] Message header + exchange header codec (`message.d`), message counter window (`session.d`).
+- [x] Pairing code / onboarding payload decode (`onboarding.d`).
 
 ### 2. Crypto primitives (add to urt, in-tree D so bare-metal targets work)
-- [ ] HKDF-SHA256 (trivial over existing HMAC).
-- [ ] PBKDF2-SHA256 (generalise `pbkdf2.d` over the digest template like HMAC).
-- [ ] AES-128-CCM (build on `aes_ecb_encrypt`; CTR + CBC-MAC, ~150 lines). Also needed by WPA2 CCMP.
-- [ ] P-256 point arithmetic in D, or accept backend-only for now. SPAKE2+ needs scalar mult and
-      point add/sub on arbitrary points, which the mbedTLS shim does not expose; extend the shim first
-      (`mbedtls_ecp_muladd`) and add a software fallback later.
-- [ ] SPAKE2+ (P-256, SHA-256), the PASE handshake core. Includes the M/N constants.
+- [x] HKDF-SHA256 (`urt.crypto.hkdf`).
+- [x] PBKDF2-SHA256 (`urt.crypto.pbkdf2` generalised over the digest).
+- [x] AES-128-CCM (`urt.crypto.aes_ccm`). Also usable by WPA2 CCMP.
+- [x] P-256 point arithmetic in D (`urt.crypto.p256`, affine, not constant-time; Jacobian
+      coordinates are the next optimisation, each affine add costs a field inversion).
+- [x] SPAKE2+ (`urt.crypto.spake2p`, Matter profile, M/N decompressed at use).
 - [ ] Sigma (CASE) needs ECDSA verify (backend has sign only; add verify) and X.509 chain validation
       against the Matter PAA/PAI/DAC and operational CA structure.
 
@@ -46,15 +44,14 @@ cut: commission over IP (on-network, using the QR/manual pairing code) instead.
 - [ ] Commissioner side: browse `_matter._tcp` for operational node `<fabric-id>-<node-id>`.
 
 ### 4. Session layer (`protocol/matter/session.d`, `exchange.d`)
-- [ ] Unsecured session (PASE/CASE handshake carriage) and secured session (AES-CCM with nonce from
-      security flags + counter + source node id).
+- [x] Secured message protection (`session.d`: nonce layout, AES-CCM, PASE key derivation).
 - [ ] Exchange manager: exchange ids, initiator/responder, reliable messaging (MRP) with ack, retry
       backoff, standalone ack. Timers via `g_app.schedule`.
-- [ ] PASE: SPAKE2+ over PBKDFParamRequest/Response, Pake1/2/3.
+- [x] PASE: SPAKE2+ over PBKDFParamRequest/Response, Pake1/2/3 (`pase.d`, both roles).
 - [ ] CASE: Sigma1/2/3 with fabric, NOC, IPK. Session resumption optional.
 
 ### 5. Interaction Model (`protocol/matter/im.d`)
-- [ ] Read/Subscribe/Report/Write/Invoke request and response TLV structures.
+- [x] Read/Subscribe/Report/Write/Invoke request and response TLV structures (`im.d`).
 - [ ] Attribute path, event path, data version, status codes.
 - [ ] Subscription keep-alive and priming report.
 
