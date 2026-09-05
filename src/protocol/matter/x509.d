@@ -390,9 +390,9 @@ unittest
 
     ubyte[64] tbuf;
     assert(encode_time(0, tbuf[]) == 17 && tbuf[0] == 0x18 && tbuf[1] == 15);
-    // Matter seconds 0x28D08480 is 2021-09-03T16:00:00Z
+    // Matter seconds 0x28D08480 is 2021-09-12T09:27:28Z
     ptrdiff_t tl = encode_time(0x28D08480, tbuf[]);
-    assert(tl == 15 && tbuf[0] == 0x17 && tbuf[2 .. 15] == cast(const(ubyte)[])"210903160000Z");
+    assert(tl == 15 && tbuf[0] == 0x17 && tbuf[2 .. 15] == cast(const(ubyte)[])"210912092728Z");
 
     // self-signed root built from a fixed private key must verify with its own public key
     static immutable ubyte[32] priv = [
