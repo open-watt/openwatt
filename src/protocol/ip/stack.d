@@ -252,6 +252,26 @@ nothrow @nogc:
         return link_local_of(r.out_iface);
     }
 
+    IPv6Addr select_source_v6_on_iface(IPv6Addr destination, BaseInterface iface)
+    {
+        if (!iface)
+            return IPv6Addr.any;
+        if (destination.is_link_local)
+            return link_local_of(iface);
+        foreach (address; Collection!IPv6Address().values)
+            if (address.iface is iface && !address.address.addr.is_link_local)
+                return address.address.addr;
+        return link_local_of(iface);
+    }
+
+    bool owns_address_v6(IPv6Addr address)
+    {
+        foreach (candidate; Collection!IPv6Address().values)
+            if (candidate.address.addr == address)
+                return true;
+        return address == IPv6Addr.loopback;
+    }
+
     RouteResult6 route_lookup_v6_dst(IPv6Addr dst, BaseInterface iface_hint = null)
     {
         if (dst == IPv6Addr.loopback)
@@ -324,6 +344,9 @@ nothrow @nogc:
 
         return best;
     }
+
+    bool upper_protocol_v6(const(void)[] data, out size_t offset, out size_t next_header_offset, out IPProtocol protocol)
+        => walk_ext_headers_v6(data, offset, next_header_offset, protocol);
 
     }
 
@@ -540,6 +563,9 @@ private:
             case RouteResult6.Kind.none:
                 version (DebugIP)
                     log.trace("no route for v6 packet");
+                static if (has_gateway)
+                    if (in_iface)
+                        icmp6_send_error(this, Icmp6Type.dest_unreachable, Icmp6DestUnreachableCode.no_route, pkt, in_iface);
                 return;
             case RouteResult6.Kind.blackhole:
                 return;
@@ -559,7 +585,10 @@ private:
                 if (in_iface)
                 {
                     if (ip.hop_limit <= 1)
+                    {
+                        icmp6_send_error(this, Icmp6Type.time_exceeded, 0, pkt, in_iface);
                         return;
+                    }
                     --ip.hop_limit;
                 }
                 // TODO: if pkt.length > out_iface.actual_mtu, send packet-too-big
@@ -621,6 +650,7 @@ private:
             case IPProtocol.no_next:
                 break;
             default:
+                icmp6_send_error(this, Icmp6Type.parameter_problem, 1, pkt, iface, cast(uint)nh_offset);
                 break;
         }
     }

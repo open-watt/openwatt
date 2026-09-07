@@ -151,13 +151,35 @@ nothrow @nogc:
                 arm_logs(kvp.value.peer);
     }
 
+    // what a claim delegates to us: the member's log tap and its whole-device model mirror
+    void arm_delegation(SyncPeer p)
+    {
+        arm_logs(p);
+        const(char)[][1] patterns = ["device:**"];
+        encoder_for(p._encoder).encode_model_sub(p, get_module!SyncModule.alloc_seq(), patterns[], false);
+    }
+
     void claim_over(SyncPeer p, MonoTime now)
     {
         if (!p.running || p._remote_role != PeerRole.member)
             return;
         ulong node_id = p._remote_node_id;
-        if (!node_id || node_id in _issued)
+        if (!node_id)
             return;
+        if (IssuedClaim* c = node_id in _issued)
+        {
+            if (c.peer is p)
+                return;
+            // a reconnected member's old peer lingers until the idle sweep on datagram links; the
+            // claim moves to the live session, and one still in flight on the dead one is re-issued
+            if (c.acked)
+            {
+                c.peer = p;
+                arm_delegation(p);
+                return;
+            }
+            _issued.remove(node_id);
+        }
 
         Neighbor* n = node_id in get_module!SyncDiscoveryModule.neighbors;
         if (!n)
@@ -455,9 +477,7 @@ nothrow @nogc:
             {
                 c.acked = true;
                 log.info("claimed node ", hex_id(kvp.key)[], " ('", from.name[], "')");
-                arm_logs(from);
-                const(char)[][1] patterns = ["device:**"];
-                encoder_for(from._encoder).encode_model_sub(from, get_module!SyncModule.alloc_seq(), patterns[], false);
+                arm_delegation(from);
             }
             else
             {

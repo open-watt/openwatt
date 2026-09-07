@@ -30,9 +30,8 @@ list(APPEND MAIN_PRIV_REQUIRES esp_driver_ledc esp_driver_spi esp_driver_gptimer
 # The component is only referenced when OW_USE_SPIFFS is defined below, so an
 # unused spiffs is discarded at link time.
 list(APPEND MAIN_PRIV_REQUIRES spiffs esp_partition)
-if(OPENWATT_COREDUMP)
-    list(APPEND MAIN_PRIV_REQUIRES espcoredump)
-endif()
+# Component requirements are resolved before OPENWATT_COREDUMP is available.
+list(APPEND MAIN_PRIV_REQUIRES espcoredump)
 if(OW_EXTRA_REQUIRES)
     list(APPEND MAIN_PRIV_REQUIRES ${OW_EXTRA_REQUIRES})
 endif()

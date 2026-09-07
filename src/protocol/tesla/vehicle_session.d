@@ -118,7 +118,11 @@ nothrow @nogc:
         => send_signed_action(TeslaDomain.infotainment, build_action_get_climate_state()[], VehicleCommandKind.get_climate_state);
 
     bool refresh_vehicle_state()
-        => send_signed_action(TeslaDomain.infotainment, build_action_get_vehicle_state()[], VehicleCommandKind.get_vehicle_state);
+    {
+        bool sent = send_signed_action(TeslaDomain.infotainment, build_action_get_vehicle_category(_vehicle_category)[], VehicleCommandKind.get_vehicle_state);
+        _vehicle_category = (_vehicle_category + 1) % 4;
+        return sent;
+    }
 
     bool charging_start()
         => send_signed_action(TeslaDomain.infotainment, build_action_charging_start_stop(true)[], VehicleCommandKind.charging_start);
@@ -171,6 +175,9 @@ protected:
         if (_state != State.starting && _state != State.running)
             return super.status_message();
 
+        if (_fault)
+            return _fault;
+
         final switch (_phase)
         {
             case Phase.connecting:
@@ -215,6 +222,7 @@ protected:
 
     override CompletionStatus shutdown()
     {
+        _auth_failures = 0;
         unsubscribe_vehicle_controls();
         if (_subscribed)
         {
@@ -232,6 +240,7 @@ protected:
         _routing_address[] = 0;
         _request_uuid[] = 0;
         _counter = 0;
+        _vehicle_category = 0;
         _pending_commands[] = PendingCommand.init;
         _charge_state = TeslaChargeState.init;
         _climate_state = TeslaClimateState.init;
@@ -351,7 +360,7 @@ private:
     enum Duration poll_charging = 2.seconds;
     enum Duration poll_idle = 30.seconds;
     enum Duration climate_poll_interval = 60.seconds;
-    enum Duration vehicle_poll_interval = 60.seconds;
+    enum Duration vehicle_poll_interval = 15.seconds;
 
     TeslaVehicleScanner _scanner;
     MACAddress _peer;
@@ -367,6 +376,7 @@ private:
 
     ubyte[16] _routing_address;
     ubyte[16] _request_uuid;
+    TeslaDomain _info_domain;
     MonoTime _last_request_time;
     MonoTime _last_poll_time;
     MonoTime _last_climate_poll_time;
@@ -465,6 +475,10 @@ private:
 
     ubyte[16] _aes_key;
     ubyte[65] _vehicle_pubkey;
+    enum ubyte auth_failure_limit = 3;
+    ubyte _auth_failures;
+    const(char)[] _fault;
+
     ubyte[16] _epoch;
     uint _counter;
     MonoTime _epoch_start;
@@ -488,6 +502,7 @@ private:
     TeslaClimateState _climate_state;
     bool _has_charge_state;
     bool _has_climate_state;
+    ubyte _vehicle_category;
 
     struct CapacitySamplerState
     {
@@ -590,6 +605,7 @@ private:
             _routing_seeded = true;
         }
         crypto_random_bytes(_request_uuid[]);
+        _info_domain = domain;
 
         Array!ubyte msg = build_session_info_request(domain, sec1[], _routing_address[], _request_uuid[]);
         _last_request_time = getTime();
@@ -635,6 +651,10 @@ private:
             return;
         }
 
+        // the vehicle broadcasts unsolicited VCSEC status to domain 0; only replies carry our routing address
+        if (!r.addressed_to(_routing_address[]))
+            return;
+
         if (_phase == Phase.session_info_xchg || _phase == Phase.awaiting_approval || _phase == Phase.info_xchg)
         {
             handle_session_info_response(r);
@@ -646,7 +666,11 @@ private:
             if (!r.has_response_signature)
             {
                 if (r.protobuf_message.length)
-                    log.warning("discarding unauthenticated vehicle response for VIN '", name[], "'");
+                {
+                    log.warning("discarding unauthenticated vehicle response for VIN '", name[], "': ",
+                                cast(void[])r.protobuf_message);
+                    note_auth_failure("Vehicle replies unauthenticated");
+                }
                 return;
             }
 
@@ -661,6 +685,7 @@ private:
             if (!decrypt_routable_response(r, _aes_key[], name[], pending.request_tag[], plaintext))
             {
                 log.error("vehicle response authentication failed for VIN '", name[], "'");
+                note_auth_failure("Vehicle responses fail authentication");
                 return;
             }
             if (!pending.response_window.accept(r.response_counter))
@@ -669,15 +694,29 @@ private:
                 return;
             }
 
+            _auth_failures = 0;
+            _fault = null;
             handle_command_response(r, plaintext[], pending.kind);
             *pending = PendingCommand.init;
             return;
         }
     }
 
+    void note_auth_failure(const(char)[] reason)
+    {
+        if (++_auth_failures < auth_failure_limit)
+            return;
+        _fault = reason;
+        _auth_failures = 0;
+        log.warning("session unusable for VIN '", name[], "': ", reason, "; re-establishing");
+        restart();
+    }
+
     void handle_session_info_response(ref const RoutableResponse r)
     {
         if (r.request_uuid.length == 16 && r.request_uuid[] != _request_uuid[])
+            return;
+        if (r.has_from_domain && r.from_domain != _info_domain)
             return;
 
         // Untrusted SessionInfo replies have no HMAC tag.

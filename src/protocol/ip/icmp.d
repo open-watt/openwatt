@@ -233,6 +233,42 @@ void handle_dest_unreachable(ref IPStack stack, const(ubyte)[] icmp)
 }
 
 
+// Token bucket: 1 token per second sustained, 6 token burst. Credit is held
+// in milliseconds (1 token = 1000 ms credit) to avoid floating-point.
+struct RateLimiter
+{
+nothrow @nogc:
+    enum uint burst_ms     = 6_000;
+    enum uint per_token_ms = 1_000;
+
+    uint     credit_ms;
+    MonoTime last_check;
+
+    bool consume(MonoTime now)
+    {
+        if (last_check.ticks == 0)
+        {
+            credit_ms = burst_ms;
+        }
+        else
+        {
+            long elapsed = (now - last_check).as!"msecs";
+            if (elapsed > 0)
+            {
+                ulong nc = ulong(credit_ms) + ulong(elapsed);
+                credit_ms = nc > burst_ms ? burst_ms : cast(uint)nc;
+            }
+        }
+        last_check = now;
+
+        if (credit_ms < per_token_ms)
+            return false;
+        credit_ms -= per_token_ms;
+        return true;
+    }
+}
+
+
 private:
 
 void handle_echo_request(ref IPStack stack, ref const Packet pkt, size_t ip_hdr_len)
@@ -290,41 +326,6 @@ bool is_icmp_error_type(ubyte type) pure
             return true;
         default:
             return false;
-    }
-}
-
-// Token bucket: 1 token per second sustained, 6 token burst. Credit is held
-// in milliseconds (1 token = 1000 ms credit) to avoid floating-point.
-struct RateLimiter
-{
-nothrow @nogc:
-    enum uint burst_ms     = 6_000;
-    enum uint per_token_ms = 1_000;
-
-    uint     credit_ms;
-    MonoTime last_check;
-
-    bool consume(MonoTime now)
-    {
-        if (last_check.ticks == 0)
-        {
-            credit_ms = burst_ms;
-        }
-        else
-        {
-            long elapsed = (now - last_check).as!"msecs";
-            if (elapsed > 0)
-            {
-                ulong nc = ulong(credit_ms) + ulong(elapsed);
-                credit_ms = nc > burst_ms ? burst_ms : cast(uint)nc;
-            }
-        }
-        last_check = now;
-
-        if (credit_ms < per_token_ms)
-            return false;
-        credit_ms -= per_token_ms;
-        return true;
     }
 }
 

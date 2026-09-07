@@ -23,6 +23,8 @@ import router.iface.wifi;
 
 nothrow @nogc:
 
+// TODO: tx admission/completion hooks (Beken txu_cntrl_push / rwm_tx_confirm) and a tx_backpressure counter
+
 class BuiltinWiFi : WiFiInterface
 {
 nothrow @nogc:
@@ -94,6 +96,8 @@ nothrow @nogc:
 
     override void cancel_scan()
     {
+        if (_wifi.is_open)
+            wifi_scan_stop(_wifi);
         _scan_handler = null;
         _scanning = false;
     }
@@ -256,12 +260,7 @@ protected:
     {
         super.update();
 
-        version (Espressif)
-        {
-            if (atomicExchange!(MemoryOrder.acq_rel)(&_wifi_pump_retry, 0u) != 0)
-                service_wifi();
-        }
-        else
+        if (atomicExchange!(MemoryOrder.acq_rel)(&_wifi_pump_retry, 0u) != 0)
             service_wifi();
 
         flush_pending_mode_update();
@@ -272,6 +271,7 @@ protected:
         if (!running)
             return;
         _mode_update_pending = true;
+        _next_mode_update_time = MonoTime.init;
     }
 
     override void on_tx_power_changed()
@@ -333,6 +333,7 @@ private:
     ubyte _num_client;
     bool _mode_update_pending;
     bool _mode_update_warned;
+    MonoTime _next_mode_update_time;
     ScanHandler _scan_handler;
     bool _scanning;
 
@@ -350,7 +351,7 @@ private:
         else if (_num_ap > 0)
             m = WifiMode.ap;
         else if (monitor)
-            m = WifiMode.monitor;  // radio on (as STA in the driver), no virtual ifs
+            m = WifiMode.monitor;
         return wifi_set_mode(_wifi, m);
     }
 
@@ -358,8 +359,11 @@ private:
     {
         if (!_mode_update_pending || !_wifi.is_open)
             return;
+        if (_next_mode_update_time.ticks != 0 && getTime() < _next_mode_update_time)
+            return;
         if (!update_drv_mode())
         {
+            _next_mode_update_time = getTime() + 1.seconds;
             if (!_mode_update_warned)
             {
                 _mode_update_warned = true;
@@ -369,6 +373,7 @@ private:
         }
         _mode_update_pending = false;
         _mode_update_warned = false;
+        _next_mode_update_time = MonoTime.init;
     }
 
     void teardown_radio()
@@ -386,6 +391,7 @@ private:
         sta_started = false;
         _mode_update_pending = false;
         _mode_update_warned = false;
+        _next_mode_update_time = MonoTime.init;
     }
 
     static void wifi_ready_dispatch() nothrow @nogc
@@ -549,6 +555,11 @@ private:
         {
             case WifiEvent.sta_started:         sta_started = true; break;
             case WifiEvent.sta_stopped:         sta_started = false; break;
+            case WifiEvent.sta_start_failed:
+                sta_started = false;
+                _mode_update_pending = true;
+                _next_mode_update_time = getTime() + 1.seconds;
+                break;
             case WifiEvent.sta_connected:       ++sta_connected_seq; break;
             case WifiEvent.sta_disconnected:    ++sta_disconnected_seq; break;
             case WifiEvent.ap_started:          ++ap_started_seq; break;
@@ -733,6 +744,7 @@ protected:
             log.error("STA connect rejected by driver");
             return CompletionStatus.error;
         }
+        radio.request_wifi_pump();
 
         _connect_initiated = true;
         _status_detail = "Connecting";

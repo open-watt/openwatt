@@ -12,7 +12,12 @@ void system_reboot()
 
 ulong unique_device_id()
 {
-    version (Bouffalo)
+    version (Beken)
+    {
+        import urt.driver.bk7231.identity : chip_unique_id;
+        return chip_unique_id();
+    }
+    else version (Bouffalo)
     {
         import urt.driver.bl_common.identity : chip_unique_id;
         return chip_unique_id();

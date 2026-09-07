@@ -1,8 +1,11 @@
 module protocol.tesla;
 
+import urt.array;
+import urt.encoding : HexDecode;
 import urt.map;
 import urt.mem;
 import urt.meta.nullable;
+import urt.result;
 import urt.string;
 import urt.string.format;
 import urt.time;
@@ -18,6 +21,7 @@ import protocol.tesla.master;
 import protocol.tesla.binding;
 import protocol.tesla.twc;
 import protocol.tesla.vehicle_codec;
+import protocol.tesla.vehicle_crypto;
 import protocol.tesla.vehicle_scanner;
 import protocol.tesla.vehicle_session;
 
@@ -50,6 +54,7 @@ nothrow @nogc:
         version (Tiny) {}
         else
         {
+            g_app.console.register_command!(crypto_test, "crypto-test")("/protocol/tesla", this);
             g_app.console.register_command!(vehicle_get_charge, "get-charge")("/protocol/tesla/session", this);
             g_app.console.register_command!(vehicle_get_climate, "get-climate")("/protocol/tesla/session", this);
             g_app.console.register_command!(vehicle_charge_start, "charge-start")("/protocol/tesla/session", this);
@@ -117,6 +122,54 @@ nothrow @nogc:
 
     version (Tiny) {} else
     {
+    void crypto_test(Session session)
+    {
+        import urt.crypto.aes : aes_gcm_encrypt, aes_gcm_decrypt;
+        import urt.digest.sha;
+
+        static immutable ubyte[16] K = HexDecode!"1b2fce19967b79db696f909cff89ea9a";
+        static immutable ubyte[16] epoch = HexDecode!"4c463f9cc0d3d26906e982ed224adde6";
+        static immutable ubyte[6] plaintext = HexDecode!"120452020801";
+        static immutable ubyte[12] nonce = HexDecode!"dbf79447fa156674dae1caed";
+        static immutable ubyte[6] expect_ct = HexDecode!"38038e8c0f2e";
+        static immutable ubyte[16] expect_tag = HexDecode!"8e128da165f162f4d7d2c8da866cf82a";
+
+        Array!ubyte meta = build_signed_command_metadata(TeslaDomain.infotainment, "5YJ30123456789ABC", epoch[], 2655, 7, 0);
+        SHA256Context sha;
+        sha_init(sha);
+        sha_update(sha, meta[]);
+        ubyte[32] aad = sha_finalise(sha);
+
+        ubyte[6] ct;
+        ubyte[16] tag;
+        Result enc = aes_gcm_encrypt(K[], nonce[], aad[], plaintext[], ct[], tag[]);
+        session.writef("encrypt (stack): {0}  ct={1} tag={2}\n", enc.succeeded ? "ok" : "ERROR", cast(void[])ct[], cast(void[])tag[]);
+        session.write_line("  vector: ", enc.succeeded && ct == expect_ct && tag == expect_tag ? "PASS" : "FAIL");
+
+        Array!ubyte heap_ct;
+        heap_ct.resize(plaintext.length);
+        ubyte[16] heap_tag;
+        Result enc2 = aes_gcm_encrypt(K[], nonce[], aad[], plaintext[], heap_ct[], heap_tag[]);
+        session.write_line("encrypt (heap buffer): ", enc2.succeeded && heap_ct[] == expect_ct[] && heap_tag == expect_tag ? "PASS" : "FAIL");
+
+        ubyte[6] back;
+        Result dec = aes_gcm_decrypt(K[], nonce[], aad[], expect_ct[], expect_tag[], back[]);
+        session.write_line("decrypt reference:      ", dec.succeeded && back == plaintext ? "PASS" : "FAIL");
+
+        ubyte[16] empty_tag;
+        Result enc3 = aes_gcm_encrypt(K[], nonce[], aad[], null, null, empty_tag[]);
+        Result dec3 = aes_gcm_decrypt(K[], nonce[], aad[], null, empty_tag[], null);
+        session.writef("empty payload round trip: {0} (enc {1}, dec {2})\n", enc3.succeeded && dec3.succeeded ? "PASS" : "FAIL", enc3.system_code, dec3.system_code);
+
+        static immutable ubyte[16] zero_key;
+        static immutable ubyte[12] zero_iv;
+        static immutable ubyte[16] tc1_tag = HexDecode!"58e2fccefa7e3061367f1d57a4e7455a";
+        ubyte[16] t;
+        Result enc4 = aes_gcm_encrypt(zero_key[], zero_iv[], null, null, null, t[]);
+        Result dec4 = aes_gcm_decrypt(zero_key[], zero_iv[], null, null, tc1_tag[], null);
+        session.write_line("NIST GCM test case 1:     ", enc4.succeeded && t == tc1_tag ? "PASS" : "FAIL", " / decrypt ", dec4.succeeded ? "PASS" : "FAIL");
+    }
+
     void vehicle_get_charge(Session session, TeslaVehicleSession vehicle)
     {
         if (!vehicle.is_ready)

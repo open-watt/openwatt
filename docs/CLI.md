@@ -696,6 +696,12 @@ service 0000FFF0-0000-1000-8000-00805F9B34FB  handles 0x0008-0xFFFF
   0x000D  0x000C  -       --CW----  0000FFF2-0000-1000-8000-00805F9B34FB
 ```
 
+### `/protocol/tesla`
+
+| Command | Syntax | Description |
+| --- | --- | --- |
+| `crypto-test` | `/protocol/tesla/crypto-test` | Runs the vehicle-command AES-GCM known-answer vector, an empty-payload round trip and NIST GCM test case 1 on this node and prints PASS/FAIL for each. |
+
 ### `/protocol/ip/*`
 
 IP configuration for the in-tree network stack. On desktop hosts the kernel's
@@ -728,12 +734,14 @@ EUI-64 link-local address, verifies it with DAD, and publishes it as a dynamic
 | --- | --- |
 | `/protocol/ip/neighbour/print` | Show the IPv4 neighbour (ARP) cache: address, MAC, reachability state, retries, interface. |
 | `/protocol/ip/neighbour6/print` | Show the IPv6 neighbour (ND) cache in the same shape. |
+| `/protocol/ip/ping6 address=<address> [count=<count>] [iface=<interface>]` | Send ICMPv6 echo requests. Link-local and multicast destinations require `iface`. |
 
 ```
 /protocol/ip/address/add address=192.168.1.10/24 interface=eth0
 /protocol/ip/address6/add address=2001:db8:1::10/64 interface=eth0
 /protocol/ip/route6/add destination=::/0 gateway=fe80::1 out-interface=eth0
 /protocol/ip/neighbour6/print
+/protocol/ip/ping6 address=fe80::1 iface=eth0
 ```
 
 ### DHCPv6
