@@ -18,6 +18,7 @@ import protocol.ble.device;
 import protocol.ble.iface;
 import protocol.tesla.vehicle_codec;
 import protocol.tesla.vehicle_session;
+import protocol.tesla.vehicle_retry;
 
 import router.iface;
 import router.iface.mac;
@@ -82,6 +83,8 @@ nothrow @nogc:
         if (_secret.get is value)
             return;
         _secret = value;
+        foreach (ref e; _vins[])
+            e.retry = VehicleRetryState.init;
         restart();
     }
 
@@ -131,6 +134,13 @@ nothrow @nogc:
             version (DebugTeslaScanner)
                 log.trace("registered VIN '", t[], "' -> hash [ ", cast(void[])hash[], " ]");
             updated ~= VinEntry(String(t.move), hash, *vehicle);
+            foreach (ref existing; _vins[])
+                if (existing.vin == updated[$ - 1].vin)
+                {
+                    updated[$ - 1].retry = existing.retry;
+                    updated[$ - 1].retry_key = existing.retry_key;
+                    break;
+                }
         }
 
         _vins = updated.move;
@@ -242,6 +252,43 @@ protected:
     }
 
 package:
+    const(VehicleRetryState)* retry_state(const(char)[] vin) const pure
+    {
+        const Secret key = _secret.get;
+        foreach (ref e; _vins[])
+            if (e.vin[] == vin && (!key || key.public_key_raw.length != 64 || e.retry_key[] == key.public_key_raw))
+                return &e.retry;
+        return null;
+    }
+
+    VehicleRetryState* retry_state(const(char)[] vin)
+    {
+        Secret key = _secret.get;
+        foreach (ref e; _vins[])
+            if (e.vin[] == vin)
+            {
+                if (key && key.public_key_raw.length == 64 && e.retry_key[] != key.public_key_raw)
+                {
+                    e.retry = VehicleRetryState.init;
+                    e.retry_key[] = key.public_key_raw;
+                }
+                return &e.retry;
+            }
+        return null;
+    }
+
+    bool reset_backoff(const(char)[] vin)
+    {
+        VehicleRetryState* retry = retry_state(vin);
+        if (!retry)
+            return false;
+        *retry = VehicleRetryState.init;
+        if (TeslaVehicleSession s = Collection!TeslaVehicleSession().get(vin))
+            if (s.scanner is this)
+                s.reset_retry_status();
+        return true;
+    }
+
     // Create a new TeslaVehicleSession for the given vehicle. The session owns
     // its own BLEClient lifecycle (created in startup, destroyed in shutdown) so
     // restart() cleanly reconnects. Returns null on allocation failure.
@@ -267,6 +314,8 @@ private:
         String vin;
         ubyte[8] hash;
         Component component;  // Root Vehicle Device for this VIN
+        VehicleRetryState retry;
+        ubyte[64] retry_key;
     }
 
     ObjectRef!BaseInterface _iface;
@@ -380,4 +429,25 @@ private:
         }
         return true;
     }
+}
+
+unittest
+{
+    import urt.mem : alloc, free;
+
+    TeslaVehicleScanner scanner = alloc!TeslaVehicleScanner(CID(100));
+    scope(exit) free(scanner);
+    TeslaVehicleSession first = alloc!TeslaVehicleSession(CID(101));
+    scope(exit) free(first);
+    scanner._vins ~= TeslaVehicleScanner.VinEntry(first.name);
+    first.attach(scanner, MACAddress(2, 3, 4, 5, 6, 7));
+    scanner.retry_state(first.vin).failed(VehicleCommandKind.get_charge_state, "Permission denied", getTime(), true);
+    first.restart();
+    TeslaVehicleSession replacement = alloc!TeslaVehicleSession(CID(101));
+    scope(exit) free(replacement);
+    replacement.attach(scanner, MACAddress(2, 3, 4, 5, 6, 8));
+    assert(replacement.scanner.retry_state(replacement.vin).failures[VehicleCommandKind.get_charge_state].latched);
+    assert(scanner.reset_backoff(first.vin));
+    assert(!replacement.scanner.retry_state(replacement.vin).status.length);
+    assert(!scanner.reset_backoff("unregistered"));
 }

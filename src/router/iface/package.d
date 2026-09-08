@@ -2,6 +2,7 @@ module router.iface;
 
 import urt.array;
 import urt.conv;
+import urt.inet : InetAddress;
 import urt.lifetime;
 import urt.map;
 import urt.mem;
@@ -796,7 +797,7 @@ nothrow @nogc:
     override void post_init()
     {
         // post_init: the platform ethernet collections own the scope by now, so these extend it
-        g_app.console.register_command!(mac_ping, "ping")("/interface/ethernet", this);
+        g_app.console.register_command!(ping, "ping")("/", this);
         g_app.console.register_command!(mac_discover, "discover")("/interface/ethernet", this);
     }
 
@@ -816,7 +817,91 @@ nothrow @nogc:
         expire_mac_probes();
     }
 
-    MacPingState mac_ping(Session session, MACAddress address, Nullable!uint count)
+    CommandState ping(Session session, const(char)[] address, Nullable!uint count, Nullable!BaseInterface iface)
+    {
+        import urt.inet : InetAddress, AddressFamily;
+        InetAddress destination;
+        if (!parse_ping_address(address, destination) || destination.addr_any)
+        {
+            session.write_line("ping requires an IPv4, IPv6 or MAC destination address");
+            return null;
+        }
+        if (destination.family == AddressFamily.ether)
+        {
+            MACAddress mac;
+            mac.b = destination._a.ether.addr;
+            return mac_ping(session, mac, count, iface ? iface.value : null);
+        }
+        static if (has_ip)
+        version (UseInternalIPStack)
+        {
+            import protocol.ip : IPModule;
+            return get_module!IPModule.ping(session, destination, count, iface ? iface.value : null);
+        }
+        session.write_line("IP ping is unavailable in this build");
+        return null;
+    }
+
+    private static bool parse_ping_address(const(char)[] text, out InetAddress address)
+    {
+        import urt.inet : InetAddress, IPAddr, IPv6Addr;
+        if (!text.length)
+            return false;
+        IPAddr v4;
+        if (v4.fromString(text) == text.length)
+        {
+            address = InetAddress(v4, 0);
+            return true;
+        }
+        IPv6Addr v6;
+        if (v6.fromString(text) == text.length)
+        {
+            address = InetAddress(v6, 0);
+            return true;
+        }
+        MACAddress mac;
+        if (mac.fromString(text) == text.length)
+        {
+            address = InetAddress(mac.b, 0);
+            return true;
+        }
+        return false;
+    }
+
+    unittest
+    {
+        import urt.inet : AddressFamily;
+        import urt.variant : Variant;
+        InetAddress address;
+        assert(parse_ping_address("192.0.2.1", address) && address.family == AddressFamily.ipv4);
+        assert(parse_ping_address("2001:db8::1", address) && address.family == AddressFamily.ipv6);
+        assert(parse_ping_address("fe80::1", address) && address.family == AddressFamily.ipv6);
+        assert(parse_ping_address("::1", address) && address.family == AddressFamily.ipv6);
+        assert(parse_ping_address("02:13:37:aa:bb:64", address) && address.family == AddressFamily.ether);
+        assert(parse_ping_address("021337aabb64", address) && address.family == AddressFamily.ether);
+        assert(parse_ping_address("0213:37aa:bb64", address) && address.family == AddressFamily.ether);
+        foreach (text; ["", "host.example", "192.0.2.1:80", "[::1]:80", "fe80::1%eth0", "2001:db8::1junk", "02:13:37:aa:bb:64junk"])
+            assert(!parse_ping_address(text, address));
+
+        InterfaceModule module_ = alloc!InterfaceModule(null);
+        scope(exit) free(module_);
+        Console* console = alloc!Console(null, StringLit!"test.ping-dispatch");
+        console.register_command!(ping, "ping")("/", module_);
+        StringSession session = console.createSession!StringSession();
+        scope(exit)
+        {
+            console.destroy_session(session);
+            Collection!Session().update_all();
+        }
+        Variant result;
+        console.execute(session, "/ping address=ff:ff:ff:ff:ff:ff", result);
+        assert(session.getOutput().contains("use discover"));
+        session.clearOutput();
+        console.execute(session, "/ping address=garbage", result);
+        assert(session.getOutput().contains("requires an IPv4, IPv6 or MAC destination address"));
+    }
+
+    private MacPingState mac_ping(Session session, MACAddress address, Nullable!uint count, BaseInterface iface)
     {
         if (!address)
         {
@@ -828,7 +913,13 @@ nothrow @nogc:
             session.write_line("ping is unicast; use discover to enumerate the segment");
             return null;
         }
-        return alloc!MacPingState(session, address, count ? count.value : 4);
+        EthernetStation station = dyn_cast!EthernetStation(iface);
+        if (iface && !station)
+        {
+            session.write_line("MAC ping requires an Ethernet station");
+            return null;
+        }
+        return alloc!MacPingState(session, address, count ? count.value : 4, station);
     }
 
     static class MacPingState : CommandState
@@ -843,13 +934,32 @@ nothrow @nogc:
         uint replies;
         MonoTime last_send;
         Array!uint txids;
+        ObjectRef!EthernetStation iface;
+        bool subscribed;
 
-        this(Session session, MACAddress dst, uint count)
+        this(Session session, MACAddress dst, uint count, EthernetStation iface)
         {
             super(session, null);
             this.dst = dst;
             this.count = count ? count : 1;
+            this.iface = iface;
+            if (iface)
+            {
+                if (!iface.running)
+                {
+                    request_cancel();
+                    return;
+                }
+                iface.subscribe(&iface_state_change);
+                subscribed = true;
+            }
             send_round();
+        }
+
+        ~this()
+        {
+            cancel_round();
+            release_interface();
         }
 
         override CommandCompletionState update()
@@ -860,6 +970,8 @@ nothrow @nogc:
                 state = CommandCompletionState.cancelled;
                 return state;
             }
+            if (state != CommandCompletionState.in_progress)
+                return state;
             if (getTime() - last_send >= 1.seconds)
             {
                 cancel_round();
@@ -877,14 +989,44 @@ nothrow @nogc:
         override void request_cancel()
         {
             if (state == CommandCompletionState.in_progress)
+            {
+                cancel_round();
+                release_interface();
                 state = CommandCompletionState.cancel_requested;
+            }
         }
 
     private:
+        void release_interface()
+        {
+            if (subscribed)
+            {
+                if (auto i = iface.get)
+                    i.unsubscribe(&iface_state_change);
+                subscribed = false;
+            }
+        }
+
+        void iface_state_change(ActiveObject, StateSignal signal)
+        {
+            if (signal == StateSignal.offline || signal == StateSignal.destroyed)
+                request_cancel();
+        }
+
         void send_round()
         {
+            if (subscribed && iface is null)
+            {
+                request_cancel();
+                return;
+            }
             ++sent;
             last_send = getTime();
+            if (auto i = iface.get)
+            {
+                txids ~= i.ping(dst, &on_reply);
+                return;
+            }
             foreach_ether_station((EthernetStation s) {
                 if (s.running)
                     txids ~= s.ping(dst, &on_reply);

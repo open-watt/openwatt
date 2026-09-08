@@ -73,6 +73,8 @@ nothrow @nogc:
             if (i < _subscribers.length && _subscribers[i] is h)
                 ++i;
         }
+        if (event == ComponentEvent.tree_changed && parent)
+            parent.notify(event);
     }
 
     void add_component(Component component) // TODO: include sampler here...
@@ -89,6 +91,7 @@ nothrow @nogc:
         }
         component.parent = this;
         components.pushBack(component);
+        notify(ComponentEvent.tree_changed);
     }
 
     inout(Component) find_component(const(char)[] name) inout pure nothrow @nogc
@@ -161,6 +164,7 @@ nothrow @nogc:
         elements ~= e;
         e.id = id.make_string();
         g_app.notify_element_created(e);
+        notify(ComponentEvent.tree_changed);
         return e;
     }
 
@@ -232,4 +236,34 @@ unittest
     assert(!element.format.valid);
     assert(component.find_or_create_element("value", format) is element);
     assert(element.format == format);
+
+    static struct Changes
+    {
+        Component root;
+        uint count;
+
+        void changed(Component source, ComponentEvent event) nothrow @nogc
+        {
+            assert(source is root && event == ComponentEvent.tree_changed);
+            ++count;
+        }
+    }
+
+    Changes changes = Changes(component);
+    component.subscribe(&changes.changed);
+    Component child = alloc!Component(StringLit!"child");
+    scope(exit) free(child);
+    component.add_component(child);
+    assert(changes.count == 1);
+    Component nested = alloc!Component(StringLit!"nested");
+    scope(exit) free(nested);
+    child.add_component(nested);
+    assert(changes.count == 2);
+    nested.notify(ComponentEvent.tree_changed);
+    assert(changes.count == 3);
+    nested.notify(ComponentEvent.offline);
+    assert(changes.count == 3);
+    component.unsubscribe(&changes.changed);
+    nested.notify(ComponentEvent.tree_changed);
+    assert(changes.count == 3);
 }

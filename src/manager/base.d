@@ -292,6 +292,8 @@ struct SyncState
 
 class BaseObject
 {
+    alias dyn_cast = manager.base.dyn_cast;
+
     alias Properties = AliasSeq!(Prop!("name", name, null, "*"),
                                  Prop!("type", type, null, "*"),
                                  Prop!("disabled", disabled, null, "h"),
@@ -1658,14 +1660,16 @@ template SynthSuggest(Setters...)
 }
 
 
-version (unittest)
+unittest
 {
+    import urt.mem;
     import urt.si.quantity : Quantity;
     import urt.si.unit : ScaledUnit, Second, Watt;
+    import manager.collection : item_table;
 
-    private enum TestMode : ubyte { idle, run, fault }
+    enum TestMode : ubyte { idle, run, fault }
 
-    private abstract class ElemTestBase : BaseObject
+    static abstract class ElemTestBase : BaseObject
     {
     nothrow @nogc:
 
@@ -1675,7 +1679,7 @@ version (unittest)
         }
     }
 
-    private abstract class ElemTestSibling : ElemTestBase
+    static abstract class ElemTestSibling : ElemTestBase
     {
     nothrow @nogc:
 
@@ -1685,7 +1689,7 @@ version (unittest)
         }
     }
 
-    private final class ActiveTestObject : ActiveObject
+    static final class ActiveTestObject : ActiveObject
     {
         enum type_name = "active-test";
         enum collection_id = cast(CollectionType)0;
@@ -1697,7 +1701,7 @@ version (unittest)
         }
     }
 
-    private final class ElemTestObject : ElemTestBase
+    static final class ElemTestObject : ElemTestBase
     {
         enum type_name = "elem-test";
         enum collection_id = cast(CollectionType)0;
@@ -1741,7 +1745,7 @@ version (unittest)
         }
     }
 
-    private final class LifecycleTestObject : ActiveObject
+    static final class LifecycleTestObject : ActiveObject
     {
         enum type_name = "lifecycle-test";
         enum collection_id = cast(CollectionType)0;
@@ -1771,12 +1775,6 @@ version (unittest)
             return CompletionStatus.complete;
         }
     }
-}
-
-unittest
-{
-    import urt.mem;
-    import manager.collection : item_table;
 
     auto table = &item_table(0);
     ElemTestObject o = alloc!ElemTestObject(table.allocate("elem-test-o", 0));
@@ -1794,6 +1792,19 @@ unittest
     assert(&DynTypeOf!ElemTestBase.info !is &DynTypeOf!ElemTestSibling.info);
     const(BaseObject) const_o = o;
     assert(dyn_cast!ElemTestObject(const_o) is o);
+
+    BaseObject base = o;
+    ElemTestBase parent = o;
+    assert(BaseObject.dyn_cast!ElemTestObject(base) is o);
+    assert(cast(ElemTestObject)base is o);
+    assert(cast(ElemTestObject)parent is o);
+    assert(cast(ElemTestBase)base is o);
+    assert(cast(ElemTestSibling)base is null);
+    assert(cast(ActiveObject)base is null);
+    assert(cast(const(ElemTestObject))const_o is o);
+    static assert(is(typeof(BaseObject.dyn_cast!ElemTestObject(cast(immutable(BaseObject))null)) == immutable(ElemTestObject)));
+    base = null;
+    assert(cast(ElemTestObject)base is null);
 
     assert(dyn_type_info!ActiveTestObject().parent is &DynTypeOf!ActiveObject.info);
 
@@ -1959,12 +1970,6 @@ unittest
     assert(proxy.prop_read!(ElemTestObject, "link") == true);
     table.remove(proxy.id);
     free(proxy);
-}
-
-
-unittest
-{
-    import manager.collection : item_table;
 
     static struct Watcher
     {
@@ -1979,13 +1984,11 @@ unittest
         }
     }
 
-    auto table = &item_table(0);
-
     // destroy() starts teardown immediately; the object leaves with shutdown already run
-    LifecycleTestObject o = alloc!LifecycleTestObject(table.allocate("lifecycle-o", 0));
-    table.bind(o.id, o);
-    o.do_update();
-    assert(o.running && o.startups == 1);
+    LifecycleTestObject lifecycle = alloc!LifecycleTestObject(table.allocate("lifecycle-o", 0));
+    table.bind(lifecycle.id, lifecycle);
+    lifecycle.do_update();
+    assert(lifecycle.running && lifecycle.startups == 1);
 
     // disabling a running object announces offline, like every other exit from running
     LifecycleTestObject d = alloc!LifecycleTestObject(table.allocate("lifecycle-d", 0));
@@ -2004,10 +2007,10 @@ unittest
     assert(wd.count == 2 && wd.seen[1] == StateSignal.destroyed);
 
     Watcher w;
-    o.subscribe(&w.on_signal);
-    o.destroy();
-    assert(o.shutdowns == 1);
-    assert(o._state == ActiveObject.State.destroyed);
+    lifecycle.subscribe(&w.on_signal);
+    lifecycle.destroy();
+    assert(lifecycle.shutdowns == 1);
+    assert(lifecycle._state == ActiveObject.State.destroyed);
     assert(w.count == 2 && w.seen[0] == StateSignal.offline && w.seen[1] == StateSignal.destroyed);
 
     // an async shutdown() continues on the state machine

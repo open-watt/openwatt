@@ -11,9 +11,14 @@ nothrow @nogc:
 
 Component resolve_component_path(const(char)[] path)
 {
+    return resolve_component_path(path, g_app.devices);
+}
+
+Component resolve_component_path(const(char)[] path, ref DeviceTable devices)
+{
     size_t dot = path.findFirst('.');
     const(char)[] device_id = path[0 .. dot];
-    Device* d = device_id in g_app.devices;
+    Device* d = device_id in devices;
     if (!d)
         return null;
     if (dot == path.length)

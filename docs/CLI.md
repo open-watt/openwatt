@@ -77,6 +77,37 @@ This section is the growing, command-by-command reference for the CLI. The
 scopes listed here are documented completely. Additional scopes will be added
 as the reference expands.
 
+### `/ping`
+
+`/ping address=<IPv4|IPv6|MAC> [count=<count>] [iface=<interface>]` selects
+ICMP, ICMPv6 or 802.1ag loopback from the destination address. The default is
+four requests, one per second; `count=0` sends one request. Use address literals
+without ports or zone suffixes. IP ping requires the internal IP stack; MAC
+ping is also available in builds using host networking.
+
+`iface` selects an Ethernet station for MAC ping. Without it, MAC requests go
+out through every running Ethernet station. MAC destinations must be unicast;
+use `/interface/ethernet/discover` for discovery.
+
+For IP ping, `iface` constrains the selected route and receiving interface.
+It is required for IPv6 link-local/multicast and IPv4 multicast/broadcast
+addresses. The command cancels if the selected interface goes offline or is
+removed. Group requests accept up to 64 distinct unicast responders during
+one second; duplicates count once per request. Reply counts can exceed request
+counts when probing a group or sending MAC requests on several interfaces.
+
+Correlated ICMP errors identify the reporting host/router and error code,
+with MTU or parameter pointer where applicable. Errors do not count as replies.
+Group requests remain open after an error and report at most 64 distinct error
+sources per request.
+
+```
+/ping address=192.0.2.1 count=3
+/ping address=2001:db8::1
+/ping address=fe80::1 iface=eth0
+/ping address=02:13:37:aa:bb:64 iface=eth0
+```
+
 ### `/log`
 
 Log calls submit severity, timestamp, hostname, tag, object name, and message as
@@ -96,18 +127,17 @@ that same structured record beyond delivery.
 | `info` | `/log/info <message>` | Emits an informational message with the `console` tag. |
 | `debug` | `/log/debug <message>` | Emits a debug message with the `console` tag. |
 | `trace` | `/log/trace <message>` | Emits a trace message with the `console` tag. |
-| `print` | `/log/print [--stream] [level=<severity>] [tag=<prefix>] [match=<text>] [max=<count>]` | Opens a live log consumer. Defaults to `level=trace` and `max=256`; `max` is capped at 1024. |
+| `print` | `/log/print [--stream] [level=<severity>] [tag=<prefix>] [match=<text>] [max=<count>]` | Opens a live log consumer. Defaults to `level=trace` and `max=256` (64 on Tiny); `max` is capped at 1024 (256 on Tiny). |
 
-`/log/print` is a temporary log consumer. When history is enabled it first
-copies matching retained records into its private view, then follows new
-records. With history disabled it starts empty and accumulates records from the
-moment the command begins. Its bounded records are released when the command
-finishes. Formatting happens only while rendering for the attached terminal,
-so retained data never contains terminal escape sequences or preformatted
-text.
+`/log/print` is a temporary log consumer. The scrollable view first copies
+matching history, when enabled, then accumulates new records up to `max`.
+Its records are released when the command finishes. Formatting happens while
+rendering, so retained data contains no terminal escape sequences or
+preformatted text.
 
 By default the command presents a scrollable live view. `--stream` instead
-prints each matching record once as it arrives. It emits no cursor movement,
+prints up to `max` matching history records, releases that private copy, then
+prints new matching records without retaining them in the view. It emits no cursor movement,
 screen clearing, or status footer, making it suitable as the initial command
 for a serial console session. Press `q` or Ctrl+C to stop either mode and return
 to the console.
@@ -468,8 +498,8 @@ connections opened by `/protocol/ble/client` entries.
 
 ### `/interface/ethernet`
 
-Ethernet interfaces are a managed collection, and additionally carry the
-mac-ping and discovery commands. Reachability testing uses 802.1ag loopback,
+Ethernet interfaces are a managed collection with a discovery command.
+MAC reachability testing uses `/ping` and 802.1ag loopback,
 so standard L2 OAM equipment both answers `ping` and can ping an OpenWatt
 station itself. Enumerating the segment is a separate command, because
 loopback is a point-to-point test that gains no third-party responders when
@@ -478,15 +508,9 @@ broadcast.
 | Command | Syntax | Description |
 | --- | --- | --- |
 | `discover` | `/interface/ethernet/discover` | Sweeps every segment for OpenWatt stations, listing each with its name and addresses. |
-| `ping` | `/interface/ethernet/ping address=<mac> [count=<count>]` | Times 802.1ag loopback round trips to `address`, one request per second. |
 
-| Argument | Values | Default | Description |
-| --- | --- | --- | --- |
-| `address` | mac address | required | Unicast destination. Multicast and broadcast are rejected; use `discover`. |
-| `count` | request count | `4` | Number of requests to send; `0` is treated as `1`. |
-
-Requests go out every running ethernet station, so whichever segment hosts the
-target answers. Each reply prints as `reply from <mac>: time=<rtt>`, with the
+Without `iface`, MAC ping requests go out every running Ethernet station.
+Each reply prints as `reply from <mac>: time=<rtt>`, with the
 responder's name appended when its LBR carried a Sender ID TLV. A summary of
 `<replies> replies for <sent> requests` closes the command, and Ctrl+C cancels
 it early.
@@ -505,7 +529,7 @@ at other levels belong to another maintenance domain and are ignored, so an
 OpenWatt station never corrupts diagnostics on a network with provisioned CFM.
 
 ```text
-/interface/ethernet/ping address=02:13:37:aa:bb:64 count=10
+/ping address=02:13:37:aa:bb:64 count=10
 /interface/ethernet/discover
 /interface/ethernet/set eth0 cfm-level=5
 ```
@@ -696,12 +720,6 @@ service 0000FFF0-0000-1000-8000-00805F9B34FB  handles 0x0008-0xFFFF
   0x000D  0x000C  -       --CW----  0000FFF2-0000-1000-8000-00805F9B34FB
 ```
 
-### `/protocol/tesla`
-
-| Command | Syntax | Description |
-| --- | --- | --- |
-| `crypto-test` | `/protocol/tesla/crypto-test` | Runs the vehicle-command AES-GCM known-answer vector, an empty-payload round trip and NIST GCM test case 1 on this node and prints PASS/FAIL for each. |
-
 ### `/protocol/ip/*`
 
 IP configuration for the in-tree network stack. On desktop hosts the kernel's
@@ -734,21 +752,20 @@ EUI-64 link-local address, verifies it with DAD, and publishes it as a dynamic
 | --- | --- |
 | `/protocol/ip/neighbour/print` | Show the IPv4 neighbour (ARP) cache: address, MAC, reachability state, retries, interface. |
 | `/protocol/ip/neighbour6/print` | Show the IPv6 neighbour (ND) cache in the same shape. |
-| `/protocol/ip/ping6 address=<address> [count=<count>] [iface=<interface>]` | Send ICMPv6 echo requests. Link-local and multicast destinations require `iface`. |
 
 ```
 /protocol/ip/address/add address=192.168.1.10/24 interface=eth0
 /protocol/ip/address6/add address=2001:db8:1::10/64 interface=eth0
 /protocol/ip/route6/add destination=::/0 gateway=fe80::1 out-interface=eth0
 /protocol/ip/neighbour6/print
-/protocol/ip/ping6 address=fe80::1 iface=eth0
+/ping address=fe80::1 iface=eth0
 ```
 
 ### DHCPv6
 
-DHCPv6 rides beside SLAAC: addresses and delegated prefixes come from DHCPv6,
-while the default route always comes from Router Advertisements because DHCPv6
-does not carry routes.
+The DHCPv6 message codec is present, but there are no DHCPv6 client, server,
+or lease commands yet. Future DHCPv6 address/prefix configuration will coexist
+with Router Advertisement discovery of default routers.
 
 ### `/protocol/http/server`
 
@@ -828,6 +845,55 @@ preflights and normal responses use the effective policy.
 /protocol/http/server add name=webserver port=80
 /protocol/http/fileserver add name=files http-server=webserver uri=/files root="conf" access=webdav allowed-origin=http://192.168.0.5:8080
 ```
+
+### `/protocol/tesla/session`
+
+Vehicle sessions report command rejection separately from session failure.
+Session counter, signature, epoch, and clock faults trigger a fresh authenticated
+handshake and timed back-off for the affected operation. A successful handshake
+does not clear that operation's delay. A Ready session reconnects after 45 seconds without
+an authenticated reply; unrelated or unauthenticated notifications do not extend that deadline.
+Controls are not automatically replayed after reconnecting. Check observed
+vehicle state before repeating a command whose outcome is unknown.
+
+Failures back off per operation; drive, location, closures and tire-pressure polls
+have independent records. Busy, timeout and unclassified action rejections delay
+the next attempt by 5 seconds, doubling to a maximum of 5 minutes. A successful
+reply clears that operation's timed back-off. Controls still require a new user
+request after the delay; they are never queued for automatic retry.
+
+Authenticated permanent rejections latch the affected operation. Key and access
+failures affecting the whole session prevent validation. Session `status` shows
+the affected operation, reason and whether the block is timed or latched.
+Unsigned faults cause timed back-off only. Key enrollment allows a 60-second
+approval window before backing off and trying again.
+
+Records belong to the scanner/VIN and survive BLE reconnects, session recreation,
+scanner restarts and unchanged VIN configuration. Latches clear on explicit
+reset, a scanner secret change, detection of changed loaded public-key material,
+VIN removal, scanner removal or OpenWatt process restart. A BLE address change,
+ordinary reconnect or unrelated successful command does not clear a latch.
+Changing vehicle permissions does not itself notify OpenWatt: correct the cause,
+then explicitly reset. Reset restarts the session and discards pending controls.
+
+### `/protocol/tesla/vehicle-scanner`
+
+| Command | Arguments | Description |
+| --- | --- | --- |
+| `backoff` | `scanner=<name> vin=<VIN>` | Show retained failure reasons, including when no live vehicle session exists. |
+| `reset-backoff` | `scanner=<name> vin=<VIN>` | Clear all failure records for this VIN and restart its session. Does not replay controls. |
+
+Encrypted vehicle responses remain required. Legacy firmware support requires
+development and acceptance testing with an old offline car.
+
+### `/apps/energy/appliance`
+
+`device`, `meter`, and `state` accept component paths before their targets exist.
+The configured path remains visible while unresolved. While the energy app is
+started, paths resolve automatically when a device appears or its tree gains
+children, including children received later over sync. Resolution occurs before
+the next topology rebuild. Device/subtree removal and recreation remain separate
+lifecycle work in `TODO.md`.
 
 ### `/automation`
 

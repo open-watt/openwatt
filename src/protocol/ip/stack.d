@@ -110,11 +110,11 @@ nothrow @nogc:
     static if (has_ipv6)
     {
 
-    void output_v6(ref Packet pkt)
+    void output_v6(ref Packet pkt, BaseInterface iface_hint = null)
     {
         if (firewall_v6.run(HookPoint.output, pkt) == Verdict.drop)
             return;
-        RouteResult6 r = route_lookup_v6(pkt);
+        RouteResult6 r = route_lookup_v6(pkt, iface_hint);
         dispatch_v6(pkt, r, null);
     }
 
@@ -572,7 +572,7 @@ private:
             case RouteResult6.Kind.local:
                 if (firewall_v6.run(HookPoint.input, pkt) == Verdict.drop)
                     return;
-                deliver_local_v6(pkt, in_iface);
+                deliver_local_v6(pkt, in_iface ? in_iface : r.out_iface);
                 return;
             case RouteResult6.Kind.forward:
             {
@@ -589,11 +589,20 @@ private:
                         icmp6_send_error(this, Icmp6Type.time_exceeded, 0, pkt, in_iface);
                         return;
                     }
-                    --ip.hop_limit;
                 }
-                // TODO: if pkt.length > out_iface.actual_mtu, send packet-too-big
                 if (firewall_v6.run(HookPoint.forward, pkt) == Verdict.drop)
                     return;
+                if (!r.out_iface)
+                    return;
+                uint mtu = r.out_iface.actual_mtu;
+                if (mtu && pkt.data.length > mtu)
+                {
+                    if (in_iface)
+                        icmp6_send_error(this, Icmp6Type.packet_too_big, 0, pkt, in_iface, mtu);
+                    return;
+                }
+                if (in_iface)
+                    --ip.hop_limit;
                 egress_v6(pkt, r.out_iface, r.next_hop);
                 return;
             }
@@ -747,12 +756,12 @@ private:
     }
 
     static if (has_ipv6)
-    RouteResult6 route_lookup_v6(ref const Packet pkt)
+    RouteResult6 route_lookup_v6(ref const Packet pkt, BaseInterface iface_hint = null)
     {
         if (pkt.length < IPv6Header.sizeof)
             return RouteResult6(RouteResult6.Kind.none);
         const IPv6Header* h = cast(const(IPv6Header)*)pkt.data.ptr;
-        return route_lookup_v6_dst(h.dst_addr);
+        return route_lookup_v6_dst(h.dst_addr, iface_hint);
     }
 
     void egress(ref Packet pkt, BaseInterface out_iface, IPAddr next_hop, ref FirewallChains fw)
@@ -826,7 +835,7 @@ private:
         switch (ip.protocol)
         {
             case IPProtocol.icmp:
-                .icmp_input(this, pkt);
+                .icmp_input(this, pkt, iface);
                 break;
             case IPProtocol.igmp:
                 .igmp_input(pkt, iface);
@@ -913,5 +922,126 @@ unittest
         assert(stack.walk_ext_headers_v6(data, l4_offset, nh_offset, protocol));
         assert(l4_offset == data.length);
         assert(protocol == IPProtocol.no_next);
+    }
+}
+
+unittest
+{
+    static if (has_ipv6 && has_gateway)
+    {
+        import urt.mem : free;
+        import manager.base : ObjectFlags;
+        import protocol.ip : pseudo_header_checksum_v6;
+
+        static class Link : EthernetStation
+        {
+            enum type_name = "icmp6-test-link";
+        nothrow @nogc:
+            uint transmissions;
+            Array!ubyte captured;
+            this(CID id, ObjectFlags flags = ObjectFlags.none)
+            {
+                super(collection_type_info!Link, id, flags);
+                _state = State.running;
+                _l2mtu = 1280;
+            }
+            override void medium_tx(ref Packet packet)
+            {
+                ++transmissions;
+                captured = cast(const(ubyte)[])packet.data;
+            }
+        }
+
+        Link ingress = Collection!Link().create("icmp6-test-ingress");
+        Link egress = Collection!Link().create("icmp6-test-egress");
+        IPv6Address address = Collection!IPv6Address().create("icmp6-test-address");
+        scope(exit)
+        {
+            Collection!IPv6Address().remove(address);
+            free(address);
+            Collection!Link().remove(ingress);
+            Collection!Link().remove(egress);
+            free(ingress);
+            free(egress);
+        }
+        IPv6Addr local = IPv6Addr(0x2001, 0xdb8, 1, 0, 0, 0, 0, 1);
+        IPv6Addr source = IPv6Addr(0x2001, 0xdb8, 1, 0, 0, 0, 0, 2);
+        IPv6Addr destination = IPv6Addr(0x2001, 0xdb8, 2, 0, 0, 0, 0, 2);
+        address.address = IPv6NetworkAddress(local, 64);
+        address.iface = ingress;
+        IPStack stack;
+        ubyte[6] mac = [2, 0, 0, 0, 0, 1];
+        stack.neighbour_v6.learn(source, ingress, mac[]);
+        stack.neighbour_v6.learn(destination, egress, mac[]);
+
+        align(uint.sizeof) ubyte[1500] data;
+        auto ip = cast(IPv6Header*)data.ptr;
+        ip.ver_tc_flow[0] = 0x60;
+        ip.src_addr = source;
+        ip.dst_addr = destination;
+        ip.next_header = IPProtocol.udp;
+        Packet packet;
+        RouteResult6 route = RouteResult6(RouteResult6.Kind.forward, egress, destination);
+        foreach (length; [1279, 1280, 1281, 1500])
+        {
+            ip.hop_limit = 64;
+            storeBigEndian(cast(ushort*)ip.payload_length.ptr, cast(ushort)(length - 40));
+            packet.init!Ethernet(data[0 .. length]);
+            uint before = egress.transmissions;
+            stack.dispatch_v6(packet, route, ingress);
+            if (length <= 1280)
+            {
+                assert(egress.transmissions == before + 1 && ip.hop_limit == 63);
+                assert(ingress.transmissions == 0);
+            }
+            else
+            {
+                assert(egress.transmissions == before && ip.hop_limit == 64);
+                assert(ingress.captured.length == 1280);
+                const reply = cast(const IPv6Header*)ingress.captured.ptr;
+                assert(reply.src_addr == local && reply.dst_addr == source);
+                assert(loadBigEndian(cast(const(ushort)*)reply.payload_length.ptr) == 1240);
+                const(ubyte)[] error = ingress.captured[40 .. $];
+                assert(error[0] == Icmp6Type.packet_too_big && error[1] == 0);
+                assert(loadBigEndian(cast(const(uint)*)(error.ptr + 4)) == 1280);
+                assert(error[8 .. $] == data[0 .. 1232]);
+                ushort pseudo = pseudo_header_checksum_v6(reply.src, reply.dst, cast(uint)error.length, IPProtocol.icmp6);
+                assert(internet_checksum(error, pseudo) == 0);
+            }
+        }
+        assert(ingress.transmissions == 2 && egress.transmissions == 2);
+        stack.dispatch_v6(packet, route, null);
+        assert(ingress.transmissions == 2 && egress.transmissions == 2);
+
+        ip.dst_addr = local;
+        ip.next_header = IPProtocol.icmp6;
+        ubyte[8] echo = [Icmp6Type.echo_request, 0, 0, 0, 0x4f, 0x57, 0, 42];
+        data[40 .. 48] = echo[];
+        foreach (length; 4 .. 9)
+        {
+            storeBigEndian(cast(ushort*)ip.payload_length.ptr, cast(ushort)length);
+            data[42 .. 44] = 0;
+            ushort pseudo = pseudo_header_checksum_v6(ip.src, ip.dst, cast(uint)length, IPProtocol.icmp6);
+            storeBigEndian(cast(ushort*)(data.ptr + 42), internet_checksum(data[40 .. 40 + length], pseudo));
+            packet.init!Ethernet(data[0 .. 40 + length]);
+            icmp6_input(stack, packet, 40, ingress);
+            assert(ingress.transmissions == (length == 8 ? 3 : 2));
+        }
+        assert(ingress.captured[40] == Icmp6Type.echo_reply);
+
+        struct Replies
+        {
+            uint count;
+            void reply(IPv6Addr, Duration) nothrow @nogc { ++count; }
+        }
+        Replies replies;
+        ushort sequence = icmp6_echo_send(stack, local, ingress, &replies.reply);
+        icmp6_echo_cancel(sequence);
+        assert(sequence && replies.count == 1);
+        IPv6Addr link_local = IPv6Addr(0xfe80, 0, 0, 0, 0, 0, 0, 1);
+        address.address = IPv6NetworkAddress(link_local, 64);
+        sequence = icmp6_echo_send(stack, link_local, ingress, &replies.reply);
+        icmp6_echo_cancel(sequence);
+        assert(sequence && replies.count == 2);
     }
 }

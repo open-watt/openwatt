@@ -25,12 +25,8 @@ if(USE_LWIP)
 endif()
 list(APPEND MAIN_PRIV_REQUIRES esp_driver_uart)
 list(APPEND MAIN_PRIV_REQUIRES esp_driver_ledc esp_driver_spi esp_driver_gptimer esp_adc)
-# Unconditional: IDF collects PRIV_REQUIRES during an early expansion pass that
-# cannot see -D cache variables, so gating this on USE_SPIFFS silently drops it.
-# The component is only referenced when OW_USE_SPIFFS is defined below, so an
-# unused spiffs is discarded at link time.
+# IDF's early dependency pass cannot see the feature cache variables.
 list(APPEND MAIN_PRIV_REQUIRES spiffs esp_partition)
-# Component requirements are resolved before OPENWATT_COREDUMP is available.
 list(APPEND MAIN_PRIV_REQUIRES espcoredump)
 if(OW_EXTRA_REQUIRES)
     list(APPEND MAIN_PRIV_REQUIRES ${OW_EXTRA_REQUIRES})

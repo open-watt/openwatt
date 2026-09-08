@@ -21,12 +21,14 @@ import manager.element;
 import manager.secret;
 
 import protocol.ble;
+import protocol.ble.att : ATTError;
 import protocol.ble.client;
 import protocol.ble.device;
 import protocol.ble.iface;
 import protocol.tesla.vehicle_codec;
 import protocol.tesla.vehicle_crypto;
 import protocol.tesla.vehicle_scanner;
+public import protocol.tesla.vehicle_retry;
 
 import router.iface;
 import router.iface.mac;
@@ -37,33 +39,6 @@ import tools.protobuf;
 nothrow @nogc:
 
 enum Bar = ScaledUnit(Pascal, 5);
-
-enum VehicleCommandKind : ubyte
-{
-    unknown,
-    get_charge_state,
-    get_climate_state,
-    get_vehicle_state,
-    charging_start,
-    charging_stop,
-    set_charging_amps,
-    climate_power,
-    climate_temperature,
-    schedule_charging,
-}
-
-static immutable vehicle_command_names = make_table!([
-    "command",
-    "get-charge",
-    "get-climate",
-    "get-vehicle",
-    "charge-start",
-    "charge-stop",
-    "set-amps",
-    "climate",
-    "set-temperature",
-    "schedule-charging",
-]);
 
 class TeslaVehicleSession : ActiveObject
 {
@@ -119,8 +94,11 @@ nothrow @nogc:
 
     bool refresh_vehicle_state()
     {
+        if (!select_vehicle_category(getTime()))
+            return false;
         bool sent = send_signed_action(TeslaDomain.infotainment, build_action_get_vehicle_category(_vehicle_category)[], VehicleCommandKind.get_vehicle_state);
-        _vehicle_category = (_vehicle_category + 1) % 4;
+        if (sent)
+            _vehicle_category = (_vehicle_category + 1) % 4;
         return sent;
     }
 
@@ -148,6 +126,15 @@ nothrow @nogc:
         => _last_seen;
 
 package:
+    void reset_retry_status()
+    {
+        _fault = null;
+        _phase = Phase.failed;
+        _pending_commands[] = PendingCommand.init;
+        restart();
+        write_status();
+    }
+
     void attach(TeslaVehicleScanner scanner, MACAddress peer)
     {
         _scanner = scanner;
@@ -167,11 +154,32 @@ package:
     }
 
 protected:
+    const(VehicleRetryState)* retry_state() const pure
+        => _scanner ? _scanner.retry_state(name[]) : null;
+
+    VehicleRetryState* retry_state()
+        => _scanner ? _scanner.retry_state(name[]) : null;
+
+    bool signer_unchanged()
+    {
+        const Secret key = _scanner ? _scanner.secret : null;
+        if (key && key.public_key_raw == _signer_pubkey[])
+            return true;
+        fail_session("Vehicle key changed; establishing a new session");
+        return false;
+    }
+
     override bool validate() const
-        => _scanner !is null && cast(bool)_peer;
+    {
+        const(VehicleRetryState)* retry = retry_state();
+        return _scanner !is null && cast(bool)_peer && (!retry || retry.failures[0].available(getTime()));
+    }
 
     override const(char)[] status_message() const
     {
+        if (const(VehicleRetryState)* retry = retry_state())
+            if (retry.status.length)
+                return retry.status[];
         if (_state != State.starting && _state != State.running)
             return super.status_message();
 
@@ -193,6 +201,7 @@ protected:
 
     override CompletionStatus startup()
     {
+        retry_state();
         if (_client is null)
         {
             BaseInterface iface = _scanner.iface;
@@ -222,6 +231,12 @@ protected:
 
     override CompletionStatus shutdown()
     {
+        if (_poll_scheduled)
+        {
+            g_app.cancel(&poll_event);
+            _poll_scheduled = false;
+        }
+        _retry_poll = PollKind.none;
         _auth_failures = 0;
         unsubscribe_vehicle_controls();
         if (_subscribed)
@@ -270,10 +285,16 @@ protected:
     }
 
 private:
-    CompletionStatus advance()
+    CompletionStatus advance(MonoTime now = getTime())
     {
+        if (_phase == Phase.ready && now - _last_authenticated_rx_time > link_timeout)
+        {
+            _fault = "Vehicle session stopped responding";
+            _phase = Phase.failed;
+            return CompletionStatus.error;
+        }
         // WinRT can report a dead GATT channel as connected.
-        if (getTime() - _last_rx_time > link_timeout)
+        if (now - _last_rx_time > link_timeout)
         {
             version (DebugTeslaSession)
                 log.trace("no vehicle traffic for ", link_timeout, ", reconnecting");
@@ -312,6 +333,11 @@ private:
                 return CompletionStatus.continue_;
 
             case Phase.awaiting_approval:
+                if (now >= _approval_deadline)
+                {
+                    record_failure(VehicleCommandKind.unknown, 0, "Key not enrolled; tap an enrolled key card during the next approval attempt, or reset back-off to try now", false);
+                    return CompletionStatus.error;
+                }
                 // Avoid overlapping GATT writes while waiting for NFC approval.
                 if (getTime() - _last_request_time > approval_interval)
                 {
@@ -331,22 +357,6 @@ private:
 
             case Phase.ready:
                 subscribe_vehicle_controls();
-                Duration interval = poll_interval_for_state();
-                if (getTime() - _last_poll_time >= interval)
-                {
-                    _last_poll_time = getTime();
-                    refresh_charge_state();
-                }
-                else if (getTime() - _last_climate_poll_time >= climate_poll_interval)
-                {
-                    _last_climate_poll_time = getTime();
-                    refresh_climate_state();
-                }
-                else if (getTime() - _last_vehicle_poll_time >= vehicle_poll_interval)
-                {
-                    _last_vehicle_poll_time = getTime();
-                    refresh_vehicle_state();
-                }
                 return CompletionStatus.complete;
 
             case Phase.failed:
@@ -356,6 +366,7 @@ private:
 
     enum Duration retry_interval = 5.seconds;
     enum Duration approval_interval = 2.seconds;
+    enum Duration approval_window = 60.seconds;
     enum Duration link_timeout = 45.seconds;
     enum Duration poll_charging = 2.seconds;
     enum Duration poll_idle = 30.seconds;
@@ -368,10 +379,12 @@ private:
     bool _subscribed;
     bool _controls_subscribed;
     bool _approval_toggle;
+    MonoTime _approval_deadline;
     ushort _tx_handle;
     ushort _rx_handle;
     Phase _phase = Phase.connecting;
     MonoTime _last_rx_time;
+    MonoTime _last_authenticated_rx_time;
     MonoTime _last_seen;
 
     ubyte[16] _routing_address;
@@ -381,12 +394,135 @@ private:
     MonoTime _last_poll_time;
     MonoTime _last_climate_poll_time;
     MonoTime _last_vehicle_poll_time;
+    enum PollKind : ubyte { none, charge, climate, vehicle }
+    PollKind _retry_poll;
+    bool _poll_scheduled;
+
     bool _routing_seeded;
 
     Element* _charging_enabled;
     Element* _charging_amps;
     Element* _hvac_power;
     Element* _hvac_target_temperature;
+
+    MonoTime next_poll_time() const
+    {
+        import urt.util : min, max;
+        MonoTime charge = max(_last_poll_time + poll_interval_for_state(), retry_time(VehicleCommandKind.get_charge_state));
+        MonoTime climate = max(_last_climate_poll_time + climate_poll_interval, retry_time(VehicleCommandKind.get_climate_state));
+        MonoTime vehicle = MonoTime(ulong.max);
+        foreach (ubyte category; 0 .. 4)
+            vehicle = min(vehicle, max(_last_vehicle_poll_time + vehicle_poll_interval, retry_time(VehicleCommandKind.get_vehicle_state, category)));
+        return min(charge, min(climate, vehicle));
+    }
+
+    MonoTime retry_time(VehicleCommandKind kind, ubyte category = 0) const
+    {
+        import urt.util : max;
+        const(VehicleRetryState)* retry = retry_state();
+        return retry ? max(retry.failures[0].next(), retry.failures[VehicleRetryState.index(kind, category)].next()) : MonoTime();
+    }
+
+    bool select_vehicle_category(MonoTime now)
+    {
+        foreach (ubyte offset; 0 .. 4)
+        {
+            ubyte category = (_vehicle_category + offset) % 4;
+            if (retry_time(VehicleCommandKind.get_vehicle_state, category) <= now)
+            {
+                _vehicle_category = category;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool poll_available(PollKind kind, MonoTime now)
+    {
+        final switch (kind)
+        {
+            case PollKind.none: return false;
+            case PollKind.charge: return retry_time(VehicleCommandKind.get_charge_state) <= now;
+            case PollKind.climate: return retry_time(VehicleCommandKind.get_climate_state) <= now;
+            case PollKind.vehicle: return select_vehicle_category(now);
+        }
+    }
+
+    MonoTime poll(MonoTime now)
+    {
+        PollKind kind = _retry_poll;
+        if (!poll_available(kind, now))
+            kind = _retry_poll = PollKind.none;
+        if (kind == PollKind.none)
+        {
+            if (now - _last_poll_time >= poll_interval_for_state() && poll_available(PollKind.charge, now))
+                kind = PollKind.charge;
+            else if (now - _last_climate_poll_time >= climate_poll_interval && poll_available(PollKind.climate, now))
+                kind = PollKind.climate;
+            else if (now - _last_vehicle_poll_time >= vehicle_poll_interval && poll_available(PollKind.vehicle, now))
+                kind = PollKind.vehicle;
+        }
+
+        bool sent;
+        final switch (kind)
+        {
+            case PollKind.none: return next_poll_time();
+            case PollKind.charge:
+                sent = refresh_charge_state();
+                if (sent)
+                    _last_poll_time = now;
+                break;
+            case PollKind.climate:
+                sent = refresh_climate_state();
+                if (sent)
+                    _last_climate_poll_time = now;
+                break;
+            case PollKind.vehicle:
+                sent = refresh_vehicle_state();
+                if (sent)
+                    _last_vehicle_poll_time = now;
+                break;
+        }
+        _retry_poll = sent ? PollKind.none : kind;
+        if (sent)
+            return next_poll_time();
+
+        MonoTime expiry = MonoTime(ulong.max);
+        foreach (ref pending; _pending_commands)
+        {
+            if (!pending.active)
+                return now + 1.seconds;
+            if (pending.sent_at + pending_command_timeout < expiry)
+                expiry = pending.sent_at + pending_command_timeout;
+        }
+        return expiry > now ? expiry : now + 1.seconds;
+    }
+
+    void schedule_poll(MonoTime when)
+    {
+        if (_phase != Phase.ready || _client is null || (_state != State.running && _state != State.starting))
+            return;
+        if (_poll_scheduled)
+            g_app.cancel(&poll_event);
+        _poll_scheduled = false;
+        if (when == MonoTime(ulong.max))
+            return;
+        g_app.schedule(when, &poll_event);
+        _poll_scheduled = true;
+    }
+
+    void poll_event(MonoTime now)
+    {
+        _poll_scheduled = false;
+        if (_phase == Phase.ready && (_state == State.running || _state == State.starting))
+            schedule_poll(poll(now));
+    }
+
+    void write_complete(const(ubyte)[], ATTError error)
+    {
+        if (error == ATTError.none)
+            schedule_poll(getTime());
+    }
 
     Duration poll_interval_for_state() const pure
     {
@@ -475,6 +611,7 @@ private:
 
     ubyte[16] _aes_key;
     ubyte[65] _vehicle_pubkey;
+    ubyte[64] _signer_pubkey;
     enum ubyte auth_failure_limit = 3;
     ubyte _auth_failures;
     const(char)[] _fault;
@@ -490,11 +627,12 @@ private:
     struct PendingCommand
     {
         bool active;
+        bool auth_failure_reported;
         VehicleCommandKind kind;
+        ubyte category;
         ubyte[16] uuid;
         ubyte[16] request_tag;
         MonoTime sent_at;
-        ResponseReplayWindow response_window;
     }
     PendingCommand[max_pending_commands] _pending_commands;
 
@@ -572,7 +710,7 @@ private:
         while (rem.length)
         {
             size_t n = rem.length > max_write ? max_write : rem.length;
-            if (!_client.write(_tx_handle, rem[0 .. n], true))
+            if (!_client.write(_tx_handle, rem[0 .. n], true, n == rem.length ? &write_complete : null))
             {
                 log.error("BLE write failed at offset ", framed.length - rem.length);
                 return false;
@@ -663,21 +801,24 @@ private:
 
         if (_phase == Phase.ready)
         {
-            if (!r.has_response_signature)
-            {
-                if (r.protobuf_message.length)
-                {
-                    log.warning("discarding unauthenticated vehicle response for VIN '", name[], "': ",
-                                cast(void[])r.protobuf_message);
-                    note_auth_failure("Vehicle replies unauthenticated");
-                }
+            if (!signer_unchanged())
                 return;
-            }
+            if (!r.has_from_domain || r.from_domain != TeslaDomain.infotainment)
+                return;
 
             PendingCommand* pending = find_pending_command(r.request_uuid);
             if (pending is null)
+                return;
+
+            if (!r.has_response_signature)
             {
-                log.warning("encrypted vehicle response has no matching request for VIN '", name[], "'");
+                if (r.signed_message_fault != 0)
+                    handle_protocol_fault(r.signed_message_fault, *pending, false);
+                else if (r.protobuf_message.length)
+                {
+                    log.warning("discarding unauthenticated vehicle response for VIN '", name[], "': ", cast(void[])r.protobuf_message);
+                    note_auth_failure(*pending, "Vehicle replies unauthenticated");
+                }
                 return;
             }
 
@@ -685,31 +826,97 @@ private:
             if (!decrypt_routable_response(r, _aes_key[], name[], pending.request_tag[], plaintext))
             {
                 log.error("vehicle response authentication failed for VIN '", name[], "'");
-                note_auth_failure("Vehicle responses fail authentication");
+                note_auth_failure(*pending, "Vehicle responses fail authentication");
                 return;
             }
-            if (!pending.response_window.accept(r.response_counter))
-            {
-                log.warning("replayed vehicle response counter ", r.response_counter, " for VIN '", name[], "'");
-                return;
-            }
-
             _auth_failures = 0;
             _fault = null;
-            handle_command_response(r, plaintext[], pending.kind);
+            _last_authenticated_rx_time = getTime();
+            if (r.signed_message_fault != 0)
+            {
+                handle_protocol_fault(r.signed_message_fault, *pending, true);
+                return;
+            }
+            VehicleCommandKind kind = pending.kind;
+            ubyte category = pending.category;
             *pending = PendingCommand.init;
+            handle_command_response(plaintext[], kind, category);
+            schedule_poll(getTime());
             return;
         }
     }
 
-    void note_auth_failure(const(char)[] reason)
+    void note_auth_failure(ref PendingCommand pending, const(char)[] reason)
     {
+        if (pending.auth_failure_reported)
+            return;
+        pending.auth_failure_reported = true;
         if (++_auth_failures < auth_failure_limit)
             return;
+        fail_session(reason);
+    }
+
+    void fail_session(const(char)[] reason)
+    {
         _fault = reason;
         _auth_failures = 0;
+        _phase = Phase.failed;
         log.warning("session unusable for VIN '", name[], "': ", reason, "; re-establishing");
         restart();
+    }
+
+    void handle_protocol_fault(uint fault, ref PendingCommand pending, bool authenticated)
+    {
+        enum MessageFault : uint
+        {
+            invalid_signature = 5,
+            invalid_token_or_counter = 6,
+            incorrect_epoch = 15,
+            time_expired = 17,
+            time_to_live_too_long = 20,
+        }
+
+        log.warning("vehicle ", vehicle_command_names[cast(size_t)pending.kind], " protocol error ", fault, " for VIN '", name[], "'");
+        VehicleCommandKind kind = pending.kind;
+        ubyte category = pending.category;
+        pending = PendingCommand.init;
+        switch (fault)
+        {
+            case MessageFault.invalid_signature:
+            case MessageFault.invalid_token_or_counter:
+            case MessageFault.incorrect_epoch:
+            case MessageFault.time_expired:
+            case MessageFault.time_to_live_too_long:
+                record_failure(kind, category, "Vehicle session needs resynchronization", false);
+                fail_session("Vehicle session needs resynchronization");
+                return;
+            default:
+                string reason;
+                bool permanent = true;
+                bool session;
+                switch (fault)
+                {
+                    case 1: reason = "Vehicle busy"; permanent = false; break;
+                    case 2: reason = "Vehicle subsystem timed out"; permanent = false; break;
+                    case 3: reason = "Key not enrolled; pair the key then reset back-off"; session = true; break;
+                    case 4: reason = "Key disabled; enable or replace the key then reset back-off"; session = true; break;
+                    case 7: reason = "Permission denied; check key role and vehicle state then reset back-off"; break;
+                    case 8: case 9: reason = "Command unsupported; update vehicle/client support then reset back-off"; break;
+                    case 11: reason = "Vehicle internal error"; permanent = false; break;
+                    case 21: reason = "Mobile access disabled; enable it then reset back-off"; session = true; break;
+                    case 22: reason = "Service access disabled; enable it then reset back-off"; session = true; break;
+                    case 23: reason = "Command requires account credentials unavailable over BLE"; break;
+                    default: reason = "Vehicle rejected command; inspect protocol error in log then reset back-off"; break;
+                }
+                record_failure(session ? VehicleCommandKind.unknown : kind, category, reason, permanent && authenticated);
+                if (session && authenticated)
+                {
+                    _phase = Phase.failed;
+                    restart();
+                }
+                schedule_poll(getTime());
+                return;
+        }
     }
 
     void handle_session_info_response(ref const RoutableResponse r)
@@ -722,8 +929,12 @@ private:
         // Untrusted SessionInfo replies have no HMAC tag.
         if (!r.session_info.length)
         {
-            if (r.has_status)
-                log.warning("vehicle returned protocol error ", r.signed_message_fault);
+            if (r.has_status && r.signed_message_fault && r.request_uuid.length == 16 && r.has_from_domain)
+            {
+                PendingCommand pending;
+                handle_protocol_fault(r.signed_message_fault, pending, false);
+                restart();
+            }
             return;
         }
 
@@ -738,9 +949,10 @@ private:
         {
             if (_phase != Phase.awaiting_approval)
             {
-                log.info("key not enrolled for VIN '", name[], "'; tap an enrolled key card on the console reader to authorise (retrying continuously)");
+                log.info("key not enrolled for VIN '", name[], "'; tap an enrolled key card on the console reader within 60 seconds to authorise");
                 send_add_key_request();
                 _phase = Phase.awaiting_approval;
+                _approval_deadline = getTime() + approval_window;
             }
             return;
         }
@@ -757,6 +969,9 @@ private:
             return;
         }
 
+        _last_authenticated_rx_time = getTime();
+        _signer_pubkey[] = _scanner.secret.public_key_raw;
+
         // Controls use INFOTAINMENT, not the VCSEC pairing session.
         _vehicle_pubkey[] = info.public_key[];
         _epoch[] = info.epoch[];
@@ -765,7 +980,11 @@ private:
 
         if (_phase == Phase.info_xchg)
         {
+            if (VehicleRetryState* retry = retry_state())
+                retry.succeeded(0);
             _phase = Phase.ready;
+            write_status();
+            schedule_poll(getTime());
             log.info("session ready for VIN '", name[], "'");
         }
         else
@@ -776,13 +995,16 @@ private:
         }
     }
 
-    void handle_command_response(ref const RoutableResponse r, const(ubyte)[] payload, VehicleCommandKind kind)
+    void record_failure(VehicleCommandKind kind, ubyte category, const(char)[] reason, bool latch)
     {
-        if (r.has_status && r.signed_message_fault != 0)
-        {
-            log.warning("vehicle ", vehicle_command_names[cast(size_t)kind], " protocol error ", r.signed_message_fault, " for VIN '", name[], "'");
-            return;
-        }
+        if (VehicleRetryState* retry = retry_state())
+            retry.failed(VehicleRetryState.index(kind, category), reason, getTime(), latch);
+        _fault = "Vehicle command back-off";
+        write_status();
+    }
+
+    void handle_command_response(const(ubyte)[] payload, VehicleCommandKind kind, ubyte category = 0)
+    {
         if (payload.length == 0)
             return;
 
@@ -798,16 +1020,22 @@ private:
             ref status = response.action_status.value;
             if (status.result.present && status.result.value != 0)
             {
+                const(char)[] reason = "Vehicle rejected action";
                 if (status.result_reason.present && status.result_reason.value.plain_text.present)
-                    log.warning("vehicle rejected ", vehicle_command_names[cast(size_t)kind], " for VIN '", name[], "': ", status.result_reason.value.plain_text.value[]);
-                else
-                    log.warning("vehicle rejected ", vehicle_command_names[cast(size_t)kind], " for VIN '", name[], "' with result ", status.result.value);
+                    reason = status.result_reason.value.plain_text.value[];
+                log.warning("vehicle rejected ", vehicle_command_names[cast(size_t)kind], " for VIN '", name[], "': ", reason);
+                record_failure(kind, category, reason, false);
                 return;
             }
 
-            bool query = kind == VehicleCommandKind.get_charge_state
-                      || kind == VehicleCommandKind.get_climate_state
-                      || kind == VehicleCommandKind.get_vehicle_state;
+            if (VehicleRetryState* retry = retry_state())
+            {
+                retry.succeeded(VehicleRetryState.index(kind, category));
+                retry.succeeded(0);
+                write_status();
+            }
+
+            bool query = kind == VehicleCommandKind.get_charge_state || kind == VehicleCommandKind.get_climate_state || kind == VehicleCommandKind.get_vehicle_state;
             if (!query)
             {
                 log.info("vehicle accepted ", vehicle_command_names[cast(size_t)kind], " for VIN '", name[], "'");
@@ -817,6 +1045,13 @@ private:
 
         if (!response.vehicle_data.present)
             return;
+
+        if (VehicleRetryState* retry = retry_state())
+        {
+            retry.succeeded(VehicleRetryState.index(kind, category));
+            retry.succeeded(0);
+            write_status();
+        }
 
         ref data = response.vehicle_data.value;
         if (data.charge_state.present)
@@ -860,8 +1095,11 @@ private:
         PendingCommand* free_slot;
         foreach (ref pending; _pending_commands)
         {
-            if (pending.active && now - pending.sent_at > pending_command_timeout)
+            if (pending.active && now - pending.sent_at >= pending_command_timeout)
+            {
+                record_failure(pending.kind, pending.category, "Vehicle command response timed out", false);
                 pending = PendingCommand.init;
+            }
             if (!pending.active && free_slot is null)
                 free_slot = &pending;
         }
@@ -870,6 +1108,7 @@ private:
 
         free_slot.active = true;
         free_slot.kind = kind;
+        free_slot.category = kind == VehicleCommandKind.get_vehicle_state ? _vehicle_category : 0;
         free_slot.uuid[] = uuid[];
         free_slot.request_tag[] = request_tag[];
         free_slot.sent_at = now;
@@ -882,7 +1121,15 @@ private:
             return null;
         foreach (ref pending; _pending_commands)
             if (pending.active && pending.uuid[] == uuid)
+            {
+                if (getTime() - pending.sent_at >= pending_command_timeout)
+                {
+                    record_failure(pending.kind, pending.category, "Vehicle command response timed out", false);
+                    pending = PendingCommand.init;
+                    return null;
+                }
                 return &pending;
+            }
         return null;
     }
 
@@ -973,10 +1220,8 @@ private:
         if (climate.climate_on.present)
         {
             v.set_element("hvac.power", climate.climate_on.value, now, &vehicle_control_change);
-            v.set_element("hvac.state", climate.climate_on.value
-                ? StringLit!"on" : StringLit!"off", now);
-            v.set_element("hvac.mode", climate.climate_on.value
-                ? StringLit!"auto" : StringLit!"off", now);
+            v.set_element("hvac.state", climate.climate_on.value ? StringLit!"on" : StringLit!"off", now);
+            v.set_element("hvac.mode", climate.climate_on.value ? StringLit!"auto" : StringLit!"off", now);
         }
         if (climate.preconditioning.present)
             v.set_element("hvac.preconditioning", climate.preconditioning.value, now);
@@ -1025,8 +1270,7 @@ private:
             v.set_element("drive.gear", gear_name(shift_state_kind(drive.gear.value)), now);
         if (drive.speed_float.present || drive.speed.present)
         {
-            float speed_mph = drive.speed_float.present
-                ? drive.speed_float.value : drive.speed.value;
+            float speed_mph = drive.speed_float.present ? drive.speed_float.value : drive.speed.value;
             v.set_element("drive.speed", Quantity!(float, ScaledUnits.kilometre_per_hour)(speed_mph * 1.609344f), now);
         }
         if (drive.power.present)
@@ -1179,11 +1423,16 @@ private:
 
     bool send_signed_action(TeslaDomain domain, const(ubyte)[] plaintext, VehicleCommandKind kind)
     {
+        retry_state();
+        if (retry_time(kind, kind == VehicleCommandKind.get_vehicle_state ? _vehicle_category : 0) > getTime())
+            return false;
         if (_phase != Phase.ready)
         {
             log.warning("session not ready, command refused");
             return false;
         }
+        if (!signer_unchanged())
+            return false;
 
         Secret secret = _scanner.secret;
         if (!secret)
@@ -1236,6 +1485,11 @@ private:
         if (pending is null)
         {
             log.warning("too many vehicle commands awaiting responses for VIN '", name[], "'");
+            return false;
+        }
+        if (retry_time(kind, pending.category) > getTime())
+        {
+            *pending = PendingCommand.init;
             return false;
         }
         if (!write_tesla_frame(msg[]))
@@ -1291,4 +1545,288 @@ private:
             diff |= b ^ r.session_info_tag[i];
         return diff == 0;
     }
+}
+
+
+unittest
+{
+    import urt.mem : alloc, free;
+
+    TeslaVehicleSession unready = alloc!TeslaVehicleSession(CID(1));
+    scope(exit) free(unready);
+    assert(!unready.refresh_vehicle_state() && unready._vehicle_category == 0);
+    assert(!unready.refresh_vehicle_state() && unready._vehicle_category == 0);
+
+    static class Session : TeslaVehicleSession
+    {
+    nothrow @nogc:
+        this() { super(CID(2)); }
+        bool accept;
+        uint charges, climates, vehicles;
+        VehicleRetryState retry;
+        override VehicleRetryState* retry_state() => &retry;
+        override const(VehicleRetryState)* retry_state() const pure => &retry;
+        override bool refresh_charge_state() { ++charges; return accept; }
+        override bool refresh_climate_state() { ++climates; return accept; }
+        override bool refresh_vehicle_state() { ++vehicles; return accept; }
+    }
+    Session s = alloc!Session();
+    scope(exit) free(s);
+    MonoTime now = MonoTime.init + 100.seconds;
+    s._last_poll_time = now;
+    s._last_climate_poll_time = now;
+    s._last_vehicle_poll_time = now - s.vehicle_poll_interval;
+    MonoTime previous = s._last_vehicle_poll_time;
+    assert(s.poll(now) == now + 1.seconds);
+    assert(s._last_vehicle_poll_time == previous && s.vehicles == 1);
+    assert(s._retry_poll == s.PollKind.vehicle);
+
+    foreach (ref pending; s._pending_commands)
+    {
+        pending.active = true;
+        pending.sent_at = now;
+    }
+    assert(s.poll(now) == now + s.pending_command_timeout);
+    assert(s._last_vehicle_poll_time == previous && s.vehicles == 2);
+    s.accept = true;
+    MonoTime admitted = now + 1.seconds;
+    assert(s.poll(admitted) > admitted);
+    assert(s._last_vehicle_poll_time == admitted && s._retry_poll == s.PollKind.none && s.vehicles == 3);
+    s.poll(admitted);
+    assert(s.vehicles == 3 && s.charges == 0 && s.climates == 0);
+
+    s.accept = false;
+    s._last_poll_time = now - s.poll_idle;
+    previous = s._last_poll_time;
+    s.poll(now);
+    assert(s.charges == 1 && s._last_poll_time == previous);
+    s.accept = true;
+    s.poll(admitted);
+    assert(s.charges == 2 && s._last_poll_time == admitted);
+
+    s._last_climate_poll_time = now - s.climate_poll_interval;
+    s.accept = false;
+    previous = s._last_climate_poll_time;
+    s.poll(now);
+    assert(s.climates == 1 && s._last_climate_poll_time == previous);
+    s.accept = true;
+    s.poll(admitted);
+    assert(s.climates == 2 && s._last_climate_poll_time == admitted);
+
+    foreach (ref pending; s._pending_commands)
+        pending.sent_at = getTime();
+    ubyte[16] uuid, tag;
+    assert(s.reserve_pending_command(uuid[], tag[], VehicleCommandKind.get_vehicle_state) is null);
+    s._pending_commands[0].sent_at -= s.pending_command_timeout;
+    assert(s.reserve_pending_command(uuid[], tag[], VehicleCommandKind.get_vehicle_state) !is null);
+
+    static class Receiver : TeslaVehicleSession
+    {
+    nothrow @nogc:
+        this() { super(CID(3)); }
+        override bool signer_unchanged() => true;
+    }
+    Receiver receiver = alloc!Receiver();
+    scope(exit) free(receiver);
+    receiver._phase = receiver.Phase.ready;
+    receiver._routing_address[] = 0x22;
+    receiver._aes_key[] = 0x44;
+    receiver._controls_subscribed = true;
+    uuid[] = 0x11;
+    tag[] = 0x33;
+
+    TeslaRoutableMessage response;
+    response.to_destination.ensure().routing_address.ensure().extend(16)[] = receiver._routing_address[];
+    response.from_destination.ensure().domain.set(cast(uint)TeslaDomain.infotainment);
+    response.request_uuid.ensure().extend(16)[] = uuid[];
+    response.signed_message_status.ensure().signed_message_fault.set(15);
+
+    void deliver()
+    {
+        Array!ubyte wire;
+        wire.resize(buffer_len(response));
+        assert(proto_serialise(wire[], response) == wire.length);
+        receiver.dispatch_response(wire[]);
+    }
+
+    auto pending = receiver.reserve_pending_command(uuid[], tag[], VehicleCommandKind.get_charge_state);
+    response.request_uuid.value[0] ^= 1;
+    deliver();
+    assert(pending.active && receiver._phase == receiver.Phase.ready && receiver._auth_failures == 0);
+    response.request_uuid.value[0] ^= 1;
+    response.from_destination.value.domain.set(cast(uint)TeslaDomain.vehicle_security);
+    deliver();
+    assert(pending.active && receiver._phase == receiver.Phase.ready);
+    response.from_destination.value.domain.set(cast(uint)TeslaDomain.infotainment);
+    response.to_destination.value.routing_address.value[0] ^= 1;
+    deliver();
+    assert(pending.active && receiver._phase == receiver.Phase.ready);
+    response.to_destination.value.routing_address.value[0] ^= 1;
+    pending.sent_at -= receiver.pending_command_timeout;
+    deliver();
+    assert(!pending.active && receiver._phase == receiver.Phase.ready);
+
+    foreach (fault; [1u, 2u, 3u, 4u, 7u, 9u, 11u, 25u, 99u])
+    {
+        pending = receiver.reserve_pending_command(uuid[], tag[], VehicleCommandKind.get_charge_state);
+        response.signed_message_status.value.signed_message_fault.set(fault);
+        deliver();
+        assert(!pending.active && receiver._phase == receiver.Phase.ready && receiver._auth_failures == 0);
+        assert(receiver._last_authenticated_rx_time == MonoTime.init);
+        deliver();
+        assert(receiver._auth_failures == 0);
+    }
+
+    foreach (fault; [5u, 6u, 15u, 17u, 20u])
+    {
+        receiver._phase = receiver.Phase.ready;
+        pending = receiver.reserve_pending_command(uuid[], tag[], VehicleCommandKind.get_charge_state);
+        response.signed_message_status.value.signed_message_fault.set(fault);
+        deliver();
+        assert(!pending.active && receiver._phase == receiver.Phase.failed);
+        assert(!receiver.refresh_vehicle_state());
+    }
+
+    receiver._phase = receiver.Phase.ready;
+    response.signed_message_status.value.signed_message_fault.set(0);
+    response.protobuf_message_as_bytes.ensure().extend(1)[0] = 0;
+    pending = receiver.reserve_pending_command(uuid[], tag[], VehicleCommandKind.get_charge_state);
+    response.request_uuid.value[0] ^= 1;
+    foreach (i; 0 .. 4)
+        deliver();
+    assert(receiver._auth_failures == 0);
+    response.request_uuid.value[0] ^= 1;
+    foreach (i; 0 .. 4)
+        deliver();
+    assert(receiver._auth_failures == 1 && receiver._phase == receiver.Phase.ready && pending.active);
+
+    response.protobuf_message_as_bytes.value.clear();
+    ubyte[12] nonce = 0x55;
+    ref signature = response.signature_data.ensure().aes_gcm_response.ensure();
+    signature.nonce.ensure().extend(12)[] = nonce[];
+    signature.counter.set(1);
+    signature.tag.ensure().extend(16)[] = 0;
+    Array!ubyte metadata = build_response_metadata(TeslaDomain.infotainment, receiver.name[], 1, 0, tag[], 0);
+    SHA256Context digest;
+    sha_init(digest);
+    sha_update(digest, metadata[]);
+    ubyte[32] aad = sha_finalise(digest);
+    ubyte[16] response_tag;
+    assert(aes_gcm_encrypt(receiver._aes_key[], nonce[], aad[], null, null, response_tag[]).succeeded);
+    signature.tag.value[] = response_tag[];
+    signature.tag.value[0] ^= 1;
+    deliver();
+    assert(receiver._auth_failures == 1 && pending.active);
+    signature.tag.value[0] ^= 1;
+    deliver();
+    assert(!pending.active && receiver._auth_failures == 0 && receiver._fault is null);
+    assert(receiver._last_authenticated_rx_time != MonoTime.init);
+    MonoTime authenticated = receiver._last_authenticated_rx_time;
+    deliver();
+    assert(receiver._last_authenticated_rx_time == authenticated);
+
+    pending = receiver.reserve_pending_command(uuid[], tag[], VehicleCommandKind.get_charge_state);
+    response.signed_message_status.value.signed_message_fault.set(15);
+    deliver();
+    assert(pending.active && receiver._phase == receiver.Phase.ready && receiver._auth_failures == 1);
+    metadata = build_response_metadata(TeslaDomain.infotainment, receiver.name[], 1, 0, tag[], 15);
+    sha_init(digest);
+    sha_update(digest, metadata[]);
+    aad = sha_finalise(digest);
+    assert(aes_gcm_encrypt(receiver._aes_key[], nonce[], aad[], null, null, response_tag[]).succeeded);
+    signature.tag.value[] = response_tag[];
+    deliver();
+    assert(!pending.active && receiver._phase == receiver.Phase.failed && receiver._auth_failures == 0);
+
+    receiver._phase = receiver.Phase.ready;
+    response.signed_message_status.value.signed_message_fault.set(0);
+    signature.tag.value[0] ^= 1;
+    foreach (i; 0 .. receiver.auth_failure_limit)
+    {
+        uuid[0] = cast(ubyte)i;
+        response.request_uuid.value[] = uuid[];
+        pending = receiver.reserve_pending_command(uuid[], tag[], VehicleCommandKind.get_charge_state);
+        deliver();
+        assert(pending.auth_failure_reported);
+    }
+    assert(receiver._phase == receiver.Phase.failed);
+
+    receiver._phase = receiver.Phase.ready;
+    receiver._last_authenticated_rx_time = now;
+    receiver._last_rx_time = now + 60.seconds;
+    assert(receiver.advance(now + 46.seconds) == CompletionStatus.error);
+    assert(receiver._phase == receiver.Phase.failed);
+}
+
+unittest
+{
+    import urt.mem : alloc, free;
+
+    static class Session : TeslaVehicleSession
+    {
+    nothrow @nogc:
+        this() { super(CID(4)); }
+        VehicleRetryState retry;
+        uint charges, climates;
+        override VehicleRetryState* retry_state() => &retry;
+        override const(VehicleRetryState)* retry_state() const pure => &retry;
+        override bool refresh_charge_state() { ++charges; return true; }
+        override bool refresh_climate_state() { ++climates; return true; }
+    }
+    Session s = alloc!Session();
+    scope(exit) free(s);
+    TeslaVehicleScanner scanner = alloc!TeslaVehicleScanner(CID(5));
+    scope(exit) free(scanner);
+    s.attach(scanner, MACAddress(2, 3, 4, 5, 6, 7));
+    assert(s.validate());
+    s._phase = s.Phase.ready;
+
+    TeslaVehicleSession.PendingCommand pending;
+    pending.kind = VehicleCommandKind.get_charge_state;
+    s.handle_protocol_fault(7, pending, false);
+    assert(!s.retry.failures[VehicleCommandKind.get_charge_state].latched);
+    assert(s.retry.failures[VehicleCommandKind.get_charge_state].retry_at > getTime());
+    pending.kind = VehicleCommandKind.get_charge_state;
+    s.handle_protocol_fault(7, pending, true);
+    assert(s.retry.failures[VehicleCommandKind.get_charge_state].latched);
+    assert(s.validate() && s._phase == s.Phase.ready);
+    assert(s.status_message() == s.retry.status[]);
+
+    MonoTime now = getTime();
+    s._last_vehicle_poll_time = now;
+    s._retry_poll = s.PollKind.charge;
+    assert(s.poll(now) > now);
+    assert(s.charges == 0 && s.climates == 1 && s._retry_poll == s.PollKind.none);
+    s.retry.failed(VehicleRetryState.index(VehicleCommandKind.get_vehicle_state, 0), "Unsupported drive state", now, true);
+    assert(s.select_vehicle_category(now) && s._vehicle_category == 1);
+    ubyte[16] uuid, tag;
+    auto queued = s.reserve_pending_command(uuid[], tag[], VehicleCommandKind.get_vehicle_state);
+    assert(queued && queued.category == 1);
+    s._vehicle_category = 2;
+    s.handle_protocol_fault(9, *queued, true);
+    assert(s.retry.failures[VehicleRetryState.index(VehicleCommandKind.get_vehicle_state, 1)].latched);
+    assert(s.select_vehicle_category(now) && s._vehicle_category == 2);
+
+    foreach (fault; [5u, 6u, 15u, 17u, 20u])
+    {
+        s._phase = s.Phase.ready;
+        pending.kind = VehicleCommandKind.get_climate_state;
+        s.handle_protocol_fault(fault, pending, false);
+        assert(s._phase == s.Phase.failed);
+        assert(s.retry_time(VehicleCommandKind.get_climate_state) > getTime());
+        s.retry.succeeded(0);
+        assert(s.retry_time(VehicleCommandKind.get_climate_state) > getTime());
+    }
+
+    pending.kind = VehicleCommandKind.get_charge_state;
+    s.handle_protocol_fault(4, pending, true);
+    assert(!s.validate() && s._phase == s.Phase.failed);
+    s.retry = VehicleRetryState.init;
+    s.reset_retry_status();
+    assert(s.validate() && !s.retry.status.length && s._fault is null);
+    s._phase = s.Phase.awaiting_approval;
+    s._approval_deadline = now;
+    s._last_rx_time = now;
+    assert(s.advance(now) == CompletionStatus.error);
+    assert(!s.validate() && !s.retry.failures[0].latched);
 }

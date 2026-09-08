@@ -1,0 +1,12 @@
+[
+    {"name": "IPv4 loopback", "command": "/ping address=127.0.0.1 count=1", "delay": 1.5, "assertions": [{"type": "contains", "value": "reply from 127.0.0.1"}, {"type": "contains", "value": "1 replies for 1 requests"}]},
+    {"name": "IPv6 loopback", "command": "/ping address=::1 count=1", "delay": 1.5, "assertions": [{"type": "contains", "value": "reply from ::1"}, {"type": "contains", "value": "1 replies for 1 requests"}]},
+    {"name": "IPv6 scope required", "command": "/ping address=fe80::1 count=1", "assertions": [{"type": "contains", "value": "scoped destinations need iface="}]},
+    {"name": "MAC dispatch", "command": "/ping address=ff:ff:ff:ff:ff:ff count=1", "assertions": [{"type": "contains", "value": "use discover"}]},
+    {"name": "IPv4 group scope required", "command": "/ping address=224.0.0.1 count=1", "assertions": [{"type": "contains", "value": "group destinations need iface="}]},
+    {"name": "Reject invalid literal", "command": "/ping address=garbage", "assertions": [{"type": "contains", "value": "requires an IPv4, IPv6 or MAC destination address"}]},
+    {"name": "Reject port", "command": "/ping address=\"127.0.0.1:80\"", "assertions": [{"type": "contains", "value": "requires an IPv4, IPv6 or MAC destination address"}]},
+    {"name": "Root ping help", "command": ":help ping", "assertions": [{"type": "contains", "value": "address"}, {"type": "contains", "value": "[iface="}]},
+    {"name": "Remove ping6", "command": "/protocol/ip/ping6 address=::1 count=1", "assertions": [{"type": "contains", "value": "no command `ping6`"}]},
+    {"name": "Remove MAC-specific command", "command": "/interface/ethernet/ping address=ff:ff:ff:ff:ff:ff", "assertions": [{"type": "contains", "value": "no command `ping`"}]}
+]

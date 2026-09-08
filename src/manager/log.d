@@ -82,12 +82,7 @@ nothrow @nogc:
         size_t hostname_end = message_end + hostname_length;
         assert(hostname_end <= _data_capacity);
 
-        return LogMessage(severity,
-                          _data[0 .. tag_end],
-                          _data[tag_end .. object_end],
-                          _data[object_end .. message_end],
-                          _data[message_end .. hostname_end],
-                          timestamp);
+        return LogMessage(severity, _data[0 .. tag_end], _data[tag_end .. object_end], _data[object_end .. message_end], _data[message_end .. hostname_end], timestamp);
     }
 
 private:
@@ -329,8 +324,7 @@ nothrow @nogc:
 
     private bool next_history(ref LogHistoryCursor cursor, out LogMessage msg)
     {
-        StoredLogMessage* record = cursor.record
-            ? (cast(StoredLogMessage*)cursor.record).next : _history_head;
+        StoredLogMessage* record = cursor.record ? (cast(StoredLogMessage*)cursor.record).next : _history_head;
         while (record && !record.historical)
             record = record.next;
         if (!record)
@@ -351,12 +345,10 @@ nothrow @nogc:
                            " delivery-dropped=", _delivery_dropped);
     }
 
-    void history_set(Session, Nullable!uint max_messages, Nullable!Duration max_age,
-                     Nullable!Severity max_severity, Nullable!(const(char)[]) tag)
+    void history_set(Session, Nullable!uint max_messages, Nullable!Duration max_age, Nullable!Severity max_severity, Nullable!(const(char)[]) tag)
     {
         if (max_messages)
-            resize_history(max_messages.value < max_history_messages
-                ? max_messages.value : max_history_messages);
+            resize_history(max_messages.value < max_history_messages ? max_messages.value : max_history_messages);
         if (max_age)
             _history_max_age = max_age.value;
         if (max_severity)
@@ -888,8 +880,7 @@ const(char)[] format_log_for_session(scope ref const LogMessage msg, ClientFeatu
 
 
 @TabComplete(&log_print_suggest)
-CommandState log_print(Session session, Nullable!Severity level, Nullable!(const(char)[]) tag,
-                       Nullable!(const(char)[]) match, Nullable!uint max, const(Variant)[] args)
+CommandState log_print(Session session, Nullable!Severity level, Nullable!(const(char)[]) tag, Nullable!(const(char)[]) match, Nullable!uint max, const(Variant)[] args)
 {
     LogFilter filter;
     filter.max_severity = level ? level.value : Severity.trace;
@@ -1196,10 +1187,7 @@ private:
             return true;
 
         import urt.string : contains_i;
-        return msg.message.contains_i(_match[]) ||
-               msg.tag.contains_i(_match[]) ||
-               msg.object_name.contains_i(_match[]) ||
-               severity_names[msg.severity].contains_i(_match[]);
+        return msg.message.contains_i(_match[]) || msg.tag.contains_i(_match[]) || msg.object_name.contains_i(_match[]) || severity_names[msg.severity].contains_i(_match[]);
     }
 
     void push(scope ref const LogMessage msg)

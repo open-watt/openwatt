@@ -17,6 +17,7 @@ import manager;
 import manager.base;
 import manager.collection;
 import manager.component;
+import manager.device : DeviceTable;
 
 nothrow @nogc:
 
@@ -27,8 +28,6 @@ struct PortCircuitBinding
     String circuit;
 }
 
-// Flat user-facing entity. Capabilities are inferred at use-time by inspecting
-// the device tree; electrical topology is supplied by Port component paths.
 class Appliance : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("kind", kind),
@@ -50,7 +49,6 @@ nothrow @nogc:
         super(collection_type_info!Appliance, id, flags);
     }
 
-    // Named kind to avoid shadowing BaseObject.type; normally inferred.
     const(char)[] kind() const pure
     {
         if (_kind.length != 0)
@@ -120,7 +118,6 @@ nothrow @nogc:
             restart();
             return null;
         }
-        // a discovered or mirrored device may not exist yet; resolve_refs() binds it when it appears
         _device_path = value.make_string();
         _device = resolve_component_path(value);
         mark_set!(typeof(this), [ "device", "kind" ])();
@@ -159,7 +156,6 @@ nothrow @nogc:
 
     bool meter_sign_set() const pure { return _meter_sign_set; }
 
-    // State may live on a different device from the control surface.
     const(char)[] state() const pure { return _state_path[]; }
     const(char)[] state(const(char)[] value)
     {
@@ -182,14 +178,17 @@ nothrow @nogc:
     Component meter_ref() pure { return _meter; }
     Component state_ref() pure { return _state; }
 
-    bool resolve_refs()
+    bool resolve_refs(ref DeviceTable devices)
     {
         bool bound = false;
-        if (_device is null && _device_path.length && (_device = resolve_component_path(_device_path[])) !is null)
+        if (_device is null && _device_path.length && (_device = resolve_component_path(_device_path[], devices)) !is null)
+        {
+            _mark_dirty(prop_mask!(typeof(this), [ "kind" ]));
             bound = true;
-        if (_meter is null && _meter_path.length && (_meter = resolve_component_path(_meter_path[])) !is null)
+        }
+        if (_meter is null && _meter_path.length && (_meter = resolve_component_path(_meter_path[], devices)) !is null)
             bound = true;
-        if (_state is null && _state_path.length && (_state = resolve_component_path(_state_path[])) !is null)
+        if (_state is null && _state_path.length && (_state = resolve_component_path(_state_path[], devices)) !is null)
             bound = true;
         return bound;
     }
@@ -197,9 +196,7 @@ nothrow @nogc:
     MeterData meter_data;
 
 protected:
-    // TODO: unknown string properties silently become port bindings. Validating
-    // device-less appliances needs namespaced or profile-authoritative ports;
-    // a local role whitelist would duplicate topology rules and drift.
+    // TODO: validate port names against an authoritative namespace (see TODO.md).
     override StringResult set_unknown_property(scope const(char)[] property, ref const Variant value)
     {
         if (!value.isString)
@@ -210,7 +207,6 @@ protected:
 
     override bool validate() const
     {
-        // Intent may target placeholders before their infrastructure exists.
         return true;
     }
 
@@ -263,4 +259,45 @@ private:
     String _state_path;
     Component _state;
 
+}
+
+unittest
+{
+    import urt.mem;
+    import manager.device : Device;
+
+    DeviceTable devices;
+    Appliance appliance = alloc!Appliance(CID(1));
+    scope(exit) free(appliance);
+    appliance._device_path = StringLit!"late.battery";
+    appliance._meter_path = StringLit!"late.battery.meter";
+    appliance._state_path = StringLit!"late.battery.state";
+    assert(!appliance.resolve_refs(devices));
+
+    Device device = alloc!Device(StringLit!"late");
+    scope(exit) free(device);
+    devices.insert(device);
+    assert(!appliance.resolve_refs(devices));
+
+    Component battery = alloc!Component(StringLit!"battery");
+    scope(exit) free(battery);
+    device.add_component(battery);
+    assert(appliance.resolve_refs(devices));
+    assert(appliance.device_ref is battery);
+    assert(appliance.meter_ref is null && appliance.state_ref is null);
+    assert(!appliance.resolve_refs(devices));
+
+    Component meter = alloc!Component(StringLit!"meter");
+    scope(exit) free(meter);
+    Component state = alloc!Component(StringLit!"state");
+    scope(exit) free(state);
+    battery.add_component(meter);
+    battery.add_component(state);
+    assert(appliance.resolve_refs(devices));
+    assert(appliance.device_ref is battery);
+    assert(appliance.meter_ref is meter && appliance.state_ref is state);
+    assert(!appliance.resolve_refs(devices));
+    assert(appliance.device == "late.battery");
+    assert(appliance.meter == "late.battery.meter");
+    assert(appliance.state == "late.battery.state");
 }

@@ -158,13 +158,7 @@ package template CollectionTypeInfoOf(Type)
         else
             enum const(void)* dyn_parent = &DynTypeOf!Super.info;
 
-        __gshared immutable CollectionTypeInfo info = cast(immutable)CollectionTypeInfo(DynTypeInfo(StringLit!(Type.type_name), dyn_parent),
-                                                                                        StringLit!_path,
-                                                                                        Type.collection_id,
-                                                                                        all_properties!Type(),
-                                                                                        create_instance,
-                                                                                        collection_root,
-                                                                                        _syncable);
+        __gshared immutable CollectionTypeInfo info = cast(immutable)CollectionTypeInfo(DynTypeInfo(StringLit!(Type.type_name), dyn_parent), StringLit!_path, Type.collection_id, all_properties!Type(), create_instance, collection_root, _syncable);
     }
 }
 
@@ -274,8 +268,7 @@ nothrow @nogc:
                 if (d.as!"msecs" >= SlowObjectUpdateMs)
                 {
                     import urt.log : writeWarning;
-                    writeWarning("collection.update.", type_info.type[], ".", active.name[],
-                                 ": ", d.as!"msecs", "ms");
+                    writeWarning("collection.update.", type_info.type[], ".", active.name[], ": ", d.as!"msecs", "ms");
                 }
             }
         }
