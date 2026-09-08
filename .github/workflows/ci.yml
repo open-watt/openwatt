@@ -89,7 +89,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        platform: [bl808, bl808_m0, rp2350]  # stm4xx, stm7xx -- no linker script yet
+        platform: [bl808, bl808_m0, rp2350, bk7231n]  # stm4xx, stm7xx -- no linker script yet
         include:
           - platform: bl808
             toolchain: riscv64-unknown-elf
@@ -98,6 +98,12 @@ jobs:
             make_args: PROCESSOR=e907
           - platform: rp2350
             toolchain: arm-none-eabi
+          # bk7231t is left out: its packed image overflows _image_limit (see TODO.md).
+          - platform: bk7231n
+            toolchain: arm-none-eabi
+            beken_sdk: 244bdfe86a1dd4324038814f3ebb8ebb24117dfb
+            make_args: BK_SDK_ROOT=../beken-sdk
+            timeout: 900
           # - platform: stm4xx
           #   toolchain: arm-none-eabi
           # - platform: stm7xx
@@ -122,8 +128,22 @@ jobs:
           key: ${{ matrix.toolchain }}
           packages: gcc-${{ matrix.toolchain }} picolibc-${{ matrix.toolchain }}${{ matrix.toolchain == 'arm-none-eabi' && ' libnewlib-arm-none-eabi' || '' }}
 
+      # Beken links vendor sources and blobs from an out-of-tree SDK, pinned here to
+      # OpenBK7231T_App fd131f3c's submodule revision. Only beken378 is checked out; the
+      # SDK's bundled ARM toolchain (635MB of the 699MB tree) is unused, the apt one builds it.
+      - name: Checkout Beken SDK
+        if: ${{ matrix.beken_sdk }}
+        run: |
+          mkdir -p ../beken-sdk/sdk/OpenBK7231N
+          cd ../beken-sdk/sdk/OpenBK7231N
+          git init -q .
+          git remote add origin https://github.com/openshwprojects/OpenBK7231N.git
+          git fetch -q --depth 1 --filter=blob:none origin ${{ matrix.beken_sdk }}
+          git sparse-checkout set --no-cone platforms/bk7231n/bk7231n_os/beken378
+          git checkout -q FETCH_HEAD
+
       - name: Build
-        run: timeout 180 make PLATFORM=${{ matrix.platform }} CONFIG=release ${{ matrix.make_args || '' }}
+        run: timeout ${{ matrix.timeout || 180 }} make PLATFORM=${{ matrix.platform }} CONFIG=release ${{ matrix.make_args || '' }}
 
   cross-esp:
     runs-on: ubuntu-latest
