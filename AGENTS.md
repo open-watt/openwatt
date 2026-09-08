@@ -447,6 +447,13 @@ change carries these obligations:
 - **Keep `docs/` current.** If a change makes a statement in `docs/` wrong, fix it in the same
   PR. Stale documentation is worse than none, because it is trusted.
 
+- **Release builds update the size ledger.** Every build prints its footprint from
+  `tools/binstats.d`; a release build also prints a ready `ledger` row. Whenever a release
+  build is made for any reason, paste that row into [docs/BINARY_SIZE.md](docs/BINARY_SIZE.md)
+  under its configuration. Targets with a hard flash limit carry that limit in every row. Never
+  run a build just to update the ledger; only deployable release builds are recorded, never
+  debug or unittest.
+
 ### PR Review and Merge Preparation
 
 **Review adversarially.** The job is to find what is wrong, not to agree. Assume the change is
@@ -460,6 +467,24 @@ Every finding resolves one of two ways, and the distinction is the reviewer's ca
 - **Non-blocking**: the code works, but something remains, most often because the direction is
   unresolved and the discussion does not belong in this PR. Record it in [TODO.md](TODO.md) and
   merge. A deferred finding that exists only in a review thread is a lost finding.
+
+**Every review audits these, on every patch:**
+
+- **Every variable declaration is justified.** Redundant or excess state is a defect: a flag that
+  restates something derivable, a copy of a value already reachable, a member that only one
+  method touches. Each field and local must earn its place; if it does not, it goes.
+- **Every code path is justified.** No redundant branches, no duplicated paths that differ by a
+  detail a parameter would express, no special cases the general case already covers. The logic
+  should be the simplest that expresses the structure of the problem, nothing more.
+- **Layout and alignment of every declaration.** Byte buffers whose interior is ever cast to a
+  hard type carry `align(N)` for the widest type cast from them. Struct and stack members are
+  ordered to minimise padding. Where raw buffers are handled, cast to a hard-typed pointer and
+  make the widest loads and stores possible, rather than assembling words from bytes: it
+  shrinks the code, and on machines without unaligned load/store the compiler must be able to
+  prove alignment or it emits byte-wise loads and reassembly.
+- **Bit-stuff where it pays.** Pack fields when the struct is allocated many times or held in
+  arrays, or when packing removes padding outright: several flags share one byte, and small
+  fields fold into padding that would otherwise be wasted.
 
 **A branch is not ready to merge until it presents well.** Before requesting review:
 
@@ -724,4 +749,5 @@ And remember,
 - No unicode in source files unless it's string data that's meant to contain unicode.
 - Line-breaks should be avoided for single statements, unless they REALLY improve readibility! Use good taste, no gratuitous line breaking! Long lines are fine; break when a user would prefer to read as a list, or other genuinely better readibility moments.
 - Reviews are ADVERSARIAL. Blocking findings are fixed before merge; everything else lands in [TODO.md](TODO.md). Rewrite the patch series before presenting it: no WIP churn, fixes amend the original sin, minimal patch count, urt bumps and doc updates fold into the patch they belong to. See the **PR Review and Merge Preparation** subsection.
+- Any release build you make, for any reason, gets a row in [docs/BINARY_SIZE.md](docs/BINARY_SIZE.md).
 - Outstanding and follow-up work ALWAYS lands in [TODO.md](TODO.md). Frontend-affecting changes ALWAYS get a migration action in [docs/wip/UX_TODO.md](docs/wip/UX_TODO.md). CLI changes ALWAYS update [docs/CLI.md](docs/CLI.md). See the **Documentation Obligations** subsection.
