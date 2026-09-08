@@ -1,8 +1,123 @@
 # TODO
 
-Cross-cutting work that needs a design decision or changes more than one module. Point fixes
-belong beside the code. When an item lands, delete it or reduce it to the work that remains;
+Outstanding work and follow-ups, including point fixes and work awaiting a design decision.
+When an item lands, delete it or reduce it to the work that remains;
 the commit history and linked design documents carry the implementation record.
+
+## Retrospective merge reconciliation (2026-09-08)
+
+- **[#669, deferred until removal is needed] Define device/subtree removal lifetime**:
+  DeviceTable currently has no removal API and production code never emits
+  `ComponentEvent.destroyed`; the earlier P1 classification overstated a
+  demonstrated runtime failure. Before introducing removal/recreation, define
+  ownership and invalidate appliance/link references, topology watches and
+  control caches before freeing Components or Elements. Include other raw
+  model-pointer consumers and coverage for removing/recreating a bound subtree.
+  Keep the process-lifetime model for now. If the code structure requires an
+  unsupported removal path, it may assert; do not introduce a removal lifecycle
+  until the feature is needed.
+
+- **[#667] Validate Tesla recovery on a vehicle**: exercise category back-off,
+  busy responses, session counter/epoch/clock faults, BLE loss, bounded key
+  approval, and latch reset with a vehicle. Host regressions do not replace
+  hardware acceptance. Legacy firmware predating encrypted responses remains
+  unsupported; development requires access to an old offline car.
+
+- **[#655, SDK acceptance] Select and pin a supported SDK revision**:
+  Compare clean and incremental full N/T SDK builds with the selected revision.
+  Full firmware and mode-retry cancellation/rebind still need hardware acceptance.
+  Candidate evidence: SDK archives built against OpenBK7231T_App `fd131f3c`
+  (N SDK `244bdfe8`, T SDK `12c68122`), with repeat builds preserving timestamps.
+  The corrected N firmware links and packs successfully; T links but has the
+  packed-size follow-up below. Neither result establishes boot acceptance.
+
+- **[uRT Variant, deferred policy] Define erased-class downcasts**:
+  Variant's current ancestry checks describe the stored type. Add a policy handoff
+  if dynamic downcasts from its erased base type are needed.
+
+- **[uRT no-RTTI build follow-up] Reconcile remaining consumers**:
+  The full no-RTTI unit build fails in `urt.internal.traits`' associative-array
+  enum test. Resolve that dependency before claiming full no-RTTI host/test
+  support. Class-to-interface dynamic casts still use an unsupported runtime
+  assertion; define their contract or reject them at compile time separately.
+
+- **[Beken STA, hardware acceptance] Validate the merged integration**:
+  Validate cold boot, association/recovery after lost confirmations, GTK rotation,
+  mode changes, allocation failures, RX/TX pressure and shutdown on a pinned SDK.
+  Exercise general-DMA TX copies with source offsets 0..3 and partial-word tails;
+  source inspection establishes synchronous copying, not the hardware alignment contract.
+  Measure service fairness outside the deferred-work budget and audit vendor
+  interrupt-context logging. Keep synthetic L-SIG input disabled pending explicit
+  buffer-length/metadata handling.
+
+- **[Beken T, separate-session follow-up] Investigate packed firmware size**:
+  T is provisional: no hardware is available, and T-specific differences remain
+  unimplemented. N is the required Beken target. The maintainer authorizes
+  dropping T from CI if it fails; its current uRT cross job passes. The local
+  T packaging failure is separate from N support. The tested T firmware links, but `pack_ram_image.py` rejects the image as 2,006 bytes too large
+  (about 2 KB, not 2 MB). Both N and T builds used `CONFIG=release`, `TINY=1`,
+  `FEATURES=switch`, `HEADLESS=1`, `-Oz`, no RTTI, exceptions, IP or TLS.
+  BK7231N now packs successfully at 1,079,206 bytes after the minimal-state audit. Evidence uses LDC 1.43,
+  arm-none-eabi GCC 15 and the SDK revisions above. Rebuilding the SDK with
+  `-Oz` instead of `-Os` produces the same overflow; that experiment was not
+  adopted. Preserve the partition boundary and required behavior when reducing
+  size. N is the target for this session and passes; investigate T separately.
+  No comparable earlier size/map has yet established when growth occurred or
+  whether a previously excluded blob was retained. Bisect in a new session if
+  that difference is not immediately apparent. The failed build's `fw.bin` is
+  an unpacked intermediate, not flashable.
+  Logs: `.tmp/urt258-evidence/final-openwatt-t-link.log` and `t-size-link.log`.
+
+- **WPA pairwise rekey**: the shared supplicant handles initial PTK installation
+  and GTK rotation, but does not yet renegotiate a PTK on an established link.
+  Add authenticated rekey transitions and retransmission tests without resetting
+  receive counters when already installed key material is repeated.
+
+- **[uRT build, in passing] Respect the compiler's Tiny version flag**:
+  `platforms.mk` hard-codes `-d-version=Tiny`, so `TINY=1 COMPILER=dmd` fails
+  before compilation. Use the existing compiler-specific `VERSION_FLAG`.
+
+- **[Host build, local work] Reconcile the unfinished power regulator**:
+  The untracked `src/driver/power/regulator.d` references `ComponentEvent.materialised`,
+  `set_device_online` and `note_activity`, which are absent from the current model.
+  It is discovered by the full source build; reconcile it with the intended model
+  work before expecting this working checkout's host build to pass.
+
+- **[Windows toolchain] Retire the default beta DMD and isolate LDC COMDAT failure**:
+  PATH selects DMD 2.112.0-beta.1, whose unittest build fails copy-constructor
+  detection at `urt.internal.traits:376`; installed stable DMD 2.113 passes the
+  isolated OpenWatt suite. LDC 1.43 aborts the full Windows unittest build with
+  an associative COMDAT error for `BLESession.find_char`; isolate that compiler
+  failure separately. Evidence: `.tmp/urt258-evidence/adoption-host-build.log`,
+  `adoption-isolated-build.log`, and `adoption-dmd-stable-run.log`.
+
+- **[uRT host test] Investigate Windows x86 stack unwinding**:
+  DMD fails twice at the unchanged `urt.internal.exception:453` stack-trace test.
+  An isolated LDC 1.43 pbuf-only suite also reaches that failure after its pbuf
+  tests pass. The larger LDC WPA/driver suites pass 76/76 and 77/77. Reproduce
+  and isolate the cause; image-layout sensitivity is only a hypothesis.
+  Evidence: `.tmp/urt258-evidence/final-host-run.log`, `final-host-rerun.log`,
+  and the isolated series pbuf logs.
+
+- **[uRT alignment, other ports] Audit opaque unwinder storage**:
+  Beken now explicitly aligns `__eh_frame_object`. STM32, RP2350 and BL common
+  still declare byte storage without an alignment contract; check their selected
+  unwinder ABI and align or remove the unused registration path as appropriate.
+
+- **[#657, transport follow-up] Complete IPv6 transport error delivery**:
+  connect incoming ICMPv6 errors to TCP/UDP when their IPv6 delivery paths are
+  implemented. Add per-destination path-MTU state and propagate local oversize
+  output failures through a transport completion API; `output_v6()` currently
+  returns void. Handle quoted fragments alongside IPv6 fragmentation/reassembly.
+  Incoming errors currently reach pending echo diagnostics only. Add host-OS
+  ICMP backends for `/ping`; IP echo currently requires the internal stack.
+
+- **[P3, style-audit deferrals] Preserve outstanding design work**: validate
+  appliance port names against a profile-authoritative or explicit namespace
+  instead of accepting every unknown string property as a circuit binding.
+  Add borrowed protobuf byte fields so vehicle decoding can avoid one owned
+  allocation per bytes field. These existing deferrals were moved out of long
+  source comments during reconciliation.
 
 ## Energy
 
@@ -279,6 +394,23 @@ The current implementation and remaining phases are described in
   Decide whether to return the status, warn (rate-limited; this is on every write), or keep it
   silent by design. As written it hides bring-up bugs.
 
+## DHCPv6 features
+
+The codec from `67e83fb4` has no operational client, server or relay. The reserved
+client/lease/server collection IDs have no implementations or commands. These
+are feature follow-ups, outside the retrospective merge fixes; choose the first
+role from a concrete deployment need before implementing or advertising it.
+
+- **Client**: decide whether the deployment needs address assignment, prefix
+  delegation or both, then implement the client lifecycle and configuration.
+- **Server and leases**: define address/prefix allocation and lease policy,
+  then implement the server and lease collections.
+- **Relay**: define the required relay deployment and supported message forms,
+  then implement request/reply forwarding.
+- **Temporary addresses (IA_TA)**: decide whether support is needed. If so,
+  add its separate four-byte header and codec coverage; the existing twelve-byte
+  IA helpers explicitly accept only IA_NA/IA_PD.
+
 ## Sync and peering
 
 The built surface is documented in [docs/SYNC.md](docs/SYNC.md) and [docs/PEERING.md](docs/PEERING.md);
@@ -292,13 +424,17 @@ this is what remains.
   the A-B-member triangle never becomes a sync loop. `/sync/peering print` should show the
   membership delta under partition.
 
-- **Rank links properly and fail over without a restart**: `discovery.d:137` still prefers by link
-  speed then recency. The intended order is operator cost override, then link class (ethernet,
-  wifi, 15.4, RS485), then speed, then recency. Collect RTT per link from any acked exchange
-  (Karn-filtered) to drive the retransmit clock and to demote a degrading active link against its
-  own baseline. Seamless failover, where a session addresses the node-id and late-binds its path
-  per send, is the full L3 move and lands with the election. Beacons stay link-local; reachability
-  through the fabric is a separate propagation mechanism.
+- **Highly desirable expansion: rank paths and fail over without a restart**:
+  Defer this architectural work from the reconciliation point fix. `discovery.d:137` prefers by link
+  speed then recency. One logical peer owns a set of discovered/configured paths; claims,
+  subscriptions, mirrored state, sequence/ACK state and queued work must survive path changes.
+  The user's provisional default order is MAC > IPv6 > IPv4 > high-bandwidth serial > radio >
+  low-bandwidth serial. Settle how that order combines physical-medium cost with encapsulation,
+  operator overrides, health and recovery hysteresis. IPv6 discovery is not implemented today.
+  Collect RTT per link from acknowledged exchanges (Karn-filtered) to drive the retransmit clock
+  and demote degraded paths. Bind additional paths to the same established remote/session before
+  transferring traffic, and distinguish link failure from a remote reboot/session epoch change.
+  Beacons stay link-local; reachability through the fabric is a separate propagation mechanism.
 
 - **Make backpressure a channel property**: `#557` paces one producer and every send reports
   pass/fail, but that is detection, not backpressure. Every other control emitter still bursts into
@@ -314,8 +450,8 @@ this is what remains.
   clock on Posix (today it rewrites the current time, so a chained authority drops pushes and
   forwards them). NTP versus peer discipline needs an owner.
 
-- **Make the full mirror a claim policy**: a claim today arms the log tap and time discipline, not
-  the member's device tree. Landing `device:**` as claim policy needs node-scoped naming for remote
+- **Finish claimed device mirroring**: acknowledged claims already subscribe to `device:**`.
+  The remaining model work needs node-scoped naming for remote
   devices (flat `g_app.devices` collides on `energy`/`system`; a colliding `add_name` adopts onto
   the local CID), offline/gone on detach (remote devices persist forever with stale values), a paced
   `model_sub` burst, one quiet skip per unknown type per session, and write routing to the authority;
@@ -371,6 +507,12 @@ this is what remains.
   (`#518`).
 
 ## Infrastructure
+
+- **Repair the runtime test harness**: `test/test_harness.py` pipes stdin into
+  `--interactive`, but startup requires a terminal and the Windows console
+  stream reads console events. Use a terminal or supported session transport.
+  Drain stderr during execution and terminate before waiting for EOF; the
+  current shutdown reads stderr before stopping the process and can hang.
 
 - **Harden bindings against malformed remote input**: the `ow/dm` review found protocol
   bindings that abort or deref on data an attacker controls, and these survive. ESPHome still

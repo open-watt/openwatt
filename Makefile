@@ -338,8 +338,7 @@ endif
 BINSTATS_LEDGER = $(if $(filter release,$(CONFIG)),--ledger "$$("$(DC)" --version 2>/dev/null | head -1)" --commit "$$(git rev-parse --short HEAD 2>/dev/null || echo -)" --date "$$(date +%F)")
 BINSTATS_IMAGE := $(if $(filter bl808,$(PLATFORM)),$(if $(filter c906,$(PROCESSOR)),d0fw.bin,m0fw.bin),$(if $(filter bl618 bk7231n bk7231t rp2350,$(PLATFORM)),fw.bin))
 
-$(TARGET): $(SOURCES) $(CONF_SOURCES) $(BAREMETAL_OBJS) $(VENDOR_OBJS) $(BAREMETAL_LD) \
-    $(BK_BEKEN_LIB) $(if $(RAM_IMAGE),$(RAM_IMAGE_PACKER))
+$(TARGET): $(SOURCES) $(CONF_SOURCES) $(BAREMETAL_OBJS) $(VENDOR_OBJS) $(BAREMETAL_LD) $(BK_BEKEN_LIB) $(if $(RAM_IMAGE),$(RAM_IMAGE_PACKER))
 
 # -- BK7231 SDK build (must come after $(TARGET) so it doesn't become default goal)
 
@@ -653,7 +652,7 @@ ifeq ($(ROUTEROS_BUILD),1)
 	@$(MAKE) --no-print-directory routeros-clean
 endif
 
-BUILD_FLAGS := $(DFLAGS) $(BUILD_CMD_FLAGS)
+BUILD_FLAGS := $(DFLAGS) $(BUILD_CMD_FLAGS) $(RAM_IMAGE) $(RAM_IMAGE_PACKER)
 FLAGS_CHANGED := $(shell printf '%s' '$(BUILD_FLAGS)' | cmp -s - $(FLAGSTAMP) || echo 1)
 
 ifneq ($(FLAGS_CHANGED),)

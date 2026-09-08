@@ -750,6 +750,9 @@
     <DCompile Include="src\protocol\tesla\vehicle_session.d">
       <Filter>src\protocol\tesla</Filter>
     </DCompile>
+    <DCompile Include="src\protocol\tesla\vehicle_retry.d">
+      <Filter>src\protocol\tesla</Filter>
+    </DCompile>
     <DCompile Include="src\manager\syslog.d">
       <Filter>src\manager</Filter>
     </DCompile>

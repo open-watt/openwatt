@@ -141,45 +141,6 @@ Array!ubyte build_response_metadata(TeslaDomain domain, const(char)[] vin,
     return meta;
 }
 
-struct ResponseReplayWindow
-{
-nothrow @nogc:
-
-    bool accept(uint counter)
-    {
-        if (!_initialised)
-        {
-            _highest = counter;
-            _seen = 1;
-            _initialised = true;
-            return true;
-        }
-
-        if (counter > _highest)
-        {
-            uint shift = counter - _highest;
-            _seen = shift >= 64 ? 1 : (_seen << shift) | 1;
-            _highest = counter;
-            return true;
-        }
-
-        uint age = _highest - counter;
-        if (age >= 64)
-            return false;
-        ulong bit = ulong(1) << age;
-        if (_seen & bit)
-            return false;
-        _seen |= bit;
-        return true;
-    }
-
-private:
-    uint _highest;
-    ulong _seen;
-    bool _initialised;
-}
-
-
 // Test vectors from teslamotors/vehicle-command protocol.md.
 unittest
 {
@@ -278,14 +239,4 @@ unittest
         ~ "050401020304070400000002081105000102030405060708090a0b0c0d0e0f"
         ~ "09040000001cff");
     assert(response_meta[] == expected_response_meta);
-
-
-    // ---- Response replay window ----
-    ResponseReplayWindow replay;
-    assert(replay.accept(100));
-    assert(replay.accept(102));
-    assert(replay.accept(101));
-    assert(!replay.accept(101));
-    assert(!replay.accept(102));
-    assert(!replay.accept(37));
 }

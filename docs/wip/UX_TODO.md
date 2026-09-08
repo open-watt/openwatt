@@ -3,6 +3,47 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-09-08: retrospective merge reconciliation
+
+- Appliance `device`, `meter`, and `state` paths may be accepted before the
+  target exists. Preserve configured paths in editors, display an unresolved
+  target separately from an empty property, and tolerate late device discovery
+  and late children. The backend now resolves both automatically while the energy
+  app is started; destruction/recreation remains separate lifecycle work.
+- Log viewers must accept Tiny's default of 64 entries and cap of 256 (normal
+  builds: 256/1024). A streaming follow retains no rolling view history after
+  emitting the initial history; clients needing scrollback must retain it.
+- Tesla sessions can restart after repeated authentication failures and retain
+  a fault status while reconnecting. Surface that status, and treat vehicle
+  categories as independently refreshed samples. Correlated session faults now
+  trigger a fresh handshake while retaining the affected operation's timed back-off;
+  show that delay even after the handshake succeeds. A Ready session also expires after 45 seconds
+  without an authenticated reply. Ordinary command rejections do not imply a broken
+  session. Do not automatically replay controls after a reconnect or infer
+  command success solely from Running; use observed vehicle state.
+  Refused polls retain their category and cadence starts on accepted submission;
+  do not assume a fixed refresh timestamp while the command queue is full.
+  Show category back-off and latch reasons from session `status`; one failed
+  telemetry category does not disable the others. Add scanner/VIN `backoff` and
+  `reset-backoff` actions under `/protocol/tesla/vehicle-scanner`, including when
+  the session is absent. Explain that reconnects preserve latches; explicit reset,
+  key change, VIN/scanner removal or process restart clears them. Permission
+  changes in the vehicle require an explicit reset. Reset never replays controls.
+- Beken `/system/sysinfo` reports SRAM and, on BK7231N, DTCM pools. Render pool
+  names and counts dynamically; BK7231T has no DTCM pool.
+- Keep DHCPv6 client/server/lease controls unavailable: only the codec exists.
+- Remove `/protocol/tesla/crypto-test` from diagnostic actions; the command was removed.
+- Migrate `/protocol/ip/ping6` and `/interface/ethernet/ping` callers to
+  `/ping address=<IPv4|IPv6|MAC> [count=] [iface=]`. Address family selects the
+  protocol; both old command paths are removed. IP ping requires the internal
+  IP stack. Consoles must handle cancellation when the selected interface goes
+  offline or is removed; scoped replies are matched on that interface.
+  Multicast requests can produce multiple replies (up to 64 distinct sources
+  per request), so reply counts can exceed request counts.
+  Handle correlated ICMP/ICMPv6 error lines, including MTU and parameter pointers;
+  errors do not increase reply counts. Multicast requests remain open after an
+  error and can report up to 64 distinct error sources per request.
+
 ## 2026-08-07: interfaces expose a `caps` property
 
 - All `/interface` collections gain a read-only `caps` bitfield property naming the
@@ -26,7 +67,7 @@ through them and remove sections as they are absorbed.
 - All ethernet-station interface collections (platform ethernet, bridge, vlan, wifi, udp)
   gain a `cfm-level` property (0-7, default 7): the 802.1ag maintenance level the station
   answers loopback at. Clients rendering interface detail/edit views may surface it.
-- `/interface/ethernet/ping` no longer accepts `identify=` and rejects multicast/broadcast
+- MAC `/ping` no longer accepts `identify=` and rejects multicast/broadcast
   addresses; it is now a unicast 802.1ag loopback (works against third-party CFM gear).
 - New command `/interface/ethernet/discover`: broadcast sweep listing OW stations on the
   segment with their system name and universal addresses. Anything that offered broadcast

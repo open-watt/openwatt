@@ -116,8 +116,6 @@ nothrow @nogc:
 //     Router-role only; we're primarily end-host. [small] (low)
 //   - ICMP redirect (type 5) ignored on receive. We don't act on routing
 //     hints from upstream gateways. [small] (low)
-//   - No ICMP echo client (we reply, can't ping out). Diagnostics gap;
-//     `/tools/ping` would be a natural place. [small] (med)
 //   - No ICMP rate counter exposed. We rate-limit silently; no way to see
 //     drops in diagnostics. [small] (low)
 //   - No router solicitation / advertisement processing. Static config only.
@@ -180,8 +178,7 @@ nothrow @nogc:
 //   - Most SocketOption values accepted but no-op (SO_KEEPALIVE, SO_LINGER,
 //     TCP_NODELAY, IP_TTL, SO_REUSEADDR, etc). [small each] (low individually,
 //     med cumulatively for portability of 3rd-party libs)
-//   - No raw sockets. [small] (low — only matters for tools like our own
-//     ping / traceroute, which don't exist yet)
+//   - No raw sockets. [small] (low)
 //   - No async ICMP error delivery. TCP RST / UDP port-unreachable should
 //     surface as ECONNREFUSED / EHOSTUNREACH on next read/write. [small]
 //     (med)
@@ -215,8 +212,7 @@ nothrow @nogc:
 //     print, per-PCB PMTU history, ICMP error counters, packet drop
 //     counters by reason. [small each] (med — debugging without these is
 //     guesswork)
-//   - No /tools/ping or /tools/traceroute. [small] (med — every other
-//     router has these)
+//   - No traceroute. [small] (med)
 //   - No flow logging hook. Firewall logs only by Verdict, not full path.
 //     [small] (low)
 //
@@ -671,7 +667,14 @@ nothrow @nogc:
         if (_phase != Phase.open || !page || page.length == 0)
             return false;
 
-        version (Windows)
+        version (UseInternalIPStack)
+            enum use_iocp = false;
+        else version (Windows)
+            enum use_iocp = true;
+        else
+            enum use_iocp = false;
+
+        static if (use_iocp)
         {
             if (_send)
             {
@@ -1074,8 +1077,7 @@ private:
             _connect_op.on_complete = &connect_complete;
             uint sent;
             ++_outstanding;
-            if (!g_connect_ex(_handle, &ra, cast(int)sockaddr_in.sizeof, null, 0, &sent, &_connect_op.ov) &&
-                ws_lasterror() != WSA_IO_PENDING)
+            if (!g_connect_ex(_handle, &ra, cast(int)sockaddr_in.sizeof, null, 0, &sent, &_connect_op.ov) && ws_lasterror() != WSA_IO_PENDING)
             {
                 --_outstanding;
                 return false;
@@ -1111,8 +1113,7 @@ private:
             WSABUF wb = WSABUF(cast(uint)_recv.buf.length, _recv.buf.ptr);
             uint flags, recvd;
             ++_outstanding;
-            if (WSARecv(_handle, &wb, 1, &recvd, &flags, &_recv.io.ov, null) != 0 &&
-                ws_lasterror() != WSA_IO_PENDING)
+            if (WSARecv(_handle, &wb, 1, &recvd, &flags, &_recv.io.ov, null) != 0 && ws_lasterror() != WSA_IO_PENDING)
             {
                 --_outstanding;
                 fail(IPEvent.error);
@@ -1129,8 +1130,7 @@ private:
             WSABUF wb = WSABUF(length, cast(ubyte*)op.page.data.ptr);
             uint sent;
             ++_outstanding;
-            if (WSASend(_handle, &wb, 1, &sent, 0, &op.io.ov, null) != 0 &&
-                ws_lasterror() != WSA_IO_PENDING)
+            if (WSASend(_handle, &wb, 1, &sent, 0, &op.io.ov, null) != 0 && ws_lasterror() != WSA_IO_PENDING)
             {
                 --_outstanding;
                 return false;
@@ -1447,8 +1447,7 @@ private:
             _accept.child = child;
             uint received;
             ++_outstanding;
-            if (!g_accept_ex(_handle, child, _accept.addrs.ptr, 0, addr_len, addr_len, &received, &_accept.io.ov) &&
-                ws_lasterror() != WSA_IO_PENDING)
+            if (!g_accept_ex(_handle, child, _accept.addrs.ptr, 0, addr_len, addr_len, &received, &_accept.io.ov) && ws_lasterror() != WSA_IO_PENDING)
             {
                 --_outstanding;
                 ws_closesocket(child);
@@ -2083,10 +2082,7 @@ nothrow @nogc:
             g_app.console.register_command!(tcp_print, "print")("/protocol/ip/tcp", this);
             g_app.console.register_command!(neighbour_v4_print, "print")("/protocol/ip/neighbour", this);
             static if (has_ipv6)
-            {
                 g_app.console.register_command!(neighbour_v6_print, "print")("/protocol/ip/neighbour6", this);
-                g_app.console.register_command!(ping6, "ping6")("/protocol/ip", this);
-            }
         }
         else version (Windows)
             load_socket_extensions();
@@ -2184,58 +2180,81 @@ nothrow @nogc:
     }
 
     version (UseInternalIPStack)
-    static if (has_ipv6)
     {
-        Ping6State ping6(Session session, IPv6Addr address, Nullable!uint count, BaseInterface iface = null)
+        PingState ping(Session session, InetAddress address, Nullable!uint count, BaseInterface iface = null)
         {
-            if (address == IPv6Addr.any)
+            if (address.addr_any)
             {
-                session.write_line("ping6 requires a destination address");
+                session.write_line("ping requires a destination address");
                 return null;
             }
-            if ((address.is_link_local || address.is_multicast) && !iface)
+            if (address.family == AddressFamily.ipv6)
             {
-                session.write_line("scoped destinations need iface=<interface>");
+                static if (!has_ipv6)
+                {
+                    session.write_line("IPv6 is unavailable in this build");
+                    return null;
+                }
+                if ((address._a.ipv6.addr.is_link_local || address._a.ipv6.addr.is_multicast) && !iface)
+                {
+                    session.write_line("scoped destinations need iface=<interface>");
+                    return null;
+                }
+            }
+            else if ((address._a.ipv4.addr.is_multicast || address._a.ipv4.addr == IPAddr.broadcast) && !iface)
+            {
+                session.write_line("group destinations need iface=<interface>");
                 return null;
             }
-            return alloc!Ping6State(&_stack, session, address, count ? count.value : 4, iface);
+            return alloc!PingState(&_stack, session, address, count ? count.value : 4, iface);
         }
 
-        static class Ping6State : CommandState
+        static class PingState : CommandState
         {
+            import manager.base : ActiveObject, ObjectRef, StateSignal;
         nothrow @nogc:
 
             CommandCompletionState state = CommandCompletionState.in_progress;
 
-            this(IPStack* stack, Session session, IPv6Addr dst, uint count, BaseInterface iface)
+            this(IPStack* stack, Session session, InetAddress dst, uint count, BaseInterface iface)
             {
                 super(session, null);
                 this.stack = stack;
                 this.dst = dst;
                 this.iface = iface;
                 this.count = count ? count : 1;
+                if (iface)
+                {
+                    if (!iface.running)
+                    {
+                        request_cancel();
+                        return;
+                    }
+                    iface.subscribe(&iface_state_change);
+                    subscribed = true;
+                }
                 send_round();
             }
 
             ~this()
             {
-                import protocol.ip.icmp6 : icmp6_echo_cancel;
-                icmp6_echo_cancel(seq);
+                cancel_round();
+                release_interface();
             }
 
             override CommandCompletionState update()
             {
-                import protocol.ip.icmp6 : icmp6_echo_cancel;
-
                 if (state == CommandCompletionState.cancel_requested)
                 {
-                    icmp6_echo_cancel(seq);
+                    cancel_round();
                     state = CommandCompletionState.cancelled;
                     return state;
                 }
+                if (state != CommandCompletionState.in_progress)
+                    return state;
                 if (getTime() - last_send >= 1.seconds)
                 {
-                    icmp6_echo_cancel(seq);
+                    cancel_round();
                     if (sent >= count)
                     {
                         session.write_line(replies, " replies for ", sent, " requests");
@@ -2250,35 +2269,157 @@ nothrow @nogc:
             override void request_cancel()
             {
                 if (state == CommandCompletionState.in_progress)
+                {
+                    cancel_round();
+                    release_interface();
                     state = CommandCompletionState.cancel_requested;
+                }
             }
 
         private:
             IPStack* stack;
-            IPv6Addr dst;
-            BaseInterface iface;
+            InetAddress dst;
+            ObjectRef!BaseInterface iface;
             MonoTime last_send;
             uint count;
             uint sent;
             uint replies;
             ushort seq;
+            bool subscribed;
+
+            void cancel_round()
+            {
+                if (dst.family == AddressFamily.ipv4)
+                {
+                    import protocol.ip.icmp : icmp_echo_cancel;
+                    icmp_echo_cancel(seq);
+                }
+                else static if (has_ipv6)
+                {
+                    import protocol.ip.icmp6 : icmp6_echo_cancel;
+                    icmp6_echo_cancel(seq);
+                }
+                seq = 0;
+            }
+
+            void release_interface()
+            {
+                if (subscribed)
+                {
+                    if (auto i = iface.get)
+                        i.unsubscribe(&iface_state_change);
+                    subscribed = false;
+                }
+            }
+
+            void iface_state_change(ActiveObject, StateSignal signal)
+            {
+                if (signal == StateSignal.offline || signal == StateSignal.destroyed)
+                    request_cancel();
+            }
 
             void send_round()
             {
-                import protocol.ip.icmp6 : icmp6_echo_send;
-
+                if (subscribed && iface is null)
+                {
+                    request_cancel();
+                    return;
+                }
                 ++sent;
                 last_send = getTime();
-                seq = icmp6_echo_send(*stack, dst, iface, &on_reply);
+                if (dst.family == AddressFamily.ipv4)
+                {
+                    import protocol.ip.icmp : icmp_echo_send;
+                    seq = icmp_echo_send(*stack, dst._a.ipv4.addr, iface, &on_reply!IPAddr, &on_error_v4);
+                }
+                else static if (has_ipv6)
+                {
+                    import protocol.ip.icmp6 : icmp6_echo_send;
+                    seq = icmp6_echo_send(*stack, dst._a.ipv6.addr, iface, &on_reply!IPv6Addr, &on_error_v6);
+                }
                 if (seq == 0)
                     session.write_line("no source address or route for ", dst);
             }
 
-            void on_reply(IPv6Addr from, Duration rtt)
+            void on_reply(Addr)(Addr from, Duration rtt)
             {
                 ++replies;
                 session.write_line("reply from ", from, ": time=", rtt);
             }
+
+            void on_error_v4(IPAddr from, ubyte type, ubyte code, uint data)
+            {
+                import protocol.ip.icmp : IcmpType, IcmpDestUnreachableCode;
+                switch (type)
+                {
+                    case IcmpType.dest_unreachable:
+                        if (code == IcmpDestUnreachableCode.frag_needed)
+                            session.write_line("fragmentation needed from ", from, ": mtu=", data & 0xffff);
+                        else
+                            session.write_line("destination unreachable from ", from, ": code=", code);
+                        break;
+                    case IcmpType.time_exceeded: session.write_line("time exceeded from ", from, ": code=", code); break;
+                    case IcmpType.parameter_problem: session.write_line("parameter problem from ", from, ": code=", code, " pointer=", data >> 24); break;
+                    default: break;
+                }
+            }
+
+            static if (has_ipv6)
+            void on_error_v6(IPv6Addr from, ubyte type, ubyte code, uint data)
+            {
+                import protocol.ip.icmp6 : Icmp6Type;
+                switch (type)
+                {
+                    case Icmp6Type.dest_unreachable: session.write_line("destination unreachable from ", from, ": code=", code); break;
+                    case Icmp6Type.packet_too_big: session.write_line("packet too big from ", from, ": mtu=", data); break;
+                    case Icmp6Type.time_exceeded: session.write_line("time exceeded from ", from, ": code=", code); break;
+                    case Icmp6Type.parameter_problem: session.write_line("parameter problem from ", from, ": code=", code, " pointer=", data); break;
+                    default: session.write_line("ICMPv6 error from ", from, ": type=", type, " code=", code); break;
+                }
+            }
+        }
+
+        unittest
+        {
+            import urt.mem : free;
+
+            static class Link : BaseInterface
+            {
+                import router.iface.packet : Packet, QueuePolicy;
+                enum type_name = "ping-test-link";
+            nothrow @nogc:
+                this(CID id, ObjectFlags flags = ObjectFlags.none)
+                {
+                    super(collection_type_info!Link, id, flags);
+                    _state = State.running;
+                }
+                override int transmit(ref Packet packet, MessageCallback callback, const(QueuePolicy)* policy) { return 0; }
+            }
+
+            Link link = Collection!Link().create("ping-lifetime-test");
+            scope(exit)
+            {
+                if (link)
+                {
+                    Collection!Link().remove(link);
+                    free(link);
+                }
+            }
+            Console* console = alloc!Console(null, StringLit!"test.ping");
+            Session session = alloc!Session(CID(1), ObjectFlags.none, *console);
+            scope(exit) free(session);
+            IPStack stack;
+            PingState command = alloc!PingState(&stack, session, InetAddress(IPAddr.loopback, 0), 4, link);
+            scope(exit) free(command);
+            assert(command.subscribed && command.sent == 1);
+            link.disabled(true);
+            assert(!command.subscribed);
+            Collection!Link().remove(link);
+            free(link);
+            link = null;
+            assert(command.update() == CommandCompletionState.cancelled);
+            command.last_send -= 2.seconds;
+            assert(command.update() == CommandCompletionState.cancelled && command.sent == 1);
         }
     }
 

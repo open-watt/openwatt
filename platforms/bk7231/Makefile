@@ -26,9 +26,9 @@ CFLAGS  += -std=gnu99
 SOC_COMMON := -DSOC_BK7231=1 -DSOC_BK7231U=2 -DSOC_BK7221U=3
 
 ifeq ($(PLATFORM),bk7231n)
-    SOC_DEF := $(SOC_COMMON) -DSOC_BK7231N=5
+    SOC_DEF := $(SOC_COMMON) -DSOC_BK7231N=5 -DCFG_SOC_NAME=SOC_BK7231N
 else ifeq ($(PLATFORM),bk7231t)
-    SOC_DEF := $(SOC_COMMON)
+    SOC_DEF := $(SOC_COMMON) -DCFG_SOC_NAME=SOC_BK7231U
 endif
 
 CFLAGS += $(SOC_DEF)
@@ -115,7 +115,7 @@ SRCS += $(S)/func/user_driver/BkDriverFlash.c
 SRCS += $(S)/func/user_driver/BkDriverRng.c
 
 URT_BK := ../../third_party/urt/src/urt/driver/bk7231
-SHIM_SRCS := $(URT_BK)/ow_rw.c $(URT_BK)/ow_shim.c
+SHIM_SRCS := $(URT_BK)/ow_rw.c $(URT_BK)/ow_shim.c $(URT_BK)/efuse.c
 
 SRCS += $(S)/driver/common/dd.c
 SRCS += $(S)/driver/common/drv_model.c
@@ -277,21 +277,39 @@ SRCS += $(S)/app/config/param_config.c
 OBJS := $(patsubst $(S)/%.c,$(BUILDDIR)/%.o,$(SRCS))
 OBJS += $(patsubst $(URT_BK)/%.c,$(BUILDDIR)/urt/%.o,$(SHIM_SRCS))
 
-.PHONY: all clean
+sh_quote = '$(subst ','"'"',$(1))'
+
+.PHONY: all clean FORCE
 
 all: $(OUTPUT)
 
-$(OUTPUT): $(OBJS)
+$(OUTPUT): $(OBJS) $(BUILDDIR)/archive-inputs Makefile
 	@mkdir -p $(dir $@)
-	$(AR) rcs $@ $^
+	rm -f $@.tmp
+	$(AR) rcs $@.tmp $(OBJS)
+	mv -f $@.tmp $@
 
-$(BUILDDIR)/%.o: $(S)/%.c
+$(BUILDDIR)/archive-inputs: FORCE
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -c $< -o $@
+	@printf '%s\n' $(call sh_quote,$(AR)) $(call sh_quote,$(OBJS)) > $@.tmp
+	@if cmp -s $@.tmp $@; then rm -f $@.tmp; else mv -f $@.tmp $@; fi
 
-$(BUILDDIR)/urt/%.o: $(URT_BK)/%.c
+FORCE:
+
+$(BUILDDIR)/compile-flags: FORCE
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -c $< -o $@
+	@printf '%s\n' $(call sh_quote,$(CC)) $(call sh_quote,$(CPPFLAGS)) $(call sh_quote,$(CFLAGS)) $(call sh_quote,$(abspath $(S))) $(call sh_quote,$(abspath $(URT_BK))) > $@.tmp
+	@if cmp -s $@.tmp $@; then rm -f $@.tmp; else mv -f $@.tmp $@; fi
+
+$(BUILDDIR)/%.o: $(S)/%.c $(BUILDDIR)/compile-flags Makefile
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -MF $(@:.o=.d) -MT $@ -c $< -o $@
+
+$(BUILDDIR)/urt/%.o: $(URT_BK)/%.c $(BUILDDIR)/compile-flags Makefile
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -MF $(@:.o=.d) -MT $@ -c $< -o $@
+
+-include $(OBJS:.o=.d)
 
 clean:
 	rm -rf build/

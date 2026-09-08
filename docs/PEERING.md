@@ -100,6 +100,10 @@ holds a key, the proof (below); it marks itself claimed, records the claimant, a
 its beacons now say claimed so other clusters' authorities skip it. A refused claim is
 `err {code:"claimed"}` or `access_denied`.
 
+If several configured sessions identify the same node, the authority keeps its pending or
+acknowledged claim on the current session. Refusal, detach or an offline session releases that
+claim; a later sweep can claim over another running session. This does not migrate session state.
+
 The dial has ten seconds to establish and exchange hellos. Expiry, a refused claim, or the session
 dying tears the pair down and demotes the link the attempt went through (30s, doubling to 10m), so
 a member that sees an authority on two segments settles on the one that works.
@@ -112,12 +116,10 @@ pronounce dead is detected by its unbound beacon and re-claimed.
 
 ### What a claim confers
 
-A successful claim arms two things on the session. The member takes its first claimant as its
-time authority (clock discipline is part of subordination), and the authority arms its log tap on
-the member. The tap is re-armed by the claim itself rather than by the session, so it follows the
-member across reboots even though the session peer is recreated each time. Mirroring the member's
-device tree as claim policy is not yet built; today a device mirror is subscribed explicitly (see
-[SYNC.md](SYNC.md)).
+A successful claim makes the first claimant the member's time authority. After the member
+acknowledges the claim, the authority arms its configured log tap and subscribes to `device:**`
+on that session. A replacement session must acknowledge its own claim before either subscription
+is armed. Device mirroring uses the model subscription described in [SYNC.md](SYNC.md).
 
 ## Dual-authority
 
@@ -185,8 +187,6 @@ The parts of the design that are settled but not built, tracked in [TODO.md](../
   addresses the node-id and late-binds its path per send, is the full L3 move and lands with the
   election. Reachability through the fabric is a separate propagation mechanism, not a beacon
   concern.
-- **The claimed surface.** `device:**` as claim policy, so a claim is the enumeration of the
-  member's device tree.
 - **Onboarding.** A factory device with no network yet: SoftAP provisioning named after the
   factory hostname serving the existing HTTP config surface, or BLE provisioning once the stack has
   a peripheral role. The chain is factory, provision, discovered, adopted, configured.

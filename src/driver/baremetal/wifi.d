@@ -23,7 +23,7 @@ import router.iface.wifi;
 
 nothrow @nogc:
 
-// TODO: tx admission/completion hooks (Beken txu_cntrl_push / rwm_tx_confirm) and a tx_backpressure counter
+// TODO: integrate TX completion/backpressure accounting; see the uRT #258 follow-up in TODO.md.
 
 class BuiltinWiFi : WiFiInterface
 {
@@ -198,7 +198,7 @@ protected:
 
     bool mode_update_pending() const pure nothrow
     {
-        return _mode_update_pending;
+        return _mode_retry_scheduled;
     }
 
     override CompletionStatus startup()
@@ -262,16 +262,13 @@ protected:
 
         if (atomicExchange!(MemoryOrder.acq_rel)(&_wifi_pump_retry, 0u) != 0)
             service_wifi();
-
-        flush_pending_mode_update();
     }
 
     override void on_wlan_bind_changed()
     {
         if (!running)
             return;
-        _mode_update_pending = true;
-        _next_mode_update_time = MonoTime.init;
+        schedule_mode_update(getTime());
     }
 
     override void on_tx_power_changed()
@@ -331,9 +328,9 @@ private:
     Wifi _wifi;
     ubyte _num_ap;
     ubyte _num_client;
-    bool _mode_update_pending;
     bool _mode_update_warned;
-    MonoTime _next_mode_update_time;
+    bool _mode_retry_scheduled;
+    bool _service_deadline_scheduled;
     ScanHandler _scan_handler;
     bool _scanning;
 
@@ -355,15 +352,24 @@ private:
         return wifi_set_mode(_wifi, m);
     }
 
-    void flush_pending_mode_update()
+    void schedule_mode_update(MonoTime when)
     {
-        if (!_mode_update_pending || !_wifi.is_open)
+        if (!_wifi.is_open)
             return;
-        if (_next_mode_update_time.ticks != 0 && getTime() < _next_mode_update_time)
+        if (_mode_retry_scheduled)
+            g_app.cancel(&mode_update_event);
+        g_app.schedule(when, &mode_update_event);
+        _mode_retry_scheduled = true;
+    }
+
+    void mode_update_event(MonoTime)
+    {
+        _mode_retry_scheduled = false;
+        if (!_wifi.is_open || !running)
             return;
         if (!update_drv_mode())
         {
-            _next_mode_update_time = getTime() + 1.seconds;
+            schedule_mode_update(getTime() + 1.seconds);
             if (!_mode_update_warned)
             {
                 _mode_update_warned = true;
@@ -371,13 +377,23 @@ private:
             }
             return;
         }
-        _mode_update_pending = false;
+        if (_mode_retry_scheduled)
+            return;
         _mode_update_warned = false;
-        _next_mode_update_time = MonoTime.init;
     }
 
     void teardown_radio()
     {
+        if (_service_deadline_scheduled)
+        {
+            g_app.cancel(&wifi_deadline_event);
+            _service_deadline_scheduled = false;
+        }
+        if (_mode_retry_scheduled)
+        {
+            g_app.cancel(&mode_update_event);
+            _mode_retry_scheduled = false;
+        }
         if (_wifi.is_open)
         {
             wifi_set_rx_callback(_wifi, null);
@@ -389,9 +405,7 @@ private:
         atomicStore!(MemoryOrder.release)(_wifi_pump_pending, 0u);
         atomicStore!(MemoryOrder.release)(_wifi_pump_retry, 0u);
         sta_started = false;
-        _mode_update_pending = false;
         _mode_update_warned = false;
-        _next_mode_update_time = MonoTime.init;
     }
 
     static void wifi_ready_dispatch() nothrow @nogc
@@ -401,8 +415,7 @@ private:
                 radio.request_wifi_pump_from_ready();
     }
 
-    // Queued pump events bind this stable trampoline rather than a radio instance, so a radio
-    // destroyed while its event is still queued is simply absent from the sweep.
+    // Queued events must not retain a radio that can be destroyed before dispatch.
     static struct PumpSweep
     {
         void event(MonoTime when) nothrow @nogc
@@ -466,6 +479,17 @@ private:
             return;
 
         bool pending = wifi_service(_wifi);
+        if (_service_deadline_scheduled)
+        {
+            g_app.cancel(&wifi_deadline_event);
+            _service_deadline_scheduled = false;
+        }
+        MonoTime deadline = wifi_service_deadline(_wifi);
+        if (deadline && _wifi.is_open)
+        {
+            g_app.schedule(deadline, &wifi_deadline_event);
+            _service_deadline_scheduled = true;
+        }
         uint event_dropped = wifi_take_event_drops(_wifi);
         if (event_dropped != 0)
         {
@@ -488,6 +512,12 @@ private:
             set_active_channel(hw_ch);
         if (pending)
             request_wifi_pump_deferred();
+    }
+
+    void wifi_deadline_event(MonoTime when)
+    {
+        _service_deadline_scheduled = false;
+        service_wifi();
     }
 
     static void wifi_event_dispatch(Wifi wifi, WifiEvent event, const(void)* data) nothrow @nogc
@@ -557,8 +587,7 @@ private:
             case WifiEvent.sta_stopped:         sta_started = false; break;
             case WifiEvent.sta_start_failed:
                 sta_started = false;
-                _mode_update_pending = true;
-                _next_mode_update_time = getTime() + 1.seconds;
+                schedule_mode_update(getTime() + 1.seconds);
                 break;
             case WifiEvent.sta_connected:       ++sta_connected_seq; break;
             case WifiEvent.sta_disconnected:    ++sta_disconnected_seq; break;
@@ -859,8 +888,7 @@ private:
         // A driver that cannot read the live rate names the PHY instead, so that direction reports the
         // mode's peak rather than the attenuated rate. An unnamed PHY gives 0, which reads as unknown.
         const ulong peak = wifi_phy_max_rate(info.phy_mode, info.bandwidth, info.nss, info.short_gi);
-        set_link_speed(info.tx_bitrate ? ulong(info.tx_bitrate) * 1000 : peak,
-                       info.rx_bitrate ? ulong(info.rx_bitrate) * 1000 : peak);
+        set_link_speed(info.tx_bitrate ? ulong(info.tx_bitrate) * 1000 : peak, info.rx_bitrate ? ulong(info.rx_bitrate) * 1000 : peak);
         set_phy_mode(info.phy_mode, info.bandwidth, info.nss, info.short_gi);
 
         MACAddress bssid = MACAddress(info.bssid);

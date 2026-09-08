@@ -553,15 +553,13 @@ private:
     {
         _pending_req = 0;
         _att_phase = ATTPhase.failed;
-        foreach (ref op; _user_ops[])
+        auto failed = _user_ops.move;
+        foreach (ref op; failed[])
         {
             if (op.cb)
                 op.cb(null, ATTError.send_failed);
         }
-        _user_ops.clear();
-
         log.error("ATT failure on connection to ", _peer);
-        // callers are receive handlers; the state machine reacts to ATTPhase.failed
     }
 
     const(GattChar)* find_char_by_handle(ushort value_handle) const
@@ -589,16 +587,14 @@ private:
     bool submit_op(ref UserOp op)
     {
         _user_ops ~= op;
-        if (_pending_req == 0)
-            send_next_op();
-        return true;
+        return send_next_op();
     }
 
-    void send_next_op()
+    bool send_next_op()
     {
-        if (_user_ops.length == 0)
-            return;
-        send_request(_user_ops[0].buf[0 .. _user_ops[0].len]);
+        if (_pending_req != 0 || _user_ops.length == 0)
+            return true;
+        return send_request(_user_ops[0].buf[0 .. _user_ops[0].len]);
     }
 
     void complete_op(const(ubyte)[] value, ATTError error)
@@ -938,6 +934,10 @@ unittest
         uint reads_done;
         ubyte[4] read_value;
         bool sub_done;
+        bool send_ok = true;
+        uint writes_done;
+        uint writes_failed;
+        bool write_on_completion;
 
         this()
         {
@@ -949,7 +949,7 @@ unittest
             last_req[0 .. pdu.length] = pdu[];
             req_len = pdu.length;
             ++sends;
-            return true;
+            return send_ok;
         }
 
         void on_ready() { ++ready_count; }
@@ -957,6 +957,21 @@ unittest
         void on_sub(const(ubyte)[] v, ATTError e) { sub_done = e == ATTError.none; }
         void on_read1(const(ubyte)[] v, ATTError e) { ++reads_done; read_value[0 .. v.length] = v[]; }
         void on_read2(const(ubyte)[] v, ATTError e) { ++reads_done; }
+        void on_write(const(ubyte)[], ATTError error)
+        {
+            if (error != ATTError.none)
+            {
+                ++writes_failed;
+                assert(_user_ops.empty && _pending_req == 0);
+                return;
+            }
+            ++writes_done;
+            if (write_on_completion)
+            {
+                write_on_completion = false;
+                assert(write(0x0022, null, true, &on_write));
+            }
+        }
     }
 
     enum GUID vendor_svc = UUID!"12345678-9ABC-DEF0-1234-56789ABCDEF0";
@@ -1092,4 +1107,29 @@ unittest
     c.att_on_pdu(indic[]);
     assert(c.notify_count == 2);
     assert(c.sends == sends_before + 1 && c.last_req[0] == ATTOpcode.confirmation);
+
+    c.write_on_completion = true;
+    assert(c.write(0x0022, null, true, &c.on_write));
+    sends_before = c.sends;
+    c.att_on_pdu(write_rsp[]);
+    assert(c.writes_done == 1 && c.sends == sends_before + 1);
+    assert(c._user_ops.length == 1 && c._pending_req == ATTOpcode.write_req);
+    c.att_on_pdu(write_rsp[]);
+    assert(c.writes_done == 2 && c._user_ops.empty && c._pending_req == 0);
+
+    c.send_ok = false;
+    assert(!c.write(0x0022, null, true, &c.on_write));
+    assert(c.writes_failed == 1 && c._att_phase == c.ATTPhase.failed);
+    assert(!c.write(0x0022, null, true, &c.on_write));
+    assert(c.writes_failed == 1);
+
+    c._att_phase = c.ATTPhase.ready;
+    c.send_ok = true;
+    assert(c.write(0x0022, null, true, &c.on_write));
+    assert(c.write(0x0022, null, true, &c.on_write));
+    assert(c.write(0x0022, null, true, &c.on_write));
+    c.send_ok = false;
+    c.att_on_pdu(write_rsp[]);
+    assert(c.writes_done == 3 && c.writes_failed == 3);
+    assert(c._user_ops.empty && c._pending_req == 0 && !c.discovery_complete);
 }

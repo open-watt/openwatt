@@ -193,7 +193,6 @@ nothrow @nogc:
 
     void refresh_device_subscriptions()
     {
-        bool new_device = false;
         foreach (Device d; g_app.devices.values)
         {
             if (d is energy_device)
@@ -202,16 +201,9 @@ nothrow @nogc:
                 continue;
             subscribed_devices ~= d;
             d.subscribe(&on_device_event);
-            new_device = true;
-            // TODO: device tree change should mark dependent appliances dirty
-            //       so registry.resync_all only re-synthesizes affected controls.
+            topology_dirty = true;
+            // TODO: resynthesize controls only for appliances affected by the tree change.
         }
-
-        // a newly-present device may satisfy an appliance that referenced it before it existed
-        if (new_device)
-            foreach (a; Collection!Appliance().values)
-                if (a.resolve_refs())
-                    topology_dirty = true;
     }
 
     void on_device_event(Component c, ComponentEvent event)
@@ -219,8 +211,7 @@ nothrow @nogc:
         if (c is null || !c.is_device)
             return;
         Device d = cast(Device)c;
-        // Device removal is not implemented yet; it must also invalidate the
-        // raw Component references held by Appliance.
+        // TODO: invalidate Appliance's cached Component references on destruction.
         if (event == ComponentEvent.destroyed)
         {
             d.unsubscribe(&on_device_event);
@@ -238,6 +229,8 @@ nothrow @nogc:
         if (topology_dirty)
         {
             topology_dirty = false;
+            foreach (a; Collection!Appliance().values)
+                a.resolve_refs(g_app.devices);
             return true;
         }
         return last_topology_rebuild == MonoTime.init;
@@ -797,8 +790,7 @@ nothrow @nogc:
             return soc;
         }
 
-        void add_row(const(char)[] label, const(char)[] kind, MeterData* data,
-                     const(char)[] apparent_override = null)
+        void add_row(const(char)[] label, const(char)[] kind, MeterData* data, const(char)[] apparent_override = null)
         {
             table.add_row();
             table.cell(label);
@@ -843,15 +835,13 @@ nothrow @nogc:
             const(char)[] kind = link.kind.length ? link.kind : "link";
             if (link.capacity_amps)
                 kind = tconcat(kind, " ", link.capacity_amps, "A");
-            add_row(tconcat(prefix, connector, link.label),
-                kind, data);
+            add_row(tconcat(prefix, connector, link.label), kind, data);
         }
 
         void add_appliance_row(Appliance a, const(char)[] prefix, bool last)
         {
             Port* p = primary_port(a);
-            add_row(tconcat(prefix, last ? "└─ " : "├─ ", a.name[]),
-                a.kind.length ? a.kind : "-", p ? &p.meter_data : null, battery_soc(a, p));
+            add_row(tconcat(prefix, last ? "└─ " : "├─ ", a.name[]), a.kind.length ? a.kind : "-", p ? &p.meter_data : null, battery_soc(a, p));
         }
 
         Component implicit_port_member(Port* p)
@@ -907,15 +897,12 @@ nothrow @nogc:
                     data = &member_data;
                 }
             }
-            add_row(tconcat(prefix, last ? "└─ " : "├─ ", implicit_member_label(p, member)),
-                implicit_member_kind(member), data, component_soc(member));
+            add_row(tconcat(prefix, last ? "└─ " : "├─ ", implicit_member_label(p, member)), implicit_member_kind(member), data, component_soc(member));
         }
 
         bool bus_has_unaccounted(Bus* bus)
         {
-            return bus !is null &&
-                   ((bus.unaccounted_load_power == bus.unaccounted_load_power && bus.unaccounted_load_power > 0) ||
-                    (bus.unaccounted_source_power == bus.unaccounted_source_power && bus.unaccounted_source_power > 0));
+            return bus !is null && ((bus.unaccounted_load_power == bus.unaccounted_load_power && bus.unaccounted_load_power > 0) || (bus.unaccounted_source_power == bus.unaccounted_source_power && bus.unaccounted_source_power > 0));
         }
 
         void add_unaccounted_row(Bus* bus, const(char)[] prefix, bool last)
@@ -924,13 +911,10 @@ nothrow @nogc:
             data.reset_to_missing();
             bool load = bus.unaccounted_load_power == bus.unaccounted_load_power && bus.unaccounted_load_power > 0;
             bool source = bus.unaccounted_source_power == bus.unaccounted_source_power && bus.unaccounted_source_power > 0;
-            float power = load ? bus.unaccounted_load_power :
-                          source ? -bus.unaccounted_source_power : float.nan;
+            float power = load ? bus.unaccounted_load_power : source ? -bus.unaccounted_source_power : float.nan;
             data.write_value(MeterField.power, 0, power);
             data.mark(MeterField.power, 0, Provenance.rogue);
-            add_row(tconcat(prefix, last ? "└─ " : "├─ ", "?"),
-                load ? "unaccounted load" : source ? "unaccounted source" : "unaccounted",
-                &data);
+            add_row(tconcat(prefix, last ? "└─ " : "├─ ", "?"), load ? "unaccounted load" : source ? "unaccounted source" : "unaccounted", &data);
         }
 
         size_t appliance_count(Bus* bus)
@@ -963,9 +947,7 @@ nothrow @nogc:
 
         bool link_has_implicit_member(Link* link)
         {
-            return link !is null && link.owner !is null && link.b !is null &&
-                   !bus_has_explicit_children(link.b, link) &&
-                   implicit_port_member(link.port_b) !is null;
+            return link !is null && link.owner !is null && link.b !is null && !bus_has_explicit_children(link.b, link) && implicit_port_member(link.port_b) !is null;
         }
 
         bool bus_has_circuit_children(Bus* bus)
@@ -984,8 +966,7 @@ nothrow @nogc:
 
         bool appliance_child_visible(Link* link, Appliance a, Bus* anchor)
         {
-            return link.owner is a && link.a is anchor && link.b !is anchor &&
-                   (bus_has_circuit_children(link.b) || link_has_implicit_member(link));
+            return link.owner is a && link.a is anchor && link.b !is anchor && (bus_has_circuit_children(link.b) || link_has_implicit_member(link));
         }
 
         size_t appliance_child_count(Appliance a, Bus* anchor)
@@ -1008,8 +989,7 @@ nothrow @nogc:
             return n;
         }
 
-        void add_bus_tree(Bus* bus, Link* ingress, TreePrefix prefix, const(char)[] connector,
-                          ref Array!(Bus*) visited, bool emit_self = true)
+        void add_bus_tree(Bus* bus, Link* ingress, TreePrefix prefix, const(char)[] connector, ref Array!(Bus*) visited, bool emit_self = true)
         {
             if (bus is null)
                 return;
@@ -1022,14 +1002,10 @@ nothrow @nogc:
                     add_bus_row(bus, prefix.text, connector);
             }
 
-            TreePrefix child_prefix = emit_self
-                ? prefix ~ (connector == "├─ " ? "│  " : connector.length ? "   " : "")
-                : prefix;
+            TreePrefix child_prefix = emit_self ? prefix ~ (connector == "├─ " ? "│  " : connector.length ? "   " : "") : prefix;
             bool has_implicit_member = link_has_implicit_member(ingress);
             bool has_unaccounted = !has_implicit_member && bus_has_unaccounted(bus);
-            size_t total = appliance_count(bus) + child_link_count(bus, ingress) +
-                           (has_implicit_member ? 1 : 0) +
-                           (has_unaccounted ? 1 : 0);
+            size_t total = appliance_count(bus) + child_link_count(bus, ingress) + (has_implicit_member ? 1 : 0) + (has_unaccounted ? 1 : 0);
             size_t emitted;
 
             foreach (a; Collection!Appliance().values)
@@ -1129,8 +1105,7 @@ nothrow @nogc:
 
         bool is_grid_ingress(Link* link)
         {
-            return link !is null && link.owner is null && link.a !is null &&
-                   link.a.contains_grid && link.b !is null;
+            return link !is null && link.owner is null && link.a !is null && link.a.contains_grid && link.b !is null;
         }
 
         size_t grid_ingress_count()
@@ -1336,9 +1311,7 @@ nothrow @nogc:
 
     override uint content_height()
     {
-        return cast(uint)(_mod.manager.graph.bus_list.length +
-                          _mod.manager.graph.links.length +
-                          _mod.manager.graph.ports.length);
+        return cast(uint)(_mod.manager.graph.bus_list.length + _mod.manager.graph.links.length + _mod.manager.graph.ports.length);
     }
 
     override const(char)[] status_text()

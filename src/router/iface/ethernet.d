@@ -76,7 +76,7 @@ nothrow @nogc:
         lbm[3] = 4;  // first TLV offset: past the transaction id
         lbm[4 .. 8] = txid.nativeToBigEndian;
         lbm[8] = 0;  // End TLV
-        _pending_pings ~= PendingPing(txid, getTime(), handler);
+        _pending_pings ~= PendingPing(getTime(), handler, id, txid, dst);
         send(dst, lbm, EtherType.cfm);
         return txid;
     }
@@ -511,13 +511,15 @@ private:
             case cfm_opcode_lbr:
             {
                 uint txid = pdu[4 .. 8].bigEndianToNative!uint;
-                foreach (ref p; _pending_pings[])
+                foreach (i, ref p; _pending_pings[])
                 {
-                    if (p.txid != txid)
+                    if (p.txid != txid || p.destination != packet.eth.src || p.iface != id)
                         continue;
                     Duration rtt = getTime() - p.sent;
-                    p.handler(packet.eth.src, rtt, cfm_sender_identity(pdu));
-                    return;    // the entry stays; it collects further replies until it expires
+                    MacPingHandler handler = p.handler;
+                    _pending_pings.removeSwapLast(i);
+                    handler(packet.eth.src, rtt, cfm_sender_identity(pdu));
+                    return;
                 }
                 return;
             }
@@ -762,9 +764,11 @@ private void sweep_reply(uint txid, MACAddress from, scope const(char)[] identit
 
 private struct PendingPing
 {
-    uint txid;
     MonoTime sent;
     MacPingHandler handler;
+    CID iface;
+    uint txid;
+    MACAddress destination;
 }
 
 private struct PendingSweep
@@ -920,4 +924,71 @@ unittest
     tagged.vlan_tag = VlanTag.none;
     assert(encode_ethernet_header(tagged, header[]) == 18);
     assert(header[12 .. 18] == [0x81, 0x00, 0, 3, 0x08, 0x00]);
+}
+
+unittest
+{
+    import urt.mem : alloc, free;
+    import manager.console : Console, Session;
+    import urt.string : StringLit;
+
+    static class Link : EthernetStation
+    {
+        enum type_name = "mac-ping-test-link";
+    nothrow @nogc:
+        this(CID id, ObjectFlags flags = ObjectFlags.none)
+        {
+            super(collection_type_info!Link, id, flags);
+            _state = State.running;
+        }
+        override void medium_tx(ref Packet packet) {}
+    }
+    Link first = Collection!Link().create("mac-ping-test-first");
+    Link second = Collection!Link().create("mac-ping-test-second");
+    scope(exit)
+    {
+        Collection!Link().remove(first);
+        Collection!Link().remove(second);
+        free(first);
+        free(second);
+    }
+    struct Results
+    {
+        uint replies;
+        void reply(MACAddress, Duration, scope const(char)[]) nothrow @nogc { ++replies; }
+    }
+    Results results;
+    MACAddress remote = MACAddress(2, 0, 0, 0, 0, 3);
+    uint txid = first.ping(remote, &results.reply);
+    scope(exit) mac_ping_cancel(txid);
+    ubyte[9] data;
+    data[0] = cast(ubyte)(first.cfm_level << 5);
+    data[1] = cfm_opcode_lbr;
+    data[3] = 4;
+    data[4 .. 8] = txid.nativeToBigEndian;
+    Packet packet;
+    ref eth = packet.init!Ethernet(data[]);
+    eth.ether_type = EtherType.cfm;
+    eth.src = MACAddress(2, 0, 0, 0, 0, 4);
+    first.cfm_ingress(packet);
+    eth.src = remote;
+    second.cfm_ingress(packet);
+    assert(results.replies == 0);
+    first.cfm_ingress(packet);
+    first.cfm_ingress(packet);
+    assert(results.replies == 1);
+
+    Console* console = alloc!Console(null, StringLit!"test.mac-ping");
+    Session session = alloc!Session(CID(1), ObjectFlags.none, *console);
+    scope(exit) free(session);
+    size_t pending = _pending_pings.length;
+    auto command = alloc!(InterfaceModule.MacPingState)(session, remote, 4, first);
+    assert(_pending_pings.length == pending + 1);
+    free(command);
+    assert(_pending_pings.length == pending);
+    command = alloc!(InterfaceModule.MacPingState)(session, remote, 4, first);
+    assert(command.subscribed);
+    first.disabled(true);
+    assert(!command.subscribed && _pending_pings.length == pending);
+    free(command);
 }

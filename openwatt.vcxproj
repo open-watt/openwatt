@@ -282,6 +282,7 @@
     <DCompile Include="src\protocol\tesla\vehicle_crypto.d" />
     <DCompile Include="src\protocol\tesla\vehicle_scanner.d" />
     <DCompile Include="src\protocol\tesla\vehicle_session.d" />
+    <DCompile Include="src\protocol\tesla\vehicle_retry.d" />
     <DCompile Include="src\protocol\tls\certificate.d" />
     <DCompile Include="src\protocol\tls\package.d" />
     <DCompile Include="src\protocol\tls\stream.d" />

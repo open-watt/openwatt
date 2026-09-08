@@ -134,8 +134,6 @@ nothrow @nogc:
         get_module!SyncModule.each_running_peer((SyncPeer p) { claim_over(p, now); });
     }
 
-    // Log delegation is claim policy: the tap is (re)armed each time a member is claimed, so it
-    // survives the member reconnecting under a fresh session rather than dying with the old peer.
     void arm_logs(SyncPeer p)
     {
         if (_collect_logs)
@@ -151,7 +149,6 @@ nothrow @nogc:
                 arm_logs(kvp.value.peer);
     }
 
-    // what a claim delegates to us: the member's log tap and its whole-device model mirror
     void arm_delegation(SyncPeer p)
     {
         arm_logs(p);
@@ -166,20 +163,8 @@ nothrow @nogc:
         ulong node_id = p._remote_node_id;
         if (!node_id)
             return;
-        if (IssuedClaim* c = node_id in _issued)
-        {
-            if (c.peer is p)
-                return;
-            // a reconnected member's old peer lingers until the idle sweep on datagram links; the
-            // claim moves to the live session, and one still in flight on the dead one is re-issued
-            if (c.acked)
-            {
-                c.peer = p;
-                arm_delegation(p);
-                return;
-            }
-            _issued.remove(node_id);
-        }
+        if (node_id in _issued)
+            return;
 
         Neighbor* n = node_id in get_module!SyncDiscoveryModule.neighbors;
         if (!n)
@@ -400,8 +385,7 @@ nothrow @nogc:
         else if (!bound_cluster.length && !claimed)
         {
             _adopted_cluster = cluster.make_string();
-            log.warning("claimed into cluster '", cluster, "' by '", from.name[],
-                        "' with no local cluster configured; set cluster= to pin this node");
+            log.warning("claimed into cluster '", cluster, "' by '", from.name[], "' with no local cluster configured; set cluster= to pin this node");
         }
 
         _claimants ~= Claimant(from._remote_node_id, from, priority);
@@ -790,6 +774,67 @@ private:
 unittest
 {
     import urt.mem;
+
+    {
+        static class Peering : SyncPeeringModule
+        {
+        nothrow @nogc:
+            this() { super(null); }
+            SyncPeer delegated;
+            override void arm_delegation(SyncPeer p) { delegated = p; }
+        }
+
+        static class Peer : SyncPeer
+        {
+        nothrow @nogc:
+            this(CID id)
+            {
+                super(id);
+                _remote_node_id = 0xA;
+                _remote_role = PeerRole.member;
+            }
+            bool live = true;
+            override bool running() const pure => live;
+        }
+
+        Peering m = alloc!Peering();
+        scope(exit) free(m);
+        Peer old_peer = alloc!Peer(CID(1));
+        scope(exit) free(old_peer);
+        Peer replacement = alloc!Peer(CID(2));
+        scope(exit) free(replacement);
+
+        MonoTime now = MonoTime() + 100.seconds;
+        m._issued.insert(0xA, SyncPeeringModule.IssuedClaim(replacement, 42, false, now));
+        foreach (i; 0 .. 3)
+        {
+            m.prune_issued();
+            m.claim_over(old_peer, now + i.seconds);
+            m.claim_over(replacement, now + i.seconds);
+        }
+        assert((0xA in m._issued).peer is replacement);
+        assert((0xA in m._issued).seq == 42 && (0xA in m._issued).sent_at == now);
+        assert(!m.claim_response(old_peer, 42, true, null, null));
+        assert(!m.claim_response(replacement, 41, true, null, null));
+        assert(m.delegated is null);
+        m.peer_detached(old_peer);
+        assert((0xA in m._issued) !is null);
+        assert(m.claim_response(replacement, 42, true, null, null));
+        assert(m.delegated is replacement && (0xA in m._issued).acked);
+        assert(!m.claim_response(replacement, 42, true, null, null));
+        m.claim_over(replacement, now + 4.seconds);
+        m.claim_over(old_peer, now + 4.seconds);
+        assert((0xA in m._issued).peer is replacement && (0xA in m._issued).acked);
+
+        replacement.live = false;
+        m.prune_issued();
+        assert((0xA in m._issued) is null);
+        m._issued.insert(0xA, SyncPeeringModule.IssuedClaim(old_peer, 43));
+        m.peer_detached(replacement);
+        assert(!m.claim_response(replacement, 42, true, null, null));
+        assert(m.claim_response(old_peer, 43, false, "access_denied", null));
+        assert((0xA in m._issued) is null);
+    }
 
     {
         SyncPeeringModule.ClaimAttempt a;

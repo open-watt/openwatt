@@ -17,11 +17,7 @@ nothrow @nogc:
 mixin LoadProtobuf!"protocol/tesla/commands.proto";
 mixin LoadProtobuf!"protocol/tesla/messages.proto";
 
-// TODO: the generated decoder copies `bytes` fields out of the receive buffer
-//       (tools.protobuf decode_value allocates an Array!ubyte per field). The
-//       response path is small and infrequent so the copies are affordable for
-//       now, but tools.protobuf should grow borrowed const(ubyte)[] fields so
-//       decoding is zero-copy; every proto consumer benefits.
+// TODO: support borrowed protobuf byte fields (see TODO.md).
 
 private Array!ubyte encode(T)(ref const T msg)
 {
@@ -97,8 +93,7 @@ Array!ubyte build_add_key_request(const(ubyte)[] pubkey_xy)
     return encode(msg);
 }
 
-Array!ubyte build_session_info_request(TeslaDomain domain, const(ubyte)[] pubkey,
-                                       const(ubyte)[] routing_address, const(ubyte)[] uuid)
+Array!ubyte build_session_info_request(TeslaDomain domain, const(ubyte)[] pubkey, const(ubyte)[] routing_address, const(ubyte)[] uuid)
 {
     assert(pubkey.length == 65);
     assert(routing_address.length == 16);
@@ -113,15 +108,7 @@ Array!ubyte build_session_info_request(TeslaDomain domain, const(ubyte)[] pubkey
 }
 
 // The payload is pre-encrypted against build_signed_command_metadata()'s AAD.
-Array!ubyte build_signed_routable_message(TeslaDomain domain,
-                                          const(ubyte)[] ciphertext,
-                                          const(ubyte)[] signer_pubkey_sec1,
-                                          const(ubyte)[] epoch,
-                                          const(ubyte)[] nonce,
-                                          uint counter, uint expires_at,
-                                          const(ubyte)[] tag,
-                                          const(ubyte)[] routing_address,
-                                          const(ubyte)[] uuid, uint flags)
+Array!ubyte build_signed_routable_message(TeslaDomain domain, const(ubyte)[] ciphertext, const(ubyte)[] signer_pubkey_sec1, const(ubyte)[] epoch, const(ubyte)[] nonce, uint counter, uint expires_at, const(ubyte)[] tag, const(ubyte)[] routing_address, const(ubyte)[] uuid, uint flags)
 {
     assert(signer_pubkey_sec1.length == 65);
     assert(epoch.length == 16);
@@ -153,9 +140,7 @@ Array!ubyte build_signed_routable_message(TeslaDomain domain,
 Array!ubyte build_action_get_charge_state()
 {
     TeslaAction action;
-    action.vehicle_action.ensure()
-          .get_vehicle_data.ensure()
-          .get_charge_state.ensure();
+    action.vehicle_action.ensure().get_vehicle_data.ensure().get_charge_state.ensure();
     return encode(action);
 }
 
@@ -177,17 +162,14 @@ Array!ubyte build_action_get_vehicle_category(uint category)
 Array!ubyte build_action_get_climate_state()
 {
     TeslaAction action;
-    action.vehicle_action.ensure()
-          .get_vehicle_data.ensure()
-          .get_climate_state.ensure();
+    action.vehicle_action.ensure().get_vehicle_data.ensure().get_climate_state.ensure();
     return encode(action);
 }
 
 Array!ubyte build_action_charging_start_stop(bool start)
 {
     TeslaAction action;
-    ref TeslaChargingStartStopAction command =
-        action.vehicle_action.ensure().charging_start_stop.ensure();
+    ref TeslaChargingStartStopAction command = action.vehicle_action.ensure().charging_start_stop.ensure();
     if (start)
         command.start.ensure();
     else
@@ -216,8 +198,7 @@ Array!ubyte build_action_climate_power(bool enabled)
 Array!ubyte build_action_climate_temperature(float driver_celsius, float passenger_celsius)
 {
     TeslaAction action;
-    ref TeslaHvacTemperatureAdjustmentAction command =
-        action.vehicle_action.ensure().hvac_temperature.ensure();
+    ref TeslaHvacTemperatureAdjustmentAction command = action.vehicle_action.ensure().hvac_temperature.ensure();
     command.level.ensure().maximum.ensure();
     command.driver_temp_celsius.set(driver_celsius);
     command.passenger_temp_celsius.set(passenger_celsius);
@@ -227,8 +208,7 @@ Array!ubyte build_action_climate_temperature(float driver_celsius, float passeng
 Array!ubyte build_action_schedule_charging(bool enabled, int minutes_after_midnight)
 {
     TeslaAction action;
-    ref TeslaScheduledChargingAction command =
-        action.vehicle_action.ensure().scheduled_charging.ensure();
+    ref TeslaScheduledChargingAction command = action.vehicle_action.ensure().scheduled_charging.ensure();
     command.enabled.set(enabled);
     command.charging_time.set(minutes_after_midnight);
     return encode(action);
@@ -279,7 +259,6 @@ int defrost_mode_kind(ref const TeslaDefrostMode state) pure
     return 0;
 }
 
-// Owns the decoded message behind its convenience accessors.
 struct RoutableResponse
 {
 nothrow @nogc:
@@ -357,19 +336,12 @@ bool decode_routable_response(const(ubyte)[] buf, ref RoutableResponse r)
     => proto_deserialise(buf, r.message) == buf.length;
 
 // The GCM tag authenticates the response metadata as AAD.
-bool decrypt_routable_response(ref const RoutableResponse response,
-                               const(ubyte)[] key, const(char)[] vin,
-                               const(ubyte)[] request_tag,
-                               ref Array!ubyte plaintext)
+bool decrypt_routable_response(ref const RoutableResponse response, const(ubyte)[] key, const(char)[] vin, const(ubyte)[] request_tag, ref Array!ubyte plaintext)
 {
-    if (!response.has_response_signature || !response.has_from_domain
-        || response.response_nonce.length != 12 || response.response_tag.length != 16
-        || request_tag.length != 16)
+    if (!response.has_response_signature || !response.has_from_domain || response.response_nonce.length != 12 || response.response_tag.length != 16 || request_tag.length != 16)
         return false;
 
-    Array!ubyte metadata = build_response_metadata(response.from_domain, vin,
-                                                   response.response_counter, response.flags,
-                                                   request_tag, response.signed_message_fault);
+    Array!ubyte metadata = build_response_metadata(response.from_domain, vin, response.response_counter, response.flags, request_tag, response.signed_message_fault);
     SHA256Context sha;
     sha_init(sha);
     sha_update(sha, metadata[]);
@@ -377,8 +349,7 @@ bool decrypt_routable_response(ref const RoutableResponse response,
 
     const(ubyte)[] ciphertext = response.protobuf_message;
     plaintext.resize(ciphertext.length);
-    Result result = aes_gcm_decrypt(key, response.response_nonce, aad[],
-                                    ciphertext, response.response_tag, plaintext[]);
+    Result result = aes_gcm_decrypt(key, response.response_nonce, aad[], ciphertext, response.response_tag, plaintext[]);
     if (result.failed)
     {
         plaintext.clear();
@@ -427,8 +398,7 @@ unittest
     assert(build_action_set_charging_amps(16)[] == HexDecode!"1205da02020810");
     assert(build_action_climate_power(true)[] == HexDecode!"120452020801");
     assert(build_action_climate_power(false)[] == HexDecode!"120452020800");
-    assert(build_action_climate_temperature(21, 21)[] ==
-        HexDecode!"1210720e2a021a00350000a8413d0000a841");
+    assert(build_action_climate_temperature(21, 21)[] == HexDecode!"1210720e2a021a00350000a8413d0000a841");
     assert(build_action_schedule_charging(true, 120)[] == HexDecode!"1207ca020408011078");
 
     TeslaCommandResponse accepted;
@@ -497,8 +467,7 @@ unittest
     assert(!parse_tesla_local_name("S1a87a5a75f3df85", parsed));    // too short
     assert(!parse_tesla_local_name("S1a87a5a75f3dz858C", parsed));  // non-hex
 
-    static immutable ubyte[] session_info_bytes = HexDecode!(
-        "0806124104c7a1f47138486aa4729971494878d33b1a24e39571f748a6e16c5955b3d877d3a6aaa0e955166474af5d32c410f439a2234137ad1bb085fd4e8813c958f11d971a104c463f9cc0d3d26906e982ed224adde6255a0a0000");
+    static immutable ubyte[] session_info_bytes = HexDecode!("0806124104c7a1f47138486aa4729971494878d33b1a24e39571f748a6e16c5955b3d877d3a6aaa0e955166474af5d32c410f439a2234137ad1bb085fd4e8813c958f11d971a104c463f9cc0d3d26906e982ed224adde6255a0a0000");
 
     SessionInfo info;
     assert(decode_session_info(session_info_bytes[], info));
@@ -517,9 +486,7 @@ unittest
     enum uint response_counter = 23;
     enum uint response_flags = encrypt_response_mask;
 
-    Array!ubyte response_meta = build_response_metadata(
-        TeslaDomain.infotainment, "5YJ30123456789ABC",
-        response_counter, response_flags, request_tag[], 0);
+    Array!ubyte response_meta = build_response_metadata(TeslaDomain.infotainment, "5YJ30123456789ABC", response_counter, response_flags, request_tag[], 0);
     SHA256Context sha_ctx;
     sha_init(sha_ctx);
     sha_update(sha_ctx, response_meta[]);
@@ -528,8 +495,7 @@ unittest
     Array!ubyte response_ciphertext;
     response_ciphertext.resize(response_plaintext.length);
     ubyte[16] response_tag = void;
-    Result enc = aes_gcm_encrypt(K[], response_nonce[], response_aad[],
-                                 response_plaintext, response_ciphertext[], response_tag[]);
+    Result enc = aes_gcm_encrypt(K[], response_nonce[], response_aad[], response_plaintext, response_ciphertext[], response_tag[]);
     assert(enc.succeeded);
 
     Array!ubyte response_message;
@@ -572,20 +538,16 @@ unittest
     assert(response.response_tag == response_tag[]);
 
     Array!ubyte decrypted;
-    assert(decrypt_routable_response(response, K[], "5YJ30123456789ABC",
-                                     request_tag[], decrypted));
+    assert(decrypt_routable_response(response, K[], "5YJ30123456789ABC", request_tag[], decrypted));
     assert(decrypted[] == response_plaintext);
 
     RoutableResponse tampered;
     assert(decode_routable_response(response_message[], tampered));
     tampered.message.signature_data.value.aes_gcm_response.value.tag.value[0] ^= 1;
     Array!ubyte rejected;
-    assert(!decrypt_routable_response(tampered, K[], "5YJ30123456789ABC",
-                                      request_tag[], rejected));
+    assert(!decrypt_routable_response(tampered, K[], "5YJ30123456789ABC", request_tag[], rejected));
 }
 
-// Envelope golden vectors pin the field order and the multi-byte
-// varint cases (signature_data length > 127, counter > 127).
 unittest
 {
     import urt.encoding : HexDecode;
@@ -614,16 +576,14 @@ unittest
         ~ "090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F202122232425262728292A2B2C2D2E2F"
         ~ "303132333435363738393A3B3C3D3E3F9A0310505152535455565758595A5B5C5D5E5F"));
 
-    assert(build_signed_routable_message(TeslaDomain.infotainment, ct[], sec1[],
-            ep[], no[], 7, 2655, tg[], ra[], uu[], 0)[] == HexDecode!(
+    assert(build_signed_routable_message(TeslaDomain.infotainment, ct[], sec1[], ep[], no[], 7, 2655, tg[], ra[], uu[], 0)[] == HexDecode!(
         "320208033A121210404142434445464748494A4B4C4D4E4F52060102030405066A80010A430A"
         ~ "4104000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F2021222324"
         ~ "25262728292A2B2C2D2E2F303132333435363738393A3B3C3D3E3F2A390A106061626364656667"
         ~ "68696A6B6C6D6E6F120C707172737475767778797A7B1807255F0A00002A1080818283848586"
         ~ "8788898A8B8C8D8E8F9A0310505152535455565758595A5B5C5D5E5F"));
 
-    assert(build_signed_routable_message(TeslaDomain.infotainment, ct[], sec1[],
-            ep[], no[], 300, 2655, tg[], ra[], uu[], encrypt_response_mask)[] == HexDecode!(
+    assert(build_signed_routable_message(TeslaDomain.infotainment, ct[], sec1[], ep[], no[], 300, 2655, tg[], ra[], uu[], encrypt_response_mask)[] == HexDecode!(
         "320208033A121210404142434445464748494A4B4C4D4E4F52060102030405066A81010A430A"
         ~ "4104000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F2021222324"
         ~ "25262728292A2B2C2D2E2F303132333435363738393A3B3C3D3E3F2A3A0A106061626364656667"
