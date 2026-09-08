@@ -1,6 +1,6 @@
 # Taps and Tunnels: remote interfaces and capture views
 
-Status: design exploration on ow/dm-props. Companion to SYNC_PROTOCOL.draft.md (the model plane)
+Status: design exploration on ow/dm-props. Companion to [SYNC.md](SYNC.md) (the model plane)
 and PROP_ELEMENTS.draft.md (properties as elements). Nothing here is built.
 
 Two demands look like one ("remote interfaces should be accessible as if they were our own") but

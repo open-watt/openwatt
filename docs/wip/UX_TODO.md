@@ -59,8 +59,12 @@ through them and remove sections as they are absorbed.
   `max-request-body`, and an interrupted upload leaves the previous file intact. Requests
   the mount refuses (403, 405, 409, 500) still drain the body and answer with the real
   status, so large uploads never die as opaque network errors.
-- Downloads above 64KB stream from disk with a known `Content-Length`; they skip response
-  compression, trading a little link time for bounded memory.
+- Downloads above 64KB stream from disk with a known `Content-Length` and are NOT
+  content-encoded, where the previous buffered path gzipped them. Large text pays for this
+  on the wire: the 132KB `goodwe_ems.conf` gzips ~4.9x, so it now transfers at full size.
+  Compressing a streamed body needs `Transfer-Encoding: chunked` (the compressed length
+  isn't known up front) plus an incremental compressor, and urt.zip's is whole-buffer
+  only, so this is deferred. Clients should not assume large files arrive compressed.
 - `.conf` and `.log` serve as `text/plain`, `.yaml`/`.yml` as `text/yaml`, so they display
   in a browser tab instead of downloading as `application/octet-stream`.
 - There is no ETag/If-Match yet: two editors saving the same file last-writer-wins.
@@ -115,3 +119,36 @@ through them and remove sections as they are absorbed.
 - Worth surfacing in UI: on Linux an AP currently reads legacy `11g` on 2.4 GHz or `11a` on
   5/6 GHz, because both AP backends run the BSS non-HT, so clients are capped at 54 Mbit/s
   no matter what the radio can do. That is real, not a reporting artifact.
+
+## 2026-09-08: energy element tree slimming, itemised with the frontend
+
+Parts of the wide `topology.*` and `circuit.*` trees are transient reasoning state wearing
+element costumes, but the UX renders the site graph in meaningful detail, so this is an
+itemised decision with the frontend rather than a sweep. The rule: elements exist for what a
+user edits, a third party samples, or the UX presents. Whatever fails all three moves to D
+structs and console views. Nothing below has happened yet; each needs a client answer first.
+
+- `circuit.bus.*` KEEP. This is the flow-colouring data; `local_fraction` is the per-node
+  green/red ratio.
+- `circuit.terminal.*` DEMOTE. A bus is one electrical node, so everything drawn from it
+  shares the bus's mix and per-port local/grid is derivable (port draw times bus ratio).
+  Battery `soc` moves onto battery-kind boundary entries first, one bar per battery on the
+  boundary marker rather than per observing terminal.
+- `circuit.branch.*` and `topology.link.*` MERGE into one edge namespace: endpoints, closed,
+  capacity, live current and power, utilisation (the UX renders CB load-vs-capacity meters).
+  No per-edge blend is published: a bus mixes perfectly, so an edge's blend is exactly the
+  source-side bus's `local_fraction`, determined by the edge's flow sign plus data already
+  published. The painting rule is documented for the frontend instead of duplicated as
+  elements. The other tree retires.
+- `circuit.production.*` RETIRE once boundary entries gain an aggregate-vs-member `mismatch`
+  flag. `production_contribution.<index>` uses unstable array-position keys and demotes to the
+  console circuit table.
+- `topology.appliance.*` DELETE: a triple-published meter mirror whose identity is superseded
+  by `appliance.*` and `boundary.*`. `topology.port.*` keeps the surviving meter mirror,
+  slimmed. `topology.appliance_index` deletes after the UX migrates off it.
+
+Two behaviours worth knowing while planning views: energy counters do not bridge outages
+(power rides through by inference, daily counters stall and self-heal when the meter returns,
+and energy moved while a meter was both silent and reset is lost to the daily account), and
+diffuse sink energy is deliberately not integrated, because sinks have no counters and
+integrating inferred power would fabricate data.

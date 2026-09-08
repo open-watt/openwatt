@@ -12,7 +12,7 @@ Host builds were used for the early survey and are noted where a figure still co
 > Tier 2 and C1 figures are from the bl618 target build. Tier 3/4 figures are still host-derived;
 > re-measure before acting. Note `bl618` is **not** a `TINY` platform - `TINY=1` covers only
 > `esp8266`, `bk7231n/t`, `esp32-c2/h2/s2` and `bl808`+`e907`
-> ([platforms.mk:439](../third_party/urt/platforms.mk#L439)), so anything gated on `is_tiny`
+> ([platforms.mk:439](../../third_party/urt/platforms.mk#L439)), so anything gated on `is_tiny`
 > needs one of those to be exercised.
 
 ---
@@ -203,8 +203,8 @@ Singletons take the `__gshared` route (C1.1); per-instance classes need heap sto
 
 Tail-allocating the buffer alongside the class was considered and rejected: `allocT`/`freeT` both
 hard-code `__traits(classInstanceSize, T)`
-([allocator.d:67](../third_party/urt/src/urt/mem/allocator.d#L67),
-[:98](../third_party/urt/src/urt/mem/allocator.d#L98)), so it needs a paired API, and it would have
+([allocator.d:67](../../third_party/urt/src/urt/mem/allocator.d#L67),
+[:98](../../third_party/urt/src/urt/mem/allocator.d#L98)), so it needs a paired API, and it would have
 to be plumbed through the deliberately type-agnostic Collection creation path. It also saves nothing
 here: the init blob is sized by `classInstanceSize`, so any way of getting the buffer out saves the
 same bytes. Its only edge is one allocation instead of two, which matters for high-count short-lived
@@ -213,9 +213,9 @@ objects (packets, sessions) - an allocation-churn concern to justify on its own 
 ### C1.1. DbModule SPSC rings `[x]`
 
 First instance, and the largest. `db` is in the switch tier
-([features.mk:70](../features.mk#L70)), so this is compiled into every embedded target.
+([features.mk:70](../../features.mk#L70)), so this is compiled into every embedded target.
 
-[package.d:225-228](../src/db/package.d#L225-L228) embeds four rings in the class:
+[package.d:225-228](../../src/db/package.d#L225-L228) embeds four rings in the class:
 
 ```d
 SPSCRing!(IngestMsg, 4096) _ingest;    // 4096 x 24B = 98,304
@@ -227,9 +227,9 @@ SPSCRing!(DbNotice,    64) _notices;   //              1,024
 That is 113,905 bytes of `__init` in flash and ~104 KB of RAM, on targets with under 350 KB of RAM
 total. Three changes:
 
-- [spsc.d:154](../third_party/urt/src/urt/sync/spsc.d#L154): `T[N] _buf = void;`, cursors left
+- [spsc.d:154](../../third_party/urt/src/urt/sync/spsc.d#L154): `T[N] _buf = void;`, cursors left
   zero-init, plus an `init()` that zeroes the three cursors.
-- [package.d:41-44](../src/db/package.d#L41-L44): tier the capacities on `is_tiny`
+- [package.d:41-44](../../src/db/package.d#L41-L44): tier the capacities on `is_tiny`
   (4096/256/256/64 -> 64/8/8/8).
 - Delete the four members; declare them in the bottom `private:` block beside `g_db` as
   `__gshared SPSCRing!(...) g_ingest = void;` and call `init()` from `DbModule.init()` ahead of
@@ -288,8 +288,8 @@ What survives of the original S3 once C1 absorbs the class cases. D's defaults a
 is `0xFF`, `float`/`double` are NaN. At **module scope** this is a real and simple win, because a
 zero-init global lands in `.bss`:
 
-[system.d:176](../src/driver/linux/system.d#L176) and
-[system.d:180](../src/driver/linux/system.d#L180), two `__gshared char[4096]` emitted as 8,192 bytes
+[system.d:176](../../src/driver/linux/system.d#L176) and
+[system.d:180](../../src/driver/linux/system.d#L180), two `__gshared char[4096]` emitted as 8,192 bytes
 of `0xFF` into `.data`.
 
 A source scan found 121 non-zero-default declarations at module or aggregate scope. The aggregate
@@ -302,8 +302,8 @@ Where a non-zero fill is genuinely wanted, broadcast it at startup rather than s
 ### S4. Verify per-symbol sections on the RISC-V-direct path `[ ]`
 
 `-L--gc-sections` is set only on the baremetal path
-([platforms.mk:710](../third_party/urt/platforms.mk#L710)). The Xtensa path gets
-`--function-sections --data-sections` from llc ([Makefile:380](../Makefile#L380)) and does have
+([platforms.mk:710](../../third_party/urt/platforms.mk#L710)). The Xtensa path gets
+`--function-sections --data-sections` from llc ([Makefile:380](../../Makefile#L380)) and does have
 per-symbol sections (130,461 in the object), so GC works there. The RISC-V path goes straight
 from LDC and has not been checked. Without per-symbol sections `--gc-sections` can only drop
 whole object files, and since the whole program compiles to one object, it drops nothing.
@@ -360,7 +360,7 @@ Template instantiation matrices, measured on the host build:
 
 ### S6. `write_log!(T...)` `[ ]`
 
-[log.d:147](../third_party/urt/src/urt/log.d#L147) mints a fresh ~1.7 KB function for every
+[log.d:147](../../third_party/urt/src/urt/log.d#L147) mints a fresh ~1.7 KB function for every
 distinct argument type tuple at every call site. Marshal to a small `LogArg[]` via per-type
 thunks and call one non-template sink; each site drops to roughly 16 bytes per argument of setup.
 Best size-per-effort of the matrices, but it touches every module, so it wants its own branch
@@ -376,26 +376,26 @@ most of the remainder.
 
 ### S8. `proto_deserialise!T` `[ ]`
 
-[package.d:122](../src/tools/protobuf/package.d#L122) unrolls a `static foreach` over
+[package.d:122](../../src/tools/protobuf/package.d#L122) unrolls a `static foreach` over
 `msg.tupleof` into a `switch` per message type: 3,540 B for `DeviceInfoResponse`, 2,592 for
 `ListEntitiesClimateResponse`, and so on across 33 instantiations.
 
 The field metadata is already a UDA on each field and `FieldInfo{id, wire, ty}` already exists at
-[package.d:36](../src/tools/protobuf/package.d#L36). Emit `immutable FieldInfo[]` plus member
+[package.d:36](../../src/tools/protobuf/package.d#L36). Emit `immutable FieldInfo[]` plus member
 offsets per message and write one runtime walker. This is the "only the struct declarations
 remain" goal: the generated types themselves are cheap, the codec is what costs.
 
 ### S9. `function_command` / `make_arg_tuple` `[ ]`
 
-[function_command.d:310](../src/manager/console/function_command.d#L310) instantiates per command
+[function_command.d:310](../../src/manager/console/function_command.d#L310) instantiates per command
 signature. Replace with a runtime signature descriptor (parameter type tags plus a conversion
 table) and one dispatcher. Also produces the longest symbol names in the binary after
 `object.__switch`, so it pays twice.
 
 ### S10. `SynthGetter` / `SynthSetter` / `MaterialProperties` `[ ]`
 
-759 instantiations across [base.d:1140](../src/manager/base.d#L1140),
-[base.d:1154](../src/manager/base.d#L1154) and [base.d:1062](../src/manager/base.d#L1062).
+759 instantiations across [base.d:1140](../../src/manager/base.d#L1140),
+[base.d:1154](../../src/manager/base.d#L1154) and [base.d:1062](../../src/manager/base.d#L1062).
 Same shape as S9: compile-time-per-property where a runtime descriptor would do. Largest single
 group, and the most invasive, so probably last.
 
@@ -409,24 +409,24 @@ _D6object__T8__switchTxaVxAaa3_626167VxQna3_736574VxQBaa4_64617465VxQBqa4_696e74
                           ^bag        ^set        ^date           ^int8
 ```
 
-That one is the `ZCLDataType` member names from [zcl.d:155](../src/protocol/zigbee/zcl.d#L155)
+That one is the `ZCLDataType` member names from [zcl.d:155](../../src/protocol/zigbee/zcl.d#L155)
 onward. Codebase-wide: 36 instantiations, 18,328 B of code and 9,056 B of symbol name, with the
 case strings stored twice (once as data, once hex-encoded in the mangling).
 
 The replacement already exists in-tree: `make_table` plus `find_first` from
-[string.d:542](../third_party/urt/src/urt/string/string.d#L542). Densest sites:
-[profile.d](../src/manager/profile.d) 32 cases, [ha_discovery.d](../src/protocol/mqtt/ha_discovery.d)
-30, [staticfiles.d](../src/protocol/http/staticfiles.d) 26,
-[json_encoder.d](../src/manager/sync/json_encoder.d) 22.
+[string.d:542](../../third_party/urt/src/urt/string/string.d#L542). Densest sites:
+[profile.d](../../src/manager/profile.d) 32 cases, [ha_discovery.d](../../src/protocol/mqtt/ha_discovery.d)
+30, [staticfiles.d](../../src/protocol/http/fileserver.d) 26,
+[json_encoder.d](../../src/manager/sync/json_encoder.d) 22.
 
 ---
 
 ## Tier 3 - build out `version (Tiny)`
 
 The flag exists and the build system sets it, but almost nothing responds. `is_tiny`
-([features.d:20](../src/manager/features.d#L20)) has exactly one consumer in the whole tree,
-[broker.d:31](../src/protocol/mqtt/broker.d#L31). `is_headless`
-([features.d:19](../src/manager/features.d#L19)) has zero. The `version (Tiny)` clause itself
+([features.d:20](../../src/manager/features.d#L20)) has exactly one consumer in the whole tree,
+[broker.d:31](../../src/protocol/mqtt/broker.d#L31). `is_headless`
+([features.d:19](../../src/manager/features.d#L19)) has zero. The `version (Tiny)` clause itself
 appears in three places, all in `urt/internal/exception.d`.
 
 This is policy work more than mechanical work: someone has to decide what a Tiny build is allowed
@@ -449,7 +449,7 @@ live_view 8,068   graph 8,660   tree_view 6,214   table 5,332   bitmap 2,984   =
 
 ### S14. Collection `get`/`print`/`set` formatting `[~]`
 
-19,652 bytes in [collection_commands.d](../src/manager/console/collection_commands.d), plus its
+19,652 bytes in [collection_commands.d](../../src/manager/console/collection_commands.d), plus its
 share of S9. The format metadata reachable via `get` is strictly non-essential on a headless
 node. Interacts with S9, so decide the descriptor shape there first.
 
@@ -471,13 +471,13 @@ not re-propose as a quick win.
 
 Each entry costs 16 bytes of pointer+length on 64-bit, 8 on 32-bit, before any string bytes.
 `make_table` packs to one offset byte plus the characters. Sites:
-[log.d:866](../src/manager/log.d#L866) `tag_colors` (16 ANSI escapes),
-[message.d:122](../src/protocol/modbus/message.d#L122) and
-[message.d:137](../src/protocol/modbus/message.d#L137),
-[meter.d:445](../src/apps/energy/meter.d#L445),
-[vehicle_session.d:811](../src/protocol/tesla/vehicle_session.d#L811),
-[log.d:23](../third_party/urt/src/urt/log.d#L23),
-[time.d:1203](../third_party/urt/src/urt/time.d#L1203).
+[log.d:866](../../src/manager/log.d#L866) `tag_colors` (16 ANSI escapes),
+[message.d:122](../../src/protocol/modbus/message.d#L122) and
+[message.d:137](../../src/protocol/modbus/message.d#L137),
+[meter.d:445](../../src/apps/energy/meter.d#L445),
+[vehicle_session.d:811](../../src/protocol/tesla/vehicle_session.d#L811),
+[log.d:23](../../third_party/urt/src/urt/log.d#L23),
+[time.d:1203](../../third_party/urt/src/urt/time.d#L1203).
 
 Single-digit KB total, so opportunistic only. Note `enuminfo` already does this properly
 (flat length-prefixed char array plus ubyte lookup tables) and is the reference implementation.
@@ -512,7 +512,7 @@ parse_proto 1 sym, 616 bytes
 ```
 
 So `enum text = import(name)` and `enum ProtoSpec spec = parse_proto(...)` at
-[package.d:22-23](../src/tools/protobuf/package.d#L22-L23) evaporate correctly. The single
+[package.d:22-23](../../src/tools/protobuf/package.d#L22-L23) evaporate correctly. The single
 `parse_proto` leak is covered by S5, and the real remaining cost is the codec matrix in S8.
 
 ### `[-]` `assert(__ctfe, msg)` as a size guard

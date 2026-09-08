@@ -1,7 +1,10 @@
 # Series residency: one block chain, three residencies
 
-Design spec drafted 2026-08-05. Not implemented. Supersedes the RAM/disk split described
-in [manager/record.d](../src/manager/record.d)'s header and the two-tier merge in `query_local`.
+Design spec drafted 2026-08-05. The target model of section 2 is implemented: buckets carry a
+residency and eviction splits on it ([manager/element.d](../src/manager/element.d), the
+`evict_over_budget` path). Sections 3 to 5 are not fully worked through; treat those as the
+remaining spec. Supersedes the RAM/disk split described in
+[manager/record.d](../src/manager/record.d)'s header and the two-tier merge in `query_local`.
 
 The thesis: **RAM and disk are not two tiers of a series, they are two residencies of the same
 block.** Today they are separate structures with separate owners, separate readers, and

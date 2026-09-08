@@ -829,6 +829,47 @@ preflights and normal responses use the effective policy.
 /protocol/http/fileserver add name=files http-server=webserver uri=/files root="conf" access=webdav allowed-origin=http://192.168.0.5:8080
 ```
 
+### `/automation`
+
+A rule that runs a console script when a signal fires (see [AUTOMATION.md](AUTOMATION.md)).
+Triggers are signal URIs, `[provider:|@]body[?k=v&k=v]`; `@x` is sugar for `element:x`. Quote any
+URI containing `?`, `=` or `@`, since the argument parser reserves them.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `on` | URI list | none | Triggers, comma-separated. `@path` (element change), `every:<dur>[?repeat=false]`, `at:<hh:mm>[?days=mon,wed,fri]`, `when:<datetime>`, `object:<name>?state=online\|offline\|destroyed`. |
+| `schedule` | duration | none | Write-only sugar for `on="every:<dur>"`. Shares the slot with `on`. |
+| `at` | `hh:mm` | none | Write-only sugar for `on="at:<hh:mm>"`. |
+| `when` | datetime | none | Write-only sugar for `on="when:<datetime>"`. |
+| `if` | expression | none | Quoted boolean gate; a falsey result skips the action. Reads elements by `@path`, compares with units. |
+| `edge` | `level`, `rising`, `falling` | `level` | Which transitions of `if` fire. Requires `if`. |
+| `for` | duration | `0` | The qualifying state must hold this long before firing; one run per episode. Requires `if`. |
+| `debounce` | duration | `0` | Trailing edge: act once the trigger stream settles; `$value` is the settled datum. |
+| `throttle` | duration | `0` | Leading edge: act, then lock out for the window. |
+| `rate` | per-time (`12/h`, `4/min`, `0.2/s`) | `0` | Token-bucket refill rate; canonicalised to `/s`. `Hz` is rejected (angular). |
+| `burst` | count | `1` | Token-bucket capacity. |
+| `do` | `{ script }` | none | The action. `$value` is the datum that fired the trigger (null for time). |
+| `run_count`, `next_run`, `last_run` | read-only | | `next_run` folds in pending debounce settles and `for` deadlines. |
+
+Shaping and `edge`/`for` hot-apply to a running rule. A trigger naming an element that does not
+exist yet parks the rule in `Starting` (`element not found: <path>`) and arms when it appears.
+
+```text
+/automation/add name=door-light on="@door.open" do={ /element/set element=hall.light value=$value }
+/automation/add name=poll schedule=5m do={ /device/print }
+/automation/add name=weekday on="at:18:00?days=mon,wed,fri" do={ /notify "evening" }
+/automation/add name=once on="every:30m?repeat=false" do={ /notify "runs once, in 30 min" }
+/automation/add name=peak on="@site.power" if="@site.power > 2000W" edge=rising do={ /notify "crossed 2kW" }
+/automation/add name=ajar on="@door.open" if="@door.open" for=5m do={ /notify "door left open 5 min" }
+/automation/add name=shut on="@door.open" if="@door.open" edge=falling for=1h do={ /notify "long closed" }
+/automation/add name=multi on="@door.open","every:1h" do={ /device/print }
+/automation/add name=motion on="@pir.motion" debounce=500ms do={ /element/set element=porch.light value=$value }
+/automation/add name=cycles on="@hws.demand" rate=12/h burst=3 do={ /element/set element=hws.enable value=1 }
+/automation/add name=up on="object:inv?state=online" do={ /notify "inverter link up" }
+/automation/set name=door-light if="@door.open"
+/automation/print
+```
+
 ### `/sync/udp-server`
 
 A datagram sync listener owns one UDP endpoint per selected local endpoint. It
@@ -861,9 +902,36 @@ endpoints can appear or disappear independently.
 opens a connected UDP endpoint owned by the peer. The last of `transport` and
 `remote` set wins.
 
-| Property | Values | Description |
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `transport` | interface | none | An interface delivering raw frames (a WebSocket, a UDP interface). |
+| `remote` | `address:port`, `[ipv6]:port`, `[mac]:port` | none | Remote UDP peer. The address and port are both required. |
+| `encoder` | `json`, `binary` | `binary` | Wire encoding for this session. |
+| `time-authority` | `yes`/`no` | `no` | Take this peer as the local clock source. A peering claim sets it on the member for its first claimant. |
+
+### `/sync/ws-server`
+
+Binds a URI on an HTTP server and spawns one dynamic `/sync/peer` per accepted
+WebSocket connection; the peer is destroyed when the socket closes. This is the
+transport browser clients use. Requires HTTP in the build.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `http-server` | HTTP server | none | The `/protocol/http/server` to bind on. |
+| `uri` | path | none | URI the WebSocket upgrade is accepted at. |
+| `encoder` | `json`, `binary` | `json` | Encoding for spawned peers. |
+
+### `/sync` commands
+
+Operate an existing peer session from the local console. Each takes `peer=`.
+
+| Command | Arguments | Description |
 | --- | --- | --- |
-| `remote` | `address:port`, `[ipv6]:port`, `[mac]:port` | Remote UDP peer. The address and port are both required. |
+| `/sync console` | `peer=` | Open an interactive console session on the remote node over the sync channel. |
+| `/sync log-sub` | `peer=`, `severity=`, `tag=` | Tap the remote node's log stream at the given severity, optionally filtered by tag. |
+| `/sync model-sub` | `peer=`, `pattern=`, `once=` | Subscribe to the remote data model by path pattern; `once=yes` fetches and closes. |
+
+See [SYNC.md](SYNC.md) for the channel these ride.
 
 ### `/sync/discover/udp`
 
@@ -927,7 +995,7 @@ links age out after 10 minutes of silence.
 
 ### `/sync/peering`
 
-The peering agent (see [PEERING.draft.md](PEERING.draft.md)) is the node-global
+The peering agent (see [PEERING.md](PEERING.md)) is the node-global
 auto-peering policy: it does not exist as a collection, just `set`/`print` on a
 singleton. Setting `role=` is the opt-in (it implies `enabled=yes`).
 

@@ -357,7 +357,7 @@ Core runtime providing:
 
 ##### Automation System
 
-An automation runs a `do={...}` action when a signal fires. It is a `Collection` object under `/automation`. Triggers are `on=<uri>,<uri>` signal URIs of the form `[provider:|@]body[?k=v&k=v]` -- e.g. `on="@door.open"` (element change; `@` is the element sentinel), `on="every:5m"`, `on="at:18:00?days=mon,fri"`, `on="when:2027-01-01T00:00:00"`, `on="mqtt:/topic?qos=1"`. URIs containing `?` `=` `@` must be quoted at the CLI (the parser reserves them). An optional `if=<expr>` (a quoted boolean expression) gates the action; a falsey result skips it. The time shorthands `schedule=`/`at=`/`when=` are thin write-only sugar that translate to `every:`/`at:`/`when:` URIs (finer detail like `?days=`/`?repeat=false` lives in the URI, not as sugar). Signals come from `ISignalProvider`s registered on the `Application` (general capability, [src/manager/signal.d](src/manager/signal.d)); the built-ins are the Application itself (the `element:` provider) and cron ([src/manager/cron.d](src/manager/cron.d), the `every:`/`at:`/`when:` time provider -- the former `/system/cron` collection is gone). Example: `/automation/add name=poll schedule=5m do={ /device/print }`. See [src/apps/automation/automation.d](src/apps/automation/automation.d). Not yet built (design in [docs/AUTOMATION.draft.md](docs/AUTOMATION.draft.md)): shaping (debounce/throttle), execution policy, and typed `$trigger.*` context.
+An automation runs a `do={...}` action when a signal fires. It is a `Collection` object under `/automation`. Triggers are `on=<uri>,<uri>` signal URIs of the form `[provider:|@]body[?k=v&k=v]` -- e.g. `on="@door.open"` (element change; `@` is the element sentinel), `on="every:5m"`, `on="at:18:00?days=mon,fri"`, `on="when:2027-01-01T00:00:00"`, `on="mqtt:/topic?qos=1"`. URIs containing `?` `=` `@` must be quoted at the CLI (the parser reserves them). An optional `if=<expr>` (a quoted boolean expression) gates the action; a falsey result skips it. The time shorthands `schedule=`/`at=`/`when=` are thin write-only sugar that translate to `every:`/`at:`/`when:` URIs (finer detail like `?days=`/`?repeat=false` lives in the URI, not as sugar). Signals come from `ISignalProvider`s registered on the `Application` (general capability, [src/manager/signal.d](src/manager/signal.d)); the built-ins are the Application itself (the `element:` provider), cron ([src/manager/cron.d](src/manager/cron.d), the `every:`/`at:`/`when:` time provider -- the former `/system/cron` collection is gone) and the object-signal module (`object:<name>?state=online|offline|destroyed`). `edge=`/`for=` qualify the condition; `debounce=`/`throttle=`/`rate=`+`burst=` shape the trigger stream. Example: `/automation/add name=poll schedule=5m do={ /device/print }`. See [src/apps/automation/automation.d](src/apps/automation/automation.d). Design: [docs/AUTOMATION.md](docs/AUTOMATION.md); command reference: the `/automation` section of [docs/CLI.md](docs/CLI.md). Not yet built (see [TODO.md](TODO.md), Automation): execution policy, typed `$trigger.*` context, more providers, the `on=` completer.
 
 #### Router Layer (src/router/)
 
@@ -371,7 +371,7 @@ Network routing infrastructure:
 Protocol implementations. Several protocols carry their own packet interface (`iface.d`); these plug into the router fabric the same way the generic L2 interfaces in `router/iface/` do.
 
 **Industrial bus / fieldbus:**
-- **Modbus** (`protocol/modbus/`): RTU, TCP and ASCII framing. `iface.d` is the packet interface (CRC, sequence correlation, address translation via [[modbus_server_map_is_arp]]); `client.d` issues requests; `binding.d` bridges to the data model with register batching and adaptive polling; `sunspec.d` decodes SunSpec models; `node.d` / `message.d` are the shared data types. Future direction: [[modbus_l2_l3_split_trajectory]].
+- **Modbus** (`protocol/modbus/`): RTU, TCP and ASCII framing. `iface.d` is the packet interface (CRC, sequence correlation, address translation via [[modbus_server_map_is_arp]]); `package.d` issues requests and tracks them (`ModbusRequestState`); `binding.d` bridges to the data model with register batching and adaptive polling; `sunspec.d` decodes SunSpec models; `node.d` / `message.d` are the shared data types. Future direction: [[modbus_l2_l3_split_trajectory]].
 - **CAN** (`protocol/can/`): CAN bus packet interface plus event-driven binding.
 - **Tesla** (`protocol/tesla/`): TWC (Tesla Wall Connector) master/slave. `iface.d` framing, `master.d` heartbeat round-robin, `binding.d` direct value push, `twc.d` device model. (Tesla *vehicle* BLE lives under `protocol/ble/` — see [[tesla_ble_architecture]].)
 - **GoodWe** (`protocol/goodwe/`): AA55 vendor protocol decoder + binding.
@@ -417,6 +417,73 @@ High-level application logic:
 - If you're not confident in a fix, explicitly state your uncertainty and present it as a hypothesis for discussion, not as a code change.
 - A fix that doesn't address the root cause is worse than no fix — it hides the real bug and creates false confidence.
 - Never take the easy path. When a structural issue is identified, address it directly — don't work around it with guards, special cases, or compatibility shims. Early structural fixes prevent compounding debt.
+
+### Documentation Obligations
+
+Work is not done when the code compiles; it is done when the record of it is correct. Every
+change carries these obligations:
+
+- **[TODO.md](TODO.md) is the single work accumulator.** Any outstanding work from a project,
+  and any follow-up that would be good or is outright required, goes there. This includes work
+  you deliberately chose not to do, work a review surfaced and deferred, and anything you
+  discovered in passing. Never leave it only in a commit message, a PR description, a branch
+  that may not land, or your own working memory. Reduce or delete an entry when it lands; the
+  file is a list of things to revisit, not a history.
+
+- **Frontend-affecting changes need a migration action.** If a change alters anything the
+  frontend apps consume (sync surface, element or component shape, CLI or API responses,
+  identity, units), add the corresponding migration action to
+  [docs/wip/UX_TODO.md](docs/wip/UX_TODO.md) in the same PR. The clients are separate
+  repositories and cannot see your change; that file is the only handoff.
+
+- **CLI changes update [docs/CLI.md](docs/CLI.md).** New commands, new collections, renamed or
+  removed properties, changed argument shapes: same PR, no exceptions.
+
+- **Process docs in `docs/wip/` are temporary by construction.** A project may add one to track
+  its own staging, design or migration state. Prune it as the work lands, and delete it when the
+  project lands; reconcile whatever minor follow-up remains into [TODO.md](TODO.md). A `wip`
+  doc that outlives its project becomes a false account of the system.
+
+- **Keep `docs/` current.** If a change makes a statement in `docs/` wrong, fix it in the same
+  PR. Stale documentation is worse than none, because it is trusted.
+
+### PR Review and Merge Preparation
+
+**Review adversarially.** The job is to find what is wrong, not to agree. Assume the change is
+broken until the code says otherwise, and read for the failure the author did not consider.
+A review that finds nothing is a review that was not performed.
+
+Every finding resolves one of two ways, and the distinction is the reviewer's call:
+
+- **Blocking**: correctness, lifetime, protocol conformance, anything that makes the merged tree
+  worse than the unmerged one. Fixed before merge, no exceptions and no "follow-up PR" promises.
+- **Non-blocking**: the code works, but something remains, most often because the direction is
+  unresolved and the discussion does not belong in this PR. Record it in [TODO.md](TODO.md) and
+  merge. A deferred finding that exists only in a review thread is a lost finding.
+
+**A branch is not ready to merge until it presents well.** Before requesting review:
+
+- the coding style is asserted, not assumed (see **Coding Style**);
+- no gratuitous line breaks: wrap only where it genuinely improves the code, never to hit a
+  column;
+- comments trimmed to what earns its place, with narration and change-justification deleted;
+- documentation updated per **Documentation Obligations**.
+
+**Rewrite the history before you present it.** A branch developed as a patch series records how
+the work happened; the record should show what the work *is*. Reconsider every series before it
+lands:
+
+- no WIP churn, no "fix typo", no "address review", no commits that exist because the day ended;
+- a fix amends the patch that introduced the fault, so no commit in the series is ever knowingly
+  wrong;
+- keep the patch count minimal. One movement is one patch;
+- a branch that genuinely performs several distinct movements factors into one patch per
+  movement, in an order where each patch stands on its own;
+- a uRT submodule bump or a documentation update is never its own patch. Fold it into the patch
+  whose work requires it.
+
+The audience for a PR is a reviewer reading it now and an auditor reading it in two years, both
+asking what changed and why. Neither wants to see your workflow.
 
 ### Language & Tooling
 
@@ -566,7 +633,7 @@ uRT replaces the D standard library to enable embedded targets without OS depend
 **Example implementations:**
 - [src/protocol/modbus/iface.d](src/protocol/modbus/iface.d) - Protocol interface
 - [src/protocol/modbus/binding.d](src/protocol/modbus/binding.d) - Binding implementation
-- [src/protocol/modbus/client.d](src/protocol/modbus/client.d) - Protocol client
+- [src/protocol/modbus/package.d](src/protocol/modbus/package.d) - Protocol module, request issue and tracking
 
 **Documentation:**
 - [docs/OVERVIEW.md](docs/OVERVIEW.md) - Detailed system overview
@@ -655,4 +722,6 @@ And remember,
 - NO GRATUITOUS COMMENTING! Default to none. One line if you must, never three. Never explain the language, never justify your change in the code, never write a function header. See the **Commenting** subsection under Coding Style.
 - NO EM-DASH EVER!
 - No unicode in source files unless it's string data that's meant to contain unicode.
-- Line-breaks at col 120 is fine, no need to break at 80! Use good taste, avoid gratuitous line breaking!
+- Line-breaks should be avoided for single statements, unless they REALLY improve readibility! Use good taste, no gratuitous line breaking! Long lines are fine; break when a user would prefer to read as a list, or other genuinely better readibility moments.
+- Reviews are ADVERSARIAL. Blocking findings are fixed before merge; everything else lands in [TODO.md](TODO.md). Rewrite the patch series before presenting it: no WIP churn, fixes amend the original sin, minimal patch count, urt bumps and doc updates fold into the patch they belong to. See the **PR Review and Merge Preparation** subsection.
+- Outstanding and follow-up work ALWAYS lands in [TODO.md](TODO.md). Frontend-affecting changes ALWAYS get a migration action in [docs/wip/UX_TODO.md](docs/wip/UX_TODO.md). CLI changes ALWAYS update [docs/CLI.md](docs/CLI.md). See the **Documentation Obligations** subsection.

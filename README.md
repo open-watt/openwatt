@@ -11,11 +11,32 @@ OpenWatt is a comprehensive energy management and home/industrial automation pla
 
 ## Documentation
 
-For a detailed overview of the project structure, terminology, and module layout, please see our [System Overview](docs/OVERVIEW.md).
+Start with the [System Overview](docs/OVERVIEW.md) for structure and terminology, then the
+[CLI Documentation](docs/CLI.md): OpenWatt is configured entirely through its console, and that
+document is both the guide and the reference for every command.
 
-A quick reference for the project's feature set is available in the [Feature Set](docs/FEATURES.md) document.
+**Guides**
 
-For details on the command-line interface and startup configuration, see the [CLI Documentation](docs/CLI.md).
+- [CLI](docs/CLI.md): the console, startup configuration, and the command reference.
+- [Feature Set](docs/FEATURES.md): current and planned features at a glance.
+- [Boards](docs/BOARDS.md): platform and board build profiles for embedded targets.
+- [Device Profiles](docs/PROFILE_FILE_FORMAT.md): the file format that describes how a device is read.
+- [Component Templates](docs/COMPONENT_TEMPLATES.md): the standard vocabulary a profile maps onto.
+
+**Specifications**
+
+- [Data Model](docs/DATA_MODEL.md): devices, components and elements, the series behind every element, and the rules that shape the model.
+- [Sync](docs/SYNC.md): the channel between nodes: sessions, the verb set, transports and reliability.
+- [Peering](docs/PEERING.md): discovery, claims and fleet formation on top of sync.
+- [Automation](docs/AUTOMATION.md): the rule engine: triggers, conditions, shaping and actions.
+
+**Design drafts**
+
+- [Energy Management](docs/ENERGY.draft.md), [Series Residency](docs/SERIES_RESIDENCY.draft.md),
+  [Property Projection](docs/PROP_ELEMENTS.draft.md), [Taps and Tunnels](docs/TAPS_AND_TUNNELS.draft.md).
+
+Per-project working documents live in [docs/wip/](docs/wip/), and [TODO.md](TODO.md) is the single
+accumulator of outstanding work.
 
 ## Getting Started
 
