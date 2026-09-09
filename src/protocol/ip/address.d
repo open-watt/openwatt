@@ -111,6 +111,17 @@ bool is_broadcast_for_interface(BaseInterface iface, IPAddr address)
 }
 
 static if (has_ipv6)
+BaseInterface interface_for_address6(IPv6Addr address)
+{
+    if (!address)
+        return null;
+    foreach (configured; Collection!IPv6Address().values)
+        if (configured.address.addr == address)
+            return configured.iface;
+    return null;
+}
+
+static if (has_ipv6)
 class IPv6Address : BaseObject
 {
     alias Properties = AliasSeq!(Prop!("address", address),

@@ -172,8 +172,10 @@ protected:
 //                if (r)
 //                    r = socket.set_socket_option(SocketOption.multicast_loopback, false);
             }
+            if (r && ipv6_group != IPv6Addr.any)
+                r = socket.set_socket_option(SocketOption.multicast6, MulticastGroup6(ipv6_group, 0));
             if (r)
-                socket.bind(InetAddress(IPAddr.any, port));
+                socket.bind(af == AddressFamily.ipv6 ? InetAddress(IPv6Addr.any, port) : InetAddress(IPAddr.any, port));
             if (!r)
             {
                 socket.close();

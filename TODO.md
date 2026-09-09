@@ -112,25 +112,29 @@ the commit history and linked design documents carry the implementation record.
   Incoming errors currently reach pending echo diagnostics only. Add host-OS
   ICMP backends for `/ping`; IP echo currently requires the internal stack.
 
-- **[#674 prerequisite landed, integration owed by #674] Consume interface scope ids**:
-  `InetAddress.scope_id` is now an OpenWatt interface identity (`BaseInterface.scope_id`,
-  `interface_for_scope`, contract in docs/OVERVIEW.md) and urt translates it at the native
-  socket boundary. #674 must: resolve `scope_id` with `interface_for_scope`, never
-  `interface_for_kernel_index`; keep the zone through `IPUDPState.open`, `c_bind` and
-  `c_connect` (bind to `(address, scope)` so identical link-locals on two links demultiplex
-  independently, and reject an unresolvable zone rather than binding unscoped); stamp
-  `iface.scope_id` on link-scoped source and destination addresses in `udp_input6` and
-  `c_recvfrom`; route Windows IOCP IPv6 sockaddr conversion through urt `make_sockaddr` /
-  `make_InetAddress` or the `inet_scope_*` helpers instead of a private v6 `sockaddr_in6`
-  builder; join and select IPv6 multicast through `SocketOption.multicast6` /
-  `multicast_interface6` with `MulticastGroup6(group, iface.scope_id)` (replaces the raw
-  `IPV6_ADD_MEMBERSHIP` setsockopt), and accept the same `MulticastGroup6` payload in
-  `c_set_option`; on Windows use `kernel_ifindex6`, never the IPv4 index. Not in the
-  prerequisite: lwIP/ESP-IDF netif index tracking (no driver sets `kernel_ifindex` there, so
-  every OpenWatt zone is "no native counterpart" under `USE_LWIP=1`; record the netif index
-  from the wifi/ethernet driver when that backend is exercised), the Ether family's
-  `scope_id` (still 0; `UDPBindEndpoint` carries the station separately), and Linux
-  runtime validation of the pktinfo path (compile-checked only; needs a two-interface host).
+- **[P2, IPv6 UDP] Validate the native zone paths on hardware**: the zone contract in
+  docs/wip/NETWORKING.draft.md is implemented for UDP on the internal stack, Linux and Windows, but only the
+  internal stack has regression coverage. Still owed: a two-interface Linux run of the pktinfo
+  receive path, connected link-local replies and `IPV6_MULTICAST_IF`; a Windows IOCP run of the
+  IPv6 `IN6_PKTINFO` path (`kernel_ifindex6`); an ESP32 run of the internal stack over wifi
+  (link-local replies, `ff02::` joins via MLD). The Ether family's `scope_id` stays 0
+  (`UDPBindEndpoint` carries the station separately). urt's WinSock `IPV6_RECVPKTINFO` /
+  `IPV6_PKTINFO` constants are the Linux values (49/50), not Windows' 19; the IOCP path defines
+  its own, but `urt.socket.recvfrom` with packet-info is wrong on Windows.
+- **[P3, build] The lwIP socket backend is unbuilt and unsupported**: ESP builds default to
+  the internal stack and do not link lwIP; `USE_INTERNAL_IP_STACK=0` on ESP32 fails to compile
+  (`IoReady` is Linux-only in manager/reactor.d, `Array!DNSQuestion` fails to emplace under the
+  embedded toolchain). No driver records a lwIP netif index, so IPv6 zones would not translate
+  there either. Either grow the FreeRTOS reactor and finish that backend, or delete the opt-in.
+- **[P2, IPv6 UDP] IPv6 multicast without a zone on the internal stack joins every link**:
+  `c_set_option(multicast6)` with `scope_id == 0` joins the group on each interface holding an
+  IPv6 address (the DNS server's mDNS/LLMNR listeners rely on this), where a native stack picks
+  one default interface. Decide whether a routed default is wanted instead, and whether the DNS
+  server should join per link explicitly. `SocketOption.multicast` (IPv4) now also joins on the
+  internal stack; before this it was a silent no-op.
+- **[P3, IPv6 UDP] TCPv6 on the internal stack**: `c_create` refuses IPv6 stream sockets
+  (`// TODO: TCPv6` in protocol/ip/socket.d); the v6 input path drops TCP segments. Windows IOCP
+  TCP is IPv4-only too.
 
 - **[P3, style-audit deferrals] Preserve outstanding design work**: validate
   appliance port names against a profile-authoritative or explicit namespace
