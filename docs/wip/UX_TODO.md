@@ -23,6 +23,14 @@ through them and remove sections as they are absorbed.
 - Continue keeping DHCPv6 client/server/lease controls unavailable. This change
   provides the allocator, not operational DHCPv6 roles.
 
+## 2026-09-09: IPv6 zone in address text (PR #674 prerequisite)
+
+- `inetaddr` values now render an IPv6 zone inside the brackets: `[fe80::1%eth0]:5353`. The zone
+  is an interface NAME when it is an OpenWatt interface and a bare number when it is a host-stack
+  interface OpenWatt does not manage. Parsers must accept `%zone` before `]`; unscoped addresses
+  are unchanged. Property values such as sync `bind` lists may carry it. `/ping address=` accepts
+  `fe80::1%<iface>` as an alternative to `iface=`.
+
 ## 2026-09-08: retrospective merge reconciliation
 
 - Appliance `device`, `meter`, and `state` paths may be accepted before the

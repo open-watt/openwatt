@@ -42,6 +42,35 @@ files, only a startup script of console commands.
 - **Protocol**: an implementation of a communication standard (Modbus, MQTT, HTTP, Zigbee). A
   protocol decodes and encodes what travels over an interface or a stream.
 
+#### Interface scope ids
+
+A link-scoped address (IPv6 `fe80::/10`, `ff01::/16`, `ff02::/16`) only means something together
+with the link it lives on. `InetAddress.scope_id` names that link, and throughout OpenWatt it is
+one identity regardless of IP backend:
+
+- `0` is unscoped.
+- `1 .. 2^26-1` is an OpenWatt interface: the object's collection slot (`BaseInterface.scope_id`,
+  resolved by `interface_for_scope`). The slot is process-local, never reused for another name,
+  resolves to null while the interface is destroyed, and resolves to the replacement once an
+  interface of the same name is recreated. Bridges and VLAN sub-interfaces are interfaces in their
+  own right, so the zone of a frame received through a bridge is the bridge, never the member port.
+- `0x8000_0000 | n` is host-stack interface `n` that OpenWatt does not manage (a Windows adapter
+  or Linux netdev with no OpenWatt object). It passes through the native boundary unchanged and
+  never resolves to an interface.
+
+The internal IP stack works in this space directly. Native backends translate at urt's socket
+boundary through an `InetScopeProvider` the interface module registers: outbound (`bind`,
+`connect`, `sendto`, `IPV6_MULTICAST_IF`, `IPV6_ADD_MEMBERSHIP`) maps a scope to the
+interface's kernel index and fails with `invalid_parameter` when the zone has no live interface or
+that interface has no native counterpart; inbound (`accept`, `getsockname`, `getpeername`,
+`recvfrom` sender and packet-info) maps the kernel index back. Windows numbers IPv4 and IPv6
+bindings separately, so the IPv6 index is what a scope translates to there. A specified zone is
+never dropped or replaced by a default interface.
+
+Text form is `addr%zone`: a zone name is an OpenWatt interface (`fe80::1%eth0`), a number is a
+host-stack index (`fe80::1%3`). Persistent configuration and anything crossing to another node
+carries names; the numeric ids are runtime handles only.
+
 ### Data model
 
 - **Device**: the root of everything known about one piece of equipment (an inverter, a battery, a

@@ -1980,7 +1980,7 @@ private:
                 info.source = from_sockaddr_in(_recv.from);
                 info.destination = destination;
                 info.rx_time = getTime();
-                info.ingress = interface_for_kernel_index(int(interface_index));
+                info.ingress = interface_for_kernel_index(AddressFamily.ipv4, int(interface_index));
                 udp_deliver(_owner, _recv.buf[0 .. bytes], info);
             }
             if (!_closing)
@@ -2007,9 +2007,9 @@ private:
                 size_t got;
                 InetAddress from;
                 InetAddress destination = _local;
-                uint interface_index;
+                uint scope_id;
                 version (linux)
-                    Result r = _socket.recvfrom(_udp_scratch[], MsgFlags.none, &from, &got, &destination, &interface_index);
+                    Result r = _socket.recvfrom(_udp_scratch[], MsgFlags.none, &from, &got, &destination, &scope_id);
                 else
                     Result r = _socket.recvfrom(_udp_scratch[], MsgFlags.none, &from, &got);
                 if (r.failed || got == 0)
@@ -2023,7 +2023,7 @@ private:
                 info.destination = destination;
                 info.rx_time = getTime();
                 version (linux)
-                    info.ingress = interface_for_kernel_index(int(interface_index));
+                    info.ingress = interface_for_scope(scope_id);
                 else if (destination.family == AddressFamily.ipv4)
                     info.ingress = interface_for_address(v4_addr(destination));
                 udp_deliver(_owner, _udp_scratch[0 .. got], info);

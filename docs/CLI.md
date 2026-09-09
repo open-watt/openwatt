@@ -82,8 +82,10 @@ as the reference expands.
 `/ping address=<IPv4|IPv6|MAC> [count=<count>] [iface=<interface>]` selects
 ICMP, ICMPv6 or 802.1ag loopback from the destination address. The default is
 four requests, one per second; `count=0` sends one request. Use address literals
-without ports or zone suffixes. IP ping requires the internal IP stack; MAC
-ping is also available in builds using host networking.
+without ports. An IPv6 literal may carry a zone suffix naming an interface
+(`fe80::1%eth0`); a numeric zone is a host-stack interface index and is not an
+OpenWatt interface. IP ping requires the internal IP stack; MAC ping is also
+available in builds using host networking.
 
 `iface` selects an Ethernet station for MAC ping. Without it, MAC requests go
 out through every running Ethernet station. MAC destinations must be unicast;
@@ -91,7 +93,8 @@ use `/interface/ethernet/discover` for discovery.
 
 For IP ping, `iface` constrains the selected route and receiving interface.
 It is required for IPv6 link-local/multicast and IPv4 multicast/broadcast
-addresses. The command cancels if the selected interface goes offline or is
+addresses; an IPv6 zone suffix selects the interface the same way, and the two
+must agree when both are given. The command cancels if the selected interface goes offline or is
 removed. Group requests accept up to 64 distinct unicast responders during
 one second; duplicates count once per request. Reply counts can exceed request
 counts when probing a group or sending MAC requests on several interfaces.
@@ -105,6 +108,7 @@ sources per request.
 /ping address=192.0.2.1 count=3
 /ping address=2001:db8::1
 /ping address=fe80::1 iface=eth0
+/ping address=fe80::1%eth0
 /ping address=02:13:37:aa:bb:64 iface=eth0
 ```
 
