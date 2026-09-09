@@ -243,6 +243,10 @@ the commit history and linked design documents carry the implementation record.
 
 ## Tesla vehicle BLE
 
+- **[#683] Validate vehicle write-back on hardware**: from the web UI, exercise charging
+  enable, current setpoint (including 5 A), HVAC power and target temperature on the S3.
+  Repeat after disconnect/reconnect and VIN removal; check existing and fresh sync mirrors.
+
 - **Honor addr_type in Windows BLE connect**: `ble_hw_connect` in urt's Windows driver drops
   its `addr_type` argument; `FromBluetoothAddressAsync` assumes a public address, so connecting
   to the (random-address) vehicle likely only works while Windows has it in its scan cache.
@@ -529,6 +533,12 @@ this is what remains.
   module-level sync test harness (the reliable sublayer and decoder are unit-testable in isolation),
   an allocation-flag placement API for `Array`/`MutableString`, and pool-backed packet buffers
   (`#518`).
+
+- **Re-announce an element whose access changes**: `access` is emitted once, at model-add time
+  (`src/manager/sync/json_encoder.d:551`). A provider that becomes writable later - a Tesla vehicle
+  session reaching `Phase.ready`, say - leaves every already-introduced mirror holding `read`, so
+  that mirror's UI offers no control and never forwards a write. Emit an access change on the
+  control plane, and make the mirror re-evaluate its peer binding.
 
 ## Infrastructure
 

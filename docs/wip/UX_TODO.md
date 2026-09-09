@@ -3,6 +3,14 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-09-09: Tesla vehicle write authority (PR #683)
+
+- Use the vehicle's `control.min` value for charging sliders; Tesla VIN registration now
+  publishes 5 A. Do not hardcode the generic 6 A vehicle default.
+- Verify charging and HVAC controls against a ready Tesla session. Binding authority now
+  permits writes; access changes after a mirror's introduction still need the sync-plane
+  follow-up recorded in TODO.md. Check both existing and newly connected mirrors.
+
 ## 2026-09-09: IPv6 pools and retained parent allocations
 
 - `/protocol/ip/pool6.prefix` is now an IPv6 network (`address/length`), with

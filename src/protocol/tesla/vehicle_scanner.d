@@ -2,13 +2,13 @@ module protocol.tesla.vehicle_scanner;
 
 import urt.array;
 import urt.log;
+import urt.si;
 import urt.string;
 import urt.time;
 
 import manager;
 import manager.base;
 import manager.collection;
-import manager.component;
 import manager.device;
 import manager.secret;
 
@@ -133,6 +133,7 @@ nothrow @nogc:
                 continue;
             version (DebugTeslaScanner)
                 log.trace("registered VIN '", t[], "' -> hash [ ", cast(void[])hash[], " ]");
+            (*vehicle).set_element("control.min", Quantity!(int, ScaledUnits.ampere)(minimum_charge_amps), getSysTime());
             updated ~= VinEntry(String(t.move), hash, *vehicle);
             foreach (ref existing; _vins[])
                 if (existing.vin == updated[$ - 1].vin)
@@ -149,18 +150,18 @@ nothrow @nogc:
         // Device, Appliance, or recorded series. Removing a VIN stops access to
         // that vehicle while leaving the collected dataset intact.
         foreach (session; Collection!TeslaVehicleSession().values)
-            if (session.scanner is this && !component_for_vin(session.vin))
+            if (session.scanner is this && !device_for_vin(session.vin))
                 session.destroy();
     }
 
-    // Vehicle Component published for `vin`, or null if the VIN isn't registered.
-    Component component_for_vin(const(char)[] vin)
+    // Tesla vehicles taper to 5A; the generic vehicle default of 6A is a J1772 EVSE floor.
+    enum minimum_charge_amps = 5;
+
+    Device device_for_vin(const(char)[] vin)
     {
         foreach (ref e; _vins[])
-        {
             if (e.vin[] == vin)
-                return e.component;
-        }
+                return e.device;
         return null;
     }
 
@@ -313,7 +314,7 @@ private:
     {
         String vin;
         ubyte[8] hash;
-        Component component;  // Root Vehicle Device for this VIN
+        Device device;
         VehicleRetryState retry;
         ubyte[64] retry_key;
     }
