@@ -2,7 +2,7 @@ module router.iface;
 
 import urt.array;
 import urt.conv;
-import urt.inet : InetAddress;
+import urt.inet : AddressFamily, InetAddress, InetScopeProvider, register_inet_scope_provider;
 import urt.lifetime;
 import urt.map;
 import urt.mem;
@@ -407,14 +407,29 @@ nothrow @nogc:
         return true;
     }
 
+    // Process-local zone identity: the InetAddress scope id that names this interface.
+    // Dense, never reclaimed, and re-claimed by a same-name recreation; see interface_for_scope.
+    final uint scope_id() const pure
+        => id.slot;
+
     // OS netdev ifindex, set by a platform backend (e.g. the Linux kernel-bridge
     // offload) when this interface is backed by a kernel netdev that isn't a
     // LinuxRawEthernet. The IP mirror resolves it via this accessor.
     final int kernel_ifindex() const pure
         => _kernel_ifindex;
-    final void set_kernel_ifindex(int idx)
+    // Windows numbers IPv4 and IPv6 bindings separately; everywhere else one index serves both.
+    final int kernel_ifindex6() const pure
+    {
+        version (Windows)
+            return _kernel_ifindex6;
+        else
+            return _kernel_ifindex;
+    }
+    final void set_kernel_ifindex(int idx, int idx6 = 0)
     {
         _kernel_ifindex = idx;
+        version (Windows)
+            _kernel_ifindex6 = idx6;
     }
 
     // alias the base functions into this scope to merge the overload sets
@@ -754,18 +769,75 @@ protected: // TODO: should probably be private?
     InterfaceSubscriber[8] _subscribers;
     ubyte _num_subscribers;
     int _kernel_ifindex;    // OS netdev ifindex when a platform backend backs this interface (0 = none)
+    version (Windows)
+        int _kernel_ifindex6;
     Array!VLANInterface _vlans;
 }
 
-BaseInterface interface_for_kernel_index(int index)
+// Zone ids (InetAddress.scope_id): an OpenWatt interface's collection slot, or foreign_scope | host
+// index for a link OpenWatt does not manage. Contract: docs/OVERVIEW.md, "Interface scope ids".
+enum uint foreign_scope = 0x8000_0000;
+
+BaseInterface interface_for_scope(uint scope_id)
+{
+    if (scope_id == 0 || scope_id > CID.id_mask)
+        return null;
+    return get_item!BaseInterface(scope_cid(scope_id));
+}
+
+BaseInterface interface_for_kernel_index(AddressFamily family, int index)
 {
     if (index == 0)
         return null;
     foreach (iface; Collection!BaseInterface().values)
-        if (iface.kernel_ifindex == index)
+        if ((family == AddressFamily.ipv6 ? iface.kernel_ifindex6 : iface.kernel_ifindex) == index)
             return iface;
     return null;
 }
+
+private bool scope_to_native(AddressFamily family, uint scope_id, out uint native)
+{
+    if (scope_id & foreign_scope)
+    {
+        native = scope_id & ~foreign_scope;
+        return native != 0;
+    }
+    BaseInterface iface = interface_for_scope(scope_id);
+    if (!iface)
+        return false;
+    int index = family == AddressFamily.ipv6 ? iface.kernel_ifindex6 : iface.kernel_ifindex;
+    if (index == 0)
+        return false;
+    native = uint(index);
+    return true;
+}
+
+private uint scope_from_native(AddressFamily family, uint native)
+{
+    debug assert(native < foreign_scope, "host interface index has no foreign encoding");
+    if (BaseInterface iface = interface_for_kernel_index(family, int(native)))
+        return iface.scope_id;
+    return foreign_scope | native;
+}
+
+// the name outlives the object: a destroyed interface's zone still prints as its name
+private const(char)[] scope_name(uint scope_id, char[] buffer)
+{
+    if (scope_id & foreign_scope)
+        return (scope_id & ~foreign_scope) ? buffer[0 .. (scope_id & ~foreign_scope).format_uint(buffer)] : null;
+    return scope_id <= CID.id_mask ? get_id_dstring(scope_cid(scope_id)) : null;
+}
+
+private uint scope_parse(const(char)[] zone)
+{
+    BaseInterface iface = Collection!BaseInterface().get(zone);
+    return iface ? iface.scope_id : 0;
+}
+
+private CID scope_cid(uint scope_id) pure
+    => CID((uint(BaseInterface.collection_id) << CID.id_bits) | scope_id);
+
+private __gshared immutable InetScopeProvider g_scope_provider = InetScopeProvider(&scope_to_native, &scope_from_native, &scope_name, &scope_parse);
 
 
 class InterfaceModule : Module
@@ -785,6 +857,7 @@ nothrow @nogc:
 
     override void init()
     {
+        register_inet_scope_provider(&g_scope_provider);
         version (UseInternalIPStack) {}
         else
             register_frame_handler(PacketType.ethernet, &on_ethernet_frame);
@@ -808,6 +881,7 @@ nothrow @nogc:
             unregister_frame_handler(PacketType.ethernet);
 
         close_udp_endpoints();
+        register_inet_scope_provider(null);
     }
 
     override void update()
@@ -832,11 +906,22 @@ nothrow @nogc:
             mac.b = destination._a.ether.addr;
             return mac_ping(session, mac, count, iface ? iface.value : null);
         }
+        BaseInterface selected = iface ? iface.value : null;
+        if (destination.family == AddressFamily.ipv6 && destination._a.ipv6.scope_id)
+        {
+            BaseInterface zone = interface_for_scope(destination._a.ipv6.scope_id);
+            if (!zone || (selected && selected !is zone))
+            {
+                session.write_line(zone ? "zone and iface name different interfaces" : "zone is not an OpenWatt interface");
+                return null;
+            }
+            selected = zone;
+        }
         static if (has_ip)
         version (UseInternalIPStack)
         {
             import protocol.ip : IPModule;
-            return get_module!IPModule.ping(session, destination, count, iface ? iface.value : null);
+            return get_module!IPModule.ping(session, destination, count, selected);
         }
         session.write_line("IP ping is unavailable in this build");
         return null;
@@ -854,10 +939,22 @@ nothrow @nogc:
             return true;
         }
         IPv6Addr v6;
-        if (v6.fromString(text) == text.length)
+        ptrdiff_t taken = v6.fromString(text);
+        if (taken == text.length)
         {
             address = InetAddress(v6, 0);
             return true;
+        }
+        if (taken > 0 && text[taken] == '%')
+        {
+            import urt.inet : inet_scope_parse;
+            uint scope_id;
+            ptrdiff_t zone = inet_scope_parse(text[taken + 1 .. $], scope_id);
+            if (zone > 0 && taken + 1 + zone == text.length)
+            {
+                address = InetAddress(v6, 0, 0, scope_id);
+                return true;
+            }
         }
         MACAddress mac;
         if (mac.fromString(text) == text.length)
@@ -880,7 +977,8 @@ nothrow @nogc:
         assert(parse_ping_address("02:13:37:aa:bb:64", address) && address.family == AddressFamily.ether);
         assert(parse_ping_address("021337aabb64", address) && address.family == AddressFamily.ether);
         assert(parse_ping_address("0213:37aa:bb64", address) && address.family == AddressFamily.ether);
-        foreach (text; ["", "host.example", "192.0.2.1:80", "[::1]:80", "fe80::1%eth0", "2001:db8::1junk", "02:13:37:aa:bb:64junk"])
+        assert(parse_ping_address("fe80::1%3", address) && address._a.ipv6.scope_id == 3);
+        foreach (text; ["", "host.example", "192.0.2.1:80", "[::1]:80", "fe80::1%eth0", "fe80::1%", "fe80::1%3:80", "2001:db8::1junk", "02:13:37:aa:bb:64junk"])
             assert(!parse_ping_address(text, address));
 
         InterfaceModule module_ = alloc!InterfaceModule(null);
@@ -1216,3 +1314,86 @@ private:
 
 
 private:
+
+unittest
+{
+    import urt.inet : IPv6Addr, inet_scope_from_native, inet_scope_to_native;
+    import urt.mem : alloc, free;
+
+    static class Link : EthernetStation
+    {
+        enum type_name = "scope-test-link";
+    nothrow @nogc:
+        this(CID id, ObjectFlags flags = ObjectFlags.none)
+        {
+            super(collection_type_info!Link, id, flags);
+            _state = State.running;
+        }
+        override void medium_tx(ref Packet packet) {}
+    }
+
+    Link a = Collection!Link().create("scope-test-a");
+    Link b = Collection!Link().create("scope-test-b");
+    uint sa = a.scope_id, sb = b.scope_id;
+    assert(sa && sb && sa != sb && sa < foreign_scope && sb < foreign_scope);
+    assert(interface_for_scope(sa) is a && interface_for_scope(sb) is b);
+    assert(interface_for_scope(0) is null && interface_for_scope(foreign_scope | sa) is null && interface_for_scope(CID.id_mask) is null);
+
+    // the same link-local bytes on two links are two addresses, each resolving to its own interface
+    IPv6Addr ll = IPv6Addr(0xfe80, 0, 0, 0, 0, 0, 0, 1);
+    InetAddress on_a = InetAddress(ll, 0, 0, sa), on_b = InetAddress(ll, 0, 0, sb);
+    assert(on_a != on_b && on_a.same_addr(on_b));
+    assert(interface_for_scope(on_a._a.ipv6.scope_id) is a && interface_for_scope(on_b._a.ipv6.scope_id) is b);
+
+    // native translation follows the kernel index and refuses zones the host stack cannot name
+    register_inet_scope_provider(&g_scope_provider);
+    scope(exit) register_inet_scope_provider(null);
+    uint native;
+    assert(!inet_scope_to_native(AddressFamily.ipv6, sa, native));
+    a.set_kernel_ifindex(7, 7);
+    assert(inet_scope_to_native(AddressFamily.ipv6, sa, native) && native == 7);
+    assert(inet_scope_to_native(AddressFamily.ipv4, sa, native) && native == 7);
+    assert(inet_scope_from_native(AddressFamily.ipv6, 7) == sa);
+    assert(inet_scope_from_native(AddressFamily.ipv6, 99) == (foreign_scope | 99));
+    assert(inet_scope_to_native(AddressFamily.ipv6, foreign_scope | 99, native) && native == 99);
+    assert(!inet_scope_to_native(AddressFamily.ipv6, sb, native));
+    assert(!inet_scope_to_native(AddressFamily.ipv6, CID.id_mask, native));
+
+    // text form: names are OpenWatt interfaces, numbers are host indices
+    char[64] tmp;
+    assert(tmp[0 .. on_a.toString(tmp, null, null)] == "[fe80::1%scope-test-a]:0");
+    InetAddress parsed;
+    assert(parsed.fromString("fe80::1%scope-test-b") == 20 && parsed == on_b);
+    assert(parsed.fromString("fe80::1%7") == 9 && parsed._a.ipv6.scope_id == sa);
+    assert(parsed.fromString("fe80::1%99") == 10 && parsed._a.ipv6.scope_id == (foreign_scope | 99));
+    assert(tmp[0 .. parsed.toString(tmp, null, null)] == "[fe80::1%99]:0");
+    assert(parsed.fromString("fe80::1%no-such-iface") == -1);
+    assert(!inet_scope_to_native(AddressFamily.ipv6, foreign_scope, native));
+    parsed._a.ipv6.scope_id = foreign_scope;
+    assert(parsed.toString(tmp, null, null) == -1);
+    assert(!inet_scope_to_native(AddressFamily.ipv6, foreign_scope, native));
+    parsed._a.ipv6.scope_id = foreign_scope;
+    assert(parsed.toString(tmp, null, null) == -1);
+
+
+    // destruction leaves the id dangling; recreation at the same name reclaims it, a new name never does
+    Collection!Link().remove(a);
+    free(a);
+    assert(interface_for_scope(sa) is null);
+    assert(!inet_scope_to_native(AddressFamily.ipv6, sa, native));
+    assert(tmp[0 .. on_a.toString(tmp, null, null)] == "[fe80::1%scope-test-a]:0");
+    assert(parsed.fromString("fe80::1%scope-test-a") == -1);
+    Link a2 = Collection!Link().create("scope-test-a");
+    Link c = Collection!Link().create("scope-test-c");
+    scope(exit)
+    {
+        Collection!Link().remove(a2);
+        Collection!Link().remove(b);
+        Collection!Link().remove(c);
+        free(a2);
+        free(b);
+        free(c);
+    }
+    assert(a2.scope_id == sa && interface_for_scope(sa) is a2);
+    assert(c.scope_id != sa && c.scope_id != sb);
+}
