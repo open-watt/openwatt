@@ -508,6 +508,16 @@ this is what remains.
 
 ## Infrastructure
 
+- **Make clock-sensitive unittests hermetic**: tests that leave a `MonoTime` member at
+  `MonoTime.init` and then compare it against a real `getTime()` only pass once the monotonic
+  clock exceeds the interval under test, so they fail on a freshly booted CI runner. The tesla
+  poll test is fixed; `protocol.obd`'s asleep-probe case still sets `_sent_time = MonoTime.init`
+  and needs the clock past `probe_interval` (`src/protocol/obd/package.d:1034`). The structural
+  answer is to stop reading the real clock in these tests: `handle_protocol_fault` and
+  `issue_requests` call `getTime()` internally, so the time source has to be injectable before
+  the tests can anchor on a synthetic base the way `protocol.tesla.vehicle_session`'s first
+  unittest already does.
+
 - **Repair the runtime test harness**: `test/test_harness.py` pipes stdin into
   `--interactive`, but startup requires a terminal and the Windows console
   stream reads console events. Use a terminal or supported session transport.
