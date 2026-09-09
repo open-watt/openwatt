@@ -775,7 +775,7 @@ protected: // TODO: should probably be private?
 }
 
 // Zone ids (InetAddress.scope_id): an OpenWatt interface's collection slot, or foreign_scope | host
-// index for a link OpenWatt does not manage. Contract: docs/OVERVIEW.md, "Interface scope ids".
+// index for a link OpenWatt does not manage. Contract: docs/wip/NETWORKING.draft.md, "Interface scope ids".
 enum uint foreign_scope = 0x8000_0000;
 
 BaseInterface interface_for_scope(uint scope_id)

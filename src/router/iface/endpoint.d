@@ -291,6 +291,16 @@ nothrow @nogc:
             return false;
     }
 
+    static if (has_ipv6)
+    {
+        bool join(IPv6Addr group, BaseInterface iface)
+            => _family == AddressFamily.ipv6 && _ip.join(group, iface);
+
+        // Pins the link for link-local and multicast sends; join() sets it on first membership.
+        bool outbound_interface(BaseInterface iface)
+            => _family == AddressFamily.ipv6 && _ip.outbound_interface(iface);
+    }
+
     bool enable_broadcast()
     {
         if (_family == AddressFamily.ether)

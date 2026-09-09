@@ -1559,29 +1559,26 @@ struct IPUDPState
 nothrow @nogc:
     bool open(UDPEndpoint* owner, const(InetAddress)* local, const(InetAddress)* remote)
     {
+        AddressFamily family = local ? local.family : remote ? remote.family : AddressFamily.ipv4;
+        if (family != AddressFamily.ipv4 && family != AddressFamily.ipv6)
+            return false;
+        if ((local && local.family != family) || (remote && remote.family != family))
+            return false;
+        InetAddress any = family == AddressFamily.ipv4 ? InetAddress(IPAddr.any, 0) : InetAddress(IPv6Addr.any, 0);
+
         version (UseInternalIPStack)
         {
-            if ((local && local.family != AddressFamily.ipv4) || (remote && remote.family != AddressFamily.ipv4))
-                return false;
-
-            UdpPcb* pcb = alloc!UdpPcb();
-            if (local)
+            static if (!has_ipv6)
             {
-                pcb.local_addr = local._a.ipv4.addr;
-                pcb.local_port = local._a.ipv4.port;
+                if (family == AddressFamily.ipv6)
+                    return false;
             }
-            if (pcb.local_port == 0)
-                pcb.local_port = allocate_udp_port();
-            if (!udp_bind_available(pcb, pcb.local_addr, pcb.local_port))
+            UdpPcb* pcb = alloc!UdpPcb();
+            pcb.family = family;
+            if (!udp_bind(pcb, local ? *local : any) || (remote && !udp_connect(pcb, *remote)))
             {
                 free(pcb);
                 return false;
-            }
-            if (remote)
-            {
-                pcb.remote_addr = remote._a.ipv4.addr;
-                pcb.remote_port = remote._a.ipv4.port;
-                pcb.connected = true;
             }
             _owner = owner;
             pcb.owner = &this;
@@ -1591,39 +1588,35 @@ nothrow @nogc:
         }
         else version (Windows)
         {
-            if (local && local.family != AddressFamily.ipv4)
-                return false;
-            if (remote && remote.family != AddressFamily.ipv4)
-                return false;
-            IOCP_SOCKET socket = ws_socket(WSA_AF_INET, WSA_SOCK_DGRAM, WSA_IPPROTO_UDP, null, 0, WSA_FLAG_OVERLAPPED);
+            bool v6 = family == AddressFamily.ipv6;
+            IOCP_SOCKET socket = ws_socket(v6 ? WSA_AF_INET6 : WSA_AF_INET, WSA_SOCK_DGRAM, WSA_IPPROTO_UDP, null, 0, WSA_FLAG_OVERLAPPED);
             if (socket == INVALID_SOCKET)
                 return false;
-            int receive_info = 1;
-            if (g_recv_msg is null || ws_setsockopt(socket, WSA_IPPROTO_IP, WSA_IP_PKTINFO, &receive_info, int.sizeof) != 0)
-            {
-                ws_closesocket(socket);
-                return false;
-            }
-            sockaddr_in address;
-            address.sin_family = cast(short)WSA_AF_INET;
-            if (local)
-                address = to_sockaddr_in(*local);
-            if (ws_bind(socket, &address, cast(int)sockaddr_in.sizeof) != 0)
+            int yes = 1;
+            bool configured = g_recv_msg !is null;
+            if (v6)
+                configured = configured && ws_setsockopt(socket, WSA_IPPROTO_IPV6, WSA_IPV6_V6ONLY, &yes, int.sizeof) == 0 && ws_setsockopt(socket, WSA_IPPROTO_IPV6, WSA_IPV6_PKTINFO, &yes, int.sizeof) == 0;
+            else
+                configured = configured && ws_setsockopt(socket, WSA_IPPROTO_IP, WSA_IP_PKTINFO, &yes, int.sizeof) == 0;
+            SockAddrBuf address;
+            int length = configured ? to_sockaddr(local ? *local : any, address) : 0;
+            if (length == 0 || ws_bind(socket, &address, length) != 0)
             {
                 ws_closesocket(socket);
                 return false;
             }
             if (remote)
             {
-                sockaddr_in peer = to_sockaddr_in(*remote);
-                if (ws_connect(socket, &peer, cast(int)sockaddr_in.sizeof) != 0)
+                SockAddrBuf peer;
+                int peer_length = to_sockaddr(*remote, peer);
+                if (peer_length == 0 || ws_connect(socket, &peer, peer_length) != 0)
                 {
                     ws_closesocket(socket);
                     return false;
                 }
             }
-            sockaddr_in bound;
-            int bound_length = sockaddr_in.sizeof;
+            SockAddrBuf bound;
+            int bound_length = SockAddrBuf.sizeof;
             if (ws_getsockname(socket, &bound, &bound_length) != 0)
             {
                 ws_closesocket(socket);
@@ -1631,7 +1624,8 @@ nothrow @nogc:
             }
             _owner = owner;
             _handle = socket;
-            _local = from_sockaddr_in(bound);
+            _family = family;
+            _local = from_sockaddr(bound);
             if (!g_app.reactor.associate(cast(HANDLE)socket) || !post_recv())
             {
                 ws_closesocket(socket);
@@ -1642,14 +1636,6 @@ nothrow @nogc:
         }
         else
         {
-            if ((local && local.family != AddressFamily.ipv4 && local.family != AddressFamily.ipv6) || (remote && remote.family != AddressFamily.ipv4 && remote.family != AddressFamily.ipv6))
-                return false;
-            AddressFamily family = AddressFamily.ipv4;
-            if (local && (local.family == AddressFamily.ipv4 || local.family == AddressFamily.ipv6))
-                family = local.family;
-            else if (remote && (remote.family == AddressFamily.ipv4 || remote.family == AddressFamily.ipv6))
-                family = remote.family;
-
             Socket socket;
             if (create_socket(family, SocketType.datagram, Protocol.udp, socket).failed)
                 return false;
@@ -1677,18 +1663,7 @@ nothrow @nogc:
                     return false;
                 }
             }
-            InetAddress bind_address = local ? *local : (family == AddressFamily.ipv6 ? InetAddress(IPv6Addr.any, 0) : InetAddress(IPAddr.any, 0));
-            if (socket.bind(bind_address).failed)
-            {
-                socket.close();
-                return false;
-            }
-            if (remote && socket.connect(*remote).failed)
-            {
-                socket.close();
-                return false;
-            }
-            if (socket.get_socket_name(_local).failed)
+            if (socket.bind(local ? *local : any).failed || (remote && socket.connect(*remote).failed) || socket.get_socket_name(_local).failed)
             {
                 socket.close();
                 return false;
@@ -1710,9 +1685,7 @@ nothrow @nogc:
     InetAddress local_address()
     {
         version (UseInternalIPStack)
-            return _pcb ? InetAddress(_pcb.local_addr, _pcb.local_port) : InetAddress();
-        else version (Windows)
-            return _local;
+            return _pcb ? udp_local(_pcb) : InetAddress();
         else
             return _local;
     }
@@ -1727,6 +1700,20 @@ nothrow @nogc:
                 if (route.kind == RouteResult.Kind.forward)
                     return route.out_iface;
             }
+            static if (has_ipv6)
+            {
+                if (_stack_ptr && remote.family == AddressFamily.ipv6)
+                {
+                    BaseInterface hint = interface_for_scope(remote._a.ipv6.scope_id);
+                    if (!hint)
+                        hint = _pcb.outbound_iface6.get;
+                    if (!hint)
+                        hint = interface_for_scope(_pcb.local_scope6);
+                    RouteResult6 route = _stack_ptr.route_lookup_v6_dst(remote._a.ipv6.addr, hint);
+                    if (route.kind == RouteResult6.Kind.forward)
+                        return route.out_iface;
+                }
+            }
         }
         return null;
     }
@@ -1736,27 +1723,7 @@ nothrow @nogc:
         if (!group.is_multicast)
             return false;
         version (UseInternalIPStack)
-        {
-            IPAddr selected = interface_;
-            if (selected == IPAddr.any)
-                selected = _pcb.local_addr != IPAddr.any ? _pcb.local_addr : _stack_ptr.select_source_v4(group);
-            if (!selected)
-                return false;
-            if (_pcb.multicast_group && _pcb.multicast_group != group)
-                return false;
-            foreach (joined; _pcb.multicast_interfaces[])
-            {
-                if (joined == selected)
-                    return outbound_interface(selected);
-            }
-            if (!outbound_interface(selected))
-                return false;
-            if (!igmp_join(*_stack_ptr, group, selected))
-                return false;
-            _pcb.multicast_group = group;
-            _pcb.multicast_interfaces ~= selected;
-            return true;
-        }
+            return udp_join(*_stack_ptr, _pcb, group, interface_);
         else version (Windows)
         {
             IPv4Membership membership = IPv4Membership(group.address, interface_.address);
@@ -1774,6 +1741,65 @@ nothrow @nogc:
             if (_socket.set_socket_option(SocketOption.multicast, membership).failed)
                 return false;
             return true;
+        }
+    }
+
+    static if (has_ipv6)
+    {
+        // The first membership also pins the outbound interface, so replies and further sends stay on that link.
+        bool join(IPv6Addr group, BaseInterface iface)
+        {
+            if (!group.is_multicast || !iface)
+                return false;
+            version (UseInternalIPStack)
+                return udp_join6(*_stack_ptr, _pcb, group, iface);
+            else version (Windows)
+            {
+                IPv6Membership membership;
+                store_ipv6_address(membership.group.ptr, group);
+                membership.interface_index = cast(uint)iface.kernel_ifindex6;
+                if (_handle == INVALID_SOCKET || membership.interface_index == 0)
+                    return false;
+                if (ws_setsockopt(_handle, WSA_IPPROTO_IPV6, WSA_IPV6_ADD_MEMBERSHIP, &membership, cast(int)membership.sizeof) != 0)
+                    return false;
+                return _scope6 != 0 || outbound_interface(iface);
+            }
+            else
+            {
+                MulticastGroup6 membership = MulticastGroup6(group, iface.scope_id);
+                if (!_socket || _socket.set_socket_option(SocketOption.multicast6, membership).failed)
+                    return false;
+                return _scope6 != 0 || outbound_interface(iface);
+            }
+        }
+
+        // Pins the link for link-scoped and multicast sends.
+        bool outbound_interface(BaseInterface iface)
+        {
+            if (!iface)
+                return false;
+            version (UseInternalIPStack)
+            {
+                _pcb.outbound_iface6 = iface;
+                return true;
+            }
+            else version (Windows)
+            {
+                uint index = cast(uint)iface.kernel_ifindex6;
+                if (_handle == INVALID_SOCKET || index == 0)
+                    return false;
+                if (ws_setsockopt(_handle, WSA_IPPROTO_IPV6, WSA_IPV6_MULTICAST_IF, &index, cast(int)index.sizeof) != 0)
+                    return false;
+                _scope6 = iface.scope_id;
+                return true;
+            }
+            else
+            {
+                if (!_socket || _socket.set_socket_option(SocketOption.multicast_interface6, cast(int)iface.scope_id).failed)
+                    return false;
+                _scope6 = iface.scope_id;
+                return true;
+            }
         }
     }
 
@@ -1817,25 +1843,22 @@ nothrow @nogc:
     ptrdiff_t sendto(scope const(void)[] data, InetAddress dst)
     {
         version (UseInternalIPStack)
-        {
-            IPAddr remote = v4_addr(dst);
-            IPAddr local = remote.is_multicast && _pcb.outbound_interface ? _pcb.outbound_interface : _pcb.local_addr;
-            if (!udp_output(*_stack_ptr, local, _pcb.local_port, remote, port_of(dst), cast(const(ubyte)[])data))
-                return 0;
-            return data.length;
-        }
+            return udp_send(*_stack_ptr, _pcb, dst, cast(const(ubyte)[])data) ? data.length : 0;
         else version (Windows)
         {
             if (_handle == INVALID_SOCKET || data.length == 0)
                 return 0;
-            sockaddr_in to = to_sockaddr_in(dst);
-            int sent = ws_sendto(_handle, data.ptr, cast(int)data.length, 0, &to, cast(int)sockaddr_in.sizeof);
+            SockAddrBuf to;
+            int length = with_zone(dst) ? to_sockaddr(dst, to) : 0;
+            if (length == 0)
+                return 0;
+            int sent = ws_sendto(_handle, data.ptr, cast(int)data.length, 0, &to, length);
             return sent > 0 ? sent : 0;
         }
         else
         {
             size_t sent;
-            if (_socket.sendto(&dst, &sent, data).failed)
+            if (!with_zone(dst) || _socket.sendto(&dst, &sent, data).failed)
                 return 0;
             return sent;
         }
@@ -1894,32 +1917,44 @@ private:
         {
             if (_pcb)
             {
-                foreach (local; _pcb.multicast_interfaces[])
-                    igmp_leave(*_stack_ptr, _pcb.multicast_group, local);
-                udp_unregister(_pcb);
-                foreach (ref dgm; _pcb.recv_queue[])
-                    udp_free_datagram_data(dgm);
-                free(_pcb);
+                udp_close(*_stack_ptr, _pcb);
                 _pcb = null;
             }
         }
 
-        package(protocol.ip) void deliver(IPAddr src, ushort sport, IPAddr dst, ushort dport, BaseInterface ingress, const(ubyte)[] data, MonoTime rx_time)
+        package(protocol.ip) void deliver(ref InetAddress src, ref InetAddress dst, BaseInterface ingress, const(ubyte)[] data, MonoTime rx_time)
         {
             UDPReceiveInfo info;
-            info.source = InetAddress(src, sport);
-            info.destination = InetAddress(dst, dport);
+            info.source = src;
+            info.destination = dst;
             info.rx_time = rx_time;
             info.ingress = ingress;
             udp_deliver(_owner, data, info);
         }
     }
+    else
+    {
+        InetAddress _local;
+        uint _scope6;   // zone of the pinned outbound interface, stamped on link-scoped sends
+
+        // A link-scoped destination without a zone takes the pinned outbound interface's; one naming another is refused.
+        bool with_zone(ref InetAddress dst)
+        {
+            if (dst.family != AddressFamily.ipv6 || !dst._a.ipv6.addr.is_link_scoped)
+                return true;
+            if (!dst._a.ipv6.scope_id)
+                dst._a.ipv6.scope_id = _scope6;
+            return !_scope6 || dst._a.ipv6.scope_id == _scope6;
+        }
+    }
+
+    version (UseInternalIPStack) {}
     else version (Windows)
     {
         struct RecvFromOp
         {
             IoOp io;
-            sockaddr_in from;
+            SockAddrBuf from;
             WSABUF buffer;
             WSAMSG message;
             ubyte[64] control;
@@ -1927,7 +1962,7 @@ private:
         }
 
         IOCP_SOCKET _handle = INVALID_SOCKET;
-        InetAddress _local;
+        AddressFamily _family;
         int  _outstanding;
         RecvFromOp _recv;
 
@@ -1942,7 +1977,7 @@ private:
             _recv.io.on_complete = &recv_complete;
             _recv.buffer = WSABUF(uint(_recv.buf.length), _recv.buf.ptr);
             _recv.message.name = &_recv.from;
-            _recv.message.namelen = sockaddr_in.sizeof;
+            _recv.message.namelen = SockAddrBuf.sizeof;
             _recv.message.lpBuffers = &_recv.buffer;
             _recv.message.dwBufferCount = 1;
             _recv.message.Control = WSABUF(uint(_recv.control.length), _recv.control.ptr);
@@ -1966,21 +2001,32 @@ private:
             {
                 uint interface_index;
                 InetAddress destination = _local;
-                if (_recv.message.Control.len >= control_data_offset + IN_PKTINFO.sizeof)
+                if (_recv.message.Control.len >= control_data_offset)
                 {
                     WSACMSGHDR* header = cast(WSACMSGHDR*)_recv.message.Control.buf;
-                    if (header.length >= control_data_offset + IN_PKTINFO.sizeof && header.level == WSA_IPPROTO_IP && header.type == WSA_IP_PKTINFO)
+                    ubyte* payload = _recv.message.Control.buf + control_data_offset;
+                    if (_family == AddressFamily.ipv4)
                     {
-                        IN_PKTINFO* packet_info = cast(IN_PKTINFO*)(_recv.message.Control.buf + control_data_offset);
-                        destination._a.ipv4.addr.address = packet_info.address;
+                        if (header.length >= control_data_offset + IN_PKTINFO.sizeof && header.level == WSA_IPPROTO_IP && header.type == WSA_IP_PKTINFO)
+                        {
+                            IN_PKTINFO* packet_info = cast(IN_PKTINFO*)payload;
+                            destination._a.ipv4.addr.address = packet_info.address;
+                            interface_index = packet_info.interface_index;
+                        }
+                    }
+                    else if (header.length >= control_data_offset + IN6_PKTINFO.sizeof && header.level == WSA_IPPROTO_IPV6 && header.type == WSA_IPV6_PKTINFO)
+                    {
+                        IN6_PKTINFO* packet_info = cast(IN6_PKTINFO*)payload;
                         interface_index = packet_info.interface_index;
+                        IPv6Addr address = load_ipv6_address(packet_info.address.ptr);
+                        destination = InetAddress(address, _local.port, 0, address.is_link_scoped ? inet_scope_from_native(AddressFamily.ipv6, interface_index) : 0);
                     }
                 }
                 UDPReceiveInfo info;
-                info.source = from_sockaddr_in(_recv.from);
+                info.source = from_sockaddr(_recv.from);
                 info.destination = destination;
                 info.rx_time = getTime();
-                info.ingress = interface_for_kernel_index(AddressFamily.ipv4, int(interface_index));
+                info.ingress = interface_for_kernel_index(_family, int(interface_index));
                 udp_deliver(_owner, _recv.buf[0 .. bytes], info);
             }
             if (!_closing)
@@ -1990,7 +2036,6 @@ private:
     else
     {
         Socket _socket;
-        InetAddress _local;
         bool _watched;
 
         void backend_release() {}
@@ -2625,29 +2670,7 @@ version (UseInternalIPStack)
     enum int TcpEndpointOwned = -1;
 
     __gshared IPStack* _stack_ptr;
-    __gshared ushort _next_udp_port = 49_152;
     __gshared ushort _next_tcp_port = 49_152;
-
-    ushort allocate_udp_port()
-    {
-        foreach (_; 0 .. 16_384)
-        {
-            ushort p = _next_udp_port;
-            _next_udp_port = _next_udp_port == 65_535 ? 49_152 : cast(ushort)(_next_udp_port + 1);
-            bool used = false;
-            foreach (pcb; _pcbs[])
-            {
-                if (pcb.local_port == p)
-                {
-                    used = true;
-                    break;
-                }
-            }
-            if (!used)
-                return p;
-        }
-        return _next_udp_port;
-    }
 
     ushort allocate_tcp_port()
     {
@@ -2703,8 +2726,27 @@ else version (Windows)
         uint address;
         uint interface_index;
     }
+    struct IN6_PKTINFO
+    {
+        ubyte[16] address;
+        uint interface_index;
+    }
+    struct sockaddr_in6
+    {
+        short sin6_family;
+        ushort sin6_port;
+        uint sin6_flowinfo;
+        ubyte[16] sin6_addr;
+        uint sin6_scope_id;
+    }
+    union SockAddrBuf
+    {
+        sockaddr_in v4;
+        sockaddr_in6 v6;
+    }
     struct IOCP_GUID { uint Data1; ushort Data2, Data3; ubyte[8] Data4; }
     struct IPv4Membership { uint group; uint interface_; }
+    struct IPv6Membership { ubyte[16] group; uint interface_index; }
 
     extern (Windows) int WSARecv (IOCP_SOCKET, WSABUF*, uint, uint*, uint*, OVERLAPPED*, void*) nothrow @nogc;
     extern (Windows) int WSASend (IOCP_SOCKET, WSABUF*, uint, uint*, uint,  OVERLAPPED*, void*) nothrow @nogc;
@@ -2723,9 +2765,10 @@ else version (Windows)
     __gshared immutable IOCP_GUID WSAID_RECVMSG  = IOCP_GUID(0xf689d7c8, 0x6f1f, 0x436b, [0x8a,0x53,0xe5,0x4f,0xe3,0x51,0xc3,0x22]);
 
     enum IOCP_SOCKET INVALID_SOCKET = ~IOCP_SOCKET(0);
-    enum int WSA_AF_INET = 2, WSA_SOCK_STREAM = 1, WSA_SOCK_DGRAM = 2;
-    enum int WSA_IPPROTO_IP = 0, WSA_IPPROTO_TCP = 6, WSA_IPPROTO_UDP = 17;
+    enum int WSA_AF_INET = 2, WSA_AF_INET6 = 23, WSA_SOCK_STREAM = 1, WSA_SOCK_DGRAM = 2;
+    enum int WSA_IPPROTO_IP = 0, WSA_IPPROTO_TCP = 6, WSA_IPPROTO_UDP = 17, WSA_IPPROTO_IPV6 = 41;
     enum int WSA_IP_MULTICAST_IF = 9, WSA_IP_ADD_MEMBERSHIP = 12, WSA_IP_PKTINFO = 19;
+    enum int WSA_IPV6_MULTICAST_IF = 9, WSA_IPV6_ADD_MEMBERSHIP = 12, WSA_IPV6_PKTINFO = 19, WSA_IPV6_V6ONLY = 27;
     enum int SOL_SOCKET_ = 0xffff, SO_REUSEADDR_ = 0x0004, SO_BROADCAST_ = 0x0020, SO_ERROR_ = 0x1007;
     enum size_t control_data_offset = (WSACMSGHDR.sizeof + size_t.alignof - 1) & ~(size_t.alignof - 1);
 
@@ -2749,7 +2792,7 @@ else version (Windows)
     __gshared LPFN_ACCEPTEX  g_accept_ex;
     __gshared LPFN_RECVMSG   g_recv_msg;
 
-    // build a v4 sockaddr_in from an InetAddress (IOCP TCP/UDP is v4-only for now)
+    // IOCP TCP is v4-only for now
     sockaddr_in to_sockaddr_in(ref const InetAddress a) nothrow @nogc
     {
         sockaddr_in sa;
@@ -2764,6 +2807,31 @@ else version (Windows)
         IPAddr ip;
         ip.address = sa.sin_addr.s_addr;
         return InetAddress(ip, loadBigEndian(&sa.sin_port));
+    }
+
+    // Returns the sockaddr length, 0 when a zone has no host interface.
+    int to_sockaddr(ref const InetAddress a, ref SockAddrBuf sa) nothrow @nogc
+    {
+        if (a.family == AddressFamily.ipv4)
+        {
+            sa.v4 = to_sockaddr_in(a);
+            return sockaddr_in.sizeof;
+        }
+        sa.v6 = sockaddr_in6.init;
+        sa.v6.sin6_family = short(WSA_AF_INET6);
+        storeBigEndian(&sa.v6.sin6_port, a._a.ipv6.port);
+        storeBigEndian(&sa.v6.sin6_flowinfo, a._a.ipv6.flow_info);
+        store_ipv6_address(sa.v6.sin6_addr.ptr, a._a.ipv6.addr);
+        if (!inet_scope_to_native(AddressFamily.ipv6, a._a.ipv6.scope_id, sa.v6.sin6_scope_id))
+            return 0;
+        return sockaddr_in6.sizeof;
+    }
+
+    InetAddress from_sockaddr(ref const SockAddrBuf sa) nothrow @nogc
+    {
+        if (sa.v4.sin_family == short(WSA_AF_INET))
+            return from_sockaddr_in(sa.v4);
+        return InetAddress(load_ipv6_address(sa.v6.sin6_addr.ptr), loadBigEndian(&sa.v6.sin6_port), loadBigEndian(&sa.v6.sin6_flowinfo), inet_scope_from_native(AddressFamily.ipv6, sa.v6.sin6_scope_id));
     }
 
 

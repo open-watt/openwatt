@@ -597,7 +597,7 @@ The interface self-configures its L2MTU from the peer's datagram payload MTU
 | `interface` | ethernet station name | none | Egress binding for an ether peer; datagrams ride this station only. |
 | `local-host` | host or address | wildcard | Local address to bind. |
 | `local-port` | `0` to `65535` | `0` | Local port; zero requests an ephemeral port. |
-| `remote-host` | host, address or MAC | none | Default datagram destination. |
+| `remote-host` | host, address or MAC | none | Default datagram destination. An IPv6 multicast or link-local peer names its link with a zone (`ff02::1%eth0`). |
 | `remote-port` | `1` to `65535` | with remote-host | Default destination port. |
 
 ### `/interface/wifi`

@@ -33,6 +33,7 @@ import urt.time;
 import manager;
 import manager.base;
 import manager.collection;
+import manager.features : has_ipv6;
 import manager.plugin;
 
 import router.iface;
@@ -266,6 +267,20 @@ protected:
                 _ep.close();
                 _ep = null;
                 return CompletionStatus.error;
+            }
+        }
+        static if (has_ipv6)
+        {
+            if (_remote.family == AddressFamily.ipv6 && _remote._a.ipv6.addr.is_multicast)
+            {
+                BaseInterface link = interface_for_scope(_remote._a.ipv6.scope_id);
+                if (!link || !_ep.join(_remote._a.ipv6.addr, link))
+                {
+                    log.error("failed to join multicast group ", _remote, link ? "" : " (a zone must name the interface)");
+                    _ep.close();
+                    _ep = null;
+                    return CompletionStatus.error;
+                }
             }
         }
         if (_broadcast && !_ep.enable_broadcast())
