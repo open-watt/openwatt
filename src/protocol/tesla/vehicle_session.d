@@ -1792,7 +1792,9 @@ unittest
     assert(s.validate() && s._phase == s.Phase.ready);
     assert(s.status_message() == s.retry.status[]);
 
-    MonoTime now = getTime();
+    MonoTime now = getTime() + s.climate_poll_interval;
+    s._last_poll_time = now - s.poll_idle;
+    s._last_climate_poll_time = now - s.climate_poll_interval;
     s._last_vehicle_poll_time = now;
     s._retry_poll = s.PollKind.charge;
     assert(s.poll(now) > now);
