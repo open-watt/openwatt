@@ -362,6 +362,8 @@ nothrow @nogc:
 
         if (value.empty)
             return "`name` must not be empty";
+        if (const(char)[] error = check_name(value))
+            return error;
 
         String old = name();
         if (old[] == value[])
@@ -409,6 +411,20 @@ nothrow @nogc:
         import manager.collection : item_table, signal_object_lifecycle, ObjectLifecycleEvent;
         signal_object_lifecycle(this, ObjectLifecycleEvent.destroyed);
         item_table(_typeInfo.collection_id).defer_free(this);
+    }
+
+    static const(char)[] check_name(const(char)[] value)
+    {
+        import urt.string.ascii : is_numeric;
+
+        bool numeric = value.length != 0;
+        foreach (c; value)
+        {
+            if (c == ':')
+                return "names must not contain ':'";
+            numeric &= is_numeric(c);
+        }
+        return numeric ? "names must not be numeric" : null;
     }
 
     // return a list of properties that can be set on this object
@@ -1666,6 +1682,8 @@ unittest
     import urt.si.quantity : Quantity;
     import urt.si.unit : ScaledUnit, Second, Watt;
     import manager.collection : item_table;
+
+    assert(BaseObject.check_name("7") && BaseObject.check_name("a:b") && BaseObject.check_name("") is null && BaseObject.check_name("eth7") is null && BaseObject.check_name("7a") is null);
 
     enum TestMode : ubyte { idle, run, fault }
 

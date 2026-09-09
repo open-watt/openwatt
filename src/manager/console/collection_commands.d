@@ -111,6 +111,12 @@ CommandState collection_add_exec(ref Command, Session session, Scope* _scope, co
 
     // create an instance
     BaseObject item = collection.alloc(name);
+    if (const(char)[] error = BaseObject.check_name(item.name[]))
+    {
+        session.write_line(error);
+        free(item);
+        return null;
+    }
 
     // set all the properties...
     foreach (ref arg; named_args)
