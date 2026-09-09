@@ -21,16 +21,15 @@ import urt.string;
 
 import manager;
 import manager.collection;
-import manager.features : has_ipv6;
 import manager.plugin;
 import manager.console;
 import manager.console.session;
-import manager.console.table : Table;
 
 import router.iface.bridge : BridgeInterface;
 
 import driver.linux.ethernet : LinuxRawEthernet;
-import driver.linux.netlink_write : ipv6_from_wire;
+import driver.linux.netlink : KernelNeighbour;
+import driver.linux.netlink_write : ipv6_from_wire, NTF_EXT_LEARNED;
 import driver.linux.nl80211 : query_wifi_interfaces, WifiIfInfo, wifi_iftype_name;
 
 import urt.internal.sys.posix : close;
@@ -57,9 +56,6 @@ nothrow @nogc:
     override void init()
     {
         g_app.console.register_command!(print_cmd, "print")("/system/linux", this);
-        g_app.console.register_command!(neighbour_v4_print, "print")("/protocol/ip/neighbour", this);
-        static if (has_ipv6)
-            g_app.console.register_command!(neighbour_v6_print, "print")("/protocol/ip/neighbour6", this);
     }
 
     // /system/linux/print [format=ip|interfaces] -- dump the live kernel network
@@ -89,71 +85,31 @@ nothrow @nogc:
         else
             format_ip_batch(session);
     }
-
-    // The kernel owns ARP/ND on these builds; same paths as the internal stack's cache prints.
-    void neighbour_v4_print(Session session)
-    {
-        neighbour_print(session, AF_INET);
-    }
-
-    static if (has_ipv6)
-    void neighbour_v6_print(Session session)
-    {
-        neighbour_print(session, AF_INET6);
-    }
-
-    void neighbour_print(Session session, ubyte family)
-    {
-        g_links.clear();
-        g_neighs.clear();
-        if (!(nl_dump(RTM_GETLINK, AF_PACKET, &on_link) & nl_dump(RTM_GETNEIGH, family, &on_neigh)))
-        {
-            session.write_line("Failed to query the kernel neighbour table (see log)");
-            return;
-        }
-        if (g_neighs.length == 0)
-        {
-            session.write_line(family == AF_INET6 ? "No IPv6 neighbour entries" : "No IPv4 neighbour entries");
-            return;
-        }
-
-        Table t;
-        t.add_column("ip");
-        t.add_column("mac");
-        t.add_column("state");
-        t.add_column("iface");
-        foreach (ref n; g_neighs[])
-        {
-            t.add_row();
-            t.cell(addr_str(n.family, n.ip[]));
-            t.cell(n.has_mac ? mac_str(n.mac) : "");
-            t.cell(nud_name(n.state));
-            t.cell(ifname(n.index));
-        }
-        t.render(session);
-    }
 }
 
-// A kernel entry tagged RTPROT_OPENWATT, keyed exactly as the writer would delete it.
+// A kernel entry OpenWatt owns (RTPROT_OPENWATT, or NTF_EXT_LEARNED for neighbours, which carry no
+// protocol), keyed exactly as the writer would delete it.
 struct OwnedEntry
 {
-    int       ifindex;      // address: the netdev; route: oif (0 = none)
+    int       ifindex;      // address/neighbour: the netdev; route: oif (0 = none)
     uint      metric;       // route only
     ubyte     family;       // AF_INET / AF_INET6
     ubyte     prefix;
     ubyte     type;         // route only: RTN_*
     bool      route;
-    ubyte[16] addr;         // address: host address; route: destination
+    bool      neighbour;
+    ubyte[16] addr;         // address/neighbour: host address; route: destination
     ubyte[16] gateway;      // route only
 }
 
-// Every route and address OpenWatt owns, typically leftovers of a previous run that exited
-// without destroying its collections. False when the kernel could not be enumerated.
+// Every route, address and neighbour OpenWatt owns, typically leftovers of a previous run that
+// exited without destroying its collections. False when the kernel could not be enumerated.
 bool netlink_dump_owned(scope void delegate(ref const OwnedEntry) nothrow @nogc dg)
 {
     g_addrs.clear();
     g_routes.clear();
-    if (!(nl_dump(RTM_GETADDR, AF_UNSPEC, &on_addr) & nl_dump(RTM_GETROUTE, AF_UNSPEC, &on_route)))
+    g_neighs.clear();
+    if (!(nl_dump(RTM_GETADDR, AF_UNSPEC, &on_addr) & nl_dump(RTM_GETROUTE, AF_UNSPEC, &on_route) & nl_dump(RTM_GETNEIGH, AF_UNSPEC, &on_neigh)))
         return false;
 
     foreach (ref r; g_routes[])
@@ -181,6 +137,31 @@ bool netlink_dump_owned(scope void delegate(ref const OwnedEntry) nothrow @nogc 
         e.prefix  = a.prefix;
         e.addr    = a.addr;
         dg(e);
+    }
+    foreach (ref n; g_neighs[])
+    {
+        if (!(n.flags & NTF_EXT_LEARNED))
+            continue;
+        OwnedEntry e;
+        e.neighbour = true;
+        e.family    = n.family;
+        e.ifindex   = n.ifindex;
+        e.addr      = n.ip;
+        dg(e);
+    }
+    return true;
+}
+
+// Every kernel neighbour on `ifindex`, as a seed for the event-driven table.
+bool netlink_dump_neighbours(int ifindex, scope void delegate(ref const KernelNeighbour) nothrow @nogc dg)
+{
+    g_neighs.clear();
+    if (!nl_dump(RTM_GETNEIGH, AF_UNSPEC, &on_neigh))
+        return false;
+    foreach (ref n; g_neighs[])
+    {
+        if (n.ifindex == ifindex)
+            dg(n);
     }
     return true;
 }
@@ -242,23 +223,13 @@ struct NetRoute
     bool      has_gateway;
 }
 
-struct NetNeigh
-{
-    int       index;
-    ubyte[16] ip;
-    ubyte[6]  mac;
-    ushort    state;
-    ubyte     family;
-    bool      has_mac;
-}
-
 size_t alen(ubyte family)
     => family == AF_INET6 ? 16 : 4;
 
-__gshared Array!NetLink  g_links;
-__gshared Array!NetAddr  g_addrs;
-__gshared Array!NetRoute g_routes;
-__gshared Array!NetNeigh g_neighs;
+__gshared Array!NetLink         g_links;
+__gshared Array!NetAddr         g_addrs;
+__gshared Array!NetRoute        g_routes;
+__gshared Array!KernelNeighbour g_neighs;
 
 
 // === dump message handlers ===
@@ -370,10 +341,11 @@ void on_neigh(const(ubyte)[] payload)
     if (nd.ndm_family != AF_INET && nd.ndm_family != AF_INET6)
         return;
 
-    NetNeigh n;
-    n.index  = nd.ndm_ifindex;
-    n.state  = nd.ndm_state;
-    n.family = nd.ndm_family;
+    KernelNeighbour n;
+    n.ifindex = nd.ndm_ifindex;
+    n.state   = nd.ndm_state;
+    n.flags   = nd.ndm_flags;
+    n.family  = nd.ndm_family;
     size_t len = alen(n.family);
     walk_attrs(payload[ndmsg.sizeof .. $], (ushort type, const(ubyte)[] d) {
         if (type == NDA_DST && d.length >= len)
@@ -542,7 +514,7 @@ void write_stanza(Session session, ref const NetLink l, ubyte family)
 
     foreach (ref n; g_neighs[])
     {
-        if (n.index == l.index && n.family == family && n.has_mac && (n.state & NUD_PERMANENT))
+        if (n.ifindex == l.index && n.family == family && n.has_mac && (n.state & NUD_PERMANENT))
             session.write_line("    up ip neigh add ", addr_str(n.family, n.ip[]), " lladdr ", mac_str(n.mac), " dev ", l.name_s, " nud permanent");
     }
 }
@@ -613,7 +585,7 @@ void format_ip_batch(Session session)
     // 6. static (permanent) neighbours
     foreach (ref n; g_neighs[])
         if (n.has_mac && (n.state & NUD_PERMANENT))
-            session.write_line("neigh add ", addr_str(n.family, n.ip[]), " lladdr ", mac_str(n.mac), " dev ", ifname(n.index), " nud permanent");
+            session.write_line("neigh add ", addr_str(n.family, n.ip[]), " lladdr ", mac_str(n.mac), " dev ", ifname(n.ifindex), " nud permanent");
 }
 
 // `[blackhole] <dst> [via <gw>] [dev <if>] [metric <n>] proto <p>`, the tail both formatters share.
@@ -664,7 +636,7 @@ bool link_has_family(int index, ubyte family)
         if (r.oif == index && r.family == family && route_is_config(r))
             return true;
     foreach (ref n; g_neighs[])
-        if (n.index == index && n.family == family && n.has_mac && (n.state & NUD_PERMANENT))
+        if (n.ifindex == index && n.family == family && n.has_mac && (n.state & NUD_PERMANENT))
             return true;
     return false;
 }
@@ -696,26 +668,6 @@ const(char)[] addr_str(ubyte family, const(ubyte)[] b)
     return tconcat(b[0], ".", b[1], ".", b[2], ".", b[3]);
 }
 
-const(char)[] nud_name(ushort state)
-{
-    if (state & NUD_PERMANENT)
-        return "permanent";
-    if (state & NUD_REACHABLE)
-        return "reachable";
-    if (state & NUD_STALE)
-        return "stale";
-    if (state & NUD_DELAY)
-        return "delay";
-    if (state & NUD_PROBE)
-        return "probe";
-    if (state & NUD_INCOMPLETE)
-        return "incomplete";
-    if (state & NUD_FAILED)
-        return "failed";
-    if (state & NUD_NOARP)
-        return "noarp";
-    return "none";
-}
 
 // Lowercase aa:bb:.. -- the ip/ifupdown convention (MACAddress renders uppercase).
 // Built from char args so tconcat materialises the result in temp memory (a single
@@ -877,13 +829,6 @@ enum RTPROT_OPENWATT = 80;
 enum RTN_UNICAST     = 1;
 enum RTN_BLACKHOLE   = 6;
 
-enum NUD_INCOMPLETE = 0x01;
-enum NUD_REACHABLE  = 0x02;
-enum NUD_STALE      = 0x04;
-enum NUD_DELAY      = 0x08;
-enum NUD_PROBE      = 0x10;
-enum NUD_FAILED     = 0x20;
-enum NUD_NOARP      = 0x40;
 enum NUD_PERMANENT  = 0x80;
 
 struct sockaddr_nl

@@ -731,7 +731,7 @@ stack is used by default and these collections only take effect when built with
 `USE_INTERNAL_IP_STACK=1`; embedded targets always use the in-tree stack.
 
 IPv4 and IPv6 are configured through parallel collections: `address`/`address6`,
-`route`/`route6`, `pool`/`pool6`. Every running Ethernet interface forms an
+`route`/`route6`, `neighbour`/`neighbour6`, `pool`/`pool6`. Every running Ethernet interface forms an
 EUI-64 link-local address, verifies it with DAD, and publishes it as a dynamic
 `address6` entry. Manual entries are only needed for global or ULA addressing.
 
@@ -752,10 +752,19 @@ EUI-64 link-local address, verifies it with DAD, and publishes it as a dynamic
 | `blackhole` | `yes`/`no` | Silently discard matching traffic. |
 | `distance` | `0` to `255` | Route preference; lower wins. |
 
-| Command | Description |
-| --- | --- |
-| `/protocol/ip/neighbour/print` | Show the IPv4 neighbour (ARP) cache: address, MAC, reachability state, retries, interface. |
-| `/protocol/ip/neighbour6/print` | Show the IPv6 neighbour (ND) cache in the same shape. |
+`/protocol/ip/neighbour` and `/protocol/ip/neighbour6` are the ARP and ND tables. Whatever
+resolves on the build publishes what it learns as dynamic (`D`) entries named by address: the
+in-tree cache, or on Linux kernel-mirror builds the kernel itself, seeded from a dump when the
+interface comes online and kept current from netlink neighbour events. Entries the operator
+adds are static, push down to the resolver (the kernel receives them as permanent
+`extern_learn` entries), and replace any learned entry for the same address and interface.
+
+| Property | Values | Description |
+| --- | --- | --- |
+| `address` | IP address | The neighbour's address. |
+| `mac` | `aa:bb:cc:dd:ee:ff` | Its link-layer address; required on a static entry. |
+| `interface` | interface name | Interface the neighbour is reached through. |
+| `state` | read-only | `incomplete`, `reachable`, `stale`, `failed`; static entries read `permanent`. |
 
 `/protocol/ip/pool6` allocates mixed-width sub-prefixes down to `/64` and
 individual host addresses from `/64`s it reserves for itself. Best-fit
@@ -805,14 +814,14 @@ with Router Advertisement discovery of default routers.
 ### Linux kernel data plane (`/system/linux`, `/system/netlink`)
 
 Linux builds without the in-tree IP stack let the kernel forward. OpenWatt mirrors its
-`address`/`address6` and `route`/`route6` collections into the kernel over rtnetlink: `distance`
-becomes the kernel metric (offset by one, so distance 0 is metric 1 rather than the IPv6 default of
-1024), `blackhole=yes` installs a `blackhole` route, and every entry is
-tagged `proto 80` so only OpenWatt's own entries are ever withdrawn; entries left behind by a
-previous run are swept at startup. A write the kernel rejects is logged once and retried with
-backoff until it is accepted. The kernel owns ARP and ND on
-these builds; `/protocol/ip/neighbour/print` and `/protocol/ip/neighbour6/print` show the
-kernel's tables (address, MAC, state, interface) in place of the internal cache.
+`address`/`address6`, `route`/`route6` and static `neighbour`/`neighbour6` entries into the
+kernel over rtnetlink: `distance` becomes the kernel metric (offset by one, so distance 0 is
+metric 1 rather than the IPv6 default of 1024), `blackhole=yes` installs a `blackhole` route, and
+every entry is tagged (`proto 80`, or `extern_learn` for neighbours) so only OpenWatt's own
+entries are ever withdrawn; entries left behind by a previous run are swept at startup. A write
+the kernel rejects is logged once and retried with backoff until it is accepted. The kernel owns
+ARP and ND on these builds, and its tables appear in `/protocol/ip/neighbour` and `neighbour6`
+as dynamic entries.
 
 | Command | Description |
 | --- | --- |
