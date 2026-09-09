@@ -373,11 +373,11 @@ private:
     enum Duration climate_poll_interval = 60.seconds;
     enum Duration vehicle_poll_interval = 15.seconds;
 
+    Device _control_device;
     TeslaVehicleScanner _scanner;
     MACAddress _peer;
     BLEClient _client;
     bool _subscribed;
-    bool _controls_subscribed;
     bool _approval_toggle;
     MonoTime _approval_deadline;
     ushort _tx_handle;
@@ -537,10 +537,10 @@ private:
 
     void subscribe_vehicle_controls()
     {
-        if (_controls_subscribed)
+        if (_control_device)
             return;
 
-        Component vehicle = _scanner.component_for_vin(name[]);
+        Device vehicle = _scanner.device_for_vin(name[]);
         if (!vehicle)
             return;
 
@@ -549,18 +549,19 @@ private:
         _hvac_power = vehicle.find_element("hvac.power");
         _hvac_target_temperature = vehicle.find_element("hvac.target_temperature");
 
-        subscribe_vehicle_control(_charging_enabled);
-        subscribe_vehicle_control(_charging_amps);
-        subscribe_vehicle_control(_hvac_power);
-        subscribe_vehicle_control(_hvac_target_temperature);
-        _controls_subscribed = true;
+        subscribe_vehicle_control(vehicle, _charging_enabled);
+        subscribe_vehicle_control(vehicle, _charging_amps);
+        subscribe_vehicle_control(vehicle, _hvac_power);
+        subscribe_vehicle_control(vehicle, _hvac_target_temperature);
+        _control_device = vehicle;
     }
 
     void unsubscribe_vehicle_controls()
     {
-        if (!_controls_subscribed)
+        if (!_control_device)
             return;
 
+        _control_device.detach_binding(this);
         unsubscribe_vehicle_control(_charging_enabled);
         unsubscribe_vehicle_control(_charging_amps);
         unsubscribe_vehicle_control(_hvac_power);
@@ -569,24 +570,23 @@ private:
         _charging_amps = null;
         _hvac_power = null;
         _hvac_target_temperature = null;
-        _controls_subscribed = false;
+        _control_device = null;
     }
 
-    void subscribe_vehicle_control(Element* element)
+    void subscribe_vehicle_control(Device vehicle, Element* element)
     {
         if (!element)
             return;
-        element.access = Access.read_write;
+        vehicle.attach_binding(this, element, Access.read_write);
         element.subscribe(&vehicle_control_change);
     }
 
     void unsubscribe_vehicle_control(Element* element)
     {
-        if (element)
-        {
-            element.unsubscribe(&vehicle_control_change);
-            element.access = Access.read;
-        }
+        if (!element)
+            return;
+        element.unsubscribe(&vehicle_control_change);
+        element.access = cast(Access)(element.access | Access.read);
     }
 
     void vehicle_control_change(ref const SampleUpdate update)
@@ -1135,7 +1135,7 @@ private:
 
     void publish_charge_state(ref const TeslaChargeState cs)
     {
-        Component v = _scanner.component_for_vin(name[]);
+        Device v = _scanner.device_for_vin(name[]);
         if (v is null)
             return;
 
@@ -1196,7 +1196,7 @@ private:
 
     void publish_climate_state(ref const TeslaClimateState climate)
     {
-        Component v = _scanner.component_for_vin(name[]);
+        Device v = _scanner.device_for_vin(name[]);
         if (v is null)
             return;
 
@@ -1346,9 +1346,9 @@ private:
             v.set_element("tyres.rear_right.warning", tyres.rear_right_hard_warning.value || tyres.rear_right_soft_warning.value, now);
     }
 
-    Component vehicle_for_update()
+    Device vehicle_for_update()
     {
-        Component v = _scanner.component_for_vin(name[]);
+        Device v = _scanner.device_for_vin(name[]);
         if (!v)
             return null;
 
@@ -1631,7 +1631,36 @@ unittest
     receiver._phase = receiver.Phase.ready;
     receiver._routing_address[] = 0x22;
     receiver._aes_key[] = 0x44;
-    receiver._controls_subscribed = true;
+    Device vehicle = alloc!Device(StringLit!"session-controls");
+    scope(exit) free(vehicle);
+    DeviceTable devices;
+    devices.insert(vehicle);
+    Element* control = alloc_element();
+    scope(exit) free(control);
+    control.parent = vehicle;
+    vehicle.elements ~= control;
+    foreach (iteration; 0 .. 8)
+    {
+        receiver._control_device = vehicle;
+        receiver._charging_enabled = control;
+        receiver.subscribe_vehicle_control(vehicle, control);
+        assert(control.access == Access.read_write);
+        assert(vehicle.bindings[0] is receiver);
+        if (iteration == 0)
+            vehicle.attach_binding(s, control, Access.read_write);
+        receiver.unsubscribe_vehicle_controls();
+        assert(!receiver._control_device && !receiver._charging_enabled);
+        assert(!vehicle.bindings[0]);
+        assert(control.access == Access.read_write);
+        receiver.unsubscribe_vehicle_controls();
+    }
+    vehicle.detach_binding(s);
+    receiver._control_device = vehicle;
+    receiver._charging_enabled = control;
+    receiver.subscribe_vehicle_control(vehicle, control);
+    receiver.unsubscribe_vehicle_controls();
+    assert(control.access == Access.read);
+    receiver._control_device = vehicle;
     uuid[] = 0x11;
     tag[] = 0x33;
 
