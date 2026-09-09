@@ -4,6 +4,33 @@ Outstanding work and follow-ups, including point fixes and work awaiting a desig
 When an item lands, delete it or reduce it to the work that remains;
 the commit history and linked design documents carry the implementation record.
 
+## Wire headers and checksums are duplicated across the tree
+
+Protocol modules redeclare the wire structs the router and IP stack already own, and three
+modules carry byte-identical copies of the IPv4 pseudo-header checksum. Each copy is somewhere
+the next fix has to be made again. `dns/server.d` shows the end state: its structs are declared
+inside a function, so nothing can share them even in principle.
+
+- `UdpHeader`, four declarations: `router/iface/endpoint.d` (canonical), `dhcp/message.d`,
+  `dhcp/message6.d` (private, inside `Dhcp6Build`), and `dns/server.d` (function-local, spelled
+  `UDPHeader`).
+- `IPv4Header` and `IPv6Header`, two each: `ip/package.d` (canonical) and `dns/server.d`, the
+  latter pair also function-local.
+- The IPv4 pseudo-header checksum, three byte-identical bodies under two names:
+  `pseudo_header_checksum` in `dhcp/message.d` and `ip/udp.d`, `pseudo_header_checksum_v4` in
+  `ip/tcp.d`. The v6 and ether variants (`ip/package.d`, `ip/tcp.d`) are genuinely distinct but
+  belong beside the others.
+- `Dhcp6Build.transmit` in `dhcp/message6.d` hand-builds the entire IPv6 + UDP output path:
+  header fill, pseudo-header checksum, the RFC 768 zero-checksum rule, and a direct
+  `EthernetStation.send`, with `hop_limit = dst.is_multicast ? 1 : 64` policy baked into a
+  message builder. It bypasses the UDP layer completely. DHCPv4 hand-rolls its output because
+  the client has no address yet; that reason does not apply to DHCPv6, which runs over
+  link-local, and master already forms and DAD-verifies a link-local address on every station.
+
+Retiring the duplicate structs and checksums onto the canonical ones depends on nothing and can
+happen now. The DHCPv6 send path waits on #674 landing UDP over IPv6, then routes through it
+and the hand-built path is deleted. Do not merge #651 or #652 while they still carry it.
+
 ## Retrospective merge reconciliation (2026-09-08)
 
 - **[#669, deferred until removal is needed] Define device/subtree removal lifetime**:
@@ -142,6 +169,59 @@ the commit history and linked design documents carry the implementation record.
   Add borrowed protobuf byte fields so vehicle decoding can avoid one owned
   allocation per bytes field. These existing deferrals were moved out of long
   source comments during reconciliation.
+
+## PR queue de-stacking (2026-09-09, re-based 2026-09-11)
+
+- **[#518] Close it; the survivor is #688**: urt#270 and #639 superseded the first two commits,
+  and the receive-into-pages commit was re-cut as #688.
+
+- **[#553] Re-cut the L4 endpoint extraction**: moving the endpoint layer to `router/transport`
+  conflicts in 24 places across `Makefile`, `features.mk`, `manager/features.d` and six IP-stack
+  modules, because the IPv6 stack landed through those same files afterwards. Rebasing it is
+  guesswork; redo the move against the current stack.
+
+- **[#561] Re-cut the STA-assist bridge work**: 13 conflicts across `bridge.d`, `ethernet.d`,
+  `packet.d` and `wifi.d`. `packet.d` moved to the page pool and `ethernet.d` gained the
+  station model since the branch was cut.
+
+- **[#121] Re-cut the physical port API**: the branch adds `src/router/port/package.d` while
+  master carries `src/router/port.d`, so the two collide as a directory-versus-file conflict.
+
+- **[#651, #652] Both now build against the merged pool and codec**: restacked on master,
+  identifiers renamed to the snake_case the merged codec uses, `delegation-length` moved from
+  the pool onto the server, and `server6.d` gated on `version (UseInternalIPStack)` like
+  `nd.d`. They must not merge until the hand-built send path is gone: see "Wire headers and
+  checksums are duplicated across the tree" above.
+
+- **[#663] A liveness verdict outlives a `device=` change made while the binding is stopped**:
+  `detach_device()` now lives in `ProtocolBinding.shutdown()` and nulls `_bound_device`, so the
+  `device` setter's `remove_online_source` is skipped between shutdown and the next materialise
+  and the old Device keeps a source keyed on the binding. Decide whether the verdict should be
+  retracted on detach or the old device re-found by name. The 2026-09-03 review findings still
+  stand: `_poll_failures` saturates at 255, Modbus/SunSpec never go offline on transport loss,
+  and zigbee `remove_all_nodes` leaks a source pointer.
+
+- **[#335] Merge urt#286 first**: the openwatt branch pins the unmerged urt tip carrying
+  `urt.driver.posix.crash_handler`, so merging it before urt#286 would regress urt.
+
+- **[#73] Rebase urt#4**: the branch pins a urt commit on a fork this remote cannot reach, so
+  the openwatt side cannot build. urt#276, #261 and #232 are rebased onto urt master; their
+  openwatt branches pin the unmerged urt tip and so regress urt until the urt side lands.
+
+- **[#532, #664] Both were re-expressed on `DeviceBuilder`**: the `system` device and the power
+  regulator built their trees with `allocT!Component`/`add_component`/`find_or_create_element`,
+  which #687 made private to `manager`. The regulator's elements now go through `bind_element`,
+  so its writable `level`/`mode`/`enable` gained the binding entry that sync write authority
+  needs; it had none before.
+
+- **[#647] `IPv6Pool.delegation_length` is gone**: #666 replaced it with the length carried on
+  `allocate_prefix(IPv6NetworkAddress)`, so the RA service asks for a /64 and reads exhaustion
+  off `prefix_len == 0`. Its `pool` documentation changed with it.
+
+- **Track the compiler in the build flag stamp**: `BUILD_FLAGS` references `BUILD_CMD_FLAGS`,
+  which is never defined, and the stamp omits `$(DC)`, so switching compilers into the same
+  output directory does not force a rebuild. Found while retiring #524, whose mechanism master
+  already carries.
 
 ## Energy
 
@@ -588,16 +668,6 @@ this is what remains.
   control plane, and make the mirror re-evaluate its peer binding.
 
 ## Infrastructure
-
-- **Make clock-sensitive unittests hermetic**: tests that leave a `MonoTime` member at
-  `MonoTime.init` and then compare it against a real `getTime()` only pass once the monotonic
-  clock exceeds the interval under test, so they fail on a freshly booted CI runner. The tesla
-  poll test is fixed; `protocol.obd`'s asleep-probe case still sets `_sent_time = MonoTime.init`
-  and needs the clock past `probe_interval` (`src/protocol/obd/package.d:1034`). The structural
-  answer is to stop reading the real clock in these tests: `handle_protocol_fault` and
-  `issue_requests` call `getTime()` internally, so the time source has to be injectable before
-  the tests can anchor on a synthetic base the way `protocol.tesla.vehicle_session`'s first
-  unittest already does.
 
 - **Repair the runtime test harness**: `test/test_harness.py` pipes stdin into
   `--interactive`, but startup requires a terminal and the Windows console
