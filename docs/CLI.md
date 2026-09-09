@@ -802,6 +802,25 @@ The DHCPv6 message codec is present, but there are no DHCPv6 client, server,
 or lease commands yet. Future DHCPv6 address/prefix configuration will coexist
 with Router Advertisement discovery of default routers.
 
+### Linux kernel data plane (`/system/linux`, `/system/netlink`)
+
+Linux builds without the in-tree IP stack let the kernel forward. OpenWatt mirrors its
+`address`/`address6` and `route`/`route6` collections into the kernel over rtnetlink: `distance`
+becomes the kernel metric (offset by one, so distance 0 is metric 1 rather than the IPv6 default of
+1024), `blackhole=yes` installs a `blackhole` route, and every entry is
+tagged `proto 80` so only OpenWatt's own entries are ever withdrawn; entries left behind by a
+previous run are swept at startup. A write the kernel rejects is logged once and retried with
+backoff until it is accepted. The kernel owns ARP and ND on
+these builds; `/protocol/ip/neighbour/print` and `/protocol/ip/neighbour6/print` show the
+kernel's tables (address, MAC, state, interface) in place of the internal cache.
+
+| Command | Description |
+| --- | --- |
+| `/system/linux/print [format=ip\|interfaces]` | Dumps the live kernel network state, both IP families. `ip` (default) is an `ip -b`-runnable reproduction script; `interfaces` is `/etc/network/interfaces` form with an `inet6` stanza per interface that carries IPv6 state. The kernel's own loopback and IPv6 link-local addresses are omitted. |
+| `/system/netlink/add-route destination=<address[/prefix]> gateway=<address>` | Installs a kernel route directly, bypassing the collections. Either family. |
+| `/system/netlink/add-neighbour address=<ip> mac=<mac> iface=<netdev>` | Installs a permanent kernel neighbour entry. Either family. |
+| `/system/netlink/del-neighbour address=<ip> iface=<netdev>` | Removes a kernel neighbour entry. |
+
 ### `/protocol/http/server`
 
 An HTTP server provides the listener and shared policy for its registered

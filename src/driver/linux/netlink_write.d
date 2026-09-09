@@ -2,6 +2,8 @@ module driver.linux.netlink_write;
 
 version (linux):
 
+import urt.conv : parse_int_fast;
+import urt.inet;
 import urt.log;
 import urt.internal.sys.posix;
 
@@ -9,6 +11,8 @@ import manager;
 import manager.plugin;
 import manager.console;
 import manager.console.session;
+
+import router.iface.mac : MACAddress;
 
 import driver.linux.raw : ioctl, ifreq, SIOCGIFFLAGS, IFF_UP, IFNAMSIZ;
 
@@ -31,6 +35,12 @@ nothrow @nogc:
 
 // === public writer API ===
 
+enum : ubyte
+{
+    AF_INET  = 2,
+    AF_INET6 = 10,
+}
+
 // Neighbour state / flags the caller chooses (ndm_state / ndm_flags).
 enum : ushort
 {
@@ -43,51 +53,81 @@ enum : ubyte
     NTF_EXT_LEARNED  = 0x10,    // learned by a userspace control plane (we own its lifecycle)
 }
 
+// Route type (rtm_type).
+enum : ubyte
+{
+    RTN_UNICAST   = 1,
+    RTN_BLACKHOLE = 6,
+}
+
 // All return: 0 on kernel ACK (success); a negative value is the kernel's
 // netlink error (-errno); TRANSPORT_ERROR means the request never round-tripped
 // (socket/bind/send/recv failed -- see log).
+enum int TRANSPORT_ERROR = int.min;
 
-// gateway == [0,0,0,0] means an on-link (connected) route; oif == 0 means "let
-// the kernel resolve the egress from the gateway".
-int netlink_add_route(ubyte[4] dst, ubyte prefix, ubyte[4] gateway, int oif)
-    => route_msg(RTM_NEWROUTE, NLM_F_CREATE | NLM_F_REPLACE, dst, prefix, gateway, oif);
+// Addresses are 4 (AF_INET) or 16 (AF_INET6) bytes in network order. An all-zero gateway means an
+// on-link (connected) route; oif == 0 means "let the kernel resolve the egress from the gateway".
+// RTN_BLACKHOLE routes carry neither gateway nor oif; the kernel rejects either. metric == 0 takes
+// the kernel default (0 for IPv4, 1024 for IPv6); routes to one destination coexist per metric.
+int netlink_add_route(const(ubyte)[] dst, ubyte prefix, const(ubyte)[] gateway, int oif, ubyte type = RTN_UNICAST, uint metric = 0)
+    => route_msg(RTM_NEWROUTE, NLM_F_CREATE | NLM_F_REPLACE, dst, prefix, gateway, oif, type, metric);
 
-int netlink_del_route(ubyte[4] dst, ubyte prefix, ubyte[4] gateway, int oif)
-    => route_msg(RTM_DELROUTE, 0, dst, prefix, gateway, oif);
+int netlink_del_route(const(ubyte)[] dst, ubyte prefix, const(ubyte)[] gateway, int oif, ubyte type = RTN_UNICAST, uint metric = 0)
+    => route_msg(RTM_DELROUTE, 0, dst, prefix, gateway, oif, type, metric);
 
-int netlink_add_neighbour(int ifindex, ubyte[4] ip, ubyte[6] mac, ushort state, ubyte flags)
+int netlink_add_neighbour(int ifindex, const(ubyte)[] ip, ubyte[6] mac, ushort state, ubyte flags)
 {
     uint seq = ++g_seq;
     NlBuilder b;
     ndmsg nd;
-    nd.ndm_family  = AF_INET;
+    nd.ndm_family  = family_of(ip);
     nd.ndm_ifindex = ifindex;
     nd.ndm_state   = state;
     nd.ndm_flags   = flags;
     nd.ndm_type    = RTN_UNICAST;
     b.family(nd);
-    b.attr(NDA_DST, ip[]);
+    b.attr(NDA_DST, ip);
     b.attr(NDA_LLADDR, mac[]);
     return nl_send_ack(b.finalise(RTM_NEWNEIGH, NLM_F_REQUEST | NLM_F_ACK | NLM_F_CREATE | NLM_F_REPLACE, seq), seq);
 }
 
-int netlink_del_neighbour(int ifindex, ubyte[4] ip)
+int netlink_del_neighbour(int ifindex, const(ubyte)[] ip)
 {
     uint seq = ++g_seq;
     NlBuilder b;
     ndmsg nd;
-    nd.ndm_family  = AF_INET;
+    nd.ndm_family  = family_of(ip);
     nd.ndm_ifindex = ifindex;
     b.family(nd);
-    b.attr(NDA_DST, ip[]);
+    b.attr(NDA_DST, ip);
     return nl_send_ack(b.finalise(RTM_DELNEIGH, NLM_F_REQUEST | NLM_F_ACK, seq), seq);
 }
 
-int netlink_add_address(int ifindex, ubyte[4] addr, ubyte prefix)
+int netlink_add_address(int ifindex, const(ubyte)[] addr, ubyte prefix)
     => addr_msg(RTM_NEWADDR, NLM_F_CREATE | NLM_F_REPLACE, ifindex, addr, prefix);
 
-int netlink_del_address(int ifindex, ubyte[4] addr, ubyte prefix)
+int netlink_del_address(int ifindex, const(ubyte)[] addr, ubyte prefix)
     => addr_msg(RTM_DELADDR, 0, ifindex, addr, prefix);
+
+// IPv6Addr holds host-order words; the wire wants network-order bytes.
+ubyte[16] ipv6_to_wire(IPv6Addr a)
+{
+    ubyte[16] r = void;
+    foreach (i, w; a.s)
+    {
+        r[i * 2] = ubyte(w >> 8);
+        r[i * 2 + 1] = ubyte(w & 0xFF);
+    }
+    return r;
+}
+
+IPv6Addr ipv6_from_wire(const(ubyte)[] b)
+{
+    IPv6Addr a;
+    foreach (i, ref w; a.s)
+        w = ushort((b[i * 2] << 8) | b[i * 2 + 1]);
+    return a;
+}
 
 // === link ops (kernel-bridge offload, see docs/LINUX_DATAPLANE.md Phase 3) ===
 
@@ -199,39 +239,42 @@ nothrow @nogc:
     {
         g_app.console.register_command!(add_route, "add-route")("/system/netlink", this);
         g_app.console.register_command!(add_neighbour, "add-neighbour")("/system/netlink", this);
+        g_app.console.register_command!(del_neighbour, "del-neighbour")("/system/netlink", this);
     }
 
-    // /system/netlink/add-route <destination[/prefix]> <gateway>
+    // /system/netlink/add-route destination=<address[/prefix]> gateway=<address>
     void add_route(Session session, const(char)[] destination, const(char)[] gateway)
     {
-        ubyte[4] dst, gw;
+        ubyte[16] dst, gw;
         ubyte prefix;
-        if (!parse_cidr(destination, dst, prefix))
+        size_t n = parse_network(destination, dst, prefix);
+        if (n == 0)
         {
-            session.write_line("Invalid destination (expected a.b.c.d or a.b.c.d/len): ", destination);
+            session.write_line("Invalid destination (expected an IPv4 or IPv6 address, optionally /prefix): ", destination);
             return;
         }
-        if (!parse_ipv4(gateway, gw))
+        if (parse_address(gateway, gw) != n)
         {
-            session.write_line("Invalid gateway (expected a.b.c.d): ", gateway);
+            session.write_line("Invalid gateway (expected an address in the destination's family): ", gateway);
             return;
         }
 
-        int r = netlink_add_route(dst, prefix, gw, 0);
+        int r = netlink_add_route(dst[0 .. n], prefix, gw[0 .. n], 0);
         report(session, r, "route ", destination);
     }
 
-    // /system/netlink/add-neighbour <ip> <mac> <interface>
+    // /system/netlink/add-neighbour address=<ip> mac=<mac> iface=<netdev>
     void add_neighbour(Session session, const(char)[] address, const(char)[] mac, const(char)[] iface)
     {
-        ubyte[4] ip;
-        ubyte[6] hw;
-        if (!parse_ipv4(address, ip))
+        ubyte[16] ip;
+        MACAddress hw;
+        size_t n = parse_address(address, ip);
+        if (n == 0)
         {
-            session.write_line("Invalid address (expected a.b.c.d): ", address);
+            session.write_line("Invalid address (expected an IPv4 or IPv6 address): ", address);
             return;
         }
-        if (!parse_mac(mac, hw))
+        if (hw.fromString(mac) != mac.length)
         {
             session.write_line("Invalid MAC (expected aa:bb:cc:dd:ee:ff): ", mac);
             return;
@@ -243,8 +286,29 @@ nothrow @nogc:
             return;
         }
 
-        int r = netlink_add_neighbour(idx, ip, hw, NUD_PERMANENT, 0);
+        int r = netlink_add_neighbour(idx, ip[0 .. n], hw.b, NUD_PERMANENT, 0);
         report(session, r, "neighbour ", address);
+    }
+
+    // /system/netlink/del-neighbour address=<ip> iface=<netdev>
+    void del_neighbour(Session session, const(char)[] address, const(char)[] iface)
+    {
+        ubyte[16] ip;
+        size_t n = parse_address(address, ip);
+        if (n == 0)
+        {
+            session.write_line("Invalid address (expected an IPv4 or IPv6 address): ", address);
+            return;
+        }
+        int idx = netlink_ifindex(iface);
+        if (idx == 0)
+        {
+            session.write_line("Unknown interface: ", iface);
+            return;
+        }
+
+        int r = netlink_del_neighbour(idx, ip[0 .. n]);
+        report(session, r, "delete neighbour ", address);
     }
 }
 
@@ -275,45 +339,65 @@ bool netlink_link_is_up(int ifindex, out bool up)
 }
 
 
-int route_msg(ushort type, ushort extra_flags, ubyte[4] dst, ubyte prefix, ubyte[4] gateway, int oif)
+ubyte family_of(const(ubyte)[] addr)
+{
+    assert(addr.length == 4 || addr.length == 16, "address must be 4 or 16 bytes");
+    return addr.length == 16 ? AF_INET6 : AF_INET;
+}
+
+bool all_zero(const(ubyte)[] bytes)
+{
+    foreach (b; bytes)
+    {
+        if (b != 0)
+            return false;
+    }
+    return true;
+}
+
+int route_msg(ushort msg, ushort extra_flags, const(ubyte)[] dst, ubyte prefix, const(ubyte)[] gateway, int oif, ubyte type, uint metric)
 {
     uint seq = ++g_seq;
-    bool has_gw = gateway != cast(ubyte[4])[0, 0, 0, 0];
+    bool has_gw = !all_zero(gateway);
 
     NlBuilder b;
     rtmsg rt;
-    rt.rtm_family   = AF_INET;
+    rt.rtm_family   = family_of(dst);
     rt.rtm_dst_len  = prefix;
     rt.rtm_table    = RT_TABLE_MAIN;
     rt.rtm_protocol = RTPROT_OPENWATT;
-    rt.rtm_scope    = has_gw ? RT_SCOPE_UNIVERSE : RT_SCOPE_LINK;
-    rt.rtm_type     = RTN_UNICAST;
+    rt.rtm_scope    = has_gw || type != RTN_UNICAST ? RT_SCOPE_UNIVERSE : RT_SCOPE_LINK;
+    rt.rtm_type     = type;
     b.family(rt);
-    b.attr(RTA_DST, dst[]);
+    b.attr(RTA_DST, dst);
     if (has_gw)
-        b.attr(RTA_GATEWAY, gateway[]);
+        b.attr(RTA_GATEWAY, gateway);
     if (oif != 0)
     {
         uint idx = oif;
         b.attr(RTA_OIF, as_bytes(idx));
     }
-    return nl_send_ack(b.finalise(type, cast(ushort)(NLM_F_REQUEST | NLM_F_ACK | extra_flags), seq), seq);
+    if (metric != 0)
+        b.attr(RTA_PRIORITY, as_bytes(metric));
+    return nl_send_ack(b.finalise(msg, cast(ushort)(NLM_F_REQUEST | NLM_F_ACK | extra_flags), seq), seq);
 }
 
-int addr_msg(ushort type, ushort extra_flags, int ifindex, ubyte[4] addr, ubyte prefix)
+int addr_msg(ushort msg, ushort extra_flags, int ifindex, const(ubyte)[] addr, ubyte prefix)
 {
     uint seq = ++g_seq;
 
     NlBuilder b;
     ifaddrmsg ifa;
-    ifa.ifa_family    = AF_INET;
+    ifa.ifa_family    = family_of(addr);
     ifa.ifa_prefixlen = prefix;
     ifa.ifa_scope     = RT_SCOPE_UNIVERSE;
     ifa.ifa_index     = ifindex;
     b.family(ifa);
-    b.attr(IFA_LOCAL, addr[]);
-    b.attr(IFA_ADDRESS, addr[]);
-    return nl_send_ack(b.finalise(type, cast(ushort)(NLM_F_REQUEST | NLM_F_ACK | extra_flags), seq), seq);
+    b.attr(IFA_LOCAL, addr);
+    b.attr(IFA_ADDRESS, addr);
+    ubyte proto = RTPROT_OPENWATT;
+    b.attr(IFA_PROTO, as_bytes(proto));     // kernels before 5.18 ignore it; the address is then unowned
+    return nl_send_ack(b.finalise(msg, cast(ushort)(NLM_F_REQUEST | NLM_F_ACK | extra_flags), seq), seq);
 }
 
 
@@ -479,46 +563,27 @@ void report(Session session, int r, const(char)[] what, const(char)[] detail)
 }
 
 
-// --- string parsing (dependency-free) ---
-
-bool parse_u8(const(char)[] s, out ubyte v)
+// Both return the wire length written (4 or 16), 0 when `s` is not an address.
+size_t parse_address(const(char)[] s, ref ubyte[16] bytes)
 {
-    if (s.length == 0 || s.length > 3)
-        return false;
-    uint n = 0;
-    foreach (c; s)
+    IPAddr v4;
+    if (v4.fromString(s) == s.length)
     {
-        if (c < '0' || c > '9')
-            return false;
-        n = n * 10 + (c - '0');
+        bytes[0 .. 4] = v4.b;
+        return 4;
     }
-    if (n > 255)
-        return false;
-    v = cast(ubyte)n;
-    return true;
+    IPv6Addr v6;
+    if (v6.fromString(s) == s.length)
+    {
+        bytes = ipv6_to_wire(v6);
+        return 16;
+    }
+    return 0;
 }
 
-bool parse_ipv4(const(char)[] s, out ubyte[4] ip)
+// `address[/prefix]`; a bare address takes the host prefix.
+size_t parse_network(const(char)[] s, ref ubyte[16] bytes, out ubyte prefix)
 {
-    size_t start = 0, part = 0;
-    for (size_t i = 0; i <= s.length; ++i)
-    {
-        if (i == s.length || s[i] == '.')
-        {
-            if (part >= 4)
-                return false;
-            if (!parse_u8(s[start .. i], ip[part]))
-                return false;
-            ++part;
-            start = i + 1;
-        }
-    }
-    return part == 4;
-}
-
-bool parse_cidr(const(char)[] s, out ubyte[4] ip, out ubyte prefix)
-{
-    prefix = 32;
     size_t slash = s.length;
     foreach (i, c; s)
     {
@@ -528,50 +593,21 @@ bool parse_cidr(const(char)[] s, out ubyte[4] ip, out ubyte prefix)
             break;
         }
     }
-    if (!parse_ipv4(s[0 .. slash], ip))
-        return false;
+    size_t n = parse_address(s[0 .. slash], bytes);
+    if (n == 0)
+        return 0;
+    ubyte host = n == 4 ? 32 : 128;
+    prefix = host;
     if (slash < s.length)
     {
-        ubyte p;
-        if (!parse_u8(s[slash + 1 .. $], p) || p > 32)
-            return false;
-        prefix = p;
+        const(char)[] rest = s[slash + 1 .. $];
+        bool ok;
+        int p = parse_int_fast(rest, ok);
+        if (!ok || rest.length || p < 0 || p > host)
+            return 0;
+        prefix = cast(ubyte)p;
     }
-    return true;
-}
-
-bool parse_hex_nibble(char c, out ubyte v)
-{
-    if (c >= '0' && c <= '9')
-        v = cast(ubyte)(c - '0');
-    else if (c >= 'a' && c <= 'f')
-        v = cast(ubyte)(c - 'a' + 10);
-    else if (c >= 'A' && c <= 'F')
-        v = cast(ubyte)(c - 'A' + 10);
-    else
-        return false;
-    return true;
-}
-
-bool parse_mac(const(char)[] s, out ubyte[6] mac)
-{
-    size_t start = 0, part = 0;
-    for (size_t i = 0; i <= s.length; ++i)
-    {
-        if (i == s.length || s[i] == ':' || s[i] == '-')
-        {
-            if (part >= 6)
-                return false;
-            const(char)[] tok = s[start .. i];
-            ubyte hi, lo;
-            if (tok.length != 2 || !parse_hex_nibble(tok[0], hi) || !parse_hex_nibble(tok[1], lo))
-                return false;
-            mac[part] = cast(ubyte)((hi << 4) | lo);
-            ++part;
-            start = i + 1;
-        }
-    }
-    return part == 6;
+    return n;
 }
 
 
@@ -582,7 +618,6 @@ enum AF_NETLINK    = 16;
 enum SOCK_RAW      = 3;
 enum SOCK_DGRAM    = 2;
 enum NETLINK_ROUTE = 0;
-enum AF_INET       = 2;
 
 enum SOL_SOCKET    = 1;
 enum SO_RCVTIMEO   = 20;
@@ -616,19 +651,18 @@ enum RT_TABLE_MAIN     = 254;
 enum RTPROT_OPENWATT   = 80;    // private protocol id -- our routes are tagged with this
 enum RT_SCOPE_UNIVERSE = 0;
 enum RT_SCOPE_LINK     = 253;
-enum RTN_UNICAST       = 1;
 
 enum RTA_DST     = 1;
-enum RTA_OIF     = 4;
-enum RTA_GATEWAY = 5;
+enum RTA_OIF      = 4;
+enum RTA_GATEWAY  = 5;
+enum RTA_PRIORITY = 6;
 
 enum NDA_DST     = 1;
 enum NDA_LLADDR  = 2;
 
 enum IFA_ADDRESS = 1;
 enum IFA_LOCAL   = 2;
-
-enum int TRANSPORT_ERROR = int.min;
+enum IFA_PROTO   = 11;
 
 version (D_LP64)
     alias c_long = long;

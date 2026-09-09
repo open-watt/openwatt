@@ -10,8 +10,6 @@ version (KernelMirror):
 // (extra routes, static neighbours, secondary addresses) -- preserving the route
 // `proto` so OpenWatt-owned entries (proto 80) stay identifiable.
 //
-// IPv4 only for now (addresses/routes/neighbours); links are family-agnostic.
-//
 // The wire structs/constants below duplicate driver.linux.netlink{,_write}.
 // TODO: hoist the shared netlink protocol definitions into one module.
 
@@ -23,13 +21,16 @@ import urt.string;
 
 import manager;
 import manager.collection;
+import manager.features : has_ipv6;
 import manager.plugin;
 import manager.console;
 import manager.console.session;
+import manager.console.table : Table;
 
 import router.iface.bridge : BridgeInterface;
 
 import driver.linux.ethernet : LinuxRawEthernet;
+import driver.linux.netlink_write : ipv6_from_wire;
 import driver.linux.nl80211 : query_wifi_interfaces, WifiIfInfo, wifi_iftype_name;
 
 import urt.internal.sys.posix : close;
@@ -56,6 +57,9 @@ nothrow @nogc:
     override void init()
     {
         g_app.console.register_command!(print_cmd, "print")("/system/linux", this);
+        g_app.console.register_command!(neighbour_v4_print, "print")("/protocol/ip/neighbour", this);
+        static if (has_ipv6)
+            g_app.console.register_command!(neighbour_v6_print, "print")("/protocol/ip/neighbour6", this);
     }
 
     // /system/linux/print [format=ip|interfaces] -- dump the live kernel network
@@ -68,9 +72,9 @@ nothrow @nogc:
         g_neighs.clear();
 
         bool ok = nl_dump(RTM_GETLINK,  AF_PACKET, &on_link)
-                & nl_dump(RTM_GETADDR,  AF_INET,   &on_addr)
-                & nl_dump(RTM_GETROUTE, AF_INET,   &on_route)
-                & nl_dump(RTM_GETNEIGH, AF_INET,   &on_neigh);
+                & nl_dump(RTM_GETADDR,  AF_UNSPEC, &on_addr)
+                & nl_dump(RTM_GETROUTE, AF_UNSPEC, &on_route)
+                & nl_dump(RTM_GETNEIGH, AF_UNSPEC, &on_neigh);
         if (!ok)
         {
             session.write_line("# failed to query kernel netlink state (see log)");
@@ -85,6 +89,100 @@ nothrow @nogc:
         else
             format_ip_batch(session);
     }
+
+    // The kernel owns ARP/ND on these builds; same paths as the internal stack's cache prints.
+    void neighbour_v4_print(Session session)
+    {
+        neighbour_print(session, AF_INET);
+    }
+
+    static if (has_ipv6)
+    void neighbour_v6_print(Session session)
+    {
+        neighbour_print(session, AF_INET6);
+    }
+
+    void neighbour_print(Session session, ubyte family)
+    {
+        g_links.clear();
+        g_neighs.clear();
+        if (!(nl_dump(RTM_GETLINK, AF_PACKET, &on_link) & nl_dump(RTM_GETNEIGH, family, &on_neigh)))
+        {
+            session.write_line("Failed to query the kernel neighbour table (see log)");
+            return;
+        }
+        if (g_neighs.length == 0)
+        {
+            session.write_line(family == AF_INET6 ? "No IPv6 neighbour entries" : "No IPv4 neighbour entries");
+            return;
+        }
+
+        Table t;
+        t.add_column("ip");
+        t.add_column("mac");
+        t.add_column("state");
+        t.add_column("iface");
+        foreach (ref n; g_neighs[])
+        {
+            t.add_row();
+            t.cell(addr_str(n.family, n.ip[]));
+            t.cell(n.has_mac ? mac_str(n.mac) : "");
+            t.cell(nud_name(n.state));
+            t.cell(ifname(n.index));
+        }
+        t.render(session);
+    }
+}
+
+// A kernel entry tagged RTPROT_OPENWATT, keyed exactly as the writer would delete it.
+struct OwnedEntry
+{
+    int       ifindex;      // address: the netdev; route: oif (0 = none)
+    uint      metric;       // route only
+    ubyte     family;       // AF_INET / AF_INET6
+    ubyte     prefix;
+    ubyte     type;         // route only: RTN_*
+    bool      route;
+    ubyte[16] addr;         // address: host address; route: destination
+    ubyte[16] gateway;      // route only
+}
+
+// Every route and address OpenWatt owns, typically leftovers of a previous run that exited
+// without destroying its collections. False when the kernel could not be enumerated.
+bool netlink_dump_owned(scope void delegate(ref const OwnedEntry) nothrow @nogc dg)
+{
+    g_addrs.clear();
+    g_routes.clear();
+    if (!(nl_dump(RTM_GETADDR, AF_UNSPEC, &on_addr) & nl_dump(RTM_GETROUTE, AF_UNSPEC, &on_route)))
+        return false;
+
+    foreach (ref r; g_routes[])
+    {
+        if (r.protocol != RTPROT_OPENWATT)
+            continue;
+        OwnedEntry e;
+        e.route   = true;
+        e.family  = r.family;
+        e.ifindex = r.oif;
+        e.metric  = r.metric;
+        e.prefix  = r.dst_len;
+        e.type    = r.rtype;
+        e.addr    = r.dst;
+        e.gateway = r.gateway;
+        dg(e);
+    }
+    foreach (ref a; g_addrs[])
+    {
+        if (a.proto != RTPROT_OPENWATT)
+            continue;
+        OwnedEntry e;
+        e.family  = a.family;
+        e.ifindex = a.index;
+        e.prefix  = a.prefix;
+        e.addr    = a.addr;
+        dg(e);
+    }
+    return true;
 }
 
 
@@ -119,33 +217,43 @@ struct NetLink
     const(char)[] ssid_s() const nothrow @nogc return => ssid[0 .. ssid_len];
 }
 
+// Addresses are network-order bytes, 4 or 16 of them per `family`.
 struct NetAddr
 {
-    int      index;
-    ubyte[4] addr;
-    ubyte    prefix;
+    int       index;
+    ubyte[16] addr;
+    ubyte     prefix;
+    ubyte     family;
+    ubyte     scope_;
+    ubyte     proto;        // IFA_PROTO; 0 on kernels that predate it
 }
 
 struct NetRoute
 {
-    ubyte[4] dst;
-    ubyte    dst_len;
-    ubyte[4] gateway;
-    int      oif;
-    ubyte    protocol;
-    ubyte    table;
-    ubyte    rtype;
-    bool     has_gateway;
+    ubyte[16] dst;
+    ubyte[16] gateway;
+    uint      metric;
+    int       oif;
+    ubyte     dst_len;
+    ubyte     protocol;
+    ubyte     table;
+    ubyte     rtype;
+    ubyte     family;
+    bool      has_gateway;
 }
 
 struct NetNeigh
 {
-    int      index;
-    ubyte[4] ip;
-    ubyte[6] mac;
-    ushort   state;
-    bool     has_mac;
+    int       index;
+    ubyte[16] ip;
+    ubyte[6]  mac;
+    ushort    state;
+    ubyte     family;
+    bool      has_mac;
 }
+
+size_t alen(ubyte family)
+    => family == AF_INET6 ? 16 : 4;
 
 __gshared Array!NetLink  g_links;
 __gshared Array!NetAddr  g_addrs;
@@ -200,21 +308,26 @@ void on_addr(const(ubyte)[] payload)
     if (payload.length < ifaddrmsg.sizeof)
         return;
     const(ifaddrmsg)* ifa = cast(const(ifaddrmsg)*)payload.ptr;
-    if (ifa.ifa_family != AF_INET)
+    if (ifa.ifa_family != AF_INET && ifa.ifa_family != AF_INET6)
         return;
 
     NetAddr a;
     a.index  = cast(int)ifa.ifa_index;
     a.prefix = ifa.ifa_prefixlen;
+    a.family = ifa.ifa_family;
+    a.scope_ = ifa.ifa_scope;
+    size_t n = alen(a.family);
     bool got = false;
     walk_attrs(payload[ifaddrmsg.sizeof .. $], (ushort type, const(ubyte)[] d) {
         // IFA_LOCAL is the host's own address (point-to-point aware); prefer it.
-        if ((type == IFA_LOCAL || (type == IFA_ADDRESS && !got)) && d.length >= 4)
+        if ((type == IFA_LOCAL || (type == IFA_ADDRESS && !got)) && d.length >= n)
         {
-            a.addr[] = d[0 .. 4];
+            a.addr[0 .. n] = d[0 .. n];
             if (type == IFA_LOCAL)
                 got = true;
         }
+        else if (type == IFA_PROTO && d.length >= 1)
+            a.proto = d[0];
     });
     g_addrs ~= a;
 }
@@ -224,7 +337,7 @@ void on_route(const(ubyte)[] payload)
     if (payload.length < rtmsg.sizeof)
         return;
     const(rtmsg)* rt = cast(const(rtmsg)*)payload.ptr;
-    if (rt.rtm_family != AF_INET)
+    if (rt.rtm_family != AF_INET && rt.rtm_family != AF_INET6)
         return;
 
     NetRoute r;
@@ -232,15 +345,20 @@ void on_route(const(ubyte)[] payload)
     r.protocol = rt.rtm_protocol;
     r.table    = rt.rtm_table;
     r.rtype    = rt.rtm_type;
+    r.family   = rt.rtm_family;
+    size_t n = alen(r.family);
     walk_attrs(payload[rtmsg.sizeof .. $], (ushort type, const(ubyte)[] d) {
         switch (type)
         {
-            case RTA_DST:     if (d.length >= 4) r.dst[] = d[0 .. 4]; break;
-            case RTA_GATEWAY: if (d.length >= 4) { r.gateway[] = d[0 .. 4]; r.has_gateway = true; } break;
-            case RTA_OIF:     if (d.length >= 4) r.oif = cast(int)load_u32(d); break;
+            case RTA_DST:      if (d.length >= n) r.dst[0 .. n] = d[0 .. n]; break;
+            case RTA_GATEWAY:  if (d.length >= n) { r.gateway[0 .. n] = d[0 .. n]; r.has_gateway = true; } break;
+            case RTA_OIF:      if (d.length >= 4) r.oif = cast(int)load_u32(d); break;
+            case RTA_PRIORITY: if (d.length >= 4) r.metric = load_u32(d); break;
             default: break;
         }
     });
+    if (r.rtype == RTN_BLACKHOLE)
+        r.oif = 0;      // IPv6 reports blackholes as `dev lo`; they have no egress
     g_routes ~= r;
 }
 
@@ -249,15 +367,17 @@ void on_neigh(const(ubyte)[] payload)
     if (payload.length < ndmsg.sizeof)
         return;
     const(ndmsg)* nd = cast(const(ndmsg)*)payload.ptr;
-    if (nd.ndm_family != AF_INET)
+    if (nd.ndm_family != AF_INET && nd.ndm_family != AF_INET6)
         return;
 
     NetNeigh n;
-    n.index = nd.ndm_ifindex;
-    n.state = nd.ndm_state;
+    n.index  = nd.ndm_ifindex;
+    n.state  = nd.ndm_state;
+    n.family = nd.ndm_family;
+    size_t len = alen(n.family);
     walk_attrs(payload[ndmsg.sizeof .. $], (ushort type, const(ubyte)[] d) {
-        if (type == NDA_DST && d.length >= 4)
-            n.ip[] = d[0 .. 4];
+        if (type == NDA_DST && d.length >= len)
+            n.ip[0 .. len] = d[0 .. len];
         else if (type == NDA_LLADDR && d.length >= 6)
         {
             n.mac[] = d[0 .. 6];
@@ -355,57 +475,13 @@ void format_interfaces(Session session)
         if (auto w = wifi_desc(l))
             session.write_line("# wifi: ", w);
 
-        const(char)[] method = l.loopback ? "loopback" : (link_has_addr(l.index) ? "static" : "manual");
         session.write_line("auto ", l.name_s);
-        session.write_line("iface ", l.name_s, " inet ", method);
-
-        if (l.loopback)
-            continue;   // `inet loopback` implies 127.0.0.1/::1 -- no further directives
-
-        if (l.kind_s == "bridge")
-            session.write_line("    bridge_ports ", bridge_ports(l.index));
-        else if (l.kind_s == "vlan" && l.link != 0)
-            session.write_line("    vlan-raw-device ", ifname(l.link));
-
-        if (l.kind_s == "bridge")
-            session.write_line("    hwaddress ether ", mac_str(l.mac));
-
-        if (l.mtu != 0 && l.mtu != 1500)
-            session.write_line("    mtu ", l.mtu);
-
-        // addresses: first as the native `address`, the rest as up-hooks
-        bool first = true;
-        foreach (ref a; g_addrs[])
-        {
-            if (a.index != l.index)
-                continue;
-            if (first)
-            {
-                session.write_line("    address ", ip4(a.addr), "/", a.prefix);
-                first = false;
-            }
-            else
-                session.write_line("    up ip addr add ", ip4(a.addr), "/", a.prefix, " dev ", l.name_s);
-        }
-
-        // routes egressing this interface (skip kernel-auto / non-main / non-unicast)
-        foreach (ref r; g_routes[])
-        {
-            if (r.oif != l.index || !route_is_config(r))
-                continue;
-            write_route(session, r, l.name_s);
-        }
-
-        // static (permanent) neighbours on this interface
-        foreach (ref n; g_neighs[])
-        {
-            if (n.index != l.index || !n.has_mac || !(n.state & NUD_PERMANENT))
-                continue;
-            session.write_line("    up ip neigh add ", ip4(n.ip), " lladdr ", mac_str(n.mac), " dev ", l.name_s, " nud permanent");
-        }
+        write_stanza(session, l, AF_INET);
+        if (!l.loopback && link_has_family(l.index, AF_INET6))
+            write_stanza(session, l, AF_INET6);
     }
 
-    // routes with no explicit egress interface (gateway-only)
+    // routes with no explicit egress interface (gateway-only, blackhole)
     bool header = false;
     foreach (ref r; g_routes[])
     {
@@ -417,7 +493,57 @@ void format_interfaces(Session session)
             session.write_line("# routes without an explicit egress interface");
             header = true;
         }
-        write_route(session, r, null);
+        session.write_line("up ip route add ", route_args(r), owned_tag(r));
+    }
+}
+
+void write_stanza(Session session, ref const NetLink l, ubyte family)
+{
+    const(char)[] method = l.loopback ? "loopback" : (link_has_addr(l.index, family) ? "static" : "manual");
+    session.write_line("iface ", l.name_s, family == AF_INET6 ? " inet6 " : " inet ", method);
+
+    if (l.loopback)
+        return;     // `loopback` implies 127.0.0.1 / ::1 -- no further directives
+
+    if (family == AF_INET)
+    {
+        if (l.kind_s == "bridge")
+            session.write_line("    bridge_ports ", bridge_ports(l.index));
+        else if (l.kind_s == "vlan" && l.link != 0)
+            session.write_line("    vlan-raw-device ", ifname(l.link));
+
+        if (l.kind_s == "bridge")
+            session.write_line("    hwaddress ether ", mac_str(l.mac));
+
+        if (l.mtu != 0 && l.mtu != 1500)
+            session.write_line("    mtu ", l.mtu);
+    }
+
+    // addresses: first as the native `address`, the rest as up-hooks
+    bool first = true;
+    foreach (ref a; g_addrs[])
+    {
+        if (a.index != l.index || a.family != family || !addr_is_config(a))
+            continue;
+        if (first)
+        {
+            session.write_line("    address ", addr_str(a.family, a.addr[]), "/", a.prefix);
+            first = false;
+        }
+        else
+            session.write_line("    up ip addr add ", addr_str(a.family, a.addr[]), "/", a.prefix, " dev ", l.name_s);
+    }
+
+    foreach (ref r; g_routes[])
+    {
+        if (r.oif == l.index && r.family == family && route_is_config(r))
+            session.write_line("    up ip route add ", route_args(r), owned_tag(r));
+    }
+
+    foreach (ref n; g_neighs[])
+    {
+        if (n.index == l.index && n.family == family && n.has_mac && (n.state & NUD_PERMANENT))
+            session.write_line("    up ip neigh add ", addr_str(n.family, n.ip[]), " lladdr ", mac_str(n.mac), " dev ", l.name_s, " nud permanent");
     }
 }
 
@@ -474,36 +600,38 @@ void format_ip_batch(Session session)
         if (l.up && !l.loopback)
             session.write_line("link set ", l.name_s, " up");
 
-    // 4. addresses (skip loopback's kernel-assigned 127.0.0.1/::1)
+    // 4. addresses (skip the kernel's own: loopback 127.0.0.1 / ::1, IPv6 link-locals)
     foreach (ref a; g_addrs[])
-        if (!link_is_loopback(a.index))
-            session.write_line("addr add ", ip4(a.addr), "/", a.prefix, " dev ", ifname(a.index));
+        if (!link_is_loopback(a.index) && addr_is_config(a))
+            session.write_line("addr add ", addr_str(a.family, a.addr[]), "/", a.prefix, " dev ", ifname(a.index));
 
     // 5. routes we'd configure (skip kernel-auto / non-main / non-unicast)
     foreach (ref r; g_routes[])
         if (route_is_config(r))
-            write_ip_route(session, r);
+            session.write_line("route add ", route_args(r));
 
     // 6. static (permanent) neighbours
     foreach (ref n; g_neighs[])
         if (n.has_mac && (n.state & NUD_PERMANENT))
-            session.write_line("neigh add ", ip4(n.ip), " lladdr ", mac_str(n.mac), " dev ", ifname(n.index), " nud permanent");
+            session.write_line("neigh add ", addr_str(n.family, n.ip[]), " lladdr ", mac_str(n.mac), " dev ", ifname(n.index), " nud permanent");
 }
 
-void write_ip_route(Session session, ref const NetRoute r)
+// `[blackhole] <dst> [via <gw>] [dev <if>] [metric <n>] proto <p>`, the tail both formatters share.
+const(char)[] route_args(ref const NetRoute r)
 {
-    const(char)[] dst = r.dst_len == 0 ? "default" : tconcat(ip4(r.dst), "/", r.dst_len);
-    const(char)[] dev = r.oif != 0 ? ifname(r.oif) : null;
-
-    if (r.has_gateway && dev)
-        session.write_line("route add ", dst, " via ", ip4(r.gateway), " dev ", dev, " proto ", r.protocol);
-    else if (r.has_gateway)
-        session.write_line("route add ", dst, " via ", ip4(r.gateway), " proto ", r.protocol);
-    else if (dev)
-        session.write_line("route add ", dst, " dev ", dev, " proto ", r.protocol);
-    else
-        session.write_line("route add ", dst, " proto ", r.protocol);
+    const(char)[] dst = r.dst_len == 0 ? (r.family == AF_INET6 ? "::/0" : "default") : tconcat(addr_str(r.family, r.dst[]), "/", r.dst_len);
+    const(char)[] s = r.rtype == RTN_BLACKHOLE ? tconcat("blackhole ", dst) : dst;
+    if (r.has_gateway)
+        s = tconcat(s, " via ", addr_str(r.family, r.gateway[]));
+    if (r.oif != 0)
+        s = tconcat(s, " dev ", ifname(r.oif));
+    if (r.metric != 0)
+        s = tconcat(s, " metric ", r.metric);
+    return tconcat(s, " proto ", r.protocol);
 }
+
+const(char)[] owned_tag(ref const NetRoute r)
+    => r.protocol == RTPROT_OPENWATT ? "   # OpenWatt-owned" : "";
 
 bool link_is_loopback(int index)
 {
@@ -513,29 +641,30 @@ bool link_is_loopback(int index)
     return false;
 }
 
-void write_route(Session session, ref const NetRoute r, const(char)[] dev)
-{
-    const(char)[] indent = dev ? "    up ip route add " : "up ip route add ";
-    const(char)[] dst = r.dst_len == 0 ? "default" : tconcat(ip4(r.dst), "/", r.dst_len);
-    const(char)[] owned = r.protocol == RTPROT_OPENWATT ? "   # OpenWatt-owned" : "";
-
-    if (r.has_gateway && dev)
-        session.write_line(indent, dst, " via ", ip4(r.gateway), " dev ", dev, " proto ", r.protocol, owned);
-    else if (r.has_gateway)
-        session.write_line(indent, dst, " via ", ip4(r.gateway), " proto ", r.protocol, owned);
-    else if (dev)
-        session.write_line(indent, dst, " dev ", dev, " proto ", r.protocol, owned);
-    else
-        session.write_line(indent, dst, " proto ", r.protocol, owned);
-}
-
 bool route_is_config(ref const NetRoute r)
-    => r.table == RT_TABLE_MAIN && r.protocol != RTPROT_KERNEL && r.rtype == RTN_UNICAST;
+    => r.table == RT_TABLE_MAIN && r.protocol != RTPROT_KERNEL && (r.rtype == RTN_UNICAST || r.rtype == RTN_BLACKHOLE);
 
-bool link_has_addr(int index)
+// IPv6 link-locals are the kernel's own (EUI-64 on link up); everything else is configuration.
+bool addr_is_config(ref const NetAddr a)
+    => !(a.family == AF_INET6 && a.scope_ == RT_SCOPE_LINK);
+
+bool link_has_addr(int index, ubyte family)
 {
     foreach (ref a; g_addrs[])
-        if (a.index == index)
+        if (a.index == index && a.family == family && addr_is_config(a))
+            return true;
+    return false;
+}
+
+bool link_has_family(int index, ubyte family)
+{
+    if (link_has_addr(index, family))
+        return true;
+    foreach (ref r; g_routes[])
+        if (r.oif == index && r.family == family && route_is_config(r))
+            return true;
+    foreach (ref n; g_neighs[])
+        if (n.index == index && n.family == family && n.has_mac && (n.state & NUD_PERMANENT))
             return true;
     return false;
 }
@@ -560,8 +689,33 @@ const(char)[] ifname(int index)
     return tconcat("if", index);
 }
 
-const(char)[] ip4(ubyte[4] a)
-    => tconcat(a[0], ".", a[1], ".", a[2], ".", a[3]);
+const(char)[] addr_str(ubyte family, const(ubyte)[] b)
+{
+    if (family == AF_INET6)
+        return tconcat(ipv6_from_wire(b));
+    return tconcat(b[0], ".", b[1], ".", b[2], ".", b[3]);
+}
+
+const(char)[] nud_name(ushort state)
+{
+    if (state & NUD_PERMANENT)
+        return "permanent";
+    if (state & NUD_REACHABLE)
+        return "reachable";
+    if (state & NUD_STALE)
+        return "stale";
+    if (state & NUD_DELAY)
+        return "delay";
+    if (state & NUD_PROBE)
+        return "probe";
+    if (state & NUD_INCOMPLETE)
+        return "incomplete";
+    if (state & NUD_FAILED)
+        return "failed";
+    if (state & NUD_NOARP)
+        return "noarp";
+    return "none";
+}
 
 // Lowercase aa:bb:.. -- the ip/ifupdown convention (MACAddress renders uppercase).
 // Built from char args so tconcat materialises the result in temp memory (a single
@@ -675,6 +829,7 @@ enum SOCK_RAW      = 3;
 enum NETLINK_ROUTE = 0;
 enum AF_UNSPEC     = 0;
 enum AF_INET       = 2;
+enum AF_INET6      = 10;
 enum AF_PACKET     = 17;
 
 enum NLM_F_REQUEST = 0x01;
@@ -705,20 +860,31 @@ enum IFLA_VLAN_ID   = 1;
 
 enum IFA_ADDRESS = 1;
 enum IFA_LOCAL   = 2;
+enum IFA_PROTO   = 11;
 
-enum RTA_DST     = 1;
-enum RTA_OIF     = 4;
-enum RTA_GATEWAY = 5;
+enum RTA_DST      = 1;
+enum RTA_OIF      = 4;
+enum RTA_GATEWAY  = 5;
+enum RTA_PRIORITY = 6;
 
 enum NDA_DST    = 1;
 enum NDA_LLADDR = 2;
 
 enum RT_TABLE_MAIN   = 254;
+enum RT_SCOPE_LINK   = 253;
 enum RTPROT_KERNEL   = 2;
 enum RTPROT_OPENWATT = 80;
 enum RTN_UNICAST     = 1;
+enum RTN_BLACKHOLE   = 6;
 
-enum NUD_PERMANENT = 0x80;
+enum NUD_INCOMPLETE = 0x01;
+enum NUD_REACHABLE  = 0x02;
+enum NUD_STALE      = 0x04;
+enum NUD_DELAY      = 0x08;
+enum NUD_PROBE      = 0x10;
+enum NUD_FAILED     = 0x20;
+enum NUD_NOARP      = 0x40;
+enum NUD_PERMANENT  = 0x80;
 
 struct sockaddr_nl
 {
