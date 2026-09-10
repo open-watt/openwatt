@@ -112,6 +112,15 @@ sources per request.
 /ping address=02:13:37:aa:bb:64 iface=eth0
 ```
 
+### `/system/page-pool`
+
+`/system/page-pool` prints the page pool's per-category statistics: pages in use and free, slab
+count, peak occupancy, allocation and failure counts, and a request-size histogram. A final `heap
+pages` line appears once any request has exceeded the largest category and been served from the
+heap. Packets, stream send queues, UDP receive queues and the HTTP fileserver draw from this pool,
+so a rising `fails` count is memory pressure and a busy `heap pages` line is a category sized too
+small. Not available on Tiny builds.
+
 ### `/log`
 
 Log calls submit severity, timestamp, hostname, tag, object name, and message as
