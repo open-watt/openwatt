@@ -93,6 +93,67 @@ Array!ubyte build_add_key_request(const(ubyte)[] pubkey_xy)
     return encode(msg);
 }
 
+enum TeslaOperationStatus : ubyte
+{
+    ok,
+    wait,
+    error,
+}
+
+struct VcsecCommandStatus
+{
+nothrow @nogc:
+
+    TeslaFromVcsecMessage message;
+
+    TeslaOperationStatus operation() const pure
+    {
+        if (!message.command_status.present)
+            return TeslaOperationStatus.ok;
+        ref status = message.command_status.value;
+        return cast(TeslaOperationStatus)(status.operation_status.present ? status.operation_status.value : 0);
+    }
+
+    bool whitelist_complete() const pure
+        => message.command_status.present && message.command_status.value.whitelist_operation_status.present;
+
+    uint whitelist_information() const pure
+    {
+        if (!whitelist_complete)
+            return 0;
+        ref status = message.command_status.value.whitelist_operation_status.value;
+        return status.whitelist_operation_information.present ? status.whitelist_operation_information.value : 0;
+    }
+}
+
+// Only field 4 distinguishes a status from the unsolicited VCSEC traffic sharing this framing.
+bool decode_vcsec_status(const(ubyte)[] buf, ref VcsecCommandStatus status)
+    => proto_deserialise(buf, status.message) == buf.length && status.message.command_status.present;
+
+// vcsec.WhitelistOperation_information_E, narrowed to what an AddKey can answer with.
+const(char)[] whitelist_information_reason(uint information) pure
+{
+    version (Tiny)
+        return null;
+    else
+    switch (information)
+    {
+        case 3:  return "the vehicle's key fob slots are full";
+        case 4:  return "the vehicle's key whitelist is full";
+        case 5:  return "the tapped key card may not add keys";
+        case 6:  return "the vehicle rejected our public key as invalid";
+        case 13: return "our key is already on the whitelist";
+        case 14: return "the key must be added at the console card reader";
+        case 19: return "the vehicle wants a key role we did not send";
+        case 24: return "enrolment was denied on the vehicle touchscreen";
+        case 25: return "the vehicle stopped waiting for the key card tap";
+        case 26: return "the vehicle stopped waiting for touchscreen acknowledgement";
+        case 27: return "the vehicle is in valet mode";
+        case 28: return "enrolment was cancelled on the vehicle";
+        default: return null;
+    }
+}
+
 Array!ubyte build_session_info_request(TeslaDomain domain, const(ubyte)[] pubkey, const(ubyte)[] routing_address, const(ubyte)[] uuid)
 {
     assert(pubkey.length == 65);
@@ -565,6 +626,20 @@ unittest
         "0A54125082014D2A470A430A4104000102030405060708090A0B0C0D0E0F1011121314151617"
         ~ "18191A1B1C1D1E1F202122232425262728292A2B2C2D2E2F303132333435363738393A3B3C3D3E3F"
         ~ "2002320208091802"));
+    static immutable ubyte[] vcsec_waiting = HexDecode!"22020801";
+    static immutable ubyte[] vcsec_whitelist_full = HexDecode!"220608021a020804";
+    static immutable ubyte[] vcsec_no_error = HexDecode!"220408001a00";
+    // The unsolicited field 3 must not read as a whitelist status; it once completed enrolments.
+    static immutable ubyte[] vcsec_unsolicited = HexDecode!"1a020800";
+
+    VcsecCommandStatus vcsec;
+    assert(decode_vcsec_status(vcsec_waiting, vcsec));
+    assert(vcsec.operation == TeslaOperationStatus.wait && !vcsec.whitelist_complete);
+    assert(decode_vcsec_status(vcsec_whitelist_full, vcsec));
+    assert(vcsec.operation == TeslaOperationStatus.error && vcsec.whitelist_complete && vcsec.whitelist_information == 4);
+    assert(decode_vcsec_status(vcsec_no_error, vcsec));
+    assert(vcsec.whitelist_complete && vcsec.whitelist_information == 0);
+    assert(!decode_vcsec_status(vcsec_unsolicited, vcsec));
 
     assert(build_session_info_request(TeslaDomain.vehicle_security, sec1[], ra[], uu[])[] == HexDecode!(
         "320208023A121210404142434445464748494A4B4C4D4E4F72430A4104000102030405060708"

@@ -238,6 +238,7 @@ protected:
         }
         _retry_poll = PollKind.none;
         _auth_failures = 0;
+        _enrol_information = 0;
         unsubscribe_vehicle_controls();
         if (_subscribed)
         {
@@ -336,7 +337,7 @@ private:
             case Phase.awaiting_approval:
                 if (now >= _approval_deadline)
                 {
-                    record_failure(VehicleCommandKind.unknown, 0, "Key not enrolled; tap an enrolled key card during the next approval attempt, or reset back-off to try now", false);
+                    record_failure(VehicleCommandKind.unknown, 0, enrolment_failure(), false);
                     return CompletionStatus.error;
                 }
                 // Avoid overlapping GATT writes while waiting for NFC approval.
@@ -380,6 +381,7 @@ private:
     BLEClient _client;
     bool _subscribed;
     bool _approval_toggle;
+    ubyte _enrol_information;
     MonoTime _approval_deadline;
     ushort _tx_handle;
     ushort _rx_handle;
@@ -781,8 +783,49 @@ private:
         }
     }
 
+    // The whitelist reply reports only failure; enrolment succeeds when SessionInfo stops
+    // answering KEY_NOT_ON_WHITELIST, which is the state the session actually needs.
+    void handle_enrolment_status(ref const VcsecCommandStatus status)
+    {
+        if (status.operation == TeslaOperationStatus.wait)
+        {
+            log.info("vehicle for VIN '", name[], "' is waiting for the key card tap");
+            return;
+        }
+
+        uint information = status.whitelist_information;
+        if (!status.whitelist_complete || information == 0)
+            return;
+
+        const(char)[] reason = whitelist_information_reason(information);
+        if (reason)
+            log.warning("vehicle for VIN '", name[], "' refused enrolment: ", reason);
+        else
+            log.warning("vehicle for VIN '", name[], "' refused enrolment, information ", information);
+
+        _enrol_information = information > ubyte.max ? ubyte.max : cast(ubyte)information;
+    }
+
+    const(char)[] enrolment_failure()
+    {
+        if (!_enrol_information)
+            return "Key not enrolled; tap an enrolled key card during the next approval attempt, or reset back-off to try now";
+        const(char)[] reason = whitelist_information_reason(_enrol_information);
+        return reason ? reason : "Vehicle refused enrolment; inspect the whitelist information in the log";
+    }
+
     void dispatch_response(const(ubyte)[] msg)
     {
+        if (_phase == Phase.awaiting_approval)
+        {
+            VcsecCommandStatus status;
+            if (decode_vcsec_status(msg, status))
+            {
+                handle_enrolment_status(status);
+                return;
+            }
+        }
+
         RoutableResponse r;
         if (!decode_routable_response(msg, r))
         {
