@@ -17,7 +17,7 @@ import manager;
 import manager.base;
 import manager.collection;
 import manager.component;
-import manager.device : DeviceTable;
+import manager.device : DeviceBuilder, DeviceTable;
 
 nothrow @nogc:
 
@@ -274,25 +274,33 @@ unittest
     appliance._state_path = StringLit!"late.battery.state";
     assert(!appliance.resolve_refs(devices));
 
-    Device device = alloc!Device(StringLit!"late");
+    Device device;
+    {
+        DeviceBuilder builder = devices.create("late");
+        device = builder.device;
+    }
     scope(exit) free(device);
-    devices.insert(device);
     assert(!appliance.resolve_refs(devices));
 
-    Component battery = alloc!Component(StringLit!"battery");
+    Component battery;
+    {
+        DeviceBuilder builder = device.edit();
+        battery = builder.component("battery");
+    }
     scope(exit) free(battery);
-    device.add_component(battery);
     assert(appliance.resolve_refs(devices));
     assert(appliance.device_ref is battery);
     assert(appliance.meter_ref is null && appliance.state_ref is null);
     assert(!appliance.resolve_refs(devices));
 
-    Component meter = alloc!Component(StringLit!"meter");
+    Component meter, state;
+    {
+        DeviceBuilder builder = device.edit();
+        meter = builder.component(battery, "meter");
+        state = builder.component(battery, "state");
+    }
     scope(exit) free(meter);
-    Component state = alloc!Component(StringLit!"state");
     scope(exit) free(state);
-    battery.add_component(meter);
-    battery.add_component(state);
     assert(appliance.resolve_refs(devices));
     assert(appliance.device_ref is battery);
     assert(appliance.meter_ref is meter && appliance.state_ref is state);

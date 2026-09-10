@@ -223,12 +223,19 @@ nothrow @nogc:
     static assert(max_bindings == 1 << binding_access_shift);
     static assert(FormatId.invalid == ushort.max);
 
-    String id;
     String name;
     String desc;
     String display_unit;
 
     SysTime last_update;
+
+    ref const(String) id() const pure
+        => _id;
+
+    package(manager) void id(String value)
+    {
+        _id = value.move;
+    }
 
     package EID _eid;
 
@@ -907,6 +914,7 @@ package:
     }
 
 private:
+    String _id;
     enum Flags : ubyte
     {
         gap_open     = 1 << 5,

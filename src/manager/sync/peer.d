@@ -17,7 +17,7 @@ import manager;
 import manager.base;
 import manager.collection;
 import manager.console.session : Session;
-import manager.device : Device;
+import manager.device : Device, DeviceBuilder, DeviceTable;
 import manager.element : Access, Element;
 import manager.id : EID;
 import manager.log;
@@ -1411,15 +1411,11 @@ unittest
     assert(p.first_sighting(huge[]));
     assert(!p.first_sighting(huge[]));
 
-    Device device = alloc!Device(StringLit!"peer-binding-test");
     DeviceTable devices;
-    devices.insert(device);
-    Component component = alloc!Component(StringLit!"status");
-    component.parent = device;
-    device.components ~= component;
-    Element* element = alloc_element();
-    element.parent = component;
-    component.elements ~= element;
+    DeviceBuilder builder = devices.create("peer-binding-test");
+    Device device = builder.device;
+    Component component = builder.component("status");
+    Element* element = builder.element(component, "value");
 
     EID eid = element.ensure_eid();
     p._live_nodes.insert(eid.raw, 0);

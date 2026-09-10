@@ -55,10 +55,7 @@ private:
     ContributionTotals views;
 }
 
-void collect_battery_store_contributions(Component port, const(char)[] circuit,
-                                         const(char)[] owner, const(char)[] port_path,
-                                         BatteryStoreContributionKind kind,
-                                         ref Array!BatteryStoreContribution into)
+void collect_battery_store_contributions(Component port, const(char)[] circuit, const(char)[] owner, const(char)[] port_path, BatteryStoreContributionKind kind, ref Array!BatteryStoreContribution into)
 {
     if (port is null || circuit.length == 0)
         return;
@@ -109,34 +106,28 @@ unittest
     import manager.series : DataFormat, SeriesKind, ValueType, register_format;
     import urt.variant : Variant;
 
-    static Component component(const(char)[] id, const(char)[] template_)
-    {
-        Component c = alloc!Component(id.make_string());
-        c.template_ = template_.make_string();
-        return c;
-    }
+    import manager.device : DeviceBuilder, DeviceTable;
 
-    static void add_num(Component c, const(char)[] id, float value, ScaledUnit unit)
+    static void add_num(ref DeviceBuilder d, Component c, const(char)[] id, float value, ScaledUnit unit)
     {
-        Element* e = alloc_element();
-        e.id = id.make_string();
-        e.format = register_format(DataFormat(ValueType.f64, SeriesKind.held, unit));
+        Element* e = d.element(c, id, register_format(DataFormat(ValueType.f64, SeriesKind.held, unit)));
         e.value = Variant(Quantity!double(value, unit));
-        c.elements ~= e;
     }
 
-    static Component battery(const(char)[] id, float soc, float cap)
+    static Component battery(ref DeviceBuilder d, const(char)[] id, float soc, float cap)
     {
-        Component b = component(id, "Battery");
+        Component b = d.component(id, "Battery");
         if (soc == soc)
-            add_num(b, "soc", soc, Percent);
+            add_num(d, b, "soc", soc, Percent);
         if (cap == cap)
-            add_num(b, "full_capacity", cap, AmpereHour);
+            add_num(d, b, "full_capacity", cap, AmpereHour);
         return b;
     }
 
-    static BatteryStoreContribution contribution(Component battery, const(char)[] circuit,
-                                                 BatteryStoreContributionKind kind)
+    DeviceTable devices;
+    DeviceBuilder d = devices.create("store-test");
+
+    static BatteryStoreContribution contribution(Component battery, const(char)[] circuit, BatteryStoreContributionKind kind)
     {
         BatteryStoreContribution c;
         c.circuit = circuit;
@@ -149,10 +140,8 @@ unittest
 
     {
         Array!BatteryStoreContribution contributions;
-        contributions ~= contribution(battery("inverter_view", 50, float.nan),
-                                      "dc_bus", BatteryStoreContributionKind.view);
-        contributions ~= contribution(battery("bms_member", 52, 100),
-                                      "dc_bus", BatteryStoreContributionKind.member);
+        contributions ~= contribution(battery(d, "inverter_view", 50, float.nan), "dc_bus", BatteryStoreContributionKind.view);
+        contributions ~= contribution(battery(d, "bms_member", 52, 100), "dc_bus", BatteryStoreContributionKind.member);
 
         Array!BatteryStore stores;
         reconcile_battery_stores(contributions, stores);
@@ -166,8 +155,7 @@ unittest
 
     {
         Array!BatteryStoreContribution contributions;
-        contributions ~= contribution(battery("integrated_view", 73, 200),
-                                      "dc_bus", BatteryStoreContributionKind.view);
+        contributions ~= contribution(battery(d, "integrated_view", 73, 200), "dc_bus", BatteryStoreContributionKind.view);
 
         Array!BatteryStore stores;
         reconcile_battery_stores(contributions, stores);
@@ -179,10 +167,8 @@ unittest
 
     {
         Array!BatteryStoreContribution contributions;
-        contributions ~= contribution(battery("pack_a", 50, 100),
-                                      "dc_bus", BatteryStoreContributionKind.member);
-        contributions ~= contribution(battery("pack_b", 60, 100),
-                                      "dc_bus", BatteryStoreContributionKind.member);
+        contributions ~= contribution(battery(d, "pack_a", 50, 100), "dc_bus", BatteryStoreContributionKind.member);
+        contributions ~= contribution(battery(d, "pack_b", 60, 100), "dc_bus", BatteryStoreContributionKind.member);
 
         Array!BatteryStore stores;
         reconcile_battery_stores(contributions, stores);
@@ -194,10 +180,8 @@ unittest
 
     {
         Array!BatteryStoreContribution contributions;
-        contributions ~= contribution(battery("inverter_view", 20, float.nan),
-                                      "dc_bus", BatteryStoreContributionKind.view);
-        contributions ~= contribution(battery("bms_member", 80, 100),
-                                      "dc_bus", BatteryStoreContributionKind.member);
+        contributions ~= contribution(battery(d, "inverter_view", 20, float.nan), "dc_bus", BatteryStoreContributionKind.view);
+        contributions ~= contribution(battery(d, "bms_member", 80, 100), "dc_bus", BatteryStoreContributionKind.member);
 
         Array!BatteryStore stores;
         reconcile_battery_stores(contributions, stores);
@@ -225,10 +209,7 @@ struct ContributionTotals
     uint full_count;
 }
 
-void collect_battery_store_contributions_impl(Component c, const(char)[] circuit,
-                                              const(char)[] owner, const(char)[] port_path,
-                                              BatteryStoreContributionKind kind,
-                                              ref Array!BatteryStoreContribution into)
+void collect_battery_store_contributions_impl(Component c, const(char)[] circuit, const(char)[] owner, const(char)[] port_path, BatteryStoreContributionKind kind, ref Array!BatteryStoreContribution into)
 {
     if (c.template_[] == "Battery")
     {

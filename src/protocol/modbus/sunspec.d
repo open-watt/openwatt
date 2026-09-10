@@ -503,8 +503,7 @@ private immutable ModelMapping[] g_models = [
     ModelMapping(111, "inverter",     inverter_components_single,     m111_fields),
     ModelMapping(112, "inverter",     inverter_components_split,      m112_fields),
     ModelMapping(113, "inverter",     inverter_components_three,      m113_fields),
-    ModelMapping(160, "inverter",     m160_components,                m160_fields,
-                 RepeatBlock(6, 8, 20, "solar.mppt", m160_repeat_components, m160_repeat_fields)),
+    ModelMapping(160, "inverter",     m160_components,                m160_fields, RepeatBlock(6, 8, 20, "solar.mppt", m160_repeat_components, m160_repeat_fields)),
     ModelMapping(203, "energy-meter", meter_three_components,         m203_fields),
     ModelMapping(702, "inverter",     m702_components,                m702_fields),
 ];
@@ -1021,16 +1020,9 @@ private:
 
     bool materialise_device()
     {
-        Device device;
-        bool is_new = false;
-        if (Device* existing = _device[] in g_app.devices)
-            device = *existing;
-        else
-        {
-            device = alloc!Device(_device);
-            is_new = true;
-            g_app.devices.insert(device);
-        }
+        DeviceBuilder b = g_app.devices.open(_device[]);
+        Device device = b.device;
+        bool is_new = b.created;
         _bound_device = device;
         version (DebugSunspec)
             log.tracef("materialise: device '{0}' ({1}) from {2} model(s)", _device[], is_new ? "new" : "existing", _models_chain.length);
@@ -1064,8 +1056,8 @@ private:
         // Pre-create info/type so it lands first in DeviceInfo ahead of the m1 fields
         if (device_type)
         {
-            Component info = find_or_create_component(device, ComponentDef("info", "DeviceInfo", null));
-            set_type_element(info, "DeviceInfo", device_type);
+            Component info = component_of(b, device, ComponentDef("info", "DeviceInfo", null));
+            set_type_element(b, info, "DeviceInfo", device_type);
         }
 
         // Skip duplicate models. SolarEdge exposes parallel chains at base 0 and
@@ -1078,8 +1070,7 @@ private:
             if (ml.model_id == 160 && i != selected_pv_model_index)
             {
                 version (DebugSunspec)
-                    log.tracef("materialise: skipping duplicate model 160 at reg {0}; selected {1} PV input(s)",
-                               ml.header_reg, pv_input_count);
+                    log.tracef("materialise: skipping duplicate model 160 at reg {0}; selected {1} PV input(s)", ml.header_reg, pv_input_count);
                 continue;
             }
 
@@ -1132,48 +1123,48 @@ private:
             Component[8] comps;
             foreach (ci, ref cd; comp_defs)
             {
-                comps[ci] = find_or_create_component(device, cd);
+                comps[ci] = component_of(b, device, cd);
                 if (cd.type_value)
-                    set_type_element(comps[ci], cd.template_, cd.type_value);
-                configure_standard_component(comps[ci], cd);
+                    set_type_element(b, comps[ci], cd.template_, cd.type_value);
+                configure_standard_component(b, comps[ci], cd);
             }
             version (DebugSunspec)
                 log.tracef("materialise: model {0} -> {1} component(s), {2} field(s)", ml.model_id, mm.components.length, mm.fields.length);
 
             Array!StripeField mf;
             foreach (ref fd; mm.fields)
-                emit_field(ml, *mm, fd, comps[fd.component_index], mf);
+                emit_field(b, ml, *mm, fd, comps[fd.component_index], mf);
 
             if (mm.repeat.stride > 0 && mm.repeat.fields.length > 0)
             {
                 const(char)[] repeat_prefix = mm.repeat.path_prefix;
                 if (ml.model_id == 160 && !pv_has_subports)
                     repeat_prefix = "solar";
-                materialise_repeat(ml, *mm, device, repeat_prefix, mf);
+                materialise_repeat(b, ml, *mm, device, repeat_prefix, mf);
             }
 
             build_stripes(mf, ml.model_id);
         }
 
-        materialise_network(device);
+        materialise_network(b, device);
 
-        device.notify(ComponentEvent.tree_changed);
+        b.commit();
         device.notify(ComponentEvent.online);
         return true;
     }
 
-    void materialise_network(Component device)
+    void materialise_network(ref DeviceBuilder b, Component device)
     {
         if (!_slave_server)
             return;
 
-        Component status = find_or_create_component(device, ComponentDef("status", "DeviceStatus", null));
-        Component network = find_or_create_component(status, ComponentDef("network", "Network", null));
-        set_const_element(network, "Network", "mode", Variant("modbus"));
+        Component status = component_of(b, device, ComponentDef("status", "DeviceStatus", null));
+        Component network = component_of(b, status, ComponentDef("network", "Network", null));
+        set_const_element(b, network, "Network", "mode", Variant("modbus"));
 
-        Component modbus = find_or_create_component(network, ComponentDef("modbus", "Modbus", null));
-        set_const_element(modbus, "Modbus", "status", Variant("online"));
-        set_const_element(modbus, "Modbus", "address", Variant(cast(uint)_slave_server.local_address));
+        Component modbus = component_of(b, network, ComponentDef("modbus", "Modbus", null));
+        set_const_element(b, modbus, "Modbus", "status", Variant("online"));
+        set_const_element(b, modbus, "Modbus", "address", Variant(cast(uint)_slave_server.local_address));
 
         if (_slave_server.iface)
         {
@@ -1185,38 +1176,28 @@ private:
                 case ModbusProtocol.ascii:   variant = "ascii";   break;
                 case ModbusProtocol.unknown: variant = "unknown"; break;
             }
-            set_const_element(modbus, "Modbus", "variant", Variant(variant));
+            set_const_element(b, modbus, "Modbus", "variant", Variant(variant));
         }
     }
 
-    void set_const_element(Component c, string template_, string id, Variant value)
-    {
-        Element* e = ensure_element(c, id);
-        if (!e.format.valid)
-            e.format = register_value_format(value);
-        if (e.value.isNull)
-        {
-            e.value = value;
-            e.sampling_mode = SamplingMode.constant;
-        }
-        populate_element_metadata(e, template_, id);
-    }
+    void set_const_element(ref DeviceBuilder b, Component c, string template_, string id, Variant value)
+        => populate_element_metadata(b.constant(c, id, value), template_, id);
 
-    void configure_standard_component(Component c, ref const ComponentDef cd)
+    void configure_standard_component(ref DeviceBuilder b, Component c, ref const ComponentDef cd)
     {
         if (cd.template_ != "Port")
             return;
 
         if (cd.path == "grid")
         {
-            set_const_element(c, "Port", "role", Variant("grid"));
-            set_const_element(c, "Port", "flow", Variant("bidirectional"));
-            set_const_element(c, "Port", "meter_sign", Variant("inverted"));
+            set_const_element(b, c, "Port", "role", Variant("grid"));
+            set_const_element(b, c, "Port", "flow", Variant("bidirectional"));
+            set_const_element(b, c, "Port", "meter_sign", Variant("inverted"));
         }
         else if (is_pv_port_path(cd.path))
         {
-            set_const_element(c, "Port", "role", Variant("pv"));
-            set_const_element(c, "Port", "flow", Variant("supply"));
+            set_const_element(b, c, "Port", "role", Variant("pv"));
+            set_const_element(b, c, "Port", "flow", Variant("supply"));
         }
     }
 
@@ -1256,7 +1237,7 @@ private:
         return n;
     }
 
-    void materialise_repeat(ref const ModelLoc ml, ref const ModelMapping mm, Component device, const(char)[] path_prefix, ref Array!StripeField out_fields)
+    void materialise_repeat(ref DeviceBuilder b, ref const ModelLoc ml, ref const ModelMapping mm, Component device, const(char)[] path_prefix, ref Array!StripeField out_fields)
     {
         ushort n = repeat_instance_count(ml, mm);
         if (n == 0)
@@ -1275,20 +1256,19 @@ private:
             {
                 const(char)[] full_path = cd.path.length == 0 ? inst_path : tconcat(inst_path, ".", cd.path);
                 ComponentDef synth = ComponentDef(cast(string)full_path, cd.template_, cd.type_value);
-                inst_comps[ci] = find_or_create_component(device, synth);
+                inst_comps[ci] = component_of(b, device, synth);
                 if (cd.type_value)
-                    set_type_element(inst_comps[ci], cd.template_, cd.type_value);
-                configure_standard_component(inst_comps[ci], synth);
+                    set_type_element(b, inst_comps[ci], cd.template_, cd.type_value);
+                configure_standard_component(b, inst_comps[ci], synth);
             }
 
             ushort inst_offset = cast(ushort)(mm.repeat.first_offset + inst * mm.repeat.stride);
             foreach (ref fd; mm.repeat.fields)
-                emit_field(ml, mm, fd, inst_comps[fd.component_index], out_fields, inst_offset);
+                emit_field(b, ml, mm, fd, inst_comps[fd.component_index], out_fields, inst_offset);
         }
     }
 
-    void emit_field(ref const ModelLoc ml, ref const ModelMapping mm, ref const FieldDef fd, Component target,
-                    ref Array!StripeField out_fields, ushort extra_offset = 0)
+    void emit_field(ref DeviceBuilder b, ref const ModelLoc ml, ref const ModelMapping mm, ref const FieldDef fd, Component target, ref Array!StripeField out_fields, ushort extra_offset = 0)
     {
         auto chain = &_chains[ml.chain_index];
 
@@ -1322,8 +1302,7 @@ private:
             return;
         }
 
-        Element* e = ensure_element(target, fd.id);
-        _bound_device.attach_binding(this, e, fd.access);
+        Element* e = bind_element(b, target, fd.id, FormatId.init, fd.access);
         populate_element_metadata(e, target.template_[], fd.id);
         if (fd.freq != Frequency.constant && fd.freq != Frequency.configuration && element_already_sampled(e, out_fields))
         {
@@ -1470,18 +1449,8 @@ private:
         return hi;
     }
 
-    void set_type_element(Component c, string template_, string type_value)
-    {
-        Element* te = ensure_element(c, "type");
-        if (!te.format.valid)
-            te.format = register_value_format(type_value);
-        if (te.value.isNull)
-        {
-            te.value = Variant(type_value);
-            te.sampling_mode = SamplingMode.constant;
-        }
-        populate_element_metadata(te, template_, "type");
-    }
+    void set_type_element(ref DeviceBuilder b, Component c, string template_, string type_value)
+        => populate_element_metadata(b.constant(c, "type", type_value), template_, "type");
 
     void populate_element_metadata(Element* e, const(char)[] template_, const(char)[] id)
     {
@@ -1498,46 +1467,17 @@ private:
             e.desc = et.desc.make_string();
     }
 
-    Component find_or_create_component(Component root, ref const ComponentDef cd)
+    Component component_of(ref DeviceBuilder b, Component root, ref const ComponentDef cd)
     {
-        Component parent = root;
-        const(char)[] remaining = cd.path;
-        while (!remaining.empty)
-        {
-            const(char)[] segment = remaining.split!'.';
-            if (segment.empty)
-                continue;
-            Component child;
-            foreach (Component existing; parent.components)
-                if (existing.id[] == segment)
-                {
-                    child = existing;
-                    break;
-                }
-            if (child is null)
-            {
-                child = alloc!Component(segment.make_string());
-                child.parent = parent;
-                parent.components ~= child;
-            }
-            parent = child;
-        }
-        if (cd.template_ && parent.template_.empty)
-            parent.template_ = cd.template_.make_string();
-        return parent;
+        if (!cd.path.empty)
+            return b.component(root, cd.path, cd.template_);
+        if (cd.template_ && root.template_.empty)
+            root.template_ = cd.template_.make_string();
+        return root;
     }
 
-    Element* ensure_element(Component c, string id)
-    {
-        foreach (Element* existing; c.elements)
-            if (existing.id[] == id)
-                return existing;
-        Element* e = alloc_element();
-        e.parent = c;
-        e.id = id.make_string();
-        c.elements ~= e;
-        return e;
-    }
+    Element* ensure_element(ref DeviceBuilder b, Component c, string id)
+        => b.element(c, id);
 
 
     void response_handler(ref const ModbusPDU req, ref ModbusPDU resp, MonoTime, MonoTime response_time)
@@ -1805,8 +1745,7 @@ private bool read_message_scale(ushort first, ushort last, const(ubyte)[] data, 
     return true;
 }
 
-private bool write_sunspec_sample(Element* element, const(void)[] wire, ref const SampleDesc base_desc,
-                                   float scale, SysTime ts)
+private bool write_sunspec_sample(Element* element, const(void)[] wire, ref const SampleDesc base_desc, float scale, SysTime ts)
 {
     const(DataFormat)* fmt = base_desc.fmt;
     if (fmt.is_text)
@@ -1909,8 +1848,7 @@ unittest
     assert(text_element.value.asString == "Model");
 
     register_enum_info("SunSpecInverterEvent", enum_info!SunSpecInverterEvent.make_void(), false);
-    FieldDef flags = FieldDef(0, "events", "SunSpecInverterEvent", 0, -1,
-                              FieldType.bitfield32, 0, Frequency.high);
+    FieldDef flags = FieldDef(0, "events", "SunSpecInverterEvent", 0, -1, FieldType.bitfield32, 0, Frequency.high);
     SampleDesc flags_desc = make_sample_desc(flags);
     assert(flags_desc.fmt.enum_info.bitfield);
 }

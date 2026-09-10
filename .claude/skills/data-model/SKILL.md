@@ -40,16 +40,31 @@ extern(C++) class Component {
     String name;
     String template_;              // e.g. "EnergyMeter", "Battery", "DeviceInfo"
     Component parent;
-    Array!Component components;    // child components
-    Array!(Element*) elements;     // direct elements
+    // components / elements: read-only slice accessors over private arrays
 }
 ```
 
 **Key methods:**
 - `find_component("battery.meter")` -- dot-separated hierarchical lookup
 - `find_element("voltage")` -- recursive element search
-- `find_or_create_element("path")` -- creates missing components/element
+- `components` / `elements` -- read-only slices; the arrays themselves are private
+- Component is read-only outside `manager`: the tree is only written through a `DeviceBuilder`
 - `full_path(buf)` -- builds path string like `"inverter.meter.voltage"`
+
+**Building and mutating devices (`DeviceBuilder`, `manager.device`):**
+- `g_app.devices.create(id)` claims a new identity; `device.edit()` opens a published one;
+  `g_app.devices.open(id)` does whichever applies. Mutate through the builder, then let it commit
+  (destructor or `commit()`).
+- `component(path, template)`, `element(path, format = none)` and `constant(path, value)` (format from the
+  value, written once, sampling mode constant), each with a `(parent, ...)` overload, are the whole write API.
+  Helpers that build part of a tree take `ref DeviceBuilder`. Values are never written through the builder:
+  hold the `Element*` and write it. Per-tick publishers bind once (see `PublishSlot` in energy) rather than
+  re-resolving by path.
+- Commit on a created device fires element-created per new element, then the `DeviceLifecycleEvent.created`
+  signal (`register_device_lifecycle_handler`). Commit on an edit fires one `tree_changed` if anything changed.
+- A builder is a synchronous burst: never hold one across ticks. Incremental producers (sync mirrors, MQTT
+  discovery, zigbee interviews) open one edit per frame or response. `online`/`offline` remain the binding's
+  explicit `notify` calls.
 
 ### Device
 
@@ -374,7 +389,7 @@ override void add_handler(Device device, Element* e, ref const ElementDesc desc,
 }
 ```
 
-`create_device_from_profile()` handles: component hierarchy construction, static elements, expression elements, sum elements, aliases, model variant filtering, and calls the delegate for each `element-map`.
+`create_device_from_profile()` handles: component hierarchy construction, static elements, expression elements, sum elements, aliases, model variant filtering, and calls the delegate for each `element-map`. It builds through a `DeviceBuilder`, so the device is announced whole (device-created, or one `tree_changed` when re-materialised) and then signalled `online`.
 
 **Properties as profile parameters:** Profiles declare `parameters: host`, `device_id`, etc. The binding's `set_unknown_property` (`manager.binding`) accepts any unknown property name and stuffs it into the binding's `_params` Map, which is later substituted into URL paths, MQTT topics, etc. This means console syntax like `host=192.168.1.5 device_id=plug42` Just Works without each binding subclass having to declare those properties.
 

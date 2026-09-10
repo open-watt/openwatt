@@ -439,8 +439,7 @@ private:
     ulong[2] make_sample_key_tuya(EUI64 eui, ubyte endpoint, ubyte dp)
         => make_sample_key(eui, endpoint, 0xEF00, dp);
 
-    void write_decoded_sample(ref SampleElement e, ref const Variant decoded, const(void)[] wire,
-                        SysTime timestamp)
+    void write_decoded_sample(ref SampleElement e, ref const Variant decoded, const(void)[] wire, SysTime timestamp)
     {
         if (!e.desc.valid)
         {
@@ -575,11 +574,9 @@ private:
         {
             if (reply == ZCLReply.default_ && !(zcl.control & ZCLControlFlags.disable_default_response))
             {
-                int tag = send_default_response(aps.src, aps.src_endpoint, aps.profile_id,
-                    aps.cluster_id, zcl, zcl.command, status);
+                int tag = send_default_response(aps.src, aps.src_endpoint, aps.profile_id, aps.cluster_id, zcl, zcl.command, status);
                 version (DebugZigbeeController)
-                    log.debugf("{0,04x}:{1,02x} ZCL default response seq={2} cmd={3,02x} status={4,02x} tag={5}",
-                        aps.src, aps.src_endpoint, zcl.seq, zcl.command, status, tag);
+                    log.debugf("{0,04x}:{1,02x} ZCL default response seq={2} cmd={3,02x} status={4,02x} tag={5}", aps.src, aps.src_endpoint, zcl.seq, zcl.command, status, tag);
             }
         }
 
@@ -887,9 +884,7 @@ private:
                             ep.mark_ias_enrolled();
                         }
                         ubyte[2] enroll_response = [0x00, 0x00];
-                        _endpoint.send_zcl_response(aps.src, aps.src_endpoint, aps.profile_id,
-                            aps.cluster_id, ZCLCommand.ias_zone_enroll_response, zcl,
-                            enroll_response[], PCP.ca);
+                        _endpoint.send_zcl_response(aps.src, aps.src_endpoint, aps.profile_id, aps.cluster_id, ZCLCommand.ias_zone_enroll_response, zcl, enroll_response[], PCP.ca);
                         reply = ZCLReply.sent;
 
                         version (DebugZigbeeController)
@@ -960,8 +955,7 @@ private:
                                 return;
                             }
                             version (DebugZigbeeController)
-                                log.debugf("{0,04x}:{1,02x} Tuya seq={2} cmd={3,02x} dp{4} = {5} ({6})",
-                                    aps.src, aps.src_endpoint, tuya_seq, zcl.command, dp.dp_id, v, dp.dp_type);
+                                log.debugf("{0,04x}:{1,02x} Tuya seq={2} cmd={3,02x} dp{4} = {5} ({6})", aps.src, aps.src_endpoint, tuya_seq, zcl.command, dp.dp_id, v, dp.dp_type);
                             if (nm)
                             {
                                 nm.tuya_datapoints[dp.dp_id] = v;
@@ -1040,18 +1034,15 @@ private:
                 tuya_txn_id += tuya_txn_id == 0;
 
                 assert(e.attribute < 256, "Invalid Tuya DP id!");
-                ptrdiff_t len = encode_dp(cast(ubyte)e.attribute, val, e.tuya_type,
-                                          e.desc, e.length, buffer[2 .. $]);
+                ptrdiff_t len = encode_dp(cast(ubyte)e.attribute, val, e.tuya_type, e.desc, e.length, buffer[2 .. $]);
                 if (len <= 0)
                     break; // failed?!
 
                 // TODO: we should request an ACK!!!
 
-                int tag = _endpoint.send_zcl_message(e.eui, e.endpoint, 0x0104, 0xEF00,
-                    ZCLCommand.tuya_data_request, APSFlags.none, buffer[0..2+len], PCP.vo);
+                int tag = _endpoint.send_zcl_message(e.eui, e.endpoint, 0x0104, 0xEF00, ZCLCommand.tuya_data_request, APSFlags.none, buffer[0..2+len], PCP.vo);
                 version (DebugZigbeeController)
-                    log.debugf("{0} Tuya write txn={1} dp{2} = {3} tag={4}",
-                        e.eui, txn, e.attribute, val, tag);
+                    log.debugf("{0} Tuya write txn={1} dp{2} = {3} tag={4}", e.eui, txn, e.attribute, val, tag);
                 break;
 
             default:
@@ -1135,12 +1126,12 @@ private:
                 }
                 node.device = device;
 
-                // set a bunch of status data
-                device.set_element("status.network.mode", StringLit!"zigbee");
-                device.set_element("status.network.zigbee.eui", node.eui);
-                device.set_element("status.network.zigbee.address", node.id);
-                device.set_element("status.network.zigbee.rssi", node.rssi);
-                device.set_element("status.network.zigbee.lqi", node.lqi);
+                DeviceBuilder builder = device.edit();
+                builder.constant("status.network.mode", StringLit!"zigbee");
+                builder.constant("status.network.zigbee.eui", node.eui);
+                builder.element("status.network.zigbee.address", register_value_format(node.id)).value = node.id;
+                builder.element("status.network.zigbee.rssi", register_value_format(node.rssi)).value = node.rssi;
+                builder.element("status.network.zigbee.lqi", register_value_format(node.lqi)).value = node.lqi;
 
                 // set component templates for components we ma have created
                 Component c = device.find_component("status");
@@ -1282,9 +1273,7 @@ private:
                 continue;
 
             ushort profile = ep.profile_id ? ep.profile_id : 0x0104;
-            int tag = _endpoint.send_zcl_message(node.id, ep.endpoint, profile, 0x0500,
-                ZCLCommand.write_attributes_no_response, ZCLControlFlags.disable_default_response,
-                req[], PCP.ca);
+            int tag = _endpoint.send_zcl_message(node.id, ep.endpoint, profile, 0x0500, ZCLCommand.write_attributes_no_response, ZCLControlFlags.disable_default_response, req[], PCP.ca);
             if (tag < 0)
                 continue;
             ep.note_ias_attempt();
@@ -1883,8 +1872,7 @@ bool decode_dp(ref const TuyaDP dp, ref Variant result)
     }
 }
 
-ptrdiff_t encode_dp(ubyte datapoint, ref const Variant value, TuyaDataType type,
-                    ref const SampleDesc desc, ubyte length, ubyte[] buffer)
+ptrdiff_t encode_dp(ubyte datapoint, ref const Variant value, TuyaDataType type, ref const SampleDesc desc, ubyte length, ubyte[] buffer)
 {
     if (buffer.length < 4)
         return -1;

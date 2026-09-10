@@ -41,8 +41,7 @@ nothrow @nogc:
     SysTime day_start;
 }
 
-void update_accounts(Device energy_device, ref Islands islands, ref TopologyGraph graph,
-                     ref DailySnapshot daily)
+void update_accounts(Device energy_device, ref Islands islands, ref TopologyGraph graph, ref DailySnapshot daily)
 {
     if (!energy_device)
         return;
@@ -50,12 +49,13 @@ void update_accounts(Device energy_device, ref Islands islands, ref TopologyGrap
     SysTime now = getSysTime();
     check_day_rollover(daily, now);
 
+    DeviceBuilder builder = energy_device.edit();
     daily.account_publishers.resize(islands.length);
     foreach (i, island; islands[])
     {
         ref publisher = daily.account_publishers[i];
         if (!publisher.bound || publisher.id != island.id[])
-            publisher.bind(energy_device, island.id[]);
+            publisher.bind(builder, island.id[]);
         update_island_accounts(publisher, island, graph, daily, now);
     }
 }
@@ -137,24 +137,24 @@ nothrow @nogc:
     AccountFloatCell grid_today_import;
     AccountFloatCell grid_today_export;
 
-    void bind(Device energy_device, const(char)[] island_id)
+    void bind(ref DeviceBuilder builder, const(char)[] island_id)
     {
         id = island_id.make_string();
-        mode.bind(account_element!String(energy_device, island_id, "mode"));
-        members.bind(account_element!String(energy_device, island_id, "members"));
-        solar_power.bind(account_element!float(energy_device, island_id, "account.solar.power"));
-        battery_power.bind(account_element!float(energy_device, island_id, "account.battery.power"));
-        grid_power.bind(account_element!float(energy_device, island_id, "account.grid.power"));
-        rogue_generation_power.bind(account_element!float(energy_device, island_id, "account.rogue.generation.power"));
-        rogue_load_power.bind(account_element!float(energy_device, island_id, "account.rogue.load.power"));
-        generation_power.bind(account_element!float(energy_device, island_id, "account.generation.power"));
-        load_power.bind(account_element!float(energy_device, island_id, "account.load.total.power"));
-        local_fraction.bind(account_element!float(energy_device, island_id, "account.local_fraction"));
-        solar_today_energy.bind(account_element!float(energy_device, island_id, "account.solar.today.energy"));
-        battery_today_charge.bind(account_element!float(energy_device, island_id, "account.battery.today.charge"));
-        battery_today_discharge.bind(account_element!float(energy_device, island_id, "account.battery.today.discharge"));
-        grid_today_import.bind(account_element!float(energy_device, island_id, "account.grid.today.import"));
-        grid_today_export.bind(account_element!float(energy_device, island_id, "account.grid.today.export"));
+        mode.bind(account_element!String(builder, island_id, "mode"));
+        members.bind(account_element!String(builder, island_id, "members"));
+        solar_power.bind(account_element!float(builder, island_id, "account.solar.power"));
+        battery_power.bind(account_element!float(builder, island_id, "account.battery.power"));
+        grid_power.bind(account_element!float(builder, island_id, "account.grid.power"));
+        rogue_generation_power.bind(account_element!float(builder, island_id, "account.rogue.generation.power"));
+        rogue_load_power.bind(account_element!float(builder, island_id, "account.rogue.load.power"));
+        generation_power.bind(account_element!float(builder, island_id, "account.generation.power"));
+        load_power.bind(account_element!float(builder, island_id, "account.load.total.power"));
+        local_fraction.bind(account_element!float(builder, island_id, "account.local_fraction"));
+        solar_today_energy.bind(account_element!float(builder, island_id, "account.solar.today.energy"));
+        battery_today_charge.bind(account_element!float(builder, island_id, "account.battery.today.charge"));
+        battery_today_discharge.bind(account_element!float(builder, island_id, "account.battery.today.discharge"));
+        grid_today_import.bind(account_element!float(builder, island_id, "account.grid.today.import"));
+        grid_today_export.bind(account_element!float(builder, island_id, "account.grid.today.export"));
         bound = true;
     }
 }
@@ -209,15 +209,13 @@ nothrow @nogc:
     }
 }
 
-Element* account_element(T)(Device energy_device, const(char)[] island_id, const(char)[] path)
+Element* account_element(T)(ref DeviceBuilder builder, const(char)[] island_id, const(char)[] path)
 {
-    return energy_device.find_or_create_element(
-        tconcat("islands.", island_id, ".", path), register_value_format!T());
+    return builder.element(tconcat("islands.", island_id, ".", path), register_value_format!T());
 }
 
 
-void update_island_accounts(ref IslandAccountPublisher publisher, Island* island, ref TopologyGraph graph,
-                            ref DailySnapshot daily, SysTime ts)
+void update_island_accounts(ref IslandAccountPublisher publisher, Island* island, ref TopologyGraph graph, ref DailySnapshot daily, SysTime ts)
 {
     IslandTotals t = compute_island_totals(island, graph, daily);
 
@@ -399,8 +397,7 @@ void add_production_today(ref IslandTotals t, ref TopologyGraph graph, Island* i
                 continue;
             if (contribution.component)
                 if (Component meter = contribution.component.get_first_component_by_template("EnergyMeter"))
-                    t.solar_today_kwh += today_delta_value(daily, meter.find_element("import"),
-                                                           contribution.meter.total_import_active[0]);
+                    t.solar_today_kwh += today_delta_value(daily, meter.find_element("import"), contribution.meter.total_import_active[0]);
         }
     }
 }

@@ -191,58 +191,59 @@ private:
 
                 // TODO: id should be `res.name`...
 
+                DeviceBuilder builder = _dev.edit();
                 if (res.friendly_name)
                     _dev.name = res.friendly_name;
                 else
                     _dev.name = res.name;
 
                 if (res.friendly_name)
-                    _dev.set_element("info.name", res.friendly_name.move);
+                    builder.constant("info.name", res.friendly_name.move);
                 else
-                    _dev.set_element("info.name", res.name.move);
-                _dev.set_element("info.esphome_ver", res.esphome_version.move);
+                    builder.constant("info.name", res.name.move);
+                builder.constant("info.esphome_ver", res.esphome_version.move);
                 SysTime comp_time;
                 ptrdiff_t taken = comp_time.fromString(res.compilation_time[]);
                 if (taken == res.compilation_time.length)
-                    _dev.set_element("info.compilation_time", comp_time);
+                    builder.constant("info.compilation_time", comp_time);
                 if (res.manufacturer)
-                    _dev.set_element("info.manufacturer_name", res.manufacturer.move);
+                    builder.constant("info.manufacturer_name", res.manufacturer.move);
                 if (res.model)
-                    _dev.set_element("info.model_id", res.model.move);
+                    builder.constant("info.model_id", res.model.move);
                 if (res.friendly_name)
-                    _dev.set_element("info.model_name", res.friendly_name.move);
+                    builder.constant("info.model_name", res.friendly_name.move);
 
                 // client name/info...
 //                if (_client.server_name[])
 //                {
-//                    e = _dev.find_or_create_element("status.name");
+//                    e = builder.element("status.name");
 //                    e.value(Variant(_client.server_name[]));
 //                }
 //                if (_client.server_info[])
 //                {
-//                    e = _dev.find_or_create_element("status.info");
+//                    e = builder.element("status.info");
 //                    e.value(Variant(_client.server_info[]));
 //                }
 
                 // do we know if it's wifi or not?
-                _dev.set_element("status.network.mode", StringLit!"wifi");
-                _dev.set_element("status.network.ip.address", _client.get_address());
+                builder.constant("status.network.mode", StringLit!"wifi");
+                builder.element("status.network.ip.address", register_value_format!(const(char)[])()).value = _client.get_address();
 
                 if (res.webserver_port)
-                    _dev.set_element("status.network.webserver_port", res.webserver_port);
+                    builder.constant("status.network.webserver_port", res.webserver_port);
                 if (res.mac_address)
                 {
                     MACAddress addr;
                     taken = addr.fromString(res.mac_address[]);
                     if (taken == res.mac_address.length)
-                        _dev.set_element("status.network.wifi.mac_address", addr);
+                        builder.constant("status.network.wifi.mac_address", addr);
                 }
                 if (res.bluetooth_mac_address)
                 {
                     MACAddress addr;
                     taken = addr.fromString(res.bluetooth_mac_address[]);
                     if (taken == res.bluetooth_mac_address.length)
-                        _dev.set_element("status.network.bluetooth.mac_address", addr);
+                        builder.constant("status.network.bluetooth.mac_address", addr);
                 }
 
                 Component c = _dev.find_component("info");
@@ -334,8 +335,8 @@ private:
                 entry.key = res.key;
                 bool known_unit;
                 entry.format = sensor_format(res.unit_of_measurement[], entry.pre_scale, known_unit);
-                Element* e = _dev.find_or_create_element(tconcat("sensors.", id), entry.format);
-                _bound_device.attach_binding(this, e, manager.element.Access.read);
+                DeviceBuilder builder = _dev.edit();
+                Element* e = bind_element(builder, _dev, tconcat("sensors.", id), entry.format);
                 e.name = res.name.move;
                 entry.element = e;
                 if (!known_unit)

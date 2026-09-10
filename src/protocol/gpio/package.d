@@ -151,16 +151,12 @@ nothrow @nogc:
 
     override bool materialise()
     {
-        Device* dev = _device[] in g_app.devices;
-        if (!dev)
-            return false;
+        DeviceBuilder builder = g_app.devices.open(_device[]);
         FormatId format = register_format(_fmt);
-        Element* e = (*dev).find_or_create_element(
-            _element_path.empty ? "state" : _element_path[], format);
+        _bound_device = builder.device;
+        Element* e = bind_element(builder, _bound_device, _element_path.empty ? "state" : _element_path[], format);
         if (_element is null)
             e.sampling_mode = SamplingMode.report;
-        _bound_device = *dev;
-        _bound_device.attach_binding(this, e, Access.read);
         _element = e;
         return true;
     }

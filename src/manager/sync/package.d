@@ -56,7 +56,7 @@ import manager;
 import manager.base;
 import manager.collection;
 import manager.component : Component;
-import manager.device : Device;
+import manager.device : DeviceBuilder, Device;
 import manager.element : Access, add_feed_listener, Cursor, Element, ElementLifecycleEvent,
                          register_element_lifecycle_handler, remove_feed_listener, SampleUpdate, sweep_dirty;
 import manager.id : EID;
@@ -880,8 +880,7 @@ nothrow @nogc:
 
     // Inbound: property sync
 
-    void inbound_set(SyncPeer from, CID target, const(char)[] prop,
-                     ref const Variant value, uint seq)
+    void inbound_set(SyncPeer from, CID target, const(char)[] prop, ref const Variant value, uint seq)
     {
         BaseObject obj = get_item(target);
         if (!obj)
@@ -1251,8 +1250,7 @@ nothrow @nogc:
         char[16] nid = void;
         if (node_id)
             format_uint(node_id, nid[], 16, 16, '0');
-        log.info("hello from '", from.name[], "' host='", host, "' ver=", ver, " caps=", caps,
-                 node_id ? " node=" : "", node_id ? nid[] : "");
+        log.info("hello from '", from.name[], "' host='", host, "' ver=", ver, " caps=", caps, node_id ? " node=" : "", node_id ? nid[] : "");
 
         // a node's newest session supersedes any older one it re-dialled away from
         if (node_id)
@@ -1566,7 +1564,8 @@ nothrow @nogc:
         }
         else
         {
-            e = dev.find_or_create_element(rest, *pf);
+            DeviceBuilder builder = dev.edit();
+            e = builder.element(rest, *pf);
             if (!e)
                 return EID.invalid;
             if (e.data_format.kind == SeriesKind.point && !e.has_history)
@@ -2530,9 +2529,8 @@ nothrow @nogc:
     {
         if (Device device = g_app.devices.find(id, peer_id))
             return device;
-        Device dev = alloc!Device(id.make_string(), peer_id);
-        g_app.devices.insert(dev);
-        return dev;
+        DeviceBuilder builder = g_app.devices.create(id, peer_id);
+        return builder.device;
     }
 
     bool has_open_console(SyncPeer peer)

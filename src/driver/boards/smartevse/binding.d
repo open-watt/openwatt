@@ -14,7 +14,7 @@ import manager.base : ActiveObject, CompletionStatus, ObjectFlags, ObjectRef, Pr
 import manager.binding : ProtocolBinding;
 import manager.collection : CID, collection_type_info;
 import manager.component : Component, ComponentEvent;
-import manager.device : Device;
+import manager.device : Device, DeviceBuilder;
 import manager.element : Access, Element, SampleUpdate, SamplingMode;
 import manager.series : DataFormat, SeriesKind, ValueType, register_format, register_value_format;
 
@@ -95,81 +95,77 @@ protected:
         if (_built)
             return true;
 
-        Device* found = _device[] in g_app.devices;
-        if (!found)
-            return false;
-        _device_instance = *found;
+        DeviceBuilder builder = g_app.devices.open(_device[]);
+        _device_instance = builder.device;
         _bound_device = _device_instance;
 
-        Component info = find_or_create_component(_device_instance, "info", "DeviceInfo");
-        set_constant(info, "type", "evse");
-        set_constant(info, "name", "SmartEVSE v3.0");
+        Component info = builder.component("info", "DeviceInfo");
+        builder.constant(info, "type", "evse");
+        builder.constant(info, "name", "SmartEVSE v3.0");
 
-        Component status = find_or_create_component(_device_instance, "status", "DeviceStatus");
-        _online = add_element!bool(status, "online");
+        Component status = builder.component("status", "DeviceStatus");
+        _online = add_element!bool(builder, status, "online");
 
-        Component grid = find_or_create_component(_device_instance, "grid", "Port");
-        set_constant(grid, "role", "parent");
-        set_constant(grid, "flow", "consume");
+        Component grid = builder.component("grid", "Port");
+        builder.constant(grid, "role", "parent");
+        builder.constant(grid, "flow", "consume");
 
-        Component control = find_or_create_component(grid, "control", "PowerControl");
-        set_constant(control, "kind", "continuous");
-        set_constant(control, "direction", "consume");
-        set_constant(control, "unit", "A");
-        set_constant(control, "min", DeciAmps(60));
-        set_constant(control, "step", DeciAmps(10));
-        set_constant(control, "can_disable", true);
-        _setpoint = add_element!DeciAmps(control, "setpoint", Access.read_write);
-        _control_max = add_element!DeciAmps(control, "max");
-        _enable = add_element!bool(control, "enable", Access.read_write);
+        Component control = builder.component(grid, "control", "PowerControl");
+        builder.constant(control, "kind", "continuous");
+        builder.constant(control, "direction", "consume");
+        builder.constant(control, "unit", "A");
+        builder.constant(control, "min", DeciAmps(60));
+        builder.constant(control, "step", DeciAmps(10));
+        builder.constant(control, "can_disable", true);
+        _setpoint = add_element!DeciAmps(builder, control, "setpoint", Access.read_write);
+        _control_max = add_element!DeciAmps(builder, control, "max");
+        _enable = add_element!bool(builder, control, "enable", Access.read_write);
 
-        Component car = find_or_create_component(_device_instance, "car", "Port");
-        set_constant(car, "role", "car");
-        set_constant(car, "flow", "supply");
+        Component car = builder.component("car", "Port");
+        builder.constant(car, "role", "car");
+        builder.constant(car, "flow", "supply");
 
-        Component evse_status = find_or_create_component(_device_instance, "evse", "EVSE");
-        _state = add_element!SmartEVSEState(evse_status, "state", Access.read_write);
-        _connected = add_element!bool(evse_status, "connected");
-        _temperature = add_element!DegreesC(evse_status, "temp");
-        _temperature_fault = add_element!bool(evse_status, "temperature_fault");
-        _rcm_fault = add_element!bool(evse_status, "rcm_fault");
+        Component evse_status = builder.component("evse", "EVSE");
+        _state = add_element!SmartEVSEState(builder, evse_status, "state", Access.read_write);
+        _connected = add_element!bool(builder, evse_status, "connected");
+        _temperature = add_element!DegreesC(builder, evse_status, "temp");
+        _temperature_fault = add_element!bool(builder, evse_status, "temperature_fault");
+        _rcm_fault = add_element!bool(builder, evse_status, "rcm_fault");
 
-        Component config = find_or_create_component(_device_instance, "config", "Configuration");
-        _max_current = add_element!DeciAmps(config, "max_current", Access.read_write, SamplingMode.config);
-        _max_temperature = add_element!DegreesC(config, "max_temperature", Access.read_write, SamplingMode.config);
-        _contactor2_mode = add_element!SmartEVSEContactor2Mode(
-            config, "contactor2_mode", Access.read_write, SamplingMode.config);
+        Component config = builder.component("config", "Configuration");
+        _max_current = add_element!DeciAmps(builder, config, "max_current", Access.read_write, SamplingMode.config);
+        _max_temperature = add_element!DegreesC(builder, config, "max_temperature", Access.read_write, SamplingMode.config);
+        _contactor2_mode = add_element!SmartEVSEContactor2Mode(builder, config, "contactor2_mode", Access.read_write, SamplingMode.config);
 
-        Component diagnostic = find_or_create_component(
-            _device_instance, "diagnostic", "SmartEVSEDiagnostics");
-        _pilot = add_element!SmartEVSEPilot(diagnostic, "pilot");
-        _pwm = add_element!uint(diagnostic, "pwm");
-        _effective_current = add_element!DeciAmps(diagnostic, "effective_current");
-        _pp_max_current = add_element!DeciAmps(diagnostic, "pp_max_current");
-        _pilot_min = add_element!MilliVolts(diagnostic, "pilot_min");
-        _pilot_max = add_element!MilliVolts(diagnostic, "pilot_max");
-        _pp_voltage = add_element!MilliVolts(diagnostic, "pp_voltage");
-        _temperature_voltage = add_element!MilliVolts(diagnostic, "temperature_voltage");
-        _adc_calibration = add_element!SmartEVSEADCCalibration(diagnostic, "adc_calibration");
-        _rcm_input = add_element!bool(diagnostic, "rcm_input");
-        _activation_wait = add_element!ubyte(diagnostic, "activation_wait");
-        _activation_pulse = add_element!ubyte(diagnostic, "activation_pulse");
-        _contactor1 = add_element!bool(diagnostic, "contactor1");
-        _contactor2 = add_element!bool(diagnostic, "contactor2");
+        Component diagnostic = builder.component("diagnostic", "SmartEVSEDiagnostics");
+        _pilot = add_element!SmartEVSEPilot(builder, diagnostic, "pilot");
+        _pwm = add_element!uint(builder, diagnostic, "pwm");
+        _effective_current = add_element!DeciAmps(builder, diagnostic, "effective_current");
+        _pp_max_current = add_element!DeciAmps(builder, diagnostic, "pp_max_current");
+        _pilot_min = add_element!MilliVolts(builder, diagnostic, "pilot_min");
+        _pilot_max = add_element!MilliVolts(builder, diagnostic, "pilot_max");
+        _pp_voltage = add_element!MilliVolts(builder, diagnostic, "pp_voltage");
+        _temperature_voltage = add_element!MilliVolts(builder, diagnostic, "temperature_voltage");
+        _adc_calibration = add_element!SmartEVSEADCCalibration(builder, diagnostic, "adc_calibration");
+        _rcm_input = add_element!bool(builder, diagnostic, "rcm_input");
+        _activation_wait = add_element!ubyte(builder, diagnostic, "activation_wait");
+        _activation_pulse = add_element!ubyte(builder, diagnostic, "activation_pulse");
+        _contactor1 = add_element!bool(builder, diagnostic, "contactor1");
+        _contactor2 = add_element!bool(builder, diagnostic, "contactor2");
 
-        Component buttons = find_or_create_component(_device_instance, "buttons", "Buttons");
-        _button_left = add_element!bool(buttons, "left");
-        _button_middle = add_element!bool(buttons, "middle");
-        _button_right = add_element!bool(buttons, "right");
+        Component buttons = builder.component("buttons", "Buttons");
+        _button_left = add_element!bool(builder, buttons, "left");
+        _button_middle = add_element!bool(builder, buttons, "middle");
+        _button_right = add_element!bool(builder, buttons, "right");
 
-        Component display = find_or_create_component(_device_instance, "display", "Display");
-        set_constant(display, "width", display_width);
-        set_constant(display, "height", display_height);
-        _backlight = add_element!bool(display, "backlight", Access.read_write);
-        _frame = add_blob(display, "frame", Access.read_write);
+        Component display = builder.component("display", "Display");
+        builder.constant(display, "width", display_width);
+        builder.constant(display, "height", display_height);
+        _backlight = add_element!bool(builder, display, "backlight", Access.read_write);
+        _frame = add_blob(builder, display, "frame", Access.read_write);
 
         g_app.request_rebind();
-        _device_instance.notify(ComponentEvent.tree_changed);
+        builder.commit();
         _built = true;
         return true;
     }
@@ -213,47 +209,20 @@ private:
     Element* _backlight;
     Element* _frame;
 
-    Component find_or_create_component(Component parent, const(char)[] id, const(char)[] template_)
+    Element* add_element(T)(ref DeviceBuilder b, Component parent, const(char)[] id, Access access = Access.read, SamplingMode mode = SamplingMode.report)
     {
-        foreach (component; parent.components)
-        {
-            if (component.id[] == id)
-                return component;
-        }
-        Component component = alloc!Component(id.make_string());
-        component.template_ = template_.make_string();
-        component.parent = parent;
-        parent.components ~= component;
-        return component;
-    }
-
-    Element* add_element(T)(Component parent, const(char)[] id, Access access = Access.read,
-                            SamplingMode mode = SamplingMode.report)
-    {
-        Element* element = parent.find_or_create_element(id, register_value_format!T());
+        Element* element = bind_element(b, parent, id, register_value_format!T(), access);
         element.sampling_mode = mode;
-        _bound_device.attach_binding(this, element, access);
         return element;
     }
 
-    Element* add_blob(Component parent, const(char)[] id, Access access)
+    Element* add_blob(ref DeviceBuilder b, Component parent, const(char)[] id, Access access)
     {
         DataFormat format = DataFormat(ValueType.u8, SeriesKind.held);
         format.count = 0;
-        Element* element = parent.find_or_create_element(id, register_format(format));
+        Element* element = bind_element(b, parent, id, register_format(format), access);
         element.sampling_mode = SamplingMode.report;
-        _bound_device.attach_binding(this, element, access);
         return element;
-    }
-
-    void set_constant(T)(Component parent, const(char)[] id, auto ref T value)
-    {
-        Element* element = parent.find_or_create_element(id, register_value_format(value));
-        if (element.record_update() == SysTime())
-        {
-            element.value(value);
-            element.sampling_mode = SamplingMode.constant;
-        }
     }
 
     void subscribe_elements()
@@ -457,8 +426,7 @@ private:
         }
         else if (update.element is _contactor2_mode)
         {
-            error = hardware.contactor2_mode(
-                cast(SmartEVSEContactor2Mode)update.value.asLong);
+            error = hardware.contactor2_mode(cast(SmartEVSEContactor2Mode)update.value.asLong);
             restore = SmartEVSEChange.contactor2_mode;
         }
 

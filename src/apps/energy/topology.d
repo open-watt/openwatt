@@ -12,6 +12,8 @@ import urt.time : SysTime;
 import urt.variant : Variant;
 
 import apps.energy.appliance;
+import apps.energy.planner : BudgetField;
+import apps.energy.state : PublishSlot;
 import apps.energy.attribution;
 import apps.energy.battery_store;
 import apps.energy.link;
@@ -427,6 +429,7 @@ nothrow @nogc:
     Bus* root;
     Array!(Bus*) members;
     IslandMode mode;
+    PublishSlot[BudgetField.max + 1] budget;
 }
 
 alias Islands = Array!(Island*);
@@ -621,9 +624,7 @@ nothrow @nogc:
         return b;
     }
 
-    Port* add_port(Appliance owner, Bus* bus, PortRole role, FlowDomain flow, Component meter,
-                   ubyte phase, MeterSign sign = MeterSign.normal, const(char)[] path = null,
-                   const(char)[] label = null, Component component = null)
+    Port* add_port(Appliance owner, Bus* bus, PortRole role, FlowDomain flow, Component meter, ubyte phase, MeterSign sign = MeterSign.normal, const(char)[] path = null, const(char)[] label = null, Component component = null)
     {
         Port* p = alloc!Port();
         p.owner = owner;
@@ -673,9 +674,7 @@ nothrow @nogc:
         return tconcat(bus ? bus.id[] : "unknown", ".", path.length ? path : port_role_name(role));
     }
 
-    Link* add_link(Appliance owner, Bus* a, Bus* b, Port* port_a, Port* port_b,
-                   float capacity_amps, bool closed = true, const(char)[] label = null,
-                   const(char)[] kind = null, const(char)[] id = null)
+    Link* add_link(Appliance owner, Bus* a, Bus* b, Port* port_a, Port* port_b, float capacity_amps, bool closed = true, const(char)[] label = null, const(char)[] kind = null, const(char)[] id = null)
     {
         Link* l = alloc!Link();
         l.owner = owner;
@@ -707,8 +706,7 @@ nothrow @nogc:
             const(char)[] to = b && b.path.length ? b.path[] : b ? port_role_name(b.role) : "b";
             return tconcat(owner.name[], ".", from, ".", to);
         }
-        return tconcat(a && a.bus ? a.bus.id[] : "unknown", ".",
-                       b && b.bus ? b.bus.id[] : "unknown");
+        return tconcat(a && a.bus ? a.bus.id[] : "unknown", ".", b && b.bus ? b.bus.id[] : "unknown");
     }
 
     Bus* bus_for_appliance(Appliance a)
@@ -1285,8 +1283,7 @@ private:
                     break;
                 }
             if (!found)
-                log.warning("energy appliance '", a.name[], "' binds unknown port '",
-                            binding.port[], "'; ignoring circuit '", binding.circuit[], "'");
+                log.warning("energy appliance '", a.name[], "' binds unknown port '", binding.port[], "'; ignoring circuit '", binding.circuit[], "'");
         }
     }
 
@@ -1503,11 +1500,7 @@ private:
             Component source = battery_store_source(p);
             if (source is null)
                 continue;
-            collect_battery_store_contributions(source, p.bus.id[],
-                                                p.owner ? p.owner.name[] : "",
-                                                p.path.length ? p.path[] : port_role_name(p.role),
-                                                battery_store_contribution_kind(p),
-                                                battery_store_contributions);
+            collect_battery_store_contributions(source, p.bus.id[], p.owner ? p.owner.name[] : "", p.path.length ? p.path[] : port_role_name(p.role), battery_store_contribution_kind(p), battery_store_contributions);
         }
         reconcile_battery_stores(battery_store_contributions, battery_stores);
     }

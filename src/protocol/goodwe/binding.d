@@ -181,18 +181,22 @@ protected:
     final override const(char)[] model_name() const pure
         => _model_name[];
 
+    final override bool materialise()
+    {
+        if (!super.materialise())
+            return false;
+        if (AA55Client c = _client.get)
+        {
+            if (!_bound_device)
+                return true;
+            DeviceBuilder builder = _bound_device.edit();
+            builder.element("status.network.ip.address", register_value_format!(const(char)[])()).value = c.get_address();
+        }
+        return true;
+    }
+
     final override FormatId add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte)
     {
-        if (elements.length == 0)
-        {
-            if (AA55Client c = _client.get)
-            {
-                Element* address = device.find_element("status.network.ip.address");
-                if (!address || address.record_update() == SysTime())
-                    device.set_element("status.network.ip.address", c.get_address());
-            }
-        }
-
         import protocol.goodwe : aa55_section_kind;
 
         if (desc.kind != aa55_section_kind)

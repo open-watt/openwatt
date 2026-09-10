@@ -23,9 +23,15 @@ import manager.element;
 
 nothrow @nogc:
 
+enum DecisionField : ubyte
+{
+    reason, target, via, device, commanded, target_bus, source_bus, path_complete,
+    path_headroom_amps, path_headroom_watts, available_headroom_amps, available_headroom_watts,
+    committed_amps, committed_watts, path_voltage, limiting_link,
+}
 
-void run_allocator(Device energy_device, ControlRegistry registry, ref Planner planner,
-                   ref Islands islands, ref TopologyGraph graph)
+
+void run_allocator(Device energy_device, ControlRegistry registry, ref Planner planner, ref Islands islands, ref TopologyGraph graph)
 {
     SysTime now = getSysTime();
 
@@ -98,8 +104,7 @@ void run_allocator(Device energy_device, ControlRegistry registry, ref Planner p
                     continue;
                 }
                 float off_cmd = release_control(*ctl, now, mt);
-                record_decision(energy_device, p,
-                                off_cmd == off_cmd && off_cmd > 0 ? "off (parked at min)"
+                record_decision(energy_device, p, off_cmd == off_cmd && off_cmd > 0 ? "off (parked at min)"
                                                                   : "off",
                                 off_cmd, now, &ctx, ctl);
                 driven ~= ctl;
@@ -659,36 +664,36 @@ float release_control(ref Control ctl, SysTime now, MonoTime mt)
     return left_at;
 }
 
-void record_decision(Device energy_device, Policy p, const(char)[] reason, float commanded,
-                     SysTime now, const(AllocationContext)* ctx = null, const(Control)* ctl = null)
+void record_decision(Device energy_device, Policy p, const(char)[] reason, float commanded, SysTime now, const(AllocationContext)* ctx = null, const(Control)* ctl = null)
 {
+    import urt.meta.enuminfo : enum_key_from_value;
+
     if (energy_device is null || p is null)
         return;
-    const(char)[] base = tconcat("allocation.", p.name[]);
+    p.publish_as(p.name[]);
+    const(char)[] base = tconcat("allocation.", p.name[], ".");
 
-    energy_device.set_element(tconcat(base, ".reason"), reason, now);
-    energy_device.set_element(tconcat(base, ".target"), p.target, now);
-    energy_device.set_element(tconcat(base, ".via"),
-        (ctl !is null && ctl.partner !is null ? ctl.partner.name[] : "").make_string(), now);
-    energy_device.set_element(tconcat(base, ".device"),
-        (ctl !is null && ctl.device !is null ? ctl.device.id[] : "").make_string(), now);
+    void put(T)(DecisionField f, auto ref T value)
+        => p.decision[f].write(energy_device, tconcat(base, enum_key_from_value!DecisionField(f)), value, now);
+
+    put(DecisionField.reason, reason);
+    put(DecisionField.target, p.target);
+    put(DecisionField.via, (ctl !is null && ctl.partner !is null ? ctl.partner.name[] : "").make_string());
+    put(DecisionField.device, (ctl !is null && ctl.device !is null ? ctl.device.id[] : "").make_string());
     if (commanded == commanded)
-        energy_device.set_element(tconcat(base, ".commanded"), commanded, now);
+        put(DecisionField.commanded, commanded);
     if (ctx !is null && ctx.path.target_bus !is null)
     {
-        energy_device.set_element(tconcat(base, ".target_bus"),
-            ctx.path.target_bus.id, now);
-        energy_device.set_element(tconcat(base, ".source_bus"),
-            (ctx.path.source_bus ? ctx.path.source_bus.id[] : "").make_string(), now);
-        energy_device.set_element(tconcat(base, ".path_complete"), ctx.path.complete, now);
-        energy_device.set_element(tconcat(base, ".path_headroom_amps"), ctx.path.headroom_amps, now);
-        energy_device.set_element(tconcat(base, ".path_headroom_watts"), ctx.path.headroom_watts, now);
-        energy_device.set_element(tconcat(base, ".available_headroom_amps"), ctx.available_headroom_amps, now);
-        energy_device.set_element(tconcat(base, ".available_headroom_watts"), ctx.available_headroom_watts, now);
-        energy_device.set_element(tconcat(base, ".committed_amps"), ctx.committed_amps, now);
-        energy_device.set_element(tconcat(base, ".committed_watts"), ctx.committed_watts, now);
-        energy_device.set_element(tconcat(base, ".path_voltage"), ctx.path.voltage, now);
-        energy_device.set_element(tconcat(base, ".limiting_link"),
-            (ctx.path.limiting_link ? ctx.path.limiting_link.id[] : "").make_string(), now);
+        put(DecisionField.target_bus, ctx.path.target_bus.id);
+        put(DecisionField.source_bus, (ctx.path.source_bus ? ctx.path.source_bus.id[] : "").make_string());
+        put(DecisionField.path_complete, ctx.path.complete);
+        put(DecisionField.path_headroom_amps, ctx.path.headroom_amps);
+        put(DecisionField.path_headroom_watts, ctx.path.headroom_watts);
+        put(DecisionField.available_headroom_amps, ctx.available_headroom_amps);
+        put(DecisionField.available_headroom_watts, ctx.available_headroom_watts);
+        put(DecisionField.committed_amps, ctx.committed_amps);
+        put(DecisionField.committed_watts, ctx.committed_watts);
+        put(DecisionField.path_voltage, ctx.path.voltage);
+        put(DecisionField.limiting_link, (ctx.path.limiting_link ? ctx.path.limiting_link.id[] : "").make_string());
     }
 }

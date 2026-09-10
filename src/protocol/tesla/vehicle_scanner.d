@@ -133,7 +133,8 @@ nothrow @nogc:
                 continue;
             version (DebugTeslaScanner)
                 log.trace("registered VIN '", t[], "' -> hash [ ", cast(void[])hash[], " ]");
-            (*vehicle).set_element("control.min", Quantity!(int, ScaledUnits.ampere)(minimum_charge_amps), getSysTime());
+            DeviceBuilder builder = (*vehicle).edit();
+            builder.constant("control.min", Quantity!(int, ScaledUnits.ampere)(minimum_charge_amps));
             updated ~= VinEntry(String(t.move), hash, *vehicle);
             foreach (ref existing; _vins[])
                 if (existing.vin == updated[$ - 1].vin)
@@ -357,8 +358,7 @@ private:
         if (local_name.length != TESLA_LOCAL_NAME_LEN)
         {
             version (DebugTeslaScanner)
-                log.trace("adv from ", f.src, " local name '", local_name, "' len ", local_name.length,
-                          " != Tesla name len ", TESLA_LOCAL_NAME_LEN);
+                log.trace("adv from ", f.src, " local name '", local_name, "' len ", local_name.length, " != Tesla name len ", TESLA_LOCAL_NAME_LEN);
             return;
         }
 

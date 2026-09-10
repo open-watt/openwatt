@@ -40,11 +40,6 @@ nothrow @nogc:
             return;
         _device = value.move;
         mark_set!(typeof(this), "device")();
-        if (!_device.empty && _device[] !in g_app.devices)
-        {
-            Device d = alloc!Device(_device);
-            g_app.devices.insert(d);
-        }
         restart();
     }
 
@@ -55,6 +50,14 @@ protected:
     bool materialise()
     {
         return true;
+    }
+
+    // an element this binding samples or writes: shaped in the builder's scope, owned by this binding
+    final Element* bind_element(ref DeviceBuilder b, Component parent, const(char)[] id, FormatId format = FormatId.init, manager.element.Access access = manager.element.Access.read)
+    {
+        Element* e = b.element(parent, id, format);
+        b.device.attach_binding(this, e, access);
+        return e;
     }
 
     void detach_device()
