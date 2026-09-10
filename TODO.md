@@ -24,12 +24,12 @@ the commit history and linked design documents carry the implementation record.
   unsupported; development requires access to an old offline car.
 
 - **[#655, SDK acceptance] Select and pin a supported SDK revision**:
-  Compare clean and incremental full N/T SDK builds with the selected revision.
-  Full firmware and mode-retry cancellation/rebind still need hardware acceptance.
-  Candidate evidence: SDK archives built against OpenBK7231T_App `fd131f3c`
-  (N SDK `244bdfe8`, T SDK `12c68122`), with repeat builds preserving timestamps.
-  The corrected N firmware links and packs successfully; T links but has the
-  packed-size follow-up below. Neither result establishes boot acceptance.
+  N is pinned: the `bk7231n` CI job builds against N SDK `244bdfe8` (the submodule
+  revision of OpenBK7231T_App `fd131f3c`) and a clean tree links and packs, so that
+  half is now continuously proven. Remaining: the same for T SDK `12c68122`, and the
+  clean-versus-incremental comparison with repeat builds preserving timestamps.
+  Full firmware and mode-retry cancellation/rebind still need hardware acceptance;
+  a green CI link establishes no boot acceptance.
 
 - **[uRT Variant, deferred policy] Define erased-class downcasts**:
   Variant's current ancestry checks describe the stored type. Add a policy handoff
@@ -49,6 +49,26 @@ the commit history and linked design documents carry the implementation record.
   Measure service fairness outside the deferred-work budget and audit vendor
   interrupt-context logging. Keep synthetic L-SIG input disabled pending explicit
   buffer-length/metadata handling.
+
+- **[Tesla] `vehicle_session.d:1799` fails in most linux/dmd CI runs**: the assertion
+  on `poll(now)`'s post-conditions (`charges == 0 && climates == 1 && _retry_poll ==
+  none`) fired in five of six observed runs, master at `bbf6fafd` included, landing on
+  the x86 or the x86_64 job but never both and once on neither. So dmd/linux is already
+  red on master and the arch that catches it is incidental. The test pins `now` while
+  `poll` reads the clock itself, which would explain a runner crossing a schedule
+  boundary mid-test, but the frequency argues for reading the schedule arithmetic
+  before writing this off as a test-only fault.
+
+- **[binstats, CI] The size tool does not run on the runners**: every baremetal job's
+  `binstats` step dies with `Failed to execute './ldmd2'` and is ignored, so no CI build
+  reports its footprint. Until that is fixed CI can only police the packer's hard limit,
+  not the ledger.
+
+- **[Beken N, flash margin] Reclaim headroom**: the packed image sits 4,788 bytes
+  under `_image_limit`, 0.4%. The CI job holds that line, but any growth now breaks
+  the build before it breaks anything else. What the margin rests on, measured while
+  adding that job: linking newlib instead of picolibc costs about 20KB (uRT #279),
+  and gcc 13.2 against 14.2 moves it 2.6KB.
 
 - **[Beken T, separate-session follow-up] Investigate packed firmware size**:
   T is provisional: no hardware is available, and T-specific differences remain

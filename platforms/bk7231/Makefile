@@ -13,7 +13,11 @@ endif
 CC      := arm-none-eabi-gcc
 AR      := arm-none-eabi-ar
 
-CFLAGS  := -mcpu=arm968e-s -marm -mfloat-abi=soft
+# The parent passes the libc the image links; standalone, probe for it. generic.h
+# uses BSD __uintN_t, which newlib's default headers do not define.
+SPECS   ?= $(if $(filter /%,$(shell $(CC) --print-file-name=picolibc.specs 2>/dev/null)),--specs=picolibc.specs)
+
+CFLAGS  := -mcpu=arm968e-s -marm -mfloat-abi=soft $(SPECS)
 CFLAGS  += -Os -g
 CFLAGS  += -ffunction-sections -fdata-sections
 CFLAGS  += -fno-strict-aliasing

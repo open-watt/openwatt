@@ -347,7 +347,7 @@ ifneq ($(filter bk7231n bk7231t,$(PLATFORM)),)
 .PHONY: bk7231-sdk bk7231-clean
 
 bk7231-sdk:
-	$(MAKE) -C $(BK_PLATFORM_DIR) PLATFORM=$(PLATFORM) $(if $(BK_SDK_ROOT),BK_SDK_ROOT=$(abspath $(BK_SDK_ROOT)))
+	$(MAKE) -C $(BK_PLATFORM_DIR) PLATFORM=$(PLATFORM) $(if $(BK_SDK_ROOT),BK_SDK_ROOT=$(abspath $(BK_SDK_ROOT))) SPECS="$(BAREMETAL_SPECS)"
 
 bk7231-clean:
 	$(MAKE) -C $(BK_PLATFORM_DIR) clean

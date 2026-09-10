@@ -94,6 +94,7 @@ the RAM-image workspace excluded.
 | date | commit | compiler | flash | ram | limit | note |
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-09-09 | 62a6417e | ldc 1.43.0 | 1,078,400 | 71,764 | 1,083,040 | first row; 99% full, 4,640 bytes of headroom |
+| 2026-09-09 | 4fd4075b | ldc 1.43.0 | 1,078,252 | 71,764 | 1,083,040 | pinned N SDK `244bdfe8`, the revision the CI job builds; 4,788 bytes of headroom |
 
 ### bl808 e907, `make PLATFORM=bl808 PROCESSOR=e907 CONFIG=release`
 
