@@ -577,8 +577,22 @@ this is what remains.
 - **Log sync residue**: render origin hostname and producer timestamp in the text sink, and cap the
   severity a remote can raise on ingress (both left from `#582`). Parked with owners elsewhere: a
   module-level sync test harness (the reliable sublayer and decoder are unit-testable in isolation),
-  an allocation-flag placement API for `Array`/`MutableString`, and pool-backed packet buffers
-  (`#518`).
+  and an allocation-flag placement API for `Array`/`MutableString`.
+
+- **Zero-copy packet retention**: `#518` proposed steal-on-retain (a pool page changes hands
+  instead of being cloned into the priority queue or the neighbour pending queue) and
+  receive-into-page on the linux raw socket. Neither has a beneficiary on master: every enqueue
+  site copies the Packet first (`Packet p = packet;` for VLAN egress rewriting in the bridge and
+  the modbus, zigbee and ble ifaces), a by-value copy of a page-backed Packet cannot own the page,
+  so retain() would always clone; and receive-into-page adds a pool alloc and free to every frame
+  nobody retains, which is most of them. The precondition is refcounted page borrows (urt's
+  `AllocationHeader.refcount` exists and nothing uses it) so a copied Packet pins the page and the
+  fan-out copies stop being copies. Then, in order: receive-into-page on linux ethernet and wifi
+  via `recvmsg` into a page (keeping the VLAN cmsg and the PACKET_OUTGOING filter), TX-path steal
+  (transmit takes a const ref), Windows receive-into-page, jumbo receive, page chains for streaming
+  writers. Separately: tune the small packet category from `/system/page-pool` histograms, and the
+  Tiny pool's 1616-byte large page cannot hold a full-frame clone behind the Packet slot and
+  headroom, so those clones fall to the heap.
 
 - **Re-announce an element whose access changes**: `access` is emitted once, at model-add time
   (`src/manager/sync/json_encoder.d:551`). A provider that becomes writable later - a Tesla vehicle
