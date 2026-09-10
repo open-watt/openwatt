@@ -735,12 +735,25 @@ IPv4 and IPv6 are configured through parallel collections: `address`/`address6`,
 EUI-64 link-local address, verifies it with DAD, and publishes it as a dynamic
 `address6` entry. Manual entries are only needed for global or ULA addressing.
 
+IPv6 hosts autoconfigure by default (SLAAC, RFC 4862): each Ethernet interface
+solicits routers on bring-up and consumes Router Advertisements. An advertised
+prefix with the on-link flag becomes a dynamic `route6` for that prefix out the
+interface; one with the autonomous flag becomes a dynamic `/128` `address6`
+(prefix + EUI-64, duplicate-address-detected before use; the address itself
+asserts no on-link prefix), marked `deprecated` once its
+preferred lifetime lapses so new connections stop sourcing from it; a nonzero
+router lifetime becomes a dynamic default `route6` via the advertising router.
+These entries carry the `D` flag in `print` and expire on their advertised
+lifetimes; no configuration is required to obtain a global address on a
+network that advertises one.
+
 `/protocol/ip/address` and `/protocol/ip/address6` properties:
 
 | Property | Values | Description |
 | --- | --- | --- |
 | `address` | `addr/prefix` (e.g. `192.168.1.10/24`, `2001:db8::5/64`) | Address and on-link prefix to bind. |
 | `interface` | interface name | Interface the address lives on. |
+| `deprecated` | `yes`/`no` | `address6` only. Not chosen as a source for new connections while another address on the interface is available; set by SLAAC when the preferred lifetime lapses. |
 
 `/protocol/ip/route` and `/protocol/ip/route6` properties:
 
