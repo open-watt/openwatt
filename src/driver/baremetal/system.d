@@ -30,6 +30,8 @@ ulong unique_device_id()
 const(char)[] reset_reason() => null;
 bool reset_was_software() => false;
 
+enum bool has_download_mode = false;
+
 bool   reboot_pending() => false;
 bool   ota_supported() => false;
 size_t ota_partition_size() => 0;
