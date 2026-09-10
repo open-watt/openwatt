@@ -7,6 +7,7 @@ import urt.endian;
 import urt.hash;
 import urt.inet;
 import urt.mem;
+import urt.mem.pagepool;
 import urt.time;
 
 import manager.base : ObjectRef;
@@ -33,11 +34,16 @@ nothrow @nogc:
 
 
 // One datagram waiting in a UdpPcb's receive queue.
-// `data` is owned; freed on dequeue or PCB destruction.
+// The page is owned; released on dequeue or PCB destruction.
 struct UdpDatagram
 {
+nothrow @nogc:
+
     InetAddress src;
-    ubyte[] data;
+    Page* page;
+
+    ubyte[] data() @property
+        => page ? cast(ubyte[])page.data : null;
 }
 
 static if (has_ipv6)
@@ -626,10 +632,10 @@ bool udp_recv(UdpPcb* pcb, out UdpDatagram d)
 
 void udp_free_datagram_data(ref UdpDatagram d)
 {
-    if (d.data.length > 0)
+    if (d.page)
     {
-        free(cast(void[])d.data);
-        d.data = null;
+        page_free(d.page);
+        d.page = null;
     }
 }
 
@@ -654,8 +660,10 @@ void deliver_to_pcb(UdpPcb* pcb, ref InetAddress src, ref InetAddress dst, BaseI
     dgm.src = src;
     if (body_.length > 0)
     {
-        dgm.data = cast(ubyte[])alloc(body_.length);
-        dgm.data[] = body_[];
+        dgm.page = page_alloc(body_.length);
+        if (!dgm.page)
+            return;
+        (cast(ubyte[])dgm.page.data)[] = body_[];
     }
     pcb.recv_queue ~= dgm;
 }
