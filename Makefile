@@ -329,7 +329,8 @@ FLAGSTAMP = $(OBJDIR)/build.flags
 # Host-side image footprint report, run straight from source by rdmd.
 # The project ldc2.conf drops the default libraries, so the LDC path restores them.
 ifeq ($(COMPILER),ldc)
-    BINSTATS := rdmd --compiler=$(dir $(DC))ldmd2 -defaultlib=phobos2-ldc,druntime-ldc -L-L$(dir $(DC))../lib tools/binstats.d
+    LDC_BIN := $(dir $(if $(findstring /,$(DC)),$(DC),$(shell p=$$(command -v $(DC)); cygpath -m "$$p" 2>/dev/null || echo "$$p")))
+    BINSTATS := rdmd --compiler=$(LDC_BIN)ldmd2 -defaultlib=phobos2-ldc,druntime-ldc -L-L$(LDC_BIN)../lib tools/binstats.d
 else ifeq ($(COMPILER),gdc)
     BINSTATS := rdmd --compiler=gdmd tools/binstats.d
 else
