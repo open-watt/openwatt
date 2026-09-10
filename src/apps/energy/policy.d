@@ -11,7 +11,10 @@ import urt.string;
 import urt.time;
 import urt.variant : Variant;
 
+import apps.energy.allocator : DecisionField;
 import apps.energy.appliance;
+import apps.energy.planner : AnalysisField;
+import apps.energy.state : PublishSlot;
 import apps.energy.control;
 import apps.energy.model : read_in_unit;
 
@@ -24,6 +27,11 @@ import manager.element;
 import manager.expression : Expression, EvalContext, parse_expression, free_expression;
 
 nothrow @nogc:
+
+enum PolicyField : ubyte
+{
+    target, tier, goal, goal_value, current_value, satisfied,
+}
 
 
 enum PolicyTier : ubyte
@@ -62,6 +70,22 @@ class Policy : ActiveObject
                                  Prop!("goal", goal),
                                  Prop!("deadline", deadline));
 nothrow @nogc:
+
+    PublishSlot[PolicyField.max + 1] published;
+    PublishSlot[DecisionField.max + 1] decision;
+    PublishSlot[AnalysisField.max + 1] analysis;
+
+    // publication is keyed by name; a rename drops the bound slots so they rebind under the new one
+    void publish_as(const(char)[] name)
+    {
+        if (_published_as[] == name)
+            return;
+        _published_as = name.make_string();
+        published[] = PublishSlot.init;
+        decision[] = PublishSlot.init;
+        analysis[] = PublishSlot.init;
+    }
+
 
     enum type_name = "policy";
     enum path = "/apps/energy/policy";
@@ -153,6 +177,7 @@ protected:
     }
 
 private:
+    String _published_as;
     String _target_name;
     ObjectRef!Appliance _target_appliance;
     PolicyTier _tier;
@@ -265,35 +290,26 @@ void publish_policy(Device energy_device, Policy p, ControlRegistry registry)
 
     Control* ctl = registry !is null ? registry.lookup(p.target_appliance) : null;
 
-    const(char)[] base = tconcat("policy.", p.name[]);
+    p.publish_as(p.name[]);
+    const(char)[] base = tconcat("policy.", p.name[], ".");
     SysTime now = getSysTime();
 
-    void set_text(string field, const(char)[] val)
-    {
-        energy_device.set_element(tconcat(base, ".", field), val, now);
-    }
-    void set_num(string field, float val)
-    {
-        energy_device.set_element(tconcat(base, ".", field), val, now);
-    }
-    void set_bool(string field, bool val)
-    {
-        energy_device.set_element(tconcat(base, ".", field), val, now);
-    }
+    void put(T)(PolicyField f, auto ref T value)
+        => p.published[f].write(energy_device, tconcat(base, enum_key_from_value!PolicyField(f)), value, now);
 
-    set_text("target", p.target);
-    set_text("tier", enum_key_from_value!PolicyTier(p.tier));
-    set_text("goal", p.goal);
+    put(PolicyField.target, p.target);
+    put(PolicyField.tier, enum_key_from_value!PolicyTier(p.tier));
+    put(PolicyField.goal, p.goal);
 
     GoalKind kind = p.parsed_goal.kind;
     if (kind == GoalKind.soc || kind == GoalKind.temp)
-        set_num("goal_value", p.parsed_goal.arg);
+        put(PolicyField.goal_value, p.parsed_goal.arg);
 
     float cv = current_value(p, ctl);
     if (cv == cv)
-        set_num("current_value", cv);
+        put(PolicyField.current_value, cv);
 
-    set_bool("satisfied", satisfied(p, ctl));
+    put(PolicyField.satisfied, satisfied(p, ctl));
 }
 
 

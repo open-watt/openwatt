@@ -185,16 +185,12 @@ unittest
     // element walk over a small tree
     import urt.mem;
     Component root = alloc!Component(StringLit!"dev");
-    Component child = alloc!Component(StringLit!"battery");
-    child.parent = root;
-    root.components ~= child;
+    Component child = root.find_or_create_component("battery");
     Element e1, e2;
     e1.id = StringLit!"voltage";
     e2.id = StringLit!"current";
-    e1.parent = child;
-    e2.parent = root;
-    child.elements ~= &e1;
-    root.elements ~= &e2;
+    child.attach_element(&e1);
+    root.attach_element(&e2);
 
     static struct Hits
     {

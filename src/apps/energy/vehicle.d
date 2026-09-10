@@ -62,27 +62,24 @@ void add_capacity_sample(const(char)[] vin, float estimate_kwh, float weight)
     if (Device* vehicle = vin in g_app.devices)
     {
         float confidence = estimate.sample_count >= 10 ? 1.0f : estimate.sample_count / 10.0f;
-        (*vehicle).set_element("battery.full_capacity", estimate.mean_kwh);
-        (*vehicle).set_element("battery.capacity_confidence", confidence);
+        vehicle.write_element("battery.full_capacity", estimate.mean_kwh);
+        vehicle.write_element("battery.capacity_confidence", confidence);
     }
 }
 
 
 Component vehicle_for(const(char)[] vin)
 {
-    Device* existing = vin in g_app.devices;
-    Device vehicle;
-    if (!existing)
-    {
-        vehicle = alloc!Device(vin.make_string());
-        g_app.devices.insert(vehicle);
-    }
-    else
-        vehicle = *existing;
+    DeviceBuilder builder = g_app.devices.open(vin);
+    Device vehicle = builder.device;
 
-    bool changed = vehicle.template_[] != "Vehicle";
+    bool changed = builder.created || vehicle.template_[] != "Vehicle";
     vehicle.template_ = StringLit!"Vehicle";
-    materialise_vehicle(vehicle, vin, changed);
+    changed = materialise_vehicle(builder, vin, changed);
+    builder.commit();
+    if (changed)
+        vehicle.notify(ComponentEvent.online);
+    enrich_from_nhtsa(vehicle, vin);
     return vehicle;
 }
 
@@ -252,6 +249,21 @@ static immutable vehicle_elements = make_table!([
     "tyres.front_right.warning",
     "tyres.rear_left.warning",
     "tyres.rear_right.warning",
+    "battery.session_delivered",
+    "battery.soc_floor",
+    "hvac.steering_wheel.heating_level",
+    "hvac.steering_wheel.heater",
+    "hvac.seats.front_left.heating_level",
+    "hvac.seats.front_right.heating_level",
+    "hvac.seats.rear_left.heating_level",
+    "hvac.seats.rear_center.heating_level",
+    "hvac.seats.rear_right.heating_level",
+    "hvac.seats.rear_left_back.heating_level",
+    "hvac.seats.rear_right_back.heating_level",
+    "hvac.seats.third_row_left.heating_level",
+    "hvac.seats.third_row_right.heating_level",
+    "hvac.seats.front_left.cooling_level",
+    "hvac.seats.front_right.cooling_level",
 ]);
 
 static immutable VehicleElementType[vehicle_elements.length] vehicle_element_types =
@@ -268,6 +280,7 @@ static immutable VehicleElementType[vehicle_elements.length] vehicle_element_typ
     Type.float_, Type.int_, Type.float_, Type.float_, Type.float_, Type.float_, Type.float_,
     Type.float_, Type.float_, Type.float_, Type.float_, Type.bool_, Type.bool_, Type.bool_,
     Type.bool_,
+    Type.float_, Type.float_, Type.int_, Type.bool_, Type.int_, Type.int_, Type.int_, Type.int_, Type.int_, Type.int_, Type.int_, Type.int_, Type.int_, Type.int_, Type.int_,
 ];
 
 static immutable ubyte['Y' - '1' + 1] vin_year_ordinals =
@@ -306,6 +319,7 @@ static immutable ScaledUnit[vehicle_elements.length] vehicle_element_units =
     ScaledUnits.kilometre_per_hour, ScaledUnits.kilowatt, ScaledUnits.kilometre, ScaledUnits.degree,
     ScaledUnits.degree, ScaledUnits.degree, ScaledUnits.metre, ScaledUnit(Pascal, 5), ScaledUnit(Pascal, 5),
     ScaledUnit(Pascal, 5), ScaledUnit(Pascal, 5), none, none, none, none,
+    ScaledUnits.kilowatt_hour, ScaledUnits.percent, none, none, none, none, none, none, none, none, none, none, none, none, none,
 ];
 
 
@@ -314,13 +328,14 @@ static assert(vehicle_components.length % 2 == 0);
 static assert(vehicle_elements.length == vehicle_element_types.length);
 static assert(vehicle_elements.length == vehicle_element_units.length);
 
-void materialise_vehicle(Device vehicle, const(char)[] vin, bool changed)
+bool materialise_vehicle(ref DeviceBuilder b, const(char)[] vin, bool changed)
 {
+    Device vehicle = b.device;
     foreach (i; 0 .. vehicle_components.length / 2)
-        ensure_component(vehicle, vehicle_components[i * 2][], vehicle_components[i * 2 + 1][], changed);
+        ensure_component(b, vehicle, vehicle_components[i * 2][], vehicle_components[i * 2 + 1][], changed);
 
     foreach (i; 0 .. vehicle_elements.length)
-        define_element(vehicle, vehicle_elements[i][], vehicle_element_formats[i], changed);
+        define_element(b, vehicle, vehicle_elements[i][], vehicle_element_formats[i], changed);
 
     changed |= set_default(vehicle, vehicle_elements[element_id!"info.type"][], StringLit!"vehicle");
     Element* serial = vehicle.find_element(vehicle_elements[element_id!"info.serial_number"][]);
@@ -347,13 +362,7 @@ void materialise_vehicle(Device vehicle, const(char)[] vin, bool changed)
         changed |= set_default(vehicle, vehicle_elements[element_id!"info.manufacture_location"][], vi.manufacture_location);
     if (vi.model_year != 0)
         changed |= set_default(vehicle, vehicle_elements[element_id!"info.model_year"][], vi.model_year);
-
-    if (changed)
-    {
-        vehicle.notify(ComponentEvent.tree_changed);
-        vehicle.notify(ComponentEvent.online);
-    }
-    enrich_from_nhtsa(vehicle, vin);
+    return changed;
 }
 
 VINInfo decode_vin(const(char)[] vin)
@@ -446,7 +455,7 @@ void enrich_from_nhtsa(Device vehicle, const(char)[] vin)
         free(ctx);
 }
 
-Component ensure_component(Component parent, const(char)[] id, const(char)[] template_, ref bool changed)
+Component ensure_component(ref DeviceBuilder b, Component parent, const(char)[] id, const(char)[] template_, ref bool changed)
 {
     if (Component component = parent.find_component(id))
     {
@@ -458,19 +467,16 @@ Component ensure_component(Component parent, const(char)[] id, const(char)[] tem
         return component;
     }
 
-    Component component = alloc!Component(id.make_string());
-    component.template_ = template_.make_string();
-    parent.add_component(component);
     changed = true;
-    return component;
+    return b.component(parent, id, template_);
 }
 
-Element* define_element(Component vehicle, const(char)[] path, FormatId format, ref bool changed, Access access = Access.read)
+Element* define_element(ref DeviceBuilder b, Component vehicle, const(char)[] path, FormatId format, ref bool changed, Access access = Access.read)
 {
     Element* element = vehicle.find_element(path);
     if (!element)
     {
-        element = vehicle.find_or_create_element(path, format);
+        element = b.element(vehicle, path, format);
         element.access = access;
         changed = true;
     }
@@ -486,15 +492,12 @@ Element* define_element(Component vehicle, const(char)[] path, FormatId format, 
     return element;
 }
 
+// seeds a declared element that has never been written
 bool set_default(T)(Device vehicle, const(char)[] path, auto ref T value)
 {
     Element* element = vehicle.find_element(path);
-    if (!element)
-    {
-        element = vehicle.find_or_create_element(path, register_value_format(value));
-        element.access = Access.read;
-    }
-    else if (element.record_update() != SysTime())
+    assert(element, "vehicle element not declared");
+    if (element.record_update() != SysTime())
         return false;
     element.value(value);
     return true;
@@ -524,6 +527,7 @@ nothrow @nogc:
         if (v is null)
             return 0;
 
+        DeviceBuilder builder = (*v).edit();
         bool changed;
         foreach (i; 0 .. results.length)
         {
@@ -557,13 +561,15 @@ nothrow @nogc:
                 case "Electrification Level":  elem_path = "info.electrification"; break;
                 default: continue;
             }
-            changed |= set_default(*v, elem_path, value.make_string());
+            if (Element* e = (*v).find_element(elem_path))
+                if (e.record_update() != SysTime())
+                    continue;
+            builder.constant(elem_path, value.make_string()).access = Access.read;
+            changed = true;
         }
+        builder.commit();
         if (changed)
-        {
-            (*v).notify(ComponentEvent.tree_changed);
             (*v).notify(ComponentEvent.online);
-        }
 
         return 0;
     }

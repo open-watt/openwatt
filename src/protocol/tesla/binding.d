@@ -180,67 +180,61 @@ protected:
         if (_built)
             return true;
 
-        Device device;
-        if (Device* existing = _device[] in g_app.devices)
-            device = *existing;
-        else
-        {
-            device = alloc!Device(_device);
-            g_app.devices.insert(device);
-        }
+        DeviceBuilder builder = g_app.devices.open(_device[]);
+        Device device = builder.device;
         _bound_device = device;
 
-        Component info = find_or_create_component(device, "info", "DeviceInfo");
-        set_constant(info, "type", "evse");
-        set_constant(info, "name", "Tesla Wall Charger Gen2");
-        add_sample(info, "serial_number", SampleKind.serial_number, text_format());
+        Component info = builder.component("info", "DeviceInfo");
+        builder.constant(info, "type", "evse");
+        builder.constant(info, "name", "Tesla Wall Charger Gen2");
+        add_sample(builder, info, "serial_number", SampleKind.serial_number, text_format());
 
-        Component status = find_or_create_component(device, "status", "DeviceStatus");
-        set_constant(status, "address", slave_id);
-        add_sample(status, "lifetime_energy", SampleKind.lifetime_energy, quantity_format(ValueType.u64, WattHour));
-        add_sample(status, "vin", SampleKind.vin, text_format());
+        Component status = builder.component("status", "DeviceStatus");
+        builder.constant(status, "address", slave_id);
+        add_sample(builder, status, "lifetime_energy", SampleKind.lifetime_energy, quantity_format(ValueType.u64, WattHour));
+        add_sample(builder, status, "vin", SampleKind.vin, text_format());
 
-        Component evse = find_or_create_component(device, "evse", "EVSE");
-        add_sample(evse, "state", SampleKind.state, enum_format!(TeslaTWCMaster.ChargerState));
-        add_sample(evse, "twc_state", SampleKind.twc_state, enum_format!TWCState());
+        Component evse = builder.component("evse", "EVSE");
+        add_sample(builder, evse, "state", SampleKind.state, enum_format!(TeslaTWCMaster.ChargerState));
+        add_sample(builder, evse, "twc_state", SampleKind.twc_state, enum_format!TWCState());
 
-        Component grid = find_or_create_component(device, "grid", "Port");
-        set_constant(grid, "role", "grid");
-        set_constant(grid, "flow", "consume");
+        Component grid = builder.component("grid", "Port");
+        builder.constant(grid, "role", "grid");
+        builder.constant(grid, "flow", "consume");
 
-        Component car = find_or_create_component(device, "car", "Port");
-        set_constant(car, "role", "car");
-        set_constant(car, "flow", "supply");
-        add_sample(car, "circuit", SampleKind.circuit, text_format());
+        Component car = builder.component("car", "Port");
+        builder.constant(car, "role", "car");
+        builder.constant(car, "flow", "supply");
+        add_sample(builder, car, "circuit", SampleKind.circuit, text_format());
 
-        Component control = find_or_create_component(grid, "control", "PowerControl");
-        set_constant(control, "kind", "continuous");
-        set_constant(control, "direction", "consume");
-        set_constant(control, "unit", "A");
-        set_constant(control, "step", CentiAmps(100));
-        set_constant(control, "min", CentiAmps(500));
-        set_constant(control, "can_disable", false);
-        _target_current = add_sample(control, "setpoint", SampleKind.setpoint, centiamps_format());
-        _current_cap = add_sample(control, "cap", SampleKind.cap, current_limit_format());
-        add_sample(control, "max", SampleKind.max, centiamps_format());
-        add_sample(control, "allocated", SampleKind.allocated, centiamps_format());
-        add_sample(control, "accepted", SampleKind.accepted, centiamps_format());
+        Component control = builder.component(grid, "control", "PowerControl");
+        builder.constant(control, "kind", "continuous");
+        builder.constant(control, "direction", "consume");
+        builder.constant(control, "unit", "A");
+        builder.constant(control, "step", CentiAmps(100));
+        builder.constant(control, "min", CentiAmps(500));
+        builder.constant(control, "can_disable", false);
+        _target_current = add_sample(builder, control, "setpoint", SampleKind.setpoint, centiamps_format());
+        _current_cap = add_sample(builder, control, "cap", SampleKind.cap, current_limit_format());
+        add_sample(builder, control, "max", SampleKind.max, centiamps_format());
+        add_sample(builder, control, "allocated", SampleKind.allocated, centiamps_format());
+        add_sample(builder, control, "accepted", SampleKind.accepted, centiamps_format());
 
-        Component meter = find_or_create_component(grid, "meter", "EnergyMeter");
-        set_constant(meter, "type", "three-phase");
-        add_sample(meter, "voltage1", SampleKind.voltage1, quantity_format(ValueType.u16, ScaledUnit(Volt)));
-        add_sample(meter, "voltage2", SampleKind.voltage2, quantity_format(ValueType.u16, ScaledUnit(Volt)));
-        add_sample(meter, "voltage3", SampleKind.voltage3, quantity_format(ValueType.u16, ScaledUnit(Volt)));
-        add_sample(meter, "current", SampleKind.current, centiamps_format());
-        add_sample(meter, "power1", SampleKind.power1, quantity_format(ValueType.u16, ScaledUnit(Watt)));
-        add_sample(meter, "power2", SampleKind.power2, quantity_format(ValueType.u16, ScaledUnit(Watt)));
-        add_sample(meter, "power3", SampleKind.power3, quantity_format(ValueType.u16, ScaledUnit(Watt)));
-        add_sample(meter, "power", SampleKind.power, quantity_format(ValueType.u16, ScaledUnit(Watt)));
-        add_sample(meter, "import", SampleKind.import_, quantity_format(ValueType.u64, WattHour));
+        Component meter = builder.component(grid, "meter", "EnergyMeter");
+        builder.constant(meter, "type", "three-phase");
+        add_sample(builder, meter, "voltage1", SampleKind.voltage1, quantity_format(ValueType.u16, ScaledUnit(Volt)));
+        add_sample(builder, meter, "voltage2", SampleKind.voltage2, quantity_format(ValueType.u16, ScaledUnit(Volt)));
+        add_sample(builder, meter, "voltage3", SampleKind.voltage3, quantity_format(ValueType.u16, ScaledUnit(Volt)));
+        add_sample(builder, meter, "current", SampleKind.current, centiamps_format());
+        add_sample(builder, meter, "power1", SampleKind.power1, quantity_format(ValueType.u16, ScaledUnit(Watt)));
+        add_sample(builder, meter, "power2", SampleKind.power2, quantity_format(ValueType.u16, ScaledUnit(Watt)));
+        add_sample(builder, meter, "power3", SampleKind.power3, quantity_format(ValueType.u16, ScaledUnit(Watt)));
+        add_sample(builder, meter, "power", SampleKind.power, quantity_format(ValueType.u16, ScaledUnit(Watt)));
+        add_sample(builder, meter, "import", SampleKind.import_, quantity_format(ValueType.u64, WattHour));
 
         _built = true;
         refresh_access(_master && _master.has_agency);
-        device.notify(ComponentEvent.tree_changed);
+        builder.commit();
         device.notify(ComponentEvent.online);
         return true;
     }
@@ -290,53 +284,10 @@ private:
     Element* _current_cap;
     Array!SampleElement _elements;
 
-    Component find_or_create_component(Component parent, const(char)[] id, const(char)[] template_)
+    Element* add_sample(ref DeviceBuilder b, Component parent, const(char)[] id, SampleKind kind, FormatId format, Access access = Access.read)
     {
-        foreach (c; parent.components)
-            if (c.id[] == id)
-            {
-                if (!c.template_)
-                    c.template_ = template_.make_string();
-                return c;
-            }
-        Component c = alloc!Component(id.make_string());
-        c.template_ = template_.make_string();
-        c.parent = parent;
-        parent.components ~= c;
-        return c;
-    }
-
-    Element* find_or_create_element(Component parent, const(char)[] id, FormatId format, Access access = Access.none)
-    {
-        foreach (e; parent.elements)
-        {
-            if (e.id[] == id)
-            {
-                if (!e.format.valid)
-                    e.format = format;
-                else
-                    assert(e.format == format || value_compatible(*format_info(format), *e.data_format),
-                           "Tesla element format mismatch");
-                if (access != Access.none)
-                    e.access = cast(Access)(e.access | access);
-                return e;
-            }
-        }
-        Element* e = alloc_element();
-        e.parent = parent;
-        e.id = id.make_string();
-        e.format = format;
-        e.access = access;
-        parent.elements ~= e;
-        g_app.notify_element_created(e);
-        return e;
-    }
-
-    Element* add_sample(Component parent, const(char)[] id, SampleKind kind, FormatId format, Access access = Access.read)
-    {
-        Element* e = find_or_create_element(parent, id, format);
+        Element* e = bind_element(b, parent, id, format, access);
         _elements ~= SampleElement(e, format, kind);
-        _bound_device.attach_binding(this, e, access);
         return e;
     }
 
@@ -384,16 +335,6 @@ private:
                 sample.element.write_record(record, timestamp, who);
             else
                 sample.element.value(box_record(record.ptr, *format_info(sample.format)), timestamp, who);
-        }
-    }
-
-    void set_constant(T)(Component parent, const(char)[] id, T value)
-    {
-        Element* e = find_or_create_element(parent, id, register_value_format(value), Access.read);
-        if (e.record_update() == SysTime())
-        {
-            e.value(value);
-            e.sampling_mode = SamplingMode.constant;
         }
     }
 
@@ -481,18 +422,16 @@ unittest
         assert((cast(CentiAmps)elements[i].record_value().asQuantity()).value == expected);
 
     DeviceTable table;
-    Device device = alloc!Device(StringLit!"twc-access-device");
-    table.insert(device);
+    DeviceBuilder access_builder = table.create("twc-access-device");
+    Device device = access_builder.device;
     scope(exit) free(device);
     binding.attach_device(device);
     binding._built = true;
-    binding._target_current = alloc_element();
-    binding._current_cap = alloc_element();
+    binding._target_current = access_builder.element("setpoint", register_value_format!int());
+    binding._current_cap = access_builder.element("cap", register_value_format!int());
+    access_builder.commit();
     foreach (element; [binding._target_current, binding._current_cap])
-    {
-        element.parent = device;
         device.attach_binding(binding, element, Access.read);
-    }
     foreach (active; [false, true, false, true])
     {
         binding.refresh_access(active);

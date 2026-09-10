@@ -25,6 +25,19 @@ nothrow @nogc:
 
 alias CreateElementHandler = FormatId delegate(Device device, Element* e, ref const ElementDesc desc, ubyte index) nothrow @nogc;
 
+enum DeviceLifecycleEvent : ubyte
+{
+    created,
+    destroyed,
+}
+
+alias DeviceLifecycleHandler = void delegate(Device device, DeviceLifecycleEvent event) nothrow @nogc;
+
+void register_device_lifecycle_handler(DeviceLifecycleHandler handler)
+{
+    _on_device_lifecycle ~= handler;
+}
+
 // null create: devices are not BaseObjects; their table is g_app.devices, not g_item_tables
 __gshared const CollectionTypeInfo device_type_info = CollectionTypeInfo(DynTypeInfo(StringLit!"device", null), StringLit!"/device", CollectionType.device, null, null, true, false);
 
@@ -49,6 +62,22 @@ nothrow @nogc:
         return null;
     }
 
+    // the identity is claimed here (bindings need the CID while building); commit announces the device
+    DeviceBuilder create(const(char)[] id, ulong peer_id = 0, bool private_ = false)
+    {
+        Device d = alloc!Device(id.make_string(), peer_id, private_);
+        insert(d);
+        return DeviceBuilder(d, true);
+    }
+
+    DeviceBuilder open(const(char)[] id, ulong peer_id = 0, bool private_ = false)
+    {
+        if (Device d = find(id, peer_id))
+            return d.edit();
+        return create(id, peer_id, private_);
+    }
+
+package:
     void insert(Device device)
     {
         debug assert(device);
@@ -70,6 +99,7 @@ nothrow @nogc:
         device.cid = make_cid(CollectionType.device, slot);
     }
 
+public:
     inout(Element)* resolve(EID eid) inout pure
     {
         if (eid.container.type_index != CollectionType.device)
@@ -113,6 +143,101 @@ private:
         => device.hash < hash ? -1 : device.hash > hash ? 1 : 0;
 
     Array!LocalDevice _local_devices;
+}
+
+// The only writer of a device tree: commit announces a created device (element-created per new
+// element, then device-created) or emits one tree_changed for an builder. A synchronous burst, never held across ticks.
+struct DeviceBuilder
+{
+nothrow @nogc:
+
+    @disable this();
+    @disable this(this);
+
+    ~this()
+    {
+        commit();
+    }
+
+    Device device() pure
+        => _device;
+
+    bool created() const pure
+        => _new;
+
+    Component component(const(char)[] path, const(char)[] template_ = null)
+        => _device.find_or_create_component(path, template_);
+
+    Component component(Component parent, const(char)[] path, const(char)[] template_ = null)
+    {
+        assert(parent.root_device() is _device, "component belongs to another device");
+        return parent.find_or_create_component(path, template_);
+    }
+
+    Element* element(const(char)[] path, FormatId format = FormatId.init)
+        => _device.find_or_create_element(path, format);
+
+    Element* element(Component parent, const(char)[] path, FormatId format = FormatId.init)
+    {
+        assert(parent.root_device() is _device, "component belongs to another device");
+        return parent.find_or_create_element(path, format);
+    }
+
+    // an element whose value is part of its shape: format from the value, never sampled; redeclaring
+    // it with a new value is how a producer updates it
+    Element* constant(T)(const(char)[] path, auto ref T value)
+        => constant(_device, path, value);
+
+    Element* constant(T)(Component parent, const(char)[] path, auto ref T value)
+    {
+        Element* e = element(parent, path, register_value_format(value));
+        e.value(value);
+        e.sampling_mode = SamplingMode.constant;
+        return e;
+    }
+
+    void commit()
+    {
+        Device d = _device;
+        if (!d)
+            return;
+        _device = null;
+        d._editing = false;
+        bool dirty = d._dirty;
+        d._dirty = false;
+        Array!(Element*) created = d._created.move;
+        foreach (e; created[])
+        {
+            if (!e.format.valid)
+            {
+                writeWarning("element '", e.id[], "' attached without a format");
+                continue;
+            }
+            if (g_app)
+                g_app.notify_element_created(e);
+        }
+        if (_new)
+            signal_device_lifecycle(d, DeviceLifecycleEvent.created);
+        else if (dirty)
+            d.notify(ComponentEvent.tree_changed);
+    }
+
+package:
+    // adopts an element prepared outside the tree (profile builder, computation targets)
+    void adopt(Component parent, Element* e)
+        => parent.attach_element(e);
+
+    this(Device device, bool is_new)
+    {
+        assert(!device._editing, "device already under builder");
+        device._editing = true;
+        _device = device;
+        _new = is_new;
+    }
+
+private:
+    Device _device;
+    bool _new;
 }
 
 enum ComputationKind : ubyte
@@ -202,8 +327,7 @@ nothrow @nogc:
         return register_format(DataFormat(ValueType.f64, SeriesKind.held, unit));
     }
 
-    void accumulate(ref const Variant new_value, SysTime timestamp,
-                    ref const Variant previous_value, SysTime previous_timestamp)
+    void accumulate(ref const Variant new_value, SysTime timestamp, ref const Variant previous_value, SysTime previous_timestamp)
     {
         import urt.si.quantity;
         import urt.si.unit;
@@ -287,6 +411,9 @@ nothrow @nogc:
     {
         clear_computations();
     }
+
+    DeviceBuilder edit()
+        => DeviceBuilder(this, false);
 
     CID cid;                            // unset until DeviceTable.insert stamps it
     IndexTable!(Element*) element_ids;
@@ -422,6 +549,7 @@ nothrow @nogc:
 package:
     int try_bind_pending()
     {
+        DeviceBuilder builder = this.edit();
         int newly_bound = 0;
         foreach (ref c; computations)
         {
@@ -493,10 +621,13 @@ package:
     {
         assert(element && format.valid && element.parent);
         element.format = format;
-        element.parent.elements ~= element;
-        g_app.notify_element_created(element);
+        element.parent.attach_element(element);
         apply_default_retention(element.parent);
     }
+
+    bool _editing;
+    bool _dirty;
+    Array!(Element*) _created;
 
 private:
     ulong _peer_id;
@@ -531,21 +662,11 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
     else
         model_bit = ModelMask.max;
 
-    Device device;
-    if (Device existing = g_app.devices.find(id, peer_id))
-    {
-        device = existing;
-        assert(device.private_ == private_, "device visibility conflict");
-        if (!device.name && name)
-            device.name = name.make_string();
-    }
-    else
-    {
-        device = alloc!Device(id.make_string(), peer_id, private_);
-        if (name)
-            device.name = name.make_string();
-        g_app.devices.insert(device);
-    }
+    DeviceBuilder builder = g_app.devices.open(id, peer_id, private_);
+    Device device = builder.device;
+    assert(device.private_ == private_, "device visibility conflict");
+    if (!device.name && name)
+        device.name = name.make_string();
 
     bool has_computation(Element* target, ComputationKind kind)
     {
@@ -559,30 +680,9 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
     {
         const(char)[] comp_id = ct.get_id(profile);
 
-        Component c;
-        foreach (Component existing; parent.components)
-        {
-            if (existing.id[] == comp_id)
-            {
-                c = existing;
-                break;
-            }
-        }
-        if (c is null)
-        {
-            c = alloc!Component(comp_id.make_string());
-            c.template_ = ct.get_template(profile).make_string();
-            c.hidden = ct.is_hidden();
-            c.parent = parent;
-            parent.components ~= c;
-        }
-        else
-        {
-            if (!c.template_)
-                c.template_ = ct.get_template(profile).make_string();
-            if (ct.is_hidden())
-                c.hidden = true;
-        }
+        Component c = builder.component(parent, comp_id, ct.get_template(profile));
+        if (ct.is_hidden())
+            c.hidden = true;
 
         foreach (ref child; ct.components(profile))
         {
@@ -759,10 +859,7 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
             }
 
             if (is_new_element && e.format.valid)
-            {
-                c.elements ~= e;
-                g_app.notify_element_created(e);
-            }
+                builder.adopt(c, e);
         }
 
         return c;
@@ -779,11 +876,19 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
 
     g_app.request_rebind();
 
-    device.notify(ComponentEvent.tree_changed);
+    builder.commit();
     device.notify(ComponentEvent.online);
 
     return device;
 }
+
+package void signal_device_lifecycle(Device device, DeviceLifecycleEvent event)
+{
+    foreach (h; _on_device_lifecycle[])
+        h(device, event);
+}
+
+private __gshared Array!DeviceLifecycleHandler _on_device_lifecycle;
 
 // recording intent default: every element that isn't a constant or config value gets history;
 // profiles will grow explicit record/retention overrides (grammar TODO)
@@ -831,9 +936,7 @@ unittest
     }
 
     Device d = alloc!Device(StringLit!"testdev");
-    Component c = alloc!Component(StringLit!"child");
-    c.parent = d;
-    d.components ~= c;
+    Component c = d.find_or_create_component("child");
     assert(!c.is_device);
     Component as_comp = d;
     assert(as_comp.is_device);
@@ -887,23 +990,21 @@ unittest
     ushort idx = handle.index;          // a stale holder still at index 1
     assert(d.element_ids.deref(idx) is e2 && idx == 2);
 
-    Device binding_device = alloc!Device(StringLit!"binding-test");
-    table.insert(binding_device);
-    Component binding_component = alloc!Component(StringLit!"binding-component");
-    binding_component.parent = binding_device;
-    binding_device.components ~= binding_component;
+    DeviceBuilder binding_builder = table.create("binding-test");
+    Device binding_device = binding_builder.device;
+    Component binding_component = binding_builder.component("binding-component");
     Element* binding_element1 = alloc_element();
     Element* binding_element2 = alloc_element();
     Element* binding_element3 = alloc_element();
     Element* unbound_element = alloc_element();
-    binding_element1.parent = binding_component;
-    binding_element2.parent = binding_component;
-    binding_element3.parent = binding_component;
-    unbound_element.parent = binding_component;
-    binding_component.elements ~= binding_element1;
-    binding_component.elements ~= binding_element2;
-    binding_component.elements ~= binding_element3;
-    binding_component.elements ~= unbound_element;
+    binding_element1.id = StringLit!"e1";
+    binding_element2.id = StringLit!"e2";
+    binding_element3.id = StringLit!"e3";
+    unbound_element.id = StringLit!"unbound";
+    binding_component.attach_element(binding_element1);
+    binding_component.attach_element(binding_element2);
+    binding_component.attach_element(binding_element3);
+    binding_component.attach_element(unbound_element);
     unbound_element.access = manager.element.Access.write;
     unbound_element.ensure_eid();
 

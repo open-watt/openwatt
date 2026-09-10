@@ -305,6 +305,38 @@ The current implementation and remaining phases are described in
 
 ## Data model
 
+- **Device construction API, remaining pieces** (the builder landed: `DeviceBuilder`,
+  `DeviceLifecycleEvent.created`, private tree arrays, energy off the table scan):
+  - no removal path: `Component` has no remove, `DeviceTable` has no remove, elements are never
+    destroyed and `DeviceLifecycleEvent.destroyed` / `ComponentEvent.destroyed` are never emitted.
+    Route removal through the builder when the first producer needs it.
+  - `online`/`offline` are still ad hoc: six emitters of `online`, one of `offline` (smartevse).
+    Mirrored and MQTT-discovered devices never go offline.
+  - MQTT discovery and sync mirrors publish an empty device and grow it one edit per frame; that is
+    the intended burst granularity, but a discovery that knows its entity set up front could build
+    once.
+  - `PublishSlot` binds lazily on first write, so structure is still created on first touch. Bind
+    the allocator, policy and planner slots when the Policy or Island is created, and drop the path
+    argument from the per-tick write.
+  - Nesting a builder asserts, in release too, by choice: find misuse early. Revisit once the
+    esphome, goodwe, zigbee, SunSpec, MQTT discovery and SmartEVSE paths have run under it; none of
+    them were exercised on the bench.
+  - The esphome and goodwe `status.network.ip.address` elements are written once at connect and
+    never refreshed; they should follow the client's connection.
+  - `open_commit()` (element.d) has no callers: every multi-element write still delivers per
+    element, so a subscriber can run between two fields of one frame and the topology watch can
+    rebuild mid-frame. Wrap each frame boundary in a `CommitScope`: the TWC push, the Modbus,
+    SunSpec, GoodWe and Zigbee response handlers, the MQTT publish path, the tesla vehicle
+    publish functions, the energy publishers, and the sync inbound value path.
+  - `components` / `elements` return writable slices, so a caller can still overwrite a slot without
+    the builder; closing it needs a slot-immutable view type.
+  - Element name and access edits on a live element are not announced anywhere: sync announces on
+    creation only, so a rediscovered MQTT entity whose access changed is stale on peers. That is
+    sync's to re-announce, not shape; a format change is a series event on the same element.
+  - Helpers that build part of a tree thread `ref DeviceBuilder` through every call (about ninety
+    sites in the TWC and SmartEVSE bindings, eight SunSpec helpers). A component-scoped handle
+    would remove the argument; not obvious it is worth its own type.
+
 - **Complete the unit model**:
 
   - represent logarithmic reference-relative units such as dBm with explicit conversion and

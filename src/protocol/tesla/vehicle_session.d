@@ -267,7 +267,7 @@ protected:
         _last_vehicle_poll_time = MonoTime.init;
 
         if (Device* vehicle = name[] in g_app.devices)
-            (*vehicle).set_element("connected", false);
+            (*vehicle).write_element("connected", false);
         _routing_seeded = false;
         _phase = Phase.connecting;
         if (_client !is null)
@@ -285,6 +285,7 @@ protected:
     }
 
 private:
+
     CompletionStatus advance(MonoTime now = getTime())
     {
         if (_phase == Phase.ready && now - _last_authenticated_rx_time > link_timeout)
@@ -1140,13 +1141,13 @@ private:
             return;
 
         SysTime now = getSysTime();
-        v.set_element("connected", true, now);
-        v.set_element("last_seen", now, now);
+        v.write_element("connected", true, now);
+        v.write_element("last_seen", now, now);
 
         if (cs.battery_level.present)
-            v.set_element("battery.soc", Quantity!(int, Percent)(cs.battery_level.value), now);
+            v.write_element("battery.soc", Quantity!(int, Percent)(cs.battery_level.value), now);
         if (cs.usable_battery_level.present)
-            v.set_element("battery.usable_soc", Quantity!(int, Percent)(cs.usable_battery_level.value), now);
+            v.write_element("battery.usable_soc", Quantity!(int, Percent)(cs.usable_battery_level.value), now);
 
         if (cs.charging_state.present)
         {
@@ -1156,39 +1157,39 @@ private:
             ];
             int state = charging_state_kind(cs.charging_state.value);
             uint idx = state >= 0 && state < names.length ? state : 0;
-            v.set_element("charging_state", names[idx], now);
+            v.write_element("charging_state", names[idx], now);
             if (state == 4 || state == 5)
-                v.set_element("charging.enabled", true, now, &vehicle_control_change);
+                v.write_element("charging.enabled", true, now, &vehicle_control_change);
             else if (state == 2 || state == 7)
-                v.set_element("charging.enabled", false, now, &vehicle_control_change);
+                v.write_element("charging.enabled", false, now, &vehicle_control_change);
         }
         if (cs.minutes_to_full_charge.present)
-            v.set_element("minutes_to_full", Quantity!(int, Minute)(cs.minutes_to_full_charge.value), now);
+            v.write_element("minutes_to_full", Quantity!(int, Minute)(cs.minutes_to_full_charge.value), now);
         if (cs.charge_limit_soc.present)
-            v.set_element("charging.target_soc", Quantity!(int, Percent)(cs.charge_limit_soc.value), now);
+            v.write_element("charging.target_soc", Quantity!(int, Percent)(cs.charge_limit_soc.value), now);
         if (cs.scheduled_charging_pending.present)
-            v.set_element("charging.scheduled", cs.scheduled_charging_pending.value, now);
+            v.write_element("charging.scheduled", cs.scheduled_charging_pending.value, now);
         if (cs.scheduled_charging_start_time_minutes.present)
-            v.set_element("charging.schedule_time", cast(int)cs.scheduled_charging_start_time_minutes.value, now);
+            v.write_element("charging.schedule_time", cast(int)cs.scheduled_charging_start_time_minutes.value, now);
         if (cs.charge_port_open.present)
         {
-            v.set_element("charging.port_open", cs.charge_port_open.value, now);
-            v.set_element("closures.charge_port", closure_name(cs.charge_port_open.value), now);
+            v.write_element("charging.port_open", cs.charge_port_open.value, now);
+            v.write_element("closures.charge_port", closure_name(cs.charge_port_open.value), now);
         }
 
         if (cs.charger_voltage.present)
-            v.set_element("meter.voltage", Quantity!(int, ScaledUnits.volt)(cs.charger_voltage.value), now);
+            v.write_element("meter.voltage", Quantity!(int, ScaledUnits.volt)(cs.charger_voltage.value), now);
         if (cs.charger_actual_current.present)
-            v.set_element("meter.current", Quantity!(int, ScaledUnits.ampere)(cs.charger_actual_current.value), now);
+            v.write_element("meter.current", Quantity!(int, ScaledUnits.ampere)(cs.charger_actual_current.value), now);
         if (cs.charger_power.present)
-            v.set_element("meter.power", Quantity!(int, ScaledUnits.watt)(cs.charger_power.value * 1000), now);
+            v.write_element("meter.power", Quantity!(int, ScaledUnits.watt)(cs.charger_power.value * 1000), now);
         if (cs.charge_energy_added.present)
-            v.set_element("meter.import", Quantity!(float, KilowattHour)(cs.charge_energy_added.value), now);
+            v.write_element("meter.import", Quantity!(float, KilowattHour)(cs.charge_energy_added.value), now);
 
         if (cs.charge_current_request_max.present)
-            v.set_element("control.max", Quantity!(int, ScaledUnits.ampere)(cs.charge_current_request_max.value), now);
+            v.write_element("control.max", Quantity!(int, ScaledUnits.ampere)(cs.charge_current_request_max.value), now);
         if (cs.charging_amps.present)
-            v.set_element("control.setpoint", Quantity!(int, ScaledUnits.ampere)(cs.charging_amps.value), now, &vehicle_control_change);
+            v.write_element("control.setpoint", Quantity!(int, ScaledUnits.ampere)(cs.charging_amps.value), now, &vehicle_control_change);
 
         if (cs.battery_level.present && cs.charge_energy_added.present)
             capacity_sample(cs.battery_level.value, cs.charge_energy_added.value);
@@ -1201,62 +1202,62 @@ private:
             return;
 
         SysTime now = getSysTime();
-        v.set_element("connected", true, now);
-        v.set_element("last_seen", now, now);
+        v.write_element("connected", true, now);
+        v.write_element("last_seen", now, now);
         if (climate.inside_temperature.present)
-            v.set_element("hvac.temperature", Quantity!(float, Celsius)(climate.inside_temperature.value), now);
+            v.write_element("hvac.temperature", Quantity!(float, Celsius)(climate.inside_temperature.value), now);
         if (climate.outside_temperature.present)
-            v.set_element("hvac.outside_temperature", Quantity!(float, Celsius)(climate.outside_temperature.value), now);
+            v.write_element("hvac.outside_temperature", Quantity!(float, Celsius)(climate.outside_temperature.value), now);
         if (climate.driver_temperature.present)
-            v.set_element("hvac.target_temperature", Quantity!(float, Celsius)(climate.driver_temperature.value), now, &vehicle_control_change);
+            v.write_element("hvac.target_temperature", Quantity!(float, Celsius)(climate.driver_temperature.value), now, &vehicle_control_change);
         if (climate.passenger_temperature.present)
-            v.set_element("hvac.passenger_target_temperature", Quantity!(float, Celsius)(climate.passenger_temperature.value), now);
+            v.write_element("hvac.passenger_target_temperature", Quantity!(float, Celsius)(climate.passenger_temperature.value), now);
         if (climate.fan_speed.present)
-            v.set_element("hvac.fan_speed", climate.fan_speed.value, now);
+            v.write_element("hvac.fan_speed", climate.fan_speed.value, now);
         if (climate.min_temperature.present)
-            v.set_element("hvac.min_temperature", Quantity!(float, Celsius)(climate.min_temperature.value), now);
+            v.write_element("hvac.min_temperature", Quantity!(float, Celsius)(climate.min_temperature.value), now);
         if (climate.max_temperature.present)
-            v.set_element("hvac.max_temperature", Quantity!(float, Celsius)(climate.max_temperature.value), now);
+            v.write_element("hvac.max_temperature", Quantity!(float, Celsius)(climate.max_temperature.value), now);
         if (climate.climate_on.present)
         {
-            v.set_element("hvac.power", climate.climate_on.value, now, &vehicle_control_change);
-            v.set_element("hvac.state", climate.climate_on.value ? StringLit!"on" : StringLit!"off", now);
-            v.set_element("hvac.mode", climate.climate_on.value ? StringLit!"auto" : StringLit!"off", now);
+            v.write_element("hvac.power", climate.climate_on.value, now, &vehicle_control_change);
+            v.write_element("hvac.state", climate.climate_on.value ? StringLit!"on" : StringLit!"off", now);
+            v.write_element("hvac.mode", climate.climate_on.value ? StringLit!"auto" : StringLit!"off", now);
         }
         if (climate.preconditioning.present)
-            v.set_element("hvac.preconditioning", climate.preconditioning.value, now);
+            v.write_element("hvac.preconditioning", climate.preconditioning.value, now);
         if (climate.battery_heater.present)
-            v.set_element("hvac.battery.heating", climate.battery_heater.value, now);
+            v.write_element("hvac.battery.heating", climate.battery_heater.value, now);
         if (climate.steering_wheel_heat_level.present)
-            v.set_element("hvac.steering_wheel.heating_level", climate.steering_wheel_heat_level.value, now);
+            v.write_element("hvac.steering_wheel.heating_level", climate.steering_wheel_heat_level.value, now);
         else if (climate.steering_wheel_heater.present)
-            v.set_element("hvac.steering_wheel.heater", climate.steering_wheel_heater.value, now);
+            v.write_element("hvac.steering_wheel.heater", climate.steering_wheel_heater.value, now);
         if (climate.seat_front_left_heating.present)
-            v.set_element("hvac.seats.front_left.heating_level", climate.seat_front_left_heating.value, now);
+            v.write_element("hvac.seats.front_left.heating_level", climate.seat_front_left_heating.value, now);
         if (climate.seat_front_right_heating.present)
-            v.set_element("hvac.seats.front_right.heating_level", climate.seat_front_right_heating.value, now);
+            v.write_element("hvac.seats.front_right.heating_level", climate.seat_front_right_heating.value, now);
         if (climate.seat_rear_left_heating.present)
-            v.set_element("hvac.seats.rear_left.heating_level", climate.seat_rear_left_heating.value, now);
+            v.write_element("hvac.seats.rear_left.heating_level", climate.seat_rear_left_heating.value, now);
         if (climate.seat_rear_center_heating.present)
-            v.set_element("hvac.seats.rear_center.heating_level", climate.seat_rear_center_heating.value, now);
+            v.write_element("hvac.seats.rear_center.heating_level", climate.seat_rear_center_heating.value, now);
         if (climate.seat_rear_right_heating.present)
-            v.set_element("hvac.seats.rear_right.heating_level", climate.seat_rear_right_heating.value, now);
+            v.write_element("hvac.seats.rear_right.heating_level", climate.seat_rear_right_heating.value, now);
         if (climate.seat_rear_left_back_heating.present)
-            v.set_element("hvac.seats.rear_left_back.heating_level", climate.seat_rear_left_back_heating.value, now);
+            v.write_element("hvac.seats.rear_left_back.heating_level", climate.seat_rear_left_back_heating.value, now);
         if (climate.seat_rear_right_back_heating.present)
-            v.set_element("hvac.seats.rear_right_back.heating_level", climate.seat_rear_right_back_heating.value, now);
+            v.write_element("hvac.seats.rear_right_back.heating_level", climate.seat_rear_right_back_heating.value, now);
         if (climate.seat_third_row_left_heating.present)
-            v.set_element("hvac.seats.third_row_left.heating_level", climate.seat_third_row_left_heating.value, now);
+            v.write_element("hvac.seats.third_row_left.heating_level", climate.seat_third_row_left_heating.value, now);
         if (climate.seat_third_row_right_heating.present)
-            v.set_element("hvac.seats.third_row_right.heating_level", climate.seat_third_row_right_heating.value, now);
+            v.write_element("hvac.seats.third_row_right.heating_level", climate.seat_third_row_right_heating.value, now);
         if (climate.seat_front_left_cooling.present)
-            v.set_element("hvac.seats.front_left.cooling_level", climate.seat_front_left_cooling.value, now);
+            v.write_element("hvac.seats.front_left.cooling_level", climate.seat_front_left_cooling.value, now);
         if (climate.seat_front_right_cooling.present)
-            v.set_element("hvac.seats.front_right.cooling_level", climate.seat_front_right_cooling.value, now);
+            v.write_element("hvac.seats.front_right.cooling_level", climate.seat_front_right_cooling.value, now);
         if (climate.defrost_mode.present)
-            v.set_element("hvac.defrost", defrost_name(defrost_mode_kind(climate.defrost_mode.value)), now);
+            v.write_element("hvac.defrost", defrost_name(defrost_mode_kind(climate.defrost_mode.value)), now);
         if (climate.climate_keeper_mode.present)
-            v.set_element("hvac.climate_keeper_mode", climate_keeper_name(climate_keeper_mode_kind(climate.climate_keeper_mode.value)), now);
+            v.write_element("hvac.climate_keeper_mode", climate_keeper_name(climate_keeper_mode_kind(climate.climate_keeper_mode.value)), now);
     }
 
     void publish_drive_state(ref const TeslaDriveState drive)
@@ -1267,16 +1268,16 @@ private:
 
         SysTime now = getSysTime();
         if (drive.gear.present)
-            v.set_element("drive.gear", gear_name(shift_state_kind(drive.gear.value)), now);
+            v.write_element("drive.gear", gear_name(shift_state_kind(drive.gear.value)), now);
         if (drive.speed_float.present || drive.speed.present)
         {
             float speed_mph = drive.speed_float.present ? drive.speed_float.value : drive.speed.value;
-            v.set_element("drive.speed", Quantity!(float, ScaledUnits.kilometre_per_hour)(speed_mph * 1.609344f), now);
+            v.write_element("drive.speed", Quantity!(float, ScaledUnits.kilometre_per_hour)(speed_mph * 1.609344f), now);
         }
         if (drive.power.present)
-            v.set_element("drive.power", Quantity!(int, Kilowatt)(drive.power.value), now);
+            v.write_element("drive.power", Quantity!(int, Kilowatt)(drive.power.value), now);
         if (drive.odometer_hundredths_mile.present)
-            v.set_element("drive.odometer", Quantity!(float, Kilometre)(drive.odometer_hundredths_mile.value * 0.01609344f), now);
+            v.write_element("drive.odometer", Quantity!(float, Kilometre)(drive.odometer_hundredths_mile.value * 0.01609344f), now);
     }
 
     void publish_location_state(ref const TeslaLocationState location)
@@ -1287,13 +1288,13 @@ private:
 
         SysTime now = getSysTime();
         if (location.latitude.present)
-            v.set_element("location.latitude", Quantity!(float, Degree)(location.latitude.value), now);
+            v.write_element("location.latitude", Quantity!(float, Degree)(location.latitude.value), now);
         if (location.longitude.present)
-            v.set_element("location.longitude", Quantity!(float, Degree)(location.longitude.value), now);
+            v.write_element("location.longitude", Quantity!(float, Degree)(location.longitude.value), now);
         if (location.heading.present)
-            v.set_element("location.heading", Quantity!(uint, Degree)(location.heading.value), now);
+            v.write_element("location.heading", Quantity!(uint, Degree)(location.heading.value), now);
         if (location.accuracy.present)
-            v.set_element("location.accuracy", Quantity!(float, ScaledUnits.metre)(location.accuracy.value), now);
+            v.write_element("location.accuracy", Quantity!(float, ScaledUnits.metre)(location.accuracy.value), now);
     }
 
     void publish_closures_state(ref const TeslaClosuresState closures)
@@ -1304,21 +1305,21 @@ private:
 
         SysTime now = getSysTime();
         if (closures.locked.present)
-            v.set_element("access.locked", closures.locked.value, now);
+            v.write_element("access.locked", closures.locked.value, now);
         if (closures.user_present.present)
-            v.set_element("access.user_present", closures.user_present.value, now);
+            v.write_element("access.user_present", closures.user_present.value, now);
         if (closures.driver_front_open.present)
-            v.set_element("closures.driver_front", closure_name(closures.driver_front_open.value), now);
+            v.write_element("closures.driver_front", closure_name(closures.driver_front_open.value), now);
         if (closures.passenger_front_open.present)
-            v.set_element("closures.passenger_front", closure_name(closures.passenger_front_open.value), now);
+            v.write_element("closures.passenger_front", closure_name(closures.passenger_front_open.value), now);
         if (closures.driver_rear_open.present)
-            v.set_element("closures.driver_rear", closure_name(closures.driver_rear_open.value), now);
+            v.write_element("closures.driver_rear", closure_name(closures.driver_rear_open.value), now);
         if (closures.passenger_rear_open.present)
-            v.set_element("closures.passenger_rear", closure_name(closures.passenger_rear_open.value), now);
+            v.write_element("closures.passenger_rear", closure_name(closures.passenger_rear_open.value), now);
         if (closures.frunk_open.present)
-            v.set_element("closures.frunk", closure_name(closures.frunk_open.value), now);
+            v.write_element("closures.frunk", closure_name(closures.frunk_open.value), now);
         if (closures.trunk_open.present)
-            v.set_element("closures.trunk", closure_name(closures.trunk_open.value), now);
+            v.write_element("closures.trunk", closure_name(closures.trunk_open.value), now);
     }
 
     void publish_tire_pressure_state(ref const TeslaTirePressureState tyres)
@@ -1329,21 +1330,21 @@ private:
 
         SysTime now = getSysTime();
         if (tyres.front_left_pressure.present)
-            v.set_element("tyres.front_left.pressure", Quantity!(float, Bar)(tyres.front_left_pressure.value), now);
+            v.write_element("tyres.front_left.pressure", Quantity!(float, Bar)(tyres.front_left_pressure.value), now);
         if (tyres.front_right_pressure.present)
-            v.set_element("tyres.front_right.pressure", Quantity!(float, Bar)(tyres.front_right_pressure.value), now);
+            v.write_element("tyres.front_right.pressure", Quantity!(float, Bar)(tyres.front_right_pressure.value), now);
         if (tyres.rear_left_pressure.present)
-            v.set_element("tyres.rear_left.pressure", Quantity!(float, Bar)(tyres.rear_left_pressure.value), now);
+            v.write_element("tyres.rear_left.pressure", Quantity!(float, Bar)(tyres.rear_left_pressure.value), now);
         if (tyres.rear_right_pressure.present)
-            v.set_element("tyres.rear_right.pressure", Quantity!(float, Bar)(tyres.rear_right_pressure.value), now);
+            v.write_element("tyres.rear_right.pressure", Quantity!(float, Bar)(tyres.rear_right_pressure.value), now);
         if (tyres.front_left_hard_warning.present || tyres.front_left_soft_warning.present)
-            v.set_element("tyres.front_left.warning", tyres.front_left_hard_warning.value || tyres.front_left_soft_warning.value, now);
+            v.write_element("tyres.front_left.warning", tyres.front_left_hard_warning.value || tyres.front_left_soft_warning.value, now);
         if (tyres.front_right_hard_warning.present || tyres.front_right_soft_warning.present)
-            v.set_element("tyres.front_right.warning", tyres.front_right_hard_warning.value || tyres.front_right_soft_warning.value, now);
+            v.write_element("tyres.front_right.warning", tyres.front_right_hard_warning.value || tyres.front_right_soft_warning.value, now);
         if (tyres.rear_left_hard_warning.present || tyres.rear_left_soft_warning.present)
-            v.set_element("tyres.rear_left.warning", tyres.rear_left_hard_warning.value || tyres.rear_left_soft_warning.value, now);
+            v.write_element("tyres.rear_left.warning", tyres.rear_left_hard_warning.value || tyres.rear_left_soft_warning.value, now);
         if (tyres.rear_right_hard_warning.present || tyres.rear_right_soft_warning.present)
-            v.set_element("tyres.rear_right.warning", tyres.rear_right_hard_warning.value || tyres.rear_right_soft_warning.value, now);
+            v.write_element("tyres.rear_right.warning", tyres.rear_right_hard_warning.value || tyres.rear_right_soft_warning.value, now);
     }
 
     Device vehicle_for_update()
@@ -1353,8 +1354,8 @@ private:
             return null;
 
         SysTime now = getSysTime();
-        v.set_element("connected", true, now);
-        v.set_element("last_seen", now, now);
+        v.write_element("connected", true, now);
+        v.write_element("last_seen", now, now);
         return v;
     }
 
@@ -1631,14 +1632,14 @@ unittest
     receiver._phase = receiver.Phase.ready;
     receiver._routing_address[] = 0x22;
     receiver._aes_key[] = 0x44;
-    Device vehicle = alloc!Device(StringLit!"session-controls");
-    scope(exit) free(vehicle);
+    import manager.series : register_value_format;
     DeviceTable devices;
-    devices.insert(vehicle);
-    Element* control = alloc_element();
+    DeviceBuilder builder = devices.create("session-controls");
+    Device vehicle = builder.device;
+    scope(exit) free(vehicle);
+    Element* control = builder.element("enabled", register_value_format!bool());
     scope(exit) free(control);
-    control.parent = vehicle;
-    vehicle.elements ~= control;
+    builder.commit();
     foreach (iteration; 0 .. 8)
     {
         receiver._control_device = vehicle;

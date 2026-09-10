@@ -26,6 +26,17 @@ import manager.element;
 
 nothrow @nogc:
 
+enum BudgetField : ubyte
+{
+    battery_available_kwh, battery_capacity_kwh, demand_floor_kwh, demand_essential_kwh,
+    demand_important_kwh, demand_opportunistic_kwh, reserve_kwh, pressure,
+}
+
+enum AnalysisField : ubyte
+{
+    marginal_value, required_kwh, max_rate_kw, slack_hours, time_to_deadline_hours, time_to_satisfy_hours,
+}
+
 
 struct Planner
 {
@@ -39,8 +50,7 @@ nothrow @nogc:
 
     Map!(String, IslandBudget) island_budgets;
 
-    void tick(Device energy_device, ControlRegistry registry, ref Islands islands,
-              ref TopologyGraph graph, SysTime now)
+    void tick(Device energy_device, ControlRegistry registry, ref Islands islands, ref TopologyGraph graph, SysTime now)
     {
         if (last_tick != SysTime.init && now - last_tick < cadence)
             return;
@@ -50,8 +60,7 @@ nothrow @nogc:
         island_budgets.clear();
         foreach (island; islands[])
         {
-            IslandBudget b = compute_island_budget(island, registry, now, slack_threshold,
-                                                   reserve_safety_factor, &graph);
+            IslandBudget b = compute_island_budget(island, registry, now, slack_threshold, reserve_safety_factor, &graph);
             island_budgets.insert(island.id, b);
             publish_island_budget(energy_device, island, b, now);
         }
@@ -103,9 +112,7 @@ nothrow @nogc:
 }
 
 
-IslandBudget compute_island_budget(Island* island, ControlRegistry registry, SysTime now,
-                                   Duration slack_threshold, float safety_factor,
-                                   TopologyGraph* graph = null)
+IslandBudget compute_island_budget(Island* island, ControlRegistry registry, SysTime now, Duration slack_threshold, float safety_factor, TopologyGraph* graph = null)
 {
     IslandBudget b;
     if (island is null)
@@ -155,8 +162,7 @@ IslandBudget compute_island_budget(Island* island, ControlRegistry registry, Sys
 }
 
 
-PolicyAnalysis analyse_policy(Policy p, ControlRegistry registry, SysTime now, Duration slack_threshold,
-                              const(IslandBudget)* budget = null, TopologyGraph* graph = null)
+PolicyAnalysis analyse_policy(Policy p, ControlRegistry registry, SysTime now, Duration slack_threshold, const(IslandBudget)* budget = null, TopologyGraph* graph = null)
 {
     PolicyAnalysis a;
 
@@ -291,50 +297,52 @@ float pressure_modifier(const(IslandBudget)* budget)
 
 void publish_island_budget(Device energy_device, Island* island, ref const IslandBudget b, SysTime now)
 {
+    import urt.meta.enuminfo : enum_key_from_value;
+
     if (energy_device is null || island is null)
         return;
-    const(char)[] base = tconcat("islands.", island.id[], ".budget");
+    const(char)[] base = tconcat("islands.", island.id[], ".budget.");
 
-    void set_num(string field, float val)
+    void put(BudgetField f, float val)
     {
-        if (val != val)
-            return;
-        energy_device.set_element(tconcat(base, ".", field), val, now);
+        if (val == val)
+            island.budget[f].write(energy_device, tconcat(base, enum_key_from_value!BudgetField(f)), val, now);
     }
 
-    set_num("battery_available_kwh", b.battery_available_kwh);
-    set_num("battery_capacity_kwh", b.battery_capacity_kwh);
-    set_num("demand_floor_kwh", b.demand_floor_kwh);
-    set_num("demand_essential_kwh", b.demand_essential_kwh);
-    set_num("demand_important_kwh", b.demand_important_kwh);
-    set_num("demand_opportunistic_kwh", b.demand_opportunistic_kwh);
-    set_num("reserve_kwh", b.reserve_kwh);
-    if (b.pressure == b.pressure)
-        set_num("pressure", b.pressure);
+    put(BudgetField.battery_available_kwh, b.battery_available_kwh);
+    put(BudgetField.battery_capacity_kwh, b.battery_capacity_kwh);
+    put(BudgetField.demand_floor_kwh, b.demand_floor_kwh);
+    put(BudgetField.demand_essential_kwh, b.demand_essential_kwh);
+    put(BudgetField.demand_important_kwh, b.demand_important_kwh);
+    put(BudgetField.demand_opportunistic_kwh, b.demand_opportunistic_kwh);
+    put(BudgetField.reserve_kwh, b.reserve_kwh);
+    put(BudgetField.pressure, b.pressure);
 }
 
 
 void publish_analysis(Device energy_device, Policy p, ref const PolicyAnalysis a, SysTime now)
 {
+    import urt.meta.enuminfo : enum_key_from_value;
+
     if (energy_device is null)
         return;
-    const(char)[] base = tconcat("policy.", p.name[], ".planner");
+    p.publish_as(p.name[]);
+    const(char)[] base = tconcat("policy.", p.name[], ".planner.");
 
-    void set_num(string field, float val)
+    void put(AnalysisField f, float val)
     {
-        if (val != val)
-            return;
-        energy_device.set_element(tconcat(base, ".", field), val, now);
+        if (val == val)
+            p.analysis[f].write(energy_device, tconcat(base, enum_key_from_value!AnalysisField(f)), val, now);
     }
 
-    set_num("marginal_value", a.marginal_value);
-    set_num("required_kwh", a.required_kwh);
-    set_num("max_rate_kw", a.max_rate_kw);
+    put(AnalysisField.marginal_value, a.marginal_value);
+    put(AnalysisField.required_kwh, a.required_kwh);
+    put(AnalysisField.max_rate_kw, a.max_rate_kw);
     if (a.slack_known)
     {
-        set_num("slack_hours", cast(float)a.slack.as!"seconds" / 3600.0f);
-        set_num("time_to_deadline_hours", cast(float)a.time_to_deadline.as!"seconds" / 3600.0f);
-        set_num("time_to_satisfy_hours", cast(float)a.time_to_satisfy.as!"seconds" / 3600.0f);
+        put(AnalysisField.slack_hours, cast(float)a.slack.as!"seconds" / 3600.0f);
+        put(AnalysisField.time_to_deadline_hours, cast(float)a.time_to_deadline.as!"seconds" / 3600.0f);
+        put(AnalysisField.time_to_satisfy_hours, cast(float)a.time_to_satisfy.as!"seconds" / 3600.0f);
     }
 }
 

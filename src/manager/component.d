@@ -34,22 +34,33 @@ nothrow @nogc:
 
     this(String id)
     {
-        this.id = id.move;
+        _id = id.move;
     }
 
-    String id;
+    ref const(String) id() const pure
+        => _id;
+
     String name;
     String template_;
     Component parent;
 
     bool hidden;
 
-    Array!(Component) components;
-    Array!(Element*) elements;
+    inout(Component)[] components() inout pure
+        => _components[];
+    inout(Element*)[] elements() inout pure
+        => _elements[];
 
     // extern(C++) has no dynamic cast: cast(Device) always "succeeds", so test this before painting
     bool is_device() const pure
         => false;
+
+    inout(Device) root_device() inout pure
+    {
+        if (parent)
+            return parent.root_device();
+        return is_device ? cast(inout(Device))this : null;
+    }
 
     final void subscribe(ComponentSubscriber handler)
     {
@@ -77,21 +88,43 @@ nothrow @nogc:
             parent.notify(event);
     }
 
-    void add_component(Component component) // TODO: include sampler here...
+    // mutators, reached only through DeviceBuilder
+    package(manager) Component find_or_create_component(const(char)[] path, const(char)[] template_ = null)
     {
-        import urt.mem.temp : tconcat;
-        foreach (Component c; components)
+        const(char)[] seg = path.split!'.';
+        Component c;
+        foreach (Component existing; _components)
         {
-            if (c.id[] == component.id[])
+            if (existing.id[] == seg[])
             {
-                debug assert(false, tconcat("Component '", component.id[], "' already exists in device '", id[], "'"));
-                assert(false, "Already exists");
-                return;
+                c = existing;
+                break;
             }
         }
-        component.parent = this;
-        components.pushBack(component);
-        notify(ComponentEvent.tree_changed);
+        if (c is null)
+        {
+            c = alloc!Component(seg.make_string());
+            c.parent = this;
+            _components ~= c;
+            mutated(null);
+        }
+        if (!path.empty)
+            return c.find_or_create_component(path, template_);
+        if (template_.length && c.template_[] != template_)
+        {
+            c.template_ = template_.make_string();
+            mutated(null);
+        }
+        return c;
+    }
+
+    package(manager) void attach_element(Element* e)
+    {
+        assert(e && e.id.length, "element needs an id");
+        debug assert(find_element(e.id[]) is null, "element already exists");
+        e.parent = this;
+        _elements ~= e;
+        mutated(e);
     }
 
     inout(Component) find_component(const(char)[] name) inout pure nothrow @nogc
@@ -127,49 +160,49 @@ nothrow @nogc:
         return null;
     }
 
-    Element* find_or_create_element(const(char)[] name, FormatId format)
+    package(manager) Element* find_or_create_element(const(char)[] name, FormatId format = FormatId.init)
     {
-        assert(format.valid, "an element requires a format");
         const(char)[] id = name.split!'.';
         if (!name.empty)
-        {
-            foreach (Component c; components)
-            {
-                if (c.id[] == id[])
-                    return c.find_or_create_element(name, format);
-            }
+            return find_or_create_component(id).find_or_create_element(name, format);
 
-            Component c = alloc!Component(id.make_string());
-            c.parent = this;
-            components ~= c;
-            return c.find_or_create_element(name, format);
-        }
-
-        foreach (Element* e; elements)
+        foreach (Element* e; _elements)
         {
             if (e.id[] == id[])
             {
                 if (!e.format.valid)
                     e.format = format;
-                else
-                    assert(e.format == format || value_compatible(*format_info(format), *e.data_format),
-                           "element path reused with an incompatible format");
+                else if (format.valid)
+                {
+                    import urt.mem.temp : tconcat;
+                    debug assert(e.format == format || value_compatible(*format_info(format), *e.data_format), tconcat("element '", id[], ".", e.id[], "' reused with an incompatible format"));
+                }
                 return e;
             }
         }
 
         Element* e = alloc_element();
         e.format = format;
-        e.parent = this;
-        elements ~= e;
         e.id = id.make_string();
-        g_app.notify_element_created(e);
-        notify(ComponentEvent.tree_changed);
+        attach_element(e);
         return e;
     }
 
-    Element* set_element(T)(const(char)[] name, auto ref T value,
-                            SysTime timestamp = getSysTime(), Subscriber who = null)
+    // a value write to a declared element; the tree is not the writer's to grow
+    Element* write_element(T)(const(char)[] name, auto ref T value, SysTime timestamp = getSysTime(), Subscriber who = null)
+    {
+        Element* e = find_element(name);
+        if (e)
+            e.value(value, timestamp, who);
+        else
+        {
+            debug assert(false, "write to an undeclared element");
+            writeWarning("element '", name, "' is not declared in '", id[], "'");
+        }
+        return e;
+    }
+
+    package(manager) Element* set_element(T)(const(char)[] name, auto ref T value, SysTime timestamp = getSysTime(), Subscriber who = null)
     {
         Element* e = find_element(name);
         if (!e)
@@ -220,7 +253,32 @@ nothrow @nogc:
     }
 
 private:
+    String _id;
+    Array!(Component) _components;
+    Array!(Element*) _elements;
     Array!ComponentSubscriber _subscribers;
+
+    void mutated(Element* created)
+    {
+        if (Device d = root_device())
+        {
+            if (d._editing)
+            {
+                d._dirty = true;
+                if (created)
+                    d._created ~= created;
+                return;
+            }
+            if (d.cid)
+            {
+                debug assert(false, "device tree mutated outside a DeviceBuilder");
+                writeWarning("device '", d.id[], "' mutated outside a DeviceBuilder");
+            }
+        }
+        if (created && g_app)
+            g_app.notify_element_created(created);
+        notify(ComponentEvent.tree_changed);
+    }
 }
 
 
@@ -229,8 +287,7 @@ unittest
     Component component = alloc!Component(StringLit!"component");
     Element* element = alloc_element();
     element.id = StringLit!"value";
-    element.parent = component;
-    component.elements ~= element;
+    component.attach_element(element);
 
     FormatId format = register_value_format!uint();
     assert(!element.format.valid);
@@ -251,13 +308,11 @@ unittest
 
     Changes changes = Changes(component);
     component.subscribe(&changes.changed);
-    Component child = alloc!Component(StringLit!"child");
+    Component child = component.find_or_create_component("child");
     scope(exit) free(child);
-    component.add_component(child);
     assert(changes.count == 1);
-    Component nested = alloc!Component(StringLit!"nested");
+    Component nested = child.find_or_create_component("nested");
     scope(exit) free(nested);
-    child.add_component(nested);
     assert(changes.count == 2);
     nested.notify(ComponentEvent.tree_changed);
     assert(changes.count == 3);

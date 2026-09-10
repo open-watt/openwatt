@@ -14,6 +14,7 @@ import apps.energy.topology;
 import apps.energy.vehicle : vehicle_for;
 
 import manager.collection;
+import manager.device : DeviceBuilder;
 import manager.component;
 import manager.element;
 
@@ -158,8 +159,8 @@ private:
         Component v = vehicle_for(car.vin);
         if (v is null)
             return;
-        v.set_element("battery.session_delivered", delivered_kwh);
+        v.write_element("battery.session_delivered", delivered_kwh);
         // Bare 0..100 values are ratios, so synthetic SOC must retain Percent.
-        v.set_element("battery.soc_floor", Quantity!(double, Percent)(soc_floor));
+        v.write_element("battery.soc_floor", Quantity!(double, Percent)(soc_floor));
     }
 }

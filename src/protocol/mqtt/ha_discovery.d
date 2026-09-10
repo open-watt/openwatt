@@ -282,22 +282,17 @@ private:
                 const(char)[] domain = json_string(config, "platform", "p");
                 if (domain.empty)
                     continue;
-                add_entity(config_topic, component_key, domain, component_key,
-                           topic.node_id, root, config, device_config);
+                add_entity(config_topic, component_key, domain, component_key, topic.node_id, root, config, device_config);
             }
             return;
         }
 
         if (topic.domain == "device_automation" || topic.domain == "tag")
             return;
-        add_entity(config_topic, null, topic.domain, topic.object_id,
-                   topic.node_id, root, root, device_config);
+        add_entity(config_topic, null, topic.domain, topic.object_id, topic.node_id, root, root, device_config);
     }
 
-    void add_entity(const(char)[] config_topic, const(char)[] component_key,
-                    const(char)[] domain, const(char)[] topic_object_id,
-                    const(char)[] node_id, ref Variant root, ref Variant config,
-                    Variant* device_config)
+    void add_entity(const(char)[] config_topic, const(char)[] component_key, const(char)[] domain, const(char)[] topic_object_id, const(char)[] node_id, ref Variant root, ref Variant config, Variant* device_config)
     {
         const(char)[] object_id = json_string(config, "object_id", "obj_id");
         if (object_id.empty)
@@ -315,7 +310,8 @@ private:
         HADevice* record = find_or_create_device(identity);
         if (!record)
             return;
-        apply_device_info(*record, device_config, identity);
+        DeviceBuilder builder = record.device.edit();
+        apply_device_info(builder, *record, device_config, identity);
 
         const(char)[] base_topic = json_string(config, "~", null);
         if (base_topic.empty)
@@ -331,8 +327,7 @@ private:
         const(char)[] entity_identity = unique_id.empty
             ? tconcat(domain, ":", object_id)
             : unique_id;
-        const(char)[] entity_id = find_or_create_entity_id(record.device, entity_identity,
-                                                            object_id, record.identity[]);
+        const(char)[] entity_id = find_or_create_entity_id(record.device, entity_identity, object_id, record.identity[]);
         if (entity_id.empty)
             return;
 
@@ -363,8 +358,7 @@ private:
                     return;
                 }
             }
-            state_format = register_format(
-                DataFormat(ValueType.u16, SeriesKind.held, select_info));
+            state_format = register_format(DataFormat(ValueType.u16, SeriesKind.held, select_info));
             // changed options rebind the enum NAME to new info; the element takes the new
             // format, prior formats and their records stay valid under the old definition
             if (prior_state && prior_state.format != state_format)
@@ -372,7 +366,7 @@ private:
         }
         else
             state_format = make_state_format(config, domain, unit, state_class);
-        Element* state = record.device.find_or_create_element(path, state_format);
+        Element* state = builder.element(path, state_format);
         Component ha_component = record.device.find_component("ha");
         if (ha_component && ha_component.name.empty)
             ha_component.name = StringLit!"Home Assistant";
@@ -399,12 +393,8 @@ private:
         entity.command_topic = command_topic.move;
         entity.value_template = json_string(config, "value_template", "val_tpl").make_string();
         entity.command_template = json_string(config, "command_template", "cmd_tpl").make_string();
-        entity.value_template_valid = compile_jinja_template(entity.value_template[],
-                                                             entity.value_expression_source,
-                                                             entity.value_expression);
-        entity.command_template_valid = compile_jinja_template(entity.command_template[],
-                                                               entity.command_expression_source,
-                                                               entity.command_expression);
+        entity.value_template_valid = compile_jinja_template(entity.value_template[], entity.value_expression_source, entity.value_expression);
+        entity.command_template_valid = compile_jinja_template(entity.command_template[], entity.command_expression_source, entity.command_expression);
         entity.uses_value_json = entity.value_expression_source[].contains("$value_json");
         entity.payload_on = state_payload(config, true).make_string();
         entity.payload_off = state_payload(config, false).make_string();
@@ -413,14 +403,13 @@ private:
         entity.select_info = select_info;
         entity.state = state;
         entity.device = record.device;
-        entity.writable = supports_write(domain, entity.command_topic[],
-                                         entity.command_template_valid);
+        entity.writable = supports_write(domain, entity.command_topic[], entity.command_template_valid);
         state.access = entity.writable ? Access.read_write : Access.read;
-        mount_status_alias(record.device, *state, entity_id);
+        mount_status_alias(builder, record.device, *state, entity_id);
         if (_active)
             attach_writer(*entity);
 
-        record.device.notify(ComponentEvent.tree_changed);
+        builder.commit();
         if (!record.announced)
         {
             record.announced = true;
@@ -453,8 +442,9 @@ private:
         if (id.empty)
             return null;
 
-        Device device = alloc!Device(id.move);
-        g_app.devices.insert(device);
+        DeviceBuilder builder = g_app.devices.create(id[]);
+        Device device = builder.device;
+        builder.commit();
 
         HADevice* record = &_devices.pushBack();
         record.identity = identity.make_string();
@@ -462,9 +452,7 @@ private:
         return record;
     }
 
-    const(char)[] find_or_create_entity_id(Device device, const(char)[] identity,
-                                            const(char)[] object_id,
-                                            const(char)[] device_identity)
+    const(char)[] find_or_create_entity_id(Device device, const(char)[] identity, const(char)[] object_id, const(char)[] device_identity)
     {
         foreach (ref entry; _entity_ids)
             if (entry.device is device && entry.identity[] == identity)
@@ -512,7 +500,7 @@ private:
         return entry.id[];
     }
 
-    void apply_device_info(ref HADevice record, Variant* config, const(char)[] identity)
+    void apply_device_info(ref DeviceBuilder builder, ref HADevice record, Variant* config, const(char)[] identity)
     {
         Device device = record.device;
         const(char)[] name = config ? json_string(*config, "name", null) : null;
@@ -520,26 +508,26 @@ private:
             name = identity;
         device.name = name.make_string();
 
-        set_info(device, "name", name, "Device Name");
+        set_info(builder, "name", name, "Device Name");
         if (config)
         {
-            set_info(device, "manufacturer_name", json_string(*config, "manufacturer", "mf"), "Manufacturer");
-            set_info(device, "model_name", json_string(*config, "model", "mdl"), "Model");
-            set_info(device, "model_id", json_string(*config, "model_id", "mdl_id"), "Model ID");
-            set_info(device, "serial_number", json_string(*config, "serial_number", "sn"), "Serial Number");
-            set_info(device, "software_version", json_string(*config, "sw_version", "sw"), "Software Version");
-            set_info(device, "hardware_version", json_string(*config, "hw_version", "hw"), "Hardware Version");
+            set_info(builder, "manufacturer_name", json_string(*config, "manufacturer", "mf"), "Manufacturer");
+            set_info(builder, "model_name", json_string(*config, "model", "mdl"), "Model");
+            set_info(builder, "model_id", json_string(*config, "model_id", "mdl_id"), "Model ID");
+            set_info(builder, "serial_number", json_string(*config, "serial_number", "sn"), "Serial Number");
+            set_info(builder, "software_version", json_string(*config, "sw_version", "sw"), "Software Version");
+            set_info(builder, "hardware_version", json_string(*config, "hw_version", "hw"), "Hardware Version");
         }
         Component info = device.find_component("info");
         if (info)
             info.template_ = StringLit!"DeviceInfo";
     }
 
-    static void set_info(Device device, const(char)[] id, const(char)[] value, const(char)[] name)
+    static void set_info(ref DeviceBuilder builder, const(char)[] id, const(char)[] value, const(char)[] name)
     {
         if (value.empty)
             return;
-        Element* element = device.set_element(tconcat("info.", id), value);
+        Element* element = builder.constant(tconcat("info.", id), value);
         element.name = name.make_string();
         element.sampling_mode = SamplingMode.constant;
         element.access = Access.read;
@@ -599,8 +587,7 @@ private:
         return value.empty ? (on ? "ON" : "OFF") : value;
     }
 
-    static bool supports_write(const(char)[] domain, const(char)[] command_topic,
-                               bool command_template_valid) pure
+    static bool supports_write(const(char)[] domain, const(char)[] command_topic, bool command_template_valid) pure
     {
         if (command_topic.empty || !command_template_valid)
             return false;
@@ -787,8 +774,7 @@ private:
         entity.state.value(value, timestamp);
     }
 
-    Variant evaluate_template(Expression* expression, ref const Variant value,
-                              ref const Variant value_json)
+    Variant evaluate_template(Expression* expression, ref const Variant value, ref const Variant value_json)
     {
         if (_template_locals.empty)
         {
@@ -803,8 +789,7 @@ private:
         return expression.evaluate(context);
     }
 
-    static FormatId make_state_format(ref Variant config, const(char)[] domain,
-                                      const(char)[] unit_text, const(char)[] state_class)
+    static FormatId make_state_format(ref Variant config, const(char)[] domain, const(char)[] unit_text, const(char)[] state_class)
     {
         if (domain == "binary_sensor" || domain == "switch")
             return register_format(DataFormat(ValueType.bool_, SeriesKind.held));
@@ -847,8 +832,7 @@ private:
         return register_format(format);
     }
 
-    static const(VoidEnumInfo)* synth_select_enum(ref Variant config,
-                                                   const(char)[] enum_name)
+    static const(VoidEnumInfo)* synth_select_enum(ref Variant config, const(char)[] enum_name)
     {
         Variant* options = json_member(config, "options", "ops");
         if (!options || !options.isArray || options.length == 0 || options.length > ubyte.max)
@@ -876,8 +860,7 @@ private:
         return register_enum_info(enum_name, created);
     }
 
-    static bool select_option(const(VoidEnumInfo)* info, ref const Variant value,
-                              out const(char)[] option)
+    static bool select_option(const(VoidEnumInfo)* info, ref const Variant value, out const(char)[] option)
     {
         if (value.isString)
         {
@@ -890,8 +873,7 @@ private:
         return option.ptr !is null;
     }
 
-    static void mount_status_alias(Device device, ref Element source,
-                                   const(char)[] source_id)
+    static void mount_status_alias(ref DeviceBuilder builder, Device device, ref Element source, const(char)[] source_id)
     {
         const(char)[] target_path = status_alias_path(source_id);
         if (target_path.empty)
@@ -900,7 +882,7 @@ private:
         Element* target = device.find_element(target_path);
         bool created = target is null;
         if (created)
-            target = device.find_or_create_element(target_path, source.format);
+            target = builder.element(target_path, source.format);
         else
         {
             bool ours;
@@ -1025,8 +1007,7 @@ unittest
 
     String translated_source;
     Expression* translated_expression;
-    assert(compile_jinja_template("{{ value | int / 10 if value | is_number else none }}",
-                                  translated_source, translated_expression));
+    assert(compile_jinja_template("{{ value | int / 10 if value | is_number else none }}", translated_source, translated_expression));
     scope(exit) translated_expression.free_expression();
     assert(translated_source[] == "$select($is_number($value), $to_int($value) / 10, null)");
     Map!(String, Variant) template_locals;
@@ -1039,15 +1020,13 @@ unittest
 
     String chained_source;
     Expression* chained_expression;
-    assert(compile_jinja_template("{{ value | float(0) | round(1) }}",
-                                  chained_source, chained_expression));
+    assert(compile_jinja_template("{{ value | float(0) | round(1) }}", chained_source, chained_expression));
     template_locals[template_value_key] = Variant("21.25");
     Variant chained_value = chained_expression.evaluate(template_context);
     assert(chained_value.isNumber && chained_value.asDouble == 21.2);
     chained_expression.free_expression();
 
-    assert(compile_jinja_template("{{ value | float(0) | round(0, 'half') }}",
-                                  chained_source, chained_expression));
+    assert(compile_jinja_template("{{ value | float(0) | round(0, 'half') }}", chained_source, chained_expression));
     template_locals[template_value_key] = Variant("21.3");
     chained_value = chained_expression.evaluate(template_context);
     assert(chained_value.isNumber && chained_value.asDouble == 21.5);
@@ -1077,32 +1056,28 @@ unittest
         `"cmd_t":"meter/current/set","unit_of_meas":"A","min":"0","max":"25",` ~
         `"mode":"slider","val_tpl":"{{ value | int / 10 if value | is_number else none }}",` ~
         `"cmd_tpl":"{{ value | int * 10 }}"}`;
-    assert(discovery.handle_publish("homeassistant/number/meter/current/config",
-                                    cast(const(ubyte)[])current_config, getTime()));
+    assert(discovery.handle_publish("homeassistant/number/meter/current/config", cast(const(ubyte)[])current_config, getTime()));
     assert(discovery.entity_count == 3);
 
     static immutable string colliding_config =
         `{"dev":{"ids":"meter-01","name":"Main Meter"},"name":"Power Switch",` ~
         `"uniq_id":"meter_power_switch","stat_t":"meter/power-switch",` ~
         `"cmd_t":"meter/power-switch/set"}`;
-    assert(discovery.handle_publish("homeassistant/switch/meter/power/config",
-                                    cast(const(ubyte)[])colliding_config, getTime()));
+    assert(discovery.handle_publish("homeassistant/switch/meter/power/config", cast(const(ubyte)[])colliding_config, getTime()));
     assert(discovery.entity_count == 4);
 
     static immutable string mode_config =
         `{"dev":{"ids":"meter-01","name":"Main Meter"},"name":"Mode",` ~
         `"uniq_id":"meter_mode","stat_t":"meter/mode","cmd_t":"meter/mode/set",` ~
         `"ops":["Normal","Eco","Boost"]}`;
-    assert(discovery.handle_publish("homeassistant/select/meter/mode/config",
-                                    cast(const(ubyte)[])mode_config, getTime()));
+    assert(discovery.handle_publish("homeassistant/select/meter/mode/config", cast(const(ubyte)[])mode_config, getTime()));
     assert(discovery.entity_count == 5);
 
     static immutable string wifi_config =
         `{"dev":{"ids":"meter-01","name":"Main Meter"},"name":"WiFi SSID",` ~
         `"obj_id":"meter_01_wifi_ssid","uniq_id":"meter_wifi_ssid",` ~
         `"stat_t":"meter/wifi/ssid"}`;
-    assert(discovery.handle_publish("homeassistant/sensor/meter/wifi_ssid/config",
-                                    cast(const(ubyte)[])wifi_config, getTime()));
+    assert(discovery.handle_publish("homeassistant/sensor/meter/wifi_ssid/config", cast(const(ubyte)[])wifi_config, getTime()));
     assert(discovery.entity_count == 6);
 
     Device* device_slot = "meter_01" in app.devices;
@@ -1155,8 +1130,7 @@ unittest
         `{"dev":{"ids":"meter-01","name":"Main Meter"},"name":"Mode",` ~
         `"uniq_id":"meter_mode","stat_t":"meter/mode","cmd_t":"meter/mode/set",` ~
         `"options":["Boost","Eco","Normal","Away"]}`;
-    assert(discovery.handle_publish("homeassistant/select/meter/mode/config",
-                                    cast(const(ubyte)[])updated_mode_config, getTime()));
+    assert(discovery.handle_publish("homeassistant/select/meter/mode/config", cast(const(ubyte)[])updated_mode_config, getTime()));
     assert(discovery.entity_count == 6);
     const(VoidEnumInfo)* updated_mode_info = mode.data_format.enum_info;
     assert(updated_mode_info && updated_mode_info.count == 4);
@@ -1188,8 +1162,7 @@ unittest
     DiscoveryTestSink second_sink;
     HADiscovery second_discovery;
     second_discovery.configure(prefixes[0 .. 1], &second_sink.publish);
-    assert(second_discovery.handle_publish("homeassistant/sensor/meter/power/config",
-                                           cast(const(ubyte)[])sensor_config, getTime()));
+    assert(second_discovery.handle_publish("homeassistant/sensor/meter/power/config", cast(const(ubyte)[])sensor_config, getTime()));
     Device* second_device_slot = "meter_012" in app.devices;
     assert(second_device_slot && *second_device_slot !is device);
     assert((*second_device_slot).find_element("ha.power"));

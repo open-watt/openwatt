@@ -85,6 +85,8 @@ nothrow @nogc:
         g_app.console.register_command!(control_print, "control")("/apps/energy", this);
         g_app.console.register_command!(why, "why")("/apps/energy", this);
         g_app.console.register_command!(live, "live")("/apps/energy", this);
+
+        register_device_lifecycle_handler(&on_device_lifecycle);
     }
 
     bool started() const pure
@@ -120,6 +122,8 @@ nothrow @nogc:
         instance.topology_dirty = true;
         instance.last_topology_rebuild = MonoTime.init;
         _instance = instance;
+        foreach (Device d; g_app.devices.values)
+            watch_device(d);
         return true;
     }
 
@@ -136,12 +140,9 @@ nothrow @nogc:
         if (!started)
             return;
 
-        auto t = getTime();
-        refresh_device_subscriptions();
-        log_slow_phase("refresh_device_subscriptions", getTime() - t);
         // Reap graph owners first so a removal cannot leave graph pointers live
         // for the rest of the tick.
-        t = getTime();
+        auto t = getTime();
         Collection!EnergyLink().update_all();
         log_slow_phase("link.update_all", getTime() - t);
         t = getTime();
@@ -159,7 +160,10 @@ nothrow @nogc:
             last_topology_rebuild = getTime();
         log_slow_phase("manager.update", getTime() - t);
         t = getTime();
-        topology_publisher.publish(energy_device, manager.graph, manager.islands, rebuild_topology);
+        {
+            DeviceBuilder builder = energy_device.edit();
+            topology_publisher.publish(builder, manager.graph, manager.islands, rebuild_topology);
+        }
         log_slow_phase("publish_topology", getTime() - t);
         t = getTime();
         registry.resync_all(manager.graph);
@@ -191,19 +195,20 @@ nothrow @nogc:
             writeWarning("energy.update.", phase, ": ", d.as!"msecs", "ms");
     }
 
-    void refresh_device_subscriptions()
+    void on_device_lifecycle(Device d, DeviceLifecycleEvent event)
     {
-        foreach (Device d; g_app.devices.values)
-        {
-            if (d is energy_device)
-                continue;
-            if (subscribed_devices[].findFirst(d) < subscribed_devices.length)
-                continue;
-            subscribed_devices ~= d;
-            d.subscribe(&on_device_event);
-            topology_dirty = true;
-            // TODO: resynthesize controls only for appliances affected by the tree change.
-        }
+        if (event == DeviceLifecycleEvent.created && started)
+            watch_device(d);
+    }
+
+    void watch_device(Device d)
+    {
+        if (d is energy_device || subscribed_devices[].findFirst(d) < subscribed_devices.length)
+            return;
+        subscribed_devices ~= d;
+        d.subscribe(&on_device_event);
+        topology_dirty = true;
+        // TODO: resynthesize controls only for appliances affected by the tree change.
     }
 
     void on_device_event(Component c, ComponentEvent event)
@@ -573,10 +578,7 @@ nothrow @nogc:
             extra ~= value;
         }
 
-        void add_row(const(char)[] object, const(char)[] id, const(char)[] kind,
-                     const(char)[] bus, const(char)[] parent, const(char)[] child,
-                     const(char)[] owner, const(char)[] path, const(char)[] role,
-                     const(char)[] state,
+        void add_row(const(char)[] object, const(char)[] id, const(char)[] kind, const(char)[] bus, const(char)[] parent, const(char)[] child, const(char)[] owner, const(char)[] path, const(char)[] role, const(char)[] state,
                      const(char)[] meter, const(char)[] coverage,
                      const(char)[] power, const(char)[] current, const(char)[] extra)
         {
@@ -633,10 +635,7 @@ nothrow @nogc:
                 append_extra(extra, tconcat("unaccounted_source=", fmt(bus.unaccounted_source_power, "W")));
             append_extra(extra, tconcat("metered_ports=", bus.metered_ports));
             append_extra(extra, tconcat("dark_ports=", bus.dark_ports));
-            add_row("bus", bus.id[], "-", bus.id[], "-", "-", "-", "-", "-", "-",
-                "-", coverage_name(bus.coverage),
-                fmt(bus.balance.active[0]), fmt(bus.balance.current[0]),
-                extra.length ? extra[] : "-");
+            add_row("bus", bus.id[], "-", bus.id[], "-", "-", "-", "-", "-", "-", "-", coverage_name(bus.coverage), fmt(bus.balance.active[0]), fmt(bus.balance.current[0]), extra.length ? extra[] : "-");
         }
 
         void add_link_row(Link* link)
@@ -652,11 +651,7 @@ nothrow @nogc:
                 append_extra(extra, tconcat("port_a=", port_id(link.port_a)));
             if (link.port_b)
                 append_extra(extra, tconcat("port_b=", port_id(link.port_b)));
-            add_row("link", link_id(link),
-                link.kind.length ? link.kind : link.owner ? "appliance" : "link",
-                "-", link.a ? link.a.id[] : "-", link.b ? link.b.id[] : "-",
-                link.owner ? link.owner.name[] : "-",
-                "-", "-", link.closed ? "closed" : "open",
+            add_row("link", link_id(link), link.kind.length ? link.kind : link.owner ? "appliance" : "link", "-", link.a ? link.a.id[] : "-", link.b ? link.b.id[] : "-", link.owner ? link.owner.name[] : "-", "-", "-", link.closed ? "closed" : "open",
                 link_meter_path(link, meter_buf[]), "-", power, current,
                 extra.length ? extra[] : "-");
         }
@@ -671,10 +666,7 @@ nothrow @nogc:
                 append_extra(extra, tconcat("phase=", port.meter_phase));
             if (port.label.length != 0)
                 append_extra(extra, tconcat("label=", port.label));
-            add_row("port", port_id(port), "-", port.bus ? port.bus.id[] : "-",
-                "-", "-", port.owner ? port.owner.name[] : "-",
-                port.path.length ? port.path[] : "-",
-                port_role_name(port.role), flow_domain_name(port.flow),
+            add_row("port", port_id(port), "-", port.bus ? port.bus.id[] : "-", "-", "-", port.owner ? port.owner.name[] : "-", port.path.length ? port.path[] : "-", port_role_name(port.role), flow_domain_name(port.flow),
                 meter_path(port.meter, meter_buf[]), "-",
                 fmt(port.meter_data.active[0]), fmt(port.meter_data.current[0]),
                 extra.length ? extra[] : "-");
