@@ -134,12 +134,26 @@ package:
         _bound_device.set_binding_access(this, _current_cap, access);
     }
 
-    void push_samples(ref TeslaTWCMaster.Charger charger)
+    // the elements a wire event can move; a push covers only the groups the master says changed
+    enum Push : ubyte
+    {
+        heartbeat = 1,      // slave heartbeat, or our own offer to it
+        charge_info = 2,
+        link_ready = 4,
+        serial = 8,
+        vehicle = 16,       // the VIN once fully collected, or dropped when the car leaves
+        all = 31,
+    }
+
+    void push_samples(ref TeslaTWCMaster.Charger charger, Push groups = Push.all)
     {
         SysTime timestamp = getSysTime();
+        CommitScope commit = open_commit();
 
         foreach (ref e; _elements)
         {
+            if (!(push_groups[e.kind] & groups))
+                continue;
             final switch (e.kind)
             {
                 case SampleKind.setpoint:
@@ -150,26 +164,26 @@ package:
                     if (e.element.record_update() == SysTime())
                         write_sample(e, charger.specified_max_current, timestamp, &on_cap_change);
                     break;
-                case SampleKind.allocated:       write_sample(e, charger.offered_current, timestamp);                                     break;
-                case SampleKind.accepted:        write_sample(e, charger.charge_current_target, timestamp);                               break;
-                case SampleKind.state:           write_sample(e, cast(ubyte)charger.charger_state, timestamp);                            break;
-                case SampleKind.twc_state:       write_sample(e, cast(ubyte)charger.state, timestamp);                                    break;
-                case SampleKind.max:             write_sample(e, charger.device_max_current, timestamp);                break;
-                case SampleKind.current:         write_sample(e, (charger.flags & 2) ? charger.current : ushort(0), timestamp);            break;
-                case SampleKind.voltage1:        write_sample(e, (charger.flags & 2) ? charger.voltage1 : ushort(0), timestamp);           break;
-                case SampleKind.voltage2:        write_sample(e, (charger.flags & 2) ? charger.voltage2 : ushort(0), timestamp);           break;
-                case SampleKind.voltage3:        write_sample(e, (charger.flags & 2) ? charger.voltage3 : ushort(0), timestamp);           break;
-                case SampleKind.power:           write_sample(e, (charger.flags & 2) ? charger.total_power : ushort(0), timestamp);       break;
-                case SampleKind.power1:          write_sample(e, (charger.flags & 2) ? charger.power1 : ushort(0), timestamp);             break;
-                case SampleKind.power2:          write_sample(e, (charger.flags & 2) ? charger.power2 : ushort(0), timestamp);             break;
-                case SampleKind.power3:          write_sample(e, (charger.flags & 2) ? charger.power3 : ushort(0), timestamp);             break;
+                case SampleKind.allocated:       write_sample(e, charger.offered_current, timestamp);                               break;
+                case SampleKind.accepted:        write_sample(e, charger.charge_current_target, timestamp);                         break;
+                case SampleKind.state:           write_sample(e, cast(ubyte)charger.charger_state, timestamp);                      break;
+                case SampleKind.twc_state:       write_sample(e, cast(ubyte)charger.state, timestamp);                              break;
+                case SampleKind.max:             write_sample(e, charger.device_max_current, timestamp);                            break;
+                case SampleKind.current:         write_sample(e, (charger.flags & 2) ? charger.current : ushort(0), timestamp);     break;
+                case SampleKind.voltage1:        write_sample(e, (charger.flags & 2) ? charger.voltage1 : ushort(0), timestamp);    break;
+                case SampleKind.voltage2:        write_sample(e, (charger.flags & 2) ? charger.voltage2 : ushort(0), timestamp);    break;
+                case SampleKind.voltage3:        write_sample(e, (charger.flags & 2) ? charger.voltage3 : ushort(0), timestamp);    break;
+                case SampleKind.power:           write_sample(e, (charger.flags & 2) ? charger.total_power : ushort(0), timestamp); break;
+                case SampleKind.power1:          write_sample(e, (charger.flags & 2) ? charger.power1 : ushort(0), timestamp);      break;
+                case SampleKind.power2:          write_sample(e, (charger.flags & 2) ? charger.power2 : ushort(0), timestamp);      break;
+                case SampleKind.power3:          write_sample(e, (charger.flags & 2) ? charger.power3 : ushort(0), timestamp);      break;
                 case SampleKind.import_:
                 case SampleKind.lifetime_energy:
                     write_sample(e, (charger.flags & 2) ? ulong(charger.lifetime_energy) * 1000 : ulong(0), timestamp);
                     break;
-                case SampleKind.serial_number:   write_sample(e, (charger.flags & 4) ? charger.serial_number[] : "", timestamp);       break;
-                case SampleKind.vin:             write_sample(e, (charger.flags & 0xF0) == 0xF0 ? charger.vin[] : "", timestamp);      break;
-                case SampleKind.circuit:         write_sample(e, (charger.flags & 0xF0) == 0xF0 ? charger.vin[] : "", timestamp);      break;
+                case SampleKind.serial_number:   write_sample(e, (charger.flags & 4) ? charger.serial_number[] : "", timestamp);    break;
+                case SampleKind.vin:             write_sample(e, (charger.flags & 0xF0) == 0xF0 ? charger.vin[] : "", timestamp);   break;
+                case SampleKind.circuit:         write_sample(e, (charger.flags & 0xF0) == 0xF0 ? charger.vin[] : "", timestamp);   break;
             }
         }
     }
@@ -283,6 +297,13 @@ private:
     Element* _target_current;
     Element* _current_cap;
     Array!SampleElement _elements;
+
+    // indexed by SampleKind
+    __gshared immutable Push[SampleKind.circuit + 1] push_groups = [
+        Push.heartbeat, Push.heartbeat, Push.heartbeat, Push.heartbeat, Push.heartbeat, Push.heartbeat, Push.link_ready,
+        Push.heartbeat, Push.charge_info, Push.charge_info, Push.charge_info, Push.charge_info, Push.charge_info,
+        Push.charge_info, Push.charge_info, Push.charge_info, Push.charge_info, Push.serial, Push.vehicle, Push.vehicle,
+    ];
 
     Element* add_sample(ref DeviceBuilder b, Component parent, const(char)[] id, SampleKind kind, FormatId format, Access access = Access.read)
     {
