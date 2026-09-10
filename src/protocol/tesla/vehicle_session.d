@@ -40,6 +40,16 @@ nothrow @nogc:
 
 enum Bar = ScaledUnit(Pascal, 5);
 
+enum TeslaEnrolResult : ubyte
+{
+    waiting,
+    enrolled,
+    rejected,
+    abandoned,
+}
+
+alias TeslaEnrolObserver = void delegate(TeslaEnrolResult result, uint information) nothrow @nogc;
+
 class TeslaVehicleSession : ActiveObject
 {
 nothrow @nogc:
@@ -126,6 +136,39 @@ nothrow @nogc:
         => _last_seen;
 
 package:
+    // null once the request is away; the observer carries the vehicle's answer.
+    const(char)[] request_enrolment(TeslaKeyRole role, TeslaEnrolObserver observer)
+    {
+        if (_phase == Phase.ready)
+            return "key is already enrolled";
+        if (_client is null || _tx_handle == 0)
+            return "vehicle is not connected";
+        if (_enrol_observer)
+            return "an enrolment is already in progress";
+
+        TeslaKeyRole previous = _enrol_role;
+        _enrol_role = role;
+        _enrol_information = 0;
+        if (!send_add_key_request())
+        {
+            _enrol_role = previous;
+            return "failed to send the enrolment request";
+        }
+
+        _enrol_observer = observer;
+        _phase = Phase.awaiting_approval;
+        _approval_toggle = true;
+        _approval_deadline = getTime() + approval_window;
+        _last_request_time = getTime();
+        return null;
+    }
+
+    void cancel_enrolment(TeslaEnrolObserver observer)
+    {
+        if (_enrol_observer is observer)
+            _enrol_observer = null;
+    }
+
     void reset_retry_status()
     {
         _fault = null;
@@ -238,7 +281,9 @@ protected:
         }
         _retry_poll = PollKind.none;
         _auth_failures = 0;
+        notify_enrolment(TeslaEnrolResult.abandoned, _enrol_information);
         _enrol_information = 0;
+        _enrol_role = TeslaKeyRole.owner;
         unsubscribe_vehicle_controls();
         if (_subscribed)
         {
@@ -338,6 +383,7 @@ private:
                 if (now >= _approval_deadline)
                 {
                     record_failure(VehicleCommandKind.unknown, 0, enrolment_failure(), false);
+                    notify_enrolment(TeslaEnrolResult.abandoned, _enrol_information);
                     return CompletionStatus.error;
                 }
                 // Avoid overlapping GATT writes while waiting for NFC approval.
@@ -381,7 +427,9 @@ private:
     BLEClient _client;
     bool _subscribed;
     bool _approval_toggle;
+    TeslaKeyRole _enrol_role = TeslaKeyRole.owner;
     ubyte _enrol_information;
+    TeslaEnrolObserver _enrol_observer;
     MonoTime _approval_deadline;
     ushort _tx_handle;
     ushort _rx_handle;
@@ -680,7 +728,7 @@ private:
             return false;
         }
 
-        Array!ubyte msg = build_add_key_request(pub);
+        Array!ubyte msg = build_add_key_request(pub, _enrol_role);
         return write_tesla_frame(msg[]);
     }
 
@@ -790,6 +838,7 @@ private:
         if (status.operation == TeslaOperationStatus.wait)
         {
             log.info("vehicle for VIN '", name[], "' is waiting for the key card tap");
+            notify_enrolment(TeslaEnrolResult.waiting, 0);
             return;
         }
 
@@ -804,6 +853,17 @@ private:
             log.warning("vehicle for VIN '", name[], "' refused enrolment, information ", information);
 
         _enrol_information = information > ubyte.max ? ubyte.max : cast(ubyte)information;
+        notify_enrolment(TeslaEnrolResult.rejected, information);
+    }
+
+    void notify_enrolment(TeslaEnrolResult result, uint information)
+    {
+        TeslaEnrolObserver observer = _enrol_observer;
+        if (!observer)
+            return;
+        if (result != TeslaEnrolResult.waiting)
+            _enrol_observer = null;
+        observer(result, information);
     }
 
     const(char)[] enrolment_failure()
@@ -1033,6 +1093,8 @@ private:
         }
         else
         {
+            if (_phase == Phase.awaiting_approval)
+                notify_enrolment(TeslaEnrolResult.enrolled, 0);
             log.info("trust verified for VIN '", name[], "', establishing infotainment session");
             send_session_info_request(TeslaDomain.infotainment);
             _phase = Phase.info_xchg;

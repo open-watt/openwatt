@@ -68,12 +68,18 @@ bool parse_tesla_local_name(const(char)[] local_name, out ubyte[8] hash) pure
     return hex_decode(local_name[1 .. 17], hash[]) == 8;
 }
 
+// Keys.Role, restricted to the roles a key may enrol itself into.
+enum TeslaKeyRole : ubyte
+{
+    owner = 2,
+    driver = 3,
+}
+
 // NFC authorises this otherwise unsigned pairing request.
-Array!ubyte build_add_key_request(const(ubyte)[] pubkey_xy)
+Array!ubyte build_add_key_request(const(ubyte)[] pubkey_xy, TeslaKeyRole role)
 {
     assert(pubkey_xy.length == 64, "Tesla AddKey requires 64-byte raw public point");
 
-    enum uint role_owner = 2;                  // Keys.Role.ROLE_OWNER
     enum uint form_factor_cloud_key = 9;       // vcsec.KeyFormFactor.KEY_FORM_FACTOR_CLOUD_KEY
     enum uint signature_type_present_key = 2;  // vcsec.SignatureType.SIGNATURE_TYPE_PRESENT_KEY
 
@@ -81,7 +87,7 @@ Array!ubyte build_add_key_request(const(ubyte)[] pubkey_xy)
     ref whitelist = unsigned.whitelist_operation.ensure();
     ref permission = whitelist.add_key_to_whitelist_and_add_permissions.ensure();
     set_sec1(permission.key.ensure().public_key_raw, pubkey_xy);
-    permission.key_role.set(role_owner);
+    permission.key_role.set(uint(role));
     whitelist.metadata_for_key.ensure().key_form_factor.set(form_factor_cloud_key);
 
     Array!ubyte unsigned_bytes = encode(unsigned);
@@ -622,10 +628,15 @@ unittest
     static ubyte[16] tg = () { ubyte[16] a; foreach (i; 0 .. 16) a[i] = cast(ubyte)(0x80 + i); return a; }();
     static immutable ubyte[6] ct = [1,2,3,4,5,6];
 
-    assert(build_add_key_request(pub_xy[])[] == HexDecode!(
+    assert(build_add_key_request(pub_xy[], TeslaKeyRole.owner)[] == HexDecode!(
         "0A54125082014D2A470A430A4104000102030405060708090A0B0C0D0E0F1011121314151617"
         ~ "18191A1B1C1D1E1F202122232425262728292A2B2C2D2E2F303132333435363738393A3B3C3D3E3F"
         ~ "2002320208091802"));
+    assert(build_add_key_request(pub_xy[], TeslaKeyRole.driver)[] == HexDecode!(
+        "0A54125082014D2A470A430A4104000102030405060708090A0B0C0D0E0F1011121314151617"
+        ~ "18191A1B1C1D1E1F202122232425262728292A2B2C2D2E2F303132333435363738393A3B3C3D3E3F"
+        ~ "2003320208091802"));
+
     static immutable ubyte[] vcsec_waiting = HexDecode!"22020801";
     static immutable ubyte[] vcsec_whitelist_full = HexDecode!"220608021a020804";
     static immutable ubyte[] vcsec_no_error = HexDecode!"220408001a00";

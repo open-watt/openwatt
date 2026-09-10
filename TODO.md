@@ -272,6 +272,15 @@ the commit history and linked design documents carry the implementation record.
   which codes are genuinely terminal; a code misclassified as terminal aborts enrolments that
   would have worked.
 
+- **[#526] Offer ROLE_CHARGING_MANAGER when enrolling**: `Keys.Role` 6 is the least-privilege
+  role for what OpenWatt actually does, and would drop the owner-level authority the enrolled
+  key currently holds. Held back only because AddKey has never been tried with it: a role the
+  vehicle refuses costs an approval window to discover.
+
+- **Document the rest of `/protocol/tesla/session`**: `get-charge`, `get-climate`,
+  `charge-start`, `charge-stop`, `set-amps`, `climate`, `set-temperature` and
+  `schedule-charging` have never been listed in [docs/CLI.md](docs/CLI.md); only `enrol` is.
+
 - **Honor addr_type in Windows BLE connect**: `ble_hw_connect` in urt's Windows driver drops
   its `addr_type` argument; `FromBluetoothAddressAsync` assumes a public address, so connecting
   to the (random-address) vehicle likely only works while Windows has it in its scan cache.

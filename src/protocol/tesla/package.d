@@ -1,9 +1,13 @@
 module protocol.tesla;
 
+import urt.mem;
 import urt.meta.nullable;
+import urt.string;
 import urt.time;
+import urt.variant;
 
 import manager;
+import manager.base;
 import manager.collection;
 import manager.console.command;
 import manager.console.session;
@@ -53,6 +57,7 @@ nothrow @nogc:
             g_app.console.register_command!(vehicle_set_temperature, "set-temperature")("/protocol/tesla/session", this);
         }
         g_app.console.register_command!(vehicle_schedule_charging, "schedule-charging")("/protocol/tesla/session", this);
+        g_app.console.register_command!(vehicle_enrol, "enrol")("/protocol/tesla/session", this);
         g_app.console.register_command!(vehicle_backoff, "backoff")("/protocol/tesla/vehicle-scanner", this);
         g_app.console.register_command!(vehicle_reset_backoff, "reset-backoff")("/protocol/tesla/vehicle-scanner", this);
     }
@@ -213,4 +218,90 @@ nothrow @nogc:
             session.write_line("charging schedule disable sent");
     }
 
+    CommandState vehicle_enrol(Session session, TeslaVehicleSession vehicle, Nullable!TeslaKeyRole role)
+    {
+        TeslaEnrolCommandState state = alloc!TeslaEnrolCommandState(session, vehicle);
+        const(char)[] refused = vehicle.request_enrolment(role ? role.value : TeslaKeyRole.owner, &state.on_result);
+        if (refused)
+        {
+            session.write_line(refused);
+            free(state);
+            return null;
+        }
+        session.write_line("enrolment requested; tap an enrolled key card on the console reader");
+        return state;
+    }
+
+}
+
+// The vehicle answers a refusal at once, but only ever proves success by admitting us to a session.
+private class TeslaEnrolCommandState : CommandState
+{
+nothrow @nogc:
+
+    // The session gives up first; this only bounds a session that stops answering altogether.
+    enum Duration answer_timeout = 90.seconds;
+
+    this(Session session, TeslaVehicleSession vehicle)
+    {
+        super(session);
+        _vehicle = vehicle;
+        _deadline = getTime() + answer_timeout;
+    }
+
+    void on_result(TeslaEnrolResult outcome, uint information)
+    {
+        if (_completion != CommandCompletionState.in_progress)
+            return;
+
+        final switch (outcome)
+        {
+            case TeslaEnrolResult.waiting:
+                return;
+            case TeslaEnrolResult.enrolled:
+                result = Variant(StringLit!"key enrolled");
+                _completion = CommandCompletionState.finished;
+                return;
+            case TeslaEnrolResult.rejected:
+                const(char)[] reason = whitelist_information_reason(information);
+                result = reason ? Variant(MutableString!0(Concat, reason))
+                                : Variant(MutableString!0(Concat, "vehicle refused enrolment, information ", information));
+                _completion = CommandCompletionState.error;
+                return;
+            case TeslaEnrolResult.abandoned:
+                result = Variant(StringLit!"vehicle abandoned the enrolment");
+                _completion = CommandCompletionState.error;
+                return;
+        }
+    }
+
+    override CommandCompletionState update()
+    {
+        if (_completion != CommandCompletionState.in_progress)
+            return finish(_completion);
+        if (getTime() >= _deadline)
+        {
+            result = Variant(StringLit!"no answer from the vehicle");
+            return finish(CommandCompletionState.timeout);
+        }
+        return CommandCompletionState.in_progress;
+    }
+
+    override void request_cancel()
+    {
+        if (_completion == CommandCompletionState.in_progress)
+            _completion = CommandCompletionState.cancelled;
+    }
+
+private:
+    ObjectRef!TeslaVehicleSession _vehicle;
+    MonoTime _deadline;
+    CommandCompletionState _completion;
+
+    CommandCompletionState finish(CommandCompletionState state)
+    {
+        if (_vehicle)
+            _vehicle.cancel_enrolment(&on_result);
+        return state;
+    }
 }
