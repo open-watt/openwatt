@@ -1184,7 +1184,7 @@ bool port_role_is(Component c, const(char)[] role)
     if (c is null || c.template_[] != "Port")
         return false;
     Element* e = c.find_element("role");
-    return e && e.value.isString && e.value.asString == role;
+    return e && e.text_value() == role;
 }
 
 
