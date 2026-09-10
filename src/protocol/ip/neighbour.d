@@ -1,13 +1,19 @@
 module protocol.ip.neighbour;
 
-version (UseInternalIPStack):
-
 import urt.array;
 import urt.inet;
 import urt.log;
+import urt.mem.temp : tconcat;
+import urt.meta : AliasSeq;
 import urt.time;
 
+import manager.base;
+import manager.collection;
+import manager.expression : NamedArgument;
+import manager.features : has_ipv6;
+
 import router.iface;
+import router.iface.mac : MACAddress;
 import router.iface.packet;
 
 private alias log = Log!"neighbour";
@@ -24,7 +30,150 @@ enum NeighbourState : ubyte
     reachable,      // confirmed within reachable_time
     stale,          // unconfirmed, use but probe on next send
     failed,         // resolution gave up -> drop queued packets
+    permanent,      // configured; never aged or probed
 }
+
+// The neighbour table. Learned entries are dynamic objects published by whichever stack resolves
+// (the in-tree cache, or the kernel on mirror builds); configured entries are static and are
+// pushed down to it.
+class IPNeighbour : BaseObject
+{
+nothrow @nogc:
+
+    enum type_name = "ip-neighbour";
+    enum path = "/protocol/ip/neighbour";
+    enum collection_id = CollectionType.ip_neighbour;
+
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
+    {
+        super(collection_type_info!IPNeighbour, id, flags);
+        _state = (flags & ObjectFlags.dynamic) ? NeighbourState.incomplete : NeighbourState.permanent;
+    }
+
+    mixin NeighbourImpl!IPAddr;
+}
+
+static if (has_ipv6)
+class IPv6Neighbour : BaseObject
+{
+nothrow @nogc:
+
+    enum type_name = "ipv6-neighbour";
+    enum path = "/protocol/ip/neighbour6";
+    enum collection_id = CollectionType.ip_neighbour6;
+
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
+    {
+        super(collection_type_info!IPv6Neighbour, id, flags);
+        _state = (flags & ObjectFlags.dynamic) ? NeighbourState.incomplete : NeighbourState.permanent;
+    }
+
+    mixin NeighbourImpl!IPv6Addr;
+}
+
+mixin template NeighbourImpl(IP)
+{
+    alias Properties = AliasSeq!(Prop!("address", address, null, "d"),
+                                 Prop!("mac", mac, null, "d"),
+                                 Prop!("interface", iface, null, "d"),
+                                 Prop!("state", state, null, "d"));
+nothrow @nogc:
+
+    IP address() const pure
+        => _address;
+    const(char)[] address(IP value)
+    {
+        if (value == IP.any)
+            return is(IP == IPv6Addr) ? "address cannot be ::" : "address cannot be 0.0.0.0";
+        _address = value;
+        mark_set!(typeof(this), "address")();
+        return null;
+    }
+
+    MACAddress mac() const pure
+        => _mac;
+    const(ubyte)[] link_address() const pure
+        => _mac.b[];
+    void mac(MACAddress value)
+    {
+        _mac = value;
+        mark_set!(typeof(this), "mac")();
+    }
+
+    inout(BaseInterface) iface() inout pure
+        => _iface;
+    const(char)[] iface(BaseInterface value)
+    {
+        if (!value)
+            return "interface cannot be null";
+        _iface = value;
+        mark_set!(typeof(this), "interface")();
+        return null;
+    }
+
+    NeighbourState state() const pure
+        => _state;
+
+    // Learned entries only: whatever resolves on this build reports what it observed.
+    void learned(NeighbourState state, MACAddress mac)
+    {
+        if (_state != state)
+        {
+            _state = state;
+            mark_set!(typeof(this), "state")();
+        }
+        if (_mac != mac)
+        {
+            _mac = mac;
+            mark_set!(typeof(this), "mac")();
+        }
+    }
+
+protected:
+
+    override bool validate() const pure nothrow @nogc
+        => _iface !is null && _address != IP.any && (_state != NeighbourState.permanent || _mac != MACAddress());
+
+private:
+    IP _address;
+    MACAddress _mac;
+    ObjectRef!BaseInterface _iface;
+    NeighbourState _state;
+}
+
+// Reflect one learned entry into the collection: update or create its dynamic object, or destroy it
+// when the resolver dropped it. A configured entry for the same key owns it; no dynamic twin then.
+void publish_neighbour(T, IP)(BaseInterface iface, IP address, NeighbourState state, MACAddress mac, bool removed)
+{
+    T twin;
+    foreach (n; Collection!T().values)
+    {
+        if (n.iface !is iface || n.address != address)
+            continue;
+        if (n.flags & ObjectFlags.dynamic)
+            twin = n;
+        else
+            removed = true;
+    }
+    if (twin)
+    {
+        if (removed)
+            twin.destroy();
+        else
+            twin.learned(state, mac);
+        return;
+    }
+    if (removed)
+        return;
+
+    T n = Collection!T().create(Collection!T().generate_name(tconcat(address)), ObjectFlags.dynamic, NamedArgument("address", address), NamedArgument("interface", iface));
+    if (n)
+        n.learned(state, mac);
+}
+
+
+version (UseInternalIPStack):
+
 
 struct NeighbourEntry(IP)
 {
@@ -45,8 +194,10 @@ struct NeighbourCache(IP)
 {
 nothrow @nogc:
 
-    alias SendRequestDg = void delegate(IP target, BaseInterface iface) nothrow @nogc;
-    alias DrainDg       = void delegate(ref Packet pkt, BaseInterface iface, const(ubyte)[] link_addr) nothrow @nogc;
+    alias SendRequestDg  = void delegate(IP target, BaseInterface iface) nothrow @nogc;
+    alias DrainDg        = void delegate(ref Packet pkt, BaseInterface iface, const(ubyte)[] link_addr) nothrow @nogc;
+    alias StaticLookupDg = const(ubyte)[] delegate(IP target, BaseInterface iface) nothrow @nogc;
+    alias ChangedDg      = void delegate(ref const NeighbourEntry!IP e, bool removed) nothrow @nogc;
 
     enum uint  retry_interval_ms       = 1000;
     enum ubyte max_retries             = 3;
@@ -55,12 +206,14 @@ nothrow @nogc:
     enum ubyte max_stale_probes        = 3;
     enum uint  failed_lifetime_ms      = 60_000;
 
-    SendRequestDg send_request;
-    DrainDg       drain;
+    SendRequestDg  send_request;
+    DrainDg        drain;
+    StaticLookupDg static_lookup;   // configured entries win over anything learned
+    ChangedDg      changed;         // publishes learned entries to the neighbour collection
 
     void learn(IP ip, BaseInterface iface, const(ubyte)[] link_addr)
     {
-        if (link_addr.length == 0 || link_addr.length > 16)
+        if (link_addr.length == 0 || link_addr.length > 16 || is_static(ip, iface))
             return;
 
         MonoTime now = getTime();
@@ -74,6 +227,7 @@ nothrow @nogc:
                 e.state          = NeighbourState.reachable;
                 e.last_confirmed = now;
                 e.retry_count    = 0;
+                touch(e);
                 drain_pending(e);
                 return;
             }
@@ -87,11 +241,12 @@ nothrow @nogc:
         n.state                    = NeighbourState.reachable;
         n.last_confirmed           = now;
         _entries ~= n;
+        touch(_entries[$ - 1]);
     }
 
     void observe(IP ip, BaseInterface iface, const(ubyte)[] link_addr)
     {
-        if (link_addr.length == 0 || link_addr.length > 16)
+        if (link_addr.length == 0 || link_addr.length > 16 || is_static(ip, iface))
             return;
 
         if (auto e = find(ip, iface))
@@ -103,6 +258,7 @@ nothrow @nogc:
                 e.link_addr_len = cast(ubyte)link_addr.length;
                 e.state = NeighbourState.stale;
                 e.retry_count = 0;
+                touch(*e);
             }
             drain_pending(*e);
             return;
@@ -116,10 +272,13 @@ nothrow @nogc:
         entry.state = NeighbourState.stale;
         entry.last_request = getTime();
         _entries ~= entry;
+        touch(_entries[$ - 1]);
     }
 
     bool advertise(IP ip, BaseInterface iface, const(ubyte)[] link_addr, bool router, bool solicited, bool override_)
     {
+        if (is_static(ip, iface))
+            return true;
         NeighbourEntry!IP* entry = find(ip, iface);
         if (!entry)
             return false;
@@ -141,6 +300,7 @@ nothrow @nogc:
                 if (entry.state == NeighbourState.reachable)
                     entry.state = NeighbourState.stale;
                 entry.is_router = router;
+                touch(*entry);
                 return true;
             }
             if (changed)
@@ -159,6 +319,7 @@ nothrow @nogc:
         entry.retry_count = 0;
         if (solicited)
             entry.last_confirmed = getTime();
+        touch(*entry);
         drain_pending(*entry);
         return true;
     }
@@ -176,6 +337,12 @@ nothrow @nogc:
     // On in-flight, replaces the queued packet (single-slot).
     const(ubyte)[] resolve(IP ip, BaseInterface iface, ref Packet pending)
     {
+        if (static_lookup)
+        {
+            if (const(ubyte)[] link = static_lookup(ip, iface))
+                return link;
+        }
+
         if (auto e = find(ip, iface))
         {
             final switch (e.state) with (NeighbourState)
@@ -188,6 +355,7 @@ nothrow @nogc:
                     e.state        = NeighbourState.incomplete;
                     e.last_request = getTime();
                     e.retry_count  = 1;
+                    touch(*e);
                     queue_pending(*e, pending);
                     if (send_request)
                         send_request(ip, iface);
@@ -195,6 +363,8 @@ nothrow @nogc:
                 case incomplete:
                     queue_pending(*e, pending);
                     return null;
+                case permanent:
+                    assert(false, "permanent entries live in the collection, not the cache");
             }
         }
 
@@ -206,6 +376,7 @@ nothrow @nogc:
         n.retry_count   = 1;
         queue_pending(n, pending);
         _entries ~= n;
+        touch(_entries[$ - 1]);
 
         if (send_request)
             send_request(ip, iface);
@@ -227,6 +398,7 @@ nothrow @nogc:
                         e.state = NeighbourState.failed;
                         e.last_confirmed = now;     // repurposed as failure timestamp
                         free_pending(e);
+                        touch(e);
                         break;
                     }
                     ++e.retry_count;
@@ -241,6 +413,7 @@ nothrow @nogc:
                         e.state        = NeighbourState.stale;
                         e.last_request = now;       // arm probe interval
                         e.retry_count  = 0;
+                        touch(e);
                     }
                     break;
 
@@ -251,6 +424,7 @@ nothrow @nogc:
                     {
                         e.state          = NeighbourState.failed;
                         e.last_confirmed = now;
+                        touch(e);
                         break;
                     }
                     ++e.retry_count;
@@ -260,6 +434,7 @@ nothrow @nogc:
                     break;
 
                 case failed:
+                case permanent:
                     break;
             }
         }
@@ -273,6 +448,8 @@ nothrow @nogc:
                 && now - e.last_confirmed >= failed_lifetime_ms.msecs)
             {
                 free_pending(*e);
+                if (changed)
+                    changed(*e, true);
                 _entries.removeSwapLast(idx);
             }
         }
@@ -282,6 +459,15 @@ nothrow @nogc:
         => _entries[];
 
 private:
+    bool is_static(IP ip, BaseInterface iface)
+        => static_lookup && static_lookup(ip, iface) !is null;
+
+    void touch(ref NeighbourEntry!IP e)
+    {
+        if (changed)
+            changed(e, false);
+    }
+
     void queue_pending(ref NeighbourEntry!IP e, ref Packet pkt)
     {
         if (e.pending_count == pending_queue_depth)
@@ -329,6 +515,27 @@ private:
 
     Array!(NeighbourEntry!IP) _entries;
     ulong _pending_overflow;
+}
+
+
+// The collection-facing halves of the cache delegates.
+const(ubyte)[] static_link(T, IP)(IP ip, BaseInterface iface)
+{
+    foreach (n; Collection!T().values)
+    {
+        if (!(n.flags & ObjectFlags.dynamic) && n.iface is iface && n.address == ip)
+            return n.link_address;
+    }
+    return null;
+}
+
+void publish_entry(T, IP)(ref const NeighbourEntry!IP e, bool removed)
+{
+    MACAddress mac;
+    if (e.link_addr_len == 6)
+        mac.b[] = e.link_addr[0 .. 6];
+    IP address = e.ip;
+    publish_neighbour!T(cast(BaseInterface)e.iface, address, e.state, mac, removed);
 }
 
 

@@ -3,6 +3,23 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-09-09: neighbour tables become collections
+
+- New collections `/protocol/ip/neighbour` (type `ip-neighbour`) and
+  `/protocol/ip/neighbour6` (type `ipv6-neighbour`) on every build, with
+  `address`, `mac`, `interface` and a read-only `state`
+  (`incomplete|reachable|stale|failed|permanent`).
+- Learned entries carry the dynamic (`D`) flag and are named by address; the
+  resolver (in-tree cache or the Linux kernel) creates, updates and destroys
+  them. Expect churn on `state` and `mac`; render them as a live table, not as
+  editable rows.
+- Configured entries are the operator's: `add` with `address`, `mac` and
+  `interface`; `state` reads `permanent`. Editing `mac` on a live entry is
+  allowed. A configured entry replaces any learned twin for the same address
+  and interface.
+- The previous function-style `/protocol/ip/neighbour/print` and
+  `neighbour6/print` outputs (columns `ip mac state rtry iface`) are gone;
+  the collection print replaces them without the retry column.
 ## 2026-09-09: Tesla vehicle write authority (PR #683)
 
 - Use the vehicle's `control.min` value for charging sliders; Tesla VIN registration now

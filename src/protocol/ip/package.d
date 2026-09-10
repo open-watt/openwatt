@@ -23,6 +23,7 @@ import manager.reactor;
 import manager : EventPriority, g_app;
 
 import protocol.ip.address;
+import protocol.ip.neighbour;
 import protocol.ip.pool;
 import protocol.ip.route;
 import protocol.ip.stack;
@@ -2096,11 +2097,13 @@ nothrow @nogc:
     override void init()
     {
         g_app.console.register_collection!IPAddress();
+        g_app.console.register_collection!IPNeighbour();
         g_app.console.register_collection!IPPool();
         g_app.console.register_collection!IPRoute();
         static if (has_ipv6)
         {
             g_app.console.register_collection!IPv6Address();
+            g_app.console.register_collection!IPv6Neighbour();
             g_app.console.register_collection!IPv6Pool();
             g_app.console.register_collection!IPv6Route();
         }
@@ -2116,6 +2119,13 @@ nothrow @nogc:
         version (UseInternalIPStack)
         {
             _stack.init_resolvers();
+            _stack.neighbour_v4_cache.static_lookup = &neighbour_v4_static;
+            _stack.neighbour_v4_cache.changed = &neighbour_v4_changed;
+            static if (has_ipv6)
+            {
+                _stack.neighbour_v6_cache.static_lookup = &neighbour_v6_static;
+                _stack.neighbour_v6_cache.changed = &neighbour_v6_changed;
+            }
 
             register_frame_handler(PacketType.ethernet, &_stack.on_packet);
             // TODO: register additional frame handlers when other L3 carriers land
@@ -2125,9 +2135,6 @@ nothrow @nogc:
 
             import protocol.ip.tcp : tcp_print;
             g_app.console.register_command!(tcp_print, "print")("/protocol/ip/tcp", this);
-            g_app.console.register_command!(neighbour_v4_print, "print")("/protocol/ip/neighbour", this);
-            static if (has_ipv6)
-                g_app.console.register_command!(neighbour_v6_print, "print")("/protocol/ip/neighbour6", this);
         }
         else version (Windows)
             load_socket_extensions();
@@ -2148,80 +2155,25 @@ nothrow @nogc:
     }
 
     version (UseInternalIPStack)
-    void neighbour_v4_print(Session session)
     {
-        import router.iface.mac : MACAddress;
-        import manager.console.table : Table;
-        import urt.mem.temp : tconcat;
+        const(ubyte)[] neighbour_v4_static(IPAddr ip, BaseInterface iface)
+            => static_link!IPNeighbour(ip, iface);
 
-        auto entries = _stack.neighbour_v4_cache.entries;
-        if (entries.length == 0)
+        void neighbour_v4_changed(ref const NeighbourEntry!IPAddr e, bool removed)
         {
-            session.write_line("No IPv4 neighbour entries");
-            return;
+            publish_entry!IPNeighbour(e, removed);
         }
 
-        Table t;
-        t.add_column("ip");
-        t.add_column("mac");
-        t.add_column("state");
-        t.add_column("rtry", Table.TextAlign.right);
-        t.add_column("iface");
-
-        foreach (ref e; entries)
+        static if (has_ipv6)
         {
-            MACAddress mac;
-            if (e.link_addr_len >= 6)
-                mac.b[] = e.link_addr[0 .. 6];
+            const(ubyte)[] neighbour_v6_static(IPv6Addr ip, BaseInterface iface)
+                => static_link!IPv6Neighbour(ip, iface);
 
-            t.add_row();
-            t.cell(tconcat(e.ip));
-            t.cell(tconcat(mac));
-            t.cell(tconcat(e.state));
-            t.cell(tconcat(e.retry_count));
-            t.cell(e.iface ? e.iface.name[] : "");
+            void neighbour_v6_changed(ref const NeighbourEntry!IPv6Addr e, bool removed)
+            {
+                publish_entry!IPv6Neighbour(e, removed);
+            }
         }
-
-        t.render(session);
-    }
-
-    version (UseInternalIPStack)
-    static if (has_ipv6)
-    void neighbour_v6_print(Session session)
-    {
-        import urt.mem.temp : tconcat;
-        import manager.console.table : Table;
-        import router.iface.mac : MACAddress;
-
-        auto entries = _stack.neighbour_v6_cache.entries;
-        if (entries.length == 0)
-        {
-            session.write_line("No IPv6 neighbour entries");
-            return;
-        }
-
-        Table t;
-        t.add_column("ip");
-        t.add_column("mac");
-        t.add_column("state");
-        t.add_column("rtry", Table.TextAlign.right);
-        t.add_column("iface");
-
-        foreach (ref e; entries)
-        {
-            MACAddress mac;
-            if (e.link_addr_len >= 6)
-                mac.b[] = e.link_addr[0 .. 6];
-
-            t.add_row();
-            t.cell(tconcat(e.ip));
-            t.cell(tconcat(mac));
-            t.cell(tconcat(e.state));
-            t.cell(tconcat(e.retry_count));
-            t.cell(e.iface ? e.iface.name[] : "");
-        }
-
-        t.render(session);
     }
 
     version (UseInternalIPStack)

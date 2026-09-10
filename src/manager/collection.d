@@ -43,6 +43,8 @@ enum CollectionType : ubyte
     interface_group,
     ip_address,
     ip_address6,
+    ip_neighbour,
+    ip_neighbour6,
     ip_pool,
     ip_pool6,
     ip_route,

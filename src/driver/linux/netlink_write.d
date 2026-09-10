@@ -41,11 +41,17 @@ enum : ubyte
     AF_INET6 = 10,
 }
 
-// Neighbour state / flags the caller chooses (ndm_state / ndm_flags).
+// Neighbour state / flags (ndm_state / ndm_flags).
 enum : ushort
 {
-    NUD_PERMANENT = 0x80,   // static, never aged or probed by the kernel
-    NUD_REACHABLE = 0x02,   // confirmed; pair with NTF_EXT_LEARNED for control-plane entries
+    NUD_INCOMPLETE = 0x01,
+    NUD_REACHABLE  = 0x02,   // confirmed; pair with NTF_EXT_LEARNED for control-plane entries
+    NUD_STALE      = 0x04,
+    NUD_DELAY      = 0x08,
+    NUD_PROBE      = 0x10,
+    NUD_FAILED     = 0x20,
+    NUD_NOARP      = 0x40,   // pseudo entry (multicast, point-to-point); never resolved
+    NUD_PERMANENT  = 0x80,   // static, never aged or probed by the kernel
 }
 enum : ubyte
 {

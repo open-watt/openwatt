@@ -669,18 +669,6 @@ this is what remains.
   route-netlink watch above. The startup sweep of stale `RTPROT_OPENWATT` entries relies on
   `IFA_PROTO` for addresses, which kernels before 5.18 ignore; on those only routes are swept.
 
-- **Neighbour table as a collection** (agreed 2026-09-09, next PR after #681): make
-  `/protocol/ip/neighbour` and `neighbour6` collections (`address`, `mac`, `interface`, read-only
-  `state`) on every build. Learned entries are dynamic objects, D-flagged like SLAAC addresses:
-  on kernel-mirror builds created, updated and destroyed from `RTNLGRP_NEIGH` events on the
-  shared listener in `driver/linux/netlink.d` (seeded by one `RTM_GETNEIGH` dump), on the
-  internal stack from the existing cache. Static entries sync back: the mirror tracks them like
-  addresses and routes and pushes `NUD_PERMANENT | NTF_EXT_LEARNED`, the flag doubling as the
-  ownership marker for the startup sweep since neighbours carry no protocol tag; the internal
-  stack installs them as permanent cache entries. The function-style neighbour prints go away.
-  While there, move the listener off its per-tick non-blocking recv onto the reactor via
-  `fdwatch`.
-
 - **Fix the HTTP binding request-state wedge**: reproduce with request tracing, then replace
   FIFO response correlation with request handles. A rejected or timed-out submission must
   clear `in_flight`; late responses must not complete a different request.

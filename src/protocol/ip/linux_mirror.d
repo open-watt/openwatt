@@ -2,12 +2,13 @@ module protocol.ip.linux_mirror;
 
 version (KernelMirror):
 
-// Mirror OpenWatt's IP tables (addresses and routes, both families) into the Linux kernel via
-// rtnetlink -- event-driven, not polled. OpenWatt is the control plane; the kernel is the data
-// plane. Routes and addresses are tagged RTPROT_OPENWATT so we only ever delete what we added.
+// Mirror OpenWatt's IP tables (addresses, routes and static neighbours, both families) into the
+// Linux kernel via rtnetlink -- event-driven, not polled. OpenWatt is the control plane; the kernel
+// is the data plane. Routes and addresses are tagged RTPROT_OPENWATT and neighbours NTF_EXT_LEARNED
+// so we only ever delete what we added.
 //
-//   * Addresses / routes are collection-managed BaseObjects. We hook the global object
-//     create/destroy handlers, and attach a property-delta slot to each
+//   * Addresses / routes / static neighbours are collection-managed BaseObjects. We hook the
+//     global object create/destroy handlers, and attach a property-delta slot to each
 //     (BaseObject.attach_delta_slot) so every property edit fans into the mirror's dirty mask --
 //     the same machinery sync uses for remotes; the mirror is just another delta subscriber,
 //     tracked by slot index. drain() pushes the deltas once per tick (only over tracked objects,
@@ -24,6 +25,9 @@ version (KernelMirror):
 //   * Leftovers of a previous run are adopted as orphans, at init or whenever the kernel can next
 //     be enumerated, skipping any key a tracked entry already holds; withdrawing them then goes
 //     through the same retry path as everything else.
+//   * The kernel's own ARP/ND entries flow the other way: each interface's table is seeded from a
+//     dump when it comes online and kept current from RTNLGRP_NEIGH events, as dynamic objects in
+//     the neighbour collections. Entries we pushed (NTF_EXT_LEARNED) are not echoed back.
 //
 // The handlers are methods of a __gshared instance so &g_mirror.handler is a delegate (the
 // registries want delegates, not free-function pointers).
@@ -31,6 +35,7 @@ version (KernelMirror):
 import urt.array;
 import urt.inet;
 import urt.log;
+import urt.mem.temp : tconcat;
 import urt.meta : AliasSeq;
 import urt.time;
 import urt.util : min;
@@ -38,15 +43,19 @@ import urt.util : min;
 import manager;
 import manager.base;
 import manager.collection;
+import manager.expression : NamedArgument;
 import manager.features : has_ipv6;
 
 import router.iface;
+import router.iface.mac : MACAddress;
 
 import protocol.ip.address;
+import protocol.ip.neighbour;
 import protocol.ip.route;
 
 import driver.linux.ethernet : LinuxRawEthernet;
-import driver.linux.netlink_dump : netlink_dump_owned, OwnedEntry;
+import driver.linux.netlink : KernelNeighbour, subscribe_neighbour_changed;
+import driver.linux.netlink_dump : netlink_dump_neighbours, netlink_dump_owned, OwnedEntry;
 import driver.linux.netlink_write;
 
 nothrow @nogc:
@@ -56,6 +65,14 @@ void mirror_init()
 {
     g_mirror.sweep();
     register_object_lifecycle_handler(&g_mirror.on_object_lifecycle);
+    subscribe_neighbour_changed(&g_mirror.on_kernel_neighbour);
+    // interfaces a platform module created during its own init predate the lifecycle hook
+    foreach (iface; Collection!BaseInterface().values)
+    {
+        iface.subscribe(&g_mirror.on_interface_state);
+        if (iface.running)
+            seed_learned(iface);
+    }
 }
 
 void mirror_drain()
@@ -83,21 +100,25 @@ __gshared Netlink nl;
 enum Duration retry_base = 1.seconds;
 enum Duration retry_max  = 60.seconds;
 
+enum ENOENT        = 2;
 enum ESRCH         = 3;
 enum ENODEV        = 19;
 enum EADDRNOTAVAIL = 99;
 
 static if (has_ipv6)
-    alias Mirrored = AliasSeq!(IPAddress, IPRoute, IPv6Address, IPv6Route);
+    alias Mirrored = AliasSeq!(IPAddress, IPRoute, IPNeighbour, IPv6Address, IPv6Route, IPv6Neighbour);
 else
-    alias Mirrored = AliasSeq!(IPAddress, IPRoute);
+    alias Mirrored = AliasSeq!(IPAddress, IPRoute, IPNeighbour);
 
 enum is_route(T) = __traits(hasMember, T, "destination");
+enum is_neighbour(T) = __traits(hasMember, T, "mac");
 
 template AddrOf(T)
 {
     static if (is_route!T)
         alias AddrOf = typeof(T.init.gateway());
+    else static if (is_neighbour!T)
+        alias AddrOf = typeof(T.init.address());
     else
         alias AddrOf = typeof(T.init.address().addr);
 }
@@ -108,6 +129,7 @@ enum Form : ubyte
 {
     address,
     route,
+    neighbour,
 }
 
 // The kernel-facing calls, so a unittest can stand in a fake kernel and timer.
@@ -117,6 +139,8 @@ struct Netlink
     int function(const(ubyte)[] dst, ubyte prefix, const(ubyte)[] gateway, int oif, ubyte type, uint metric) nothrow @nogc del_route = &netlink_del_route;
     int function(int ifindex, const(ubyte)[] addr, ubyte prefix) nothrow @nogc add_address = &netlink_add_address;
     int function(int ifindex, const(ubyte)[] addr, ubyte prefix) nothrow @nogc del_address = &netlink_del_address;
+    int function(int ifindex, const(ubyte)[] ip, ubyte[6] mac, ushort state, ubyte flags) nothrow @nogc add_neighbour = &netlink_add_neighbour;
+    int function(int ifindex, const(ubyte)[] ip) nothrow @nogc del_neighbour = &netlink_del_neighbour;
     bool function(scope void delegate(ref const OwnedEntry) nothrow @nogc dg) nothrow @nogc dump_owned = &netlink_dump_owned;
     int function(const(BaseInterface) iface) nothrow @nogc ifindex = &kernel_ifindex;
     void function(Duration delay) nothrow @nogc schedule = &schedule_retry;
@@ -200,14 +224,22 @@ nothrow @nogc:
             if (t.obj && dispatch!interface_of(&t) is iface)
                 push(&t);
         }
+        seed_learned(iface);
     }
 
     void on_object_created(BaseObject obj)
     {
+        if (auto iface = dyn_cast!BaseInterface(obj))
+        {
+            iface.subscribe(&on_interface_state);
+            return;
+        }
+
         ubyte kind = ubyte.max;
         static foreach (i, T; Mirrored)
         {
-            if (dyn_cast!T(obj))
+            // learned neighbours came from the kernel; only configured ones go down to it
+            if (dyn_cast!T(obj) && !(is_neighbour!T && (obj.flags & ObjectFlags.dynamic)))
                 kind = i;
         }
         if (kind == ubyte.max)
@@ -223,6 +255,13 @@ nothrow @nogc:
 
     void on_object_destroyed(BaseObject obj)
     {
+        if (auto iface = dyn_cast!BaseInterface(obj))
+        {
+            iface.unsubscribe(&on_interface_state);
+            drop_learned(iface);
+            return;
+        }
+
         foreach (i, ref t; tracked[])
         {
             if (t.obj is obj)
@@ -236,6 +275,21 @@ nothrow @nogc:
                 return;
             }
         }
+    }
+
+    void on_interface_state(ActiveObject o, StateSignal signal)
+    {
+        BaseInterface iface = dyn_cast!BaseInterface(o);
+        if (signal == StateSignal.online)
+            seed_learned(iface);
+        else if (signal == StateSignal.offline)
+            drop_learned(iface);
+    }
+
+    void on_kernel_neighbour(ref const KernelNeighbour n, bool removed)
+    {
+        if (BaseInterface iface = interface_for_ifindex(n.ifindex))
+            apply_learned(iface, n, removed);
     }
 
     void push(Tracked* t)
@@ -271,7 +325,7 @@ nothrow @nogc:
         uint stale = 0;
         bool ok = nl.dump_owned((ref const OwnedEntry e) {
             Tracked t;
-            t.form    = e.route ? Form.route : Form.address;
+            t.form    = e.neighbour ? Form.neighbour : e.route ? Form.route : Form.address;
             t.family  = e.family;
             t.ifindex = e.ifindex;
             t.prefix  = e.prefix;
@@ -446,19 +500,37 @@ int push_entry(T)(Tracked* t)
         if (idx == 0)
             return withdraw(t);
 
-        addr = wire(o.address.addr);
-        prefix = o.address.prefix_len;
-        if (t.pushed && (t.ifindex != idx || t.addr[0 .. n] != addr[] || t.prefix != prefix))
+        static if (is_neighbour!T)
         {
-            r = withdraw(t);
+            addr = wire(o.address);
+            if (t.pushed && (t.ifindex != idx || t.addr[0 .. n] != addr[]))
+            {
+                r = withdraw(t);
+                if (r != 0)
+                    return r;
+            }
+
+            r = nl.add_neighbour(idx, addr[], o.mac.b, NUD_PERMANENT, NTF_EXT_LEARNED);
             if (r != 0)
                 return r;
+            t.form = Form.neighbour;
         }
+        else
+        {
+            addr = wire(o.address.addr);
+            prefix = o.address.prefix_len;
+            if (t.pushed && (t.ifindex != idx || t.addr[0 .. n] != addr[] || t.prefix != prefix))
+            {
+                r = withdraw(t);
+                if (r != 0)
+                    return r;
+            }
 
-        r = nl.add_address(idx, addr[], prefix);
-        if (r != 0)
-            return r;
-        t.form = Form.address;
+            r = nl.add_address(idx, addr[], prefix);
+            if (r != 0)
+                return r;
+            t.form = Form.address;
+        }
         t.ifindex = idx;
     }
 
@@ -478,10 +550,21 @@ int withdraw(Tracked* t)
     if (!t.pushed)
         return 0;
     size_t n = t.family == AF_INET6 ? 16 : 4;
-    int r = t.form == Form.route ? nl.del_route(t.addr[0 .. n], t.prefix, t.gateway[0 .. n], t.ifindex, t.type, t.metric)
-                                 : nl.del_address(t.ifindex, t.addr[0 .. n], t.prefix);
-    // ESRCH/EADDRNOTAVAIL/ENODEV: the kernel already dropped it (netdev gone, operator removed it)
-    if (r != 0 && r != -ESRCH && r != -EADDRNOTAVAIL && r != -ENODEV)
+    int r;
+    final switch (t.form)
+    {
+        case Form.route:
+            r = nl.del_route(t.addr[0 .. n], t.prefix, t.gateway[0 .. n], t.ifindex, t.type, t.metric);
+            break;
+        case Form.address:
+            r = nl.del_address(t.ifindex, t.addr[0 .. n], t.prefix);
+            break;
+        case Form.neighbour:
+            r = nl.del_neighbour(t.ifindex, t.addr[0 .. n]);
+            break;
+    }
+    // ENOENT/ESRCH/EADDRNOTAVAIL/ENODEV: the kernel already dropped it (netdev gone, operator removed it)
+    if (r != 0 && r != -ENOENT && r != -ESRCH && r != -EADDRNOTAVAIL && r != -ENODEV)
         return r;
     t.pushed = false;
     return 0;
@@ -505,6 +588,82 @@ int kernel_ifindex(const(BaseInterface) iface)
     if (int idx = iface.kernel_ifindex())
         return idx;
     return 0;
+}
+
+BaseInterface interface_for_ifindex(int ifindex)
+{
+    foreach (i; Collection!BaseInterface().values)
+    {
+        if (kernel_ifindex(i) == ifindex)
+            return i;
+    }
+    return null;
+}
+
+void seed_learned(BaseInterface iface)
+{
+    // several OpenWatt interfaces may sit on one netdev; the table lives on the one events resolve to
+    int idx = kernel_ifindex(iface);
+    if (idx == 0 || interface_for_ifindex(idx) !is iface)
+        return;
+    netlink_dump_neighbours(idx, (ref const KernelNeighbour n) { apply_learned(iface, n, false); });
+}
+
+void drop_learned(BaseInterface iface)
+{
+    drop_learned_entries!IPNeighbour(iface);
+    static if (has_ipv6)
+        drop_learned_entries!IPv6Neighbour(iface);
+}
+
+void drop_learned_entries(T)(BaseInterface iface)
+{
+    Array!T doomed;
+    foreach (n; Collection!T().values)
+    {
+        if ((n.flags & ObjectFlags.dynamic) && n.iface is iface)
+            doomed ~= n;
+    }
+    foreach (n; doomed[])
+        n.destroy();
+}
+
+void apply_learned(BaseInterface iface, ref const KernelNeighbour n, bool removed)
+{
+    NeighbourState state;
+    if ((n.flags & NTF_EXT_LEARNED) || !learned_state(n.state, state))
+        removed = true;     // our own entry echoed back, or a NUD_NONE/NUD_NOARP placeholder
+    MACAddress mac;
+    if (n.has_mac)
+        mac.b = n.mac;
+
+    static if (has_ipv6)
+    {
+        if (n.family == AF_INET6)
+        {
+            publish_neighbour!IPv6Neighbour(iface, ipv6_from_wire(n.ip[]), state, mac, removed);
+            return;
+        }
+    }
+    ubyte[4] b = n.ip[0 .. 4];
+    publish_neighbour!IPNeighbour(iface, IPAddr(b), state, mac, removed);
+}
+
+bool learned_state(ushort nud, out NeighbourState state)
+{
+    if (nud & NUD_PERMANENT)
+        state = NeighbourState.permanent;
+    else if (nud & NUD_REACHABLE)
+        state = NeighbourState.reachable;
+    else if (nud & (NUD_STALE | NUD_DELAY | NUD_PROBE))
+        state = NeighbourState.stale;
+    else if (nud & NUD_INCOMPLETE)
+        state = NeighbourState.incomplete;
+    else if (nud & NUD_FAILED)
+        state = NeighbourState.failed;
+    else
+        return false;
+    return true;
 }
 
 
@@ -577,6 +736,8 @@ version (unittest)
 
     int fake_add_address(int, const(ubyte)[], ubyte) => -1;
     int fake_del_address(int, const(ubyte)[], ubyte) => -1;
+    int fake_add_neighbour(int, const(ubyte)[], ubyte[6], ushort, ubyte) => -1;
+    int fake_del_neighbour(int, const(ubyte)[]) => -1;
     int fake_ifindex(const(BaseInterface)) => 0;
 
     bool fake_dump_owned(scope void delegate(ref const OwnedEntry) nothrow @nogc dg)
@@ -603,6 +764,8 @@ version (unittest)
         nl.del_route = &fake_del_route;
         nl.add_address = &fake_add_address;
         nl.del_address = &fake_del_address;
+        nl.add_neighbour = &fake_add_neighbour;
+        nl.del_neighbour = &fake_del_neighbour;
         nl.dump_owned = &fake_dump_owned;
         nl.ifindex = &fake_ifindex;
         nl.schedule = &fake_schedule;
