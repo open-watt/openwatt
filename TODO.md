@@ -580,6 +580,24 @@ this is what remains.
   an allocation-flag placement API for `Array`/`MutableString`, and pool-backed packet buffers
   (`#518`).
 
+- **Minimal-copy packet flow**: pages are reference counted (urt `#285`) and `Packet` is a view
+  (copies borrow; `clone`, `share` and `alloc_packet` hold a reference; `mutable` and
+  `alloc_prefix` copy on write when the page is shared). Remaining steps, each landable alone:
+  ingress moves the driver's reference into dispatch and every ingress path terminates it
+  (local delivery releases, forward passes it on, drop releases), so a unicast forward sees a
+  unique page at the egress rewrite; receive into a page on linux ethernet and wifi via
+  `recvmsg` (keeping the VLAN cmsg and the PACKET_OUTGOING filter), which only pays after
+  ingress moves; a fragment descriptor (page reference plus window) so a frame is a header plus
+  fragments and the linux driver gathers with `sendmsg`, deleting the 1522-byte stack copy in
+  `medium_tx`; a page form of `RecvHandler` with a linearise helper for straddling records,
+  migrating the consumers that already keep a partial-frame tail (modbus, telnet, TLS, HTTP);
+  TCP send as a page chain with a copybreak concentrator, segmentation by page windows, ack
+  advancing the head and retransmit re-walking; TCP receive as a sequence-sorted chain with
+  out-of-order pages linked as holes and a receive copybreak; DMA drivers (ESP, Bouffalo wifi)
+  holding the page until tx completion; TCP receive chains registering a reclaimer. Also: the
+  Tiny pool's 1616-byte large page cannot hold a full-frame clone behind headroom, and the small
+  packet category should be tuned from `/system/page-pool` histograms.
+
 - **Re-announce an element whose access changes**: `access` is emitted once, at model-add time
   (`src/manager/sync/json_encoder.d:551`). A provider that becomes writable later - a Tesla vehicle
   session reaching `Phase.ready`, or a TWC master taking over or standing down - leaves

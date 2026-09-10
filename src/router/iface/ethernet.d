@@ -86,7 +86,7 @@ nothrow @nogc:
     {
         ubyte[6] query = void;
         query[0 .. 4] = txid.nativeToBigEndian;
-        query[4 .. 6] = ushort(type).nativeToBigEndian;
+        query[4 .. 6] = ow_wire_type(type).nativeToBigEndian;
         station_send_control(OWControl.addr_query, MACAddress.broadcast, query);
     }
 
@@ -350,7 +350,7 @@ protected:
     {
         if (buffer.length < 5)
             return -1;
-        storeBigEndian(cast(ushort*)buffer.ptr, ushort(packet.type));
+        storeBigEndian(cast(ushort*)buffer.ptr, ow_wire_type(packet.type));
         storeBigEndian(cast(ushort*)(buffer.ptr + 2), cast(ushort)packet.data.length);
 
         size_t offset = 5;
@@ -618,15 +618,16 @@ private:
                 if (content.length < 6)
                     return;
                 uint txid = content[0 .. 4].bigEndianToNative!uint;
-                ushort type = content[4 .. 6].bigEndianToNative!ushort;
-                if (type != PacketType.unknown && type >= PacketType.count)
+                ushort wire_type = content[4 .. 6].bigEndianToNative!ushort;
+                if (wire_type != ushort.max && wire_type >= PacketType.count)
                     return;
+                PacketType type = ow_packet_type(wire_type);
                 if (unicast)
-                    send_addr_report(src, txid, cast(PacketType)type);
+                    send_addr_report(src, txid, type);
                 else
                 {
                     // jitter broadcast replies so a populated segment doesn't answer in one synchronised burst
-                    _pending_reports ~= PendingReport(src, txid, cast(PacketType)type, getTime() + (rand() % report_jitter_ms).msecs);
+                    _pending_reports ~= PendingReport(src, txid, type, getTime() + (rand() % report_jitter_ms).msecs);
                 }
                 return;
             }

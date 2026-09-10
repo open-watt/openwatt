@@ -815,7 +815,7 @@ private:
     bool validate_response_length(ubyte tag, const(void)[] response_message) const
     {
         auto frame = _queue.find_in_flight(tag);
-        if (!frame || frame.packet is null)
+        if (!frame || !frame.packet.valid)
             return true; // can't validate without the request
 
         const(ubyte)[] request_pdu = cast(const(ubyte)[])frame.packet.data;
@@ -1009,7 +1009,7 @@ private:
                 foreach (kvp; _pending[])
                 {
                     auto frame = _queue.find_in_flight(kvp.key);
-                    if (frame && frame.packet)
+                    if (frame && frame.packet.valid)
                     {
                         matched_tag = kvp.key;
                         pm = &kvp.value();

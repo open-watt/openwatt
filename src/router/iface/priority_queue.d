@@ -13,7 +13,7 @@ nothrow @nogc:
 
 struct QueuedFrame
 {
-    Packet* packet;
+    Packet packet;
     MessageCallback callback;
     MonoTime enqueue_time;
     MonoTime dispatch_time;
@@ -114,8 +114,8 @@ nothrow @nogc:
         }
 
         QueuedFrame* frame = _pool.alloc();
-        frame.packet = packet.clone();
-        if (!frame.packet)
+        frame.packet = packet.share();
+        if (!frame.packet.valid)
         {
             _pool.free(frame);
             return -1;
@@ -127,7 +127,7 @@ nothrow @nogc:
         int tag = _tags.alloc();
         if (tag < 0)
         {
-            frame.packet.free_clone();
+            frame.packet.release();
             _pool.free(frame);
             return -1;
         }
@@ -382,11 +382,7 @@ private:
     void free_frame(QueuedFrame* frame)
     {
         _tags.free(frame.tag);
-        if (frame.packet)
-        {
-            frame.packet.free_clone();
-            frame.packet = null;
-        }
+        frame.packet.release();
         frame.callback = null;
         _pool.free(frame);
     }
