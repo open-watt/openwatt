@@ -73,6 +73,7 @@ nothrow @nogc:
             _subscribed = false;
         }
         _iface = value;
+        mark_set!(typeof(this), "iface")();
         restart();
     }
 
@@ -85,6 +86,7 @@ nothrow @nogc:
         _secret = value;
         foreach (ref e; _vins[])
             e.retry = VehicleRetryState.init;
+        mark_set!(typeof(this), "secret")();
         restart();
     }
 
@@ -146,6 +148,7 @@ nothrow @nogc:
         }
 
         _vins = updated.move;
+        mark_set!(typeof(this), "vins")();
 
         // VIN configuration owns live discovery sessions, not the persistent
         // Device, Appliance, or recorded series. Removing a VIN stops access to

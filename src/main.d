@@ -14,6 +14,7 @@ import manager.collection;
 import manager.console.session : Session, default_console_session_name;
 import manager.log : default_log_sink_name, format_log_text,
                      retire_bootstrap_log_sink, set_bootstrap_log_sink;
+import manager.saved_config : saved_config_file;
 
 import driver.watchdog;
 
@@ -168,8 +169,19 @@ int main(string[] args)
         trust_config = false;
         retire_config(config_path);
         retire_config("startup.conf");
+        retire_config(saved_config_file);
     }
-    char[] conf = trust_config ? cast(char[])load_file(config_path) : null;
+
+    // a saved config is preferred over the startup script
+    char[] conf = null;
+    bool using_saved_config = false;
+    if (trust_config && !config_path_explicit)
+    {
+        conf = cast(char[])load_file(saved_config_file);
+        using_saved_config = conf !is null;
+    }
+    if (trust_config && conf is null)
+        conf = cast(char[])load_file(config_path);
     if (conf is null && trust_config && !config_path_explicit)
         conf = cast(char[])load_file("startup.conf");
 
@@ -202,7 +214,9 @@ int main(string[] args)
 
     if (conf !is null)
     {
-        static if (default_conf.length > 0)
+        if (using_saved_config)
+            log_info("system", "using saved configuration '", saved_config_file, "'; startup script skipped");
+        else static if (default_conf.length > 0)
             log_info("system", "using startup.conf from the filesystem; bring-up defaults skipped");
         combined_config ~= conf;
         combined_config ~= '\n';
@@ -259,7 +273,12 @@ int main(string[] args)
     {
         import urt.lifetime : move;
         if (!g_app.console.execute_script(startup_session, combined_config.move))
+        {
+            // move a broken saved config aside so the next boot reaches startup.conf
+            if (using_saved_config)
+                retire_config(saved_config_file);
             return -1;
+        }
         startup_pending = !startup_session.is_idle();
     }
 
@@ -367,6 +386,9 @@ void finish_startup(ref Session startup_session, bool interactive_mode, ref Obje
     g_app.console.destroy_session(startup_session);
     startup_session = null;
     retire_bootstrap_log_sink();
+
+    // the boot config is the baseline; only post-boot mutations count as divergence
+    g_app.config_dirty = false;
 
     version (AllocProfile)
     {

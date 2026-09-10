@@ -31,6 +31,7 @@ import manager.reactor;
 import manager.profile : Profile, load_profile;
 import manager.secret;
 import manager.signal;
+import manager.saved_config;
 import manager.system;
 
 version (UseSpiffs)   version = HasFilesystem;
@@ -384,6 +385,10 @@ nothrow @nogc:
     Array!UndecidedLink undecided_links;
 
     Map!(String, RegisteredType) types;
+    Array!String type_order;    // registration order; module init order is dependency-plausible for export
+
+    // running config has diverged from what the next boot would load; cleared at boot-complete and on save
+    bool config_dirty;
 
     // database...
 
@@ -459,6 +464,9 @@ nothrow @nogc:
         console.register_command!(show_time, "time")("/system", this);
         console.register_command!sleep("/system", this);
         console.register_command!reboot("/system", this);
+
+        console.register_command!(config_export, "export")("/system/config", this);
+        console.register_command!(config_save, "save")("/system/config", this);
 
         version (HasFilesystem)
         {
@@ -688,6 +696,7 @@ nothrow @nogc:
     {
         assert(type_info.type !in types, "Type already registered!");
         types.insert(type_info.type, RegisteredType(type_info, path));
+        type_order ~= type_info.type;
     }
 
     void register_heartbeat_handler(HeartbeatHandler handler)

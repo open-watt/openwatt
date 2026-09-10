@@ -99,17 +99,49 @@ nothrow @nogc:
                                      Prop!("algorithm", algorithm),
                                      Prop!("services", services));
 
-    const(char)[] password() const pure
+    const(char)[] password() const
     {
         if (_function == HashFunction.plain_text)
             return cast(char[])_hash[];
-        assert(false, "TODO: generate MCF string for hashed passwords?");
-        // $algo$param$salt$hash
-        return null;
+        if (_hash.empty)
+            return null;
+
+        import urt.mem.temp : talloc;
+        import urt.string.ascii : hex_digits;
+
+        // colon-separated rather than MCF '$' form: '$' triggers interpolation in the console lexer
+        const(char)[] algo = hash_function_name(_function);
+        char[] buf = cast(char[])talloc(7 + algo.length + _salt.length*2 + _hash.length*2);
+        size_t o = 0;
+        buf[o .. o + 5] = "hash:"; o += 5;
+        buf[o .. o + algo.length] = algo[]; o += algo.length;
+        buf[o++] = ':';
+        foreach (b; _salt[])
+        {
+            buf[o++] = hex_digits[b >> 4];
+            buf[o++] = hex_digits[b & 0xF];
+        }
+        buf[o++] = ':';
+        foreach (b; _hash[])
+        {
+            buf[o++] = hex_digits[b >> 4];
+            buf[o++] = hex_digits[b & 0xF];
+        }
+        return buf[0 .. o];
     }
     void password(const(char)[] value)
     {
+        if (try_set_mcf(value))
+            return;
         set_password(cast(ubyte[])value, _function);
+    }
+
+    // recoverable secret material for outbound use (wifi psk etc); empty when only the hash is known
+    const(char)[] plaintext() const pure
+    {
+        if (_function == HashFunction.plain_text)
+            return cast(const(char)[])_hash[];
+        return cast(const(char)[])_plaintext[];
     }
 
     HashFunction algorithm() const pure
@@ -126,9 +158,14 @@ nothrow @nogc:
             // we can re-hash a plaintext password
             set_password(_hash[], value);
         }
+        else if (!_plaintext.empty)
+        {
+            Array!ubyte keep = _plaintext[];
+            set_password(keep[], value);
+        }
         else
         {
-            // the password we already store is not plaintext, we must discard it
+            // the stored password is not plaintext and not recoverable, we must discard it
             _function = value;
             _salt[] = 0;
             _hash = null;
@@ -136,17 +173,18 @@ nothrow @nogc:
         }
     }
 
-    // should we return an array of strings instead of a comma-separated list?
-    String services() const
+    const(char)[][] services() const
     {
-        MutableString!0 r;
+        import urt.mem.temp : talloc_array;
+
+        auto buf = talloc_array!(const(char)[])(_services.length);
+        size_t n = 0;
         foreach (s; _services[])
         {
             if (s.value.enable)
-                r.concat(r.length > 0 ? "," : "", s.key);
+                buf[n++] = s.key[];
         }
-        // TODO: we should be able to promote MutableString to String!!
-        return r[].make_string();
+        return buf[0 .. n];
     }
     void services(String[] value)
     {
@@ -303,6 +341,7 @@ private:
     HashFunction _function = HashFunction.plain_text; // TODO: not a great default! :P
     ubyte[16] _salt;
     Array!ubyte _hash;
+    Array!ubyte _plaintext;     // retained for outbound use; persisted in the side store, never in config
 
     static if (has_ec_secret)
     {
@@ -321,15 +360,64 @@ private:
     void set_password(ubyte[] password, HashFunction hash_function)
     {
         if (hash_function == HashFunction.plain_text)
+        {
             _salt[] = 0;
+            _plaintext = null;
+        }
         else
         {
             for (size_t i = 0; i < 16; i += uint.sizeof)
                 *cast(uint*)&_salt[i] = rand();
+            // copy before _hash is replaced: the re-hash path passes a slice of the old _hash
+            Array!ubyte keep = password[];
+            _plaintext = keep.move;
         }
         _function = hash_function;
         _hash = hash_password(password, _salt[], hash_function);
+        if (hash_function != HashFunction.plain_text)
+            store_secret_material(_hash[], _plaintext[]);
         mark_set!(typeof(this), [ "password", "algorithm" ])();
+    }
+
+    // accepts the hash:algo:salt:hash form the password getter emits, so exports reload
+    bool try_set_mcf(const(char)[] value)
+    {
+        if (value.length < 6 || value[0 .. 5] != "hash:")
+            return false;
+        const(char)[] rest = value[5 .. $];
+        size_t sep = 0;
+        while (sep < rest.length && rest[sep] != ':')
+            ++sep;
+        if (sep == rest.length)
+            return false;
+
+        HashFunction fn;
+        if (rest[0 .. sep] == hash_function_name(HashFunction.sha1))
+            fn = HashFunction.sha1;
+        else if (rest[0 .. sep] == hash_function_name(HashFunction.sha256))
+            fn = HashFunction.sha256;
+        else
+            return false;
+
+        rest = rest[sep + 1 .. $];
+        sep = 0;
+        while (sep < rest.length && rest[sep] != ':')
+            ++sep;
+        if (sep != _salt.length*2 || rest.length <= sep + 1)
+            return false;
+
+        ubyte[16] salt;
+        Array!ubyte hash;
+        hash.resize((rest.length - sep - 1) / 2);
+        if (!parse_hex_bytes(rest[0 .. sep], salt[]) || !parse_hex_bytes(rest[sep + 1 .. $], hash[]))
+            return false;
+
+        _function = fn;
+        _salt = salt;
+        _hash = hash.move;
+        _plaintext = lookup_secret_material(_hash[]);
+        mark_set!(typeof(this), [ "password", "algorithm" ])();
+        return true;
     }
 
     static if (has_ec_secret)
@@ -434,6 +522,140 @@ void secure_zero(ubyte[] buffer)
         volatileStore(&b, ubyte(0));
 }
 
+
+// hash -> plaintext side store: lets hashed exports stay usable for outbound secrets.
+// Lives beside the config, is never exported or synced, and losing it only costs
+// outbound use until someone re-types the password.
+enum secret_store_file = "conf/secret.store";
+
+Array!ubyte lookup_secret_material(const(ubyte)[] hash)
+{
+    load_secret_store();
+    String key = tconcat_hex(hash).make_string();
+    if (Array!ubyte* p = key in g_secret_store)
+    {
+        Array!ubyte r = (*p)[];
+        return r.move;
+    }
+    return Array!ubyte();
+}
+
+void store_secret_material(const(ubyte)[] hash, const(ubyte)[] plain)
+{
+    load_secret_store();
+    String key = tconcat_hex(hash).make_string();
+    if (Array!ubyte* p = key in g_secret_store)
+    {
+        if ((*p)[] == plain[])
+            return;
+        *p = plain[];
+    }
+    else
+    {
+        Array!ubyte v = plain[];
+        g_secret_store.insert(key.move, v.move);
+    }
+    write_secret_store();
+}
+
+private:
+
+__gshared Map!(String, Array!ubyte) g_secret_store;
+__gshared bool g_secret_store_loaded;
+
+const(char)[] tconcat_hex(const(ubyte)[] bytes)
+{
+    import urt.mem.temp : talloc;
+    import urt.string.ascii : hex_digits;
+
+    char[] buf = cast(char[])talloc(bytes.length*2);
+    foreach (i, b; bytes)
+    {
+        buf[i*2] = hex_digits[b >> 4];
+        buf[i*2 + 1] = hex_digits[b & 0xF];
+    }
+    return buf;
+}
+
+void load_secret_store()
+{
+    if (g_secret_store_loaded)
+        return;
+    g_secret_store_loaded = true;
+
+    char[] data = cast(char[])load_file(secret_store_file);
+    if (data is null)
+        return;
+
+    const(char)[] text = data;
+    while (!text.empty)
+    {
+        const(char)[] line = text.split!'\n';
+        if (line.empty)
+            continue;
+        const(char)[] key = line.split!':';
+        if (key.empty || line.empty || (line.length & 1))
+            continue;
+        Array!ubyte plain;
+        plain.resize(line.length / 2);
+        if (!parse_hex_bytes(line, plain[]))
+            continue;
+        g_secret_store.insert(key.make_string(), plain.move);
+    }
+    free(cast(void[])data);
+}
+
+void write_secret_store()
+{
+    import urt.string.ascii : hex_digits;
+
+    MutableString!0 buf;
+    foreach (ref kvp; g_secret_store[])
+    {
+        buf.append(kvp.key[], ':');
+        foreach (b; kvp.value[])
+            buf.append(hex_digits[b >> 4], hex_digits[b & 0xF]);
+        buf.append('\n');
+    }
+    if (!save_file(secret_store_file, cast(const(void)[])buf[]))
+        log_warning("secret", "could not write '", secret_store_file, "'");
+}
+
+const(char)[] hash_function_name(HashFunction fn) pure
+{
+    final switch (fn)
+    {
+        case HashFunction.plain_text: return "plain";
+        case HashFunction.sha1:       return "sha1";
+        case HashFunction.sha256:     return "sha256";
+    }
+}
+
+bool parse_hex_bytes(const(char)[] text, ubyte[] bytes) pure
+{
+    if (text.length != bytes.length*2)
+        return false;
+    foreach (i, ref b; bytes)
+    {
+        int hi = hex_value(text[i*2]);
+        int lo = hex_value(text[i*2 + 1]);
+        if (hi < 0 || lo < 0)
+            return false;
+        b = cast(ubyte)((hi << 4) | lo);
+    }
+    return true;
+}
+
+private int hex_value(char c) pure
+{
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'a' && c <= 'f')
+        return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F')
+        return c - 'A' + 10;
+    return -1;
+}
 
 Array!ubyte hash_password(const ubyte[] password, const ubyte[] salt, HashFunction hash_function)
 {

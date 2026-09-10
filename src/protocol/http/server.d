@@ -8,6 +8,7 @@ import urt.kvp;
 import urt.lifetime;
 import urt.log;
 import urt.mem;
+import urt.mem.temp : talloc_array;
 import urt.string;
 import urt.string.format : tconcat, tstring;
 import urt.time;
@@ -77,6 +78,18 @@ nothrow @nogc:
         return null;
     }
 
+    static if (has_tls)
+    const(char)[][] certificates() const
+    {
+        auto buf = talloc_array!(const(char)[])(_certificates.length);
+        size_t n = 0;
+        foreach (ref c; _certificates)
+        {
+            if (c)
+                buf[n++] = c.name[];
+        }
+        return buf[0 .. n];
+    }
     static if (has_tls)
     void certificates(Certificate[] value)
     {
