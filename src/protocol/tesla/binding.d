@@ -21,6 +21,7 @@ import manager.element;
 import manager.plugin;
 import manager.sample;
 import manager.series;
+import manager.series : Scalar;
 
 import protocol.tesla;
 import protocol.tesla.master;
@@ -33,7 +34,8 @@ nothrow @nogc:
 
 class TeslaTWCBinding : ProtocolBinding
 {
-    alias Properties = AliasSeq!(Prop!("slave_id", slave_id));
+    alias Properties = AliasSeq!(Prop!("master", master),
+                                 Prop!("slave_id", slave_id));
 nothrow @nogc:
 
     enum type_name = "twc-binding";
@@ -44,12 +46,25 @@ nothrow @nogc:
         super(collection_type_info!TeslaTWCBinding, id, flags);
     }
 
+    final inout(TeslaTWCMaster) master() inout pure
+        => _master;
+    final void master(TeslaTWCMaster value)
+    {
+        if (_master.get is value)
+            return;
+        detach();
+        _master = value;
+        mark_set!(typeof(this), "master")();
+        restart();
+    }
+
     final ushort slave_id() const pure
         => _slave_id;
     final void slave_id(ushort value)
     {
         if (_slave_id == value)
             return;
+        detach();
         _slave_id = value;
         mark_set!(typeof(this), "slave_id")();
         restart();
@@ -57,74 +72,89 @@ nothrow @nogc:
 
     final override bool validate() const pure
     {
-        return !_device.empty && _slave_id != 0;
+        return !_device.empty && _slave_id != 0 && _master !is null;
     }
 
     override CompletionStatus startup()
     {
+        TeslaTWCMaster m = _master.get;
+        if (!m || !m.running)
+            return CompletionStatus.continue_;
+
         if (!materialise())
             return CompletionStatus.error;
 
-        if (!_master)
+        if (!m.adopt(_slave_id, this))
         {
-            auto tesla_mod = get_module!TeslaProtocolModule;
-            outer: foreach (twc; tesla_mod.twc_masters.values)
-            {
-                foreach (i, ref c; twc.chargers)
-                {
-                    if (_slave_id == c.id)
-                    {
-                        _master = twc;
-                        _charger_index = cast(ubyte)i;
-                        break outer;
-                    }
-                }
-            }
-            if (!_master)
-                return CompletionStatus.continue_;
+            _fail_reason = "charger already has a binding";
+            return CompletionStatus.error;
         }
+        if (_target_current.record_update() != SysTime())
+            m.set_target_current(_slave_id, (cast(CentiAmps)_target_current.record_value().asQuantity()).value);
+        if (_current_cap.record_update() != SysTime())
+            m.set_cap(_slave_id, (cast(CentiAmps)_current_cap.record_value().asQuantity()).value);
+        _master.subscribe(&master_state_change);
+        _subscribed = true;
 
         if (_target_current)
-        {
             _target_current.subscribe(&on_target_current_change);
-            _subscribed = true;
-        }
+        if (_current_cap)
+            _current_cap.subscribe(&on_cap_change);
+        _elem_subscribed = true;
 
         return CompletionStatus.complete;
     }
 
     override CompletionStatus shutdown()
     {
-        if (_subscribed)
+        if (_elem_subscribed)
         {
-            _target_current.unsubscribe(&on_target_current_change);
-            _subscribed = false;
+            if (_target_current)
+                _target_current.unsubscribe(&on_target_current_change);
+            if (_current_cap)
+                _current_cap.unsubscribe(&on_cap_change);
+            _elem_subscribed = false;
         }
-        _master = null;
+        detach();
         _target_current = null;
+        _current_cap = null;
         _elements.clear();
         detach_device();
         _built = false;
         return CompletionStatus.complete;
     }
 
-    override void update()
+package:
+    void refresh_access(bool writable)
     {
-        if (!_master)
+        if (!_built)
             return;
+        Access access = writable ? Access.read_write : Access.read;
+        _bound_device.set_binding_access(this, _target_current, access);
+        _bound_device.set_binding_access(this, _current_cap, access);
+    }
 
-        TeslaTWCMaster.Charger* charger = &_master.chargers[_charger_index];
+    void push_samples(ref TeslaTWCMaster.Charger charger)
+    {
         SysTime timestamp = getSysTime();
 
-        // TODO: user can write to target_current; we just push the master's view here
         foreach (ref e; _elements)
         {
             final switch (e.kind)
             {
-                case SampleKind.setpoint:        write_sample(e, charger.target_current, timestamp);                                      break;
+                case SampleKind.setpoint:
+                    if (e.element.record_update() == SysTime() && charger.device_max_current)
+                        write_sample(e, charger.target_current, timestamp, &on_target_current_change);
+                    break;
+                case SampleKind.cap:
+                    if (e.element.record_update() == SysTime())
+                        write_sample(e, charger.specified_max_current, timestamp, &on_cap_change);
+                    break;
+                case SampleKind.allocated:       write_sample(e, charger.offered_current, timestamp);                                     break;
+                case SampleKind.accepted:        write_sample(e, charger.charge_current_target, timestamp);                               break;
                 case SampleKind.state:           write_sample(e, cast(ubyte)charger.charger_state, timestamp);                            break;
                 case SampleKind.twc_state:       write_sample(e, cast(ubyte)charger.state, timestamp);                                    break;
-                case SampleKind.max:             write_sample(e, charger.max_current, timestamp);                                         break;
+                case SampleKind.max:             write_sample(e, charger.device_max_current, timestamp);                break;
                 case SampleKind.current:         write_sample(e, (charger.flags & 2) ? charger.current : ushort(0), timestamp);            break;
                 case SampleKind.voltage1:        write_sample(e, (charger.flags & 2) ? charger.voltage1 : ushort(0), timestamp);           break;
                 case SampleKind.voltage2:        write_sample(e, (charger.flags & 2) ? charger.voltage2 : ushort(0), timestamp);           break;
@@ -187,11 +217,14 @@ protected:
         set_constant(control, "kind", "continuous");
         set_constant(control, "direction", "consume");
         set_constant(control, "unit", "A");
-        set_constant(control, "step", 1);
+        set_constant(control, "step", CentiAmps(100));
         set_constant(control, "min", CentiAmps(500));
         set_constant(control, "can_disable", false);
-        _target_current = add_sample(control, "setpoint", SampleKind.setpoint, centiamps_format(), Access.read_write);
+        _target_current = add_sample(control, "setpoint", SampleKind.setpoint, centiamps_format());
+        _current_cap = add_sample(control, "cap", SampleKind.cap, current_limit_format());
         add_sample(control, "max", SampleKind.max, centiamps_format());
+        add_sample(control, "allocated", SampleKind.allocated, centiamps_format());
+        add_sample(control, "accepted", SampleKind.accepted, centiamps_format());
 
         Component meter = find_or_create_component(grid, "meter", "EnergyMeter");
         set_constant(meter, "type", "three-phase");
@@ -206,6 +239,9 @@ protected:
         add_sample(meter, "import", SampleKind.import_, quantity_format(ValueType.u64, WattHour));
 
         _built = true;
+        refresh_access(_master && _master.has_agency);
+        device.notify(ComponentEvent.tree_changed);
+        device.notify(ComponentEvent.online);
         return true;
     }
 
@@ -214,6 +250,9 @@ private:
     enum SampleKind : ubyte
     {
         setpoint,
+        cap,
+        allocated,
+        accepted,
         state,
         twc_state,
         max,
@@ -241,13 +280,14 @@ private:
 
     ushort _slave_id;
 
-    TeslaTWCMaster _master;
-    ubyte _charger_index;
+    ObjectRef!TeslaTWCMaster _master;
 
     bool _subscribed;
+    bool _elem_subscribed;
     bool _built;
 
     Element* _target_current;
+    Element* _current_cap;
     Array!SampleElement _elements;
 
     Component find_or_create_component(Component parent, const(char)[] id, const(char)[] template_)
@@ -306,6 +346,18 @@ private:
     FormatId centiamps_format()
         => quantity_format(ValueType.u16, ScaledUnit(Ampere, -2));
 
+    FormatId current_limit_format()
+    {
+        DataFormat format = DataFormat(ValueType.u16, SeriesKind.held, ScaledUnit(Ampere, -2));
+        Constraint constraint;
+        constraint.check_fn = &check_current_limit;
+        format.constraint = register_constraint(constraint);
+        return register_format(format);
+    }
+
+    static const(char)[] check_current_limit(ref const Scalar value, ref const DataFormat format)
+        => value.u != 0 && value.u < TeslaTWCMaster.Charger.min_current ? "TWC current limit must be zero (no cap) or at least 5A" : null;
+
     FormatId enum_format(E)()
         => register_format(DataFormat(ValueType.u8, SeriesKind.held, enum_info!E.make_void()));
 
@@ -316,22 +368,22 @@ private:
         return register_format(format);
     }
 
-    void write_sample(T)(ref SampleElement sample, T value, SysTime timestamp)
+    void write_sample(T)(ref SampleElement sample, T value, SysTime timestamp, Subscriber who = null)
     {
         static if (is(T : const(char)[]))
         {
             if (sample.element.format == sample.format)
-                sample.element.write_sample(value, timestamp);
+                sample.element.write_sample(value, timestamp, who);
             else
-                sample.element.value(value, timestamp);
+                sample.element.value(value, timestamp, who);
         }
         else
         {
             const(void)[] record = (cast(const(void)*)&value)[0 .. T.sizeof];
             if (sample.element.format == sample.format)
-                sample.element.write_record(record, timestamp);
+                sample.element.write_record(record, timestamp, who);
             else
-                sample.element.value(box_record(record.ptr, *format_info(sample.format)), timestamp);
+                sample.element.value(box_record(record.ptr, *format_info(sample.format)), timestamp, who);
         }
     }
 
@@ -345,13 +397,106 @@ private:
         }
     }
 
+    void detach()
+    {
+        if (_subscribed)
+        {
+            _master.unsubscribe(&master_state_change);
+            _subscribed = false;
+        }
+        if (TeslaTWCMaster m = _master.get)
+            m.detach(_slave_id, this);
+    }
+
+    void master_state_change(ActiveObject, StateSignal signal)
+    {
+        if (signal == StateSignal.offline)
+            restart();
+    }
+
     void on_target_current_change(ref const SampleUpdate update)
     {
-        if (!_master || update.element !is _target_current || !update.value_ready)
+        TeslaTWCMaster m = _master.get;
+        if (!m || !m.has_agency || update.element !is _target_current || !update.value_ready)
             return;
-        TeslaTWCMaster.Charger* charger = &_master.chargers[_charger_index];
-        charger.target_current = (cast(CentiAmps)update.value.asQuantity()).value;
+        ushort target = (cast(CentiAmps)update.value.asQuantity()).value;
+        m.set_target_current(_slave_id, target);
         version (DebugTWCBinding)
-            log.trace("set target current: ", charger.target_current);
+            log.trace("set target current: ", target);
+    }
+
+    void on_cap_change(ref const SampleUpdate update)
+    {
+        TeslaTWCMaster m = _master.get;
+        if (!m || !m.has_agency || update.element !is _current_cap || !update.value_ready)
+            return;
+        ushort limit = (cast(CentiAmps)update.value.asQuantity()).value;
+        m.set_cap(_slave_id, limit);
+        version (DebugTWCBinding)
+            log.trace("set max current: ", limit);
+    }
+}
+
+unittest
+{
+    import urt.mem : free;
+
+    static class TestBinding : TeslaTWCBinding
+    {
+    nothrow @nogc:
+        this(CID id) { super(id); }
+        void attach_device(Device device) { _bound_device = device; }
+    }
+    TestBinding binding = alloc!TestBinding(CID(1));
+    scope(exit) free(binding);
+    const(DataFormat)* format = format_info(binding.current_limit_format());
+    foreach (ushort current; [ushort(0), ushort(500), ushort(2500)])
+    {
+        Scalar value = Scalar.of(current);
+        assert(format.constraint.check(value, *format) is null);
+    }
+    Scalar below_floor = Scalar.of(ushort(300));
+    assert(format.constraint.check(below_floor, *format).length);
+
+    Element[5] elements;
+    foreach (i, kind; [TeslaTWCBinding.SampleKind.setpoint, TeslaTWCBinding.SampleKind.cap,
+                      TeslaTWCBinding.SampleKind.max, TeslaTWCBinding.SampleKind.allocated, TeslaTWCBinding.SampleKind.accepted])
+    {
+        elements[i].format = kind == TeslaTWCBinding.SampleKind.cap ? binding.current_limit_format() : binding.centiamps_format();
+        binding._elements ~= TeslaTWCBinding.SampleElement(&elements[i], elements[i].format, kind);
+    }
+    TeslaTWCMaster.Charger charger;
+    charger.device_max_current = 3200;
+    charger.target_current = 2800;
+    charger.specified_max_current = 2000;
+    charger.offered_current = 1000;
+    charger.charge_current_target = 1600;
+    binding.push_samples(charger);
+    foreach (i, expected; [2800, 2000, 3200, 1000, 1600])
+        assert((cast(CentiAmps)elements[i].record_value().asQuantity()).value == expected);
+    charger.offered_current = 500;
+    charger.charge_current_target = 1000;
+    binding.push_samples(charger);
+    foreach (i, expected; [2800, 2000, 3200, 500, 1000])
+        assert((cast(CentiAmps)elements[i].record_value().asQuantity()).value == expected);
+
+    DeviceTable table;
+    Device device = alloc!Device(StringLit!"twc-access-device");
+    table.insert(device);
+    scope(exit) free(device);
+    binding.attach_device(device);
+    binding._built = true;
+    binding._target_current = alloc_element();
+    binding._current_cap = alloc_element();
+    foreach (element; [binding._target_current, binding._current_cap])
+    {
+        element.parent = device;
+        device.attach_binding(binding, element, Access.read);
+    }
+    foreach (active; [false, true, false, true])
+    {
+        binding.refresh_access(active);
+        assert(binding._target_current.access == (active ? Access.read_write : Access.read));
+        assert(binding._current_cap.access == binding._target_current.access);
     }
 }

@@ -1207,7 +1207,11 @@ replace the `Port`; it only describes control.
   - `percent` - 0-100% of an external reference
   - `nameplate_fraction` - 0-1 of `max`
 - `min: num` - Minimum non-zero setpoint (in `unit`). Below this the device is effectively off.
-- `max: num` - Maximum allowable setpoint (in `unit`).
+- `max: num` - Maximum allowable setpoint (in `unit`). For TWC this is the read-only discovered hardware maximum.
+- `cap: num` - Optional writable ceiling where supported; TWC uses zero for no secondary cap.
+- `allocated: num` - Read-only current allocation commanded by the controller where supported.
+- `accepted: num` - Read-only limit acknowledged by the controlled device where supported.
+  Allocation and acknowledgement do not overwrite the requested `setpoint` or `cap`.
 - `step: num` - Resolution of setpoint changes (in `unit`); e.g. 1 A for an EVSE.
 - `measured: alias` - Reference (`@path`) to the element carrying actual current
   consumption or production, typically a neighbouring `EnergyMeter`'s `power`.

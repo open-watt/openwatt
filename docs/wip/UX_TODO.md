@@ -197,6 +197,39 @@ through them and remove sections as they are absorbed.
   5/6 GHz, because both AP backends run the BSS non-HT, so clients are capped at 54 Mbit/s
   no matter what the radio can do. That is real, not a reporting artifact.
 
+## 2026-09-10: TWC discovery and charge controls
+
+- Replace the old TWC free commands with the `/protocol/tesla/twc` collection.
+  Configure `stream` or `interface`; discovered bindings and devices use `twc_<hex-id>`.
+  Migrate appliance device references and add `master` to manually configured TWC bindings.
+- Configure the shared fleet budget on `TeslaTWCMaster.max-current` (32A default).
+  Remove `max-current` from binding forms; binding properties only identify master,
+  slave id, and Device. Do not migrate several per-charger ceilings by summing them:
+  the master property must match the actual shared installation limit.
+- `grid.control.max` is the read-only discovered hardware maximum. Move user/policy
+  ceilings to writable `grid.control.cap` (zero means uncapped; nonzero minimum 5A).
+  Keep writable `setpoint` as requested demand. Display read-only `allocated` for
+  the last commanded allocation and `accepted` for the charger's reported limit;
+  neither value should overwrite the request or cap. All values and `step` carry amps.
+- TWC `setpoint` and `cap` access now follows the master's bus agency: read/write
+  only while active, read-only while observing. Live access-change propagation is
+  still TODO; clients must eventually update controls without reconnecting.
+- A circuit-budget reduction waits for charger acknowledgements before reallocating
+  current. Budgets below 5A per eligible charger remain unsupported pending stop/admission policy.
+
+## 2026-09-01: `Wh` is an energy unit, not a duration
+
+- An element carrying watt-hours (a TWC's `status.lifetime_energy`, a meter's `import`)
+  arrives over sync as `"unit":"Wh"` in its type frame, and each value as
+  `{"q":394167000,"u":"Wh"}`. Both were verified against the encoders and the unit parser
+  round-trips `Wh` back to watt-hours exactly, so a client showing this as a time is
+  reading the unit wrong on its own side.
+- The likely trap is tokenising the suffix and finding `h` for hours. Units are whole
+  symbols: match `Wh`, `kWh`, `MWh`, `varh`, `VAh` before any single-letter fallback.
+- Rendering a quantity from `u` alone is enough; there is no need to reduce to base units.
+  `Wh` is joules scaled by 3600, so a client that normalises will get joules, never
+  seconds.
+
 ## 2026-09-08: energy element tree slimming, itemised with the frontend
 
 Parts of the wide `topology.*` and `circuit.*` trees are transient reasoning state wearing

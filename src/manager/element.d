@@ -862,6 +862,22 @@ package:
             }
         if (!detached)
             return;
+        refresh_access();
+    }
+
+    void set_binding_access(ubyte index, Access value)
+    {
+        foreach (ref binding; _bindings)
+            if (binding < binding_destroyed && binding_index(binding) == index)
+            {
+                binding = binding_entry(index, value);
+                refresh_access();
+                return;
+            }
+    }
+
+    void refresh_access()
+    {
         Access combined;
         foreach (binding; _bindings)
         {

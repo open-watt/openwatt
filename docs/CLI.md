@@ -990,6 +990,96 @@ exist yet parks the rule in `Starting` (`element not found: <path>`) and arms wh
 /automation/print
 ```
 
+### `/protocol/tesla/twc`
+
+A TWC master runs the Tesla Wall Connector (Gen2) master role on an RS485 bus
+reached through a `/interface/tesla-twc` interface. It announces itself, then
+round-robins heartbeats and status requests across the chargers on the bus.
+Slaves that answer the announcement with a link-ready message are discovered
+automatically: each one gets a charger record, a dynamic `/binding/tesla/twc`
+entry, and a Device, all named for the slave's 16-bit bus id (e.g. `twc_6820`).
+Name collisions get a numeric suffix. Existing manually configured bindings
+for the same master and slave are reused; a second binding cannot take over
+an already-bound charger.
+No slave addresses are configured on the master.
+
+The bus allows one master. On startup the master listens for a few seconds
+before claiming the bus, and stands by if another master is heard - snooping
+the slaves' replies, discovering chargers from heartbeats as well as link-ready
+announcements, so devices stay populated read-only - then takes over once
+that master has been silent for ~15s. Hearing another master while active
+stands down immediately. Our bus id is the low 16 bits of the node id; a master
+frame carrying our own id while we are silent is an id collision with another
+node, reported as a config error that fails the master. The status message
+names the situation throughout.
+
+| Property | Access | Values | Default | Description |
+| --- | --- | --- | --- | --- |
+| `interface` | read/write | interface name | required | The `tesla-twc` interface carrying the bus. |
+| `stream` | read/write | stream name | required | Byte stream carrying the bus; the master creates and owns a `tesla-twc` interface over it. |
+| `max-current` | read/write | amps | 32A | Shared circuit budget for the entire fleet, not a per-charger limit. Minimum 5A. |
+
+The master divides the circuit budget into equal shares, redistributing unused
+shares when a charger's request, optional cap, or hardware maximum is lower.
+Reductions retain their previous reservation until a heartbeat
+confirms the new limit and measured current has fallen; missing replies never
+release current for another charger. No new increases are granted while a known
+charger lacks a fresh heartbeat. Lowering the circuit budget drains existing
+allocations first and blocks increases during that transition. Budgets below
+5A per eligible charger are not supported yet: no new allocations are issued,
+existing grants are not revoked, and stop/admission policy remains TODO.
+
+`interface` and `stream` are mutually exclusive: setting either replaces the
+other, and the interface created for a `stream` is destroyed with the master.
+Naming a stream is the short form, and is all that a bus of its own needs;
+name an interface instead when it is shared, bridged, or captured.
+
+```text
+/protocol/tesla/twc add name=shed stream=shed_rs485
+
+/interface/tesla-twc add name=shed_twc stream=shed_rs485
+/protocol/tesla/twc add name=shed interface=shed_twc
+```
+
+### `/binding/tesla/twc`
+
+Bridges one charger on a master's bus to its Device. Its properties identify the
+association; charger capabilities, controls, and operating state are Device elements.
+A manually configured binding pre-adopts its slave id. Allocation waits for a
+hardware maximum and fresh heartbeat data.
+
+| Property | Access | Values | Default | Description |
+| --- | --- | --- | --- | --- |
+| `device` | read/write | device name | required | Device to create or populate. |
+| `master` | read/write | TWC master name | required | The `/protocol/tesla/twc` master owning the bus. |
+| `slave_id` | read/write | 16-bit id | required | The charger's TWC bus id. |
+
+The Device's `grid.control` elements carry amp quantities:
+
+| Element | Access | Meaning |
+| --- | --- | --- |
+| `setpoint` | read/write | Requested current, initially the discovered hardware maximum. Allocation never overwrites it. |
+| `cap` | read/write | Optional per-charger ceiling; zero means no secondary cap. Nonzero values must be at least 5A. |
+| `max` | read | Discovered hardware maximum. |
+| `allocated` | read | Most recent current limit commanded by the master, initially zero before admission. |
+| `accepted` | read | Current limit reported by the charger in its heartbeat. |
+
+`setpoint` and `cap` are writable only while the associated master is running
+and active on the bus. Listening, standby, and offline transitions revoke this
+binding's write permission; taking over restores it. Client notification of these
+access changes remains TODO, so already-connected clients may show stale controls.
+
+The existing `grid.meter.current` is measured consumption. `allocated` and
+`accepted` may differ while a command is awaiting acknowledgement. Setpoints
+below 5A retain the existing 5A floor for admitted chargers (`can_disable=false`).
+Stopping a charger requires the vehicle-side control path.
+
+```text
+/protocol/tesla/twc add name=twc0 stream=shed_rs485 max-current=32A
+/binding/tesla/twc add name=twc_6820 device=twc_6820 master=twc0 slave_id=0x6820
+/element/set element=twc_6820.grid.control.cap value=20A
+```
+
 ### `/sync/udp-server`
 
 A datagram sync listener owns one UDP endpoint per selected local endpoint. It

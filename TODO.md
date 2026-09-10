@@ -232,6 +232,20 @@ the commit history and linked design documents carry the implementation record.
 
 ## Tesla TWC
 
+- **[#661] Validate fleet transfers on hardware**: exercise cap changes, circuit-budget
+  reductions, dropped replies, restart/takeover, and measured-current ramp-down.
+  Verify no current is reassigned until the lower limit is acknowledged and measured.
+- **[#661] Establish a verified TWC stop/start operation**: the existing driver has a
+  5A floor and cannot safely revoke an admitted charger's grant. The below-minimum
+  fleet-budget case is deliberately deferred from this PR: decide admission/stop
+  policy, zero grants, and live circuit-budget reductions below the fleet minimum.
+  For now no new allocations are issued in that case; existing grants remain reserved.
+
+- **[#661] Exercise arbitration on a two-master bench**: cover simultaneous startup,
+  takeover after silence, duplicate bus ids, and ids sharing the same low nibble
+  (the current jitter has only 16 slots). Also verify standby discovery from an
+  already-running master's heartbeat replies without a fresh slave announcement.
+
 - **Allow satisfied charging to turn fully off**: the vehicle model now carries
   `charging.enabled` (`src/apps/energy/vehicle.d`), but `pick_enable_element`
   (`src/apps/energy/control.d:427`) searches the control component and does not find it. Wire
@@ -536,8 +550,9 @@ this is what remains.
 
 - **Re-announce an element whose access changes**: `access` is emitted once, at model-add time
   (`src/manager/sync/json_encoder.d:551`). A provider that becomes writable later - a Tesla vehicle
-  session reaching `Phase.ready`, say - leaves every already-introduced mirror holding `read`, so
-  that mirror's UI offers no control and never forwards a write. Emit an access change on the
+  session reaching `Phase.ready`, or a TWC master taking over or standing down - leaves
+  already-introduced mirrors holding stale access, so
+  their UIs may hide available controls or offer controls without agency. Emit an access change on the
   control plane, and make the mirror re-evaluate its peer binding.
 
 ## Infrastructure

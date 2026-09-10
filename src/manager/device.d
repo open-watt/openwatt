@@ -328,6 +328,16 @@ nothrow @nogc:
         return index;
     }
 
+    void set_binding_access(ActiveObject binding, Element* element, manager.element.Access access)
+    {
+        foreach (index, attached; bindings)
+            if (attached is binding)
+            {
+                element.set_binding_access(cast(ubyte)index, access);
+                return;
+            }
+    }
+
     void detach_binding(ActiveObject binding)
     {
         ubyte index;
@@ -932,6 +942,14 @@ unittest
     assert(binding_element1.binding_entries[] == [read0, read1, read2, read3]);
     assert(binding_element2.binding_entries[] == [read_write1, read3, ubyte.max, ubyte.max]);
     assert(binding_element2.access == ElementAccess.read_write);
+    binding_device.set_binding_access(test_bindings[1], binding_element2, ElementAccess.read);
+    assert(binding_element2.access == ElementAccess.read);
+    binding_device.set_binding_access(test_bindings[3], binding_element2, ElementAccess.read_write);
+    binding_device.set_binding_access(test_bindings[1], binding_element2, ElementAccess.read);
+    assert(binding_element2.access == ElementAccess.read_write);
+    binding_device.set_binding_access(test_bindings[3], binding_element2, ElementAccess.read);
+    assert(binding_element2.access == ElementAccess.read);
+    binding_device.set_binding_access(test_bindings[1], binding_element2, ElementAccess.read_write);
     binding_device.detach_binding(test_bindings[1]);
     assert(binding_device.bindings.length == 4 && !binding_device.bindings[1]);
     assert(binding_element1.binding_entries[] == [read0, Element.binding_destroyed, read2, read3]);
