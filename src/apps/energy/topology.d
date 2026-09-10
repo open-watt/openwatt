@@ -1296,8 +1296,7 @@ private:
         if (bound.length != 0)
             return bound;
         if (Element* e = c.find_element("circuit"))
-            if (e.value.isString && e.value.asString.length != 0)
-                return e.value.asString;
+            return e.text_value();
         return null;
     }
 
@@ -1320,21 +1319,23 @@ private:
     PortRole read_port_role(Component c)
     {
         if (Element* e = c.find_element("role"))
-            if (e.value.isString)
-                return port_role_from_name(e.value.asString);
+        {
+            const(char)[] role = e.text_value();
+            if (role.length)
+                return port_role_from_name(role);
+        }
         return PortRole.connection;
     }
 
     FlowDomain read_flow_domain(Component c)
     {
         if (Element* e = c.find_element("flow"))
-            if (e.value.isString)
-            {
-                const(char)[] flow = e.value.asString;
-                if (flow == "consume")       return FlowDomain.consume;
-                if (flow == "supply")        return FlowDomain.supply;
-                if (flow == "bidirectional") return FlowDomain.bidirectional;
-            }
+        {
+            const(char)[] flow = e.text_value();
+            if (flow == "consume")       return FlowDomain.consume;
+            if (flow == "supply")        return FlowDomain.supply;
+            if (flow == "bidirectional") return FlowDomain.bidirectional;
+        }
         return FlowDomain.consume;
     }
 
@@ -1349,8 +1350,11 @@ private:
     MeterSign read_meter_sign(Component c)
     {
         if (Element* e = c.find_element("meter_sign"))
-            if (e.value.isString)
-                return meter_sign_from_name(e.value.asString);
+        {
+            const(char)[] sign = e.text_value();
+            if (sign.length)
+                return meter_sign_from_name(sign);
+        }
         return MeterSign.normal;
     }
 

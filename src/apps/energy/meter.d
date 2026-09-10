@@ -297,7 +297,7 @@ static BusType get_meter_type(Component meter)
 
     Element* e = meter.find_element("type");
     // TODO: this should compare to-lower!! (case-insensitive)
-    switch(e && e.value.isString ? e.value.asString : "")
+    switch (e ? e.text_value() : "")
     {
         case "dc":              return BusType.dc;
         case "single-phase":    return BusType.single_phase;

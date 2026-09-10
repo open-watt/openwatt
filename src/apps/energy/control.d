@@ -92,11 +92,9 @@ nothrow @nogc:
 
     ControlKind kind() const
     {
-        if (kind_e && kind_e.value.isString)
-        {
-            if (const(ControlKind)* p = enum_from_key!ControlKind(kind_e.value.asString))
+        if (kind_e)
+            if (const(ControlKind)* p = enum_from_key!ControlKind(kind_e.text_value()))
                 return *p;
-        }
         if (source && source.template_[] == "Switch")
             return ControlKind.discrete;
         return ControlKind.unknown;
@@ -104,11 +102,9 @@ nothrow @nogc:
 
     ControlDirection direction() const
     {
-        if (direction_e && direction_e.value.isString)
-        {
-            if (const(ControlDirection)* p = enum_from_key!ControlDirection(direction_e.value.asString))
+        if (direction_e)
+            if (const(ControlDirection)* p = enum_from_key!ControlDirection(direction_e.text_value()))
                 return *p;
-        }
         if (source && source.template_[] == "Switch")
             return ControlDirection.consume;
         return ControlDirection.unknown;
@@ -116,11 +112,9 @@ nothrow @nogc:
 
     ControlUnit unit() const
     {
-        if (unit_e && unit_e.value.isString)
-        {
-            if (const(ControlUnit)* p = enum_from_key!ControlUnit(unit_e.value.asString))
+        if (unit_e)
+            if (const(ControlUnit)* p = enum_from_key!ControlUnit(unit_e.text_value()))
                 return *p;
-        }
         if (source && source.template_[] == "Switch")
             return ControlUnit.boolean;
         return ControlUnit.unknown;
@@ -154,12 +148,9 @@ nothrow @nogc:
         {
             if (can_disable_e.value.isBool)
                 return can_disable_e.value.asBool || enable_e !is null;
-            if (can_disable_e.value.isString)
-            {
-                const(char)[] s = can_disable_e.value.asString;
-                if (s.ieq("false") || s[] == "0")
-                    return enable_e !is null;
-            }
+            const(char)[] s = can_disable_e.text_value();
+            if (s.ieq("false") || s[] == "0")
+                return enable_e !is null;
         }
         return true;
     }
