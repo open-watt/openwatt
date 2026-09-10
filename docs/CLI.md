@@ -815,6 +815,42 @@ The DHCPv6 message codec is present, but there are no DHCPv6 client, server,
 or lease commands yet. Future DHCPv6 address/prefix configuration will coexist
 with Router Advertisement discovery of default routers.
 
+### `/protocol/ip/ra`
+
+The Router Advertisement service makes this node an IPv6 router for a link:
+it advertises one /64 prefix for SLAAC, periodically and in answer to Router
+Solicitations, and withdraws itself (zero router-lifetime) on shutdown or when
+its interface, pool or prefix changes. The prefix comes from a `pool6` (one /64
+held for the service's lifetime, released when the pool goes offline or is
+renumbered, so a DHCPv6-PD delegation flows straight through) or is given
+statically. The advertisement is applied to the advertising link exactly as a
+received one would be: the prefix becomes a dynamic on-link `route6` and the
+node's own prefix+EUI-64 becomes a dynamic `/128` `address6` after DAD, both
+refreshed by every advertisement sent. Only built with the in-tree IP stack
+and `GATEWAY=1`; on desktop hosts the kernel owns the router role.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `interface` | interface name | | Interface to advertise on. |
+| `pool` | `pool6` name | | Pool to draw the /64 from; its own prefix must be shorter than /64. |
+| `prefix` | `prefix/64` | | Static alternative to `pool`. |
+| `interval` | `4s` to `1800s` | `600s` | Maximum unsolicited advertisement interval; each gap is random between a third of this and this (fixed at this below 9s), the first three capped at 16s. |
+| `router-lifetime` | `0s`, or `interval` to `9000s` | `30m` | Default-router lifetime; `0s` advertises prefix only. |
+| `valid-lifetime` | duration | `30d` | Prefix valid lifetime. |
+| `preferred-lifetime` | duration <= `valid-lifetime` | `7d` | Prefix preferred lifetime. |
+| `managed` | `yes`/`no` | `no` | M flag: clients should use DHCPv6 for addresses. |
+| `other-config` | `yes`/`no` | `no` | O flag: clients should use DHCPv6 for other config. |
+| `dns` | IPv6 addresses | empty | RDNSS servers advertised. |
+
+Solicited advertisements are delayed by up to 500ms and never sent within 3s of
+the previous one. Durations with a bare `m` suffix parse as metres (the SI unit
+system owns unquoted suffixes); write minutes quoted (`"30m"`) or in another unit.
+
+```
+# advertise a /64 out of the site delegation, with DNS
+/protocol/ip/pool6/add name=site prefix=2001:db8:40::/56
+/protocol/ip/ra/add name=lan interface=eth1 pool=site dns="2001:db8:40::53"
+```
 ### Linux kernel data plane (`/system/linux`, `/system/netlink`)
 
 Linux builds without the in-tree IP stack let the kernel forward. OpenWatt mirrors its

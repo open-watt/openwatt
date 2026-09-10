@@ -169,6 +169,38 @@ void on_neighbour_advert(ref IPStack stack, ref const IPv6Header ip, const(ubyte
     stack.neighbour_v6_cache.advertise(target, iface, target_link_address, router, solicited, override_);
 }
 
+void on_router_solicit(ref IPStack stack, ref const IPv6Header ip, const(ubyte)[] message, BaseInterface iface)
+{
+    EthernetStation station = dyn_cast!EthernetStation(iface);
+    if (!station || ip.hop_limit != 255 || message.length < 8 || message[1] != 0)
+        return;
+    const(ubyte)[] options = message[8 .. $];
+    if (!valid_options(options))
+        return;
+
+    IPv6Addr source = ip.src_addr;
+    const(ubyte)[] source_link_address = find_option(options, NDOption.source_link_addr);
+    if (source_link_address.length != 0 && source_link_address.length != 6)
+        return;
+    if (source == IPv6Addr.any && source_link_address.length)
+        return;
+    if (source == IPv6Addr.any && ip.dst_addr != IPv6Addr.linkLocal_routers)
+        return;
+    if (source != IPv6Addr.any && source_link_address.length)
+        stack.neighbour_v6_cache.observe(source, iface, source_link_address);
+
+    version (DebugND)
+        write_log(Severity.debug_, "nd", null, "rx router-solicit from ", source, " on ", iface.name);
+
+    static if (has_gateway)
+    {
+        import protocol.ip.ra : RAService;
+        foreach (service; Collection!RAService().values)
+            if (service.iface is iface)
+                service.solicited();
+    }
+}
+
 void on_router_advert(ref IPStack stack, ref const IPv6Header ip, const(ubyte)[] message, BaseInterface iface)
 {
     EthernetStation station = dyn_cast!EthernetStation(iface);
@@ -278,6 +310,25 @@ void slaac_update(ref IPStack stack, MonoTime now)
             _slaac_ifaces[i - 1].rs_sent = 0;
             _slaac_ifaces[i - 1].ra_seen = false;
         }
+    }
+}
+
+// A locally advertised prefix is applied to the advertising link exactly as a received one would be
+void slaac_apply(ref IPStack stack, EthernetStation iface, IPv6NetworkAddress prefix, uint valid, uint preferred, MonoTime now)
+{
+    ra_route(iface, prefix, IPv6Addr.any, valid, now);
+    ra_autonomous(stack, iface, prefix, valid, preferred, now);
+}
+
+void slaac_withdraw(ref IPStack stack, EthernetStation iface, IPv6NetworkAddress prefix, MonoTime now)
+{
+    ra_route(iface, prefix, IPv6Addr.any, 0, now);
+    foreach (i, ref state; _slaac_prefixes[])
+    {
+        if (state.iface.get !is iface || state.formed.s[0 .. 4] != prefix.addr.s[0 .. 4])
+            continue;
+        remove_slaac_prefix(stack, i);
+        return;
     }
 }
 
