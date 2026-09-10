@@ -968,8 +968,23 @@ request after the delay; they are never queued for automatic retry.
 Authenticated permanent rejections latch the affected operation. Key and access
 failures affecting the whole session prevent validation. Session `status` shows
 the affected operation, reason and whether the block is timed or latched.
-Unsigned faults cause timed back-off only. Key enrollment allows a 60-second
-approval window before backing off and trying again.
+Unsigned faults cause timed back-off only. Key enrolment allows a 60-second
+approval window before backing off and trying again. When the vehicle refuses an
+enrolment outright it says why, and that reason replaces the generic "tap a key
+card" message in the session's back-off record.
+
+A session enrols itself whenever the vehicle reports that its key is not on the
+whitelist, so `enrol` is only needed to drive the attempt by hand: to retry
+without waiting out the back-off, or to ask for a role other than owner.
+
+| Command | Arguments | Description |
+| --- | --- | --- |
+| `enrol` | `<session> [role=owner\|driver]` | Send an AddKey request now and wait for the outcome. Defaults to `owner`. Reports the vehicle's refusal reason, or succeeds once the vehicle admits the key to a session. |
+
+The vehicle answers a refusal immediately, but only ever proves success by
+admitting the key to an authenticated session, so `enrol` stays pending until the
+handshake completes, the vehicle refuses, or 90 seconds elapse. Tap an enrolled
+key card on the console reader while it waits.
 
 Records belong to the scanner/VIN and survive BLE reconnects, session recreation,
 scanner restarts and unchanged VIN configuration. Latches clear on explicit

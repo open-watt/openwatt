@@ -105,3 +105,19 @@ message TeslaVcsecSignedMessage {
 message TeslaToVcsecMessage {
     optional TeslaVcsecSignedMessage signed_message = 1;
 }
+
+// FromVCSECMessage field 3 is undocumented, arrives unsolicited about once a second, and shapes
+// exactly like CommandStatus.whitelist_operation_status, so only field 4 may be read as a status.
+
+message TeslaWhitelistOperationStatus {
+    optional uint32 whitelist_operation_information = 1;
+}
+
+message TeslaCommandStatus {
+    optional uint32 operation_status = 1;
+    optional TeslaWhitelistOperationStatus whitelist_operation_status = 3;
+}
+
+message TeslaFromVcsecMessage {
+    optional TeslaCommandStatus command_status = 4;
+}

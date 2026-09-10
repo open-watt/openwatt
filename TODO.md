@@ -270,6 +270,26 @@ the commit history and linked design documents carry the implementation record.
   enable, current setpoint (including 5 A), HVAC power and target temperature on the S3.
   Repeat after disconnect/reconnect and VIN removal; check existing and fresh sync mirrors.
 
+- **[#526] Validate the whitelist refusal decode on the car**: the reason strings come from
+  Tesla's `vcsec.proto` enum, never from an observed refusal. Provoke one (enrol a key while
+  the vehicle sits at the touchscreen prompt and decline it, expecting information 24) and
+  confirm the frame reaches `handle_enrolment_status` rather than being dropped as unaddressed.
+
+- **[#526] Fail fast on terminal whitelist refusals**: `WHITELIST_FULL`, `NO_PERMISSION_TO_ADD`
+  and `INVALID_PUBLIC_KEY` cannot succeed by retrying, but the session still burns its whole
+  60-second approval window before backing off. Ending the phase early needs on-car evidence of
+  which codes are genuinely terminal; a code misclassified as terminal aborts enrolments that
+  would have worked.
+
+- **[#526] Offer ROLE_CHARGING_MANAGER when enrolling**: `Keys.Role` 6 is the least-privilege
+  role for what OpenWatt actually does, and would drop the owner-level authority the enrolled
+  key currently holds. Held back only because AddKey has never been tried with it: a role the
+  vehicle refuses costs an approval window to discover.
+
+- **Document the rest of `/protocol/tesla/session`**: `get-charge`, `get-climate`,
+  `charge-start`, `charge-stop`, `set-amps`, `climate`, `set-temperature` and
+  `schedule-charging` have never been listed in [docs/CLI.md](docs/CLI.md); only `enrol` is.
+
 - **Honor addr_type in Windows BLE connect**: `ble_hw_connect` in urt's Windows driver drops
   its `addr_type` argument; `FromBluetoothAddressAsync` assumes a public address, so connecting
   to the (random-address) vehicle likely only works while Windows has it in its scan cache.
