@@ -445,10 +445,13 @@ nothrow @nogc:
     }
 
 private:
+    enum max_line_length = 8192;
+    enum max_headers = 128;
+
     static bool read_http_version(ref const(char)[] msg, ref HTTPMessage message)
     {
         enum http = "HTTP/";
-        if (msg[0..http.length] != http)
+        if (msg.length < http.length || msg[0..http.length] != http)
             return false;
 
         msg = msg[http.length..$];
@@ -461,7 +464,7 @@ private:
         msg = msg[1..$];
 
         int minor = msg.parse_int_fast(success);
-        if (!success || msg.empty)
+        if (!success)
             return false;
 
         if (major >= 16 || minor >= 16)
@@ -509,18 +512,20 @@ private:
 
     static int read_request_line(ref const(char)[] msg, ref HTTPMessage message)
     {
-        const HTTPMethod* method = msg.split!(' ', false).enum_from_key!HTTPMethod;
+        size_t unread = msg.length;
+        const(char)[] line = msg.takeLine;
+        if (line.length == unread || line.length > max_line_length)
+            return -1;
+
+        const HTTPMethod* method = line.split!(' ', false).enum_from_key!HTTPMethod;
         if (!method)
             return -1;
         message.method = *method;
 
-        if (int result = read_request_target(msg, message))
+        if (int result = read_request_target(line, message))
             return result;
 
-        if (!read_http_version(msg, message))
-            return -1;
-
-        if (msg.takeLine.length != 0)
+        if (!read_http_version(line, message) || line.length != 0)
             return -1;
 
         return 0;
@@ -637,29 +642,23 @@ private:
             msg = msg[newline + 2 .. $];
             if (newline == 0)
                 break; // empty line marks end of header fields
+            if (line.length > max_line_length || message.headers.length >= max_headers)
+                return -1;
 
+            // obs-fold (RFC 9112 5.2) is rejected rather than joined
             if (line[0].is_whitespace)
-            {
-                assert(false, "TODO: just check this path is correct...");
+                return -1;
 
-                // line continues last header value...
-                if (message.headers.empty)
-                    return -1; // bad header format
-                MutableString!0 newVal = MutableString!0(Concat, message.headers[$ - 1].value, ' ', line.trim);
-                message.headers[$ - 1].value = String(newVal.move);
-            }
-            else
-            {
-                // header field...
-                size_t colon = line.findFirst(':');
-                if (colon == line.length)
-                    return -1; // bad header format
+            size_t colon = line.findFirst(':');
+            if (colon == line.length)
+                return -1;
 
-                const(char)[] key = line[0 .. colon];
-                const(char)[] value = line[colon + 2 .. $].trim;
+            const(char)[] key = line[0 .. colon].trim;
+            const(char)[] value = line[colon + 1 .. $].trim;
+            if (key.empty)
+                return -1;
 
-                message.headers ~= HTTPParam(key.make_string(), value.make_string());
-            }
+            message.headers ~= HTTPParam(key.make_string(), value.make_string());
         }
         return 1;
     }
