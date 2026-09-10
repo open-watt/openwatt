@@ -761,8 +761,7 @@ EUI-64 link-local address, verifies it with DAD, and publishes it as a dynamic
 individual host addresses from `/64`s it reserves for itself. Best-fit
 allocation packs around existing reservations. Static host reservations accept
 any nonzero 64-bit interface ID; automatic issuance uses IDs 1..65535 per `/64`.
-These allocator APIs are available for future DHCPv6 integration; the DHCPv6
-client, server and lease collections are not implemented.
+`/protocol/dhcp/server6` and `/protocol/dhcp/lease6` draw from these pools.
 
 A pool's `prefix` is one IPv6 network, including its length. Configure a static
 pool with `prefix=fd00:12:34::/48`, or request a `/56` from a parent with
@@ -802,6 +801,25 @@ The DHCPv6 message codec is present, but there are no DHCPv6 client, server,
 or lease commands yet. Future DHCPv6 address/prefix configuration will coexist
 with Router Advertisement discovery of default routers.
 
+#### Server
+
+`/protocol/dhcp/server6` leases host addresses and delegates sub-prefixes from
+one `pool6`. Dynamic `/protocol/dhcp/lease6` entries track the bindings by
+client DUID and expire on their advertised lifetimes.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `interface` | interface name | | Interface to serve on. |
+| `pool` | `pool6` name | | Pool supplying addresses and delegable prefixes. |
+| `lease-time` | duration | `1d` | Valid lifetime granted to clients. |
+| `delegation-length` | `1` to `64` | `0` (disabled) | Width of delegated sub-prefixes; unset refuses `IA_PD`. |
+| `dns` | IPv6 addresses | empty | DNS servers offered (option 23). |
+
+```
+/protocol/ip/pool6/add name=lan prefix="fd00:60::/48"
+/protocol/dhcp/server6/add name=srv interface=eth1 pool=lan delegation-length=60 dns="fd00:60::53"
+/protocol/dhcp/lease6/print
+```
 ### Linux kernel data plane (`/system/linux`, `/system/netlink`)
 
 Linux builds without the in-tree IP stack let the kernel forward. OpenWatt mirrors its
