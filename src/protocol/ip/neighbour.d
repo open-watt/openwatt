@@ -4,6 +4,7 @@ version (UseInternalIPStack):
 
 import urt.array;
 import urt.inet;
+import urt.lifetime : move;
 import urt.log;
 import urt.time;
 
@@ -33,7 +34,7 @@ struct NeighbourEntry(IP)
     ubyte[16] link_addr;        // MAC (6) or EUI-64 (8) etc.
     MonoTime last_confirmed;
     MonoTime last_request;
-    Packet*[pending_queue_depth] pending;
+    Packet[pending_queue_depth] pending;
     ubyte link_addr_len;
     NeighbourState state;
     ubyte retry_count;
@@ -287,9 +288,9 @@ private:
         if (e.pending_count == pending_queue_depth)
         {
             // evict oldest to make room for newest
-            e.pending[0].free_clone();
+            e.pending[0].release();
             foreach (i; 1 .. pending_queue_depth)
-                e.pending[i - 1] = e.pending[i];
+                e.pending[i - 1] = move(e.pending[i]);
             --e.pending_count;
 
             ++_pending_overflow;
@@ -298,17 +299,16 @@ private:
                             ": dropping queued packet for ", e.ip,
                             " on ", e.iface.name, " (state=", e.state, ")");
         }
-        Packet* queued = pkt.clone();
-        if (!queued)
+        e.pending[e.pending_count] = pkt.share();
+        if (!e.pending[e.pending_count].valid)
             return;
-        e.pending[e.pending_count] = queued;
         ++e.pending_count;
     }
 
     void free_pending(ref NeighbourEntry!IP e)
     {
         foreach (i; 0 .. e.pending_count)
-            e.pending[i].free_clone();
+            e.pending[i].release();
         e.pending_count = 0;
     }
 
@@ -321,8 +321,8 @@ private:
         }
         foreach (i; 0 .. e.pending_count)
         {
-            drain(*e.pending[i], e.iface, e.link_addr[0 .. e.link_addr_len]);
-            e.pending[i].free_clone();
+            drain(e.pending[i], e.iface, e.link_addr[0 .. e.link_addr_len]);
+            e.pending[i].release();
         }
         e.pending_count = 0;
     }

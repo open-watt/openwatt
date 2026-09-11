@@ -7,6 +7,7 @@ module driver.baremetal.ble;
 
 import urt.array;
 import urt.endian;
+import urt.lifetime : move;
 import urt.log;
 import urt.map;
 import urt.mem.temp;
@@ -137,8 +138,8 @@ protected:
         _adv_handles.clear();
         _addr_types.clear();
 
-        foreach (p; _emu_responses[])
-            p.free_clone();
+        foreach (ref p; _emu_responses[])
+            p.release();
         _emu_responses.clear();
 
         return super.shutdown();
@@ -204,7 +205,7 @@ private:
 
     Map!(MACAddress, BLEAdv) _adv_handles;
     Map!(MACAddress, BLEAddrType) _addr_types; // LE address type by device, learnt from adverts
-    Array!(Packet*) _emu_responses;
+    Array!Packet _emu_responses;
 
     void account_driver_drops()
     {
@@ -664,15 +665,15 @@ private:
     // mid-iteration.
     void emu_respond(ref BLEFrame req, const(ubyte)[] pdu)
     {
-        Packet* response = alloc_packet!BLEFrame(pdu);
-        if (!response)
+        Packet response = alloc_packet!BLEFrame(pdu);
+        if (!response.valid)
             return;
         ref f = response.hdr!BLEFrame;
         f.src = req.dst;
         f.dst = req.src;
         f.kind = BLEFrameKind.att;
         f.code = pdu[0];
-        _emu_responses ~= response;
+        _emu_responses ~= move(response);
 
         import protocol.ble : BLEModule;
         get_module!BLEModule.request_service();
@@ -682,10 +683,10 @@ private:
     {
         while (_emu_responses.length > 0)
         {
-            Packet* p = _emu_responses[0];
+            Packet p = move(_emu_responses[0]);
             _emu_responses.remove(0);
-            on_incoming(*p);
-            p.free_clone();
+            on_incoming(p);
+            p.release();
         }
     }
 

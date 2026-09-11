@@ -94,11 +94,11 @@ void icmp6_send_error(ref IPStack stack, ubyte type, ubyte code, ref const Packe
     size_t message_length = 8 + quote_length;
     size_t total = IPv6Header.sizeof + message_length;
 
-    Packet* response = alloc_packet!RawFrame(total);
-    if (!response)
+    Packet response = alloc_packet!RawFrame(total);
+    if (!response.valid)
         return;
     scope(exit)
-        response.free_clone();
+        response.release();
     ubyte[] buffer = cast(ubyte[])response.payload;
 
     auto ip = cast(IPv6Header*)buffer.ptr;
@@ -122,9 +122,9 @@ void icmp6_send_error(ref IPStack stack, ubyte type, ubyte code, ref const Packe
     storeBigEndian(cast(ushort*)(message + 2), checksum);
 
     if (original_source.is_link_local && ingress)
-        stack.output_v6_routed(*response, ingress, original_source);
+        stack.output_v6_routed(response, ingress, original_source);
     else
-        stack.output_v6(*response);
+        stack.output_v6(response);
 }
 
 ushort icmp6_echo_send(ref IPStack stack, IPv6Addr destination, BaseInterface iface_hint, Echo6Handler handler, Echo6ErrorHandler error_handler = null)
@@ -300,11 +300,11 @@ void handle_echo_request(ref IPStack stack, ref const Packet packet, size_t offs
 
     size_t message_length = datagram_end - offset;
     size_t total = IPv6Header.sizeof + message_length;
-    Packet* reply = alloc_packet!RawFrame(total);
-    if (!reply)
+    Packet reply = alloc_packet!RawFrame(total);
+    if (!reply.valid)
         return;
     scope(exit)
-        reply.free_clone();
+        reply.release();
     ubyte[] buffer = cast(ubyte[])reply.payload;
 
     auto reply_ip = cast(IPv6Header*)buffer.ptr;
@@ -328,9 +328,9 @@ void handle_echo_request(ref IPStack stack, ref const Packet packet, size_t offs
         write_log(Severity.debug_, "icmp6", null, "tx echo reply dst=", reply_ip.dst_addr, " (", total, " bytes)");
 
     if (reply_ip.dst_addr.is_link_local && iface)
-        stack.output_v6(*reply, iface);
+        stack.output_v6(reply, iface);
     else
-        stack.output_v6(*reply);
+        stack.output_v6(reply);
 }
 
 void handle_echo_reply(ref const IPv6Header ip, const(ubyte)[] message, BaseInterface iface)
