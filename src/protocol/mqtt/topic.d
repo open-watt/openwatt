@@ -11,7 +11,8 @@ nothrow @nogc:
 
 
 // In-process delivery for bindings. Wire-side subscribers (Session) leave callback null; the broker dispatches them by formatting a PUBLISH packet.
-alias PublishCallback = void delegate(const(char)[] sender, const(char)[] topic, const(ubyte)[] payload, MonoTime timestamp) nothrow @nogc;
+// `replayed` marks retained-message replay: stale state, not evidence the publisher is alive.
+alias PublishCallback = void delegate(const(char)[] sender, const(char)[] topic, const(ubyte)[] payload, MonoTime timestamp, bool replayed) nothrow @nogc;
 
 // Topic length capped at 65535 (on-wire 2-byte length prefix). `$`-prefixed topics are reserved: root-level `#` and `+` MUST NOT match them (MQTT-4.7.2-1).
 bool validate_topic_name(const(char)[] name) pure

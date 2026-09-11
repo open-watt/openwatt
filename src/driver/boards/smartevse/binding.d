@@ -74,7 +74,7 @@ nothrow @nogc:
 
         publish(SmartEVSEChange.all);
         publish_online();
-        _device_instance.notify(ComponentEvent.online);
+        _device_instance.notify(ComponentEvent.materialised);
         return CompletionStatus.complete;
     }
 
@@ -82,10 +82,9 @@ nothrow @nogc:
     {
         unsubscribe();
         if (_device_instance)
-            _device_instance.notify(ComponentEvent.offline);
-        detach_device();
+            set_device_online(false);
         _built = false;
-        return CompletionStatus.complete;
+        return super.shutdown();
     }
 
 protected:
@@ -103,8 +102,7 @@ protected:
         builder.constant(info, "type", "evse");
         builder.constant(info, "name", "SmartEVSE v3.0");
 
-        Component status = builder.component("status", "DeviceStatus");
-        _online = add_element!bool(builder, status, "online");
+        builder.component("status", "DeviceStatus");
 
         Component grid = builder.component("grid", "Port");
         builder.constant(grid, "role", "parent");
@@ -177,7 +175,6 @@ private:
     bool _built;
     bool _subscribed;
 
-    Element* _online;
     Element* _setpoint;
     Element* _control_max;
     Element* _enable;
@@ -357,7 +354,7 @@ private:
         SmartEVSE hardware = _evse.get;
         bool online = hardware && hardware.running;
         auto timestamp = getSysTime();
-        _online.value(online, timestamp, &element_changed);
+        set_device_online(online);
         _enable.value(online && !hardware.stopped, timestamp, &element_changed);
     }
 

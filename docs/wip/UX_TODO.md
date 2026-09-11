@@ -3,6 +3,30 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-09-11: device liveness and `status.online` (PR #663)
+
+- Every device now carries a `status.online` boolean element holding one central reachability
+  verdict, aggregated across every binding that can reach the device. Render a device's
+  online/offline state from this element instead of per-protocol heuristics or the absence of
+  value updates.
+- The verdict has three states, and the element is written only once some source has voted.
+  Treat a device with no `status.online` value as *unknown*, not offline, and show it as such;
+  a device is offline only when the element reads false. Once published, losing every source
+  (its last binding stopped, restarted, removed or disabled) reads offline, never back to unknown.
+- A device stays online while any one source can still reach it, so a partially failing device
+  reports online with some of its elements stale. Element-level staleness is still the client's
+  own call; `status.online` does not answer it.
+- `ComponentEvent.online` / `offline` now mean "backing source reachable / unreachable". The old
+  tree-is-ready meaning moved to the new `ComponentEvent.materialised`. Anything that used
+  `online` as the go-ahead to render a device's tree must switch to `materialised`.
+- Bindings gain an `offline-timeout` duration property (see the `/binding` common properties in
+  [CLI.md](../CLI.md)) that marks a device offline after a quiet period even while its transport
+  stays up. Surface it wherever binding configuration is edited: default `0` (disabled), `30s`
+  for CAN.
+- Devices bound through OBD or Home Assistant availability/LWT do not vote yet
+  and will stay unknown. A dropped peer link does not yet mark that peer's mirrored devices
+  offline.
+
 ## 2026-09-09: Tesla vehicle write authority (PR #683)
 
 - Use the vehicle's `control.min` value for charging sliders; Tesla VIN registration now

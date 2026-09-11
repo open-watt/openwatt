@@ -44,6 +44,7 @@ nothrow @nogc:
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!TeslaTWCBinding, id, flags);
+        _quiet_limit = 30.seconds;
     }
 
     final inout(TeslaTWCMaster) master() inout pure
@@ -119,9 +120,8 @@ nothrow @nogc:
         _target_current = null;
         _current_cap = null;
         _elements.clear();
-        detach_device();
         _built = false;
-        return CompletionStatus.complete;
+        return super.shutdown();
     }
 
 package:
@@ -144,6 +144,9 @@ package:
         vehicle = 16,       // the VIN once fully collected, or dropped when the car leaves
         all = 31,
     }
+
+    void heard()
+        => note_activity();
 
     void push_samples(ref TeslaTWCMaster.Charger charger, Push groups = Push.all)
     {
@@ -373,7 +376,10 @@ private:
     void master_state_change(ActiveObject, StateSignal signal)
     {
         if (signal == StateSignal.offline)
+        {
+            set_device_online(false);
             restart();
+        }
     }
 
     void on_target_current_change(ref const SampleUpdate update)

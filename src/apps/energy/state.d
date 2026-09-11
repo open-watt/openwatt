@@ -38,7 +38,7 @@ Device create_energy_device()
         builder.component(id[]);
 
     builder.commit();
-    d.notify(ComponentEvent.online);
+    d.notify(ComponentEvent.materialised);
 
     return d;
 }

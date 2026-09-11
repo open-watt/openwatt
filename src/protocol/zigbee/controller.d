@@ -1125,6 +1125,7 @@ private:
                     return;
                 }
                 node.device = device;
+                node.seen();
 
                 DeviceBuilder builder = device.edit();
                 builder.constant("status.network.mode", StringLit!"zigbee");

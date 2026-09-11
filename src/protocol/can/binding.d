@@ -48,6 +48,7 @@ nothrow @nogc:
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!CANBinding, id, flags);
+        _quiet_limit = 30.seconds;
     }
 
     final inout(CANInterface) iface() inout pure
@@ -181,7 +182,10 @@ private:
     void iface_state_change(ActiveObject obj, StateSignal signal)
     {
         if (signal == StateSignal.offline)
+        {
+            set_device_online(false);
             restart();
+        }
     }
 
     void packet_handler(ref const Packet p, BaseInterface i, PacketDirection dir, void* u)
@@ -190,10 +194,12 @@ private:
             return;
 
         ref can = p.hdr!CANFrame;
+        bool matched;
         foreach (ref e; elements)
         {
             if (e.id != can.id)
                 continue;
+            matched = true;
 
             assert(e.offset + e.length <= p.length, "message too small for element data?!");
             const(void)[] wire = p.data[e.offset .. e.offset + e.length];
@@ -228,5 +234,8 @@ private:
             version (DebugCANBinding)
                 log.debugf("sample - offset: {0} element: {1} = {2}", e.offset, el.id, el.value);
         }
+
+        if (matched)
+            note_activity();
     }
 }
