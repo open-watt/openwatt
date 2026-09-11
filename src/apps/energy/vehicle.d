@@ -569,7 +569,7 @@ nothrow @nogc:
         }
         builder.commit();
         if (changed)
-            (*v).notify(ComponentEvent.online);
+            (*v).notify(ComponentEvent.materialised);
 
         return 0;
     }

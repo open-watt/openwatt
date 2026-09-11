@@ -187,7 +187,10 @@ private:
     void state_change(ActiveObject obj, StateSignal signal)
     {
         if (signal == StateSignal.offline)
+        {
+            set_device_online(false);
             restart();
+        }
     }
 
     void clear_subscriptions()
@@ -251,6 +254,7 @@ private:
 
     void on_value(ushort handle, const(ubyte)[] value)
     {
+        note_activity();
         foreach (ref e; elements)
         {
             if (e.handle != handle)

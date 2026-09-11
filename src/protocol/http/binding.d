@@ -301,7 +301,10 @@ private:
     void state_change(ActiveObject obj, StateSignal signal)
     {
         if (signal == StateSignal.offline)
+        {
+            set_device_online(false);
             restart();
+        }
     }
 
     // TODO: DELETE THIS QUEUE THING; IT'S A HACK, HTTPClient NEEDS TO RETURN A HANDLE
@@ -742,25 +745,34 @@ private:
                 // TODO: parse Location URL, compare to client, handle case 3
                 log.warning("redirect to '", location, "' - not yet implemented");
             }
+            report_poll(false);
             return 0;
         }
 
         if (response.status_code < 200 || response.status_code >= 300)
         {
             log.warning("request returned status ", response.status_code);
+            report_poll(false);
             return 0;
         }
 
         if (response.content.length == 0 || rs is null)
+        {
+            report_poll(true);
             return 0;
+        }
 
         ref const HTTPRequestDesc req = get_http_request(*_profile_data, req_idx);
 
         if (req.parse_mode == HTTPRequestDesc.ParseMode.none)
+        {
+            report_poll(true);
             return 0;
+        }
 
         if (req.parse_mode == HTTPRequestDesc.ParseMode.regex)
         {
+            bool matched;
             foreach (ref se; _elements[])
             {
                 ref const HTTPElementDesc http = _profile_data.get_section!HTTPElementDesc(http_section_kind, se.http_index);
@@ -781,19 +793,27 @@ private:
                 {
                     se.last_sample = getTime();
                     se.sampled = true;
+                    matched = true;
                 }
             }
+            report_poll(matched);
             return 0;
         }
 
         Variant json = parse_json(cast(const(char)[])response.content[]);
-        // TODO: we don't have a way to signal a parse error :/
+        if (json.isNull)
+        {
+            log.warning("response is not a JSON document");
+            report_poll(false);
+            return 0;
+        }
 
         if (rs.success_expr)
         {
             if (!evaluate_success(json, rs.success_expr))
             {
                 log.warning("success check failed for request");
+                report_poll(false);
                 return 0;
             }
         }
@@ -806,10 +826,12 @@ private:
             if (data is null)
             {
                 log.warning("root path '", root_path, "' not found in response");
+                report_poll(false);
                 return 0;
             }
         }
 
+        bool sampled;
         const(char)[] parse_tmpl = rs.resolved_parse_template ? rs.resolved_parse_template[] : req.get_parse_template(*_profile_data);
 
         foreach (ref se; _elements[])
@@ -845,11 +867,13 @@ private:
                 continue;
             se.last_sample = getTime();
             se.sampled = true;
+            sampled = true;
 
             version (DebugHTTPClientBinding)
                 log.trace("HTTP sampled: ", se.element.id, " = ", se.element.value);
         }
 
+        report_poll(sampled);
         return 0;
     }
 

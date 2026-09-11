@@ -292,6 +292,13 @@ nothrow @nogc:
     bool available() const pure
         => pan_id != 0xFFFF && id != 0xFFFE;
 
+    void seen()
+    {
+        last_seen = getSysTime();
+        if (device)
+            device.set_online(cast(void*)get_module!ZigbeeProtocolModule, true);
+    }
+
     ref Endpoint get_endpoint(ubyte endpoint_id)
     {
         Endpoint* ep = endpoint_id in endpoints;
@@ -363,6 +370,8 @@ nothrow @nogc:
         g_app.console.register_command!(nodes_print, "nodes")("/protocol/zigbee", this);
         g_app.console.register_command!(zcl_read, "read")("/protocol/zigbee", this);
         g_app.console.register_command!(zcl_write, "write")("/protocol/zigbee", this);
+
+        g_app.schedule(getTime() + liveness_scan_interval, &liveness_scan);
     }
 
     uint element_size(uint)
@@ -502,6 +511,8 @@ nothrow @nogc:
         NodeMap* n = eui in nodes_by_eui;
         if (!n)
             return;
+        if (n.device)
+            n.device.remove_online_source(cast(void*)this);
         if (n.pan_id != 0xFFFF && n.id != 0xFFFE)
             detach_node(n.pan_id, n.id);
         nodes_by_eui.remove(eui);
@@ -570,6 +581,25 @@ nothrow @nogc:
         if (n)
             return *n;
         return null;
+    }
+
+    // battery devices legitimately report as seldom as daily, so their quiet window is generous
+    enum liveness_scan_interval = dur!"minutes"(1);
+    enum router_quiet_limit = dur!"hours"(2);
+    enum end_device_quiet_limit = dur!"hours"(26);
+
+    void liveness_scan(MonoTime scheduled)
+    {
+        SysTime now = getSysTime();
+        foreach (ref NodeMap n; nodes_by_eui.values)
+        {
+            if (!n.device || n.last_seen == SysTime())
+                continue;
+            Duration limit = n.desc.type >= NodeType.end_device ? end_device_quiet_limit : router_quiet_limit;
+            if (now - n.last_seen >= limit)
+                n.device.set_online(cast(void*)this, false);
+        }
+        g_app.schedule(getTime() + liveness_scan_interval, &liveness_scan);
     }
 
     void note_awake(NodeMap* node)

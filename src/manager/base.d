@@ -801,7 +801,7 @@ nothrow @nogc:
         {
             bool was_running = _state == State.running;
             _state |= _disabled;
-            _state &= ~_start;
+            _state &= ~(_start | _fail);
             if (_state & _valid)
                 _state |= _stop;
             if (was_running)

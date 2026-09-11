@@ -7,6 +7,7 @@ import urt.mem.temp : tconcat;
 import urt.meta : AliasSeq;
 import urt.result;
 import urt.string;
+import urt.time;
 import urt.variant;
 
 import manager;
@@ -20,7 +21,8 @@ nothrow @nogc:
 
 abstract class ProtocolBinding : ActiveObject
 {
-    alias Properties = AliasSeq!(Prop!("device", device));
+    alias Properties = AliasSeq!(Prop!("device", device),
+                                 Prop!("offline-timeout", offline_timeout));
 nothrow @nogc:
 
     enum type_name = "binding";
@@ -38,14 +40,38 @@ nothrow @nogc:
     {
         if (value == _device)
             return;
+        detach_device();
         _device = value.move;
         mark_set!(typeof(this), "device")();
         restart();
     }
 
+    // silence longer than this marks the device offline; zero disables the watchdog
+    final Duration offline_timeout() const pure
+        => _quiet_limit;
+    final void offline_timeout(Duration value)
+    {
+        _quiet_limit = value;
+        mark_set!(typeof(this), "offline-timeout")();
+        if (_quiet_armed)
+        {
+            g_app.cancel(&quiet_check);
+            _quiet_armed = false;
+        }
+        if (running && _last_activity != MonoTime.init)
+            arm_quiet();
+    }
+
 protected:
+    enum offline_after = 3;                     // consecutive poll failures
+    enum offline_grace = dur!"seconds"(30);     // and no successful sample within this window
+
     String _device;
     Device _bound_device;
+    Duration _quiet_limit;
+    MonoTime _last_activity;
+    ubyte _poll_failures;
+    bool _quiet_armed;
 
     bool materialise()
     {
@@ -60,12 +86,80 @@ protected:
         return e;
     }
 
+    final void note_activity()
+    {
+        _last_activity = getTime();
+        set_device_online(true);
+        arm_quiet();
+    }
+
+    final void report_poll(bool success)
+    {
+        if (success)
+        {
+            _poll_failures = 0;
+            note_activity();
+        }
+        else
+        {
+            if (_poll_failures != ubyte.max)
+                ++_poll_failures;
+            if (_poll_failures >= offline_after && getTime() - _last_activity >= offline_grace)
+                set_device_online(false);
+        }
+    }
+
+    final void set_device_online(bool online)
+    {
+        if (_bound_device)
+            _bound_device.set_online(cast(void*)this, online);
+    }
+
+    override CompletionStatus shutdown()
+    {
+        detach_device();
+        return CompletionStatus.complete;
+    }
+
     void detach_device()
     {
+        if (_quiet_armed)
+        {
+            g_app.cancel(&quiet_check);
+            _quiet_armed = false;
+        }
+        _poll_failures = 0;
+        _last_activity = MonoTime.init;
         if (!_bound_device)
             return;
+        _bound_device.remove_online_source(cast(void*)this);
         _bound_device.detach_binding(this);
         _bound_device = null;
+    }
+
+private:
+    void arm_quiet()
+    {
+        if (!g_app || _quiet_limit <= Duration.zero || _quiet_armed)
+            return;
+        g_app.schedule(_last_activity + _quiet_limit, &quiet_check);
+        _quiet_armed = true;
+    }
+
+    void quiet_check(MonoTime)
+    {
+        _quiet_armed = false;
+        if (_quiet_limit <= Duration.zero)
+            return;
+        MonoTime deadline = _last_activity + _quiet_limit;
+        MonoTime now = getTime();
+        if (now < deadline)
+        {
+            g_app.schedule(deadline, &quiet_check);
+            _quiet_armed = true;
+            return;
+        }
+        set_device_online(false);
     }
 }
 
@@ -100,7 +194,7 @@ protected:
         if (format.valid)
         {
             if (_bound_device && _bound_device !is device)
-                _bound_device.detach_binding(this);
+                detach_device();
             _bound_device = device;
             device.attach_binding(this, element, cast(manager.element.Access)desc.access);
         }
@@ -189,6 +283,108 @@ protected:
             g_app.release_profile(_profile_data);
             _profile_data = null;
         }
-        return CompletionStatus.complete;
+        return super.shutdown();
     }
+}
+
+unittest
+{
+    import manager.collection : collection_type_info, item_table;
+
+    static final class TestBinding : ProtocolBinding
+    {
+        enum type_name = "liveness-test-binding";
+        enum collection_id = cast(CollectionType)0;
+    nothrow @nogc:
+
+        Device target;
+        uint startups, fail_first;
+
+        this(CID id, ObjectFlags flags = ObjectFlags.none)
+        {
+            super(collection_type_info!TestBinding, id, flags);
+        }
+
+        override CompletionStatus startup()
+        {
+            ++startups;
+            if (fail_first)
+            {
+                --fail_first;
+                return CompletionStatus.error;
+            }
+            _bound_device = target;
+            return CompletionStatus.complete;
+        }
+
+        override CompletionStatus shutdown()
+        {
+            detach_device();
+            return super.shutdown();
+        }
+
+        void heard()
+            => note_activity();
+    }
+
+    DeviceTable devices;
+    DeviceBuilder b = devices.create("liveness-binding-test");
+    Device dev = b.device;
+    b.commit();
+
+    auto table = &item_table(0);
+    TestBinding binding = alloc!TestBinding(table.allocate("liveness-b", 0));
+    table.bind(binding.id, binding);
+    binding.target = dev;
+    binding.fail_first = 1;
+    binding.do_update();
+    assert(binding.startups == 1 && !binding.running);
+    binding.do_update();
+    assert(binding.startups == 2 && binding.running);
+    binding.heard();
+    assert(dev.online_status == OnlineStatus.online);
+
+    binding.restart();
+    assert(dev.online_status == OnlineStatus.offline && binding._bound_device is null);
+    binding.do_update();
+    assert(binding.running && dev.online_status == OnlineStatus.offline);
+    binding.heard();
+    assert(dev.online_status == OnlineStatus.online);
+
+    int other;
+    dev.set_online(&other, true);
+    binding.disabled = true;
+    binding.do_update();
+    assert(dev.online_status == OnlineStatus.online && binding._bound_device is null);
+    dev.remove_online_source(&other);
+    assert(dev.online_status == OnlineStatus.offline);
+    binding.disabled = false;
+    binding.do_update();
+    binding.heard();
+    assert(dev.online_status == OnlineStatus.online);
+
+    binding.device = StringLit!"replacement";
+    assert(dev.online_status == OnlineStatus.offline && binding._last_activity == MonoTime.init);
+    binding.do_update();
+    binding.heard();
+    binding.fail_first = 1;
+    binding.restart();
+    binding.do_update();
+    assert(!binding.running && dev.online_status == OnlineStatus.offline);
+    binding.destroy();
+    assert(!binding._quiet_armed);
+    table.free_pending();
+
+    binding = alloc!TestBinding(table.allocate("liveness-disabled", 0));
+    table.bind(binding.id, binding);
+    binding.target = dev;
+    binding.do_update();
+    binding.heard();
+    binding.fail_first = 1;
+    binding.restart();
+    binding.do_update();
+    binding.disabled = true;
+    assert(dev.online_status == OnlineStatus.offline && binding._bound_device is null);
+    binding.destroy();
+    table.free_pending();
 }

@@ -319,8 +319,14 @@ The current implementation and remaining phases are described in
   - no removal path: `Component` has no remove, `DeviceTable` has no remove, elements are never
     destroyed and `DeviceLifecycleEvent.destroyed` / `ComponentEvent.destroyed` are never emitted.
     Route removal through the builder when the first producer needs it.
-  - `online`/`offline` are still ad hoc: six emitters of `online`, one of `offline` (smartevse).
-    Mirrored and MQTT-discovered devices never go offline.
+  - liveness is centralised (`Device.set_online`, the `status.online` element), but not every
+    source votes yet, so those devices sit at `unknown` forever:
+    - OBD wants a richer verdict than a binary flag; parked and asleep are not offline. The likely
+      mapping is online while the dongle answers, with awake/asleep staying its own element.
+    - Home Assistant availability/LWT needs `availability`/`availability_topic` parsed (single and
+      list forms, custom payloads) and per-entity availability aggregated up to the device.
+    - a peer link dropping should mark that peer's mirrored devices offline; the sync layer has
+      no override today, and mirrored devices therefore never go offline.
   - MQTT discovery and sync mirrors publish an empty device and grow it one edit per frame; that is
     the intended burst granularity, but a discovery that knows its entity set up front could build
     once.

@@ -38,6 +38,13 @@ void register_device_lifecycle_handler(DeviceLifecycleHandler handler)
     _on_device_lifecycle ~= handler;
 }
 
+enum OnlineStatus : ubyte
+{
+    unknown,
+    online,
+    offline,
+}
+
 // null create: devices are not BaseObjects; their table is g_app.devices, not g_item_tables
 __gshared const CollectionTypeInfo device_type_info = CollectionTypeInfo(DynTypeInfo(StringLit!"device", null), StringLit!"/device", CollectionType.device, null, null, true, false);
 
@@ -67,7 +74,11 @@ nothrow @nogc:
     {
         Device d = alloc!Device(id.make_string(), peer_id, private_);
         insert(d);
-        return DeviceBuilder(d, true);
+        DeviceBuilder builder = DeviceBuilder(d, true);
+        Element* online = builder.element("status.online", register_value_format!bool());
+        online.access = manager.element.Access.read;
+        online.sampling_mode = SamplingMode.report;
+        return builder;
     }
 
     DeviceBuilder open(const(char)[] id, ulong peer_id = 0, bool private_ = false)
@@ -486,6 +497,39 @@ nothrow @nogc:
 
     bool binding_is_peer(ubyte index) const pure
         => index < bindings.length && (_peer_binding_mask & (1 << index)) != 0;
+    OnlineStatus online_status() const pure
+        => _online;
+
+    // online while any source can reach it; `source` is an identity only, never dereferenced, and must stay stable until removed
+    void set_online(void* source, bool online)
+    {
+        foreach (ref s; _online_sources)
+        {
+            if (s.source is source)
+            {
+                if (s.online == online)
+                    return;
+                s.online = online;
+                refresh_online();
+                return;
+            }
+        }
+        _online_sources ~= OnlineSource(source, online);
+        refresh_online();
+    }
+
+    void remove_online_source(void* source)
+    {
+        foreach (i; 0 .. _online_sources.length)
+        {
+            if (_online_sources[i].source is source)
+            {
+                _online_sources.remove(i);
+                refresh_online();
+                return;
+            }
+        }
+    }
 
     void clear_computations()
     {
@@ -630,9 +674,40 @@ package:
     Array!(Element*) _created;
 
 private:
+    struct OnlineSource
+    {
+        void* source;
+        bool online;
+    }
+
     ulong _peer_id;
+    Array!OnlineSource _online_sources;
+    OnlineStatus _online;
     bool _private;
     ubyte _peer_binding_mask;
+
+    void refresh_online()
+    {
+        OnlineStatus s = OnlineStatus.unknown;
+        foreach (ref src; _online_sources)
+        {
+            if (src.online)
+            {
+                s = OnlineStatus.online;
+                break;
+            }
+            s = OnlineStatus.offline;
+        }
+        if (s == OnlineStatus.unknown && _online != OnlineStatus.unknown)
+            s = OnlineStatus.offline;
+        if (s == _online)
+            return;
+        _online = s;
+        if (s == OnlineStatus.unknown)
+            return;
+        write_element("status.online", s == OnlineStatus.online);
+        notify(s == OnlineStatus.online ? ComponentEvent.online : ComponentEvent.offline);
+    }
 }
 
 Device create_device_from_profile(ref Profile profile, const(char)[] model, const(char)[] id, const(char)[] name, scope CreateElementHandler create_element_handler, ulong peer_id = 0, bool private_ = false)
@@ -877,7 +952,8 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
     g_app.request_rebind();
 
     builder.commit();
-    device.notify(ComponentEvent.online);
+    device.notify(ComponentEvent.tree_changed);
+    device.notify(ComponentEvent.materialised);
 
     return device;
 }
@@ -1095,4 +1171,23 @@ unittest
     assert(target.value.asDouble == 6.0);
     source.unsubscribe(&sum.element_updated);
     source.teardown();
+
+    DeviceTable devices;
+    DeviceBuilder lb = devices.create("liveness-test");
+    Device ld = lb.device;
+    lb.commit();
+    Element* online = ld.find_element("status.online");
+    assert(online && online.access == manager.element.Access.read && online.sampling_mode == SamplingMode.report);
+    assert(ld.online_status == OnlineStatus.unknown);
+    int src_a, src_b;
+    ld.set_online(&src_a, true);
+    assert(ld.online_status == OnlineStatus.online && online.value.asBool());
+    ld.set_online(&src_b, false);
+    assert(ld.online_status == OnlineStatus.online);
+    ld.set_online(&src_a, false);
+    assert(ld.online_status == OnlineStatus.offline && !online.value.asBool());
+    ld.remove_online_source(&src_a);
+    assert(ld.online_status == OnlineStatus.offline);
+    ld.remove_online_source(&src_b);
+    assert(ld.online_status == OnlineStatus.offline && !online.value.asBool());
 }

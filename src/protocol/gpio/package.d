@@ -200,8 +200,7 @@ nothrow @nogc:
             if (_element)
                 _element.mark_gap();
             _element = null;
-            detach_device();
-            return CompletionStatus.complete;
+            return super.shutdown();
         }
 
         override void update()

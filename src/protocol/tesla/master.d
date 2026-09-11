@@ -694,6 +694,8 @@ private:
                 return;
             slave = discover(msg.sender);
         }
+        if (TeslaTWCBinding binding = slave.binding.get)
+            binding.heard();
         ubyte flags_before = slave.flags;
         ushort offered_before = slave.offered_current;
         TeslaTWCBinding.Push changed;
