@@ -893,6 +893,12 @@ this is what remains.
   walk, so the moved-in and re-added entries can receive the same packet again. Snapshot the
   subscriber set or defer removals until the walk ends.
 
+- **Default TLS trust for mbedtls clients**: a client with no `ca` still runs with
+  `MBEDTLS_SSL_VERIFY_NONE`. Load the system bundle on Linux and RouterOS
+  (`/etc/ssl/certs/ca-certificates.crt`) and a baked-in bundle on embedded targets as the
+  default chain, then flip the default to required. Explicit `ca` pinning already verifies on
+  both backends.
+
 - **Make clock-sensitive unittests hermetic**: tests that leave a `MonoTime` member at
   `MonoTime.init` and then compare it against a real `getTime()` only pass once the monotonic
   clock exceeds the interval under test, so they fail on a freshly booted CI runner. The tesla
