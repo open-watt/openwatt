@@ -152,6 +152,29 @@ the commit history and linked design documents carry the implementation record.
   allocation per bytes field. These existing deferrals were moved out of long
   source comments during reconciliation.
 
+## IEEE 2030.5 / CSIP-AUS client
+
+Mutual TLS (PR #695) and the urt XML codec (urt#291) are the prerequisites. Remaining, in order:
+
+- **`src/protocol/sep2/`**: `schema.d` resource structs with a reflective XML mapper over
+  `XmlReader`/`XmlWriter`; `client.d` as `/protocol/sep2/client` (remote, client-cert, ca, pin,
+  NMI) doing DeviceCapability discovery, EndDevice registration keyed by the certificate
+  fingerprint (LFDI, SFDI), Time sync, FunctionSetAssignments and DERProgram walks, and polling
+  at the server's `pollRate`; `der.d` for the DERControl event timeline (start, duration,
+  randomisation, supersession, DefaultDERControl fallback), the mandatory Response acks, and
+  telemetry (MirrorUsagePoint, MirrorMeterReading, DERStatus, DERCapability, DERSettings).
+  Polling only; the notification endpoint is optional in CSIP-AUS and deferred.
+- **Energy app intake**: a time-bounded watt import and export constraint on the grid ingress,
+  honoured by the allocator (raise controllable load before curtailing generation), and an
+  inverter generation-limit control (SunSpec model 123 first). The `opModEnergize` backstop
+  maps to the same path with a zero limit.
+- **`sep2:` signal provider** so automations can react to event start and end.
+- **Cipher pinning**: servers require TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8; mbedtls offers it by
+  default, but the client should pin TLS 1.2 and that suite so a misconfigured server fails
+  loudly. Needs `mbedtls_ssl_conf_ciphersuites` and `mbedtls_ssl_conf_min_version` bindings.
+- **Test bench**: run ANU's `envoy` utility server locally before the `cactus` harness and
+  certification.
+
 ## Energy
 
 - **Speed up topology publisher binding**: `TopologyPublisher.bind()` repeats
@@ -597,6 +620,11 @@ this is what remains.
   control plane, and make the mirror re-evaluate its peer binding.
 
 ## Infrastructure
+
+- **Default TLS trust for mbedtls clients**: a client with no `ca` still runs with
+  `MBEDTLS_SSL_VERIFY_NONE`. Load the system bundle on Linux and RouterOS
+  (`/etc/ssl/certs/ca-certificates.crt`) and a baked-in bundle on embedded targets as the
+  default chain, then flip the default to required. Explicit `ca` pinning already verifies.
 
 - **Make clock-sensitive unittests hermetic**: tests that leave a `MonoTime` member at
   `MonoTime.init` and then compare it against a real `getTime()` only pass once the monotonic
