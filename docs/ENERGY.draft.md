@@ -157,7 +157,7 @@ Policies are layered intent that the allocator services every tick. Each policy 
 ```
 /apps/energy/policy
 add name=car_reserve    target=LRW3F7EKXMC392131 tier=floor         goal="soc(20)"
-add name=car_ready      target=LRW3F7EKXMC392131 tier=important     goal="soc(40)" deadline=11:00 shape=window
+add name=car_ready      target=LRW3F7EKXMC392131 tier=important     goal="soc(40)" deadline=11:00
 add name=car_topup      target=LRW3F7EKXMC392131 tier=opportunistic goal="soc(90)"
 add name=cabin_ev_surplus target=cabin_evse tier=opportunistic goal="soc(100)"
 ```
@@ -171,7 +171,7 @@ add name=cabin_ev_surplus target=cabin_evse tier=opportunistic goal="soc(100)"
 | `important` | Try to reach the goal. Yields to floor/essential; solar and battery only — no grid buy. |
 | `opportunistic` | Consume surplus only; gated on battery/solar pressure. |
 
-**Goals**: `on`, `off`, `soc(N)`, `temp(N)`, `duty(...)`, or an expression. `deadline=HH:MM` feeds the slack boost on essential/important tiers. `shape=window` marks charge-window intent (parsed and published; ranking integration pending).
+**Goals**: `on`, `off`, `soc(N)`, `temp(N)`, or an expression. `duty(...)` parses but is refused at validation until controls carry a duty accumulator. `deadline=HH:MM` feeds the slack boost on essential/important tiers. A charge-window `shape=` property is not accepted yet; it returns with window scheduling in the planner.
 
 A target usually carries several policies at different tiers — read each block top-to-bottom as intent: "never below 20%, be at 40% by 11am, fill to 90% on surplus."
 

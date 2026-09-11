@@ -39,7 +39,7 @@ Here are some of the common commands used in the `conf/startup.conf` file:
 - `/interface/modbus`: Creates and configures Modbus interfaces.
 - `/interface/bridge`: Creates bridges between interfaces.
 - `/protocol/modbus/client`: Configures Modbus clients for communicating with devices.
-- `/apps/energy/appliance`: Configures appliances within the energy management system.
+- `/apps/energy`: The energy manager: links, appliances and policies over a circuit graph.
 - etc...
 
 ## Example Configuration
@@ -989,7 +989,68 @@ then explicitly reset. Reset restarts the session and discards pending controls.
 Encrypted vehicle responses remain required. Legacy firmware support requires
 development and acceptance testing with an old offline car.
 
+### `/apps/energy`
+
+The energy manager models a site as circuits joined by links, with appliances bound to circuits
+through their ports and policies declaring intent against appliances
+([ENERGY.draft.md](ENERGY.draft.md)). Nothing is modelled until `start` runs; every other command
+answers `Energy app is not started` before then. Circuits are not declared: naming one from a link
+or a port binding brings it into existence, and `grid` is the implicit root.
+
+| Command | Arguments | Description |
+| --- | --- | --- |
+| `start` | | Create the `energy` device and begin modelling. |
+| `topology` | `-w` | The raw graph: buses, links, ports, coverage and residuals. `-w` (or `--watch`) keeps the view live. |
+| `circuit` | `-w` | The reconciled circuit view. |
+| `control` | | Every discovered control surface: kind, direction, unit, range, setpoint and nameplate. |
+| `why` | | Per-policy decisions: goal, current value, satisfaction, marginal value and the reason for the current command. |
+| `live` | | Live island accounts: solar, battery, grid, rogue, generation and load. |
+
+### `/apps/energy/link`
+
+A link is installed infrastructure joining two circuits in feed direction: a breaker, an inline
+meter, a contactor. A link with only `parent` dangles toward unenumerated equipment and becomes a
+diffuse-load sink named after the link; a link with only `circuit` is a point connection.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `kind` | `breaker`, `meter`, ... | inferred | `capacity` implies `breaker`, `meter` implies `meter`. |
+| `parent`, `child` | circuit names | none | The circuits joined, in feed direction. |
+| `circuit` | circuit name | none | Point connection instead of a bridge. |
+| `role` | `pv`, ... | none | What lives on the child circuit when it is not otherwise modelled; `role=pv` books backfeed as solar. |
+| `capacity` | amps (`20A`; a bare number is amps) | none | Current limit enforced by protection. |
+| `closed` | `yes`/`no` | `yes` | Whether the link conducts. |
+| `meter` | component path | none | Any `EnergyMeter` component measuring the flow at this point. |
+| `meter-phase` | `0` to `3` | `0` | Phase of a multi-phase meter to read; `0` is the total. |
+| `meter-sign` | `normal`, `inverted` | `normal` | Polarity correction. |
+
+```text
+/apps/energy/link add name=main kind=breaker parent=grid child=main meter=se_meter.meter capacity=63A meter-phase=1
+/apps/energy/link add name=house_gpo_outlets parent=house.gpo
+```
+
 ### `/apps/energy/appliance`
+
+An appliance consumes, produces or stores energy. Its electrical shape comes from its device
+profile's `Port` components; each port binds to a circuit with `<port>=<circuit>`, so any property
+name not listed below is taken as a port binding (`grid=house`, `solar.mppt1=cabin.pv1`). An
+appliance with no device and no meter is a valid intent anchor for policies.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `device` | component path | none | The protocol device or sub-component carrying data and controls. |
+| `kind` | `inverter`, `battery`, `evse`, `car`, `hvac`, `water-heater`, `pv`, ... | from `info.type` | Appliance class; set it for anchors without a device. |
+| `meter` | component path | none | Consumption meter when it is not on the device. |
+| `meter-sign` | `normal`, `inverted` | `normal` | Polarity correction for `meter`. |
+| `state` | component path | none | State component (SOC, temperature) when it lives on a different device than control. |
+| `vin` | VIN | none | Vehicle identity; a car attaches to the circuit named by its VIN. |
+| `capacity` | kWh | none | Usable battery capacity when the device cannot report it. |
+| `root` | `yes`/`no` | `no` | Source root for otherwise unrooted islands (generators, off-grid inverters). |
+
+```text
+/apps/energy/appliance add name=goodwe grid=house backup=house.backup_feed battery=dc_bus device=goodwe_ems
+/apps/energy/appliance add name=cabin_hot_water connection=cabin.laundry kind=water-heater
+```
 
 `device`, `meter`, and `state` accept component paths before their targets exist.
 The configured path remains visible while unresolved. While the energy app is
@@ -997,6 +1058,25 @@ started, paths resolve automatically when a device appears or its tree gains
 children, including children received later over sync. Resolution occurs before
 the next topology rebuild. Device/subtree removal and recreation remain separate
 lifecycle work in `TODO.md`.
+
+### `/apps/energy/policy`
+
+A policy is layered intent the allocator services every tick: a target appliance, a tier and a
+goal. Policies target the appliance, never the charger: a car's policies drive whichever EVSE it is
+paired to.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `target` | appliance name or VIN | required | The appliance the intent applies to; must exist. |
+| `tier` | `floor`, `essential`, `important`, `opportunistic` | `floor` | Priority contract: `floor` always holds and may buy from the grid; `essential` must reach its goal by `deadline`; `important` tries, from solar and battery only; `opportunistic` consumes surplus only. |
+| `goal` | `on`, `off`, `soc(N)`, `temp(N)`, `(expression)` | required | What satisfies the policy. `duty(Nh|Nm|Ns)` parses but is refused at validation until controls carry a duty accumulator. |
+| `deadline` | `HH:MM` | none | Feeds the slack boost on `essential` and `important` tiers. |
+
+```text
+/apps/energy/policy add name=car_reserve target=LRW3F7EKXMC392131 tier=floor goal="soc(20)"
+/apps/energy/policy add name=car_ready target=LRW3F7EKXMC392131 tier=important goal="soc(40)" deadline=11:00
+/apps/energy/policy add name=hotwater_super target=cabin_hot_water tier=opportunistic goal="temp(70)"
+```
 
 ### `/automation`
 
