@@ -379,7 +379,7 @@ protected:
         if (_current_pass != Pass.serve && fmt.is_scalar && e.record_update() == SysTime())
         {
             manager.series.Scalar zero;
-            zero.raw[] = 0;
+            zero.u = 0;
             e.value = box_record(zero.raw.ptr, *fmt);
         }
 
@@ -602,7 +602,7 @@ private:
         if (fmt.is_scalar)
         {
             manager.series.Scalar scalar;
-            scalar.raw[] = 0;
+            scalar.u = 0;
             if (!sample_record(wire, e.desc, scalar.raw[0 .. fmt.stride]))
                 return false;
             if (e.element.format == e.desc.format)

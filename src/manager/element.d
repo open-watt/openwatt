@@ -21,6 +21,7 @@ import urt.lifetime;
 import urt.log : writeWarning;
 import urt.mem.alloc;
 import urt.mem.reclaim : ReclaimResult;
+import urt.si.quantity : Quantity;
 import urt.si.unit : ScaledUnit;
 import urt.string;
 import urt.time;
@@ -333,7 +334,7 @@ nothrow @nogc:
                     if (!data_format.is_scalar || data_format.type != ValueType.user || data_format.user_type.type_id != TypeDetailsFor!U.type_id)
                         return "incompatible value";
                     Scalar s;
-                    s.raw[] = 0;
+                    s.u = 0;
                     s.raw[0 .. U.sizeof] = (cast(const(ubyte)*)&v)[0 .. U.sizeof];
                 }
             }
@@ -357,33 +358,42 @@ nothrow @nogc:
     {
         assert(format.valid, "element has no data format");
         static if (is(immutable T == immutable Variant))
-        {
             update_typed_series(v, timestamp, who);
-        }
         else
-        {
-            Variant boxed = Variant(v);
-            update_typed_series(boxed, timestamp, who);
-        }
+            write_sample(v, timestamp, who);
     }
 
+    pragma(inline, true)
     void write_sample(T)(T v, SysTime t = getSysTime(), Subscriber who = null)
     {
         static if (is(T == String))
             store_sample(v.move, t, who);
         else static if (is(T : const(char)[]))
             store_sample(v, t, who);
+        else static if (is(Unqual!T == Quantity!(N, scale), N, ScaledUnit scale))
+            write_scalar(Scalar.of(v), value_type_of!N, v.unit, t, who);
+        else static if (__traits(compiles, ValueType(scalar_type!T)))
+            write_scalar(Scalar.of(v), scalar_type!T, ScaledUnit(), t, who);
         else
         {
-            static assert(is(typeof(value_type_of!T)));
-            if (value_type_of!T == data_format.type)
-                store_sample(v, t, who);
-            else
-            {
-                Variant boxed = Variant(v);
-                update_typed_series(boxed, t, who);
-            }
+            Variant boxed = Variant(v);
+            update_typed_series(boxed, t, who);
         }
+    }
+
+    private void write_scalar(Scalar s, ValueType type, ScaledUnit unit, SysTime t, Subscriber who)
+    {
+        const(DataFormat)* f = data_format;
+        bool same_unit = f.desc == DataFormat.Desc.quantity ? f.unit == unit : unit == ScaledUnit();
+        if (type == f.type && same_unit)
+        {
+            debug assert(f.count == 1, "a single typed value must describe one record");
+            store_scalar(s, t, who);
+            return;
+        }
+        DataFormat src = DataFormat(type, SeriesKind.held, unit);
+        Variant boxed = box_record(s.raw.ptr, src);
+        update_typed_series(boxed, t, who);
     }
 
     void write_record(const(void)[] record, SysTime t = getSysTime(), Subscriber who = null)
@@ -498,7 +508,7 @@ public:
         if (value == format)
             return;
         release_register();
-        _latest.raw[] = 0;
+        _latest.u = 0;
         _format = value.valid ? cast(ushort)(value + 1) : 0;
     }
 
@@ -576,8 +586,7 @@ public:
             write_text_sample(v, t, who);
         else
         {
-            static assert(is(typeof(value_type_of!T)));
-            debug assert(value_type_of!T == data_format.type);
+            debug assert(scalar_type!T == data_format.type);
             debug assert(data_format.count == 1, "a single typed value must describe one record");
             Scalar s = Scalar.of(v);
             store_record(s.raw[0 .. data_format.stride], t, who);
@@ -585,13 +594,23 @@ public:
     }
 
     // untyped path for callers holding a record in a runtime-known DataFormat
+    void store_scalar(ref const Scalar s, SysTime t = getSysTime(), Subscriber who = null)
+    {
+        debug assert(data_format.is_scalar);
+        if (held_repeat(s.raw == _latest.raw, t))
+            return;
+        SysTime[1] time = t;
+        SampleUpdate update = SampleUpdate(&this, s.raw[0 .. data_format.stride], time[], null, who);
+        commit_update(update, false);
+    }
+
     void store_record(const(void)[] record, SysTime t = getSysTime(), Subscriber who = null)
     {
         debug assert(record.length == data_format.stride);
         if (data_format.is_scalar)
         {
             Scalar s;
-            s.raw[] = 0;
+            s.u = 0;
             s.raw[0 .. data_format.stride] = cast(const(ubyte)[])record;
             if (held_repeat(s.raw == _latest.raw, t))
                 return;
@@ -1028,7 +1047,7 @@ private:
     {
         if (data_format.is_scalar)
         {
-            _latest.raw[] = 0;
+            _latest.u = 0;
             _latest.raw[0 .. data_format.stride] =
                 (cast(const(ubyte)[])update.records)[$ - data_format.stride .. $];
         }
