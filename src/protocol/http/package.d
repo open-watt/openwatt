@@ -456,7 +456,7 @@ nothrow @nogc:
             // TODO: thread cancellation through to http_request's HTTPOneShot
         }
 
-        int response_handler(ref const HTTPMessage response)
+        final int response_handler(ref const HTTPMessage response)
         {
             if (response.status_code == 0)
             {

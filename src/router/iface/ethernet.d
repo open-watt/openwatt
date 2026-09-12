@@ -92,9 +92,9 @@ nothrow @nogc:
 
     // Properties...
 
-    ubyte cfm_level() const
+    final ubyte cfm_level() const
         => _cfm_level;
-    const(char)[] cfm_level(ubyte value)
+    final const(char)[] cfm_level(ubyte value)
     {
         if (value > 7)
             return "cfm level must be 0-7";
@@ -163,7 +163,7 @@ protected:
         }
     }
 
-    override void ingress(ref Packet packet)
+    final override void ingress(ref Packet packet)
     {
         if (!packet.consume_priority_tags())
         {
@@ -366,10 +366,10 @@ protected:
         return offset + packet.data.length;
     }
 
-    override ushort pcap_type() const
+    final override ushort pcap_type() const
         => 1; // LINKTYPE_ETHERNET
 
-    override void pcap_write(ref const Packet packet, PacketDirection dir, scope void delegate(scope const void[] packet_data) nothrow @nogc sink) const
+    final override void pcap_write(ref const Packet packet, PacketDirection dir, scope void delegate(scope const void[] packet_data) nothrow @nogc sink) const
     {
         if (packet.type == PacketType.ethernet)
         {

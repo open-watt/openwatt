@@ -257,7 +257,7 @@ nothrow @nogc:
         mark_set!(typeof(this), "actual-mtu")();
         on_mtu_changed();
     }
-    ushort actual_mtu() const pure
+    final ushort actual_mtu() const pure
         => _mtu == 0 ? _l2mtu : _mtu;
 
     // TODO: the L2MTU properties should be available only to actual L2 interfaces...
@@ -290,29 +290,29 @@ nothrow @nogc:
         return null;
     }
 
-    SysTime last_status_change_time() const => _status.link_status_change_time;
-    ConnectionStatus connected() const => _status.connected;
-    LinkStatus link_status() const => _status.link_status;
-    ulong link_downs() const => _status.link_downs;
-    ulong tx_link_speed() const => _status.tx_link_speed;
-    ulong rx_link_speed() const => _status.rx_link_speed;
-    ulong tx_bytes() const => _status.tx_bytes;
-    ulong rx_bytes() const => _status.rx_bytes;
-    ulong tx_packets() const => _status.tx_packets;
-    ulong rx_packets() const => _status.rx_packets;
-    ulong tx_dropped() const => _status.tx_dropped;
-    ulong rx_dropped() const => _status.rx_dropped;
-    ulong rx_rate() const => _status.rx_rate;
-    ulong tx_rate() const => _status.tx_rate;
-    ulong tx_rate_max() const => _status.tx_rate_max;
-    ulong rx_rate_max() const => _status.rx_rate_max;
-    Milliseconds avg_queue_time() const => Milliseconds(float(_status.avg_queue_us) / 1000);
-    Milliseconds avg_service_time() const => Milliseconds(float(_status.avg_service_us) / 1000);
-    Milliseconds max_service_time() const => Milliseconds(float(_status.max_service_us) / 1000);
+    final SysTime last_status_change_time() const => _status.link_status_change_time;
+    final ConnectionStatus connected() const => _status.connected;
+    final LinkStatus link_status() const => _status.link_status;
+    final ulong link_downs() const => _status.link_downs;
+    final ulong tx_link_speed() const => _status.tx_link_speed;
+    final ulong rx_link_speed() const => _status.rx_link_speed;
+    final ulong tx_bytes() const => _status.tx_bytes;
+    final ulong rx_bytes() const => _status.rx_bytes;
+    final ulong tx_packets() const => _status.tx_packets;
+    final ulong rx_packets() const => _status.rx_packets;
+    final ulong tx_dropped() const => _status.tx_dropped;
+    final ulong rx_dropped() const => _status.rx_dropped;
+    final ulong rx_rate() const => _status.rx_rate;
+    final ulong tx_rate() const => _status.tx_rate;
+    final ulong tx_rate_max() const => _status.tx_rate_max;
+    final ulong rx_rate_max() const => _status.rx_rate_max;
+    final Milliseconds avg_queue_time() const => Milliseconds(float(_status.avg_queue_us) / 1000);
+    final Milliseconds avg_service_time() const => Milliseconds(float(_status.avg_service_us) / 1000);
+    final Milliseconds max_service_time() const => Milliseconds(float(_status.max_service_us) / 1000);
 
     // API...
 
-    ref const(IfStatus) status() const pure
+    final ref const(IfStatus) status() const pure
         => _status;
 
     final void reset_counters()
@@ -390,7 +390,7 @@ nothrow @nogc:
         }
     }
 
-    bool set_master(BaseInterface master, byte slave_id) pure
+    final bool set_master(BaseInterface master, byte slave_id) pure
     {
         if (master is null)
         {
@@ -436,7 +436,7 @@ nothrow @nogc:
     alias subscribe = typeof(super).subscribe;
     alias unsubscribe = typeof(super).unsubscribe;
 
-    void subscribe(InterfaceSubscriber.PacketHandler packet_handler, ref const PacketFilter filter, void* user_data = null)
+    final void subscribe(InterfaceSubscriber.PacketHandler packet_handler, ref const PacketFilter filter, void* user_data = null)
     {
         if (_num_subscribers >= _subscribers.length)
         {
@@ -449,7 +449,7 @@ nothrow @nogc:
             on_subscribers_changed(true);
     }
 
-    void unsubscribe(InterfaceSubscriber.PacketHandler packet_handler)
+    final void unsubscribe(InterfaceSubscriber.PacketHandler packet_handler)
     {
         foreach (i, ref sub; _subscribers[0.._num_subscribers])
         {
@@ -515,7 +515,7 @@ nothrow @nogc:
     {
     }
 
-    ptrdiff_t toString(char[] buffer, const(char)[] format, const(FormatArg)[] format_args) const nothrow @nogc
+    final ptrdiff_t toString(char[] buffer, const(char)[] format, const(FormatArg)[] format_args) const nothrow @nogc
     {
         if (buffer.length < "interface:".length + name.length)
             return -1; // Not enough space
@@ -759,7 +759,7 @@ package:
 
     Packet[] _send_queue;
 
-    void queue_update_service_times(uint wait_us, uint service_us)
+    final void queue_update_service_times(uint wait_us, uint service_us)
     {
         update_service_times(wait_us, service_us);
     }

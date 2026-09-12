@@ -144,19 +144,19 @@ nothrow @nogc:
         set_time_authority(value);
     }
 
-    void bind_remote(ref const InetAddress addr)
+    final void bind_remote(ref const InetAddress addr)
     {
         _remote_addr = addr;
         _peer_flags |= PeerFlags.remote_bound;
     }
 
-    package void adopt_udp_endpoint(UDPEndpoint* endpoint)
+    final package void adopt_udp_endpoint(UDPEndpoint* endpoint)
     {
         remote(endpoint.remote);
         _udp_endpoint = endpoint;
     }
 
-    package void bind_udp_endpoint(UDPEndpoint* endpoint, ref const InetAddress remote)
+    final package void bind_udp_endpoint(UDPEndpoint* endpoint, ref const InetAddress remote)
     {
         assert(endpoint);
         detach_transport();
@@ -174,7 +174,7 @@ nothrow @nogc:
     // and re-bases. Destination-session matching prevents stale streams from delivering
     // or acknowledging frames. Reliable, ordered transports skip this sublayer.
 
-    int transmit_frame(const(ubyte)[] frame, bool is_text = false, TxQueue queue = TxQueue.control)
+    final int transmit_frame(const(ubyte)[] frame, bool is_text = false, TxQueue queue = TxQueue.control)
     {
         if (!transport_ready)
         {
@@ -263,10 +263,10 @@ nothrow @nogc:
 
     enum SyncHandle invalid_handle = SyncHandle.max;
 
-    SyncHandle introduce(BaseObject obj)
+    final SyncHandle introduce(BaseObject obj)
         => introduce(EID(obj.id));
 
-    SyncHandle introduce(EID node)
+    final SyncHandle introduce(EID node)
     {
         foreach (i, n; _introduced[])
             if (n == node)
@@ -277,10 +277,10 @@ nothrow @nogc:
     }
 
     // announced handles are sender-side, dense and ascending: a new one extends the table by exactly one
-    bool adoptable(SyncHandle handle) const pure
+    final bool adoptable(SyncHandle handle) const pure
         => (handle & 1) == 0 && (handle >> 1) <= _adopted.length;
 
-    void adopt(SyncHandle handle, EID local)
+    final void adopt(SyncHandle handle, EID local)
     {
         if (!adoptable(handle))
         {
@@ -298,13 +298,13 @@ nothrow @nogc:
         _adopted[][idx] = local;
     }
 
-    SyncHandle handle_of(BaseObject obj)
+    final SyncHandle handle_of(BaseObject obj)
         => handle_of(EID(obj.id));
 
-    SyncHandle handle_of(CID cid)
+    final SyncHandle handle_of(CID cid)
         => handle_of(EID(cid));
 
-    SyncHandle handle_of(EID node)
+    final SyncHandle handle_of(EID node)
     {
         foreach (i, n; _adopted[])
             if (n == node)
@@ -315,7 +315,7 @@ nothrow @nogc:
         return invalid_handle;
     }
 
-    EID node_of(SyncHandle handle)
+    final EID node_of(SyncHandle handle)
     {
         size_t idx = cast(size_t)(handle >> 1);
         if (handle & 1)
@@ -326,11 +326,11 @@ nothrow @nogc:
     // handles are announced in ascending order over the reliable in-order control
     // plane, so anything below the high-water mark has had its add delivered (even
     // if the node failed to materialise); anything above is still in flight
-    bool handle_announced(SyncHandle handle) const pure
+    final bool handle_announced(SyncHandle handle) const pure
         => (handle >> 1) < ((handle & 1) ? _introduced.length : _adopted.length);
 
     // legacy object-mirror accessor; dissolves with the mirror verbs
-    CID cid_of(SyncHandle handle)
+    final CID cid_of(SyncHandle handle)
         => node_of(handle).container;
 
     // Session schema interning: formats and named types push once per session,
@@ -338,7 +338,7 @@ nothrow @nogc:
     // (a sibling peer answers "always seen" and emits no type frames).
 
     // session ft for a local format; first=true when the definition must be pushed first
-    uint ft_of(FormatId f, out bool first)
+    final uint ft_of(FormatId f, out bool first)
     {
         size_t i = f;
         while (_ft_sent.length <= i)
@@ -352,7 +352,7 @@ nothrow @nogc:
     }
 
     // true if this enum dictionary was already pushed; records it either way
-    bool enum_seen(const(VoidEnumInfo)* info)
+    final bool enum_seen(const(VoidEnumInfo)* info)
     {
         foreach (e; _enums_sent[])
             if (e is info)
@@ -361,7 +361,7 @@ nothrow @nogc:
         return false;
     }
 
-    void forget(BaseObject obj)
+    final void forget(BaseObject obj)
     {
         EID node = EID(obj.id);
         foreach (ref n; _introduced[])
@@ -377,7 +377,7 @@ nothrow @nogc:
     // which registers our fan-out sink toward it. Both carry a severity + tag
     // filter; off clears.
 
-    void request_logs(Severity max_severity, bool off, const(char)[] tag)
+    final void request_logs(Severity max_severity, bool off, const(char)[] tag)
     {
         _want_logs = !off;
         _want_log_severity = max_severity;
@@ -386,7 +386,7 @@ nothrow @nogc:
             encoder_for(_encoder).encode_log_sub(this, max_severity, off, tag);
     }
 
-    void set_log_sub(Severity max_severity, bool off, const(char)[] tag)
+    final void set_log_sub(Severity max_severity, bool off, const(char)[] tag)
     {
         if (off)
         {
@@ -410,7 +410,7 @@ nothrow @nogc:
         }
     }
 
-    void flush_logs()
+    final void flush_logs()
     {
         if (!_log_active)
             return;
@@ -435,7 +435,7 @@ protected:
     // Idempotent; WS-spawned peers call this at accept time, because the client's
     // first frames can arrive before our first startup tick and unsubscribed
     // packets are dropped.
-    package void subscribe_transport()
+    final package void subscribe_transport()
     {
         if (uses_udp_endpoint || (_peer_flags & PeerFlags.transport_subscribed) || !_transport)
             return;
@@ -590,7 +590,7 @@ protected:
     }
 
     // Wait for the peer to acknowledge the gap before re-pushing current live values.
-    package bool take_val_repush()
+    final package bool take_val_repush()
     {
         ref DataQueue q = _queues[TxQueue.val - 1];
         if (!q.evicted || !q.backlog.empty || !q.epoch_acked)
@@ -612,7 +612,7 @@ package:
         bool   device_sent;
     }
 
-    void attach_model_element(Device device, Element* element, Access access)
+    final void attach_model_element(Device device, Element* element, Access access)
     {
         PeerBinding binding = model_binding(device);
         if (!binding)
@@ -631,7 +631,7 @@ package:
             }
     }
 
-    void detach_model_bindings()
+    final void detach_model_bindings()
     {
         foreach (binding; _model_bindings)
         {
@@ -641,7 +641,7 @@ package:
         _model_bindings.clear();
     }
 
-    void grant_claim_time_authority()
+    final void grant_claim_time_authority()
     {
         if (_time_authority)
             return;
@@ -649,7 +649,7 @@ package:
         set_time_authority(true);
     }
 
-    void revoke_claim_time_authority()
+    final void revoke_claim_time_authority()
     {
         if (!_time_authority_from_claim)
             return;
@@ -666,7 +666,7 @@ package:
     ubyte            _warned_name_count;
     SyncEncoderKind  _encoder = SyncEncoderKind.binary;
 
-    bool first_sighting(const(char)[] name)
+    final bool first_sighting(const(char)[] name)
     {
         import urt.hash : fnv1a;
         uint h = fnv1a(cast(const(ubyte)[])name);
@@ -684,11 +684,11 @@ package:
     // bulk walks stop short of the window's end so the session's other control frames always find room
     enum control_reserve = 16;
 
-    size_t control_window_free()
+    final size_t control_window_free()
         => !sublayer_armed ? size_t.max : (_resend.length >= max_unacked ? 0 : max_unacked - _resend.length);
 
     // burst protocol: begin_burst, send, check send_ok after every send; refusal or teardown ends it
-    uint begin_burst()
+    final uint begin_burst()
     {
         // a condemned session stays failed until its replacement session starts
         if (_state == State.running || _state == State.starting)
@@ -696,7 +696,7 @@ package:
         return _session_gen;
     }
 
-    bool send_ok(uint gen) const pure
+    final bool send_ok(uint gen) const pure
         => !_send_failed && _session_gen == gen;
 
     uint             _intro_table;
@@ -719,7 +719,7 @@ package:
     bool             _local_nonce_set;
 
     // our session nonce, sent in hello; fresh per session (cleared on detach)
-    const(ubyte)[] local_nonce()
+    final const(ubyte)[] local_nonce()
     {
         if (!_local_nonce_set)
         {
@@ -1020,7 +1020,7 @@ private:
         }
     }
 
-    package void deliver_frame(const(ubyte)[] frame)
+    final package void deliver_frame(const(ubyte)[] frame)
     {
         if (disabled)
             return;
@@ -1183,7 +1183,7 @@ private:
         // else: too far ahead or hold full; retransmission re-supplies it once the window moves
     }
 
-    package void reset_sublayer()
+    final package void reset_sublayer()
     {
         _resend.clear();
         _reorder.clear();
@@ -1214,7 +1214,7 @@ private:
         deliver_frame(cast(const(ubyte)[])p.data);
     }
 
-    package void on_udp_receive(UDPEndpoint*, const(void)[] data, ref UDPReceiveInfo) nothrow @nogc
+    final package void on_udp_receive(UDPEndpoint*, const(void)[] data, ref UDPReceiveInfo) nothrow @nogc
     {
         deliver_frame(cast(const(ubyte)[])data);
     }

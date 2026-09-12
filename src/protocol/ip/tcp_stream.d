@@ -370,9 +370,9 @@ nothrow @nogc:
     }
 
     // Properties
-    ushort port() const pure
+    final ushort port() const pure
         => _port;
-    void port(ushort value)
+    final void port(ushort value)
     {
         if (_port == value)
             return;
@@ -383,7 +383,7 @@ nothrow @nogc:
 
     // API...
 
-    void set_connection_callback(NewConnection callback, void* user_data)
+    final void set_connection_callback(NewConnection callback, void* user_data)
     {
         _connection_callback = callback;
         _user_data = user_data;
@@ -427,7 +427,7 @@ protected:
         super(type_info, id, flags);
     }
 
-    void on_accept(TCPListener* listener, TCPConnection* conn, MonoTime)
+    final void on_accept(TCPListener* listener, TCPConnection* conn, MonoTime)
     {
         if (conn is null)
         {

@@ -103,7 +103,7 @@ nothrow @nogc:
     // Every authority this node can see and is allowed to join. An adopted member talks
     // only to its own fleet; a factory node talks to whoever answers, and the authority
     // decides whether to keep it.
-    void sweep_authorities(MonoTime now)
+    final void sweep_authorities(MonoTime now)
     {
         foreach (kvp; get_module!SyncDiscoveryModule.neighbors[])
         {
@@ -129,12 +129,12 @@ nothrow @nogc:
     // Claim the members that have opened a session to us and pass the filter. The beacon
     // carries the adoption state that decides key handover, so a node we have not heard
     // from yet waits for a later pass rather than being guessed at.
-    void claim_inbound(MonoTime now)
+    final void claim_inbound(MonoTime now)
     {
         get_module!SyncModule.each_running_peer((SyncPeer p) { claim_over(p, now); });
     }
 
-    void arm_logs(SyncPeer p)
+    final void arm_logs(SyncPeer p)
     {
         if (_collect_logs)
             p.request_logs(_log_severity, false, null);
@@ -142,7 +142,7 @@ nothrow @nogc:
             p.request_logs(_log_severity, true, null);
     }
 
-    void arm_claimed_logs()
+    final void arm_claimed_logs()
     {
         foreach (kvp; _issued[])
             if (kvp.value.acked && kvp.value.peer)
@@ -156,7 +156,7 @@ nothrow @nogc:
         encoder_for(p._encoder).encode_model_sub(p, get_module!SyncModule.alloc_seq(), patterns[], false);
     }
 
-    void claim_over(SyncPeer p, MonoTime now)
+    final void claim_over(SyncPeer p, MonoTime now)
     {
         if (!p.running || p._remote_role != PeerRole.member)
             return;
@@ -196,7 +196,7 @@ nothrow @nogc:
     }
 
     // An inbound session is the member's to keep alive; when it goes, so does the claim.
-    void prune_issued()
+    final void prune_issued()
     {
         Array!ulong ended;
         foreach (kvp; _issued[])
@@ -209,7 +209,7 @@ nothrow @nogc:
         }
     }
 
-    void peering_set(Session session, Nullable!bool enabled, Nullable!PeerRole role, Nullable!(const(char)[]) cluster, Nullable!uint priority, Nullable!(const(char)[]) claim, Nullable!(const(char)[]) secret, Nullable!bool collect_logs, Nullable!Severity log_severity)
+    final void peering_set(Session session, Nullable!bool enabled, Nullable!PeerRole role, Nullable!(const(char)[]) cluster, Nullable!uint priority, Nullable!(const(char)[]) claim, Nullable!(const(char)[]) secret, Nullable!bool collect_logs, Nullable!Severity log_severity)
     {
         bool cluster_conflict = claimed && cluster && cluster.value[] != bound_cluster[];
 
@@ -259,7 +259,7 @@ nothrow @nogc:
         apply_peering_state();
     }
 
-    void peering_print(Session session)
+    final void peering_print(Session session)
     {
         session.write_line("enabled:  ", _enabled ? "yes" : "no");
         session.write_line("role:     ", role_name(_role));
@@ -305,18 +305,18 @@ nothrow @nogc:
         session.write_line("neighbours: ", members, " members (", unbound, " unbound), ", authorities, " authorities");
     }
 
-    bool claimed() const pure
+    final bool claimed() const pure
         => _claimants.length > 0;
 
     // The cluster this node is bound to: config wins, then persisted fleet allegiance,
     // then a cluster adopted for this session by the first claimant.
-    const(char)[] bound_cluster() const pure
+    final const(char)[] bound_cluster() const pure
         => _cluster.length ? _cluster[] : _allegiance_cluster.length ? _allegiance_cluster[] : _adopted_cluster[];
 
     // A claim arrived on the sync channel; accept binds this member to the
     // claimant's cluster. Multiple claimants from one cluster are the
     // dual-authority shape; a second cluster is refused.
-    void handle_claim(SyncPeer from, uint seq, const(char)[] cluster, uint priority, const(char)[] auth, const(char)[] key)
+    final void handle_claim(SyncPeer from, uint seq, const(char)[] cluster, uint priority, const(char)[] auth, const(char)[] key)
     {
         auto enc = encoder_for(from._encoder);
 
@@ -404,7 +404,7 @@ nothrow @nogc:
     // Factory reset of fleet state: allegiance, key, session claims. The node beacons
     // unbound-and-unadopted again, so a sweeping authority may immediately re-adopt it;
     // reset before moving the hardware, or disable its old authority's claim filter.
-    void peering_reset(Session session)
+    final void peering_reset(Session session)
     {
         import urt.file : delete_file;
 
@@ -419,7 +419,7 @@ nothrow @nogc:
     }
 
     // Sync module calls this as a peer detaches; the claim dies with the session.
-    void peer_detached(SyncPeer p)
+    final void peer_detached(SyncPeer p)
     {
         foreach (kvp; _issued[])
         {
@@ -450,7 +450,7 @@ nothrow @nogc:
     }
 
     // res/err routing from the sync module: true when the seq belonged to a claim we sent.
-    bool claim_response(SyncPeer from, uint seq, bool ok, const(char)[] code, const(char)[] text)
+    final bool claim_response(SyncPeer from, uint seq, bool ok, const(char)[] code, const(char)[] text)
     {
         foreach (kvp; _issued[])
         {
@@ -790,11 +790,11 @@ unittest
             this(CID id)
             {
                 super(id);
+                _state = State.running;
                 _remote_node_id = 0xA;
                 _remote_role = PeerRole.member;
             }
-            bool live = true;
-            override bool running() const pure => live;
+            void set_live(bool v) { _state = v ? State.running : State.disabled; }
         }
 
         Peering m = alloc!Peering();
@@ -826,7 +826,7 @@ unittest
         m.claim_over(old_peer, now + 4.seconds);
         assert((0xA in m._issued).peer is replacement && (0xA in m._issued).acked);
 
-        replacement.live = false;
+        replacement.set_live(false);
         m.prune_issued();
         assert((0xA in m._issued) is null);
         m._issued.insert(0xA, SyncPeeringModule.IssuedClaim(old_peer, 43));

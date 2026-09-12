@@ -894,7 +894,7 @@ unittest
 
     // An OBDBinding allocated directly (no Application/collection harness), with the
     // transport and timer edges overridden so the test drives the scheduler.
-    static final class TestBinding : OBDBinding
+    static class TestBinding : OBDBinding
     {
     nothrow @nogc:
         uint submits;

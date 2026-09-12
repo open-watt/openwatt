@@ -46,7 +46,7 @@ protected:
     bool continuous_redraw()
         => true;
 
-    void request_redraw()
+    final void request_redraw()
     {
         _redraw_requested = true;
     }
@@ -58,7 +58,7 @@ protected:
     bool handle_key(const(char)[] seq)
         => false;
 
-    void ensure_visible(uint row)
+    final void ensure_visible(uint row)
     {
         uint dh = data_height();
         if (row < _scroll_offset)

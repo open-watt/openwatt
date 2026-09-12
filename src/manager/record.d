@@ -767,7 +767,7 @@ nothrow @nogc:
         super(session, null);
     }
 
-    override CommandCompletionState update()
+    final override CommandCompletionState update()
     {
         if (_cancel)
         {
@@ -778,7 +778,7 @@ nothrow @nogc:
         return CommandCompletionState.finished;
     }
 
-    override void request_cancel()
+    final override void request_cancel()
     {
         _cancel = true;
     }

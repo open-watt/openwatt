@@ -40,9 +40,9 @@ nothrow @nogc:
     bool default_expanded(const(char)[])
         => _default_expand;
 
-    @property bool default_expand() const pure
+    final @property bool default_expand() const pure
         => _default_expand;
-    @property void default_expand(bool v)
+    final @property void default_expand(bool v)
     {
         _default_expand = v;
     }

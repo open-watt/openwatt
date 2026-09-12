@@ -102,10 +102,10 @@ nothrow @nogc:
         return StringResult.success;
     }
 
-    EUI64 eui() const pure
+    final EUI64 eui() const pure
         => _eui;
 
-    ushort node_id() const pure
+    final ushort node_id() const pure
         => _node_id;
 
     bool is_router() const pure
@@ -647,7 +647,7 @@ protected:
         }
     }
 
-    void note_node_activity(ushort src)
+    final void note_node_activity(ushort src)
     {
         MonoTime cut = getTime() + zigbee_awake_grace;
         foreach (req; _zdo_requests[])
@@ -662,7 +662,7 @@ protected:
         }
     }
 
-    void incoming_packet(ref const Packet p, BaseInterface iface, PacketDirection dir, void*)
+    final void incoming_packet(ref const Packet p, BaseInterface iface, PacketDirection dir, void*)
     {
         // TODO: we should enhance the PACKET FILTER to do this work!
         ref aps = p.hdr!APSFrame;
@@ -856,13 +856,13 @@ protected:
         }
     }
 
-    ZDOReply send_zdo_status(ref const APSFrame aps, ubyte seq, ZDOStatus status)
+    final ZDOReply send_zdo_status(ref const APSFrame aps, ubyte seq, ZDOStatus status)
     {
         int tag = send_zdo_response(aps.src, aps.cluster_id | 0x8000, seq, status, null);
         return tag > 0 ? ZDOReply.sent : ZDOReply.impossible;
     }
 
-    ZDOReply send_zdo_payload(ref const APSFrame aps, void[] payload)
+    final ZDOReply send_zdo_payload(ref const APSFrame aps, void[] payload)
     {
         int tag = send_zdo_message(aps.src, aps.cluster_id | 0x8000, payload, PCP.ca);
         return tag > 0 ? ZDOReply.sent : ZDOReply.impossible;

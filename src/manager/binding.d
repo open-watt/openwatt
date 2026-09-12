@@ -121,7 +121,7 @@ protected:
         return CompletionStatus.complete;
     }
 
-    void detach_device()
+    final void detach_device()
     {
         if (_quiet_armed)
         {
@@ -201,7 +201,7 @@ protected:
         return format;
     }
 
-    override StringResult set_unknown_property(scope const(char)[] property, ref const Variant value)
+    final override StringResult set_unknown_property(scope const(char)[] property, ref const Variant value)
     {
         if (!value.isString)
             return StringResult(tconcat("Profile parameter '", property, "' must be a string"));

@@ -125,7 +125,7 @@ nothrow @nogc:
     }
 
 package:
-    void refresh_access(bool writable)
+    final void refresh_access(bool writable)
     {
         if (!_built)
             return;
@@ -148,7 +148,7 @@ package:
     void heard()
         => note_activity();
 
-    void push_samples(ref TeslaTWCMaster.Charger charger, Push groups = Push.all)
+    final void push_samples(ref TeslaTWCMaster.Charger charger, Push groups = Push.all)
     {
         SysTime timestamp = getSysTime();
         CommitScope commit = open_commit();
@@ -409,7 +409,7 @@ unittest
 {
     import urt.mem : free;
 
-    static final class TestBinding : TeslaTWCBinding
+    static class TestBinding : TeslaTWCBinding
     {
     nothrow @nogc:
         this(CID id) { super(id); }

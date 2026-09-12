@@ -38,7 +38,7 @@ nothrow @nogc:
         _id = id.move;
     }
 
-    ref const(String) id() const pure
+    final ref const(String) id() const pure
         => _id;
 
     String name;
@@ -47,16 +47,16 @@ nothrow @nogc:
 
     bool hidden;
 
-    inout(Component)[] components() inout pure
+    final inout(Component)[] components() inout pure
         => _components[];
-    inout(Element*)[] elements() inout pure
+    final inout(Element*)[] elements() inout pure
         => _elements[];
 
     // extern(C++) has no dynamic cast: cast(Device) always "succeeds", so test this before painting
     bool is_device() const pure
         => false;
 
-    inout(Device) root_device() inout pure
+    final inout(Device) root_device() inout pure
     {
         if (parent)
             return parent.root_device();
@@ -90,7 +90,7 @@ nothrow @nogc:
     }
 
     // mutators, reached only through DeviceBuilder
-    package(manager) Component find_or_create_component(const(char)[] path, const(char)[] template_ = null)
+    final package(manager) Component find_or_create_component(const(char)[] path, const(char)[] template_ = null)
     {
         const(char)[] seg = path.split!'.';
         Component c;
@@ -119,7 +119,7 @@ nothrow @nogc:
         return c;
     }
 
-    package(manager) void attach_element(Element* e)
+    final package(manager) void attach_element(Element* e)
     {
         assert(e && e.id.length, "element needs an id");
         debug assert(find_element(e.id[]) is null, "element already exists");
@@ -128,7 +128,7 @@ nothrow @nogc:
         mutated(e);
     }
 
-    inout(Component) find_component(const(char)[] name) inout pure nothrow @nogc
+    final inout(Component) find_component(const(char)[] name) inout pure nothrow @nogc
     {
         const(char)[] id = name.split!'.';
         foreach (inout Component c; components)
@@ -139,7 +139,7 @@ nothrow @nogc:
         return null;
     }
 
-    inout(Element)* find_element(const(char)[] name) inout pure nothrow @nogc
+    final inout(Element)* find_element(const(char)[] name) inout pure nothrow @nogc
     {
         const(char)[] id = name.split!'.';
         if (!name.empty)
@@ -161,7 +161,7 @@ nothrow @nogc:
         return null;
     }
 
-    package(manager) Element* find_or_create_element(const(char)[] name, FormatId format = FormatId.init)
+    final package(manager) Element* find_or_create_element(const(char)[] name, FormatId format = FormatId.init)
     {
         const(char)[] id = name.split!'.';
         if (!name.empty)
@@ -212,7 +212,7 @@ nothrow @nogc:
         return e;
     }
 
-    inout(Component) get_first_component_by_template(const char[] template_name) inout pure nothrow @nogc
+    final inout(Component) get_first_component_by_template(const char[] template_name) inout pure nothrow @nogc
     {
         foreach (inout Component c; components)
             if (c.template_[] == template_name[])
@@ -220,7 +220,7 @@ nothrow @nogc:
         return null;
     }
 
-    inout(Component) find_first_component_by_template_recursive(const char[] template_name) inout pure nothrow @nogc
+    final inout(Component) find_first_component_by_template_recursive(const char[] template_name) inout pure nothrow @nogc
     {
         foreach (inout Component c; components)
         {
@@ -232,7 +232,7 @@ nothrow @nogc:
         return null;
     }
 
-    ptrdiff_t full_path(char[] buf) const nothrow @nogc
+    final ptrdiff_t full_path(char[] buf) const nothrow @nogc
     {
         size_t pos;
         if (parent)
@@ -248,7 +248,7 @@ nothrow @nogc:
     }
 
     import urt.string.format;
-    ptrdiff_t toString(char[] buffer, const(char)[] fmt, const(FormatArg)[] format_args) const
+    final ptrdiff_t toString(char[] buffer, const(char)[] fmt, const(FormatArg)[] format_args) const
     {
         return format(buffer, "Component({0}, \"{1}\", ...)", id, name).length;
     }

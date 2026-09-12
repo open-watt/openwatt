@@ -1214,7 +1214,7 @@ const(char)[] format_soc_bar(float soc)
     return tconcat(green_bg, bar[0 .. split], grey_bg, bar[split .. $], reset);
 }
 
-private class EnergyApp
+private final class EnergyApp
 {
 nothrow @nogc:
     EnergyManager* manager;
@@ -1241,10 +1241,10 @@ nothrow @nogc:
         _mod = mod;
     }
 
-    override uint header_rows()
+    final override uint header_rows()
         => 1;
 
-    override void render_content(uint offset, uint count, uint width)
+    final override void render_content(uint offset, uint count, uint width)
     {
         if (width != _prev_width)
         {
