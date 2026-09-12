@@ -49,14 +49,21 @@ struct UDPFrame
 nothrow @nogc:
     enum Type = PacketType.udp;
 
-    ubyte[16] addr;
+    union {
+        ubyte[16] addr;
+        uint addr32;
+    }
     ushort port;
     AddressFamily family = AddressFamily.unspecified;
 
     InetAddress address() const
     {
         if (family == AddressFamily.ipv4)
-            return InetAddress(IPAddr(addr[0 .. 4]), port);
+        {
+            IPAddr ip;
+            ip.address = addr32;
+            return InetAddress(ip, port);
+        }
         if (family == AddressFamily.ipv6)
         {
             IPv6Addr a;

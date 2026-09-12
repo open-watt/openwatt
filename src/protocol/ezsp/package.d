@@ -62,11 +62,16 @@ size_t ezsp_serialise(T)(ref T data, ubyte[] buffer)
                         return 0;
                     buffer[bytes++] = cast(ubyte)members[i].length;
                     buffer[bytes++] = cast(ubyte)members[i + 1].length;
-                    ushort* arr = cast(ushort*)(buffer.ptr + bytes);
-                    arr[0 .. members[i].length] = members[i];
-                    arr += members[i].length;
-                    arr[0 .. members[i + 1].length] = members[i + 1];
-                    bytes += len;
+                    foreach (v; members[i])
+                    {
+                        buffer[bytes .. bytes + 2] = nativeToLittleEndian(v);
+                        bytes += 2;
+                    }
+                    foreach (v; members[i + 1])
+                    {
+                        buffer[bytes .. bytes + 2] = nativeToLittleEndian(v);
+                        bytes += 2;
+                    }
                 }
             }
             else
@@ -132,9 +137,11 @@ size_t ezsp_deserialise(T)(const(ubyte)[] data, out T t)
                     size_t len = 2 + (len1 + len2)*2;
                     if (data.length < offset + len)
                         return 0;
-                    const arr = cast(ushort*)(data.ptr + offset + 2);
+                    ushort[] arr = talloc_array!ushort(len1 + len2);
+                    foreach (j, ref v; arr)
+                        v = littleEndianToNative!ushort(data.ptr[offset + 2 + j*2 .. offset + 4 + j*2][0 .. 2]);
                     tup[i] = arr[0 .. len1];
-                    tup[i + 1] = (arr + len1)[0 .. len2];
+                    tup[i + 1] = arr[len1 .. $];
                     offset += len;
                 }
             }

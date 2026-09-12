@@ -151,7 +151,7 @@ void on_neighbour_advert(ref IPStack stack, ref const IPv6Header ip, const(ubyte
     IPv6Addr target = load_ipv6_address(message.ptr + 8);
     if (target.is_multicast)
         return;
-    uint flags = loadBigEndian(cast(const(uint)*)(message.ptr + 4));
+    uint flags = bigEndianToNative!uint(message[4 .. 8]);
     bool router = (flags & 0x8000_0000) != 0;
     bool solicited = (flags & 0x4000_0000) != 0;
     bool override_ = (flags & 0x2000_0000) != 0;

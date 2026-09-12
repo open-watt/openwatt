@@ -1,7 +1,7 @@
 module manager.sync.peer;
 
 import urt.array;
-import urt.endian : storeLittleEndian;
+import urt.endian : nativeToLittleEndian;
 import urt.inet;
 import urt.lifetime : move;
 import urt.log;
@@ -913,8 +913,8 @@ private:
         if (_tx_session == 0)
             _tx_session = make_session_id();
         _rel_buf.clear();
-        put_u32(_rel_buf, _tx_session);
-        put_u32(_rel_buf, _rx_session);
+        _rel_buf ~= nativeToLittleEndian(_tx_session);
+        _rel_buf ~= nativeToLittleEndian(_rx_session);
         _rel_buf ~= kind;
     }
 
@@ -966,11 +966,6 @@ private:
             id = *cast(uint*)b.ptr;
         }
         return id;
-    }
-
-    static void put_u32(ref Array!ubyte buf, uint v)
-    {
-        storeLittleEndian(cast(uint*)buf.extend(uint.sizeof).ptr, v);
     }
 
     void clear_log_sink()

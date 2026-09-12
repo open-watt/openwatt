@@ -1,5 +1,6 @@
 module router.iface.mac;
 
+import urt.processor : SupportUnalignedLoadStore;
 import urt.string.format : FormatArg;
 
 nothrow @nogc:
@@ -29,19 +30,35 @@ nothrow @nogc:
         enum eapol_multicast    = MACAddress(0x01, 0x80, 0xC2, 0x00, 0x00, 0x03);
         enum lldp_multicast     = MACAddress(0x01, 0x80, 0xC2, 0x00, 0x00, 0x0E);
 
-        align(2) ubyte[6] b;
+        union {
+            ubyte[6] b;
+            ushort[3] w;
+        }
 
-        version (BigEndian)
+        static if (SupportUnalignedLoadStore)
         {
-            ulong ul() @property const pure => *cast(ulong*)b.ptr >> 16;
-            bool is_link_local() const pure
-                => *cast(uint*)b.ptr == 0x0180C200 && ((*cast(ushort*)(b.ptr + 4) & 0xFFF0) == 0x0000);
+            version (BigEndian)
+            {
+                ulong ul() @property const pure => *cast(ulong*)b.ptr >> 16;
+                bool is_link_local() const pure
+                    => *cast(uint*)b.ptr == 0x0180C200 && (*cast(ushort*)(b.ptr + 4) & 0xFFF0) == 0x0000;
+            }
+            else
+            {
+                ulong ul() @property const pure => (*cast(ulong*)b.ptr << 16) >> 16;
+                bool is_link_local() const pure
+                    => *cast(uint*)b.ptr == 0x00C28001 && (*cast(ushort*)(b.ptr + 4) & 0xF0FF) == 0x0000;
+            }
+        }
+        else version (BigEndian)
+        {
+            ulong ul() @property const pure => ulong(w[0]) << 32 | uint(w[1]) << 16 | w[2];
+            bool is_link_local() const pure => w[0] == 0x0180 && w[1] == 0xC200 && (w[2] & 0xFFF0) == 0;
         }
         else
         {
-            ulong ul() @property const pure => (*cast(ulong*)b.ptr << 16) >> 16;
-            bool is_link_local() const pure
-                => *cast(uint*)b.ptr == 0x00C28001 && ((*cast(ushort*)(b.ptr + 4) & 0xF0FF) == 0x0000);
+            ulong ul() @property const pure => w[0] | uint(w[1]) << 16 | ulong(w[2]) << 32;
+            bool is_link_local() const pure => w[0] == 0x8001 && w[1] == 0x00C2 && (w[2] & 0xF0FF) == 0;
         }
 
         // inverse of ul; bits above 47 are ignored
@@ -102,7 +119,7 @@ nothrow @nogc:
 
     size_t toHash() const pure
     {
-        ushort* s = cast(ushort*)b.ptr;
+        const(ushort)* s = cast(const(ushort)*)b.ptr;
 
         // TODO: this is just a big hack!
         //       let's investigate a reasonable implementation!

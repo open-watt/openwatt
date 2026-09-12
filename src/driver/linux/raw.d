@@ -297,7 +297,7 @@ private:
     }
 
     // Linux delivers one frame per recv(); jumbo-sized buffer.
-    ubyte[16 * 1024] rx_buf = void;
+    align(4) ubyte[16 * 1024] rx_buf = void;
 }
 
 

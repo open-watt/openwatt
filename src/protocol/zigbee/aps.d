@@ -121,13 +121,13 @@ ptrdiff_t parse_aps_frame(const void[] packet, out APSFrame frame) pure
     }
     if (frame.delivery_mode == APSDeliveryMode.group)
     {
-        frame.dst = *cast(ushort*)(p.ptr + i);
+        frame.dst = littleEndianToNative!ushort(p[i .. i + 2][0 .. 2]);
         i += 2;
     }
     if ((frame.type & 1) == 0) // APSFrameType == Data or Ack
     {
-        frame.cluster_id = *cast(ushort*)(p.ptr + i);
-        frame.profile_id = *cast(ushort*)(p.ptr + i + 2);
+        frame.cluster_id = littleEndianToNative!ushort(p[i .. i + 2][0 .. 2]);
+        frame.profile_id = littleEndianToNative!ushort(p[i + 2 .. i + 4][0 .. 2]);
         i += 4;
     }
     frame.src_endpoint = p[i++]; // TODO: isn't this field optional??

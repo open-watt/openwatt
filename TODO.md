@@ -747,6 +747,35 @@ fix; inlining is not the universal answer, and was measured to be the wrong one 
 
 Not a lever: `--linkonce-templates` changes nothing here (one object file already), and LTO is
 unusable on this target (see the strict-alignment entry).
+
+### Strict alignment follow-ups (2026-09-11)
+
+From the PR #563 audit; the call-site rule is in AGENTS.md (pointer form only on proven memory).
+
+- ESP heap cost of the 8-byte untyped default: IDF TLSF has `ALIGN_SIZE = 4`, so every untyped
+  `alloc` now takes `tlsf_memalign_offs` with a front gap; measure heap free and fragmentation on
+  the S3 and C6 after urt#287 and decide whether to accept or special-case the ESP backend.
+- LDC emits `alloca [N x i8], align 1` for `ubyte[N]` locals; GCC raises local arrays to the
+  target preferred alignment. Propose upstream that LDC match (the ARM datalayout already declares
+  32-bit preferred aggregate alignment); until then every wide-viewed local needs `align()`.
+- Measure `pragma(inline, false)` on the 4- and 8-byte slice-form endian helpers for strict-align
+  targets only; force-inlining everything cost 96 B on BK7231N, the narrow set was byte-identical.
+- Pin the Ethernet frame base: Linux raw RX is now `align(4)`; Windows pcap and the wifi radio
+  RX hand over foreign buffers, so the OW transport header padding (frame+20 4-aligned) is
+  unasserted there. Assert at `incoming_ethernet_frame` once every driver states its alignment.
+- Sealed bucket images place the record plane at `base + count*4`; round to 8 before 8-byte
+  records are ever loaded wide from a sealed bucket (series.d image layout).
+- Sweep the remaining `align(size_t.sizeof)` buffers to a literal alignment matching the widest
+  view taken of them.
+- ARMv5TE `ldrd` needs 8-byte alignment; a `cast(ulong*)` on 4-aligned memory is unsafe there
+  even though the same code is fine on v7. Any 64-bit pointer-form access must prove 8, not 4.
+- Frame pointers cost 26 KB of BK7231N text (`-frame-pointer=all`, 2.8%); `non-leaf` recovers 9.6 KB
+  but the crash walker then needs the exception frame's `lr` as the first edge, since a leaf has no
+  frame record. Worth doing once the walker handles it.
+- LTO on ARMv5TE is not usable as is: the single-thread atomic lowering does not reach lld's LTO
+  codegen (`__atomic_*` libcalls go undefined) and the size optimisation is lost there too (full LTO
+  produced a 1.22 MB text, +275 KB). Needs `minsize` propagated into the LTO backend before it can
+  fix the remaining single-caller forwarders the -Oz inliner leaves out of line.
 ## Dated entries
 
 Deferred work lands here as dated sections; remove a section once it is absorbed.
