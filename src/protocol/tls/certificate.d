@@ -186,6 +186,14 @@ nothrow @nogc:
     bool is_valid() const pure
         => _status == CertStatus.issued && running;
 
+    ubyte[32] fingerprint() const
+    {
+        SHA256Context ctx;
+        sha_init(ctx);
+        sha_update(ctx, _certref.cert_der());
+        return sha_finalise(ctx);
+    }
+
 protected:
 
     override bool validate() const
@@ -193,9 +201,9 @@ protected:
         final switch (_type)
         {
             case CertType.certificate:
-                if (_cert_file.empty || _key_file.empty)
+                if (_cert_file.empty)
                 {
-                    writeError("Certificate '", name, "': certificate type requires certificate_file and key_file");
+                    writeError("Certificate '", name, "': certificate type requires certificate_file");
                     return false;
                 }
                 return true;
@@ -340,18 +348,6 @@ private:
             _status = CertStatus.error;
             return CompletionStatus.error;
         }
-        version (DebugCertificate)
-            writeDebug("Certificate '", name, "': read cert file, ", cast(uint)cert_data.length, " bytes");
-
-        auto key_data = cast(ubyte[])load_file(_key_file[]);
-        if (key_data is null)
-        {
-            writeError("Certificate '", name, "': failed to read key file '", _key_file, "'");
-            _status = CertStatus.error;
-            return CompletionStatus.error;
-        }
-        version (DebugCertificate)
-            writeDebug("Certificate '", name, "': read key file, ", cast(uint)key_data.length, " bytes");
 
         auto r = cert_data.load_certificate(_certref);
         if (!r)
@@ -360,34 +356,40 @@ private:
             _status = CertStatus.error;
             return CompletionStatus.error;
         }
-        version (DebugCertificate)
-            writeDebug("Certificate '", name, "': certificate loaded into store");
 
-        r = key_data.import_private_key(_keypair);
-        if (!r)
+        if (!_key_file.empty)
         {
-            writeErrorf("Certificate '{0}': failed to load private key, err={1,08x}", name, r.system_code);
-            _certref.free_cert();
-            _status = CertStatus.error;
-            return CompletionStatus.error;
-        }
-        version (DebugCertificate)
-            writeDebug("Certificate '", name, "': private key imported");
+            auto key_data = cast(ubyte[])load_file(_key_file[]);
+            if (key_data is null)
+            {
+                writeError("Certificate '", name, "': failed to read key file '", _key_file, "'");
+                _certref.free_cert();
+                _status = CertStatus.error;
+                return CompletionStatus.error;
+            }
 
-        r = _certref.associate_key(_keypair);
-        if (!r)
-        {
-            writeErrorf("Certificate '{0}': failed to associate key with certificate, err={1,08x}", name, r.system_code);
-            _certref.free_cert();
-            _keypair.free_keypair();
-            _status = CertStatus.error;
-            return CompletionStatus.error;
+            r = key_data.import_private_key(_keypair);
+            if (!r)
+            {
+                writeErrorf("Certificate '{0}': failed to load private key, err={1,08x}", name, r.system_code);
+                _certref.free_cert();
+                _status = CertStatus.error;
+                return CompletionStatus.error;
+            }
+
+            r = _certref.associate_key(_keypair);
+            if (!r)
+            {
+                writeErrorf("Certificate '{0}': failed to associate key with certificate, err={1,08x}", name, r.system_code);
+                _certref.free_cert();
+                _keypair.free_keypair();
+                _status = CertStatus.error;
+                return CompletionStatus.error;
+            }
         }
 
         _expiry = _certref.cert_expiry();
         _status = CertStatus.issued;
-        version (DebugCertificate)
-            writeDebug("Certificate '", name, "': issued, context=", cast(ulong)_certref.native_cert_context());
         writeInfo("Certificate '", name, "': loaded from files");
         return CompletionStatus.complete;
     }

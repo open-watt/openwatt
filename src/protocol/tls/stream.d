@@ -4,34 +4,9 @@ version (NoTLS) {}
 else
 {
 
-// =============================================================================
-// TODO: POSIX TLS CLIENT VALIDATION IS DISABLED.
-//
-// On POSIX (mbedtls), client mode currently uses MBEDTLS_SSL_VERIFY_NONE - we
-// accept ANY server certificate without validating the chain, expiry, or
-// hostname. TLS gives us encryption-only with zero identity guarantees;
-// every outbound connection is trivially MITM-able by anyone on the path.
-//
-// Windows (Schannel) is fine - SCH_CRED_AUTO_CRED_VALIDATION walks the OS
-// trust store and validates chain + hostname. The asymmetry means Windows
-// builds get real TLS, Linux/RouterOS/embedded builds get a security smell.
-//
-// To fix (probably half a day):
-//   1. Load a CA bundle on startup
-//        - Linux/RouterOS: /etc/ssl/certs/ca-certificates.crt (Alpine, Debian)
-//        - Embedded: baked-in bundle, or per-cert pinning
-//      via mbedtls_x509_crt_parse_file() / _parse_path()
-//   2. mbedtls_ssl_conf_ca_chain(_ssl_conf, &ca_chain, null)
-//   3. Flip authmode to MBEDTLS_SSL_VERIFY_REQUIRED
-//   4. mbedtls_ssl_set_hostname() is already called - it drives hostname
-//      matching once VERIFY_REQUIRED is on, so it Just Works
-//   5. Decide policy for self-signed / pinned certs (config-time trust list?)
-//
-// MUST land before production deployment. The MITM-as-first-class-capability
-// direction is fundamentally broken without it: the outbound legs of a router
-// MITM must validate cloud cert chains to detect tampering - otherwise our
-// MITM defeats its own security model.
-// =============================================================================
+// TODO: an mbedtls client with no `ca` accepts any server certificate (VERIFY_NONE). Load a system CA
+// bundle (or a baked-in one on embedded) as the default chain before production deployment.
+// Schannel validates against the OS trust store regardless.
 
 import urt.array;
 import urt.log;
@@ -82,7 +57,9 @@ class TLSStream : Stream
                                  Prop!("remote", remote),
                                  Prop!("keepalive", keepalive),
                                  Prop!("certificate", certificate),
-                                 Prop!("certificates", certificates));
+                                 Prop!("certificates", certificates),
+                                 Prop!("client-cert", client_cert),
+                                 Prop!("ca", ca));
 nothrow @nogc:
 
     enum type_name = "tls";
@@ -154,6 +131,28 @@ nothrow @nogc:
         restart();
     }
 
+    inout(Certificate) client_cert() inout pure
+        => _client_cert.get;
+    void client_cert(Certificate value)
+    {
+        if (_client_cert.get is value)
+            return;
+        _client_cert = value;
+        mark_set!(typeof(this), "client-cert")();
+        restart();
+    }
+
+    inout(Certificate) ca() inout pure
+        => _ca.get;
+    void ca(Certificate value)
+    {
+        if (_ca.get is value)
+            return;
+        _ca = value;
+        mark_set!(typeof(this), "ca")();
+        restart();
+    }
+
     // API...
 
     String selected_cert_name() const pure
@@ -212,6 +211,9 @@ nothrow @nogc:
 
         if (_handshake_state == HandshakeState.not_started)
         {
+            if (!is_server && (!cert_ready(_client_cert) || !cert_ready(_ca)))
+                return CompletionStatus.continue_;
+
             if (is_server)
             {
                 // Buffer ClientHello for SNI extraction
@@ -251,24 +253,15 @@ nothrow @nogc:
                 _selected_cert = selected;
             }
 
+            Certificate own = is_server ? dyn_cast!Certificate(_selected_cert) : _client_cert.get;
             version (MbedTLS)
-            {
-                if (is_server)
-                    init_mbedtls_context(true, dyn_cast!Certificate(_selected_cert));
-                else
-                    init_mbedtls_context(false, null);
-            }
+                init_mbedtls_context(is_server, own);
             else version (Windows)
             {
-                if (is_server)
-                {
-                    init_context(true, cast(const(CERT_CONTEXT)*)dyn_cast!Certificate(_selected_cert).get_cert_context());
-                    // process the already-buffered ClientHello
-                    if (_handshake_state == HandshakeState.in_progress)
-                        advance_handshake(_conn.host[], true);
-                }
-                else
-                    init_context(false, null);
+                init_context(is_server, own ? cast(const(CERT_CONTEXT)*)own.get_cert_context() : null);
+                // process the already-buffered ClientHello
+                if (is_server && _handshake_state == HandshakeState.in_progress)
+                    advance_handshake(_conn.host[], true);
             }
         }
 
@@ -668,6 +661,8 @@ private:
     bool _close_notify = false;
 
     Array!(ObjectRef!Certificate) _certificates;
+    ObjectRef!Certificate _client_cert;
+    ObjectRef!Certificate _ca;
     BaseObject _selected_cert;
     ObjectRef!Stream _stream;
     Array!ubyte _receive_buffer;
@@ -738,6 +733,15 @@ private:
     void incoming_message(const(void)[] message)
     {
         _app_buffer ~= cast(const(ubyte)[])message;
+    }
+
+    // An unset ref is ready; a configured one holds the handshake until its object is issued.
+    static bool cert_ready(ref const ObjectRef!Certificate r)
+    {
+        if (r.name.empty)
+            return true;
+        const Certificate c = r.get;
+        return c && c.is_valid;
     }
 
     Certificate select_certificate()
@@ -871,13 +875,13 @@ private:
 
             urt_ssl_attach_rng(_ssl_conf);
 
-            if (is_server && cert !is null)
+            if (cert !is null)
             {
                 auto x509 = cast(mbedtls_x509_crt*)cert.get_cert_context();
                 auto pk = cast(mbedtls_pk_context*)cert.get_key_context();
                 if (x509 is null || pk is null)
                 {
-                    log.error("certificate missing cert or key context");
+                    log.error("certificate '", cert.name, "' has no key");
                     free_mbedtls_contexts();
                     _handshake_state = HandshakeState.failed;
                     return;
@@ -891,13 +895,16 @@ private:
                     _handshake_state = HandshakeState.failed;
                     return;
                 }
-                mbedtls_ssl_conf_authmode(_ssl_conf, MBEDTLS_SSL_VERIFY_NONE);
             }
-            else if (!is_server)
+
+            Certificate ca = is_server ? null : _ca.get;
+            if (ca !is null)
             {
-                // Client mode: skip server cert verification for now
-                mbedtls_ssl_conf_authmode(_ssl_conf, MBEDTLS_SSL_VERIFY_NONE);
+                mbedtls_ssl_conf_ca_chain(_ssl_conf, cast(mbedtls_x509_crt*)ca.get_cert_context(), null);
+                mbedtls_ssl_conf_authmode(_ssl_conf, MBEDTLS_SSL_VERIFY_REQUIRED);
             }
+            else
+                mbedtls_ssl_conf_authmode(_ssl_conf, MBEDTLS_SSL_VERIFY_NONE);
 
             _ssl = urt_ssl_new();
             if (_ssl is null)
@@ -1046,16 +1053,12 @@ private:
             ZeroMemory(&creds, SCHANNEL_CRED.sizeof);
             creds.dwVersion = SCHANNEL_CRED_VERSION;
             creds.grbitEnabledProtocols = 0;
-            if (is_server)
+            if (pCertContext)
             {
                 creds.cCreds = 1;
                 creds.paCred = cast(const(CERT_CONTEXT)**)&pCertContext;
-                creds.dwFlags |= SCH_CRED_NO_DEFAULT_CREDS;
             }
-            else
-            {
-                creds.dwFlags = SCH_CRED_AUTO_CRED_VALIDATION | SCH_CRED_NO_DEFAULT_CREDS;
-            }
+            creds.dwFlags = SCH_CRED_NO_DEFAULT_CREDS | (is_server ? 0 : SCH_CRED_AUTO_CRED_VALIDATION);
 
             auto status = AcquireCredentialsHandleA(null, cast(char*)UNISP_NAME_A.ptr, is_server ? SECPKG_CRED_INBOUND : SECPKG_CRED_OUTBOUND, null, &creds, null, null, &_credentials, null);
             if (status != SEC_E_OK)

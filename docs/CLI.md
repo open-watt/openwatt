@@ -421,6 +421,42 @@ no transport properties.
 /console/session/add name=default stream=console profile=vt100 initial-command="/log/print --stream"
 ```
 
+### `/stream/tls`
+
+A TLS stream wraps a byte stream in TLS. With `remote` it connects out over its own TCP stream
+and acts as a client; with `certificates` it acts as a server on a pre-assigned `stream`, which
+is how `/protocol/tls/server` creates its connections. A client may present its own certificate
+and pin the trust anchor the server chain must verify against; both must name issued
+`/certificate` objects, and the handshake waits until they are.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `remote` | `host[:port]` | empty | Server to connect to; the stream is a client when set. |
+| `stream` | stream name | empty | Underlying byte stream when the connection is supplied externally. |
+| `keepalive` | `yes`/`no` | `no` | TCP keepalive on the owned connection. |
+| `certificate` | certificate name | empty | Server certificate; makes the stream a server. |
+| `certificates` | certificate names | empty | Server certificates selected by SNI. |
+| `client-cert` | certificate name | empty | Certificate and key presented to the server (mutual TLS). |
+| `ca` | certificate name | empty | Trust anchor for the server chain; verification is required when set and skipped otherwise on mbedtls builds. Schannel builds always validate against the OS store. |
+
+### `/certificate`
+
+A certificate object holds an X.509 certificate for TLS servers and clients. A `certificate`
+type loads it from files; without `key_file` the object is a trust anchor only (a CA or chain
+file) and can be named by `ca` but not presented.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `cert-type` | `certificate`, `self_signed`, `acme` | `certificate` | Where the certificate comes from. |
+| `certificate_file` | path | empty | PEM or DER certificate, or a PEM chain for a trust anchor. Sets `cert-type` to `certificate`. |
+| `key_file` | path | empty | Private key for `certificate_file`; optional for a trust anchor. |
+| `domain` | host name | empty | Common name for `self_signed`; the ACME order domain for `acme`. |
+| `email` | address | empty | ACME account contact. |
+| `http-server` | server name | empty | HTTP server used for the ACME challenge. |
+| `uri` | URL | Let's Encrypt | ACME directory. |
+| `cert-status` | read-only | | `none`, `pending`, `issued`, `expired`, or `error`. |
+| `expiry` | read-only | | Not-after time of the issued certificate. |
+
 ### `/interface/*`
 
 All interface collections expose these properties in addition to the common
@@ -887,6 +923,18 @@ kernel's tables (address, MAC, state, interface) in place of the internal cache.
 | `/system/netlink/add-route destination=<address[/prefix]> gateway=<address>` | Installs a kernel route directly, bypassing the collections. Either family. |
 | `/system/netlink/add-neighbour address=<ip> mac=<mac> iface=<netdev>` | Installs a permanent kernel neighbour entry. Either family. |
 | `/system/netlink/del-neighbour address=<ip> iface=<netdev>` | Removes a kernel neighbour entry. |
+
+### `/protocol/http/client`
+
+An HTTP client issues requests to one origin over its own connection, or over an externally
+supplied stream. `https://` origins use TLS when it is built.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `remote` | `http[s]://host[:port]` | empty | Origin to connect to. |
+| `stream` | stream name | empty | Byte stream to speak HTTP over instead of connecting. |
+| `client-cert` | certificate name | empty | Certificate presented to the server for mutual TLS. |
+| `ca` | certificate name | empty | Trust anchor the server chain must verify against. |
 
 ### `/protocol/http/server`
 

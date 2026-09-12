@@ -17,6 +17,10 @@ import urt.time;
 import manager;
 import manager.base;
 import manager.collection;
+import manager.features;
+
+static if (has_tls)
+    import protocol.tls : Certificate;
 
 import protocol.http;
 import protocol.http.message;
@@ -30,8 +34,6 @@ nothrow @nogc:
 
 class HTTPClient : ActiveObject
 {
-    alias Properties = AliasSeq!(Prop!("remote", remote),
-                                 Prop!("stream", stream));
 nothrow @nogc:
 
     enum type_name = "http-client";
@@ -96,6 +98,41 @@ nothrow @nogc:
         return null;
     }
 
+    static if (has_tls)
+    inout(Certificate) client_cert() inout pure
+        => _client_cert.get;
+    static if (has_tls)
+    void client_cert(Certificate value)
+    {
+        if (_client_cert.get is value)
+            return;
+        _client_cert = value;
+        mark_set!(typeof(this), "client-cert")();
+        restart();
+    }
+
+    static if (has_tls)
+    inout(Certificate) ca() inout pure
+        => _ca.get;
+    static if (has_tls)
+    void ca(Certificate value)
+    {
+        if (_ca.get is value)
+            return;
+        _ca = value;
+        mark_set!(typeof(this), "ca")();
+        restart();
+    }
+
+    static if (has_tls)
+        alias Properties = AliasSeq!(Prop!("remote", remote),
+                                     Prop!("stream", stream),
+                                     Prop!("client-cert", client_cert),
+                                     Prop!("ca", ca));
+    else
+        alias Properties = AliasSeq!(Prop!("remote", remote),
+                                     Prop!("stream", stream));
+
     // API...
 
     HTTPMessage* request(HTTPMethod method, const(char)[] resource, HTTPMessageHandler response_handler, const void[] content = null, HTTPParam[] params = null, HTTPParam[] additional_headers = null, String username = null, String password = null)
@@ -133,7 +170,11 @@ protected:
         if (!_stream && _conn.has_remote())
         {
             ushort default_port = _tls ? 443 : 80;
-            if (!_conn.start(this, default_port, _tls))
+            static if (has_tls)
+                bool started = _conn.start(this, default_port, _tls, _client_cert.get, _ca.get);
+            else
+                bool started = _conn.start(this, default_port, _tls);
+            if (!started)
                 return CompletionStatus.error;
             _stream = _conn.get;
         }
@@ -194,6 +235,10 @@ protected:
 private:
     ObjectRef!Stream _stream;
     IPClient _conn;
+    static if (has_tls)
+    ObjectRef!Certificate _client_cert;
+    static if (has_tls)
+    ObjectRef!Certificate _ca;
     bool _tls;
 
     HTTPVersion server_version = HTTPVersion.V1_1;
