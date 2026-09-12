@@ -145,7 +145,7 @@ protected:
         if (fmt.is_scalar && e.record_update() == SysTime())
         {
             Scalar z;
-            z.raw[] = 0;
+            z.u = 0;
             e.value = box_record(z.raw.ptr, *fmt);
         }
 
@@ -270,7 +270,7 @@ private:
             if (fmt.is_scalar)
             {
                 Scalar s;
-                s.raw[] = 0;
+                s.u = 0;
                 if (!sample_record(wire, e.desc, s.raw[0 .. fmt.stride]))
                     continue;
                 if (el.format == e.desc.format)

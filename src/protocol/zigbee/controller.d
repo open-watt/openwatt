@@ -463,7 +463,7 @@ private:
         if (fmt.is_scalar)
         {
             Scalar s;
-            s.raw[] = 0;
+            s.u = 0;
             if (!sample_record(wire, e.desc, s.raw[0 .. fmt.stride]))
                 return;
             if (e.element.format == e.desc.format)

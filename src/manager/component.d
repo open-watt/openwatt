@@ -5,7 +5,10 @@ import urt.lifetime;
 import urt.log;
 import urt.map;
 import urt.mem;
+import urt.si.quantity : Quantity;
+import urt.si.unit : ScaledUnit;
 import urt.string;
+import urt.traits : is_some_float, is_some_int, Unqual;
 import urt.time;
 
 import manager;
@@ -192,24 +195,60 @@ nothrow @nogc:
     // a value write to a declared element; the tree is not the writer's to grow
     Element* write_element(T)(const(char)[] name, auto ref T value, SysTime timestamp = getSysTime(), Subscriber who = null)
     {
-        Element* e = find_element(name);
-        if (e)
-            e.value(value, timestamp, who);
+        static if (!is(Unqual!T == T))
+        {
+            pragma(inline, true);
+            return write_element(name, cast()forward!value, timestamp, who);
+        }
+        else static if (is(T == Quantity!(U, u), U, ScaledUnit u) && !T.Dynamic)
+        {
+            pragma(inline, true);
+            return write_element(name, Quantity!U(value.value, u), timestamp, who);
+        }
+        else static if (is_some_int!T || is_some_float!T)
+        {
+            pragma(inline, true);
+            return write_element(name, Quantity!T(value, ScaledUnit()), timestamp, who);
+        }
         else
         {
-            debug assert(false, "write to an undeclared element");
-            writeWarning("element '", name, "' is not declared in '", id[], "'");
+            Element* e = find_element(name);
+            if (e)
+                e.value(forward!value, timestamp, who);
+            else
+            {
+                debug assert(false, "write to an undeclared element");
+                writeWarning("element '", name, "' is not declared in '", id[], "'");
+            }
+            return e;
         }
-        return e;
     }
 
     package(manager) Element* set_element(T)(const(char)[] name, auto ref T value, SysTime timestamp = getSysTime(), Subscriber who = null)
     {
-        Element* e = find_element(name);
-        if (!e)
-            e = find_or_create_element(name, register_value_format(value));
-        e.value(value, timestamp, who);
-        return e;
+        static if (!is(Unqual!T == T))
+        {
+            pragma(inline, true);
+            return set_element(name, cast()forward!value, timestamp, who);
+        }
+        else static if (is(T == Quantity!(U, u), U, ScaledUnit u) && !T.Dynamic)
+        {
+            pragma(inline, true);
+            return set_element(name, Quantity!U(value.value, u), timestamp, who);
+        }
+        else static if (is_some_int!T || is_some_float!T)
+        {
+            pragma(inline, true);
+            return set_element(name, Quantity!T(value, ScaledUnit()), timestamp, who);
+        }
+        else
+        {
+            Element* e = find_or_create_element(name);
+            if (!e.format.valid)
+                e.format = register_value_format(value);
+            e.value(forward!value, timestamp, who);
+            return e;
+        }
     }
 
     final inout(Component) get_first_component_by_template(const char[] template_name) inout pure nothrow @nogc

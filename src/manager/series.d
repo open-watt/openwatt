@@ -416,7 +416,7 @@ nothrow @nogc:
     static Scalar of(T)(T v)
     {
         Scalar s;
-        s.raw[] = 0;
+        s.u = 0;
         static if (is(immutable T == immutable bool))
             s.b = v;
         else static if (is(Unqual!T == Duration))
@@ -1172,7 +1172,7 @@ private bool unbox_scalar_value(ref const Variant v, ref const DataFormat fmt, o
             const(TypeDetails)* td = fmt.user_type;
             if (!td.variant)
                 return false;
-            s.raw[] = 0;
+            s.u = 0;
             if (td.variant(s.raw.ptr, *cast(Variant*)&v, false))
                 return true;
             if (!v.isString || !td.stringify)
