@@ -715,6 +715,38 @@ this is what remains.
   accumulator source paths, element metadata, profile enums, protocol element descriptors,
   and other slices into profile string/section storage.
 
+### Template instantiation is 32% of the BK7231N image (2026-09-12)
+
+Measured on the BK7231N release image (953,924 B of text): symbols from template
+instantiations are 304,584 B, 31.9% of it. 1,425 of those symbols, 152,244 B (16.0% of text),
+have exactly one caller and are never address-taken, so they exist only because an
+instantiation gets its own out-of-line symbol. Three machines dominate, and each needs its own
+fix; inlining is not the universal answer, and was measured to be the wrong one for Array.
+
+- **`Array!T`: 64,968 B over 536 symbols and 88 element types.** The shared cores already exist
+  (`array_grow_trivial`, `array_reserve_trivial`, `array_allocate`, `array_free`) and take the
+  element size at runtime, so `Array!ubyte.grow`, `Array!uint.grow` and
+  `Array!InetAddress.grow` are the same 22 instructions differing only in three immediate
+  constants. The wrapper is 86 B because the core takes eight arguments and four of them spill
+  to the stack. Shrink the ABI instead of inlining: the core can derive `alloc_count` from the
+  array prefix and `has_allocation` from the pointer, and (size, alignment, prefix) pack into
+  one word, leaving four register arguments and a wrapper of a few moves. Measured dead end:
+  `pragma(inline, true)` on grow/reserve/resize/remove/removeSwapLast/clear/~this removes 203
+  symbols and 5,740 B of Array code but costs 704 B of text overall, because the callers absorb
+  more than the wrappers held.
+- **Console property thunks: 31,512 B over 468 symbols.** `mark_set` is 9,592 B over 114
+  symbols, 106 of them single-caller, and is a constant mask OR'd into a flags word followed by
+  a shared notify path: pass the mask, keep one function. `SynthGetter`/`SynthSetter`/
+  `SynthDefault` are 21,920 B over 354 symbols, all address-taken because they are the function
+  pointers in the property descriptor, so they cannot be inlined away and must instead become
+  fewer: one adapter per property *type* plus a member pointer in the descriptor, rather than
+  one per property.
+- **`from_variant!T` / `to_variant!T`: 14,184 B over 74 symbols, `from_variant` averaging 211 B.**
+  41 of them are single-caller. Per-type parsing is real work, but the integer and enum families
+  should share one body parameterised by width and signedness.
+
+Not a lever: `--linkonce-templates` changes nothing here (one object file already), and LTO is
+unusable on this target (see the strict-alignment entry).
 ## Dated entries
 
 Deferred work lands here as dated sections; remove a section once it is absorbed.
