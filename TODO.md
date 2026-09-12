@@ -614,6 +614,17 @@ this is what remains.
   the tests can anchor on a synthetic base the way `protocol.tesla.vehicle_session`'s first
   unittest already does.
 
+- **`/system/fs/read` silently truncates to nothing**: the command formats the length, a
+  literal and the whole file body through `tconcat` (`src/manager/system.d:285`), whose arena is
+  4 KB (`TempMemSize`). When the concat does not fit, nothing is produced and the command prints
+  an empty line: no error, and an empty file is indistinguishable from a failed read. The arena
+  is a per-frame bump allocator, so a file near the limit is a coin flip -- reading a 2,145-byte
+  config off a live ESP32-S3 failed three times and succeeded on the fourth, while a 2,174-byte
+  file beside it read first time. Anything past ~4 KB can never be read. The single-argument
+  `write_line` overload bypasses `tconcat`, so writing the prefix and the body separately fixes
+  the common case; a file read should stream rather than materialise. The HTTP fileserver mount
+  (`access=write`, GET and PUT) is the reliable transport in the meantime.
+
 - **Repair the runtime test harness**: `test/test_harness.py` pipes stdin into
   `--interactive`, but startup requires a terminal and the Windows console
   stream reads console events. Use a terminal or supported session transport.
