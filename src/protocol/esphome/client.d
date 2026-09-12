@@ -31,7 +31,7 @@ nothrow @nogc:
 alias ESPHomeMessageHandler = void delegate(uint msg_type, const(ubyte)[] payload);
 
 
-class ESPHomeClient : ActiveObject
+final class ESPHomeClient : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("remote", remote),
                                  Prop!("port", port),

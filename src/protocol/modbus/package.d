@@ -51,7 +51,7 @@ unittest
     assert(!translate_legacy_byte_type("u16", buffer, length));
 }
 
-class ModbusProtocolModule : Module, ProfileSections
+final class ModbusProtocolModule : Module, ProfileSections
 {
     mixin DeclareModule!"protocol.mb";
 nothrow @nogc:
@@ -438,7 +438,7 @@ nothrow @nogc:
 }
 
 
-class ModbusRequestState : CommandState
+final class ModbusRequestState : CommandState
 {
 nothrow @nogc:
 

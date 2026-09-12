@@ -25,7 +25,7 @@ import protocol.ip.tcp_stream : TCPServer;
 nothrow @nogc:
 
 
-class PCAPServer : ActiveObject
+final class PCAPServer : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("port", port),
                                  Prop!("allow-anonymous", allow_anonymous));

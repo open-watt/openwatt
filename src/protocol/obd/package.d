@@ -44,7 +44,7 @@ struct ElementDesc_OBD
     ushort desc = 0xFFFF;
 }
 
-class OBDProtocolModule : Module, ProfileSections
+final class OBDProtocolModule : Module, ProfileSections
 {
     mixin DeclareModule!"protocol.obd";
 nothrow @nogc:

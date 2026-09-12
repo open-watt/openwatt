@@ -31,7 +31,7 @@ version = DebugHTTPServer;
 nothrow @nogc:
 
 
-class HTTPServer : ActiveObject
+final class HTTPServer : ActiveObject
 {
 nothrow @nogc:
 

@@ -61,9 +61,9 @@ nothrow @nogc:
         restart();
     }
 
-    MACAddress peer() const pure
+    final MACAddress peer() const pure
         => _peer;
-    void peer(MACAddress value)
+    final void peer(MACAddress value)
     {
         if (_peer == value)
             return;
@@ -74,19 +74,19 @@ nothrow @nogc:
 
     // API
 
-    bool discovery_complete() const pure
+    final bool discovery_complete() const pure
         => _connected && _att_phase == ATTPhase.ready;
 
-    ushort att_mtu() const pure
+    final ushort att_mtu() const pure
         => _mtu;
 
-    const(GattService)[] services() const pure
+    final const(GattService)[] services() const pure
         => _services[];
 
-    const(GattChar)[] characteristics() const pure
+    final const(GattChar)[] characteristics() const pure
         => _chars[];
 
-    ushort find_characteristic(GUID service, GUID char_uuid) const
+    final ushort find_characteristic(GUID service, GUID char_uuid) const
     {
         foreach (ref c; _chars[])
         {
@@ -143,14 +143,14 @@ nothrow @nogc:
         return submit_op(op);
     }
 
-    void on_notify(ushort handle, NotifyDelegate callback)
+    final void on_notify(ushort handle, NotifyDelegate callback)
     {
         _notify_handlers ~= NotifyHandler(handle, callback);
         if (_att_phase == ATTPhase.ready)
             att_subscribe(handle, true);
     }
 
-    void clear_notify(ushort handle)
+    final void clear_notify(ushort handle)
     {
         for (size_t i = 0; i < _notify_handlers.length;)
         {
@@ -161,12 +161,12 @@ nothrow @nogc:
         }
     }
 
-    void on_discovery_done(DiscoveryDoneDelegate callback)
+    final void on_discovery_done(DiscoveryDoneDelegate callback)
     {
         _discovery_handlers ~= callback;
     }
 
-    void clear_discovery_done(DiscoveryDoneDelegate callback)
+    final void clear_discovery_done(DiscoveryDoneDelegate callback)
     {
         for (size_t i = 0; i < _discovery_handlers.length; ++i)
         {
@@ -335,7 +335,7 @@ private:
     Array!NotifyHandler _notify_handlers;
     Array!DiscoveryDoneDelegate _discovery_handlers;
 
-    package MACAddress local_mac()
+    final package MACAddress local_mac()
     {
         if (!_local_mac)
         {
@@ -363,7 +363,7 @@ private:
             log.info("read_rsp: [ ", cast(void[])value, " ]");
     }
 
-    package void incoming_frame(ref const Packet p, BaseInterface iface)
+    final package void incoming_frame(ref const Packet p, BaseInterface iface)
     {
         ref f = p.hdr!BLEFrame;
 

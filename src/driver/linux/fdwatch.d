@@ -40,7 +40,7 @@ void fd_watch_changed()
 }
 
 
-class LinuxFdWatchModule : Module
+final class LinuxFdWatchModule : Module
 {
     mixin DeclareModule!"os.fdwatch";
 nothrow @nogc:

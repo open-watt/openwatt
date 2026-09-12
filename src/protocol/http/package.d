@@ -202,7 +202,7 @@ bool http_request(const(char)[] url,
 }
 
 
-class HTTPModule : Module, ProfileSections, ProfileRootSections
+final class HTTPModule : Module, ProfileSections, ProfileRootSections
 {
     mixin DeclareModule!"http";
 nothrow @nogc:
@@ -437,7 +437,7 @@ nothrow @nogc:
         Collection!WebSocketServer().update_all();
     }
 
-    static class HTTPRequestState : CommandState
+    static final class HTTPRequestState : CommandState
     {
     nothrow @nogc:
 
@@ -456,7 +456,7 @@ nothrow @nogc:
             // TODO: thread cancellation through to http_request's HTTPOneShot
         }
 
-        int response_handler(ref const HTTPMessage response)
+        final int response_handler(ref const HTTPMessage response)
         {
             if (response.status_code == 0)
             {
@@ -519,7 +519,7 @@ ushort find_request_index(ref const Profile profile, const(char)[] name)
     return ushort.max;
 }
 
-class HTTPOneShot
+final class HTTPOneShot
 {
 nothrow @nogc:
 

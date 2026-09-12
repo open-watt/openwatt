@@ -44,7 +44,7 @@ enum ConsoleOutput : ubyte
 }
 
 
-class ConsoleStream : Stream
+final class ConsoleStream : Stream
 {
     alias Properties = AliasSeq!(Prop!("input", input),
                                  Prop!("output", output));
@@ -392,7 +392,7 @@ private:
     }
 }
 
-class ConsoleStreamModule : Module
+final class ConsoleStreamModule : Module
 {
     mixin DeclareModule!"stream.console";
 nothrow @nogc:

@@ -13,7 +13,7 @@ import router.iface;
 nothrow @nogc:
 
 
-class InterfaceGroup : BaseObject
+final class InterfaceGroup : BaseObject
 {
     alias Properties = AliasSeq!(Prop!("interface", iface),
                                  Prop!("group", group));

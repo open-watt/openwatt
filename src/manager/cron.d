@@ -26,7 +26,7 @@ enum TimeKind : ubyte
 }
 
 // The built-in time signal provider: schemes `every:<dur>`, `at:<hh:mm>?days=...`, `when:<datetime>`.
-class CronModule : Module, ISignalProvider
+final class CronModule : Module, ISignalProvider
 {
     mixin DeclareModule!"cron";
 nothrow @nogc:
@@ -84,7 +84,7 @@ nothrow @nogc:
 
 private:
 
-class TimeSub : SignalSub
+final class TimeSub : SignalSub
 {
 nothrow @nogc:
 

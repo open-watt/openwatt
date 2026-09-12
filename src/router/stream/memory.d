@@ -36,7 +36,7 @@ enum MemoryMode : ubyte
 enum fifo_overhead = 8;
 
 
-class MemoryStream : Stream
+final class MemoryStream : Stream
 {
     alias Properties = AliasSeq!(Prop!("tx-mode", tx_mode),
                                  Prop!("tx-ptr", tx_ptr),
@@ -369,7 +369,7 @@ private:
 }
 
 
-class MemoryStreamModule : Module
+final class MemoryStreamModule : Module
 {
     mixin DeclareModule!"stream.memory";
 nothrow @nogc:

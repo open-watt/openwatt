@@ -40,7 +40,7 @@ nothrow @nogc:
 static if (has_all):
 
 
-class LinuxBLEInterface : BLEInterface
+final class LinuxBLEInterface : BLEInterface
 {
     alias Properties = AliasSeq!(Prop!("hci-index", hci_index));
 nothrow @nogc:
@@ -549,7 +549,7 @@ private:
 // the LinuxBLEInterface collection in sync, mirroring driver.linux.ethernet.
 // ---------------------------------------------------------------------------
 
-class LinuxBLEModule : Module
+final class LinuxBLEModule : Module
 {
     mixin DeclareModule!"interface.ble";
 nothrow @nogc:

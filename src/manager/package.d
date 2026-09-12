@@ -325,7 +325,7 @@ Mod get_module(Mod)()
 
 
 // Handle for an `element:` signal subscription owned by the Application.
-private class ElementSignalSub : SignalSub
+private final class ElementSignalSub : SignalSub
 {
 nothrow @nogc:
     SignalSink sink;
@@ -335,7 +335,7 @@ nothrow @nogc:
     override ISignalProvider provider()
         => g_app;
 
-    void on_change(ref const SampleUpdate update)
+    final void on_change(ref const SampleUpdate update)
     {
         if (update.element !is element || !update.value_ready)
             return;
@@ -345,7 +345,7 @@ nothrow @nogc:
     }
 }
 
-class Application : ISignalProvider
+final class Application : ISignalProvider
 {
 nothrow @nogc:
 
@@ -1710,7 +1710,7 @@ Component resolve_global_component(const(char)[] path) nothrow @nogc
 }
 
 
-class DeviceTreeView : TreeViewState
+final class DeviceTreeView : TreeViewState
 {
 nothrow @nogc:
 

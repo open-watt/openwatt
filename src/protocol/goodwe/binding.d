@@ -33,7 +33,7 @@ struct ElementDesc_AA55
     ushort desc = 0xFFFF;
 }
 
-class GoodWeBinding : ProfileBinding
+final class GoodWeBinding : ProfileBinding
 {
     alias Properties = AliasSeq!(Prop!("client", client),
                                  Prop!("profile", profile),

@@ -66,7 +66,7 @@ nothrow @nogc:
 // AP support arrives.
 // ---------------------------------------------------------------------------
 
-class LinuxWifiRadio : WiFiInterface
+final class LinuxWifiRadio : WiFiInterface
 {
     alias Properties = AliasSeq!(Prop!("wiphy", wiphy),
                                  Prop!("netdev", netdev));
@@ -1159,7 +1159,7 @@ const(char)[] monitor_failure_message(MonitorFailure f) pure
 }
 
 
-class LinuxWlan : WLANInterface
+final class LinuxWlan : WLANInterface
 {
 nothrow @nogc:
 
@@ -1740,7 +1740,7 @@ private:
 // across-BSS index parsing is needed.
 // ---------------------------------------------------------------------------
 
-class LinuxAP : APInterface
+final class LinuxAP : APInterface
 {
 nothrow @nogc:
 
@@ -2237,7 +2237,7 @@ private:
 // the (Radio, WLAN) pairs in sync with the kernel's wifi netdevs.
 // ---------------------------------------------------------------------------
 
-class LinuxWlanModule : Module
+final class LinuxWlanModule : Module
 {
     mixin DeclareModule!"interface.wifi.linux";
 nothrow @nogc:

@@ -156,9 +156,9 @@ nothrow @nogc:
         restart();
     }
 
-    inout(Stream) stream() inout pure
+    final inout(Stream) stream() inout pure
         => _stream;
-    void stream(Stream value)
+    final void stream(Stream value)
     {
         if (_stream.get is value)
             return;
@@ -295,10 +295,10 @@ protected:
     }
 
 package:
-    bool has_agency() const pure
+    final bool has_agency() const pure
         => running && _role == BusRole.active;
 
-    Charger* find_charger(ushort slave_id)
+    final Charger* find_charger(ushort slave_id)
     {
         foreach (ref c; _chargers)
         {
@@ -308,7 +308,7 @@ package:
         return null;
     }
 
-    Charger* adopt(ushort slave_id, TeslaTWCBinding binding)
+    final Charger* adopt(ushort slave_id, TeslaTWCBinding binding)
     {
         Charger* c = find_charger(slave_id);
         if (c && c.binding && c.binding.get !is binding)
@@ -320,21 +320,21 @@ package:
         return c;
     }
 
-    void detach(ushort slave_id, TeslaTWCBinding binding)
+    final void detach(ushort slave_id, TeslaTWCBinding binding)
     {
         Charger* c = find_charger(slave_id);
         if (c && c.binding.get is binding)
             c.binding = null;
     }
 
-    void set_target_current(ushort slave_id, ushort current)
+    final void set_target_current(ushort slave_id, ushort current)
     {
         if (Charger* c = find_charger(slave_id))
             c.target_current = current;
         rebalance();
     }
 
-    void set_cap(ushort slave_id, ushort current)
+    final void set_cap(ushort slave_id, ushort current)
     {
         if (Charger* c = find_charger(slave_id))
             c.specified_max_current = current;

@@ -28,7 +28,7 @@ import router.stream;
 
 nothrow @nogc:
 
-class HTTPClient : ActiveObject
+final class HTTPClient : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("remote", remote),
                                  Prop!("stream", stream));

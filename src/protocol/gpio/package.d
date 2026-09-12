@@ -18,7 +18,7 @@ import manager.reactor;
 nothrow @nogc:
 
 
-class GpioBinding : ProtocolBinding
+final class GpioBinding : ProtocolBinding
 {
     alias Properties = AliasSeq!(Prop!("chip", chip),
                                  Prop!("rx-line", rx_line),
@@ -344,7 +344,7 @@ private:
 }
 
 
-class GpioModule : Module
+final class GpioModule : Module
 {
     mixin DeclareModule!"protocol.gpio";
 nothrow @nogc:

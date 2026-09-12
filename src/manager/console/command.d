@@ -171,7 +171,7 @@ nothrow @nogc:
 }
 
 
-class Context : CommandState
+final class Context : CommandState
 {
 nothrow @nogc:
 

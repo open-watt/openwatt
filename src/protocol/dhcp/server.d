@@ -32,7 +32,7 @@ import router.iface.packet;
 nothrow @nogc:
 
 
-class DHCPServer : ActiveObject
+final class DHCPServer : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("interface", iface),
                                  Prop!("pool", pool),

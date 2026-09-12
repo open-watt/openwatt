@@ -396,7 +396,7 @@ CommandState while_exec(ref Command, Session session, Scope*, const Variant[] ar
 
 
 // Drives a `:while` loop: alternates between the cond script and the do script.
-class WhileLoopState : CommandState
+final class WhileLoopState : CommandState
 {
 nothrow @nogc:
 
@@ -527,7 +527,7 @@ CommandState wait_exec(ref Command, Session session, Scope*, const Variant[] arg
 }
 
 
-class WaitCommandState : CommandState
+final class WaitCommandState : CommandState
 {
 nothrow @nogc:
 

@@ -29,7 +29,7 @@ nothrow @nogc:
 // its own framing. Either way the transport is a BaseInterface that hands us decapsulated spinel frames as
 // RawFrame packets and accepts RawFrames to transmit. This client speaks only the spinel command layer.
 //
-class SpinelClient : ActiveObject
+final class SpinelClient : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("interface", iface),
                                  Prop!("iid", iid),

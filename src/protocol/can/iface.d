@@ -84,7 +84,7 @@ struct CANFrame
 }
 
 
-class CANInterface : BaseInterface
+final class CANInterface : BaseInterface
 {
     version(HasGPIO)
         alias Properties = AliasSeq!(Prop!("stream", stream),

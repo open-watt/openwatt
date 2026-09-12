@@ -49,7 +49,7 @@ CommandState sync_console(Session session, SyncPeer peer)
 }
 
 
-package class SyncConsoleStream : Stream
+final package class SyncConsoleStream : Stream
 {
     alias Properties = AliasSeq!(Prop!("peer", peer),
                                  Prop!("sequence", sequence));
@@ -158,7 +158,7 @@ private:
 }
 
 
-private class PeerConsoleCommand : CommandState
+private final class PeerConsoleCommand : CommandState
 {
 nothrow @nogc:
 

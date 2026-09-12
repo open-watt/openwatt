@@ -15,7 +15,7 @@ nothrow @nogc:
 mixin LoadProtobuf!"protocol/esphome/api.proto";
 
 
-class ESPHomeModule : Module
+final class ESPHomeModule : Module
 {
     mixin DeclareModule!"protocol.esphome";
 nothrow @nogc:

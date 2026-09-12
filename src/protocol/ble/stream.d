@@ -28,7 +28,7 @@ enum BLEWriteMode : ubyte
     request,
 }
 
-class BLESerialStream : Stream
+final class BLESerialStream : Stream
 {
     alias Properties = AliasSeq!(Prop!("client", client),
                                  Prop!("service", service),

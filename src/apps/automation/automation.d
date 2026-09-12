@@ -30,7 +30,7 @@ enum Edge : ubyte
 }
 
 
-class Automation : ActiveObject
+final class Automation : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("on", on),
                                  Prop!("schedule", schedule),

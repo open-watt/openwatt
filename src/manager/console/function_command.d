@@ -47,7 +47,7 @@ nothrow @nogc:
 
 
 // TODO: DELETE THIS!!!
-class FunctionCommandState : CommandState
+final class FunctionCommandState : CommandState
 {
 nothrow @nogc:
     this(Session session)

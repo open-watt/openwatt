@@ -124,7 +124,7 @@ private struct LogConsumerSlot
 }
 
 
-class LogModule : Module
+final class LogModule : Module
 {
     mixin DeclareModule!"log";
 nothrow @nogc:
@@ -606,7 +606,7 @@ enum LogLineEnding : ubyte
 }
 
 
-class LogSink : ActiveObject
+final class LogSink : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("stream", stream),
                                  Prop!("format", format),
@@ -945,7 +945,7 @@ immutable string[16] tag_colors = [
     "\x1b[38;2;190;100;190m",  "\x1b[38;2;170;190;100m",
 ];
 
-class LogFollowState : LiveViewState
+final class LogFollowState : LiveViewState
 {
 nothrow @nogc:
 

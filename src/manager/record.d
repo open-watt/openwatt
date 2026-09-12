@@ -438,7 +438,7 @@ unittest
 }
 
 
-class Recorder : ActiveObject
+final class Recorder : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("dir", dir),
                                  Prop!("filter", filter));
@@ -767,7 +767,7 @@ nothrow @nogc:
         super(session, null);
     }
 
-    override CommandCompletionState update()
+    final override CommandCompletionState update()
     {
         if (_cancel)
         {
@@ -778,7 +778,7 @@ nothrow @nogc:
         return CommandCompletionState.finished;
     }
 
-    override void request_cancel()
+    final override void request_cancel()
     {
         _cancel = true;
     }
@@ -790,7 +790,7 @@ private:
 }
 
 
-class RecordQueryCommand : RecordFetchCommand
+final class RecordQueryCommand : RecordFetchCommand
 {
 nothrow @nogc:
 
@@ -817,7 +817,7 @@ private:
 }
 
 
-class RecordGraphCommand : RecordFetchCommand
+final class RecordGraphCommand : RecordFetchCommand
 {
 nothrow @nogc:
 
@@ -843,7 +843,7 @@ private:
 }
 
 
-class RecordModule : Module
+final class RecordModule : Module
 {
     mixin DeclareModule!"record";
 nothrow @nogc:
@@ -958,7 +958,7 @@ nothrow @nogc:
 
 // Live graph: re-fetches a sliding [now - span, now] window a few times a
 // second, so short spans scroll in realtime. +/- halve/double the span.
-class GraphViewState : LiveViewState
+final class GraphViewState : LiveViewState
 {
     import urt.mem.temp : tconcat;
     import manager.console.command : CommandCompletionState;

@@ -31,7 +31,7 @@ nothrow @nogc:
 // Concrete EthernetInterface backed by an npcap adapter handle.
 // ---------------------------------------------------------------------------
 
-class WindowsPcapEthernet : EthernetInterface
+final class WindowsPcapEthernet : EthernetInterface
 {
     alias Properties = AliasSeq!(Prop!("adapter", adapter));
 nothrow @nogc:
@@ -167,7 +167,7 @@ private:
 // add/remove events through an SPSC ring; we just drain that ring each update.
 // ---------------------------------------------------------------------------
 
-class WindowsPcapEthernetModule : Module
+final class WindowsPcapEthernetModule : Module
 {
     mixin DeclareModule!"ethernet.pcap";
 nothrow @nogc:

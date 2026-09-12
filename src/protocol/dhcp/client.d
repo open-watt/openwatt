@@ -30,7 +30,7 @@ import router.iface.packet;
 nothrow @nogc:
 
 
-class DHCPClient : ActiveObject
+final class DHCPClient : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("interface", iface),
                                  Prop!("add-default-route", add_default_route));

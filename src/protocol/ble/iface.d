@@ -179,9 +179,9 @@ nothrow @nogc:
 
     // Properties...
 
-    ubyte max_in_flight() const pure
+    final ubyte max_in_flight() const pure
         => _max_in_flight;
-    StringResult max_in_flight(ubyte value)
+    final StringResult max_in_flight(ubyte value)
     {
         if (value == 0)
             return StringResult("max-in-flight must be non-zero");
@@ -262,7 +262,7 @@ protected:
         return CompletionStatus.complete;
     }
 
-    override void online()
+    final override void online()
     {
         super.online();
 
@@ -288,7 +288,7 @@ protected:
         return CompletionStatus.complete;
     }
 
-    override void update()
+    final override void update()
     {
         super.update();
         _queue.timeout_stale(getTime());
@@ -318,7 +318,7 @@ protected:
         return tag;
     }
 
-    override ushort pcap_type() const
+    final override ushort pcap_type() const
         => 251; // DLT_BLUETOOTH_LE_LL
 
     // Backend hook: submit a dequeued frame to the transport. Return true if

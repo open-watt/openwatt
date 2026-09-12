@@ -40,7 +40,7 @@ nothrow @nogc:
 
 
 
-class EnergyAppModule : Module
+final class EnergyAppModule : Module
 {
     mixin DeclareModule!"apps.energy";
 nothrow @nogc:
@@ -1214,7 +1214,7 @@ const(char)[] format_soc_bar(float soc)
     return tconcat(green_bg, bar[0 .. split], grey_bg, bar[split .. $], reset);
 }
 
-private class EnergyApp
+private final class EnergyApp
 {
 nothrow @nogc:
     EnergyManager* manager;
@@ -1241,10 +1241,10 @@ nothrow @nogc:
         _mod = mod;
     }
 
-    override uint header_rows()
+    final override uint header_rows()
         => 1;
 
-    override void render_content(uint offset, uint count, uint width)
+    final override void render_content(uint offset, uint count, uint width)
     {
         if (width != _prev_width)
         {
@@ -1265,7 +1265,7 @@ private:
 }
 
 
-class EnergyLiveView : EnergyTableView
+final class EnergyLiveView : EnergyTableView
 {
 nothrow @nogc:
 
@@ -1292,7 +1292,7 @@ protected:
 }
 
 
-class TopologyWatchState : EnergyTableView
+final class TopologyWatchState : EnergyTableView
 {
 nothrow @nogc:
 
@@ -1318,7 +1318,7 @@ protected:
 }
 
 
-class CircuitWatchState : EnergyTableView
+final class CircuitWatchState : EnergyTableView
 {
 nothrow @nogc:
 

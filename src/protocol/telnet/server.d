@@ -23,7 +23,7 @@ import protocol.ip.tcp_stream;
 nothrow @nogc:
 
 
-class TelnetServer
+final class TelnetServer
 {
 nothrow @nogc:
 

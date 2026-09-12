@@ -17,7 +17,7 @@ nothrow @nogc:
 
 static if (has_tls)
 {
-    class TLSModule : Module
+    final class TLSModule : Module
     {
         mixin DeclareModule!"tls";
     nothrow @nogc:

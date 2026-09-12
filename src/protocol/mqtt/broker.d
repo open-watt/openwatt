@@ -35,7 +35,7 @@ enum bool has_message_cache = !is_tiny;
 nothrow @nogc:
 
 
-class MQTTBroker : ActiveObject
+final class MQTTBroker : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("port", port),
                                  Prop!("tls-port", tls_port),

@@ -58,7 +58,7 @@ enum uint ezsp_grace_period = 4000; // milliseconds - how long to wait for EZSP 
 enum ieee802154_phy_bitrate = 250_000;
 
 
-class ZigbeeInterface : BaseInterface
+final class ZigbeeInterface : BaseInterface
 {
     alias Properties = AliasSeq!(Prop!("ezsp-client", ezsp_client),
                                  Prop!("max-in-flight", max_in_flight),

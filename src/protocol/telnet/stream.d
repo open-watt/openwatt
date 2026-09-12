@@ -42,7 +42,7 @@ enum TelnetRole : ubyte
     client,
 }
 
-class TelnetStream : Stream
+final class TelnetStream : Stream
 {
     alias Properties = AliasSeq!(Prop!("transport", transport),
                                  Prop!("role", role));

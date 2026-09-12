@@ -100,22 +100,22 @@ nothrow @nogc:
     }
 
     // Properties...
-    bool vlan_filtering() const
+    final bool vlan_filtering() const
         => _vlan_filtering;
-    void vlan_filtering(bool value)
+    final void vlan_filtering(bool value)
     {
         _vlan_filtering = value;
         mark_set!(typeof(this), "vlan-filtering")();
     }
 
-    ushort pvid() const
+    final ushort pvid() const
         => _bridge_port.pvid;
-    void pvid(typeof(null))
+    final void pvid(typeof(null))
     {
         _bridge_port.pvid = 0;
         mark_set!(typeof(this), "pvid")();
     }
-    const(char)[] pvid(ushort value)
+    final const(char)[] pvid(ushort value)
     {
         if (value == 0 || value > 4094)
             return "invalid vlan id";
@@ -124,17 +124,17 @@ nothrow @nogc:
         return null;
     }
 
-    bool ingress_filtering() const
+    final bool ingress_filtering() const
         => _bridge_port.ingress_filtering;
-    void ingress_filtering(bool value)
+    final void ingress_filtering(bool value)
     {
         _bridge_port.ingress_filtering = value;
         mark_set!(typeof(this), "ingress-filtering")();
     }
 
-    bool untagged_egress() const
+    final bool untagged_egress() const
         => _bridge_port.untagged_egress;
-    void untagged_egress(bool value)
+    final void untagged_egress(bool value)
     {
         _bridge_port.untagged_egress = value;
         mark_set!(typeof(this), "untagged-egress")();
@@ -142,7 +142,7 @@ nothrow @nogc:
 
     // API...
 
-    bool add_member(BaseInterface iface, ushort pvid = 1, bool ingress_filtering = true, bool untagged_egress = true)
+    final bool add_member(BaseInterface iface, ushort pvid = 1, bool ingress_filtering = true, bool untagged_egress = true)
     {
         assert(iface !is this, "Cannot add a bridge to itself!");
         assert(_members.length < _cpu_port, "Too many _members in the bridge!"); // member indices live below the pseudo-ports
@@ -193,7 +193,7 @@ nothrow @nogc:
         return true;
     }
 
-    bool remove_member(size_t index)
+    final bool remove_member(size_t index)
     {
         if (index >= _members.length)
             return false;
@@ -215,7 +215,7 @@ nothrow @nogc:
         return true;
     }
 
-    bool remove_member(const(char)[] name)
+    final bool remove_member(const(char)[] name)
     {
         foreach (i, ref m; _members)
         {
@@ -227,15 +227,15 @@ nothrow @nogc:
 
     // --- kernel-bridge offload seam (driver.linux.bridge drives this) ---
 
-    size_t member_count() const
+    final size_t member_count() const
         => _members.length;
 
-    BaseInterface member_iface(size_t i)
+    final BaseInterface member_iface(size_t i)
         => _members[i].iface;
 
     // Mark/unmark a member as kernel-offloaded (by identity, not removal -- the
     // member stays in _members, keeping port indices and the address table stable).
-    void set_member_offloaded(BaseInterface iface, bool offloaded)
+    final void set_member_offloaded(BaseInterface iface, bool offloaded)
     {
         foreach (ref m; _members)
         {
@@ -247,13 +247,13 @@ nothrow @nogc:
         }
     }
 
-    void attach_cpu_port(CpuPortSink sink)
+    final void attach_cpu_port(CpuPortSink sink)
     {
         _cpu.send = sink;
         _cpu.active = true;
     }
 
-    void detach_cpu_port()
+    final void detach_cpu_port()
     {
         _cpu.active = false;
         _cpu.send = null;
@@ -262,7 +262,7 @@ nothrow @nogc:
     // Ingress from the kernel-switched ethernet segment (the offload module drains
     // the CPU-port socket and feeds frames here). This is a switching ingress like
     // any member port, with src = _cpu_port.
-    void cpu_port_incoming(ref Packet packet)
+    final void cpu_port_incoming(ref Packet packet)
     {
         if (!running || !_cpu.active)
             return;
@@ -289,7 +289,7 @@ nothrow @nogc:
 
     // The CPU port only needs promiscuous mode to feed a sniffer; bridge-addressed
     // and broadcast/multicast frames reach it without it.
-    bool cpu_port_wants_promisc() const
+    final bool cpu_port_wants_promisc() const
         => _num_subscribers != 0;
 
     protected override void on_subscribers_changed(bool any)
@@ -1003,7 +1003,7 @@ private:
 }
 
 
-class BridgeInterfaceModule : Module
+final class BridgeInterfaceModule : Module
 {
     mixin DeclareModule!"interface.bridge";
 nothrow @nogc:

@@ -23,7 +23,7 @@ enum FileMode : ubyte
 }
 
 
-class FileStream : Stream
+final class FileStream : Stream
 {
     alias Properties = AliasSeq!(Prop!("tx-file", tx_file),
                                  Prop!("rx-file", rx_file),
@@ -190,7 +190,7 @@ private:
 }
 
 
-class FileStreamModule : Module
+final class FileStreamModule : Module
 {
     mixin DeclareModule!"stream.file";
 nothrow @nogc:

@@ -390,7 +390,7 @@ nothrow @nogc:
 
 
 extern(C++)
-class Device : Component
+final class Device : Component
 {
 extern(D):
 nothrow @nogc:

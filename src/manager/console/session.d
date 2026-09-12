@@ -181,10 +181,10 @@ nothrow @nogc:
     final bool is_attached() const pure
         => attached();
 
-    override bool validate() const pure
+    final override bool validate() const pure
         => (_stream !is null && _profile_set) || (_flags & ObjectFlags.dynamic);
 
-    override CompletionStatus startup()
+    final override CompletionStatus startup()
     {
         Stream s = _stream;
         if (s)
@@ -235,7 +235,7 @@ nothrow @nogc:
         return CompletionStatus.complete;
     }
 
-    override CompletionStatus shutdown()
+    final override CompletionStatus shutdown()
     {
         unsubscribe_stream();
 
@@ -271,7 +271,7 @@ nothrow @nogc:
         return CompletionStatus.complete;
     }
 
-    override void update()
+    final override void update()
     {
         Stream s = _stream;
         if (s)
@@ -373,7 +373,7 @@ nothrow @nogc:
         return term ? term.terminal_type : null;
     }
 
-    ptrdiff_t write_raw(const(void)[] data)
+    final ptrdiff_t write_raw(const(void)[] data)
     {
         if (!_stream)
             return -1;
@@ -513,7 +513,7 @@ nothrow @nogc:
         receive_input(text[]);
     }
 
-    ptrdiff_t append_input(const(char)[] text)
+    final ptrdiff_t append_input(const(char)[] text)
     {
         assert(_console != null, "Session was closed!");
         assert(!_current_command);
@@ -609,7 +609,7 @@ nothrow @nogc:
         return -1;
     }
 
-    MutableString!0 take_input()
+    final MutableString!0 take_input()
     {
         MutableString!0 take = _buffer.move;
         _buffer = null;
@@ -633,25 +633,25 @@ nothrow @nogc:
     final Array!String suggest(const(char)[] text)
         => _console.suggest(text, _cur_scope);
 
-    void set_local(const(char)[] name, ref const Variant value)
+    final void set_local(const(char)[] name, ref const Variant value)
     {
         _session_locals[make_string(name)] = value;
     }
 
 protected:
-    void enter_command(const(char)[])
+    final void enter_command(const(char)[])
     {
         if (_features & ClientFeatures.escape)
             write_output("", true);
     }
 
-    void command_finished(CommandState, CommandCompletionState)
+    final void command_finished(CommandState, CommandCompletionState)
     {
         if (_show_prompt && (_features & ClientFeatures.escape))
             send_prompt_and_buffer(false);
     }
 
-    void show_suggestions(const(String)[] suggestions)
+    final void show_suggestions(const(String)[] suggestions)
     {
         if (_features & ClientFeatures.escape)
             write_output("", true);
@@ -828,7 +828,7 @@ protected:
         _history_cursor = cast(uint)_history.length;
     }
 
-    void do_bell()
+    final void do_bell()
     {
     }
 
@@ -1247,11 +1247,11 @@ package:
     Variant _return_value;
     bool _returning = false;
 
-    ref CommandState current_command() => _current_command;
+    final ref CommandState current_command() => _current_command;
 }
 
 // TODO: DELETE THIS IF WE INTRODUCE A MemoryStream or BufferStream??
-class StringSession : Session
+final class StringSession : Session
 {
 nothrow @nogc:
 
@@ -1288,7 +1288,7 @@ private:
 }
 
 
-class ConsoleSessionModule : Module
+final class ConsoleSessionModule : Module
 {
     mixin DeclareModule!"console.session";
 nothrow @nogc:
@@ -1335,7 +1335,7 @@ private:
 
 version (unittest):
 
-private class SessionTestStream : Stream
+private final class SessionTestStream : Stream
 {
 nothrow @nogc:
 

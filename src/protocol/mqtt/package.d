@@ -22,7 +22,7 @@ import protocol.mqtt.topic : validate_topic_name;
 nothrow @nogc:
 
 
-class MQTTModule : Module, ProfileSections, ProfileRootSections
+final class MQTTModule : Module, ProfileSections, ProfileRootSections
 {
     mixin DeclareModule!"protocol.mqtt";
 nothrow @nogc:

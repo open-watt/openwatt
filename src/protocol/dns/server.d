@@ -54,7 +54,7 @@ enum NSProtocol : ubyte
     wins, //       ""
 }
 
-class DNSServer : ActiveObject
+final class DNSServer : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("interface", iface),
                                  Prop!("protocols", protocols),

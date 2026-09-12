@@ -33,7 +33,7 @@ struct ElementDesc_BLE
     ushort desc = 0xFFFF;
 }
 
-class BLEClientBinding : ProfileBinding
+final class BLEClientBinding : ProfileBinding
 {
     alias Properties = AliasSeq!(Prop!("client", client),
                                  Prop!("profile", profile),

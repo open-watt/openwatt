@@ -64,27 +64,27 @@ nothrow @nogc:
         super(collection_type_info!TeslaVehicleSession, id, flags);
     }
 
-    const(char)[] vin() const pure
+    final const(char)[] vin() const pure
         => name[];
 
-    MACAddress peer() const pure
+    final MACAddress peer() const pure
         => _peer;
 
-    inout(BLEClient) client() inout pure
+    final inout(BLEClient) client() inout pure
         => _client;
 
-    Phase session_state() const pure
+    final Phase session_state() const pure
         => _phase;
 
-    inout(TeslaVehicleScanner) scanner() inout pure
+    final inout(TeslaVehicleScanner) scanner() inout pure
         => _scanner;
 
-    bool is_ready() const pure => _phase == Phase.ready;
+    final bool is_ready() const pure => _phase == Phase.ready;
 
-    bool has_charge_state() const pure => _has_charge_state;
-    bool has_climate_state() const pure => _has_climate_state;
-    ref const(TeslaChargeState) charge_state() const pure => _charge_state;
-    ref const(TeslaClimateState) climate_state() const pure => _climate_state;
+    final bool has_charge_state() const pure => _has_charge_state;
+    final bool has_climate_state() const pure => _has_climate_state;
+    final ref const(TeslaChargeState) charge_state() const pure => _charge_state;
+    final ref const(TeslaClimateState) climate_state() const pure => _climate_state;
 
     bool refresh_charge_state()
         => send_signed_action(TeslaDomain.infotainment, build_action_get_charge_state()[], VehicleCommandKind.get_charge_state);
@@ -102,31 +102,31 @@ nothrow @nogc:
         return sent;
     }
 
-    bool charging_start()
+    final bool charging_start()
         => send_signed_action(TeslaDomain.infotainment, build_action_charging_start_stop(true)[], VehicleCommandKind.charging_start);
-    bool charging_stop()
+    final bool charging_stop()
         => send_signed_action(TeslaDomain.infotainment, build_action_charging_start_stop(false)[], VehicleCommandKind.charging_stop);
 
-    bool set_charging_amps(int amps)
+    final bool set_charging_amps(int amps)
         => send_signed_action(TeslaDomain.infotainment, build_action_set_charging_amps(amps)[], VehicleCommandKind.set_charging_amps);
 
-    bool climate_power(bool enabled)
+    final bool climate_power(bool enabled)
         => send_signed_action(TeslaDomain.infotainment, build_action_climate_power(enabled)[], VehicleCommandKind.climate_power);
 
-    bool climate_temperature(float celsius)
+    final bool climate_temperature(float celsius)
         => send_signed_action(TeslaDomain.infotainment, build_action_climate_temperature(celsius, celsius)[], VehicleCommandKind.climate_temperature);
 
-    bool schedule_charging(bool enabled, TimeOfDay start)
+    final bool schedule_charging(bool enabled, TimeOfDay start)
     {
         int minutes_after_midnight = cast(int)start.hour * 60 + start.minute;
         return send_signed_action(TeslaDomain.infotainment, build_action_schedule_charging(enabled, minutes_after_midnight)[], VehicleCommandKind.schedule_charging);
     }
 
-    MonoTime last_seen() const pure
+    final MonoTime last_seen() const pure
         => _last_seen;
 
 package:
-    void reset_retry_status()
+    final void reset_retry_status()
     {
         _fault = null;
         _phase = Phase.failed;
@@ -135,14 +135,14 @@ package:
         write_status();
     }
 
-    void attach(TeslaVehicleScanner scanner, MACAddress peer)
+    final void attach(TeslaVehicleScanner scanner, MACAddress peer)
     {
         _scanner = scanner;
         _peer = peer;
         _last_seen = getTime();
     }
 
-    void mark_seen(MACAddress peer)
+    final void mark_seen(MACAddress peer)
     {
         _last_seen = getTime();
         if (_peer == peer)

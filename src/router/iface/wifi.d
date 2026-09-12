@@ -382,10 +382,10 @@ protected:
     final inout(APInterface) bound_ap() inout pure
         => _bound_aps.length > 0 ? _bound_aps[0] : null;
 
-    override ushort pcap_type() const
+    final override ushort pcap_type() const
         => 127; // LINKTYPE_IEEE802_11_RADIOTAP
 
-    override void pcap_write(ref const Packet packet, PacketDirection dir, scope void delegate(scope const void[] packet_data) nothrow @nogc sink) const
+    final override void pcap_write(ref const Packet packet, PacketDirection dir, scope void delegate(scope const void[] packet_data) nothrow @nogc sink) const
     {
         if (packet.type == PacketType.wifi_80211)
             sink(packet.data);
@@ -534,7 +534,7 @@ protected:
             mark_set!(typeof(this), "phy-mode")();
     }
 
-    override void offline()
+    final override void offline()
     {
         super.offline();
         set_phy_mode(WifiPhyMode.unknown);
@@ -678,7 +678,7 @@ private:
 }
 
 
-class WiFiInterfaceModule : Module
+final class WiFiInterfaceModule : Module
 {
     mixin DeclareModule!"interface.wifi";
 nothrow @nogc:

@@ -14,7 +14,7 @@ import protocol.dhcp.server;
 nothrow @nogc:
 
 
-class DHCPModule : Module
+final class DHCPModule : Module
 {
     mixin DeclareModule!"protocol.dhcp";
 nothrow @nogc:

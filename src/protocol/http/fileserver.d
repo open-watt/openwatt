@@ -39,7 +39,7 @@ enum FileServerAccess : ubyte
 // The access property sets how far the mount goes beyond that: write adds PUT
 // and DELETE, webdav upgrades it to a WebDAV server that filesystem clients
 // (davfs2, rclone, Explorer, Finder) can mount.
-class FileServer : ActiveObject
+final class FileServer : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("http-server", http_server),
                                  Prop!("uri", uri),

@@ -76,7 +76,7 @@ else version (Windows)
 nothrow @nogc:
 
 
-class TLSStream : Stream
+final class TLSStream : Stream
 {
     alias Properties = AliasSeq!(Prop!("stream", stream),
                                  Prop!("remote", remote),
@@ -1172,7 +1172,7 @@ private:
     }
 }
 
-class TLSServer : TCPServer
+final class TLSServer : TCPServer
 {
     alias Properties = AliasSeq!(Prop!("certificate", certificate),
                                  Prop!("certificates", certificates));

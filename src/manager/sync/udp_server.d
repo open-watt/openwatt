@@ -27,7 +27,7 @@ nothrow @nogc:
 alias log = Log!"sync.udp-server";
 
 
-class UDPSyncServer : ActiveObject
+final class UDPSyncServer : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("bind", bind),
                                  Prop!("interface", interfaces),

@@ -261,7 +261,7 @@ private:
 }
 
 
-class PcapModule : Module
+final class PcapModule : Module
 {
     mixin DeclareModule!"manager.pcap";
 nothrow @nogc:

@@ -25,7 +25,7 @@ nothrow @nogc:
 
 package __gshared uint can_section_kind;
 
-class CANProtocolModule : Module, ProfileSections
+final class CANProtocolModule : Module, ProfileSections
 {
     mixin DeclareModule!"protocol.can";
 nothrow @nogc:

@@ -15,7 +15,7 @@ import manager.signal;
 nothrow @nogc:
 
 
-class ObjectSignalModule : Module, ISignalProvider
+final class ObjectSignalModule : Module, ISignalProvider
 {
     mixin DeclareModule!"object-signal";
 nothrow @nogc:
@@ -102,7 +102,7 @@ nothrow @nogc:
 
 private:
 
-class ObjectSignalSub : SignalSub
+final class ObjectSignalSub : SignalSub
 {
 nothrow @nogc:
     SignalSink sink;

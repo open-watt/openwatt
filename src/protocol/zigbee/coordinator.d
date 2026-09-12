@@ -27,7 +27,7 @@ import protocol.zigbee.zdo;
 nothrow @nogc:
 
 
-class ZigbeeCoordinator : ZigbeeRouter
+final class ZigbeeCoordinator : ZigbeeRouter
 {
     alias Properties = AliasSeq!(Prop!("channel", channel));
 nothrow @nogc:

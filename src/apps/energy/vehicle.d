@@ -504,7 +504,7 @@ bool set_default(T)(Device vehicle, const(char)[] path, auto ref T value)
 }
 
 
-class NHTSALookup
+final class NHTSALookup
 {
 nothrow @nogc:
     String vin;

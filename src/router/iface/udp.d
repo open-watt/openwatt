@@ -89,7 +89,7 @@ nothrow @nogc:
     }
 }
 
-class UDPInterface : BaseInterface
+final class UDPInterface : BaseInterface
 {
     alias Properties = AliasSeq!(Prop!("interface", iface),
                                  Prop!("local-host", local_host),

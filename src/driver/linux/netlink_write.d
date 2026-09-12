@@ -230,7 +230,7 @@ int netlink_ifindex(const(char)[] name)
 
 // === console-facing module ===
 
-class LinuxNetlinkWriteModule : Module
+final class LinuxNetlinkWriteModule : Module
 {
     mixin DeclareModule!"os.netlink.write";
 nothrow @nogc:

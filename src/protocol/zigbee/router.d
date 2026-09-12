@@ -38,17 +38,17 @@ nothrow @nogc:
 
     // Properties...
 
-    EUI64 pan_eui() const pure
+    final EUI64 pan_eui() const pure
         => _network_params.pan_id == 0xFFFF ? _pan_eui : _network_params.extended_pan_id;
-    void pan_eui(EUI64 value)
+    final void pan_eui(EUI64 value)
     {
         _pan_eui = value;
         mark_set!(typeof(this), "pan-eui")();
     }
 
-    ushort pan_id() const pure
+    final ushort pan_id() const pure
         => _network_params.pan_id == 0xFFFF ? _pan_id : _network_params.pan_id;
-    void pan_id(ushort value)
+    final void pan_id(ushort value)
     {
         _pan_id = value;
         mark_set!(typeof(this), "pan-id")();

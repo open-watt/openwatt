@@ -18,7 +18,7 @@ import router.iface.mac;
 nothrow @nogc:
 
 
-class DHCPLease : BaseObject
+final class DHCPLease : BaseObject
 {
     alias Properties = AliasSeq!(Prop!("address", address),
                                  Prop!("mac", mac),

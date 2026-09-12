@@ -17,7 +17,7 @@ import manager.features : has_ipv6, is_tiny;
 nothrow @nogc:
 
 
-class IPPool : BaseObject
+final class IPPool : BaseObject
 {
     alias Properties = AliasSeq!(Prop!("start", start),
                                  Prop!("end", end));
@@ -211,9 +211,9 @@ nothrow @nogc:
         super(collection_type_info!IPv6Pool, id, flags);
     }
 
-    IPv6NetworkAddress prefix() const pure
+    final IPv6NetworkAddress prefix() const pure
         => _prefix;
-    const(char)[] prefix(IPv6NetworkAddress value)
+    final const(char)[] prefix(IPv6NetworkAddress value)
     {
         if (value.prefix_len > 64)
             return "prefix length must be <= 64";
@@ -234,9 +234,9 @@ nothrow @nogc:
         return null;
     }
 
-    inout(IPv6Pool) pool() inout pure
+    final inout(IPv6Pool) pool() inout pure
         => _pool;
-    const(char)[] pool(IPv6Pool value)
+    final const(char)[] pool(IPv6Pool value)
     {
         for (IPv6Pool parent = value; parent; parent = parent._pool.get)
             if (parent is this || parent._pool.name == name)
@@ -250,14 +250,14 @@ nothrow @nogc:
         return null;
     }
 
-    bool contains(IPv6Addr addr) const pure
+    final bool contains(IPv6Addr addr) const pure
     {
         if (!_tree.ready)
             return false;
         return (hi_bits(addr) & high_mask(_prefix.prefix_len)) == _tree.base;
     }
 
-    IPv6NetworkAddress allocate_prefix(IPv6NetworkAddress preferred)
+    final IPv6NetworkAddress allocate_prefix(IPv6NetworkAddress preferred)
     {
         ubyte len = preferred.prefix_len;
         if (len <= _prefix.prefix_len || len > 64 || !_tree.ready)
@@ -274,24 +274,24 @@ nothrow @nogc:
         return IPv6NetworkAddress(make_addr(hi, 0), len);
     }
 
-    bool reserve_prefix(IPv6NetworkAddress prefix)
+    final bool reserve_prefix(IPv6NetworkAddress prefix)
     {
         if (prefix.prefix_len <= _prefix.prefix_len || prefix.prefix_len > 64 || !_tree.ready)
             return false;
         return _tree.reserve(hi_bits(prefix.addr), prefix.prefix_len);
     }
 
-    void release_prefix(IPv6NetworkAddress prefix)
+    final void release_prefix(IPv6NetworkAddress prefix)
     {
         if (prefix.prefix_len <= _prefix.prefix_len || prefix.prefix_len > 64 || !_tree.ready)
             return;
         _tree.release(hi_bits(prefix.addr), prefix.prefix_len);
     }
 
-    uint prefixes_used() const pure
+    final uint prefixes_used() const pure
         => _tree.used - cast(uint)_hosts.length;
 
-    IPv6Addr allocate_address(IPv6Addr preferred = IPv6Addr.any)
+    final IPv6Addr allocate_address(IPv6Addr preferred = IPv6Addr.any)
     {
         if (!_tree.ready)
             return IPv6Addr.any;
@@ -310,7 +310,7 @@ nothrow @nogc:
         return make_addr(subnet, host_alloc(*r));
     }
 
-    bool reserve_address(IPv6Addr addr)
+    final bool reserve_address(IPv6Addr addr)
     {
         if (!contains(addr))
             return false;
@@ -328,7 +328,7 @@ nothrow @nogc:
         return host_set(*r, id);
     }
 
-    void release_address(IPv6Addr addr)
+    final void release_address(IPv6Addr addr)
     {
         ulong id = lo_bits(addr);
         if (id == 0)
@@ -343,7 +343,7 @@ nothrow @nogc:
         }
     }
 
-    uint addresses_used() const pure
+    final uint addresses_used() const pure
     {
         uint n = 0;
         foreach (ref r; _hosts)

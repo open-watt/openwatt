@@ -32,7 +32,7 @@ nothrow @nogc:
 static if (has_all && num_ble > 0):
 
 
-class BuiltinBLEInterface : BLEInterface
+final class BuiltinBLEInterface : BLEInterface
 {
     alias Properties = AliasSeq!(Prop!("port", port));
 nothrow @nogc:
@@ -967,7 +967,7 @@ private:
 }
 
 
-class BuiltinBLEModule : Module
+final class BuiltinBLEModule : Module
 {
     mixin DeclareModule!"interface.ble.builtin";
 nothrow @nogc:

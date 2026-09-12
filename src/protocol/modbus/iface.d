@@ -114,7 +114,7 @@ struct ModbusFrame
 }
 
 
-class ModbusInterface : BaseInterface
+final class ModbusInterface : BaseInterface
 {
 nothrow @nogc:
 

@@ -10,7 +10,7 @@ import protocol.ntp.client;
 nothrow @nogc:
 
 
-class NTPModule : Module
+final class NTPModule : Module
 {
     mixin DeclareModule!"protocol.ntp";
 nothrow @nogc:

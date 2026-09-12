@@ -15,7 +15,7 @@ import router.stream;
 nothrow @nogc:
 
 
-class PPPClient : BaseInterface
+final class PPPClient : BaseInterface
 {
     alias Properties = AliasSeq!(Prop!("stream", stream),
                                  Prop!("protocol", protocol));
@@ -195,7 +195,7 @@ private:
 }
 
 
-class PPPoEClient : BaseInterface
+final class PPPoEClient : BaseInterface
 {
     alias Properties = AliasSeq!(Prop!("interface", iface),
                                  Prop!("protocol", protocol));

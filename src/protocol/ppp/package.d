@@ -43,7 +43,7 @@ enum PPPProtocol
 }
 
 
-class PPPModule : Module
+final class PPPModule : Module
 {
     mixin DeclareModule!"protocol.ppp";
 nothrow @nogc:

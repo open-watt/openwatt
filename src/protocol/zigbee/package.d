@@ -332,7 +332,7 @@ nothrow @nogc:
     }
 }
 
-class ZigbeeProtocolModule : Module, ProfileSections
+final class ZigbeeProtocolModule : Module, ProfileSections
 {
     mixin DeclareModule!"protocol.zigbee";
 nothrow @nogc:
@@ -958,7 +958,7 @@ private:
 
 __gshared ushort tuya_seq = 0x8000; // shared between tuya_read and tuya_write, offset from controller's counter
 
-class EnergyScanState : CommandState
+final class EnergyScanState : CommandState
 {
 nothrow @nogc:
 
@@ -1056,7 +1056,7 @@ nothrow @nogc:
     }
 }
 
-class ZCLReadState : CommandState
+final class ZCLReadState : CommandState
 {
 nothrow @nogc:
 
@@ -1257,7 +1257,7 @@ nothrow @nogc:
 }
 
 
-class TuyaReadState : CommandState
+final class TuyaReadState : CommandState
 {
 nothrow @nogc:
 
@@ -1336,7 +1336,7 @@ private:
 }
 
 
-class ZCLWriteState : CommandState
+final class ZCLWriteState : CommandState
 {
 nothrow @nogc:
 

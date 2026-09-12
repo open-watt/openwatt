@@ -22,7 +22,7 @@ import router.stream;
 nothrow @nogc:
 
 
-class OTAUpdater : ActiveObject
+final class OTAUpdater : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("http-server", http_server),
                                  Prop!("uri", uri),
@@ -289,7 +289,7 @@ private:
 }
 
 
-class OTAModule : Module
+final class OTAModule : Module
 {
     mixin DeclareModule!"apps.ota";
 nothrow @nogc:

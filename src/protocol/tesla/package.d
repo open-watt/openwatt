@@ -23,7 +23,7 @@ import router.iface;
 nothrow @nogc:
 
 
-class TeslaProtocolModule : Module
+final class TeslaProtocolModule : Module
 {
     mixin DeclareModule!"protocol.tesla";
 nothrow @nogc:

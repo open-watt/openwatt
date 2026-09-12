@@ -623,7 +623,7 @@ protected:
     ObjectFlags _flags;
     package bool _is_remote;
     package ushort _sync_slot = sync_slot_none;
-    package ulong props_set() const pure
+    final package ulong props_set() const pure
         => _props_set;
 
     // validate configuration is in an operable state
@@ -814,8 +814,7 @@ nothrow @nogc:
         write_status();
     }
 
-    // TODO: PUT FINAL BACK WHEN EVERYTHING PORTED!
-    /+final+/ bool running() const pure
+    final bool running() const pure
         => _state == State.running;
 
     final override ObjectFlags flags() const

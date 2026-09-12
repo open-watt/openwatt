@@ -125,7 +125,7 @@ struct PendingInboundCmd
     CommandState  command;
 }
 
-class SyncModule : Module
+final class SyncModule : Module
 {
     mixin DeclareModule!"sync";
 nothrow @nogc:
