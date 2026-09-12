@@ -51,7 +51,7 @@ enum CertStatus
     error,
 }
 
-class Certificate : ActiveObject
+final class Certificate : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("cert-type", cert_type),
                                  Prop!("domain", domain),

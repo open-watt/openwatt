@@ -69,7 +69,7 @@ struct EZSPReply(R)
         EZSPResult!R value;
 }
 
-class EZSPClient : ActiveObject
+final class EZSPClient : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("ash-stream", ash_stream),
                                  Prop!("ash-interface", ash_interface),
@@ -515,7 +515,7 @@ protected:
 
 private:
 
-    static class YieldEZSP : AwakenEvent
+    static final class YieldEZSP : AwakenEvent
     {
     nothrow @nogc:
         bool finished;

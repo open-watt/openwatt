@@ -22,7 +22,7 @@ nothrow @nogc:
 
 package __gshared uint aa55_section_kind;
 
-class GoodWeModule : Module, ProfileSections
+final class GoodWeModule : Module, ProfileSections
 {
     mixin DeclareModule!"protocol.goodwe";
 nothrow @nogc:

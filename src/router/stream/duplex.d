@@ -15,7 +15,7 @@ import router.stream;
 nothrow @nogc:
 
 
-class DuplexStream : Stream
+final class DuplexStream : Stream
 {
     alias Properties = AliasSeq!(Prop!("tx", tx),
                                  Prop!("rx", rx));
@@ -210,7 +210,7 @@ private:
 }
 
 
-class DuplexStreamModule : Module
+final class DuplexStreamModule : Module
 {
     mixin DeclareModule!"stream.duplex";
 nothrow @nogc:

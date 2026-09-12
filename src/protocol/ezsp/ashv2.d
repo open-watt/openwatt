@@ -28,7 +28,7 @@ nothrow @nogc:
 // https://www.silabs.com/documents/public/user-guides/ug101-uart-gateway-protocol-reference.pdf
 //
 
-class ASHInterface : BaseInterface
+final class ASHInterface : BaseInterface
 {
     alias Properties = AliasSeq!(Prop!("stream", stream),
                                  Prop!("window", window),

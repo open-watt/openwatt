@@ -1050,7 +1050,7 @@ private:
         ubyte endpoint;
     }
 
-    static class YieldZB : AwakenEvent
+    static final class YieldZB : AwakenEvent
     {
     nothrow @nogc:
         Timer timeout;
@@ -1093,7 +1093,7 @@ private:
 }
 
 
-class ZigbeeEndpoint : ActiveObject
+final class ZigbeeEndpoint : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("node", node),
                                  Prop!("endpoint-id", endpoint),

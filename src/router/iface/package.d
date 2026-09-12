@@ -840,7 +840,7 @@ private CID scope_cid(uint scope_id) pure
 private __gshared immutable InetScopeProvider g_scope_provider = InetScopeProvider(&scope_to_native, &scope_from_native, &scope_name, &scope_parse);
 
 
-class InterfaceModule : Module
+final class InterfaceModule : Module
 {
     mixin DeclareModule!"interface";
 nothrow @nogc:
@@ -1020,7 +1020,7 @@ nothrow @nogc:
         return alloc!MacPingState(session, address, count ? count.value : 4, station);
     }
 
-    static class MacPingState : CommandState
+    static final class MacPingState : CommandState
     {
     nothrow @nogc:
 
@@ -1153,7 +1153,7 @@ nothrow @nogc:
         return alloc!MacDiscoverState(session);
     }
 
-    static class MacDiscoverState : CommandState
+    static final class MacDiscoverState : CommandState
     {
     nothrow @nogc:
 

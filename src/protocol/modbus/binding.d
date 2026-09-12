@@ -41,7 +41,7 @@ struct ElementDesc_Modbus
 }
 
 
-class ModbusBinding : ProfileBinding
+final class ModbusBinding : ProfileBinding
 {
     alias Properties = AliasSeq!(Prop!("node", node),
                                  Prop!("slave", slave),

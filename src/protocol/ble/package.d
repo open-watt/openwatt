@@ -33,7 +33,7 @@ nothrow @nogc:
 
 package __gshared uint ble_section_kind;
 
-class BLEModule : Module, ProfileSections
+final class BLEModule : Module, ProfileSections
 {
     mixin DeclareModule!"protocol.ble";
 nothrow @nogc:

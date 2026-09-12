@@ -63,7 +63,7 @@ nothrow @nogc:
 }
 
 
-class Policy : ActiveObject
+final class Policy : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("target", target),
                                  Prop!("tier", tier),

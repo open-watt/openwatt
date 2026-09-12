@@ -26,7 +26,7 @@ alias MIBSetHandler = SNMPError delegate(ref const OID name, ref const VarBindVa
 alias TrapHandler = void delegate(ref const SNMPMessage msg, ref const InetAddress sender) nothrow @nogc;
 
 
-class SNMPAgent : ActiveObject
+final class SNMPAgent : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("port", port),
                                  Prop!("trap-port", trap_port),

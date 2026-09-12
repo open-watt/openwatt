@@ -431,7 +431,7 @@ MutableString!0 collection_complete(SuggestFlags flags)(ref Command, ref Console
 }
 
 
-class CollectionWatchState : LiveViewState
+final class CollectionWatchState : LiveViewState
 {
 nothrow @nogc:
 

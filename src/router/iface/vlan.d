@@ -15,7 +15,7 @@ import router.iface.ethernet;
 nothrow @nogc:
 
 
-class VLANInterface : EthernetStation
+final class VLANInterface : EthernetStation
 {
     alias Properties = AliasSeq!(Prop!("interface", iface),
                                  Prop!("vlan", vlan),

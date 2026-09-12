@@ -31,7 +31,7 @@ nothrow @nogc:
 // EthernetInterface backed by an AF_PACKET socket on a kernel netdev.
 // ---------------------------------------------------------------------------
 
-class LinuxRawEthernet : EthernetInterface
+final class LinuxRawEthernet : EthernetInterface
 {
     alias Properties = AliasSeq!(Prop!("adapter", adapter));
 nothrow @nogc:
@@ -212,7 +212,7 @@ private:
 // the LinuxRawEthernet collection in sync with the kernel's netdev list.
 // ---------------------------------------------------------------------------
 
-class LinuxRawEthernetModule : Module
+final class LinuxRawEthernetModule : Module
 {
     mixin DeclareModule!"interface.ethernet.linux";
 nothrow @nogc:

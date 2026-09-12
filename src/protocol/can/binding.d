@@ -35,7 +35,7 @@ struct ElementDesc_CAN
     ushort desc = 0xFFFF;
 }
 
-class CANBinding : ProfileBinding
+final class CANBinding : ProfileBinding
 {
     alias Properties = AliasSeq!(Prop!("interface", iface),
                                  Prop!("profile", profile),

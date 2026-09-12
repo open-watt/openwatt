@@ -13,7 +13,7 @@ import protocol.spinel.client;
 nothrow @nogc:
 
 
-class SpinelProtocolModule : Module
+final class SpinelProtocolModule : Module
 {
     mixin DeclareModule!"protocol.spinel";
 nothrow @nogc:

@@ -43,7 +43,7 @@ static if (has_ip)
 nothrow @nogc:
 
 
-class LinuxBridgeOffloadModule : Module
+final class LinuxBridgeOffloadModule : Module
 {
     mixin DeclareModule!"interface.bridge.linux";
 nothrow @nogc:

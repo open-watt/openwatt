@@ -101,7 +101,7 @@ private:
     }
 }
 
-class I2CInterface : BaseInterface
+final class I2CInterface : BaseInterface
 {
     alias Properties = AliasSeq!(Prop!("device", device),
                                  Prop!("frequency", frequency),
@@ -449,7 +449,7 @@ private:
     }
 }
 
-class I2CModule : Module
+final class I2CModule : Module
 {
     mixin DeclareModule!"router.iface.i2c";
 nothrow @nogc:

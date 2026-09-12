@@ -34,7 +34,7 @@ import router.iface.mac;
 nothrow @nogc:
 
 
-class ESPHomeBinding : ProfileBinding
+final class ESPHomeBinding : ProfileBinding
 {
     alias Properties = AliasSeq!(Prop!("client", client),
                                  Prop!("profile", profile),

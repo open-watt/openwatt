@@ -40,7 +40,7 @@ enum MaxFibers = 2;
 
 enum MonoTime wake_only = MonoTime(ulong.max);
 
-class ZigbeeController : ActiveObject
+final class ZigbeeController : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("endpoint", endpoint),
                                  Prop!("auto-create", auto_create));

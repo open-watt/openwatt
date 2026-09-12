@@ -78,7 +78,7 @@ CommandState telnet(Session session, const(char)[] remote)
 }
 
 
-class TelnetClientCommand : CommandState
+final class TelnetClientCommand : CommandState
 {
 nothrow @nogc:
 

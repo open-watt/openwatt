@@ -24,7 +24,7 @@ struct NSLookupResult
     // TODO: details...
 }
 
-class DNSModule : Module
+final class DNSModule : Module
 {
     mixin DeclareModule!"protocol.dns";
 nothrow @nogc:
@@ -44,7 +44,7 @@ nothrow @nogc:
     }
 
 
-    static class DNSRequestState : CommandState
+    static final class DNSRequestState : CommandState
     {
     nothrow @nogc:
 

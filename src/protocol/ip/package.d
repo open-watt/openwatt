@@ -2078,7 +2078,7 @@ private:
 }
 
 
-class IPModule : Module
+final class IPModule : Module
 {
     mixin DeclareModule!"protocol.ip";
 nothrow @nogc:

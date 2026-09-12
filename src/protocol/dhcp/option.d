@@ -30,7 +30,7 @@ enum DHCPOptionType : ubyte
 }
 
 
-class DHCPOption : BaseObject
+final class DHCPOption : BaseObject
 {
     alias Properties = AliasSeq!(Prop!("code", code),
                                  Prop!("type", type),

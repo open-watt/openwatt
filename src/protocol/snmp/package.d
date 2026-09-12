@@ -14,7 +14,7 @@ public import protocol.snmp.agent;
 nothrow @nogc:
 
 
-class SNMPModule : Module
+final class SNMPModule : Module
 {
     mixin DeclareModule!"protocol.snmp";
 nothrow @nogc:

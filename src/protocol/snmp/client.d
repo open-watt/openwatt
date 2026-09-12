@@ -31,7 +31,7 @@ alias SNMPResponseHandler = void delegate(ref PDU request, ref PDU response, Sys
 alias SNMPClientErrorHandler = void delegate(SNMPClientErrorType err, ref PDU request, SysTime request_time) nothrow @nogc;
 
 
-class SNMPClient : ActiveObject
+final class SNMPClient : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("remote", remote),
                                  Prop!("community", community),

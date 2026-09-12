@@ -25,7 +25,7 @@ nothrow @nogc:
 
 // TODO: integrate TX completion/backpressure accounting; see the uRT #258 follow-up in TODO.md.
 
-class BuiltinWiFi : WiFiInterface
+final class BuiltinWiFi : WiFiInterface
 {
 nothrow @nogc:
 
@@ -625,7 +625,7 @@ private:
 }
 
 
-class BuiltinWlan : WLANInterface
+final class BuiltinWlan : WLANInterface
 {
 nothrow @nogc:
 
@@ -928,7 +928,7 @@ private:
 }
 
 
-class BuiltinAp : APInterface
+final class BuiltinAp : APInterface
 {
 nothrow @nogc:
 
@@ -1162,7 +1162,7 @@ private:
 }
 
 
-class BuiltinWifiModule : Module
+final class BuiltinWifiModule : Module
 {
     mixin DeclareModule!"interface.wifi.builtin";
 nothrow @nogc:

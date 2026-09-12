@@ -345,7 +345,7 @@ nothrow @nogc:
     }
 }
 
-class Application : ISignalProvider
+final class Application : ISignalProvider
 {
 nothrow @nogc:
 
@@ -1710,7 +1710,7 @@ Component resolve_global_component(const(char)[] path) nothrow @nogc
 }
 
 
-class DeviceTreeView : TreeViewState
+final class DeviceTreeView : TreeViewState
 {
 nothrow @nogc:
 

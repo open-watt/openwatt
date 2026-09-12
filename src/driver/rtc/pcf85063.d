@@ -23,7 +23,7 @@ enum PCF85063Error : ubyte
 }
 
 
-class PCF85063 : ActiveObject
+final class PCF85063 : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("interface", iface),
                                  Prop!("address", address),
@@ -381,7 +381,7 @@ private:
     }
 }
 
-class PCF85063Module : Module
+final class PCF85063Module : Module
 {
     mixin DeclareModule!"driver.rtc.pcf85063";
 nothrow @nogc:

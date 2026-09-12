@@ -16,7 +16,7 @@ public import router.stream;
 nothrow @nogc:
 
 
-class BridgeStream : Stream
+final class BridgeStream : Stream
 {
     alias Properties = AliasSeq!(Prop!("streams", streams));
 nothrow @nogc:
@@ -183,7 +183,7 @@ private:
 }
 
 
-class BridgeStreamModule : Module
+final class BridgeStreamModule : Module
 {
     mixin DeclareModule!"stream.bridge";
 nothrow @nogc:

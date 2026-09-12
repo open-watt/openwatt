@@ -35,7 +35,7 @@ nothrow @nogc:
 alias APIHandler = int delegate(const(char)[] uri, ref const HTTPMessage request, ref Stream stream) nothrow @nogc;
 
 
-class APIManager : ActiveObject
+final class APIManager : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("http-server", http_server),
                                  Prop!("uri", uri));
@@ -980,7 +980,7 @@ private:
 }
 
 
-class APIModule : Module
+final class APIModule : Module
 {
     mixin DeclareModule!"apps.api";
 nothrow @nogc:

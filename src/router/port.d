@@ -72,7 +72,7 @@ struct PortInfo
     String serial;
 }
 
-class PortModule : Module
+final class PortModule : Module
 {
     mixin DeclareModule!"router.port";
 nothrow @nogc:

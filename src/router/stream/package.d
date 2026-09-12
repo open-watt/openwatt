@@ -442,7 +442,7 @@ private:
     bool _pumping_tx;
 }
 
-class StreamModule : Module
+final class StreamModule : Module
 {
     mixin DeclareModule!"stream";
 nothrow @nogc:

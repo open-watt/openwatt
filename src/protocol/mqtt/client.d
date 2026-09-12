@@ -25,7 +25,7 @@ import protocol.mqtt.topic;
 nothrow @nogc:
 
 
-class MQTTClient : ActiveObject
+final class MQTTClient : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("host", host),
                                  Prop!("port", port),

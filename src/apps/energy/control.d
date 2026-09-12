@@ -158,7 +158,7 @@ nothrow @nogc:
 
 
 // Maps policy targets to direct or graph-projected control surfaces.
-class ControlRegistry
+final class ControlRegistry
 {
 nothrow @nogc:
 

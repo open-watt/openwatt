@@ -34,7 +34,7 @@ alias ModbusResponseHandler = void delegate(ref const ModbusPDU request, ref Mod
 alias ModbusErrorHandler = void delegate(ModbusErrorType errorType, ref const ModbusPDU request, MonoTime request_time) nothrow @nogc;
 alias ModbusSnoopHandler = void delegate(ubyte server_address, ref const ModbusPDU request, ref ModbusPDU response, MonoTime request_time, MonoTime response_time) nothrow @nogc;
 
-class ModbusNode : ActiveObject
+final class ModbusNode : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("interface", iface),
                                  Prop!("address", address),

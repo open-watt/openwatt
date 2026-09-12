@@ -1003,7 +1003,7 @@ private:
 }
 
 
-class BridgeInterfaceModule : Module
+final class BridgeInterfaceModule : Module
 {
     mixin DeclareModule!"interface.bridge";
 nothrow @nogc:

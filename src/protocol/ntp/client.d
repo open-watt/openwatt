@@ -14,7 +14,7 @@ nothrow @nogc:
 
 
 // SNTP (RFC 4330) unicast client
-class NTPClient : ActiveObject
+final class NTPClient : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("server",   server),
                                  Prop!("port",     port),

@@ -333,7 +333,7 @@ private:
     }
 }
 
-class TextViewState : LiveViewState
+final class TextViewState : LiveViewState
 {
 nothrow @nogc:
 

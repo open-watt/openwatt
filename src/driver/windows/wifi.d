@@ -94,7 +94,7 @@ nothrow @nogc:
 // WlanConnect / WlanDisconnect through the radio's handle.
 // ---------------------------------------------------------------------------
 
-class WindowsWifiRadio : WiFiInterface
+final class WindowsWifiRadio : WiFiInterface
 {
     alias Properties = AliasSeq!(Prop!("adapter", adapter));
 nothrow @nogc:
@@ -243,7 +243,7 @@ private:
 }
 
 
-class WindowsWlan : WLANInterface
+final class WindowsWlan : WLANInterface
 {
 nothrow @nogc:
 
@@ -467,7 +467,7 @@ private:
 // its wifi event ring each update.
 // ---------------------------------------------------------------------------
 
-class WindowsWlanModule : Module
+final class WindowsWlanModule : Module
 {
     mixin DeclareModule!"wifi.windows";
 nothrow @nogc:

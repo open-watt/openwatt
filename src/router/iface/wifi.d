@@ -678,7 +678,7 @@ private:
 }
 
 
-class WiFiInterfaceModule : Module
+final class WiFiInterfaceModule : Module
 {
     mixin DeclareModule!"interface.wifi";
 nothrow @nogc:

@@ -73,7 +73,7 @@ private MQTTSubscriptionRange mqtt_subscriptions(ref const Profile profile) noth
 }
 
 
-class MQTTBinding : ProfileBinding
+final class MQTTBinding : ProfileBinding
 {
     alias Properties = AliasSeq!(Prop!("broker",  broker),
                                  Prop!("client",  client),

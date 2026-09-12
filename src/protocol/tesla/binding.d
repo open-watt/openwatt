@@ -409,7 +409,7 @@ unittest
 {
     import urt.mem : free;
 
-    static class TestBinding : TeslaTWCBinding
+    static final class TestBinding : TeslaTWCBinding
     {
     nothrow @nogc:
         this(CID id) { super(id); }

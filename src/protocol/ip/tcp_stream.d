@@ -26,7 +26,7 @@ public import router.stream;
 nothrow @nogc:
 
 
-class TCPStream : Stream
+final class TCPStream : Stream
 {
     alias Properties = AliasSeq!(Prop!("remote", remote),
                                  Prop!("remote_address", remote_address),

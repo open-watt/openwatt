@@ -14,7 +14,7 @@ public import apps.automation.automation;
 nothrow @nogc:
 
 
-class AutomationModule : Module
+final class AutomationModule : Module
 {
     mixin DeclareModule!"automation";
 nothrow @nogc:

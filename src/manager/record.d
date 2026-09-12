@@ -438,7 +438,7 @@ unittest
 }
 
 
-class Recorder : ActiveObject
+final class Recorder : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("dir", dir),
                                  Prop!("filter", filter));
@@ -790,7 +790,7 @@ private:
 }
 
 
-class RecordQueryCommand : RecordFetchCommand
+final class RecordQueryCommand : RecordFetchCommand
 {
 nothrow @nogc:
 
@@ -817,7 +817,7 @@ private:
 }
 
 
-class RecordGraphCommand : RecordFetchCommand
+final class RecordGraphCommand : RecordFetchCommand
 {
 nothrow @nogc:
 
@@ -843,7 +843,7 @@ private:
 }
 
 
-class RecordModule : Module
+final class RecordModule : Module
 {
     mixin DeclareModule!"record";
 nothrow @nogc:
@@ -958,7 +958,7 @@ nothrow @nogc:
 
 // Live graph: re-fetches a sliding [now - span, now] window a few times a
 // second, so short spans scroll in realtime. +/- halve/double the span.
-class GraphViewState : LiveViewState
+final class GraphViewState : LiveViewState
 {
     import urt.mem.temp : tconcat;
     import manager.console.command : CommandCompletionState;

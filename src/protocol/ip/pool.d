@@ -17,7 +17,7 @@ import manager.features : has_ipv6, is_tiny;
 nothrow @nogc:
 
 
-class IPPool : BaseObject
+final class IPPool : BaseObject
 {
     alias Properties = AliasSeq!(Prop!("start", start),
                                  Prop!("end", end));

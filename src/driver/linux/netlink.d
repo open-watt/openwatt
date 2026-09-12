@@ -35,7 +35,7 @@ void subscribe_link_changed(LinkChangedHandler handler)
 private __gshared Array!LinkChangedHandler g_link_handlers;
 
 
-class LinuxNetlinkModule : Module
+final class LinuxNetlinkModule : Module
 {
     mixin DeclareModule!"os.netlink";
 nothrow @nogc:

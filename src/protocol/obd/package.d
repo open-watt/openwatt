@@ -44,7 +44,7 @@ struct ElementDesc_OBD
     ushort desc = 0xFFFF;
 }
 
-class OBDProtocolModule : Module, ProfileSections
+final class OBDProtocolModule : Module, ProfileSections
 {
     mixin DeclareModule!"protocol.obd";
 nothrow @nogc:
@@ -894,7 +894,7 @@ unittest
 
     // An OBDBinding allocated directly (no Application/collection harness), with the
     // transport and timer edges overridden so the test drives the scheduler.
-    static class TestBinding : OBDBinding
+    static final class TestBinding : OBDBinding
     {
     nothrow @nogc:
         uint submits;

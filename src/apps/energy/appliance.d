@@ -28,7 +28,7 @@ struct PortCircuitBinding
     String circuit;
 }
 
-class Appliance : ActiveObject
+final class Appliance : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("kind", kind),
                                  Prop!("vin", vin),

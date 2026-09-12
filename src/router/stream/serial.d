@@ -82,7 +82,7 @@ struct ModemLines
     bool cts, dsr, dcd, ri; // what the peer presents
 }
 
-class SerialStream : Stream
+final class SerialStream : Stream
 {
     version (Embedded)
         alias Properties = AliasSeq!(Prop!("device", device),
@@ -1011,7 +1011,7 @@ private:
 }
 
 
-class SerialStreamModule : Module
+final class SerialStreamModule : Module
 {
     mixin DeclareModule!"stream.serial";
 nothrow @nogc:

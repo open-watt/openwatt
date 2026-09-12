@@ -36,7 +36,7 @@ nothrow @nogc:
 alias log = Log!"sync.ws-server";
 
 
-class WebSocketSyncServer : ActiveObject
+final class WebSocketSyncServer : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("http-server", http_server),
                                  Prop!("uri",         uri),

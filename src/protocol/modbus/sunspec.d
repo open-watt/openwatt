@@ -548,7 +548,7 @@ private const(char)[] sunspec_model_name(ushort id) pure nothrow @nogc
 
 // SunspecBinding
 
-class SunspecBinding : ProtocolBinding
+final class SunspecBinding : ProtocolBinding
 {
     alias Properties = AliasSeq!(Prop!("node", node),
                                  Prop!("slave", slave));

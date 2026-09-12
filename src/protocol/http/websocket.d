@@ -61,7 +61,7 @@ enum WSExtensions : ubyte
 }
 
 
-class WebSocket : BaseInterface
+final class WebSocket : BaseInterface
 {
     alias Properties = AliasSeq!(Prop!("remote", remote),
                                  Prop!("stream", stream));
@@ -669,7 +669,7 @@ private:
     }
 }
 
-class WebSocketServer : ActiveObject
+final class WebSocketServer : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("http-server", http_server),
                                  Prop!("uri", uri));

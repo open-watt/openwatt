@@ -20,7 +20,7 @@ import router.stream;
 nothrow @nogc:
 
 
-class EZSPProtocolModule : Module
+final class EZSPProtocolModule : Module
 {
     mixin DeclareModule!"protocol.ezsp";
 nothrow @nogc:

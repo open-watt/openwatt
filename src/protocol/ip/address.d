@@ -14,7 +14,7 @@ import router.iface;
 nothrow @nogc:
 
 
-class IPAddress : BaseObject
+final class IPAddress : BaseObject
 {
     alias Properties = AliasSeq!(Prop!("address", address),
                                  Prop!("interface", iface));
@@ -122,7 +122,7 @@ BaseInterface interface_for_address6(IPv6Addr address)
 }
 
 static if (has_ipv6)
-class IPv6Address : BaseObject
+final class IPv6Address : BaseObject
 {
     alias Properties = AliasSeq!(Prop!("address", address),
                                  Prop!("interface", iface),

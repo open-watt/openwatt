@@ -17,7 +17,7 @@ import manager.component;
 nothrow @nogc:
 
 
-class EnergyLink : ActiveObject
+final class EnergyLink : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("kind", kind),
                                  Prop!("parent", parent_circuit),

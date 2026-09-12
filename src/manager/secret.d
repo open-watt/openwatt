@@ -33,7 +33,7 @@ enum SecretKind : ubyte
     // TODO: ec_p384, rsa_2048, x509_cert+key, api_token, ...
 }
 
-class Secret : BaseObject
+final class Secret : BaseObject
 {
 nothrow @nogc:
 

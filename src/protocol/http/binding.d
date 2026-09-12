@@ -66,7 +66,7 @@ pure nothrow @nogc:
     ref ushort body_val_offset() => sub_offsets[3];
 }
 
-class HTTPClientBinding : ProfileBinding
+final class HTTPClientBinding : ProfileBinding
 {
     alias Properties = AliasSeq!(Prop!("client", client),
                                  Prop!("profile", profile),

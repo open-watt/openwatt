@@ -343,7 +343,7 @@ private:
 }
 
 
-class AA55Client : ActiveObject
+final class AA55Client : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("remote", remote));
 nothrow @nogc:

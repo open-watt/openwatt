@@ -110,7 +110,7 @@ enum CPCEndpointId : ubyte
 }
 
 
-class CPCInterface : BaseInterface
+final class CPCInterface : BaseInterface
 {
     alias Properties = AliasSeq!(Prop!("stream", stream),
                                  Prop!("retransmits", retransmits),
@@ -1281,7 +1281,7 @@ private:
 }
 
 
-class CPCEndpoint : BaseInterface
+final class CPCEndpoint : BaseInterface
 {
     alias Properties = AliasSeq!(Prop!("cpc", cpc),
                                  Prop!("endpoint", endpoint));
@@ -1584,7 +1584,7 @@ private:
 }
 
 
-class CPCProtocolModule : Module
+final class CPCProtocolModule : Module
 {
     mixin DeclareModule!"protocol.cpc";
 nothrow @nogc:

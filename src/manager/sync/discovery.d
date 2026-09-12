@@ -140,7 +140,7 @@ nothrow @nogc:
 }
 
 
-class UDPDiscovery : ActiveObject
+final class UDPDiscovery : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("bind", bind),
                                  Prop!("interface", interfaces),
@@ -548,7 +548,7 @@ private:
 }
 
 
-class SyncDiscoveryModule : Module
+final class SyncDiscoveryModule : Module
 {
     mixin DeclareModule!"sync.discovery";
 nothrow @nogc:

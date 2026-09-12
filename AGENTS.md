@@ -587,6 +587,15 @@ this(I)(const I i)
 - Manager imports second (e.g., `import manager.base;`)
 - Other imports follow
 
+**Classes and methods are `final` unless designed for subclassing:**
+- A class nobody derives from is `final class`; a method nothing overrides is `final`. D makes every
+  class method virtual by default, and each virtual is a vtable slot, an indirect call at every
+  site, and a body the linker cannot drop or inline. On BK7231N this is 15 KB of a 1 MB image.
+- `abstract` classes and the classes that are genuinely derived from stay open, and so do the
+  methods a subclass or a test double overrides. The compiler rejects a `final` that something
+  inherits or overrides, so the build is the check: run the platform configurations, not just
+  the host one, since a driver excluded from your build may be the one that overrides.
+
 **Code organization:**
 - Header is `module ...;`\n [imports]\n `version = DebugXXX;`\n `nothrow @nogc:`\n\n [public module stuff]...
 - Public API (properties, overrides) at top of class/module

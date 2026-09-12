@@ -42,7 +42,7 @@ nothrow @nogc:
 //   /secret/add  name=tesla  kind=ec_p256  key_file=/etc/openwatt/tesla.pem
 //   /protocol/tesla/vehicle-scanner/add  name=tesla  iface=ble1  secret=tesla
 // ---------------------------------------------------------------------------
-class TeslaVehicleScanner : ActiveObject
+final class TeslaVehicleScanner : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("iface", iface),
                                  Prop!("secret", secret),

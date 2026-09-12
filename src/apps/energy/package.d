@@ -40,7 +40,7 @@ nothrow @nogc:
 
 
 
-class EnergyAppModule : Module
+final class EnergyAppModule : Module
 {
     mixin DeclareModule!"apps.energy";
 nothrow @nogc:
@@ -1265,7 +1265,7 @@ private:
 }
 
 
-class EnergyLiveView : EnergyTableView
+final class EnergyLiveView : EnergyTableView
 {
 nothrow @nogc:
 
@@ -1292,7 +1292,7 @@ protected:
 }
 
 
-class TopologyWatchState : EnergyTableView
+final class TopologyWatchState : EnergyTableView
 {
 nothrow @nogc:
 
@@ -1318,7 +1318,7 @@ protected:
 }
 
 
-class CircuitWatchState : EnergyTableView
+final class CircuitWatchState : EnergyTableView
 {
 nothrow @nogc:
 

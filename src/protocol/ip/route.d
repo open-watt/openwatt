@@ -14,7 +14,7 @@ import router.iface;
 nothrow @nogc:
 
 
-class IPRoute : BaseObject
+final class IPRoute : BaseObject
 {
     alias Properties = AliasSeq!(Prop!("destination", destination),
                                  Prop!("gateway", gateway),
@@ -117,7 +117,7 @@ private:
 
 
 static if (has_ipv6)
-class IPv6Route : BaseObject
+final class IPv6Route : BaseObject
 {
     alias Properties = AliasSeq!(Prop!("destination", destination),
                                  Prop!("gateway", gateway),

@@ -1251,7 +1251,7 @@ package:
 }
 
 // TODO: DELETE THIS IF WE INTRODUCE A MemoryStream or BufferStream??
-class StringSession : Session
+final class StringSession : Session
 {
 nothrow @nogc:
 
@@ -1288,7 +1288,7 @@ private:
 }
 
 
-class ConsoleSessionModule : Module
+final class ConsoleSessionModule : Module
 {
     mixin DeclareModule!"console.session";
 nothrow @nogc:

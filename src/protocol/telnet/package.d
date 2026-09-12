@@ -20,7 +20,7 @@ import protocol.ip.tcp_stream;
 nothrow @nogc:
 
 
-class TelnetModule : Module
+final class TelnetModule : Module
 {
     mixin DeclareModule!"protocol.telnet";
 nothrow @nogc:

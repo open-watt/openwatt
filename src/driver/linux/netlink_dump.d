@@ -49,7 +49,7 @@ enum LinuxPrintFormat
 
 // === console module ===
 
-class LinuxNetConfModule : Module
+final class LinuxNetConfModule : Module
 {
     mixin DeclareModule!"os.linux.netconf";
 nothrow @nogc:
