@@ -61,6 +61,9 @@
     <Filter Include="src\driver\linux">
       <UniqueIdentifier>{8391f7e5-f4d3-41c4-b7ae-16195ad3ccbd}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\driver\power">
+      <UniqueIdentifier>{0edd63a5-4fb6-4d76-800a-e8c421eae4ff}</UniqueIdentifier>
+    </Filter>
     <Filter Include="src\driver\windows">
       <UniqueIdentifier>{417eeecb-0fc8-4b57-88c7-db9299ca521b}</UniqueIdentifier>
     </Filter>
@@ -308,6 +311,12 @@
     </DCompile>
     <DCompile Include="src\driver\esp32\watchdog.d">
       <Filter>src\driver\esp32</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\power\hardware.d">
+      <Filter>src\driver\power</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\power\regulator.d">
+      <Filter>src\driver\power</Filter>
     </DCompile>
     <DCompile Include="src\driver\ethernet.d">
       <Filter>src\driver</Filter>
