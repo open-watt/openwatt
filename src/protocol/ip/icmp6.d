@@ -404,7 +404,7 @@ void handle_echo_error(ref IPStack stack, ref const IPv6Header ip, const(ubyte)[
         if (!multicast)
             _pending_echoes.removeSwapLast(i);
         if (handler)
-            handler(ip.src_addr, message[0], message[1], loadBigEndian(cast(const(uint)*)(message.ptr + 4)));
+            handler(ip.src_addr, message[0], message[1], bigEndianToNative!uint(message[4 .. 8]));
         return;
     }
 }

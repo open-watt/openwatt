@@ -164,7 +164,7 @@ protected:
         if (!_is_server && _handshake_parser is null && !_subscribed)
         {
             // Generate a 16-byte random nonce, base64-encoded, as the Sec-WebSocket-Key.
-            ubyte[16] nonce = void;
+            align(4) ubyte[16] nonce = void;
             foreach (i; 0 .. 4)
                 (cast(uint*)nonce.ptr)[i] = rand();
             char[base64_encode_length(16)] key_b64 = void;
@@ -282,7 +282,7 @@ protected:
                 bool rsv1 = (msg[0] >> 6) & 1; // RSV1
                 bool fin = msg[0] >> 7; // FIN
                 bool mask = msg[1] >> 7; // MASK
-                ubyte[4] mask_key;
+                align(4) ubyte[4] mask_key;
 
                 // work out payload length
                 size_t payload_len = msg[1] & 0x7F;
@@ -608,7 +608,7 @@ private:
 
         if (!_is_server)
         {
-            ubyte[4] mask = void;
+            align(4) ubyte[4] mask = void;
             *cast(uint*)mask.ptr = rand();
             frame[len .. len + 4][0..4] = mask[];
             len += 4;

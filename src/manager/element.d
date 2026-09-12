@@ -671,7 +671,7 @@ public:
         for (Subscription* s = _subs; s; s = s.next)
             if (s.callback == callback)
                 return;
-        Subscription* n = cast(Subscription*)alloc(Subscription.sizeof).ptr;
+        Subscription* n = alloc!Subscription();
         n.callback = callback;
         n.next = _subs;
         _subs = n;
@@ -686,7 +686,7 @@ public:
             {
                 Subscription* dead = *p;
                 *p = dead.next;
-                free((cast(void*)dead)[0 .. Subscription.sizeof]);
+                free(dead);
                 return;
             }
             p = &(*p).next;
@@ -697,11 +697,7 @@ public:
     {
         if (!_history)
         {
-            // zero-fill rather than assign .init: SeriesStore holds an Array, whose opAssign
-            // would try to release the garbage "previous" contents of raw memory
-            void[] mem = alloc(SeriesStore.sizeof);
-            (cast(ubyte[])mem)[] = 0;
-            _history = cast(SeriesStore*)mem.ptr;
+            _history = alloc!SeriesStore();
             g_historical_elements ~= &this;
 
             // a held register value becomes record 0; the store owns it from here and the
@@ -1202,7 +1198,7 @@ private:
                 cap *= 2;
             if (cap > text_heap_limit)
                 cap = text_heap_limit;
-            b.heap = b.heap ? realloc(b.heap[0 .. b.heap_capacity], cap, 8, MemFlags.slow).ptr : alloc(cap, MemFlags.slow).ptr;
+            b.heap = b.heap ? realloc(b.heap[0 .. b.heap_capacity], cap, 2, MemFlags.slow).ptr : alloc(cap, 2, MemFlags.slow).ptr;
             b.heap_capacity = cap;
         }
         ushort* p = cast(ushort*)(cast(ubyte*)b.heap + b.heap_used);

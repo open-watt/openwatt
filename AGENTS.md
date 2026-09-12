@@ -477,11 +477,14 @@ Every finding resolves one of two ways, and the distinction is the reviewer's ca
   detail a parameter would express, no special cases the general case already covers. The logic
   should be the simplest that expresses the structure of the problem, nothing more.
 - **Layout and alignment of every declaration.** Byte buffers whose interior is ever cast to a
-  hard type carry `align(N)` for the widest type cast from them. Struct and stack members are
-  ordered to minimise padding. Where raw buffers are handled, cast to a hard-typed pointer and
-  make the widest loads and stores possible, rather than assembling words from bytes: it
-  shrinks the code, and on machines without unaligned load/store the compiler must be able to
-  prove alignment or it emits byte-wise loads and reassembly.
+  hard type carry `align(N)` for the widest type cast from them, stated literally (`align(8)`,
+  never `align(size_t.sizeof)`, which is 4 on 32-bit). Struct and stack members are ordered to
+  minimise padding. A cast to a wide pointer is a claim of alignment: use the pointer forms
+  (`loadBigEndian(cast(const uint*)p)`) only where the buffer is aligned by construction, and
+  the slice forms (`bigEndianToNative!uint(b[o .. o + 4])`) everywhere else. The compiler cannot
+  prove alignment through a pointer or `ref`, so a plain `ubyte[N]` local or a byte-array struct
+  member is never a proof; on strict-align cores a false claim is a silent wrong result, not a
+  fault. Untyped allocations are 8-aligned; typed ones follow `T.alignof`.
 - **Bit-stuff where it pays.** Pack fields when the struct is allocated many times or held in
   arrays, or when packing removes padding outright: several flags share one byte, and small
   fields fold into padding that would otherwise be wasted.

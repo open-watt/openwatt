@@ -112,7 +112,7 @@ const(char)[] enum_info_name(const(VoidEnumInfo)* info)
 // binary wire -> one typed record; false when the desc can't represent the bytes
 bool sample_record(const(void)[] wire, ref const SampleDesc desc, void[] record)
 {
-    ubyte[256] image = void;
+    align(8) ubyte[256] image = void;
 
     const(Encoding)* enc = desc.enc;
     if (enc)
@@ -192,7 +192,7 @@ bool sample_record(const(void)[] wire, ref const SampleDesc desc, void[] record)
 // record -> wire bytes; read-modify-write, so decomposed fields sharing a container survive
 bool emit_record(const(void)[] record, ref const SampleDesc desc, void[] wire)
 {
-    ubyte[256] image = void;
+    align(8) ubyte[256] image = void;
 
     const(Encoding)* enc = desc.enc;
     if (enc)
@@ -447,7 +447,7 @@ bool emit_text(const(char)[] text, ref const SampleDesc desc, void[] wire)
 {
     if (wire.length > 256)
         return false;
-    ubyte[256] image = void;
+    align(8) ubyte[256] image = void;
     ubyte pad = desc.layout.flags & WireFlags.space_padded ? ' ' : 0;
     image[0 .. wire.length] = pad;
     size_t n = text.length < wire.length ? text.length : wire.length;

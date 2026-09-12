@@ -1,6 +1,5 @@
 module manager.sample.wire;
 
-import urt.endian : loadLittleEndian, storeLittleEndian;
 import urt.util : byte_reverse;
 
 nothrow @nogc:
@@ -254,7 +253,7 @@ unittest
 
     // floats
     immutable float f = 1234.5f;
-    ubyte[4] fbuf;
+    align(4) ubyte[4] fbuf;
     *cast(uint*)fbuf.ptr = *cast(const uint*)&f;
     assert(wire_extract_float(fbuf, WireLayout(WK.float_, 32)) == 1234.5f);
     ubyte[4] fbe = [fbuf[3], fbuf[2], fbuf[1], fbuf[0]];
@@ -289,36 +288,16 @@ private:
 
 ulong load_le(const(ubyte)* p, uint n) pure
 {
-    if (n == 8)
-        return loadLittleEndian(cast(const(ulong)*)p);
     ulong v = 0;
-    uint o = n & 4;
-    if (o)
-        v = loadLittleEndian(cast(const(uint)*)p);
-    if (n & 2)
-    {
-        v |= ulong(loadLittleEndian(cast(const(ushort)*)(p + o))) << (o*8);
-        o += 2;
-    }
-    if (n & 1)
-        v |= ulong(p[o]) << (o*8);
+    foreach (i; 0 .. n)
+        v |= ulong(p[i]) << (i*8);
     return v;
 }
 
 void store_le(ubyte* p, uint n, ulong v) pure
 {
-    if (n == 8)
-        return storeLittleEndian(cast(ulong*)p, v);
-    uint o = n & 4;
-    if (o)
-        storeLittleEndian(cast(uint*)p, cast(uint)v);
-    if (n & 2)
-    {
-        storeLittleEndian(cast(ushort*)(p + o), cast(ushort)(v >> (o*8)));
-        o += 2;
-    }
-    if (n & 1)
-        p[o] = cast(ubyte)(v >> (o*8));
+    foreach (i; 0 .. n)
+        p[i] = cast(ubyte)(v >> (i*8));
 }
 
 // self-inverse register transform: intra^(sw^swb), then reverse^(sw^rev)
