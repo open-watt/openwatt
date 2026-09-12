@@ -202,7 +202,7 @@ struct Property
 
             // default value reflects what get() returns on a freshly-constructed
             // object, derived from the getter's return type's init value.
-            prop.init_val = &SynthDefault!(Getters[0]);
+            prop.init_val = &SynthDefault!(Unqual!(ReturnType!(Getters[0])));
         }
 
         // synthesise setter
@@ -630,6 +630,7 @@ protected:
     bool validate() const
         => true;
 
+    pragma(inline, true)
     void mark_set(T, string[] props)() nothrow @nogc
     {
         enum mask = prop_mask!(T, props);
@@ -641,6 +642,7 @@ protected:
         return mark_set!(T, [ prop ])();
     }
 
+    pragma(inline, true)
     void mark_assigned(T, string[] props)() nothrow @nogc
     {
         _props_set |= prop_mask!(T, props);
@@ -1634,9 +1636,8 @@ void ElemOnChange(alias fn)(BaseObject item, ref const SampleUpdate update) noth
         __traits(child, instance, fn)();
 }
 
-Variant SynthDefault(alias Getter)() nothrow @nogc
+Variant SynthDefault(U)() nothrow @nogc
 {
-    alias U = Unqual!(ReturnType!Getter);
     static if (is(U == Variant))
         return Variant();
     else static if (__traits(compiles, { U v = U.init; return to_variant(v); }))
