@@ -107,8 +107,10 @@ nothrow @nogc:
     // re-collect (a service() may have opened/closed fds, matching the old post-service rebuild).
     void service_all()
     {
-        foreach (ref w; _watchers[])
-            w.service();
+        // Index, not a cached slice: service() dispatches packets, and a handler that starts
+        // or stops an fd-watching object appends to (reallocating) or shifts down _watchers.
+        for (size_t i = 0; i < _watchers.length; ++i)
+            _watchers[i].service();
         rebuild();
     }
 

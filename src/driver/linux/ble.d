@@ -27,6 +27,7 @@ import manager.features;
 import manager.plugin;
 
 import driver.linux.fdwatch;
+import driver.linux.sysfs : sysfs_device_is_removable;
 
 import router.iface;
 import router.iface.priority_queue;
@@ -734,20 +735,21 @@ private:
 
         const(char)[] iface_name = next_iface_name();
         log_info(ModuleName, "Found BLE adapter: hci", index, " (", iface_name, ")");
-        // dynamic: we own its lifecycle and rediscover it each boot, so it
-        // isn't persisted to config -- only dynamic entries are reaped when
-        // their controller disappears.
-        auto iface = Collection!LinuxBLEInterface().create(iface_name, ObjectFlags.dynamic);
+        // A USB dongle can be unplugged; a UART/platform-attached controller is soldered down.
+        const bool removable = sysfs_device_is_removable("/sys/class/bluetooth/", tconcat("hci", index));
+        auto iface = Collection!LinuxBLEInterface().create(iface_name,
+                                                           removable ? ObjectFlags.dynamic : ObjectFlags.none);
         iface.hci_index = index;
     }
 
     void remove_adapter(ushort index)
     {
+        // Only removable controllers are reaped; a soldered one stays put and simply restarts.
         LinuxBLEInterface iface = find_by_index(index);
         if (iface is null || !(iface.flags & ObjectFlags.dynamic))
             return;
         log_info(ModuleName, "BLE adapter gone: hci", index);
-        Collection!LinuxBLEInterface().remove(iface);
+        iface.destroy();
     }
 
     const(char)[] next_iface_name()

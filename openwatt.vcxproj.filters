@@ -297,6 +297,9 @@
     <DCompile Include="src\driver\ble.d">
       <Filter>src\driver</Filter>
     </DCompile>
+    <DCompile Include="src\driver\can.d">
+      <Filter>src\driver</Filter>
+    </DCompile>
     <DCompile Include="src\driver\boards\smartevse.d">
       <Filter>src\driver\boards</Filter>
     </DCompile>
@@ -313,6 +316,9 @@
       <Filter>src\driver</Filter>
     </DCompile>
     <DCompile Include="src\driver\linux\ble.d">
+      <Filter>src\driver\linux</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\linux\can.d">
       <Filter>src\driver\linux</Filter>
     </DCompile>
     <DCompile Include="src\driver\linux\ctrl_iface.d">
