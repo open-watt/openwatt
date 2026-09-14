@@ -316,7 +316,10 @@ private:
                 set_state(State.running);
         }
         else
+        {
             _link = -1;
+            log.debug_(event == IPEvent.closed ? "closed by peer" : "connection error");
+        }
     }
 
     void close_conn()

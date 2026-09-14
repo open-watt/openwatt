@@ -9,6 +9,7 @@ import urt.lifetime;
 import urt.log;
 import urt.mem : memmove;
 import urt.mem;
+import urt.mem.pagepool;
 import urt.rand;
 import urt.string;
 import urt.string.format : tconcat;
@@ -86,6 +87,7 @@ nothrow @nogc:
     }
     void remote(InetAddress value)
     {
+        detach_stream();
         _conn.remote(value);
         _tls = false;
         _resource = String();
@@ -109,6 +111,7 @@ nothrow @nogc:
         auto r = _conn.remote(url.host.make_string());
         if (r.failed)
             return r.message;
+        detach_stream();
         _tls = tls;
         _resource = url.path.make_string();
         _stream = null;
@@ -123,11 +126,7 @@ nothrow @nogc:
     {
         if (_stream is stream)
             return;
-        if (_subscribed)
-        {
-            _stream.unsubscribe(&stream_state_change);
-            _subscribed = false;
-        }
+        detach_stream();
         _conn.clear_remote();
         _stream = stream;
         mark_set!(typeof(this), [ "stream", "remote" ])();
@@ -219,11 +218,9 @@ protected:
     {
         if (_subscribed)
             send_close(1001); // going away
-        if (_subscribed)
-        {
-            _stream.unsubscribe(&stream_state_change);
-            _subscribed = false;
-        }
+        detach_stream();
+        if (_is_server && _stream && _stream.running)
+            _stream.destroy();   // the per-connection socket serves only this session
         if (_handshake_parser)
         {
             free(_handshake_parser);
@@ -242,14 +239,13 @@ protected:
         _rx_overhead = 0;
         _pending_message_type = WSMessageType.unknown;
         _tx_pending.clear();
+        _tx_offset = 0;
         return CompletionStatus.complete;
     }
 
     final override void update()
     {
         super.update();
-
-        drain_tx();
 
         ubyte[1024] tmp = void;
         ubyte[] buf = _message.empty ? tmp[] : _message[];
@@ -532,13 +528,8 @@ protected:
         }
 
         size_t frame_len = header_len + data.length;
-        // always accept at least one frame when empty
-        if (!_tx_pending.empty && _tx_pending.length + frame_len > MaxTxPending)
-        {
-            log.warning("tx-drop: pending buffer would exceed cap (pending=", _tx_pending.length, " frame=", frame_len, " cap=", MaxTxPending, ")");
-            add_tx_drop();
+        if (!admit_tx(frame_len))
             return -1;
-        }
 
         version (DebugWebSocket)
         {
@@ -546,6 +537,7 @@ protected:
                       cast(void[])data[0 .. data.length <= 200 ? data.length : 200], data.length > 200 ? ", ... ]" : " ]");
         }
 
+        compact_tx();
         _tx_pending ~= header[0 .. header_len];
         size_t body_off = _tx_pending.length;
         _tx_pending ~= cast(const(ubyte)[])data;
@@ -556,7 +548,7 @@ protected:
         }
 
         add_tx_frame(frame_len);
-        drain_tx();
+        arm_tx();
         return 0;
     }
 
@@ -570,6 +562,8 @@ private:
     bool _is_server;
     bool _subscribed;
     bool _close_sent;
+    bool _tx_closing;
+    bool _tx_waking;
 
     HTTPParser* _handshake_parser; // non-null while client handshake is in flight
     String _handshake_key;
@@ -580,7 +574,9 @@ private:
     WSMessageType _pending_message_type;
 
     Array!ubyte _tx_pending;
-    enum size_t MaxTxPending = 4 * 1024 * 1024;
+    size_t _tx_offset;
+    enum size_t max_tx_pending = 128 * 1024;   // hard bound; must exceed the largest frame a client commits (sync: 64 KB)
+    enum size_t max_tx_page = 1600;
 
     void stream_state_change(ActiveObject, StateSignal signal)
     {
@@ -619,25 +615,100 @@ private:
             frame[len .. len + payload.length] = payload[];
         len += payload.length;
 
+        if (!admit_tx(len))
+            return;
+        compact_tx();
         _tx_pending ~= frame[0 .. len];
-        drain_tx();
+        arm_tx();
     }
 
-    void drain_tx()
+    // consumed bytes are reclaimed once per append rather than per page
+    void compact_tx()
     {
-        while (_tx_pending.length > 0)
+        if (_tx_offset == 0)
+            return;
+        if (_tx_offset == _tx_pending.length)
+            _tx_pending.clear();
+        else
+            _tx_pending.remove(0, _tx_offset);
+        _tx_offset = 0;
+    }
+
+    // every callback and timer that references this object or the stream is released here
+    void detach_stream()
+    {
+        g_app.cancel(&tx_overflow);
+        g_app.cancel(&tx_wake);
+        _tx_closing = false;
+        _tx_waking = false;
+        if (_stream)
+            _stream.release_tx_handler(&produce_tx);
+        if (_subscribed)
         {
-            ptrdiff_t r = _stream.write(_tx_pending[]);
-            if (r < 0)
-            {
-                log.warning("tx stream error; resetting");
-                restart();
-                return;
-            }
-            if (r == 0)
-                return; // backpressure; pick up next tick
-            _tx_pending.remove(0, r);
+            _stream.unsubscribe(&stream_state_change);
+            _subscribed = false;
         }
+    }
+
+    // one bound for data and control frames alike
+    bool admit_tx(size_t bytes)
+    {
+        if (_tx_pending.length - _tx_offset + bytes <= max_tx_pending)
+            return true;
+        add_tx_drop();
+        close_tx();
+        return false;
+    }
+
+    // a message that cannot be retained closes the link; deferred, the refusal is detected inside the sender's own call
+    void close_tx()
+    {
+        if (_tx_closing)
+            return;
+        _tx_closing = true;
+        g_app.schedule(getTime(), &tx_overflow);
+    }
+
+    void tx_overflow(MonoTime)
+    {
+        log.warning("tx overflow: ", _tx_pending.length - _tx_offset, " bytes pending; closing");
+        restart();
+    }
+
+    void tx_wake(MonoTime)
+    {
+        _tx_waking = false;
+        arm_tx();
+    }
+
+    void arm_tx()
+    {
+        if (_stream && _stream.tx_handler is null)
+            _stream.tx_handler(&produce_tx);
+    }
+
+    Page* produce_tx(Stream, size_t requested)
+    {
+        size_t pending = _tx_pending.length - _tx_offset;
+        if (pending == 0)
+            return null;
+        size_t take = pending < requested ? pending : requested;
+        if (take > max_tx_page)
+            take = max_tx_page;
+        Page* page = page_alloc(take);
+        if (!page)
+        {
+            // the stream disarms on null; one outstanding timer re-arms it rather than waiting for the next frame
+            if (!_tx_waking)
+            {
+                _tx_waking = true;
+                g_app.schedule(getTime() + msecs(20), &tx_wake);
+            }
+            return null;
+        }
+        page.data[] = _tx_pending[_tx_offset .. _tx_offset + take];
+        _tx_offset += take;
+        return page;
     }
 
     void send_close(ushort code)

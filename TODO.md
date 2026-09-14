@@ -746,8 +746,52 @@ this is what remains.
   FIFO response correlation with request handles. A rejected or timed-out submission must
   clear `in_flight`; late responses must not complete a different request.
 
-- **Fix API response truncation**: `/api/get` responses around 140 KB currently produce
-  incomplete JSON without an error.
+- **Bound the TCP push backlog once its writers can take a partial write**: `TCPConnection.send()`
+  queues pages without limit because MQTT packet emission (`src/protocol/mqtt/connection.d`),
+  HTTP `write_message`/`format_message` responses, the `/api` JSON dumps (`/api/get` responses
+  around 140 KB already truncate) and console session output push a whole message in one
+  `write()` and ignore the return; a cap would truncate their protocol streams. Migrate each to a
+  `tx_handler` producer (the fileserver and the API schema endpoint are the pattern), or have it
+  check `tx_backlog` before committing a message, then enforce a backlog bound in `send()`.
+
+- **WebSocket TX should retain frame descriptors, not a byte array**: `_tx_pending` is a contiguous
+  buffer compacted on each append, so the pending backlog is copied on every drain cycle. Keep a
+  bounded ring of frame pages with framing progress instead, and stop masking in place.
+
+- **Take the caller's `MemFlags` through the page-pool jumbo path**: `pagepool.d` hard-codes
+  `MemFlags.dma` for any request above the largest slab category, which on ESP32 confines a
+  large page to internal SRAM while PSRAM sits idle. Only a page that reaches a NIC ring needs
+  DMA; ESP32 WiFi copies on `esp_wifi_internal_tx`, and TCP TX pages are copied into the pcb
+  send buffer. Nothing in tree hands a pool jumbo to hardware, so the default should be the
+  caller's flags with no DMA bit. Alongside that, surface `page_pool_stats()` and the ESP
+  `heap_caps` per-capability free/largest figures through a release-safe console command; the
+  pool collects per-category and jumbo histograms, counts and high-water marks and nothing
+  reads them.
+
+- **Diagnose the ESP32-S3 DHCP client's cold-boot DISCOVER loop**: `openwatt-4547` (WiFi
+  station, node `2BF1FA7C63674547`) broadcasts DISCOVER every 4 to 30 s from a cold boot and never
+  sends REQUEST. On its LAN two servers share one L2: `192.168.0.1` and `192.168.3.1` (the same
+  MikroTik). Only the `.3.1` OFFER (`192.168.3.11`, 600 s) is ever seen on the wire and the client
+  ignores it, while the `.0.1` server that leased it `192.168.0.88` for 396 renewals no longer
+  answers. No ARP probe, DECLINE or REQUEST leaves the node. The node's own log is needed; it
+  ships over sync only once peered, and the Pi is not ingesting the node's AF_ETHERNET beacon
+  either (`/sync/neighbor print` is empty while the `0x88b5` beacon lands on `eth0` every 30 s,
+  although the same beacon produced `appeared via ether2` earlier).
+
+- **A stalled sync log subscriber blinds local logging**: the log router holds each record in its
+  128-record delivery queue until every consumer acks, and a `log_sub` peer whose transport has
+  stopped draining never acks, so new records are dropped at ingress for every sink, including
+  stderr and history. Verified on Windows with a stalled WebSocket subscriber: the transport's own
+  `tx overflow` warning never reached the log. Evict or bypass a consumer that holds the queue past
+  a bound rather than dropping for everyone.
+
+- **Symbolised traces are garbage on DMD/Windows**: `_resolve_batch` resolves every frame to
+  `RtlUserThreadStart` with vctools file names, in crash traces and in `capture_trace` callers
+  alike, so a trace from a debug build on Windows identifies nothing.
+
+- **Move WebSocket RX off the tick**: `WebSocket.update()` still polls `_stream.read()` each
+  frame; it should install `rx_handler` and decode on delivery. TX is now pull-driven by the
+  stream, so the tick carries only RX.
 
 - **Fix `/device/print` on non-terminal sessions**: `/api/cli/execute` crashes the process and
   a piped interactive session prints nothing. Audit `DeviceTreeView` and other live views for
