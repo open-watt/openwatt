@@ -1,6 +1,7 @@
 module manager.value;
 
 import urt.array;
+import urt.format.json;
 import urt.inet;
 import urt.lifetime;
 import urt.mem;
@@ -600,4 +601,15 @@ const(char[]) from_variant(ref const Variant v, out Device r) nothrow @nogc
     const(char)[] s = v.asString;
     r = g_app.find_device(s);
     return r ? null : tconcat("No device '", s, '\'');
+}
+
+bool append_json(ref Array!char json, ref const Variant v, const(char)[] fallback = "null") nothrow @nogc
+{
+    ptrdiff_t n = v.write_json(null);
+    size_t base = json.length;
+    if (n > 0 && v.write_json(json.extend(cast(size_t)n)) == n)
+        return true;
+    json.resize(base);
+    json ~= fallback;
+    return false;
 }
