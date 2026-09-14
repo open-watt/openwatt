@@ -21,6 +21,7 @@ import manager.device;
 import manager.element;
 import manager.path : walk_elements;
 import manager.plugin;
+import manager.value : append_json;
 
 import protocol.http.message;
 import protocol.http.server;
@@ -382,9 +383,8 @@ private:
             import urt.format.json;
 
             const v = Variant(output);
-            size_t bytes = v.write_json(null);
             Array!char tmp;
-            v.write_json(tmp.extend(bytes));
+            append_json(tmp, v, "\"\"");
             response.content ~= tmp[];
             response.content ~= "}";
         }
@@ -685,10 +685,7 @@ private:
             }
         }
         else
-        {
-            size_t bytes = v.write_json(null);
-            v.write_json(json.extend(bytes));
-        }
+            append_json(json, v);
 
         if (elem.sampling_mode != SamplingMode.constant)
         {
@@ -1062,8 +1059,7 @@ void emit_collection(ref Array!char json, ref const Application.RegisteredType c
         {
             Variant def = prop.init_val();
             json ~= ",\"default\":";
-            size_t n = def.write_json(null);
-            def.write_json(json.extend(n));
+            append_json(json, def);
         }
 
         json ~= '}';

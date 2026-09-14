@@ -26,6 +26,7 @@ import manager.series : Constraint, DataFormat, RecordBlock, Scalar, SeriesKind,
 import manager.sync;
 import manager.sync.encoder;
 import manager.sync.peer;
+import manager.value : append_json;
 
 
 nothrow @nogc:
@@ -1366,8 +1367,8 @@ private:
     void write_str(const(char)[] s)
     {
         const v = Variant(s);
-        size_t n = v.write_json(null);
-        v.write_json(_buf.extend(n));
+        if (!append_json(_buf, v, "\"\""))
+            log.warning("string has no JSON encoding (", s.length, "B); sent empty");
     }
 
     static bool parse_peer_id(const(char)[] text, out ulong peer_id) pure
@@ -1380,8 +1381,8 @@ private:
 
     void write_variant(ref const Variant v)
     {
-        size_t n = v.write_json(null);
-        v.write_json(_buf.extend(n));
+        if (!append_json(_buf, v))
+            log.warning("value has no JSON encoding; sent null");
     }
 
     // constraint scalars are typed by their format; read stride bytes like compare_scalar does
