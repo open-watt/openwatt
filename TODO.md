@@ -325,8 +325,9 @@ The current implementation and remaining phases are described in
       mapping is online while the dongle answers, with awake/asleep staying its own element.
     - Home Assistant availability/LWT needs `availability`/`availability_topic` parsed (single and
       list forms, custom payloads) and per-entity availability aggregated up to the device.
-    - a peer link dropping should mark that peer's mirrored devices offline; the sync layer has
-      no override today, and mirrored devices therefore never go offline.
+    - a peer link dropping leaves that peer's mirrored elements asserting stale values as live; the
+      answer is the provisional gap and reconnect testimony in
+      [docs/wip/SERIES_AUTHORSHIP.draft.md](docs/wip/SERIES_AUTHORSHIP.draft.md), not a liveness override.
   - MQTT discovery and sync mirrors publish an empty device and grow it one edit per frame; that is
     the intended burst granularity, but a discovery that knows its entity set up front could build
     once.
@@ -504,6 +505,14 @@ role from a concrete deployment need before implementing or advertising it.
 
 The built surface is documented in [docs/SYNC.md](docs/SYNC.md) and [docs/PEERING.md](docs/PEERING.md);
 this is what remains.
+
+- **Series authorship, gaps and reconnection** (`ow/series-authorship`, design in
+  [docs/wip/SERIES_AUTHORSHIP.draft.md](docs/wip/SERIES_AUTHORSHIP.draft.md)): one author per element,
+  enforced at attach; mirror writes are forwarded requests, never records; a mirror raises a
+  provisional gap on link loss and resolves it on reconnect from the author's delivery cursor and
+  `lost` testimony, never from timing. Wire gains `follows_gap` on blocks, gap and revert frames,
+  and gap state in the add frame. Subsumes the `on_mirror_write` TODO in
+  `src/manager/sync/package.d` as its write-gate patch.
 
 - **Elect an active authority**: two authorities of one cluster already share a member (each holds
   its own session), but nothing elects between them. Build the authority-to-authority session
