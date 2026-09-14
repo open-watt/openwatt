@@ -78,7 +78,7 @@ nothrow @nogc:
     DHCPOptionType resolved_type() const pure
         => _type == DHCPOptionType.auto_ ? infer_type(_code) : _type;
 
-    // Encode value into builder. Returns false on parse error.
+    // Encode value into builder. Returns false when the value does not parse or does not fit.
     bool to_wire(ref DhcpBuild b) const
     {
         DHCPOptionType t = resolved_type;
@@ -92,14 +92,12 @@ nothrow @nogc:
                 size_t n;
                 if (!parse_hex_bytes(v, buf[], n))
                     return false;
-                b.add_raw_option(_code, buf[0 .. n]);
-                return true;
+                return b.add_raw_option(_code, buf[0 .. n]);
             case DHCPOptionType.ip:
                 IPAddr a;
                 if (a.fromString(v) <= 0)
                     return false;
-                b.add_addr_option(cast(DhcpOption)_code, a);
-                return true;
+                return b.add_addr_option(cast(DhcpOption)_code, a);
             case DHCPOptionType.ip_list:
                 ubyte[252] buf = void;        // 63 IPv4 addrs max in one option
                 size_t n;
@@ -120,34 +118,29 @@ nothrow @nogc:
                 }
                 if (n == 0)
                     return false;
-                b.add_raw_option(_code, buf[0 .. n]);
-                return true;
+                return b.add_raw_option(_code, buf[0 .. n]);
             case DHCPOptionType.u8:
                 ulong u; size_t taken;
                 u = parse_uint(v, &taken);
                 if (taken == 0 || u > ubyte.max)
                     return false;
                 ubyte[1] one = [cast(ubyte)u];
-                b.add_raw_option(_code, one[]);
-                return true;
+                return b.add_raw_option(_code, one[]);
             case DHCPOptionType.u16:
                 ulong u; size_t taken;
                 u = parse_uint(v, &taken);
                 if (taken == 0 || u > ushort.max)
                     return false;
                 ubyte[2] two = [cast(ubyte)(u >> 8), cast(ubyte)u];
-                b.add_raw_option(_code, two[]);
-                return true;
+                return b.add_raw_option(_code, two[]);
             case DHCPOptionType.u32:
                 ulong u; size_t taken;
                 u = parse_uint(v, &taken);
                 if (taken == 0 || u > uint.max)
                     return false;
-                b.add_uint_option(cast(DhcpOption)_code, cast(uint)u);
-                return true;
+                return b.add_uint_option(cast(DhcpOption)_code, cast(uint)u);
             case DHCPOptionType.string_:
-                b.add_raw_option(_code, cast(const(ubyte)[])v);
-                return true;
+                return b.add_raw_option(_code, cast(const(ubyte)[])v);
             case DHCPOptionType.bool_:
                 ubyte byte_;
                 if (v == "true" || v == "1" || v == "yes" || v == "on")
@@ -157,8 +150,7 @@ nothrow @nogc:
                 else
                     return false;
                 ubyte[1] one = [byte_];
-                b.add_raw_option(_code, one[]);
-                return true;
+                return b.add_raw_option(_code, one[]);
         }
     }
 

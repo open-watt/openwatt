@@ -181,14 +181,14 @@ protected:
             _subscribed = true;
         }
 
-        // Reconcile pool reservations with existing leases (static + dynamic).
+        // Reconcile pool reservations with the leases this server answers for.
         if (_pool)
         {
             foreach (l; Collection!DHCPLease().values)
             {
-                IPAddr a = (cast(DHCPLease)l).address;
-                if (_pool.contains(a))
-                    _pool.reserve(a);
+                DHCPLease lease = l;
+                if (owns(lease) && _pool.contains(lease.address))
+                    _pool.reserve(lease.address);
             }
         }
 
@@ -210,29 +210,9 @@ protected:
         return CompletionStatus.complete;
     }
 
-    override void update()
-    {
-        super.update();
-
-        // Reap expired dynamic leases. Each cycle, scan and destroy.
-        // Cheap enough at small scales; can be made periodic later.
-        SysTime now = getSysTime();
-        foreach (l; Collection!DHCPLease().values)
-        {
-            DHCPLease lease = l;
-            if (!lease.is_expired(now))
-                continue;
-            if (_pool && _pool.contains(lease.address))
-                _pool.release(lease.address);
-            version (DebugDHCP)
-                log.debug_("lease ", lease.address, " expired");
-            lease.destroy();
-        }
-    }
-
 private:
-    enum SysTime offer_hold = SysTime(0); // 0 = will be replaced by 30s pseudo-expiry
-    enum size_t offer_hold_seconds = 30;
+    enum Duration offer_hold = 30.seconds;
+    enum Duration decline_quarantine = 600.seconds;
 
     ObjectRef!BaseInterface _iface;
 
@@ -317,7 +297,7 @@ private:
                 handle_discover(*dh, client_mac, p);
                 break;
             case DhcpMessageType.request:
-                handle_request(*dh, client_mac, p);
+                handle_request(*dh, client_mac, p, IPAddr(ip.dst) == _server_ip);
                 break;
             case DhcpMessageType.decline:
                 handle_decline(*dh, client_mac, p);
@@ -383,9 +363,9 @@ private:
             }
         }
 
-        // Hold the offer briefly; ACK extends to full lease time.
-        if (!lease.is_static_lease())
-            lease.expires = getSysTime() + offer_hold_seconds.seconds;
+        // Hold a fresh offer briefly; a committed lease keeps whatever it already has (the REQUEST may be lost)
+        if (!lease.is_static_lease() && lease.deadline < getTime() + offer_hold)
+            lease.expire_in(offer_hold);
 
         const(char)[] hostname = p.hostname();
         if (hostname.length > 0)
@@ -394,15 +374,17 @@ private:
         send_reply(req, client_mac, offer, DhcpMessageType.offer);
     }
 
-    void handle_request(ref const DhcpHeader req, MACAddress client_mac, ref DhcpParse p)
+    // RFC 2131 4.3.2: SELECTING names a server, INIT-REBOOT names an address, RENEWING/REBINDING carry ciaddr;
+    // a client we hold no lease for is refused only when it addressed us, a stranger's INIT-REBOOT or REBINDING gets silence
+    void handle_request(ref const DhcpHeader req, MACAddress client_mac, ref DhcpParse p, bool unicast)
     {
         IPAddr requested;
-        bool has_requested = p.requested_address(requested);
+        p.requested_address(requested);
         IPAddr server_id;
         bool has_server_id = p.server_id(server_id);
+        IPAddr ciaddr;
+        ciaddr.b = req.ciaddr;
 
-        // If a server-id is present and points elsewhere, the client picked another server.
-        // Drop our pending offer (lease will time out via offer_hold expiry).
         if (has_server_id && server_id != _server_ip)
         {
             version (DebugDHCP)
@@ -410,26 +392,23 @@ private:
             return;
         }
 
-        IPAddr ciaddr;
-        ciaddr.b = req.ciaddr;
-
-        IPAddr target = has_requested ? requested : ciaddr;
-        if (target == IPAddr.any)
+        IPAddr target = has_server_id || ciaddr == IPAddr.any ? requested : ciaddr;
+        DHCPLease lease = find_lease_for_mac(client_mac);
+        if (target == IPAddr.any || !lease)
         {
-            send_nak(req, client_mac, "no requested address");
+            if (has_server_id || (unicast && ciaddr != IPAddr.any))
+                send_nak(req, client_mac, "no lease for client");
             return;
         }
-
-        DHCPLease lease = find_lease_for_mac(client_mac);
-        if (!lease || lease.address != target)
+        if (lease.address != target)
         {
-            send_nak(req, client_mac, "no matching lease");
+            send_nak(req, client_mac, "wrong address");
             return;
         }
 
         // Bind / extend.
         if (!lease.is_static_lease())
-            lease.expires = getSysTime() + _lease_time;
+            lease.expire_in(_lease_time);
 
         log.info("issued lease ", target, " to ", client_mac,
                  lease.hostname[].length ? tconcat(" (", lease.hostname[], ")") : "",
@@ -438,24 +417,20 @@ private:
         send_reply(req, client_mac, target, DhcpMessageType.ack);
     }
 
+    // the lease stays as the reservation's owner, unmatchable, until its quarantine runs out
     void handle_decline(ref const DhcpHeader req, MACAddress client_mac, ref DhcpParse p)
     {
-        // Client says the address it just got conflicts.
-        // Drop the lease; keep the pool slot reserved so we don't immediately re-offer it.
         IPAddr declined;
         if (!p.requested_address(declined))
             return;
 
         DHCPLease lease = find_lease_for_addr_and_mac(declined, client_mac);
-        if (!lease)
+        if (!lease || lease.is_static_lease())
             return;
 
-        log.warning(client_mac, " declined ", declined, "; quarantining");
-
-        // Leave the pool bit set as a cheap quarantine; destroy the lease record.
-        // TODO: real quarantine list with timed release.
-        if (!lease.is_static_lease())
-            lease.destroy();
+        log.warning(client_mac, " declined ", declined, "; quarantined for ", decline_quarantine.as!"seconds", "s");
+        lease.declined = true;
+        lease.expire_in(decline_quarantine);
     }
 
     void handle_release(ref const DhcpHeader req, MACAddress client_mac, ref DhcpParse p)
@@ -470,13 +445,22 @@ private:
             return;
 
         log.info(client_mac, " released ", ciaddr);
-
-        if (_pool && _pool.contains(ciaddr))
-            _pool.release(ciaddr);
         lease.destroy();
     }
 
     // ---- lookup / policy ----
+
+    // a static lease is ours when it sits in our subnet; a dynamic one when our pool allocated it
+    bool owns(const DHCPLease lease) const
+    {
+        if (lease.is_static_lease())
+            return (lease.address & _subnet_mask) == (_server_ip & _subnet_mask);
+        return _pool && lease.pool is _pool.get;
+    }
+
+    // a quarantined lease still owns its reservation but answers to no client
+    bool matches(const DHCPLease lease, MACAddress mac) const
+        => lease.mac == mac && !lease.declined && owns(lease);
 
     DHCPLease find_lease_for_mac(MACAddress mac)
     {
@@ -485,10 +469,8 @@ private:
         foreach (l; Collection!DHCPLease().values)
         {
             DHCPLease lease = l;
-            if (lease.mac != mac)
+            if (!matches(lease, mac))
                 continue;
-            if (_pool && !_pool.contains(lease.address))
-                continue;       // belongs to a different server's scope
             if (lease.is_static_lease())
                 return lease;
             dynamic_match = lease;
@@ -501,7 +483,7 @@ private:
         foreach (l; Collection!DHCPLease().values)
         {
             DHCPLease lease = l;
-            if (lease.address == addr && lease.mac == mac)
+            if (lease.address == addr && matches(lease, mac))
                 return lease;
         }
         return null;
@@ -515,11 +497,8 @@ private:
         foreach (l; Collection!DHCPLease().values)
         {
             DHCPLease lease = l;
-            if (lease.mac != mac)
-                continue;
-            if (_pool && !_pool.contains(lease.address))
-                continue;
-            ++count;
+            if (matches(lease, mac))
+                ++count;
         }
         return count >= _mac_limit;
     }
@@ -564,9 +543,13 @@ private:
                 log.warning("option '", opt.name[], "' (code=", opt.code, ") failed to encode");
         }
 
-        b.finish();
-
-        send_to_client(b, req, client_mac, yiaddr);
+        if (!b.finish())
+        {
+            log.error(type, " to ", client_mac, " does not fit the frame; dropped");
+            return;
+        }
+        if (!send_to_client(b, req, client_mac, yiaddr))
+            log.warning("failed to transmit ", type, " to ", client_mac);
     }
 
     void send_nak(ref const DhcpHeader req, MACAddress client_mac, const(char)[] reason)
@@ -578,15 +561,15 @@ private:
         b.add_message_type(DhcpMessageType.nak);
         b.add_addr_option(DhcpOption.server_id, _server_ip);
         if (reason.length > 0)
-            b.add_message(reason);
+            b.add_string_option(DhcpOption.message, reason);
         b.finish();
 
         // NAK always broadcast (RFC 2131 4.3.2).
-        b.transmit(station, _server_ip, IPAddr.broadcast, MACAddress.broadcast,
-                   DhcpServerPort, DhcpClientPort);
+        if (!b.transmit(station, _server_ip, IPAddr.broadcast, MACAddress.broadcast, DhcpServerPort, DhcpClientPort))
+            log.warning("failed to transmit NAK to ", client_mac);
     }
 
-    void send_to_client(ref DhcpBuild b, ref const DhcpHeader req, MACAddress client_mac, IPAddr yiaddr)
+    bool send_to_client(ref DhcpBuild b, ref const DhcpHeader req, MACAddress client_mac, IPAddr yiaddr)
     {
         // Honour the BROADCAST flag; otherwise unicast to chaddr.
         bool broadcast = (req.flags[0] & 0x80) != 0;
@@ -601,16 +584,9 @@ private:
         }
 
         if (broadcast)
-        {
-            b.transmit(station, _server_ip, IPAddr.broadcast, MACAddress.broadcast,
-                       DhcpServerPort, DhcpClientPort);
-        }
-        else
-        {
-            IPAddr ip_dst = ciaddr != IPAddr.any ? ciaddr : yiaddr;
-            b.transmit(station, _server_ip, ip_dst, client_mac,
-                       DhcpServerPort, DhcpClientPort);
-        }
+            return b.transmit(station, _server_ip, IPAddr.broadcast, MACAddress.broadcast, DhcpServerPort, DhcpClientPort);
+        IPAddr ip_dst = ciaddr != IPAddr.any ? ciaddr : yiaddr;
+        return b.transmit(station, _server_ip, ip_dst, client_mac, DhcpServerPort, DhcpClientPort);
     }
 }
 

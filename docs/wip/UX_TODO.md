@@ -3,6 +3,15 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-09-15: DHCPv4 lease quarantine (PR #705)
+
+- `/protocol/dhcp/lease` gains a read-only `declined` boolean. A lease whose client sent
+  DECLINE stays in the collection for ten minutes with `declined=true`, owning its address so
+  it is not re-offered; show it as quarantined rather than as an active binding, and expect it
+  to disappear when the quarantine lapses.
+- Dynamic leases now expire and vanish on their own, and `expires` is a display value derived
+  from the lease's monotonic deadline; a wall-clock correction no longer moves the real expiry.
+
 ## 2026-09-11: device liveness and `status.online` (PR #663)
 
 - Every device now carries a `status.online` boolean element holding one central reachability

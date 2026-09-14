@@ -483,6 +483,41 @@ The current implementation and remaining phases are described in
   Decide whether to return the status, warn (rate-limited; this is on every write), or keep it
   silent by design. As written it hides bring-up bugs.
 
+## DHCPv4 audit
+
+Static audit of `8b17d83f` (client, server, lease, option and message modules). These
+are code findings, not an attribution of the reported S3 Wi-Fi incident. No runtime
+reproduction or packet capture was performed. The P1 findings (NAK recovery, exchange
+scoping, configuration reconciliation, DISCOVER shortening committed leases, lease
+ownership, option-buffer overrun), the INIT-REBOOT silence rule and monotonic lease
+expiry landed: a lease arms its own expiry and returns its own reservation to the pool
+that made it, so no server reaps. What follows is still open.
+
+- **P2: receive validation bypasses transport checks** (both `incoming_packet`
+  methods): raw interface subscriptions do not check IPv4 checksum, fragmentation,
+  or nonzero UDP checksum. UDP length is bounded by the frame rather than IPv4
+  total length. Share a validated DHCP datagram decoder and reject malformed packets
+  before changing lease state; preserve legal IPv4 zero UDP checksums.
+- **P2: pool edits discard live reservations** (`ip/pool.d`, `start`, `end`):
+  changing either endpoint clears the allocation bitmap without reconciling active
+  leases; the running DHCP server can then allocate an already leased address.
+  Rebuild reservations from their owners when changing pool geometry.
+- **Remaining protocol/lifecycle work**: honour client identifiers instead of
+  keying solely by MAC; implement or explicitly delimit relay and DHCPINFORM
+  support; validate infinite lease values; implement conflict detection; consume requested
+  DNS configuration; replace the client's 1s hostname poll with a `manager.system`
+  change signal; ARP-resolve the server for unicast RENEW/RELEASE instead of
+  broadcasting at L2. Audit subscription-capacity failure handling as part of
+  bring-up.
+- **Diagnostics and verification**: packet-level DHCP logs require a compile-time
+  flag. Add a deterministic client/server packet harness covering acquisition, loss,
+  duplicates, NAK recovery, renewal changes, multiple scopes, DECLINE followed by
+  DISCOVER and by quarantine expiry, and a clock jump followed by a duplicate DISCOVER;
+  only the option
+  builder's fit boundaries and the client's T1/T2 derivation are unit-tested today,
+  because NAK recovery, ACK reconciliation and pool ownership all run through the
+  collection and scheduler and need that harness.
+
 ## DHCPv6 features
 
 The codec from `67e83fb4` has no operational client, server or relay. The reserved
