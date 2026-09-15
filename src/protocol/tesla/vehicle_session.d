@@ -38,8 +38,6 @@ import tools.protobuf;
 
 nothrow @nogc:
 
-enum Bar = ScaledUnit(Pascal, 5);
-
 class TeslaVehicleSession : ActiveObject
 {
 nothrow @nogc:
@@ -1335,13 +1333,13 @@ private:
 
         SysTime now = getSysTime();
         if (tyres.front_left_pressure.present)
-            v.write_element("tyres.front_left.pressure", Quantity!(float, Bar)(tyres.front_left_pressure.value), now);
+            v.write_element("tyres.front_left.pressure", Quantity!(float, ScaledUnits.bar)(tyres.front_left_pressure.value), now);
         if (tyres.front_right_pressure.present)
-            v.write_element("tyres.front_right.pressure", Quantity!(float, Bar)(tyres.front_right_pressure.value), now);
+            v.write_element("tyres.front_right.pressure", Quantity!(float, ScaledUnits.bar)(tyres.front_right_pressure.value), now);
         if (tyres.rear_left_pressure.present)
-            v.write_element("tyres.rear_left.pressure", Quantity!(float, Bar)(tyres.rear_left_pressure.value), now);
+            v.write_element("tyres.rear_left.pressure", Quantity!(float, ScaledUnits.bar)(tyres.rear_left_pressure.value), now);
         if (tyres.rear_right_pressure.present)
-            v.write_element("tyres.rear_right.pressure", Quantity!(float, Bar)(tyres.rear_right_pressure.value), now);
+            v.write_element("tyres.rear_right.pressure", Quantity!(float, ScaledUnits.bar)(tyres.rear_right_pressure.value), now);
         if (tyres.front_left_hard_warning.present || tyres.front_left_soft_warning.present)
             v.write_element("tyres.front_left.warning", tyres.front_left_hard_warning.value || tyres.front_left_soft_warning.value, now);
         if (tyres.front_right_hard_warning.present || tyres.front_right_soft_warning.present)
