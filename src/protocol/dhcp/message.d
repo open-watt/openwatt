@@ -98,6 +98,7 @@ nothrow @nogc:
     ubyte[DhcpBuildBufSize] buf = void;
     size_t opt_offset;
     size_t total_len;     // populated by finish()
+    bool failed;          // an option did not fit; finish() and transmit() refuse the frame
 
     // Initialise a BOOTP frame (op = BootpRequest or BootpReply).
     void start(ubyte op, MACAddress chaddr, uint xid, ushort secs, bool broadcast_flag)
@@ -118,6 +119,8 @@ nothrow @nogc:
         h.chaddr[0 .. 6] = chaddr.b[];
         h.magic = [0x63, 0x82, 0x53, 0x63];
         opt_offset = IPv4Header.sizeof + UdpHeader.sizeof + DhcpHeader.sizeof;
+        total_len = 0;
+        failed = false;
     }
 
     // Mirror BOOTP fields server-side from the request: copies xid, secs, flags, giaddr, chaddr.
@@ -134,6 +137,8 @@ nothrow @nogc:
         h.chaddr = req.chaddr;
         h.magic = [0x63, 0x82, 0x53, 0x63];
         opt_offset = IPv4Header.sizeof + UdpHeader.sizeof + DhcpHeader.sizeof;
+        total_len = 0;
+        failed = false;
     }
 
     void set_ciaddr(IPAddr addr) { hdr().ciaddr = addr.b; }
@@ -143,60 +148,45 @@ nothrow @nogc:
     DhcpHeader* hdr()
         => cast(DhcpHeader*)(buf.ptr + IPv4Header.sizeof + UdpHeader.sizeof);
 
-    void add_message_type(DhcpMessageType t)
-    {
-        buf[opt_offset++] = DhcpOption.message_type;
-        buf[opt_offset++] = 1;
-        buf[opt_offset++] = t;
-    }
-
-    void add_addr_option(DhcpOption opt, IPAddr addr)
-    {
-        buf[opt_offset++] = opt;
-        buf[opt_offset++] = 4;
-        buf[opt_offset .. opt_offset + 4] = addr.b[];
-        opt_offset += 4;
-    }
-
-    // Generic option append: caller-supplied code and raw value bytes.
-    // Returns false if the option wouldn't fit before the END marker is written.
+    // Every option lands through here; it keeps one byte back for the END marker.
     bool add_raw_option(ubyte code, const(ubyte)[] data)
     {
-        if (data.length > 255)
+        if (failed || data.length > 255 || opt_offset + 2 + data.length > DhcpBuildBufSize - 1)
+        {
+            failed = true;
             return false;
-        // reserve 2 bytes (END + at least one pad slot is implicit) at the tail
-        if (opt_offset + 2 + data.length > DhcpBuildBufSize - 1)
-            return false;
+        }
         buf[opt_offset++] = code;
         buf[opt_offset++] = cast(ubyte)data.length;
-        if (data.length > 0)
-        {
-            buf[opt_offset .. opt_offset + data.length] = data[];
-            opt_offset += data.length;
-        }
+        buf[opt_offset .. opt_offset + data.length] = data[];
+        opt_offset += data.length;
         return true;
     }
 
-    void add_uint_option(DhcpOption opt, uint value)
+    bool add_message_type(DhcpMessageType t)
     {
-        buf[opt_offset++] = opt;
-        buf[opt_offset++] = 4;
-        buf[opt_offset++] = cast(ubyte)(value >> 24);
-        buf[opt_offset++] = cast(ubyte)(value >> 16);
-        buf[opt_offset++] = cast(ubyte)(value >> 8);
-        buf[opt_offset++] = cast(ubyte)value;
+        ubyte[1] v = [t];
+        return add_raw_option(DhcpOption.message_type, v[]);
     }
 
-    void add_client_identifier(MACAddress mac)
+    bool add_addr_option(DhcpOption opt, IPAddr addr)
+        => add_raw_option(opt, addr.b[]);
+
+    bool add_uint_option(DhcpOption opt, uint value)
     {
-        buf[opt_offset++] = DhcpOption.client_identifier;
-        buf[opt_offset++] = 7;
-        buf[opt_offset++] = HType_Ethernet;
-        buf[opt_offset .. opt_offset + 6] = mac.b[];
-        opt_offset += 6;
+        ubyte[4] v = [cast(ubyte)(value >> 24), cast(ubyte)(value >> 16), cast(ubyte)(value >> 8), cast(ubyte)value];
+        return add_raw_option(opt, v[]);
     }
 
-    void add_parameter_request_list()
+    bool add_client_identifier(MACAddress mac)
+    {
+        ubyte[7] v;
+        v[0] = HType_Ethernet;
+        v[1 .. 7] = mac.b[];
+        return add_raw_option(DhcpOption.client_identifier, v[]);
+    }
+
+    bool add_parameter_request_list()
     {
         static immutable ubyte[4] params = [
             DhcpOption.subnet_mask,
@@ -204,35 +194,19 @@ nothrow @nogc:
             DhcpOption.dns,
             DhcpOption.lease_time,
         ];
-        buf[opt_offset++] = DhcpOption.parameter_list;
-        buf[opt_offset++] = params.length;
-        buf[opt_offset .. opt_offset + params.length] = params[];
-        opt_offset += params.length;
+        return add_raw_option(DhcpOption.parameter_list, params[]);
     }
 
-    void add_string_option(DhcpOption opt, const(char)[] s)
+    bool add_string_option(DhcpOption opt, const(char)[] s)
     {
         size_t n = s.length > 255 ? 255 : s.length;
-        buf[opt_offset++] = opt;
-        buf[opt_offset++] = cast(ubyte)n;
-        if (n > 0)
-        {
-            buf[opt_offset .. opt_offset + n] = cast(const(ubyte)[])s[0 .. n];
-            opt_offset += n;
-        }
+        return add_raw_option(opt, cast(const(ubyte)[])s[0 .. n]);
     }
 
-    void add_message(const(char)[] s)
+    bool finish()
     {
-        size_t n = s.length > 255 ? 255 : s.length;
-        buf[opt_offset++] = DhcpOption.message;
-        buf[opt_offset++] = cast(ubyte)n;
-        buf[opt_offset .. opt_offset + n] = cast(const(ubyte)[])s[0 .. n];
-        opt_offset += n;
-    }
-
-    void finish()
-    {
+        if (failed)
+            return false;
         buf[opt_offset++] = DhcpOption.end;
 
         // pad BOOTP payload to legacy minimum (300 bytes) so picky clients/servers don't ignore us
@@ -245,12 +219,16 @@ nothrow @nogc:
             opt_offset += pad;
         }
         total_len = opt_offset;
+        return true;
     }
 
     // Frame the IP+UDP+DHCP payload and hand it to the interface for transmission.
     // src_port/dst_port choose the BOOTP direction (server -> client uses 67->68).
-    void transmit(EthernetStation iface, IPAddr src, IPAddr dst, MACAddress eth_dst, ushort src_port, ushort dst_port)
+    bool transmit(EthernetStation iface, IPAddr src, IPAddr dst, MACAddress eth_dst, ushort src_port, ushort dst_port)
     {
+        if (failed || total_len == 0)
+            return false;
+
         ubyte[] frame = buf[0 .. total_len];
         size_t udp_len = total_len - IPv4Header.sizeof;
         size_t ip_total = total_len;
@@ -288,7 +266,7 @@ nothrow @nogc:
         u.checksum[0] = cast(ubyte)(cc >> 8);
         u.checksum[1] = cast(ubyte)cc;
 
-        iface.send(eth_dst, frame, EtherType.ip4);
+        return iface.send(eth_dst, frame, EtherType.ip4) >= 0;
     }
 }
 
@@ -436,4 +414,32 @@ IPAddr prefix_to_mask(ubyte prefix_len) pure
     r.b[2] = cast(ubyte)(m >> 8);
     r.b[3] = cast(ubyte)m;
     return r;
+}
+
+
+unittest
+{
+    enum size_t header = IPv4Header.sizeof + UdpHeader.sizeof + DhcpHeader.sizeof;
+    ubyte[255] big;
+    ubyte[62] fit;
+    ubyte[63] over;
+
+    // options fill the buffer to the byte held back for END, and the frame still finishes
+    DhcpBuild b;
+    b.start(BootpRequest, MACAddress.init, 1, 0, false);
+    assert(b.opt_offset == header);
+    assert(b.add_raw_option(200, big[]) && b.add_raw_option(201, fit[]));
+    assert(b.opt_offset == DhcpBuildBufSize - 1 && !b.failed);
+    assert(b.finish() && b.total_len == DhcpBuildBufSize);
+
+    // one byte more fails the option, sticks, and refuses finish() and transmit()
+    b.start(BootpRequest, MACAddress.init, 1, 0, false);
+    assert(b.add_raw_option(200, big[]) && !b.add_raw_option(201, over[]));
+    assert(b.failed && !b.add_message_type(DhcpMessageType.discover));
+    assert(!b.finish() && !b.transmit(null, IPAddr.any, IPAddr.broadcast, MACAddress.broadcast, DhcpClientPort, DhcpServerPort));
+
+    // an option value longer than the length octet allows is refused outright
+    ubyte[256] long_;
+    b.start(BootpRequest, MACAddress.init, 1, 0, false);
+    assert(!b.add_raw_option(200, long_[]) && b.failed);
 }

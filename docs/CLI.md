@@ -873,6 +873,88 @@ and retries. Retaining local configuration does not establish upstream reachabil
 /protocol/ip/pool6/add name=site pool=upstream prefix=::/56
 ```
 
+### DHCPv4
+
+#### `/protocol/dhcp/client`
+
+Acquires an IPv4 lease on an ethernet interface. The bound address appears as a
+dynamic `address`, the subnet as a dynamic connected `route`, and the offered
+router as a dynamic default `route`; all three are updated in place when a
+renewal changes them and destroyed when the lease is released. Replies are
+accepted only for the exchange in flight and, outside REBINDING, only from the
+selected server. A NAK or an expired lease restarts the client from DISCOVER.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `interface` | interface name | | Ethernet interface to acquire on. |
+| `add-default-route` | `yes`/`no` | `yes` | Install the offered router as a default route. |
+
+```
+/protocol/dhcp/client/add name=wan interface=eth0
+```
+
+#### `/protocol/dhcp/server`
+
+Answers DHCP on an ethernet interface from its own IPv4 address. Dynamic
+addresses come from a `pool`; without one the server answers static leases
+only. A server answers for the static leases in its subnet and for the dynamic
+leases its pool allocated, and stays silent on an INIT-REBOOT or broadcast
+REBINDING from a client it holds no lease for.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `interface` | interface name | | Interface to serve on; must carry an `address`. |
+| `pool` | `pool` name | | Dynamic address range; must lie inside the interface subnet. |
+| `lease-time` | duration | `1d` | Lease time granted on ACK. |
+| `mac-limit` | count | `0` (unlimited) | Maximum leases per client MAC. |
+| `add-default-gateway` | `yes`/`no` | `yes` | Advertise the server address as the router unless an option 3 is configured. |
+| `options` | `option` names | | Extra options appended to every OFFER and ACK. |
+
+```
+/protocol/ip/pool/add name=lan start=192.168.1.100 end=192.168.1.199
+/protocol/dhcp/server/add name=lan interface=eth1 pool=lan lease-time=12h
+```
+
+#### `/protocol/dhcp/lease`
+
+One entry per bound address. A lease added here is static: it never expires
+and is offered to its MAC whenever that client asks. Leases the server hands
+out are dynamic, carry the pool that allocated them, and expire on their own,
+returning the reservation to that pool; a DISCOVER holds a fresh offer for 30
+seconds and an ACK extends the lease to the server's `lease-time`. A client
+that DECLINEs its address leaves the lease quarantined for ten minutes, during
+which the address is neither offered nor matched to any client.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `address` | IPv4 address | required | Leased address. |
+| `mac` | MAC address | required | Client hardware address. |
+| `hostname` | text | | Hostname the client sent. |
+| `expires` | date-time | | Wall-clock expiry of a dynamic lease; the deadline itself runs on the monotonic clock. |
+| `pool` | `pool` name | | Pool that allocated a dynamic lease. |
+| `declined` | boolean | read only | The client declined this address; the lease is in quarantine. |
+
+```
+/protocol/dhcp/lease/add name=printer address=192.168.1.20 mac=00:11:22:33:44:55
+```
+
+#### `/protocol/dhcp/option`
+
+A named option value the server appends to its replies, referenced from the
+server's `options` list. The value is parsed according to `type`; `auto`
+infers the type for well-known codes and falls back to raw hex bytes.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `code` | `1` to `254` | required | Option code. |
+| `type` | `auto`, `bytes`, `ip`, `ip_list`, `u8`, `u16`, `u32`, `string`, `bool` | `auto` | How `value` is encoded. |
+| `value` | text | | Value in the form the type expects; `ip_list` is comma-separated, `bytes` is hex. |
+
+```
+/protocol/dhcp/option/add name=dns code=6 value=192.168.1.1,1.1.1.1
+/protocol/dhcp/server/set lan options=dns
+```
+
 ### DHCPv6
 
 The DHCPv6 message codec is present, but there are no DHCPv6 client, server,
