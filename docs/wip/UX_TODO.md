@@ -3,6 +3,16 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-09-15: JSON quantity scaling (uRT #297)
+
+- Consume each quantity's `q` and `u` together. An unspellable source scale now
+  selects a spellable engineering prefix: `2.95` at `10^5 W` arrives as
+  `{"q":2.95e2,"u":"kW"}`, while named units such as `bar` stay unchanged.
+  Do not assume the value-frame unit always matches the element's declared unit.
+- Accept exponent notation in all JSON numbers and plain numbers for bare scales
+  without a unit spelling (`23302` at `10^-1` becomes `23302e-1`). Add regression
+  coverage for pressure, scaled dimensionless sensors, and negative SI exponents.
+
 ## 2026-09-15: DHCPv4 lease quarantine (PR #705)
 
 - `/protocol/dhcp/lease` gains a read-only `declined` boolean. A lease whose client sent
