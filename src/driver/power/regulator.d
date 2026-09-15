@@ -435,9 +435,4 @@ nothrow @nogc:
         g_app.register_enum!ZcEdge();
         g_app.console.register_collection!PowerRegulator();
     }
-
-    override void update()
-    {
-        Collection!PowerRegulator().update_all();
-    }
 }
