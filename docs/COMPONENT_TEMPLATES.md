@@ -31,6 +31,7 @@ Quick reference for standard component templates and their expected elements.
 | `Configuration` | Device settings | varies |
 | **Capability primitive (energy app contract)** |||
 | `PowerControl` | Unified actuator surface | `kind`, `setpoint` |
+| `GridAuthority` | Direction from the network operator | `source` |
 
 ---
 
@@ -1251,6 +1252,101 @@ replace the `Port`; it only describes control.
 | Heat-pump compressor | `kind=discrete`, `min_on_time=600`, `min_off_time=300` |
 
 ---
+
+## GridAuthority
+
+Direction from a network operator, market operator, aggregator or regulator
+over what a site or a device may import, export, generate or consume: the
+limits and states in force right now. Every scheme that hands out such
+direction populates this one record, so the energy app has a single input
+regardless of country or protocol. The component is not a topology node and
+has no `Port`.
+
+### Scope by placement
+
+Where the component sits says what it governs:
+
+- At the device root (`authority`): the site's connection point. Export and
+  import limits are site totals; generation and load limits cover every DER
+  and controllable load behind the point. This is the IEEE 2030.5 / CSIP-AUS
+  shape.
+- Under a `Port`: that terminal only. A demand-response receiver wired to one
+  air conditioner's AS/NZS 4755 interface publishes here, and its `load_limit`
+  or `load_fraction` binds that appliance alone.
+- Under a subsystem component such as `solar` or `battery`: that subsystem.
+  A ripple-control receiver on a PV array, or a battery-only charge limit.
+
+A site may hold several authorities at once: an operator's site limits plus a
+per-appliance receiver, or two operators' programs. Consumers take the most
+restrictive value per field across every authority that governs a thing.
+
+### Conventions
+
+- Limits are watts. `-1` means the authority does not direct that quantity.
+  `0` is a real instruction: an export limit of 0 W is the CSIP-AUS emergency
+  backstop, a load limit of 0 W is a DRM1 shutdown.
+- Fractions are percent of the device's nameplate, `-1` when not directed.
+  Schemes that speak in nameplate percentages (ripple control, Japanese output
+  control, AS/NZS 4755 modes, 2030.5 fixed-power modes) publish these; a
+  consumer that knows the nameplate may fold them into watts.
+- A limit takes effect the moment the element changes. The producer has
+  already applied whatever randomised start, ramp, or notice period its scheme
+  requires, and it reverts the element itself when the event ends. Consumers
+  never infer expiry from `event_end`.
+- Loss of the authority link is the producer's problem. Schemes with failsafe
+  values (EEBUS LPC, DNSP fallback limits) require the producer to publish
+  those values once its grace period passes; the device going `offline` is not
+  a signal to relax anything.
+- `mandatory` separates an obligation from advice. Advisory programs
+  (OpenADR levels, price-linked requests) publish `mandatory: false` and the
+  consumer may weigh them against local goals.
+
+### Required
+- `source: enum` - Scheme the direction comes from:
+  - `csip-aus` - CSIP-AUS over IEEE 2030.5 (Australian DNSPs).
+  - `ieee2030.5` - IEEE 2030.5 outside the CSIP-AUS profile (CSIP / Rule 21).
+  - `openadr` - OpenADR 2.0b or 3 events.
+  - `eebus` - EEBUS LPC / LPP, the §14a EnWG path via the smart meter gateway.
+  - `as4755` - AS/NZS 4755 demand response modes on the appliance interface.
+  - `ripple` - Ripple control or relay contacts (0 / 30 / 60 / 100 %).
+  - `schedule` - A published schedule such as Japanese output control.
+  - `manual` - Entered by the operator at the console.
+
+### Optional
+- `operator: string` - Who issued the direction: the DNSP, aggregator or
+  program name.
+- `mandatory: bool` - Whether compliance is an obligation. Missing means true.
+- `event: string` - Identifier of the event whose direction applies; empty
+  while the standing default applies.
+- `event_start: time` - When the current event took effect.
+- `event_end: time` - When the producer expects to revert it. Informational;
+  see the conventions above.
+- `export_limit: W` - Cap on export at the governed point.
+- `import_limit: W` - Cap on import at the governed point.
+- `generation_limit: W` - Cap on generation behind the governed point.
+- `load_limit: W` - Cap on controllable load behind the governed point.
+- `charge_limit: W` - Cap on power into storage.
+- `discharge_limit: W` - Cap on power out of storage.
+- `generation_fraction: %` - Generation cap as a share of nameplate.
+- `load_fraction: %` - Load cap as a share of nameplate; AS/NZS 4755 DRM2 is
+  50 and DRM3 is 75.
+- `energize: bool` - False while the authority requires the DER de-energised.
+- `connect: bool` - False while the authority requires the DER disconnected
+  from the grid.
+- `level: enum` - Advisory demand-response level: `normal`, `moderate`,
+  `high`, `special`. OpenADR simple signals map here.
+
+### Mapping by scheme
+
+| Scheme | Fields it fills |
+| --- | --- |
+| CSIP-AUS / IEEE 2030.5 | `export_limit`, `import_limit`, `generation_limit`, `load_limit`, `energize`, `connect`, `generation_fraction` (opModMaxLimW, opModFixedW), `event`, `event_start`, `event_end` |
+| EEBUS LPC / LPP (§14a EnWG) | `load_limit` (LPC), `generation_limit` (LPP), `event_end` from the limit duration; failsafe values applied by the producer |
+| AS/NZS 4755 DRED | `load_fraction` 0 / 50 / 75 (DRM1 / DRM2 / DRM3) under the appliance port, `load_limit` 0 for DRM1 |
+| Ripple control, VDE-AR-N 4105 | `generation_fraction` 0 / 30 / 60 / 100 under the PV subsystem |
+| OpenADR | `level` for simple signals, `load_limit` or `load_fraction` for load dispatch, `mandatory` per program, `event*` |
+| Japanese output control | `generation_fraction` from the day's schedule, `event_end` at the slot boundary |
+| UK ANM / DFS, NL congestion | `export_limit` or `generation_limit` (ANM), `load_limit` (DFS turn-down), `mandatory` per contract |
 
 ## Usage Examples
 

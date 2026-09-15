@@ -1965,6 +1965,7 @@ __gshared immutable KnownElements[] g_well_known_elements = [
     KnownElements("Vehicle", g_Vehicle_elements),
     KnownElements("WaterHeater", g_WaterHeater_elements),
     KnownElements("PowerControl", g_PowerControl_elements),
+    KnownElements("GridAuthority", g_GridAuthority_elements),
     KnownElements("Switch", g_Switch_elements),
     KnownElements("ContactSensor", g_ContactSensor_elements),
     KnownElements("ModbusConfig", g_ModbusConfig_elements),
@@ -2282,6 +2283,26 @@ __gshared immutable KnownElementTemplate[] g_Vehicle_elements = [
     make_element_template!("soc", "%", "State of Charge", null, Frequency.medium),
     make_element_template!("range", "km", "Remaining Range", null, Frequency.medium),
     make_element_template!("battery_capacity", "kWh", "Battery Capacity", null, Frequency.constant),
+];
+
+__gshared immutable KnownElementTemplate[] g_GridAuthority_elements = [
+    make_element_template!("source", null, "Source", "csip-aus | ieee2030.5 | openadr | eebus | as4755 | ripple | schedule | manual", Frequency.constant),
+    make_element_template!("operator", null, "Operator", "Who issued the direction", Frequency.constant),
+    make_element_template!("mandatory", "Boolean", "Mandatory", "Obligation rather than advice; missing means true", Frequency.constant),
+    make_element_template!("event", null, "Active Event", "Identifier of the event whose direction applies; empty under the default", Frequency.report),
+    make_element_template!("event_start", null, "Event Start", "When the current event took effect", Frequency.report),
+    make_element_template!("event_end", null, "Event End", "When the producer expects to revert the event", Frequency.report),
+    make_element_template!("export_limit", "W", "Export Limit", "Cap on export at the governed point; -1 when not directed", Frequency.report),
+    make_element_template!("import_limit", "W", "Import Limit", "Cap on import at the governed point; -1 when not directed", Frequency.report),
+    make_element_template!("generation_limit", "W", "Generation Limit", "Cap on generation behind the governed point; -1 when not directed", Frequency.report),
+    make_element_template!("load_limit", "W", "Load Limit", "Cap on controllable load behind the governed point; -1 when not directed", Frequency.report),
+    make_element_template!("charge_limit", "W", "Charge Limit", "Cap on power into storage; -1 when not directed", Frequency.report),
+    make_element_template!("discharge_limit", "W", "Discharge Limit", "Cap on power out of storage; -1 when not directed", Frequency.report),
+    make_element_template!("generation_fraction", "%", "Generation Fraction", "Generation cap as a share of nameplate; -1 when not directed", Frequency.report),
+    make_element_template!("load_fraction", "%", "Load Fraction", "Load cap as a share of nameplate; -1 when not directed", Frequency.report),
+    make_element_template!("energize", "Boolean", "Energize", "False while the authority requires the DER de-energised", Frequency.report),
+    make_element_template!("connect", "Boolean", "Connect", "False while the authority requires the DER disconnected", Frequency.report),
+    make_element_template!("level", null, "Level", "Advisory demand-response level: normal | moderate | high | special", Frequency.report),
 ];
 
 __gshared immutable KnownElementTemplate[] g_PowerControl_elements = [
