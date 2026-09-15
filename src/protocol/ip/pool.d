@@ -7,6 +7,7 @@ import urt.lifetime;
 import urt.map;
 import urt.mem;
 import urt.string;
+import urt.time;
 import urt.util : ctz, log2;
 
 import manager;
@@ -16,6 +17,8 @@ import manager.features : has_ipv6, is_tiny;
 
 nothrow @nogc:
 
+
+enum MonoTime no_expiry = MonoTime(ulong.max);
 
 final class IPPool : BaseObject
 {
@@ -250,6 +253,27 @@ nothrow @nogc:
         return null;
     }
 
+    // a delegated prefix expires; static pools stay at no_expiry
+    final void lifetimes(MonoTime preferred_until, MonoTime valid_until)
+    {
+        _preferred_until = preferred_until;
+        _valid_until = valid_until;
+    }
+
+    // tightest bound along the parent chain, so a pool carved from a delegation inherits its expiry
+    final void bounds(out MonoTime preferred_until, out MonoTime valid_until)
+    {
+        preferred_until = no_expiry;
+        valid_until = no_expiry;
+        for (IPv6Pool p = this; p; p = p._pool.get)
+        {
+            if (p._preferred_until < preferred_until)
+                preferred_until = p._preferred_until;
+            if (p._valid_until < valid_until)
+                valid_until = p._valid_until;
+        }
+    }
+
     final bool contains(IPv6Addr addr) const pure
     {
         if (!_tree.ready)
@@ -426,6 +450,8 @@ private:
     }
 
     IPv6NetworkAddress _prefix;
+    MonoTime _preferred_until = no_expiry;
+    MonoTime _valid_until = no_expiry;
     bool _acquired;
     ObjectRef!IPv6Pool _pool;
     PrefixTree!() _tree;

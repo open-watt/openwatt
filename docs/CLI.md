@@ -957,9 +957,35 @@ infers the type for well-known codes and falls back to raw hex bytes.
 
 ### DHCPv6
 
-The DHCPv6 message codec is present, but there are no DHCPv6 client, server,
-or lease commands yet. Future DHCPv6 address/prefix configuration will coexist
-with Router Advertisement discovery of default routers.
+The DHCPv6 message codec and client are present; there are no server or lease
+commands yet. DHCPv6 address and prefix configuration coexists with Router
+Advertisement discovery of default routers.
+
+#### Client
+
+`/protocol/dhcp/client6` requests host addresses (`IA_NA`) and/or delegated
+prefixes (`IA_PD`). Each bound address appears as a dynamic `address6`. The
+delegated prefix appears as one dynamic `pool6` named `pool-name`, a stable
+identity for downstream consumers to draw from: the pool carries the freshest
+delegated prefix and is renumbered in place when the server replaces it, and the
+delegation's remaining lifetimes ride with it and cap whatever an `ra` service
+drawing from it advertises. Bindings are tracked by identity, so a renumbering
+Reply that deprecates the old address beside its replacement keeps both until the
+old one lapses. Each IA is renewed at its own T1, rebound at T2 and each binding
+dropped at its own valid lifetime; an address is marked deprecated once its
+preferred lifetime passes. Only built with the in-tree IP stack; on desktop hosts the kernel's own
+client owns the lease.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `interface` | interface name | | Interface to solicit on. |
+| `request-address` | `yes`/`no` | `yes` | Request an `IA_NA` host address. |
+| `request-prefix` | `yes`/`no` | `no` | Request an `IA_PD` delegated prefix. |
+| `pool-name` | name | `<name>.pd` | Name of the dynamic pool carrying the delegated prefix. |
+
+```
+/protocol/dhcp/client6/add name=wan interface=eth0 request-prefix=true pool-name=site
+```
 
 ### `/protocol/ip/ra`
 
@@ -982,8 +1008,8 @@ and `GATEWAY=1`; on desktop hosts the kernel owns the router role.
 | `prefix` | `prefix/64` | | Static alternative to `pool`. |
 | `interval` | `4s` to `1800s` | `600s` | Maximum unsolicited advertisement interval; each gap is random between a third of this and this (fixed at this below 9s), the first three capped at 16s. |
 | `router-lifetime` | `0s`, or `interval` to `9000s` | `30m` | Default-router lifetime; `0s` advertises prefix only. |
-| `valid-lifetime` | duration | `30d` | Prefix valid lifetime. |
-| `preferred-lifetime` | duration <= `valid-lifetime` | `7d` | Prefix preferred lifetime. |
+| `valid-lifetime` | duration | `30d` | Prefix valid lifetime; capped to the remaining lifetime of a delegated pool prefix. |
+| `preferred-lifetime` | duration <= `valid-lifetime` | `7d` | Prefix preferred lifetime; capped the same way. |
 | `managed` | `yes`/`no` | `no` | M flag: clients should use DHCPv6 for addresses. |
 | `other-config` | `yes`/`no` | `no` | O flag: clients should use DHCPv6 for other config. |
 | `dns` | IPv6 addresses | empty | RDNSS servers advertised. |

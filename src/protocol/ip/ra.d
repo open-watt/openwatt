@@ -226,6 +226,7 @@ protected:
             }
             _lease = p;
             p.subscribe(&pool_state_change);
+            p.bounds(_preferred_until, _valid_until);
         }
         else
             _prefix = _static_prefix;
@@ -259,7 +260,7 @@ protected:
             {
                 if (now < _last_ra + min_delay_between_ras)
                     return CompletionStatus.continue_;
-                send_ra(s, now, 0);
+                send_ra(s, now, 0, true);
             }
             if (s)
                 slaac_withdraw(get_module!IPModule.stack, s, _prefix, now);
@@ -278,6 +279,8 @@ protected:
             _joined = false;
         }
         _station = null;
+        _preferred_until = no_expiry;
+        _valid_until = no_expiry;
         return CompletionStatus.complete;
     }
 
@@ -301,6 +304,8 @@ private:
     Duration _router_lifetime;
     Duration _valid_lifetime;
     Duration _preferred_lifetime;
+    MonoTime _preferred_until = no_expiry;      // delegation bounds, held past the pool's own teardown
+    MonoTime _valid_until = no_expiry;
     MonoTime _last_ra;
     MonoTime _next_ra;
     Array!IPv6Addr _dns;
@@ -345,8 +350,10 @@ private:
         EthernetStation s = _station.get;
         if (!s)
             return;
-        send_ra(s, now, cast(ushort)_router_lifetime.as!"seconds");
-        slaac_apply(get_module!IPModule.stack, s, _prefix, cast(uint)_valid_lifetime.as!"seconds", cast(uint)_preferred_lifetime.as!"seconds", now);
+        if (IPv6Pool p = _lease.get)
+            p.bounds(_preferred_until, _valid_until);
+        send_ra(s, now, cast(ushort)_router_lifetime.as!"seconds", false);
+        slaac_apply(get_module!IPModule.stack, s, _prefix, capped(_valid_lifetime, _valid_until, now), capped(_preferred_lifetime, _preferred_until, now), now);
         long max_ms = _interval.as!"msecs";
         long min_ms = max_ms >= 9000 ? max_ms / 3 : max_ms;
         Duration next = (min_ms + rand() % (max_ms - min_ms + 1)).msecs;
@@ -359,11 +366,23 @@ private:
         arm(now + next);
     }
 
-    void send_ra(EthernetStation s, MonoTime now, ushort lifetime)
+    // RFC 8415 6.3: a delegated prefix is never advertised beyond the delegation's remaining lifetime
+    static uint capped(Duration configured, MonoTime until, MonoTime now) pure
+    {
+        if (until == no_expiry)
+            return cast(uint)configured.as!"seconds";
+        Duration left = until > now ? until - now : Duration.zero;
+        return cast(uint)(left < configured ? left : configured).as!"seconds";
+    }
+
+    // withdrawal zeroes the prefix lifetimes too: a zero router lifetime alone leaves the prefix on-link and preferred
+    void send_ra(EthernetStation s, MonoTime now, ushort lifetime, bool withdraw)
     {
         IPv6Addr source = link_local_of(s);
         if (source == IPv6Addr.any)
             return;
+        uint valid = withdraw ? 0 : capped(_valid_lifetime, _valid_until, now);
+        uint preferred = withdraw ? 0 : capped(_preferred_lifetime, _preferred_until, now);
 
         align(size_t.sizeof) ubyte[IPv6Header.sizeof + 16 + 8 + 32 + 8 + 16 * 8] buffer = void;
         size_t dns_count = _dns.length > 8 ? 8 : _dns.length;
@@ -395,8 +414,8 @@ private:
         option[1] = 4;
         option[2] = 64;
         option[3] = 0xC0;
-        storeBigEndian(cast(uint*)(option + 4), cast(uint)_valid_lifetime.as!"seconds");
-        storeBigEndian(cast(uint*)(option + 8), cast(uint)_preferred_lifetime.as!"seconds");
+        storeBigEndian(cast(uint*)(option + 4), valid);
+        storeBigEndian(cast(uint*)(option + 8), preferred);
         store_ipv6_address(option + 16, _prefix.addr);
         option += 32;
 
@@ -423,6 +442,22 @@ private:
         _last_ra = now;
         s.send(ipv6_multicast_mac(IPv6Addr.linkLocal_allNodes), buffer[0 .. IPv6Header.sizeof + message_length], EtherType.ip6);
     }
+}
+
+
+unittest
+{
+    MonoTime now = MonoTime(1_000_000_000_000);
+    Duration configured = 3600.seconds;
+
+    // unbounded pools and bounds beyond the configured lifetime leave it untouched
+    assert(RAService.capped(configured, no_expiry, now) == 3600);
+    assert(RAService.capped(configured, now + 7200.seconds, now) == 3600);
+
+    // a delegation ending sooner caps the advertisement, and a lapsed one advertises zero
+    assert(RAService.capped(configured, now + 600.seconds, now) == 600);
+    assert(RAService.capped(configured, now, now) == 0);
+    assert(RAService.capped(configured, now - 1.seconds, now) == 0);
 }
 
 }
