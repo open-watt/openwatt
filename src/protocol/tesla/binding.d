@@ -252,7 +252,7 @@ protected:
         _built = true;
         refresh_access(_master && _master.has_agency);
         builder.commit();
-        device.notify(ComponentEvent.online);
+        device.notify(ComponentEvent.materialised);
         return true;
     }
 

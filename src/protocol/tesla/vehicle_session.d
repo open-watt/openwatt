@@ -267,7 +267,10 @@ protected:
         _last_vehicle_poll_time = MonoTime.init;
 
         if (Device* vehicle = name[] in g_app.devices)
+        {
             (*vehicle).write_element("connected", false);
+            (*vehicle).remove_online_source(cast(void*)this);
+        }
         _routing_seeded = false;
         _phase = Phase.connecting;
         if (_client !is null)
@@ -985,6 +988,8 @@ private:
                 retry.succeeded(0);
             _phase = Phase.ready;
             write_status();
+            if (Device* vehicle = name[] in g_app.devices)
+                (*vehicle).set_online(cast(void*)this, true);
             schedule_poll(getTime());
             log.info("session ready for VIN '", name[], "'");
         }

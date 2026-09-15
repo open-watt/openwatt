@@ -805,7 +805,7 @@ private:
     void replay_discovery_state()
     {
         _trie.match_retained("#", (ref const RetainedMessage message) nothrow @nogc {
-            _ha_discovery.handle_state_publish(message.topic[], message.payload[], getTime());
+            _ha_discovery.handle_state_publish(message.topic[], message.payload[], getTime(), true);
         });
     }
 

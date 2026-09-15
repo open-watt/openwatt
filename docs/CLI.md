@@ -642,7 +642,9 @@ malformed or error responses all count) and no poll has succeeded for thirty
 seconds, and online again on the first successful sample. A partially failing
 device stays online while any of its data still samples; the dead elements
 simply stop updating. Event-driven bindings mark the device online on incoming
-data and offline when their transport drops. A binding retracts its
+data and offline when their transport drops. Bindings that drive local hardware
+(`/binding/gpio`, `/driver/power/regulator`) mark the device online once the
+hardware is claimed and offline when it faults. A binding retracts its
 verdict and cancels its watchdog during shutdown, including restarts. If no
 other source remains online, the device becomes offline until fresh activity.
 
@@ -659,7 +661,9 @@ to six mode-01 pids per request, queries the supported-pid bitmasks at startup
 so pids the vehicle does not implement are never polled, and treats a silent
 vehicle as parked rather than failed: it follows the interface's `vehicle` state,
 dropping to a quiet probe every ten seconds while that reads `asleep` and
-resuming its normal cadence when the vehicle answers again.
+resuming its normal cadence when the vehicle answers again. The device's
+`status.online` verdict follows the interface, so it reads online while the
+adapter answers whether or not the vehicle is awake.
 
 | Property | Values | Default | Description |
 | --- | --- | --- | --- |

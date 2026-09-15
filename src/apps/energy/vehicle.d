@@ -78,7 +78,7 @@ Component vehicle_for(const(char)[] vin)
     changed = materialise_vehicle(builder, vin, changed);
     builder.commit();
     if (changed)
-        vehicle.notify(ComponentEvent.online);
+        vehicle.notify(ComponentEvent.materialised);
     enrich_from_nhtsa(vehicle, vin);
     return vehicle;
 }
