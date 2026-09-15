@@ -239,6 +239,32 @@ the commit history and linked design documents carry the implementation record.
   last displayed reason. Record an explicit idle/satisfied result each tick, or expire the
   reason elements.
 
+- **Land policy `shape=`**: `conf/startup.conf` passes `shape=window` on `evie_ready` and
+  `zephyr_ready`, but `Policy` has no `shape` property, so `add` refuses both with
+  `No property 'shape'` and neither policy exists at runtime. `ow/energy-policy-shape` re-adds the
+  property pending window scheduling in the planner; land it, or drop the argument from the config.
+
+- **Implement or de-document the energy-app setpoints**: COMPONENT_TEMPLATES.md describes
+  `Battery.target_state`/`min_state`, `WaterHeater` and `HVAC` `min_temperature`/`super_temperature`,
+  and `PowerControl.measured`/`autonomous_reference` as driven or read by the energy app. The
+  allocator writes only `setpoint` and `enable`, and nothing reads the two aliases. Wire them, or
+  mark them planned so profile authors stop expecting them.
+
+- **Several control surfaces per appliance**: the spec lets a device expose more than one
+  `PowerControl` (split charge and discharge surfaces) and conditions Switch-as-control on Port
+  association; `find_actuator_in` takes the first match anywhere in the tree and the registry holds
+  one `Control` per appliance.
+
+- **Reconcile the `DeviceInfo.type` vocabulary**: the doc enumerates `energy-meter`, `inverter`,
+  `battery`, `evse`, `smart-switch`, `contact-sensor`; the energy app also classifies on `pv`,
+  `solar`, `generator`, `car`, `vehicle`, `hvac` and `water-heater`. A standalone PV device written
+  to the documented list is treated as a boundary port.
+
+- **Pylon profile limits**: `can_profiles/pylon.conf` maps `chargeCurrentLimit` and
+  `dischargeCurrentLimit` under a `BMS` template no template table knows; the documented home is
+  `Battery.max_charge_current`/`max_discharge_current`. Fix alongside `ow/energy-bms-limits`, which
+  is what will read them.
+
 ## Tesla TWC
 
 - **[#661] Validate fleet transfers on hardware**: exercise cap changes, circuit-budget
