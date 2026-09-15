@@ -68,6 +68,7 @@ row alone. Sizes stay in bytes; round in the note if that reads better.
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-09-10 | #687 | ldc 1.43.0 | 5,622,160 | 494,512 | | first row; DeviceBuilder as the only tree writer, deployed to the Pi as slot 152 |
 | 2026-09-10 | #689 | ldc 1.43.0 | 5,635,616 | 494,512 | | integration image, master + #687 + #689, deployed to the Pi as slot 154 |
+| 2026-09-15 | 95417758 | ldc 1.43.0 | 5,578,016 | 482,808 | | master after #699, #706 and #707, deployed to the Pi as slot 156 |
 
 ### Waveshare ESP32-S3-RS485-CAN, `make esp-idf-build BOARD=waveshare-esp32-s3-rs485-can CONFIG=release`
 
@@ -77,6 +78,7 @@ Limit is the 4 MB `ota_0` partition. `ram` is internal DRAM only; PSRAM is heap.
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-09-08 | 6b95c1e1 | ldc 1.42.0 | 3,190,272 | 150,049 | 4,194,304 | first row; LDC 1.43 bitcode is rejected by esp-clang 21, build with 1.42 |
 | 2026-09-09 | a8c75cbf | ldc 1.42.0 | 2,831,712 | 129,561 | 4,194,304 | uRT now defaults to no exceptions, removing RTTI and exception metadata |
+| 2026-09-15 | 95417758 | ldc 1.42.0 | 2,853,040 | 129,897 | 4,194,304 | master after #699, OTA to openwatt-4547 |
 
 ### SmartEVSE v3.0, `make esp-idf-build BOARD=smartevse-v30 CONFIG=release`
 

@@ -754,8 +754,10 @@ this is what remains.
   buffer compacted on each append, so the pending backlog is copied on every drain cycle. Keep a
   bounded ring of frame pages with framing progress instead, and stop masking in place.
 
-- **Take the caller's `MemFlags` through the page-pool jumbo path**: `pagepool.d` hard-codes
-  `MemFlags.dma` for any request above the largest slab category, which on ESP32 confines a
+- **Take the caller's `MemFlags` through the page pool**: `pagepool.d` hard-codes `MemFlags.dma` for
+  slabs and for any request above the largest slab category (on the fixed ESP32-S3 image the slab
+  path still logs `OOM! size=6544 flags=4 free=4852` with internal SRAM at 246 of 303 KB and 7.8 MB
+  of PSRAM idle), which on ESP32 confines a
   large page to internal SRAM while PSRAM sits idle. Only a page that reaches a NIC ring needs
   DMA; ESP32 WiFi copies on `esp_wifi_internal_tx`, and TCP TX pages are copied into the pcb
   send buffer. Nothing in tree hands a pool jumbo to hardware, so the default should be the
@@ -784,6 +786,22 @@ this is what remains.
 - **Symbolised traces are garbage on DMD/Windows**: `_resolve_batch` resolves every frame to
   `RtlUserThreadStart` with vctools file names, in crash traces and in `capture_trace` callers
   alike, so a trace from a debug build on Windows identifies nothing.
+
+- **Classify Linux netdevs before naming them `etherN`**: on the Pi `can0` enumerates as `ether1`
+  (MAC `00:00:00:00:00:00`, TX drops only) ahead of `eth0` as `ether2`, so a `/interface/vlan`
+  parented on `ether1` silently receives nothing; the site config carried exactly that for weeks.
+  Already listed under `/port` discovery; it also needs the ethernet collection to skip
+  non-ARPHRD_ETHER devices and stable names for the rest.
+
+- **`parse_syslog` rejects a small fraction of relayed log frames**: the Pi logs
+  `sync: malformed log frame from 'fleet-sync1'` about once every three minutes while openwatt-4547
+  streams logs (23 in the last window against 7812 accepted), and the record is dropped with no
+  record of what failed. `parse_syslog` requires exactly 7 space-delimited header fields, so any
+  empty or space-bearing HOSTNAME/APP-NAME/PROCID/TIMESTAMP breaks it; `format_syslog` guards the
+  first three with `-` but the timestamp only on `ticks`, and both sides build the line in the 4 KB
+  temp arena. `src/manager/syslog.d` has no unittest: add a round-trip test over the awkward cases
+  (empty message, nil fields, pre-epoch and far-future stamps, names with spaces), log the offending
+  prefix on rejection, and make the encoder refuse to emit a line it cannot parse back.
 
 - **Move WebSocket RX off the tick**: `WebSocket.update()` still polls `_stream.read()` each
   frame; it should install `rx_handler` and decode on delivery. TX is now pull-driven by the
