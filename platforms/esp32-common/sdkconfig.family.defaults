@@ -1,0 +1,5 @@
+# Interrupt paths that drive pins and rearm timers must stay live while the
+# cache is off for flash writes, on every part in the family.
+CONFIG_GPIO_CTRL_FUNC_IN_IRAM=y
+CONFIG_GPTIMER_CTRL_FUNC_IN_IRAM=y
+CONFIG_GPTIMER_ISR_CACHE_SAFE=y

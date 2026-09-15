@@ -785,6 +785,25 @@ this is what remains.
   `RtlUserThreadStart` with vctools file names, in crash traces and in `capture_trace` callers
   alike, so a trace from a debug build on Windows identifies nothing.
 
+- **Bring the power regulator up on hardware**: with the ESP32-family primitives available
+  (urt#296), `fire_open` now reaches a real hardware claim instead of the platform gate, and
+  refuses at the first `counter_acquire` on an ESP32-S3 with both counters free. This driver has
+  never run on hardware on any target, so this is first bring-up rather than a port regression.
+  Diagnosis is blocked by a second defect: `log_error` from `src/driver/power/hardware.d` prints
+  garbage for its arguments (observed `code=1070315704`, `code=1107998164` - float bit patterns -
+  and a `Counter.port` of 3 for both counters where the acquire loop cannot return the same port
+  twice), so the reported errno and ports cannot be trusted. Fix the logging first, then the
+  claim.
+
+- **Port the last two classic-only ESP32 primitives**: counters, GPIO interrupts, link slots and
+  the ADC (oneshot reads, calibration by the IDF's own scheme macro) now build on every part in
+  the family, which is what the power regulator needs. Two remain gated to classic ESP32 in
+  `urt/driver/esp32`: the reflex (NMI-tier link) synthesises Xtensa `xt_nmi` code against classic
+  pin ranges, and the ISR-side raw ADC read drives the classic SAR registers directly
+  (`adc_hw_can_read_critical` is false elsewhere). Each needs its own port and hardware check:
+  S2/S3 for the reflex NMI vector and GPIO register layout, and a per-part ISR-safe SAR path or
+  an honest "not in ISR" contract for the ADC.
+
 - **Move WebSocket RX off the tick**: `WebSocket.update()` still polls `_stream.read()` each
   frame; it should install `rx_handler` and decode on delivery. TX is now pull-driven by the
   stream, so the tick carries only RX.
