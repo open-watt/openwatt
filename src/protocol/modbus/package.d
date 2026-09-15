@@ -532,9 +532,15 @@ nothrow @nogc:
                     break;
                 case FunctionCode.write_multiple_coils:
                 case FunctionCode.write_multiple_registers:
-                    assert(false, "TODO: pretty-print the output?");
-//                    session.write_line("Starting register: ", toHexString(response.data[0..2], 2, 4, "_ "));
-//                    session.write_line("Number of registers written: ", toHexString(response.data[2..4], 2, 4, "_ "));
+                    if (response.data.length < 4)
+                    {
+                        session.write_line("Invalid write response...");
+                        break;
+                    }
+                    ushort start = response.data[0..2].bigEndianToNative!ushort;
+                    ushort written = response.data[2..4].bigEndianToNative!ushort;
+                    session.writef("  {0}: {1} written
+", start, written);
                     break;
                 default:
                     break;
