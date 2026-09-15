@@ -113,6 +113,7 @@ nothrow @nogc:
             attach_writer(entity);
     }
 
+    // the transport is gone, so every availability observation is stale and every vote retracts
     void suspend()
     {
         if (!_active)
@@ -121,6 +122,7 @@ nothrow @nogc:
             detach_writer(entity);
         _publisher = null;
         _active = false;
+        forget_availability();
     }
 
     bool handle_publish(const(char)[] topic, const(ubyte)[] payload, MonoTime timestamp)
@@ -142,7 +144,8 @@ nothrow @nogc:
         return false;
     }
 
-    void handle_state_publish(const(char)[] topic, const(ubyte)[] payload, MonoTime timestamp)
+    // a retained replay only seeds availability nobody has observed yet; live observations are newer
+    void handle_state_publish(const(char)[] topic, const(ubyte)[] payload, MonoTime timestamp, bool replay = false)
     {
         if (_prefixes.empty || payload.empty)
             return;
@@ -150,6 +153,9 @@ nothrow @nogc:
         {
             if (entity.state_topic[] == topic)
                 write_state(entity, payload, cast(SysTime)timestamp);
+            foreach (i; 0 .. entity.availability.length)
+                if (entity.availability[i].topic[] == topic && !(replay && entity.availability[i].state))
+                    apply_availability(entity, i, payload, replay);
         }
     }
 
@@ -166,8 +172,21 @@ private:
         bool announced;
     }
 
+    struct HAAvailability
+    {
+        String topic;
+        String payload_available;
+        String payload_not_available;
+        String expression_source;
+        Expression* expression;
+        ubyte state;
+        bool uses_value_json;
+    }
+
     struct HAEntity
     {
+        @disable this(this);
+
         String config_topic;
         String component_key;
         String domain;
@@ -187,6 +206,10 @@ private:
         Device device;
         Expression* value_expression;
         Expression* command_expression;
+        Array!HAAvailability availability;
+        ubyte availability_mode;
+        ubyte available;
+        bool live_verdict;
         bool value_template_valid;
         bool command_template_valid;
         bool uses_value_json;
@@ -223,6 +246,21 @@ private:
         foreach (ref entity; _entities)
             release_entity(entity);
         _entities.clear();
+        forget_availability();
+    }
+
+    void forget_availability()
+    {
+        foreach (ref entity; _entities)
+        {
+            foreach (ref a; entity.availability)
+                a.state = 0;
+            entity.available = 0;
+            entity.live_verdict = false;
+        }
+        if (g_app)
+            foreach (ref record; _devices)
+                record.device.remove_online_source(&this);
     }
 
     void release_entity(ref HAEntity entity)
@@ -235,10 +273,15 @@ private:
         if (entity.command_expression)
             entity.command_expression.free_expression();
         entity.command_expression = null;
+        foreach (ref a; entity.availability)
+            if (a.expression)
+                a.expression.free_expression();
+        entity.availability.clear();
     }
 
     void remove_entities(const(char)[] config_topic)
     {
+        Device device;
         for (size_t i = 0; i < _entities.length; )
         {
             if (_entities[i].config_topic[] != config_topic)
@@ -249,8 +292,11 @@ private:
             release_entity(_entities[i]);
             if (_entities[i].state)
                 _entities[i].state.mark_gap();
+            device = _entities[i].device;
             _entities.removeSwapLast(i);
         }
+        if (device)
+            refresh_device_online(device);
     }
 
     void handle_config(ref const HADiscoveryTopic topic, const(char)[] config_topic, const(ubyte)[] payload)
@@ -403,6 +449,7 @@ private:
         entity.select_info = select_info;
         entity.state = state;
         entity.device = record.device;
+        parse_availability(*entity, config, root, base_topic);
         entity.writable = supports_write(domain, entity.command_topic[], entity.command_template_valid);
         state.access = entity.writable ? Access.read_write : Access.read;
         mount_status_alias(builder, record.device, *state, entity_id);
@@ -531,6 +578,121 @@ private:
         element.name = name.make_string();
         element.sampling_mode = SamplingMode.constant;
         element.access = Access.read;
+    }
+
+    static void parse_availability(ref HAEntity entity, ref Variant config, ref Variant root, const(char)[] base_topic)
+    {
+        // a list entry names its topic and template directly; the single form uses the prefixed keys
+        static void add(ref HAEntity entity, const(char)[] base_topic, ref Variant object, Variant* fallback, bool list_item)
+        {
+            const(char)[] get(const(char)[] full, const(char)[] abbreviated)
+            {
+                const(char)[] value = json_string(object, full, abbreviated);
+                return value.ptr || !fallback ? value : json_string(*fallback, full, abbreviated);
+            }
+
+            HAAvailability a;
+            a.topic = resolve_topic(list_item ? get("topic", "t") : get("availability_topic", "avty_t"), base_topic);
+            if (a.topic.empty)
+                return;
+            const(char)[] template_ = list_item ? get("value_template", "val_tpl") : get("availability_template", "avty_tpl");
+            if (!template_.empty)
+            {
+                if (!compile_jinja_template(template_, a.expression_source, a.expression))
+                    return;
+                a.uses_value_json = a.expression_source[].contains("$value_json");
+            }
+            const(char)[] available = get("payload_available", "pl_avail");
+            const(char)[] not_available = get("payload_not_available", "pl_not_avail");
+            a.payload_available = (available.ptr ? available : "online").make_string();
+            a.payload_not_available = (not_available.ptr ? not_available : "offline").make_string();
+            entity.availability.pushBack(a.move);
+        }
+
+        const(char)[] mode = json_string(config, "availability_mode", "avty_mode");
+        if (!mode.ptr)
+            mode = json_string(root, "availability_mode", "avty_mode");
+        entity.availability_mode = mode == "all" ? 1 : mode == "any" ? 2 : 0;
+
+        Variant* list = json_member(config, "availability", "avty");
+        if (!list)
+            list = json_member(root, "availability", "avty");
+        if (!list)
+            add(entity, base_topic, config, &root, false);
+        else if (list.isObject)
+            add(entity, base_topic, *list, null, true);
+        else if (list.isArray)
+        {
+            foreach (ref item; list.asArray()[])
+                if (item.isObject)
+                    add(entity, base_topic, item, null, true);
+        }
+    }
+
+    void apply_availability(ref HAEntity entity, size_t index, const(ubyte)[] payload, bool replay)
+    {
+        HAAvailability* a = &entity.availability[index];
+        const(char)[] token = (cast(const(char)[])payload).trim();
+        Variant rendered;
+        if (a.expression)
+        {
+            Variant json;
+            if (a.uses_value_json)
+                json = parse_json(token);
+            Variant raw = Variant(token);
+            rendered = evaluate_template(a.expression, raw, json);
+            if (!rendered.isString)
+                return;
+            token = rendered.asString().trim();
+        }
+        ubyte state = token == a.payload_available[] ? 1 : token == a.payload_not_available[] ? 2 : 0;
+        if (state == 0)
+            return;
+        a.state = state;
+
+        // availability_mode: latest follows the topic last heard, all needs every topic up, any needs one
+        ubyte verdict = state;
+        if (entity.availability_mode == 0)
+        {
+            if (replay && entity.live_verdict)
+                return;
+        }
+        else
+        {
+            bool any_up, any_down, all_up = true;
+            foreach (ref other; entity.availability)
+            {
+                any_up |= other.state == 1;
+                any_down |= other.state == 2;
+                all_up &= other.state == 1;
+            }
+            if (entity.availability_mode == 1)
+                verdict = any_down ? 2 : all_up ? 1 : 0;
+            else
+                verdict = any_up ? 1 : any_down ? 2 : 0;
+        }
+        entity.live_verdict = !replay;
+        if (verdict == entity.available)
+            return;
+        entity.available = verdict;
+        refresh_device_online(entity.device);
+    }
+
+    // a device is reachable while any of its entities says so; entities without availability never vote
+    void refresh_device_online(Device device)
+    {
+        bool any_up, any_down;
+        foreach (ref entity; _entities)
+        {
+            if (entity.device !is device)
+                continue;
+            any_up |= entity.available == 1;
+            any_down |= entity.available == 2;
+        }
+        if (any_up || any_down)
+            device.set_online(&this, any_up);
+        else
+            device.remove_online_source(&this);
     }
 
     static const(char)[] device_identity(Variant* config)
@@ -1158,6 +1320,66 @@ unittest
     assert(relay.value.isBool && !relay.value.asBool);
     relay.value(true);
     assert(sink.topic[] == "meter/relay/set" && sink.payload[] == "ON");
+
+    assert(device.online_status == OnlineStatus.unknown);
+    static immutable string link_config =
+        `{"dev":{"ids":"meter-01","name":"Main Meter"},"name":"Link","uniq_id":"meter_link","stat_t":"meter/link",` ~
+        `"avty_t":"meter/status","pl_avail":"up","pl_not_avail":"down"}`;
+    assert(discovery.handle_publish("homeassistant/sensor/meter/link/config", cast(const(ubyte)[])link_config, getTime()));
+    assert(device.online_status == OnlineStatus.unknown);
+    discovery.handle_publish("meter/status", cast(const(ubyte)[])"up", getTime());
+    assert(device.online_status == OnlineStatus.online);
+    discovery.handle_publish("meter/status", cast(const(ubyte)[])"down", getTime());
+    assert(device.online_status == OnlineStatus.offline);
+
+    static immutable string radio_config =
+        `{"dev":{"ids":"meter-01","name":"Main Meter"},"name":"Radio","uniq_id":"meter_radio","stat_t":"meter/radio",` ~
+        `"avty_mode":"all","avty":[{"t":"meter/status","pl_avail":"up","pl_not_avail":"down"},` ~
+        `{"t":"meter/lwt","val_tpl":"{{ value_json.state }}"}]}`;
+    assert(discovery.handle_publish("homeassistant/sensor/meter/radio/config", cast(const(ubyte)[])radio_config, getTime()));
+    discovery.handle_publish("meter/lwt", cast(const(ubyte)[])`{"state":"online"}`, getTime());
+    assert(device.online_status == OnlineStatus.offline);
+    discovery.handle_publish("meter/status", cast(const(ubyte)[])"up", getTime());
+    assert(device.online_status == OnlineStatus.online);
+    discovery.handle_publish("meter/lwt", cast(const(ubyte)[])`{"state":"offline"}`, getTime());
+    assert(device.online_status == OnlineStatus.online);
+    assert(discovery.handle_publish("homeassistant/sensor/meter/link/config", cast(const(ubyte)[])"", getTime()));
+    assert(device.online_status == OnlineStatus.offline);
+    discovery.handle_publish("meter/lwt", cast(const(ubyte)[])`{"state":"online"}`, getTime());
+    assert(device.online_status == OnlineStatus.online);
+    assert(discovery.handle_publish("homeassistant/sensor/meter/radio/config", cast(const(ubyte)[])"", getTime()));
+    assert(device.online_status == OnlineStatus.offline);
+
+    assert(discovery.handle_publish("homeassistant/sensor/meter/link/config", cast(const(ubyte)[])link_config, getTime()));
+    discovery.handle_state_publish("meter/status", cast(const(ubyte)[])"down", getTime(), true);
+    assert(device.online_status == OnlineStatus.offline);
+    discovery.handle_publish("meter/status", cast(const(ubyte)[])"up", getTime());
+    assert(device.online_status == OnlineStatus.online);
+    discovery.handle_state_publish("meter/status", cast(const(ubyte)[])"down", getTime(), true);
+    assert(device.online_status == OnlineStatus.online);
+    discovery.suspend();
+    assert(device.online_status == OnlineStatus.offline);
+    discovery.resume(&sink.publish);
+    assert(device.online_status == OnlineStatus.offline);
+    discovery.handle_state_publish("meter/status", cast(const(ubyte)[])"up", getTime(), true);
+    assert(device.online_status == OnlineStatus.online);
+    assert(discovery.handle_publish("homeassistant/sensor/meter/link/config", cast(const(ubyte)[])"", getTime()));
+
+    static immutable string latest_config =
+        `{"dev":{"ids":"meter-01","name":"Main Meter"},"name":"Latest","uniq_id":"meter_latest","stat_t":"meter/latest",` ~
+        `"avty":[{"t":"meter/status","pl_avail":"up","pl_not_avail":"down"},{"t":"meter/lwt"}]}`;
+    assert(discovery.handle_publish("homeassistant/sensor/meter/latest/config", cast(const(ubyte)[])latest_config, getTime()));
+    discovery.handle_state_publish("meter/status", cast(const(ubyte)[])"up", getTime(), true);
+    assert(device.online_status == OnlineStatus.online);
+    discovery.handle_state_publish("meter/lwt", cast(const(ubyte)[])"offline", getTime(), true);
+    assert(device.online_status == OnlineStatus.offline);
+    discovery.handle_publish("meter/status", cast(const(ubyte)[])"up", getTime());
+    assert(device.online_status == OnlineStatus.online);
+    discovery.handle_state_publish("meter/lwt", cast(const(ubyte)[])"offline", getTime(), true);
+    assert(device.online_status == OnlineStatus.online);
+    discovery.handle_publish("meter/lwt", cast(const(ubyte)[])"offline", getTime());
+    assert(device.online_status == OnlineStatus.offline);
+    assert(discovery.handle_publish("homeassistant/sensor/meter/latest/config", cast(const(ubyte)[])"", getTime()));
 
     DiscoveryTestSink second_sink;
     HADiscovery second_discovery;

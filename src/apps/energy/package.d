@@ -118,6 +118,7 @@ nothrow @nogc:
         EnergyApp instance = alloc!EnergyApp();
         instance.manager = alloc!EnergyManager();
         instance.energy_device = device;
+        device.set_online(cast(void*)instance, true);
         instance.registry = alloc!ControlRegistry();
         instance.topology_dirty = true;
         instance.last_topology_rebuild = MonoTime.init;

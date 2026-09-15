@@ -190,6 +190,7 @@ nothrow @nogc:
             _clock.nominal_rate = _sampler.clock_hz();
             _clock.anchors.clear();     // new stream: sample-0 anchor is re-established on the first edge
             _have_stream = false;
+            set_device_online(true);
             return CompletionStatus.complete;
         }
 
@@ -284,6 +285,7 @@ private:
             if (status != GpioDrainStatus.drained || (ready & IoReady.error))
             {
                 detach_watch();
+                set_device_online(false);
                 restart();
             }
         }

@@ -321,10 +321,6 @@ The current implementation and remaining phases are described in
     Route removal through the builder when the first producer needs it.
   - liveness is centralised (`Device.set_online`, the `status.online` element), but not every
     source votes yet, so those devices sit at `unknown` forever:
-    - OBD wants a richer verdict than a binary flag; parked and asleep are not offline. The likely
-      mapping is online while the dongle answers, with awake/asleep staying its own element.
-    - Home Assistant availability/LWT needs `availability`/`availability_topic` parsed (single and
-      list forms, custom payloads) and per-entity availability aggregated up to the device.
     - a peer link dropping should mark that peer's mirrored devices offline; the sync layer has
       no override today, and mirrored devices therefore never go offline.
   - MQTT discovery and sync mirrors publish an empty device and grow it one edit per frame; that is
@@ -796,6 +792,10 @@ this is what remains.
 - **Fix `/device/print` on non-terminal sessions**: `/api/cli/execute` crashes the process and
   a piped interactive session prints nothing. Audit `DeviceTreeView` and other live views for
   terminal-channel assumptions.
+
+- **Document `/protocol/mqtt/broker` in CLI.md**: the broker, its `discover` prefixes and the Home
+  Assistant discovery it drives (entity mapping, writers, availability aggregated into
+  `status.online`) have no CLI.md section at all.
 
 - **Clarify TLS server transport ownership**: ensure shutdown cannot destroy a listener twice
   when a server-side TCP stream takes multiple ticks to stop.

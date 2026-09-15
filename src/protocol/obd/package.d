@@ -220,6 +220,7 @@ nothrow @nogc:
         i.prop_element(prop_index!(OBDInterface, "vehicle")).subscribe(&vehicle_changed);
         _vehicle = i.vehicle;
         _subscribed = true;
+        set_device_online(true);
 
         begin_discovery();
         issue_requests();
@@ -409,7 +410,10 @@ private:
     void iface_state_change(ActiveObject, StateSignal signal)
     {
         if (signal == StateSignal.offline)
+        {
+            set_device_online(false);
             restart();
+        }
     }
 
     void poll_timer_fired(MonoTime)
