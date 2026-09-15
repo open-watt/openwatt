@@ -3,6 +3,18 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-09-16: power regulator drops `window`
+
+- `/driver/power/regulator` no longer has a `window` property; remove it from any regulator
+  configuration view. Stored configuration carrying `window=` is now rejected as an unknown
+  property, so migrate saved regulator configs before upgrading.
+- Burst-fire duty now follows `level` directly at q16 resolution instead of quantising to
+  `1/window` steps. Commanded level and delivered power previously diverged: at the default
+  `window=50`, a commanded 25% delivered 26%, 99% saturated to 100%, and anything below about
+  1.5% delivered nothing at all, while `applied-level` reported the commanded figure throughout.
+  A client that worked around the dead bottom or saturated top of the range should drop those
+  workarounds; the full 0-100 range is now linear in power.
+
 ## 2026-09-15: DHCPv4 lease quarantine (PR #705)
 
 - `/protocol/dhcp/lease` gains a read-only `declined` boolean. A lease whose client sent
