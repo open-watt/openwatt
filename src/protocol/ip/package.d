@@ -855,7 +855,7 @@ nothrow @nogc:
 private:
     enum Phase : ubyte { connecting, open, dead }
     enum size_t max_tx_refill = 16 * 1024;
-    enum size_t max_page_data = ushort.max - Page.sizeof - (size_t.sizeof - 1);
+    enum size_t max_page_data = 1600;
 
     Phase _phase;
     bool _closing;

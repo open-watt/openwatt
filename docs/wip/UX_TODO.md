@@ -12,6 +12,13 @@ through them and remove sections as they are absorbed.
 - Dynamic leases now expire and vanish on their own, and `expires` is a display value derived
   from the lease's monotonic deadline; a wall-clock correction no longer moves the real expiry.
 
+## 2026-09-14: WebSocket sync sessions drop under sustained client backpressure
+
+- A sync WebSocket now holds at most 128 KB of unsent frames (previously 4 MB). When a client
+  stops reading and that fills, the server closes the socket. Keep the socket drained (do not
+  pause reads while rendering), and reconnect with backoff on an unexpected close, resubscribing
+  from scratch.
+
 ## 2026-09-11: device liveness and `status.online` (PR #663)
 
 - Every device now carries a `status.online` boolean element holding one central reachability
