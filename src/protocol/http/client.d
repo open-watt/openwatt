@@ -278,6 +278,8 @@ private:
 
         if (requests[0].response_handler)
             requests[0].response_handler(response);
+        if (!running)
+            return 0;
 
         free(requests[0]);
         requests.popFront();

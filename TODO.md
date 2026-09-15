@@ -154,20 +154,22 @@ the commit history and linked design documents carry the implementation record.
 
 ## IEEE 2030.5 / CSIP-AUS client
 
-Mutual TLS (PR #695) and the urt XML codec (urt#291) are the prerequisites. Remaining, in order:
+The guidance path is built (`src/protocol/sep2/`: discovery, registration, program walk, DERControl
+timeline with Response acks). Remaining, in order:
 
-- **`src/protocol/sep2/`**: `schema.d` resource structs with a reflective XML mapper over
-  `XmlReader`/`XmlWriter`; `client.d` as `/protocol/sep2/client` (remote, client-cert, ca, pin,
-  NMI) doing DeviceCapability discovery, EndDevice registration keyed by the certificate
-  fingerprint (LFDI, SFDI), Time sync, FunctionSetAssignments and DERProgram walks, and polling
-  at the server's `pollRate`; `der.d` for the DERControl event timeline (start, duration,
-  randomisation, supersession, DefaultDERControl fallback), the mandatory Response acks, and
-  telemetry (MirrorUsagePoint, MirrorMeterReading, DERStatus, DERCapability, DERSettings).
-  Polling only; the notification endpoint is optional in CSIP-AUS and deferred.
-- **Energy app intake**: a time-bounded watt import and export constraint on the grid ingress,
-  honoured by the allocator (raise controllable load before curtailing generation), and an
-  inverter generation-limit control (SunSpec model 123 first). The `opModEnergize` backstop
-  maps to the same path with a zero limit.
+- **Telemetry**: MirrorUsagePoint creation and periodic MirrorMeterReading posts for the site and
+  DER readings, plus DERStatus, DERCapability and DERSettings under the EndDevice's DERListLink.
+  Mandatory for certification.
+- **Energy app intake**: find the site's `GridAuthority` component and turn its limits into a
+  watt import and export constraint on the grid ingress, honoured by the allocator (raise
+  controllable load before curtailing generation), plus an inverter generation-limit control
+  (SunSpec model 123 first). `energize=false` maps to the same path with a zero limit.
+- **List paging**: lists are fetched with `?s=0&l=255` and never paged; a program with more
+  events than that loses the tail. Follow `all` versus `results` and fetch the remainder.
+- **Per-list poll rates**: one poll interval drives the whole re-walk from the assignments. The
+  spec allows a different `pollRate` per list; the client keeps the last one it saw.
+- **Response on opt-out and `responseRequired` bit 2**: user opt-out responses are not sent (no
+  user interaction exists yet).
 - **`sep2:` signal provider** so automations can react to event start and end.
 - **Cipher pinning**: servers require TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8; mbedtls offers it by
   default, but the client should pin TLS 1.2 and that suite so a misconfigured server fails
@@ -674,6 +676,13 @@ this is what remains.
   (`/etc/ssl/certs/ca-certificates.crt`) and a baked-in bundle on embedded targets as the
   default chain, then flip the default to required. Explicit `ca` pinning already verifies on
   both backends.
+
+- **HTTP client loses a response delivered with the close**: `HTTPClient` is still
+  `update()`-pumped. When a server answers and closes in the same flight (HTTP/1.0, or
+  `Connection: close`), the stream goes offline before the next tick reads it; `IPClient`
+  restarts the client, the buffered response is dropped, and the request is resent on the new
+  connection every 5 s forever. Seen against a Python `http.server` fixture. Move the client to
+  `rx_handler` delivery so the parser runs on arrival, and drain before acting on offline.
 
 - **Make clock-sensitive unittests hermetic**: tests that leave a `MonoTime` member at
   `MonoTime.init` and then compare it against a real `getTime()` only pass once the monotonic

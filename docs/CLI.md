@@ -1173,6 +1173,40 @@ preflights and normal responses use the effective policy.
 /protocol/http/fileserver add name=files http-server=webserver uri=/files root="conf" access=webdav allowed-origin=http://192.168.0.5:8080
 ```
 
+### `/binding/sep2`
+
+An IEEE 2030.5 (SEP2, CSIP-AUS profile) client that presents the utility as a device. It
+connects to the utility server over mutual TLS, finds or registers its EndDevice by the
+certificate fingerprint (the LFDI), walks the function-set assignments to the DER programs,
+and polls the DERControl lists at the server's poll rate. The default control and the active
+event resolve to the limits in force, published on the bound device's `authority` component
+(template `GridAuthority`, see [COMPONENT_TEMPLATES.md](COMPONENT_TEMPLATES.md#gridauthority));
+every event receives the Response acknowledgements the server asks for. Protocol state (LFDI,
+SFDI, EndDevice href, phase, program and event counts, poll rate, clock offset) sits beside it
+in an untemplated `sep2` component for visibility.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `device` | device name | empty | Device to publish the authority on; created if absent. Required. |
+| `remote` | `https://host[:port]` | empty | Utility server origin. Must be `https`. |
+| `client-cert` | certificate name | empty | Device certificate presented to the server. Its SHA-256 fingerprint is the LFDI. Required. |
+| `ca` | certificate name | empty | Trust anchor for the server chain (the utility's SERCA). |
+| `pin` | number | `0` | Registration PIN the installer was given; when set, a mismatch with the server's Registration is a failure. |
+| `device-category` | hex bitmask | `0` | DeviceCategoryType sent when the client has to create its own EndDevice. |
+| `poll` | duration | server rate | Overrides the poll interval the server advertises (300s when it advertises none). |
+| `offline-timeout` | duration | `0` | Silence longer than this marks the device offline; zero disables it. |
+| `phase` | read-only | | Where the walk is: `capability`, `time`, `end_device`, `register`, `registration`, `assignments`, `programs`, `controls`, `polling`. |
+| `lfdi` | read-only | | The 40-hex-digit LFDI. |
+| `sfdi` | read-only | | The decimal SFDI with its check digit. |
+| `end-device` | read-only | | href of our EndDevice on the server. |
+| `programs`, `events` | read-only | | DER programs assigned and events currently held. |
+
+```text
+/certificate/add name=serca certificate_file=/etc/openwatt/serca.pem
+/certificate/add name=dev certificate_file=/etc/openwatt/device.pem key_file=/etc/openwatt/device.key
+/binding/sep2/add name=utility device=authority remote=https://der.utility.example client-cert=dev ca=serca pin=111115
+```
+
 ### `/protocol/tesla/session`
 
 Vehicle sessions report command rejection separately from session failure.
