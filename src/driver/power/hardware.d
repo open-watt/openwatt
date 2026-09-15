@@ -28,7 +28,6 @@ struct FireConfig
 struct FireParams
 {
     uint level;             // Q16 power fraction; the ceiling when droop is active
-    uint window = 50;       // burst repeat window in full mains cycles
     uint droop_start_mhz;   // output is zero at and below this frequency
     uint droop_span_mhz;    // start..start+span maps 0..level; 0 disables droop
     uint droop_slope_q16;   // level per mHz across the span
@@ -246,15 +245,10 @@ private:
         if (engine.edge_parity == 1)
         {
             // fire whole cycles only, so the load never draws a dc component
-            uint fire_cycles = cast(uint)((ulong(level) * params.window + 0x8000) >> 16);
-            engine.burst_acc += fire_cycles;
-            if (engine.burst_acc >= params.window)
-            {
-                engine.burst_acc -= params.window;
-                engine.burst_on = true;
-            }
-            else
-                engine.burst_on = false;
+            engine.burst_acc += level;
+            engine.burst_on = engine.burst_acc >= 0x10000;
+            if (engine.burst_on)
+                engine.burst_acc -= 0x10000;
         }
         if (engine.psm_on != engine.burst_on)
             set_psm(*engine, engine.burst_on);
