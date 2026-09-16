@@ -805,6 +805,15 @@ this is what remains.
   LUT, and add the signed `zc-offset` property from the design note only if a real lead time
   shows up.
 
+- **Port the last two classic-only ESP32 primitives**: counters, GPIO interrupts, link slots and
+  the ADC (oneshot reads, calibration by the IDF's own scheme macro) are available
+  across the family. Two remain gated to classic ESP32 in
+  `urt/driver/esp32`: the reflex (NMI-tier link) synthesises Xtensa `xt_nmi` code against classic
+  pin ranges, and the ISR-side raw ADC read drives the classic SAR registers directly
+  (`adc_hw_can_read_critical` is false elsewhere). Each needs its own port and hardware check:
+  S2/S3 for the reflex NMI vector and GPIO register layout, and a per-part ISR-safe SAR path or
+  an honest "not in ISR" contract for the ADC.
+
 - **Move WebSocket RX off the tick**: `WebSocket.update()` still polls `_stream.read()` each
   frame; it should install `rx_handler` and decode on delivery. TX is now pull-driven by the
   stream, so the tick carries only RX.
