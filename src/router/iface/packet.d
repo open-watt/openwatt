@@ -434,6 +434,13 @@ private:
 // _offset is a ubyte, so 255 is the ceiling.
 enum ubyte packet_headroom = 128;
 
+// the ether page holds a 1522-byte frame behind the Packet slot and headroom; urt's defaults do not
+version (Tiny) {} else
+immutable PageCategoryConfig[2] packet_page_categories = [
+    { page_size:  352, pages_per_slab: 8, max_slabs: 8, prealloc_slabs: 1 },
+    { page_size: 1744, pages_per_slab: 4, max_slabs: 8, prealloc_slabs: 1 },
+];
+
 Packet* alloc_packet(T)(size_t payload, ubyte headroom = packet_headroom)
 {
     Page* page = page_alloc(payload, size_t.sizeof, packet_prefix_size + headroom);
@@ -621,8 +628,24 @@ ref const(PacketCodec) packet_codec(PacketType type) pure
 
 unittest
 {
-    bool owns_pool = page_pool_init();
+    version (Tiny) enum sized_categories = false;
+    else enum sized_categories = true;
+
+    static if (sized_categories)
+        bool owns_pool = page_pool_init(packet_page_categories);
+    else
+        bool owns_pool = page_pool_init();
     scope(exit) if (owns_pool) page_pool_deinit();
+
+    static if (sized_categories)
+    {
+        if (owns_pool)
+        {
+            Packet* frame = alloc_packet!Ethernet(1522);
+            assert(frame && page_category(frame.page) == 1);
+            frame.free_clone();
+        }
+    }
 
     Packet* owned = alloc_packet!RawFrame(4);
     assert(owned && owned.packet_page_offset == packet_page_start);

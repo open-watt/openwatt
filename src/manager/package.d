@@ -395,7 +395,13 @@ nothrow @nogc:
         g_app = this;
 
         import urt.mem.pagepool : page_pool_init;
-        bool pool_ready = page_pool_init();
+        version (Tiny)
+            bool pool_ready = page_pool_init();
+        else
+        {
+            import router.iface.packet : packet_page_categories;
+            bool pool_ready = page_pool_init(packet_page_categories);
+        }
         debug assert(pool_ready, "page pool initialisation failed");
 
         bool reclaimer_registered = register_reclaimer(&reclaim_element_history, 32, false);
@@ -457,6 +463,8 @@ nothrow @nogc:
         console.register_command!uptime("/system", this);
         console.register_command!sysinfo("/system", this);
         console.register_command!(show_time, "time")("/system", this);
+        version (Tiny) {} else
+            console.register_command!(page_pool, "page-pool")("/system", this);
         console.register_command!sleep("/system", this);
         console.register_command!reboot("/system", this);
 
