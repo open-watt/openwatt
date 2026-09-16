@@ -270,7 +270,7 @@ nothrow @nogc:
         p._intro_table = 0;
         p._intro_slot = 1;
         p._introducing = true;
-        pump_introductions(p);
+        p.arm_tx();
     }
 
     // removal-safe walk for transmitting bodies: a refused send may detach the peer under it
@@ -289,11 +289,7 @@ nothrow @nogc:
     void tick_peer(SyncPeer p)
     {
         if (p._introducing)
-        {
-            pump_introductions(p);
             return;
-        }
-        pump_model_intro(p);
         encoder_for(p._encoder).tick_dirty(p);
         p.flush_logs();
     }
@@ -311,30 +307,7 @@ nothrow @nogc:
             if (!e || h == SyncPeer.invalid_handle)
                 continue;
             if (e.data_format.kind == SeriesKind.point)
-            {
-                // events deliver every occurrence (mode `all`); the cursor clamps
-                // past eviction and reports lost
-                ulong* next = node.raw in p._live_nodes;
-                if (!next || !e.has_history)
-                    continue;
-                ulong committed = *next;
-                auto c = e.open_series_cursor(committed);
-                for (;;)
-                {
-                    RecordBlock blk = c.next(256);
-                    if (!blk.count)
-                        break;
-                    enc.encode_val_block(p, h, blk);
-                    if (!p.send_ok(gen))
-                        break;
-                    committed = c.position;
-                }
-                // position commits only past accepted sends, and the send may have torn the
-                // session down and freed the map entry, so look it up again
-                if (ulong* live = node.raw in p._live_nodes)
-                    *live = committed;
-                e.close_series_cursor(c);
-            }
+                send_live_events(p, enc, e, h, gen);
             else
                 enc.encode_val(p, h, e);
             if (!p.send_ok(gen))
@@ -343,20 +316,54 @@ nothrow @nogc:
         p._pending_vals.clear();
     }
 
-    void pump_introductions(SyncPeer p)
+    static void send_live_events(SyncPeer p, SyncEncoder enc, Element* e, SyncHandle h, uint gen)
     {
-        if (!p._introducing)
+        EID node = e.ensure_eid();
+        ulong* next = node.raw in p._live_nodes;
+        // Backfill owns the cursor while parked and re-marks the node on completion.
+        if (!next || (*next & SyncPeer.live_parked) || !e.has_history)
             return;
+        ulong committed = *next;
+        auto c = e.open_series_cursor(committed);
+        for (;;)
+        {
+            RecordBlock blk = c.next(256);
+            if (!blk.count)
+                break;
+            enc.encode_val_block(p, h, blk);
+            if (!p.send_ok(gen))
+                break;
+            committed = c.position;
+        }
+        // Sending can detach the session and invalidate the map entry.
+        if (ulong* live = node.raw in p._live_nodes)
+            *live = committed;
+        e.close_series_cursor(c);
+    }
 
+    bool produce(SyncPeer p)
+    {
+        if (p._introducing)
+        {
+            if (pump_introductions(p))
+                return true;
+            if (p._introducing)
+                return false;
+        }
+        return pump_model_intro(p);
+    }
+
+    bool pump_introductions(SyncPeer p)
+    {
         SyncEncoder enc = encoder_for(p._encoder);
         uint gen = p.begin_burst();
-        while (p.control_window_free() > SyncPeer.control_reserve)
+        while (!p.tx_blocked())
         {
             BaseObject obj = next_object(p._intro_table, p._intro_slot);
             if (!obj)
             {
                 p._introducing = false;
-                return;
+                return false;
             }
             if (!obj._typeInfo.syncable || obj._is_remote)
                 continue;
@@ -364,123 +371,129 @@ nothrow @nogc:
                 continue;   // the lifecycle hook announced it while the walk was paused
             enc.encode_add_name(p, obj);
             if (!p.send_ok(gen))
-                return;
+                return false;
         }
+        return p.tx_full();
     }
 
-    void pump_model_intro(SyncPeer p)
+    bool pump_model_intro(SyncPeer p)
     {
-        pump_live_rescan(p);
-        if (p._pending_subs.empty && p._pending_live.empty && p._pending_refresh.empty)
-            return;
         SyncEncoder enc = encoder_for(p._encoder);
         uint gen = p.begin_burst();
 
-        // Refresh existing handles before introducing nodes with their current shape.
-        while (!p._pending_refresh.empty)
+        // Draining pending subscriptions makes room for the remaining rescan.
+        for (;;)
         {
-            if (!pump_refresh(p, enc, p._pending_refresh[0], gen))
-                return;
-            p._pending_refresh.remove(0);
-        }
+            pump_live_rescan(p);
+            if (p._pending_subs.empty && p._pending_live.empty && p._pending_refresh.empty)
+                return false;
 
-        while (!p._pending_live.empty)
-        {
-            if (p.control_window_free() <= SyncPeer.control_reserve)
-                return;
-            EID node = p._pending_live[0];
-            p._pending_live.remove(0);
-            if (Element* e = resolve_element(node))
+            // Refresh existing handles before introducing nodes with their current shape.
+            while (!p._pending_refresh.empty)
             {
-                if (authored_by(p, e))
-                    continue;
-                char[256] buf = void;
-                ptrdiff_t len = e.full_path(buf);
-                if (len > 0 && len <= buf.length)
-                    introduce_element(p, enc, e, buf[0 .. len], gen, true, 0, 0);
+                if (!pump_refresh(p, enc, p._pending_refresh[0], gen))
+                    return p.send_ok(gen) && p.tx_full();
+                p._pending_refresh.remove(0);
             }
-            if (!p.send_ok(gen))
-                return;
-        }
 
-        while (!p._pending_subs.empty)
-        {
-            ref sub = p._pending_subs[0];
-            bool starved = false;
-
-            uint device_index = 0;
-            foreach (dev; g_app.devices.values)
+            while (!p._pending_live.empty)
             {
-                if (device_index < sub.device_cursor)
+                if (p.tx_blocked())
+                    return p.tx_full();
+                Element* e = resolve_element(p._pending_live[0]);
+                if (e && !authored_by(p, e))
                 {
-                    ++device_index;
-                    continue;
+                    char[256] buf = void;
+                    ptrdiff_t len = e.full_path(buf);
+                    ulong no_history = ulong.max;
+                    if (len > 0 && len <= buf.length && !introduce_element(p, enc, e, buf[0 .. len], gen, true, 0, 0, no_history))
+                        return p.tx_full();
                 }
-                if (!dev.cid || dev.private_)
-                {
-                    ++device_index;
-                    ++sub.device_cursor;
-                    continue;
-                }
+                if (!p.send_ok(gen))
+                    return false;
+                p._pending_live.remove(0);
+            }
 
-                if (!sub.device_sent)
+            while (!p._pending_subs.empty)
+            {
+                ref sub = p._pending_subs[0];
+                bool starved = false;
+
+                uint device_index = 0;
+                foreach (dev; g_app.devices.values)
                 {
-                    if (p.control_window_free() <= SyncPeer.control_reserve)
+                    if (device_index < sub.device_cursor)
+                    {
+                        ++device_index;
+                        continue;
+                    }
+                    if (!dev.cid || dev.private_)
+                    {
+                        ++device_index;
+                        ++sub.device_cursor;
+                        continue;
+                    }
+
+                    if (!sub.device_sent)
+                    {
+                        if (p.tx_blocked())
+                        {
+                            starved = true;
+                            break;
+                        }
+                        if (match_path(sub.pattern[], dev.id[]))
+                            introduce_device(p, enc, dev);
+                        if (!p.send_ok(gen))
+                            return false;
+                        sub.device_sent = true;
+                    }
+
+                    uint match_index = 0;
+                    bool complete = walk_elements_until(dev, sub.pattern[], (Element* e, const(char)[] path)
+                    {
+                        if (match_index++ < sub.element_cursor)
+                            return true;
+                        if (authored_by(p, e))
+                        {
+                            ++sub.element_cursor;
+                            return true;
+                        }
+                        if (p.tx_blocked())
+                            return false;
+                        if (sub.arm)
+                            track_live(p, e);
+                        if (!introduce_element(p, enc, e, path, gen, sub.arm, sub.from_ms, sub.to_ms, sub.backfill_cursor))
+                            return false;
+                        ++sub.element_cursor;
+                        return p.send_ok(gen);
+                    });
+                    if (!p.send_ok(gen))
+                        return false;
+                    if (!complete)
                     {
                         starved = true;
                         break;
                     }
-                    if (match_path(sub.pattern[], dev.id[]))
-                        introduce_device(p, enc, dev);
+
+                    ++device_index;
+                    ++sub.device_cursor;
+                    sub.element_cursor = 0;
+                    sub.device_sent = false;
+                }
+
+                if (starved)
+                    return p.tx_full();
+
+                if (sub.res_seq)
+                {
+                    if (p.tx_blocked())
+                        return p.tx_full();
+                    enc.encode_res(p, sub.res_seq);
                     if (!p.send_ok(gen))
-                        return;
-                    sub.device_sent = true;
-                }
-
-                uint match_index = 0;
-                bool complete = walk_elements_until(dev, sub.pattern[], (Element* e, const(char)[] path)
-                {
-                    if (match_index++ < sub.element_cursor)
-                        return true;
-                    if (authored_by(p, e))
-                    {
-                        ++sub.element_cursor;
-                        return true;
-                    }
-                    if (p.control_window_free() <= SyncPeer.control_reserve)
                         return false;
-                    if (sub.arm)
-                        track_live(p, e);
-                    introduce_element(p, enc, e, path, gen, sub.arm, sub.from_ms, sub.to_ms);
-                    ++sub.element_cursor;
-                    return p.send_ok(gen);
-                });
-                if (!p.send_ok(gen))
-                    return;
-                if (!complete)
-                {
-                    starved = true;
-                    break;
                 }
-
-                ++device_index;
-                ++sub.device_cursor;
-                sub.element_cursor = 0;
-                sub.device_sent = false;
+                p._pending_subs.remove(0);
             }
-
-            if (starved)
-                return;
-
-            if (sub.res_seq)
-            {
-                if (p.control_window_free() <= SyncPeer.control_reserve)
-                    return;
-                enc.encode_res(p, sub.res_seq);
-                if (!p.send_ok(gen))
-                    return;
-            }
-            p._pending_subs.remove(0);
         }
     }
 
@@ -1355,7 +1368,7 @@ nothrow @nogc:
         staged[staged.length - 1].res_seq = seq;
         foreach (ref req; staged[])
             from._pending_subs ~= req.move;
-        pump_model_intro(from);
+        from.arm_tx();
     }
 
     void inbound_model_unsub(SyncPeer from, const(char[])[] patterns)
@@ -2197,10 +2210,12 @@ nothrow @nogc:
                 if (r.device == dev.cid)
                 {
                     r.cursor = 0;
+                    p.arm_tx();
                     return;
                 }
             }
             p._pending_refresh ~= SyncPeer.PendingRefresh(dev.cid);
+            p.arm_tx();
         });
     }
 
@@ -2220,7 +2235,7 @@ nothrow @nogc:
             {
                 if (knows_subtree(p, c))
                 {
-                    if (p.control_window_free() <= SyncPeer.control_reserve)
+                    if (p.tx_blocked())
                         return false;
                     char[256] path = void;
                     char[max_template_chain] templates = void;
@@ -2276,31 +2291,34 @@ nothrow @nogc:
         enc.encode_add(to, h, tconcat("device:", dev.id[]), "device", chain, 0, null, dev.peer_id);
     }
 
-    void send_element(SyncPeer to, SyncEncoder enc, Element* e, const(char)[] path, uint gen, bool include_value = true)
+    // False requests a retry; the peer remembers which schema frames were sent.
+    bool send_element(SyncPeer to, SyncEncoder enc, Element* e, const(char)[] path, uint gen, bool include_value = true)
     {
         import urt.mem.temp : tconcat;
         import manager.sample : enum_info_name;
 
         if (!e.format.valid)
-            return;
+            return true;
         const(DataFormat)* fmt = e.data_format;
         if (!wire_serialisable(*fmt))
         {
             log.debug_("skipping unserialisable element ", path);
-            return;
+            return true;
         }
         EID node = e.ensure_eid();
         if (!node)
-            return;
+            return true;
         Device device = g_app.devices.container(node.container);
         if (!device)
-            return;
+            return true;
+        if (to.tx_blocked())
+            return false;
         SyncHandle h = to.handle_of(node);
         if (h != SyncPeer.invalid_handle)
         {
             if (include_value)
                 enc.encode_val(to, h, e);
-            return;
+            return true;
         }
         if (fmt.desc == DataFormat.Desc.enum_)
         {
@@ -2308,13 +2326,15 @@ nothrow @nogc:
             if (!ename)
             {
                 log.warning("element ", path, " cites an unregistered enum - skipped");
-                return;
+                return true;
             }
             if (!to.enum_seen(fmt.enum_info))
             {
                 enc.encode_type_enum(to, ename, fmt.enum_info);
                 if (!to.send_ok(gen))
-                    return;
+                    return true;
+                if (to.tx_blocked())
+                    return false;
             }
         }
         bool first;
@@ -2323,34 +2343,54 @@ nothrow @nogc:
         {
             enc.encode_type_format(to, ft, *fmt);
             if (!to.send_ok(gen))
-                return;
+                return true;
+            if (to.tx_blocked())
+                return false;
         }
         h = to.introduce(node);
         char[max_template_chain] templates = void;
         const(char)[] chain = omit_unclassified_chain(path_templates(e.parent, templates[]));
         enc.encode_add(to, h, tconcat("device:", path), "element", chain, ft, e, device.peer_id, include_value);
+        return true;
     }
 
-    void send_backfill(SyncPeer to, SyncEncoder enc, Element* e, ulong from_ms, ulong to_ms, uint gen)
+    // On false, resume holds the next unsent record.
+    static bool send_backfill(SyncPeer to, SyncEncoder enc, Element* e, ulong from_ms, ulong to_ms, uint gen, ref ulong resume)
     {
         import urt.time : from_unix_time_ns;
 
         if (!e.has_history)
-            return;
-        SyncHandle h = to.handle_of(e.ensure_eid());
+            return true;
+        EID node = e.ensure_eid();
+        SyncHandle h = to.handle_of(node);
         if (h == SyncPeer.invalid_handle)
-            return;
+            return true;
         ulong idx = e.index_for_time(from_unix_time_ns(from_ms * 1_000_000));
+        if (resume != ulong.max)
+        {
+            idx = resume;
+            if (ulong* live = node.raw in to._live_nodes)
+                *live = idx;
+        }
+        resume = ulong.max;
         if (idx == ulong.max)
-            return;
+            return true;
         Cursor cursor = e.open_series_cursor(idx);
         scope (exit) e.close_series_cursor(cursor);
         SysTime to_t = to_ms ? from_unix_time_ns(to_ms * 1_000_000) : SysTime();
         for (;;)
         {
+            if (to.tx_blocked())
+            {
+                resume = idx;
+                if (ulong* live = node.raw in to._live_nodes)
+                    *live = idx | SyncPeer.live_parked;
+                return false;
+            }
             RecordBlock blk = cursor.next(256);
             if (!blk.count)
                 break;
+            idx = blk.first_index + blk.count;
             if (to_ms)
             {
                 uint full = blk.count;
@@ -2359,7 +2399,7 @@ nothrow @nogc:
                 if (blk.count)
                     enc.encode_val_block(to, h, blk);
                 if (!to.send_ok(gen))
-                    return;
+                    return true;
                 commit_backfill(to, e, blk);
                 if (blk.count < full)
                     break;
@@ -2368,24 +2408,26 @@ nothrow @nogc:
             {
                 enc.encode_val_block(to, h, blk);
                 if (!to.send_ok(gen))
-                    return;
+                    return true;
                 commit_backfill(to, e, blk);
             }
         }
+        return true;
     }
 
-    void commit_backfill(SyncPeer to, Element* e, ref const RecordBlock blk)
+    static void commit_backfill(SyncPeer to, Element* e, ref const RecordBlock blk)
     {
         if (ulong* live = e.ensure_eid().raw in to._live_nodes)
             *live = blk.first_index + blk.count;
     }
 
-    void introduce_element(SyncPeer p, SyncEncoder enc, Element* e, const(char)[] path, uint gen, bool arm, ulong from_ms, ulong to_ms)
+    bool introduce_element(SyncPeer p, SyncEncoder enc, Element* e, const(char)[] path, uint gen, bool arm, ulong from_ms, ulong to_ms, ref ulong resume)
     {
         bool backfill = from_ms && e.has_history;
-        send_element(p, enc, e, path, gen, !backfill);
-        if (backfill && p.send_ok(gen))
-            send_backfill(p, enc, e, from_ms, to_ms, gen);
+        if (resume == ulong.max && !send_element(p, enc, e, path, gen, !backfill))
+            return false;
+        if (backfill && p.send_ok(gen) && !send_backfill(p, enc, e, from_ms, to_ms, gen, resume))
+            return false;
         if (backfill && e.data_format.kind != SeriesKind.point && p.send_ok(gen))
         {
             SyncHandle h = p.handle_of(e.ensure_eid());
@@ -2394,6 +2436,7 @@ nothrow @nogc:
         }
         if (arm && e.data_format.kind == SeriesKind.point && p.send_ok(gen))
             mark_pending_val(p, e);
+        return true;
     }
 
     void mark_pending_val(SyncPeer p, Element* e)
@@ -2413,12 +2456,15 @@ nothrow @nogc:
         {
             p._live_rescan = true;
             p._rescan_cursor = 0;
-            return;
         }
-        foreach (n; p._pending_live[])
-            if (n == node)
-                return;
-        p._pending_live ~= node;
+        else
+        {
+            foreach (n; p._pending_live[])
+                if (n == node)
+                    return;
+            p._pending_live ~= node;
+        }
+        p.arm_tx();
     }
 
     void pump_live_rescan(SyncPeer p)

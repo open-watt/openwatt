@@ -184,6 +184,14 @@ the commit history and linked design documents carry the implementation record.
 
 ## Energy
 
+- **The topology publisher dominates the synced model**: measured on the prod Pi 2026-09-16,
+  the `energy` device is 5298 of the node's 6613 tree nodes, 80% of everything sync carries.
+  Every bus and every port emits all nine meter fields plus a `_source` provenance element each,
+  whether or not the field is present, so a fully `missing`/`nan` bus still costs 18 elements.
+  This is what pushed the model snapshot to roughly 1.1 MB. Gate the provenance elements behind
+  `hidden`, or omit absent fields entirely and publish provenance only where it differs from the
+  bus default.
+
 - **Speed up topology publisher binding**: `TopologyPublisher.bind()` repeats
   `find_or_create_element` for every field of every record. A rebuild performs roughly 3000
   dotted-path lookups and takes about 106 ms on the Pi. Reuse bindings whose IDs did not
@@ -622,13 +630,29 @@ this is what remains.
   transferring traffic, and distinguish link failure from a remote reboot/session epoch change.
   Beacons stay link-local; reachability through the fabric is a separate propagation mechanism.
 
-- **Make backpressure a channel property**: `#557` paces one producer and every send reports
-  pass/fail, but that is detection, not backpressure. Every other control emitter still bursts into
-  the 64-frame window (`model_sub`/`sub` fan-out, lifecycle fan-out, `result`, `history`) and a
-  refused send aborts a burst with work left. Producers must be able to ask for room and
-  suspend/resume; oversize control frames must be refused at encode time against `hello.max_frame`
-  rather than dropped in the interface; `val_block` chunking must honour `max_frame` instead of a
-  fixed 256 records; and control frames should ride PCP >= ca with DEI=0 on the underlying packets.
+- **The Pi trips the 5s supervisor watchdog on first boot after an OTA**: observed 2026-09-16,
+  two `no heartbeat for 5000ms; killing app` kills in 40s on the first two launches of a new slot,
+  then the third launch soaked and committed and has been clean since. Slot 156 shows the same kill
+  on 2026-09-15 three times, so this predates the sync tx-feed work and is not caused by it, but
+  first-boot is clearly the worst case: every binding starts, the whole device tree is built and
+  every peer introduces at once. Find what runs long enough to starve the heartbeat at boot (the
+  `log_slow_phase` subdivisions and `collection.update.*` warnings are the handles) rather than
+  raising the deadline. Related: `collection.update.interface.sync1-ws<n>` sits at a steady 70ms
+  per frame against a 50ms budget, also pre-existing, with occasional 500-600ms spikes.
+
+- **Make backpressure a channel property**: the bulk walks (registry and model introduction,
+  live re-arm, history backfill, template refresh) now run as the transport's `tx_handler` and ask
+  `tx_ready` before every frame, so a model larger than the websocket's 128 KB bound mirrors
+  instead of restarting the session, and a paced queue holds 16 KB plus one frame.
+  Every other emitter still pushes: the `val` and `log` queues (`flush_pending_vals` drains an
+  armed event series to its head in one burst; it only stays behind a parked backfill), `tick_dirty`, the
+  `model_sub`/`sub` fan-out, lifecycle fan-out, `result` and `history`, and on a reliable
+  transport a refused push is dropped with no retry path. Move them onto the same feed; oversize
+  control frames must be refused at encode time against `hello.max_frame` rather than dropped in
+  the interface; `val_block` chunking must honour `max_frame` instead of a fixed 256 records; and
+  control frames should ride PCP >= ca with DEI=0 on the underlying packets. `BaseInterface`'s
+  handler slot is single-owner like `Stream`'s, which suits the one-peer websocket; a shared
+  bounded interface would need per-peer arbitration.
 
 - **Harden clock discipline**: gate member sampling, recording and shipping on wall time (an ESP32
   ships 1970-stamped samples until its first pull), carry a synced flag in `hello`, add a
@@ -814,9 +838,20 @@ this is what remains.
   `tx_handler` producer (the fileserver and the API schema endpoint are the pattern), or have it
   check `tx_backlog` before committing a message, then enforce a backlog bound in `send()`.
 
+- **The websocket's 128 KB hard bound is sized for the desktop, not for a micro**: pulled
+  producers now stop at 16 KB, but every pushed emitter can still drive `_tx_pending` to the hard
+  bound against a stalled reader, as one contiguous allocation per session. The bound exists only
+  to exceed the largest committed frame (sync: 64 KB), so it falls with `hello.max_frame`: once
+  pushed emitters are on the feed and `max_frame` is negotiated per platform, derive the bound
+  from it. Until then a no-PSRAM ESP32 serving two stalled browsers can be asked for 256 KB of
+  contiguous heap it does not have. Measure the heap headroom on each target that serves `/sync`
+  over a websocket, and check what `_tx_pending` does when that allocation fails.
+
 - **WebSocket TX should retain frame descriptors, not a byte array**: `_tx_pending` is a contiguous
   buffer compacted on each append, so the pending backlog is copied on every drain cycle. Keep a
-  bounded ring of frame pages with framing progress instead, and stop masking in place.
+  bounded ring of frame pages with framing progress instead, and stop masking in place. With the
+  ring in place a `tx_handler` producer can hand over page-backed packets, as `Stream`'s hands over
+  pages, and the pulled path stops copying the encoder buffer into the queue.
 
 - **Take the caller's `MemFlags` through the page-pool jumbo path**: `pagepool.d` hard-codes
   `MemFlags.dma` for any request above the largest slab category, which on ESP32 confines a

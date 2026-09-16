@@ -552,6 +552,14 @@ protected:
         return 0;
     }
 
+    override void tx_handler_changed()
+    {
+        pull_tx();
+    }
+
+    override bool tx_ready() const
+        => _tx_pending.length - _tx_offset < tx_low_water;
+
 private:
     ObjectRef!Stream _stream;
     IPClient _conn;
@@ -564,6 +572,7 @@ private:
     bool _close_sent;
     bool _tx_closing;
     bool _tx_waking;
+    bool _tx_pulling;
 
     HTTPParser* _handshake_parser; // non-null while client handshake is in flight
     String _handshake_key;
@@ -575,7 +584,10 @@ private:
 
     Array!ubyte _tx_pending;
     size_t _tx_offset;
-    enum size_t max_tx_pending = 128 * 1024;   // hard bound; must exceed the largest frame a client commits (sync: 64 KB)
+    enum size_t max_tx_frame = 64 * 1024 + 14;                  // maximum sync payload plus WebSocket header
+    enum size_t max_tx_pending = 128 * 1024;
+    enum size_t tx_low_water = 16 * 1024;                       // reserve room for one maximum frame
+    static assert(tx_low_water + max_tx_frame <= max_tx_pending, "the last frame admitted must fit");
     enum size_t max_tx_page = 1600;
 
     void stream_state_change(ActiveObject, StateSignal signal)
@@ -687,8 +699,22 @@ private:
             _stream.tx_handler(&produce_tx);
     }
 
+    void pull_tx()
+    {
+        if (_tx_pulling || _tx_closing)
+            return;
+        if (tx_ready)
+        {
+            _tx_pulling = true;
+            invite_tx();
+            _tx_pulling = false;
+        }
+        arm_tx();
+    }
+
     Page* produce_tx(Stream, size_t requested)
     {
+        pull_tx();
         size_t pending = _tx_pending.length - _tx_offset;
         if (pending == 0)
             return null;
