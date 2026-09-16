@@ -91,7 +91,7 @@ nothrow @nogc:
 package:
     void insert(Device device)
     {
-        debug assert(device);
+        debug assert(device !is null);
         const(char)[] name = device.id[];
         debug assert(device.peer_id || !device.private_);
         debug assert(find(name, device.peer_id) is null, "device identity already in use");
@@ -435,7 +435,7 @@ nothrow @nogc:
 
     ubyte attach_binding(ActiveObject binding, Element* element, manager.element.Access access, bool peer = false)
     {
-        assert(binding);
+        assert(binding !is null);
         EID eid = element.ensure_eid();
         assert(cid && eid.container == cid, "binding element belongs to another device");
         ubyte index;
