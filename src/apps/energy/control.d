@@ -409,7 +409,7 @@ private:
             if (Element* e = bat.find_element("state"))
                 return e;
         }
-        if (Component ts = c.get_first_component_by_template("ThermalStore"))
+        if (Component ts = c.get_first_component_by_template("WaterHeater"))
             if (Element* e = ts.find_element("temperature"))
                 return e;
         return null;
@@ -450,4 +450,35 @@ Duration read_duration(const(Element)* e)
         return Duration.zero;
     // Bare duration constants are already seconds; typed values normalise to them.
     return seconds(cast(long)e.normalised_value());
+}
+
+unittest
+{
+    import urt.mem;
+    import urt.si.quantity : Quantity;
+    import urt.si.unit : Celsius, Percent;
+    import urt.variant : Variant;
+    import manager.device : DeviceBuilder, DeviceTable;
+    import manager.series : DataFormat, SeriesKind, ValueType, register_format;
+
+    static Element* add_num(ref DeviceBuilder d, Component c, const(char)[] id, float value, ScaledUnit unit)
+    {
+        Element* e = d.element(c, id, register_format(DataFormat(ValueType.f64, SeriesKind.held, unit)));
+        e.value = Variant(Quantity!double(value, unit));
+        return e;
+    }
+
+    ControlRegistry registry = alloc!ControlRegistry();
+    DeviceTable devices;
+
+    DeviceBuilder hws = devices.create("hws");
+    Element* temperature = add_num(hws, hws.component("tank", "WaterHeater"), "temperature", 55, Celsius);
+    assert(registry.pick_state_element(hws.device) is temperature);
+
+    DeviceBuilder bms = devices.create("bms");
+    Element* soc = add_num(bms, bms.component("battery", "Battery"), "soc", 60, Percent);
+    assert(registry.pick_state_element(bms.device) is soc);
+
+    DeviceBuilder bare = devices.create("bare");
+    assert(registry.pick_state_element(bare.device) is null);
 }
