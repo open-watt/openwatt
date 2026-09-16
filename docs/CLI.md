@@ -694,7 +694,7 @@ zero-cross edges stop. The regulator materialises a Device exposing writable
 follows the zero-cross detector, so a lost mains reference reads offline.
 
 `burst_fire` mode conducts whole mains cycles (never a DC-injecting half
-cycle), distributing them evenly across the repeat `window`; it is the right
+cycle), distributing them evenly across the cycle stream; it is the right
 mode behind an inverter, where phase-angle chop feeds the inverter harmonics
 it handles poorly. `phase_angle` mode delays the gate within each half cycle
 for continuous sub-cycle resolution and a steady per-cycle draw that meters
@@ -716,7 +716,6 @@ half cycle.
 | `mode` | read/write | `burst_fire`, `phase_angle` | `burst_fire` | Firing strategy; switchable at runtime. |
 | `level` | read/write | `0` to `100` | `0` | Target power in percent; the ceiling when a droop curve is set. |
 | `enable` | read/write | boolean | `true` | Master gate; disabled holds the output off without losing the level. |
-| `window` | read/write | `1` to `1000` | `50` | Burst repeat window in full mains cycles; bounds the longest off-run at low levels. |
 | `droop-start` | read/write | hertz | `0` (disabled) | Frequency at and below which droop output is zero. |
 | `droop-full` | read/write | hertz | `0` (disabled) | Frequency at which droop output reaches `level`. |
 | `frequency` | read only | hertz | | Measured mains frequency from the zero-cross stream. |

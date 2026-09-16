@@ -45,7 +45,6 @@ class PowerRegulator : ProtocolBinding
                                  Prop!("mode", mode),
                                  Prop!("level", level),
                                  Prop!("enable", enable),
-                                 Prop!("window", window),
                                  Prop!("droop-start", droop_start),
                                  Prop!("droop-full", droop_full),
                                  Prop!("frequency", frequency, "status", "d"),
@@ -157,18 +156,6 @@ nothrow @nogc:
         publish_controls();
     }
 
-    // burst repeat window in full mains cycles; bounds the longest off-run at low levels
-    final uint window() const pure
-        => _window;
-    final void window(uint value)
-    {
-        if (_window == value)
-            return;
-        _window = value;
-        mark_set!(typeof(this), "window")();
-        restart();
-    }
-
     // hertz
     final float droop_start() const pure
         => _droop_start;
@@ -214,8 +201,6 @@ nothrow @nogc:
     final override bool validate() const pure
     {
         if (_device.empty || _psm_pin == uint.max || _zc_pin == uint.max || _psm_pin == _zc_pin)
-            return false;
-        if (_window == 0 || _window > 1000)
             return false;
         if ((_droop_start != 0 || _droop_full != 0) && _droop_full <= _droop_start)
             return false;
@@ -312,7 +297,6 @@ private:
     FireEngine _engine;
     uint _psm_pin = uint.max;
     uint _zc_pin = uint.max;
-    uint _window = 50;
     float _level = 0;
     float _droop_start = 0;
     float _droop_full = 0;
@@ -340,7 +324,6 @@ private:
         params.level = cast(uint)(_level * (65536.0f / 100) + 0.5f);
         if (params.level > 0x10000)
             params.level = 0x10000;
-        params.window = _window;
         params.mode = _mode;
         params.enable = _enable;
         if (_droop_full > _droop_start && _droop_start > 0)

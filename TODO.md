@@ -785,6 +785,26 @@ this is what remains.
   `RtlUserThreadStart` with vctools file names, in crash traces and in `capture_trace` callers
   alike, so a trace from a debug build on Windows identifies nothing.
 
+- **The phase-angle delay LUT interpolates a cube root linearly at both extremes**:
+  `phase_delay_frac` indexes a 33-entry table by `level_q16 >> 11` and interpolates linearly
+  across each 3.125%-wide interval, but a(P) approaches a cube root at both ends, so the chord
+  departs badly from the curve there. Mid-way through the bottom interval a commanded 1.56%
+  delivers about 0.39%, a 4x error exactly where a diversion controller wants fine trickle
+  control; the top interval errs about 1.2 points the other way. Breakpoints are exact, and
+  mid-range is fine. Fix with non-uniform breakpoints clustered at the extremes, or more
+  entries; burst-fire is unaffected.
+
+- **Verify phase-angle linearity against a trusted instrument**: the regulator now locks and
+  fires on an ESP32-S3 (bench Waveshare, BTA16 + CT3021 gate opto + PC817 detector, 50 Hz lock,
+  100 clean edges/s). Burst-fire tracks the commanded level, but phase-angle measured low at
+  50%: a bench meter read 165.1 V where the 25% point's 124.3 V implies 175.8 V, about 44% power
+  for a commanded 50%. That meter is average-responding on a chopped waveform and is the prime
+  suspect; a constant zero-cross timing offset was ruled out arithmetically, since a late offset
+  raises the ratio rather than lowering it and an early offset large enough to fit implies an
+  impossible 211 V mains. Re-measure with a true-RMS or power meter before touching the phase
+  LUT, and add the signed `zc-offset` property from the design note only if a real lead time
+  shows up.
+
 - **Move WebSocket RX off the tick**: `WebSocket.update()` still polls `_stream.read()` each
   frame; it should install `rx_handler` and decode on delivery. TX is now pull-driven by the
   stream, so the tick carries only RX.
