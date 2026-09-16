@@ -684,8 +684,35 @@ package:
     // bulk walks stop short of the window's end so the session's other control frames always find room
     enum control_reserve = 16;
 
-    final size_t control_window_free()
-        => !sublayer_armed ? size_t.max : (_resend.length >= max_unacked ? 0 : max_unacked - _resend.length);
+    final bool control_starved()
+        => sublayer_armed && _resend.length + control_reserve >= max_unacked;
+
+    // a bulk walk runs inside one invitation until the grant or the control window is spent
+    final bool tx_blocked()
+        => _tx_grant == 0 || control_starved();
+
+    // what a blocked walk returns: only a spent grant asks the sink for another invitation
+    final bool tx_grant_spent()
+        => _tx_grant == 0 && !control_starved();
+
+    final bool produce_tx(BaseInterface, size_t requested)
+    {
+        _tx_grant = requested;
+        _peer_flags |= PeerFlags.tx_producing;
+        scope (exit) _peer_flags &= ~PeerFlags.tx_producing;
+        return get_module!SyncModule.produce(this);
+    }
+
+    // every path that queues bulk work ends here; a walk already running sees the new work itself
+    final void arm_tx()
+    {
+        if ((_peer_flags & PeerFlags.tx_producing) || !transport_ready)
+            return;
+        if (uses_udp_endpoint)
+            produce_tx(null, size_t.max);
+        else
+            _transport.tx_handler(&produce_tx);
+    }
 
     // burst protocol: begin_burst, send, check send_ok after every send; refusal or teardown ends it
     final uint begin_burst()
@@ -709,6 +736,7 @@ package:
     enum pre_start_max_bytes = 64 * 1024;
     bool             _send_failed;
     uint             _session_gen;       // bumped by detach_peer; a burst spanning it is dead
+    size_t           _tx_grant;          // bytes left in the current invitation
 
     ubyte            _remote_caps;       // hello negotiation; 0 = no hello received
     ulong            _remote_node_id;    // hello identity; 0 = peer announced none
@@ -810,6 +838,7 @@ private:
         ctl_ack_pending            = 1 << 3,
         uses_udp_endpoint          = 1 << 4,
         owns_udp_endpoint          = 1 << 5,
+        tx_producing               = 1 << 6,
     }
 
     struct SentFrame
@@ -870,6 +899,7 @@ private:
 
     int raw_tx(const(ubyte)[] bytes, bool is_text)
     {
+        _tx_grant -= bytes.length < _tx_grant ? bytes.length : _tx_grant;
         if (uses_udp_endpoint)
             return _udp_endpoint.sendto(bytes, _remote) == bytes.length ? 0 : -1;
 
@@ -942,8 +972,11 @@ private:
 
     void release_control(ubyte ack)
     {
+        size_t held = _resend.length;
         while (!_resend.empty && cast(ubyte)(ack - _resend[0].seq) < 128)
             _resend.remove(0);
+        if (_resend.length != held)
+            arm_tx();
     }
 
     static void release_data(ref DataQueue q, ubyte ack)
@@ -980,6 +1013,8 @@ private:
     void detach_transport()
     {
         release_transport_state();
+        if (BaseInterface transport = _transport)
+            transport.release_tx_handler(&produce_tx);
         if (!(_peer_flags & PeerFlags.transport_subscribed))
             return;
         if (BaseInterface transport = _transport)

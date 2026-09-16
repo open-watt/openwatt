@@ -269,7 +269,7 @@ nothrow @nogc:
         p._intro_table = 0;
         p._intro_slot = 1;
         p._introducing = true;
-        pump_introductions(p);
+        p.arm_tx();
     }
 
     // removal-safe walk for transmitting bodies: a refused send may detach the peer under it
@@ -288,11 +288,7 @@ nothrow @nogc:
     void tick_peer(SyncPeer p)
     {
         if (p._introducing)
-        {
-            pump_introductions(p);
             return;
-        }
-        pump_model_intro(p);
         encoder_for(p._encoder).tick_dirty(p);
         p.flush_logs();
     }
@@ -342,20 +338,30 @@ nothrow @nogc:
         p._pending_vals.clear();
     }
 
-    void pump_introductions(SyncPeer p)
+    // the peer's TxHandler body; false on the window or a dead session, since an ack or the next startup re-arms
+    bool produce(SyncPeer p)
     {
-        if (!p._introducing)
-            return;
+        if (p._introducing)
+        {
+            if (pump_introductions(p))
+                return true;
+            if (p._introducing)
+                return false;
+        }
+        return pump_model_intro(p);
+    }
 
+    bool pump_introductions(SyncPeer p)
+    {
         SyncEncoder enc = encoder_for(p._encoder);
         uint gen = p.begin_burst();
-        while (p.control_window_free() > SyncPeer.control_reserve)
+        while (!p.tx_blocked())
         {
             BaseObject obj = next_object(p._intro_table, p._intro_slot);
             if (!obj)
             {
                 p._introducing = false;
-                return;
+                return false;
             }
             if (!obj._typeInfo.syncable || obj._is_remote)
                 continue;
@@ -363,115 +369,121 @@ nothrow @nogc:
                 continue;   // the lifecycle hook announced it while the walk was paused
             enc.encode_add_name(p, obj);
             if (!p.send_ok(gen))
-                return;
+                return false;
         }
+        return p.tx_grant_spent();
     }
 
-    void pump_model_intro(SyncPeer p)
+    bool pump_model_intro(SyncPeer p)
     {
-        pump_live_rescan(p);
-        if (p._pending_subs.empty && p._pending_live.empty)
-            return;
         SyncEncoder enc = encoder_for(p._encoder);
         uint gen = p.begin_burst();
 
-        while (!p._pending_live.empty)
+        // a drained queue loops back so a rescan held off by max_pending_subs can stage its remainder
+        for (;;)
         {
-            if (p.control_window_free() <= SyncPeer.control_reserve)
-                return;
-            EID node = p._pending_live[0];
-            p._pending_live.remove(0);
-            if (Element* e = resolve_element(node))
+            pump_live_rescan(p);
+            if (p._pending_subs.empty && p._pending_live.empty)
+                return false;
+
+            while (!p._pending_live.empty)
             {
-                if (authored_by(p, e))
-                    continue;
-                char[256] buf = void;
-                ptrdiff_t len = e.full_path(buf);
-                if (len > 0 && len <= buf.length)
-                    introduce_element(p, enc, e, buf[0 .. len], gen, true, 0, 0);
+                if (p.tx_blocked())
+                    return p.tx_grant_spent();
+                EID node = p._pending_live[0];
+                p._pending_live.remove(0);
+                if (Element* e = resolve_element(node))
+                {
+                    if (authored_by(p, e))
+                        continue;
+                    char[256] buf = void;
+                    ptrdiff_t len = e.full_path(buf);
+                    if (len > 0 && len <= buf.length)
+                        introduce_element(p, enc, e, buf[0 .. len], gen, true, 0, 0);
+                }
+                if (!p.send_ok(gen))
+                    return false;
             }
-            if (!p.send_ok(gen))
-                return;
-        }
 
-        while (!p._pending_subs.empty)
-        {
-            ref sub = p._pending_subs[0];
-            bool starved = false;
-
-            uint device_index = 0;
-            foreach (dev; g_app.devices.values)
+            while (!p._pending_subs.empty)
             {
-                if (device_index < sub.device_cursor)
-                {
-                    ++device_index;
-                    continue;
-                }
-                if (!dev.cid || dev.private_)
-                {
-                    ++device_index;
-                    ++sub.device_cursor;
-                    continue;
-                }
+                ref sub = p._pending_subs[0];
+                bool starved = false;
 
-                if (!sub.device_sent)
+                uint device_index = 0;
+                foreach (dev; g_app.devices.values)
                 {
-                    if (p.control_window_free() <= SyncPeer.control_reserve)
+                    if (device_index < sub.device_cursor)
+                    {
+                        ++device_index;
+                        continue;
+                    }
+                    if (!dev.cid || dev.private_)
+                    {
+                        ++device_index;
+                        ++sub.device_cursor;
+                        continue;
+                    }
+
+                    if (!sub.device_sent)
+                    {
+                        if (p.tx_blocked())
+                        {
+                            starved = true;
+                            break;
+                        }
+                        if (match_path(sub.pattern[], dev.id[]))
+                            introduce_device(p, enc, dev);
+                        if (!p.send_ok(gen))
+                            return false;
+                        sub.device_sent = true;
+                    }
+
+                    uint match_index = 0;
+                    bool complete = walk_elements_until(dev, sub.pattern[], (Element* e, const(char)[] path)
+                    {
+                        if (match_index++ < sub.element_cursor)
+                            return true;
+                        if (authored_by(p, e))
+                        {
+                            ++sub.element_cursor;
+                            return true;
+                        }
+                        if (p.tx_blocked())
+                            return false;
+                        if (sub.arm)
+                            track_live(p, e);
+                        introduce_element(p, enc, e, path, gen, sub.arm, sub.from_ms, sub.to_ms);
+                        ++sub.element_cursor;
+                        return p.send_ok(gen);
+                    });
+                    if (!p.send_ok(gen))
+                        return false;
+                    if (!complete)
                     {
                         starved = true;
                         break;
                     }
-                    if (match_path(sub.pattern[], dev.id[]))
-                        introduce_device(p, enc, dev);
+
+                    ++device_index;
+                    ++sub.device_cursor;
+                    sub.element_cursor = 0;
+                    sub.device_sent = false;
+                }
+
+                if (starved)
+                    return p.tx_grant_spent();
+
+                if (sub.res_seq)
+                {
+                    if (p.tx_blocked())
+                        return p.tx_grant_spent();
+                    enc.encode_res(p, sub.res_seq);
                     if (!p.send_ok(gen))
-                        return;
-                    sub.device_sent = true;
-                }
-
-                uint match_index = 0;
-                bool complete = walk_elements_until(dev, sub.pattern[], (Element* e, const(char)[] path)
-                {
-                    if (match_index++ < sub.element_cursor)
-                        return true;
-                    if (authored_by(p, e))
-                    {
-                        ++sub.element_cursor;
-                        return true;
-                    }
-                    if (p.control_window_free() <= SyncPeer.control_reserve)
                         return false;
-                    if (sub.arm)
-                        track_live(p, e);
-                    introduce_element(p, enc, e, path, gen, sub.arm, sub.from_ms, sub.to_ms);
-                    ++sub.element_cursor;
-                    return p.send_ok(gen);
-                });
-                if (!p.send_ok(gen))
-                    return;
-                if (!complete)
-                {
-                    starved = true;
-                    break;
                 }
-
-                ++device_index;
-                ++sub.device_cursor;
-                sub.element_cursor = 0;
-                sub.device_sent = false;
+                p._pending_subs.remove(0);
             }
-
-            if (starved)
-                return;
-
-            if (sub.res_seq)
-            {
-                if (p.control_window_free() <= SyncPeer.control_reserve)
-                    return;
-                enc.encode_res(p, sub.res_seq);
-                if (!p.send_ok(gen))
-                    return;
-            }
-            p._pending_subs.remove(0);
         }
     }
 
@@ -1345,7 +1357,7 @@ nothrow @nogc:
         staged[staged.length - 1].res_seq = seq;
         foreach (ref req; staged[])
             from._pending_subs ~= req.move;
-        pump_model_intro(from);
+        from.arm_tx();
     }
 
     void inbound_model_unsub(SyncPeer from, const(char[])[] patterns)
@@ -2285,12 +2297,15 @@ nothrow @nogc:
         {
             p._live_rescan = true;
             p._rescan_cursor = 0;
-            return;
         }
-        foreach (n; p._pending_live[])
-            if (n == node)
-                return;
-        p._pending_live ~= node;
+        else
+        {
+            foreach (n; p._pending_live[])
+                if (n == node)
+                    return;
+            p._pending_live ~= node;
+        }
+        p.arm_tx();
     }
 
     void pump_live_rescan(SyncPeer p)

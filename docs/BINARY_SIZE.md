@@ -68,6 +68,7 @@ row alone. Sizes stay in bytes; round in the note if that reads better.
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-09-10 | #687 | ldc 1.43.0 | 5,622,160 | 494,512 | | first row; DeviceBuilder as the only tree writer, deployed to the Pi as slot 152 |
 | 2026-09-10 | #689 | ldc 1.43.0 | 5,635,616 | 494,512 | | integration image, master + #687 + #689, deployed to the Pi as slot 154 |
+| 2026-09-16 | 7c50cea4 | ldc 1.43.0 | 5,605,168 | 483,280 | | master + sync bulk walks on the transport tx feed |
 
 ### Waveshare ESP32-S3-RS485-CAN, `make esp-idf-build BOARD=waveshare-esp32-s3-rs485-can CONFIG=release`
 
