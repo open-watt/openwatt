@@ -84,6 +84,7 @@ enum CollectionType : ubyte
     console_session,
     smartevse,
     tesla_twc,
+    telnet_server,
     count
 }
 

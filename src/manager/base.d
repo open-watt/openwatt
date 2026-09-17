@@ -605,10 +605,30 @@ nothrow @nogc:
     final Variant get_config()
         => gather();
 
-    final MutableString!0 export_config() const pure
+    final void export_config(ref MutableString!0 buf, const(char)[] path)
     {
-        // TODO: this should return a string that contains the command which would recreate this object...
-        return MutableString!0();
+        bool any = false;
+        foreach (i, p; properties())
+        {
+            if (!p.get || !p.set || p.read_only)
+                continue;
+            if (!(_props_set & (1uL << i)))
+                continue;
+            if (p.name[] == "name" || p.name[] == "type" || p.name[] == "flags" || p.name[] == "disabled")
+                continue;
+            Variant v = p.get(this, *p);
+            if (v.isNull)
+                continue;
+            if (!any)
+            {
+                buf.append(path, "/set ", name[]);
+                any = true;
+            }
+            buf.append(' ', p.name[], '=');
+            append_config_value(buf, v);
+        }
+        if (any)
+            buf.append('\n');
     }
 
     final int opCmp(const BaseObject rhs) const pure
@@ -1394,6 +1414,41 @@ template MaterialProperties(Type)
     __gshared const MaterialProperties = _make();
 }
 
+package void append_config_value(ref MutableString!0 buf, ref const Variant v)
+{
+    if (v.isArray)
+    {
+        foreach (i; 0 .. v.length)
+        {
+            if (i > 0)
+                buf.append(',');
+            append_config_value(buf, v[i]);
+        }
+        return;
+    }
+    {
+        import manager.expression : Script;
+        if (v.isUser!Script)
+        {
+            buf.append('{', v.asUser!Script.source, '}');
+            return;
+        }
+    }
+    if (v.isString)
+    {
+        buf.append('"');
+        foreach (c; v.asString)
+        {
+            if (c == '"' || c == '\\' || c == '$')
+                buf.append('\\');
+            buf.append(c);
+        }
+        buf.append('"');
+        return;
+    }
+    buf.append(v);
+}
+
 // '*' always, 'd' default, 'h' hidden
 ubyte parse_prop_flags(string flags) pure
 {
@@ -2050,4 +2105,21 @@ unittest
     assert(t.shutdowns == 1 && t._state == ActiveObject.State.destroyed);
 
     table.free_pending();
+
+    import manager.expression : parse_primary_exp, free_expression, EvalContext;
+
+    foreach (value; [ "source", "00123", "true", "null", "@missing", "$name", "a,b", "a b", "\"", "\\", "\\a\\b", "a\"b\"c", "line\nnext", "\\$name\"" ])
+    {
+        Variant original = Variant(value);
+        MutableString!0 encoded;
+        append_config_value(encoded, original);
+        assert(encoded[0] == '"' && encoded[$ - 1] == '"');
+        const(char)[] encoded_text = encoded[];
+        auto expression = parse_primary_exp(encoded_text);
+        assert(expression !is null && encoded_text.empty);
+        scope(exit) free_expression(expression);
+        EvalContext context;
+        Variant restored = expression.evaluate(context);
+        assert(restored.isString && restored.asString == value);
+    }
 }

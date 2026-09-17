@@ -31,6 +31,7 @@ import manager.reactor;
 import manager.profile : Profile, load_profile;
 import manager.secret;
 import manager.signal;
+import manager.saved_config;
 import manager.system;
 
 version (UseSpiffs)   version = HasFilesystem;
@@ -385,6 +386,8 @@ nothrow @nogc:
 
     Map!(String, RegisteredType) types;
 
+    bool config_dirty;
+
     // database...
 
     this()
@@ -459,6 +462,9 @@ nothrow @nogc:
         console.register_command!(show_time, "time")("/system", this);
         console.register_command!sleep("/system", this);
         console.register_command!reboot("/system", this);
+
+        console.register_command!(config_export, "export")("/system/config", this);
+        console.register_command!(config_save, "save")("/system/config", this);
 
         version (HasFilesystem)
         {
