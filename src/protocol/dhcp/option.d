@@ -1,7 +1,7 @@
 module protocol.dhcp.option;
 
 import urt.array;
-import urt.conv : parse_uint;
+import urt.conv : get_digit, parse_uint;
 import urt.inet;
 import urt.lifetime;
 import urt.string;
@@ -90,7 +90,7 @@ nothrow @nogc:
             case DHCPOptionType.bytes:
                 ubyte[256] buf = void;
                 size_t n;
-                if (!parse_hex_bytes(v, buf[], n))
+                if (!parse_hex_list(v, buf[], n))
                     return false;
                 return b.add_raw_option(_code, buf[0 .. n]);
             case DHCPOptionType.ip:
@@ -199,10 +199,8 @@ DHCPOptionType infer_type(ubyte code) pure
 
 private:
 
-bool parse_hex_bytes(const(char)[] s, ubyte[] out_, ref size_t out_len) pure
+bool parse_hex_list(const(char)[] s, ubyte[] out_, ref size_t out_len) pure
 {
-    import urt.string.ascii : is_hex;
-
     out_len = 0;
     size_t i = 0;
     while (i < s.length)
@@ -213,20 +211,23 @@ bool parse_hex_bytes(const(char)[] s, ubyte[] out_, ref size_t out_len) pure
             break;
         if (i + 1 >= s.length || out_len >= out_.length)
             return false;
-        ubyte c0 = s[i];
-        ubyte c1 = s[i + 1];
-        if (!c0.is_hex || !c1.is_hex)
+        uint hi = get_digit(s[i]);
+        uint lo = get_digit(s[i + 1]);
+        if (hi >= 16 || lo >= 16)
             return false;
-        if ((c0 | 0x20) >= 'a')
-            c0 = cast(ubyte)((c0 | 0x20) - 'a' + 10);
-        else
-            c0 -= '0';
-        if ((c1 | 0x20) >= 'a')
-            c1 = cast(ubyte)((c1 | 0x20) - 'a' + 10);
-        else
-            c1 -= '0';
-        out_[out_len++] = cast(ubyte)(c0 << 4 | c1);
+        out_[out_len++] = cast(ubyte)(hi << 4 | lo);
         i += 2;
     }
     return true;
+}
+
+unittest
+{
+    ubyte[4] bytes;
+    size_t len;
+    assert(parse_hex_list(" 01:ab, CD00 ", bytes[], len) && len == 4);
+    assert(bytes == [0x01, 0xAB, 0xCD, 0x00]);
+    assert(parse_hex_list(" ,:", bytes[], len) && len == 0);
+    foreach (invalid; [ "0", "0 1", "GG", "@0", "0011223344" ])
+        assert(!parse_hex_list(invalid, bytes[], len));
 }

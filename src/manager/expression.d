@@ -1257,26 +1257,31 @@ private Expression* parse_primary_exp(ref Parser parser, bool allow_slash = fals
     {
         MutableString!0 copy;
         bool interpolated = false;
+        bool escaped = false;
 
         size_t len = 0;
         while (len < parser.text.length && parser.text[len] != '"')
         {
             if (parser.text[len] == '\\')
             {
+                if (!escaped)
+                {
+                    copy = parser.text[0 .. len];
+                    escaped = true;
+                }
                 if (++len == parser.text.length)
                     return parser.fail("Expected '\"'");
-                copy = parser.text[0 .. len - 1];
             }
-            if (parser.text[len] == '$')
+            else if (parser.text[len] == '$')
                 interpolated = true;
-            if (copy)
+            if (escaped)
                 copy ~= parser.text[len];
             len++;
         }
         if (len == parser.text.length)
             return parser.fail("Expected '\"'");
 
-        if (copy)
+        if (escaped)
             r = alloc_expression(copy.move);
         else
         {
@@ -1600,6 +1605,16 @@ unittest
 
     invalid = make_script(":put before\n}");
     assert(invalid.commands.empty);
+
+    foreach (literal; [ "\"\"", "\"\\$name\"", "\"\\\"\"", "\"\\\\\"" ])
+    {
+        const(char)[] remaining = literal;
+        auto quoted = parse_primary_exp(remaining);
+        assert(quoted !is null && remaining.empty && quoted.ty == Type.str);
+        assert(!(quoted.flags & Flags.interpolated_string));
+        free_expression(quoted);
+    }
+
 }
 
 version (AllocProfile) unittest

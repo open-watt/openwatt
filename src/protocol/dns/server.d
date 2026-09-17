@@ -92,31 +92,29 @@ nothrow @nogc:
         return null;
     }
 
-    // should we return an array of strings instead of a comma-separated list?
-    String protocols() const
+    const(char)[][] protocols() const
     {
-        MutableString!0 r;
+        import urt.mem.temp : talloc_array;
+
+        auto buf = talloc_array!(const(char)[])(NSProtocol.max + 1);
+        size_t n = 0;
         foreach (i; 0 .. NSProtocol.max + 1)
         {
             if (_protocols & (1 << i))
-            {
-                if (r.length)
-                    r ~= ',';
-                r ~= enum_key_by_decl_index!NSProtocol(i);
-            }
+                buf[n++] = enum_key_by_decl_index!NSProtocol(i);
         }
-        // TODO: we should be able to promote MutableString to String!!
-        return r[].make_string();
+        return buf[0 .. n];
     }
     void protocols(String[] value)
     {
-        // populate the bitfield
+        ubyte set = 0;
         foreach (ref v; value)
         {
             const NSProtocol* p = enum_from_key!NSProtocol(v[]);
             if (p)
-                _protocols |= 1 << *p;
+                set |= 1 << *p;
         }
+        _protocols = set;
         mark_set!(typeof(this), "protocols")();
     }
     void protocols(ref Array!String value)

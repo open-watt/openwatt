@@ -119,7 +119,7 @@ nothrow @nogc:
             return;
         }
         size_t end = 0;
-        while (end < n && resp[end] >= '0' && resp[end] <= '9')
+        while (end < n && resp[end].is_numeric)
             ++end;
         const(char)[] id = resp[0 .. end];
         if (id.length == 0)

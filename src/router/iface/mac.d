@@ -192,6 +192,8 @@ nothrow @nogc:
 
     ptrdiff_t fromString(const(char)[] s)
     {
+        import urt.conv : get_digit;
+
         const len = s.length;
         if (len < bytes*2)
             return -1;
@@ -209,14 +211,9 @@ nothrow @nogc:
                     continue;
             }
 
-            uint digit = c - '0';
-            if (digit > 9)
-            {
-                digit = (c | 0x20) - 'a';
-                if (digit > 5)
-                    return -1;
-                digit += 10;
-            }
+            uint digit = get_digit(c);
+            if (digit >= 16)
+                return -1;
 
             if (i++ == 0)
                 b[j] = cast(ubyte)(digit << 4);

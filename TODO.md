@@ -4,6 +4,36 @@ Outstanding work and follow-ups, including point fixes and work awaiting a desig
 When an item lands, delete it or reduce it to the work that remains;
 the commit history and linked design documents carry the implementation record.
 
+## HIGH PRIORITY: saved configuration can lose state on reboot (#665)
+
+- **KNOWN RESTORE LIMITATIONS, explicitly deferred for #665: boot-created objects and omitted dependencies.**
+  Phased export creates objects disabled, applies saved properties, then enables only
+  those originally enabled. Forward references and cycles between exported objects
+  are handled. References to excluded dynamic, temporary, remote or missing objects
+  still require those identities to exist when properties are applied.
+  Existing names from process defaults, discovery and `system.conf` reject the create
+  command; later sets apply explicit properties, but cannot undo earlier startup or
+  restore omitted defaults/removals. An already-enabled boot object saved as disabled
+  is not disabled by the rejected create. Keep `system.conf` for early hardware
+  sequencing; design reconciliation across firmware changes and the later `user.conf`
+  layer. Save success is not proof of complete restoration or remote reachability.
+- **HIGH PRIORITY HARDENING, explicitly deferred for #665: secret-store scope and access.** Every hashed password, including
+  verification-only admin credentials, is persisted as reversible hex plaintext.
+  Restrict recoverable storage to explicit outbound requirements and create it with
+  owner-only permissions; the current POSIX save path requests mode 0666. Define
+  deletion/rotation cleanup so superseded plaintext does not accumulate indefinitely.
+- **HIGH PRIORITY: confirmed remote configuration changes.** A config can parse and
+  stay alive while disabling management connectivity. Add a confirmation deadline,
+  explicit remote acceptance and automatic return to a protected known-good revision;
+  uptime alone is not proof of reachability. Current rollback detects integrity/syntax
+  errors and NVS-counted failed boots, not command errors or management disconnection.
+- Exercise revision publication and rollback under actual power interruption on each
+  embedded filesystem (SPIFFS/littlefs), including NVS boot-failure recovery. Host
+  fault-injection tests do not establish the storage driver's power-loss guarantees.
+- Bound cleanup of crash-left `.tmp` and rejected `.bad` revision files without losing
+  useful recovery evidence; successful-save retention currently prunes completed files.
+- Complete the config-dirty mutation coverage (`set-hostname` currently bypasses it).
+
 ## Retrospective merge reconciliation (2026-09-08)
 
 - **[#669, deferred until removal is needed] Define device/subtree removal lifetime**:
@@ -638,6 +668,8 @@ this is what remains.
   control plane, and make the mirror re-evaluate its peer binding.
 
 ## Infrastructure
+
+- Fix `urt.conv.parse_uint` overflow: reject values outside `ulong` range using the existing zero-consumption error contract. Revision filenames use checked `parse_int_fast`.
 
 - **Unsubscribe during packet dispatch walks a stale slice**: `BaseInterface.fire_subscribers`
   and `send` iterate `_subscribers[0 .. _num_subscribers]` captured before the loop, and

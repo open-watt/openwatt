@@ -1879,7 +1879,7 @@ ubyte wire_span(ref const SampleDesc desc, const(char)[] spec)
     {
         uint n = 0;
         size_t i = 3;   // char_ only compiles from the str family
-        while (i < spec.length && spec[i] >= '0' && spec[i] <= '9')
+        while (i < spec.length && spec[i].is_numeric)
             n = n*10 + (spec[i++] - '0');
         return cast(ubyte)n;
     }

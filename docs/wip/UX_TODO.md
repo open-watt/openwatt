@@ -291,6 +291,29 @@ through them and remove sections as they are absorbed.
 - Rendering a quantity from `u` alone is enough; there is no need to reduce to base units.
   `Wh` is joules scaled by 3600, so a client that normalises will get joules, never
   seconds.
+## 2026-09-02: saved config and a config-dirty flag for a Save button
+
+- `/system/config/save` publishes a numbered config revision, keeps five completed revisions,
+  and reports its filename. `file=` supplies a revision base, not an exact output filename.
+  Boot selects the newest valid saved revision in place of startup.conf. `.tmp` files are ignored;
+  corrupt/unparseable revisions are retired as `.bad` with logged rollback. Exhausted revisions
+  do not trigger factory defaults. Surface rollback messages and retain access to recovery logs.
+- Revision publication does not confirm management reachability. A confirmation-window protocol
+  is still outstanding; do not present save success as proof a remote update is safe.
+- Consume secret `services`, DNS `protocols`, and certificate lists as arrays rather than
+  comma-joined strings. TCP-client `remote` now reports the live hostname or typed address;
+  do not assume it is always a hostname string. Telnet servers are managed collection objects
+  with add/remove/get/set/reset/print operations and a `port` property.
+- `/system/sysinfo config-dirty` returns `true`/`false`: whether config has been modified since boot
+  or the last save. The human `sysinfo` output shows it as `Config: modified|saved`.
+- Suggested UX: poll it alongside the existing sysinfo health poll and show a Save button (invoking
+  `/system/config/save`) whenever it reads `true`. It clears on a successful save to the default path.
+- Dirtiness is event-based, not a diff: setting a property back to its old value still reads dirty
+  until saved. Save success confirms a file write, not a complete future restore: #665
+  exports create-disabled, configure, and enable phases. Clients consuming exports must
+  accept `set` commands as well as `add`. References to excluded objects and reconciliation
+  with boot-created objects remain incomplete. Do not describe the saved state as verified
+  to survive reboot; see `TODO.md`.
 
 ## 2026-09-08: energy element tree slimming, itemised with the frontend
 

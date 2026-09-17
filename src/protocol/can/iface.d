@@ -155,7 +155,7 @@ nothrow @nogc:
         => _device[];
     final const(char)[] device(const(char)[] value)
     {
-        if (!value.empty && (value.length != 5 || value[0 .. 4] != "twai" || value[4] < '0' || value[4] > '9' || value[4] - '0' >= num_can))
+        if (!value.empty && (value.length != 5 || value[0 .. 4] != "twai" || !value[4].is_numeric || value[4] - '0' >= num_can))
             return "invalid CAN device";
         bool changed = _device[] != value;
         if (!value.empty)

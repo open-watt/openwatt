@@ -22,6 +22,7 @@ module manager.sample.spec;
 
 import urt.meta.enuminfo : VoidEnumInfo;
 import urt.si.unit : ScaledUnit;
+import urt.string.ascii : is_numeric;
 import urt.typereg : find_type_by_name, TypeDetails;
 
 import manager.sample.codec;
@@ -121,11 +122,11 @@ bool compile_spec(const(char)[] spec, ref const LayoutContext ctx, ScaledUnit un
     else
     {
         size_t fl = 0;
-        while (fl < spec.length && (spec[fl] < '0' || spec[fl] > '9') && spec[fl] != '_')
+        while (fl < spec.length && !spec[fl].is_numeric && spec[fl] != '_')
             ++fl;
         family = spec[0 .. fl];
         dl = fl;
-        while (dl < spec.length && spec[dl] >= '0' && spec[dl] <= '9')
+        while (dl < spec.length && spec[dl].is_numeric)
             ++dl;
         width = fl < dl ? parse_uint(spec[fl .. dl]) : 0;
     }

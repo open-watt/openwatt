@@ -1,7 +1,6 @@
 module manager.bootguard;
 
-// Counted in NVS, not on the filesystem this may have to roll back. Cutting
-// power a few times in a row is therefore also the manual factory reset.
+// Counted in NVS, independently of the configuration filesystem.
 
 import driver.system : reset_was_software;
 
@@ -27,33 +26,19 @@ bool boot_config_trusted()
         uint failures = read_counter();
         if (failures >= max_config_boot_failures)
         {
-            log_warning("system", "startup config ignored after ", failures,
-                        " failed boots; falling back to default config");
+            log_warning("system", "configuration failed ", failures, " boots; requesting previous saved revision");
             return false;
         }
-        // Power cycles still count; cutting power repeatedly is the factory reset.
         if (!reset_was_software())
             write_counter(failures + 1);
         return true;
     }
 }
 
-// Renamed rather than deleted, so the operator can still see what broke.
-void retire_config(const(char)[] path)
+void boot_config_recovered()
 {
     static if (has_nvs)
-    {
-        import urt.file : file_exists, rename_file;
-        import urt.mem.temp : tconcat;
-
-        if (!file_exists(path))
-            return;
-        const(char)[] retired = tconcat(path, ".bad");
-        if (rename_file(path, retired))
-            log_warning("system", "moved '", path, "' aside as '", retired, "'");
-        else
-            log_warning("system", "could not move '", path, "' aside; it will be retried");
-    }
+        write_counter(1);
 }
 
 // Safe to call every frame; touches NVS once.
