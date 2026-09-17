@@ -185,7 +185,6 @@ package:
                     write_sample(e, (charger.flags & 2) ? ulong(charger.lifetime_energy) * 1000 : ulong(0), timestamp);
                     break;
                 case SampleKind.serial_number:   write_sample(e, (charger.flags & 4) ? charger.serial_number[] : "", timestamp);    break;
-                case SampleKind.vin:             write_sample(e, (charger.flags & 0xF0) == 0xF0 ? charger.vin[] : "", timestamp);   break;
                 case SampleKind.circuit:         write_sample(e, (charger.flags & 0xF0) == 0xF0 ? charger.vin[] : "", timestamp);   break;
             }
         }
@@ -209,7 +208,6 @@ protected:
         Component status = builder.component("status", "DeviceStatus");
         builder.constant(status, "address", slave_id);
         add_sample(builder, status, "lifetime_energy", SampleKind.lifetime_energy, quantity_format(ValueType.u64, WattHour));
-        add_sample(builder, status, "vin", SampleKind.vin, text_format());
 
         Component evse = builder.component("evse", "EVSE");
         add_sample(builder, evse, "state", SampleKind.state, enum_format!(TeslaTWCMaster.ChargerState));
@@ -278,7 +276,6 @@ private:
         import_,
         lifetime_energy,
         serial_number,
-        vin,
         circuit
     }
 
@@ -305,7 +302,7 @@ private:
     __gshared immutable Push[SampleKind.circuit + 1] push_groups = [
         Push.heartbeat, Push.heartbeat, Push.heartbeat, Push.heartbeat, Push.heartbeat, Push.heartbeat, Push.link_ready,
         Push.heartbeat, Push.charge_info, Push.charge_info, Push.charge_info, Push.charge_info, Push.charge_info,
-        Push.charge_info, Push.charge_info, Push.charge_info, Push.charge_info, Push.serial, Push.vehicle, Push.vehicle,
+        Push.charge_info, Push.charge_info, Push.charge_info, Push.charge_info, Push.serial, Push.vehicle,
     ];
 
     Element* add_sample(ref DeviceBuilder b, Component parent, const(char)[] id, SampleKind kind, FormatId format, Access access = Access.read)

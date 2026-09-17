@@ -3,6 +3,12 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-09-17: Tesla wall connector drops `status.vin`
+
+- `status.vin` is gone. It duplicated `car.circuit`, which is the element the energy graph
+  actually reads and the one the `Port` reference specifies for a runtime circuit identity.
+  Read the connected VIN from `<twc>.car.circuit`.
+
 ## 2026-09-17: vehicle terminal moves under a `connection` port
 
 - A `Vehicle` device now exposes `connection: Port` (`role=connection`, `flow=consume`) and the
