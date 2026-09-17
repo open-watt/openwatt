@@ -3,6 +3,7 @@ module manager.syslog;
 import urt.log;
 import urt.mem.temp : tconcat;
 import urt.string : contains;
+import urt.string.ascii : is_numeric;
 import urt.time;
 
 nothrow @nogc:
@@ -33,7 +34,7 @@ bool parse_syslog(const(char)[] line, out LogMessage msg)
 
     size_t i = 1;
     uint pri = 0;
-    while (i < line.length && line[i] >= '0' && line[i] <= '9')
+    while (i < line.length && line[i].is_numeric)
         pri = pri * 10 + (line[i++] - '0');
     if (i >= line.length || line[i] != '>')
         return false;

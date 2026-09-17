@@ -219,6 +219,8 @@ nothrow @nogc:
     // matching wifi interface is found.
     bool find_interface_for_adapter(const(char)[] adapter_name, ref GUID out_guid)
     {
+        import urt.uuid : UUID = GUID;
+
         if (_handle is null)
             return false;
 
@@ -233,9 +235,10 @@ nothrow @nogc:
             return false;
         const(char)[] guid_str = adapter_name[lb + 1 .. rb];
 
-        GUID parsed;
-        if (!parse_guid_string(guid_str, parsed))
+        UUID uuid;
+        if (guid_str.length != 36 || uuid.fromString(guid_str) != 36)
             return false;
+        GUID parsed = GUID(uuid.data1, uuid.data2, uuid.data3, uuid.data4);
 
         WLAN_INTERFACE_INFO_LIST* list;
         if (WlanEnumInterfaces(_handle, null, &list) != 0)
@@ -314,40 +317,4 @@ private:
 bool guids_equal(ref const GUID a, ref const GUID b) pure
 {
     return a.Data1 == b.Data1 && a.Data2 == b.Data2 && a.Data3 == b.Data3 && a.Data4 == b.Data4;
-}
-
-// Parse the standard 8-4-4-4-12 GUID form (case-insensitive, no braces).
-bool parse_guid_string(const(char)[] s, ref GUID g) pure
-{
-    if (s.length != 36) return false;
-    if (s[8] != '-' || s[13] != '-' || s[18] != '-' || s[23] != '-') return false;
-
-    uint d1; if (!parse_hex_uint(s[0 .. 8], d1)) return false; g.Data1 = d1;
-    uint d2; if (!parse_hex_uint(s[9 .. 13], d2)) return false; g.Data2 = cast(ushort)d2;
-    uint d3; if (!parse_hex_uint(s[14 .. 18], d3)) return false; g.Data3 = cast(ushort)d3;
-
-    uint b;
-    if (!parse_hex_uint(s[19 .. 21], b)) return false; g.Data4[0] = cast(ubyte)b;
-    if (!parse_hex_uint(s[21 .. 23], b)) return false; g.Data4[1] = cast(ubyte)b;
-    foreach (i; 0 .. 6)
-    {
-        if (!parse_hex_uint(s[24 + i*2 .. 26 + i*2], b)) return false;
-        g.Data4[2 + i] = cast(ubyte)b;
-    }
-    return true;
-}
-
-private bool parse_hex_uint(const(char)[] s, out uint value) pure
-{
-    uint v = 0;
-    foreach (c; s)
-    {
-        v <<= 4;
-        if (c >= '0' && c <= '9') v |= c - '0';
-        else if (c >= 'a' && c <= 'f') v |= c - 'a' + 10;
-        else if (c >= 'A' && c <= 'F') v |= c - 'A' + 10;
-        else return false;
-    }
-    value = v;
-    return true;
 }

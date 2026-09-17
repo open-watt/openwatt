@@ -4,6 +4,7 @@ version (CoreDump):
 
 import urt.file;
 import urt.log;
+import urt.string.ascii : is_numeric;
 
 nothrow @nogc:
 
@@ -88,7 +89,7 @@ uint next_dump_number()
     uint number;
     foreach (char c; sequence)
     {
-        if (c < '0' || c > '9')
+        if (!c.is_numeric)
             continue;
         if (number > (uint.max - cast(uint)(c - '0')) / 10)
             return uint.max;

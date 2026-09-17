@@ -910,7 +910,7 @@ package bool bluetoothd_running()
         dirent* e = readdir(dir);
         if (e is null)
             return false;
-        if (e.d_name[0] < '0' || e.d_name[0] > '9')
+        if (!e.d_name[0].is_numeric)
             continue;
 
         char[280] path = void;

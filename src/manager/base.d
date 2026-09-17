@@ -422,7 +422,7 @@ nothrow @nogc:
         {
             if (c == ':')
                 return "names must not contain ':'";
-            numeric &= is_numeric(c);
+            numeric &= c.is_numeric;
         }
         return numeric ? "names must not be numeric" : null;
     }

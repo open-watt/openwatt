@@ -1,6 +1,7 @@
 module router.stream.serial;
 
 import urt.array;
+import urt.conv : get_digit;
 import urt.io;
 import urt.lifetime;
 import urt.log;
@@ -1430,14 +1431,8 @@ version(Posix)
         ushort v = 0;
         foreach (c; s)
         {
-            uint d;
-            if (c >= '0' && c <= '9')
-                d = c - '0';
-            else if (c >= 'a' && c <= 'f')
-                d = c - 'a' + 10;
-            else if (c >= 'A' && c <= 'F')
-                d = c - 'A' + 10;
-            else
+            uint d = get_digit(c);
+            if (d >= 16)
                 break;
             v = cast(ushort)((v << 4) | d);
         }

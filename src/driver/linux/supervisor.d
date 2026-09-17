@@ -7,6 +7,7 @@ import urt.internal.sys.posix : open, close, read, write, fsync, unlink,
                                 O_NONBLOCK, F_SETFL, fcntl, poll, pollfd, POLLIN, usleep,
                                 stat, stat_t;
 import urt.io : writeln;
+import urt.string.ascii : is_numeric;
 import urt.string.format : tconcat;
 import urt.time : getTime, MonoTime, seconds;
 
@@ -346,7 +347,7 @@ int read_next()
     bool any = false;
     foreach (c; buf[0 .. n])
     {
-        if (c >= '0' && c <= '9')
+        if (c.is_numeric)
         {
             v = v * 10 + (c - '0');
             any = true;
@@ -412,7 +413,7 @@ int parse_field(const(char)[] s, const(char)[] key)
         {
             int v = 0;
             size_t j = i + key.length;
-            while (j < s.length && s[j] >= '0' && s[j] <= '9')
+            while (j < s.length && s[j].is_numeric)
                 v = v * 10 + (s[j++] - '0');
             return v;
         }
