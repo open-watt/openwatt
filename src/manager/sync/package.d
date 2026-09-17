@@ -56,7 +56,7 @@ import manager;
 import manager.base;
 import manager.collection;
 import manager.component : Component;
-import manager.device : DeviceBuilder, Device;
+import manager.device : Device, DeviceBuilder, DeviceLifecycleEvent, register_device_lifecycle_handler;
 import manager.element : Access, add_feed_listener, Cursor, Element, ElementLifecycleEvent,
                          register_element_lifecycle_handler, remove_feed_listener, SampleUpdate, sweep_dirty;
 import manager.id : EID;
@@ -162,6 +162,7 @@ nothrow @nogc:
         register_object_lifecycle_handler(&on_object_lifecycle);
         register_object_state_handler(&on_object_state);
         register_element_lifecycle_handler(&on_element_lifecycle);
+        register_device_lifecycle_handler(&on_device_lifecycle);
         subscribe_clock_change(&on_clock_step);
     }
 
@@ -370,10 +371,18 @@ nothrow @nogc:
     void pump_model_intro(SyncPeer p)
     {
         pump_live_rescan(p);
-        if (p._pending_subs.empty && p._pending_live.empty)
+        if (p._pending_subs.empty && p._pending_live.empty && p._pending_refresh.empty)
             return;
         SyncEncoder enc = encoder_for(p._encoder);
         uint gen = p.begin_burst();
+
+        // Refresh existing handles before introducing nodes with their current shape.
+        while (!p._pending_refresh.empty)
+        {
+            if (!pump_refresh(p, enc, p._pending_refresh[0], gen))
+                return;
+            p._pending_refresh.remove(0);
+        }
 
         while (!p._pending_live.empty)
         {
@@ -526,6 +535,7 @@ nothrow @nogc:
         p._pending_vals.clear();
         p._pending_subs.clear();
         p._pending_live.clear();
+        p._pending_refresh.clear();
         p._live_rescan = false;
         p._rescan_cursor = 0;
 
@@ -1509,18 +1519,24 @@ nothrow @nogc:
         register_enum_info(name, make_enum_info(name, keys[], values[]));
     }
 
-    void inbound_model_add(SyncPeer from, SyncHandle handle, const(char)[] path, const(char)[] node_class, uint ft, const(char)[] access, Variant* v, ulong t_ms, ulong peer_id)
+    void inbound_model_add(SyncPeer from, SyncHandle handle, const(char)[] path, const(char)[] node_class, const(char)[] templates, uint ft, const(char)[] access, Variant* v, ulong t_ms, ulong peer_id)
     {
+        // Shape only: it names no node, so it never consumes a handle.
+        if (node_class[] == "component")
+        {
+            materialise_component(path, templates, peer_id);
+            return;
+        }
         if (!from.adoptable(handle))
         {
             log.warning("add from '", from.name[], "' with unusable handle ", handle);
             return;
         }
         // Failed materialisation must still advance the announced handle high-water.
-        from.adopt(handle, materialise_add(from, path, node_class, ft, access, v, t_ms, peer_id));
+        from.adopt(handle, materialise_add(from, path, node_class, templates, ft, access, v, t_ms, peer_id));
     }
 
-    EID materialise_add(SyncPeer from, const(char)[] path, const(char)[] node_class, uint ft, const(char)[] access, Variant* v, ulong t_ms, ulong peer_id)
+    EID materialise_add(SyncPeer from, const(char)[] path, const(char)[] node_class, const(char)[] templates, uint ft, const(char)[] access, Variant* v, ulong t_ms, ulong peer_id)
     {
         Address a = Address.parse(path);
         if (!a.valid || a.ns[] != "device")
@@ -1536,7 +1552,15 @@ nothrow @nogc:
             return EID.invalid;
 
         if (node_class[] == "device")
+        {
+            if (templates.length)
+            {
+                DeviceBuilder builder = dev.edit();
+                apply_path_templates(builder, null, templates);
+                builder.commit();
+            }
             return EID(dev.cid);
+        }
         if (node_class[] != "element" || rest.empty)
         {
             log.warning("add with unsupported class '", node_class, "' at '", path, "'");
@@ -1554,20 +1578,25 @@ nothrow @nogc:
             return EID.invalid;
         }
         Element* e = dev.find_element(rest);
+        DeviceBuilder builder = dev.edit();
+        apply_path_templates(builder, component_path(rest), templates);
         if (e && e.format.valid)
         {
             if (e.format != *pf && !value_compatible(*format_info(*pf), *e.data_format))
             {
                 log.warning("add for '", path, "' conflicts with the existing element's format - skipped");
+                builder.commit();
                 return EID.invalid;
             }
         }
         else
         {
-            DeviceBuilder builder = dev.edit();
             e = builder.element(rest, *pf);
             if (!e)
+            {
+                builder.commit();
                 return EID.invalid;
+            }
             if (e.data_format.kind == SeriesKind.point && !e.has_history)
             {
                 // a mirror event log retains the same window the authority's default gives
@@ -1575,6 +1604,7 @@ nothrow @nogc:
                 e.retention(3600.seconds);
             }
         }
+        builder.commit();
         Access remote_access = Access.read;
         if (access.length)
         {
@@ -2136,6 +2166,100 @@ nothrow @nogc:
         return result;
     }
 
+    void materialise_component(const(char)[] path, const(char)[] templates, ulong peer_id)
+    {
+        Address a = Address.parse(path);
+        if (!a.valid || a.ns[] != "device")
+        {
+            log.warning("component add with unsupported path '", path, "'");
+            return;
+        }
+        const(char)[] rest = a.subject;
+        const(char)[] dev_id = rest.split!'.';
+        Device dev = g_app.devices.find(dev_id, peer_id);
+        if (!dev)
+            return;     // shape for a device we do not mirror
+
+        DeviceBuilder builder = dev.edit();
+        apply_path_templates(builder, rest, templates);
+        builder.commit();
+    }
+
+    void on_device_lifecycle(Device dev, DeviceLifecycleEvent event)
+    {
+        if (event != DeviceLifecycleEvent.reclassified || !dev.cid || dev.private_)
+            return;
+        each_running_peer((SyncPeer p) {
+            if (!(p._remote_caps & SyncCaps.templates))
+                return;
+            foreach (ref r; p._pending_refresh[])
+            {
+                if (r.device == dev.cid)
+                {
+                    r.cursor = 0;
+                    return;
+                }
+            }
+            p._pending_refresh ~= SyncPeer.PendingRefresh(dev.cid);
+        });
+    }
+
+    // Include unclassified components so refreshes propagate cleared templates.
+    bool pump_refresh(SyncPeer p, SyncEncoder enc, ref SyncPeer.PendingRefresh refresh, uint gen)
+    {
+        import urt.mem.temp : tconcat;
+
+        Device dev = g_app.devices.container(refresh.device);
+        if (!dev)
+            return true;
+
+        uint index;
+        bool walk(Component c)
+        {
+            if (index++ >= refresh.cursor)
+            {
+                if (knows_subtree(p, c))
+                {
+                    if (p.control_window_free() <= SyncPeer.control_reserve)
+                        return false;
+                    char[256] path = void;
+                    char[max_template_chain] templates = void;
+                    ptrdiff_t len = c.full_path(path);
+                    const(char)[] chain = path_templates(c, templates[]);
+                    if (len > 0 && len <= path.length && chain)
+                        enc.encode_add(p, 0, tconcat("device:", path[0 .. len]), "component", chain, 0, null, dev.peer_id);
+                }
+                refresh.cursor = index;
+                if (!p.send_ok(gen))
+                    return false;
+            }
+            foreach (child; c.components)
+                if (!walk(child))
+                    return false;
+            return true;
+        }
+        return walk(dev);
+    }
+
+    bool knows_subtree(SyncPeer p, Component c)
+    {
+        static bool introduced(SyncPeer p, EID node)
+        {
+            SyncHandle h = p.handle_of(node);
+            return h != SyncPeer.invalid_handle && !(h & 1);
+        }
+
+        if (c.is_device && introduced(p, EID((cast(Device)cast(void*)c).cid)))
+            return true;
+        foreach (Element* e; c.elements)
+            if (e.eid && introduced(p, e.eid))
+                return true;
+        foreach (child; c.components)
+            if (knows_subtree(p, child))
+                return true;
+        return false;
+    }
+
     // Model-plane introduction: schema pushed before first cite, node bound to a
     // session handle, current value riding the add frame.
 
@@ -2147,7 +2271,9 @@ nothrow @nogc:
         if (to.handle_of(node) != SyncPeer.invalid_handle)
             return;
         SyncHandle h = to.introduce(node);
-        enc.encode_add(to, h, tconcat("device:", dev.id[]), "device", 0, null, dev.peer_id);
+        char[max_template_chain] templates = void;
+        const(char)[] chain = omit_unclassified_chain(path_templates(dev, templates[]));
+        enc.encode_add(to, h, tconcat("device:", dev.id[]), "device", chain, 0, null, dev.peer_id);
     }
 
     void send_element(SyncPeer to, SyncEncoder enc, Element* e, const(char)[] path, uint gen, bool include_value = true)
@@ -2200,7 +2326,9 @@ nothrow @nogc:
                 return;
         }
         h = to.introduce(node);
-        enc.encode_add(to, h, tconcat("device:", path), "element", ft, e, device.peer_id, include_value);
+        char[max_template_chain] templates = void;
+        const(char)[] chain = omit_unclassified_chain(path_templates(e.parent, templates[]));
+        enc.encode_add(to, h, tconcat("device:", path), "element", chain, ft, e, device.peer_id, include_value);
     }
 
     void send_backfill(SyncPeer to, SyncEncoder enc, Element* e, ulong from_ms, ulong to_ms, uint gen)
@@ -2611,6 +2739,56 @@ private:
 
 enum max_model_time_ms = ulong.max / 1_000_000;
 
+enum max_template_chain = 256;
+
+// Root-first templates terminated by '/'; null on overflow, never a partial chain.
+const(char)[] path_templates(Component leaf, char[] buffer)
+{
+    static bool put(Component c, char[] buffer, ref size_t len)
+    {
+        if (c.parent && !put(c.parent, buffer, len))
+            return false;
+        const(char)[] t = c.template_[];
+        if (len + t.length + 1 > buffer.length)
+            return false;
+        buffer[len .. len + t.length] = t;
+        len += t.length;
+        buffer[len++] = '/';
+        return true;
+    }
+    size_t len;
+    return put(leaf, buffer, len) ? buffer[0 .. len] : null;
+}
+
+const(char)[] omit_unclassified_chain(const(char)[] chain) pure
+{
+    foreach (c; chain)
+        if (c != '/')
+            return chain;
+    return null;
+}
+
+const(char)[] component_path(const(char)[] element_path) pure
+{
+    size_t dot = element_path.findLast('.');
+    return dot < element_path.length ? element_path[0 .. dot] : null;
+}
+
+// Empty segments clear templates; an absent chain leaves them unchanged.
+void apply_path_templates(ref DeviceBuilder b, const(char)[] path, const(char)[] templates)
+{
+    if (templates.empty)
+        return;
+
+    Component c = b.device;
+    c.template_ = templates.split!('/', false, false).make_string();
+    while (!path.empty && !templates.empty)
+    {
+        c = b.component(c, path.split!'.');
+        c.template_ = templates.split!('/', false, false).make_string();
+    }
+}
+
 bool model_value_is_newer(SysTime current, ulong t_ms, SysTime timestamp) pure
 {
     import urt.time : unix_time_ns;
@@ -2687,4 +2865,133 @@ unittest
     assert(model_value_is_newer(current, 2, from_unix_time_ns(2_000_000)));
     assert(!model_value_is_newer(current, 0, current));
     assert(model_value_is_newer(current, 0, current + nsecs(1_000)));
+
+    import manager.component : ComponentEvent;
+    import manager.device : DeviceTable;
+    import manager.series : register_value_format;
+
+    DeviceTable devices;
+    char[max_template_chain] buffer = void;
+
+    Device authority;
+    Component meter;
+    {
+        DeviceBuilder builder = devices.create("authority");
+        authority = builder.device;
+        authority.template_ = StringLit!"Vehicle";
+        Component port = builder.component("connection", "Port");
+        meter = builder.component(port, "meter", "EnergyMeter");
+        builder.element(meter, "power", register_value_format!float());
+        builder.commit();
+    }
+    assert(path_templates(authority, buffer[]) == "Vehicle/");
+    assert(path_templates(meter, buffer[]) == "Vehicle/Port/EnergyMeter/");
+
+    // Refreshes state empty templates; introductions omit wholly unclassified chains.
+    Device plain;
+    Component bare;
+    {
+        DeviceBuilder builder = devices.create("plain");
+        plain = builder.device;
+        bare = builder.component("status");
+        builder.commit();
+    }
+    assert(path_templates(plain, buffer[]) == "/");
+    assert(path_templates(bare, buffer[]) == "//");
+    assert(omit_unclassified_chain("//") is null && omit_unclassified_chain("/") is null && omit_unclassified_chain(null) is null);
+    assert(omit_unclassified_chain("/Port/") == "/Port/");
+
+    // Overflow must not produce a partial chain.
+    char[8] cramped = void;
+    assert(path_templates(meter, cramped[]) is null);
+    assert(path_templates(authority, cramped[]) == "Vehicle/");
+
+    assert(component_path("connection.meter.power") == "connection.meter");
+    assert(component_path("power") is null);
+
+    static struct Watch
+    {
+    nothrow @nogc:
+        uint tree_changes;
+        uint reclassified;
+        Device last;
+        void on_tree(Component, ComponentEvent event)
+        {
+            if (event == ComponentEvent.tree_changed)
+                ++tree_changes;
+        }
+        void on_device(Device d, DeviceLifecycleEvent event)
+        {
+            if (event == DeviceLifecycleEvent.reclassified)
+            {
+                ++reclassified;
+                last = d;
+            }
+        }
+    }
+    // the lifecycle registry has no removal, so the watcher outlives this block
+    static Watch watch;
+    register_device_lifecycle_handler(&watch.on_device);
+
+    Device mirror;
+    {
+        DeviceBuilder builder = devices.create("mirror");
+        mirror = builder.device;
+        builder.commit();
+    }
+    mirror.subscribe(&watch.on_tree);
+
+    void apply(const(char)[] path, const(char)[] templates)
+    {
+        watch.tree_changes = 0;
+        watch.reclassified = 0;
+        DeviceBuilder builder = mirror.edit();
+        apply_path_templates(builder, path, templates);
+        builder.commit();
+    }
+
+    apply("connection.meter", "Vehicle/Port/EnergyMeter/");
+    assert(watch.tree_changes == 1 && watch.reclassified == 1 && watch.last is mirror);
+    assert(mirror.template_[] == "Vehicle");
+    Component mirrored_port = mirror.find_component("connection");
+    assert(mirrored_port && mirrored_port.template_[] == "Port");
+    Component mirrored_meter = mirrored_port.find_component("meter");
+    assert(mirrored_meter && mirrored_meter.template_[] == "EnergyMeter");
+    assert(path_templates(mirrored_meter, buffer[]) == "Vehicle/Port/EnergyMeter/");
+
+    // A root-only change still notifies consumers.
+    apply(null, "Charger/");
+    assert(mirror.template_[] == "Charger" && watch.tree_changes == 1 && watch.reclassified == 1);
+
+    // Repeated templates do not notify consumers.
+    apply("connection.meter", "Charger/Port/EnergyMeter/");
+    assert(watch.tree_changes == 0 && watch.reclassified == 0);
+
+    // An absent chain preserves existing templates.
+    apply("connection.meter", null);
+    assert(watch.reclassified == 0 && mirrored_port.template_[] == "Port");
+
+    // An empty segment clears only that component.
+    apply("connection.meter", "Charger//EnergyMeter/");
+    assert(watch.reclassified == 1);
+    assert(mirrored_port.template_.length == 0 && mirrored_meter.template_[] == "EnergyMeter");
+    assert(mirror.template_[] == "Charger");
+
+    // The root can be cleared independently.
+    apply(null, "/");
+    assert(watch.reclassified == 1 && mirror.template_.length == 0);
+
+    // a chain shorter than the path speaks only for the nodes it names
+    apply("connection.meter", "Charger/");
+    assert(mirror.template_[] == "Charger" && mirrored_meter.template_[] == "EnergyMeter");
+
+    // Initial classification does not emit a reclassification event.
+    watch.reclassified = 0;
+    {
+        DeviceBuilder builder = devices.create("fresh");
+        builder.device.template_ = StringLit!"Vehicle";
+        builder.component("connection", "Port");
+        builder.commit();
+    }
+    assert(watch.reclassified == 0);
 }

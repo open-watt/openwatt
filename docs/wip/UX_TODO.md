@@ -3,6 +3,26 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-09-17: `add` frames carry component templates
+
+- The model-plane `add` frame gains an optional `tmpl`: the authority's component template for
+  every node the path crosses, the device's own first, each followed by `/`
+  (`Vehicle/Port/EnergyMeter/`). Split on `/` and drop the final empty piece; the segments then
+  align one to one with the device and each component on the path.
+- A chain that is present is authoritative: a segment sets that node's template, and an empty
+  segment clears it (`Vehicle//EnergyMeter/` unclassifies the middle node, `/` unclassifies the
+  device). A chain that is absent says nothing; never treat a missing `tmpl` as a clear.
+- Devices owned by a peer previously arrived with no component templates at all, because the
+  mirror builds components from element paths alone. Any client that classified components by
+  template saw peer-owned devices as untyped and silently skipped them; that now resolves, so
+  expect fleet devices to start appearing in template-driven views.
+- A template can change after a device is already on screen (a fleet node upgrading, a binding
+  that classifies its tree late, a template being cleared). Those arrive as
+  `add {path, class:"component", tmpl}`: no `h`, no value, and `tmpl` always present; apply the
+  chain to the named component and its ancestors. They are only sent to a session whose `hello`
+  lists the `templates` capability; without it the new shape only appears on the next full
+  introduction, i.e. after a reconnect.
+
 ## 2026-09-16: JSON quantity scaling (uRT #297, adopted by #711)
 
 - Consume each quantity's `q` and `u` together. An unspellable source scale now

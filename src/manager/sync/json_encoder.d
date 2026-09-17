@@ -529,7 +529,7 @@ nothrow @nogc:
         send_frame(peer);
     }
 
-    override void encode_add(SyncPeer peer, SyncHandle h, const(char)[] path, const(char)[] node_class, uint ft, Element* e, ulong peer_id, bool include_value = true)
+    override void encode_add(SyncPeer peer, SyncHandle h, const(char)[] path, const(char)[] node_class, const(char)[] templates, uint ft, Element* e, ulong peer_id, bool include_value = true)
     {
         import urt.time : unix_time_ns;
         import manager.element : Access;
@@ -562,6 +562,11 @@ nothrow @nogc:
                     _buf.append(",\"t\":", unix_time_ns(e.last_update) / 1_000_000);
                 }
             }
+        }
+        if (templates.length)
+        {
+            _buf ~= ",\"tmpl\":";
+            write_str(templates);
         }
         send_frame(peer);
     }
@@ -1080,6 +1085,7 @@ nothrow @nogc:
                 const(char)[] cls = require_str(json, "class");
                 uint ft = optional_uint(json, "ft", uint.max);
                 const(char)[] access = optional_str(json, "access");
+                const(char)[] templates = optional_str(json, "tmpl");
                 ulong t = optional_ulong(json, "t");
                 ulong peer_id;
                 if (const(char)[] owner = optional_str(json, "peer"))
@@ -1088,7 +1094,7 @@ nothrow @nogc:
                         bad("peer");
                 }
                 if (!bad_frame)
-                    sync.inbound_model_add(peer, h, path, cls, ft, access, json.getMember("v"), t, peer_id);
+                    sync.inbound_model_add(peer, h, path, cls, templates, ft, access, json.getMember("v"), t, peer_id);
                 break;
             }
 

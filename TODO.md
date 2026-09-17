@@ -570,6 +570,38 @@ role from a concrete deployment need before implementing or advertising it.
 The built surface is documented in [docs/SYNC.md](docs/SYNC.md) and [docs/PEERING.md](docs/PEERING.md);
 this is what remains.
 
+- **A cleared template can survive a reconnect on a wholly unclassified path**: an introduction
+  omits `tmpl` when nothing on the path carries a template, and an absent chain is silence, so a
+  mirror that missed a clear while its session was down keeps the stale label if every node on
+  that path, the device included, ended up unclassified. Live clears always travel (refresh
+  frames state unclassified nodes explicitly), and any template left anywhere on the path makes
+  the introduction's chain present and therefore corrective. Closing it means stating `/`-only
+  chains on every introduction, which is most of the bytes of a large unclassified device; nothing
+  clears a template today, so the trade stays as it is until something does.
+
+- **Two nodes race to author a mirror's `status.online`**: every node fabricates `status.online` when
+  it creates a device, mirrors included, so a downstream session may announce its own copy to a relay
+  before the relay introduces the authority's. The relay then sees that session as the node's author
+  and, by the usual rule, never introduces it back, so neither an introduction nor a template refresh
+  ever carries `status`'s shape to it. Seen on the four-node rig: `status` arrived typed or bare
+  depending on which side won. Decide who authors a mirror's liveness element.
+
+- **Refresh filtering scans handles linearly**: `pump_refresh` asks `SyncPeer.handle_of` for each
+  element under each templated component, and `handle_of` is a linear scan of the session's
+  handle tables. A reclassification of a large device on a session holding thousands of handles is
+  O(elements x handles), once per event. Fine at fleet scale and only at configuration time; a
+  keyed handle lookup fixes it if a device ever churns templates.
+
+- **The sync capability byte is full**: `templates` took bit 7 of `SyncCaps`, which is a `ubyte`
+  on the wire (binary `hello`) and in `SyncPeer._remote_caps`. The next capability needs the field
+  widened first; JSON names capabilities as strings and has no such limit.
+
+- **Intern the `add` frame's template chain**: `tmpl` repeats the same short chain on every
+  element of a component, so a full intro pays for it once per element rather than once per
+  component. Formats and enum dictionaries already intern per session (`to.ft_of`,
+  `to.enum_seen`); give the chain the same treatment if intro size becomes the binding
+  constraint. It is a few percent of a burst that is already paced, so it is not urgent.
+
 - **Elect an active authority**: two authorities of one cluster already share a member (each holds
   its own session), but nothing elects between them. Build the authority-to-authority session
   carrying membership view, epoch and liveness, elect by `priority` then node-id, and have members
