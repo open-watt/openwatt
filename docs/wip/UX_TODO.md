@@ -3,6 +3,20 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-09-17: vehicle terminal moves under a `connection` port
+
+- A `Vehicle` device now exposes `connection: Port` (`role=connection`, `flow=consume`) and the
+  charge terminal lives under it. Element paths move: `meter.*` -> `connection.meter.*` and
+  `control.*` -> `connection.control.*`. Nothing else in the vehicle tree moves; `battery`,
+  `charging`, `hvac` and the rest stay at the device root.
+- `connection.circuit` publishes the VIN. A car and an EVSE that publishes the same VIN on its
+  `car` port now share a circuit and join with no configuration, so expect vehicles to start
+  appearing attached to their charger in the energy flow graph instead of on an island of their
+  own.
+- A `/apps/energy/appliance` with `vin=` and no `device=` now binds itself to the VIN-rooted
+  vehicle device, so `device` reads back as the VIN where it used to read empty. Its port also
+  carries the vehicle's own meter and charge control, where it previously had neither.
+
 ## 2026-09-16: JSON quantity scaling (uRT #297, adopted by #711)
 
 - Consume each quantity's `q` and `u` together. An unspellable source scale now
