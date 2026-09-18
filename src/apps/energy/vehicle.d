@@ -164,8 +164,9 @@ static immutable vehicle_components = make_table!([
     "info", "DeviceInfo",
     "status", "DeviceStatus",
     "battery", "Battery",
-    "meter", "EnergyMeter",
-    "control", "PowerControl",
+    "connection", "Port",
+    "connection.meter", "EnergyMeter",
+    "connection.control", "PowerControl",
     "charging", "VehicleCharging",
     "hvac", "HVAC",
     "access", "VehicleAccess",
@@ -198,18 +199,18 @@ static immutable vehicle_elements = make_table!([
     "battery.usable_soc",
     "battery.full_capacity",
     "battery.capacity_confidence",
-    "meter.voltage",
-    "meter.current",
-    "meter.power",
-    "meter.import",
-    "meter.type",
-    "control.kind",
-    "control.direction",
-    "control.unit",
-    "control.min",
-    "control.max",
-    "control.step",
-    "control.setpoint",
+    "connection.meter.voltage",
+    "connection.meter.current",
+    "connection.meter.power",
+    "connection.meter.import",
+    "connection.meter.type",
+    "connection.control.kind",
+    "connection.control.direction",
+    "connection.control.unit",
+    "connection.control.min",
+    "connection.control.max",
+    "connection.control.step",
+    "connection.control.setpoint",
     "hvac.power",
     "hvac.state",
     "hvac.mode",
@@ -264,6 +265,9 @@ static immutable vehicle_elements = make_table!([
     "hvac.seats.third_row_right.heating_level",
     "hvac.seats.front_left.cooling_level",
     "hvac.seats.front_right.cooling_level",
+    "connection.role",
+    "connection.flow",
+    "connection.circuit",
 ]);
 
 static immutable VehicleElementType[vehicle_elements.length] vehicle_element_types =
@@ -281,6 +285,7 @@ static immutable VehicleElementType[vehicle_elements.length] vehicle_element_typ
     Type.float_, Type.float_, Type.float_, Type.float_, Type.bool_, Type.bool_, Type.bool_,
     Type.bool_,
     Type.float_, Type.float_, Type.int_, Type.bool_, Type.int_, Type.int_, Type.int_, Type.int_, Type.int_, Type.int_, Type.int_, Type.int_, Type.int_, Type.int_, Type.int_,
+    Type.string_, Type.string_, Type.string_,
 ];
 
 static immutable ubyte['Y' - '1' + 1] vin_year_ordinals =
@@ -320,6 +325,7 @@ static immutable ScaledUnit[vehicle_elements.length] vehicle_element_units =
     ScaledUnits.degree, ScaledUnits.degree, ScaledUnits.metre, ScaledUnit(Pascal, 5), ScaledUnit(Pascal, 5),
     ScaledUnit(Pascal, 5), ScaledUnit(Pascal, 5), none, none, none, none,
     ScaledUnits.kilowatt_hour, ScaledUnits.percent, none, none, none, none, none, none, none, none, none, none, none, none, none,
+    none, none, none,
 ];
 
 
@@ -344,12 +350,17 @@ bool materialise_vehicle(ref DeviceBuilder b, const(char)[] vin, bool changed)
         serial.value(vin.make_string());
         changed = true;
     }
-    changed |= set_default(vehicle, vehicle_elements[element_id!"control.kind"][], StringLit!"continuous");
-    changed |= set_default(vehicle, vehicle_elements[element_id!"control.direction"][], StringLit!"consume");
-    changed |= set_default(vehicle, vehicle_elements[element_id!"control.unit"][], StringLit!"A");
-    changed |= set_default(vehicle, vehicle_elements[element_id!"control.min"][], 6);
-    changed |= set_default(vehicle, vehicle_elements[element_id!"control.step"][], 1);
-    changed |= set_default(vehicle, vehicle_elements[element_id!"meter.type"][], StringLit!"single-phase");
+    changed |= set_default(vehicle, vehicle_elements[element_id!"connection.role"][], StringLit!"connection");
+    changed |= set_default(vehicle, vehicle_elements[element_id!"connection.flow"][], StringLit!"consume");
+    // The car names its own circuit, so plugging it into an EVSE that publishes the same VIN is
+    // the whole association; nothing configures the join.
+    changed |= set_default(vehicle, vehicle_elements[element_id!"connection.circuit"][], vin.make_string());
+    changed |= set_default(vehicle, vehicle_elements[element_id!"connection.control.kind"][], StringLit!"continuous");
+    changed |= set_default(vehicle, vehicle_elements[element_id!"connection.control.direction"][], StringLit!"consume");
+    changed |= set_default(vehicle, vehicle_elements[element_id!"connection.control.unit"][], StringLit!"A");
+    changed |= set_default(vehicle, vehicle_elements[element_id!"connection.control.min"][], 6);
+    changed |= set_default(vehicle, vehicle_elements[element_id!"connection.control.step"][], 1);
+    changed |= set_default(vehicle, vehicle_elements[element_id!"connection.meter.type"][], StringLit!"single-phase");
 
     VINInfo vi = decode_vin(vin);
     if (vi.manufacturer_name)

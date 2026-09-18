@@ -19,7 +19,7 @@ import apps.energy.battery_store;
 import apps.energy.link;
 import apps.energy.meter;
 import apps.energy.production;
-import apps.energy.vehicle : vehicle_for;
+
 public import apps.energy.model;
 
 import manager;
@@ -842,8 +842,6 @@ nothrow @nogc:
 
             Array!DevicePort virtual_ports;
             collect_bound_ports(a, virtual_ports);
-            if (virtual_ports.length == 0)
-                collect_vehicle_port(a, virtual_ports);
             if (virtual_ports.length != 0)
             {
                 add_device_ports(a, virtual_ports);
@@ -1216,28 +1214,6 @@ private:
             spec.closed = true;
             into ~= spec;
         }
-    }
-
-    // A shared VIN circuit joins an unprofiled car to its EVSE.
-    void collect_vehicle_port(Appliance a, ref Array!DevicePort into)
-    {
-        if (a.vin.length == 0)
-            return;
-        if (a.kind != "car" && a.kind != "vehicle")
-            return;
-        DevicePort spec;
-        spec.path = StringLit!"connection";
-        spec.circuit = a.vin;
-        spec.role = PortRole.connection;
-        spec.flow = FlowDomain.consume;
-        spec.meter = a.meter_ref;
-        spec.sign = a.meter_sign_set ? a.meter_sign : MeterSign.normal;
-        spec.component = a.state_ref;
-        if (spec.component is null)
-            spec.component = a.device_ref;
-        if (spec.component is null)
-            spec.component = vehicle_for(a.vin);
-        into ~= spec;
     }
 
     void apply_appliance_meter(Appliance a, ref Array!DevicePort specs)

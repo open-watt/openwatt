@@ -236,7 +236,16 @@ nothrow @nogc:
         {
             topology_dirty = false;
             foreach (a; Collection!Appliance().values)
+            {
+                // A VIN is a device reference: the vehicle tree rooted at it carries the car's
+                // port, meter and control, and configuration never has to name it.
+                if (a.vin.length != 0 && a.device.length == 0)
+                {
+                    vehicle_for(a.vin);
+                    a.device(a.vin);
+                }
                 a.resolve_refs(g_app.devices);
+            }
             return true;
         }
         return last_topology_rebuild == MonoTime.init;
