@@ -344,6 +344,31 @@ The current implementation and remaining phases are described in
 
 ## Data model
 
+- **Modbus `report` registers: accept unsolicited responses and never poll them**: some devices
+  push a value on their own schedule instead of answering reads. The bench PT100 transmitter does
+  exactly this, and today the only way to consume it is snoop mode, which disables polling for the
+  whole binding. Add a sample frequency (or profile attribute) meaning "reported": exclude the
+  register from the poll scheduler and the batch grouping entirely, and match an unsolicited
+  response to it by address with no preceding request outstanding. Zigbee and MQTT already model
+  reporting this way; Modbus needs the same so one binding can poll most registers and accept
+  reports for a few.
+
+- **Modbus profile quirk to force write-multiple for single-register writes**: `createMessage_Write`
+  (`src/protocol/modbus/message.d:186`) collapses a one-element array to fn 06 / fn 05. The bench
+  TAC1100 rejects fn 06 on its config registers and accepts only fn 16, so a single-register write
+  has to be spelled `values=2,3` to avoid the collapse. Add a per-profile (or per-remote-server)
+  quirk that pins writes to fn 16 / fn 15 regardless of count.
+
+- **`slave=` accepts only a named remote-server, and a raw unit address silently polls nothing**:
+  `/binding/modbus` leaves `_slave_server` null unless `slave=` names an
+  `/interface/modbus/remote-server` entry, and the poll path early-outs on
+  `if (_snooping || !_slave_server) return;` (`src/protocol/modbus/binding.d:238`). A binding
+  configured with a bare unit address therefore reaches Running and transmits nothing, with no
+  diagnostic. Either resolve a numeric `slave=` to an implicit server or refuse the config in
+  `validate()`. A `/interface/modbus` bus scan command would also have found the TAC1100's address
+  in seconds instead of by hand.
+
+
 - **Device construction API, remaining pieces** (the builder landed: `DeviceBuilder`,
   `DeviceLifecycleEvent.created`, private tree arrays, energy off the table scan):
   - no removal path: `Component` has no remove, `DeviceTable` has no remove, elements are never
