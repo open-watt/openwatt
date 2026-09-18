@@ -80,6 +80,8 @@ enum MessageState
 
 alias MessageCallback = void delegate(int msg_handle, MessageState state) nothrow @nogc;
 alias IncomingPacketHandler = void delegate(ref Packet p, BaseInterface i) nothrow @nogc;
+// The handler submits up to `requested` bytes through forward(); true asks to be invited again as room frees, false disarms until tx_handler() re-arms it.
+alias TxHandler = bool delegate(BaseInterface sink, size_t requested) nothrow @nogc;
 
 
 __gshared IncomingPacketHandler[PacketType.count] _frame_handlers;
@@ -472,6 +474,20 @@ nothrow @nogc:
     {
     }
 
+    final void tx_handler(TxHandler handler)
+    {
+        _tx_handler = handler;
+        tx_handler_changed();
+    }
+    final TxHandler tx_handler() const pure
+        => _tx_handler;
+
+    final void release_tx_handler(TxHandler handler)
+    {
+        if (_tx_handler is handler)
+            _tx_handler = null;
+    }
+
     int forward(ref Packet packet, MessageCallback callback = null, const(QueuePolicy)* queue_policy = null)
     {
         if (!running)
@@ -560,9 +576,29 @@ protected:
                                   "avg-queue-time", "avg-service-time", "max-service-time" ])();
 
         set_link_speed(0);
+        _tx_handler = null;
     }
 
     abstract int transmit(ref Packet packet, MessageCallback callback = null, const(QueuePolicy)* queue_policy = null);
+
+    // one invitation; false once the handler has disarmed itself
+    final bool invite_tx(size_t requested)
+    {
+        TxHandler h = _tx_handler;
+        if (!h)
+            return false;
+        if (h(this, requested))
+            return true;
+        if (_tx_handler is h)
+            _tx_handler = null;
+        return false;
+    }
+
+    // an unbounded interface takes everything the handler has in one invitation
+    void tx_handler_changed()
+    {
+        invite_tx(size_t.max);
+    }
 
     final void incoming_packet(ref Packet packet)
     {
@@ -768,6 +804,7 @@ package:
 protected: // TODO: should probably be private?
     InterfaceSubscriber[8] _subscribers;
     ubyte _num_subscribers;
+    TxHandler _tx_handler;
     int _kernel_ifindex;    // OS netdev ifindex when a platform backend backs this interface (0 = none)
     version (Windows)
         int _kernel_ifindex6;
@@ -1396,4 +1433,110 @@ unittest
     }
     assert(a2.scope_id == sa && interface_for_scope(sa) is a2);
     assert(c.scope_id != sa && c.scope_id != sb);
+
+    // tx_handler: an unbounded sink takes everything in one invitation; a bounded one grants the
+    // room under its cap, holds the handler while the producer wants more, and drops it on false
+    import router.iface.packet : RawFrame;
+
+    static class Sink : BaseInterface
+    {
+        enum type_name = "tx-handler-test-sink";
+    nothrow @nogc:
+        this(const CollectionTypeInfo* type_info, CID id, ObjectFlags flags = ObjectFlags.none)
+        {
+            super(type_info, id, flags);
+            _state = State.running;
+        }
+        this(CID id, ObjectFlags flags = ObjectFlags.none)
+        {
+            this(collection_type_info!Sink, id, flags);
+        }
+        override int transmit(ref Packet packet, MessageCallback, const(QueuePolicy)*)
+        {
+            pending += packet.length;
+            return 0;
+        }
+        size_t pending;
+    }
+
+    static final class Bounded : Sink
+    {
+        enum type_name = "tx-handler-test-bounded";
+    nothrow @nogc:
+        this(CID id, ObjectFlags flags = ObjectFlags.none)
+        {
+            super(collection_type_info!Bounded, id, flags);
+        }
+        override void tx_handler_changed()
+        {
+            while (pending < cap && invite_tx(cap - pending))
+                ++invites;
+        }
+        void drain(size_t bytes)
+        {
+            pending -= bytes;
+            tx_handler_changed();
+        }
+        size_t cap = 300;
+        size_t invites;
+    }
+
+    static struct Producer
+    {
+    nothrow @nogc:
+        bool produce(BaseInterface sink, size_t requested)
+        {
+            ++calls;
+            size_t sent;
+            while (remaining && sent < requested)
+            {
+                ubyte[64] buf;
+                Packet p;
+                p.init!RawFrame(buf[0 .. frame]);
+                sink.forward(p);
+                remaining -= frame;
+                sent += frame;
+            }
+            return remaining != 0;
+        }
+        size_t remaining;
+        size_t frame = 40;
+        size_t calls;
+    }
+
+    Sink open = Collection!Sink().create("tx-handler-test-open");
+    Bounded bounded = Collection!Bounded().create("tx-handler-test-bounded");
+    scope(exit)
+    {
+        Collection!Sink().remove(open);
+        Collection!Bounded().remove(bounded);
+        free(open);
+        free(bounded);
+    }
+
+    Producer whole = Producer(400);
+    open.tx_handler(&whole.produce);
+    assert(whole.calls == 1 && whole.remaining == 0 && open.pending == 400 && open.tx_handler is null);
+
+    Producer paced = Producer(1000);
+    bounded.tx_handler(&paced.produce);
+    assert(paced.calls == 1 && bounded.pending == 320 && paced.remaining == 680 && bounded.tx_handler !is null);
+    bounded.drain(320);
+    assert(paced.calls == 2 && bounded.pending == 320 && paced.remaining == 360);
+    bounded.drain(320);
+    assert(paced.calls == 3 && bounded.pending == 320 && paced.remaining == 40 && bounded.tx_handler !is null);
+    bounded.drain(320);
+    assert(paced.calls == 4 && bounded.pending == 40 && paced.remaining == 0 && bounded.tx_handler is null);
+    assert(bounded.invites == 3);
+
+    // a handler with nothing to give disarms on its first invitation; releasing a stranger is a no-op
+    Producer idle;
+    bounded.tx_handler(&idle.produce);
+    assert(idle.calls == 1 && bounded.tx_handler is null);
+    Producer held = Producer(1000);
+    bounded.tx_handler(&held.produce);
+    bounded.release_tx_handler(&idle.produce);
+    assert(bounded.tx_handler !is null);
+    bounded.release_tx_handler(&held.produce);
+    assert(bounded.tx_handler is null);
 }
