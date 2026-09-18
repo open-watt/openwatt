@@ -477,7 +477,7 @@ nothrow @nogc:
         send_frame(peer);
     }
 
-    override void encode_add(SyncPeer peer, SyncHandle h, const(char)[] path, const(char)[] node_class, uint ft, Element* e, ulong peer_id, bool include_value = true)
+    override void encode_add(SyncPeer peer, SyncHandle h, const(char)[] path, const(char)[] node_class, const(char)[] templates, uint ft, Element* e, ulong peer_id, bool include_value = true)
     {
         import urt.time : unix_time_ns;
         import manager.element : Access;
@@ -506,6 +506,7 @@ nothrow @nogc:
             _buf.put_varint(t_ms);
         }
         _buf.put_varint(peer_id);
+        _buf.put_str(templates);
         send_frame(peer);
     }
 
@@ -948,12 +949,15 @@ nothrow @nogc:
                     v = r.variant();
                     t_ms = r.varint();
                 }
+                const(char)[] templates;
                 if (r.more())
                     peer_id = r.varint();
+                if (r.more())
+                    templates = r.str();
                 if (!r.fail)
                 {
                     Variant* value = v.isNull ? null : &v;
-                    sync.inbound_model_add(peer, h, path, node_class, ft, access, value, t_ms, peer_id);
+                    sync.inbound_model_add(peer, h, path, node_class, templates, ft, access, value, t_ms, peer_id);
                 }
                 break;
             }
@@ -1493,4 +1497,19 @@ unittest
     Reader scoped_add = Reader(buf[]);
     peer_id = scoped_add.more ? scoped_add.varint() : 0;
     assert(peer_id == 0x0123_4567_89AB_CDEF && !scoped_add.fail);
+
+    buf.clear();
+    buf.put_varint(0);
+    buf.put_str("/Port/EnergyMeter");
+    Reader templated_add = Reader(buf[]);
+    peer_id = templated_add.more ? templated_add.varint() : 0;
+    const(char)[] templates = templated_add.more ? templated_add.str() : null;
+    assert(peer_id == 0 && templates == "/Port/EnergyMeter" && !templated_add.fail && !templated_add.more);
+
+    buf.clear();
+    buf.put_varint(9);
+    Reader untemplated_add = Reader(buf[]);
+    peer_id = untemplated_add.more ? untemplated_add.varint() : 0;
+    templates = untemplated_add.more ? untemplated_add.str() : null;
+    assert(peer_id == 9 && templates is null && !untemplated_add.fail);
 }

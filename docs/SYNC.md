@@ -48,7 +48,7 @@ tick where JSON favours a frame per element.
 `hello` is the first frame in each direction: protocol version, hostname, capability bits,
 `max_frame`, and node-id, role, cluster and a fresh 16-byte nonce for peering. Capability names the
 verb families this build serves: `objects` (the object mirror), `model` (the data-model plane),
-`history`, `console`, `logs`, `time` and `console_session`. `max_frame` bounds every response;
+`history`, `console`, `logs`, `time`, `console_session` and `templates`. `max_frame` bounds every response;
 history already caps at 2000 points to fit one 64 KB packet.
 
 Session handles name everything addressable. The introducer allocates them, dense and ascending,
@@ -136,10 +136,25 @@ with zero segments.
   count, series kind, unit, rate) and a named dictionary (enum or bitfield members). Formats with
   no wire representation, the same verdict `ows.container_serialisable` gives, are skipped from
   the surface with a log.
-- **`add {h, path, class, ft, peer?, v?, t?}`** binds a handle to a path, announces existence,
-  cites schema and carries the current value and timestamp, all in one frame. `class` is `device`
-  or `element`; `peer` is the hexadecimal owner of a peer-local device and is omitted for the
-  global namespace.
+- **`add {h, path, class, ft, peer?, v?, t?, tmpl?}`** binds a handle to a path, announces
+  existence, cites schema and carries the current value and timestamp, all in one frame. `class`
+  is `device` or `element`; `peer` is the hexadecimal owner of a peer-local device and is omitted
+  for the global namespace. `tmpl` is the root-first `/`-joined component template of every node
+  the path crosses, the device's own first; the receiver builds components from the path alone, so
+  without it a mirrored device arrives untyped and no consumer that discovers by template can see
+  it. It is omitted when nothing on the path carries a template, and a receiver that predates it
+  ignores it.
+- **`add {path, class:"component", peer?, tmpl}`** refreshes shape. It binds no node and consumes
+  no handle; `path` names a component (the bare device path names the device itself) and `tmpl`
+  covers every node down to it. Existing handles carry values, never shape, so a template learned
+  after a device was introduced - a relay whose own authority upgraded, or a binding that
+  classifies its tree on a later pass - reaches downstream sessions only this way. Any
+  reclassification of an existing node, local or mirrored, queues the device on every session
+  that advertised `templates`; the introduction pump then sends one frame per templated component
+  under which that session already holds a handle, under the same control window as every other
+  introduction. A session introduced to nothing under a component is owed nothing for it, so a
+  fresh mirror refreshes nothing and a narrow subscription is refreshed exactly where it looks. A
+  peer without the capability picks the shape up from `tmpl` on its next introduction.
 - **`val {h, s:[[t,v],...], lost?}`** is the feed, deliberately dumb: it is nearly all the bytes on
   a mature link and every field multiplies by sample count. `lost` reports overrun rather than
   hiding it, the difference between a mirror that is wrong and one that knows where. There is no
@@ -193,6 +208,7 @@ timestamp the subordinate collects until the next push. The authority is either 
 | `history` | `history_req`, `history` |
 | `console` | `cmd`, `result`, `error`, `suggest`, `suggestions` |
 | `console_session` | `console` |
+| `templates` | `add {class:"component"}` |
 | `logs` | `log_sub`, `log` |
 | `time` | `time_req`, `time_resp`, `time_push` |
 

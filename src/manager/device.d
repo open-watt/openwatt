@@ -29,6 +29,7 @@ enum DeviceLifecycleEvent : ubyte
 {
     created,
     destroyed,
+    reclassified,   // an existing node changed its template
 }
 
 alias DeviceLifecycleHandler = void delegate(Device device, DeviceLifecycleEvent event) nothrow @nogc;
@@ -215,7 +216,9 @@ nothrow @nogc:
         _device = null;
         d._editing = false;
         bool dirty = d._dirty;
+        bool reclassified = d._reclassified;
         d._dirty = false;
+        d._reclassified = false;
         Array!(Element*) created = d._created.move;
         foreach (e; created[])
         {
@@ -230,7 +233,11 @@ nothrow @nogc:
         if (_new)
             signal_device_lifecycle(d, DeviceLifecycleEvent.created);
         else if (dirty)
+        {
             d.notify(ComponentEvent.tree_changed);
+            if (reclassified)
+                signal_device_lifecycle(d, DeviceLifecycleEvent.reclassified);
+        }
     }
 
 package:
@@ -671,6 +678,7 @@ package:
 
     bool _editing;
     bool _dirty;
+    bool _reclassified;
     Array!(Element*) _created;
 
 private:

@@ -50,9 +50,10 @@ enum SyncCaps : ubyte
     logs    = 1 << 4,
     time    = 1 << 5,
     console_session = 1 << 6,
+    templates = 1 << 7, // understands `add {class:"component"}` shape refreshes
 }
 
-enum ubyte local_sync_caps = SyncCaps.objects | SyncCaps.model | SyncCaps.history | SyncCaps.console | SyncCaps.logs | SyncCaps.time | SyncCaps.console_session;
+enum ubyte local_sync_caps = SyncCaps.objects | SyncCaps.model | SyncCaps.history | SyncCaps.console | SyncCaps.logs | SyncCaps.time | SyncCaps.console_session | SyncCaps.templates;
 
 // reliability sublayer classification; values are the wire kind byte
 enum TxQueue : ubyte
@@ -612,6 +613,13 @@ package:
         bool   device_sent;
     }
 
+    // a device whose classification changed after this session may have been introduced to it
+    struct PendingRefresh
+    {
+        CID  device;
+        uint cursor;
+    }
+
     final void attach_model_element(Device device, Element* element, Access access)
     {
         PeerBinding binding = model_binding(device);
@@ -740,6 +748,7 @@ package:
 
     Array!PendingSub _pending_subs;
     Array!EID        _pending_live;
+    Array!PendingRefresh _pending_refresh;
     bool             _live_rescan;
     uint             _rescan_cursor;
     enum max_pending_subs = 8;
