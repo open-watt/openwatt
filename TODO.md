@@ -725,6 +725,20 @@ this is what remains.
   stream reads console events. Use a terminal or supported session transport.
   Drain stderr during execution and terminate before waiting for EOF; the
   current shutdown reads stderr before stopping the process and can hang.
+  `test/test_runner.py` also looks for `bin/x86_64_debug/openwatt` while the makefile emits
+  `bin/x86_64_linux_debug/`, so it finds no Linux build at all.
+
+- **`assert(classref)` still segfaults LDC debug builds**: under `--fno-rtti`, `assert(o)` on a
+  class reference runs the invariant, and urt's `_d_invariant_impl` walks `typeid(o)`, which is
+  gone. #710 moved the two `device.d` sites to `!is null`, but others remain: `debug assert(s)`
+  in `ModbusInterface.startup` (`src/protocol/modbus/iface.d`) kills any debug instance whose
+  startup script creates a Modbus interface. Sweeping every site is whack-a-mole; having
+  `_d_invariant_impl` skip the ClassInfo walk when RTTI is compiled out fixes them all at once.
+
+- **Move Xtensa to LDC 1.43 when esp-clang reaches LLVM 22**: LDC 1.43 emits LLVM 22 bitcode,
+  which no esp-clang yet reads (the latest, esp-21.1.3, is LLVM 21), so Xtensa firmware is
+  pinned to LDC 1.42 and the makefile refuses a newer one. Espressif has shipped a major every
+  six months or so; re-check when the next esp-clang lands.
 
 - **Harden bindings against malformed remote input**: the `ow/dm` review found protocol
   bindings that abort or deref on data an attacker controls, and these survive. ESPHome still

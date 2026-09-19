@@ -457,7 +457,7 @@ endif
 
 .PHONY: esp-idf-build esp-flash esp-monitor esp-check-isr
 
-ESP_IDF_PATH ?= $(lastword $(sort $(wildcard $(HOME)/.espressif/*/esp-idf)))
+ESP_IDF_PATH ?= $(or $(lastword $(sort $(wildcard $(HOME)/.espressif/*/esp-idf))),$(lastword $(sort $(wildcard $(HOME)/esp/esp-idf*))))
 ifeq ($(PLATFORM),esp32)
     ESP_PROJECT_DIR := platforms/esp32
     ESP_IDF_TARGET  := esp32
@@ -515,6 +515,25 @@ else ifeq ($(PLATFORM),esp32-p4)
 endif
 
 ifdef ESP_PROJECT_DIR
+    # The D object builds without IDF; these guard the firmware link.
+    ifneq ($(filter esp-idf-build esp-flash,$(MAKECMDGOALS)),)
+        # esp_hal_uart, which the main component requires, arrived with IDF 6.
+        ifeq ($(wildcard $(ESP_IDF_PATH)/components/esp_hal_uart),)
+            $(error No ESP-IDF v6 or newer at '$(ESP_IDF_PATH)'; set ESP_IDF_PATH)
+        endif
+        ifeq ($(XTENSA_TWO_STAGE),1)
+            ifeq ($(ESPRESSIF_LLC),)
+                $(error Xtensa firmware needs esp-clang's llc; install it with idf_tools.py install esp-clang)
+            endif
+            # llc cannot read bitcode from a newer LLVM major than its own.
+            LLVM_MISMATCH := $(shell ldc=$$("$(DC)" --version | sed -n 's/.*LLVM \([0-9]*\)\..*/\1/p' | head -1); \
+                llc=$$("$(ESPRESSIF_LLC)" --version | sed -n 's/.*LLVM version \([0-9]*\)\..*/\1/p' | head -1); \
+                [ "$$ldc" -gt "$$llc" ] 2>/dev/null && echo "$(DC) is LLVM $$ldc but esp-clang's llc is LLVM $$llc")
+            ifneq ($(LLVM_MISMATCH),)
+                $(error $(LLVM_MISMATCH); pass an older LDC as DC=)
+            endif
+        endif
+    endif
     esp_config_has_line = $(shell tr -d '\r' < "$(1)" | grep -Fxc '$(2)')
     ESP_BUILD_DIR := $(abspath $(OBJDIR)/esp-idf)
     ESP_SDKCONFIG := $(ESP_BUILD_DIR)/sdkconfig
@@ -584,7 +603,7 @@ else
     XTENSA_EH_FLAGS := --emit-dwarf-unwind=always --exception-model=dwarf
 endif
 $(ESP_LINK_OBJ): $(TARGET)
-	"$(ESPRESSIF_LLC)" -O2 -mtriple=xtensa-none-elf --emulated-tls --mtext-section-literals --function-sections --data-sections $(XTENSA_EH_FLAGS) $(XTENSA_MATTR) --filetype=obj $< -o $@
+	"$(ESPRESSIF_LLC)" -O2 -mtriple=xtensa-none-elf --emulated-tls --mtext-section-literals --function-sections --data-sections $(XTENSA_EH_FLAGS) $(XTENSA_MATTR) $(XTENSA_LLC_EXTRA_FLAGS) --filetype=obj $< -o $@
 else
 ESP_LINK_OBJ := $(TARGET)
 endif
