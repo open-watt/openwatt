@@ -16,7 +16,7 @@ public import manager.expression : NamedArgument;
 nothrow @nogc:
 
 
-alias CID = ID!6;
+alias CID = ID!7;
 
 enum CollectionType : ubyte
 {
@@ -87,6 +87,9 @@ enum CollectionType : ubyte
     telnet_server,
     count
 }
+
+// A collection past the type field's width would alias another's table and lose its name.
+static assert(CollectionType.count <= 1 << CID.type_bits, "CollectionType has outgrown the CID type field; widen CID");
 
 const(char)[] get_id_dstring(CID id) pure
 {
@@ -621,5 +624,6 @@ private:
 package(manager) CID make_cid(uint type_idx, uint slot) pure
 {
     debug assert(slot && slot <= CID.id_mask, "invalid collection slot");
+    debug assert(type_idx < 1 << CID.type_bits, "collection type outside the CID type field");
     return CID((type_idx << CID.id_bits) | slot);
 }
