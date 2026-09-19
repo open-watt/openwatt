@@ -606,7 +606,7 @@ else
     XTENSA_EH_FLAGS := --emit-dwarf-unwind=always --exception-model=dwarf
 endif
 $(ESP_LINK_OBJ): $(TARGET)
-	"$(ESPRESSIF_LLC)" -O2 -mtriple=xtensa-none-elf --emulated-tls --mtext-section-literals --function-sections --data-sections $(XTENSA_EH_FLAGS) $(XTENSA_MATTR) --filetype=obj $< -o $@
+	"$(ESPRESSIF_LLC)" -O2 -mtriple=xtensa-none-elf --emulated-tls --mtext-section-literals --function-sections --data-sections $(XTENSA_EH_FLAGS) $(XTENSA_MATTR) $(XTENSA_LLC_EXTRA_FLAGS) --filetype=obj $< -o $@
 else
 ESP_LINK_OBJ := $(TARGET)
 endif
