@@ -3,6 +3,8 @@
 #
 #   OW_BUILDNAME      (required)  -- bin/<name>_<config>/ subdir, e.g. esp32-s3.
 #   OW_EXTRA_REQUIRES (optional)  -- extra component names for PRIV_REQUIRES.
+#                                    Chips with a radio list bt here; the requires pass runs
+#                                    too early to gate it on USE_BLE.
 #   OW_NO_WIFI        (optional)  -- set truthy on chips without esp_wifi (h2, p4).
 
 if(NOT DEFINED OW_BUILDNAME)

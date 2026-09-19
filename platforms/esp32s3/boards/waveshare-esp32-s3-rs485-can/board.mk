@@ -3,5 +3,3 @@ BOARD_PLATFORM := esp32-s3
 BOARD_FLASH_SIZE := 16MB
 BOARD_PSRAM_SIZE := 8MB
 
-# Turns SPIFFS off, so the storage partition is littlefs alone.
-USE_LITTLEFS := 1

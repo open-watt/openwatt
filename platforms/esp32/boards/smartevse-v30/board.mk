@@ -11,6 +11,11 @@ HEADLESS ?= 1
 TINY ?= 1
 IDF_LOG_LEVEL ?= warn
 PRESERVE_NVS ?= 1
+# Stock-firmware compatibility: the stock partition table's SPIFFS partition is kept as is.
+USE_SPIFFS := 1
+USE_LITTLEFS := 0
+# NimBLE does not fit the 4 MB app-only image.
+USE_BLE ?= 0
 BOARD_OTA_FILENAME := firmware.bin
 
 ifneq ($(VERSIONS),)

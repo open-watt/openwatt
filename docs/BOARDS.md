@@ -92,7 +92,7 @@ console.
 | `esp32-s3` | ESP32-S3-DevKitC-1-N16R8 | 16 MB | 8 MB |
 | `esp32-c2` | ESP8684-DevKitC-02, 4 MB variant | 4 MB | none |
 | `esp32-c3` | ESP32-C3-DevKitM-1 | 4 MB | none |
-| `esp32-c5` | ESP32-C5-DevKitC-1 with N4 module | 4 MB | none |
+| `esp32-c5` | ESP32-C5-DevKitC-1 with N8R8 module | 8 MB | 8 MB (unused) |
 | `esp32-c6` | ESP32-C6-DevKitC-1 | 8 MB | none |
 | `esp32-h2` | ESP32-H2-DevKitM-1-N4 | 4 MB | none |
 | `esp32-p4` | ESP32-P4-Function-EV-Board | 16 MB | 32 MB |
