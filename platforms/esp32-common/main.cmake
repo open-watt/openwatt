@@ -13,7 +13,7 @@ set(ESP32_SYS_DIR    "${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/urt/src/u
 set(URT_INTERNAL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/urt/src/urt/internal")
 
 set(MAIN_PRIV_REQUIRES esp_hal_uart esp_rom esp_event esp_driver_gpio esp_driver_ledc
-                       esp_driver_gptimer esp_adc driver nvs_flash mbedtls)
+                       esp_driver_gptimer esp_adc driver nvs_flash mbedtls app_update)
 list(APPEND MAIN_PRIV_REQUIRES esp_driver_i2c)
 list(APPEND MAIN_PRIV_REQUIRES esp_driver_spi)
 if(NOT OW_NO_WIFI)
