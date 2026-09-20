@@ -547,7 +547,7 @@ private:
             return;
 
         _charging_enabled = vehicle.find_element("charging.enabled");
-        _charging_amps = vehicle.find_element("control.setpoint");
+        _charging_amps = vehicle.find_element("charge.control.setpoint");
         _hvac_power = vehicle.find_element("hvac.power");
         _hvac_target_temperature = vehicle.find_element("hvac.target_temperature");
 
@@ -1181,18 +1181,18 @@ private:
         }
 
         if (cs.charger_voltage.present)
-            v.write_element("meter.voltage", Quantity!(int, ScaledUnits.volt)(cs.charger_voltage.value), now);
+            v.write_element("charge.meter.voltage", Quantity!(int, ScaledUnits.volt)(cs.charger_voltage.value), now);
         if (cs.charger_actual_current.present)
-            v.write_element("meter.current", Quantity!(int, ScaledUnits.ampere)(cs.charger_actual_current.value), now);
+            v.write_element("charge.meter.current", Quantity!(int, ScaledUnits.ampere)(cs.charger_actual_current.value), now);
         if (cs.charger_power.present)
-            v.write_element("meter.power", Quantity!(int, ScaledUnits.watt)(cs.charger_power.value * 1000), now);
+            v.write_element("charge.meter.power", Quantity!(int, ScaledUnits.watt)(cs.charger_power.value * 1000), now);
         if (cs.charge_energy_added.present)
-            v.write_element("meter.import", Quantity!(float, KilowattHour)(cs.charge_energy_added.value), now);
+            v.write_element("charge.meter.import", Quantity!(float, KilowattHour)(cs.charge_energy_added.value), now);
 
         if (cs.charge_current_request_max.present)
-            v.write_element("control.max", Quantity!(int, ScaledUnits.ampere)(cs.charge_current_request_max.value), now);
+            v.write_element("charge.control.max", Quantity!(int, ScaledUnits.ampere)(cs.charge_current_request_max.value), now);
         if (cs.charging_amps.present)
-            v.write_element("control.setpoint", Quantity!(int, ScaledUnits.ampere)(cs.charging_amps.value), now, &vehicle_control_change);
+            v.write_element("charge.control.setpoint", Quantity!(int, ScaledUnits.ampere)(cs.charging_amps.value), now, &vehicle_control_change);
 
         if (cs.battery_level.present && cs.charge_energy_added.present)
             capacity_sample(cs.battery_level.value, cs.charge_energy_added.value);

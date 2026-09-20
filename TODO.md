@@ -277,6 +277,26 @@ the commit history and linked design documents carry the implementation record.
   last displayed reason. Record an explicit idle/satisfied result each tick, or expire the
   reason elements.
 
+- **A dead device reads as a measured zero, not as missing** (found 2026-09-17 on the prod Pi).
+  `ModbusBinding.add_handler` seeds every scalar element with a zero record at materialise, before
+  a register has been read (`src/protocol/modbus/binding.d:379`). `get_meter_data` accepts any
+  non-NaN reading as `Provenance.measured` and never consults `Device.online_status`, so an
+  inverter that has never answered presents authoritative 0 W port meters. On the Pi, `goodwe_ems`
+  (TX 10 KB, RX 0, `status.online=false`) made `house.backup` and `dc_bus` rogue-value anomalies,
+  double-counted the house battery's discharge into `generation` (once as `account.battery.power`,
+  again as the dc_bus residual), and forced the house-bus residual onto the only unmetered link,
+  fabricating hundreds of watts of `shed_evse` draw. Drop the seed, make
+  `Element.normalised_value`/`scaled_value` return NaN for an unsampled element (`Variant.asQuantity`
+  launders Null to 0), and treat meters on an offline device as missing. Peer-mirrored devices go
+  stale silently too: `pt100`/`tac1100` read `online false` with 11-hour-old values while
+  `cabin_hot_water` still consumed them as current.
+
+- **The grid bus is flagged as an anomaly whenever the site imports**: `classify_bus_coverage`
+  (`src/apps/energy/topology.d:1701`) runs on the island root like any other bus, so the grid bus,
+  which has one metered port and no dark port to absorb the flow, goes `rogue-value` (and `anomaly`
+  when importing) above the 50 W noise floor. The accounts are unaffected because `add_island_rogue`
+  skips `island.root`, but the published bus state lies.
+
 ## Tesla TWC
 
 - **[#661] Validate fleet transfers on hardware**: exercise cap changes, circuit-budget
@@ -749,6 +769,16 @@ this is what remains.
   control plane, and make the mirror re-evaluate its peer binding.
 
 ## Infrastructure
+
+- **Application recreation leaves the global page pool initialized**: `Application.~this` does not
+  deinitialize the pool, so a second `create_application()` in the same process asserts in
+  `page_pool_init`. Define ownership and teardown for shared pool users before adding more
+  application-backed integration unittests (found reviewing #718).
+
+- **The low-level `/element/set` command ignores element access**: `Application.element_set`
+  calls `Element.value` without checking `Access.write`, allowing CLI writes to reported
+  read-only identities such as a port's `circuit`. Define whether this command is an explicit
+  diagnostic override or should enforce the same write contract as clients (found in #718).
 
 - Fix `urt.conv.parse_uint` overflow: reject values outside `ulong` range using the existing zero-consumption error contract. Revision filenames use checked `parse_int_fast`.
 

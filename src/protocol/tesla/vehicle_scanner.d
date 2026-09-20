@@ -136,7 +136,7 @@ nothrow @nogc:
             version (DebugTeslaScanner)
                 log.trace("registered VIN '", t[], "' -> hash [ ", cast(void[])hash[], " ]");
             DeviceBuilder builder = (*vehicle).edit();
-            builder.constant("control.min", Quantity!(int, ScaledUnits.ampere)(minimum_charge_amps));
+            builder.constant("charge.control.min", Quantity!(int, ScaledUnits.ampere)(minimum_charge_amps));
             updated ~= VinEntry(String(t.move), hash, *vehicle);
             foreach (ref existing; _vins[])
                 if (existing.vin == updated[$ - 1].vin)
