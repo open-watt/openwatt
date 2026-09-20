@@ -558,6 +558,9 @@ protected:
 
     void on_mtu_changed() {}
 
+    override bool quiet_lifecycle() const
+        => (flags & ObjectFlags.temporary) != 0;
+
     override void online()
     {
         _status.link_status = LinkStatus.up;
@@ -609,7 +612,8 @@ protected:
         {
             add_rx_frame(packet.length);
             fire_subscribers(packet);
-            _master.slave_incoming(packet, _slave_id);
+            if (_master && _master.running)
+                _master.slave_incoming(packet, _slave_id);
             return;
         }
 
@@ -793,7 +797,7 @@ protected:
 
     // TODO: this package section should be refactored out of existence!
 package:
-    BaseInterface _master;
+    ObjectRef!BaseInterface _master;
     byte _slave_id;
 
     Packet[] _send_queue;

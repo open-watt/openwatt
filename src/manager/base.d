@@ -1093,7 +1093,7 @@ protected:
         online();
         signal_state_change(StateSignal.online);
 
-        if (!(flags & (ObjectFlags.dynamic | ObjectFlags.temporary)))
+        if (!quiet_lifecycle)
             log.notice("online");
         else
             log.trace("online");
@@ -1104,7 +1104,7 @@ protected:
 
     final void set_offline()
     {
-        if (!(flags & (ObjectFlags.dynamic | ObjectFlags.temporary)))
+        if (!quiet_lifecycle)
             log.notice("offline");
         else
             log.trace("offline");
@@ -1123,6 +1123,9 @@ protected:
     void offline()
     {
     }
+
+    protected bool quiet_lifecycle() const
+        => (flags & (ObjectFlags.dynamic | ObjectFlags.temporary)) != 0;
 
     // push the derived views: state transitions (and any subclass state feeding status_message)
     // write the elements the moment they change

@@ -149,11 +149,14 @@ nothrow @nogc:
         assert(!(iface.flags & ObjectFlags.slave), "Interface is already slaved!");
         if (iface.flags & ObjectFlags.temporary)
             return false;
+        foreach (ref member; _members)
+            if (member.iface is iface)
+                return false;
 
         ubyte port = cast(ubyte)_members.length;
-        if (!iface.set_master(this, port))
-            return false;
-        _members ~= BridgePort(iface, pvid, ingress_filtering, untagged_egress);
+        _members ~= BridgePort(ObjectRef!BaseInterface(iface), pvid, ingress_filtering, untagged_egress);
+        if (running)
+            attach_member(port);
 
         static if (has_modbus)
         {
@@ -189,7 +192,6 @@ nothrow @nogc:
         if (running)
             update_link_speed();
 
-        iface.restart();
         return true;
     }
 
@@ -338,7 +340,7 @@ nothrow @nogc:
                 entry.upstream_cb = null; // suppress on_port_callback firing upstream during abort
                 foreach (ref pt; entry.port_tags[])
                 {
-                    if (pt.tag > 0)
+                    if (pt.tag > 0 && pt.iface)
                         pt.iface.abort(pt.tag, reason);
                 }
                 if (cb)
@@ -358,7 +360,7 @@ nothrow @nogc:
             if (entry.bridge_tag == msg_handle)
             {
                 if (entry.port_tags.length == 1)
-                    return entry.port_tags[0].iface.msg_state(entry.port_tags[0].tag);
+                    return entry.port_tags[0].iface ? entry.port_tags[0].iface.msg_state(entry.port_tags[0].tag) : MessageState.aborted;
                 return MessageState.in_flight;
             }
             entry = entry.next;
@@ -367,6 +369,20 @@ nothrow @nogc:
     }
 
 protected:
+
+    override CompletionStatus startup()
+    {
+        foreach (ref m; _members)
+            if (!m.iface)
+                return CompletionStatus.continue_;
+        foreach (i; 0 .. _members.length)
+        {
+            if (_members[i].iface._master && _members[i].iface._master !is this)
+                return CompletionStatus.error;
+            attach_member(i);
+        }
+        return super.startup();
+    }
 
     override void online()
     {
@@ -386,6 +402,8 @@ protected:
         ulong tx = 0, rx = 0;
         foreach (ref m; _members)
         {
+            if (!m.iface)
+                continue;
             if (m.iface.tx_link_speed > tx)
                 tx = m.iface.tx_link_speed;
             if (m.iface.rx_link_speed > rx)
@@ -396,6 +414,18 @@ protected:
 
     override CompletionStatus shutdown()
     {
+        foreach (ref m; _members)
+        {
+            if (m.subscribed)
+            {
+                if (auto iface = m.iface.get)
+                {
+                    iface.unsubscribe(&member_state_change);
+                    iface.set_master(null, 0);
+                }
+                m.subscribed = false;
+            }
+        }
         while (_tracking_active)
         {
             TagTracking* entry = _tracking_active;
@@ -403,7 +433,7 @@ protected:
             entry.upstream_cb = null;
             foreach (ref pt; entry.port_tags[])
             {
-                if (pt.tag > 0)
+                if (pt.tag > 0 && pt.iface)
                     pt.iface.abort(pt.tag);
             }
             if (cb)
@@ -546,22 +576,40 @@ private:
     }
     CpuPort _cpu;
 
+    void attach_member(size_t index)
+    {
+        ref BridgePort member = _members[index];
+        if (member.subscribed)
+            return;
+        bool attached = member.iface.set_master(this, cast(byte)index);
+        assert(attached);
+        member.iface.subscribe(&member_state_change);
+        member.subscribed = true;
+    }
+
+    void member_state_change(ActiveObject, StateSignal signal)
+    {
+        if (signal == StateSignal.destroyed && running)
+            restart();
+    }
+
     struct BridgePort
     {
         struct VLANMember
         {
             short first, count;
         }
-        BaseInterface iface;
+        ObjectRef!BaseInterface iface;
         ushort pvid = 1;
         bool ingress_filtering = false;
         bool untagged_egress = true;
         bool offloaded = false;     // enslaved to a kernel bridge; the kernel switches it, OW skips it
+        bool subscribed;
     }
 
     struct PortTag
     {
-        BaseInterface iface;
+        ObjectRef!BaseInterface iface;
         int tag;
     }
 
@@ -688,7 +736,7 @@ private:
             return false;
         if (port == _local_port)
             return true;
-        return port < _members.length && !(_members[port].iface.caps & InterfaceCaps.ethernet);
+        return port < _members.length && _members[port].iface && !(_members[port].iface.caps & InterfaceCaps.ethernet);
     }
 
     void local_dispatch(ref Packet packet)
@@ -989,7 +1037,8 @@ private:
         if (btag < 0)
         {
             foreach (ref pt; tracking.port_tags[])
-                pt.iface.abort(pt.tag);
+                if (pt.iface)
+                    pt.iface.abort(pt.tag);
             recycle_tracking(tracking);
             return -1;
         }

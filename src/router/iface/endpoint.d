@@ -712,9 +712,21 @@ unittest
     {
 nothrow @nogc:
 
-        this(CID id)
+        this(CID id, ObjectFlags flags = ObjectFlags.none)
         {
-            super(id);
+            super(id, flags);
+        }
+
+        void start_test()
+        {
+            assert(startup() == CompletionStatus.complete);
+            _state = State.running;
+        }
+
+        void stop_test()
+        {
+            assert(shutdown() == CompletionStatus.complete);
+            _state = State.destroyed;
         }
 
         void receive(ref Packet packet)
@@ -768,8 +780,8 @@ nothrow @nogc:
     assert(ephemeral.join(group));
     assert(ephemeral._ether._groups && (*ephemeral._ether._groups)[].contains(group));
 
-    TestEtherStation station = alloc!TestEtherStation(CID(0xF001));
-    BridgeInterface master = alloc!BridgeInterface(CID(0xF002));
+    TestEtherStation station = Collection!TestEtherStation().create("ether-test-station");
+    TestEtherStation master = Collection!TestEtherStation().create("ether-test-master");
     sink.expected_ingress = station;
     InetAddress station_local = InetAddress(station.mac.b, 500);
     UDPEndpoint* bound = udp_open(&station_local, null, &sink.recv, station);
@@ -785,10 +797,15 @@ nothrow @nogc:
 
     bound.close();
     update_udp_endpoints();
+    master.start_test();
     assert(master.add_member(station));
     assert(station.flags & ObjectFlags.slave);
     assert(!udp_open(&station_local, null, &sink.recv, station));
-    station.set_master(null, 0);
+    master.stop_test();
+    assert(!(station.flags & ObjectFlags.slave));
+    station.stop_test();
+    Collection!TestEtherStation().remove(master);
+    Collection!TestEtherStation().remove(station);
     free(master);
     free(station);
 
