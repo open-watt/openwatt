@@ -616,8 +616,10 @@ ifndef ESP_PROJECT_DIR
 endif
 	@echo "Building ESP-IDF firmware ($(ESP_IDF_TARGET))..."
 	@echo "Hardware: $(ESP_REFERENCE_BOARD), flash $(ESP_FLASH_SIZE), PSRAM $(ESP_PSRAM_SIZE)"
-# LDC emits D crt constructors into .init_array; ESP-IDF's linker script collects only .ctors
+# IDF expects .ctors on Xtensa and .init_array on RISC-V.
+ifeq ($(ARCH),xtensa)
 	@if "$(ESP_OBJDUMP)" -h "$(ESP_LINK_OBJ)" | grep -q "\.init_array"; then 		"$(ESP_OBJCOPY)" --rename-section .init_array=.ctors "$(ESP_LINK_OBJ)"; 	fi
+endif
 	bash -c '. "$(ESP_IDF_PATH)/export.sh" > /dev/null 2>&1 && \
 		cd "$(ESP_PROJECT_DIR)" && \
 		idf.py -B "$(ESP_BUILD_DIR)" -DIDF_TARGET=$(ESP_IDF_TARGET) \
