@@ -79,6 +79,7 @@ Limit is the 4 MB `ota_0` partition. `ram` is internal DRAM only; PSRAM is heap.
 | 2026-09-08 | 6b95c1e1 | ldc 1.42.0 | 3,190,272 | 150,049 | 4,194,304 | first row; LDC 1.43 bitcode is rejected by esp-clang 21, build with 1.42 |
 | 2026-09-09 | a8c75cbf | ldc 1.42.0 | 2,831,712 | 129,561 | 4,194,304 | uRT now defaults to no exceptions, removing RTTI and exception metadata |
 | 2026-09-16 | 2aa2b6a2 | ldc 1.42.0 | 2,868,288 | 130,621 | 4,194,304 | burst duty accumulates in q16, `window` retired; built with the uncommitted urt counter ABI fix (urt#296) |
+| 2026-09-20 | #720 | ldc 1.42.0 | 2,893,056 | 136,247 | 4,194,304 | first build against ESP-IDF v6.2 (master), esp-clang 21.1.3; the RAM rise is IDF v6.2 |
 
 ### SmartEVSE v3.0, `make esp-idf-build BOARD=smartevse-v30 CONFIG=release`
 
@@ -87,6 +88,7 @@ Limit is the stock 0x1b0000 `ota_0` partition, which the in-place migration must
 | date | commit | compiler | flash | ram | limit | note |
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-09-09 | a8c75cbf | ldc 1.42.0 | 1,612,576 | 91,223 | 1,769,472 | first row; 91% of the stock partition |
+| 2026-09-20 | #720 | ldc 1.42.0 | 1,671,152 | 96,793 | 1,769,472 | first build against ESP-IDF v6.2 (master); 94% of the stock partition |
 
 ### BK7231N, `make PLATFORM=bk7231n CONFIG=release`
 
