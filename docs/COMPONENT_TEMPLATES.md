@@ -393,7 +393,9 @@ ports into appliance rows so user-visible devices are the primary objects.
   usually supplies this by binding the port path (`grid=house`,
   `solar.mppt1=pv.east`). Profiles/drivers may expose it directly when
   the device knows the circuit identity at runtime, such as a VIN-derived EVSE
-  car circuit.
+  car circuit. These reported identities are read-only; appliance port bindings
+  override them without editing the element. The Tesla TWC exposes `status.vin`
+  as the reported identity and aliases `car.circuit` to it.
 - `capacity: A` - Port or conversion/link current limit.
 - `closed: bool` - Whether this port/link is electrically closed. Missing means
   closed.
@@ -888,11 +890,15 @@ willingness-to-accept which the energy app reads when choosing a new setpoint.)
 - `battery: Battery` - At minimum populates `soc`; vehicle-specific extension is
   `full_capacity` in kWh (semantically energy capacity, not chemistry Ah) and
   `usable_soc` (%) excluding the reserve buffer
-- `meter: EnergyMeter` (type: `single-phase` or `three-phase` for typical
+- `charge: Port` - The charge terminal, `role=connection`, `flow=consume`.
+  Its `circuit` element publishes the VIN, so a car plugged into an EVSE that
+  publishes the same VIN on its `car` port shares a circuit and the two join with
+  no configuration.
+- `charge.meter: EnergyMeter` (type: `single-phase` or `three-phase` for typical
   home/destination charging, `dc` for Supercharger / CCS DC fast charging) -
   `voltage`, `current`, `power`, `import` =
   current-session energy delivered, `absolute` = lifetime energy delivered to this VIN
-- `control: PowerControl` - Energy-app charge-rate actuator. Charge-only vehicles:
+- `charge.control: PowerControl` - Energy-app charge-rate actuator. Charge-only vehicles:
   `kind=continuous, direction=consume, unit=A, min=6, max=<max_amps>, step=1`.
   V2G-capable vehicles: `direction=bidirectional` with the setpoint range extended
   into negative values to represent discharge current (export to grid/load).

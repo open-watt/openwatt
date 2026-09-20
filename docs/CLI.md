@@ -1240,6 +1240,12 @@ development and acceptance testing with an old offline car.
 
 ### `/apps/energy/appliance`
 
+With `vin=<VIN>` and no explicit `device`, the appliance uses the VIN-rooted
+vehicle device and its `charge` port. `device` remains empty; changing or clearing
+`vin` changes or removes that fallback. An explicit `device` takes precedence;
+clearing it restores VIN lookup. Use `charge=<circuit>` to override the port's
+VIN-derived circuit.
+
 `device`, `meter`, and `state` accept component paths before their targets exist.
 The configured path remains visible while unresolved. While the energy app is
 started, paths resolve automatically when a device appears or its tree gains

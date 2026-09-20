@@ -23,6 +23,21 @@ through them and remove sections as they are absorbed.
   lists the `templates` capability; without it the new shape only appears on the next full
   introduction, i.e. after a reconnect.
 
+## 2026-09-17: vehicle terminal moves under a `charge` port
+
+- A `Vehicle` device now exposes `charge: Port` (`role=connection`, `flow=consume`) and the
+  charge terminal lives under it. Element paths move: `meter.*` -> `charge.meter.*` and
+  `control.*` -> `charge.control.*`. Nothing else in the vehicle tree moves; `battery`,
+  `charging`, `hvac` and the rest stay at the device root.
+- `charge.circuit` publishes the VIN. A car and an EVSE that publishes the same VIN on its
+  `car` port now share a circuit and join with no configuration, so expect vehicles to start
+  appearing attached to their charger in the energy flow graph instead of on an island of their
+  own.
+- A `/apps/energy/appliance` with `vin=` and no `device=` resolves the VIN-rooted
+  vehicle device without changing the configured `device` property. Changing or clearing `vin`
+  updates this fallback; an explicit `device` takes precedence. Its port carries the vehicle's
+  own meter and charge control.
+
 ## 2026-09-16: JSON quantity scaling (uRT #297, adopted by #711)
 
 - Consume each quantity's `q` and `u` together. An unspellable source scale now

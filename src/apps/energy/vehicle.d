@@ -117,8 +117,7 @@ Appliance vehicle_appliance_for(const(char)[] vin)
     }
 
     appliance.vin(vin);
-    if (const(char)[] error = appliance.device(vin))
-        writeError("could not bind vehicle appliance for VIN '", vin, "': ", error);
+    appliance.resolve_refs(g_app.devices);
     return appliance;
 }
 
@@ -164,8 +163,9 @@ static immutable vehicle_components = make_table!([
     "info", "DeviceInfo",
     "status", "DeviceStatus",
     "battery", "Battery",
-    "meter", "EnergyMeter",
-    "control", "PowerControl",
+    "charge", "Port",
+    "charge.meter", "EnergyMeter",
+    "charge.control", "PowerControl",
     "charging", "VehicleCharging",
     "hvac", "HVAC",
     "access", "VehicleAccess",
@@ -198,18 +198,21 @@ static immutable vehicle_elements = make_table!([
     "battery.usable_soc",
     "battery.full_capacity",
     "battery.capacity_confidence",
-    "meter.voltage",
-    "meter.current",
-    "meter.power",
-    "meter.import",
-    "meter.type",
-    "control.kind",
-    "control.direction",
-    "control.unit",
-    "control.min",
-    "control.max",
-    "control.step",
-    "control.setpoint",
+    "charge.role",
+    "charge.flow",
+    "charge.circuit",
+    "charge.meter.voltage",
+    "charge.meter.current",
+    "charge.meter.power",
+    "charge.meter.import",
+    "charge.meter.type",
+    "charge.control.kind",
+    "charge.control.direction",
+    "charge.control.unit",
+    "charge.control.min",
+    "charge.control.max",
+    "charge.control.step",
+    "charge.control.setpoint",
     "hvac.power",
     "hvac.state",
     "hvac.mode",
@@ -271,7 +274,7 @@ static immutable VehicleElementType[vehicle_elements.length] vehicle_element_typ
     Type.string_, Type.string_, Type.string_, Type.string_, Type.string_, Type.string_,
     Type.string_, Type.int_, Type.string_, Type.bool_, Type.time, Type.string_, Type.int_,
     Type.bool_, Type.int_, Type.bool_, Type.int_, Type.bool_, Type.int_, Type.int_,
-    Type.float_, Type.float_, Type.int_, Type.int_, Type.int_, Type.float_, Type.string_,
+    Type.float_, Type.float_, Type.string_, Type.string_, Type.string_, Type.int_, Type.int_, Type.int_, Type.float_, Type.string_,
     Type.string_, Type.string_, Type.string_, Type.int_, Type.int_, Type.int_, Type.int_,
     Type.bool_, Type.string_, Type.string_, Type.float_, Type.float_, Type.float_,
     Type.float_, Type.float_, Type.float_, Type.int_, Type.bool_, Type.string_,
@@ -312,7 +315,7 @@ static immutable ScaledUnit[vehicle_elements.length] vehicle_element_units =
 [
     none, none, none, none, none, none, none, none, none, none, none, none, ScaledUnits.minute, none,
     ScaledUnits.percent, none, none, none, ScaledUnits.percent, ScaledUnits.percent, ScaledUnits.kilowatt_hour,
-    none, ScaledUnits.volt, ScaledUnits.ampere, ScaledUnits.watt, ScaledUnits.kilowatt_hour, none, none, none, none,
+    none, none, none, none, ScaledUnits.volt, ScaledUnits.ampere, ScaledUnits.watt, ScaledUnits.kilowatt_hour, none, none, none, none,
     ScaledUnits.ampere, ScaledUnits.ampere, ScaledUnits.ampere, ScaledUnits.ampere, none, none, none,
     ScaledUnits.celsius, ScaledUnits.celsius, ScaledUnits.celsius, ScaledUnits.celsius, ScaledUnits.celsius,
     ScaledUnits.celsius, none, none, none, none, none, none, none, none, none, none, none, none, none, none, none,
@@ -344,12 +347,15 @@ bool materialise_vehicle(ref DeviceBuilder b, const(char)[] vin, bool changed)
         serial.value(vin.make_string());
         changed = true;
     }
-    changed |= set_default(vehicle, vehicle_elements[element_id!"control.kind"][], StringLit!"continuous");
-    changed |= set_default(vehicle, vehicle_elements[element_id!"control.direction"][], StringLit!"consume");
-    changed |= set_default(vehicle, vehicle_elements[element_id!"control.unit"][], StringLit!"A");
-    changed |= set_default(vehicle, vehicle_elements[element_id!"control.min"][], 6);
-    changed |= set_default(vehicle, vehicle_elements[element_id!"control.step"][], 1);
-    changed |= set_default(vehicle, vehicle_elements[element_id!"meter.type"][], StringLit!"single-phase");
+    changed |= set_default(vehicle, vehicle_elements[element_id!"charge.role"][], StringLit!"connection");
+    changed |= set_default(vehicle, vehicle_elements[element_id!"charge.flow"][], StringLit!"consume");
+    changed |= set_default(vehicle, vehicle_elements[element_id!"charge.circuit"][], vin.make_string());
+    changed |= set_default(vehicle, vehicle_elements[element_id!"charge.control.kind"][], StringLit!"continuous");
+    changed |= set_default(vehicle, vehicle_elements[element_id!"charge.control.direction"][], StringLit!"consume");
+    changed |= set_default(vehicle, vehicle_elements[element_id!"charge.control.unit"][], StringLit!"A");
+    changed |= set_default(vehicle, vehicle_elements[element_id!"charge.control.min"][], 6);
+    changed |= set_default(vehicle, vehicle_elements[element_id!"charge.control.step"][], 1);
+    changed |= set_default(vehicle, vehicle_elements[element_id!"charge.meter.type"][], StringLit!"single-phase");
 
     VINInfo vi = decode_vin(vin);
     if (vi.manufacturer_name)

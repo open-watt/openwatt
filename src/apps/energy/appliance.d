@@ -73,6 +73,11 @@ nothrow @nogc:
         if (_vin[] == value)
             return;
         _vin = value.make_string();
+        if (_device_path.length == 0)
+        {
+            _device = null;
+            _mark_dirty(prop_mask!(typeof(this), [ "kind" ]));
+        }
         mark_set!(typeof(this), "vin")();
         restart();
     }
@@ -181,7 +186,8 @@ nothrow @nogc:
     bool resolve_refs(ref DeviceTable devices)
     {
         bool bound = false;
-        if (_device is null && _device_path.length && (_device = resolve_component_path(_device_path[], devices)) !is null)
+        const(char)[] device_path = _device_path.length ? _device_path[] : _vin[];
+        if (_device is null && device_path.length && (_device = resolve_component_path(device_path, devices)) !is null)
         {
             _mark_dirty(prop_mask!(typeof(this), [ "kind" ]));
             bound = true;
@@ -308,4 +314,39 @@ unittest
     assert(appliance.device == "late.battery");
     assert(appliance.meter == "late.battery.meter");
     assert(appliance.state == "late.battery.state");
+
+    assert(appliance.device("") is null);
+    appliance.vin("late");
+    assert(appliance.resolve_refs(devices));
+    assert(appliance.device_ref is device);
+    assert(appliance.device.length == 0);
+
+    Device other;
+    {
+        DeviceBuilder builder = devices.create("other");
+        other = builder.device;
+    }
+    scope(exit) free(other);
+    appliance.vin("other");
+    assert(appliance.device_ref is null);
+    assert(appliance.resolve_refs(devices));
+    assert(appliance.device_ref is other);
+    assert(appliance.device.length == 0);
+    appliance.vin("");
+    assert(!appliance.resolve_refs(devices));
+    assert(appliance.device_ref is null);
+
+    appliance._device_path = StringLit!"late.battery";
+    assert(appliance.resolve_refs(devices));
+    appliance.vin("other");
+    assert(!appliance.resolve_refs(devices));
+    assert(appliance.device_ref is battery);
+    assert(appliance.device == "late.battery");
+    assert(appliance.device("") is null);
+    assert(appliance.resolve_refs(devices));
+    assert(appliance.device_ref is other);
+    appliance.vin("missing");
+    assert(!appliance.resolve_refs(devices));
+    assert(appliance.device_ref is null);
+    assert(appliance.device.length == 0);
 }

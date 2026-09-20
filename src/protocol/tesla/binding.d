@@ -186,7 +186,6 @@ package:
                     break;
                 case SampleKind.serial_number:   write_sample(e, (charger.flags & 4) ? charger.serial_number[] : "", timestamp);    break;
                 case SampleKind.vin:             write_sample(e, (charger.flags & 0xF0) == 0xF0 ? charger.vin[] : "", timestamp);   break;
-                case SampleKind.circuit:         write_sample(e, (charger.flags & 0xF0) == 0xF0 ? charger.vin[] : "", timestamp);   break;
             }
         }
     }
@@ -209,7 +208,7 @@ protected:
         Component status = builder.component("status", "DeviceStatus");
         builder.constant(status, "address", slave_id);
         add_sample(builder, status, "lifetime_energy", SampleKind.lifetime_energy, quantity_format(ValueType.u64, WattHour));
-        add_sample(builder, status, "vin", SampleKind.vin, text_format());
+        Element* vin = add_sample(builder, status, "vin", SampleKind.vin, text_format());
 
         Component evse = builder.component("evse", "EVSE");
         add_sample(builder, evse, "state", SampleKind.state, enum_format!(TeslaTWCMaster.ChargerState));
@@ -222,7 +221,7 @@ protected:
         Component car = builder.component("car", "Port");
         builder.constant(car, "role", "car");
         builder.constant(car, "flow", "supply");
-        add_sample(builder, car, "circuit", SampleKind.circuit, text_format());
+        add_circuit_alias(builder, vin);
 
         Component control = builder.component(grid, "control", "PowerControl");
         builder.constant(control, "kind", "continuous");
@@ -278,8 +277,7 @@ private:
         import_,
         lifetime_energy,
         serial_number,
-        vin,
-        circuit
+        vin
     }
 
     struct SampleElement
@@ -302,10 +300,10 @@ private:
     Array!SampleElement _elements;
 
     // indexed by SampleKind
-    __gshared immutable Push[SampleKind.circuit + 1] push_groups = [
+    __gshared immutable Push[SampleKind.vin + 1] push_groups = [
         Push.heartbeat, Push.heartbeat, Push.heartbeat, Push.heartbeat, Push.heartbeat, Push.heartbeat, Push.link_ready,
         Push.heartbeat, Push.charge_info, Push.charge_info, Push.charge_info, Push.charge_info, Push.charge_info,
-        Push.charge_info, Push.charge_info, Push.charge_info, Push.charge_info, Push.serial, Push.vehicle, Push.vehicle,
+        Push.charge_info, Push.charge_info, Push.charge_info, Push.charge_info, Push.serial, Push.vehicle,
     ];
 
     Element* add_sample(ref DeviceBuilder b, Component parent, const(char)[] id, SampleKind kind, FormatId format, Access access = Access.read)
@@ -313,6 +311,24 @@ private:
         Element* e = bind_element(b, parent, id, format, access);
         _elements ~= SampleElement(e, format, kind);
         return e;
+    }
+
+    static void add_circuit_alias(ref DeviceBuilder builder, Element* vin)
+    {
+        Element* circuit = builder.element("car.circuit", vin.format);
+        circuit.access = Access.read;
+        circuit.sampling_mode = SamplingMode.dependent;
+        foreach (ref computation; builder.device.computations)
+            if (computation.kind == ComputationKind.alias_ && computation.target is circuit)
+                return;
+
+        Computation computation;
+        computation.kind = ComputationKind.alias_;
+        computation.device = builder.device;
+        computation.target = circuit;
+        computation.link = g_app.create_link(circuit, null, vin, null, true);
+        computation.bound = true;
+        builder.device.computations ~= computation;
     }
 
     FormatId quantity_format(ValueType type, ScaledUnit unit)
