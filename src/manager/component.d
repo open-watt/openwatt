@@ -45,8 +45,19 @@ nothrow @nogc:
         => _id;
 
     String name;
-    String template_;
     Component parent;
+
+    final ref const(String) template_() const pure return
+        => _template;
+    final void template_(String value)
+    {
+        if (_template[] == value[])
+            return;
+        _template = value.move;
+        if (Device d = root_device())
+            d._reclassified = true;
+        mutated(null);
+    }
 
     bool hidden;
 
@@ -114,11 +125,8 @@ nothrow @nogc:
         }
         if (!path.empty)
             return c.find_or_create_component(path, template_);
-        if (template_.length && c.template_[] != template_)
-        {
+        if (template_.length)
             c.template_ = template_.make_string();
-            mutated(null);
-        }
         return c;
     }
 
@@ -294,6 +302,7 @@ nothrow @nogc:
 
 private:
     String _id;
+    String _template;
     Array!(Component) _components;
     Array!(Element*) _elements;
     Array!ComponentSubscriber _subscribers;
