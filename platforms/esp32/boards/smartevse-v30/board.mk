@@ -11,6 +11,7 @@ HEADLESS ?= 1
 TINY ?= 1
 IDF_LOG_LEVEL ?= warn
 PRESERVE_NVS ?= 1
+USE_SPIFFS := 1
 BOARD_OTA_FILENAME := firmware.bin
 
 ifneq ($(VERSIONS),)
