@@ -9,6 +9,7 @@ module manager.sync.binary_encoder;
 // the same fidelity the JSON channel has, and property setters parse them.
 
 import urt.array;
+import urt.endian : littleEndianToNative, nativeToLittleEndian;
 import urt.log;
 import urt.mem;
 import urt.meta.enuminfo : VoidEnumInfo;
@@ -1207,8 +1208,7 @@ void put_zigzag(ref Array!ubyte buf, long v)
 
 void put_f64(ref Array!ubyte buf, double d)
 {
-    ubyte[8] bytes = *cast(const(ubyte[8])*)&d;
-    buf ~= bytes[];
+    buf ~= nativeToLittleEndian(d)[];
 }
 
 void put_str(ref Array!ubyte buf, const(char)[] s)
@@ -1341,7 +1341,7 @@ nothrow @nogc:
             fail = true;
             return 0;
         }
-        double d = *cast(const(double)*)(buf.ptr + pos);
+        double d = littleEndianToNative!double(buf[pos .. pos + 8][0 .. 8]);
         pos += 8;
         return d;
     }
@@ -1454,6 +1454,20 @@ unittest
         buf.put_zigzag(v);
         Reader r = Reader(buf[]);
         assert(r.zigzag() == v && !r.fail);
+    }
+
+    foreach (offset; 1 .. 9)
+    {
+        buf.clear();
+        buf.resize(offset);
+        buf.ptr[0 .. offset] = 0xA5;
+        buf.put_f64(1.0);
+        assert(buf[offset .. $] == [0, 0, 0, 0, 0, 0, 0xF0, 0x3F]);
+        Reader number = Reader(buf[offset .. $]);
+        assert(number.f64() == 1.0 && !number.fail && number.pos == 8);
+        Reader short_number = Reader(buf[offset .. offset + 7]);
+        short_number.f64();
+        assert(short_number.fail);
     }
 
     // variant round-trip: scalars, strings, nesting

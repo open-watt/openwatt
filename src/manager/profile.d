@@ -1722,21 +1722,21 @@ VoidEnumInfo* parse_enum(ConfItem conf, bool is_bitfield = false)
     VoidEnumInfo* info;
     if (min >= byte.min && max <= byte.max)
     {
-        auto b_values = cast(byte[])talloc(1 * count);
+        auto b_values = talloc_array!byte(count);
         foreach (i, v; t_vals)
             b_values[i] = cast(byte)v;
         info = make_enum_info(enum_name, keys[], b_values[], displays[]);
     }
     else if (min >= short.min && max <= short.max)
     {
-        auto s_values = cast(short[])talloc(2 * count);
+        auto s_values = talloc_array!short(count);
         foreach (i, v; t_vals)
             s_values[i] = cast(short)v;
         info = make_enum_info(enum_name, keys[], s_values[], displays[]);
     }
     else if (min >= int.min && max <= int.max)
     {
-        auto i_values = cast(int[])talloc(4 * count);
+        auto i_values = talloc_array!int(count);
         foreach (i, v; t_vals)
             i_values[i] = cast(int)v;
         info = make_enum_info(enum_name, keys[], i_values[], displays[]);

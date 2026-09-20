@@ -403,7 +403,7 @@ auto spinelDeserialise(string fmt)(const(void)[] buffer)
                     len += l;
                     ++count;
                 }
-                r[i] = cast(ArrayEl[])talloc(ArrayEl.sizeof * count);
+                r[i] = talloc_array!ArrayEl(count);
 
                 foreach (j; 0..count)
                 {
