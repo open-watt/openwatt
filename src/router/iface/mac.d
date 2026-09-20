@@ -1,6 +1,5 @@
 module router.iface.mac;
 
-import urt.processor : SupportUnalignedLoadStore;
 import urt.string.format : FormatArg;
 
 nothrow @nogc:
@@ -35,30 +34,28 @@ nothrow @nogc:
             ushort[3] w;
         }
 
-        static if (SupportUnalignedLoadStore)
+        private pragma(inline, true) uint prefix() @property const pure
         {
             version (BigEndian)
-            {
-                ulong ul() @property const pure => *cast(ulong*)b.ptr >> 16;
-                bool is_link_local() const pure
-                    => *cast(uint*)b.ptr == 0x0180C200 && (*cast(ushort*)(b.ptr + 4) & 0xFFF0) == 0x0000;
-            }
+                return uint(w[0]) << 16 | w[1];
             else
-            {
-                ulong ul() @property const pure => (*cast(ulong*)b.ptr << 16) >> 16;
-                bool is_link_local() const pure
-                    => *cast(uint*)b.ptr == 0x00C28001 && (*cast(ushort*)(b.ptr + 4) & 0xF0FF) == 0x0000;
-            }
+                return w[0] | uint(w[1]) << 16;
         }
-        else version (BigEndian)
+
+        pragma(inline, true) ulong ul() @property const pure
         {
-            ulong ul() @property const pure => ulong(w[0]) << 32 | uint(w[1]) << 16 | w[2];
-            bool is_link_local() const pure => w[0] == 0x0180 && w[1] == 0xC200 && (w[2] & 0xFFF0) == 0;
+            version (BigEndian)
+                return ulong(prefix) << 16 | w[2];
+            else
+                return prefix | ulong(w[2]) << 32;
         }
-        else
+
+        pragma(inline, true) bool is_link_local() const pure
         {
-            ulong ul() @property const pure => w[0] | uint(w[1]) << 16 | ulong(w[2]) << 32;
-            bool is_link_local() const pure => w[0] == 0x8001 && w[1] == 0x00C2 && (w[2] & 0xF0FF) == 0;
+            version (BigEndian)
+                return ((prefix ^ 0x0180C200) | (w[2] & 0xFFF0)) == 0;
+            else
+                return ((prefix ^ 0x00C28001) | (w[2] & 0xF0FF)) == 0;
         }
 
         // inverse of ul; bits above 47 are ignored
@@ -270,6 +267,15 @@ unittest
     assert(MACAddress.lldp_multicast.is_link_local);
     assert(!MACAddress(0x01, 0x80, 0xC2, 0x00, 0x00, 0x10).is_link_local);
     assert(!mac.is_link_local);
+
+    foreach (i; 0 .. MACAddress.bytes)
+        foreach (value; 0 .. 256)
+        {
+            auto candidate = MACAddress.stp_multicast;
+            candidate.b[i] = cast(ubyte)value;
+            assert(candidate.is_link_local == (candidate.b[0] == 1 && candidate.b[1] == 0x80 && candidate.b[2] == 0xC2 && candidate.b[3] == 0 && candidate.b[4] == 0 && candidate.b[5] < 16));
+            assert(MACAddress.from_ul(candidate.ul) == candidate);
+        }
 
     // toString
     char[MACAddress.StringLen] buf;

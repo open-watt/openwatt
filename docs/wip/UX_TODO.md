@@ -3,6 +3,14 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-09-20: ESP filesystem default changes to LittleFS
+
+- The uRT update defaults ESP storage to LittleFS; SmartEVSE explicitly retains SPIFFS.
+  Existing SPIFFS volumes require backup, explicit LittleFS formatting, and restoration of
+  configuration and identity or re-adoption. Do not present re-adoption alone as a storage fix.
+  Account for changed node identity and fleet membership when identity files are not restored,
+  and verify persistence after reboot before treating migration as complete.
+
 ## 2026-09-17: `add` frames carry component templates
 
 - The model-plane `add` frame gains an optional `tmpl`: the authority's component template for

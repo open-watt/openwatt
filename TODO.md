@@ -1,5 +1,26 @@
 # TODO
 
+- Endian codegen follow-up: investigate LLVM array-return lowering for ARM native
+  double stores and Beken/Xtensa swapped stores; direct pointer-output comparisons
+  are shorter, but returning the same byte array recreates the existing sequence.
+  Check remaining strict swapped-16 masking and Xtensa bytewise lowering despite
+  unaligned capability. Keep any DMD improvement simple; no compiler-specific
+  FP path is justified by the current results.
+- Verify ESP-IDF RV32 emulated TLS with two tasks: distinct temp arenas, contents
+  preserved across preemption, and allocations reclaimed after task deletion. uRT
+  #303 is merged; flag checks and C5/BL618 cross-builds passed, but this hardware
+  isolation/cleanup test remains outstanding.
+- Firmware-test the uRT P4 RV32IMAFC/ilp32f correction (removes unsupported standard
+  D/V extensions). O2/Oz scalar fragments pass; no board execution yet.
+- Retest packed-member access after LDC #4236 is fixed before removing the byte-copy
+  workaround: https://github.com/ldc-developers/ldc/issues/4236.
+- Verify the width-aware uRT endian paths on RP2350 hardware using the DHCPv6 IA_PREFIX
+  reproducer before retiring the global strict-alignment proposal in uRT #306. Optimized
+  Cortex-M33 IR/assembly and host suites pass; the target test image has only been built.
+- Before deploying the LittleFS-default uRT update to existing SPIFFS devices, back up persistent
+  files, explicitly format LittleFS, restore configuration/identity or re-adopt, and verify
+  persistence after reboot. Mount failure does not auto-format; re-adoption alone is insufficient.
+
 Outstanding work and follow-ups, including point fixes and work awaiting a design decision.
 When an item lands, delete it or reduce it to the work that remains;
 the commit history and linked design documents carry the implementation record.
