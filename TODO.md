@@ -1,5 +1,14 @@
 # TODO
 
+- **SocketCAN hardware validation (#503)**: WSL virtual CAN covers discovery,
+  classic/extended/RTR forwarding, duplicate claims and disconnect recovery. Still
+  exercise a physical controller's bitrate changes, rejected timing restoration,
+  bus-off recovery and capability failures. Validate Linux USB WiFi/BLE removal on
+  real adapters; WSL has no radios. Discovery-owned interfaces remain dynamic.
+- **Bridge port removal**: `BridgeInterface.remove_member` still asserts after
+  modifying its array; finish port-index/address-table updates and cancellation of
+  pending port tags before exposing removal as a console operation.
+
 - Separate Element's unseen state from a valid zero timestamp; held-value dedup
   currently treats SysTime.init as unseen on clocks whose epoch starts at zero.
 - Make Tesla BLE startup report unsupported AES-GCM/ECDH backends directly on
@@ -899,9 +908,9 @@ this is what remains.
   - enforce live retention ceilings for open-squelch edge streams; and
   - add the waveform generator API needed by RF433 transmit.
 
-- **Complete `/port` discovery and eventing**: publish serial and CAN devices, classify Linux
-  netdevs by ARPHRD type, and replace polling with route netlink for netdevs plus uevents or
-  inotify-backed rescans for tty devices.
+- **Complete `/port` eventing**: replace tty discovery polling with uevents or
+  inotify-backed rescans. Linux CAN publication and ARPHRD netdev classification
+  are implemented; netdev discovery already subscribes to route netlink.
 
 - **Complete the Linux kernel mirror** (`src/protocol/ip/linux_mirror.d`): a netlink transport
   failure stalls the main loop on the writer's 1s `SO_RCVTIMEO` backstop; move the ACK wait onto

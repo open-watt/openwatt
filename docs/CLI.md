@@ -145,6 +145,10 @@ add name=gw_meter interface=goodwe_meter address=2 profile=gm1000
 
 Configuring the remote server will populate the runtime with a `Device` representing the data sampled from the meter, which can be used by local program logic. This bridge configuration solves the problem where a modbus appliance (the meter) on a single hardware bus can not receive requests from multiple masters.
 
+Bridge ports attach while their bridge is running and detach during its shutdown.
+Disabling or removing a bridge releases its member interfaces. If a member is
+destroyed, the bridge restarts and waits for that named member to be recreated.
+
 ## CLI Command Reference
 
 This section is the growing, command-by-command reference for the CLI. The
@@ -639,6 +643,53 @@ each inferring it independently.
 ```text
 /stream/ble-serial/add name=obd0 client=car service=FFF0 write=FFF2 notify=FFF1
 /interface/obd/add name=car-obd stream=obd0
+```
+
+### `/interface/can`
+
+A CAN interface carries CAN frames from one of two mutually exclusive sources: a
+byte `stream` running a framing `protocol`, or an `adapter` naming a controller
+the host itself owns. Setting either one clears the other, so the last one
+assigned is the one that takes effect.
+
+`adapter` is spelled the way the platform names its controllers. On linux that is
+a SocketCAN netdev (`can0`, `slcan0`, `vcan0`); on Espressif it is the on-chip
+TWAI peripheral (`twai0`). Linux controllers are discovered at startup, listed by
+`/port/print` under kind `can`, and given an interface named `can1`, `can2`... A
+discovery-owned interface is removed when its netdev disappears; operator-created
+interfaces remain configured for reconnection.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `adapter` | controller name | none | Host CAN controller to bind. Mutually exclusive with `stream`. |
+| `stream` | stream | none | Byte stream carrying framed CAN traffic. Mutually exclusive with `adapter`. |
+| `protocol` | `ebyte` | none | Framing used on `stream`. Required when `stream` is set. |
+| `baud-rate` | bits/second | Linux: `0`; Espressif: `500000` | Linux `0` adopts existing bit timing. Unconfigured physical buses require an explicit rate; virtual CAN requires `0`. |
+| `tx-gpio` | pin | platform | Transmit pin. Espressif only. |
+| `rx-gpio` | pin | platform | Receive pin. Espressif only. |
+
+On linux the bitrate is link configuration rather than socket configuration, and
+the kernel only accepts it while the link is down. Setting `baud-rate` therefore
+takes the link down, applies the rate, and raises it again, which needs
+`CAP_NET_ADMIN`; without it the interface reports the netlink error and retries
+under the usual backoff. Only `baud-rate` is sent, so the driver derives the
+segment timing from its own clock.
+
+A discovered interface takes `baud-rate` from the link rather than imposing one,
+and the link is only bounced when the property and the link disagree. So adopting
+an already-configured bus disturbs nothing, and changing `baud-rate` is what
+pushes a new rate down to the controller.
+
+An unconfigured physical controller stays offline until `baud-rate` is explicitly
+set. A failed link query never triggers a bitrate change. Virtual CAN (`vcan` and
+`vxcan`) has no bit timing and uses `baud-rate=0`. An already-up link with matching
+settings is adopted without a netlink write. Opening its raw socket still requires
+`CAP_NET_RAW`.
+
+```text
+/interface/can/add name=bms adapter=can0 baud-rate=500000
+/interface/can/add name=goodwe_can stream=can.1 protocol=ebyte
+/interface/can/set bms baud-rate=250000
 ```
 
 ### `/interface/udp`

@@ -218,6 +218,153 @@ int netlink_set_link_up(int ifindex, bool up)
     return nl_send_ack(b.finalise(RTM_NEWLINK, NLM_F_REQUEST | NLM_F_ACK, seq), seq);
 }
 
+struct CANLink
+{
+    uint bitrate;
+    bool up;
+    bool virtual_link;
+}
+
+unittest
+{
+    import driver.linux.sysfs : ARPHRD_CAN;
+
+    foreach (kind; [ "can", "vcan", "vxcan", "ether" ])
+    {
+        foreach (uint bitrate; [ 0u, 250_000u ])
+        {
+            NlBuilder b;
+            ifinfomsg ifi;
+            ifi.ifi_index = 7;
+            ifi.ifi_type = ARPHRD_CAN;
+            ifi.ifi_flags = IFF_UP;
+            b.family(ifi);
+            size_t info = b.nest_begin(IFLA_LINKINFO);
+            b.attr_str(IFLA_INFO_KIND, kind);
+            if (bitrate)
+            {
+                size_t data = b.nest_begin(IFLA_INFO_DATA);
+                can_bittiming bt;
+                bt.bitrate = bitrate;
+                b.attr(IFLA_CAN_BITTIMING, as_bytes(bt));
+                b.nest_end(data);
+            }
+            b.nest_end(info);
+            auto message = b.finalise(RTM_NEWLINK, 0, 42);
+            CANLink link;
+            assert(decode_can_link(message, 7, 42, link) == (kind != "ether"));
+            if (kind != "ether")
+            {
+                assert(link.up && link.virtual_link == (kind != "can"));
+                assert(link.bitrate == (kind == "can" ? bitrate : 0));
+            }
+            assert(!decode_can_link(message, 8, 42, link));
+            assert(!decode_can_link(message, 7, 43, link));
+            assert(!decode_can_link(message[0 .. $ - 1], 7, 42, link));
+            assert(!decode_can_link(b.finalise(NLMSG_ERROR, 0, 42), 7, 42, link));
+        }
+    }
+}
+
+bool netlink_get_can_link(int ifindex, out CANLink link)
+{
+    if (ifindex <= 0)
+        return false;
+    uint seq = ++g_seq;
+    NlBuilder b;
+    ifinfomsg ifi;
+    ifi.ifi_index = ifindex;
+    b.family(ifi);
+    const(ubyte)[] msg = b.finalise(RTM_GETLINK, NLM_F_REQUEST, seq);
+
+    int fd = socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
+    if (fd < 0)
+        return false;
+    scope(exit) close(fd);
+
+    sockaddr_nl local;
+    local.nl_family = AF_NETLINK;
+    if (bind(fd, &local, sockaddr_nl.sizeof) < 0)
+        return false;
+
+    timeval tv;
+    tv.tv_sec = 1;
+    if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, timeval.sizeof) < 0)
+        return false;
+
+    sockaddr_nl kernel;
+    kernel.nl_family = AF_NETLINK;
+    if (sendto(fd, msg.ptr, msg.length, 0, &kernel, sockaddr_nl.sizeof) != cast(ptrdiff_t)msg.length)
+        return false;
+
+    align(4) ubyte[4096] buf = void;
+    ptrdiff_t n = recv(fd, buf.ptr, buf.length, 0);
+    return n > 0 && decode_can_link(buf[0 .. cast(size_t)n], ifindex, seq, link);
+}
+
+private bool decode_can_link(const(ubyte)[] data, int ifindex, uint seq, out CANLink link)
+{
+    import driver.linux.sysfs : ARPHRD_CAN;
+
+    while (data.length >= nlmsghdr.sizeof)
+    {
+        const(nlmsghdr)* h = peek!nlmsghdr(data);
+        if (!h || h.nlmsg_len < nlmsghdr.sizeof || h.nlmsg_len > data.length)
+            return false;
+        if (h.nlmsg_seq == seq && h.nlmsg_type == NLMSG_ERROR)
+            return false;
+        if (h.nlmsg_seq == seq && h.nlmsg_type == RTM_NEWLINK && h.nlmsg_len >= nlmsghdr.sizeof + ifinfomsg.sizeof)
+        {
+            const(ifinfomsg)* ifi = cast(const(ifinfomsg)*)(data.ptr + nlmsghdr.sizeof);
+            if (ifi.ifi_index != ifindex || ifi.ifi_type != ARPHRD_CAN)
+                return false;
+            auto info = find_attr(data[nlmsghdr.sizeof + ifinfomsg.sizeof .. h.nlmsg_len], IFLA_LINKINFO);
+            auto kind = find_attr(info, IFLA_INFO_KIND);
+            link.up = (ifi.ifi_flags & IFF_UP) != 0;
+            link.virtual_link = kind == cast(const(ubyte)[])"vcan\0" || kind == cast(const(ubyte)[])"vxcan\0";
+            if (link.virtual_link)
+                return true;
+            if (kind != cast(const(ubyte)[])"can\0")
+                return false;
+            auto bt = find_attr(find_attr(info, IFLA_INFO_DATA), IFLA_CAN_BITTIMING);
+            if (bt.length != 0 && bt.length < can_bittiming.sizeof)
+                return false;
+            if (bt.length >= can_bittiming.sizeof)
+                link.bitrate = (cast(const(can_bittiming)*)bt.ptr).bitrate;
+            return true;
+        }
+
+        uint aligned = (h.nlmsg_len + 3u) & ~3u;
+        if (aligned >= data.length)
+            break;
+        data = data[aligned .. $];
+    }
+    return false;
+}
+
+// CAN bit timing is link configuration, not socket configuration, and the kernel rejects
+// it unless the link is down -- bring it down first. Zeroing everything but `bitrate` asks
+// the driver to derive the segment timing from its own clock, which is what
+// `ip link set canX type can bitrate N` does.
+int netlink_set_can_bitrate(int ifindex, uint bitrate)
+{
+    can_bittiming bt;
+    bt.bitrate = bitrate;
+
+    uint seq = ++g_seq;
+    NlBuilder b;
+    ifinfomsg ifi;
+    ifi.ifi_index = ifindex;
+    b.family(ifi);
+    size_t li = b.nest_begin(IFLA_LINKINFO);
+    b.attr_str(IFLA_INFO_KIND, "can");
+    size_t data = b.nest_begin(IFLA_INFO_DATA);
+    b.attr(IFLA_CAN_BITTIMING, as_bytes(bt));
+    b.nest_end(data);
+    b.nest_end(li);
+    return nl_send_ack(b.finalise(RTM_NEWLINK, NLM_F_REQUEST | NLM_F_ACK, seq), seq);
+}
+
 // Resolve a kernel netdev name to its ifindex; 0 if unknown.
 int netlink_ifindex(const(char)[] name)
 {
@@ -476,7 +623,7 @@ int nl_send_ack(const(ubyte)[] msg, uint seq)
 struct NlBuilder
 {
 nothrow @nogc:
-    ubyte[512] buf = 0;
+    align(4) ubyte[512] buf = 0;
     size_t     len;
 
     // Place the family header (rtmsg/ndmsg/ifaddrmsg) right after the nlmsghdr.
@@ -644,8 +791,43 @@ enum NLA_F_NESTED  = 0x8000;
 enum IFLA_ADDRESS   = 1;
 enum IFLA_IFNAME    = 3;
 enum IFLA_MASTER    = 10;
+enum RTM_GETLINK    = 18;
+enum NLA_TYPE_MASK  = 0x3FFF;
+
+// Payload of the first `type` attribute at this nesting level, or null.
+const(ubyte)[] find_attr(const(ubyte)[] attrs, ushort type)
+{
+    while (attrs.length >= rtattr.sizeof)
+    {
+        const(rtattr)* a = cast(const(rtattr)*)attrs.ptr;
+        if (a.rta_len < rtattr.sizeof || a.rta_len > attrs.length)
+            break;
+        if ((a.rta_type & NLA_TYPE_MASK) == type)
+            return attrs[rtattr.sizeof .. a.rta_len];
+        uint aligned = (a.rta_len + 3u) & ~3u;
+        if (aligned >= attrs.length)
+            break;
+        attrs = attrs[aligned .. $];
+    }
+    return null;
+}
+
 enum IFLA_LINKINFO  = 18;
 enum IFLA_INFO_KIND = 1;    // nested under IFLA_LINKINFO
+enum IFLA_INFO_DATA = 2;    // nested under IFLA_LINKINFO, link-type specific
+enum IFLA_CAN_BITTIMING = 1;    // nested under IFLA_INFO_DATA when INFO_KIND is "can"
+
+struct can_bittiming
+{
+    uint bitrate;
+    uint sample_point;
+    uint tq;
+    uint prop_seg;
+    uint phase_seg1;
+    uint phase_seg2;
+    uint sjw;
+    uint brp;
+}
 
 enum RT_TABLE_MAIN     = 254;
 enum RTPROT_OPENWATT   = 80;    // private protocol id -- our routes are tagged with this

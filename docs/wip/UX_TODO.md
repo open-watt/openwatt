@@ -279,6 +279,40 @@ through them and remove sections as they are absorbed.
   link quality on some platforms and is a fixed ceiling on others. Clients should not
   present it as a measured throughput; `tx-rate`/`rx-rate` remain the measured counters.
 
+## 2026-09-21: discovered interface logging and port removability
+
+- Discovery-owned interfaces retain `dynamic` (`D`) regardless of physical bus.
+  Interface online/offline transitions now log at notice unless temporary; clients
+  displaying logs should expect these events for discovered interfaces too.
+- Ethernet, WiFi and CAN `/port` entries expose the existing `removable` hint for
+  USB devices. Do not infer object ownership or persistence from that hint.
+- Bridge members now clear `slave` (`S`) when the bridge shuts down and reacquire
+  it when the bridge starts. Treat `S` as active attachment, not saved membership;
+  a bridge with a missing member waits for that named interface to be recreated.
+
+## 2026-08-12: CAN interfaces gain `adapter`; SocketCAN controllers auto-discovered
+
+- `/interface/can` property `device` is renamed `adapter`, matching the ethernet and wifi
+  interfaces. It now names a host CAN controller generally, not just an Espressif TWAI
+  peripheral: on linux it is a SocketCAN netdev (`can0`), on Espressif still `twai0`.
+  Clients offering the old `device=` in pickers or forms must rename it.
+- `adapter` and `stream` are mutually exclusive and each setter clears the other, so a form
+  offering both should present them as a mode choice rather than two independent fields.
+  An interface with both set is invalid and reports as such.
+- Linux SocketCAN controllers are discovered at startup and appear as `/interface/can`
+  entries named `can1`, `can2`... alongside any stream-backed ones, plus `/port` entries of
+  kind `can`. All discovery-owned controllers carry `dynamic` and are removed when
+  their netdev disappears, including virtual CAN. Operator-created interfaces remain.
+- Linux `baud-rate` defaults to `0`: startup adopts existing physical bit timing and
+  reports that value. An unconfigured physical bus stays offline until a rate is set.
+  Virtual CAN uses `0` and needs no bit timing. Espressif retains its `500000` default.
+  Update bitrate forms and validation to permit Linux `0`; it is not a live measurement.
+- Changing `baud-rate` on linux is applied to the bus (the link is bounced and the rate set
+  via netlink), so it is a real setting rather than advisory, and needs `CAP_NET_ADMIN`. It
+  is pushed down only when it differs from what the link already carries.
+- Previously a CAN controller was mis-claimed as an ethernet interface, so any client that
+  learned to expect `can0` under `/interface/ethernet` should stop.
+
 ## 2026-08-13: WLAN interfaces report the negotiated PHY as `phy-mode`
 
 - New read-only property `phy-mode` on `/interface/wlan`, a display string such as `VHT80

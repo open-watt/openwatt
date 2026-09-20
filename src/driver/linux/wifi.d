@@ -2310,7 +2310,9 @@ private:
         // VIFs we create (monitor/AP/STA) never spawn duplicate radios.
         Array!String os_buf;
         enumerate_wifi_adapters((const(char)[] name, const(char)[] description) nothrow @nogc {
-            port_add(PortKind.wifi, tconcat("linux:wifi:", name), name, name, ModuleName, description);
+            const bool removable = adapter_is_removable(name);
+            port_add(PortKind.wifi, tconcat("linux:wifi:", name), name, name, ModuleName, description,
+                     removable ? PortFlags.removable : PortFlags.none);
 
             uint w = read_wiphy(read_ifindex(name));
             bool present = false;
@@ -2327,10 +2329,6 @@ private:
                 auto base = next_radio_name();
                 log_info(ModuleName, "Found wifi interface: \"", description, "\" (", name, ")");
 
-                // dynamic: auto-discovery owns these and rediscovers them each
-                // boot, so they aren't persisted to config -- and only dynamic
-                // entries are reaped below when their netdev disappears.
-                // Operator/config radios (flags == none) are left alone.
                 auto radio = Collection!LinuxWifiRadio().create(tconcat(base, "-radio"), ObjectFlags.dynamic);
                 radio.wiphy = name;
                 if (description.length > 0)
@@ -2346,8 +2344,7 @@ private:
         Array!LinuxWifiRadio gone;
         foreach (r; Collection!LinuxWifiRadio().values)
         {
-            // Only reap what auto-discovery created; an operator/config radio is
-            // not ours to remove even if its netdev momentarily disappears.
+            // Operator-created radios are not owned by discovery.
             if (!(r.flags & ObjectFlags.dynamic))
                 continue;
 
@@ -2369,11 +2366,11 @@ private:
             port_remove(PortKind.wifi, tconcat("linux:wifi:", r.wiphy[]));
             Array!LinuxWlan paired;
             foreach (w; Collection!LinuxWlan().values)
-                if (dyn_cast!LinuxWifiRadio(w.radio) is r)
+                if ((w.flags & ObjectFlags.dynamic) && dyn_cast!LinuxWifiRadio(w.radio) is r)
                     paired ~= w;
             foreach (w; paired[])
-                Collection!LinuxWlan().remove(w);
-            Collection!LinuxWifiRadio().remove(r);
+                w.destroy();
+            r.destroy();
         }
     }
 

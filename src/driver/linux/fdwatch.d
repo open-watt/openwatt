@@ -17,6 +17,7 @@ import urt.array;
 
 import manager;
 import manager.plugin;
+import manager.reactor : Reactor;
 
 import urt.internal.sys.posix : pollfd;
 
@@ -27,7 +28,7 @@ alias FdWatchService = void delegate() nothrow @nogc;
 alias FdWatchCollect = void delegate(ref Array!pollfd fds) nothrow @nogc;
 
 bool add_fd_watcher(FdWatchService service, FdWatchCollect collect)
-    => g_fdwatch.add(service, collect);
+    => g_fdwatch.add(service, collect, g_app.reactor);
 
 void remove_fd_watcher(FdWatchService service)
 {
@@ -68,15 +69,17 @@ nothrow @nogc:
 
     Array!Watcher _watchers;
     Array!pollfd _desired;
-    bool _drain_set;
+    Reactor* _reactor;
+    bool _servicing;
 
-    bool add(FdWatchService service, FdWatchCollect collect)
+    bool add(FdWatchService service, FdWatchCollect collect, ref Reactor reactor)
     {
-        if (!_drain_set)
+        if (_reactor is null)
         {
-            g_app.reactor.set_pool_drain(&service_all);
-            _drain_set = true;
+            _reactor = &reactor;
+            _reactor.set_pool_drain(&service_all);
         }
+        assert(_reactor is &reactor);
         _watchers ~= Watcher(service, collect);
         rebuild();
         return true;
@@ -88,7 +91,10 @@ nothrow @nogc:
         {
             if (w.service is service)
             {
-                _watchers.remove(i);
+                if (_servicing)
+                    w = Watcher.init;
+                else
+                    _watchers.remove(i);
                 rebuild();
                 return;
             }
@@ -99,28 +105,81 @@ nothrow @nogc:
     {
         _desired.clear();
         foreach (ref w; _watchers[])
-            w.collect(_desired);
-        g_app.reactor.set_pool_fds(_desired[]);
+            if (w.collect)
+                w.collect(_desired);
+        if (_reactor)
+            _reactor.set_pool_fds(_desired[]);
     }
 
     // reactor-driven: any pooled fd ready runs this once per wait pass. Drain every watcher then
     // re-collect (a service() may have opened/closed fds, matching the old post-service rebuild).
     void service_all()
     {
-        foreach (ref w; _watchers[])
-            w.service();
+        _servicing = true;
+        // Removals leave tombstones until the pass ends; additions wait for the next pass.
+        size_t count = _watchers.length;
+        for (size_t i = 0; i < count; ++i)
+            if (auto service = _watchers[i].service)
+                service();
+        _servicing = false;
+        for (size_t i = _watchers.length; i-- > 0;)
+            if (!_watchers[i].service)
+                _watchers.remove(i);
         rebuild();
     }
 
     void stop()
     {
-        _watchers.clear();
-        _desired.clear();
-        if (_drain_set)
+        if (_servicing)
         {
-            g_app.reactor.set_pool_fds(null);
-            g_app.reactor.set_pool_drain(null);
-            _drain_set = false;
+            foreach (ref w; _watchers[])
+                w = Watcher.init;
+        }
+        else
+            _watchers.clear();
+        _desired.clear();
+        if (_reactor)
+        {
+            _reactor.set_pool_fds(null);
+            _reactor.set_pool_drain(null);
+            _reactor = null;
         }
     }
+}
+
+unittest
+{
+    struct Test
+    {
+    nothrow @nogc:
+        FdWatch watches;
+        Reactor reactor;
+        uint second_calls, third_calls, added_calls;
+
+        void collect(ref Array!pollfd) {}
+        void first()
+        {
+            watches.remove(&first);
+            watches.remove(&third);
+            watches.add(&added, &collect, reactor);
+        }
+        void second() { ++second_calls; }
+        void third() { ++third_calls; }
+        void added() { ++added_calls; }
+    }
+
+    Test t;
+    assert(t.reactor.init());
+    scope(exit)
+    {
+        t.watches.stop();
+        t.reactor.destroy();
+    }
+    t.watches.add(&t.first, &t.collect, t.reactor);
+    t.watches.add(&t.second, &t.collect, t.reactor);
+    t.watches.add(&t.third, &t.collect, t.reactor);
+    t.watches.service_all();
+    assert(t.second_calls == 1 && t.third_calls == 0 && t.added_calls == 0);
+    t.watches.service_all();
+    assert(t.second_calls == 2 && t.third_calls == 0 && t.added_calls == 1);
 }

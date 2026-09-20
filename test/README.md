@@ -117,3 +117,16 @@ See [test_harness_features.md](test_harness_features.md) for details.
 ## For Claude Code
 
 A Claude Code skill is available at `.claude/skills/test-runtime.md` that provides guidance for automated testing.
+
+## Linux interface regression tests
+
+`test_linux_interfaces.py` uses the existing process/console harness and temporary
+configuration. Run as root in a fresh network and mount namespace; it creates only
+virtual CAN and veth devices and checks forwarding, hotplug, descriptor cleanup,
+bridge offload handoff and discovery ownership:
+
+```sh
+unshare -nm --propagation private sh -c 'mount -t sysfs sysfs /sys && python3 test/test_linux_interfaces.py --binary /path/to/openwatt'
+```
+
+Physical CAN bit timing and USB radio hardware still require hardware tests.

@@ -734,20 +734,18 @@ private:
 
         const(char)[] iface_name = next_iface_name();
         log_info(ModuleName, "Found BLE adapter: hci", index, " (", iface_name, ")");
-        // dynamic: we own its lifecycle and rediscover it each boot, so it
-        // isn't persisted to config -- only dynamic entries are reaped when
-        // their controller disappears.
         auto iface = Collection!LinuxBLEInterface().create(iface_name, ObjectFlags.dynamic);
         iface.hci_index = index;
     }
 
     void remove_adapter(ushort index)
     {
+        // Only discovery-owned controllers are reaped.
         LinuxBLEInterface iface = find_by_index(index);
         if (iface is null || !(iface.flags & ObjectFlags.dynamic))
             return;
         log_info(ModuleName, "BLE adapter gone: hci", index);
-        Collection!LinuxBLEInterface().remove(iface);
+        iface.destroy();
     }
 
     const(char)[] next_iface_name()
