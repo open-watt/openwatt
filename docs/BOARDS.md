@@ -3,8 +3,8 @@
 `PLATFORM` selects a chip family, architecture, toolchain, and peripheral
 capabilities. `BOARD` selects populated hardware and product policy.
 
-When `BOARD` is omitted, each embedded platform uses a named reference
-development board. This makes `make PLATFORM=...` useful for development
+When `BOARD` is omitted, each embedded platform uses a reference development
+configuration. This makes `make PLATFORM=...` useful for development
 without pretending that every product using the same chip has the reference
 board's flash or external RAM.
 
@@ -43,7 +43,7 @@ another's generated configuration.
 
 ## ESP core-dump builds
 
-`COREDUMP=1` is an opt-in diagnostic feature for ESP32-S3, C5 and C6. It selects
+`COREDUMP=1` is an opt-in diagnostic feature for ESP32-S3, S31, C5 and C6. It selects
 the platform's coredump partition table, reserving 512 KiB of flash, and places
 the result in a separate `*_coredump` build directory:
 
@@ -59,13 +59,18 @@ partition table together with the coredump-enabled image. The normal
 
 Board profiles in the tree. Build with `make esp-idf-build BOARD=<name> CONFIG=release`; the
 output lands in `bin/<platform>_<board>_<config>/`. Each board's `system.conf` wires its
-peripherals and its `default.conf` brings up a setup access point at `192.168.4.1` with the HTTP
+peripherals and its `default.conf` brings up a setup access point with the HTTP
 API, sync, OTA and file server, so a fresh unit is reachable before it has any credentials.
 
 | Board | `BOARD=` | Platform | Flash | PSRAM |
 | --- | --- | --- | ---: | ---: |
 | SmartEVSE v3.0 | `smartevse-v30` | `esp32` | 4 MB | none |
 | Waveshare ESP32-S3-RS485-CAN | `waveshare-esp32-s3-rs485-can` | `esp32-s3` | 16 MB | 8 MB |
+| ESP32-S31-Function-CoreBoard-1 | `esp32-s31-function-coreboard-1` | `esp32-s31` | 16 MB | 16 MB |
+
+**ESP32-S31-Function-CoreBoard-1** enables the fitted 16 MB octal PSRAM at 200 MHz.
+Its setup AP is at `192.168.1.1`. The board's Ethernet port remains unsupported.
+Espressif documents its fitted memory on the [S31 board page](https://esp32-s31.espressif.com/en).
 
 **SmartEVSE v3.0** replaces the stock SmartEVSE firmware in place. The build is `switch-http`,
 headless and tiny, with Modbus, the HTTP client and the file server compiled out, and the
@@ -90,6 +95,7 @@ console.
 | `esp32` | ESP32-DevKitC V4 with ESP32-WROOM-32E | 4 MB | none |
 | `esp32-s2` | ESP32-S2-DevKitC-1-N8R2 | 8 MB | 2 MB |
 | `esp32-s3` | ESP32-S3-DevKitC-1-N16R8 | 16 MB | 8 MB |
+| `esp32-s31` | Generic S31 development configuration | 16 MB | none |
 | `esp32-c2` | ESP8684-DevKitC-02, 4 MB variant | 4 MB | none |
 | `esp32-c3` | ESP32-C3-DevKitM-1 | 4 MB | none |
 | `esp32-c5` | ESP32-C5-DevKitC-1 with N8R8 module | 8 MB | 8 MB |
@@ -100,6 +106,10 @@ console.
 These are development defaults, not chip capabilities. A production board
 must declare its fitted memory even when it happens to match the reference
 profile.
+
+The generic S31 configuration assumes 16 MB external flash and no PSRAM. Both
+the platform and Function-CoreBoard-1 profiles create the chip's `wifi1` and
+`wpan1` radios; set `wpan1`'s channel before using the 802.15.4 radio.
 
 The C5 and C6 layouts use two 3.5 MiB OTA slots. When migrating from the old
 layouts, back up filesystem contents and flash the new partition table and

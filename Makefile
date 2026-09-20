@@ -57,8 +57,8 @@ ifeq ($(filter 0 1,$(COREDUMP)),)
     $(error COREDUMP must be 0 or 1)
 endif
 ifeq ($(COREDUMP),1)
-    ifeq ($(filter esp32-s3 esp32-c5 esp32-c6,$(PLATFORM)),)
-        $(error COREDUMP=1 is supported only on PLATFORM=esp32-s3, esp32-c5 or esp32-c6)
+    ifeq ($(filter esp32-s3 esp32-s31 esp32-c5 esp32-c6,$(PLATFORM)),)
+        $(error COREDUMP=1 is supported only on PLATFORM=esp32-s3, esp32-s31, esp32-c5 or esp32-c6)
     endif
     DFLAGS := $(DFLAGS) $(VERSION_FLAG)CoreDump
     BUILD_VARIANT_SUFFIX := _coredump
@@ -183,6 +183,8 @@ else ifeq ($(PLATFORM),esp32-s2)
     CONF_DIR := platforms/esp32s2
 else ifeq ($(PLATFORM),esp32-s3)
     CONF_DIR := platforms/esp32s3
+else ifeq ($(PLATFORM),esp32-s31)
+    CONF_DIR := platforms/esp32s31
 else ifeq ($(PLATFORM),esp32-c2)
     CONF_DIR := platforms/esp32c2
 else ifeq ($(PLATFORM),esp32-c3)
@@ -488,6 +490,12 @@ else ifeq ($(PLATFORM),esp32-s3)
     ESP_REFERENCE_BOARD := ESP32-S3-DevKitC-1-N16R8
     ESP_FLASH_SIZE := 16MB
     ESP_PSRAM_SIZE := 8MB
+else ifeq ($(PLATFORM),esp32-s31)
+    ESP_PROJECT_DIR := platforms/esp32s31
+    ESP_IDF_TARGET  := esp32s31
+    ESP_REFERENCE_BOARD := Generic ESP32-S31 (16 MB flash)
+    ESP_FLASH_SIZE := 16MB
+    ESP_PSRAM_SIZE := 0MB
 else ifeq ($(PLATFORM),esp32-c2)
     ESP_PROJECT_DIR := platforms/esp32c2
     ESP_IDF_TARGET  := esp32c2

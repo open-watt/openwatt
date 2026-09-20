@@ -5,7 +5,9 @@ description: Espressif (ESP32) platform port -- build, flash, debug, WiFi shim, 
 
 # Espressif Platform Skill
 
-You are working on Espressif ESP32 platform support for OpenWatt. All ESP32 variants run FreeRTOS with ESP-IDF v6.0, using LDC to cross-compile D. Xtensa variants (ESP32, ESP32-S2, ESP32-S3) require a two-stage bitcode build via Espressif's llc fork due to upstream LLVM bugs. RISC-V variants (ESP32-C3, C6, H2) compile directly with LDC.
+You are working on Espressif ESP32 platform support for OpenWatt. ESP32 targets run FreeRTOS with ESP-IDF v6 or newer; ESP32-S31 requires v6.1. LDC cross-compiles the D code. Xtensa variants (ESP32, ESP32-S2, ESP32-S3) require a two-stage bitcode build via Espressif's llc fork due to upstream LLVM bugs. RISC-V variants (ESP32-C2, C3, C5, C6, H2, P4, S31) compile directly with LDC.
+
+The C2, C3, C5, C6 and H2 use the soft-float ABI (`ilp32`). P4 and S31 have FPUs and use `ilp32f`: P4 uses the `esp32p4` processor entry, and S31 uses `e907`. The D object and ESP-IDF must agree on this ABI.
 
 The current dev board is an ESP32-S3 with 8MB octal PSRAM and 16MB flash, connected via native USB Serial/JTAG (no UART bridge chip).
 
@@ -20,7 +22,7 @@ The D code compiles to an object file, then ESP-IDF links it with the C runtime.
 make PLATFORM=esp32-s3 CONFIG=release    # or CONFIG=unittest
 
 # 2. Compile and link with ESP-IDF (from WSL, needs IDF environment)
-source /home/[user]/.espressif/release-v6.0/esp-idf/export.sh
+source /home/[user]/.espressif/release-v6.1/esp-idf/export.sh
 make esp-idf-build PLATFORM=esp32-s3 CONFIG=release
 
 # Full clean rebuild (needed when sdkconfig.defaults changes)
@@ -36,13 +38,22 @@ The dev board connects via USB Serial/JTAG to Windows. Flash addresses must matc
 python -m esptool --chip esp32s3 -p COM5 -b 460800 write_flash 0x0 bin\esp32-s3_release\bootloader.bin 0x8000 bin\esp32-s3_release\partition-table.bin 0x10000 bin\esp32-s3_release\ota_data_initial.bin 0x20000 bin\esp32-s3_release\openwatt.bin
 ```
 
+The bootloader offset is not the same on every part: it is `0x0` on the S3, and `0x2000` on the
+S31 and the other newer parts. `flasher_args.json` in the build directory carries the offsets the
+build actually produced, and `make esp-flash` uses them; only a hand-written esptool line can get
+them wrong.
+
 ### Serial monitor
 
 ```powershell
 python -m serial.tools.miniterm COM5 115200
 ```
 
-On boards with native USB Serial/JTAG, the COM port drops on reset (USB re-enumerates). Bootloader output is lost unless you reconnect fast. The unit test build calls `abort()` after tests to create a crash/reboot loop so output is visible.
+Opening the port resets the chip: pyserial asserts DTR and RTS on open, and on a USB
+Serial/JTAG part that is the reset sequence. Set `dtr = False` and `rts = False` on an unopened
+`Serial()` and then `open()`, or every probe silently reboots the unit and discards anything
+created from the console. On boards with native USB Serial/JTAG, the COM port drops on reset
+(USB re-enumerates). Bootloader output is lost unless you reconnect fast. The unit test build calls `abort()` after tests to create a crash/reboot loop so output is visible.
 
 ## Platform Files
 

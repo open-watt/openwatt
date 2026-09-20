@@ -733,7 +733,7 @@ This collection represents physical radios; WLAN and AP interfaces bind to them.
 
 ### `/interface/wpan`
 
-The raw IEEE 802.15.4 radio, present on the ESP32-C5, C6 and H2. On its own it delivers the beacon,
+The raw IEEE 802.15.4 radio, present on the ESP32-C5, C6, H2 and S31. On its own it delivers the beacon,
 data, acknowledgement and command frames it hears as `wpan` packets and transmits frames handed to
 it; Zigbee and Thread will layer on top. Multipurpose, fragment and extended frames are not parsed
 and count as `rx-dropped`. With the default `pan-id` and `short-address` the radio has no network
