@@ -611,6 +611,7 @@ package:
         uint   device_cursor;
         uint   element_cursor;
         bool   device_sent;
+        ulong  backfill_cursor = ulong.max;   // next unsent backfill record
     }
 
     // a device whose classification changed after this session may have been introduced to it
@@ -692,8 +693,32 @@ package:
     // bulk walks stop short of the window's end so the session's other control frames always find room
     enum control_reserve = 16;
 
-    final size_t control_window_free()
-        => !sublayer_armed ? size_t.max : (_resend.length >= max_unacked ? 0 : max_unacked - _resend.length);
+    final bool control_starved()
+        => sublayer_armed && _resend.length + control_reserve >= max_unacked;
+
+    final bool tx_blocked()
+        => control_starved() || (!uses_udp_endpoint && !_transport.tx_ready);
+
+    // Transport readiness re-invites; control-window starvation waits for an ACK.
+    final bool tx_full()
+        => !control_starved() && !uses_udp_endpoint && !_transport.tx_ready;
+
+    final bool produce_tx(BaseInterface)
+    {
+        _peer_flags |= PeerFlags.tx_producing;
+        scope (exit) _peer_flags &= ~PeerFlags.tx_producing;
+        return get_module!SyncModule.produce(this);
+    }
+
+    final void arm_tx()
+    {
+        if ((_peer_flags & PeerFlags.tx_producing) || !transport_ready)
+            return;
+        if (uses_udp_endpoint)
+            produce_tx(null);
+        else
+            _transport.tx_handler(&produce_tx);
+    }
 
     // burst protocol: begin_burst, send, check send_ok after every send; refusal or teardown ends it
     final uint begin_burst()
@@ -744,6 +769,7 @@ package:
 
     Array!String     _model_subs;        // armed live model patterns
     Map!(ulong, ulong) _live_nodes;      // EID.raw of armed nodes -> next unsent record index (point series)
+    enum ulong live_parked = 1UL << 63;  // backfill owns the live cursor while parked
     Array!EID        _pending_vals;      // dirty matched nodes awaiting this tick's flush
 
     Array!PendingSub _pending_subs;
@@ -819,6 +845,7 @@ private:
         ctl_ack_pending            = 1 << 3,
         uses_udp_endpoint          = 1 << 4,
         owns_udp_endpoint          = 1 << 5,
+        tx_producing               = 1 << 6,
     }
 
     struct SentFrame
@@ -951,8 +978,11 @@ private:
 
     void release_control(ubyte ack)
     {
+        size_t held = _resend.length;
         while (!_resend.empty && cast(ubyte)(ack - _resend[0].seq) < 128)
             _resend.remove(0);
+        if (_resend.length != held)
+            arm_tx();
     }
 
     static void release_data(ref DataQueue q, ubyte ack)
@@ -989,6 +1019,8 @@ private:
     void detach_transport()
     {
         release_transport_state();
+        if (BaseInterface transport = _transport)
+            transport.release_tx_handler(&produce_tx);
         if (!(_peer_flags & PeerFlags.transport_subscribed))
             return;
         if (BaseInterface transport = _transport)
@@ -1436,4 +1468,106 @@ unittest
     p.detach_model_bindings();
     assert(device.bindings.length == 1 && !device.bindings[0]);
     assert(element.binding_entries[] == [Element.binding_destroyed, ubyte.max, ubyte.max, ubyte.max]);
+}
+
+unittest
+{
+    import urt.mem;
+    import manager.series : register_value_format;
+
+    static final class Narrow : BaseInterface
+    {
+        enum type_name = "sync-test-narrow";
+    nothrow @nogc:
+        this(CID id, ObjectFlags flags = ObjectFlags.none)
+        {
+            super(collection_type_info!Narrow, id, flags);
+            _caps = cast(InterfaceCaps)(InterfaceCaps.reliable | InterfaceCaps.ordered);
+            _state = State.running;
+        }
+        override bool tx_ready() const
+            => pending < cap;
+        override int transmit(ref Packet packet, MessageCallback, const(QueuePolicy)*)
+        {
+            pending += packet.length;
+            if (pending > peak)
+                peak = pending;
+            ++frames;
+            return 0;
+        }
+        size_t pending, peak, frames;
+        size_t cap = 4096;
+    }
+
+    Narrow link = Collection!Narrow().create("sync-test-narrow");
+    SyncPeer peer = alloc!SyncPeer(CID(9));
+    scope(exit)
+    {
+        free(peer);
+        Collection!Narrow().remove(link);
+        free(link);
+    }
+    peer._transport = link;
+
+    DeviceTable devices;
+    Element* power;
+    {
+        DeviceBuilder builder = devices.create("historian");
+        power = builder.element(builder.component("meter"), "power", register_value_format!float());
+        builder.commit();
+    }
+    enum records = 4000;
+    power.retention(records);
+    foreach (i; 0 .. records)
+    {
+        float[1] v = [float(i)];
+        SysTime[1] t = [from_unix_time_ns((i + 1) * 1_000_000_000L)];
+        power.write_samples(v[], t[]);
+    }
+    peer.introduce(power.ensure_eid());
+
+    // Backfill spans multiple transport windows.
+    import manager.sync.binary_encoder : BinaryEncoder;
+    SyncEncoder enc = alloc!BinaryEncoder(null);
+    scope(exit) free(enc);
+    uint gen = peer.begin_burst();
+    ulong resume = ulong.max;
+    uint passes;
+    ulong last = 0;
+    while (!SyncModule.send_backfill(peer, enc, power, 1, 0, gen, resume))
+    {
+        assert(peer.send_ok(gen) && resume != ulong.max && resume > last);
+        last = resume;
+        link.pending = 0;
+        ++passes;
+    }
+    assert(passes > 1 && resume == ulong.max && peer.send_ok(gen));
+    assert(link.frames == (records + 255) / 256);
+
+    // The initial live cursor must not count as delivered history.
+    peer._live_nodes.insert(power.ensure_eid().raw, power.record_count);
+    ulong* live = power.ensure_eid().raw in peer._live_nodes;
+    link.frames = 0;
+    link.pending = link.cap;
+    assert(!SyncModule.send_backfill(peer, enc, power, 1, 0, gen, resume) && link.frames == 0);
+    assert(*live == (resume | SyncPeer.live_parked));
+
+    // Live events wait behind a parked backfill.
+    float[1] late = [float(records)];
+    SysTime[1] late_time = [from_unix_time_ns((records + 1) * 1_000_000_000L)];
+    power.write_samples(late[], late_time[]);
+    SyncHandle handle = peer.handle_of(power.ensure_eid());
+    SyncModule.send_live_events(peer, enc, power, handle, gen);
+    assert(link.frames == 0 && *live == (resume | SyncPeer.live_parked));
+
+    while (!SyncModule.send_backfill(peer, enc, power, 1, 0, gen, resume))
+    {
+        SyncModule.send_live_events(peer, enc, power, handle, gen);
+        link.pending = 0;
+    }
+    assert(link.frames == (records + 1 + 255) / 256 && *live == records + 1);
+
+    // The live flush must not duplicate the completed backfill.
+    SyncModule.send_live_events(peer, enc, power, handle, gen);
+    assert(link.frames == (records + 1 + 255) / 256);
 }
