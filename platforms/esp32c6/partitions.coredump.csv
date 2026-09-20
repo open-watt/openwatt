@@ -1,8 +1,9 @@
-# OpenWatt ESP32-C6 partition table (16 MB flash, two OTA slots, with filesystem)
+# OpenWatt ESP32-C6 partition table with a flash coredump reserve (16 MB flash).
 # Name,    Type, SubType,  Offset,     Size,     Flags
 nvs,       data, nvs,      0x9000,     0x6000,
 phy_init,  data, phy,      0xf000,     0x1000,
 otadata,   data, ota,      0x10000,    0x2000,
 ota_0,     app,  ota_0,    0x20000,    0x380000,
 ota_1,     app,  ota_1,    0x3A0000,   0x380000,
-storage,   data, spiffs,   0x720000,   0x8E0000,
+storage,   data, spiffs,   0x720000,   0x860000,
+coredump,  data, coredump, 0xF80000,   0x80000,

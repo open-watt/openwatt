@@ -57,8 +57,8 @@ ifeq ($(filter 0 1,$(COREDUMP)),)
     $(error COREDUMP must be 0 or 1)
 endif
 ifeq ($(COREDUMP),1)
-    ifneq ($(PLATFORM),esp32-s3)
-        $(error COREDUMP=1 is currently supported only on PLATFORM=esp32-s3)
+    ifeq ($(filter esp32-s3 esp32-c5 esp32-c6,$(PLATFORM)),)
+        $(error COREDUMP=1 is supported only on PLATFORM=esp32-s3, esp32-c5 or esp32-c6)
     endif
     DFLAGS := $(DFLAGS) $(VERSION_FLAG)CoreDump
     BUILD_VARIANT_SUFFIX := _coredump
@@ -491,14 +491,14 @@ else ifeq ($(PLATFORM),esp32-c3)
 else ifeq ($(PLATFORM),esp32-c5)
     ESP_PROJECT_DIR := platforms/esp32c5
     ESP_IDF_TARGET  := esp32c5
-    ESP_REFERENCE_BOARD := ESP32-C5-DevKitC-1 (N4 module)
-    ESP_FLASH_SIZE := 4MB
-    ESP_PSRAM_SIZE := 0MB
+    ESP_REFERENCE_BOARD := ESP32-C5-DevKitC-1 (N8R8 module)
+    ESP_FLASH_SIZE := 8MB
+    ESP_PSRAM_SIZE := 8MB
 else ifeq ($(PLATFORM),esp32-c6)
     ESP_PROJECT_DIR := platforms/esp32c6
     ESP_IDF_TARGET  := esp32c6
-    ESP_REFERENCE_BOARD := ESP32-C6-DevKitC-1
-    ESP_FLASH_SIZE := 8MB
+    ESP_REFERENCE_BOARD := ESP32-C6-DevKitC-1 (N16 module)
+    ESP_FLASH_SIZE := 16MB
     ESP_PSRAM_SIZE := 0MB
 else ifeq ($(PLATFORM),esp32-h2)
     ESP_PROJECT_DIR := platforms/esp32h2
@@ -569,7 +569,7 @@ ifdef ESP_PROJECT_DIR
         ESP_PSRAM_SIZE := $(BOARD_PSRAM_SIZE)
     endif
     ifeq ($(COREDUMP),1)
-        ESP_COREDUMP_SDKCONFIG := $(abspath platforms/esp32s3/sdkconfig.coredump.defaults)
+        ESP_COREDUMP_SDKCONFIG := $(abspath $(ESP_PROJECT_DIR)/sdkconfig.coredump.defaults)
         ifeq ($(wildcard $(ESP_COREDUMP_SDKCONFIG)),)
             $(error Missing ESP-IDF coredump policy $(ESP_COREDUMP_SDKCONFIG))
         endif

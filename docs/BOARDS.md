@@ -41,10 +41,10 @@ ESP-IDF output and generated `sdkconfig` files live below the board-specific
 OpenWatt object directory. Building two boards therefore cannot reuse one
 another's generated configuration.
 
-## ESP32-S3 core-dump builds
+## ESP core-dump builds
 
-`COREDUMP=1` is an opt-in diagnostic feature for the ESP32-S3 only. It selects
-the S3 16 MB coredump partition table, reserving 512 KiB of flash, and places
+`COREDUMP=1` is an opt-in diagnostic feature for ESP32-S3, C5 and C6. It selects
+the platform's coredump partition table, reserving 512 KiB of flash, and places
 the result in a separate `*_coredump` build directory:
 
 ```bash
@@ -92,11 +92,16 @@ console.
 | `esp32-s3` | ESP32-S3-DevKitC-1-N16R8 | 16 MB | 8 MB |
 | `esp32-c2` | ESP8684-DevKitC-02, 4 MB variant | 4 MB | none |
 | `esp32-c3` | ESP32-C3-DevKitM-1 | 4 MB | none |
-| `esp32-c5` | ESP32-C5-DevKitC-1 with N4 module | 4 MB | none |
-| `esp32-c6` | ESP32-C6-DevKitC-1 | 8 MB | none |
+| `esp32-c5` | ESP32-C5-DevKitC-1 with N8R8 module | 8 MB | 8 MB |
+| `esp32-c6` | ESP32-C6-DevKitC-1 with 16 MB flash | 16 MB | none |
 | `esp32-h2` | ESP32-H2-DevKitM-1-N4 | 4 MB | none |
 | `esp32-p4` | ESP32-P4-Function-EV-Board | 16 MB | 32 MB |
 
 These are development defaults, not chip capabilities. A production board
 must declare its fitted memory even when it happens to match the reference
 profile.
+
+The C5 and C6 layouts use two 3.5 MiB OTA slots. When migrating from the old
+layouts, back up filesystem contents and flash the new partition table and
+application together; an app-only OTA cannot update the table. Reformat and
+restore the moved filesystem. The NVS, PHY and OTA metadata offsets are unchanged.
