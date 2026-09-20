@@ -1008,6 +1008,119 @@ From the PR #563 audit; the call-site rule is in AGENTS.md (pointer form only on
   codegen (`__atomic_*` libcalls go undefined) and the size optimisation is lost there too (full LTO
   produced a 1.22 MB text, +275 KB). Needs `minsize` propagated into the LTO backend before it can
   fix the remaining single-caller forwarders the -Oz inliner leaves out of line.
+- **Take the mbedtls shim's EC key import and export off the private members**: urt#299 sets
+  `MBEDTLS_ALLOW_PRIVATE_ACCESS` so the shim compiles against mbedtls 4.x, which also leaves
+  `urt_pk_import_ec_p256_key` and `urt_pk_export_privkey_d` reading `grp`, `d` and `Q` directly.
+  Those are private from 3.x on, so upstream may rearrange them in a minor release. Switching to
+  the classic accessors does not settle it: 4.2.0 moved `mbedtls_ecp_read_key`,
+  `mbedtls_ecp_set_public_key` and `mbedtls_ecp_export` into `mbedtls/private/ecp.h` behind the
+  same guard, so only PSA is sanctioned there. The shim already runs its RNG, key attributes and
+  ECDH through PSA on 4.x, so these two would follow that path; the cost is that PSA hands back a
+  `psa_key_id_t` rather than an `mbedtls_pk_context`, so the TLS callers move with it. 3.x can use
+  its public accessors and 2.28.1, which the Bouffalo targets vendor, keeps the direct members.
+  Worth doing when the 4.x path next needs touching, not as a build fix.
+
+### ESP RISC-V bring-up (2026-09-20)
+
+The ESP32-C5 and C6 do not link. openwatt#720 landed the target-independent half (app_update,
+the S3's S32C1I atomics, C5/C6 soft-float, `-Oz` on every ESP); what is left is below, on the
+unmerged `ow/esp-riscv-bringup` branches of openwatt and urt. With those, the C5 links: every
+symbol resolves and an image is produced, though it no longer fits its slot (below). **Nothing
+on those branches has been booted**, and the one board that was flashed boot-loops, so treat all
+of it as unverified.
+
+- **Single-core RISC-V has no `xPortEnterCriticalTimeout`.** The RISC-V port defines it only
+  under `#if (configNUM_CORES > 1)`, and every ESP RISC-V part is single-core, so urt's binding
+  in `urt/internal/sys/freertos/package.d` leaves it undefined; it happens to resolve on Xtensa,
+  whose port defines it unconditionally. The branch routes `irq_disable`/`irq_enable` through a
+  C shim where the preprocessor picks the right `portENTER_CRITICAL` expansion, and drops
+  `Critical`'s FreeRTOS arm so ESP takes the bare-metal path. Two things to review: every
+  `Critical` then shares one global mux, which is correct but coarse once a second core exists,
+  and ISR callers get `portENTER_CRITICAL` rather than the `_ISR` form.
+
+- **The C5 boot-loops, cause unknown.** The image links and the bootloader hands over, then the
+  app takes a `SW_CPU` reset through `esp_restart_noos_inner` and repeats. The panic text goes to
+  the USB-serial-JTAG console, not the CP210x UART, so it was never captured; a diagnostic image
+  with the console on UART0 builds but overflows the 3 MB slot by 31 KB with IDF logging on. The
+  critical-section change above, NimBLE init, and LittleFS mounting a SPIFFS-formatted partition
+  are all candidates. Get the backtrace before changing anything.
+
+- **The NimBLE driver compiles whether or not IDF has BT.** `urt/driver/esp32/ble.d` gates on the
+  chip having a radio, so the C5 and C6 emit direct `ble_gap_*`/`ble_gattc_*` calls while their
+  sdkconfig sets `CONFIG_BT_ENABLED=n`, leaving 17 undefined symbols. The C shim is gated
+  correctly; only the D side drifts. The fix is one build-owned switch feeding both languages,
+  the way `USE_SPIFFS`/`USE_LITTLEFS` already do.
+
+- **The 3 MB OTA slot is already too small.** The first C6 release image measured 3,090,080 of
+  its 3,145,728-byte slot, 98%, with BLE enabled, and on 2026-09-20 the C5 built from the
+  bring-up branch overflowed that same layout by 1,952 bytes. So this is not future headroom
+  pressure; one of the two parts does not fit today. Decide whether these parts carry BLE, then
+  widen the slots or trim features: the 8 MB table has 1.875 MB of storage to borrow from, and
+  neither part needs that much. The SmartEVSE is drifting the same way, 91% of its stock
+  partition on 2026-09-09 and 94% on 2026-09-19, but it cannot borrow: its table is the stock
+  one.
+
+- **A LittleFS default needs a C6 migration.** SPIFFS is still the `esp%` default, and the C5
+  cannot use it (its sdkconfig disables the VFS syscalls the SPIFFS backend rides on, so
+  `ftruncate` goes undefined). Switching the default costs the deployed SPIFFS C6s their
+  `conf/node.id` and fleet allegiance on first boot, so that release needs a re-adoption note,
+  and ideally the NVS identity fallback already noted at `src/manager/sync/peering.d`. The
+  SmartEVSE must stay on SPIFFS either way: it keeps the stock partition table for
+  stock-firmware compatibility.
+
+- **The C5 reference profile describes the wrong module.** It claims the N4 (4 MB, no PSRAM);
+  the devkit in hand is an N8R8, 8 MB flash and 8 MB PSRAM, and a full image does not fit 4 MB
+  dual-OTA at all. The branch moves the profile to 8 MB with the C6's partition layout. Note the
+  profile sets `CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y` without `CONFIG_SPIRAM=y`, so the PSRAM
+  is unused whichever module is fitted.
+
+- **C5 and C6 text is ~395 KB larger than the S3's, unexplained.** Across the 10,166 functions
+  present in both images RISC-V is only 4.8% bigger, and it wins on functions under 32 bytes and
+  over 512; soft-float accounts for 536 bytes of helpers, and 802.15.4 is not built into either.
+  So the bulk is code the S3 image simply does not contain. Worth identifying before deciding how
+  to win back the C6's headroom.
+
+### Keep FreeRTOS out of the primitives (2026-09-20)
+
+Every port, bare-metal or ESP, runs the same single reactor loop in `src/main.d`, with no reactor
+I/O and idle in `Event.wait`. The bare-metal ports realise the primitives on IRQ masking, atomics,
+WFI and an mtime oneshot; the ESP port instead adopted the kernel's objects, and that is what
+broke the RISC-V parts above. The D-side kernel surface is 18 symbols
+(`urt/internal/sys/freertos/package.d`).
+
+One dependency has to stay: the main loop is an IDF task, and IDF's own tasks (WiFi, lwIP, the
+NimBLE host, the task WDT) only run if we block cooperatively, so the reactor wake stays a task
+notification. The C shim's worker tasks stay C-side too; that is IDF's boundary, not ours.
+
+- Audit whether any D code on ESP blocks on `Mutex`/`Semaphore`/`Event` outside the reactor. The
+  architecture says no. Record anything found before changing the arms.
+- Point the sync primitives at their `Embedded` arms instead of the `FreeRTOS` ones, shrinking
+  the binding to the notify and task-handle calls.
+- Route fibres through `co_swap` instead of one FreeRTOS task per fibre
+  (`urt/driver/freertos/fibre.d`). This is the largest single win, since every `async` call
+  currently costs a task, and the riskiest item: the Xtensa arm must spill register windows
+  before switching and has never run. Verify on hardware, RISC-V first.
+
+### ESP second core (2026-09-20)
+
+The runtime is single-core on every part, including the dual-core S3, which sets
+`CONFIG_FREERTOS_UNICORE=y` in `platforms/esp32s3/sdkconfig.defaults`. Prerequisites, each small
+once the primitives work is done:
+
+- `cpu_id()` for ESP (Xtensa `PRID`, RISC-V `mhartid`) and `has_smp = true`. This compiles the
+  SMP arm of `Critical` for the first time; it has never built on any port, and no port defines
+  `cpu_id()` today.
+- Per-core arenas in `urt/mem/temp.d`; the single `__gshared` arena is the known hazard, and the
+  file says so.
+- Real atomics, which openwatt#720 provides on Xtensa; RISC-V already has the A extension.
+
+The open decision is the model, and it is a design question rather than a checkbox:
+
+- **AMP**, as on the BL808: core 1 runs a second instance bridged by IPC, IDF stays unicore on
+  core 0. Fits "FreeRTOS does not schedule our work" and reuses the BL808 shape, but needs an
+  APP_CPU release path outside IDF, which leaves it stalled under `UNICORE`.
+- **SMP** under IDF's kernel: `UNICORE=n` and pinned tasks. Less work, more FreeRTOS.
+
 ## Dated entries
 
 Deferred work lands here as dated sections; remove a section once it is absorbed.
