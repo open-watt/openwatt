@@ -948,6 +948,19 @@ this is what remains.
   test partition but `manager.element` cannot allocate its own assertion buffers. Switch tier
   leaves 57.6 KB and is the realistic configuration. Either size the heavier element cases
   against available heap, or state that embedded test runs are switch-tier only.
+
+- **Reduce embedded unittest metadata's internal-RAM cost.** The C5 run for #728
+  retained 29,072 bytes of `TypeInfo_Class` and 15,368 of `ModuleInfo`, leaving about
+  6 KB of DMA-capable heap; the priority-queue depth test failed at its 23rd packet.
+  The runner needs ModuleInfo to discover tests. Investigate flash placement or a
+  smaller test index while preserving required relocation and startup writes.
+
+- **Run remaining embedded tests after an assertion failure.** Without exceptions,
+  `urt.package.run_test` aborts at the first failed assertion. Add test selection or
+  isolated recovery so finding the next failure does not require changing and
+  reflashing the image. Any recovery must handle skipped destructors and dirty
+  shared state; an assertion-handler `longjmp` alone is not sufficient.
+
 - **Application recreation leaves the global page pool initialized**: `Application.~this` does not
   deinitialize the pool, so a second `create_application()` in the same process asserts in
   `page_pool_init`. Define ownership and teardown for shared pool users before adding more

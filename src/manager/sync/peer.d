@@ -1398,8 +1398,10 @@ unittest
     // the byte bound condemns too: one oversized frame on a fresh peer
     SyncPeer c = alloc!SyncPeer(CID(3));
     scope(exit) free(c);
-    ubyte[SyncPeer.pre_start_max_bytes + 1] big;
-    c.deliver_frame(big[]);
+    ubyte[] big = alloc_array!ubyte(SyncPeer.pre_start_max_bytes + 1);
+    scope(exit) free(big);
+    assert(big.length == SyncPeer.pre_start_max_bytes + 1);
+    c.deliver_frame(big);
     assert(c._pre_start.empty && c._pre_start_overflow);
 }
 
@@ -1443,9 +1445,11 @@ unittest
     p._warned_name_count = 0;
     assert(p.first_sighting("wifi-ap"));
 
-    char[40_000] huge = 'x';
-    assert(p.first_sighting(huge[]));
-    assert(!p.first_sighting(huge[]));
+    char[] huge = alloc_array!char(40_000, 'x');
+    scope(exit) free(huge);
+    assert(huge.length == 40_000);
+    assert(p.first_sighting(huge));
+    assert(!p.first_sighting(huge));
 
     DeviceTable devices;
     DeviceBuilder builder = devices.create("peer-binding-test");

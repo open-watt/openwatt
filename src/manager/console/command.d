@@ -579,9 +579,8 @@ unittest
     console.execute(s, ":put $x", r);
     assert(s.getOutput() == "42\n");
 
-    // :run file= reads and executes a script from disk. Skipped on baremetal
-    // where there is no filesystem to back get_temp_filename.
-    version (BareMetal) {}
+    // Embedded targets have no temporary directory for get_temp_filename.
+    version (Embedded) {}
     else
     {
         import urt.file : get_temp_filename, save_file, delete_file;
