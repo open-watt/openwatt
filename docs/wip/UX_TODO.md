@@ -3,6 +3,14 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-09-20: unprovisioned micros advertise themselves as claimable
+
+- Every micro with a provisioning AP now ships bring-up defaults that beacon on that AP and set
+  `/sync/peering role=member`, so a factory-fresh board offers itself to any authority on the
+  segment instead of being invisible until someone uploads a `startup.conf`. Expect unknown
+  nodes to appear in fleet and neighbour views with `state=unbound`. Offer the claim action
+  and distinguish unclaimed nodes from adopted fleet members.
+
 ## 2026-09-20: ESP filesystem default changes to LittleFS
 
 - The uRT update defaults ESP storage to LittleFS; SmartEVSE explicitly retains SPIFFS.
