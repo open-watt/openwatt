@@ -269,7 +269,7 @@ nothrow @nogc:
     }
 
 private:
-    align(uint.sizeof) ubyte[dhcp6_build_buf_size] buf = void;
+    align(size_t.alignof) ubyte[dhcp6_build_buf_size] buf = void;
     ushort offset;
     ushort open_option;
     bool failed = true;
