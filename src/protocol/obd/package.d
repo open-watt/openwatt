@@ -444,16 +444,14 @@ private:
         issue_requests();
     }
 
-    void issue_requests()
+    void issue_requests(MonoTime now = getTime())
     {
         if (_outstanding)
             return;
 
-        MonoTime now = getTime();
-
         if (_vehicle == VehicleState.asleep)
         {
-            if (now - _sent_time < probe_interval)
+            if (_sent_time != MonoTime.init && now - _sent_time < probe_interval)
                 return arm_poll(_sent_time + probe_interval);
             static immutable ubyte[2] probe = [0x01, 0x00];
             send_request(0, false, probe[]);
@@ -936,6 +934,18 @@ unittest
         override void arm_poll(MonoTime) { ++polls_armed; }
         override void disarm_poll() {}
     }
+
+    TestBinding early = alloc!TestBinding();
+    scope (exit) free(early);
+    early._vehicle = VehicleState.asleep;
+    early.issue_requests(MonoTime.init + 1.seconds);
+    assert(early.submits == 1 && early.last_req[0 .. 2] == [0x01, 0x00]);
+    early._outstanding = false;
+    early._sent_time = MonoTime.init + 1.seconds;
+    early.issue_requests(MonoTime.init + 2.seconds);
+    assert(early.submits == 1 && early.polls_armed == 1);
+    early.issue_requests(early._sent_time + early.probe_interval);
+    assert(early.submits == 2);
 
     TestBinding b = alloc!TestBinding();
     scope (exit) free(b);
