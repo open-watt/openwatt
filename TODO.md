@@ -1133,14 +1133,10 @@ of it as unverified.
   correctly; only the D side drifts. The fix is one build-owned switch feeding both languages,
   the way `USE_SPIFFS`/`USE_LITTLEFS` already do.
 
-- **The 3 MB OTA slot is already too small.** The first C6 release image measured 3,090,080 of
-  its 3,145,728-byte slot, 98%, with BLE enabled, and on 2026-09-20 the C5 built from the
-  bring-up branch overflowed that same layout by 1,952 bytes. So this is not future headroom
-  pressure; one of the two parts does not fit today. Decide whether these parts carry BLE, then
-  widen the slots or trim features: the 8 MB table has 1.875 MB of storage to borrow from, and
-  neither part needs that much. The SmartEVSE is drifting the same way, 91% of its stock
-  partition on 2026-09-09 and 94% on 2026-09-19, but it cannot borrow: its table is the stock
-  one.
+- Choose an H2 feature set that fits its 1.75 MiB OTA slots; the reported 2.69 MB
+  full image cannot fit a dual-OTA layout on its 4 MB flash.
+- Reduce SmartEVSE image size within its stock partition layout; the 2026-09-19
+  build used 94% of its slot, and stock-firmware compatibility prevents resizing it.
 
 - **A LittleFS default needs a C6 migration.** SPIFFS is still the `esp%` default, and the C5
   cannot use it (its sdkconfig disables the VFS syscalls the SPIFFS backend rides on, so
