@@ -1455,6 +1455,10 @@ the neighbour table, and creates one dynamic sync server over the same
 endpoints. Domains are the opt-in: no domain configured, no beacons or inbound
 sync accepted on that segment.
 
+ESP provisioning defaults create a discovery domain on the setup AP and set
+`/sync/peering/set role=member`. Loading a `startup.conf` replaces those defaults;
+it must configure its own discovery domains and peering role.
+
 `bind` takes one or more local endpoints and beacons from each. The domain's
 `port` fills only entries whose `InetAddress.port` is zero; an explicit port in
 an entry always wins. AF_ETHERNET and IPv4 entries are passed directly to
