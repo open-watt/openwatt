@@ -197,6 +197,7 @@ void register_modules(Application app)
         register_module!(protocol.ntp)(app);
         register_module!(protocol.obd)(app);
         register_module!(protocol.ppp)(app);
+        register_module!(protocol.sep2)(app);
 //        register_module!(protocol.snmp)(app);
         register_module!(protocol.spinel)(app);
         register_module!(protocol.telnet)(app);

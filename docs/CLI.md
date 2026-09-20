@@ -1307,6 +1307,39 @@ preflights and normal responses use the effective policy.
 /protocol/http/fileserver add name=files http-server=webserver uri=/files root="conf" access=webdav allowed-origin=http://192.168.0.5:8080
 ```
 
+### `/binding/sep2`
+
+An IEEE 2030.5 (SEP2, CSIP-AUS profile) client that presents the utility as a device. It
+connects to the utility server over mutual TLS, finds its EndDevice by the certificate
+fingerprint (the LFDI), walks the function-set assignments to the DER programs,
+and polls the DERControl lists at the server's poll rate. The default control and the active
+event resolve to the limits in force, published on the bound device's `authority` component
+(template `GridAuthority`, see [COMPONENT_TEMPLATES.md](COMPONENT_TEMPLATES.md#gridauthority));
+every event receives the Response acknowledgements the server asks for. Protocol state (LFDI,
+SFDI, EndDevice href, the walk's phase, program and event counts, poll rate, clock offset) sits
+beside it in an untemplated `sep2` component.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `device` | device name | empty | Device to publish the authority on; created if absent. Required. |
+| `remote` | `https://host[:port][/path]` | empty | The utility server's DeviceCapability URL. Must be `https`; the path defaults to `/dcap`. |
+| `client-cert` | certificate name | empty | Device certificate presented to the server, with its full signing chain in the file. Its SHA-256 fingerprint is the LFDI. Required. |
+| `ca` | certificate name | empty | Trust anchor for the server chain (the utility's SERCA). |
+| `scheme` | `ieee2030_5`, `csip_aus` | `ieee2030_5` | Profile the utility runs. A label only: it is published as the authority's `source` and does not change decoding or behaviour. |
+| `pin` | number | `0` | Registration PIN the installer was given; when set, a mismatch with the server's Registration is a failure. |
+| `offline-timeout` | duration | `0` | Silence longer than this marks the device offline; zero disables it. |
+
+The EndDevice must already exist on the server: enrol the device's LFDI with the utility first. The
+binding polls at the rate the server advertises, 300 s when it advertises none. A failed walk is
+retried with backoff from 5 s to 300 s; the last committed direction and its event deadlines stay
+in force throughout.
+
+```text
+/certificate/add name=serca certificate_file=/etc/openwatt/serca.pem
+/certificate/add name=dev certificate_file=/etc/openwatt/device.pem key_file=/etc/openwatt/device.key
+/binding/sep2/add name=utility device=authority remote=https://der.utility.example/api/v2/dcap scheme=csip_aus client-cert=dev ca=serca pin=111115
+```
+
 ### `/protocol/tesla/session`
 
 Vehicle sessions report command rejection separately from session failure.
