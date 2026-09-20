@@ -115,11 +115,10 @@ nothrow @nogc:
         request.response_handler = response_handler;
         request.timestamp = getSysTime();
 
-        if (requests.length == 0) // OR CONCURRENT REQUESTS...
-            send_request(*request);
-
         requests ~= request;
-        return request;
+        if (requests.length == 1 && !_dispatching)
+            send_request(*request);
+        return running ? request : null;
     }
 
 
@@ -130,6 +129,7 @@ protected:
 
     override CompletionStatus startup()
     {
+        parser = HTTPParser(&dispatch_message);
         if (!_stream && _conn.has_remote())
         {
             ushort default_port = _tls ? 443 : 80;
@@ -146,6 +146,9 @@ protected:
 
     override CompletionStatus shutdown()
     {
+        foreach (request; requests)
+            free(request);
+        requests.clear();
         if (_conn.has_remote())
         {
             _conn.stop();
@@ -160,6 +163,8 @@ protected:
             return;
 
         int result = parser.update(stream);
+        if (!running)
+            return;
         if (result != 0)
         {
             restart();
@@ -174,14 +179,11 @@ protected:
             HTTPMessage* r = requests[i];
             if (now - r.timestamp > 5.seconds)
             {
-                if (r.response_handler)
-                {
-                    HTTPMessage empty;
-                    r.response_handler(empty);
-                }
-                requests.remove(i);
-                free(r);
-                sendNext = true;
+                sendNext |= i == 0;
+                HTTPMessage empty;
+                complete_request(i, empty);
+                if (!running)
+                    return;
             }
             else
                 ++i;
@@ -195,11 +197,23 @@ private:
     ObjectRef!Stream _stream;
     IPClient _conn;
     bool _tls;
+    bool _dispatching;
 
     HTTPVersion server_version = HTTPVersion.V1_1;
 
     HTTPParser parser;
     Array!(HTTPMessage*) requests;
+
+    void complete_request(size_t index, ref const HTTPMessage response)
+    {
+        HTTPMessage* request = requests[index];
+        requests.remove(index);
+        scope (exit) free(request);
+        _dispatching = true;
+        scope (exit) _dispatching = false;
+        if (request.response_handler)
+            request.response_handler(response);
+    }
 
     void send_request(ref HTTPMessage request)
     {
@@ -207,6 +221,8 @@ private:
         if (message.empty)
             return;
         ptrdiff_t r = stream.write(message[]);
+        if (!running)
+            return;
         if (r != message.length)
         {
             writeWarning("HTTP client: write failed (", r, " of ", message.length, " bytes)");
@@ -231,21 +247,144 @@ private:
 
         bool should_close = requests[0].http_version == HTTPVersion.V1_0 || requests[0].header("Connection") == "close";
 
-        if (requests[0].response_handler)
-            requests[0].response_handler(response);
-
-        free(requests[0]);
-        requests.popFront();
+        complete_request(0, response);
+        if (!running)
+            return 1;
 
         if (should_close)
         {
             restart();
-            return 0;
+            return 1;
         }
 
         if (requests.length > 0)
             send_request(*requests[0]);
 
-        return 0;
+        return running ? 0 : 1;
+    }
+}
+
+unittest
+{
+    static class TestStream : Stream
+    {
+    nothrow @nogc:
+        enum type_name = "http-test-stream";
+        const(ubyte)[] input;
+        uint reads, writes;
+        bool fail_write;
+        this(CID id, ObjectFlags flags = ObjectFlags.none) { super(collection_type_info!TestStream, id, flags); }
+        void activate() { set_state(State.running); }
+        override ptrdiff_t read(void[] buffer)
+        {
+            ++reads;
+            size_t count = min(buffer.length, input.length);
+            (cast(ubyte[])buffer)[0 .. count] = input[0 .. count];
+            input = input[count .. $];
+            return count;
+        }
+        override ptrdiff_t write(const(void[])[] data...)
+        {
+            ++writes;
+            if (fail_write)
+                return -1;
+            size_t count;
+            foreach (part; data)
+                count += part.length;
+            return count;
+        }
+    }
+
+    static struct Handler
+    {
+    nothrow @nogc:
+        HTTPClient client;
+        bool timeout, destroy_client;
+        uint calls;
+        int stop(ref const HTTPMessage response)
+        {
+            ++calls;
+            assert(response.status_code == (timeout ? 0 : 200));
+            if (destroy_client)
+                client.destroy();
+            else
+                client.restart();
+            return 0;
+        }
+        int enqueue(ref const HTTPMessage response)
+        {
+            ++calls;
+            assert(client.requests.empty);
+            assert(client.request(HTTPMethod.GET, "/next", null) !is null);
+            return 0;
+        }
+    }
+
+    foreach (timeout; [false, true])
+        foreach (destroy_client; [false, true])
+        {
+            TestStream wire = Collection!TestStream().alloc("http-callback-wire");
+            Collection!TestStream().add(wire);
+            wire.activate();
+            HTTPClient client = Collection!HTTPClient().alloc("http-callback-client");
+            Collection!HTTPClient().add(client);
+            client.stream(wire);
+            Collection!HTTPClient().update_all();
+            assert(client.running);
+            Handler handler = Handler(client, timeout, destroy_client);
+            client.request(HTTPMethod.GET, "/first", &handler.stop);
+            client.request(HTTPMethod.GET, "/second", &handler.stop);
+            if (timeout)
+                foreach (request; client.requests)
+                    request.timestamp = getSysTime() - 10.seconds;
+            else
+                wire.input = cast(const(ubyte)[])("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"
+                    ~ "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+            client.update();
+            assert(handler.calls == 1 && wire.reads == 1 && wire.writes == 1 && client.requests.empty && !client.running);
+            if (!destroy_client)
+            {
+                wire.input = null;
+                Collection!HTTPClient().update_all();
+                assert(client.running);
+                client.update();
+                assert(handler.calls == 1);
+                client.destroy();
+            }
+            wire.destroy();
+            Collection!HTTPClient().update_all();
+            Collection!Stream().update_all();
+        }
+
+    foreach (timeout; [false, true])
+    {
+        TestStream wire = Collection!TestStream().alloc("http-enqueue-wire");
+        Collection!TestStream().add(wire);
+        wire.activate();
+        HTTPClient client = Collection!HTTPClient().alloc("http-enqueue-client");
+        Collection!HTTPClient().add(client);
+        client.stream(wire);
+        Collection!HTTPClient().update_all();
+        Handler handler = Handler(client);
+        auto request = client.request(HTTPMethod.GET, "/first", &handler.enqueue);
+        if (timeout)
+            request.timestamp = getSysTime() - 10.seconds;
+        else
+            wire.input = cast(const(ubyte)[])"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n";
+        client.update();
+        assert(handler.calls == 1 && wire.writes == 2 && client.requests.length == 1);
+        client.request(HTTPMethod.GET, "/expired-queued", null).timestamp = getSysTime() - 10.seconds;
+        client.update();
+        assert(wire.writes == 2 && client.requests.length == 1);
+        client.restart();
+        assert(client.requests.empty);
+        Collection!HTTPClient().update_all();
+        wire.fail_write = true;
+        assert(client.request(HTTPMethod.GET, "/failed", null) is null);
+        assert(!client.running && client.requests.empty);
+        client.destroy();
+        wire.destroy();
+        Collection!HTTPClient().update_all();
+        Collection!Stream().update_all();
     }
 }
