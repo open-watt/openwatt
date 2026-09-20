@@ -12,6 +12,8 @@ import protocol.tesla.vehicle_crypto;
 
 import tools.protobuf;
 
+import manager.features : has_aes_gcm;
+
 nothrow @nogc:
 
 mixin LoadProtobuf!"protocol/tesla/commands.proto";
@@ -478,74 +480,79 @@ unittest
     assert(info.clock_time == 2650);
     assert(info.status == 0);
 
-    static immutable ubyte[16] K = HexDecode!"1b2fce19967b79db696f909cff89ea9a";
-    static immutable ubyte[16] request_tag = HexDecode!"000102030405060708090a0b0c0d0e0f";
-    static immutable ubyte[12] response_nonce = HexDecode!"101112131415161718191a1b";
-    static immutable ubyte[16] response_uuid = HexDecode!"202122232425262728292a2b2c2d2e2f";
-    static immutable ubyte[] response_plaintext = HexDecode!"12040a021200";
-    enum uint response_counter = 23;
-    enum uint response_flags = encrypt_response_mask;
+    static if (has_aes_gcm)
+    {
+        static immutable ubyte[16] K = HexDecode!"1b2fce19967b79db696f909cff89ea9a";
+        static immutable ubyte[16] request_tag = HexDecode!"000102030405060708090a0b0c0d0e0f";
+        static immutable ubyte[12] response_nonce = HexDecode!"101112131415161718191a1b";
+        static immutable ubyte[16] response_uuid = HexDecode!"202122232425262728292a2b2c2d2e2f";
+        static immutable ubyte[] response_plaintext = HexDecode!"12040a021200";
+        enum uint response_counter = 23;
+        enum uint response_flags = encrypt_response_mask;
 
-    Array!ubyte response_meta = build_response_metadata(TeslaDomain.infotainment, "5YJ30123456789ABC", response_counter, response_flags, request_tag[], 0);
-    SHA256Context sha_ctx;
-    sha_init(sha_ctx);
-    sha_update(sha_ctx, response_meta[]);
-    ubyte[32] response_aad = sha_finalise(sha_ctx);
+        Array!ubyte response_meta = build_response_metadata(TeslaDomain.infotainment, "5YJ30123456789ABC", response_counter, response_flags, request_tag[], 0);
+        SHA256Context sha_ctx;
+        sha_init(sha_ctx);
+        sha_update(sha_ctx, response_meta[]);
+        ubyte[32] response_aad = sha_finalise(sha_ctx);
 
-    Array!ubyte response_ciphertext;
-    response_ciphertext.resize(response_plaintext.length);
-    ubyte[16] response_tag = void;
-    Result enc = aes_gcm_encrypt(K[], response_nonce[], response_aad[], response_plaintext, response_ciphertext[], response_tag[]);
-    assert(enc.succeeded);
+        Array!ubyte response_ciphertext;
+        response_ciphertext.resize(response_plaintext.length);
+        ubyte[16] response_tag = void;
+        Result enc = aes_gcm_encrypt(K[], response_nonce[], response_aad[], response_plaintext, response_ciphertext[], response_tag[]);
+        assert(enc.succeeded);
 
-    Array!ubyte response_message;
-    response_message ~= cast(ubyte)0x3A; // from_destination
-    response_message ~= cast(ubyte)0x02;
-    response_message ~= cast(ubyte)0x08;
-    response_message ~= cast(ubyte)TeslaDomain.infotainment;
-    response_message ~= cast(ubyte)0x52; // protobuf_message_as_bytes
-    response_message ~= cast(ubyte)response_ciphertext.length;
-    response_message ~= response_ciphertext[];
-    response_message ~= cast(ubyte)0x6A; // signature_data
-    response_message ~= cast(ubyte)0x24;
-    response_message ~= cast(ubyte)0x4A; // AES_GCM_Response_data
-    response_message ~= cast(ubyte)0x22;
-    response_message ~= cast(ubyte)0x0A; // nonce
-    response_message ~= cast(ubyte)response_nonce.length;
-    response_message ~= response_nonce[];
-    response_message ~= cast(ubyte)0x10; // counter
-    response_message ~= cast(ubyte)response_counter;
-    response_message ~= cast(ubyte)0x1A; // tag
-    response_message ~= cast(ubyte)response_tag.length;
-    response_message ~= response_tag[];
-    response_message ~= cast(ubyte)0x92; // request_uuid, field 50
-    response_message ~= cast(ubyte)0x03;
-    response_message ~= cast(ubyte)response_uuid.length;
-    response_message ~= response_uuid[];
-    response_message ~= cast(ubyte)0xA0; // flags, field 52
-    response_message ~= cast(ubyte)0x03;
-    response_message ~= cast(ubyte)response_flags;
+        Array!ubyte response_message;
+        response_message ~= cast(ubyte)0x3A; // from_destination
+        response_message ~= cast(ubyte)0x02;
+        response_message ~= cast(ubyte)0x08;
+        response_message ~= cast(ubyte)TeslaDomain.infotainment;
+        response_message ~= cast(ubyte)0x52; // protobuf_message_as_bytes
+        response_message ~= cast(ubyte)response_ciphertext.length;
+        response_message ~= response_ciphertext[];
+        response_message ~= cast(ubyte)0x6A; // signature_data
+        response_message ~= cast(ubyte)0x24;
+        response_message ~= cast(ubyte)0x4A; // AES_GCM_Response_data
+        response_message ~= cast(ubyte)0x22;
+        response_message ~= cast(ubyte)0x0A; // nonce
+        response_message ~= cast(ubyte)response_nonce.length;
+        response_message ~= response_nonce[];
+        response_message ~= cast(ubyte)0x10; // counter
+        response_message ~= cast(ubyte)response_counter;
+        response_message ~= cast(ubyte)0x1A; // tag
+        response_message ~= cast(ubyte)response_tag.length;
+        response_message ~= response_tag[];
+        response_message ~= cast(ubyte)0x92; // request_uuid, field 50
+        response_message ~= cast(ubyte)0x03;
+        response_message ~= cast(ubyte)response_uuid.length;
+        response_message ~= response_uuid[];
+        response_message ~= cast(ubyte)0xA0; // flags, field 52
+        response_message ~= cast(ubyte)0x03;
+        response_message ~= cast(ubyte)response_flags;
 
-    RoutableResponse response;
-    assert(decode_routable_response(response_message[], response));
-    assert(response.has_from_domain);
-    assert(response.from_domain == TeslaDomain.infotainment);
-    assert(response.has_response_signature);
-    assert(response.response_counter == response_counter);
-    assert(response.flags == response_flags);
-    assert(response.request_uuid == response_uuid[]);
-    assert(response.response_nonce == response_nonce[]);
-    assert(response.response_tag == response_tag[]);
+        RoutableResponse response;
+        assert(decode_routable_response(response_message[], response));
+        assert(response.has_from_domain);
+        assert(response.from_domain == TeslaDomain.infotainment);
+        assert(response.has_response_signature);
+        assert(response.response_counter == response_counter);
+        assert(response.flags == response_flags);
+        assert(response.request_uuid == response_uuid[]);
+        assert(response.response_nonce == response_nonce[]);
+        assert(response.response_tag == response_tag[]);
 
-    Array!ubyte decrypted;
-    assert(decrypt_routable_response(response, K[], "5YJ30123456789ABC", request_tag[], decrypted));
-    assert(decrypted[] == response_plaintext);
+        Array!ubyte decrypted;
+        assert(decrypt_routable_response(response, K[], "5YJ30123456789ABC", request_tag[], decrypted));
+        assert(decrypted[] == response_plaintext);
 
-    RoutableResponse tampered;
-    assert(decode_routable_response(response_message[], tampered));
-    tampered.message.signature_data.value.aes_gcm_response.value.tag.value[0] ^= 1;
-    Array!ubyte rejected;
-    assert(!decrypt_routable_response(tampered, K[], "5YJ30123456789ABC", request_tag[], rejected));
+        RoutableResponse tampered;
+        assert(decode_routable_response(response_message[], tampered));
+        tampered.message.signature_data.value.aes_gcm_response.value.tag.value[0] ^= 1;
+        Array!ubyte rejected;
+        assert(!decrypt_routable_response(tampered, K[], "5YJ30123456789ABC", request_tag[], rejected));
+    }
+
+
 }
 
 unittest

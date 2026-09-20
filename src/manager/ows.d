@@ -31,6 +31,7 @@ import urt.log : writeWarning;
 import urt.mem.alloc;
 import urt.si.unit : ScaledUnit;
 
+import manager.features : has_file_io;
 import manager.series;
 
 nothrow @nogc:
@@ -335,6 +336,7 @@ private:
 }
 
 
+static if (has_file_io)
 unittest
 {
     import urt.time : from_unix_time_ns;

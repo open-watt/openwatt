@@ -25,5 +25,15 @@ version (NoGateway) enum has_gateway = false; else enum has_gateway = true;
 version (HasAPI)   enum has_api    = true; else version (NoAll) enum has_api = false; else enum has_api = true;
 version (HasOTA)   enum has_ota    = true; else version (NoAll) enum has_ota = false; else enum has_ota = true;
 
+version (MbedTLS)       enum has_aes_gcm = true;
+else version (Windows) enum has_aes_gcm = true;
+else                  enum has_aes_gcm = false;
+
+version (UseSpiffs)        enum has_file_io = true;
+else version (UseLittleFS) enum has_file_io = true;
+else version (Windows)    enum has_file_io = true;
+else version (Posix)      enum has_file_io = true;
+else                      enum has_file_io = false;
+
 version (Headless) enum is_headless = true; else enum is_headless = false;
 version (Tiny)     enum is_tiny     = true; else enum is_tiny     = false;

@@ -2,6 +2,8 @@ module protocol.tesla.vehicle_crypto;
 
 import urt.array;
 
+import manager.features : has_aes_gcm;
+
 nothrow @nogc:
 
 
@@ -210,24 +212,26 @@ unittest
         "000105010103021135594a333031323334353637383941424303104c463f9cc0d3d26906e982ed224adde6040400000a5f050400000007ff");
     assert(hvac_meta[] == hvac_expected_meta);
 
-    SHA256Context sha_ctx;
-    sha_init(sha_ctx);
-    sha_update(sha_ctx, hvac_meta[]);
-    ubyte[32] hvac_aad = sha_finalise(sha_ctx);
+    static if (has_aes_gcm)
+    {
+        SHA256Context sha_ctx;
+        sha_init(sha_ctx);
+        sha_update(sha_ctx, hvac_meta[]);
+        ubyte[32] hvac_aad = sha_finalise(sha_ctx);
 
-    static immutable ubyte[6] hvac_plaintext = HexDecode!"120452020801";
-    static immutable ubyte[12] hvac_nonce = HexDecode!"dbf79447fa156674dae1caed";
-    static immutable ubyte[6] hvac_expected_ct = HexDecode!"38038e8c0f2e";
-    static immutable ubyte[16] hvac_expected_tag = HexDecode!"8e128da165f162f4d7d2c8da866cf82a";
+        static immutable ubyte[6] hvac_plaintext = HexDecode!"120452020801";
+        static immutable ubyte[12] hvac_nonce = HexDecode!"dbf79447fa156674dae1caed";
+        static immutable ubyte[6] hvac_expected_ct = HexDecode!"38038e8c0f2e";
+        static immutable ubyte[16] hvac_expected_tag = HexDecode!"8e128da165f162f4d7d2c8da866cf82a";
 
-    ubyte[6] hvac_ct = void;
-    ubyte[16] hvac_tag = void;
-    Result enc = aes_gcm_encrypt(K[], hvac_nonce[], hvac_aad[],
-                                 hvac_plaintext[], hvac_ct[], hvac_tag[]);
-    assert(enc.succeeded);
-    assert(hvac_ct == hvac_expected_ct);
-    assert(hvac_tag == hvac_expected_tag);
-
+        ubyte[6] hvac_ct = void;
+        ubyte[16] hvac_tag = void;
+        Result enc = aes_gcm_encrypt(K[], hvac_nonce[], hvac_aad[],
+                                     hvac_plaintext[], hvac_ct[], hvac_tag[]);
+        assert(enc.succeeded);
+        assert(hvac_ct == hvac_expected_ct);
+        assert(hvac_tag == hvac_expected_tag);
+    }
 
     // ---- Response metadata layout ----
     static immutable ubyte[16] request_tag = HexDecode!"000102030405060708090a0b0c0d0e0f";
