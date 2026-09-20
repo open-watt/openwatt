@@ -1,5 +1,11 @@
 # TODO
 
+- Separate Element's unseen state from a valid zero timestamp; held-value dedup
+  currently treats SysTime.init as unseen on clocks whose epoch starts at zero.
+- Make Tesla BLE startup report unsupported AES-GCM/ECDH backends directly on
+  embedded targets instead of discovering the missing backend during a session.
+- Support or explicitly reject Linux builds without mbedTLS: uRT KeyPair currently
+  fails a static assertion before the backend-independent unit tests can run.
 - Endian codegen follow-up: investigate LLVM array-return lowering for ARM native
   double stores and Beken/Xtensa swapped stores; direct pointer-output comparisons
   are shorter, but returning the same byte array recreates the existing sequence.

@@ -1559,14 +1559,14 @@ unittest
     n.format = register_format(bool_held);
     n.ensure_history();
     bool[2] lv = [true, false];
-    SysTime[2] tm = [from_unix_time_ns(1_000_000), from_unix_time_ns(2_000_000)];
+    SysTime[2] tm = [from_unix_time_ns(1_000_000_000), from_unix_time_ns(2_000_000_000)];
     n.write_samples(lv[], tm[]);
     assert(n.record_count == 2);
     assert(n.value.isBool && !n.value.asBool);
-    assert(n.last_update == from_unix_time_ns(2_000_000));
+    assert(n.last_update == from_unix_time_ns(2_000_000_000));
 
     // a boxed write to an Element with a typed series lands in the series too
-    n.value(Variant(true), from_unix_time_ns(3_000_000));
+    n.value(Variant(true), from_unix_time_ns(3_000_000_000));
     assert(n.record_count == 3);
     assert(n.latest_record.b);
     assert(n.value.asBool);
@@ -1578,16 +1578,16 @@ unittest
     static immutable DataFormat volts_held = DataFormat(ValueType.f64, SeriesKind.held, ScaledUnit(Volt));
     Element q;
     q.format = register_format(volts_held);
-    q.value(Variant(Quantity!double(23.05, ScaledUnit(Volt))), from_unix_time_ns(1_000_000));
+    q.value(Variant(Quantity!double(23.05, ScaledUnit(Volt))), from_unix_time_ns(1_000_000_000));
     assert(q.latest_record.f64_ == 23.05);
     assert(q.value.isQuantity);
 
     static immutable DataFormat u32_held = DataFormat(ValueType.u32, SeriesKind.held);
     Element widened;
     widened.format = register_format(u32_held);
-    widened.write_sample(ushort(42), from_unix_time_ns(1_000_000));
+    widened.write_sample(ushort(42), from_unix_time_ns(1_000_000_000));
     assert(widened.latest_record.u == 42);
-    widened.value(ulong.max, from_unix_time_ns(2_000_000));
+    widened.value(ulong.max, from_unix_time_ns(2_000_000_000));
     assert(widened.latest_record.u == 42);
 
     // try_set reports refusals and stores nothing; in-range values store
@@ -1707,8 +1707,8 @@ unittest
 
     double[3] tx_a_values = [1.0, 2.0, 3.0];
     double[3] tx_b_values = [10.0, 20.0, 30.0];
-    SysTime[3] tx_times = [from_unix_time_ns(100), from_unix_time_ns(200),
-                           from_unix_time_ns(300)];
+    SysTime[3] tx_times = [from_unix_time_ns(100_000), from_unix_time_ns(200_000),
+                           from_unix_time_ns(300_000)];
     {
         CommitScope frame = open_commit();
         tx_a.write_samples(tx_a_values[], tx_times[]);
@@ -1720,15 +1720,15 @@ unittest
 
     // the bare pair is the same machinery; held dedup and event deferral apply inside a scope
     begin_commit();
-    tx_a.write_sample(3.0, from_unix_time_ns(400));   // equal held value publishes nothing
-    tx_b.write_sample(40.0, from_unix_time_ns(400));
+    tx_a.write_sample(3.0, from_unix_time_ns(400_000));   // equal held value publishes nothing
+    tx_b.write_sample(40.0, from_unix_time_ns(400_000));
     tx_b.mark_gap();
     assert(receiver.calls == 2);
     end_commit();
     assert(receiver.calls == 4);
     assert(receiver.events == 1 && receiver.last_event == SeriesEvent.gap);
 
-    tx_a.write_sample(4.0, from_unix_time_ns(500), &receiver.receive);
+    tx_a.write_sample(4.0, from_unix_time_ns(500_000), &receiver.receive);
     assert(receiver.calls == 4);
 
     tx_a.unsubscribe(&receiver.receive);
@@ -1740,24 +1740,24 @@ unittest
     // retention=none: latest and last_update track, nothing is stored
     Element n;
     n.format = register_format(f64_held);
-    n.write_sample(9.0, from_unix_time_ns(500));
+    n.write_sample(9.0, from_unix_time_ns(500_000));
     assert(n.record_count == 0 && n.bucket_count == 0);
     assert(n.latest_record.f64_ == 9.0);
-    assert(n.last_update == from_unix_time_ns(500));
+    assert(n.last_update == from_unix_time_ns(500_000));
 
     // held series: equal observations advance last_update but record nothing
     Element e;
     e.format = register_format(f64_held);
     e.ensure_history();
-    e.write_sample(1.0, from_unix_time_ns(1_000));
-    e.write_sample(1.0, from_unix_time_ns(2_000));
-    e.write_sample(2.0, from_unix_time_ns(3_000));
+    e.write_sample(1.0, from_unix_time_ns(1_000_000));
+    e.write_sample(1.0, from_unix_time_ns(2_000_000));
+    e.write_sample(2.0, from_unix_time_ns(3_000_000));
     assert(e.record_count == 2);
-    assert(e.last_update == from_unix_time_ns(3_000));
+    assert(e.last_update == from_unix_time_ns(3_000_000));
 
     // a gap forces a bucket boundary and the successor bucket records it
     e.mark_gap();
-    e.write_sample(3.0, from_unix_time_ns(10_000));
+    e.write_sample(3.0, from_unix_time_ns(10_000_000));
     assert(e.bucket_count == 2);
     assert(e._history.buckets[$-1].follows_gap);
 
@@ -1765,24 +1765,24 @@ unittest
     Cursor c = e.open_series_cursor(0);
     RecordBlock b = c.next(16);
     assert(b.count == 2 && b.get!double(0) == 1.0 && b.get!double(1) == 2.0);
-    assert(b.time(1) == from_unix_time_ns(3_000));
+    assert(b.time(1) == from_unix_time_ns(3_000_000));
     b = c.next(16);
     assert(b.count == 1 && b.get!double(0) == 3.0);
     assert(!c.pending);
 
     // irregular block append feeds the tail and updates latest
     double[3] vals = [4.0, 5.0, 6.0];
-    SysTime[3] times = [from_unix_time_ns(11_000), from_unix_time_ns(12_000), from_unix_time_ns(13_000)];
+    SysTime[3] times = [from_unix_time_ns(11_000_000), from_unix_time_ns(12_000_000), from_unix_time_ns(13_000_000)];
     e.write_samples(vals[], times[]);
     assert(e.record_count == 6);
     assert(e.latest_record.f64_ == 6.0);
     b = c.next(16);
-    assert(b.count == 3 && b.ts !is null && b.time(2) == from_unix_time_ns(13_000));
+    assert(b.count == 3 && b.ts !is null && b.time(2) == from_unix_time_ns(13_000_000));
     e.close_series_cursor(c);
 
     // untyped record write: same flow as write_sample(), format known only at runtime
     double rv = 7.0;
-    e.write_record((cast(const(void)*)&rv)[0 .. 8], from_unix_time_ns(14_000));
+    e.write_record((cast(const(void)*)&rv)[0 .. 8], from_unix_time_ns(14_000_000));
     assert(e.record_count == 7);
     assert(e.latest_record.f64_ == 7.0);
 
@@ -1802,20 +1802,20 @@ unittest
     Element te;
     te.format = register_format(text_fmt);
     te.ensure_history();
-    te.write_sample("run", from_unix_time_ns(500));
+    te.write_sample("run", from_unix_time_ns(500_000));
     assert(te.record_count == 1);
     assert(te.text_value == "run");
     assert(te.value().asString == "run");
 
-    te.write_sample(long_str, from_unix_time_ns(1_000));
+    te.write_sample(long_str, from_unix_time_ns(1_000_000));
     assert(te.record_count == 2);
     assert(te.value().asString == long_str);
-    te.write_sample(long_str, from_unix_time_ns(2_000));
+    te.write_sample(long_str, from_unix_time_ns(2_000_000));
     assert(te.record_count == 2);   // held repeat records nothing
-    assert(te.last_update == from_unix_time_ns(2_000));
+    assert(te.last_update == from_unix_time_ns(2_000_000));
 
     // a bouncing value reuses its heap entry: 3 records, 2 entries
-    te.write_sample("run", from_unix_time_ns(3_000));
+    te.write_sample("run", from_unix_time_ns(3_000_000));
     assert(te.record_count == 3);
     const(Bucket)* tb = te._history.buckets[$-1];
     assert(tb.heap_used == heap_entry_bytes(3) + heap_entry_bytes(long_str.length));
@@ -1825,7 +1825,7 @@ unittest
     String src = "second value arriving as a shared handle".make_string();
     static ushort rc(ref const String s) => (cast(const(ushort)*)s.ptr)[-2] & 0x3FFF;
     assert(rc(src) == 0);
-    te.write_sample(src, from_unix_time_ns(4_000));
+    te.write_sample(src, from_unix_time_ns(4_000_000));
     assert(te.record_count == 4);
     assert(rc(src) == 0);
     assert(te.value().asString == src[]);
@@ -1845,7 +1845,7 @@ unittest
     text_batch.format = register_format(text_fmt);
     text_batch.ensure_history();
     const(char)[][2] words = ["one", "two"];
-    SysTime[2] word_times = [from_unix_time_ns(4_000), from_unix_time_ns(5_000)];
+    SysTime[2] word_times = [from_unix_time_ns(4_000_000), from_unix_time_ns(5_000_000)];
     text_batch.write_samples(words[], word_times[]);
     assert(text_batch.record_count == 2);
     assert(text_batch.value().asString == "two");
@@ -1882,7 +1882,7 @@ unittest
     assert(p._history.first_index == 0);
     foreach (_; 0 .. 4)
         pinc.next(1);
-    p.write_sample(6.0, from_unix_time_ns(7_000));
+    p.write_sample(6.0, from_unix_time_ns(7_000_000));
     assert(p._history.first_index == 4);
     p.close_series_cursor(pinc);
     p.teardown();
@@ -1907,7 +1907,7 @@ unittest
     // closing the front slot shifts the survivor down; its id must still find it
     m.close_series_cursor(pinned);
     assert(tail.next(16).get!double(0) == 2.0);
-    m.write_sample(9.0, from_unix_time_ns(9_000));
+    m.write_sample(9.0, from_unix_time_ns(9_000_000));
     assert(m._history.first_index == 4);     // the pin left with its cursor, and the lapped
                                              // reader's borrow died with its bucket
     Cursor reused = m.open_series_cursor(0);
@@ -1929,10 +1929,10 @@ unittest
     }
     foreach (_; 0 .. 3)
         lead.next(1);
-    mp.write_sample(4.0, from_unix_time_ns(5_000));
+    mp.write_sample(4.0, from_unix_time_ns(5_000_000));
     assert(mp._history.first_index == 0);
     mp.close_series_cursor(lag);
-    mp.write_sample(5.0, from_unix_time_ns(6_000));
+    mp.write_sample(5.0, from_unix_time_ns(6_000_000));
     assert(mp._history.first_index == 3);
     mp.close_series_cursor(lead);
     mp.teardown();
@@ -1978,11 +1978,11 @@ unittest
     ubyte[32] key1;
     foreach (i, ref byt; key1)
         byt = cast(ubyte)i;
-    k.write_record(key1[], from_unix_time_ns(1_000));
+    k.write_record(key1[], from_unix_time_ns(1_000_000));
     assert(!k.has_history && k.record_count == 0);
     assert(cast(const(ubyte)[])k.value().asBuffer == key1[]);
-    k.write_record(key1[], from_unix_time_ns(2_000));
-    assert(k.last_update == from_unix_time_ns(2_000));   // held dedup vs the register
+    k.write_record(key1[], from_unix_time_ns(2_000_000));
+    assert(k.last_update == from_unix_time_ns(2_000_000));   // held dedup vs the register
     ubyte[32] key2 = key1;
     key2[0] = 0xFF;
     const(void)* key_buffer = k.wide_register;
@@ -1998,7 +1998,7 @@ unittest
     k.retention(4);
     assert(k.record_count == 1 && k.wide_register is null);
     assert(cast(const(ubyte)[])k.tail_record() == key2[]);
-    k.write_record(key1[], from_unix_time_ns(4_000));
+    k.write_record(key1[], from_unix_time_ns(4_000_000));
     assert(k.record_count == 2);
     Cursor kc = k.open_series_cursor(0);
     RecordBlock kb = kc.next(16);
@@ -2011,18 +2011,18 @@ unittest
     // text without requested history: the value lives in the record register, no store at all
     Element tv;
     tv.format = register_format(text_fmt);
-    tv.write_sample("first", from_unix_time_ns(1_000));
+    tv.write_sample("first", from_unix_time_ns(1_000_000));
     assert(!tv.has_history && tv.record_count == 0);
     assert(tv.text_value == "first");
     assert(tv.value().asString == "first");
-    tv.write_sample("a rather longer second value", from_unix_time_ns(2_000));
+    tv.write_sample("a rather longer second value", from_unix_time_ns(2_000_000));
     assert(!tv.has_history);
     assert(tv.text_value == "a rather longer second value");
-    assert(tv.last_update == from_unix_time_ns(2_000));
+    assert(tv.last_update == from_unix_time_ns(2_000_000));
 
     // held dedup still applies against the register
-    tv.write_sample("a rather longer second value", from_unix_time_ns(2_500));
-    assert(tv.last_update == from_unix_time_ns(2_500));
+    tv.write_sample("a rather longer second value", from_unix_time_ns(2_500_000));
+    assert(tv.last_update == from_unix_time_ns(2_500_000));
 
     // expressing history interest migrates the held value into record 0, and the store owns
     // it from there: the register drops its reference
@@ -2030,7 +2030,7 @@ unittest
     assert(tv.record_count == 1 && tv.bucket_count == 1);
     assert(tv.text_register[].length == 0);
     assert(tv.text_value == "a rather longer second value");
-    tv.write_sample("third", from_unix_time_ns(3_000));
+    tv.write_sample("third", from_unix_time_ns(3_000_000));
     assert(tv.record_count == 2);
     Cursor tvc = tv.open_series_cursor(0);
     RecordBlock tvb = tvc.next(16);
@@ -2043,7 +2043,7 @@ unittest
     th_lit.format = register_format(text_fmt);
     String shared_value = "a shared handle".make_string();
     assert(rc(shared_value) == 0);
-    th_lit.write_sample(shared_value, from_unix_time_ns(1_000));
+    th_lit.write_sample(shared_value, from_unix_time_ns(1_000_000));
     assert(!th_lit.has_history);
     assert(rc(shared_value) == 1);                      // stored by reference, no copy
     assert(th_lit.text_value.ptr is shared_value.ptr);
@@ -2055,7 +2055,7 @@ unittest
     lit.format = register_format(text_fmt);
     String brand = StringLit!"Fronius";
     assert(!brand.has_rc);
-    lit.write_sample(brand, from_unix_time_ns(1_000));
+    lit.write_sample(brand, from_unix_time_ns(1_000_000));
     assert(lit.text_value == "Fronius" && lit.text_value.ptr is brand.ptr);
     lit.teardown();
 
@@ -2069,8 +2069,8 @@ unittest
     sweep_dirty(&count_swept);      // drain anything earlier tests enlisted
     swept = 0;
     add_feed_listener();
-    text_feed.write_sample("online", from_unix_time_ns(1_000));
-    wide_feed.write_record(key1[], from_unix_time_ns(1_000));
+    text_feed.write_sample("online", from_unix_time_ns(1_000_000));
+    wide_feed.write_record(key1[], from_unix_time_ns(1_000_000));
     remove_feed_listener();
     sweep_dirty(&count_swept);
     assert(swept == 2);
@@ -2097,7 +2097,7 @@ unittest
     // oversize samples are refused at the gateway
     char[] huge = cast(char[])alloc(40_000);
     huge[] = 'x';
-    th.write_sample(cast(const(char)[])huge, from_unix_time_ns(100_000));
+    th.write_sample(cast(const(char)[])huge, from_unix_time_ns(100_000_000));
     assert(th.record_count == 60);
     free(huge);
     th.teardown();
@@ -2119,17 +2119,17 @@ unittest
         Element z;
         z.format = register_format(f64_sampled);
         z.ensure_history();
-        z.write_sample(1.0, from_unix_time_ns(1_000));
-        z.write_sample(1.0, from_unix_time_ns(2_000));
+        z.write_sample(1.0, from_unix_time_ns(1_000_000));
+        z.write_sample(1.0, from_unix_time_ns(2_000_000));
         z.mark_gap();
-        z.write_sample(1.0, from_unix_time_ns(3_000));
+        z.write_sample(1.0, from_unix_time_ns(3_000_000));
         assert(z.bucket_count == 2);
         Bucket* pb = z._history.buckets[0];
         assert(pb.sealed && pb.packed !is null && pb.samples is null);   // packed at seal, raw dropped
 
         Cursor zc = z.open_series_cursor(0);
         RecordBlock zb = zc.next(16);
-        assert(zb.count == 2 && zb.get!double(0) == 1.0 && zb.time(1) == from_unix_time_ns(2_000));
+        assert(zb.count == 2 && zb.get!double(0) == 1.0 && zb.time(1) == from_unix_time_ns(2_000_000));
         assert(pb.samples !is null && pb.refs == 1);  // reconstituted, borrowed
         zb = zc.next(16);
         assert(zb.count == 1);
@@ -2141,9 +2141,9 @@ unittest
         Element zt;
         zt.format = register_format(text_fmt);
         zt.ensure_history();
-        zt.write_sample("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", from_unix_time_ns(1_000));
+        zt.write_sample("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", from_unix_time_ns(1_000_000));
         zt.mark_gap();
-        zt.write_sample("bbbb", from_unix_time_ns(2_000));
+        zt.write_sample("bbbb", from_unix_time_ns(2_000_000));
         Bucket* tb0 = zt._history.buckets[0];
         assert(tb0.packed !is null && tb0.samples is null);
         Cursor ztc = zt.open_series_cursor(0);
@@ -2156,9 +2156,9 @@ unittest
         Element q;
         q.format = register_format(f64_sampled);
         q.ensure_history();
-        q.write_sample(2.0, from_unix_time_ns(1_000));
+        q.write_sample(2.0, from_unix_time_ns(1_000_000));
         q.mark_gap();
-        q.write_sample(2.0, from_unix_time_ns(2_000));
+        q.write_sample(2.0, from_unix_time_ns(2_000_000));
         Bucket* qb = q._history.buckets[0];
         assert(qb.packed !is null && qb.samples is null);
         RecordBlock qr = q.read_records(0, 16);
@@ -2174,14 +2174,14 @@ unittest
         Element w;
         w.format = register_format(f64_sampled);
         w.ensure_history();
-        w.write_sample(3.0, from_unix_time_ns(1_000));
+        w.write_sample(3.0, from_unix_time_ns(1_000_000));
         Cursor wc = w.open_series_cursor(0);
         RecordBlock wb = wc.next(16);
         assert(wb.count == 1);
         Bucket* wb0 = w._history.buckets[0];
         assert(wb0.refs == 1);
         w.mark_gap();
-        w.write_sample(3.0, from_unix_time_ns(2_000));
+        w.write_sample(3.0, from_unix_time_ns(2_000_000));
         assert(wb0.sealed && wb0.packed !is null && wb0.samples !is null);
         wb = wc.next(16);
         assert(wb.count == 1 && wb0.samples is null && wb0.packed !is null);
@@ -2194,7 +2194,7 @@ unittest
     Element dying;
     dying.format = register_format(f64_held);
     begin_commit();
-    dying.write_sample(1.0, from_unix_time_ns(1_000));
+    dying.write_sample(1.0, from_unix_time_ns(1_000_000));
     assert(g_pending_updates.length == 1);
     assert(g_dirty_elements[].contains(&dying));
     dying.teardown();

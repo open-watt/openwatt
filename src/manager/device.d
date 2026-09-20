@@ -1173,8 +1173,8 @@ unittest
     sum.sum_type = SumType.sum;
     source.subscribe(&sum.element_updated);
     double[3] values = [1.0, 2.0, 3.0];
-    SysTime[3] times = [from_unix_time_ns(100), from_unix_time_ns(200),
-                        from_unix_time_ns(300)];
+    SysTime[3] times = [from_unix_time_ns(100_000), from_unix_time_ns(200_000),
+                        from_unix_time_ns(300_000)];
     source.write_samples(values[], times[]);
     assert(target.value.asDouble == 6.0);
     source.unsubscribe(&sum.element_updated);
