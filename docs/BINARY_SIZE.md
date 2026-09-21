@@ -99,6 +99,17 @@ Limit is the 3.5 MB `ota_0` partition. `ram` is internal DRAM only; the board al
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-09-21 | 2cd253be | ldc 1.43.0 | 3,316,320 | 163,289 | 3,670,016 | ESP-IDF 6.1; 353,696 bytes free; 16 MB PSRAM enabled |
 
+### ESP32-H2 DevKitM-1, `make esp-idf-build PLATFORM=esp32-h2 CONFIG=release FEATURES=switch`
+
+4 MB part with no PSRAM. The table spends the whole 4,194,304 bytes: 131,072 for the bootloader,
+partition table, nvs, phy_init and otadata, two 1,900,544 byte OTA slots, and 262,144 of storage.
+The limit below is one slot. `full` is about 2.7 MB, so it cannot share the flash with a second
+app partition, though it fits the 3,801,088 byte single-app layout the unittest table uses.
+
+| date | commit | compiler | flash | ram | limit | note |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2026-09-21 | ow/esp32h2 | ldc 1.43.0 | 1,029,552 | 43,510 | 1,900,544 | first row; switch tier, 46% of the slot free |
+
 ### SmartEVSE v3.0, `make esp-idf-build BOARD=smartevse-v30 CONFIG=release`
 
 Limit is the stock 0x1b0000 `ota_0` partition, which the in-place migration must not change.
