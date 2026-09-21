@@ -3,6 +3,12 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-09-29: HTTP client timeout
+
+- `/protocol/http/client` gains a writable `timeout` duration, default `5s`. Expose it in
+  HTTP client editors. It measures request age from submission, including queue time;
+  changing it also affects pending requests.
+
 ## 2026-09-29: main stack high-water mark
 
 - `/system/sysinfo` adds `Stack: <peak> / <size>` after the memory pools; the size is
