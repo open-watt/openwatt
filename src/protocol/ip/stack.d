@@ -811,8 +811,13 @@ private:
         MACAddress dst;
         dst.b[] = link_addr[0 .. 6];
         ubyte ver = (cast(const(ubyte)*)pkt.data.ptr)[0] >> 4;
-        EtherType etype = ver == 6 ? EtherType.ip6 : EtherType.ip4;
-        station.send(dst, pkt.data, etype);
+        Packet framed;
+        ref eth = framed.init!Ethernet(pkt.data, pkt.creation_time);
+        eth.src = station.mac;
+        eth.dst = dst;
+        eth.ether_type = ver == 6 ? EtherType.ip6 : EtherType.ip4;
+        framed.checksum_pending = pkt.checksum_pending;
+        station.forward(framed);
     }
 
     void deliver_local(ref Packet pkt, BaseInterface iface = null)

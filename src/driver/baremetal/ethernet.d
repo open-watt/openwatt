@@ -98,6 +98,12 @@ nothrow @nogc:
     final bool flow_control() const pure => _config.flow_control;
     final void flow_control(bool value) { set_wiring!"flow-control"(_config.flow_control, value); }
 
+    static if (has_eth_tx_checksum)
+    {
+        final bool tx_checksum() const pure => _config.tx_checksum;
+        final void tx_checksum(bool value) { set_wiring!"tx-checksum"(_config.tx_checksum, value); }
+    }
+
     final bool auto_negotiate() const pure => _auto_negotiate;
     final void auto_negotiate(bool value)
     {
@@ -138,17 +144,21 @@ nothrow @nogc:
                                        Prop!("auto-negotiate", auto_negotiate),
                                        Prop!("duplex", duplex, "status"));
     static if (has_eth_pin_select)
-        alias Properties = AliasSeq!(CommonProperties,
-                                     Prop!("tx-en-gpio", tx_en_gpio),
-                                     Prop!("txd0-gpio", txd0_gpio),
-                                     Prop!("txd1-gpio", txd1_gpio),
-                                     Prop!("crs-dv-gpio", crs_dv_gpio),
-                                     Prop!("rxd0-gpio", rxd0_gpio),
-                                     Prop!("rxd1-gpio", rxd1_gpio),
-                                     Prop!("clock-loopback-gpio", clock_loopback_gpio),
-                                     Prop!("hw-timestamp", hw_timestamp));
+        alias PinSelectProperties = AliasSeq!(Prop!("tx-en-gpio", tx_en_gpio),
+                                              Prop!("txd0-gpio", txd0_gpio),
+                                              Prop!("txd1-gpio", txd1_gpio),
+                                              Prop!("crs-dv-gpio", crs_dv_gpio),
+                                              Prop!("rxd0-gpio", rxd0_gpio),
+                                              Prop!("rxd1-gpio", rxd1_gpio),
+                                              Prop!("clock-loopback-gpio", clock_loopback_gpio),
+                                              Prop!("hw-timestamp", hw_timestamp));
     else
-        alias Properties = CommonProperties;
+        alias PinSelectProperties = AliasSeq!();
+    static if (has_eth_tx_checksum)
+        alias TxChecksumProperties = AliasSeq!(Prop!("tx-checksum", tx_checksum));
+    else
+        alias TxChecksumProperties = AliasSeq!();
+    alias Properties = AliasSeq!(CommonProperties, PinSelectProperties, TxChecksumProperties);
 
     final Duplex duplex() const pure => _duplex;
 
@@ -178,10 +188,11 @@ protected:
             }
             _active[_eth.port] = this;
             set_connected(false);
+            _caps &= ~(InterfaceCaps.hw_timestamp | InterfaceCaps.tx_checksum);
             if (_config.timestamp)
                 _caps |= InterfaceCaps.hw_timestamp;
-            else
-                _caps &= ~InterfaceCaps.hw_timestamp;
+            if (_config.tx_checksum)
+                _caps |= InterfaceCaps.tx_checksum;
             mark_set!(typeof(this), "caps")();
             eth_set_rx_callback(_eth, &rx_dispatch);
             eth_set_link_callback(_eth, &link_dispatch);
@@ -233,6 +244,15 @@ protected:
 
     override int wire_send(const(ubyte)[] frame)
         => _eth.is_open && eth_tx(_eth, frame) ? 0 : -1;
+
+    static if (has_eth_tx_checksum)
+    {
+        override bool mac_completes_checksum(const(ubyte)[] frame)
+            => _eth.is_open && eth_checksum_insertable(_eth, frame);
+
+        override int wire_send_checksum(const(ubyte)[] frame)
+            => _eth.is_open && eth_tx(_eth, frame, true) ? 0 : -1;
+    }
 
 private:
     EthMac _eth;
@@ -348,7 +368,7 @@ private:
         if (iface is null || !iface.running)
             return;
         HwTimestamp hw = HwTimestamp(info.timestamp.seconds, info.timestamp.nanoseconds);
-        iface.incoming_ethernet_frame(frame, iface.receive_time(info), 0, 0, info.has_timestamp ? &hw : null);
+        iface.incoming_ethernet_frame(frame, iface.receive_time(info), 0, 0, info.has_timestamp ? &hw : null, info.checksum_verified);
     }
 
     // The MAC clock and MonoTime run off the same crystal, so one paired sample per service

@@ -65,6 +65,7 @@ enum PacketDirection : ubyte
     reliable = 1 << 1, // delivery is acknowledged and retransmitted; loss surfaces as an error, never silently
     ordered  = 1 << 2, // frames are delivered in transmit order
     hw_timestamp = 1 << 3, // creation_time of a received packet is when the MAC saw it, not when software did
+    tx_checksum = 1 << 4, // the MAC completes a TCP or UDP checksum left pending
 }
 
 enum MessageState

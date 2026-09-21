@@ -129,6 +129,7 @@ joins the heap under `SPIRAM_USE_MALLOC` and is not counted here.
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-09-21 | ow/esp32p4 | ldc 1.43.0 | 2,371,264 | 62,622 | 3,145,728 | first row; boots, console interactive, 32 MB PSRAM in the heap |
 | 2026-09-21 | ow/esp-ethernet | ldc 1.43.0 | 2,408,096 | 64,252 | 3,145,728 | `USE_ETHERNET`: EMAC driver, esp_eth, IP101 |
+| 2026-09-22 | ow/checksum-offload | ldc 1.43.0 | 2,409,152 | 64,252 | 3,145,728 | checksum offload plumbing; no `tx-checksum` on the P4 |
 
 ### ESP32-P4X, `make esp-idf-build PLATFORM=esp32-p4x CONFIG=release`
 
