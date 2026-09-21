@@ -462,12 +462,18 @@ The current implementation and remaining phases are described in
 
 ## Data model
 
-- **Two more `realloc` results stored unchecked**: `manager/series.d:811`
-  (`b.packed = realloc(dst, packed_size).ptr`) and `router/iface/mac.d:407`
-  (`mem = realloc(mem, ...)`) assign straight into the owning field, so an allocation failure
-  installs null over a live pointer exactly as `element.add_heap_entry` did before it was fixed.
-  Both want the same shape: grow into a temporary, keep the old block when the grow fails, and
-  give the caller a way to refuse the operation.
+- **A numeric-to-text format change with history crashes the next text read**: `text_value`
+  reads the tail bucket without checking that bucket's format, so after `format` switches a
+  numeric element with recorded history to text, it takes the scalar bucket's samples as `ushort`
+  heap offsets into a heap that is null. `tail_record` likewise hands back the previous format's
+  record. Either the readers ignore a tail whose format is not the element's, or the setter
+  retires the tail.
+
+- **One more `realloc` result stored unchecked**: `router/iface/mac.d:407`
+  (`mem = realloc(mem, ...)`) assigns straight into the owning field, so an allocation failure
+  installs null over a live pointer. It wants the shape the series bucket lifecycle now has: grow
+  into a temporary, keep the old block when the grow fails, and let the caller refuse the
+  operation.
 
 - **`bucket_capacity`/`text_bucket_capacity` do not scale with the target**: `text_heap_limit`
   now does (8k under `Tiny`, 64k otherwise), but the record-count caps declared beside it are
