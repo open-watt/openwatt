@@ -541,20 +541,19 @@ public:
     }
 
     // Without a store the value is a String held in the record register, and the slice is stable
-    // until the next write to this element. With a store it borrows the open bucket's heap, which
-    // the next write may reallocate.
+    // until the next write to this element. Once the store holds a value it borrows the open
+    // bucket's heap, which the next write may reallocate.
     const(char)[] text_value() const pure
     {
         if (!format.valid || !data_format.is_text || _last_update == SysTime())
             return null;
-        if (!_history)
-            return text_register[];
-        if (!_history.buckets.length)
-            return null;
-        const(Bucket)* b = _history.buckets[$-1];
-        if (!b.count || !b.samples)
-            return null;
-        return cast(const(char)[])heap_view(b.heap, (cast(const(ushort)*)b.samples)[b.count - 1]);
+        if (_history && _history.buckets.length)
+        {
+            const(Bucket)* b = _history.buckets[$-1];
+            if (b.count && b.samples)
+                return cast(const(char)[])heap_view(b.heap, (cast(const(ushort)*)b.samples)[b.count - 1]);
+        }
+        return text_register[];
     }
 
     // Wide records don't fit the Scalar register. Without a store the register points at one
@@ -719,17 +718,14 @@ public:
             _history = alloc!SeriesStore();
             g_historical_elements ~= &this;
 
-            // a held register value becomes record 0; the store owns it from here and the
+            // a held register value becomes record 0; the store owns it once it lands and the
             // register releases, so only one of the two ever holds the value
             if (format.valid && _last_update != SysTime())
             {
                 if (data_format.is_text)
                 {
                     if (text_register().length)
-                    {
                         append_text(text_register()[], unix_time_ns(_last_update) / 1000);
-                        release_register();
-                    }
                 }
                 else if (data_format.is_wide && wide_register())
                 {
@@ -949,7 +945,8 @@ private:
 
     enum bucket_capacity = 256; // TODO: scale with rate (target a time span, not a record count)
     enum text_bucket_capacity = 64;     // text series are low-rate; keep resident buckets small
-    enum text_heap_limit = 0x1_0000;    // u16 record offsets address the bucket heap
+    // u16 record offsets cap the bucket heap at 64k; a small target cannot serve that much contiguous
+    version (Tiny) enum text_heap_limit = 0x2000; else enum text_heap_limit = 0x1_0000;
 
     const(char)[] update_typed_series(ref const Variant v, SysTime timestamp, Subscriber who)
     {
@@ -1071,9 +1068,9 @@ private:
     void write_text_sample(const(char)[] v, SysTime t, Subscriber who, String handle = String())
     {
         debug assert(data_format.is_text);
-        if (v.length > MaxStringLen)
+        if (v.length > MaxStringLen || heap_entry_bytes(v.length) > text_heap_limit)
         {
-            writeWarning("text sample refused (exceeds 32k): element '", id, "'");
+            writeWarning("text sample refused (exceeds the bucket heap): element '", id, "'");
             return;
         }
         if (held_repeat(text_value() == v, t))
@@ -1084,7 +1081,13 @@ private:
         SysTime previous_timestamp = last_update;
 
         if (_history)
-            append_text(v, unix_time_ns(t) / 1000);
+        {
+            if (!append_text(v, unix_time_ns(t) / 1000))
+            {
+                writeWarning("text sample dropped (allocation failed): element '", id, "'");
+                return;
+            }
+        }
         else
         {
             set_text_register(handle ? handle.move : v.make_string());
@@ -1140,56 +1143,62 @@ private:
         }
     }
 
-    ulong append_text(const(char)[] v, ulong tick)
+    // retiring the tail seals it, so the record's heap entry is secured before anything retires
+    bool append_text(const(char)[] v, ulong tick)
     {
         bool follows_gap = (_status & Flags.gap_open) != 0;
-        _status &= ~Flags.gap_open;
-
         SeriesStore* h = _history;
-        Bucket* b = h.buckets.length ? h.buckets[$-1] : null;
+        Bucket* tail = h.buckets.length ? h.buckets[$-1] : null;
 
+        bool format_changed = tail && tail.format != format;
+        bool roll = !tail || tail.count + 1 > tail.capacity || follows_gap || format_changed
+                 || (tail.count && tick - tail.first_tick > uint.max);
         uint entry = uint.max;
-        if (b)
+        if (!roll)
         {
-            bool format_changed = b.format != format;
-            bool roll = b.count + 1 > b.capacity || follows_gap || format_changed
-                     || (b.count && tick - b.first_tick > uint.max);
-            if (!roll)
+            entry = find_heap_entry(*tail, v);
+            if (entry == uint.max && tail.heap_used + heap_entry_bytes(v.length) > text_heap_limit)
+                roll = true;
+        }
+
+        Bucket* b = roll ? alloc_bucket(text_bucket_capacity) : tail;
+        if (entry == uint.max)
+        {
+            entry = add_heap_entry(*b, v);
+            if (entry == uint.max)
             {
-                entry = find_heap_entry(*b, v);
-                if (entry == uint.max && b.heap_used + heap_entry_bytes(v.length) > text_heap_limit)
-                    roll = true;
-            }
-            if (roll)
-            {
-                retire_tail(b);
-                if (format_changed)
-                    fire_format_change();
-                b = null;
-                entry = uint.max;
+                if (roll)
+                    h.free_bucket(b);
+                return false;
             }
         }
-        if (!b)
+        if (roll)
         {
-            b = alloc_bucket(text_bucket_capacity);
+            if (tail)
+            {
+                retire_tail(tail);
+                if (format_changed)
+                    fire_format_change();
+            }
             b.first_index = h.head;
             b.follows_gap = follows_gap;
             h.buckets ~= b;
         }
+        _status &= ~Flags.gap_open;
+
         if (b.count == 0)
             b.first_tick = tick;
-        if (entry == uint.max)
-            entry = add_heap_entry(*b, v);
         (cast(ushort*)b.samples)[b.count] = cast(ushort)entry;
         b.offsets[b.count] = cast(uint)(tick - b.first_tick);
         ++b.count;
         b.last_offset = b.offsets[b.count - 1];
 
-        ulong first_index = h.head;
         ++h.head;
+        if (text_register().length)
+            release_register();
         evict_over_budget();
         mark_dirty();
-        return first_index;
+        return true;
     }
 
     // the bucket heap: 2-aligned len-prefixed values, content-matched so repeated values
@@ -1217,7 +1226,15 @@ private:
                 cap *= 2;
             if (cap > text_heap_limit)
                 cap = text_heap_limit;
-            b.heap = b.heap ? realloc(b.heap[0 .. b.heap_capacity], cap, 2, MemFlags.slow).ptr : alloc(cap, 2, MemFlags.slow).ptr;
+            version (unittest)
+            {
+                if (g_fail_heap_grow)
+                    return uint.max;
+            }
+            void* grown = b.heap ? realloc(b.heap[0 .. b.heap_capacity], cap, 2, MemFlags.slow).ptr : alloc(cap, 2, MemFlags.slow).ptr;
+            if (!grown)
+                return uint.max;
+            b.heap = grown;
             b.heap_capacity = cap;
         }
         ushort* p = cast(ushort*)(cast(ubyte*)b.heap + b.heap_used);
@@ -1614,6 +1631,8 @@ unittest
 
 version (unittest)
 {
+    private __gshared bool g_fail_heap_grow;
+
     // byte-level RLE test codec: [run u8][value u8]*; enough to exercise pack/reconstitute
     private __gshared bool g_rle_codec_on;
 
@@ -1653,6 +1672,19 @@ version (unittest)
             o += run;
         }
         return o == d.length;
+    }
+}
+
+version (unittest)
+private final class UpdateCounter
+{
+nothrow @nogc:
+
+    uint calls;
+
+    void receive(ref const SampleUpdate)
+    {
+        ++calls;
     }
 }
 
@@ -2083,24 +2115,83 @@ unittest
     th.format = register_format(text_fmt);
     th.ensure_history();
     char[1200] big = 'x';
-    foreach (i; 0 .. 60)
+    enum per_bucket = Element.text_heap_limit / heap_entry_bytes(big.length);
+    enum text_records = per_bucket + 6;   // a few past what one bucket heap holds
+    foreach (i; 0 .. text_records)
     {
         big[0] = cast(char)('a' + i);
         th.write_sample(big[], from_unix_time_ns(1_000 * (i + 1)));
     }
-    assert(th.record_count == 60 && th.bucket_count == 2);
+    assert(th.record_count == text_records);
+    assert(th.bucket_count == (text_records + per_bucket - 1) / per_bucket);
     assert(th._history.buckets[0].sealed);
-    assert(th._history.buckets[0].count == 54);   // 54 * 1202-byte entries is all a 64k heap holds
+    assert(th._history.buckets[0].count == per_bucket);
     assert(th._history.buckets[0].heap_capacity == th._history.buckets[0].heap_used);
-    assert(th.text_value[0] == cast(char)('a' + 59));
+    assert(th.text_value[0] == cast(char)('a' + text_records - 1));
 
     // oversize samples are refused at the gateway
-    char[] huge = cast(char[])alloc(40_000);
+    char[] huge = cast(char[])alloc(Element.text_heap_limit + 8);
+    assert(huge.ptr, "no buffer to build an oversize sample from");
     huge[] = 'x';
     th.write_sample(cast(const(char)[])huge, from_unix_time_ns(100_000_000));
-    assert(th.record_count == 60);
+    assert(th.record_count == text_records);
     free(huge);
     th.teardown();
+
+    // a sample that cannot allocate leaves value, freshness, gap state and subscribers alone
+    {
+        Element ft;
+        ft.format = register_format(text_fmt);
+        ft.ensure_history();
+        UpdateCounter counter = alloc!UpdateCounter();
+        ft.subscribe(&counter.receive);
+
+        ft.write_sample("a", from_unix_time_ns(1_000));
+        assert(ft.record_count == 1 && counter.calls == 1);
+
+        char[100] outgrow = 'g';    // past the first 64-byte heap, so the open bucket must grow
+        g_fail_heap_grow = true;
+        ft.write_sample(outgrow[], from_unix_time_ns(2_000));
+        assert(ft.record_count == 1 && ft.bucket_count == 1);
+        assert(ft.text_value == "a" && ft.last_update == from_unix_time_ns(1_000));
+        assert(counter.calls == 1);
+
+        // a gap rolls to a new bucket; failing to fill it must not retire the old tail
+        ft.mark_gap();
+        uint after_gap = counter.calls;
+        ft.write_sample("b", from_unix_time_ns(3_000));
+        assert(ft.record_count == 1 && ft.bucket_count == 1);
+        assert(!ft._history.buckets[0].sealed);
+        assert(ft.text_value == "a" && ft.last_update == from_unix_time_ns(1_000));
+        assert(counter.calls == after_gap);
+
+        g_fail_heap_grow = false;
+        ft.write_sample("b", from_unix_time_ns(4_000));
+        assert(ft.record_count == 2 && ft.bucket_count == 2);
+        assert(ft._history.buckets[0].sealed && ft._history.buckets[1].follows_gap);
+        assert(ft.text_value == "b" && counter.calls == after_gap + 1);
+
+        ft.unsubscribe(&counter.receive);
+        ft.teardown();
+        free(counter);
+    }
+
+    // a held value the store could not take stays the value until a later write supersedes it
+    {
+        Element fh;
+        fh.format = register_format(text_fmt);
+        fh.write_sample("held", from_unix_time_ns(1_000));
+        g_fail_heap_grow = true;
+        fh.ensure_history();
+        g_fail_heap_grow = false;
+        assert(fh.record_count == 0 && fh.text_value == "held");
+        assert(fh.last_update == from_unix_time_ns(1_000));
+
+        fh.write_sample("next", from_unix_time_ns(2_000));
+        assert(fh.record_count == 1 && fh.text_value == "next");
+        assert(fh.text_register[].length == 0);
+        fh.teardown();
+    }
 
     // {raw,packed} entries: a sealed bucket packs when its last reader releases (immediately,
     // when nothing was reading); late cursors reconstitute a shared raw side and drop it again

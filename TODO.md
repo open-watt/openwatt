@@ -462,6 +462,18 @@ The current implementation and remaining phases are described in
 
 ## Data model
 
+- **Two more `realloc` results stored unchecked**: `manager/series.d:811`
+  (`b.packed = realloc(dst, packed_size).ptr`) and `router/iface/mac.d:407`
+  (`mem = realloc(mem, ...)`) assign straight into the owning field, so an allocation failure
+  installs null over a live pointer exactly as `element.add_heap_entry` did before it was fixed.
+  Both want the same shape: grow into a temporary, keep the old block when the grow fails, and
+  give the caller a way to refuse the operation.
+
+- **`bucket_capacity`/`text_bucket_capacity` do not scale with the target**: `text_heap_limit`
+  now does (8k under `Tiny`, 64k otherwise), but the record-count caps declared beside it are
+  still 256 and 64 on every part, so a bucket on a 320KB device costs what one on a Pi costs.
+  Fold all three into the same per-target sizing rather than leaving one scaled and two fixed.
+
 - **Modbus `report` registers: accept unsolicited responses and never poll them**: some devices
   push a value on their own schedule instead of answering reads. The bench PT100 transmitter does
   exactly this, and today the only way to consume it is snoop mode, which disables polling for the
