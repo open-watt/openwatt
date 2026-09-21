@@ -3,6 +3,12 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-09-21: RP2350 hardware identity
+
+- RP2350 now supplies a stable hardware node ID and derives its default hostname
+  from that ID. Rediscover upgraded boards and associate their advertised identity
+  with any existing device record instead of relying on the old generic hostname.
+
 ## 2026-09-21: bootloader reboot
 
 - `/system/reboot` accepts optional `bootloader=1` on classic ESP32 and RP2350.

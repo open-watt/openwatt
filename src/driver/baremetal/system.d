@@ -7,7 +7,13 @@ nothrow @nogc:
 
 void system_reboot()
 {
-    log_notice("system", "system_reboot: not implemented on this platform");
+    version (RP2350)
+    {
+        import urt.driver.rp2350.bootrom : rom_reboot, RebootType;
+        rom_reboot(RebootType.normal);
+    }
+    else
+        log_notice("system", "system_reboot: not implemented on this platform");
 }
 
 ulong unique_device_id()
@@ -20,6 +26,11 @@ ulong unique_device_id()
     else version (Bouffalo)
     {
         import urt.driver.bl_common.identity : chip_unique_id;
+        return chip_unique_id();
+    }
+    else version (RP2350)
+    {
+        import urt.driver.rp2350.identity : chip_unique_id;
         return chip_unique_id();
     }
     else

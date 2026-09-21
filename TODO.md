@@ -34,6 +34,23 @@ Outstanding work and follow-ups, including point fixes and work awaiting a desig
 When an item lands, delete it or reduce it to the work that remains;
 the commit history and linked design documents carry the implementation record.
 
+## HIGH PRIORITY: a target with no crypto backend fails in the field, not at build
+
+`aes_gcm_encrypt`/`decrypt` and the ECDH helpers are dispatchers to mbedtls or Windows CNG;
+bare metal has no third branch and returns `unsupported` at runtime. SHA-256 and HMAC do
+have software implementations, and the CSPRNG has hardware backends on Beken and RP2350,
+so randomness is real on those two and absent on every other bare-metal target. An image
+still builds cleanly and then cannot do TLS or a Tesla vehicle session, and nothing says so
+until it is running on a device.
+
+The Tesla and TLS unit tests are gated on `has_crypto` to keep the suite moving. That is a
+holding action, not an answer. Options, cheapest first:
+
+- let `has_crypto` gate the features themselves, so an image that cannot do AES-GCM fails
+  to build rather than failing on a customer's device;
+- add a software AES-GCM to urt, which serves every bare-metal target;
+- bring a trimmed mbedtls to bare metal if ECDH is genuinely needed there.
+
 ## HIGH PRIORITY: saved configuration can lose state on reboot (#665)
 
 - **KNOWN RESTORE LIMITATIONS, explicitly deferred for #665: boot-created objects and omitted dependencies.**
@@ -1088,6 +1105,62 @@ this is what remains.
   contract, or give borrowers ownership before allowing reload/free. Borrowers include
   accumulator source paths, element metadata, profile enums, protocol element descriptors,
   and other slices into profile string/section storage.
+
+### RP2350 bring-up follow-ups (2026-09-20)
+
+Boots and runs on a WeAct RP2350B Core, with an interactive console on UART1 (GPIO8 TX,
+GPIO21 RX): commands echo and execute, and the heartbeat ticks idle. `xosc_hz` is confirmed
+at 12MHz by clean UART framing. Outstanding:
+
+- **`UartConfig.tx_gpio`/`rx_gpio` are ignored.** The driver routes a fixed default pair per
+  port, so a stream cannot pick its own pins. Picking them needs a funcsel per pin, not per
+  port: most UART pins are funcsel 2, but the alternates (GPIO6, 10, 14, 18, 22, 23) are 0x0b.
+- **The `FLASH` region caps at 4MB.** The Core carries 16MB and there is no partition table,
+  so the ceiling is the linker script's alone.
+- **Unit tests stop at the first failure on hardware.** All 180 modules pass now, and
+  reflashing no longer needs the button, so a regression costs a build cycle rather than a
+  trip to the bench. `NOEXCEPTIONS=0`, which would let `run_test` catch and carry on, still
+  does not build on baremetal: `dwarfeh.d` casts `Throwable` to `Error` and urt's no-RTTI
+  `_d_cast` wants a `dyn_cast!Error` contract that `Throwable` does not declare.
+- **The app is silent after the unit tests finish.** The runner prints `Process restarting...`
+  and nothing follows. A release image boots to a working console, so this is specific to the
+  `CONFIG=unittest` image, not to app startup.
+- **The hard-float fix is unverified on STM32.** `arm: select the hard-float ABI explicitly`
+  changes codegen for every ARM baremetal target, and only RP2350 has been run.
+- **More of the boot ROM is worth taking.** `urt/driver/rp2350/bootrom.d` has the table
+  lookup, so each addition is a signature and a code. Still unused:
+  `CONNECT_INTERNAL_FLASH`, `FLASH_EXIT_XIP`, `FLASH_RANGE_ERASE`, `FLASH_RANGE_PROGRAM`,
+  `FLASH_FLUSH_CACHE` and `FLASH_ENTER_CMD_XIP` are the whole erase/program sequence, so
+  littlefs and config persistence need no QMI driver; `OTP_ACCESS` reaches the OTP where a
+  durable identity or MAC would live; and `LOAD_PARTITION_TABLE`/`PICK_AB_PARTITION`/
+  `CHAIN_IMAGE`/`EXPLICIT_BUY` are an A/B OTA framework already in silicon, `EXPLICIT_BUY`
+  being the commit step that gives rollback. No crypto is exported, so none of this touches
+  the AES-GCM gap.
+
+  Note `RESET_USB_BOOT` is RP2040 only. RP2350 reboots through `REBOOT` with
+  `BOOT_TYPE_BOOTSEL`, and the lookup pointer sits at `0x16`, not the RP2040 `0x18`; the
+  wrong one reads a bogus pointer and hard faults inside ROM.
+
+- **Drive the RP2350 SHA256 block.** `SHA256_BASE 0x400F8000` (`CSR`, `WDATA`, `SUM0..7`)
+  is still unused. It is an optimisation rather than a gap, since urt already has software
+  SHA-256. The TRNG beside it is driven.
+- **Measure the TRNG sample interval.** `trng.d` leaves `SAMPLE_CNT1` at its `0xFFFF` reset
+  value, the slowest the block offers, because a conservative interval is the safe default
+  for entropy and nothing had measured the alternative. That is roughly 12.6M cycles per
+  192-bit collection before the von Neumann decorrelator discards anything, so a key or a
+  nonce costs real time. The rate against entropy quality wants measuring before it is
+  tuned.
+- **Generate register definitions instead of hand-writing them.** Three constants in the
+  RP2350 driver were wrong (`PLL_SYS_BASE`, `RESET_IO_BANK0`, and pad ISO never cleared)
+  because nothing checked them against a primary source. A small generator emitting
+  `regs.d` from the pico-sdk headers would be authoritative and re-runnable; pico-sdk is
+  BSD-3-Clause against urt's MIT, so the attribution question needs deciding first.
+- **No USB device stack.** `router/stream/usb_serial.d` is ESP32-only and rides that part's
+  hardware USB-Serial-JTAG block. RP2350 needs a real CDC-ACM driver (controller bring-up,
+  EP0, enumeration, bulk endpoints); until then the board does not enumerate at all once
+  our image is running, and the UART is the only console.
+- **The on-board RGB LED is undriven.** It is the only peripheral on the Core, and a
+  wire-free liveness signal, but needs PIO or bit-banged WS2812 timing.
 
 ### Template instantiation is 32% of the BK7231N image (2026-09-12)
 
