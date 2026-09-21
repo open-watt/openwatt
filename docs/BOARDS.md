@@ -111,7 +111,10 @@ The generic S31 configuration assumes 16 MB external flash and no PSRAM. Both
 the platform and Function-CoreBoard-1 profiles create the chip's `wifi1` and
 `wpan1` radios; set `wpan1`'s channel before using the 802.15.4 radio.
 
-The C5 and C6 layouts use two 3.5 MiB OTA slots. When migrating from the old
+The H2 profile creates the chip's `wpan1` radio the same way; it has no WiFi.
+
+The C5 and C6 layouts use two 3.5 MiB OTA slots, and the H2 two 1.8125 MiB slots with a
+256 KiB LittleFS partition at the top of its 4 MB. When migrating from the old
 layouts, back up filesystem contents and flash the new partition table and
 application together; an app-only OTA cannot update the table. Reformat and
 restore the moved filesystem. The NVS, PHY and OTA metadata offsets are unchanged.

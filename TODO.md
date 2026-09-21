@@ -386,7 +386,7 @@ holding action, not an answer. Options, cheapest first:
 - Create `wpan1` in the C5 and C6 system profiles, as on S31; both currently require
   manually adding the built-in radio.
 - **Receive is validated on hardware; transmit is not.** On an ESP32-C5 DevKitC-1,
-  `/interface/wpan/add name=wpan0 channel=15 promiscuous=yes` comes up Running with
+  `/interface/wpan/add name=wpan1 channel=15 promiscuous=yes` comes up Running with
   link-status up and counts real traffic off the air: 54 packets and 1,568 bytes in the first
   minute, about 51 B/s, with zero rx-dropped. That exercises the driver opening the radio, the
   ISR handing frames to the shim, the 16-slot ring, the MHR parser and the interface counters.
@@ -394,7 +394,7 @@ holding action, not an answer. Options, cheapest first:
   burst load heavy enough to drop.
 - **Our extended-address display disagrees with the chip's EUI-64 in the middle two bytes.**
   `esptool` reports the C5's 802.15.4 address as `10:bd:a3:ff:fe:c0:b0:ac`, the canonical
-  EUI-48-to-EUI-64 mapping that inserts `ff:fe`; `/interface/wpan/get wpan0 extended-address`
+  EUI-48-to-EUI-64 mapping that inserts `ff:fe`; `/interface/wpan/get wpan1 extended-address`
   reads back `10:BD:A3:FE:FF:C0:B0:AC`. The driver round-trips its own bytes faithfully, so the
   disagreement is in what `esp_read_mac(ESP_MAC_IEEE802154)` hands back: IDF composes it from
   `ESP_MAC_EFUSE_EXT` plus the base MAC and orders that pair the other way. Settle which order
@@ -874,6 +874,38 @@ this is what remains.
 
 ## Infrastructure
 
+- **A bare ESP32-H2 release build does not fit**: `FEATURES` defaults to `full`, which links at
+  about 2.7 MB against the 1.8125 MB OTA slot, so `make esp-idf-build PLATFORM=esp32-h2
+  CONFIG=release` fails the partition check. The IP tiers buy nothing on a part with no IP
+  interface, so the choice is `switch`, which fits with room to spare but drops the BLE and
+  Zigbee stacks, or `full` in a single-app layout, which gives up OTA. Set it in `features.mk`.
+
+- **`/stream/serial device=uart0` produces nothing on the ESP32-H2**: `device=uart1` with
+  `tx-gpio=24 rx-gpio=23` (UART0's IO_MUX pins, per IDF `soc/esp32h2/uart_pins.h`) drives the
+  DevKitM-1's CH343 bridge and gives a fully interactive console, so the stream and the shim are
+  fine; uart0 stays silent whether IDF's console is on it, on USB-JTAG, or disabled. Something
+  about UART0 after the ROM leaves it is not being re-initialised. Until that is understood the
+  H2's console stays on `usb-serial`.
+
+- **The H2's `usb-serial` console wedges the host USB link**: the firmware logs
+  `usb-serial 'console': online`, but the CDC device drops into Windows error 31 within seconds
+  and only a physical replug clears it; the board never resets meanwhile. Suspect the endpoint
+  being written continuously with nothing draining it. The C3/C6/S3 use the same config without
+  trouble.
+
+- **`/system/fs/format` did not take on the H2**: the command returns no output and littlefs
+  still reports `Corrupted dir pair at {0x0, 0x1}` on the next boot, so `manager.ows` cannot pass
+  on hardware. The format runs as a latent `CommandState` on its own task, and nothing reports
+  whether it failed or never ran.
+
+- **Nothing formats a fresh filesystem**: a failed `lfs_mount` latches `mount_state = -1` and only
+  an explicit `/system/fs/format` clears it. A unittest image has no console, so `manager.ows`
+  can never pass on a board whose storage partition has not been formatted by hand first.
+
+- **A full-tier unittest image leaves the ESP32-H2 29.6 KB of heap**: it fits the fused 3.625 MB
+  test partition but `manager.element` cannot allocate its own assertion buffers. Switch tier
+  leaves 57.6 KB and is the realistic configuration. Either size the heavier element cases
+  against available heap, or state that embedded test runs are switch-tier only.
 - **Application recreation leaves the global page pool initialized**: `Application.~this` does not
   deinitialize the pool, so a second `create_application()` in the same process asserts in
   `page_pool_init`. Define ownership and teardown for shared pool users before adding more
@@ -1366,7 +1398,7 @@ on a board silkscreened
   the first ESP target in the tree where that gap costs a fitted port.
 
 - **802.15.4 receives; transmit is unproven, as on the C5.** With the WpanInterface of #732,
-  `wpan0` on channel 15 comes up Running and counts real frames off the air while BLE and the AP
+  `wpan1` on channel 15 comes up Running and counts real frames off the air while BLE and the AP
   run, so `num_wpan = 1` is right. Nothing has driven the transmit path on any part.
 
 - **The heap's preferred pool is empty during startup.** Every object created between the

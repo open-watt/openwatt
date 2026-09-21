@@ -750,7 +750,7 @@ identity, so only broadcast frames and `promiscuous` capture reach the interface
 | `cca` | read/write | boolean | `true` | Clear-channel assessment before each transmission. |
 
 ```text
-/interface/wpan/add name=wpan0 channel=15 promiscuous=yes
+/interface/wpan/add name=wpan1 channel=15 promiscuous=yes
 ```
 
 ### `/interface/wlan`
