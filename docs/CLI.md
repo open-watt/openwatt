@@ -151,6 +151,45 @@ This section is the growing, command-by-command reference for the CLI. The
 scopes listed here are documented completely. Additional scopes will be added
 as the reference expands.
 
+### `/system`
+
+Node-wide state and lifecycle. The sub-scopes `/system/config`, `/system/fs` and
+`/system/alloc` are not covered here yet.
+
+`/system/hostname` prints the node's hostname; `/system/set-hostname <name>` sets it, and
+also stamps the log HOSTNAME field.
+
+`/system/sysinfo` prints hostname, node id, OS, CPU, memory pools, uptime, wall time and
+whether the saved configuration is dirty, plus the reset reason where the platform has
+one. Given property names instead, it prints only those values, one per line: `hostname`,
+`node-id`, `os`, `processor`, `total`, `used`, `peak`, `largest`, `ext-total`, `ext-used`,
+`ext-peak`, `ext-largest`, `uptime`, `time`, `config-dirty`, `reset-reason`.
+
+`/system/uptime` prints time since start, and `/system/time` the current date and time.
+`/system/sysinfo time` marks it `(unsynchronised)` until wall time is set.
+
+`/system/log-level <severity>` sets the maximum severity that reaches the log sinks.
+
+`/system/update-rate <rate>` sets the main loop frequency, a quantity in Hz, clamped to
+1..1000.
+
+`/system/profile-path <path>` sets the root searched recursively for device profiles. It
+must be set before profiles load and cannot be empty; a command-line override wins and the
+command says so.
+
+`/system/sleep <duration>` pauses the session for the given duration. It is latent, so
+Ctrl-C cancels it, which makes it useful for pacing a startup script.
+
+`/system/reboot [bootloader=<n>]` restarts the node. Without arguments it performs a
+normal restart.
+
+`<n>` is an integer, and any non-zero value restarts into the chip's own ROM loader
+instead, where the part exposes its factory firmware-update interface. `bootloader=1`
+is the usual form; the value selects between loaders on a part offering more than one,
+which none currently does. Only targets whose silicon provides such an entry point
+implement this, and elsewhere the command reports that the platform has no bootloader
+mode and does not reboot.
+
 ### `/ping`
 
 `/ping address=<IPv4|IPv6|MAC> [count=<count>] [iface=<interface>]` selects

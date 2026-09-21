@@ -43,6 +43,7 @@ void system_reboot()
 // computers carry a software identity (persisted node.id): a Pi's identity travels
 // with its SD card, not the board
 ulong unique_device_id() => 0;
+enum bool has_download_mode = false;
 
 bool reboot_pending() => g_reboot;
 
