@@ -90,6 +90,15 @@ Limit is the 3.5 MB `ota_0` partition. `ram` is internal DRAM only; PSRAM is hea
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-09-21 | #732 | ldc 1.43.0 | 3,195,392 | 164,903 | 3,670,016 | first row; ESP-IDF v6.1, with the 802.15.4 interface. Built with the unmerged uRT RISC-V bring-up patched in locally, without which a C5 does not link |
 
+### ESP32-S31 Function-CoreBoard-1, `make esp-idf-build BOARD=esp32-s31-function-coreboard-1 CONFIG=release`
+
+Limit is the 3.5 MB `ota_0` partition. `ram` is internal DRAM only; the board also has
+16 MB PSRAM.
+
+| date | commit | compiler | flash | ram | limit | note |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2026-09-21 | 2cd253be | ldc 1.43.0 | 3,316,320 | 163,289 | 3,670,016 | ESP-IDF 6.1; 353,696 bytes free; 16 MB PSRAM enabled |
+
 ### SmartEVSE v3.0, `make esp-idf-build BOARD=smartevse-v30 CONFIG=release`
 
 Limit is the stock 0x1b0000 `ota_0` partition, which the in-place migration must not change.

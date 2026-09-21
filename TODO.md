@@ -383,6 +383,8 @@ holding action, not an answer. Options, cheapest first:
 
 ## 802.15.4 radio (WpanInterface)
 
+- Create `wpan1` in the C5 and C6 system profiles, as on S31; both currently require
+  manually adding the built-in radio.
 - **Receive is validated on hardware; transmit is not.** On an ESP32-C5 DevKitC-1,
   `/interface/wpan/add name=wpan0 channel=15 promiscuous=yes` comes up Running with
   link-status up and counts real traffic off the air: 54 packets and 1,568 bytes in the first
@@ -1315,8 +1317,8 @@ notification. The C shim's worker tasks stay C-side too; that is IDF's boundary,
 
 ### ESP second core (2026-09-20)
 
-The runtime is single-core on every part, including the dual-core S3, which sets
-`CONFIG_FREERTOS_UNICORE=y` in `platforms/esp32s3/sdkconfig.defaults`. Prerequisites, each small
+The runtime is single-core on every part, including the dual-core S3 and S31, which both set
+`CONFIG_FREERTOS_UNICORE=y` in their `sdkconfig.defaults`. Prerequisites, each small
 once the primitives work is done:
 
 - `cpu_id()` for ESP (Xtensa `PRID`, RISC-V `mhartid`) and `has_smp = true`. This compiles the
@@ -1332,6 +1334,54 @@ The open decision is the model, and it is a design question rather than a checkb
   core 0. Fits "FreeRTOS does not schedule our work" and reuses the BL808 shape, but needs an
   APP_CPU release path outside IDF, which leaves it stalled under `UNICORE`.
 - **SMP** under IDF's kernel: `UNICORE=n` and pinned tasks. Less work, more FreeRTOS.
+
+### ESP32-S31 bring-up (2026-09-21)
+
+`PLATFORM=esp32-s31` builds, links, boots and runs: the console is interactive over
+USB-serial-JTAG, `wap1` beacons, and `ble1` receives adverts. The part is an ESP32-S31 rev v0.0
+on a board silkscreened
+"ESP32-S31 Function-Core Board V1.0", with 16 MB flash: dual-core RV32IMAFC plus an LP core at
+300 MHz, Wi-Fi 6 on 2.4 GHz only, BT 5.4 LE, IEEE 802.15.4, and a gigabit EMAC.
+
+- **It needs ESP-IDF v6.1**, where `esp32s31` is still a preview target; v6.0.1 has no
+  `components/soc/esp32s31` at all. Only `idf.py set-target` enforces `--preview`, and the build
+  passes `-DIDF_TARGET`, so nothing had to change. `~/.espressif` now resolves to v6.1 for every
+  ESP target and no other target has been rebuilt against it.
+
+- **Hard-float ABI, shared with P4.** S31 uses `ilp32f` through the `e907` processor
+  entry; P4 uses `ilp32f` through `esp32p4`. The C2, C3, C5, C6 and H2 use `ilp32`.
+  The D object and ESP-IDF must use the same ABI.
+
+- **The ADC has no calibration scheme.** `ow_shim.c` gated on
+  `ADC_CALI_SCHEME_LINE_FITTING_SUPPORTED` and treated the `#else` as curve fitting; the S31
+  supports neither, so those types do not exist, exactly as on the H4. Now a three-way gate, and
+  the part reads raw counts until IDF ships a scheme for it.
+
+- **Verify PSRAM initialization on hardware.** Espressif specifies 16 MB PSRAM for the
+  Function-CoreBoard-1. Its BOARD profile enables octal PSRAM at the IDF default 200 MHz;
+  confirm the detected size, boot memory test and external heap on the bench board.
+
+- **The Ethernet port is dead weight.** The part has a gigabit EMAC with IEEE 1588v2 and the
+  board has an RJ45, but `urt/driver/esp32` has no EMAC driver, so nothing can reach it. This is
+  the first ESP target in the tree where that gap costs a fitted port.
+
+- **802.15.4 receives; transmit is unproven, as on the C5.** With the WpanInterface of #732,
+  `wpan0` on channel 15 comes up Running and counts real frames off the air while BLE and the AP
+  run, so `num_wpan = 1` is right. Nothing has driven the transmit path on any part.
+
+- **The heap's preferred pool is empty during startup.** Every object created between the
+  console and the first interface logs `heap.alloc: preferred pool full, fail to default` with
+  `free=0 largest=0` at `flags=2`, twice per object. Each falls back to the default pool and the
+  unit runs, and the messages stop once startup settles, but a pool that is empty from boot is
+  not doing its job on this part. It has not been compared against a C5 or an S3 boot.
+
+- **LittleFS never formats the virgin storage partition.** `Corrupted dir pair at {0x0, 0x1}`
+  at error level, then the unit falls back to the built-in `default.conf`, and the next boot
+  logs it again identically: nothing formats the partition, so a fresh board has nowhere to keep
+  a `startup.conf` or a `node.id` while `/system/sysinfo` still reports `Config: saved`. The
+  partition is subtype `spiffs`, as the C5 and C6 tables also declare, while the build mounts it
+  with `USE_LITTLEFS=1`. Seen twice on the S31 and not yet checked on another part, but nothing
+  about it looks S31-specific.
 
 ## Dated entries
 

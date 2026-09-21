@@ -149,6 +149,8 @@ void register_modules(Application app)
             register_module!(router.stream.usb_serial)(app);
         else version (ESP32_S3)
             register_module!(router.stream.usb_serial)(app);
+        else version (ESP32_S31)
+            register_module!(router.stream.usb_serial)(app);
 
         import manager.console.session;
         register_module!(manager.console.session)(app);

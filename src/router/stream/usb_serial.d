@@ -12,6 +12,8 @@ else version (ESP32_P4)
     version = USBSerialJTAG;
 else version (ESP32_S3)
     version = USBSerialJTAG;
+else version (ESP32_S31)
+    version = USBSerialJTAG;
 else version (ESP32_S2)
     version = USBCDC;
 
