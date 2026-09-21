@@ -19,6 +19,14 @@ through them and remove sections as they are absorbed.
   Account for changed node identity and fleet membership when identity files are not restored,
   and verify persistence after reboot before treating migration as complete.
 
+## 2026-09-19: `/interface/wpan` collection (802.15.4 radio)
+
+- New interface collection `wpan` on ESP32-C5, C6 and H2 builds, with the `radio` property
+  group `channel`, `tx-power`, `pan-id`, `short-address`, `extended-address`, `promiscuous` and
+  `cca`. `extended-address` is an EUI-64 (eight octets), not a MAC address; give it its own
+  formatter. Packet type `wpan` (3) now has a codec, so pcap and OW-encapsulated wpan frames
+  can appear on interfaces that relay them.
+
 ## 2026-09-17: `add` frames carry component templates
 
 - The model-plane `add` frame gains an optional `tmpl`: the authority's component template for

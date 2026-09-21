@@ -297,6 +297,9 @@
     <DCompile Include="src\driver\baremetal\wifi.d">
       <Filter>src\driver\baremetal</Filter>
     </DCompile>
+    <DCompile Include="src\driver\baremetal\wpan.d">
+      <Filter>src\driver\baremetal</Filter>
+    </DCompile>
     <DCompile Include="src\driver\ble.d">
       <Filter>src\driver</Filter>
     </DCompile>
@@ -367,6 +370,9 @@
       <Filter>src\driver</Filter>
     </DCompile>
     <DCompile Include="src\driver\wifi.d">
+      <Filter>src\driver</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\wpan.d">
       <Filter>src\driver</Filter>
     </DCompile>
     <DCompile Include="src\driver\windows\adapter_watcher.d">
@@ -568,6 +574,9 @@
       <Filter>src\router\iface</Filter>
     </DCompile>
     <DCompile Include="src\router\iface\wifi.d">
+      <Filter>src\router\iface</Filter>
+    </DCompile>
+    <DCompile Include="src\router\iface\wpan.d">
       <Filter>src\router\iface</Filter>
     </DCompile>
     <DCompile Include="src\router\port.d">
@@ -1086,6 +1095,9 @@
     <DCompile Include="third_party\urt\src\urt\driver\wifi.d">
       <Filter>third_party\urt\driver</Filter>
     </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\wpan.d">
+      <Filter>third_party\urt\driver</Filter>
+    </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\wpa\crypto.d">
       <Filter>third_party\urt\driver\wpa</Filter>
     </DCompile>
@@ -1243,6 +1255,9 @@
       <Filter>third_party\urt\driver\esp32</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\esp32\wifi.d">
+      <Filter>third_party\urt\driver\esp32</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\esp32\wpan.d">
       <Filter>third_party\urt\driver\esp32</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\freertos\fibre.d">

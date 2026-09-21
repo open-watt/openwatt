@@ -5,8 +5,8 @@ import urt.string.format : FormatArg;
 nothrow @nogc:
 
 
-enum MACAddress MACLit(string addr) = (){ MACAddress a; assert(a.fromString(addr) == a.length, "Not a mac address"); return a; }();
-enum EUI64 EUILit(string addr) = (){ EUI64 a; assert(a.fromString(addr) == a.length, "Not an eui64 address"); return a; }();
+enum MACAddress MACLit(string addr) = (){ MACAddress a; assert(a.fromString(addr) == addr.length, "Not a mac address"); return a; }();
+enum EUI64 EUILit(string addr) = (){ EUI64 a; assert(a.fromString(addr) == addr.length, "Not an eui64 address"); return a; }();
 
 alias MACAddress = EUI!48;
 alias EUI64 = EUI!64;

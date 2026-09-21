@@ -39,6 +39,7 @@ public static import router.iface.i2c;
 public static import router.iface.udp;
 public static import router.iface.vlan;
 public static import router.iface.wifi;
+public static import router.iface.wpan;
 
 nothrow @nogc:
 
