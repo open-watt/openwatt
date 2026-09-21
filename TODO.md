@@ -361,6 +361,49 @@ the commit history and linked design documents carry the implementation record.
   Switch to `IBluetoothLEDeviceStatics2.FromBluetoothAddressWithBluetoothAddressTypeAsync`.
   Blocked on testing against the car.
 
+## 802.15.4 radio (WpanInterface)
+
+- **Receive is validated on hardware; transmit is not.** On an ESP32-C5 DevKitC-1,
+  `/interface/wpan/add name=wpan0 channel=15 promiscuous=yes` comes up Running with
+  link-status up and counts real traffic off the air: 54 packets and 1,568 bytes in the first
+  minute, about 51 B/s, with zero rx-dropped. That exercises the driver opening the radio, the
+  ISR handing frames to the shim, the 16-slot ring, the MHR parser and the interface counters.
+  Still unproven: transmit with and without CCA, the tx-completion callback, and the ring under
+  burst load heavy enough to drop.
+- **Our extended-address display disagrees with the chip's EUI-64 in the middle two bytes.**
+  `esptool` reports the C5's 802.15.4 address as `10:bd:a3:ff:fe:c0:b0:ac`, the canonical
+  EUI-48-to-EUI-64 mapping that inserts `ff:fe`; `/interface/wpan/get wpan0 extended-address`
+  reads back `10:BD:A3:FE:FF:C0:B0:AC`. The driver round-trips its own bytes faithfully, so the
+  disagreement is in what `esp_read_mac(ESP_MAC_IEEE802154)` hands back: IDF composes it from
+  `ESP_MAC_EFUSE_EXT` plus the base MAC and orders that pair the other way. Settle which order
+  is on-air correct against the standard before changing anything, since the address we display
+  is also the one we hand the radio.
+- **The H2 needs the soft-float processor entry the C5 and C6 got** and does not have it: it is
+  still on `e906`, which has no atomic extension, so every `__atomic_*` libcall is undefined at
+  link. IDF builds it `rv32imac` like the others. The H2 also cannot fit the full tier at all,
+  at 2.69 MB against the 1.75 MB OTA slots of its 4 MB flash.
+
+- **WiFi coexistence on C5/C6**: the 802.15.4 radio shares the RF path with WiFi;
+  `CONFIG_ESP_COEX_SW_COEXIST_ENABLE=y` is required when both run and is not yet set.
+- **Multipurpose, fragment and extended frames are refused.** They carry their own header
+  formats, which `WpanFrame.parse` does not implement, so they count as rx-dropped and never
+  reach a capture. Zigbee, Thread and 6LoWPAN use none of them; add each format with a consumer
+  or when a capture needs it. 802.15.4-2015 IE lists are likewise left to the consumer.
+- **An elided PAN is reported as `wpan_broadcast_pan`, not resolved.** 802.15.4-2015 lets a
+  frame drop the PAN when it is the receiver's own, which Thread does routinely, so the same
+  node is learned under `0xFFFF` from those frames and under its real PAN from explicit ones.
+  The interface knows its `pan-id` and could substitute it on receive; decide that with the
+  first consumer that keys on the universal address.
+- **EUI-64 does not fit the 48-bit universal address**: extended addresses keep their low 48
+  bits, so two radios sharing an OUI alias in an address table. Decide the universal address
+  shape for 64-bit link layers before a bridge learns wpan addresses.
+- **Radio features the stack layers will need**: hardware auto-ack and frame-pending table,
+  coordinator mode, energy detect and channel scan, `receive_at`/`transmit_at`, MAC security
+  offload. Add each with its consumer (Zigbee NWK over wpan, Thread), not speculatively.
+- A rejected ISR event post (reactor ISR queue full) is retried by the next radio event or the
+  1s heartbeat; a quiet radio holds frames for up to a second after such a burst.
+- Linux backend over an nl802154/AF_IEEE802154 socket so a host can drive a USB dongle.
+
 ## Zigbee latency and robustness
 
 - **Expose scheduling validation metrics**: queue wait by PCP, deadline promotions and
@@ -807,6 +850,20 @@ this is what remains.
   read-only identities such as a port's `circuit`. Define whether this command is an explicit
   diagnostic override or should enforce the same write contract as clients (found in #718).
 
+- **`FEATURES=switch` does not link.** `driver/linux/bridge.d` and `driver/linux/wifi.d` import
+  `protocol.ip.linux_mirror.mirror_refresh_interface` unconditionally, but the switch tier drops
+  `protocol.ip`, so the symbol is undefined at link. Found while testing another branch on
+  2026-09-20; `IPV6=0 GATEWAY=0` builds clean, so it is this tier specifically. Gate the import
+  and its call sites on `has_ip`.
+
+- **`EUILit` is unusable under LDC.** Building an EUI-64 from a string literal at compile time
+  makes LDC 1.42 emit `ICE: overlapping initializers for struct literal`, from `EUI`'s union of a
+  `ulong` and a `ubyte[8]`. DMD accepts it, and every ESP build uses LDC, so the template cannot
+  be used in anything that targets hardware; use the `EUI64(0x01, ...)` constructor instead.
+  Nothing had ever instantiated it, which is also why its own length check was wrong until now.
+  The C-style `EUI64 x = { b: [...] }` initialiser is not an escape: D refuses brace initialisers
+  on a struct that declares a constructor, and `EUI` declares one.
+
 - Fix `urt.conv.parse_uint` overflow: reject values outside `ulong` range using the existing zero-consumption error contract. Revision filenames use checked `parse_int_fast`.
 
 - **Unsubscribe during packet dispatch walks a stale slice**: `BaseInterface.fire_subscribers`
@@ -1104,34 +1161,23 @@ From the PR #563 audit; the call-site rule is in AGENTS.md (pointer form only on
 
 ### ESP RISC-V bring-up (2026-09-20)
 
-The ESP32-C5 and C6 do not link. openwatt#720 landed the target-independent half (app_update,
-the S3's S32C1I atomics, C5/C6 soft-float, `-Oz` on every ESP); what is left is below, on the
-unmerged `ow/esp-riscv-bringup` branches of openwatt and urt. With those, the C5 links: every
-symbol resolves and an image is produced, though it no longer fits its slot (below). **Nothing
-on those branches has been booted**, and the one board that was flashed boot-loops, so treat all
-of it as unverified.
-
-- **Single-core RISC-V has no `xPortEnterCriticalTimeout`.** The RISC-V port defines it only
-  under `#if (configNUM_CORES > 1)`, and every ESP RISC-V part is single-core, so urt's binding
-  in `urt/internal/sys/freertos/package.d` leaves it undefined; it happens to resolve on Xtensa,
-  whose port defines it unconditionally. The branch routes `irq_disable`/`irq_enable` through a
-  C shim where the preprocessor picks the right `portENTER_CRITICAL` expansion, and drops
-  `Critical`'s FreeRTOS arm so ESP takes the bare-metal path. Two things to review: every
-  `Critical` then shares one global mux, which is correct but coarse once a second core exists,
-  and ISR callers get `portENTER_CRITICAL` rather than the `_ISR` form.
+The pinned uRT includes the single-core RISC-V critical-section and ESP task-creation
+fixes. The remaining build integration below still needs to land; in particular, the
+D-side BLE driver must agree with the ESP-IDF Bluetooth configuration. Earlier C5 hardware
+validation used additional local patches and does not validate the committed tree.
 
 - **The C5 boot-loops, cause unknown.** The image links and the bootloader hands over, then the
   app takes a `SW_CPU` reset through `esp_restart_noos_inner` and repeats. The panic text goes to
   the USB-serial-JTAG console, not the CP210x UART, so it was never captured; a diagnostic image
   with the console on UART0 builds but overflows the 3 MB slot by 31 KB with IDF logging on. The
-  critical-section change above, NimBLE init, and LittleFS mounting a SPIFFS-formatted partition
+  NimBLE init and LittleFS mounting a SPIFFS-formatted partition
   are all candidates. Get the backtrace before changing anything.
 
-- **The NimBLE driver compiles whether or not IDF has BT.** `urt/driver/esp32/ble.d` gates on the
-  chip having a radio, so the C5 and C6 emit direct `ble_gap_*`/`ble_gattc_*` calls while their
-  sdkconfig sets `CONFIG_BT_ENABLED=n`, leaving 17 undefined symbols. The C shim is gated
-  correctly; only the D side drifts. The fix is one build-owned switch feeding both languages,
-  the way `USE_SPIFFS`/`USE_LITTLEFS` already do.
+- **Enable Bluetooth in the C5/C6/H2 IDF targets.** These are Bluetooth-enabled builds, but
+  their defaults set `CONFIG_BT_ENABLED=n` and their component dependencies omit `bt`.
+  Enable BT and NimBLE and include `bt`, matching the S3 target. The C5 firmware link fails
+  on NimBLE symbols with ESP-IDF v6.1 and uRT `a8fe623`; the critical-section symbols resolve.
+  This target configuration predates #732 and is a separate build fix.
 
 - Choose an H2 feature set that fits its 1.75 MiB OTA slots; the reported 2.69 MB
   full image cannot fit a dual-OTA layout on its 4 MB flash.

@@ -80,6 +80,15 @@ Limit is the 4 MB `ota_0` partition. `ram` is internal DRAM only; PSRAM is heap.
 | 2026-09-09 | a8c75cbf | ldc 1.42.0 | 2,831,712 | 129,561 | 4,194,304 | uRT now defaults to no exceptions, removing RTTI and exception metadata |
 | 2026-09-16 | 2aa2b6a2 | ldc 1.42.0 | 2,868,288 | 130,621 | 4,194,304 | burst duty accumulates in q16, `window` retired; built with the uncommitted urt counter ABI fix (urt#296) |
 | 2026-09-20 | #720 | ldc 1.42.0 | 2,893,056 | 136,247 | 4,194,304 | first build against ESP-IDF v6.2 (master), esp-clang 21.1.3; the RAM rise is IDF v6.2 |
+| 2026-09-21 | #732 | ldc 1.42.0 | 2,903,088 | 136,079 | 4,194,304 | ESP-IDF v6.1 release; LDC 1.43 is refused on Xtensa because esp-clang 21's llc cannot read LLVM 22 bitcode |
+
+### ESP32-C5 DevKitC-1, `make esp-idf-build PLATFORM=esp32-c5 CONFIG=release`
+
+Limit is the 3.5 MB `ota_0` partition. `ram` is internal DRAM only; PSRAM is heap.
+
+| date | commit | compiler | flash | ram | limit | note |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2026-09-21 | #732 | ldc 1.43.0 | 3,195,392 | 164,903 | 3,670,016 | first row; ESP-IDF v6.1, with the 802.15.4 interface. Built with the unmerged uRT RISC-V bring-up patched in locally, without which a C5 does not link |
 
 ### SmartEVSE v3.0, `make esp-idf-build BOARD=smartevse-v30 CONFIG=release`
 

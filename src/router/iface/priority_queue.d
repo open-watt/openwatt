@@ -104,14 +104,9 @@ nothrow @nogc:
         PCP pcp = packet.pcp;
         bool dei = packet.dei;
 
-        // check total queue capacity
-        if (_queued_count >= _max_queue_depth)
-        {
-            if (!dei && !drop_lowest_dei())
-                return -1;
-            else if (dei)
-                return -1;
-        }
+        // the evicted frame's callback may resubmit into the slot it vacated
+        if (_queued_count >= _max_queue_depth && (dei || !drop_lowest_dei() || _queued_count >= _max_queue_depth))
+            return -1;
 
         QueuedFrame* frame = _pool.alloc();
         frame.packet = packet.clone();
@@ -175,11 +170,7 @@ nothrow @nogc:
             if (frame.tag == tag)
             {
                 update_time_stats(frame, timestamp);
-                if (frame.callback)
-                    frame.callback(tag, state);
-                free_frame(frame);
-                _in_flight.remove(i);
-                --_in_flight_count;
+                retire(detach_in_flight(i), state);
                 return;
             }
         }
@@ -191,25 +182,17 @@ nothrow @nogc:
         {
             if (frame.tag == tag)
             {
-                if (frame.callback)
-                    frame.callback(tag, reason);
-                free_frame(frame);
-                _in_flight.remove(i);
-                --_in_flight_count;
+                retire(detach_in_flight(i), reason);
                 return true;
             }
         }
-        foreach (ref bucket; _buckets)
+        foreach (rank, ref bucket; _buckets)
         {
             foreach (i, frame; bucket[])
             {
                 if (frame.tag == tag)
                 {
-                    if (frame.callback)
-                        frame.callback(tag, reason);
-                    free_frame(frame);
-                    bucket.remove(i);
-                    --_queued_count;
+                    retire(detach_queued(rank, i), reason);
                     return true;
                 }
             }
@@ -219,82 +202,64 @@ nothrow @nogc:
 
     void abort_all(MessageState reason = MessageState.aborted)
     {
-        foreach (ref bucket; _buckets)
+        // a callback from either phase may resubmit, into a bucket already drained
+        while (_queued_count != 0 || _in_flight.length != 0)
         {
-            foreach (frame; bucket[])
+            foreach (rank, ref bucket; _buckets)
             {
-                if (frame.callback)
-                    frame.callback(frame.tag, reason);
-                free_frame(frame);
+                while (bucket.length != 0)
+                    retire(detach_queued(rank, 0), reason);
             }
-            bucket.clear();
+            abort_all_in_flight(reason);
         }
-        _queued_count = 0;
-
-        foreach (frame; _in_flight[])
-        {
-            if (frame.callback)
-                frame.callback(frame.tag, reason);
-            free_frame(frame);
-        }
-        _in_flight.clear();
-        _in_flight_count = 0;
     }
 
     void abort_all_in_flight(MessageState reason = MessageState.aborted)
     {
-        foreach (frame; _in_flight[])
-        {
-            if (frame.callback)
-                frame.callback(frame.tag, reason);
-            free_frame(frame);
-        }
-        _in_flight.clear();
-        _in_flight_count = 0;
+        while (_in_flight.length != 0)
+            retire(detach_in_flight(0), reason);
     }
 
     void timeout_stale(MonoTime now)
     {
         promote_due(now);
+        while (QueuedFrame* frame = detach_expired(now))
+            retire(frame, MessageState.expired);
+        while (QueuedFrame* frame = detach_timed_out(now))
+            retire(frame, MessageState.timeout);
+    }
 
-        foreach (ref bucket; _buckets)
+    bool next_due(out MonoTime when) const pure
+    {
+        bool any;
+        void consider(MonoTime t)
         {
-            size_t i = 0;
-            while (i < bucket.length)
-            {
-                QueuedFrame* frame = bucket[i];
-                if ((frame.deadline_after != 0 && packet_age_ms(frame, now) >= frame.deadline_after) ||
-                    (_queue_timeout != Duration() && (now - frame.enqueue_time) > _queue_timeout))
-                {
-                    if (frame.callback)
-                        frame.callback(frame.tag, MessageState.expired);
-                    free_frame(frame);
-                    bucket.remove(i);
-                    --_queued_count;
-                }
-                else
-                    ++i;
-            }
+            if (!any || t < when)
+                when = t;
+            any = true;
         }
 
+        foreach (rank, ref bucket; _buckets)
+        {
+            foreach (frame; bucket[])
+            {
+                if (frame.deadline_after != 0)
+                {
+                    uint after = frame.deadline_after;
+                    if (!frame.priority_escalated && frame.priority_escalation_after < after && pcp_priority_map[frame.urgent_pcp] > rank)
+                        after = frame.priority_escalation_after;
+                    consider(frame.packet.creation_time + after.msecs);
+                }
+                if (_queue_timeout != Duration())
+                    consider(frame.enqueue_time + _queue_timeout);
+            }
+        }
         if (_transport_timeout != Duration())
         {
-            size_t i = 0;
-            while (i < _in_flight.length)
-            {
-                QueuedFrame* frame = _in_flight[i];
-                if ((now - frame.dispatch_time) > _transport_timeout)
-                {
-                    if (frame.callback)
-                        frame.callback(frame.tag, MessageState.timeout);
-                    free_frame(frame);
-                    _in_flight.remove(i);
-                    --_in_flight_count;
-                }
-                else
-                    ++i;
-            }
+            foreach (frame; _in_flight[])
+                consider(frame.dispatch_time + _transport_timeout);
         }
+        return any;
     }
 
 private:
@@ -367,11 +332,7 @@ private:
             {
                 if (frame.dei)
                 {
-                    if (frame.callback)
-                        frame.callback(frame.tag, MessageState.dropped);
-                    free_frame(frame);
-                    _buckets[rank].remove(i);
-                    --_queued_count;
+                    retire(detach_queued(rank, i), MessageState.dropped);
                     return true;
                 }
             }
@@ -379,16 +340,58 @@ private:
         return false;
     }
 
-    void free_frame(QueuedFrame* frame)
+    QueuedFrame* detach_queued(size_t rank, size_t i)
     {
-        _tags.free(frame.tag);
-        if (frame.packet)
+        QueuedFrame* frame = _buckets[rank][i];
+        _buckets[rank].remove(i);
+        --_queued_count;
+        return frame;
+    }
+
+    QueuedFrame* detach_in_flight(size_t i)
+    {
+        QueuedFrame* frame = _in_flight[i];
+        _in_flight.remove(i);
+        --_in_flight_count;
+        return frame;
+    }
+
+    QueuedFrame* detach_expired(MonoTime now)
+    {
+        foreach (rank, ref bucket; _buckets)
         {
-            frame.packet.free_clone();
-            frame.packet = null;
+            foreach (i, frame; bucket[])
+            {
+                if ((frame.deadline_after != 0 && packet_age_ms(frame, now) >= frame.deadline_after) ||
+                    (_queue_timeout != Duration() && (now - frame.enqueue_time) >= _queue_timeout))
+                    return detach_queued(rank, i);
+            }
         }
-        frame.callback = null;
+        return null;
+    }
+
+    QueuedFrame* detach_timed_out(MonoTime now)
+    {
+        if (_transport_timeout == Duration())
+            return null;
+        foreach (i, frame; _in_flight[])
+        {
+            if ((now - frame.dispatch_time) >= _transport_timeout)
+                return detach_in_flight(i);
+        }
+        return null;
+    }
+
+    // Detach and free before re-entry; reserve the tag until the caller finishes its bookkeeping.
+    void retire(QueuedFrame* frame, MessageState state)
+    {
+        MessageCallback callback = frame.callback;
+        ubyte tag = frame.tag;
+        frame.packet.free_clone();
         _pool.free(frame);
+        if (callback)
+            callback(tag, state);
+        _tags.free(tag);
     }
 }
 
@@ -433,9 +436,13 @@ unittest
 
     int deadline_tag = queue.enqueue(deadline_packet, null, &deadline);
     assert(deadline_tag > 0);
+    MonoTime due;
+    assert(queue.next_due(due) && due == base + 100.msecs);
     queue.timeout_stale(base + 100.msecs);
+    assert(queue.next_due(due) && due == base + 200.msecs);
     QueuedFrame* promoted = queue.dequeue();
     assert(promoted !is null);
+    assert(!queue.next_due(due));
     assert(promoted.tag == deadline_tag);
     assert(promoted.pcp == PCP.ic);
     assert(promoted.packet.pcp == PCP.ca);
@@ -476,4 +483,146 @@ unittest
     assert(!queue.is_queued(cast(ubyte)next_background_tag));
 
     queue.abort_all();
+
+    // a terminal callback may resubmit and re-enter: the frame it reports is already gone
+    static struct Resubmit
+    {
+    nothrow @nogc:
+        PriorityPacketQueue* queue;
+        Packet* replacement;
+        MonoTime now;
+        int calls;
+        int replacement_tag;
+
+        void terminal(int tag, MessageState state)
+        {
+            ++calls;
+            assert(!queue.is_queued(cast(ubyte)tag) && queue.find_in_flight(cast(ubyte)tag) is null);
+            if (calls == 1)
+            {
+                replacement_tag = queue.enqueue(*replacement);
+                queue.timeout_stale(now);
+            }
+        }
+    }
+    Resubmit r;
+    r.queue = &queue;
+    r.replacement = &routine;
+    r.now = base + 1000.msecs;
+    assert(queue.enqueue(deadline_packet, &r.terminal, &deadline) > 0);
+    queue.timeout_stale(r.now);
+    assert(r.calls == 1 && queue.is_queued(cast(ubyte)r.replacement_tag));
+
+    r.calls = 0;
+    assert(queue.enqueue(deadline_packet, &r.terminal, &deadline) > 0);
+    queue.abort_all();
+    assert(r.calls == 1 && !queue.has_pending);
+
+    // the same from an in-flight frame's abort
+    r.calls = 0;
+    assert(queue.enqueue(important, &r.terminal) > 0);
+    assert(queue.dequeue() !is null);
+    queue.abort_all();
+    assert(r.calls == 1 && !queue.has_pending && queue.in_flight_count == 0);
+
+    // an evicted frame's callback refills its slot: the outer enqueue is refused, not admitted over the bound
+    r.calls = 0;
+    assert(queue.enqueue(background, &r.terminal) > 0);
+    foreach (i; 1 .. 32)
+        assert(queue.enqueue(routine) > 0);
+    assert(queue.enqueue(important) < 0);
+    size_t depth;
+    foreach (pcp; 0 .. 8)
+        depth += queue.queue_depth(cast(PCP)pcp);
+    assert(r.calls == 1 && depth == 32);
+    queue.abort_all();
+}
+
+unittest
+{
+    static struct Completion
+    {
+    nothrow @nogc:
+        PriorityPacketQueue* queue;
+        Packet* packet;
+        int replacement;
+        uint calls;
+
+        void done(int tag, MessageState)
+        {
+            ++calls;
+            assert(!queue.is_queued(cast(ubyte)tag));
+            assert(queue.find_in_flight(cast(ubyte)tag) is null);
+            assert(!queue.abort(cast(ubyte)tag));
+            queue.complete(cast(ubyte)tag);
+            replacement = queue.enqueue(*packet);
+            assert(replacement > 0 && replacement != tag);
+        }
+    }
+
+    foreach (mode; 0 .. 8)
+    {
+        ubyte[1] data;
+        Packet packet;
+        packet.init!RawFrame(data[]);
+        PriorityPacketQueue queue;
+        queue.init(1);
+        Completion completion;
+        completion.queue = &queue;
+        completion.packet = &packet;
+        packet.pcp = PCP.bk;
+        packet.dei = true;
+        int first = queue.enqueue(packet, &completion.done);
+        assert(first == 1);
+        packet.pcp = PCP.be;
+        packet.dei = false;
+        if (mode == 0 || mode == 2 || mode == 4 || mode == 7)
+            assert(queue.dequeue() !is null);
+
+        // Wrap the allocator while the first frame still owns tag 1.
+        foreach (i; 0 .. (mode == 5 ? 223 : 254))
+        {
+            int tag = queue.enqueue(packet);
+            assert(tag > 0);
+            assert(queue.abort(cast(ubyte)tag));
+        }
+
+        MonoTime due;
+        switch (mode)
+        {
+            case 0:
+                queue.complete(cast(ubyte)first);
+                break;
+            case 1, 2:
+                assert(queue.abort(cast(ubyte)first));
+                break;
+            case 3:
+                queue.set_queue_timeout(1.msecs);
+                assert(queue.next_due(due));
+                queue.timeout_stale(due);
+                break;
+            case 4:
+                queue.set_transport_timeout(1.msecs);
+                assert(queue.next_due(due));
+                queue.timeout_stale(due);
+                break;
+            case 5:
+                foreach (i; 1 .. 32)
+                    assert(queue.enqueue(packet) > 0);
+                assert(queue.enqueue(packet) < 0);
+                break;
+            case 6:
+                queue.abort_all();
+                break;
+            case 7:
+                queue.abort_all_in_flight();
+                break;
+            default:
+                assert(false);
+        }
+        assert(completion.calls == 1);
+        assert(queue.is_queued(cast(ubyte)completion.replacement) == (mode != 6));
+        queue.abort_all();
+        assert(!queue.has_pending && queue.in_flight_count == 0);
+    }
 }

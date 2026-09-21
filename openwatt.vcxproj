@@ -79,6 +79,7 @@
     <DCompile Include="src\driver\baremetal\system.d" />
     <DCompile Include="src\driver\baremetal\watchdog.d" />
     <DCompile Include="src\driver\baremetal\wifi.d" />
+    <DCompile Include="src\driver\baremetal\wpan.d" />
     <DCompile Include="src\driver\ble.d" />
     <DCompile Include="src\driver\boards\smartevse\binding.d" />
     <DCompile Include="src\driver\boards\smartevse\display.d" />
@@ -116,6 +117,7 @@
     <DCompile Include="src\driver\system.d" />
     <DCompile Include="src\driver\watchdog.d" />
     <DCompile Include="src\driver\wifi.d" />
+    <DCompile Include="src\driver\wpan.d" />
     <DCompile Include="src\driver\windows\adapter_watcher.d" />
     <DCompile Include="src\driver\windows\ethernet.d" />
     <DCompile Include="src\driver\windows\iphlpapi.d" />
@@ -314,6 +316,7 @@
     <DCompile Include="src\router\iface\udp.d" />
     <DCompile Include="src\router\iface\vlan.d" />
     <DCompile Include="src\router\iface\wifi.d" />
+    <DCompile Include="src\router\iface\wpan.d" />
     <DCompile Include="src\router\pcap.d" />
     <DCompile Include="src\router\pcap_server.d" />
     <DCompile Include="src\router\port.d" />
@@ -395,6 +398,7 @@
     <DCompile Include="third_party\urt\src\urt\fs\littlefs.d" />
     <DCompile Include="third_party\urt\src\urt\fs\spiffs.d" />
     <DCompile Include="third_party\urt\src\urt\driver\wifi.d" />
+    <DCompile Include="third_party\urt\src\urt\driver\wpan.d" />
     <DCompile Include="third_party\urt\src\urt\driver\wpa\authenticator.d" />
     <DCompile Include="third_party\urt\src\urt\driver\wpa\crypto.d" />
     <DCompile Include="third_party\urt\src\urt\driver\wpa\eapol.d" />
@@ -1046,6 +1050,20 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\esp32\wifi.d">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\esp32\wpan.d">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>

@@ -692,6 +692,28 @@ This collection represents physical radios; WLAN and AP interfaces bind to them.
 | `netdev` | read-only | Linux netdev name | empty | Primary Linux virtual interface adopted or created for the radio. |
 | `adapter` | read/write | Windows adapter name | required on Windows | Physical Windows WiFi adapter to manage. |
 
+### `/interface/wpan`
+
+The raw IEEE 802.15.4 radio, present on the ESP32-C5, C6 and H2. On its own it delivers the beacon,
+data, acknowledgement and command frames it hears as `wpan` packets and transmits frames handed to
+it; Zigbee and Thread will layer on top. Multipurpose, fragment and extended frames are not parsed
+and count as `rx-dropped`. With the default `pan-id` and `short-address` the radio has no network
+identity, so only broadcast frames and `promiscuous` capture reach the interface.
+
+| Property | Access | Values | Default | Description |
+| --- | --- | --- | --- | --- |
+| `channel` | read/write | `11` to `26` | required | 2.4GHz O-QPSK channel. A value outside the range is stored and holds the interface out of Running. |
+| `tx-power` | read/write | dBm | `0` | Requested transmit power; `0` selects the platform default. |
+| `pan-id` | read/write | `0x0000` to `0xFFFF` | `0xFFFF` | PAN the radio filters on; `0xFFFF` is the broadcast PAN. |
+| `short-address` | read/write | `0x0000` to `0xFFFF` | `0xFFFE` | 16-bit MAC address; `0xFFFE` means none assigned. |
+| `extended-address` | read/write | EUI-64 | factory EUI-64 | 64-bit MAC address; reports the factory address until one is assigned. |
+| `promiscuous` | read/write | boolean | `false` | Receives every frame regardless of address, with hardware acknowledgement off. |
+| `cca` | read/write | boolean | `true` | Clear-channel assessment before each transmission. |
+
+```text
+/interface/wpan/add name=wpan0 channel=15 promiscuous=yes
+```
+
 ### `/interface/wlan`
 
 A WLAN interface is one station association bound to a WiFi radio.

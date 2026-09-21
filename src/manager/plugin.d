@@ -158,10 +158,13 @@ void register_modules(Application app)
         register_module!(router.iface.bridge)(app);
         register_module!(router.iface.i2c)(app);
         register_module!(router.iface.wifi)(app);
+        register_module!(router.iface.wpan)(app);
 
-        import driver.ethernet, driver.wifi;
+        import driver.ethernet, driver.wifi, driver.wpan;
         register_module!(driver.ethernet)(app);
         register_module!(driver.wifi)(app);
+        static if (is(WpanModule))
+            register_module!(driver.wpan)(app);
     }
 
     static if (has_all)
