@@ -509,6 +509,7 @@ public:
             return;
         release_register();
         _latest.u = 0;
+        _status &= ~Flags.unrecorded;
         _format = value.valid ? cast(ushort)(value + 1) : 0;
     }
 
@@ -557,24 +558,23 @@ public:
     }
 
     // Wide records don't fit the Scalar register. Without a store the register points at one
-    // owned stride-sized buffer, overwritten in place; with a store latest is the open bucket's
-    // tail record.
+    // owned stride-sized buffer, overwritten in place; once the store holds a record latest is
+    // the open bucket's tail record.
     const(void)[] tail_record() const pure
     {
         if (!format.valid || !data_format.is_wide)
             return null;
-        if (!_history)
+        if (_history && _history.buckets.length)
         {
-            const(void)* held = wide_register();
-            return held ? held[0 .. data_format.stride] : null;
+            const(Bucket)* b = _history.buckets[$-1];
+            if (b.count && b.samples)
+            {
+                ubyte stride = format_info(b.format).stride;
+                return (cast(const(ubyte)*)b.samples)[(b.count - 1) * stride .. b.count * stride];
+            }
         }
-        if (!_history.buckets.length)
-            return null;
-        const(Bucket)* b = _history.buckets[$-1];
-        if (!b.count || !b.samples)
-            return null;
-        ubyte stride = format_info(b.format).stride;
-        return (cast(const(ubyte)*)b.samples)[(b.count - 1) * stride .. b.count * stride];
+        const(void)* held = wide_register();
+        return held ? held[0 .. data_format.stride] : null;
     }
 
     void store_sample(T)(T v, SysTime t = getSysTime(), Subscriber who = null)
@@ -731,7 +731,6 @@ public:
                 {
                     SysTime[1] held_time = _last_update;
                     append(wide_register()[0 .. data_format.stride], held_time[]);
-                    release_register();
                 }
             }
         }
@@ -930,6 +929,7 @@ private:
     {
         gap_open     = 1 << 5,
         dirty_listed = 1 << 6,
+        unrecorded   = 1 << 7,  // the scalar register holds a value history could not record
     }
 
     ubyte[max_bindings] _bindings;
@@ -1009,7 +1009,7 @@ private:
     // held series: an equal observation only advances the timestamps
     bool held_repeat(bool equal, SysTime t)
     {
-        if (data_format.kind != SeriesKind.held || _last_update == SysTime() || !equal)
+        if (data_format.kind != SeriesKind.held || _last_update == SysTime() || !equal || (_status & Flags.unrecorded))
             return false;
         if (t > _last_update)
             _last_update = t;
@@ -1028,21 +1028,20 @@ private:
     {
         debug assert(update.element is &this);
         debug assert(update.count != 0);
-        debug assert(data_format.is_scalar || data_format.is_wide,
-                     "managed records require typed sample handling");
+        debug assert(data_format.is_scalar || data_format.is_wide, "managed records require typed sample handling");
         prepare_before(update);
-        apply(update);
+        if (!apply(update))
+            return;
         prepare_after(update);
         submit(update, batch);
     }
 
-    void apply(ref SampleUpdate update)
+    bool apply(ref SampleUpdate update)
     {
         if (data_format.is_scalar)
         {
             _latest.u = 0;
-            _latest.raw[0 .. data_format.stride] =
-                (cast(const(ubyte)[])update.records)[$ - data_format.stride .. $];
+            _latest.raw[0 .. data_format.stride] = (cast(const(ubyte)[])update.records)[$ - data_format.stride .. $];
         }
         else if (!_history)
         {
@@ -1051,16 +1050,17 @@ private:
             set_wide_register((cast(const(ubyte)[])update.records)[$ - data_format.stride .. $]);
         }
 
-        if (update.times.length)
+        bool recorded = update.times.length ? append(update.records, update.times) : append(update.records, update.ticks);
+        if (!recorded)
         {
-            _last_update = update.times[$-1];
-            append(update.records, update.times);
+            writeWarning("series record dropped (allocation failed): element '", id, "'");
+            if (data_format.is_wide)    // the store held the only copy of a wide value
+                return false;
+            _status |= Flags.unrecorded;
+            mark_dirty();
         }
-        else
-        {
-            _last_update = data_format.clock.to_wall(update.ticks[$-1]);
-            append(update.records, update.ticks);
-        }
+        _last_update = update.times.length ? update.times[$-1] : data_format.clock.to_wall(update.ticks[$-1]);
+        return true;
     }
 
     // `handle` is the caller's String when it has one: with no store the register keeps it
@@ -1143,7 +1143,6 @@ private:
         }
     }
 
-    // retiring the tail seals it, so the record's heap entry is secured before anything retires
     bool append_text(const(char)[] v, ulong tick)
     {
         bool follows_gap = (_status & Flags.gap_open) != 0;
@@ -1151,8 +1150,7 @@ private:
         Bucket* tail = h.buckets.length ? h.buckets[$-1] : null;
 
         bool format_changed = tail && tail.format != format;
-        bool roll = !tail || tail.count + 1 > tail.capacity || follows_gap || format_changed
-                 || (tail.count && tick - tail.first_tick > uint.max);
+        bool roll = !tail || tail.count + 1 > tail.capacity || follows_gap || format_changed || (tail.count && tick - tail.first_tick > uint.max);
         uint entry = uint.max;
         if (!roll)
         {
@@ -1162,27 +1160,15 @@ private:
         }
 
         Bucket* b = roll ? alloc_bucket(text_bucket_capacity) : tail;
+        if (!b)
+            return false;
         if (entry == uint.max)
-        {
             entry = add_heap_entry(*b, v);
-            if (entry == uint.max)
-            {
-                if (roll)
-                    h.free_bucket(b);
-                return false;
-            }
-        }
-        if (roll)
+        if (entry == uint.max || (roll && !publish_bucket(b, tail, follows_gap, format_changed)))
         {
-            if (tail)
-            {
-                retire_tail(tail);
-                if (format_changed)
-                    fire_format_change();
-            }
-            b.first_index = h.head;
-            b.follows_gap = follows_gap;
-            h.buckets ~= b;
+            if (roll)
+                h.free_bucket(b);
+            return false;
         }
         _status &= ~Flags.gap_open;
 
@@ -1247,7 +1233,7 @@ private:
         return offset;
     }
 
-    ulong append(const(void)[] samples, const(SysTime)[] times)
+    bool append(const(void)[] samples, const(SysTime)[] times)
     {
         import urt.mem : alloca;
 
@@ -1263,7 +1249,7 @@ private:
         return append_block(samples, unix_time_ns(times[0]) / 1000, ts);
     }
 
-    ulong append(const(void)[] samples, const(ulong)[] ticks)
+    bool append(const(void)[] samples, const(ulong)[] ticks)
     {
         import urt.mem : alloca;
 
@@ -1281,19 +1267,18 @@ private:
 
     // t0 is the batch base tick, ts the batch-relative offsets; empty ts = regular series,
     // where the record index is the offset
-    ulong append_block(const(void)[] samples, ulong t0, const(uint)[] ts)
+    bool append_block(const(void)[] samples, ulong t0, const(uint)[] ts)
     {
         ubyte stride = data_format.stride;
         uint n = cast(uint)(samples.length / stride);
         assert(ts.length == 0 || ts.length == n, "times array must match sample count");
 
         bool follows_gap = (_status & Flags.gap_open) != 0;
-        _status &= ~Flags.gap_open;
-
-        ulong first_index = ulong.max;
         if (_history)
         {
             Bucket* b = writable_bucket(n, follows_gap, t0 + (ts.length ? ts[$-1] : 0));
+            if (!b)
+                return false;
             (cast(ubyte*)b.samples)[b.count*stride .. (b.count + n)*stride] = cast(const(ubyte)[])samples[];
             if (b.count == 0)
                 b.first_tick = t0;
@@ -1306,52 +1291,64 @@ private:
             b.count += n;
             b.last_offset = b.offsets ? b.offsets[b.count - 1] : b.count - 1;
 
-            first_index = _history.head;
             _history.head += n;
+            if (data_format.is_wide && wide_register())
+                release_register();
             evict_over_budget();
         }
+        _status &= ~(Flags.gap_open | Flags.unrecorded);
 
         mark_dirty();
-        return first_index;
+        return true;
 
         // TODO: reactor-thread producers must defer observer dispatch and dirty marking to the main loop
     }
 
     Bucket* writable_bucket(uint n, bool follows_gap, ulong max_tick)
     {
-        Bucket* b = _history.buckets.length ? _history.buckets[$-1] : null;
+        Bucket* tail = _history.buckets.length ? _history.buckets[$-1] : null;
         // roll when the new block's offset from this bucket's base would exceed the uint offset field:
         // a slow stream spanning >~71 min at 1 MHz, or a base discontinuity that would underflow it
-        bool overflow = b && b.offsets && b.count && max_tick - b.first_tick > uint.max;
-        bool format_changed = b && b.format != format;
-        if (!b || b.count + n > b.capacity || follows_gap || overflow || format_changed)
+        bool overflow = tail && tail.offsets && tail.count && max_tick - tail.first_tick > uint.max;
+        bool format_changed = tail && tail.format != format;
+        if (tail && !(tail.count + n > tail.capacity || follows_gap || overflow || format_changed))
+            return tail;
+        Bucket* b = alloc_bucket(n > bucket_capacity ? n : bucket_capacity);
+        if (b && !publish_bucket(b, tail, follows_gap, format_changed))
         {
-            if (b)
-            {
-                retire_tail(b);
-                if (format_changed)
-                    fire_format_change();
-            }
-            b = alloc_bucket(n > bucket_capacity ? n : bucket_capacity);
-            b.first_index = _history.head;
-            b.follows_gap = follows_gap;
-            _history.buckets ~= b;
+            _history.free_bucket(b);
+            b = null;
         }
         return b;
     }
 
+    // every bucket behind the tail is sealed, so the new one must be ready before the tail
+    // retires; on false the tail is untouched and the caller still owns b
+    bool publish_bucket(Bucket* b, Bucket* tail, bool follows_gap, bool format_changed)
+    {
+        if (tail)
+        {
+            if (!retire_tail(tail))
+                return false;
+            if (format_changed)
+                fire_format_change();
+        }
+        b.first_index = _history.head;
+        b.follows_gap = follows_gap;
+        _history.buckets ~= b;
+        return true;
+    }
+
     // roll the tail out of the write path: a non-empty tail seals, an empty one is recycled
     // so sealed buckets always carry records
-    void retire_tail(Bucket* b)
+    bool retire_tail(Bucket* b)
     {
         debug assert(_history.buckets.length && _history.buckets[$-1] is b);
         if (b.count || b.sealed)
-            _history.seal(b);
-        else
-        {
-            _history.free_bucket(b);
-            _history.buckets.popBack();
-        }
+            return _history.seal(b);
+        _history.free_bucket(b);
+        _history.buckets.popBack();
+        return true;
     }
 
     void fire_format_change()
@@ -1445,14 +1442,29 @@ private:
 
     Bucket* alloc_bucket(uint capacity)
     {
+        version (unittest)
+        {
+            if (g_fail_bucket_alloc)
+                return null;
+        }
         Bucket* b = cast(Bucket*)alloc(Bucket.sizeof).ptr;
+        if (!b)
+            return null;
         *b = Bucket.init;
         b.format = format;
         b.capacity = capacity;
         b.samples = alloc(capacity * data_format.stride, MemFlags.slow).ptr;
         if (!data_format.regular)
             b.offsets = cast(uint*)alloc(capacity * uint.sizeof, MemFlags.slow).ptr;
-        return b;
+        if (b.samples && (b.offsets || data_format.regular))
+            return b;
+        // not free_bucket: its drop_raw treats a null samples plane as already dropped
+        if (b.samples)
+            free(b.samples[0 .. capacity * data_format.stride]);
+        if (b.offsets)
+            free((cast(void*)b.offsets)[0 .. capacity * uint.sizeof]);
+        free((cast(void*)b)[0 .. Bucket.sizeof]);
+        return null;
     }
 
     void mark_dirty()
@@ -1632,6 +1644,7 @@ unittest
 version (unittest)
 {
     private __gshared bool g_fail_heap_grow;
+    private __gshared bool g_fail_bucket_alloc;
 
     // byte-level RLE test codec: [run u8][value u8]*; enough to exercise pack/reconstitute
     private __gshared bool g_rle_codec_on;
@@ -2171,9 +2184,143 @@ unittest
         assert(ft._history.buckets[0].sealed && ft._history.buckets[1].follows_gap);
         assert(ft.text_value == "b" && counter.calls == after_gap + 1);
 
+        // a tail that cannot seal keeps the write path; nothing is published behind it
+        ft.mark_gap();
+        uint before_seal = counter.calls;
+        g_fail_seal = true;
+        ft.write_sample("c", from_unix_time_ns(5_000));
+        g_fail_seal = false;
+        assert(ft.record_count == 2 && ft.bucket_count == 2 && !ft._history.buckets[1].sealed);
+        assert(ft.text_value == "b" && ft.last_update == from_unix_time_ns(4_000));
+        assert(counter.calls == before_seal);
+
         ft.unsubscribe(&counter.receive);
         ft.teardown();
         free(counter);
+    }
+
+    // a numeric roll that cannot allocate or seal leaves the tail open and the gap pending; a
+    // scalar's value still lands in the register, so only its history record is lost
+    {
+        static immutable DataFormat f64_sampled_ft = DataFormat(ValueType.f64, SeriesKind.sampled);
+        Element fn;
+        fn.format = register_format(f64_sampled_ft);
+        fn.ensure_history();
+        UpdateCounter counter = alloc!UpdateCounter();
+        fn.subscribe(&counter.receive);
+
+        fn.write_sample(1.0, from_unix_time_ns(1_000));
+        fn.mark_gap();
+        uint before = counter.calls;
+        g_fail_bucket_alloc = true;
+        fn.write_sample(2.0, from_unix_time_ns(2_000));
+        g_fail_bucket_alloc = false;
+        assert(fn.record_count == 1 && fn.bucket_count == 1 && !fn._history.buckets[0].sealed);
+        assert(fn.latest_record.f64_ == 2.0 && fn.last_update == from_unix_time_ns(2_000));
+        assert(counter.calls == before + 1);
+
+        fn.write_sample(3.0, from_unix_time_ns(3_000));
+        assert(fn.record_count == 2 && fn.bucket_count == 2);
+        assert(fn._history.buckets[0].sealed && fn._history.buckets[1].follows_gap);
+
+        fn.mark_gap();
+        g_fail_seal = true;
+        fn.write_sample(4.0, from_unix_time_ns(4_000));
+        g_fail_seal = false;
+        assert(fn.record_count == 2 && fn.bucket_count == 2 && !fn._history.buckets[1].sealed);
+        assert(fn.latest_record.f64_ == 4.0);
+
+        fn.unsubscribe(&counter.receive);
+        fn.teardown();
+        free(counter);
+    }
+
+    // a held scalar the register shows but history missed is retried by the next equal
+    // observation, and the accepted value still reaches the live feed
+    {
+        static immutable DataFormat f64_held_ft = DataFormat(ValueType.f64, SeriesKind.held);
+        Element fs;
+        fs.format = register_format(f64_held_ft);
+        fs.ensure_history();
+        fs.write_sample(1.0, from_unix_time_ns(1_000));
+        fs.mark_gap();
+
+        uint dirty_visits;
+        void count_dirty(ref Element) nothrow @nogc { ++dirty_visits; }
+        sweep_dirty(&count_dirty);
+        dirty_visits = 0;
+        add_feed_listener();
+        g_fail_bucket_alloc = true;
+        fs.write_sample(2.0, from_unix_time_ns(2_000));
+        g_fail_bucket_alloc = false;
+        remove_feed_listener();
+        sweep_dirty(&count_dirty);
+        assert(dirty_visits == 1);
+        assert(fs.record_count == 1 && fs.latest_record.f64_ == 2.0);
+
+        fs.write_sample(2.0, from_unix_time_ns(3_000));
+        assert(fs.record_count == 2 && fs.bucket_count == 2 && fs._history.buckets[1].follows_gap);
+
+        fs.write_sample(2.0, from_unix_time_ns(4_000));   // recorded now, so the repeat is held again
+        assert(fs.record_count == 2 && fs.last_update == from_unix_time_ns(4_000));
+        fs.teardown();
+
+        // the retry belongs to the scalar register, so a new format that discards it drops it too
+        Element fc;
+        fc.format = register_format(f64_held_ft);
+        fc.ensure_history();
+        g_fail_bucket_alloc = true;
+        fc.write_sample(2.0, from_unix_time_ns(1_000));
+        g_fail_bucket_alloc = false;
+        assert(fc.record_count == 0);
+        fc.format = register_format(text_fmt);
+        fc.write_sample("a", from_unix_time_ns(2_000));
+        fc.write_sample("a", from_unix_time_ns(3_000));
+        assert(fc.record_count == 1 && fc.text_value == "a");
+        fc.teardown();
+    }
+
+    // a wide value kept in a store has no other copy, so a record that cannot land is no update
+    {
+        DataFormat wide_ft = DataFormat(ValueType.u8, SeriesKind.held);
+        wide_ft.count = 32;
+        ubyte[32] w1, w2;
+        foreach (i, ref byt; w1)
+            byt = cast(ubyte)i;
+        w2[] = 0xAA;
+
+        Element fw;
+        fw.format = register_format(wide_ft);
+        fw.ensure_history();
+        UpdateCounter counter = alloc!UpdateCounter();
+        fw.subscribe(&counter.receive);
+
+        fw.write_record(w1[], from_unix_time_ns(1_000));
+        fw.mark_gap();
+        uint before = counter.calls;
+        g_fail_bucket_alloc = true;
+        fw.write_record(w2[], from_unix_time_ns(2_000));
+        g_fail_bucket_alloc = false;
+        assert(fw.record_count == 1 && cast(const(ubyte)[])fw.tail_record == w1[]);
+        assert(fw.last_update == from_unix_time_ns(1_000) && counter.calls == before);
+
+        fw.unsubscribe(&counter.receive);
+        fw.teardown();
+        free(counter);
+
+        // a held wide value the store could not take stays the value until a write supersedes it
+        Element fk;
+        fk.format = register_format(wide_ft);
+        fk.write_record(w1[], from_unix_time_ns(1_000));
+        g_fail_bucket_alloc = true;
+        fk.ensure_history();
+        g_fail_bucket_alloc = false;
+        assert(fk.record_count == 0 && cast(const(ubyte)[])fk.tail_record == w1[]);
+
+        fk.write_record(w2[], from_unix_time_ns(2_000));
+        assert(fk.record_count == 1 && cast(const(ubyte)[])fk.tail_record == w2[]);
+        assert(fk.wide_register() is null);
+        fk.teardown();
     }
 
     // a held value the store could not take stays the value until a later write supersedes it

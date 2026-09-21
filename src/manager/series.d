@@ -758,16 +758,23 @@ nothrow @nogc:
 
     // retire the open tail: shrink the builder planes into one immutable image in
     // [offsets | records | heap] order, byte-identical to the ows payload
-    void seal(Bucket* b)
+    bool seal(Bucket* b)
     {
         if (b.sealed)
-            return;
+            return true;
         debug assert(b.count, "empty buckets are recycled, not sealed");
         const(DataFormat)* fmt = format_info(b.format);
         uint offs_bytes = b.offsets ? b.count * cast(uint)uint.sizeof : 0;
         uint rec_bytes = b.count * fmt.stride;
         uint total = offs_bytes + rec_bytes + b.heap_used;
+        version (unittest)
+        {
+            if (g_fail_seal)
+                return false;
+        }
         void[] img = alloc(total, MemFlags.slow);
+        if (!img.ptr)
+            return false;
         ubyte* p = cast(ubyte*)img.ptr;
         p[0 .. offs_bytes] = (cast(const(ubyte)*)b.offsets)[0 .. offs_bytes];
         p[offs_bytes .. offs_bytes + rec_bytes] = (cast(const(ubyte)*)b.samples)[0 .. rec_bytes];
@@ -785,6 +792,7 @@ nothrow @nogc:
         b.heap_capacity = b.heap_used;
         // pack now if nothing borrows the raw side; otherwise the last release_ref packs
         try_pack(b);
+        return true;
     }
 
     // packing only reads the raw side, so it may run on any sealed bucket regardless of
@@ -805,10 +813,18 @@ nothrow @nogc:
             if (!g_codecs[i].match || !g_codecs[i].match(*fmt, blk))
                 continue;
             void[] dst = alloc(img.length, MemFlags.slow);
+            if (!dst.ptr)
+                return;     // no memory is not the codec declining; a later try may pack it
             ptrdiff_t packed_size = g_codecs[i].pack(blk, img, dst);
             if (packed_size > 0 && packed_size < img.length)
             {
-                b.packed = realloc(dst, packed_size).ptr;
+                void[] shrunk = realloc(dst, packed_size);
+                if (!shrunk.ptr)
+                {
+                    free(dst);
+                    return;
+                }
+                b.packed = shrunk.ptr;
                 b.packed_bytes = cast(uint)packed_size;
                 b.codec = cast(ubyte)(first_registered_codec + i);
                 if (!b.refs)
@@ -843,6 +859,8 @@ nothrow @nogc:
                 return false;
             debug assert(b.packed_bytes, "flushed bucket lost its payload size");
             fetched = alloc(b.packed_bytes, MemFlags.slow);
+            if (!fetched.ptr)
+                return false;
             if (!container.read_payload(*b, fetched))
             {
                 free(fetched);
@@ -863,8 +881,13 @@ nothrow @nogc:
             return false;
         }
         void[] img = alloc(total, MemFlags.slow);
-        bool ok = g_codecs[b.codec - first_registered_codec].unpack(encoded, *fmt, b.count,
-                                                                    irregular, b.heap_used, img);
+        if (!img.ptr)
+        {
+            if (fetched)
+                free(fetched);
+            return false;
+        }
+        bool ok = g_codecs[b.codec - first_registered_codec].unpack(encoded, *fmt, b.count, irregular, b.heap_used, img);
         if (fetched)
             free(fetched);
         if (!ok)
@@ -1365,6 +1388,9 @@ bool unbox_double(ref const Variant v, ref const DataFormat fmt, out double d)
     return d == d; // reject NaN
 }
 
+
+version (unittest)
+    public __gshared bool g_fail_seal;
 
 unittest
 {

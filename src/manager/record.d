@@ -27,6 +27,7 @@ import manager.console.graph;
 import manager.console.live_view;
 import manager.device;
 import manager.element;
+import manager.features : has_file_io;
 import manager.ows;
 import manager.plugin;
 
@@ -88,9 +89,9 @@ nothrow @nogc:
             Bucket* b = h.buckets[flush_pos];
             if (!b.sealed)
             {
-                if (!b.count || now - b.first_tick < tail_flush_age)
+                // sealing the tail makes the element roll a fresh bucket on its next write
+                if (!b.count || now - b.first_tick < tail_flush_age || !h.seal(b))
                     break;
-                h.seal(b);  // the element rolls a fresh bucket on its next write
             }
             if (b.count && !b.file_offset && !container.append(b))
                 break; // disk trouble; retry next flush
@@ -435,6 +436,39 @@ unittest
     assert(bucketed.length == 4);
     assert(bucketed[0].time == 0);
     assert(bucketed[3].time == 75);
+}
+
+static if (has_file_io)
+unittest
+{
+    import urt.file : delete_file;
+    import urt.time : from_unix_time_ns;
+
+    // a tail that cannot seal stays out of the container rather than being written as an image
+    static immutable DataFormat f64_held = DataFormat(ValueType.f64, SeriesKind.held);
+    enum path = "record_seal_unittest.tmp";
+    delete_file(path);
+
+    Element e;
+    e.format = register_format(f64_held);
+    SeriesStore* h = e.ensure_history();
+    e.write_sample(1.0, from_unix_time_ns(1_000));
+
+    RecordStream rs;
+    rs.element = &e;
+    assert(rs.container.open_(path, *h));
+    g_fail_seal = true;
+    rs.flush();
+    g_fail_seal = false;
+    assert(!h.buckets[0].sealed && !h.buckets[0].file_offset && rs.flush_pos == 0);
+
+    rs.flush();
+    assert(h.buckets[0].sealed && h.buckets[0].file_offset && rs.flush_pos == 1);
+
+    rs.container.close_();
+    h.container = null;
+    e.teardown();
+    delete_file(path);
 }
 
 
