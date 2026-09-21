@@ -797,6 +797,31 @@ this is what remains.
 
 ## Infrastructure
 
+- **WiFi does not start on an ESP32-C5 built against ESP-IDF v6.1.** The same tree on the same
+  board brings `wifi1` online under v6.0 and fails under v6.1 with `wifi: Expected to init 16 rx
+  buffer, actual is 8`, so `esp_wifi_init` returns no-memory and the radio retries forever. v6.1
+  costs 8,010 more bytes of static internal RAM (156,893 to 164,903) and the C5 had no margin:
+  WiFi wants 16 static RX and 16 static TX buffers, about 51 KB, from internal DMA-capable RAM
+  that BLE and the 802.15.4 driver also draw on. PSRAM cannot hold the static buffers. Shrink
+  `CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM`, move TX to dynamic buffers, or move our own driver
+  queues out of internal RAM; the largest are the IDF log queue (8.7 KB), the WiFi raw RX queue
+  (8.2 KB) and `g_bulk_events` (6.1 KB). The S3 is unaffected. `IDF_LOG_LEVEL=error` is what
+  surfaced the cause; a release build logs only `WiFi radio init failed`.
+- **The boot guard can lock an embedded node into a permanent reboot loop.** After three failed
+  boots `boot_config_trusted()` demands the previous saved revision; when none exists `main`
+  logs `refusing to replace deployment configuration with defaults` and returns -1. On a desktop
+  that exits the process. On an ESP nothing runs the main loop afterwards, so the watchdog
+  resets the chip, and the counter clears only after 60 s of uptime the node can no longer reach:
+  every later boot takes the same path. Seen on an ESP32-C5 after three bench resets, with the
+  PC parked in the idle task's WFI at the dump; recovery needed the `openwatt/boot_fail` entry
+  deleted from the NVS image by hand. Refusing to clobber a deployment is right, but the node
+  must still come up far enough to be reached: run without the saved configuration, keep the
+  watchdog fed, and let the counter clear.
+- **`boot_fail` is stored as a blob and rewritten twice per boot.** `write_counter` hands
+  `nvs_write` a slice, so each update costs three NVS entries (two data, one index) where a
+  `u8` costs one. On the C5 above, five of the six NVS pages were full of erased `boot_fail`
+  entries. Store it as an integer type.
+
 - **Application recreation leaves the global page pool initialized**: `Application.~this` does not
   deinitialize the pool, so a second `create_application()` in the same process asserts in
   `page_pool_init`. Define ownership and teardown for shared pool users before adding more
