@@ -15,3 +15,12 @@ else version (linux)
     import driver.linux.ethernet;
     alias EthernetModule = LinuxRawEthernetModule;
 }
+else
+{
+    import urt.driver.ethernet : num_ethernet;
+    static if (num_ethernet > 0)
+    {
+        import driver.baremetal.ethernet;
+        alias EthernetModule = BuiltinEthernetModule;
+    }
+}

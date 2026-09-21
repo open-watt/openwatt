@@ -1399,10 +1399,6 @@ on a board silkscreened
   Function-CoreBoard-1. Its BOARD profile enables octal PSRAM at the IDF default 200 MHz;
   confirm the detected size, boot memory test and external heap on the bench board.
 
-- **The Ethernet port is dead weight.** The part has a gigabit EMAC with IEEE 1588v2 and the
-  board has an RJ45, but `urt/driver/esp32` has no EMAC driver, so nothing can reach it. This is
-  the first ESP target in the tree where that gap costs a fitted port.
-
 - **802.15.4 receives; transmit is unproven, as on the C5.** With the WpanInterface of #732,
   `wpan1` on channel 15 comes up Running and counts real frames off the air while BLE and the AP
   run, so `num_wpan = 1` is right. Nothing has driven the transmit path on any part.
@@ -1466,6 +1462,79 @@ scaffolded but never built. Release is 2,371,264 bytes, 75% of the 3 MB `ota_0` 
   probably the per-fibre task stack, and everything after `urt.async` is still unreached. The
   unittest image needs the fused-slot `partitions.unittest.csv`, which takes effect with #728.
 
+
+### ESP Ethernet follow-ups (2026-09-21)
+
+`/interface/ethernet` now has an Espressif backend (`driver/baremetal/ethernet.d` over
+`urt/driver/ethernet.d`), built only where a board sets `USE_ETHERNET := 1`: an EMAC is a port
+only where a PHY is wired to it, so no platform turns it on and no image pays for it otherwise.
+Run on a WT99P4C5-S1 (P4 v1.0, IP101GRI) up to MAC and PHY install, factory address, link-down
+status and live reinstall. **No frame has crossed a wire on any part**, for want of a cable. Also open:
+
+- **The classic ESP32 and the S31 are built, not run.** The shim assembles
+  `eth_esp32_emac_config_t` per target (fixed RMII pads and APLL clock output on the ESP32,
+  IO_MUX pin selection on the P4, RGMII and gigabit on the S31), and only the P4 arm has run. `BOARD=esp32-s31-function-coreboard-1` (YT8531 on RGMII, reset GPIO7, `phy=yt8531`)
+  is the first gigabit and RGMII run waiting to happen, and the first of the `yt8531` setup, whose register sequence is copied from the ESP-IDF Ethernet
+  example rather than derived from a datasheet.
+
+- **No CI job compiles the driver.** `USE_ETHERNET` is off in every CI build, and the ESP jobs stop
+  before the C shim links, so urt#318 passed CI with two ownership bugs a mocked-SDK probe found
+  at once. Wants a board build that links the shim, and the probe kept as a host test of the
+  backend: close from inside the RX callback, calls through an unopened handle, close and reopen.
+
+- **RGMII pins are reachable from urt but not from the console.** `EthernetConfig.data_gpio`
+  carries all twelve, but `/interface/ethernet` only exposes the six RMII pads as properties;
+  there is no array-valued property precedent and no RGMII board to test one against. The S31
+  therefore runs on the reference wiring of the part until that is added.
+
+- **Hardware timestamps reach the packet, and nothing reads them yet.** With `hw-timestamp=true`
+  the interface gains `InterfaceCaps.hw_timestamp`, `Packet.creation_time` becomes the instant the
+  MAC saw the frame (the stamp projected onto `MonoTime` from one paired clock sample per service
+  pass; both run off the same crystal), and the raw stamp rides in `eth.hw_time` behind
+  `Packet.has_hw_timestamp`, in spare bytes of the embed union so `Packet` did not grow. The raw
+  value matters once a servo steers the MAC clock away from `MonoTime`: PTP arithmetic is in the
+  MAC domain. `eth_get_time`, `eth_set_time` and `eth_adjust_frequency` discipline the clock. The
+  1588 unit starts on P4 v1.0 silicon; **no stamped frame has been seen**, for want of a cable.
+  Using any of it needs the PTP protocol itself
+  (announce/sync/follow_up/delay_req/delay_resp, BMCA, a servo) and a grandmaster; check whether
+  the Pi NIC timestamps in hardware before assuming it can be one. Transmit timestamps, which
+  PTP also needs, go through `esp_eth_transmit_ctrl_vargs` and are not wired. IDF marks the
+  whole surface Experimental. Note the clock-domain split: PTP would discipline wall time while
+  `MonoTime` free-runs, so it improves records without tightening timer scheduling unless
+  `esp_eth_mac_set_target_time` is used directly, which is the interesting half: several nodes
+  sampling at the same instant rather than approximately together.
+
+- **Only ethernet headers can carry a hardware stamp.** `hw_time` lives in `Ethernet`, so a radio
+  that stamps in hardware (802.15.4 does) has nowhere to put one without its own header field.
+
+- **Only the Espressif backend reports `duplex`.** The read-only property and `router.status.Duplex`
+  exist so every backend can; Linux has it in `/sys/class/net/<if>/duplex` and Windows in the adapter
+  info, and neither feeds it.
+
+- **Link detection is a 2s poll inside ESP-IDF.** Nothing of ours waits or polls, but esp_eth finds
+  the link by reading the PHY status over MDIO on its own timer (`check_link_period_ms`), so a cable
+  event can be 2s late. A PHY interrupt pin would make it a real edge: GPIO interrupt, then one MDIO
+  read through `ETH_CMD_READ_PHY_REG`. IDF uses that pin on no PHY, so it would be ours to build,
+  per board that wires it.
+
+- **A cable pull reinstalls the MAC.** Link-down restarts the interface, as the Linux backend
+  does, and shutdown closes the driver, so every replug pays a full `esp_eth_driver_install`.
+  Staying installed across link loss needs offline/online without shutdown.
+
+- **MAC address filtering is unused.** The interface runs promiscuous because it may be bridged.
+  Not a user setting: a port that is NOT a bridge member should program the perfect filters itself
+  (8 slots, one is the station address) from its own addresses plus the stack's multicast
+  memberships (IGMP/MLD groups, solicited-node, mDNS, the OW discovery group), and fall back to
+  promiscuous on its own whenever the set outgrows the hardware or the port joins a bridge. Needs
+  `ETH_CMD_ADD_MAC_FILTER`/`ETH_CMD_DEL_MAC_FILTER` through the facade, a filter-capacity figure
+  per backend, and a membership-change signal from the stack to the interface.
+
+- **PTP is the big one.** Everything under the protocol exists: stamped RX, clock get/set/slew.
+  Missing: TX timestamps, the protocol (announce/sync/follow_up/delay_req/delay_resp, BMCA, a
+  servo), and a grandmaster. With a disciplined clock the MAC's PPS output (an edge on a GPIO at
+  each second boundary of the 1588 clock, other rates on the P4/S31) and target-time alarm become
+  worth exposing: PPS pins on two nodes under a scope measure the real sync error, and the alarm
+  gives several nodes one sampling instant.
 
 ## Dated entries
 

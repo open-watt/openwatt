@@ -653,7 +653,7 @@ endif
 			-DOPENWATT_COREDUMP=$(COREDUMP) \
 			-DPRESERVE_NVS=$(if $(filter 1,$(PRESERVE_NVS)),1,0) \
 			-DUSE_LWIP=$(if $(filter 1,$(USE_INTERNAL_IP_STACK)),0,1) \
-			-DUSE_SPIFFS=$(USE_SPIFFS) -DUSE_LITTLEFS=$(USE_LITTLEFS) build'
+			-DUSE_SPIFFS=$(USE_SPIFFS) -DUSE_LITTLEFS=$(USE_LITTLEFS) -DUSE_ETHERNET=$(USE_ETHERNET) build'
 	cp "$(ESP_BUILD_DIR)/openwatt.bin" "$(TARGETDIR)/openwatt.bin"
 	$(if $(BOARD_OTA_FILENAME),cp "$(ESP_BUILD_DIR)/openwatt.bin" "$(TARGETDIR)/$(BOARD_OTA_FILENAME)")
 	cp "$(ESP_BUILD_DIR)/bootloader/bootloader.bin" "$(TARGETDIR)/bootloader.bin"

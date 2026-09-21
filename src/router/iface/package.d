@@ -64,6 +64,7 @@ enum PacketDirection : ubyte
     ethernet = 1 << 0, // attaches to an ethernet segment; marshals exotic packets over the OW ethertype
     reliable = 1 << 1, // delivery is acknowledged and retransmitted; loss surfaces as an error, never silently
     ordered  = 1 << 2, // frames are delivered in transmit order
+    hw_timestamp = 1 << 3, // creation_time of a received packet is when the MAC saw it, not when software did
 }
 
 enum MessageState

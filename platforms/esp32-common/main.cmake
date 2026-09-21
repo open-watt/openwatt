@@ -67,6 +67,9 @@ endif()
 if(OPENWATT_COREDUMP)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE OW_ENABLE_COREDUMP=1)
 endif()
+if(USE_ETHERNET)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE OW_USE_ETHERNET=1)
+endif()
 
 # Makefile typically passes OPENWATT_OBJ via -D; fall back to the debug path
 # under bin/<buildname>_debug/ for direct idf.py invocations.

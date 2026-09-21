@@ -802,7 +802,7 @@ protected:
 //        mark_set!(typeof(this), "max-l2mtu")();
     }
 
-    final void incoming_ethernet_frame(const(ubyte)[] data, MonoTime ts, ushort vlan_tci = 0, ushort vlan_tpid = 0)
+    final void incoming_ethernet_frame(const(ubyte)[] data, MonoTime ts, ushort vlan_tci = 0, ushort vlan_tpid = 0, const(HwTimestamp)* hw_time = null)
     {
         if (data.length < 14)
         {
@@ -817,6 +817,8 @@ protected:
         eth.src = MACAddress(data[6 .. 12]);
         eth.ether_type = data[12 .. 14].bigEndianToNative!ushort;
         packet._offset = 14;
+        if (hw_time)
+            packet.set_hw_timestamp(*hw_time);
 
         if (vlan_tpid != 0)
         {

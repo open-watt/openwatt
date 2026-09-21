@@ -5,3 +5,6 @@
 BOARD_PLATFORM := esp32-p4
 BOARD_FLASH_SIZE := 16MB
 BOARD_PSRAM_SIZE := 32MB
+
+# The IP101GRI on the RJ45; system.conf creates the interface.
+USE_ETHERNET := 1

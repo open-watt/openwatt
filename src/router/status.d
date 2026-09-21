@@ -19,6 +19,13 @@ enum LinkStatus : byte
     up
 }
 
+enum Duplex : byte
+{
+    unknown = -1,
+    half = 0,
+    full
+}
+
 struct StreamStatus
 {
 nothrow @nogc:
