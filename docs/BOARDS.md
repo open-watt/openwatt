@@ -59,14 +59,17 @@ partition table together with the coredump-enabled image. The normal
 
 Board profiles in the tree. Build with `make esp-idf-build BOARD=<name> CONFIG=release`; the
 output lands in `bin/<platform>_<board>_<config>/`. Each board's `system.conf` wires its
-peripherals and its `default.conf` brings up a setup access point with the HTTP
-API, sync, OTA and file server, so a fresh unit is reachable before it has any credentials.
+peripherals and its `default.conf` brings up the HTTP API, sync, OTA and file server, so a fresh
+unit is reachable before it has any credentials. Boards with a radio also open a setup access
+point; a board without one is reachable over its console until a `startup.conf` gives it a
+network.
 
 | Board | `BOARD=` | Platform | Flash | PSRAM |
 | --- | --- | --- | ---: | ---: |
 | SmartEVSE v3.0 | `smartevse-v30` | `esp32` | 4 MB | none |
 | Waveshare ESP32-S3-RS485-CAN | `waveshare-esp32-s3-rs485-can` | `esp32-s3` | 16 MB | 8 MB |
 | ESP32-S31-Function-CoreBoard-1 | `esp32-s31-function-coreboard-1` | `esp32-s31` | 16 MB | 16 MB |
+| Wireless-Tag WT99P4C5-S1 | `wt99p4c5-s1` | `esp32-p4` | 16 MB | 32 MB |
 
 **ESP32-S31-Function-CoreBoard-1** enables the fitted 16 MB octal PSRAM at 200 MHz.
 Its setup AP is at `192.168.1.1`. The board's Ethernet port remains unsupported.
@@ -88,6 +91,13 @@ and WiFi running access point and station concurrently alongside BLE scanning. I
 point is WPA2 (`OpenWatt-Waveshare`, password `openwatt-setup`) and it also opens a telnet
 console.
 
+**Wireless-Tag WT99P4C5-S1** is a WT0132P4-A1 module (ESP32-P4 N16R32, 16 MB flash and 32 MB HEX
+PSRAM) on a carrier with a 10/100 Ethernet port, an ESP32-C5-WROOM-1 for Wi-Fi 6, BLE and
+802.15.4, RS485, an SD slot and MIPI DSI/CSI connectors. `BOARD=` matters more than usual here:
+it selects `esp32-p4`, and an `esp32-p4x` image will not boot this one. The console is
+UART0 out of the USB-C marked USB_UART. **Neither the EMAC (IP101GRI on the RJ45) nor the C5 has a
+driver yet**, so the board has no network; both pin maps are recorded in `system.conf`.
+
 ## Espressif reference profiles
 
 | Platform | Reference development board | Flash | PSRAM |
@@ -101,7 +111,15 @@ console.
 | `esp32-c5` | ESP32-C5-DevKitC-1 with N8R8 module | 8 MB | 8 MB |
 | `esp32-c6` | ESP32-C6-DevKitC-1 with 16 MB flash | 16 MB | none |
 | `esp32-h2` | ESP32-H2-DevKitM-1-N4 | 4 MB | none |
-| `esp32-p4` | ESP32-P4-Function-EV-Board | 16 MB | 32 MB |
+| `esp32-p4` | WT0132P4-A1 module | 16 MB | 32 MB |
+| `esp32-p4x` | ESP32-P4X-Function-EV-Board | 16 MB | 32 MB |
+
+The ESP32-P4 needs two platforms because it is two parts. Revisions below v3.0 and
+from v3.0 up have different register maps and different ISA extensions, and ESP-IDF
+makes supporting them mutually exclusive. Espressif sells the v3.x part as the ESP32-P4X, so
+`esp32-p4` is the original silicon and `esp32-p4x` the v3.x one. Neither image boots the other's silicon, and the
+bootloader's minimum-revision field refuses it at flash time rather than at boot.
+Read the revision off the part with `esptool chip-id` before choosing.
 
 These are development defaults, not chip capabilities. A production board
 must declare its fitted memory even when it happens to match the reference

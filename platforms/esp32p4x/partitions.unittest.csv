@@ -1,0 +1,10 @@
+# OpenWatt ESP32-P4X unittest layout: the release table with the two OTA slots
+# aggregated into one app partition. A test image runs once and aborts, so it has no
+# use for a rollback slot and does not fit one. Everything else is byte-for-byte the
+# release layout, so a filesystem formatted under either image is valid under the other.
+# Name,    Type, SubType,  Offset,     Size,     Flags
+nvs,       data, nvs,      0x9000,     0x6000,
+phy_init,  data, phy,      0xf000,     0x1000,
+otadata,   data, ota,      0x10000,    0x2000,
+factory,   app,  factory,  0x20000,    0x600000,
+storage,   data, spiffs,   0x620000,   0x9E0000,
