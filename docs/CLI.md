@@ -1180,6 +1180,17 @@ kernel's tables (address, MAC, state, interface) in place of the internal cache.
 | `/system/netlink/add-neighbour address=<ip> mac=<mac> iface=<netdev>` | Installs a permanent kernel neighbour entry. Either family. |
 | `/system/netlink/del-neighbour address=<ip> iface=<netdev>` | Removes a kernel neighbour entry. |
 
+### `/protocol/http/client`
+
+An HTTP client issues requests to one origin over its own connection, or over an externally
+supplied stream. `https://` origins use TLS when it is built.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `remote` | `http[s]://host[:port]` | empty | Origin to connect to. |
+| `stream` | stream name | empty | Byte stream to speak HTTP over instead of connecting. |
+| `timeout` | duration | `5s` | How long a request may wait for its response before it completes empty. |
+
 ### `/protocol/http/server`
 
 An HTTP server provides the listener and shared policy for its registered
