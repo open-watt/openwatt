@@ -339,7 +339,19 @@ endif
 BINSTATS_LEDGER = $(if $(filter release,$(CONFIG)),--ledger "$$("$(DC)" --version 2>/dev/null | head -1)" --commit "$$(git rev-parse --short HEAD 2>/dev/null || echo -)" --date "$$(date +%F)")
 BINSTATS_IMAGE := $(if $(filter bl808,$(PLATFORM)),$(if $(filter c906,$(PROCESSOR)),d0fw.bin,m0fw.bin),$(if $(filter bl618 bk7231n bk7231t rp2350,$(PLATFORM)),fw.bin))
 
+ifeq ($(PLATFORM),rp2350)
+    EXTRA_ARTEFACTS := $(TARGETDIR)/fw.uf2
+endif
+
+.PHONY: build
+build: $(TARGET) $(EXTRA_ARTEFACTS)
+
 $(TARGET): $(SOURCES) $(CONF_SOURCES) $(BAREMETAL_OBJS) $(VENDOR_OBJS) $(BAREMETAL_LD) $(BK_BEKEN_LIB) $(if $(RAM_IMAGE),$(RAM_IMAGE_PACKER))
+
+ifeq ($(PLATFORM),rp2350)
+$(TARGETDIR)/fw.uf2: $(TARGET)
+	@if command -v picotool >/dev/null 2>&1; then picotool uf2 convert -t elf $< $@ || { rm -f $@; exit 1; }; else rm -f $@; echo "picotool not found; no UF2 produced"; fi
+endif
 
 # -- BK7231 SDK build (must come after $(TARGET) so it doesn't become default goal)
 

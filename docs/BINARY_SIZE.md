@@ -108,6 +108,15 @@ the RAM-image workspace excluded.
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-09-09 | 62a6417e | ldc 1.43.0 | 1,078,400 | 71,764 | 1,083,040 | first row; 99% full, 4,640 bytes of headroom |
 
+### RP2350, `make PLATFORM=rp2350 CONFIG=release`
+
+Limit is the linker script's `FLASH` region, not the board: the WeAct RP2350B Core
+carries 16MB.
+
+| date | commit | compiler | flash | ram | limit | note |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2026-09-21 | ow/rp2350-bringup | ldc 1.43.0 | 1,593,336 | 41,236 | 4,194,304 | first row |
+
 ### bl808 e907, `make PLATFORM=bl808 PROCESSOR=e907 CONFIG=release`
 
 | date | commit | compiler | flash | ram | limit | note |
