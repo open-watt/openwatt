@@ -558,10 +558,6 @@ ifdef ESP_PROJECT_DIR
     ESP_BUILD_DIR := $(abspath $(OBJDIR)/esp-idf)
     ESP_SDKCONFIG := $(ESP_BUILD_DIR)/sdkconfig
     ESP_SDKCONFIG_DEFAULTS := $(abspath $(ESP_PROJECT_DIR)/sdkconfig.defaults);$(abspath platforms/esp32-common/sdkconfig.family.defaults)
-    ifeq ($(CONFIG),release)
-        ESP_RELEASE_SDKCONFIG := platforms/esp32-common/sdkconfig.release.defaults
-        ESP_SDKCONFIG_DEFAULTS := $(ESP_SDKCONFIG_DEFAULTS);$(abspath $(ESP_RELEASE_SDKCONFIG))
-    endif
     ifeq ($(NOEXCEPTIONS),1)
         ESP_NOEH_SDKCONFIG := platforms/esp32-common/sdkconfig.noexceptions.defaults
         ESP_SDKCONFIG_DEFAULTS := $(ESP_SDKCONFIG_DEFAULTS);$(abspath $(ESP_NOEH_SDKCONFIG))
