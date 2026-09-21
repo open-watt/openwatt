@@ -428,8 +428,19 @@ unittest
     static class TestBinding : TeslaTWCBinding
     {
     nothrow @nogc:
-        this(CID id) { super(id); }
+        DeviceTable* fixtures;
+        this(CID id, ObjectFlags flags = ObjectFlags.none) { super(id, flags); }
         void attach_device(Device device) { _bound_device = device; }
+        void step() { set_state(State.starting); }
+        override bool materialise()
+        {
+            DeviceBuilder builder = fixtures.open(_device[]);
+            _bound_device = builder.device;
+            _target_current = bind_element(builder, builder.device, "setpoint", centiamps_format());
+            _current_cap = bind_element(builder, builder.device, "cap", current_limit_format());
+            _built = true;
+            return true;
+        }
     }
     TestBinding binding = alloc!TestBinding(CID(1));
     scope(exit) free(binding);
@@ -481,4 +492,42 @@ unittest
         assert(binding._target_current.access == (active ? Access.read_write : Access.read));
         assert(binding._current_cap.access == binding._target_current.access);
     }
+
+    static final class TestMaster : TeslaTWCMaster
+    {
+    nothrow @nogc:
+        this(CID id) { super(id); }
+        void start() { set_state(State.running); }
+        void stop() { set_state_deferred(State.stopping); }
+        override CompletionStatus shutdown() => CompletionStatus.complete;
+    }
+    TestMaster master = alloc!TestMaster(Collection!TeslaTWCMaster().allocate_id("twc-binding-lifecycle"));
+    Collection!TeslaTWCMaster().add(master);
+    TestBinding live = alloc!TestBinding(Collection!TeslaTWCBinding().allocate_id("twc-binding-live"), ObjectFlags.dynamic);
+    Collection!TeslaTWCBinding().add(live);
+    Device lifecycle_device = table.create("twc-binding-device").device;
+    scope(exit) free(lifecycle_device);
+    live.fixtures = &table;
+    live.master = master;
+    live.slave_id = 123;
+    live.device = "twc-binding-device".make_string();
+    master.start();
+    live.step();
+    assert(live.running && live._subscribed && live._elem_subscribed);
+    lifecycle_device.set_online(cast(void*)live, true);
+    master.stop();
+    assert(!live.running && !live._subscribed && !live._elem_subscribed);
+    assert(lifecycle_device.online_status == OnlineStatus.offline);
+    assert(Collection!TeslaTWCBinding().get("twc-binding-live") is live);
+    foreach (provider; lifecycle_device.bindings)
+        assert(provider !is live);
+    master.start();
+    live.step();
+    assert(live.running && live._subscribed && live._elem_subscribed);
+    master.destroy();
+    assert(Collection!TeslaTWCBinding().get("twc-binding-live") is null);
+    assert(!live._subscribed && !live._elem_subscribed);
+    assert(table.find("twc-binding-device", 0) is lifecycle_device);
+    foreach (provider; lifecycle_device.bindings)
+        assert(provider !is live);
 }
