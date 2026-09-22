@@ -43,6 +43,17 @@ ESP-IDF output and generated `sdkconfig` files live below the board-specific
 OpenWatt object directory. Building two boards therefore cannot reuse one
 another's generated configuration.
 
+## ESP unit-test builds
+
+`CONFIG=unittest` loads an optional platform `sdkconfig.unittest.defaults` before
+board and coredump overrides. C5 and H2 use larger single-app test layouts with
+the same data-partition offsets and sizes as their normal layouts. Flash the
+complete test image and partition table with
+`make esp-flash PLATFORM=esp32-c5 CONFIG=unittest`; app-only OTA does not install
+the test layout. Regenerate an existing build's `sdkconfig` when changing defaults.
+Filesystem tests still require formatted storage; remaining embedded test limits
+are tracked in TODO.md.
+
 ## ESP core-dump builds
 
 `COREDUMP=1` is an opt-in diagnostic feature for ESP32-S3, S31, C5 and C6. It selects

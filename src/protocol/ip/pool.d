@@ -1096,7 +1096,9 @@ unittest
         }
         tree.reset(base, 48);
 
-        bool[65536] occupied;
+        bool[] occupied = alloc_array!bool(65536);
+        scope(exit) free(occupied);
+        assert(occupied.length == 65536);
         struct Reservation
         {
             ulong hi;
