@@ -74,7 +74,7 @@ network.
 | Wireless-Tag WT99P4C5-S1 | `wt99p4c5-s1` | `esp32-p4` | 16 MB | 32 MB |
 
 **ESP32-S31-Function-CoreBoard-1** enables the fitted 16 MB octal PSRAM at 200 MHz.
-Its setup AP is at `192.168.1.1`. The RJ45 is `eth1`, a Motorcomm YT8531 on RGMII (`phy=yt8531`), built but not yet run.
+Its setup AP is at `192.168.4.1`. The RJ45 is `eth1`, a Motorcomm YT8531 on RGMII (`phy=yt8531`), built but not yet run.
 Espressif documents its fitted memory on the [S31 board page](https://esp32-s31.espressif.com/en).
 
 **SmartEVSE v3.0** replaces the stock SmartEVSE firmware in place. The build is `switch-http`,

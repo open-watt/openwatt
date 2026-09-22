@@ -3,6 +3,12 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-09-22: every setup AP is at 192.168.4.1
+
+- The generic ESP platform bring-up defaults (and the ESP32-S31 board) moved their provisioning
+  AP from `192.168.1.1/24` to `192.168.4.1/24`, matching the Waveshare and SmartEVSE boards.
+  Onboarding or recovery flows that direct the user to the setup AP must use `192.168.4.1`.
+
 ## 2026-09-21: RP2350 hardware identity
 
 - RP2350 now supplies a stable hardware node ID and derives its default hostname
