@@ -31,7 +31,8 @@ nothrow @nogc:
 final class HTTPClient : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("remote", remote),
-                                 Prop!("stream", stream));
+                                 Prop!("stream", stream),
+                                 Prop!("timeout", timeout));
 nothrow @nogc:
 
     enum type_name = "http-client";
@@ -94,6 +95,14 @@ nothrow @nogc:
         mark_set!(typeof(this), [ "stream", "remote" ])();
         restart();
         return null;
+    }
+
+    Duration timeout() const pure
+        => _timeout;
+    void timeout(Duration value)
+    {
+        _timeout = value;
+        mark_set!(typeof(this), "timeout")();
     }
 
     // API...
@@ -177,7 +186,7 @@ protected:
         for (size_t i = 0; i < requests.length; )
         {
             HTTPMessage* r = requests[i];
-            if (now - r.timestamp > 5.seconds)
+            if (now - r.timestamp > _timeout)
             {
                 sendNext |= i == 0;
                 HTTPMessage empty;
@@ -196,6 +205,7 @@ protected:
 private:
     ObjectRef!Stream _stream;
     IPClient _conn;
+    Duration _timeout = 5.seconds;
     bool _tls;
     bool _dispatching;
 
