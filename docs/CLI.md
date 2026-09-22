@@ -652,7 +652,7 @@ byte `stream` running a framing `protocol`, or an `adapter` naming a controller
 the host itself owns. Setting either one clears the other, so the last one
 assigned is the one that takes effect.
 
-`adapter` is spelled the way the platform names its controllers. On linux that is
+`adapter` uses the platform's controller name. On Linux that is
 a SocketCAN netdev (`can0`, `slcan0`, `vcan0`); on Espressif it is the on-chip
 TWAI peripheral (`twai0`). Linux controllers are discovered at startup, listed by
 `/port/print` under kind `can`, and given an interface named `can1`, `can2`... A
@@ -668,28 +668,22 @@ interfaces remain configured for reconnection.
 | `tx-gpio` | pin | platform | Transmit pin. Espressif only. |
 | `rx-gpio` | pin | platform | Receive pin. Espressif only. |
 
-On linux the bitrate is link configuration rather than socket configuration, and
-the kernel only accepts it while the link is down. Setting `baud-rate` therefore
-takes the link down, applies the rate, and raises it again, which needs
-`CAP_NET_ADMIN`; without it the interface reports the netlink error and retries
-under the usual backoff. Only `baud-rate` is sent, so the driver derives the
-segment timing from its own clock.
+On Linux, `baud-rate=0` adopts and reports the controller's configured bitrate.
+An unconfigured physical controller stays offline until a rate is set. Virtual
+CAN (`vcan` and `vxcan`) uses `0` because it has no bit timing.
 
-A discovered interface takes `baud-rate` from the link rather than imposing one,
-and the link is only bounced when the property and the link disagree. So adopting
-an already-configured bus disturbs nothing, and changing `baud-rate` is what
-pushes a new rate down to the controller.
+Changing the bitrate takes the link down, applies the rate, and brings it up.
+This requires `CAP_NET_ADMIN`, as does bringing up a down link. An already-up
+link with matching settings needs no configuration write. Opening the socket
+requires `CAP_NET_RAW`. Configuration failures use the usual startup backoff.
 
-An unconfigured physical controller stays offline until `baud-rate` is explicitly
-set. A failed link query never triggers a bitrate change. Virtual CAN (`vcan` and
-`vxcan`) has no bit timing and uses `baud-rate=0`. An already-up link with matching
-settings is adopted without a netlink write. Opening its raw socket still requires
-`CAP_NET_RAW`.
+Use `/interface/can/print` to find the discovered interface for your adapter.
+For example, if `can1` names the controller you want to configure:
 
 ```text
-/interface/can/add name=bms adapter=can0 baud-rate=500000
+/interface/can/set can1 baud-rate=500000
 /interface/can/add name=goodwe_can stream=can.1 protocol=ebyte
-/interface/can/set bms baud-rate=250000
+/interface/can/set can1 baud-rate=250000
 ```
 
 ### `/interface/udp`

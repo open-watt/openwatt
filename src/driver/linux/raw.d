@@ -86,7 +86,6 @@ struct ifreq
     }
 }
 
-// SocketCAN (linux/can.h). CAN_RAW carries one struct can_frame per read/write.
 enum AF_CAN  = 29;
 enum CAN_RAW = 1;
 
@@ -102,9 +101,17 @@ struct sockaddr_can
     int    can_ifindex;
     union CanAddr
     {
-        struct Tp { uint rx_id, tx_id; }
+        struct Tp
+        {
+            uint rx_id, tx_id;
+        }
         Tp tp;
-        struct J1939 { ulong name; uint pgn; ubyte addr; }  // added in 5.4; widened the union to 8-align
+        struct J1939
+        {
+            ulong name;
+            uint pgn;
+            ubyte addr;
+        }
         J1939 j1939;
         int[3] reserved;
     }
@@ -341,9 +348,6 @@ private:
 }
 
 
-// CAN_RAW socket bound to a SocketCAN netdev. Bitrate and bus state are link
-// properties owned by the netdev (`ip link set canX type can bitrate N`), not by
-// the socket, so this only carries frames.
 struct CANSocket
 {
 nothrow @nogc:
@@ -394,7 +398,6 @@ nothrow @nogc:
         close_fd();
     }
 
-    // 1 = got a frame, 0 = socket drained, -1 = error (see last_recv_error)
     int poll(out can_frame frame, out MonoTime timestamp)
     {
         ptrdiff_t n = recv(fd, &frame, can_frame.sizeof, 0);
@@ -425,7 +428,8 @@ nothrow @nogc:
     Result last_send_error;
     Result last_recv_error;
 
-    bool valid() const pure => fd >= 0;
+    bool valid() const pure
+        => fd >= 0;
 
     int fd = -1;
     int ifindex;

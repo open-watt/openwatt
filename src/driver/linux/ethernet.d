@@ -181,8 +181,6 @@ private:
         }
     }
 
-    // An enslaved port is switched by the kernel, so its fd stays out of the wait set
-    // entirely rather than being read and discarded.
     void collect_fds(ref Array!pollfd fds)
     {
         if (_raw.valid && !_enslaved)
@@ -284,9 +282,7 @@ private:
     {
         Array!String os_buf;
         enumerate_adapters((const(char)[] name, const(char)[] description) nothrow @nogc {
-            const bool removable = adapter_is_removable(name);
-            port_add(PortKind.ethernet, tconcat("linux:ethernet:", name), name, name, ModuleName, description,
-                     removable ? PortFlags.removable : PortFlags.none);
+            port_add(PortKind.ethernet, tconcat("linux:ethernet:", name), name, name, ModuleName, description, adapter_is_removable(name) ? PortFlags.removable : PortFlags.none);
 
             bool present = false;
             foreach (e; Collection!LinuxRawEthernet().values)
@@ -313,7 +309,6 @@ private:
         Array!LinuxRawEthernet gone;
         foreach (e; Collection!LinuxRawEthernet().values)
         {
-            // Operator-created interfaces are not owned by discovery.
             if (!(e.flags & ObjectFlags.dynamic))
                 continue;
 

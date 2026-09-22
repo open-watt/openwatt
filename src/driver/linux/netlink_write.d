@@ -225,47 +225,6 @@ struct CANLink
     bool virtual_link;
 }
 
-unittest
-{
-    import driver.linux.sysfs : ARPHRD_CAN;
-
-    foreach (kind; [ "can", "vcan", "vxcan", "ether" ])
-    {
-        foreach (uint bitrate; [ 0u, 250_000u ])
-        {
-            NlBuilder b;
-            ifinfomsg ifi;
-            ifi.ifi_index = 7;
-            ifi.ifi_type = ARPHRD_CAN;
-            ifi.ifi_flags = IFF_UP;
-            b.family(ifi);
-            size_t info = b.nest_begin(IFLA_LINKINFO);
-            b.attr_str(IFLA_INFO_KIND, kind);
-            if (bitrate)
-            {
-                size_t data = b.nest_begin(IFLA_INFO_DATA);
-                can_bittiming bt;
-                bt.bitrate = bitrate;
-                b.attr(IFLA_CAN_BITTIMING, as_bytes(bt));
-                b.nest_end(data);
-            }
-            b.nest_end(info);
-            auto message = b.finalise(RTM_NEWLINK, 0, 42);
-            CANLink link;
-            assert(decode_can_link(message, 7, 42, link) == (kind != "ether"));
-            if (kind != "ether")
-            {
-                assert(link.up && link.virtual_link == (kind != "can"));
-                assert(link.bitrate == (kind == "can" ? bitrate : 0));
-            }
-            assert(!decode_can_link(message, 8, 42, link));
-            assert(!decode_can_link(message, 7, 43, link));
-            assert(!decode_can_link(message[0 .. $ - 1], 7, 42, link));
-            assert(!decode_can_link(b.finalise(NLMSG_ERROR, 0, 42), 7, 42, link));
-        }
-    }
-}
-
 bool netlink_get_can_link(int ifindex, out CANLink link)
 {
     if (ifindex <= 0)
@@ -342,10 +301,7 @@ private bool decode_can_link(const(ubyte)[] data, int ifindex, uint seq, out CAN
     return false;
 }
 
-// CAN bit timing is link configuration, not socket configuration, and the kernel rejects
-// it unless the link is down -- bring it down first. Zeroing everything but `bitrate` asks
-// the driver to derive the segment timing from its own clock, which is what
-// `ip link set canX type can bitrate N` does.
+// The kernel requires the link down; zero timing fields ask the driver to derive them.
 int netlink_set_can_bitrate(int ifindex, uint bitrate)
 {
     can_bittiming bt;
@@ -794,7 +750,6 @@ enum IFLA_MASTER    = 10;
 enum RTM_GETLINK    = 18;
 enum NLA_TYPE_MASK  = 0x3FFF;
 
-// Payload of the first `type` attribute at this nesting level, or null.
 const(ubyte)[] find_attr(const(ubyte)[] attrs, ushort type)
 {
     while (attrs.length >= rtattr.sizeof)
@@ -936,3 +891,44 @@ extern(C) nothrow @nogc
 }
 
 int last_errno() => *__errno_location();
+
+unittest
+{
+    import driver.linux.sysfs : ARPHRD_CAN;
+
+    foreach (kind; [ "can", "vcan", "vxcan", "ether" ])
+    {
+        foreach (uint bitrate; [ 0u, 250_000u ])
+        {
+            NlBuilder b;
+            ifinfomsg ifi;
+            ifi.ifi_index = 7;
+            ifi.ifi_type = ARPHRD_CAN;
+            ifi.ifi_flags = IFF_UP;
+            b.family(ifi);
+            size_t info = b.nest_begin(IFLA_LINKINFO);
+            b.attr_str(IFLA_INFO_KIND, kind);
+            if (bitrate)
+            {
+                size_t data = b.nest_begin(IFLA_INFO_DATA);
+                can_bittiming bt;
+                bt.bitrate = bitrate;
+                b.attr(IFLA_CAN_BITTIMING, as_bytes(bt));
+                b.nest_end(data);
+            }
+            b.nest_end(info);
+            auto message = b.finalise(RTM_NEWLINK, 0, 42);
+            CANLink link;
+            assert(decode_can_link(message, 7, 42, link) == (kind != "ether"));
+            if (kind != "ether")
+            {
+                assert(link.up && link.virtual_link == (kind != "can"));
+                assert(link.bitrate == (kind == "can" ? bitrate : 0));
+            }
+            assert(!decode_can_link(message, 8, 42, link));
+            assert(!decode_can_link(message, 7, 43, link));
+            assert(!decode_can_link(message[0 .. $ - 1], 7, 42, link));
+            assert(!decode_can_link(b.finalise(NLMSG_ERROR, 0, 42), 7, 42, link));
+        }
+    }
+}

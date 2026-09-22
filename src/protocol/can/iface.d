@@ -1,5 +1,6 @@
 module protocol.can.iface;
 
+import urt.driver.can;
 import urt.endian;
 import urt.log;
 import urt.mem;
@@ -15,19 +16,13 @@ import manager.plugin;
 import router.iface;
 import router.stream;
 
-import urt.driver.can;
-
-// SocketCAN is the linux backend for `adapter`; Espressif's is the on-chip TWAI
-// controller behind urt.driver.can. They are mutually exclusive per platform.
 version (linux)
 {
     import urt.array : Array;
     import urt.result : StringResult;
     import urt.internal.sys.posix : pollfd, POLLIN;
-    import driver.linux.raw : CANSocket, can_frame,
-                              CAN_EFF_FLAG, CAN_RTR_FLAG, CAN_ERR_FLAG, CAN_EFF_MASK, CAN_SFF_MASK;
-    import driver.linux.netlink_write : netlink_ifindex, netlink_set_link_up,
-                                        netlink_set_can_bitrate, netlink_get_can_link, CANLink;
+    import driver.linux.raw : CANSocket, can_frame, CAN_EFF_FLAG, CAN_RTR_FLAG, CAN_ERR_FLAG, CAN_EFF_MASK, CAN_SFF_MASK;
+    import driver.linux.netlink_write : netlink_ifindex, netlink_set_link_up, netlink_set_can_bitrate, netlink_get_can_link, CANLink;
     import driver.linux.fdwatch : add_fd_watcher, remove_fd_watcher, fd_watch_changed;
     enum has_socketcan = true;
 }
@@ -159,9 +154,8 @@ nothrow @nogc:
         => _protocol;
     const(char)[] protocol(CANInterfaceProtocol value)
     {
-        import urt.mem.temp;
         if (value != CANInterfaceProtocol.ebyte)
-            return tconcat("Invalid CAN protocol '", protocol, "': expect 'ebyte|??'.");
+            return "invalid CAN protocol: expected 'ebyte'";
         _protocol = value;
         _adapter = String();
         mark_set!(typeof(this), [ "protocol", "adapter" ])();
@@ -254,9 +248,7 @@ protected:
             if (_stream !is null)
                 return false;
             static if (has_socketcan)
-            {
                 return true;
-            }
             else static if (num_can > 0)
                 return _baud_rate > 0;
             else

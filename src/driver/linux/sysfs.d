@@ -81,9 +81,6 @@ struct OSAdapterInfo
 uint read_ifindex(const(char)[] adapter_name)
     => read_sysfs_uint(adapter_name, "/ifindex");
 
-// /sys/class/net/<iface>/type is the ARPHRD_* link type. The kernel exposes plenty of
-// netdevs that are not ethernet -- notably SocketCAN controllers (ARPHRD_CAN), which
-// carry a /device symlink and no /wireless subdir, so nothing else tells them apart.
 uint read_link_type(const(char)[] adapter_name)
     => read_sysfs_uint(adapter_name, "/type");
 
@@ -243,7 +240,7 @@ bool set_adapter_mtu(const(char)[] adapter_name, ushort mtu)
     return ioctl(fd, SIOCSIFMTU, &req) == 0;
 }
 
-// Bus identity is a removability hint, not discovery ownership; internal USB also matches.
+// Internal USB devices also carry this removability hint.
 bool sysfs_device_is_removable(const(char)[] class_dir, const(char)[] device)
 {
     char[32] buf = void;

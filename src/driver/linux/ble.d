@@ -740,7 +740,6 @@ private:
 
     void remove_adapter(ushort index)
     {
-        // Only discovery-owned controllers are reaped.
         LinuxBLEInterface iface = find_by_index(index);
         if (iface is null || !(iface.flags & ObjectFlags.dynamic))
             return;

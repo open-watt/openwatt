@@ -1,10 +1,13 @@
 # TODO
 
-- **SocketCAN hardware validation (#503)**: WSL virtual CAN covers discovery,
-  classic/extended/RTR forwarding, duplicate claims and disconnect recovery. Still
-  exercise a physical controller's bitrate changes, rejected timing restoration,
-  bus-off recovery and capability failures. Validate Linux USB WiFi/BLE removal on
-  real adapters; WSL has no radios. Discovery-owned interfaces remain dynamic.
+- **Before merging #503, narrow the bridge lifetime repair**: the current revival
+  attaches members only while the bridge is running, changing configured ownership
+  and the `S` flag on disable/restart. Preserve configured membership while fixing
+  destruction, hotplug rebinding and callback lifetimes; reconcile the bridge docs
+  and tests with that contract.
+- **SocketCAN hardware validation (#503)**: exercise a physical controller's bitrate
+  changes, rejected timing restoration, bus-off recovery and capability failures.
+  Validate Linux USB WiFi/BLE removal on real adapters.
 - **Bridge port removal**: `BridgeInterface.remove_member` still asserts after
   modifying its array; finish port-index/address-table updates and cancellation of
   pending port tags before exposing removal as a console operation.
@@ -909,8 +912,7 @@ this is what remains.
   - add the waveform generator API needed by RF433 transmit.
 
 - **Complete `/port` eventing**: replace tty discovery polling with uevents or
-  inotify-backed rescans. Linux CAN publication and ARPHRD netdev classification
-  are implemented; netdev discovery already subscribes to route netlink.
+  inotify-backed rescans.
 
 - **Complete the Linux kernel mirror** (`src/protocol/ip/linux_mirror.d`): a netlink transport
   failure stalls the main loop on the writer's 1s `SO_RCVTIMEO` backstop; move the ACK wait onto

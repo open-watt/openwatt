@@ -1124,7 +1124,7 @@ protected:
     {
     }
 
-    protected bool quiet_lifecycle() const
+    bool quiet_lifecycle() const
         => (flags & (ObjectFlags.dynamic | ObjectFlags.temporary)) != 0;
 
     // push the derived views: state transitions (and any subclass state feeding status_message)

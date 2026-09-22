@@ -2,17 +2,6 @@ module driver.linux.fdwatch;
 
 version (linux):
 
-// Fans a dynamic set of fds out to collect/service watchers, backed by the main loop's reactor
-// (manager.reactor) rather than a thread. Each watcher provides a collect hook (append its fds)
-// and a service hook (drain them). All watchers' fds live in the reactor's epoll set as one pool
-// sharing a single coalesced drain: when any pooled fd is ready, the reactor runs service_all()
-// once per wait pass, which services every watcher and re-collects. Call fd_watch_changed() after
-// any change to a watcher's fd set.
-//
-// This is the readiness-only model: the reactor never touches the fds beyond epoll; the watcher's
-// service() does the actual I/O on the main thread. protocol/ip drives sockets through the same
-// reactor via the completion-shaped watch_io/IoOp layer instead.
-
 import urt.array;
 
 import manager;
@@ -111,8 +100,6 @@ nothrow @nogc:
             _reactor.set_pool_fds(_desired[]);
     }
 
-    // reactor-driven: any pooled fd ready runs this once per wait pass. Drain every watcher then
-    // re-collect (a service() may have opened/closed fds, matching the old post-service rebuild).
     void service_all()
     {
         _servicing = true;
@@ -156,16 +143,29 @@ unittest
         Reactor reactor;
         uint second_calls, third_calls, added_calls;
 
-        void collect(ref Array!pollfd) {}
+        void collect(ref Array!pollfd)
+        {
+        }
         void first()
         {
             watches.remove(&first);
             watches.remove(&third);
             watches.add(&added, &collect, reactor);
         }
-        void second() { ++second_calls; }
-        void third() { ++third_calls; }
-        void added() { ++added_calls; }
+        void second()
+        {
+            ++second_calls;
+        }
+
+        void third()
+        {
+            ++third_calls;
+        }
+
+        void added()
+        {
+            ++added_calls;
+        }
     }
 
     Test t;

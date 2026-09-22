@@ -93,7 +93,6 @@ private:
         Array!CANInterface stale;
         foreach (e; Collection!CANInterface().values)
         {
-            // Operator-created and stream-backed interfaces are not owned by discovery.
             if (!(e.flags & ObjectFlags.dynamic) || e.adapter.empty)
                 continue;
 
@@ -116,7 +115,6 @@ private:
         }
     }
 
-    // Pick the lowest unused "canN" name so removed slots get reused.
     const(char)[] next_iface_name()
     {
         for (int n = 1; n < 256; ++n)

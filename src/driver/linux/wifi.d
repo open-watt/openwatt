@@ -2310,9 +2310,7 @@ private:
         // VIFs we create (monitor/AP/STA) never spawn duplicate radios.
         Array!String os_buf;
         enumerate_wifi_adapters((const(char)[] name, const(char)[] description) nothrow @nogc {
-            const bool removable = adapter_is_removable(name);
-            port_add(PortKind.wifi, tconcat("linux:wifi:", name), name, name, ModuleName, description,
-                     removable ? PortFlags.removable : PortFlags.none);
+            port_add(PortKind.wifi, tconcat("linux:wifi:", name), name, name, ModuleName, description, adapter_is_removable(name) ? PortFlags.removable : PortFlags.none);
 
             uint w = read_wiphy(read_ifindex(name));
             bool present = false;
@@ -2344,7 +2342,6 @@ private:
         Array!LinuxWifiRadio gone;
         foreach (r; Collection!LinuxWifiRadio().values)
         {
-            // Operator-created radios are not owned by discovery.
             if (!(r.flags & ObjectFlags.dynamic))
                 continue;
 
