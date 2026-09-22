@@ -136,6 +136,8 @@ nothrow @nogc:
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!TeslaTWCMaster, id, flags);
+        if (!is_remote)
+            subscribe(&lifetime_change);
 
         import manager.system : node_id;
         _id_on_bus = cast(ushort)node_id();
@@ -267,6 +269,8 @@ protected:
     override void online()
     {
         super.online();
+        foreach (ref c; _chargers)
+            spawn_binding(c);
         refresh_binding_access();
     }
 
@@ -384,6 +388,8 @@ private:
     // only the stream-mode interface is ours to destroy; a user's is merely released
     void release_iface()
     {
+        release_bindings();
+        _chargers.clear();
         if (_subscribed)
         {
             _iface.unsubscribe(&incoming_packet);
@@ -403,6 +409,19 @@ private:
         _collision = false;
     }
 
+    void release_bindings()
+    {
+        foreach (binding; Collection!TeslaTWCBinding().values)
+            if (!binding.is_remote && binding.master is this && (binding.flags & ObjectFlags.dynamic))
+                binding.destroy();
+    }
+
+    void lifetime_change(ActiveObject, StateSignal signal)
+    {
+        if (signal == StateSignal.destroyed)
+            release_bindings();
+    }
+
     Charger* add_charger(ushort slave_id)
     {
         Charger* c = &_chargers.pushBack();
@@ -416,11 +435,17 @@ private:
     {
         Charger* c = add_charger(slave_id);
         log.info("discovered charger '", c.name[], "' on bus");
+        if (running)
+            spawn_binding(*c);
+        return c;
+    }
 
+    void spawn_binding(ref Charger c)
+    {
         foreach (binding; Collection!TeslaTWCBinding().values)
         {
-            if (binding.master is this && binding.slave_id == slave_id)
-                return c;
+            if (binding.master is this && binding.slave_id == c.id)
+                return;
         }
 
         c.name = Collection!TeslaTWCBinding().generate_name(c.name[]).make_string();
@@ -428,13 +453,12 @@ private:
         if (b)
         {
             b.master = this;
-            b.slave_id = slave_id;
+            b.slave_id = c.id;
             b.device = c.name;
             Collection!TeslaTWCBinding().add(b);
         }
         else
             log.error("could not spawn binding for charger '", c.name[], "'");
-        return c;
     }
 
     void set_role(BusRole role)
@@ -884,6 +908,7 @@ unittest
         this(CID id) { super(id); }
         void start() { set_state(State.running); }
         void stop() { set_state_deferred(State.stopping); }
+        override CompletionStatus shutdown() => CompletionStatus.complete;
     }
 
     TestInterface iface = Collection!TestInterface().alloc("twc-review-interface");
@@ -970,6 +995,69 @@ unittest
     assert(master.max_current(Amps(float.nan)).length);
     assert(master.max_current(Amps(1000)).length);
     assert(master.max_current(Amps(32)) is null);
+
+    TeslaTWCBinding mirrored = Collection!TeslaTWCBinding().alloc("twc-review-mirror", cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.remote));
+    Collection!TeslaTWCBinding().add(mirrored);
+    scope(exit)
+    {
+        Collection!TeslaTWCBinding().remove(mirrored);
+        free(mirrored);
+    }
+    mirrored.master = master;
+    master.discover(125);
+    assert(Collection!TeslaTWCBinding().get("twc_007d") is null);
+    master.start();
+    TeslaTWCBinding spawned = Collection!TeslaTWCBinding().get("twc_007d");
+    assert(spawned && (spawned.flags & ObjectFlags.dynamic) && spawned.master is master && spawned.slave_id == 125);
+    spawned.disabled = true;
+    spawned.offline_timeout = 90.seconds;
+    spawned.device = "twc-review-custom-device".make_string();
+    master.find_charger(125).reserved_current = 1600;
+    master.stop();
+    assert(Collection!TeslaTWCBinding().get("twc_007d") is spawned);
+    assert(Collection!TeslaTWCBinding().get("twc-review-binding") is binding);
+    assert(Collection!TeslaTWCBinding().get("twc-review-mirror") is mirrored);
+    assert(master.find_charger(125));
+    master.start();
+    assert(Collection!TeslaTWCBinding().get("twc_007d") is spawned);
+    assert(spawned.disabled && spawned.offline_timeout == 90.seconds);
+    assert(spawned.device == "twc-review-custom-device");
+    assert(master.find_charger(125).reserved_current == 1600);
+    master.restart();
+    assert(Collection!TeslaTWCBinding().get("twc_007d") is spawned);
+    master.start();
+    master.disabled = true;
+    assert(Collection!TeslaTWCBinding().get("twc_007d") is spawned);
+
+    TestMaster other = alloc!TestMaster(Collection!TeslaTWCMaster().allocate_id("twc-review-other"));
+    Collection!TeslaTWCMaster().add(other);
+    other.discover(125);
+    other.start();
+    assert(other.find_charger(125).name == "twc_007d1");
+    assert(Collection!TeslaTWCBinding().get("twc_007d1").device == "twc_007d1");
+    other.stop();
+    binding.master = other;
+    mirrored.master = other;
+    other.destroy();
+    assert(Collection!TeslaTWCBinding().get("twc_007d1") is null);
+    assert(Collection!TeslaTWCBinding().get("twc-review-binding") is binding);
+    assert(Collection!TeslaTWCBinding().get("twc-review-mirror") is mirrored);
+    binding.master = master;
+    mirrored.master = master;
+
+    TestMaster unstarted = alloc!TestMaster(Collection!TeslaTWCMaster().allocate_id("twc-review-unstarted"));
+    Collection!TeslaTWCMaster().add(unstarted);
+    TeslaTWCBinding unstarted_binding = Collection!TeslaTWCBinding().alloc("twc-review-unstarted-binding", ObjectFlags.dynamic);
+    Collection!TeslaTWCBinding().add(unstarted_binding);
+    unstarted_binding.master = unstarted;
+    unstarted.destroy();
+    assert(Collection!TeslaTWCBinding().get("twc-review-unstarted-binding") is null);
+
+    master.iface = iface;
+    assert(Collection!TeslaTWCBinding().get("twc_007d") is null);
+    assert(master._chargers.empty);
+    assert(Collection!TeslaTWCBinding().get("twc-review-binding") is binding);
+    assert(Collection!TeslaTWCBinding().get("twc-review-mirror") is mirrored);
 
     master._chargers.clear();
     foreach (id; [ushort(1), ushort(2)])

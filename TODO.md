@@ -359,6 +359,13 @@ holding action, not an answer. Options, cheapest first:
 
 ## Tesla TWC
 
+- Mark sampled series gaps when a binding loses observation. TWC master outages
+  currently mark the Device offline and detach providers without calling `mark_gap()`
+  on sampled elements, so resumed history can bridge the outage. Define this in the
+  shared binding/provider lifecycle, accounting for other live providers and preserving
+  control setpoints; cover both shutdown and the silence watchdog, plus accumulator
+  integration across gaps.
+
 - **[#661] Validate fleet transfers on hardware**: exercise cap changes, circuit-budget
   reductions, dropped replies, restart/takeover, and measured-current ramp-down.
   Verify no current is reassigned until the lower limit is acknowledged and measured.
@@ -381,6 +388,13 @@ holding action, not an answer. Options, cheapest first:
 - **Verify recovery on hardware**: confirm that a slave answers master heartbeats without a
   fresh announce after a link flap. If it does not, explicitly restart the announce ceremony
   when repeated heartbeats go unanswered.
+
+- **Evict chargers that leave the bus**: `_chargers` only ever grows. A charger removed from
+  the bus keeps its stale state flag and reservation until the next master restart, withholding
+  its share of the budget; after the restart its flag is never set again, and because
+  `next_offer` holds every offer while any known charger lacks fresh state, no charger can be
+  offered more current than it already has. Its binding is also respawned on every master
+  start. Needs a presence timeout that evicts the record and its dynamic binding.
 
 ## Tesla vehicle BLE
 
@@ -494,6 +508,15 @@ The current implementation and remaining phases are described in
   now does (8k under `Tiny`, 64k otherwise), but the record-count caps declared beside it are
   still 256 and 64 on every part, so a bucket on a 320KB device costs what one on a Pi costs.
   Fold all three into the same per-target sizing rather than leaving one scaled and two fixed.
+
+- **Audit dynamic-object ownership across the tree**: `ObjectFlags.dynamic` means the object
+  was created by something other than the user, is excluded from saved config, and is managed
+  by its creator - so its creator must destroy it. Most spawners comply (sync `ws_server` and
+  `peering`, the Tesla vehicle scanner, the Linux enumeration drivers, and now the TWC master),
+  but `vehicle_appliance_for` (`src/apps/energy/vehicle.d`) allocs a dynamic `Appliance` from a
+  free function with no owning object at all. Decide who owns a VIN-keyed appliance (the
+  observer that saw the VIN, or durable like the Device it wraps) and sweep the remaining
+  `ObjectFlags.dynamic` sites for the same question.
 
 - **Modbus `report` registers: accept unsolicited responses and never poll them**: some devices
   push a value on their own schedule instead of answering reads. The bench PT100 transmitter does

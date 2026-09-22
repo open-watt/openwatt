@@ -1413,6 +1413,19 @@ for the same master and slave are reused; a second binding cannot take over
 an already-bound charger.
 No slave addresses are configured on the master.
 
+Discovered bindings survive master disable, restart and failure, preserving their
+identity and runtime settings. They stop sampling and providing write access while
+the master is offline, and re-adopt when it returns. A disabled binding stays
+disabled. Chargers discovered during startup get bindings when the master comes up.
+Charger records and current reservations also survive ordinary outages; increased
+offers remain gated on fresh heartbeat data from every known charger.
+
+Removing the master destroys its local dynamic bindings, even if it was already
+disabled. Changing its `interface` or `stream` retires those bindings and clears
+the old bus's charger records. Manually configured bindings and remote proxies
+are never destroyed by this cleanup. Devices retain their elements and recorded
+series after their bindings are removed.
+
 The bus allows one master. On startup the master listens for a few seconds
 before claiming the bus, and stands by if another master is heard - snooping
 the slaves' replies, discovering chargers from heartbeats as well as link-ready

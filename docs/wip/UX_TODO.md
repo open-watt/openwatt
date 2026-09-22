@@ -9,6 +9,15 @@ through them and remove sections as they are absorbed.
   AP from `192.168.1.1/24` to `192.168.4.1/24`, matching the Waveshare and SmartEVSE boards.
   Onboarding or recovery flows that direct the user to the setup AP must use `192.168.4.1`.
 
+## 2026-09-22: discovered TWC bindings follow their owner's lifetime
+
+- Discovered `/binding/tesla/twc` entries retain identity and runtime settings across master
+  outages and explicit disable. Display them as waiting for their master; an outage does
+  not remove the binding. Device providers detach while the binding is stopped.
+- Removing a master or changing its `interface`/`stream` removes its local dynamic bindings.
+  Reflect those removals in binding views without deleting their Devices or recorded series.
+  Manually configured bindings and remote proxies are preserved.
+
 ## 2026-09-21: RP2350 hardware identity
 
 - RP2350 now supplies a stable hardware node ID and derives its default hostname
