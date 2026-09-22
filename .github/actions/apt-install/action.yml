@@ -25,11 +25,11 @@ runs:
         FOREIGN_ARCH: ${{ inputs.foreign-arch }}
       run: |
         image="${ImageOS:-$( . /etc/os-release && echo "$ID$VERSION_ID" )}"
-        hash=$(printf '%s|%s' "$PACKAGES" "$FOREIGN_ARCH" | sha256sum | cut -c1-12)
+        hash=$({ printf '%s|%s\n' "$PACKAGES" "$FOREIGN_ARCH"; dpkg-query -W -f='${binary:Package}=${Version}\n'; } | sha256sum | cut -c1-12)
         # The cache restore untars as the runner user, so the parent must not be root-owned.
         mkdir -p "$HOME/.apt-debs"
         echo "dir=$HOME/.apt-debs/$SET" >> "$GITHUB_OUTPUT"
-        echo "key=apt-v1-$image-$(uname -m)-$SET-$hash" >> "$GITHUB_OUTPUT"
+        echo "key=apt-v2-$image-$(uname -m)-$SET-$hash" >> "$GITHUB_OUTPUT"
         if [ -n "$FOREIGN_ARCH" ]; then
             sudo dpkg --add-architecture "$FOREIGN_ARCH"
         fi

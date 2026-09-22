@@ -8,6 +8,8 @@ import urt.log;
 import urt.string.format : tconcat;
 import urt.time : MonoTime, getTime, msecs;
 
+import driver.system : ResetClass, ImageId, OtaImage;
+
 nothrow @nogc:
 
 
@@ -47,10 +49,23 @@ enum bool has_download_mode = false;
 
 bool reboot_pending() => g_reboot;
 
-// The supervisor relaunches this process; the reason it stopped is in its log,
-// not in anything the new process can read.
-const(char)[] reset_reason() => null;
-bool reset_was_software() => false;
+// The supervisor tells a relaunched process how its predecessor ended.
+const(char)[] reset_reason()
+{
+    const(char)* v = getenv("OW_LAST_END");
+    return v ? v[0 .. cstrlen(v)] : null;
+}
+
+ResetClass reset_class()
+{
+    switch (reset_reason())
+    {
+        case "crashed": return ResetClass.crash;
+        case "stopped": return ResetClass.deliberate;
+        case "started": return ResetClass.deliberate;
+        default:        return ResetClass.unknown;
+    }
+}
 
 bool ota_supported() => true;
 
@@ -171,7 +186,11 @@ void supervisor_heartbeat()
     watchdog_write("h\n");
 }
 
-void ota_commit() {}
+// Slot probation is the supervisor's: it soaks and rolls back on its own count.
+bool ota_running_image(out OtaImage image) => false;
+bool ota_accept_image() => false;
+bool ota_previous_image(out ImageId image) => false;
+bool ota_revert(ref const ImageId image) => false;
 
 void ota_push_policy(uint commit_secs, uint watchdog_ms, uint max_fail)
 {

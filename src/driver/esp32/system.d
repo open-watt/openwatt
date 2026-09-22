@@ -2,11 +2,15 @@ module driver.esp32.system;
 
 version (Espressif):
 
+import driver.system : ResetClass, ImageId, OtaImage;
+
 nothrow @nogc:
 
 
 void system_reboot()
 {
+    import urt.driver.reset : ResetMark, reset_record_mark;
+    reset_record_mark(ResetMark.deliberate);
     esp_restart();
 }
 
@@ -44,27 +48,14 @@ bool reboot_pending() => false;
 
 // Why the chip came up. A restart that never reached the panic handler leaves no
 // core dump, so without this a brownout and a clean reboot look identical.
-const(char)[] reset_reason()
-{
-    switch (esp_reset_reason())
-    {
-        case 1:  return "power-on";
-        case 2:  return "external pin";
-        case 3:  return "software";
-        case 4:  return "panic";
-        case 5:  return "interrupt watchdog";
-        case 6:  return "task watchdog";
-        case 7:  return "other watchdog";
-        case 8:  return "deep sleep wake";
-        case 9:  return "brownout";
-        case 10: return "sdio";
-        case 11: return "usb";
-        case 12: return "jtag";
-        default: return "unknown";
-    }
-}
+const(char)[] reset_reason() => reset_table[reset_index()].name;
 
-bool reset_was_software() => esp_reset_reason() == 3;
+ResetClass reset_class()
+{
+    import urt.driver.reset : reset_record_take;
+    reset_record_take();
+    return reset_table[reset_index()].cls;
+}
 
 bool ota_supported() => true;
 
@@ -99,15 +90,69 @@ void ota_abort(uint handle)
     esp_ota_abort(handle);
 }
 
-void ota_commit()
+bool ota_running_image(out OtaImage image)
 {
-    esp_ota_mark_app_valid_cancel_rollback();
+    auto p = esp_ota_get_running_partition();
+    if (!p || esp_partition_get_sha256(p, image.id.ptr) != 0)
+        return false;
+    uint state;
+    // Factory and USB-flashed images need not have an OTA state entry.
+    image.pending = esp_ota_get_state_partition(p, &state) == 0 && state == 1;
+    return true;
+}
+
+bool ota_accept_image() => esp_ota_mark_app_valid_cancel_rollback() == 0;
+
+bool ota_previous_image(out ImageId image)
+{
+    auto p = esp_ota_get_next_update_partition(null);
+    return p && esp_partition_get_sha256(p, image.ptr) == 0;
+}
+
+bool ota_revert(ref const ImageId image)
+{
+    auto p = esp_ota_get_next_update_partition(null);
+    ImageId candidate;
+    if (!p || esp_partition_get_sha256(p, candidate.ptr) != 0 || candidate != image)
+        return false;
+    return esp_ota_set_boot_partition(p) == 0;
 }
 
 void ota_push_policy(uint commit_secs, uint watchdog_ms, uint max_fail) {}
 
 
 private:
+
+struct ResetEntry
+{
+    string name;
+    ResetClass cls;
+}
+
+immutable ResetEntry[16] reset_table = [
+    { "unknown",            ResetClass.unknown },
+    { "power-on",           ResetClass.power },
+    { "external pin",       ResetClass.deliberate },
+    { "software",           ResetClass.deliberate },
+    { "panic",              ResetClass.crash },
+    { "interrupt watchdog", ResetClass.crash },
+    { "task watchdog",      ResetClass.crash },
+    { "other watchdog",     ResetClass.crash },
+    { "deep sleep wake",    ResetClass.deliberate },
+    { "brownout",           ResetClass.power },
+    { "sdio",               ResetClass.deliberate },
+    { "usb",                ResetClass.deliberate },
+    { "jtag",               ResetClass.deliberate },
+    { "efuse error",        ResetClass.crash },
+    { "power glitch",       ResetClass.power },
+    { "cpu lockup",         ResetClass.crash },
+];
+
+size_t reset_index()
+{
+    int r = esp_reset_reason();
+    return r > 0 && r < reset_table.length ? r : 0;
+}
 
 private struct esp_partition_t
 {
@@ -132,6 +177,9 @@ private extern (C)
     int rtc_gpio_set_level(int gpio, uint level);
     int rtc_gpio_hold_en(int gpio);
     const(esp_partition_t)* esp_ota_get_next_update_partition(const(esp_partition_t)* start);
+    const(esp_partition_t)* esp_ota_get_running_partition();
+    int esp_ota_get_state_partition(const(esp_partition_t)* p, uint* state);
+    int esp_partition_get_sha256(const(esp_partition_t)* p, ubyte* hash);
     int esp_ota_begin(const(esp_partition_t)* p, size_t image_size, ref uint handle);
     int esp_ota_write(uint handle, const(void)* data, size_t len);
     int esp_ota_end(uint handle);

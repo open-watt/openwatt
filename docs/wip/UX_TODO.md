@@ -3,6 +3,16 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-09-23: boot guard recovery status
+
+- `/system/sysinfo` adds `Boot:` with the configuration rung and recovery reason;
+  clients parsing the human output must tolerate and display this field.
+- Recovery can temporarily run `startup.conf` or bring-up defaults while keeping
+  the saved configuration. Explain that degraded boot does not erase deployment
+  state; the power-cycle gesture skips `user.conf` for one boot.
+- `/system/reboot crash=true` is a diagnostic fault injection. Keep it out of the
+  normal restart action; normal restart remains `/system/reboot`.
+
 ## 2026-09-22: every setup AP is at 192.168.4.1
 
 - The generic ESP platform bring-up defaults (and the ESP32-S31 board) moved their provisioning

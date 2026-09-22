@@ -9,6 +9,8 @@ import urt.system;
 import urt.time;
 import urt.variant : Variant;
 
+import manager.bootguard : boot_guard_status;
+
 import driver.system : has_download_mode, reset_reason, system_reboot;
 static if (has_download_mode)
     import driver.system : system_reboot_to_bootloader;
@@ -186,6 +188,7 @@ void sysinfo(Session session, const(Variant)[] args)
         session.write_line("Uptime:   ", seconds(getAppTime().as!"seconds"));
         session.write_line("Time:     ", getDateTime(), wall_time_set() ? "" : "  (unsynchronised)");
         session.write_line("Config:   ", g_app.config_dirty ? "modified" : "saved");
+        session.write_line("Boot:     ", boot_guard_status());
         if (const(char)[] reason = reset_reason())
             session.write_line("Reset:    ", reason);
     }
@@ -240,8 +243,13 @@ void show_time(Session session)
     session.write_line(getDateTime());
 }
 
-void reboot(Session session, Nullable!uint bootloader)
+void reboot(Session session, Nullable!uint bootloader, Nullable!bool crash)
 {
+    if (crash && crash.value)
+    {
+        session.write_line("reboot: crashing...");
+        abort();
+    }
     if (bootloader && bootloader.value)
     {
         static if (has_download_mode)

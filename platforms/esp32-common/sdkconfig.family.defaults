@@ -7,6 +7,9 @@ CONFIG_GPTIMER_ISR_CACHE_SAFE=y
 # startup.conf owns the radio configuration; the driver must not persist its own copy to NVS.
 CONFIG_ESP_WIFI_NVS_ENABLED=n
 
+# A new image boots once as pending; the boot guard accepts it and runs its own trial.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
 # Size-optimised in every config; otherwise a unittest image compiles IDF at -Og and
 # pays for it in its partition.
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y

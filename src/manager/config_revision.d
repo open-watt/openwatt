@@ -18,7 +18,7 @@ nothrow @nogc:
 enum retained_config_revisions = 5;
 alias RevisionValidator = bool function(const(char)[]) nothrow @nogc;
 
-char[] load_config_revision(const(char)[] base, RevisionValidator validate = null, bool rollback = false)
+char[] load_config_revision(const(char)[] base, RevisionValidator validate = null, bool rollback = false, int* loaded = null)
 {
     auto revisions = list_revisions(base);
     foreach (revision; revisions[])
@@ -40,17 +40,11 @@ char[] load_config_revision(const(char)[] base, RevisionValidator validate = nul
             continue;
         }
         log_info("config", "loaded revision '", path, "'");
+        if (loaded)
+            *loaded = revision;
         return data;
     }
-    if (rollback)
-        return null;
-    char[] legacy = cast(char[])load_file(base);
-    if (legacy !is null && validate && !validate(legacy))
-    {
-        free(legacy);
-        return null;
-    }
-    return legacy;
+    return null;
 }
 
 Result save_config_revision(const(char)[] base, const(char)[] data, out int revision)
@@ -112,6 +106,12 @@ Result save_config_revision(const(char)[] base, const(char)[] data, out int revi
             log_warning("config", "could not prune revision '", old_path, "'");
     }
     return Result.success;
+}
+
+int newest_config_revision(const(char)[] base)
+{
+    auto revisions = list_revisions(base);
+    return revisions.empty ? 0 : revisions[0];
 }
 
 bool has_config_revisions(const(char)[] base)
@@ -212,6 +212,8 @@ unittest
         char[256] buffer;
         char[] base = buffer[];
         assert(get_temp_filename(base, ".", "owr"));
+        assert(save_file(base, "unnumbered"));
+        assert(load_config_revision(base) is null);
         assert(delete_file(base));
         scope(exit)
         {
