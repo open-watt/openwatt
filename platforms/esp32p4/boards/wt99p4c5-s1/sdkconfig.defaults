@@ -1,0 +1,8 @@
+# WT99P4C5-S1: 16 MB flash and 32 MB HEX PSRAM on the WT0132P4-A1 module.
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_SPEED_200M=y
+
+# The ESP32-C5's SDIO wiring belongs here as CONFIG_ESP_HOSTED_* once the esp_hosted
+# component is built in; setting it before then only yields unknown-symbol notes.
+# CMD=19 CLK=18 D0-D3=14-17 slave reset=54, recorded in system.conf meanwhile.

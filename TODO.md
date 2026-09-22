@@ -1418,8 +1418,54 @@ on a board silkscreened
   logs it again identically: nothing formats the partition, so a fresh board has nowhere to keep
   a `startup.conf` or a `node.id` while `/system/sysinfo` still reports `Config: saved`. The
   partition is subtype `spiffs`, as the C5 and C6 tables also declare, while the build mounts it
-  with `USE_LITTLEFS=1`. Seen twice on the S31 and not yet checked on another part, but nothing
-  about it looks S31-specific.
+  with `USE_LITTLEFS=1`. Not S31-specific: a first boot on an ESP32-P4 fails
+  identically, and it fails every filesystem unit test; formatting by hand first took the P4 run
+  from ~20 modules to 115. `ow_lfs_ready()` in `littlefs_port.c` latches `mount_state = -1` on
+  any mount failure. Formatting on mount failure is not the fix, since that destroys a filesystem
+  after a transient corruption, or a partition still holding SPIFFS. Test the medium instead:
+  format only when the whole partition reads `0xFF`, log that it happened, and keep any other
+  failure latched. Check where the format runs; inline during startup risks the watchdog.
+
+### ESP32-P4 bring-up (2026-09-21)
+
+`PLATFORM=esp32-p4` **boots and runs on a WT99P4C5-S1**: the console is interactive over the
+USB_UART port, `/system/sysinfo` reports 32 MB of PSRAM in the heap, and the main loop idles at 0%
+load. It built and linked against ESP-IDF v6.1 with no source change at all; the profile had been
+scaffolded but never built. Release is 2,371,264 bytes, 75% of the 3 MB `ota_0` slot.
+
+- **The P4 is two parts, and needs two platforms.** Revisions below v3.0 and from v3.0 up have
+  different register maps (`soc/esp32p4/register/hw_ver1` against `hw_ver3`) and different ISA
+  extensions (v3 adds `_zcb_zcmp_zcmt`; Espressif's PIE is `xespv2p1` against `xespv`), and IDF
+  makes the two mutually exclusive. Espressif sells v3.x as the P4X, so `esp32-p4` is the original
+  part and `esp32-p4x` the v3.x one.
+  Nothing in the D half cares: it targets the base rv32imafc/ilp32f and reaches hardware through
+  IDF, so one object serves both and only the sdkconfig differs. **The `esp32-p4x` platform has never
+  been built against real silicon** -- no v3 part is in hand, and its profile is IDF's default.
+
+- **The minimum-revision field catches the mismatch at flash time.** esptool refuses a v3.1 image
+  on a v1.0 part before writing anything, which is how the split was found. No risk of a wrong
+  image reaching a board silently.
+
+- **The console is UART0, not USB-serial-JTAG.** The board brings the console out of a USB-C
+  socket marked USB_UART through a CP2102N; the part's own USB-serial-JTAG is on GPIO24/25 and is
+  not wired out. `/stream/usb-serial` still builds for the part.
+
+- **The v3 bootloader has almost no headroom**: 0x5f40 of the 0x6000 between its offset and the
+  partition table, against 0x5c30 on v1. Neither varies with `CONFIG`, since
+  `BOOTLOADER_COMPILER_OPTIMIZATION` is its own Kconfig choice defaulting to size. If a v3
+  bootloader feature is ever needed, the escape is `CONFIG_PARTITION_TABLE_OFFSET=0x10000`, which
+  the vendor's own configuration takes.
+
+- **The C5, when it is wired.** An ESP-HOSTED SDIO slave: CMD GPIO19, CLK GPIO18, D0-D3 GPIO14-17,
+  slave reset GPIO54. The open question is whether `esp_wifi_remote` proxies
+  `esp_wifi_internal_reg_rxcb` and `esp_wifi_internal_tx`; those are the only path the in-tree IP
+  stack takes, so without them a hosted radio cannot feed the fabric at all.
+
+- **Unit tests on hardware: 115 modules pass, then `urt.async` fails.** The task-create assert
+  that stopped the run there is fixed (urt#315); what follows it is a D assert and a store fault,
+  probably the per-fibre task stack, and everything after `urt.async` is still unreached. The
+  unittest image needs the fused-slot `partitions.unittest.csv`, which takes effect with #728.
+
 
 ## Dated entries
 

@@ -1,0 +1,2 @@
+# CONFIG=unittest builds a far larger image than a release one and does not need OTA.
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.unittest.csv"

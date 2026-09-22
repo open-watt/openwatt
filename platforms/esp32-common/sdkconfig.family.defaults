@@ -3,3 +3,7 @@
 CONFIG_GPIO_CTRL_FUNC_IN_IRAM=y
 CONFIG_GPTIMER_CTRL_FUNC_IN_IRAM=y
 CONFIG_GPTIMER_ISR_CACHE_SAFE=y
+
+# Size-optimised in every config; otherwise a unittest image compiles IDF at -Og and
+# pays for it in its partition.
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y

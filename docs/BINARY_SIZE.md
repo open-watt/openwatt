@@ -119,6 +119,23 @@ Limit is the stock 0x1b0000 `ota_0` partition, which the in-place migration must
 | 2026-09-09 | a8c75cbf | ldc 1.42.0 | 1,612,576 | 91,223 | 1,769,472 | first row; 91% of the stock partition |
 | 2026-09-20 | #720 | ldc 1.42.0 | 1,671,152 | 96,793 | 1,769,472 | first build against ESP-IDF v6.2 (master); 94% of the stock partition |
 
+### Wireless-Tag WT99P4C5-S1, `make esp-idf-build BOARD=wt99p4c5-s1 CONFIG=release`
+
+Limit is the 3 MB `ota_0` partition. `ram` is internal DRAM only; the module's 32 MB of HEX PSRAM
+joins the heap under `SPIRAM_USE_MALLOC` and is not counted here.
+
+| date | commit | compiler | flash | ram | limit | note |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2026-09-21 | ow/esp32p4 | ldc 1.43.0 | 2,371,264 | 62,622 | 3,145,728 | first row; boots, console interactive, 32 MB PSRAM in the heap |
+
+### ESP32-P4X, `make esp-idf-build PLATFORM=esp32-p4x CONFIG=release`
+
+Limit is the 3 MB `ota_0` partition. The P4 from revision v3.0; no such part has been run.
+
+| date | commit | compiler | flash | ram | limit | note |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2026-09-21 | ow/esp32p4 | ldc 1.43.0 | 2,375,296 | 62,708 | 3,145,728 | first row; minimum revision v3.0; builds and links, never booted |
+
 ### BK7231N, `make PLATFORM=bk7231n CONFIG=release`
 
 Limit is `_image_limit` from the linker script: the packed image must fit the app slot with

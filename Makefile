@@ -197,6 +197,8 @@ else ifeq ($(PLATFORM),esp32-h2)
     CONF_DIR := platforms/esp32h2
 else ifeq ($(PLATFORM),esp32-p4)
     CONF_DIR := platforms/esp32p4
+else ifeq ($(PLATFORM),esp32-p4x)
+    CONF_DIR := platforms/esp32p4x
 endif
 
 ifneq ($(BUILD_VARIANT_SUFFIX),)
@@ -529,7 +531,13 @@ else ifeq ($(PLATFORM),esp32-h2)
 else ifeq ($(PLATFORM),esp32-p4)
     ESP_PROJECT_DIR := platforms/esp32p4
     ESP_IDF_TARGET  := esp32p4
-    ESP_REFERENCE_BOARD := ESP32-P4-Function-EV-Board
+    ESP_REFERENCE_BOARD := WT0132P4-A1 module
+    ESP_FLASH_SIZE := 16MB
+    ESP_PSRAM_SIZE := 32MB
+else ifeq ($(PLATFORM),esp32-p4x)
+    ESP_PROJECT_DIR := platforms/esp32p4x
+    ESP_IDF_TARGET  := esp32p4
+    ESP_REFERENCE_BOARD := ESP32-P4X-Function-EV-Board
     ESP_FLASH_SIZE := 16MB
     ESP_PSRAM_SIZE := 32MB
 endif
@@ -558,10 +566,6 @@ ifdef ESP_PROJECT_DIR
     ESP_BUILD_DIR := $(abspath $(OBJDIR)/esp-idf)
     ESP_SDKCONFIG := $(ESP_BUILD_DIR)/sdkconfig
     ESP_SDKCONFIG_DEFAULTS := $(abspath $(ESP_PROJECT_DIR)/sdkconfig.defaults);$(abspath platforms/esp32-common/sdkconfig.family.defaults)
-    ifeq ($(CONFIG),release)
-        ESP_RELEASE_SDKCONFIG := platforms/esp32-common/sdkconfig.release.defaults
-        ESP_SDKCONFIG_DEFAULTS := $(ESP_SDKCONFIG_DEFAULTS);$(abspath $(ESP_RELEASE_SDKCONFIG))
-    endif
     ifeq ($(NOEXCEPTIONS),1)
         ESP_NOEH_SDKCONFIG := platforms/esp32-common/sdkconfig.noexceptions.defaults
         ESP_SDKCONFIG_DEFAULTS := $(ESP_SDKCONFIG_DEFAULTS);$(abspath $(ESP_NOEH_SDKCONFIG))
