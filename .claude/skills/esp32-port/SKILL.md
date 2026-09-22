@@ -9,6 +9,10 @@ You are working on Espressif ESP32 platform support for OpenWatt. ESP32 targets 
 
 The C2, C3, C5, C6 and H2 use the soft-float ABI (`ilp32`). P4 and S31 have FPUs and use `ilp32f`: P4 uses the `esp32p4` processor entry, and S31 uses `e907`. The D object and ESP-IDF must agree on this ABI.
 
+The P4 is two platforms: `esp32-p4` for silicon below revision v3.0 and `esp32-p4x` for v3.x, which Espressif sells as the ESP32-P4X. Register maps and ISA extensions differ, neither image boots the other's part, and esptool refuses the wrong one at flash time, so read the revision with `esptool chip-id` first. A board picks its platform through `BOARD_PLATFORM`.
+
+Ethernet is a board decision, never a platform default: `USE_ETHERNET := 1` in `board.mk` builds the EMAC driver (`src/driver/baremetal/ethernet.d` over urt's `driver/esp32/ethernet.d`), and the board's `system.conf` creates the `/interface/ethernet` object with its PHY wiring.
+
 The current dev board is an ESP32-S3 with 8MB octal PSRAM and 16MB flash, connected via native USB Serial/JTAG (no UART bridge chip).
 
 ## Build & Flash
