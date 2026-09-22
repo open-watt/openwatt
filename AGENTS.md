@@ -188,6 +188,12 @@ timers, and completion callbacks:
   counters, and fires only while Running.
 - **TX is self-clocking**: transmit on submission when the link is idle; send the next queued item
   from the completion event (ack callback, prompt, response), never from a tick.
+- **TX can also be pulled**: a sink invites a producer and calls back until it is done, through
+  `Stream.tx_handler` (return a `Page*`, null to disarm) or `BaseInterface.tx_handler` (submit
+  through `forward()`, return false to disarm). A bulk walk such as a file download is a
+  producer, never a loop.
+- **`heartbeat()` dispatches only for collection root types.** Defined on a derived type it is
+  silent dead code.
 
 ##### ObjectRef and Dependency Management
 
@@ -255,6 +261,16 @@ void iface_state_change(ActiveObject, StateSignal signal)
 - `ObjectRef` uses `alias get this`, so `_iface !is null` works naturally and covers both "never set" and "target destroyed/missing" cases — no separate `detached()` check needed at use sites.
 - `destroy()` fires `StateSignal.offline` before `StateSignal.destroyed` for running objects, so handling `offline` alone is sufficient.
 - `unsubscribe()` is idempotent — safe to call in `shutdown()` even if `startup()` never completed.
+- **Temporaries are never `ObjectRef`.** A generated-name, one-shot object can never rebind, so the
+  ref could only tombstone. Hold it as a plain reference and null every reference to it on
+  `offline`: a temporary leaving Running destroys itself, so a reference that outlives the signal
+  becomes a second destroy from inside the first.
+- **A double destroy, or a signal handler re-entered, is a bookkeeping error; never guard it.** A
+  handler that makes a terminal decision on `offline` or `destroyed` deregisters immediately, and
+  a `running` check inside a signal handler is the smell.
+- **Stream-bound state dies in `shutdown()`.** Read tails, partial frames and parser state derived
+  from the bytes survive a stream cycle unless reset there, and get prepended to the next
+  connection's data.
 
 #### 4. Module System
 
@@ -266,6 +282,10 @@ Modules are the top-level organizational unit. Each module registers Collections
 - `post_update()`: Called after all modules' `update()`
 
 **Module registration:** Modules are manually registered in [src/manager/plugin.d:59-94](src/manager/plugin.d#L59-L94). Each protocol/router layer is a module.
+
+The console tree is baked once startup completes, so `register_command` belongs only in a
+module's `init()`. Cross-module helpers are methods on the Module class, called as
+`get_module!XModule.helper(...)`, not free functions.
 
 #### 5. Hierarchical Data Model: Device → Component → Element
 
@@ -409,6 +429,20 @@ High-level application logic:
 
 ## Development Practices
 
+### Worktrees and Branches
+
+Work in your own worktree and branch from the first edit: `git worktree add d:/tmp/wt-<topic> -b
+ow/<topic> github/master`, with submodules initialised there, urt included. The primary checkout
+carries live uncommitted work, so never edit it or switch its branches or submodule checkouts.
+The remote is `github`, and local `master` is not `github/master`; base on `github/master`. The
+stash is shared by every worktree of a repo, so never `git stash` in one; make a WIP commit on
+your own branch instead.
+
+Every branch that holds work gets a PR, or the work does not exist. One that is not ready gets a
+draft whose title says so (`WIP backup:` or `Needs decision:`) and whose body says what the work
+is, what state it is in, and the decision it waits on. A branch without a PR is lost the moment
+its worktree is cleaned up, and a local-only branch is lost with the machine.
+
 ### Debugging & Root Cause Analysis
 
 **Never apply speculative fixes.** When investigating a bug:
@@ -417,6 +451,20 @@ High-level application logic:
 - If you're not confident in a fix, explicitly state your uncertainty and present it as a hypothesis for discussion, not as a code change.
 - A fix that doesn't address the root cause is worse than no fix — it hides the real bug and creates false confidence.
 - Never take the easy path. When a structural issue is identified, address it directly — don't work around it with guards, special cases, or compatibility shims. Early structural fixes prevent compounding debt.
+
+**Trust only evidence you have checked.** A stale ref and a contaminated build both produce
+clean-looking output:
+- Fetch before judging upstream. `git fetch` does not fetch submodules; fetch them too, and check
+  `gh pr view` for any PR number you are about to reason about.
+- Search branches, not just master, before fixing a platform or build failure. Bring-up work is
+  often pushed unmerged; `git log --all -S <symbol>` and `gh pr list --state all` find it.
+- Run one build per tree and leave it alone while it runs. Two builds sharing `obj/`, or an edit
+  made while the compile is reading sources, each yield a plausible wrong result; use a second
+  worktree for parallel work.
+- Take hardware addresses from a primary source, the datasheet or the vendor SDK linker script,
+  never from a skill file or an existing linker script.
+- When each round trip is edit, build, flash and run, bundle every cheap independent probe into
+  the same build, with a sanity probe for its precondition.
 
 ### Documentation Obligations
 
@@ -428,16 +476,23 @@ change carries these obligations:
   you deliberately chose not to do, work a review surfaced and deferred, and anything you
   discovered in passing. Never leave it only in a commit message, a PR description, a branch
   that may not land, or your own working memory. Reduce or delete an entry when it lands; the
-  file is a list of things to revisit, not a history.
+  file is a list of things to revisit, not a history. Correct a stale or wrong entry on sight,
+  in the change that learned better, and say what the evidence was.
 
 - **Frontend-affecting changes need a migration action.** If a change alters anything the
   frontend apps consume (sync surface, element or component shape, CLI or API responses,
   identity, units), add the corresponding migration action to
   [docs/wip/UX_TODO.md](docs/wip/UX_TODO.md) in the same PR. The clients are separate
-  repositories and cannot see your change; that file is the only handoff.
+  repositories and cannot see your change; that file is the only handoff. They attach as sync
+  peers that only subscribe and mirror, with no version negotiation, so any change to sync
+  frames, verbs or identity is a coordinated breaking change.
 
 - **CLI changes update [docs/CLI.md](docs/CLI.md).** New commands, new collections, renamed or
   removed properties, changed argument shapes: same PR, no exceptions.
+
+- **[docs/OVERVIEW.md](docs/OVERVIEW.md) is orientation, not a spec home.** A contract goes in
+  the reference doc it belongs to (CLI.md, DATA_MODEL.md, SYNC.md, PEERING.md, AUTOMATION.md).
+  If none fits, park it as an unlinked `docs/wip/*.draft.md`; never start a thin new doc for it.
 
 - **Process docs in `docs/wip/` are temporary by construction.** A project may add one to track
   its own staging, design or migration state. Prune it as the work lands, and delete it when the
@@ -448,9 +503,10 @@ change carries these obligations:
   PR. Stale documentation is worse than none, because it is trusted.
 
 - **Release builds update the size ledger.** Every build prints its footprint from
-  `tools/binstats.d`; a release build also prints a ready `ledger` row. Whenever a release
-  build is made for any reason, paste that row into [docs/BINARY_SIZE.md](docs/BINARY_SIZE.md)
-  under its configuration. Targets with a hard flash limit carry that limit in every row. Never
+  `tools/binstats.d`; a release build also prints a ready `ledger` row. A PR records one row per
+  configuration it builds in [docs/BINARY_SIZE.md](docs/BINARY_SIZE.md): the final build of the
+  tree being merged. Overwrite the row while iterating; comparisons between builds belong in the
+  PR or TODO.md, not in extra rows. Targets with a hard flash limit carry that limit in every row. Never
   run a build just to update the ledger; only deployable release builds are recorded, never
   debug or unittest.
 
@@ -509,6 +565,19 @@ lands:
   movement, in an order where each patch stands on its own;
 - a uRT submodule bump or a documentation update is never its own patch. Fold it into the patch
   whose work requires it.
+- urt commits are PR-grade: never a comment-only commit, and never a commit followed by its
+  inverse. Reset past both and fold the submodule pointer churn away.
+
+**Shape the tree broad, not tall.** Root every branch on master unless it consumes another
+branch's symbols; a feature joining two chains gets an integration branch that merges its
+prerequisites. Each branch builds on its own and carries its own docs.
+
+**Commit messages are a subject**, with a body only for what the subject cannot carry: a
+non-obvious reason, a correctness argument. No narrated backstory, and no `Co-Authored-By`
+trailers.
+
+**Push review fixes as you make them**, one per review point. Review and merge happen in one pass,
+so a fix held back for an unrelated open question misses it.
 
 The audience for a PR is a reviewer reading it now and an auditor reading it in two years, both
 asking what changed and why. Neither wants to see your workflow.
@@ -524,6 +593,19 @@ asking what changed and why. Neither wants to see your workflow.
 - Use `@nogc nothrow` attributes wherever possible
 - Minimize allocations (allocations should be deliberate and infrequent)
 - Avoid D standard library (Phobos) - use uRT runtime instead
+
+**Building and measuring:**
+- **Two build systems.** The Makefile discovers every `src/**/*.d`; `openwatt.vcxproj` and
+  `openwatt.vcxproj.filters` do not. A new `.d` file goes into both, and a clean `make` proves
+  nothing for Visual Studio. After a scripted edit, assert the new state; a grep that finds
+  nothing means "clean" and "wrong pattern" alike (use raw strings for Windows paths).
+- **Embedded targets build `CONFIG=release`**; a debug image may not fit the flash. Diagnose on a
+  debug build where it fits, on the Pi or the desktop, because optimisation can make a readback lie.
+- **Measure code size from an LDC release build with `size`**, never from a debug build and never
+  from the file size. Measure struct layout on a 32-bit triple (`-mtriple=riscv32-unknown-none-elf`,
+  `armv7-none-eabi`): pointers halve while 8-byte types stay 8-aligned, so every hole moves.
+- **Let CI prove a build.** Build locally only to measure, to run, or to diagnose a CI failure,
+  and never sweep the cross-build matrix by hand.
 
 ### Coding Style
 
@@ -612,6 +694,45 @@ this(I)(const I i)
 - Keep one definition of each function and struct. Put `version` blocks *inside* at the exact point of divergence -- never duplicate the entire function or struct across version blocks.
 - When a version flag is needed in multiple places within a function, compute it once as an `enum` at the top (e.g. `version (X) enum hw = true; else enum hw = false;`) and branch with `static if`.
 - Declare local `version` identifiers (e.g. `version = Foo;`) at the top of a `version` block to create derived flags that simplify downstream conditionals.
+- Write `version (X) {} else` on one line, with the gated statement on the next.
+- Where compilers share syntax, share the branch: LDC and GDC share GCC-extended asm, and only
+  DMD's Intel-style asm gets its own `version (DigitalMars)` arm.
+
+**D idioms:**
+- `T(x)` for a conversion D accepts implicitly (widening, same-width sign change, a constant that
+  fits). `cast(T)x` only where D demands it (runtime narrowing, pointer reinterpretation, const
+  stripping), so that every `cast` is a visible, auditable claim.
+- Call a discarded result bare; never `cast(void)` it to quiet a lint.
+- `//` comments only, never `/* */`, including when porting C.
+- `Component` and `Device` are `extern(C++)`, so `cast(Device)c` always succeeds. Test with
+  `is_device`, never with a downcast.
+- Module-level data is TLS by default. Do not flip it to `__gshared` without checking every
+  cross-thread access, and do not leave as TLS data that a `pragma(crt_constructor)` writes and
+  another thread reads.
+- Inside a managed object, log with `log.warning(...)` and its siblings, which attach the
+  object's identity; `writeWarning` with a hand-built name preamble is for code with no object.
+- Name with device-driver vocabulary (`service`, `drive`), never `drain` or `pump`.
+
+**Layering and footprint:**
+- A C shim (`urt/driver/<plat>/*.c`) wraps only what D cannot reach: macros, static inlines, ABI
+  and link-order fixes. Anything D can declare and call is done in D, since a call through the
+  shim cannot inline.
+- urt never depends on openwatt to link. Platform shims, port assembly and any `--wrap` flag a
+  driver relies on live in urt, under `src/urt/driver/<plat>/` and urt's `platforms.mk`.
+- No printf-family in formatting or conversion paths; it drags in the whole format parser.
+  Post-process minimal CRT calls (`gcvt`, `ecvt`) or format by hand.
+- In a bloaty template, put the non-T-carrying work in one never-inlined core taking as few
+  arguments as possible, and keep the inlined shell to the T-carrying part.
+
+**Correctness rules:**
+- A helper that returns and calls back later copies every slice argument before returning; the
+  caller cannot know when it is safe to free them.
+- Encode/decode and read/write pairs mirror exactly, defensive cases included, even where upstream
+  validation makes one side's guard unreachable.
+- Packet transit, retry and timeout timers run on `MonoTime`; project to `SysTime` only at a
+  record sink.
+- Before drafting a new member of an existing family (a sampler, client, interface), survey two
+  or three siblings rather than copying the nearest one.
 
 **Property patterns:**
 - **Mutually exclusive properties**: Later-set properties overwrite state of earlier ones. Don't validate mutual exclusion; instead, have each property setter update internal state to indicate which option is active.
@@ -761,5 +882,5 @@ And remember,
 - No unicode in source files unless it's string data that's meant to contain unicode.
 - Line-breaks should be avoided for single statements, unless they REALLY improve readibility! Use good taste, no gratuitous line breaking! Long lines are fine; break when a user would prefer to read as a list, or other genuinely better readibility moments.
 - Reviews are ADVERSARIAL. Blocking findings are fixed before merge; everything else lands in [TODO.md](TODO.md). Rewrite the patch series before presenting it: no WIP churn, fixes amend the original sin, minimal patch count, urt bumps and doc updates fold into the patch they belong to. See the **PR Review and Merge Preparation** subsection.
-- Any release build you make, for any reason, gets a row in [docs/BINARY_SIZE.md](docs/BINARY_SIZE.md).
+- The final release build of each configuration a PR builds gets one row in [docs/BINARY_SIZE.md](docs/BINARY_SIZE.md).
 - Outstanding and follow-up work ALWAYS lands in [TODO.md](TODO.md). Frontend-affecting changes ALWAYS get a migration action in [docs/wip/UX_TODO.md](docs/wip/UX_TODO.md). CLI changes ALWAYS update [docs/CLI.md](docs/CLI.md). See the **Documentation Obligations** subsection.
