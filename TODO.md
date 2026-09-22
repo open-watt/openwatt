@@ -1,5 +1,12 @@
 # TODO
 
+- Decide uRT's memory-flags contract for allocations that must remain accessible
+  while the flash cache is disabled. The power regulator's `FireEngine` uses
+  `MemFlags.fast`, which prefers internal SRAM but may fall back to PSRAM under
+  exhaustion or fragmentation, allowing the ISR cache-access crash to recur.
+  Deferred from #745: provide guaranteed internal placement with clean allocation
+  failure, and test the exhausted-internal-heap path.
+
 - Verify `/system/reboot bootloader=1` on classic ESP32 hardware; the downloader
   path has compiled, but its RTC GPIO0 hold and subsequent flashing cycle remain untested.
 
@@ -80,6 +87,12 @@ holding action, not an answer. Options, cheapest first:
 - Bound cleanup of crash-left `.tmp` and rejected `.bad` revision files without losing
   useful recovery evidence; successful-save retention currently prunes completed files.
 - Complete the config-dirty mutation coverage (`set-hostname` currently bypasses it).
+- **A tripped boot guard with no earlier revision is a permanent reboot loop.** Once NVS records
+  3 failed boots and `conf/config.conf` exists with no older usable revision, `main` logs
+  `refusing to replace deployment configuration with defaults` and returns -1. The counter is
+  never touched on that path, so every boot repeats it until NVS is erased over serial
+  (`openwatt-F993`, 2026-09-22). Refusing the defaults is right; the refusal has to land in a
+  reachable state (provisioning AP, deployment config untouched) rather than a reboot.
 
 ## Retrospective merge reconciliation (2026-09-08)
 

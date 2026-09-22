@@ -81,6 +81,7 @@ Limit is the 4 MB `ota_0` partition. `ram` is internal DRAM only; PSRAM is heap.
 | 2026-09-16 | 2aa2b6a2 | ldc 1.42.0 | 2,868,288 | 130,621 | 4,194,304 | burst duty accumulates in q16, `window` retired; built with the uncommitted urt counter ABI fix (urt#296) |
 | 2026-09-20 | #720 | ldc 1.42.0 | 2,893,056 | 136,247 | 4,194,304 | first build against ESP-IDF v6.2 (master), esp-clang 21.1.3; the RAM rise is IDF v6.2 |
 | 2026-09-21 | #732 | ldc 1.42.0 | 2,903,088 | 136,079 | 4,194,304 | ESP-IDF v6.1 release; LDC 1.43 is refused on Xtensa because esp-clang 21's llc cannot read LLVM 22 bitcode |
+| 2026-09-22 | fc5efe57 | ldc 1.42.0 | 2,913,664 | 139,459 | 4,194,304 | `COREDUMP=1`, with the power regulator's ISR state moved out of PSRAM |
 
 ### ESP32-C5 DevKitC-1, `make esp-idf-build PLATFORM=esp32-c5 CONFIG=release`
 
