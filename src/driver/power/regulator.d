@@ -1,6 +1,6 @@
 module driver.power.regulator;
 
-import urt.mem : alloc;
+import urt.mem : MemFlags, alloc, free;
 import urt.meta : AliasSeq;
 import urt.si.quantity : Quantity;
 import urt.si.unit : Hertz;
@@ -182,19 +182,16 @@ nothrow @nogc:
 
     final float frequency() const
     {
-        FireStatus status = fire_status(*cast(FireEngine*)&_engine);
+        FireStatus status = engine_status();
         return status.period_q4 ? 8_000_000.0f / status.period_q4 : 0;
     }
 
     final float applied_level() const
-    {
-        FireStatus status = fire_status(*cast(FireEngine*)&_engine);
-        return status.level_q16 * (100.0f / 65536);
-    }
+        => engine_status().level_q16 * (100.0f / 65536);
 
     final bool zc_ok() const
     {
-        FireStatus status = fire_status(*cast(FireEngine*)&_engine);
+        FireStatus status = engine_status();
         return !status.fault && status.period_q4 != 0;
     }
 
@@ -212,23 +209,28 @@ nothrow @nogc:
         if (!materialise())
             return CompletionStatus.error;
 
-        if (!_opened)
+        if (!_engine)
         {
+            _engine = alloc!FireEngine(MemFlags.fast);
+            if (!_engine)
+                return CompletionStatus.error;
+
             FireConfig config;
             config.psm_gpio = _psm_pin;
             config.zc_gpio = _zc_pin;
             config.zc_trigger = cast(GpioInterruptTrigger)_zc_edge;
             config.zc_pull = _zc_pull;
             config.psm_invert = _psm_invert;
-            if (!fire_open(_engine, config))
+            if (!fire_open(*_engine, config))
             {
+                free(_engine);
+                _engine = null;
                 static if (fire_supported)
                     log.error("failed to claim regulator hardware; pins, counters, or link slots busy?");
                 else
                     log.error("power regulator is not supported on this platform");
                 return CompletionStatus.error;
             }
-            _opened = true;
         }
 
         push_params();
@@ -252,10 +254,11 @@ nothrow @nogc:
             _scheduled = false;
         }
         unsubscribe();
-        if (_opened)
+        if (_engine)
         {
-            fire_close(_engine);
-            _opened = false;
+            fire_close(*_engine);
+            free(_engine);
+            _engine = null;
         }
         return super.shutdown();
     }
@@ -294,7 +297,7 @@ private:
 
     enum telemetry_period = dur!"seconds"(1);
 
-    FireEngine _engine;
+    FireEngine* _engine;    // ISRs touch this with the flash cache off; keep it out of PSRAM
     uint _psm_pin = uint.max;
     uint _zc_pin = uint.max;
     float _level = 0;
@@ -305,7 +308,6 @@ private:
     Pull _zc_pull;
     bool _psm_invert;
     bool _enable = true;
-    bool _opened;
     bool _subscribed;
     bool _scheduled;
 
@@ -318,7 +320,7 @@ private:
 
     void push_params()
     {
-        if (!_opened)
+        if (!_engine)
             return;
         FireParams params;
         params.level = cast(uint)(_level * (65536.0f / 100) + 0.5f);
@@ -333,7 +335,7 @@ private:
             if (params.droop_span_mhz)
                 params.droop_slope_q16 = cast(uint)((ulong(params.level) << 16) / params.droop_span_mhz);
         }
-        fire_set_params(_engine, params);
+        fire_set_params(*_engine, params);
     }
 
     void telemetry(MonoTime now)
@@ -347,9 +349,12 @@ private:
         _scheduled = true;
     }
 
+    FireStatus engine_status() const
+        => _engine ? fire_status(*cast(FireEngine*)_engine) : FireStatus();
+
     void publish_status()
     {
-        FireStatus status = fire_status(_engine);
+        FireStatus status = engine_status();
         auto timestamp = getSysTime();
         bool ok = !status.fault && status.period_q4 != 0;
         set_device_online(ok);

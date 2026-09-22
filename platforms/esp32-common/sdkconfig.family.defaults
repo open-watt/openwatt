@@ -4,6 +4,9 @@ CONFIG_GPIO_CTRL_FUNC_IN_IRAM=y
 CONFIG_GPTIMER_CTRL_FUNC_IN_IRAM=y
 CONFIG_GPTIMER_ISR_CACHE_SAFE=y
 
+# startup.conf owns the radio configuration; the driver must not persist its own copy to NVS.
+CONFIG_ESP_WIFI_NVS_ENABLED=n
+
 # Size-optimised in every config; otherwise a unittest image compiles IDF at -Og and
 # pays for it in its partition.
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y
