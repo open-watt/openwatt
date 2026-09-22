@@ -3,6 +3,22 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-09-29: `Button` and `Light` templates
+
+- New component template `Light`, which extends `Switch`: `switch` is its on/off, and the optional
+  `level` (%), `cct` (K, with `min_cct`/`max_cct`), `colour`, `effect` and `indicate` elements are
+  its capabilities. Render a toggle, then a brightness slider, colour temperature and colour
+  controls as the elements are present. `indicate` is an override (blink, flash...) that wins
+  while set; offer it as "identify".
+- New component template `Button`: `state` (bool), constant `mode` (`momentary`/`latching`) and
+  `event` (`click`/`double`/`triple`/`hold`/`release`, a point series). It is read-only; show it
+  as an indicator, never as a control.
+- A `Switch` or `Light` may carry `input: Button` and `indicator: Light` children; draw them as
+  part of their output rather than as separate controls.
+- SmartEVSE: `buttons.left`, `buttons.middle` and `buttons.right` are now `Button` components; the
+  pressed level moves from `buttons.<name>` to `buttons.<name>.state`.
+- Brilliant 22034 fan: `light` is now a `Light`, and its `on` element is renamed `switch`.
+
 ## 2026-09-29: HTTP client timeout
 
 - `/protocol/http/client` gains a writable `timeout` duration, default `5s`. Expose it in

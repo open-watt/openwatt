@@ -1966,6 +1966,8 @@ __gshared immutable KnownElements[] g_well_known_elements = [
     KnownElements("WaterHeater", g_WaterHeater_elements),
     KnownElements("PowerControl", g_PowerControl_elements),
     KnownElements("Switch", g_Switch_elements),
+    KnownElements("Light", g_Light_elements),
+    KnownElements("Button", g_Button_elements),
     KnownElements("ContactSensor", g_ContactSensor_elements),
     KnownElements("ModbusConfig", g_ModbusConfig_elements),
     KnownElements("EthernetConfig", g_EthernetConfig_elements),
@@ -2314,7 +2316,7 @@ __gshared immutable KnownElementTemplate[] g_WaterHeater_elements = [
 
 __gshared immutable KnownElementTemplate[] g_Switch_elements = [
     make_element_template!("switch", "Boolean", "Switch State", null, Frequency.realtime),
-//    make_element_template!("mode", "SwitchMode", "Switch Mode", "Current switch mode", Frequency.high), // TODO: ...
+    make_element_template!("type", null, "Switch Type", "Load hint: light | outlet | power | fan", Frequency.constant),
     make_element_template!("timer", "s", "Timer", "Timer value", Frequency.high),
     make_element_template!("direction", null, "Direction", "consume | produce | bidirectional", Frequency.constant),
     make_element_template!("nameplate_power", "W", "Nameplate Power", "Known nominal load when on", Frequency.constant),
@@ -2324,6 +2326,23 @@ __gshared immutable KnownElementTemplate[] g_Switch_elements = [
     make_element_template!("max_cycles_per_hour", "Count", "Max Cycles per Hour", "Cap on on-off cycles per hour (relay-protection)", Frequency.constant),
     make_element_template!("command_latency", "s", "Command Latency", "Typical command-to-effect lag (informational)", Frequency.constant),
     make_element_template!("can_disable", "Boolean", "Can Disable", "False for switches that accept commands but cannot be cleanly turned off", Frequency.constant),
+];
+
+__gshared immutable KnownElementTemplate[] g_Light_elements = g_Switch_elements ~ [
+    make_element_template!("level", "%", "Level", "Brightness", Frequency.realtime),
+    make_element_template!("cct", "K", "Colour Temperature", null, Frequency.realtime),
+    make_element_template!("min_cct", "K", "Min Colour Temperature", null, Frequency.constant),
+    make_element_template!("max_cct", "K", "Max Colour Temperature", null, Frequency.constant),
+    make_element_template!("colour", null, "Colour", null, Frequency.realtime),
+    make_element_template!("effect", null, "Effect", "none | blink | fast_blink | breathe | flash", Frequency.realtime),
+    make_element_template!("indicate", null, "Indicate", "Override of the output while not none; same values as effect", Frequency.realtime),
+    make_element_template!("indicate_colour", null, "Indicate Colour", null, Frequency.realtime),
+];
+
+__gshared immutable KnownElementTemplate[] g_Button_elements = [
+    make_element_template!("mode", null, "Button Mode", "momentary | latching", Frequency.constant),
+    make_element_template!("state", "Boolean", "Button State", "Pressed, or the switch position", Frequency.realtime),
+    make_element_template!("event", null, "Button Event", "click | double | triple | hold | release", Frequency.realtime),
 ];
 
 __gshared immutable KnownElementTemplate[] g_ContactSensor_elements = [

@@ -24,7 +24,9 @@ Quick reference for standard component templates and their expected elements.
 | `HVAC` | Climate control system | - |
 | `MediaPlayback` | Audio/video playback state and durable controls | - |
 | `WaterHeater` | Hot water tank | `temperature` |
-| `Switch` | On/off control | `switch` |
+| `Switch` | On/off actuator | `switch` |
+| `Light` | Light emitter; extends `Switch` | `switch` |
+| `Button` | Physical input | `state` |
 | `Shutter` | Window/door shutter control | `position` |
 | `ContactSensor` | Contact/door sensor | `open` or `alarm` |
 | `Network` | Network connectivity | - |
@@ -1068,7 +1070,7 @@ controlled.
 
 ## Switch
 
-On/off control devices.
+On/off actuators: a relay, a contactor, a smart plug's outlet.
 
 `Switch` is itself a control surface: the `switch` element is both the
 observable state and the on/off actuator. When a `Switch` is associated with a
@@ -1092,8 +1094,7 @@ port it controls. Fixed, opaque switch-load devices may expose a single
 - `switch: boolean/enum` - Switch state (on/off, 0/1). Also the on/off actuator (the control's `enable` surface). A discrete control has no scalar setpoint.
 
 ### Optional (device-level)
-- `type: enum` - Switch type - light, power, outlet (power outlet), fan, etc
-- `mode: enum` - Switch mode
+- `type: enum` - Load hint: light, power, outlet (power outlet), fan, etc. It never changes the template; an output that can shape light is a [`Light`](#light).
 - `timer: s` - Timer value
 
 ### Optional (energy-app control metadata)
@@ -1114,6 +1115,60 @@ port it controls. Fixed, opaque switch-load devices may expose a single
   devices.
 - `meter: EnergyMeter` - Switch-internal metadata. Terminal energy meters belong
   under the relevant `Port`.
+- `input: Button` (or `input1..N`) - A physical input wired to this output, when
+  independently readable. A local binding that owns the output acts on it: a
+  momentary input toggles the output on each press, and a latching input's
+  position is followed.
+- `indicator: Light` - An indicator for this output, when independently drivable.
+  A local binding that owns the output mirrors the output's state there, and
+  `indicate` overrides it.
+
+---
+
+## Light
+
+Light emitters: a bulb, an LED strip or controller, a dimmer, an indicator LED.
+
+`Light` extends [`Switch`](#switch): every `Switch` element, relation and energy
+rule applies, with `switch` as the on/off element. An output is a `Light` when
+the device can shape the light (`level`, `cct`, `colour`, `effect`, `indicate`);
+a bare contact feeding a lighting circuit is a `Switch` with `type=light`.
+Capabilities are the optional elements present, which map onto the Zigbee and
+Matter On/Off, Level Control, Color Control and Identify clusters.
+
+As an energy control a `Light` is discrete, as a `Switch` is.
+
+### Required
+- `switch: boolean` - On/off, as on `Switch`
+
+### Optional
+- `level: %` (writable) - Brightness
+- `cct: K` (writable) - Colour temperature; bindings convert ZCL mireds
+- `min_cct: K`, `max_cct: K` - Colour temperature range
+- `colour` (writable) - Colour; the representation is not yet settled
+- `effect: enum` (writable) - `none`, `blink`, `fast_blink`, `breathe`, `flash`: the owner's steady appearance
+- `indicate: enum` (writable) - Same values as `effect`. While not `none` it replaces the output; clearing it restores whatever the owner last set. This lets the system, or a UI's "identify", borrow a light without disturbing its state.
+- `indicate_colour` (writable) - Colour for `indicate`, on colour outputs
+- All optional elements of [`Switch`](#switch)
+
+---
+
+## Button
+
+A physical input: a pushbutton, a rocker, a toggle. `Button` is never an
+actuator. What an input does is decided by whoever owns it (see `input` under
+[`Switch`](#switch)), or by an automation on its `event`.
+
+A button wired to an output nests under that output as `input`. A detached
+input (a scene button, a remote's keys, a board's BOOT button) sits at device
+level.
+
+### Required
+- `state: boolean` - The raw level: pressed, or the switch position
+
+### Optional
+- `mode: enum` (constant) - `momentary` (pushbutton) or `latching` (rocker, toggle)
+- `event: enum` - Momentary only; a point series of `click`, `double`, `triple`, `hold`, `release`. Gesture timings are binding properties.
 
 ---
 
