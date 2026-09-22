@@ -893,6 +893,25 @@ this is what remains.
 
 ## Infrastructure
 
+- **The Makefile gates by naming platforms, not by declaring what they need.** `TINY ?= 1`
+  lists platforms by name, `BINSTATS_IMAGE` filters a list of names, and each artefact
+  (`fw.bin` objcopy, the RP2350 UF2) sits in its own `ifeq ($(PLATFORM),...)` block. Every new
+  part edits several unrelated places, and nothing says why a part is on a list. A platform
+  would instead declare its features and handicaps (small flash, a UF2 loader, no FPU,
+  strict alignment), and the build config gates would follow from those declarations.
+
+- **`expand()` asserts `unsupported` where it could return null.** On a platform with
+  neither `has_expand` nor `has_memsize` (rp2350, stm32, BK7231 non-N) it is a hard assert,
+  though null is already its legal "could not expand in place" result. Nothing calls it yet
+  outside its own test, so this bites the first real caller on those parts, which would then
+  have to branch on the capability flags for a function that already has a failure result.
+  `memsize` has no honest fallback value, so its assert stays.
+
+- **`/system/config`, `/system/fs` and `/system/alloc` are undocumented.** The `/system`
+  section of docs/CLI.md covers the ten top-level commands and says the sub-scopes are not
+  covered yet, but the reference promises that every scope it lists is complete. That is
+  export and save, the six filesystem commands, and the seven allocator-profiling commands.
+
 - **A bare ESP32-H2 release build does not fit**: `FEATURES` defaults to `full`, which links at
   about 2.7 MB against the 1.8125 MB OTA slot, so `make esp-idf-build PLATFORM=esp32-h2
   CONFIG=release` fails the partition check. The IP tiers buy nothing on a part with no IP
@@ -1226,6 +1245,12 @@ at 12MHz by clean UART framing. Outstanding:
   our image is running, and the UART is the only console.
 - **The on-board RGB LED is undriven.** It is the only peripheral on the Core, and a
   wire-free liveness signal, but needs PIO or bit-banged WS2812 timing.
+- **The bk7231 half of the `main`-entry fix has never been assembled.** urt#314 zeroes
+  argc, argv and the frame pointer before `bl main` on all three ARM baremetal ports. rp2350
+  runs it on hardware and stm4xx links it, but bk7231 builds in ARM mode (`armv5te`), so its
+  variant differs (`mov fp, #0`, r11 not r7) and nothing covers it: the vendor SDK is not
+  checked out on the machine that made the change, and CI does not build bk7231n until #678
+  lands. Build it once.
 
 ### Template instantiation is 32% of the BK7231N image (2026-09-12)
 
@@ -1299,6 +1324,13 @@ From the PR #563 audit; the call-site rule is in AGENTS.md (pointer form only on
   `psa_key_id_t` rather than an `mbedtls_pk_context`, so the TLS callers move with it. 3.x can use
   its public accessors and 2.28.1, which the Bouffalo targets vendor, keeps the direct members.
   Worth doing when the 4.x path next needs touching, not as a build fix.
+- **`talloc` aligns every allocation to 8, including strings.** urt#301 made `talloc(size)`
+  return `talloc_aligned(size, 8)` so a typed array cut from the temp arena is never
+  misaligned. The string and `char[]` call sites in urt and openwatt only need alignment 1 or
+  2, so each wastes up to 7 bytes of an arena that is small by design. Efficiency, not
+  correctness. The open question is which way the default points: keep 8 and have string
+  sites ask for less, or default to 1 and have typed sites ask for their `T.alignof`, which
+  `talloc_array!T` already does.
 
 ### ESP RISC-V bring-up (2026-09-20)
 
