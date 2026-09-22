@@ -120,6 +120,7 @@ Limit is the stock 0x1b0000 `ota_0` partition, which the in-place migration must
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-09-09 | a8c75cbf | ldc 1.42.0 | 1,612,576 | 91,223 | 1,769,472 | first row; 91% of the stock partition |
 | 2026-09-20 | #720 | ldc 1.42.0 | 1,671,152 | 96,793 | 1,769,472 | first build against ESP-IDF v6.2 (master); 94% of the stock partition |
+| 2026-09-22 | 76fe3546 | ldc 1.42.0 | 1,673,072 | 96,296 | 1,769,472 | ESP-IDF 6.1; `esp_eth` in the platform requires costs nothing (same size without it); 96,400 bytes free |
 
 ### Wireless-Tag WT99P4C5-S1, `make esp-idf-build BOARD=wt99p4c5-s1 CONFIG=release`
 
