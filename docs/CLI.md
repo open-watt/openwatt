@@ -651,6 +651,41 @@ OpenWatt station never corrupts diagnostics on a network with provisioned CFM.
 /interface/ethernet/set eth0 cfm-level=5
 ```
 
+On an Espressif board built with `USE_ETHERNET=1` the interface drives the EMAC and its external
+PHY directly, and the wiring is part of the interface. The board's `system.conf` creates it. Any pin left at `-1` takes the reference wiring of the part,
+so a board that follows the reference design needs only its PHY address and reset line. Changing
+a wiring property reinstalls the MAC.
+
+| Property | Default | Description |
+| --- | --- | --- |
+| `phy` | `generic` | The PHY part. Every PHY is driven through its IEEE 802.3 registers; `yt8531` adds the setup that part needs beyond them (autonegotiation back on after reset, RGMII clock delays). |
+| `phy-address` | `-1` | PHY address on the management bus; `-1` probes for it. |
+| `mdc-gpio`, `mdio-gpio` | `-1` | Management bus pins. |
+| `phy-reset-gpio` | `-1` | PHY hardware reset, active low; `-1` when it is not wired. |
+| `clock-mode` | `platform_default` | Who sources the 50MHz RMII clock: `external` (PHY or oscillator) or `output` (the MAC, from an internal PLL). |
+| `clock-gpio` | `-1` | The pin that clock enters or leaves by. |
+| `promiscuous` | `true` | Receive every frame, which a bridged port needs. Applies immediately. |
+| `flow-control` | `false` | Honour and send 802.3x pause frames. |
+| `auto-negotiate` | `true` | Negotiate speed and duplex with the link partner. Setting it `true` hands a forced link back to detection. The link drops while the mode changes. |
+| `speed` | `s100m` | Forces the link to `s10m`, `s100m`, or `s1000m` where the MAC is gigabit. Setting it turns `auto-negotiate` off. |
+| `full-duplex` | `true` | Forces the duplex. Setting it turns `auto-negotiate` off. A forced end facing a negotiating partner leaves that partner at half duplex, so force both ends or neither. |
+| `duplex` | read-only | What this end of the link is running: `full`, `half`, or `unknown` while it is down. |
+
+The ESP32-P4 and ESP32-S31 route the data plane through IO_MUX and timestamp in the MAC, which
+adds:
+
+| Property | Default | Description |
+| --- | --- | --- |
+| `tx-en-gpio`, `txd0-gpio`, `txd1-gpio`, `crs-dv-gpio`, `rxd0-gpio`, `rxd1-gpio` | `-1` | RMII data pads. |
+| `clock-loopback-gpio` | `-1` | With `clock-mode=output`, the pad the clock re-enters by; these MACs do not loop it back internally. |
+| `hw-timestamp` | `false` | Start the IEEE 1588 clock of the MAC and stamp received frames with it. The interface then reports the `hw_timestamp` capability, and a received packet's time is when the MAC saw it rather than when software did. |
+
+```text
+/interface/ethernet/add name=eth1 phy-address=1 phy-reset-gpio=51
+/interface/ethernet/add name=eth1 phy-address=0 clock-mode=output clock-gpio=17
+/interface/ethernet/add name=eth1 phy=yt8531 phy-reset-gpio=7
+```
+
 ### `/interface/obd`
 
 An OBD interface speaks OBD-II diagnostics to a vehicle: requests and responses

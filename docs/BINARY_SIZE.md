@@ -98,6 +98,7 @@ Limit is the 3.5 MB `ota_0` partition. `ram` is internal DRAM only; the board al
 | date | commit | compiler | flash | ram | limit | note |
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-09-21 | 2cd253be | ldc 1.43.0 | 3,316,320 | 163,289 | 3,670,016 | ESP-IDF 6.1; 353,696 bytes free; 16 MB PSRAM enabled |
+| 2026-09-21 | ow/esp-ethernet | ldc 1.43.0 | 3,347,584 | 165,029 | 3,670,016 | `USE_ETHERNET`: EMAC driver, esp_eth, YT8531; 91% of the slot, not run |
 
 ### ESP32-H2 DevKitM-1, `make esp-idf-build PLATFORM=esp32-h2 CONFIG=release FEATURES=switch`
 
@@ -127,6 +128,7 @@ joins the heap under `SPIRAM_USE_MALLOC` and is not counted here.
 | date | commit | compiler | flash | ram | limit | note |
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-09-21 | ow/esp32p4 | ldc 1.43.0 | 2,371,264 | 62,622 | 3,145,728 | first row; boots, console interactive, 32 MB PSRAM in the heap |
+| 2026-09-21 | ow/esp-ethernet | ldc 1.43.0 | 2,408,096 | 64,252 | 3,145,728 | `USE_ETHERNET`: EMAC driver, esp_eth, IP101 |
 
 ### ESP32-P4X, `make esp-idf-build PLATFORM=esp32-p4x CONFIG=release`
 

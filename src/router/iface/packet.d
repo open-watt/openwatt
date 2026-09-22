@@ -401,6 +401,15 @@ nothrow @nogc:
         vlan_tag = VlanTag.none;
     }
 
+    bool has_hw_timestamp() const pure
+        => (_flags & hw_timestamp_flag) != 0;
+
+    void set_hw_timestamp(HwTimestamp time) pure
+    {
+        hdr!Ethernet().hw_time = time;
+        _flags |= hw_timestamp_flag;
+    }
+
     // monotonic; a packet is a physical event, not a wall-clock label. Project to SysTime only at record boundaries (element values, pcap, logs).
     MonoTime creation_time; // time received, or time of call to send
     union {
@@ -420,6 +429,7 @@ private:
     enum ubyte vlan_tag_mask = 7;
     enum ubyte mutable_flag = 1 << 3;
     enum ubyte page_flag = 1 << 4;
+    enum ubyte hw_timestamp_flag = 1 << 5;
 
     Page* page() const
     {
@@ -491,6 +501,14 @@ struct RawFrame
     bool is_text; // payload is text, which can be verified for validity, or drive WebSocket text flag for instance
 }
 
+// When the start-of-frame delimiter crossed the receiving MAC, on the clock of that MAC:
+// the IEEE 1588 domain, which a PTP servo steers and MonoTime does not follow.
+struct HwTimestamp
+{
+    uint seconds;
+    uint nanoseconds;
+}
+
 struct Ethernet
 {
     enum Type = PacketType.ethernet;
@@ -498,6 +516,7 @@ struct Ethernet
     MACAddress dst;
     MACAddress src;
     ushort ether_type;
+    HwTimestamp hw_time;    // valid only where Packet.has_hw_timestamp
 
     static ulong extract_src(ref const Packet p) pure nothrow @nogc
     {

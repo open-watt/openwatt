@@ -386,6 +386,22 @@ through them and remove sections as they are absorbed.
   with boot-created objects remain incomplete. Do not describe the saved state as verified
   to survive reboot; see `TODO.md`.
 
+## 2026-09-22: built-in Ethernet on Espressif boards
+
+- `/interface/ethernet` objects on ESP boards built with `USE_ETHERNET` carry the MAC/PHY wiring
+  as properties (`phy`, `phy-address`, `mdc-gpio`, `mdio-gpio`, `phy-reset-gpio`, `clock-mode`,
+  `clock-gpio`, and on the P4/S31 the RMII pad and `clock-loopback-gpio` properties). They are
+  board configuration from `system.conf`; an interface editor should show them read-mostly, and
+  must expect the set to differ by part rather than assume a fixed list.
+- `auto-negotiate`, `speed` and `full-duplex` are writable. Setting `speed` or `full-duplex`
+  forces the link and turns `auto-negotiate` off, so a form that writes all three must write
+  `auto-negotiate` last, as the saved config does.
+- New read-only `duplex`: `full`, `half` or `unknown` while the link is down. It is what the
+  link is running, as against `full-duplex`, which is what a forced link asks for.
+- `caps` may now include `hw_timestamp` (with `hw-timestamp=true` on a P4/S31): a received
+  packet's time is when the MAC saw it. Nothing in the UX needs to act on it yet.
+- The status message `Cable unplugged` is a normal state for a port with no link, not a fault.
+
 ## 2026-09-08: energy element tree slimming, itemised with the frontend
 
 Parts of the wide `topology.*` and `circuit.*` trees are transient reasoning state wearing

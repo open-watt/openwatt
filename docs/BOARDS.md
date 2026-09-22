@@ -23,6 +23,8 @@ A board lives at `platforms/<family>/boards/<name>/` and contains:
 - `board.mk`, required. It declares `BOARD_PLATFORM`, `BOARD_FLASH_SIZE`, and
   `BOARD_PSRAM_SIZE`. Product defaults such as `FEATURES`, `HEADLESS`, `TINY`,
   and `VERSIONS` also belong here. Use `?=` for values users may override.
+  A board that wires a PHY to an Espressif EMAC sets `USE_ETHERNET := 1`; the
+  driver is never built otherwise, since the MAC alone is not a port.
 - `system.conf`, required. It replaces the platform's baked-in startup script.
 - `sdkconfig.defaults`, required for Espressif boards. ESP-IDF applies it after
   the platform defaults, so board values override the reference development
@@ -72,7 +74,7 @@ network.
 | Wireless-Tag WT99P4C5-S1 | `wt99p4c5-s1` | `esp32-p4` | 16 MB | 32 MB |
 
 **ESP32-S31-Function-CoreBoard-1** enables the fitted 16 MB octal PSRAM at 200 MHz.
-Its setup AP is at `192.168.1.1`. The board's Ethernet port remains unsupported.
+Its setup AP is at `192.168.1.1`. The RJ45 is `eth1`, a Motorcomm YT8531 on RGMII (`phy=yt8531`), built but not yet run.
 Espressif documents its fitted memory on the [S31 board page](https://esp32-s31.espressif.com/en).
 
 **SmartEVSE v3.0** replaces the stock SmartEVSE firmware in place. The build is `switch-http`,
@@ -95,8 +97,9 @@ console.
 PSRAM) on a carrier with a 10/100 Ethernet port, an ESP32-C5-WROOM-1 for Wi-Fi 6, BLE and
 802.15.4, RS485, an SD slot and MIPI DSI/CSI connectors. `BOARD=` matters more than usual here:
 it selects `esp32-p4`, and an `esp32-p4x` image will not boot this one. The console is
-UART0 out of the USB-C marked USB_UART. **Neither the EMAC (IP101GRI on the RJ45) nor the C5 has a
-driver yet**, so the board has no network; both pin maps are recorded in `system.conf`.
+UART0 out of the USB-C marked USB_UART. The RJ45 is `eth1`, an IP101GRI on the EMAC, and takes an
+address by DHCP out of the box. **The C5 has no driver yet**, so the wire is the only network; its
+SDIO pin map is recorded in `system.conf`.
 
 ## Espressif reference profiles
 
