@@ -410,6 +410,22 @@ nothrow @nogc:
         _flags |= hw_timestamp_flag;
     }
 
+    bool checksum_pending() const pure
+        => (_flags & checksum_pending_flag) != 0;
+
+    void checksum_pending(bool value) pure
+    {
+        _flags = cast(ubyte)(value ? _flags | checksum_pending_flag : _flags & ~checksum_pending_flag);
+    }
+
+    bool checksum_verified() const pure
+        => (_flags & checksum_verified_flag) != 0;
+
+    void set_checksum_verified() pure
+    {
+        _flags |= checksum_verified_flag;
+    }
+
     // monotonic; a packet is a physical event, not a wall-clock label. Project to SysTime only at record boundaries (element values, pcap, logs).
     MonoTime creation_time; // time received, or time of call to send
     union {
@@ -430,6 +446,8 @@ private:
     enum ubyte mutable_flag = 1 << 3;
     enum ubyte page_flag = 1 << 4;
     enum ubyte hw_timestamp_flag = 1 << 5;
+    enum ubyte checksum_pending_flag = 1 << 6;
+    enum ubyte checksum_verified_flag = 1 << 7;
 
     Page* page() const
     {

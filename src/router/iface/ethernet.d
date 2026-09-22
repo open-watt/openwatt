@@ -14,6 +14,7 @@ import manager.console;
 import manager.plugin;
 
 import router.iface;
+import router.iface.checksum;
 
 //version = DebugEthernetFlow;
 
@@ -40,6 +41,21 @@ size_t encode_ethernet_header(ref const Packet packet, ubyte[] buffer)
     }
     storeBigEndian(ether_type, packet.eth.ether_type);
     return required;
+}
+
+size_t encode_ethernet_frame(ref const Packet packet, ubyte[] buffer)
+{
+    size_t header_len = encode_ethernet_header(packet, buffer);
+    if (header_len == 0 || packet.data.length > buffer.length - header_len)
+        return 0;
+    buffer[header_len .. header_len + packet.data.length] = cast(const(ubyte)[])packet.data[];
+    return header_len + packet.data.length;
+}
+
+void complete_frame_checksum(ref const Packet packet, ubyte[] frame)
+{
+    if (packet.checksum_pending)
+        complete_checksum(frame[$ - packet.data.length .. $], cast(EtherType)packet.eth.ether_type);
 }
 
 
@@ -802,7 +818,7 @@ protected:
 //        mark_set!(typeof(this), "max-l2mtu")();
     }
 
-    final void incoming_ethernet_frame(const(ubyte)[] data, MonoTime ts, ushort vlan_tci = 0, ushort vlan_tpid = 0, const(HwTimestamp)* hw_time = null)
+    final void incoming_ethernet_frame(const(ubyte)[] data, MonoTime ts, ushort vlan_tci = 0, ushort vlan_tpid = 0, const(HwTimestamp)* hw_time = null, bool checksum_verified = false)
     {
         if (data.length < 14)
         {
@@ -819,6 +835,8 @@ protected:
         packet._offset = 14;
         if (hw_time)
             packet.set_hw_timestamp(*hw_time);
+        if (checksum_verified)
+            packet.set_checksum_verified();
 
         if (vlan_tpid != 0)
         {
@@ -850,25 +868,19 @@ protected:
 
         ubyte[1522] buffer = void;
 
-        size_t header_len = encode_ethernet_header(packet, buffer[]);
-        if (header_len == 0)
+        size_t packet_len = encode_ethernet_frame(packet, buffer[]);
+        if (packet_len == 0)
         {
+            log.warning("egress frame does not fit: payload=", packet.data.length, " vlan=", packet.vlan, " etype=", packet.eth.ether_type);
             add_tx_drop();
             return;
         }
+        ubyte[] frame = buffer[0 .. packet_len];
+        bool offload = packet.checksum_pending && mac_completes_checksum(frame);
+        if (!offload)
+            complete_frame_checksum(packet, frame);
 
-        ubyte* payload = buffer.ptr + header_len;
-        if (packet.data.length > buffer.sizeof - (payload - buffer.ptr))
-        {
-            log.warning("egress buffer too small: payload=", packet.data.length, " avail=", buffer.sizeof - (payload - buffer.ptr),
-                        " vlan=", packet.vlan, " etype=", packet.eth.ether_type);
-            add_tx_drop();
-            return;
-        }
-        payload[0 .. packet.data.length] = cast(const(ubyte)[])packet.data[];
-        size_t packet_len = (payload + packet.data.length) - buffer.ptr;
-
-        if (wire_send(buffer[0 .. packet_len]) != 0)
+        if ((offload ? wire_send_checksum(frame) : wire_send(frame)) != 0)
             add_tx_drop();
         else
             add_tx_frame(packet_len);
@@ -877,6 +889,14 @@ protected:
     // Subclass hook: push a fully-framed ethernet frame onto the wire.
     // Return 0 on success, non-zero on failure (already logged by the subclass).
     abstract int wire_send(const(ubyte)[] frame);
+
+    bool mac_completes_checksum(const(ubyte)[] frame)
+        => false;
+
+    int wire_send_checksum(const(ubyte)[] frame)
+    {
+        assert(false, "mac_completes_checksum without wire_send_checksum");
+    }
 }
 
 
@@ -930,6 +950,7 @@ unittest
 
 unittest
 {
+    import urt.hash : internet_checksum;
     import urt.mem : alloc, free;
     import manager.console : Console, Session;
     import urt.string : StringLit;
@@ -993,4 +1014,64 @@ unittest
     first.disabled(true);
     assert(!command.subscribed && _pending_pings.length == pending);
     free(command);
+
+    static class Wire : EthernetInterface
+    {
+        enum type_name = "checksum-test-wire";
+    nothrow @nogc:
+        ubyte[64] sent;
+        bool offload, mac_asked;
+
+        this(CID id, ObjectFlags flags = ObjectFlags.none)
+        {
+            super(collection_type_info!Wire, id, flags);
+            _state = State.running;
+        }
+        override bool mac_completes_checksum(const(ubyte)[] frame)
+            => offload && frame[12] == 0x08;
+        override int wire_send(const(ubyte)[] frame)
+        {
+            sent[0 .. frame.length] = frame[];
+            mac_asked = false;
+            return 0;
+        }
+        override int wire_send_checksum(const(ubyte)[] frame)
+        {
+            sent[0 .. frame.length] = frame[];
+            mac_asked = true;
+            return 0;
+        }
+    }
+    Wire wire = Collection!Wire().create("checksum-test-wire");
+    scope(exit)
+    {
+        Collection!Wire().remove(wire);
+        free(wire);
+    }
+
+    ubyte[30] datagram = [0x45, 0, 0, 30, 0, 0, 0, 0, 64, 17, 0, 0, 10, 0, 0, 1, 10, 0, 0, 2,
+                          0, 1, 0, 2, 0, 10, 0, 0, 'h', 'i'];
+    ubyte[12] pseudo = [10, 0, 0, 1, 10, 0, 0, 2, 0, 17, 0, 10];
+    Packet udp;
+    udp.init!Ethernet(datagram[]).ether_type = EtherType.ip4;
+    udp.checksum_pending = true;
+
+    wire.medium_tx(udp);
+    assert(!wire.mac_asked);
+    assert(internet_checksum(wire.sent[34 .. 44], internet_checksum(pseudo[])) == 0);
+    assert(datagram[26] == 0 && datagram[27] == 0);
+
+    wire.offload = true;
+    wire.medium_tx(udp);
+    assert(wire.mac_asked && wire.sent[40] == 0 && wire.sent[41] == 0);
+
+    udp.vlan = 5;
+    wire.medium_tx(udp);
+    assert(!wire.mac_asked && wire.sent[12] == 0x81);
+    assert(internet_checksum(wire.sent[38 .. 48], internet_checksum(pseudo[])) == 0);
+
+    udp.vlan = 0;
+    udp.checksum_pending = false;
+    wire.medium_tx(udp);
+    assert(!wire.mac_asked && wire.sent[40] == 0 && wire.sent[41] == 0);
 }

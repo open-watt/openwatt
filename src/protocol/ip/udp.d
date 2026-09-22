@@ -342,7 +342,7 @@ void udp_input(ref IPStack stack, ref Packet pkt, BaseInterface iface, bool grou
 
     // Verify checksum if present (zero means sender opted out).
     ushort wire_csum = loadBigEndian(&u.checksum);
-    if (wire_csum != 0)
+    if (wire_csum != 0 && !pkt.checksum_verified)
     {
         ushort pseudo = pseudo_header_checksum(IPAddr(ip.src), IPAddr(ip.dst), IPProtocol.udp, udp_len);
         ushort calc = internet_checksum(payload[0 .. udp_len], pseudo);
@@ -410,7 +410,7 @@ static if (has_ipv6)
         const(ubyte)[] datagram = cast(const(ubyte)[])pkt.data;
         ushort src_port, dst_port;
         const(ubyte)[] body_;
-        if (!parse_udp6(datagram, l4_offset, src_port, dst_port, body_))
+        if (!parse_udp6(datagram, l4_offset, src_port, dst_port, body_, pkt.checksum_pending, pkt.checksum_verified))
             return;
 
         const ip = cast(const IPv6Header*)datagram.ptr;
@@ -491,14 +491,9 @@ bool udp_output(ref IPStack stack, IPAddr src_addr, ushort src_port, IPAddr dst_
     if (payload.length > 0)
         buf[IPv4Header.sizeof + UdpHeader.sizeof .. total] = payload[];
 
-    ushort pseudo = pseudo_header_checksum(src_addr, dst_addr, IPProtocol.udp, udp_len);
-    ushort cc = internet_checksum(buf[IPv4Header.sizeof .. total], pseudo);
-    if (cc == 0)
-        cc = 0xFFFF;    // RFC 768: zero means "no checksum"; use all-ones to mean "checksum is zero"
-    storeBigEndian(&u.checksum, cc);
-
     Packet pkt;
     pkt.init!RawFrame(buf[0 .. total]);
+    pkt.checksum_pending = true;
     if (src_addr != IPAddr.any)
     {
         BaseInterface iface = interface_for_address(src_addr);
@@ -541,12 +536,13 @@ static if (has_ipv6)
             return false;
 
         align(size_t.sizeof) ubyte[max_size] buf = void;
-        size_t total = write_udp6(buf[], src_addr, src_port, dst_addr, dst_port, payload);
+        size_t total = write_udp6(buf[], src_addr, src_port, dst_addr, dst_port, payload, 64, false);
         if (total == 0)
             return false;
 
         Packet pkt;
         pkt.init!RawFrame(buf[0 .. total]);
+        pkt.checksum_pending = true;
         if (scoped)
             stack.output_v6_routed(pkt, iface, dst_addr);
         else
@@ -554,7 +550,7 @@ static if (has_ipv6)
         return true;
     }
 
-    size_t write_udp6(ubyte[] buffer, IPv6Addr src_addr, ushort src_port, IPv6Addr dst_addr, ushort dst_port, const(ubyte)[] payload, ubyte hop_limit = 64)
+    size_t write_udp6(ubyte[] buffer, IPv6Addr src_addr, ushort src_port, IPv6Addr dst_addr, ushort dst_port, const(ubyte)[] payload, ubyte hop_limit = 64, bool checksum = true)
     {
         size_t udp_len = UdpHeader.sizeof + payload.length;
         size_t total = IPv6Header.sizeof + udp_len;
@@ -577,6 +573,8 @@ static if (has_ipv6)
         storeBigEndian(&u.checksum, ushort(0));
         if (payload.length > 0)
             buffer[IPv6Header.sizeof + UdpHeader.sizeof .. total] = payload[];
+        if (!checksum)
+            return total;
 
         ushort pseudo = pseudo_header_checksum_v6(ip.src, ip.dst, cast(uint)udp_len, IPProtocol.udp);
         ushort cc = internet_checksum(buffer[IPv6Header.sizeof .. total], pseudo);
@@ -587,7 +585,7 @@ static if (has_ipv6)
     }
 
     // RFC 8200: the checksum is mandatory over v6, so a zero checksum is a discard.
-    bool parse_udp6(const(ubyte)[] datagram, size_t l4_offset, out ushort src_port, out ushort dst_port, out const(ubyte)[] payload)
+    bool parse_udp6(const(ubyte)[] datagram, size_t l4_offset, out ushort src_port, out ushort dst_port, out const(ubyte)[] payload, bool pending = false, bool verified = false)
     {
         if (datagram.length < IPv6Header.sizeof || l4_offset < IPv6Header.sizeof || l4_offset + UdpHeader.sizeof > datagram.length)
             return false;
@@ -600,12 +598,16 @@ static if (has_ipv6)
         const(ubyte)[] segment = datagram[l4_offset .. end];
         const u = cast(const UdpHeader*)segment.ptr;
         ushort udp_len = loadBigEndian(&u.length);
-        if (udp_len < UdpHeader.sizeof || udp_len > segment.length || loadBigEndian(&u.checksum) == 0)
+        if (udp_len < UdpHeader.sizeof || udp_len > segment.length)
             return false;
 
-        ushort pseudo = pseudo_header_checksum_v6(ip.src, ip.dst, udp_len, IPProtocol.udp);
-        if (internet_checksum(segment[0 .. udp_len], pseudo) != 0)
-            return false;
+        if (!pending)
+        {
+            if (loadBigEndian(&u.checksum) == 0)
+                return false;
+            if (!verified && internet_checksum(segment[0 .. udp_len], pseudo_header_checksum_v6(ip.src, ip.dst, udp_len, IPProtocol.udp)) != 0)
+                return false;
+        }
 
         src_port = loadBigEndian(&u.src_port);
         dst_port = loadBigEndian(&u.dst_port);
@@ -727,6 +729,8 @@ unittest
         buffer[IPv6Header.sizeof + 6] = 0;
         buffer[IPv6Header.sizeof + 7] = 0;
         assert(!parse_udp6(buffer[0 .. total], IPv6Header.sizeof, src_port, dst_port, body_));
+        assert(!parse_udp6(buffer[0 .. total], IPv6Header.sizeof, src_port, dst_port, body_, false, true));
+        assert(parse_udp6(buffer[0 .. total], IPv6Header.sizeof, src_port, dst_port, body_, true));
 
         assert(write_udp6(buffer[0 .. 8], src, 1, dst, 2, payload[]) == 0);
 

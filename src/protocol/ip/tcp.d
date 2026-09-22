@@ -586,11 +586,11 @@ void tcp_input(ref IPStack stack, ref Packet pkt)
         return;
 
     const(ubyte)[] tcp_seg = (cast(const(ubyte)*)pkt.data.ptr)[ip_hdr_len .. ip_total];
-    tcp_segment_input(stack, InetAddress(IPAddr(ip.src), 0), InetAddress(IPAddr(ip.dst), 0), tcp_seg, pkt.creation_time);
+    tcp_segment_input(stack, InetAddress(IPAddr(ip.src), 0), InetAddress(IPAddr(ip.dst), 0), tcp_seg, pkt.creation_time, pkt.checksum_pending || pkt.checksum_verified);
 }
 
 // src/dst ports arrive zero here; they are filled in from the TCP header
-void tcp_segment_input(ref IPStack stack, InetAddress src, InetAddress dst, const(ubyte)[] tcp_seg, MonoTime rx_time)
+void tcp_segment_input(ref IPStack stack, InetAddress src, InetAddress dst, const(ubyte)[] tcp_seg, MonoTime rx_time, bool checksum_trusted = false)
 {
     if (tcp_seg.length < TcpHeader.sizeof)
         return;
@@ -600,10 +600,7 @@ void tcp_segment_input(ref IPStack stack, InetAddress src, InetAddress dst, cons
     if (tcp_hdr_len < TcpHeader.sizeof || tcp_hdr_len > tcp_seg.length)
         return;
 
-    // Verify TCP checksum (pseudo-header + segment).
-    ushort pseudo = transport_pseudo_checksum(src, dst, IPProtocol.tcp, cast(ushort)tcp_seg.length);
-    ushort calc = internet_checksum(tcp_seg, pseudo);
-    if (calc != 0)
+    if (!checksum_trusted && internet_checksum(tcp_seg, transport_pseudo_checksum(src, dst, IPProtocol.tcp, cast(ushort)tcp_seg.length)) != 0)
         return;
 
     src.port = t.src_port.bigEndianToNative!ushort;
@@ -1344,10 +1341,6 @@ void send_segment_raw(ref IPStack stack, ref const InetAddress src, ref const In
     {
         case AddressFamily.ipv4:
         {
-            ushort pseudo = transport_pseudo_checksum(src, dst, IPProtocol.tcp, cast(ushort)tcp_total);
-            ushort cc = internet_checksum(buf[reserve .. total], pseudo);
-            t.checksum = nativeToBigEndian(cc);
-
             auto ip = cast(IPv4Header*)buf.ptr;
             ip.ver_ihl  = 0x45;
             ip.tos      = 0;
@@ -1366,6 +1359,7 @@ void send_segment_raw(ref IPStack stack, ref const InetAddress src, ref const In
 
             Packet pkt;
             pkt.init!RawFrame(buf[0 .. total]);
+            pkt.checksum_pending = true;
             if (egress)
                 stack.output_v4_routed(pkt, egress, next_hop);
             else

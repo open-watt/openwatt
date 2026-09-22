@@ -671,6 +671,16 @@ a wiring property reinstalls the MAC.
 | `full-duplex` | `true` | Forces the duplex. Setting it turns `auto-negotiate` off. A forced end facing a negotiating partner leaves that partner at half duplex, so force both ends or neither. |
 | `duplex` | read-only | What this end of the link is running: `full`, `half`, or `unknown` while it is down. |
 
+Receive checksum verification needs no setting on any part: the MAC discards a frame that fails it,
+and the stack skips the arithmetic for frames the driver reports the MAC checked (TCP or UDP over
+IPv4 without options or fragments, or IPv6 without extension headers, at most one 802.1Q tag).
+
+The classic ESP32 can also insert checksums on transmit, which adds:
+
+| Property | Default | Description |
+| --- | --- | --- |
+| `tx-checksum` | `false` | Have the MAC complete the TCP and UDP checksums of frames the IP stack originates. The interface then reports the `tx_checksum` capability. Insertion needs the whole frame in the transmit FIFO, 2 KB here; the P4's 256 bytes and the S31's 1 KB are smaller than a frame, so those parts do not offer it. Frames in a layout the MAC does not handle are completed in software. |
+
 The ESP32-P4 and ESP32-S31 route the data plane through IO_MUX and timestamp in the MAC, which
 adds:
 

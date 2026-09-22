@@ -400,6 +400,9 @@ through them and remove sections as they are absorbed.
   link is running, as against `full-duplex`, which is what a forced link asks for.
 - `caps` may now include `hw_timestamp` (with `hw-timestamp=true` on a P4/S31): a received
   packet's time is when the MAC saw it. Nothing in the UX needs to act on it yet.
+- On the classic ESP32 only, `tx-checksum` (default `false`) has the MAC fill in outgoing TCP and
+  UDP checksums, and `caps` then includes `tx_checksum`. Board configuration like the wiring
+  properties; the P4 and S31 do not have the property at all, so don't render it as unsupported.
 - The status message `Cable unplugged` is a normal state for a port with no link, not a fault.
 
 ## 2026-09-08: energy element tree slimming, itemised with the frontend

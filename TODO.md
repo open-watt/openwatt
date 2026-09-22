@@ -1521,6 +1521,26 @@ status and live reinstall. **No frame has crossed a wire on any part**, for want
   does, and shutdown closes the driver, so every replug pays a full `esp_eth_driver_install`.
   Staying installed across link loss needs offline/online without shutdown.
 
+- **Checksum offload is built and its hardware half is unproven.** The stack leaves TCP and UDP
+  checksums pending (`Packet.checksum_pending`) and whatever frames the packet completes them
+  (`encode_ethernet_frame`), unless the interface declares `InterfaceCaps.tx_checksum`. Received
+  frames carry `Packet.checksum_verified` where the driver says the MAC checked that frame, and the
+  transports then skip the arithmetic but not the validity rules. Both directions decide per frame
+  from the engine's layout coverage (urt `engine_checksums`), since esp_eth never hands over the
+  descriptor's own checksum status. Still to prove on a wire:
+  - TX insertion exists only on the classic ESP32. It needs store-and-forward, so the whole frame
+    in the transmit FIFO: 2 KB there, 256 bytes on the P4 and 1 KB on the S31 (datasheets), whose
+    datasheets list no transmit insertion at all. No classic ESP32 board with a PHY is in hand, so
+    `tx-checksum=true` has never run. Capture full-MTU UDP and TCP from one and check the sums.
+  - RX trust rests on esp_eth dropping `ErrSummary` frames. Send the P4 board a datagram with a
+    corrupt UDP checksum (scapy) and confirm it never reaches the socket.
+  - ICMP and ICMPv6 stay in software on both paths; the engines cover them but the gain is nil.
+  - A pcap tap sees locally originated TCP/UDP with a zero checksum, because taps sit above framing.
+  - When v4 fragmentation lands (`stack.d`, "fragment (v4) or send PTB"), it must complete a
+    pending checksum before it splits, and never mark a fragment pending.
+  - Linux and Windows backends could report `checksum_verified` from the kernel's view
+    (`PACKET_AUXDATA` `TP_STATUS_CSUM_VALID`); they do not.
+
 - **MAC address filtering is unused.** The interface runs promiscuous because it may be bridged.
   Not a user setting: a port that is NOT a bridge member should program the perfect filters itself
   (8 slots, one is the station address) from its own addresses plus the stack's multicast
