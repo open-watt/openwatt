@@ -1,5 +1,10 @@
 # TODO
 
+- Validate boot-guard OTA handoff on ESP32 hardware with NVS write/commit failures
+  and power loss before/after image acceptance and rollback slot selection. Also
+  exercise record loss/corruption and the power-on gesture on embedded targets.
+  Host fault-injection tests and cross-compilation do not substitute for these checks.
+
 - Give `ObjectRef` an `opCast(bool)` that tests for a stored identity, preserving
   `detached()` as the unresolved-target check and `alias get this` for object access.
   Audit existing boolean uses (including negation, logical operators and ternaries)
@@ -109,12 +114,45 @@ holding action, not an answer. Options, cheapest first:
 - Bound cleanup of crash-left `.tmp` and rejected `.bad` revision files without losing
   useful recovery evidence; successful-save retention currently prunes completed files.
 - Complete the config-dirty mutation coverage (`set-hostname` currently bypasses it).
-- **A tripped boot guard with no earlier revision is a permanent reboot loop.** Once NVS records
-  3 failed boots and `conf/config.conf` exists with no older usable revision, `main` logs
-  `refusing to replace deployment configuration with defaults` and returns -1. The counter is
-  never touched on that path, so every boot repeats it until NVS is erased over serial
-  (`openwatt-F993`, 2026-09-22). Refusing the defaults is right; the refusal has to land in a
-  reachable state (provisioning AP, deployment config untouched) rather than a reboot.
+- **Retained reset/clock validation after uRT #322/#327**: the pin includes the
+  merged watchdog-clock and reset-barrier fixes plus RTC restore. Verify Beken
+  reset with its watchdog initially disabled, RP2350 mark/reset and wall-time
+  restore, and cold power cycles without sync. Add regression coverage for
+  invalid/warm records, repeated take/caller ordering, scratch preservation,
+  and RTC offset restoration. Reconcile the RTC stop/reset contract with the
+  ESP32 no-op and RP2350 stop-only implementations.
+- **Boot guard follow-ups**:
+  - **Bare-metal parts have no hardware watchdog armed.** `driver.baremetal.watchdog` is a no-op
+    except on the BL808 M0, so a hang on RP2350, BK7231 or BL618 never resets and never counts.
+    Arm each part's watchdog from `watchdog_init`; the record already classifies the resulting
+    reset (`running` left in place reads as a watchdog). Bouffalo also has no `system_reset()`:
+    its reset needs the vendor's clock-switch sequence from TCM (`GLB_SW_System_Reset`), so its
+    fault paths still halt and the crash only ends with a power cycle, which erases the record.
+  - **BK7231 and Bouffalo classification is unverified on hardware**: both build with the
+    record in place (BK7231N `.persist` after `.bss`; Bouffalo at the top of HBN RAM, one slot
+    per BL808 core), but no board was attached. Check that the Beken bootloader and the
+    Bouffalo boot ROM leave those bytes alone across a reset.
+  - **No bare-metal part has a filesystem** (RP2350, BK7231, Bouffalo): LittleFS exists only
+    for ESP (`urt/driver/esp32/littlefs_port.c` over `esp_partition_*`, enabled for `esp%` in
+    `platforms.mk`). Without one these parts have no `startup.conf`, no saved revisions and no
+    boot store, so the bring-up defaults are their only rung and the gesture counter never
+    survives a power loss. Each needs a LittleFS block device over its own flash, a region
+    carved out of the linker `FLASH` region, and `USE_LITTLEFS` on by default. RP2350: the
+    bootrom's `flash_range_erase`/`flash_range_program`, called from RAM with XIP exited and
+    interrupts off, then the QMI XIP configuration restored, as pico-sdk's `flash.c` does.
+    The library itself is already in urt (`third_party/littlefs`, v2.11.3); only the block
+    devices are missing.
+  - The Linux supervisor's own slot probation (30 s soak, three failures) still runs beside the
+    app's ladder and should defer to it.
+  - A fixed recovery image, built once and never updated over the air, as the final rung on
+    parts with no A/B slot.
+  - **A stepped-down unit stays down until someone reboots it**, even after the fault clears; on
+    the bring-up defaults it is off the site network. Decide whether a healthy lower rung
+    schedules its own retry of the top, with backoff (10 min, 1 h, 6 h, ...).
+  - The reset gesture on a BOOT button; safe-state indication in the beacon and on an LED.
+- **The BK7231N `switch-ip` build no longer fits**: `make PLATFORM=bk7231n CONFIG=release
+  FEATURES=switch-ip HEADLESS=1 MODBUS=0` links but the packed image is 157,830 bytes over
+  `_image_limit` on master (2026-09-22); the last ledger row (2026-09-09) had 4,640 bytes spare.
 
 ## Retrospective merge reconciliation (2026-09-08)
 

@@ -89,7 +89,11 @@ void config_save(Session session, Nullable!(const(char)[]) file)
     if (r)
     {
         if (path == saved_config_file)
+        {
+            import manager.bootguard : boot_guard_config_saved;
             g_app.config_dirty = false;
+            boot_guard_config_saved();
+        }
         session.write_line("saved configuration revision ", revision, " to '", path, '.', revision, "' (", buf.length, " bytes)");
     }
     else

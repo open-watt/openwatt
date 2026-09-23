@@ -41,6 +41,7 @@ private enum int default_max_fail = 3;        // probation failures before rollb
 __gshared int g_commit_secs = default_commit_secs;
 __gshared int g_watchdog_ms = default_watchdog_ms;
 __gshared int g_max_fail = default_max_fail;
+__gshared const(char)* g_last_end = "started"; // how the previous child ended, handed to the next as OW_LAST_END
 
 // The watchdog/launcher. Picks the slot to run (staged update on probation, else
 // last-known-good), runs it, and rolls back to good if a probationary slot crashes,
@@ -105,9 +106,11 @@ int run_supervisor(string[] args)
                 return 0;
 
             case EndKind.restart:
+                g_last_end = "stopped";
                 continue;
 
             case EndKind.failed:
+                g_last_end = "crashed";
                 if (!committed && probation)
                 {
                     ++fail;
@@ -162,6 +165,7 @@ EndKind launch_and_monitor(int target, bool probation, ref int good, ref int fai
         char[24] fdbuf = void, slotbuf = void;
         setenv("OW_WATCHDOG_FD", int_to_z(fdbuf, wr), 1);
         setenv("OW_SLOT", int_to_z(slotbuf, target), 1);
+        setenv("OW_LAST_END", g_last_end, 1);
 
         char[4096] pathbuf = void;
         const(char)* slot = slot_path_z(pathbuf, target);

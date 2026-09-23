@@ -133,22 +133,8 @@ protected:
         _http_server.subscribe(&server_state_change);
         _subscribed = true;
 
-        // hand the policy to the supervisor (Linux); arm the soak->mark-valid timer (ESP).
         ota_push_policy(cast(uint)_commit_time.as!"seconds", cast(uint)_watchdog.as!"msecs", _max_fail);
-        _committed = false;
         return CompletionStatus.complete;
-    }
-
-    // TODO: move this checkpoint to the main app, ahead of config execution.
-    // Marking valid from here judges the image by "the configured system stayed
-    // up", so a bad config costs a firmware rollback.
-    override void update()
-    {
-        if (!_committed && getAppTime() >= _commit_time)
-        {
-            ota_commit();
-            _committed = true;
-        }
     }
 
     override CompletionStatus shutdown()
@@ -181,7 +167,6 @@ private:
     Duration _commit_time;
     Duration _watchdog;
     uint _max_fail;
-    bool _committed;
     bool _registered;
     bool _subscribed;
     uint _handle;

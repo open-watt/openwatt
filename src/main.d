@@ -15,7 +15,7 @@ import manager.console.session : Session, default_console_session_name;
 import manager.log : default_log_sink_name, format_log_text,
                      retire_bootstrap_log_sink, set_bootstrap_log_sink;
 import manager.saved_config : saved_config_file, valid_saved_config;
-import manager.config_revision : load_config_revision, has_config_revisions;
+import manager.config_revision : load_config_revision, newest_config_revision;
 
 import driver.watchdog;
 
@@ -163,25 +163,33 @@ int main(string[] args)
             append_interactive_session_defaults(combined_config);
     }
 
-    bool rollback_config = !config_path_explicit && !boot_config_trusted();
+    // An explicit --config bypasses the boot guard.
+    BootDecision decision;
+    int newest_revision = config_path_explicit ? 0 : newest_config_revision(saved_config_file);
+    bool has_startup = file_exists(config_path) || file_exists("startup.conf");
+    if (!config_path_explicit)
+        decision = boot_guard_begin(newest_revision, has_startup);
     char[] conf = null;
     bool using_saved_config = false;
-    if (!config_path_explicit)
+    int revision = 0;
+    Rung rung = Rung.startup;
+    if (!config_path_explicit && decision.rung == Rung.saved)
     {
-        conf = load_config_revision(saved_config_file, &valid_saved_config, rollback_config);
+        conf = load_config_revision(saved_config_file, &valid_saved_config, decision.retire_revision, &revision);
         using_saved_config = conf !is null;
-        if (conf is null && (rollback_config || has_config_revisions(saved_config_file) || file_exists(saved_config_file)))
-        {
-            log_error("config", "no usable saved revision remains; refusing to replace deployment configuration with defaults");
-            return -1;
-        }
-        if (rollback_config)
-            boot_config_recovered();
+        if (using_saved_config)
+            rung = Rung.saved;
+    }
+    if (conf is null && (config_path_explicit || decision.rung <= Rung.startup))
+    {
+        conf = cast(char[])load_file(config_path);
+        if (conf is null && !config_path_explicit)
+            conf = cast(char[])load_file("startup.conf");
     }
     if (conf is null)
-        conf = cast(char[])load_file(config_path);
-    if (conf is null && !config_path_explicit)
-        conf = cast(char[])load_file("startup.conf");
+        rung = Rung.defaults;
+    if (!config_path_explicit)
+        boot_guard_loaded(rung, revision);
 
     version (CoreDump)
     {
@@ -214,6 +222,8 @@ int main(string[] args)
     {
         if (using_saved_config)
             log_info("system", "using saved configuration '", saved_config_file, "'; startup script skipped");
+        else if (newest_revision > 0 && decision.rung != Rung.saved)
+            log_warning("system", "using startup.conf; the saved configuration is skipped by the boot guard");
         else static if (default_conf.length > 0)
             log_info("system", "using startup.conf from the filesystem; bring-up defaults skipped");
         combined_config ~= conf;
@@ -223,6 +233,8 @@ int main(string[] args)
     }
     else if (!config_path_explicit)
     {
+        if (decision.one_shot || (decision.rung == Rung.defaults && (newest_revision || has_startup)))
+            log_warning("system", "boot guard: running bring-up defaults");
         char[] fallback_conf = cast(char[])load_file("conf/default.conf");
         if (fallback_conf is null)
             fallback_conf = cast(char[])load_file("default.conf");
@@ -243,8 +255,8 @@ int main(string[] args)
         }
     }
 
-    char[] user_conf = cast(char[])load_file("conf/user.conf");
-    if (user_conf is null)
+    char[] user_conf = decision.one_shot ? null : cast(char[])load_file("conf/user.conf");
+    if (user_conf is null && !decision.one_shot)
         user_conf = cast(char[])load_file("user.conf");
     if (user_conf !is null)
     {

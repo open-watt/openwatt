@@ -82,6 +82,7 @@ Limit is the 4 MB `ota_0` partition. `ram` is internal DRAM only; PSRAM is heap.
 | 2026-09-20 | #720 | ldc 1.42.0 | 2,893,056 | 136,247 | 4,194,304 | first build against ESP-IDF v6.2 (master), esp-clang 21.1.3; the RAM rise is IDF v6.2 |
 | 2026-09-21 | #732 | ldc 1.42.0 | 2,903,088 | 136,079 | 4,194,304 | ESP-IDF v6.1 release; LDC 1.43 is refused on Xtensa because esp-clang 21's llc cannot read LLVM 22 bitcode |
 | 2026-09-22 | fc5efe57 | ldc 1.42.0 | 2,913,664 | 139,459 | 4,194,304 | `COREDUMP=1`, with the power regulator's ISR state moved out of PSRAM |
+| 2026-09-23 | #747 | ldc 1.42.0 | 2,917,648 | 139,515 | 4,194,304 | `COREDUMP=1`; boot guard ladder and retained reset record |
 
 ### ESP32-C5 DevKitC-1, `make esp-idf-build PLATFORM=esp32-c5 CONFIG=release`
 
@@ -120,6 +121,7 @@ Limit is the stock 0x1b0000 `ota_0` partition, which the in-place migration must
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-09-09 | a8c75cbf | ldc 1.42.0 | 1,612,576 | 91,223 | 1,769,472 | first row; 91% of the stock partition |
 | 2026-09-20 | #720 | ldc 1.42.0 | 1,671,152 | 96,793 | 1,769,472 | first build against ESP-IDF v6.2 (master); 94% of the stock partition |
+| 2026-09-23 | #747 | ldc 1.42.0 | 1,676,544 | 96,376 | 1,769,472 | app rollback enabled for the boot guard's firmware trial; 95% of the stock partition |
 
 ### Wireless-Tag WT99P4C5-S1, `make esp-idf-build BOARD=wt99p4c5-s1 CONFIG=release`
 
@@ -157,11 +159,18 @@ carries 16MB.
 | date | commit | compiler | flash | ram | limit | note |
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-09-21 | ow/rp2350-bringup | ldc 1.43.0 | 1,593,336 | 41,236 | 4,194,304 | first row |
+| 2026-09-23 | #747 | ldc 1.43.0 | 1,597,272 | 41,456 | 4,194,304 | boot guard ladder and retained reset record |
 
 ### bl808 e907, `make PLATFORM=bl808 PROCESSOR=e907 CONFIG=release`
 
 | date | commit | compiler | flash | ram | limit | note |
 | --- | --- | --- | --- | --- | --- | --- |
+
+### BL618, `make PLATFORM=bl618 CONFIG=release`
+
+| date | commit | compiler | flash | ram | limit | note |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2026-09-23 | #747 | ldc 1.43.0 | 2,237,328 | 53,248 | - | first row; boot guard ladder and retained reset record |
 
 Add a section for any other configuration the first time it is deployed. Keep the make
 invocation in the heading exact, including FEATURES, HEADLESS, IPV6 and GATEWAY when they

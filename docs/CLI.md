@@ -31,66 +31,33 @@ Each of these top-level commands has its own set of sub-commands for more specif
 
 ### Saved Configuration
 
-The running configuration can be saved and restored:
+- `/system/config/export` prints the running configuration as a command script,
+  excluding dynamic, temporary and remote objects.
+- `/system/config/save [file=<base>]` saves a numbered revision and keeps the latest five.
+  The default is `conf/config.conf.1`, `.2`, etc.; the command reports the filename.
+- `/system/sysinfo` shows whether the configuration has unsaved changes. Saving to the
+  default path clears that indication.
 
-- `/system/config/export`: Prints the running configuration as a script of `add` and `set` commands.
-  Only properties that were explicitly set are emitted; dynamic, temporary,
-  and remote (synced) objects are skipped.
-- `/system/config/save [file=<base>]`: Publishes a numbered revision, using `conf/config.conf`
-  as the default base: `conf/config.conf.1`, `.2`, and so on. The command reports the actual
-  filename. The latest five completed revisions are retained for each base, including custom
-  `file=` exports. Only the default base is selected automatically at boot.
+Boot loads the newest valid saved revision. Use `--config=<path>` to select a file
+explicitly, including a particular revision. Custom `file=` saves are not selected
+at boot.
 
-String values are always double-quoted in exports; quotes, backslashes and dollar signs
-are backslash-escaped to preserve literal text.
+After three crashes before 60 seconds of uptime, recovery steps down from saved
+configuration to `startup.conf`, then bring-up defaults. An unproven revision is
+replaced by an older one; previously successful revisions are preserved. `/system/sysinfo` reports the active configuration and
+recovery reason. Power loss and deliberate restarts do not count as crashes.
 
-Exports run in three phases: create every included object with `disabled=true`, set its
-saved properties, then enable only objects that were originally enabled. All identities
-exist before references are applied, including same-type dependencies and cycles.
-Objects with no saved properties need no configuration `set` command.
+Five power-ons that each end within five seconds select bring-up defaults for one
+boot, skipping `user.conf` without erasing anything. On supported OTA platforms, a
+new firmware image that keeps crashing even with defaults can roll back.
 
-**Known restore limitations (#665):** dependencies excluded from export must still exist.
-Objects already created by `system.conf`, process defaults or discovery reject the `add`;
-later `set` commands apply saved properties, but do not undo earlier startup, omitted
-settings or removals. An already-enabled boot object saved as disabled also stays enabled
-because its disabling `add` was rejected. A successful save does not guarantee a complete
-restore. Reconciliation is tracked at the top of `TODO.md`.
+Restore requires referenced objects to exist. Settings for objects created during
+startup may not fully restore, including their disabled state. Recovery detects
+corrupt scripts and crashes; it does not verify remote connectivity.
 
-Each revision is written to a separate `.tmp` file with an integrity checksum, flushed, then
-renamed to its completed filename. Unfinished candidates are never selected at boot. A failed
-write preserves previous completed revisions. On POSIX systems the containing directory is
-also flushed after publication; Windows publication requests write-through. Embedded guarantees
-still depend on the filesystem and storage driver.
-
-Boot selects the newest revision with a valid checksum and parseable script. Corrupt or
-unparseable revisions are renamed `.bad`, logged, and skipped in favour of older revisions.
-The legacy `conf/config.conf` is still accepted as a fallback; new saves leave it intact.
-The platform's `system.conf` and `user.conf` layers still apply. An explicit `--config` bypasses
-automatic revision selection and can name an individual revision for recovery.
-
-On targets with NVS boot-failure tracking, repeated failed boots retire the newest revision
-and try the previous one. Exhausted saved revisions stop startup with an error; they do not
-automatically run factory/startup defaults. With no saved configuration history, normal initial
-provisioning still applies. Deliberately remove saved revisions (including `.bad` files) and
-the legacy file to return to startup defaults; do not use repeated power cycling as a factory
-reset. This recovery detects integrity, syntax and counted boot failures, not loss of remote
-connectivity or individual command errors. A remote confirmation window is outstanding work.
-
-A hashed `/secret` exports its password as `hash:<algo>:<salt>:<hash>`. Recoverable password
-material is stored separately in numbered `conf/secret.store.<revision>` files, using the same
-publication and retention mechanism. Each store snapshot includes all retained hash mappings,
-so older config revisions can still recover their secrets. Unsaved changes to the store must
-be persisted before a config revision can be published. The legacy `conf/secret.store` remains
-readable. If material cannot be recovered, outbound use requires the password to be re-entered.
-
-**Deferred security hardening (#665):** the side store contains reversible hex plaintext for
-all hashed passwords, including verification-only credentials, and uses ordinary file creation
-permissions. Restricting its scope, tightening access, and deleting obsolete material are tracked
-prominently in `TODO.md`. Hashes in a config export do not protect a copied secret store.
-
-Config mutations after boot (any collection `add`/`remove`/`set`/`reset`) mark the running configuration
-dirty. `/system/sysinfo` shows this as `Config: modified` or `Config: saved`, and `/system/sysinfo
-config-dirty` returns the bare boolean for UX clients polling health; saving to the default path clears it.
+Saved passwords use a separate `conf/secret.store.<revision>` file. Keep it with the
+configuration when backing up or restoring, and protect it: its contents are
+recoverable plaintext. Missing secrets must be re-entered.
 
 ### Configuration property round trips
 
@@ -185,8 +152,9 @@ command says so.
 `/system/sleep <duration>` pauses the session for the given duration. It is latent, so
 Ctrl-C cancels it, which makes it useful for pacing a startup script.
 
-`/system/reboot [bootloader=<n>]` restarts the node. Without arguments it performs a
-normal restart.
+`/system/reboot [bootloader=<n>] [crash=<bool>]` restarts the node. Without arguments it
+performs a normal restart. `crash=true` aborts the process instead, which the boot guard
+counts as a crash; it exists to exercise the guard.
 
 `<n>` is an integer, and any non-zero value restarts into the chip's own ROM loader
 instead, where the part exposes its factory firmware-update interface. `bootloader=1`
