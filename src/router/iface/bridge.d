@@ -4,7 +4,6 @@ import urt.array;
 import urt.log;
 import urt.map;
 import urt.mem;
-import urt.meta.nullable;
 import urt.string;
 import urt.time;
 
@@ -27,15 +26,15 @@ nothrow @nogc:
 // The CPU-port sink injects a frame into the kernel-switched ethernet segment;
 // it returns <0 on failure (mirrors BaseInterface.forward's convention).
 alias CpuPortSink = int delegate(ref Packet packet) nothrow @nogc;
-alias MemberAddedHook = void delegate(BridgeInterface bridge, BaseInterface member) nothrow @nogc;
+alias PortsChangedHook = void delegate(BridgeInterface bridge) nothrow @nogc;
 alias CpuPromiscHook = void delegate(BridgeInterface bridge) nothrow @nogc;
 
-__gshared MemberAddedHook g_bridge_member_added;
+__gshared PortsChangedHook g_bridge_ports_changed;
 __gshared CpuPromiscHook g_bridge_cpu_promisc_changed;
 
-void register_bridge_offload_hooks(MemberAddedHook member_added, CpuPromiscHook promisc_changed)
+void register_bridge_offload_hooks(PortsChangedHook ports_changed, CpuPromiscHook promisc_changed)
 {
-    g_bridge_member_added = member_added;
+    g_bridge_ports_changed = ports_changed;
     g_bridge_cpu_promisc_changed = promisc_changed;
 }
 
@@ -106,6 +105,7 @@ nothrow @nogc:
     {
         _vlan_filtering = value;
         mark_set!(typeof(this), "vlan-filtering")();
+        ports_changed();
     }
 
     final ushort pvid() const
@@ -141,89 +141,6 @@ nothrow @nogc:
     }
 
     // API...
-
-    final bool add_member(BaseInterface iface, ushort pvid = 1, bool ingress_filtering = true, bool untagged_egress = true)
-    {
-        assert(iface !is this, "Cannot add a bridge to itself!");
-        assert(_members.length < _cpu_port, "Too many _members in the bridge!"); // member indices live below the pseudo-ports
-        assert(!(iface.flags & ObjectFlags.slave), "Interface is already slaved!");
-        if (iface.flags & ObjectFlags.temporary)
-            return false;
-
-        ubyte port = cast(ubyte)_members.length;
-        if (!iface.set_master(this, port))
-            return false;
-        _members ~= BridgePort(iface, pvid, ingress_filtering, untagged_egress);
-
-        static if (has_modbus)
-        {
-            // TODO: move this logic into the modbus interface...
-            // For modbus member interfaces, we'll pre-populate the MAC table with known device addresses...
-            import protocol.modbus;
-            import protocol.modbus.iface;
-            ModbusInterface mb = dyn_cast!ModbusInterface(iface);
-            if (mb)
-            {
-                ushort vlan = 0;
-
-                auto mod_mb = get_module!ModbusProtocolModule;
-                foreach (ref map; mod_mb.remote_servers.values)
-                {
-                    if (map.iface is iface)
-                        _address_table.insert(ulong(map.universal_address) | (ulong(vlan) << 48) | (ulong(PacketType.modbus) << 60), port);
-                }
-            }
-        }
-
-        // a new ethernet member extends the segment: re-prime the neighbour table
-        if (running && (iface.caps & InterfaceCaps.ethernet))
-            station_link_up();
-
-        // Member added to a running bridge: let the backend (re-)evaluate offload --
-        // a second netdev member may newly qualify it, or an already-offloaded
-        // bridge may need the new netdev enslaved. (Members added before the bridge
-        // is running are picked up when it goes online. Removal stays unsupported.)
-        if (running && g_bridge_member_added)
-            g_bridge_member_added(this, iface);
-
-        if (running)
-            update_link_speed();
-
-        iface.restart();
-        return true;
-    }
-
-    final bool remove_member(size_t index)
-    {
-        if (index >= _members.length)
-            return false;
-
-        _members[index].iface.set_master(null, 0);
-        _members.remove(index);
-
-        // TODO: update the MAC table to adjust all the port numbers!
-        assert(false);
-
-        // TODO: all the subscriber user_data's are wrong!!!
-        //       we need to unsubscribe and resubscribe all the _members...
-        assert(false);
-
-        // TODO: scan active TagTracking entries and remove PortTags for the removed
-        //       interface, decrementing n_pending for each. If n_pending reaches 0,
-        //       fire the upstream callback and recycle the entry.
-
-        return true;
-    }
-
-    final bool remove_member(const(char)[] name)
-    {
-        foreach (i, ref m; _members)
-        {
-            if (m.iface.name[] == name[])
-                return remove_member(i);
-        }
-        return false;
-    }
 
     // --- kernel-bridge offload seam (driver.linux.bridge drives this) ---
 
@@ -338,12 +255,12 @@ nothrow @nogc:
                 entry.upstream_cb = null; // suppress on_port_callback firing upstream during abort
                 foreach (ref pt; entry.port_tags[])
                 {
-                    if (pt.tag > 0)
+                    if (pt.tag > 0 && pt.iface)
                         pt.iface.abort(pt.tag, reason);
                 }
+                recycle_tracking(entry);
                 if (cb)
                     cb(msg_handle, reason);
-                recycle_tracking(entry);
                 return;
             }
             entry = entry.next;
@@ -358,7 +275,7 @@ nothrow @nogc:
             if (entry.bridge_tag == msg_handle)
             {
                 if (entry.port_tags.length == 1)
-                    return entry.port_tags[0].iface.msg_state(entry.port_tags[0].tag);
+                    return entry.port_tags[0].iface ? entry.port_tags[0].iface.msg_state(entry.port_tags[0].tag) : MessageState.aborted;
                 return MessageState.in_flight;
             }
             entry = entry.next;
@@ -386,6 +303,8 @@ protected:
         ulong tx = 0, rx = 0;
         foreach (ref m; _members)
         {
+            if (!m.iface)
+                continue;
             if (m.iface.tx_link_speed > tx)
                 tx = m.iface.tx_link_speed;
             if (m.iface.rx_link_speed > rx)
@@ -403,7 +322,7 @@ protected:
             entry.upstream_cb = null;
             foreach (ref pt; entry.port_tags[])
             {
-                if (pt.tag > 0)
+                if (pt.tag > 0 && pt.iface)
                     pt.iface.abort(pt.tag);
             }
             if (cb)
@@ -488,7 +407,7 @@ protected:
         // Offloaded members are RX-idled (the kernel switches them), so they must
         // not deliver frames up to the software bridge.
         debug assert(!_members[src_port].offloaded, "offloaded member should be RX-idled");
-        ref const BridgePort port = _members[src_port];
+        BridgePort port = _members[src_port];
         ulong src_address;
 
         // check for link-local frames (bridges must not forward link-local frames)
@@ -534,6 +453,89 @@ protected:
 
 private:
 
+    void attach_port(BridgePort member)
+    {
+        foreach (i, m; _members)
+            if (m is member)
+            {
+                member.iface.set_master(ObjectRef!BaseInterface(this), cast(byte)i);
+                ports_changed();
+                return;
+            }
+        assert(_members.length < _cpu_port);
+        ubyte port = cast(ubyte)_members.length;
+        BaseInterface iface = member.iface;
+        _members ~= ObjectRef!BridgePort(member);
+        iface.set_master(ObjectRef!BaseInterface(this), cast(byte)port);
+        static if (has_modbus)
+        {
+            // TODO: move this logic into the modbus interface...
+            // For modbus member interfaces, we'll pre-populate the MAC table with known device addresses...
+            import protocol.modbus;
+            import protocol.modbus.iface;
+            ModbusInterface mb = dyn_cast!ModbusInterface(iface);
+            if (mb)
+            {
+                ushort vlan = 0;
+
+                auto mod_mb = get_module!ModbusProtocolModule;
+                foreach (ref map; mod_mb.remote_servers.values)
+                {
+                    if (map.iface is iface)
+                        _address_table.insert(ulong(map.universal_address) | (ulong(vlan) << 48) | (ulong(PacketType.modbus) << 60), port);
+                }
+            }
+        }
+
+        ports_changed();
+        if (running && (iface.caps & InterfaceCaps.ethernet))
+            station_link_up();
+    }
+
+    void detach_port(BridgePort member)
+    {
+        foreach (i, m; _members)
+        {
+            if (m !is member)
+                continue;
+            _members.remove(i);
+            _address_table.remove_port(cast(ubyte)i, _cpu_port);
+            foreach (j; i .. _members.length)
+                if (auto iface = _members[j].iface)
+                    iface.set_master(ObjectRef!BaseInterface(this), cast(byte)j);
+            cancel_port(member.iface);
+            ports_changed();
+            return;
+        }
+    }
+
+    void cancel_port(BaseInterface iface)
+    {
+        for (TagTracking* entry = _tracking_active; entry;)
+        {
+            bool affected;
+            foreach (ref pt; entry.port_tags[])
+                affected |= pt.iface is iface;
+            if (affected)
+            {
+                abort(entry.bridge_tag);
+                entry = _tracking_active;
+            }
+            else
+                entry = entry.next;
+        }
+    }
+
+    void ports_changed()
+    {
+        if (running)
+        {
+            update_link_speed();
+            if (g_bridge_ports_changed)
+                g_bridge_ports_changed(this);
+        }
+    }
+
     enum ubyte _local_port  = 0xFE;
     enum ubyte _attach_port = 0xFD; // the station (EthernetStation): where the exotic and ethernet domains meet
     enum ubyte _cpu_port    = 0xFC; // kernel-offloaded ethernet segment, reached via the CPU-port AF_PACKET on br-<name>
@@ -546,22 +548,9 @@ private:
     }
     CpuPort _cpu;
 
-    struct BridgePort
-    {
-        struct VLANMember
-        {
-            short first, count;
-        }
-        BaseInterface iface;
-        ushort pvid = 1;
-        bool ingress_filtering = false;
-        bool untagged_egress = true;
-        bool offloaded = false;     // enslaved to a kernel bridge; the kernel switches it, OW skips it
-    }
-
     struct PortTag
     {
-        BaseInterface iface;
+        ObjectRef!BaseInterface iface;
         int tag;
     }
 
@@ -619,15 +608,15 @@ private:
     }
 
     bool _vlan_filtering;
-    BridgePort _bridge_port;
-    Array!BridgePort _members;
+    BridgePortConfig _bridge_port = BridgePortConfig(1, false, true);
+    Array!(ObjectRef!BridgePort) _members;
     AddressTable _address_table;
 
     TagTracking* _tracking_free;
     TagTracking* _tracking_active;
     TagAllocator _bridge_tags;
 
-    bool classify_vlan(ref Packet packet, ref const BridgePort port)
+    bool classify_vlan(Port)(ref Packet packet, auto ref const Port port)
     {
         if (packet.has_inline_vlan_tag && !packet.promote_vlan_tag())
             return false;
@@ -644,17 +633,14 @@ private:
             return true;
         }
         if (vid != port.pvid && port.ingress_filtering)
-            assert(false, "TODO");
+            return false;
         return true;
     }
 
-    bool prepare_egress(ref Packet packet, ref const BridgePort port)
+    bool prepare_egress(Port)(ref Packet packet, auto ref const Port port)
     {
         if (packet.vid != port.pvid)
-        {
-            assert(false, "TODO");
             return false;
-        }
         if (port.untagged_egress)
             packet.consume_vlan_tag();
         else if (packet.type == PacketType.ethernet && packet.vlan_tag == VlanTag.none)
@@ -688,7 +674,7 @@ private:
             return false;
         if (port == _local_port)
             return true;
-        return port < _members.length && !(_members[port].iface.caps & InterfaceCaps.ethernet);
+        return port < _members.length && _members[port].iface && !(_members[port].iface.caps & InterfaceCaps.ethernet);
     }
 
     void local_dispatch(ref Packet packet)
@@ -929,7 +915,7 @@ private:
                         add_tx_frame(packet.data.length);
                     return tag;
                 }
-                tracking.port_tags.pushBack(PortTag(_members[dst_port].iface, tag));
+                tracking.port_tags.pushBack(PortTag(ObjectRef!BaseInterface(_members[dst_port].iface), tag));
                 tracking.pending = 1;
                 goto finalize;
             }
@@ -949,7 +935,7 @@ private:
             int tag = member.iface.forward(outgoing, &tracking.on_port_callback);
             if (tag > 0)
             {
-                tracking.port_tags.pushBack(PortTag(member.iface, tag));
+                tracking.port_tags.pushBack(PortTag(ObjectRef!BaseInterface(member.iface), tag));
                 ++tracking.pending;
             }
             else if (tag == 0)
@@ -989,7 +975,8 @@ private:
         if (btag < 0)
         {
             foreach (ref pt; tracking.port_tags[])
-                pt.iface.abort(pt.tag);
+                if (pt.iface)
+                    pt.iface.abort(pt.tag);
             recycle_tracking(tracking);
             return -1;
         }
@@ -1003,6 +990,175 @@ private:
 }
 
 
+private struct BridgePortConfig
+{
+    ushort pvid = 1;
+    bool ingress_filtering = true;
+    bool untagged_egress = true;
+}
+
+final class BridgePort : BaseObject
+{
+    alias Properties = AliasSeq!(Prop!("bridge", bridge),
+                                 Prop!("interface", interface_name),
+                                 Prop!("pvid", pvid),
+                                 Prop!("ingress-filtering", ingress_filtering),
+                                 Prop!("untagged-egress", untagged_egress));
+nothrow @nogc:
+
+    enum type_name = "bridge-port";
+    enum path = "/interface/bridge/port";
+    enum collection_id = CollectionType.bridge_port;
+
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
+    {
+        super(collection_type_info!BridgePort, id, flags);
+    }
+
+    final const(char)[] bridge() const pure
+        => _bridge.name[];
+
+    override ObjectFlags flags() const
+    {
+        ObjectFlags value = super.flags;
+        if ((_bridge && (_bridge.flags & ObjectFlags.dynamic)) || (_iface && (_iface.flags & ObjectFlags.dynamic)))
+            value |= ObjectFlags.dynamic;
+        return value;
+    }
+
+    final const(char)[] bridge(const(char)[] value)
+    {
+        if (auto obj = Collection!BaseInterface().get(value))
+            if (!dyn_cast!BridgeInterface(obj))
+                return "master must be a bridge";
+        if (auto error = check_membership(value, interface_name))
+            return error;
+        unbind();
+        _bridge = ObjectRef!BridgeInterface(value);
+        mark_set!(typeof(this), [ "bridge", "flags" ])();
+        return null;
+    }
+
+    final const(char)[] interface_name() const pure
+        => _iface.name[];
+
+    final const(char)[] interface_name(const(char)[] value)
+    {
+        if (auto obj = Collection!BaseInterface().get(value))
+            if (obj.flags & ObjectFlags.temporary)
+                return "temporary interfaces cannot be bridge ports";
+        if (auto error = check_membership(bridge, value))
+            return error;
+        unbind();
+        _iface = ObjectRef!BaseInterface(value);
+        mark_set!(typeof(this), [ "interface", "flags" ])();
+        return null;
+    }
+
+    final ushort pvid() const pure
+        => _config.pvid;
+
+    final const(char)[] pvid(ushort value)
+    {
+        if (value == 0 || value > 4094)
+            return "invalid vlan id";
+        _config.pvid = value;
+        mark_set!(typeof(this), "pvid")();
+        return null;
+    }
+
+    final bool ingress_filtering() const pure
+        => _config.ingress_filtering;
+
+    final void ingress_filtering(bool value)
+    {
+        _config.ingress_filtering = value;
+        mark_set!(typeof(this), "ingress-filtering")();
+    }
+
+    final bool untagged_egress() const pure
+        => _config.untagged_egress;
+
+    final void untagged_egress(bool value)
+    {
+        _config.untagged_egress = value;
+        mark_set!(typeof(this), "untagged-egress")();
+    }
+
+protected:
+    override bool validate() const
+        => bridge.length && interface_name.length;
+
+private:
+    ObjectRef!BridgeInterface _bridge;
+    ObjectRef!BaseInterface _iface;
+    BridgePortConfig _config;
+    bool offloaded;
+
+    BaseInterface iface()
+        => _iface;
+
+    BridgeInterface bridge_object()
+        => dyn_cast!BridgeInterface(cast(BaseInterface)_bridge.get);
+
+    const(char)[] check_membership(const(char)[] master, const(char)[] member)
+    {
+        if (!member.length)
+            return null;
+        foreach (p; Collection!BridgePort().values)
+            if (p !is this && p.interface_name == member)
+                return "interface already has a bridge port";
+        const(char)[] ancestor = master;
+        for (uint depth = 0; ancestor.length; ++depth)
+        {
+            if (ancestor == member || depth > Collection!BridgePort().item_count)
+                return "bridge membership would form a cycle";
+            const(char)[] next;
+            foreach (p; Collection!BridgePort().values)
+                if (p !is this && p.interface_name == ancestor)
+                {
+                    next = p.bridge;
+                    break;
+                }
+            ancestor = next;
+        }
+        uint count;
+        foreach (p; Collection!BridgePort().values)
+            if (p !is this && p.bridge == master)
+                ++count;
+        return count >= BridgeInterface._cpu_port ? "too many bridge ports" : null;
+    }
+
+    void unbind()
+    {
+        if (auto b = bridge_object())
+            b.detach_port(this);
+        if (_iface && _iface._master.name[] == bridge)
+            _iface.set_master(ObjectRef!BaseInterface.init, 0);
+        offloaded = false;
+    }
+
+    void endpoint_created()
+    {
+        mark_set!(typeof(this), "flags")();
+    }
+
+    void reconcile()
+    {
+        if (disabled || !validate())
+        {
+            unbind();
+            return;
+        }
+        if (!_iface)
+            return;
+        if (auto b = bridge_object())
+            b.attach_port(this);
+        else
+            _iface.set_master(ObjectRef!BaseInterface(bridge), 0);
+    }
+}
+
 final class BridgeInterfaceModule : Module
 {
     mixin DeclareModule!"interface.bridge";
@@ -1011,28 +1167,206 @@ nothrow @nogc:
     override void init()
     {
         g_app.console.register_collection!BridgeInterface();
-        g_app.console.register_command!(port_add, "add")("/interface/bridge/port", this);
+        g_app.console.register_collection!BridgePort();
+        Collection!BridgePort().subscribe(&ports_changed);
+        register_object_lifecycle_handler(&endpoint_changed);
     }
 
-    void port_add(Session session, BridgeInterface bridge, BaseInterface _interface, Nullable!ushort pvid, Nullable!bool ingress_filtering, Nullable!bool untagged_egress)
+    override void update()
     {
-        if (bridge is _interface)
-        {
-            session.write_line("Can't add a bridge to itself.");
-            return;
-        }
-        if (_interface.flags & ObjectFlags.slave)
-        {
-            session.write_line("Interface '", _interface.name[], "' is already a slave to '", _interface._master.name[], "'.");
-            return;
-        }
-
-        if (!bridge.add_member(_interface, pvid ? pvid.value : 1, ingress_filtering ? ingress_filtering.value : true, untagged_egress ? untagged_egress.value : true))
-        {
-            session.write_line("Failed to add interface '", _interface.name[], "' to bridge '", bridge.name[], "'.");
-            return;
-        }
-
-        log_info(ModuleName, "bridge port add - bridge: ", bridge.name[], "  interface: ", _interface.name[]);
+        Collection!BridgePort().update_all();
     }
+
+    override void deinit()
+    {
+        Collection!BridgePort().unsubscribe(&ports_changed);
+        unregister_object_lifecycle_handler(&endpoint_changed);
+    }
+
+private:
+    void ports_changed(BaseObject obj, CollectionEvent event)
+    {
+        auto port = cast(BridgePort)obj;
+        if (event == CollectionEvent.removed)
+            port.unbind();
+        else
+            port.reconcile();
+    }
+
+    void endpoint_changed(BaseObject obj, ObjectLifecycleEvent event)
+    {
+        auto iface = dyn_cast!BaseInterface(obj);
+        if (!iface)
+            return;
+        foreach (port; Collection!BridgePort().values)
+        {
+            if (port._iface !is iface && cast(BaseInterface)port._bridge.get !is iface)
+                continue;
+            if (event == ObjectLifecycleEvent.created)
+                port.endpoint_created();
+            else if (iface.flags & ObjectFlags.dynamic)
+                port.destroy();
+            else
+            {
+                if (auto b = port.bridge_object())
+                    b.detach_port(port);
+                port.offloaded = false;
+            }
+        }
+    }
+}
+
+unittest
+{
+    final class TestPort : BaseInterface
+    {
+        enum type_name = "bridge-test-port";
+    nothrow @nogc:
+        this(CID id, ObjectFlags flags = ObjectFlags.none)
+        {
+            super(collection_type_info!TestPort, id, flags);
+            _caps |= InterfaceCaps.ethernet;
+        }
+
+        void start()
+        {
+            if (!running)
+                set_state(State.validate);
+            set_state(State.starting);
+        }
+
+        override int transmit(ref Packet, MessageCallback callback, const(QueuePolicy)*)
+        {
+            pending = callback;
+            return callback ? 17 : 0;
+        }
+
+        override void abort(int, MessageState reason)
+        {
+            auto callback = pending;
+            pending = null;
+            if (callback)
+                callback(17, reason);
+        }
+
+        MessageCallback pending;
+    }
+
+    auto module_ = alloc!BridgeInterfaceModule(null);
+    Collection!BridgePort().subscribe(&module_.ports_changed);
+    register_object_lifecycle_handler(&module_.endpoint_changed);
+    scope(exit)
+    {
+        Collection!BridgePort().unsubscribe(&module_.ports_changed);
+        unregister_object_lifecycle_handler(&module_.endpoint_changed);
+        free(module_);
+    }
+
+    struct Observer
+    {
+        uint first_calls, second_calls, third_calls;
+    nothrow @nogc:
+        void first(BaseObject, CollectionEvent event)
+        {
+            ++first_calls;
+            if (event == CollectionEvent.added)
+            {
+                Collection!BridgePort().unsubscribe(&second);
+                Collection!BridgePort().subscribe(&third);
+            }
+        }
+
+        void second(BaseObject, CollectionEvent)
+        {
+            ++second_calls;
+        }
+
+        void third(BaseObject, CollectionEvent)
+        {
+            ++third_calls;
+        }
+    }
+    Observer observer;
+    Collection!BridgePort().subscribe(&observer.first);
+    Collection!BridgePort().subscribe(&observer.second);
+    auto unpublished = Collection!BridgePort().alloc("bridge-test-notifications");
+    assert(unpublished.pvid(42) is null);
+    assert(observer.first_calls == 0);
+    Collection!BridgePort().add(unpublished);
+    assert(observer.first_calls == 1 && observer.second_calls == 0 && observer.third_calls == 0);
+    assert(unpublished.pvid(43) is null);
+    assert(observer.first_calls == 2 && observer.third_calls == 1);
+    Collection!BridgePort().remove(unpublished);
+    assert(observer.first_calls == 3 && observer.third_calls == 2);
+    free(unpublished);
+    Collection!BridgePort().unsubscribe(&observer.first);
+    Collection!BridgePort().unsubscribe(&observer.third);
+
+    auto member = Collection!TestPort().create("bridge-test-member");
+    auto port = Collection!BridgePort().alloc("bridge-test-membership");
+    assert(port.bridge("bridge-test-master") is null);
+    assert(port.interface_name(member.name[]) is null);
+    Collection!BridgePort().add(port);
+    member.start();
+    assert(!member.running && (member.flags & ObjectFlags.slave));
+    auto master = Collection!BridgeInterface().create("bridge-test-master");
+    member.start();
+    assert(master.running && member.running && master.member_count == 1);
+    master.disabled = true;
+    assert(!member.running && (member.flags & ObjectFlags.slave));
+    master.destroy();
+    assert(Collection!BridgePort().get(port.name[]) is port);
+    master = Collection!BridgeInterface().create("bridge-test-master");
+    member.start();
+    assert(master.running && member.running && master.member_count == 1);
+
+    member.disabled = true;
+    assert(master.running);
+    member.destroy();
+    assert(master.running && master.member_count == 0);
+    assert(Collection!BridgePort().get(port.name[]) is port);
+    member = Collection!TestPort().create("bridge-test-member");
+    assert(member.running && master.member_count == 1);
+
+    struct Completion
+    {
+        uint calls;
+        MessageState state;
+        void completed(int, MessageState value) nothrow @nogc
+        {
+            ++calls;
+            state = value;
+        }
+    }
+    Completion completion;
+    register_packet_codec!Ethernet();
+    Packet packet;
+    ref frame = packet.init!Ethernet(null);
+    frame.dst = MACAddress(0xff, 0xff, 0xff, 0xff, 0xff, 0xff);
+    packet.vlan_tag = VlanTag._8100;
+    packet.vlan = 42;
+    assert(!master.classify_vlan(packet, port));
+    assert(!master.prepare_egress(packet, port));
+    assert(port.pvid(42) is null);
+    assert(master.classify_vlan(packet, port));
+    assert(master.prepare_egress(packet, port));
+    packet.vlan = 0;
+    int tag = master.transmit(packet, &completion.completed, null);
+    assert(tag > 0 && member.pending);
+    port.destroy();
+    assert(!member.pending && completion.calls == 1 && completion.state == MessageState.aborted);
+    assert(master.running && master.member_count == 0);
+    assert(!(member.flags & ObjectFlags.slave));
+    master.destroy();
+
+    auto dynamic_master = Collection!BridgeInterface().create("bridge-test-dynamic", ObjectFlags.dynamic);
+    port = Collection!BridgePort().alloc("bridge-test-dynamic-membership");
+    assert(port.bridge(dynamic_master.name[]) is null);
+    assert(port.interface_name(member.name[]) is null);
+    Collection!BridgePort().add(port);
+    assert(port.flags & ObjectFlags.dynamic);
+    dynamic_master.destroy();
+    assert(Collection!BridgePort().get("bridge-test-dynamic-membership") is null);
+    assert(!(member.flags & ObjectFlags.slave));
+    member.destroy();
 }

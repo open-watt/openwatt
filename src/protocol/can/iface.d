@@ -1,5 +1,6 @@
 module protocol.can.iface;
 
+import urt.driver.can;
 import urt.endian;
 import urt.log;
 import urt.mem;
@@ -15,7 +16,18 @@ import manager.plugin;
 import router.iface;
 import router.stream;
 
-import urt.driver.can;
+version (linux)
+{
+    import urt.array : Array;
+    import urt.result : StringResult;
+    import urt.internal.sys.posix : pollfd, POLLIN;
+    import driver.linux.raw : CANSocket, can_frame, CAN_EFF_FLAG, CAN_RTR_FLAG, CAN_ERR_FLAG, CAN_EFF_MASK, CAN_SFF_MASK;
+    import driver.linux.netlink_write : netlink_ifindex, netlink_set_link_up, netlink_set_can_bitrate, netlink_get_can_link, CANLink;
+    import driver.linux.fdwatch : add_fd_watcher, remove_fd_watcher, fd_watch_changed;
+    enum has_socketcan = true;
+}
+else
+    enum has_socketcan = false;
 
 version(Espressif)
     version = HasGPIO;
@@ -89,14 +101,14 @@ final class CANInterface : BaseInterface
     version(HasGPIO)
         alias Properties = AliasSeq!(Prop!("stream", stream),
                                      Prop!("protocol", protocol),
-                                     Prop!("device", device),
+                                     Prop!("adapter", adapter),
                                      Prop!("baud-rate", baud_rate),
                                      Prop!("tx-gpio", tx_gpio),
                                      Prop!("rx-gpio", rx_gpio));
     else
         alias Properties = AliasSeq!(Prop!("stream", stream),
                                      Prop!("protocol", protocol),
-                                     Prop!("device", device),
+                                     Prop!("adapter", adapter),
                                      Prop!("baud-rate", baud_rate));
 
 nothrow @nogc:
@@ -131,10 +143,10 @@ nothrow @nogc:
         if (_stream is value)
             return null;
         _stream = value;
-        mark_set!(typeof(this), "stream")();
+        _adapter = String();
+        mark_set!(typeof(this), [ "stream", "adapter" ])();
 
-        if (!_stream || !_stream.running)
-            restart();
+        restart();
         return null;
     }
 
@@ -142,38 +154,39 @@ nothrow @nogc:
         => _protocol;
     const(char)[] protocol(CANInterfaceProtocol value)
     {
-        import urt.mem.temp;
         if (value != CANInterfaceProtocol.ebyte)
-            return tconcat("Invalid CAN protocol '", protocol, "': expect 'ebyte|??'.");
+            return "invalid CAN protocol: expected 'ebyte'";
         _protocol = value;
-        _device = String();
-        mark_set!(typeof(this), [ "protocol", "device" ])();
+        _adapter = String();
+        mark_set!(typeof(this), [ "protocol", "adapter" ])();
+        restart();
         return null;
     }
 
-    final const(char)[] device() const pure
-        => _device[];
-    final const(char)[] device(const(char)[] value)
+    final const(char)[] adapter() const pure
+        => _adapter[];
+    final const(char)[] adapter(const(char)[] value)
     {
-        if (!value.empty && (value.length != 5 || value[0 .. 4] != "twai" || !value[4].is_numeric || value[4] - '0' >= num_can))
-            return "invalid CAN device";
-        bool changed = _device[] != value;
+        if (!value.empty && !valid_adapter_name(value))
+            return "invalid CAN adapter";
+        bool changed = _adapter[] != value;
         if (!value.empty)
             changed |= _stream !is null || _protocol != CANInterfaceProtocol.unknown;
         if (!changed)
         {
-            mark_assigned!(typeof(this), [ "device", "stream", "protocol" ])();
+            mark_assigned!(typeof(this), [ "adapter", "stream", "protocol" ])();
             return null;
         }
 
-        _device = value.make_string();
-        _can_port = value.empty ? -1 : cast(byte)(value[4] - '0');
+        _adapter = value.make_string();
+        static if (!has_socketcan && num_can > 0)
+            _can_port = value.empty ? -1 : cast(byte)(value[4] - '0');
         if (!value.empty)
         {
             _stream = null;
             _protocol = CANInterfaceProtocol.unknown;
         }
-        mark_set!(typeof(this), [ "device", "stream", "protocol" ])();
+        mark_set!(typeof(this), [ "adapter", "stream", "protocol" ])();
         restart();
         return null;
     }
@@ -230,9 +243,13 @@ protected:
 
     override bool validate() const
     {
-        if (!_device.empty)
+        if (!_adapter.empty)
         {
-            static if (num_can > 0)
+            if (_stream !is null)
+                return false;
+            static if (has_socketcan)
+                return true;
+            else static if (num_can > 0)
                 return _baud_rate > 0;
             else
                 return false;
@@ -242,9 +259,34 @@ protected:
 
     override CompletionStatus startup()
     {
-        if (!_device.empty)
+        if (!_adapter.empty)
         {
-            static if (num_can > 0)
+            static if (has_socketcan)
+            {
+                if (!_sock.valid)
+                {
+                    int ifindex = netlink_ifindex(_adapter[]);
+                    foreach (e; Collection!CANInterface().values)
+                    {
+                        if (e !is this && e._sock.valid && e._sock.ifindex == ifindex)
+                        {
+                            log.error("CAN adapter '", _adapter, "' is already claimed by '", e.name, "'");
+                            return CompletionStatus.error;
+                        }
+                    }
+
+                    if (!configure_link(ifindex))
+                        return CompletionStatus.error;
+                    StringResult r = _sock.open(_adapter[]);
+                    if (r.failed)
+                    {
+                        log.error(r.message);
+                        return CompletionStatus.error;
+                    }
+                }
+                register_fdwatch();
+            }
+            else static if (num_can > 0)
             {
                 import urt.atomic : atomicStore, MemoryOrder;
 
@@ -291,7 +333,7 @@ protected:
 
         // an ebyte module hides the CAN bus behind a UART, and its bus bitrate is configured out of band,
         // so the serial link is both the rate we know and the one that actually limits us
-        if (!_device.empty)
+        if (!_adapter.empty)
             set_link_speed(_baud_rate);
         else if (Stream s = _stream)
             set_link_speed(s.tx_link_speed, s.rx_link_speed);
@@ -301,6 +343,11 @@ protected:
     {
         _tail_bytes = 0;
         _resyncing = false;
+        static if (has_socketcan)
+        {
+            unregister_fdwatch();
+            _sock.close();
+        }
         if (_can.is_open)
         {
             ubyte port = _can.port;
@@ -319,6 +366,15 @@ protected:
 
     override void update()
     {
+        static if (has_socketcan)
+        {
+            if (!_adapter.empty)
+            {
+                super.update();
+                return;
+            }
+        }
+
         if (_can.is_open)
         {
             import urt.atomic : cas;
@@ -453,10 +509,30 @@ protected:
             version (DebugCANInterface)
                 writeDebug("CAN packet dropped on interface '", name, "': invalid frame - data too long");
             add_tx_drop();
-            return false;
+            return -1;
         }
 
         ref can = packet.hdr!CANFrame;
+
+        static if (has_socketcan)
+        {
+            if (_sock.valid)
+            {
+                can_frame f;
+                f.can_id = (can.id & (can.extended ? CAN_EFF_MASK : CAN_SFF_MASK))
+                         | (can.extended ? CAN_EFF_FLAG : 0)
+                         | (can.remote_transmission_request ? CAN_RTR_FLAG : 0);
+                f.len = cast(ubyte)packet.data.length;
+                f.data[0 .. f.len] = cast(const ubyte[])packet.data[];
+                if (!_sock.send(f))
+                {
+                    add_tx_drop();
+                    return -1;
+                }
+                add_tx_frame(packet.data.length);
+                return 0;
+            }
+        }
 
         if (_can.is_open)
         {
@@ -546,11 +622,11 @@ protected:
     }
 
 private:
+    String _adapter;
     ObjectRef!Stream _stream;
+    uint _baud_rate = has_socketcan ? 0 : 500_000;
     CANInterfaceProtocol _protocol;
-    String _device;
     byte _can_port = -1;
-    uint _baud_rate = 500_000;
     ubyte[LargestProtocolFrame] _tail;
     ushort _tail_bytes;
     bool _resyncing;
@@ -564,6 +640,140 @@ private:
     Can _can;
     shared uint _native_rx_pending;
     shared uint _native_rx_retry;
+
+    static bool valid_adapter_name(const(char)[] value)
+    {
+        static if (has_socketcan)
+            return value.length < 16;
+        else static if (num_can > 0)
+            return value.length == 5 && value[0 .. 4] == "twai" && value[4].is_numeric && value[4] - '0' < num_can;
+        else
+            return false;
+    }
+
+    static if (has_socketcan)
+    {
+        CANSocket _sock;
+        bool _fdwatch_registered;
+
+        void register_fdwatch()
+        {
+            if (!_fdwatch_registered && add_fd_watcher(&service_io, &collect_fds))
+            {
+                _fdwatch_registered = true;
+                fd_watch_changed();
+            }
+        }
+
+        void unregister_fdwatch()
+        {
+            if (_fdwatch_registered)
+            {
+                remove_fd_watcher(&service_io);
+                _fdwatch_registered = false;
+                fd_watch_changed();
+            }
+        }
+
+        void collect_fds(ref Array!pollfd fds)
+        {
+            if (_sock.valid)
+                fds ~= pollfd(_sock.fd, POLLIN);
+        }
+
+        void service_io()
+        {
+            if (running && _sock.valid)
+                drain_socket();
+        }
+
+        bool configure_link(int ifindex)
+        {
+            CANLink link;
+            if (!netlink_get_can_link(ifindex, link))
+            {
+                log.error("cannot query CAN adapter '", _adapter, "'");
+                return false;
+            }
+            if (link.virtual_link && _baud_rate != 0)
+            {
+                log.error("virtual CAN adapters require baud-rate=0");
+                return false;
+            }
+            if (!link.virtual_link && _baud_rate == 0)
+            {
+                if (link.bitrate == 0)
+                {
+                    log.error("CAN adapter '", _adapter, "' has no bit timing; set baud-rate");
+                    return false;
+                }
+                _baud_rate = link.bitrate;
+                mark_set!(typeof(this), "baud-rate")();
+            }
+            if (!link.virtual_link && link.bitrate != _baud_rate)
+            {
+                if (link.up)
+                {
+                    int down = netlink_set_link_up(ifindex, false);
+                    if (down != 0)
+                    {
+                        log.error("failed to take '", _adapter, "' down: ", down);
+                        return false;
+                    }
+                }
+                int set = netlink_set_can_bitrate(ifindex, _baud_rate);
+                if (set != 0)
+                {
+                    log.error("failed to set bitrate ", _baud_rate, " on '", _adapter, "': ", set);
+                    if (link.up)
+                        netlink_set_link_up(ifindex, true);
+                    return false;
+                }
+                link.up = false;
+            }
+            if (!link.up)
+            {
+                int up = netlink_set_link_up(ifindex, true);
+                if (up != 0)
+                {
+                    log.error("failed to bring up '", _adapter, "': ", up);
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        void drain_socket()
+        {
+            can_frame frame;
+            MonoTime ts;
+            while (running && _sock.valid)
+            {
+                int res = _sock.poll(frame, ts);
+                if (res == 0)
+                    break;
+                if (res < 0)
+                {
+                    log.error("receive failed on '", _adapter, "': errno=", _sock.last_recv_error.system_code);
+                    _sock.close();
+                    restart();
+                    return;
+                }
+
+                if (frame.can_id & CAN_ERR_FLAG)    // bus diagnostics, not traffic
+                    continue;
+
+                Packet packet;
+                bool extended = (frame.can_id & CAN_EFF_FLAG) != 0;
+                ubyte len = frame.len > 8 ? 8 : frame.len;
+                ref CANFrame can = packet.init!CANFrame(frame.data[0 .. len], ts);
+                can.id = frame.can_id & (extended ? CAN_EFF_MASK : CAN_SFF_MASK);
+                can.extended = extended;
+                can.remote_transmission_request = (frame.can_id & CAN_RTR_FLAG) != 0;
+                incoming_packet(packet);
+            }
+        }
+    }
 
     static if (num_can > 0)
     {

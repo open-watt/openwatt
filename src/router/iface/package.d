@@ -395,21 +395,23 @@ nothrow @nogc:
         }
     }
 
-    final bool set_master(BaseInterface master, byte slave_id) pure
+    final void set_master(ObjectRef!BaseInterface master, byte slave_id)
     {
-        if (master is null)
+        if (_master.name == master.name)
         {
-            _master = null;
-            _slave_id = 0;
-            _flags &= ~ObjectFlags.slave;
-            return true;
+            _slave_id = slave_id;
+            return;
         }
-        if (_master !is null)
-            return false;
+        unsubscribe_master();
         _master = master;
         _slave_id = slave_id;
-        _flags |= ObjectFlags.slave;
-        return true;
+        if (master.name.length)
+            _flags |= ObjectFlags.slave;
+        else
+            _flags &= ~ObjectFlags.slave;
+        mark_set!(typeof(this), "flags")();
+        if (!(_state & _destroyed))
+            restart();
     }
 
     // Process-local zone identity: the InetAddress scope id that names this interface.
@@ -561,8 +563,19 @@ protected:
 
     void on_mtu_changed() {}
 
+    override bool quiet_lifecycle() const
+        => (flags & ObjectFlags.temporary) != 0;
+
+    override bool dependencies_ready() const
+        => !(_flags & ObjectFlags.slave) || (dyn_cast!(router.iface.bridge.BridgeInterface)(_master.get) && _master.running);
+
     override void online()
     {
+        if (_master)
+        {
+            _master.subscribe(&master_state_change);
+            _master_subscribed = true;
+        }
         _status.link_status = LinkStatus.up;
         _status.link_status_change_time = getSysTime();
         _last_bitrate_sample = MonoTime.init;   // next heartbeat establishes the rate baseline
@@ -571,6 +584,7 @@ protected:
 
     override void offline()
     {
+        unsubscribe_master();
         _status.link_status = LinkStatus.down;
         _status.link_status_change_time = getSysTime();
         ++_status.link_downs;
@@ -608,11 +622,19 @@ protected:
 
     final void incoming_packet(ref Packet packet)
     {
-        if (_master)
+        if (_flags & ObjectFlags.slave)
         {
+            if (!running || !dependencies_ready())
+            {
+                add_rx_drop();
+                return;
+            }
+            BaseInterface master = _master;
+            byte port = _slave_id;
             add_rx_frame(packet.length);
             fire_subscribers(packet);
-            _master.slave_incoming(packet, _slave_id);
+            if (running && _master is master && _slave_id == port && master.running)
+                master.slave_incoming(packet, port);
             return;
         }
 
@@ -628,7 +650,7 @@ protected:
 
     final void dispatch(ref Packet packet)
     {
-        debug assert(_master is null, "dispatch() on a slaved interface; ingress must enter via incoming_packet()");
+        debug assert(!(_flags & ObjectFlags.slave), "dispatch() on a slaved interface; ingress must enter via incoming_packet()");
 
         add_rx_frame(packet.length);
 
@@ -796,8 +818,25 @@ protected:
 
     // TODO: this package section should be refactored out of existence!
 package:
-    BaseInterface _master;
+    void master_state_change(ActiveObject, StateSignal signal)
+    {
+        if (signal == StateSignal.offline)
+            restart();
+    }
+
+    void unsubscribe_master()
+    {
+        if (_master_subscribed)
+        {
+            if (_master)
+                _master.unsubscribe(&master_state_change);
+            _master_subscribed = false;
+        }
+    }
+
+    ObjectRef!BaseInterface _master;
     byte _slave_id;
+    bool _master_subscribed;
 
     Packet[] _send_queue;
 
@@ -1326,7 +1365,7 @@ nothrow @nogc:
             foreach (iface; interfaces.values)
             {
                 session.writef("{0, 3} {1}{2}  {3, -*4}  {5, *6}  {7, *8}  {9, *10}  {11, *12}  {13, *14}  {15, *16}\n",
-                                i, iface.status.link_status ? 'R' : ' ', iface._master ? 'S' : ' ',
+                                i, iface.status.link_status ? 'R' : ' ', iface.flags & ObjectFlags.slave ? 'S' : ' ',
                                 iface.name, name_len,
                                 iface.status.rx_bytes, rx_len, iface.status.tx_bytes, tx_len,
                                 iface.status.rx_packets, rp_len, iface.status.tx_packets, tp_len,
@@ -1340,7 +1379,7 @@ nothrow @nogc:
             size_t i = 0;
             foreach (iface; interfaces.values)
             {
-                session.writef("{0, 3} {6}{7}  {1, -*2}  {3, -*4}  {5}\n", i, iface.name, name_len, iface.type, type_len, iface.mac, iface.status.link_status ? 'R' : ' ', iface._master ? 'S' : ' ');
+                session.writef("{0, 3} {6}{7}  {1, -*2}  {3, -*4}  {5}\n", i, iface.name, name_len, iface.type, type_len, iface.mac, iface.status.link_status ? 'R' : ' ', iface.flags & ObjectFlags.slave ? 'S' : ' ');
                 ++i;
             }
         }

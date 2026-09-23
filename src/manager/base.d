@@ -408,8 +408,9 @@ nothrow @nogc:
 
     void destroy()
     {
-        import manager.collection : item_table, signal_object_lifecycle, ObjectLifecycleEvent;
+        import manager.collection : item_table, signal_object_lifecycle, ObjectLifecycleEvent, CollectionEvent;
         signal_object_lifecycle(this, ObjectLifecycleEvent.destroyed);
+        item_table(_typeInfo.collection_id).notify(this, CollectionEvent.removed);
         item_table(_typeInfo.collection_id).defer_free(this);
     }
 
@@ -685,6 +686,10 @@ protected:
             ss.props_dirty |= mask;
             slot = ss.next;
         }
+        import manager.collection : item_table, CollectionEvent;
+        ref table = item_table(_typeInfo.collection_id);
+        if (table.get(_id) is this)
+            table.notify(this, CollectionEvent.changed);
     }
 
     public final ushort attach_delta_slot(Object owner) nothrow @nogc
@@ -1078,6 +1083,9 @@ protected:
         }
     }
 
+    bool dependencies_ready() const
+        => true;
+
     CompletionStatus startup()
         => CompletionStatus.complete;
 
@@ -1093,7 +1101,7 @@ protected:
         online();
         signal_state_change(StateSignal.online);
 
-        if (!(flags & (ObjectFlags.dynamic | ObjectFlags.temporary)))
+        if (!quiet_lifecycle)
             log.notice("online");
         else
             log.trace("online");
@@ -1104,7 +1112,7 @@ protected:
 
     final void set_offline()
     {
-        if (!(flags & (ObjectFlags.dynamic | ObjectFlags.temporary)))
+        if (!quiet_lifecycle)
             log.notice("offline");
         else
             log.trace("offline");
@@ -1123,6 +1131,9 @@ protected:
     void offline()
     {
     }
+
+    bool quiet_lifecycle() const
+        => (flags & (ObjectFlags.dynamic | ObjectFlags.temporary)) != 0;
 
     // push the derived views: state transitions (and any subclass state feeding status_message)
     // write the elements the moment they change
@@ -1163,6 +1174,8 @@ package:
                 break;
 
             case State.starting:
+                if (!dependencies_ready())
+                    break;
                 CompletionStatus s = startup();
                 if (_state != State.starting)
                     break;      // startup() re-targeted us (restart, destroy); its result is stale
@@ -1223,7 +1236,7 @@ private:
 
 struct ObjectRef(Type)
 {
-    import manager.collection : get_id, get_item;
+    import manager.collection : get_id, get_item, Collection;
 nothrow @nogc:
     static assert (is(Type : BaseObject), "Type must be a subclass of BaseObject");
 
@@ -1232,6 +1245,12 @@ nothrow @nogc:
     this(Type object)
     {
         _id = object ? object.id : CID();
+    }
+
+    this(const(char)[] name)
+    {
+        if (name.length)
+            _id = Collection!Type().table.reserve(name, Type.collection_id);
     }
 
     void opAssign(Type object)

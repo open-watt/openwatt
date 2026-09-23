@@ -97,11 +97,10 @@ nothrow @nogc:
         return 0;
     }
 
-    void remove_port(ubyte port_index)
+    void remove_port(ubyte port_index, ubyte port_limit = ubyte.max)
     {
         ulong[64] remove_buf = void;
         size_t remove_count = 0;
-        // re-index survivors in the first pass
         foreach (ref kvp; _backing)
         {
             if (kvp.value == port_index)
@@ -109,8 +108,6 @@ nothrow @nogc:
                 if (remove_count < remove_buf.length)
                     remove_buf[remove_count++] = kvp.key;
             }
-            else if (kvp.value > port_index)
-                --kvp.value;
         }
         do
         {
@@ -127,13 +124,17 @@ nothrow @nogc:
         }
         while (remove_count > 0);
 
+        foreach (ref kvp; _backing)
+            if (kvp.value > port_index && kvp.value < port_limit)
+                --kvp.value;
+
         for (ubyte i = 0; i < _len;)
         {
             if (_values[i] == port_index)
                 cache_remove(i);
             else
             {
-                if (_values[i] > port_index)
+                if (_values[i] > port_index && _values[i] < port_limit)
                     --_values[i];
                 ++i;
             }
@@ -224,4 +225,17 @@ private:
         }
         --_len;
     }
+}
+
+unittest
+{
+    AddressTable table = AddressTable(2);
+    foreach (ulong key; 1 .. 201)
+        table.insert(key, key <= 100 ? 7 : 8);
+    table.insert(300, 0xFC);
+    table.insert(301, 0xFE);
+    table.remove_port(7, 0xFC);
+    foreach (ulong key; 1 .. 201)
+        assert(table.get(key) == (key <= 100 ? -1 : 7));
+    assert(table.get(300) == 0xFC && table.get(301) == 0xFE);
 }

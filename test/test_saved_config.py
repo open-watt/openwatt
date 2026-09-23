@@ -119,6 +119,23 @@ def main():
         assert 'Item does not exist:' not in logs and "Set '" not in logs, logs
     print('PASS: phased restore handles cycles, same-type references, CAN, TLS bridges, web services and enabled state', flush=True)
 
+    directory = fixture('bridge-membership', '\n'.join([
+        '/interface/bridge/add name=master',
+        '/interface/bridge/add name=member',
+        '/interface/bridge/port/add name=port bridge=master interface=member pvid=42',
+        '/interface/bridge/port/add name=missing bridge=absent-master interface=absent-member',
+        '/system/config/save',
+        '',
+    ]))
+    for _ in range(2):
+        logs = boot(binary, directory)
+        exported = observed(directory)
+        assert '/interface/bridge/port/add name=port' in exported
+        assert '/interface/bridge/port/set port bridge="master" interface="member" pvid=42' in exported
+        assert 'bridge="absent-master" interface="absent-member"' in exported
+        assert 'Invalid value' not in logs and 'Item does not exist:' not in logs, logs
+    print('PASS: bridge memberships and unresolved endpoint names survive save and reboot', flush=True)
+
     directory = fixture('boot-created', '/stream/memory/set system comment=saved\n/system/config/save\n')
     (directory / 'conf/system.conf').write_text('/stream/memory/add name=system comment=boot\n', encoding='utf-8')
     for _ in range(2):
