@@ -1094,7 +1094,7 @@ protected:
         online();
         signal_state_change(StateSignal.online);
 
-        if (!(flags & (ObjectFlags.dynamic | ObjectFlags.temporary)))
+        if (!(flags & ObjectFlags.temporary))
             log.notice("online");
         else
             log.trace("online");
@@ -1105,7 +1105,7 @@ protected:
 
     final void set_offline()
     {
-        if (!(flags & (ObjectFlags.dynamic | ObjectFlags.temporary)))
+        if (!(flags & ObjectFlags.temporary))
             log.notice("offline");
         else
             log.trace("offline");

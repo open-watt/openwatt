@@ -773,6 +773,47 @@ each inferring it independently.
 /interface/obd/add name=car-obd stream=obd0
 ```
 
+### `/interface/can`
+
+A CAN interface carries CAN frames from one of two mutually exclusive sources: a
+byte `stream` running a framing `protocol`, or an `adapter` naming a controller
+the host itself owns. Setting either one clears the other, so the last one
+assigned is the one that takes effect.
+
+`adapter` uses the platform's controller name. On Linux that is
+a SocketCAN netdev (`can0`, `slcan0`, `vcan0`); on Espressif it is the on-chip
+TWAI peripheral (`twai0`). Linux controllers are discovered at startup, listed by
+`/port/print` under kind `can`, and given an interface named `can1`, `can2`... A
+discovery-owned interface is removed when its netdev disappears; operator-created
+interfaces remain configured for reconnection.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `adapter` | controller name | none | Host CAN controller to bind. Mutually exclusive with `stream`. |
+| `stream` | stream | none | Byte stream carrying framed CAN traffic. Mutually exclusive with `adapter`. |
+| `protocol` | `ebyte` | none | Framing used on `stream`. Required when `stream` is set. |
+| `baud-rate` | bits/second | Linux: `0`; Espressif: `500000` | Linux `0` adopts existing bit timing. Unconfigured physical buses require an explicit rate; virtual CAN requires `0`. |
+| `tx-gpio` | pin | platform | Transmit pin. Espressif only. |
+| `rx-gpio` | pin | platform | Receive pin. Espressif only. |
+
+On Linux, `baud-rate=0` adopts and reports the controller's configured bitrate.
+An unconfigured physical controller stays offline until a rate is set. Virtual
+CAN (`vcan` and `vxcan`) uses `0` because it has no bit timing.
+
+Changing the bitrate takes the link down, applies the rate, and brings it up.
+This requires `CAP_NET_ADMIN`, as does bringing up a down link. An already-up
+link with matching settings needs no configuration write. Opening the socket
+requires `CAP_NET_RAW`. Configuration failures use the usual startup backoff.
+
+Use `/interface/can/print` to find the discovered interface for your adapter.
+For example, if `can1` names the controller you want to configure:
+
+```text
+/interface/can/set can1 baud-rate=500000
+/interface/can/add name=goodwe_can stream=can.1 protocol=ebyte
+/interface/can/set can1 baud-rate=250000
+```
+
 ### `/interface/udp`
 
 A UDP interface is a raw-packet interface over UDP datagrams: one datagram is

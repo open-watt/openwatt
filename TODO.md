@@ -28,7 +28,9 @@
 
 - Verify `/system/reboot bootloader=1` on classic ESP32 hardware; the downloader
   path has compiled, but its RTC GPIO0 hold and subsequent flashing cycle remain untested.
-
+- **SocketCAN hardware validation (#503)**: exercise a physical controller's bitrate
+  changes, rejected timing restoration, bus-off recovery and capability failures.
+  Validate Linux USB WiFi/BLE removal on real adapters.
 
 - Separate Element's unseen state from a valid zero timestamp; held-value dedup
   currently treats SysTime.init as unseen on clocks whose epoch starts at zero.
@@ -1097,9 +1099,8 @@ this is what remains.
   - enforce live retention ceilings for open-squelch edge streams; and
   - add the waveform generator API needed by RF433 transmit.
 
-- **Complete `/port` discovery and eventing**: publish serial and CAN devices, classify Linux
-  netdevs by ARPHRD type, and replace polling with route netlink for netdevs plus uevents or
-  inotify-backed rescans for tty devices.
+- **Complete `/port` eventing**: replace tty discovery polling with uevents or
+  inotify-backed rescans.
 
 - **Complete the Linux kernel mirror** (`src/protocol/ip/linux_mirror.d`): a netlink transport
   failure stalls the main loop on the writer's 1s `SO_RCVTIMEO` backstop; move the ACK wait onto

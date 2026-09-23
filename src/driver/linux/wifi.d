@@ -2326,7 +2326,7 @@ private:
         // VIFs we create (monitor/AP/STA) never spawn duplicate radios.
         Array!String os_buf;
         enumerate_wifi_adapters((const(char)[] name, const(char)[] description) nothrow @nogc {
-            port_add(PortKind.wifi, tconcat("linux:wifi:", name), name, name, ModuleName, description);
+            port_add(PortKind.wifi, tconcat("linux:wifi:", name), name, name, ModuleName, description, adapter_is_removable(name) ? PortFlags.removable : PortFlags.none);
 
             uint w = read_wiphy(read_ifindex(name));
             bool present = false;
