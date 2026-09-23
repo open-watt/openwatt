@@ -25,7 +25,9 @@ import urt.mem;
 import urt.result;
 import urt.time;
 
+import manager;
 import manager.base;
+import manager.collection;
 import manager.features;
 import manager.plugin;
 
@@ -51,7 +53,7 @@ nothrow @nogc:
     override void init()
     {
         register_object_state_handler(&on_object_state);
-        register_bridge_offload_hooks(&on_member_added, &on_cpu_promisc_changed);
+        register_bridge_offload_hooks(&on_ports_changed, &on_cpu_promisc_changed);
     }
 
     override void update()
@@ -109,7 +111,21 @@ private:
     {
         BridgeInterface bridge = dyn_cast!BridgeInterface(obj);
         if (!bridge)
+        {
+            if (!dyn_cast!EthernetInterface(obj))
+                return;
+            foreach (b; Collection!BridgeInterface().values)
+            {
+                foreach (i; 0 .. b.member_count)
+                    if (b.member_iface(i) is obj)
+                    {
+                        g_app.cancel(&sync_ports);
+                        g_app.schedule(getTime(), &sync_ports);
+                        return;
+                    }
+            }
             return;
+        }
 
         final switch (sig)
         {
@@ -123,29 +139,65 @@ private:
         }
     }
 
-    void on_member_added(BridgeInterface bridge, BaseInterface member)
+    void sync_ports(MonoTime)
+    {
+        foreach (bridge; Collection!BridgeInterface().values)
+            if (bridge.running)
+                on_ports_changed(bridge);
+    }
+
+    void on_ports_changed(BridgeInterface bridge)
     {
         Offload* o = find(bridge);
-        if (o && o.engaged)
+        if (!o)
         {
-            if (LinuxRawEthernet eth = dyn_cast!LinuxRawEthernet(member))
-                enslave(o, eth);
-            else if (dyn_cast!EthernetInterface(member))
-            {
-                // the kernel segment can't forward to a software ethernet member;
-                // fall back to full software bridging
-                log_info(ModuleName, "bridge '", bridge.name[], "': software ethernet member '", member.name[], "' added; tearing down kernel offload");
-                disengage(bridge);
-                return;
-            }
-            // a netdev or new software member can change the promisc requirement
-            cpu_set_promisc(o);
+            engage(bridge);
             return;
         }
-
-        // Not yet offloaded: a newly-added netdev member may now make the bridge
-        // qualify (>=2 netdev members). engage() re-checks and is a no-op otherwise.
-        engage(bridge);
+        size_t count;
+        bool software_ethernet;
+        foreach (i; 0 .. bridge.member_count)
+        {
+            auto member = bridge.member_iface(i);
+            if (!member || !member.running)
+                continue;
+            if (dyn_cast!LinuxRawEthernet(member))
+                ++count;
+            else if (dyn_cast!EthernetInterface(member))
+                software_ethernet = true;
+        }
+        if (count < 2 || software_ethernet || bridge.vlan_filtering)
+        {
+            disengage(bridge);
+            return;
+        }
+        for (size_t i = o.netdevs.length; i-- > 0;)
+        {
+            auto eth = o.netdevs[i];
+            bool present;
+            foreach (j; 0 .. bridge.member_count)
+                present |= bridge.member_iface(j) is eth && eth.running;
+            if (present)
+                continue;
+            o.netdevs.remove(i);
+            int index = netlink_ifindex(eth.adapter);
+            if (index)
+                netlink_set_master(index, 0);
+            bridge.set_member_offloaded(eth, false);
+            eth.set_enslaved(false);
+        }
+        foreach (i; 0 .. bridge.member_count)
+        {
+            auto eth = dyn_cast!LinuxRawEthernet(bridge.member_iface(i));
+            if (!eth || !eth.running)
+                continue;
+            bool present;
+            foreach (existing; o.netdevs[])
+                present |= existing is eth;
+            if (!present)
+                enslave(o, eth);
+        }
+        cpu_set_promisc(o);
     }
 
     void on_cpu_promisc_changed(BridgeInterface bridge)
@@ -156,7 +208,7 @@ private:
 
     void engage(BridgeInterface bridge)
     {
-        if (find(bridge))
+        if (!bridge.running || find(bridge))
             return;     // already engaged
 
         if (bridge.vlan_filtering)
@@ -172,6 +224,8 @@ private:
         foreach (i; 0 .. bridge.member_count)
         {
             BaseInterface m = bridge.member_iface(i);
+            if (!m || !m.running)
+                continue;
             if (dyn_cast!LinuxRawEthernet(m))
                 ++netdev_members;
             else if (dyn_cast!EthernetInterface(m))
@@ -208,7 +262,8 @@ private:
         foreach (i; 0 .. bridge.member_count)
         {
             if (LinuxRawEthernet eth = dyn_cast!LinuxRawEthernet(bridge.member_iface(i)))
-                enslave(o, eth);
+                if (eth.running)
+                    enslave(o, eth);
         }
 
         netlink_set_link_up(br_ifindex, true);

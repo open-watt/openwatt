@@ -1,5 +1,24 @@
 # TODO
 
+- Give `ObjectRef` an `opCast(bool)` that tests for a stored identity, preserving
+  `detached()` as the unresolved-target check and `alias get this` for object access.
+  Audit existing boolean uses (including negation, logical operators and ternaries)
+  and replace live-target checks with `!ref.detached` before changing conversion
+  semantics. Replace the bridge master's `name.length` identity check with the bool
+  conversion. Cover empty, resolved, destroyed and recreated targets in tests;
+  leave null comparisons unchanged (`is` cannot be overloaded in D).
+- Export passive `BaseObject` configuration as fully configured creations after
+  active object identities exist, without an enable phase. Preserve passive
+  dependency ordering (for example DHCP leases reference IP pools) and replay of
+  existing boot-created objects.
+- Let PPP/PPPoE servers target a bridge and create membership rows for accepted
+  session interfaces. Use the shared bridge-port collection and dynamic endpoint
+  cleanup rather than a separate membership path.
+- Fix the Windows empty-directory `get_temp_filename` contract in uRT; the native
+  console unit test fails creating its script file (command.d:590), including
+  outside the sandbox. WSL unit tests pass.
+- Complete bridge VLAN membership tables beyond per-port PVID configuration;
+  non-PVID ingress with filtering and non-PVID egress currently drop.
 - Decide uRT's memory-flags contract for allocations that must remain accessible
   while the flash cache is disabled. The power regulator's `FireEngine` uses
   `MemFlags.fast`, which prefers internal SRAM but may fall back to PSRAM under
@@ -9,6 +28,9 @@
 
 - Verify `/system/reboot bootloader=1` on classic ESP32 hardware; the downloader
   path has compiled, but its RTC GPIO0 hold and subsequent flashing cycle remain untested.
+- **SocketCAN hardware validation (#503)**: exercise a physical controller's bitrate
+  changes, rejected timing restoration, bus-off recovery and capability failures.
+  Validate Linux USB WiFi/BLE removal on real adapters.
 
 - Separate Element's unseen state from a valid zero timestamp; held-value dedup
   currently treats SysTime.init as unseen on clocks whose epoch starts at zero.
@@ -1077,9 +1099,8 @@ this is what remains.
   - enforce live retention ceilings for open-squelch edge streams; and
   - add the waveform generator API needed by RF433 transmit.
 
-- **Complete `/port` discovery and eventing**: publish serial and CAN devices, classify Linux
-  netdevs by ARPHRD type, and replace polling with route netlink for netdevs plus uevents or
-  inotify-backed rescans for tty devices.
+- **Complete `/port` eventing**: replace tty discovery polling with uevents or
+  inotify-backed rescans.
 
 - **Complete the Linux kernel mirror** (`src/protocol/ip/linux_mirror.d`): a netlink transport
   failure stalls the main loop on the writer's 1s `SO_RCVTIMEO` backstop; move the ACK wait onto

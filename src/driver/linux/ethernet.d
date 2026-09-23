@@ -13,11 +13,14 @@ import manager.collection;
 import manager.console;
 import manager.plugin;
 
+import driver.linux.fdwatch;
 import driver.linux.netlink;
 import driver.linux.netlink_write;
 import driver.linux.sysfs;
 
 import driver.linux.raw;
+
+import urt.internal.sys.posix : pollfd, POLLIN;
 
 import router.iface;
 import router.iface.ethernet;
@@ -80,7 +83,8 @@ nothrow @nogc:
             set_kernel_ifindex(_raw.ifindex);
         }
 
-        SysTime now = getSysTime();
+        // heartbeat() only runs once we are up, so the wait for carrier is polled here
+        MonoTime now = getTime();
         if (now - _last_refresh >= 1.seconds)
         {
             _last_refresh = now;
@@ -89,11 +93,14 @@ nothrow @nogc:
 
         if (_status.connected == ConnectionStatus.disconnected)
             return CompletionStatus.continue_;
+
+        register_fdwatch();
         return CompletionStatus.complete;
     }
 
     override CompletionStatus shutdown()
     {
+        unregister_fdwatch();
         _raw.close();
         set_kernel_ifindex(0);
         return super.shutdown();
@@ -113,60 +120,38 @@ nothrow @nogc:
         return null;
     }
 
-    // Enslaved to a kernel bridge (offloaded): the kernel switches this port's
-    // traffic, so OpenWatt must stop polling its AF_PACKET socket or it would
-    // double-process kernel-switched frames. The socket stays open (instant
-    // wire_send / re-enable); the kernel buffers and ages the unread RX.
     final void set_enslaved(bool value)
     {
+        if (_enslaved == value)
+            return;
         _enslaved = value;
+        if (!value)
+        {
+            // Discard frames already switched by the kernel before resuming software RX.
+            _raw.close();
+            if (running)
+            {
+                auto result = _raw.open(_adapter[]);
+                if (result.failed)
+                {
+                    log.error(result.message);
+                    restart();
+                }
+            }
+        }
+        fd_watch_changed();
     }
 
-    override void update()
+    override void heartbeat(MonoTime now)
     {
-        super.update();
+        super.heartbeat(now);
 
-        SysTime now = getSysTime();
-        if (now - _last_refresh >= 1.seconds)
-        {
-            _last_refresh = now;
-            refresh_os_state();
-            if (_status.connected == ConnectionStatus.disconnected)
-            {
-                restart();
-                return;
-            }
-        }
+        if (!_raw.valid)
+            return restart();
 
-        if (_enslaved)
-            return;
-
-        const(ubyte)[] data;
-        uint wire_len;
-        MonoTime ts;
-        ubyte pkttype;
-        ushort vlan_tci;
-        ushort vlan_tpid;
-
-        while (true)
-        {
-            int res = _raw.poll_ll(data, wire_len, ts, pkttype, vlan_tci, vlan_tpid);
-            if (res == 0)
-                break;
-            if (res < 0)
-                break;
-
-            if (pkttype == PACKET_OUTGOING)
-                continue;
-
-            if (data.length < wire_len)
-            {
-                add_rx_drop();
-                continue;
-            }
-
-            incoming_ethernet_frame(data, ts, vlan_tci, vlan_tpid);
-        }
+        refresh_os_state();
+        if (_status.connected == ConnectionStatus.disconnected)
+            restart();
     }
 
 protected:
@@ -181,8 +166,72 @@ protected:
 private:
     RawAdapter _raw;
     String _adapter;
-    SysTime _last_refresh;
+    MonoTime _last_refresh;
     bool _enslaved;
+    bool _fdwatch_registered;
+
+    void register_fdwatch()
+    {
+        if (!_fdwatch_registered && add_fd_watcher(&service_io, &collect_fds))
+        {
+            _fdwatch_registered = true;
+            fd_watch_changed();
+        }
+    }
+
+    void unregister_fdwatch()
+    {
+        if (_fdwatch_registered)
+        {
+            remove_fd_watcher(&service_io);
+            _fdwatch_registered = false;
+            fd_watch_changed();
+        }
+    }
+
+    void collect_fds(ref Array!pollfd fds)
+    {
+        if (_raw.valid && !_enslaved)
+            fds ~= pollfd(_raw.fd, POLLIN);
+    }
+
+    void service_io()
+    {
+        if (!running || !_raw.valid || _enslaved)
+            return;
+
+        const(ubyte)[] data;
+        uint wire_len;
+        MonoTime ts;
+        ubyte pkttype;
+        ushort vlan_tci;
+        ushort vlan_tpid;
+
+        while (running && _raw.valid && !_enslaved)
+        {
+            int res = _raw.poll_ll(data, wire_len, ts, pkttype, vlan_tci, vlan_tpid);
+            if (res == 0)
+                break;
+            if (res < 0)
+            {
+                // Remove error-ready fds from epoll; heartbeat retries the interface.
+                log.error("receive failed on '", _adapter, "': errno=", _raw.last_recv_error.system_code);
+                _raw.close();
+                return;
+            }
+
+            if (pkttype == PACKET_OUTGOING)
+                continue;
+
+            if (data.length < wire_len)
+            {
+                add_rx_drop();
+                continue;
+            }
+
+            incoming_ethernet_frame(data, ts, vlan_tci, vlan_tpid);
+        }
+    }
 
     void apply_configured_mtu()
     {
@@ -241,7 +290,7 @@ private:
     {
         Array!String os_buf;
         enumerate_adapters((const(char)[] name, const(char)[] description) nothrow @nogc {
-            port_add(PortKind.ethernet, tconcat("linux:ethernet:", name), name, name, ModuleName, description);
+            port_add(PortKind.ethernet, tconcat("linux:ethernet:", name), name, name, ModuleName, description, adapter_is_removable(name) ? PortFlags.removable : PortFlags.none);
 
             bool present = false;
             foreach (e; Collection!LinuxRawEthernet().values)
@@ -256,10 +305,6 @@ private:
             {
                 auto iface_name = next_iface_name();
                 log_info(ModuleName, "Found ethernet interface: \"", description, "\" (", name, ")");
-                // dynamic: we own its lifecycle and rediscover it each boot, so
-                // it isn't persisted to config -- and only dynamic entries are
-                // reaped below when their netdev disappears. Operator/config
-                // interfaces (flags == none) are left alone.
                 auto iface = Collection!LinuxRawEthernet().create(iface_name, ObjectFlags.dynamic);
                 iface.adapter = name;
                 if (description.length > 0)
@@ -272,9 +317,6 @@ private:
         Array!LinuxRawEthernet gone;
         foreach (e; Collection!LinuxRawEthernet().values)
         {
-            // Only reap what auto-discovery created; an operator/config interface
-            // (e.g. bound to a veth that enumerate_adapters doesn't list) is not
-            // ours to remove.
             if (!(e.flags & ObjectFlags.dynamic))
                 continue;
 
@@ -294,7 +336,7 @@ private:
         {
             log_info(ModuleName, "Ethernet adapter gone: ", e.adapter);
             port_remove(PortKind.ethernet, tconcat("linux:ethernet:", e.adapter[]));
-            Collection!LinuxRawEthernet().remove(e);
+            e.destroy();
         }
     }
 

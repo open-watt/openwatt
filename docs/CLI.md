@@ -145,6 +145,11 @@ add name=gw_meter interface=goodwe_meter address=2 profile=gm1000
 
 Configuring the remote server will populate the runtime with a `Device` representing the data sampled from the meter, which can be used by local program logic. This bridge configuration solves the problem where a modbus appliance (the meter) on a single hardware bus can not receive requests from multiple masters.
 
+Bridge membership is configured independently under `/interface/bridge/port`.
+Members keep their own link state while their master is unavailable and count
+received traffic as dropped. A bridge keeps running when a member is unavailable.
+See the bridge port collection below.
+
 ## CLI Command Reference
 
 This section is the growing, command-by-command reference for the CLI. The
@@ -586,6 +591,49 @@ reconnection scan can still disrupt clients of the running AP. A bridge generate
 an address from the node id, while a VLAN follows its parent interface's address
 and cannot be assigned independently.
 
+### `/interface/bridge/port`
+
+A persistent membership collection with the standard `add`, `set`, `get`,
+`print`, and `remove` commands. Each row is configuration, not a running object.
+
+| Property | Default | Description |
+| --- | --- | --- |
+| `bridge` | none | Master bridge name; may refer to a bridge that is currently absent. |
+| `interface` | none | Member interface name; may refer to an interface that is currently absent. |
+| `pvid` | `1` | Port VLAN ID, `1` through `4094`. |
+| `ingress-filtering` | `true` | Apply ingress VLAN filtering when the bridge has VLAN filtering enabled. |
+| `untagged-egress` | `true` | Strip the port's VLAN tag on egress. |
+| `disabled` | `false` | Release the association while retaining its configuration. |
+
+An enabled, fully configured row immediately reserves the member for its bridge.
+The member carries `S` even when the master is absent or disabled, and runs
+independently of its master. Received traffic updates its RX counters and is
+dropped while the master is offline; it never delivers standalone traffic while
+configured as a member. A bridge remains running with unavailable members,
+including when no member is usable. Membership edits update ports without
+restarting the bridge.
+
+An interface can have only one membership row. Self-membership and cycles are
+rejected. Deleting a non-dynamic endpoint retains the row for recreation under
+the same name. Destroying a dynamic endpoint deletes its membership rows; a
+rediscovered device does not inherit membership through a reused synthesized
+name. Merely going offline or being disabled does not delete rows.
+Rows referencing either a dynamic bridge or a dynamic member are themselves
+dynamic and excluded from configuration export. Rows with static endpoints
+are saved, including references to currently absent endpoints.
+
+VLAN filtering currently supports each port's PVID only. Filtered ingress and
+egress for other VLAN IDs are dropped; a per-port VLAN membership table is not
+yet available.
+
+```text
+/interface/bridge/port/add name=lan-uplink bridge=lan interface=ether1
+/interface/bridge/port/set lan-uplink pvid=20
+/interface/bridge/port/remove lan-uplink
+```
+
+The existing `add bridge=... interface=...` form still works; omitting `name` generates a membership name.
+
 ### `/interface/ap`
 
 An AP interface is one BSS served by a WiFi radio.
@@ -723,6 +771,47 @@ each inferring it independently.
 ```text
 /stream/ble-serial/add name=obd0 client=car service=FFF0 write=FFF2 notify=FFF1
 /interface/obd/add name=car-obd stream=obd0
+```
+
+### `/interface/can`
+
+A CAN interface carries CAN frames from one of two mutually exclusive sources: a
+byte `stream` running a framing `protocol`, or an `adapter` naming a controller
+the host itself owns. Setting either one clears the other, so the last one
+assigned is the one that takes effect.
+
+`adapter` uses the platform's controller name. On Linux that is
+a SocketCAN netdev (`can0`, `slcan0`, `vcan0`); on Espressif it is the on-chip
+TWAI peripheral (`twai0`). Linux controllers are discovered at startup, listed by
+`/port/print` under kind `can`, and given an interface named `can1`, `can2`... A
+discovery-owned interface is removed when its netdev disappears; operator-created
+interfaces remain configured for reconnection.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `adapter` | controller name | none | Host CAN controller to bind. Mutually exclusive with `stream`. |
+| `stream` | stream | none | Byte stream carrying framed CAN traffic. Mutually exclusive with `adapter`. |
+| `protocol` | `ebyte` | none | Framing used on `stream`. Required when `stream` is set. |
+| `baud-rate` | bits/second | Linux: `0`; Espressif: `500000` | Linux `0` adopts existing bit timing. Unconfigured physical buses require an explicit rate; virtual CAN requires `0`. |
+| `tx-gpio` | pin | platform | Transmit pin. Espressif only. |
+| `rx-gpio` | pin | platform | Receive pin. Espressif only. |
+
+On Linux, `baud-rate=0` adopts and reports the controller's configured bitrate.
+An unconfigured physical controller stays offline until a rate is set. Virtual
+CAN (`vcan` and `vxcan`) uses `0` because it has no bit timing.
+
+Changing the bitrate takes the link down, applies the rate, and brings it up.
+This requires `CAP_NET_ADMIN`, as does bringing up a down link. An already-up
+link with matching settings needs no configuration write. Opening the socket
+requires `CAP_NET_RAW`. Configuration failures use the usual startup backoff.
+
+Use `/interface/can/print` to find the discovered interface for your adapter.
+For example, if `can1` names the controller you want to configure:
+
+```text
+/interface/can/set can1 baud-rate=500000
+/interface/can/add name=goodwe_can stream=can.1 protocol=ebyte
+/interface/can/set can1 baud-rate=250000
 ```
 
 ### `/interface/udp`

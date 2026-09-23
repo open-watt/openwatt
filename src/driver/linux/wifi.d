@@ -2171,7 +2171,14 @@ nothrow @nogc:
     {
         super(session, null);
         _radio = radio;
+        radio.subscribe(&radio_state_changed);
         refresh();
+    }
+
+    ~this()
+    {
+        if (_radio)
+            _radio.unsubscribe(&radio_state_changed);
     }
 
     override uint content_height()
@@ -2182,7 +2189,7 @@ nothrow @nogc:
 
     override CommandCompletionState update()
     {
-        if (getSysTime() - _last_refresh >= 2.seconds)
+        if (_radio && getSysTime() - _last_refresh >= 2.seconds)
             refresh();
         return super.update();
     }
@@ -2215,12 +2222,21 @@ nothrow @nogc:
         => tconcat(_count, " APs | rescans every 2s");
 
 private:
-    LinuxWifiRadio _radio;
+    ObjectRef!LinuxWifiRadio _radio;
     WifiScanResult[64] _results = void;
     size_t _count;
     SysTime _last_refresh;
     size_t[Table.max_cols] _sticky_widths;
     uint _prev_width;
+
+    void radio_state_changed(ActiveObject radio, StateSignal signal)
+    {
+        if (signal != StateSignal.destroyed)
+            return;
+        radio.unsubscribe(&radio_state_changed);
+        _radio = null;
+        request_cancel();
+    }
 
     void refresh()
     {
@@ -2310,7 +2326,7 @@ private:
         // VIFs we create (monitor/AP/STA) never spawn duplicate radios.
         Array!String os_buf;
         enumerate_wifi_adapters((const(char)[] name, const(char)[] description) nothrow @nogc {
-            port_add(PortKind.wifi, tconcat("linux:wifi:", name), name, name, ModuleName, description);
+            port_add(PortKind.wifi, tconcat("linux:wifi:", name), name, name, ModuleName, description, adapter_is_removable(name) ? PortFlags.removable : PortFlags.none);
 
             uint w = read_wiphy(read_ifindex(name));
             bool present = false;
@@ -2327,10 +2343,6 @@ private:
                 auto base = next_radio_name();
                 log_info(ModuleName, "Found wifi interface: \"", description, "\" (", name, ")");
 
-                // dynamic: auto-discovery owns these and rediscovers them each
-                // boot, so they aren't persisted to config -- and only dynamic
-                // entries are reaped below when their netdev disappears.
-                // Operator/config radios (flags == none) are left alone.
                 auto radio = Collection!LinuxWifiRadio().create(tconcat(base, "-radio"), ObjectFlags.dynamic);
                 radio.wiphy = name;
                 if (description.length > 0)
@@ -2346,8 +2358,6 @@ private:
         Array!LinuxWifiRadio gone;
         foreach (r; Collection!LinuxWifiRadio().values)
         {
-            // Only reap what auto-discovery created; an operator/config radio is
-            // not ours to remove even if its netdev momentarily disappears.
             if (!(r.flags & ObjectFlags.dynamic))
                 continue;
 
@@ -2369,11 +2379,11 @@ private:
             port_remove(PortKind.wifi, tconcat("linux:wifi:", r.wiphy[]));
             Array!LinuxWlan paired;
             foreach (w; Collection!LinuxWlan().values)
-                if (dyn_cast!LinuxWifiRadio(w.radio) is r)
+                if ((w.flags & ObjectFlags.dynamic) && dyn_cast!LinuxWifiRadio(w.radio) is r)
                     paired ~= w;
             foreach (w; paired[])
-                Collection!LinuxWlan().remove(w);
-            Collection!LinuxWifiRadio().remove(r);
+                w.destroy();
+            r.destroy();
         }
     }
 
@@ -2396,4 +2406,25 @@ private:
         }
         return tconcat("wlan", 999);
     }
+}
+
+
+unittest
+{
+    auto console = Console(null, StringLit!"scan-test");
+    auto session = console.createSession!StringSession();
+    scope(exit)
+    {
+        console.destroy_session(session);
+        Collection!Session().update_all();
+    }
+    auto radio = Collection!LinuxWifiRadio().create("scan-test-radio", cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.disabled));
+    auto view = alloc!WifiScanView(session, radio);
+    radio.destroy();
+    assert(view._radio is null);
+    radio = Collection!LinuxWifiRadio().create("scan-test-radio", cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.disabled));
+    assert(view._radio is null);
+    assert(view.update() == CommandCompletionState.cancelled);
+    free(view);
+    radio.destroy();
 }
