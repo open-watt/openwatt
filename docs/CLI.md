@@ -2,6 +2,65 @@
 
 The application is configured and controlled through a command-line interface (CLI). The CLI provides a powerful way to interact with the system, manage devices, and configure applications.
 
+## Command Index
+
+The scopes covered by the [CLI Command Reference](#cli-command-reference). Every collection
+also carries the generic [collection commands](#collection-commands).
+
+- [`/apps/energy/appliance`](#appsenergyappliance)
+- [`/automation`](#automation)
+- [`/binding`](#binding-common-properties) - common properties
+  - [`/binding/obd`](#bindingobd)
+  - [`/binding/tesla/twc`](#bindingteslatwc)
+- [`/console/session`](#consolesession)
+- [`/driver/power/regulator`](#driverpowerregulator)
+- [`/interface`](#interface) - common properties
+  - [ethernet station properties](#ethernet-station-properties)
+  - [`/interface/ap`](#interfaceap)
+  - [`/interface/ble`](#interfaceble)
+  - [`/interface/ethernet`](#interfaceethernet)
+  - [`/interface/obd`](#interfaceobd)
+  - [`/interface/udp`](#interfaceudp)
+  - [`/interface/wifi`](#interfacewifi)
+  - [`/interface/wlan`](#interfacewlan)
+  - [`/interface/wpan`](#interfacewpan)
+- [`/log`](#log)
+  - [`/log/history`](#loghistory)
+  - [`/log/sink`](#logsink)
+- [`/ping`](#ping)
+- `/protocol`
+  - [`/protocol/ble/client`](#protocolbleclient)
+  - [`/protocol/ble/device`](#protocolbledevice)
+  - `/protocol/dhcp` - [DHCPv4](#dhcpv4), [DHCPv6](#dhcpv6)
+    - [`/protocol/dhcp/client`](#protocoldhcpclient)
+    - [`/protocol/dhcp/client6`](#protocoldhcpclient6)
+    - [`/protocol/dhcp/lease`](#protocoldhcplease)
+    - [`/protocol/dhcp/option`](#protocoldhcpoption)
+    - [`/protocol/dhcp/server`](#protocoldhcpserver)
+  - [`/protocol/http/fileserver`](#protocolhttpfileserver)
+  - [`/protocol/http/server`](#protocolhttpserver)
+  - [`/protocol/ip`](#protocolip) - `address`, `route`, `pool`, `neighbour` and their IPv6 counterparts
+    - [`/protocol/ip/ra`](#protocolipra)
+  - [`/protocol/tesla/session`](#protocolteslasession)
+  - [`/protocol/tesla/twc`](#protocolteslatwc)
+  - [`/protocol/tesla/vehicle-scanner`](#protocolteslavehicle-scanner)
+- [`/stream`](#stream) - common properties
+  - [`/stream/ble-serial`](#streamble-serial)
+  - [`/stream/console`](#streamconsole)
+  - [`/stream/duplex`](#streamduplex)
+  - [`/stream/serial`](#streamserial)
+  - [`/stream/usb-serial`](#streamusb-serial)
+- [`/sync`](#sync-commands) - `console`, `log-sub`, `model-sub`
+  - [`/sync/discover/udp`](#syncdiscoverudp)
+  - [`/sync/neighbor`](#syncneighbor)
+  - [`/sync/peer`](#syncpeer)
+  - [`/sync/peering`](#syncpeering)
+  - [`/sync/udp-server`](#syncudp-server)
+  - [`/sync/ws-server`](#syncws-server)
+- [`/system`](#system)
+  - [`/system/config`](#saved-configuration) - saved configuration
+  - [`/system/linux`, `/system/netlink`](#linux-kernel-data-plane-systemlinux-systemnetlink)
+
 ## Startup Configuration
 
 The primary configuration file for the system is `conf/startup.conf`. This file is not a simple configuration file, but rather a script that is executed line-by-line at startup. This allows for a flexible and powerful configuration process.
@@ -1144,7 +1203,7 @@ The DHCPv6 message codec and client are present; there are no server or lease
 commands yet. DHCPv6 address and prefix configuration coexists with Router
 Advertisement discovery of default routers.
 
-#### Client
+#### `/protocol/dhcp/client6`
 
 `/protocol/dhcp/client6` requests host addresses (`IA_NA`) and/or delegated
 prefixes (`IA_PD`). Each bound address appears as a dynamic `address6`. The
