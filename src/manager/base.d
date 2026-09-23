@@ -408,8 +408,9 @@ nothrow @nogc:
 
     void destroy()
     {
-        import manager.collection : item_table, signal_object_lifecycle, ObjectLifecycleEvent;
+        import manager.collection : item_table, signal_object_lifecycle, ObjectLifecycleEvent, CollectionEvent;
         signal_object_lifecycle(this, ObjectLifecycleEvent.destroyed);
+        item_table(_typeInfo.collection_id).notify(this, CollectionEvent.removed);
         item_table(_typeInfo.collection_id).defer_free(this);
     }
 
@@ -1223,7 +1224,7 @@ private:
 
 struct ObjectRef(Type)
 {
-    import manager.collection : get_id, get_item;
+    import manager.collection : get_id, get_item, Collection;
 nothrow @nogc:
     static assert (is(Type : BaseObject), "Type must be a subclass of BaseObject");
 
@@ -1232,6 +1233,12 @@ nothrow @nogc:
     this(Type object)
     {
         _id = object ? object.id : CID();
+    }
+
+    this(const(char)[] name)
+    {
+        if (name.length)
+            _id = Collection!Type().table.reserve(name, Type.collection_id);
     }
 
     void opAssign(Type object)

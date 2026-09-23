@@ -85,6 +85,7 @@ enum CollectionType : ubyte
     smartevse,
     tesla_twc,
     telnet_server,
+    bridge_port,
     count
 }
 
@@ -244,6 +245,12 @@ nothrow @nogc:
     ref CollectionTable table() pure
         => item_table(type_info.collection_id);
 
+    void subscribe(CollectionHandler handler)
+        => table.subscribe(type_info, handler);
+
+    void unsubscribe(CollectionHandler handler)
+        => table.unsubscribe(handler);
+
     uint item_count()
     {
         ref t = table;
@@ -299,12 +306,16 @@ nothrow @nogc:
         assert(cast(bool)item._id, "item must have a valid CID");
         table.bind(item._id, item);
         signal_object_lifecycle(item, ObjectLifecycleEvent.created);
+        table.notify(item, CollectionEvent.added);
     }
 
     void remove(BaseObject item)
     {
-        if (item._id)
+        if (table.get(item._id) is item)
+        {
+            table.notify(item, CollectionEvent.removed);
             table.remove(item._id);
+        }
     }
 
     BaseObject get(const(char)[] name)
@@ -485,9 +496,27 @@ enum ObjectLifecycleEvent : ubyte
 
 alias ObjectLifecycleHandler = void delegate(BaseObject obj, ObjectLifecycleEvent event) nothrow @nogc;
 
+enum CollectionEvent : ubyte
+{
+    added,
+    removed,
+}
+
+alias CollectionHandler = void delegate(BaseObject, CollectionEvent) nothrow @nogc;
+
 void register_object_lifecycle_handler(ObjectLifecycleHandler handler) nothrow @nogc
 {
     _on_object_lifecycle ~= handler;
+}
+
+void unregister_object_lifecycle_handler(ObjectLifecycleHandler handler) nothrow @nogc
+{
+    foreach (i, h; _on_object_lifecycle[])
+        if (h is handler)
+        {
+            _on_object_lifecycle.remove(i);
+            return;
+        }
 }
 
 BaseObject next_object(ref uint table, ref uint slot)
@@ -616,9 +645,51 @@ nothrow @nogc:
         _pending_free.clear();
     }
 
+    void subscribe(const(CollectionTypeInfo)* type, CollectionHandler handler)
+    {
+        _subscribers ~= Subscription(type, handler);
+    }
+
+    void unsubscribe(CollectionHandler handler)
+    {
+        foreach (i, ref s; _subscribers[])
+        {
+            if (s.handler !is handler)
+                continue;
+            if (_notifying)
+                s.handler = null;
+            else
+                _subscribers.remove(i);
+            return;
+        }
+    }
+
+    package void notify(BaseObject item, CollectionEvent event)
+    {
+        ++_notifying;
+        size_t count = _subscribers.length;
+        for (size_t i = 0; i < count; ++i)
+        {
+            auto s = _subscribers[i];
+            if (s.handler && type_matches(s.type, item._typeInfo))
+                s.handler(item, event);
+        }
+        if (--_notifying == 0)
+            for (size_t i = _subscribers.length; i-- > 0;)
+                if (!_subscribers[i].handler)
+                    _subscribers.remove(i);
+    }
 private:
     IdAllocator!BaseObject _machine;
     Array!BaseObject _pending_free;
+    struct Subscription
+    {
+        const(CollectionTypeInfo)* type;
+        CollectionHandler handler;
+    }
+    Array!Subscription _subscribers;
+    uint _notifying;
+
 }
 
 package(manager) CID make_cid(uint type_idx, uint slot) pure

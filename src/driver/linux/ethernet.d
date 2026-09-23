@@ -113,13 +113,25 @@ nothrow @nogc:
         return null;
     }
 
-    // Enslaved to a kernel bridge (offloaded): the kernel switches this port's
-    // traffic, so OpenWatt must stop polling its AF_PACKET socket or it would
-    // double-process kernel-switched frames. The socket stays open (instant
-    // wire_send / re-enable); the kernel buffers and ages the unread RX.
     final void set_enslaved(bool value)
     {
+        if (_enslaved == value)
+            return;
         _enslaved = value;
+        if (!value)
+        {
+            // Discard frames already switched by the kernel before resuming software RX.
+            _raw.close();
+            if (running)
+            {
+                auto result = _raw.open(_adapter[]);
+                if (result.failed)
+                {
+                    log.error(result.message);
+                    restart();
+                }
+            }
+        }
     }
 
     override void update()
@@ -294,7 +306,7 @@ private:
         {
             log_info(ModuleName, "Ethernet adapter gone: ", e.adapter);
             port_remove(PortKind.ethernet, tconcat("linux:ethernet:", e.adapter[]));
-            Collection!LinuxRawEthernet().remove(e);
+            e.destroy();
         }
     }
 

@@ -145,6 +145,11 @@ add name=gw_meter interface=goodwe_meter address=2 profile=gm1000
 
 Configuring the remote server will populate the runtime with a `Device` representing the data sampled from the meter, which can be used by local program logic. This bridge configuration solves the problem where a modbus appliance (the meter) on a single hardware bus can not receive requests from multiple masters.
 
+Bridge membership is configured independently under `/interface/bridge/port`.
+Members keep their own link state while their master is unavailable and count
+received traffic as dropped. A bridge keeps running when a member is unavailable.
+See the bridge port collection below.
+
 ## CLI Command Reference
 
 This section is the growing, command-by-command reference for the CLI. The
@@ -585,6 +590,49 @@ addresses, and only the assigned interface restarts. In APSTA mode, the station'
 reconnection scan can still disrupt clients of the running AP. A bridge generates
 an address from the node id, while a VLAN follows its parent interface's address
 and cannot be assigned independently.
+
+### `/interface/bridge/port`
+
+A persistent membership collection with the standard `add`, `set`, `get`,
+`print`, and `remove` commands. Each row is configuration, not a running object.
+
+| Property | Default | Description |
+| --- | --- | --- |
+| `bridge` | none | Master bridge name; may refer to a bridge that is currently absent. |
+| `interface` | none | Member interface name; may refer to an interface that is currently absent. |
+| `pvid` | `1` | Port VLAN ID, `1` through `4094`. |
+| `ingress-filtering` | `true` | Apply ingress VLAN filtering when the bridge has VLAN filtering enabled. |
+| `untagged-egress` | `true` | Strip the port's VLAN tag on egress. |
+| `disabled` | `false` | Release the association while retaining its configuration. |
+
+An enabled, fully configured row immediately reserves the member for its bridge.
+The member carries `S` even when the master is absent or disabled, and runs
+independently of its master. Received traffic updates its RX counters and is
+dropped while the master is offline; it never delivers standalone traffic while
+configured as a member. A bridge remains running with unavailable members,
+including when no member is usable. Membership edits update ports without
+restarting the bridge.
+
+An interface can have only one membership row. Self-membership and cycles are
+rejected. Deleting a non-dynamic endpoint retains the row for recreation under
+the same name. Destroying a dynamic endpoint deletes its membership rows; a
+rediscovered device does not inherit membership through a reused synthesized
+name. Merely going offline or being disabled does not delete rows.
+Rows referencing either a dynamic bridge or a dynamic member are themselves
+dynamic and excluded from configuration export. Rows with static endpoints
+are saved, including references to currently absent endpoints.
+
+VLAN filtering currently supports each port's PVID only. Filtered ingress and
+egress for other VLAN IDs are dropped; a per-port VLAN membership table is not
+yet available.
+
+```text
+/interface/bridge/port/add name=lan-uplink bridge=lan interface=ether1
+/interface/bridge/port/set lan-uplink pvid=20
+/interface/bridge/port/remove lan-uplink
+```
+
+The existing `add bridge=... interface=...` form still works; omitting `name` generates a membership name.
 
 ### `/interface/ap`
 

@@ -314,6 +314,25 @@ through them and remove sections as they are absorbed.
   link quality on some platforms and is a fixed ceiling on others. Clients should not
   present it as a measured throughput; `tx-rate`/`rx-rate` remain the measured counters.
 
+
+## 2026-09-23: bridge membership is a collection
+
+- Use `/interface/bridge/port` collection rows for membership CRUD. Each row has
+  `bridge`, `interface`, `pvid`, `ingress-filtering`, and `untagged-egress`; it has
+  no `running` state. Both endpoint names may be unresolved.
+- Move port configuration forms onto these rows. Retain the row identity when
+  changing a bridge or member; removal remains possible while either is absent.
+- Show `S` as configured subordination, including while the master is offline.
+  Member running state reflects its own link, independently of the master. While
+  the master is offline, received traffic increments member RX and drop counters;
+  a bridge continues with unavailable ports.
+- Destruction of a dynamic endpoint removes the associated rows. Do not recreate
+  membership automatically when a synthesized interface name is reused.
+- A membership with either endpoint dynamic also carries `D` and is excluded from
+  configuration export. Static memberships persist. A disabled row releases its
+  interface while retaining the row for re-enabling.
+
+
 ## 2026-08-13: WLAN interfaces report the negotiated PHY as `phy-mode`
 
 - New read-only property `phy-mode` on `/interface/wlan`, a display string such as `VHT80
