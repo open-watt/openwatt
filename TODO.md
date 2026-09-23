@@ -150,6 +150,8 @@ holding action, not an answer. Options, cheapest first:
     the bring-up defaults it is off the site network. Decide whether a healthy lower rung
     schedules its own retry of the top, with backoff (10 min, 1 h, 6 h, ...).
   - The reset gesture on a BOOT button; safe-state indication in the beacon and on an LED.
+  - Wire up retained wall time on BK7231, BL618 and STM32; verify counter registers and
+    reset/power-loss behavior on hardware.
 - **The BK7231N `switch-ip` build no longer fits**: `make PLATFORM=bk7231n CONFIG=release
   FEATURES=switch-ip HEADLESS=1 MODBUS=0` links but the packed image is 157,830 bytes over
   `_image_limit` on master (2026-09-22); the last ledger row (2026-09-09) had 4,640 bytes spare.
