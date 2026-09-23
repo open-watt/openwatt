@@ -13,6 +13,13 @@ through them and remove sections as they are absorbed.
 - `/system/reboot crash=true` is a diagnostic fault injection. Keep it out of the
   normal restart action; normal restart remains `/system/reboot`.
 
+## 2026-09-23: ethernet interfaces renumber where a CAN adapter is present
+
+- SocketCAN (#503) no longer enumerates CAN adapters as ethernet interfaces, so a host with a
+  CAN adapter renumbers its NICs: the prod Pi's `eth0` moved from `ether2` to `ether1`, and its
+  CAN adapter now appears as `can1`. Anything that stored an interface name (views, filters,
+  saved layouts) needs to re-resolve rather than assume the old name still exists.
+
 ## 2026-09-22: every setup AP is at 192.168.4.1
 
 - The generic ESP platform bring-up defaults (and the ESP32-S31 board) moved their provisioning
