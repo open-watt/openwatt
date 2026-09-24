@@ -174,3 +174,31 @@ bool parse_node_desc(const(ubyte)[] message, NodeMap* node)
 
     return true;
 }
+
+bool parse_power_desc(const(ubyte)[] message, NodeMap* node)
+{
+    if (message.length < 4 || loadLittleEndian(cast(const ushort*)message.ptr) != node.id)
+        return false;
+
+    enum ubyte[4] power_levels = [ 0, 33, 66, 100 ];
+    node.power.current_mode = cast(CurrentPowerMode)(message[2] & 0x0F);
+    node.power.available_sources = message[2] >> 4;
+    node.power.current_source = message[3] & 0x0F;
+    node.power.batt_level = power_levels[message[3] >> 6];
+    node.initialised |= 0x02;
+    return true;
+}
+
+bool parse_active_eps(const(ubyte)[] message, NodeMap* node)
+{
+    if (message.length < 3 || loadLittleEndian(cast(const ushort*)message.ptr) != node.id)
+        return false;
+
+    ubyte num_endpoints = message[2];
+    if (message.length < 3 + num_endpoints)
+        return false;
+    foreach (endpoint; message[3 .. 3 + num_endpoints])
+        node.get_endpoint(endpoint).dynamic = false;
+    node.initialised |= 0x04;
+    return true;
+}
