@@ -171,6 +171,7 @@ a netbooted image is bounded by RAM instead.
 | date | commit | compiler | flash | ram | limit | note |
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-09-26 | ow/mt7621-board | ldc 1.43.0 | 2,762,180 | 49,640 | 16,515,072 | first row; console only |
+| 2026-09-26 | ow/mt7621-switch-ports | ldc 1.43.0 | 2,787,716 | 51,144 | 16,515,072 | frame engine, MT7530 front ports, network defaults |
 
 ### bl808 e907, `make PLATFORM=bl808 PROCESSOR=e907 CONFIG=release`
 

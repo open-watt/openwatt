@@ -1327,24 +1327,40 @@ at 12MHz by clean UART framing. Outstanding:
 ### MT7621 bring-up follow-ups (2026-09-26)
 
 `make BOARD=rb760igs` builds an image that RouterBOOT netboots on the MikroTik hEX S (RB760iGS): an
-ELF linked at `0x80001000`, running from RAM. Outstanding:
+ELF linked at `0x80001000`, running from RAM. The unittest image passes on the hardware, and a
+4-minute soak answers every ping and HTTP request. The hEX S has no serial header, so the platform
+also broadcasts console output as UDP. Outstanding:
 
-- **Strip the bring-up probes before landing.** The LED heartbeat and the 10-minute auto-reset
-  (which hands the next netboot back to RouterOS) are board hacks inside the chip driver.
+- **Strip the bring-up probes before landing.** The LED heartbeat, the 10-minute auto-reset
+  (which hands the next netboot back to RouterOS) and the netconsole with its fixed IP are board
+  hacks inside the chip driver; the netconsole becomes a UDP log sink.
 - **Only a watchdog reset is identifiable.** `RSTSTAT` latches the watchdog and software-reset
   causes (write-1-to-clear), but a deliberate `/system/reboot` and a fault's reset are both
   software resets, so every other boot classifies as `unknown` and counts a boot-guard strike. A
   retained reset record needs RAM that survives RouterBOOT, which is untested; until NVS exists the
   boot guard keeps no state across resets anyway.
+- **Ethernet and the MT7530 switch.** Standalone ports come up with the base MAC RouterBOOT
+  leaves in GDMA1, offset by front port; design and remaining phases in `docs/wip/SWITCH.md`.
+  Every claimed port is isolated and CPU-only, and bridges forward in software. Open items in the
+  driver:
+  - Three consecutive runs on 2026-09-25 took a lease but never answered the PC's ARP or ping;
+    every run since answered all of them. Unexplained; the interrupt path has since stopped acking
+    after its last ring check, which could lose a wakeup. If it recurs, capture with `DebugARP` on,
+    which shows whether the request arrives and the reply is sent.
+  - Unclaimed ports stay powered and merely isolated; power their PHYs down once the netconsole is gone.
+  - Receive trusts the frame engine's special-tag untag (`rxd2` VTAG, port in `rxd3`). 802.1Q frames on a
+    front port pass inline both ways (ether1.3 takes a DHCP lease); 802.1ad is untested.
+  - DMA buffers are uncached and transmit waits for each release; move to cached buffers with MIPS L1/L2
+    cache maintenance and reclaim from the release ring.
 - **Check whether BL618, BL808 M0 and BK7231N corrupt their TLSF heaps.** `vendor.mk` forces
   `TLSF_ALIGN_SIZE_LOG2=3` on them (urt 51f84f0) so 8-byte requests skip memalign's gap, but on
   32-bit TLSF's 4-byte size field then makes blocks alternate between 8- and 4-aligned and its size
   arithmetic stops matching the physical layout: the MT7621 corrupted its heap within the first
   unittest module, and builds without the define. Getting the no-gap intent back needs TLSF
   patched to an 8-byte header overhead on 32-bit.
-- **Only the GIC timer compare has a user.** Shared lines route to CPU pin 0 of VPE 0 and dispatch
-  through `_irq_dispatch`, but no peripheral has an interrupt handler yet. The periodic and one-shot
-  compare share one register, as on BL618.
+- **Only the timer compare and the frame engine take interrupts.** Shared lines route to CPU pin 0
+  of VPE 0 and dispatch through `_irq_dispatch`; the UART and the switch are still polled. The
+  periodic and one-shot compare share one register, as on BL618.
 - **The CPU clock is derived, not measured.** `cpu_rate()` follows Linux's clk-mt7621 and the
   timing looks right, but nothing has checked it against a reference.
 - **RAM size is a board fact.** `board.mk` passes the hEX S's 256MB. Detect it at runtime as
@@ -1361,7 +1377,7 @@ ELF linked at `0x80001000`, running from RAM. Outstanding:
 - **The console drops output on a non-blocking UART.** `Session` ignores short writes from
   `_stream.write`, and a bare-metal `uart_hw_write` takes only what the FIFO holds (16 bytes on
   MT7621), so a burst loses everything past the first FIFO-full. Any platform without
-  interrupt-driven UART TX is affected.
+  interrupt-driven UART TX is affected; the MT7621 netconsole hides it by mirroring the input.
 - **UART2/UART3 are pinmuxed to GPIO on the hEX S** (per the OpenWrt DTS), and the UART driver
   does not touch GPIOMODE.
 - **Only one VPE of one core runs.** The 1004Kc pair has four VPEs.
