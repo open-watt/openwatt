@@ -31,6 +31,7 @@ Quick reference for standard component templates and their expected elements.
 | `Configuration` | Device settings | varies |
 | **Capability primitive (energy app contract)** |||
 | `PowerControl` | Unified actuator surface | `kind`, `setpoint` |
+| `GridAuthority` | Direction from the network operator | `source` |
 
 ---
 
@@ -1257,6 +1258,83 @@ replace the `Port`; it only describes control.
 | Heat-pump compressor | `kind=discrete`, `min_on_time=600`, `min_off_time=300` |
 
 ---
+
+## GridAuthority
+
+Direction from a network operator over what the site may import, export,
+generate or consume at its connection point: the limits and states in force
+right now. The record is scheme-neutral so the energy app has one input
+whatever protocol delivered the direction, but it specifies only what a
+producer in the tree demonstrates. Today that is one producer: the IEEE 2030.5
+DERControl subset mapped below.
+
+The component sits at the device root as `authority` and governs the site's
+connection point. It is not a topology node and has no `Port`. A site has one
+authority.
+
+### Conventions
+
+- Limits are watts. `-1` means the authority does not direct that quantity.
+  `0` is a real instruction: an export limit of 0 W is the CSIP-AUS emergency
+  backstop.
+- `generation_fraction` is a cap in percent of the DER's nameplate, `-1` when
+  not directed. It is a ceiling like the watt limits, never a setpoint.
+- A limit takes effect the moment the element changes. The producer has
+  already applied whatever randomised start its scheme requires, and it
+  reverts the element itself when the event ends. Consumers never infer expiry
+  from `event_end`.
+- Loss of the authority link is the producer's problem. The device going
+  `offline` is not a signal to relax anything; the last direction stands until
+  the producer publishes another.
+- `energize` and `connect` are equipment instructions, not power limits, and
+  neither is expressible as one. `energize: false` requires the DER to cease
+  energising its terminals while it may stay connected; `connect: false`
+  requires it to open its connection to the grid. A 0 W export limit is a
+  different thing again: the DER keeps generating into local load. A consumer
+  routes these to the DER's own enable and connect controls.
+
+### Required
+- `source: enum` - Scheme the direction comes from: `ieee2030.5`, or `csip-aus`
+  for IEEE 2030.5 under the CSIP-AUS profile. It is a label the installer sets.
+  The producer decodes both identically, and no rule here depends on it yet.
+
+### Optional
+- `event: string` - Identifier of the event whose direction applies; empty
+  while the standing default applies.
+- `event_start: time` - When the current event took effect.
+- `event_end: time` - When the producer expects to revert it. Informational.
+- `export_limit: W` - Cap on export at the connection point.
+- `import_limit: W` - Cap on import at the connection point.
+- `generation_limit: W` - Cap on generation behind the connection point.
+- `load_limit: W` - Cap on controllable load behind the connection point.
+- `generation_fraction: %` - Cap on generation as a share of nameplate.
+- `energize: bool` - False while the DER must cease to energise.
+- `connect: bool` - False while the DER must disconnect from the grid.
+
+### IEEE 2030.5 mapping
+
+| DERControlBase | Element |
+| --- | --- |
+| `opModExpLimW` | `export_limit` |
+| `opModImpLimW` | `import_limit` |
+| `opModGenLimW` | `generation_limit` |
+| `opModLoadLimW` | `load_limit` |
+| `opModMaxLimW` | `generation_fraction` |
+| `opModEnergize` | `energize` |
+| `opModConnect` | `connect` |
+
+`opModFixedW` and `opModTargetW` are signed power setpoints, not ceilings, and
+have no place in this record. The binding logs them as not acted on.
+
+### Not yet specified
+
+Other schemes are expected to land here: EEBUS LPC and LPP under §14a EnWG,
+AS/NZS 4755 demand-response modes, ripple control, OpenADR. What they need
+beyond the fields above (a load fraction, storage limits, advisory levels and
+how advice weighs against obligation, placement under a `Port` or subsystem,
+and how several authorities over one thing compose) is deliberately left
+open. Each is specified with the first producer that demonstrates it and the
+consumer that has to act on it, not before.
 
 ## Usage Examples
 

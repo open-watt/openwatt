@@ -2,6 +2,65 @@
 
 The application is configured and controlled through a command-line interface (CLI). The CLI provides a powerful way to interact with the system, manage devices, and configure applications.
 
+## Command Index
+
+The scopes covered by the [CLI Command Reference](#cli-command-reference). Every collection
+also carries the generic [collection commands](#collection-commands).
+
+- [`/apps/energy/appliance`](#appsenergyappliance)
+- [`/automation`](#automation)
+- [`/binding`](#binding-common-properties) - common properties
+  - [`/binding/obd`](#bindingobd)
+  - [`/binding/tesla/twc`](#bindingteslatwc)
+- [`/console/session`](#consolesession)
+- [`/driver/power/regulator`](#driverpowerregulator)
+- [`/interface`](#interface) - common properties
+  - [ethernet station properties](#ethernet-station-properties)
+  - [`/interface/ap`](#interfaceap)
+  - [`/interface/ble`](#interfaceble)
+  - [`/interface/ethernet`](#interfaceethernet)
+  - [`/interface/obd`](#interfaceobd)
+  - [`/interface/udp`](#interfaceudp)
+  - [`/interface/wifi`](#interfacewifi)
+  - [`/interface/wlan`](#interfacewlan)
+  - [`/interface/wpan`](#interfacewpan)
+- [`/log`](#log)
+  - [`/log/history`](#loghistory)
+  - [`/log/sink`](#logsink)
+- [`/ping`](#ping)
+- `/protocol`
+  - [`/protocol/ble/client`](#protocolbleclient)
+  - [`/protocol/ble/device`](#protocolbledevice)
+  - `/protocol/dhcp` - [DHCPv4](#dhcpv4), [DHCPv6](#dhcpv6)
+    - [`/protocol/dhcp/client`](#protocoldhcpclient)
+    - [`/protocol/dhcp/client6`](#protocoldhcpclient6)
+    - [`/protocol/dhcp/lease`](#protocoldhcplease)
+    - [`/protocol/dhcp/option`](#protocoldhcpoption)
+    - [`/protocol/dhcp/server`](#protocoldhcpserver)
+  - [`/protocol/http/fileserver`](#protocolhttpfileserver)
+  - [`/protocol/http/server`](#protocolhttpserver)
+  - [`/protocol/ip`](#protocolip) - `address`, `route`, `pool`, `neighbour` and their IPv6 counterparts
+    - [`/protocol/ip/ra`](#protocolipra)
+  - [`/protocol/tesla/session`](#protocolteslasession)
+  - [`/protocol/tesla/twc`](#protocolteslatwc)
+  - [`/protocol/tesla/vehicle-scanner`](#protocolteslavehicle-scanner)
+- [`/stream`](#stream) - common properties
+  - [`/stream/ble-serial`](#streamble-serial)
+  - [`/stream/console`](#streamconsole)
+  - [`/stream/duplex`](#streamduplex)
+  - [`/stream/serial`](#streamserial)
+  - [`/stream/usb-serial`](#streamusb-serial)
+- [`/sync`](#sync-commands) - `console`, `log-sub`, `model-sub`
+  - [`/sync/discover/udp`](#syncdiscoverudp)
+  - [`/sync/neighbor`](#syncneighbor)
+  - [`/sync/peer`](#syncpeer)
+  - [`/sync/peering`](#syncpeering)
+  - [`/sync/udp-server`](#syncudp-server)
+  - [`/sync/ws-server`](#syncws-server)
+- [`/system`](#system)
+  - [`/system/config`](#saved-configuration) - saved configuration
+  - [`/system/linux`, `/system/netlink`](#linux-kernel-data-plane-systemlinux-systemnetlink)
+
 ## Startup Configuration
 
 The primary configuration file for the system is `conf/startup.conf`. This file is not a simple configuration file, but rather a script that is executed line-by-line at startup. This allows for a flexible and powerful configuration process.
@@ -506,6 +565,42 @@ no transport properties.
 /stream/usb-serial/add name=console
 /console/session/add name=default stream=console profile=vt100 initial-command="/log/print --stream"
 ```
+
+### `/stream/tls`
+
+A TLS stream wraps a byte stream in TLS. With `remote` it connects out over its own TCP stream
+and acts as a client; with `certificates` it acts as a server on a pre-assigned `stream`, which
+is how `/protocol/tls/server` creates its connections. A client may present its own certificate
+and pin the trust anchor the server chain must verify against; both must name issued
+`/certificate` objects, and the handshake waits until they are.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `remote` | `host[:port]` | empty | Server to connect to; the stream is a client when set. |
+| `stream` | stream name | empty | Underlying byte stream when the connection is supplied externally. |
+| `keepalive` | `yes`/`no` | `no` | TCP keepalive on the owned connection. |
+| `certificate` | certificate name | empty | Server certificate; makes the stream a server. |
+| `certificates` | certificate names | empty | Server certificates selected by SNI. |
+| `client-cert` | certificate name | empty | Certificate and key presented to the server (mutual TLS). |
+| `ca` | certificate name | empty | Trust anchor for the server chain: the chain must end at this certificate and pass hostname checks. Unset, mbedtls builds skip verification and Schannel builds validate against the OS store. |
+
+### `/certificate`
+
+A certificate object holds an X.509 certificate for TLS servers and clients. A `certificate`
+type loads it from files; without `key_file` the object is a trust anchor only (a CA or chain
+file) and can be named by `ca` but not presented.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `cert-type` | `certificate`, `self_signed`, `acme` | `certificate` | Where the certificate comes from. |
+| `certificate_file` | path | empty | PEM or DER certificate, or a PEM chain for a trust anchor. Sets `cert-type` to `certificate`. |
+| `key_file` | path | empty | Private key for `certificate_file`; optional for a trust anchor. |
+| `domain` | host name | empty | Common name for `self_signed`; the ACME order domain for `acme`. |
+| `email` | address | empty | ACME account contact. |
+| `http-server` | server name | empty | HTTP server used for the ACME challenge. |
+| `uri` | URL | Let's Encrypt | ACME directory. |
+| `cert-status` | read-only | | `none`, `pending`, `issued`, `expired`, or `error`. |
+| `expiry` | read-only | | Not-after time of the issued certificate. |
 
 ### `/interface/*`
 
@@ -1201,7 +1296,7 @@ The DHCPv6 message codec and client are present; there are no server or lease
 commands yet. DHCPv6 address and prefix configuration coexists with Router
 Advertisement discovery of default routers.
 
-#### Client
+#### `/protocol/dhcp/client6`
 
 `/protocol/dhcp/client6` requests host addresses (`IA_NA`) and/or delegated
 prefixes (`IA_PD`). Each bound address appears as a dynamic `address6`. The
@@ -1282,6 +1377,18 @@ kernel's tables (address, MAC, state, interface) in place of the internal cache.
 | `/system/netlink/add-neighbour address=<ip> mac=<mac> iface=<netdev>` | Installs a permanent kernel neighbour entry. Either family. |
 | `/system/netlink/del-neighbour address=<ip> iface=<netdev>` | Removes a kernel neighbour entry. |
 
+### `/protocol/http/client`
+
+An HTTP client issues requests to one origin over its own connection, or over an externally
+supplied stream. `https://` origins use TLS when it is built.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `remote` | `http[s]://host[:port]` | empty | Origin to connect to. |
+| `stream` | stream name | empty | Byte stream to speak HTTP over instead of connecting. |
+| `client-cert` | certificate name | empty | Certificate presented to the server for mutual TLS. |
+| `ca` | certificate name | empty | Trust anchor the server chain must verify against. |
+
 ### `/protocol/http/server`
 
 An HTTP server provides the listener and shared policy for its registered
@@ -1359,6 +1466,39 @@ preflights and normal responses use the effective policy.
 ```text
 /protocol/http/server add name=webserver port=80
 /protocol/http/fileserver add name=files http-server=webserver uri=/files root="conf" access=webdav allowed-origin=http://192.168.0.5:8080
+```
+
+### `/binding/sep2`
+
+An IEEE 2030.5 (SEP2, CSIP-AUS profile) client that presents the utility as a device. It
+connects to the utility server over mutual TLS, finds its EndDevice by the certificate
+fingerprint (the LFDI), walks the function-set assignments to the DER programs,
+and polls the DERControl lists at the server's poll rate. The default control and the active
+event resolve to the limits in force, published on the bound device's `authority` component
+(template `GridAuthority`, see [COMPONENT_TEMPLATES.md](COMPONENT_TEMPLATES.md#gridauthority));
+every event receives the Response acknowledgements the server asks for. Protocol state (LFDI,
+SFDI, EndDevice href, the walk's phase, program and event counts, poll rate, clock offset) sits
+beside it in an untemplated `sep2` component.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `device` | device name | empty | Device to publish the authority on; created if absent. Required. |
+| `remote` | `https://host[:port][/path]` | empty | The utility server's DeviceCapability URL. Must be `https`; the path defaults to `/dcap`. |
+| `client-cert` | certificate name | empty | Device certificate presented to the server, with its full signing chain in the file. Its SHA-256 fingerprint is the LFDI. Required. |
+| `ca` | certificate name | empty | Trust anchor for the server chain (the utility's SERCA). |
+| `scheme` | `ieee2030_5`, `csip_aus` | `ieee2030_5` | Profile the utility runs. A label only: it is published as the authority's `source` and does not change decoding or behaviour. |
+| `pin` | number | `0` | Registration PIN the installer was given; when set, a mismatch with the server's Registration is a failure. |
+| `offline-timeout` | duration | `0` | Silence longer than this marks the device offline; zero disables it. |
+
+The EndDevice must already exist on the server: enrol the device's LFDI with the utility first. The
+binding polls at the rate the server advertises, 300 s when it advertises none. A failed walk is
+retried with backoff from 5 s to 300 s; the last committed direction and its event deadlines stay
+in force throughout.
+
+```text
+/certificate/add name=serca certificate_file=/etc/openwatt/serca.pem
+/certificate/add name=dev certificate_file=/etc/openwatt/device.pem key_file=/etc/openwatt/device.key
+/binding/sep2/add name=utility device=authority remote=https://der.utility.example/api/v2/dcap scheme=csip_aus client-cert=dev ca=serca pin=111115
 ```
 
 ### `/protocol/tesla/session`

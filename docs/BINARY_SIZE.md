@@ -69,6 +69,7 @@ row alone. Sizes stay in bytes; round in the note if that reads better.
 | 2026-09-10 | #687 | ldc 1.43.0 | 5,622,160 | 494,512 | | first row; DeviceBuilder as the only tree writer, deployed to the Pi as slot 152 |
 | 2026-09-10 | #689 | ldc 1.43.0 | 5,635,616 | 494,512 | | integration image, master + #687 + #689, deployed to the Pi as slot 154 |
 | 2026-09-16 | 7c50cea4 | ldc 1.43.0 | 5,605,168 | 483,280 | | master + sync bulk walks on the transport tx feed |
+| 2026-09-23 | 22eb4266 | ldc 1.43.0 | 5,659,224 | 486,968 | - | deployed to the prod Pi as slot 159 |
 
 ### Waveshare ESP32-S3-RS485-CAN, `make esp-idf-build BOARD=waveshare-esp32-s3-rs485-can CONFIG=release`
 
@@ -84,6 +85,8 @@ Limit is the 4 MB `ota_0` partition. `ram` is internal DRAM only; PSRAM is heap.
 | 2026-09-22 | fc5efe57 | ldc 1.42.0 | 2,913,664 | 139,459 | 4,194,304 | `COREDUMP=1`, with the power regulator's ISR state moved out of PSRAM |
 | 2026-09-23 | #747 | ldc 1.42.0 | 2,917,648 | 139,515 | 4,194,304 | `COREDUMP=1`; boot guard ladder and retained reset record |
 | 2026-09-23 | ba8561fb | ldc 1.42.0 | 2,917,952 | 139,547 | 4,194,304 | `COREDUMP=1`; wall clock kept across a reset |
+| 2026-09-23 | 22eb4266 | ldc 1.42.0 | 2,925,264 | 140,443 | 4,194,304 | `COREDUMP=1`, deployed to openwatt-F993 |
+| 2026-09-23 | 22eb4266 | ldc 1.42.0 | 2,916,032 | 137,111 | 4,194,304 | deployed to openwatt-4547, which runs the standard partition table |
 
 ### ESP32-C5 DevKitC-1, `make esp-idf-build PLATFORM=esp32-c5 CONFIG=release`
 

@@ -1,5 +1,10 @@
 # TODO
 
+- **Linux boot guard cannot recover a repeatedly crashing configured image**: after the crash
+  threshold it selects the bring-up-defaults rung, but this Pi has no `default.conf`; it then
+  skips the existing `conf/startup.conf` and exits 255 forever. Define and implement a recovery
+  rung that always yields a runnable configuration, and cover repeated crash/restart behaviour.
+
 - Validate boot-guard OTA handoff on ESP32 hardware with NVS write/commit failures
   and power loss before/after image acceptance and rollback slot selection. Also
   exercise record loss/corruption and the power-on gesture on embedded targets.
@@ -152,6 +157,18 @@ holding action, not an answer. Options, cheapest first:
   - The reset gesture on a BOOT button; safe-state indication in the beacon and on an LED.
   - Wire up retained wall time on BK7231, BL618 and STM32; verify counter registers and
     reset/power-loss behavior on hardware.
+- **A firmware update renamed a deployed unit's ethernet interface.** SocketCAN (#503) stopped
+  enumerating CAN adapters as ethernet interfaces, so on the prod Pi (one NIC plus an mcp251x)
+  `eth0` moved from `ether2` to `ether1`. Its `startup.conf` names `ether2` as the VLAN parent,
+  so after the update it had no VLAN 3, no DHCP client, no in-stack addresses and no fleet
+  peering, and said nothing beyond one failed-create line. Fixed by hand on 2026-09-23
+  (`conf/startup.conf.bak-2026-09-23-ether`). Interface names are deployment identifiers:
+  either derive them so they do not shift when an unrelated device class moves, or detect the
+  shift and migrate. Unknown names in a saved config should also be loud, not a single line.
+- **A SocketCAN interface with no bit timing retries forever.** The Pi's auto-created `can1`
+  logs `CAN adapter 'can0' has no bit timing; set baud-rate` on every retry (26 times in one
+  log tail) and never starts. Either do not auto-create an interface that cannot run, or fail
+  it once and stay quiet.
 - **The BK7231N `switch-ip` build no longer fits**: `make PLATFORM=bk7231n CONFIG=release
   FEATURES=switch-ip HEADLESS=1 MODBUS=0` links but the packed image is 157,830 bytes over
   `_image_limit` on master (2026-09-22); the last ledger row (2026-09-09) had 4,640 bytes spare.
@@ -303,6 +320,68 @@ holding action, not an answer. Options, cheapest first:
   Add borrowed protobuf byte fields so vehicle decoding can avoid one owned
   allocation per bytes field. These existing deferrals were moved out of long
   source comments during reconciliation.
+
+## IEEE 2030.5 / CSIP-AUS client
+
+The guidance path is built (`src/protocol/sep2/`: discovery, program walk, DERControl timeline
+with Response acks). The entries marked required must land before a production connection to a utility
+server; the Energex and Ergon SEP2 Client Handbook (Release 8) is the reference for them.
+
+- **HTTP timeout (required)**: the binding's HTTP client waits the default 5 s. Utilities
+  recommend 30 s or more; set `timeout` on the owned client once `/protocol/http/client` has the
+  property (PR #738).
+- **Per-list poll rates (required)**: one interval drives the whole re-walk, taken from the last
+  `pollRate` seen. Utilities enrol a site in several programs with different rates (the
+  Queensland handbook lists an emergency program at 900 s beside a DOE program at 300 s and an
+  isolated-generation one at 60 s), so the single rate under-polls one or over-polls another, and
+  over-polling breaches the server's terms. Each program list needs its own refresh timer, each
+  committing its own slice of the timeline.
+- **Telemetry (required)**: MirrorUsagePoint creation and periodic MirrorMeterReading posts for
+  the site and for the aggregate of managed DER: real and reactive power at both, voltage at
+  one, per SA TS 5573 section 8. Plus DERStatus, DERCapability and DERSettings under the
+  EndDevice's DERListLink. Utilities audit it continuously against billing data. DER the client
+  cannot control must still be counted in the aggregate.
+- **Persist the default across reboot (required)**: nothing survives a restart, so a power cycle
+  with no comms publishes every limit as not directed. The standing default carries the
+  connection contract's minimum for exactly this case; store the last DefaultDERControl and
+  publish it at startup until the first walk commits. Confirm the rule against SA TS 5573.
+- **Energy app intake (required)**: find the site's `GridAuthority` component and turn its watt
+  limits into an import and export constraint on the grid ingress, honoured by the allocator
+  (raise controllable load before curtailing generation), plus an inverter generation-limit
+  control (SunSpec model 123 first) for `generation_limit` and `generation_fraction`. The import
+  limit is conditional: unmanaged load may exceed it, managed load may only consume while the
+  site is under it. Generation and load limits bind managed DER only and may prevent
+  self-consumption, which export and import limits never do. `energize` and `connect` are not
+  power limits and must not be folded into one: they go to the DER's own enable and connect
+  controls (SunSpec model 123 `Conn`), which no profile exposes as a control yet. Compliance
+  has to work with the allocator stopped.
+- **Client certificate chain on Schannel**: utilities require the full signing chain. mbedtls
+  sends whatever chain `certificate_file` holds; the Windows loader keeps only the first
+  certificate of the file, so the intermediates are never presented.
+- **Power setpoints**: `opModFixedW` and `opModTargetW` are recognised and logged as not acted
+  on. They are signed setpoints, not ceilings, so they do not fit `GridAuthority`; acting on
+  them needs a setpoint surface and a consumer that can dispatch storage. `opModTargetW` is
+  optional in CSIP-AUS and reserved for opt-in DER services.
+- **Growing the `GridAuthority` contract**: the template specifies only what IEEE 2030.5
+  demonstrates. Placement under a `Port` or subsystem, composition of several authorities over
+  one thing, advisory direction and how it weighs against obligation, load fractions and storage
+  limits are all unspecified on purpose. Specify each with its first producer (AS/NZS 4755 DRM
+  lines on an appliance port is the nearest) and the consumer that has to honour it.
+- **Self-registration**: the binding requires the EndDevice to exist and fails with a clear
+  message otherwise. Utilities register out of band and reject in-band creation for direct
+  clients, so this waits for one that accepts it. Publishing the ConnectionPoint's NMI under the
+  `sep2` component belongs with it. A cloud-proxy mode, where one certificate sees many
+  EndDevices and LFDIs derive from the NMI, is a separate object.
+- **List paging**: lists are fetched with `?s=0&l=255` and never paged; a program with more
+  events than that loses the tail. Follow `all` versus `results` and fetch the remainder.
+- **Response on opt-out and `responseRequired` bit 2**: user opt-out responses are not sent (no
+  user interaction exists yet).
+- **`sep2:` signal provider** so automations can react to event start and end.
+- **Cipher pinning**: servers require TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8; mbedtls offers it by
+  default, but the client should pin TLS 1.2 and that suite so a misconfigured server fails
+  loudly. Needs `mbedtls_ssl_conf_ciphersuites` and `mbedtls_ssl_conf_min_version` bindings.
+- **Test bench**: run ANU's `envoy` utility server locally before the `cactus` harness and
+  certification. A utility's own test server is an environment, not a conformance harness.
 
 ## Energy
 
@@ -891,7 +970,9 @@ this is what remains.
   every peer introduces at once. Find what runs long enough to starve the heartbeat at boot (the
   `log_slow_phase` subdivisions and `collection.update.*` warnings are the handles) rather than
   raising the deadline. Related: `collection.update.interface.sync1-ws<n>` sits at a steady 70ms
-  per frame against a 50ms budget, also pre-existing, with occasional 500-600ms spikes.
+  per frame against a 50ms budget, also pre-existing, with occasional 500-600ms spikes. The
+  supervisor now emits all child thread stacks through bounded GDB before the kill; capture the
+  next miss and trace the blocking path.
 
 - **Make backpressure a channel property**: the bulk walks (registry and model introduction,
   live re-arm, history backfill, template refresh) now run as the transport's `tx_handler` and ask
@@ -1055,6 +1136,19 @@ this is what remains.
   client's declined-reply path, any offline handler) unsubscribes and re-subscribes inside the
   walk, so the moved-in and re-added entries can receive the same packet again. Snapshot the
   subscriber set or defer removals until the walk ends.
+
+- **Default TLS trust for mbedtls clients**: a client with no `ca` still runs with
+  `MBEDTLS_SSL_VERIFY_NONE`. Load the system bundle on Linux and RouterOS
+  (`/etc/ssl/certs/ca-certificates.crt`) and a baked-in bundle on embedded targets as the
+  default chain, then flip the default to required. Explicit `ca` pinning already verifies on
+  both backends.
+
+- **HTTP client loses a response delivered with the close**: `HTTPClient` is still
+  `update()`-pumped. When a server answers and closes in the same flight (HTTP/1.0, or
+  `Connection: close`), the stream goes offline before the next tick reads it; `IPClient`
+  restarts the client, the buffered response is dropped, and the request is resent on the new
+  connection every 5 s forever. Seen against a Python `http.server` fixture. Move the client to
+  `rx_handler` delivery so the parser runs on arrival, and drain before acting on offline.
 
 - **Make clock-sensitive unittests hermetic**: tests that leave a `MonoTime` member at
   `MonoTime.init` and then compare it against a real `getTime()` only pass once the monotonic

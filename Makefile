@@ -119,7 +119,7 @@ ifeq ($(COMPILER),ldc)
     ifneq ($(CTOR_SCAN_OK),)
       DFLAGS := $(DFLAGS) --fno-moduleinfo
       ifeq ($(NOEXCEPTIONS),1)
-        DFLAGS := $(DFLAGS) --fno-rtti
+        DFLAGS := $(DFLAGS) --fno-rtti $(VERSION_FLAG)NoRTTI
       endif
     endif
   endif

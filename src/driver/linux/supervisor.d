@@ -30,6 +30,7 @@ private extern(C) nothrow @nogc
 }
 
 private enum int SIGKILL = 9;
+private enum int WNOHANG = 1;
 private enum int backoff_ms = 1000;
 
 // OTA policy: built-in defaults used until (and unless) a running OTA object pushes a
@@ -228,6 +229,7 @@ EndKind monitor_child(pid_t pid, int rd, int target, bool probation, ref int goo
         if (pr == 0)
         {
             slog(tconcat("no heartbeat for ", g_watchdog_ms, "ms; killing app"));
+            capture_stacks(pid);
             kill(pid, SIGKILL);
             reap(pid);
             return EndKind.failed;
@@ -257,6 +259,40 @@ EndKind monitor_child(pid_t pid, int rd, int target, bool probation, ref int goo
             break; // EAGAIN: nothing more right now
         }
     }
+}
+
+private void capture_stacks(pid_t target)
+{
+    slog(tconcat("watchdog: capturing stacks from pid ", target));
+    pid_t tracer = fork();
+    if (tracer < 0)
+    {
+        slog("watchdog: could not fork stack capture");
+        return;
+    }
+    if (tracer == 0)
+    {
+        char[24] target_buf = void;
+        const(char)*[17] argv = [
+            "/usr/bin/gdb", "--batch", "--quiet", "--nx", "-p", int_to_z(target_buf, target),
+            "-ex", "set pagination off", "-ex", "set print thread-events off",
+            "-ex", "thread apply all bt 64", "-ex", "detach", "-ex", "quit", null
+        ];
+        execv(argv[0], argv.ptr);
+        _exit(127);
+    }
+
+    MonoTime deadline = getTime() + seconds(3);
+    int status;
+    while (getTime() < deadline)
+    {
+        if (waitpid(tracer, &status, WNOHANG) == tracer)
+            return;
+        usleep(10_000);
+    }
+    slog("watchdog: stack capture timed out");
+    kill(tracer, SIGKILL);
+    waitpid(tracer, &status, 0);
 }
 
 void apply_cfg(const(char)[] line)

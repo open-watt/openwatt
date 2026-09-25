@@ -13,6 +13,13 @@ through them and remove sections as they are absorbed.
 - `/system/reboot crash=true` is a diagnostic fault injection. Keep it out of the
   normal restart action; normal restart remains `/system/reboot`.
 
+## 2026-09-23: ethernet interfaces renumber where a CAN adapter is present
+
+- SocketCAN (#503) no longer enumerates CAN adapters as ethernet interfaces, so a host with a
+  CAN adapter renumbers its NICs: the prod Pi's `eth0` moved from `ether2` to `ether1`, and its
+  CAN adapter now appears as `can1`. Anything that stored an interface name (views, filters,
+  saved layouts) needs to re-resolve rather than assume the old name still exists.
+
 ## 2026-09-22: every setup AP is at 192.168.4.1
 
 - The generic ESP platform bring-up defaults (and the ESP32-S31 board) moved their provisioning
@@ -63,6 +70,24 @@ through them and remove sections as they are absorbed.
   `cca`. `extended-address` is an EUI-64 (eight octets), not a MAC address; give it its own
   formatter. Packet type `wpan` (3) now has a codec, so pcap and OW-encapsulated wpan frames
   can appear on interfaces that relay them.
+## 2026-09-20: grid authority devices and the `GridAuthority` template
+
+- A new device shape arrives from `/binding/sep2`: `info.type` is `grid-authority`, and an
+  `authority` component carries the template `GridAuthority` (see
+  [COMPONENT_TEMPLATES.md](../COMPONENT_TEMPLATES.md#gridauthority)). Treat it as the operator's
+  direction over the site's connection point, not as an appliance: it has no `Port` and no meter.
+- `export_limit`, `import_limit`, `generation_limit` and `load_limit` are watts, and
+  `generation_fraction` is percent of nameplate. In all five `-1` means "not directed": render it
+  as absent, never as a negative value. `0` is a real limit and deserves emphasis, since an
+  export limit of 0 W is the emergency backstop.
+- `energize` and `connect` are booleans that are true in normal operation. False is an
+  instruction to the DER and should read as an alarm-grade state, distinct from any limit.
+- `event` is the identifier of the event in force and is empty under the standing default;
+  `event_start` and `event_end` are timestamps that are zero when there is no event. A change of
+  event republishes every element even when the limits are unchanged.
+- An untemplated `sep2` component sits beside it with protocol state (`lfdi`, `sfdi`, `phase`,
+  `end_device`, `programs`, `events`, `poll_rate`, `clock_offset`). It is diagnostic; do not build
+  product behaviour on it.
 
 ## 2026-09-17: `add` frames carry component templates
 
