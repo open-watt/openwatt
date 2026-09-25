@@ -712,6 +712,19 @@ adds:
 /interface/ethernet/add name=eth1 phy=yt8531 phy-reset-gpio=7
 ```
 
+A part with more than one MAC, or a MAC wired to a switch chip, names the MAC and the switch port.
+On the MT7621, `ge1` fronts the MT7530: the MAC is not an interface itself, each front port is, and
+a port no interface claims does not forward.
+
+| Property | Default | Description |
+| --- | --- | --- |
+| `device` | unset | The MAC, by the vendor's name for it (`ge1` on the MT7621). Unset means the part's first MAC. |
+| `switch-port` | `-1` | The front port of the switch behind `device`, in the chip's numbering. Required when `device` fronts a switch; `-1` otherwise. |
+
+```text
+/interface/ethernet/add name=ether1 device=ge1 switch-port=0
+```
+
 ### `/interface/obd`
 
 An OBD interface speaks OBD-II diagnostics to a vehicle: requests and responses

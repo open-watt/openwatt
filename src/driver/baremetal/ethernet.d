@@ -7,6 +7,7 @@ static if (num_ethernet > 0)
 
 import urt.atomic;
 import urt.log;
+import urt.string;
 import urt.time;
 
 import manager;
@@ -130,7 +131,15 @@ nothrow @nogc:
         apply_link_mode();
     }
 
-    alias CommonProperties = AliasSeq!(Prop!("phy", phy),
+    final String device() const pure => _device;
+    final void device(String value) { set_wiring!"device"(_device, value); }
+
+    final byte switch_port() const pure => _switch_port;
+    final void switch_port(byte value) { set_wiring!"switch-port"(_switch_port, value); }
+
+    alias CommonProperties = AliasSeq!(Prop!("device", device),
+                                       Prop!("switch-port", switch_port),
+                                       Prop!("phy", phy),
                                        Prop!("phy-address", phy_address),
                                        Prop!("mdc-gpio", mdc_gpio),
                                        Prop!("mdio-gpio", mdio_gpio),
@@ -169,10 +178,22 @@ nothrow @nogc:
         return super.status_message();
     }
 
+    // A MAC that fronts a switch is not an interface itself; each front port is.
+    // TODO: say why; an unknown device or a missing switch-port fails silently.
+    override bool validate() const
+    {
+        immutable port = resolve_port();
+        if (port >= num_ethernet)
+            return false;
+        immutable ports = eth_switch_ports(port);
+        return ports ? _switch_port >= 0 && _switch_port < ports : _switch_port < 0;
+    }
+
     override void heartbeat(MonoTime now)
     {
         super.heartbeat(now);
-        service();
+        if (_eth.is_open)
+            service_port(_eth.port);
     }
 
 protected:
@@ -181,12 +202,30 @@ protected:
     {
         if (!_eth.is_open)
         {
-            if (eth_open(_eth, 0, _config).failed)
+            immutable port = resolve_port();
+            if (slot(port) !is null)
             {
-                log.error("ethernet MAC or PHY init failed");
+                log.error("another interface already drives this port");
                 return CompletionStatus.error;
             }
-            _active[_eth.port] = this;
+            if (_users[port] == 0)
+            {
+                if (eth_open(_shared[port], port, _config).failed)
+                {
+                    log.error("ethernet MAC or PHY init failed");
+                    return CompletionStatus.error;
+                }
+                eth_set_rx_callback(_shared[port], &rx_dispatch);
+                eth_set_link_callback(_shared[port], &link_dispatch);
+                if (eth_switch_ports(port))
+                    eth_set_switch_link_callback(_shared[port], &switch_link_dispatch);
+                eth_set_ready_callback(&request_service);
+            }
+            ++_users[port];
+            _eth = _shared[port];
+            slot(port) = this;
+            if (is_switch_port && eth_switch_port_enable(_eth, cast(ubyte)_switch_port, true).failed)
+                log.warning("switch rejected the port");
             set_connected(false);
             _caps &= ~(InterfaceCaps.hw_timestamp | InterfaceCaps.tx_checksum);
             if (_config.timestamp)
@@ -194,9 +233,6 @@ protected:
             if (_config.tx_checksum)
                 _caps |= InterfaceCaps.tx_checksum;
             mark_set!(typeof(this), "caps")();
-            eth_set_rx_callback(_eth, &rx_dispatch);
-            eth_set_link_callback(_eth, &link_dispatch);
-            eth_set_ready_callback(&request_service);
 
             ubyte[6] hw = void;
             if (_assigned_mac != MACAddress.init)
@@ -204,13 +240,17 @@ protected:
                 if (eth_set_address(_eth, _assigned_mac.b).failed)
                     log.warning("driver rejected hardware address");
             }
-            else if (eth_get_hardware_address(0, hw))
+            else if (eth_get_hardware_address(port, hw))
+            {
+                if (is_switch_port)
+                    offset_mac(hw, _switch_port);
                 adopt_mac(MACAddress(hw));
+            }
 
             if (!_auto_negotiate)
                 apply_link_mode();
         }
-        service();
+        service_port(_eth.port);
         return _link_up ? CompletionStatus.complete : CompletionStatus.continue_;
     }
 
@@ -218,15 +258,26 @@ protected:
     {
         if (_eth.is_open)
         {
-            eth_set_ready_callback(null);
-            bool first_attempt = _active[_eth.port] !is null;
-            _active[_eth.port] = null;
-            if (eth_close(_eth).failed)
+            immutable port = _eth.port;
+            bool first_attempt = slot(port) is this;
+            if (first_attempt)
             {
-                if (first_attempt)
-                    log.warning("driver refused to uninstall; retrying");
-                return CompletionStatus.continue_;
+                slot(port) = null;
+                if (is_switch_port)
+                    eth_switch_port_enable(_eth, cast(ubyte)_switch_port, false);
             }
+            if (_users[port] == 1)
+            {
+                eth_set_ready_callback(null);
+                if (eth_close(_shared[port]).failed)
+                {
+                    if (first_attempt)
+                        log.warning("driver refused to uninstall; retrying");
+                    return CompletionStatus.continue_;
+                }
+            }
+            --_users[port];
+            _eth = EthMac.init;
         }
         _link_up = false;
         return super.shutdown();
@@ -243,7 +294,13 @@ protected:
     }
 
     override int wire_send(const(ubyte)[] frame)
-        => _eth.is_open && eth_tx(_eth, frame) ? 0 : -1;
+    {
+        if (!_eth.is_open)
+            return -1;
+        if (is_switch_port)
+            return eth_tx_switch(_eth, frame, cast(ubyte)_switch_port) ? 0 : -1;
+        return eth_tx(_eth, frame) ? 0 : -1;
+    }
 
     static if (has_eth_tx_checksum)
     {
@@ -255,8 +312,12 @@ protected:
     }
 
 private:
+    enum uint max_switch_ports = 8;
+
     EthMac _eth;
     EthernetConfig _config;
+    String _device;
+    byte _switch_port = -1;
     MACAddress _assigned_mac;
     EthSpeed _speed = EthSpeed.s100m;
     bool _auto_negotiate = true;
@@ -264,8 +325,37 @@ private:
     bool _link_up;
     Duplex _duplex = Duplex.unknown;
 
+    __gshared EthMac[num_ethernet] _shared;
+    __gshared uint[num_ethernet] _users;
     __gshared BuiltinEthernet[num_ethernet] _active;
+    __gshared BuiltinEthernet[max_switch_ports][num_ethernet] _switch_active;
     __gshared shared(uint) _service_pending;
+
+    bool is_switch_port() const pure => _switch_port >= 0;
+
+    // Unnamed means the first MAC, so single-MAC boards need no device property.
+    ubyte resolve_port() const
+    {
+        if (!_device)
+            return 0;
+        foreach (p; 0 .. num_ethernet)
+        {
+            if (eth_name(cast(ubyte)p) == _device[])
+                return cast(ubyte)p;
+        }
+        return ubyte.max;
+    }
+
+    ref BuiltinEthernet slot(ubyte port)
+        => is_switch_port ? _switch_active[port][_switch_port] : _active[port];
+
+    static void offset_mac(ref ubyte[6] mac, uint by)
+    {
+        uint low = (mac[3] << 16 | mac[4] << 8 | mac[5]) + by;
+        mac[3] = cast(ubyte)(low >> 16);
+        mac[4] = cast(ubyte)(low >> 8);
+        mac[5] = cast(ubyte)low;
+    }
 
     void set_wiring(string prop, T)(ref T field, T value)
     {
@@ -285,20 +375,29 @@ private:
             log.warning("set link mode failed");
     }
 
-    void service()
+    // One service pass drains the MAC for every interface on it.
+    static void service_port(ubyte port)
     {
-        if (!_eth.is_open)
+        if (_users[port] == 0)
             return;
+        BuiltinEthernet plain = _active[port];
         static if (has_eth_timestamp)
-            sample_clocks();
-        if (eth_service(_eth))
-            request_service();
-        uint dropped = eth_take_rx_drops(_eth);
-        if (dropped != 0)
         {
-            _status.rx_dropped += dropped;
-            mark_set!(typeof(this), "rx-dropped")();
+            if (plain !is null)
+                plain.sample_clocks();
         }
+        if (eth_service(_shared[port]))
+            request_service();
+        uint dropped = eth_take_rx_drops(_shared[port]);
+        // TODO: a switch-fronting MAC has no plain interface, so its drops are counted nowhere.
+        if (dropped != 0 && plain !is null)
+            plain.add_rx_drops(dropped);
+    }
+
+    void add_rx_drops(uint dropped)
+    {
+        _status.rx_dropped += dropped;
+        mark_set!(typeof(this), "rx-dropped")();
     }
 
     void set_connected(bool value)
@@ -315,7 +414,7 @@ private:
         if (_link_up)
         {
             EthLinkInfo info;
-            if (eth_get_link(_eth, info))
+            if (is_switch_port ? eth_get_switch_link(_eth, cast(ubyte)_switch_port, info).succeeded : eth_get_link(_eth, info).succeeded)
             {
                 set_duplex(info.full_duplex ? Duplex.full : Duplex.half);
                 set_link_speed(info.speed == EthSpeed.s10m ? 10_000_000 : info.speed == EthSpeed.s100m ? 100_000_000 : 1_000_000_000);
@@ -353,9 +452,8 @@ private:
         void event(MonoTime) nothrow @nogc
         {
             atomicStore!(MemoryOrder.release)(_service_pending, 0u);
-            foreach (iface; _active)
-                if (iface !is null)
-                    iface.service();
+            foreach (p; 0 .. num_ethernet)
+                service_port(cast(ubyte)p);
         }
     }
     __gshared ServiceSweep _service_sweep;
@@ -364,7 +462,11 @@ private:
     {
         if (eth.port >= num_ethernet)
             return;
-        auto iface = _active[eth.port];
+        BuiltinEthernet iface;
+        if (info.switch_port == ubyte.max)
+            iface = _active[eth.port];
+        else if (info.switch_port < max_switch_ports)
+            iface = _switch_active[eth.port][info.switch_port];
         if (iface is null || !iface.running)
             return;
         HwTimestamp hw = HwTimestamp(info.timestamp.seconds, info.timestamp.nanoseconds);
@@ -404,6 +506,15 @@ private:
         if (eth.port >= num_ethernet)
             return;
         auto iface = _active[eth.port];
+        if (iface !is null)
+            iface.on_link(event);
+    }
+
+    static void switch_link_dispatch(EthMac eth, ubyte switch_port, EthLinkEvent event)
+    {
+        if (eth.port >= num_ethernet || switch_port >= max_switch_ports)
+            return;
+        auto iface = _switch_active[eth.port][switch_port];
         if (iface !is null)
             iface.on_link(event);
     }
