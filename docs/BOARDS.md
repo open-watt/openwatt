@@ -25,6 +25,9 @@ A board lives at `platforms/<family>/boards/<name>/` and contains:
   and `VERSIONS` also belong here. Use `?=` for values users may override.
   A board that wires a PHY to an Espressif EMAC sets `USE_ETHERNET := 1`; the
   driver is never built otherwise, since the MAC alone is not a port.
+  A board on a part whose clock is configured rather than fixed (MT7621) sets
+  `BOARD_CPU_HZ`, so timekeeping reads the counter directly instead of scaling
+  a clock measured at boot; boot reports a board value the part disagrees with.
 - `system.conf`, required. It replaces the platform's baked-in startup script.
 - `sdkconfig.defaults`, required for Espressif boards. ESP-IDF applies it after
   the platform defaults, so board values override the reference development
