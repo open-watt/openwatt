@@ -163,6 +163,15 @@ carries 16MB.
 | 2026-09-23 | #747 | ldc 1.43.0 | 1,597,272 | 41,456 | 4,194,304 | boot guard ladder and retained reset record |
 | 2026-09-23 | ba8561fb | ldc 1.43.0 | 1,597,768 | 41,488 | 4,194,304 | POWMAN always-on timer keeps the wall clock across a reset |
 
+### MT7621 hEX S, `make BOARD=rb760igs CONFIG=release`
+
+Limit is the hEX S `firmware` partition the `kernel` file lives in, before filesystem overhead;
+a netbooted image is bounded by RAM instead.
+
+| date | commit | compiler | flash | ram | limit | note |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2026-09-26 | ow/mt7621-board | ldc 1.43.0 | 2,762,180 | 49,640 | 16,515,072 | first row; console only |
+
 ### bl808 e907, `make PLATFORM=bl808 PROCESSOR=e907 CONFIG=release`
 
 | date | commit | compiler | flash | ram | limit | note |

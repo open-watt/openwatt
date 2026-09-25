@@ -1324,6 +1324,57 @@ at 12MHz by clean UART framing. Outstanding:
 - **The on-board RGB LED is undriven.** It is the only peripheral on the Core, and a
   wire-free liveness signal, but needs PIO or bit-banged WS2812 timing.
 
+### MT7621 bring-up follow-ups (2026-09-26)
+
+`make BOARD=rb760igs` builds an image that RouterBOOT netboots on the MikroTik hEX S (RB760iGS): an
+ELF linked at `0x80001000`, running from RAM. Outstanding:
+
+- **Strip the bring-up probes before landing.** The LED heartbeat and the 10-minute auto-reset
+  (which hands the next netboot back to RouterOS) are board hacks inside the chip driver.
+- **Only a watchdog reset is identifiable.** `RSTSTAT` latches the watchdog and software-reset
+  causes (write-1-to-clear), but a deliberate `/system/reboot` and a fault's reset are both
+  software resets, so every other boot classifies as `unknown` and counts a boot-guard strike. A
+  retained reset record needs RAM that survives RouterBOOT, which is untested; until NVS exists the
+  boot guard keeps no state across resets anyway.
+- **Check whether BL618, BL808 M0 and BK7231N corrupt their TLSF heaps.** `vendor.mk` forces
+  `TLSF_ALIGN_SIZE_LOG2=3` on them (urt 51f84f0) so 8-byte requests skip memalign's gap, but on
+  32-bit TLSF's 4-byte size field then makes blocks alternate between 8- and 4-aligned and its size
+  arithmetic stops matching the physical layout: the MT7621 corrupted its heap within the first
+  unittest module, and builds without the define. Getting the no-gap intent back needs TLSF
+  patched to an 8-byte header overhead on 32-bit.
+- **Only the GIC timer compare has a user.** Shared lines route to CPU pin 0 of VPE 0 and dispatch
+  through `_irq_dispatch`, but no peripheral has an interrupt handler yet. The periodic and one-shot
+  compare share one register, as on BL618.
+- **The CPU clock is derived, not measured.** `cpu_rate()` follows Linux's clk-mt7621 and the
+  timing looks right, but nothing has checked it against a reference.
+- **RAM size is a board fact.** `board.mk` passes the hEX S's 256MB. Detect it at runtime as
+  Linux's mt7621 memory probe does (write a marker, find where it aliases) and size the heap from
+  that. RouterBOOT's resident footprint is also unverified: the heap takes everything above the
+  image; nothing has broken, but nothing has proven it either.
+- **No wall clock.** Neither the SoC nor the board has an RTC; the default config needs an NTP
+  client. There is no TRNG driver either, so `crypto_random_bytes` is unsupported.
+- **Audit the `align(1)` structs.** LDC loads `align(1)` fields at their natural alignment, so a
+  misaligned one traps on MIPS and silently rotates on ARMv5 (BK7231). `urt.uuid.GUID` now stores
+  bytes; the DHCP message, TCP header, GoodWe AA55 and Linux mgmt structs are unaudited. Worth an
+  upstream LDC report: `DtoAlignment(VarDeclaration*)` knows the field alignment but member loads
+  ignore it.
+- **The console drops output on a non-blocking UART.** `Session` ignores short writes from
+  `_stream.write`, and a bare-metal `uart_hw_write` takes only what the FIFO holds (16 bytes on
+  MT7621), so a burst loses everything past the first FIFO-full. Any platform without
+  interrupt-driven UART TX is affected.
+- **UART2/UART3 are pinmuxed to GPIO on the hEX S** (per the OpenWrt DTS), and the UART driver
+  does not touch GPIOMODE.
+- **Only one VPE of one core runs.** The 1004Kc pair has four VPEs.
+- **TLS is emulated.** `-emulated-tls` with urt's own single-threaded `__emutls_get_address`,
+  since the UserLocal register is optional in MIPS32r2. Native TLS would be cheaper if the
+  1004Kc has Config3.ULRI.
+- **The sysroot is hand-built.** picolibc and compiler-rt builtins are built locally per
+  `third_party/urt/platforms/mt7621/README.txt`; CI has no MIPS job.
+- **RP2350 and STM32 still run picolibc's malloc behind a stash-header wrapper**
+  (`urt/driver/{rp2350,stm32}/alloc.d`, identical copies). MT7621 moved to the vendored TLSF with
+  its own C entry points, so no libc allocator links; the same would suit them. RP2350's `_sbrk`
+  is dead code: picolibc's malloc calls its own weak `sbrk` over the same linker symbols.
+
 ### Template instantiation is 32% of the BK7231N image (2026-09-12)
 
 Measured on the BK7231N release image (953,924 B of text): symbols from template

@@ -129,7 +129,7 @@ nothrow @nogc:
             if (value.length == 5 && value[][0 .. 4] == "uart")
             {
                 uint port = value[][4] - '0';
-                if (port < num_uarts)
+                if (port >= first_uart && port < first_uart + num_uarts)
                 {
                     _uart_port = cast(byte)port;
                     _device = value.move;
@@ -139,7 +139,7 @@ nothrow @nogc:
                 }
             }
             _device = String();
-            return StringResult("invalid device: expected uart0-uart" ~ cast(char)('0' + num_uarts - 1));
+            return StringResult("invalid device: expected uart" ~ cast(char)('0' + first_uart) ~ "-uart" ~ cast(char)('0' + first_uart + num_uarts - 1));
         }
         else
         {
