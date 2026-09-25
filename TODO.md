@@ -1339,8 +1339,9 @@ also broadcasts console output as UDP. Outstanding:
   software resets, so every other boot classifies as `unknown` and counts a boot-guard strike. A
   retained reset record needs RAM that survives RouterBOOT, which is untested; until NVS exists the
   boot guard keeps no state across resets anyway.
-- **Ethernet and the MT7530 switch.** Standalone ports come up with the base MAC RouterBOOT
-  leaves in GDMA1, offset by front port; design and remaining phases in `docs/wip/SWITCH.md`.
+- **Ethernet and the MT7530 switch.** Standalone ports come up with the board's MACs from
+  hard_config (etherN = base + N-1, as RouterOS assigns them); design and remaining phases in
+  `docs/wip/SWITCH.md`.
   Every claimed port is isolated and CPU-only, and bridges forward in software. Open items in the
   driver:
   - Three consecutive runs on 2026-09-25 took a lease but never answered the PC's ARP or ping;
@@ -1367,6 +1368,9 @@ also broadcasts console output as UDP. Outstanding:
   Linux's mt7621 memory probe does (write a marker, find where it aliases) and size the heap from
   that. RouterBOOT's resident footprint is also unverified: the heap takes everything above the
   image; nothing has broken, but nothing has proven it either.
+- **Check the model against the build.** hard_config carries the board code (`RB760iGS`) and the
+  RAM size (tag 0x0D); warn when an image runs on a board it was not built for, and take the RAM
+  size from there instead of `board.mk`.
 - **No wall clock.** Neither the SoC nor the board has an RTC; the default config needs an NTP
   client. There is no TRNG driver either, so `crypto_random_bytes` is unsupported.
 - **Audit the `align(1)` structs.** LDC loads `align(1)` fields at their natural alignment, so a

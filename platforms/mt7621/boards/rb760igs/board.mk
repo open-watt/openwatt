@@ -5,3 +5,9 @@ BOARD_PLATFORM := mt7621
 BOARD_FLASH_SIZE := 16MB
 BOARD_PSRAM_SIZE := 0MB
 BOARD_RAM_SIZE := 256MB
+
+ifneq ($(VERSIONS),)
+    VERSIONS := $(VERSIONS),RouterBoot
+else
+    VERSIONS := RouterBoot
+endif

@@ -56,7 +56,7 @@ every claimed port is isolated and CPU-only, and bridges forward in software.
 
 ## Phases
 
-Status 2026-09-26 on the hEX S: phase 0 runs except GE2 and the hard_config read; phase 1 runs
+Status 2026-09-26 on the hEX S: phase 0 runs except GE2; phase 1 runs
 except the netconsole's move to a UDP log sink. The MT7621 entry in TODO.md lists what the first cut left open.
 
 0. MIPS GIC interrupt driver and timer tick; a real frame-engine driver (QDMA TX, interrupt-driven
