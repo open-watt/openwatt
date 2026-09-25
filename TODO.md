@@ -470,6 +470,21 @@ holding action, not an answer. Options, cheapest first:
   Switch to `IBluetoothLEDeviceStatics2.FromBluetoothAddressWithBluetoothAddressTypeAsync`.
   Blocked on testing against the car.
 
+- **The BLE connect gate is one slot with no cancel path**: `_pending_connect_tag` in
+  `src/driver/baremetal/ble.d` gates every connect on a radio, and three of its exits leak it. A
+  10 s deadline now backstops them, but `ble_connect_cancel` is called from nowhere, so an
+  abandoned connect still holds the radio for up to 10 s. Before the deadline, one leak latched it
+  for 12 h of a 14 h uptime on the S3 while scanning stayed healthy. Close each exit and wire the
+  cancel.
+
+- **An out-of-bounds write in the ESP32 BLE path corrupts the heap under coex, never pinned**: the
+  deployed S3 beside the car crashed in the `wifi` task (`tlsf_malloc` -> `remove_free_block`, a
+  corrupted heap free list) inside the 30 s OTA soak, while an identical bench board away from the
+  car stayed up, because only the car's BLE connection loads coex that hard. It was attributed to
+  urt's BLE scan pulls (`f77153dc`, `015ec8ba`) in 2026-08 and the corruptor was never found. Next
+  step: a `CONFIG_HEAP_POISONING` build, which faults where the write happens rather than where coex
+  later trips over it.
+
 ## 802.15.4 radio (WpanInterface)
 
 - Create `wpan1` in the C5 and C6 system profiles, as on S31; both currently require
@@ -975,6 +990,13 @@ this is what remains.
   already-introduced mirrors holding stale access, so
   their UIs may hide available controls or offer controls without agency. Emit an access change on the
   control plane, and make the mirror re-evaluate its peer binding.
+
+- **One RPC layer for `/api` and `/sync`**: both run CLI execution (immediate versus latent
+  commands, the result shape) and emit enum metadata with their own code, and a schema snapshot
+  would be the third copy. A small `manager.rpc` (`execute_cli`, `snapshot_enum`, later
+  `snapshot_schema`) leaves each transport only its framing and keeps a WS-to-HTTP fallback
+  byte-identical. The data-model verbs (`/get`, `/set`) and sync's property verbs are different
+  domains and stay apart. Worth doing once a second consumer needs the shared shape.
 
 ## Infrastructure
 
@@ -1665,6 +1687,22 @@ status and live reinstall. **No frame has crossed a wire on any part**, for want
   each second boundary of the 1588 clock, other rates on the P4/S31) and target-time alarm become
   worth exposing: PPS pins on two nodes under a scope measure the real sync error, and the alarm
   gives several nodes one sampling instant.
+
+### Draft PRs waiting on a decision
+
+Built work that had no PR, now kept as drafts so that it is not lost. Each PR body says what the
+work is, what state it is in, and what it is waiting on.
+
+- **#749, SmartEVSE front panel and wifi mirror**: bench-validated 2026-08-28. Only its AP client
+  count needs re-fitting to master's wifi driver, but the image sits at 94% of the stock
+  partition, so measure the screen's cost first.
+- **#750, bridge IGMP/MLD and DHCP snooping**: unit-tested, never run on the wire. It needs a
+  rebase off the old `ow/ipv6` stack, a querier role and fast-leave.
+- **#751 and urt#321, the build-owned BLE switch**: the rest of `ow/esp-riscv-bringup`, and what
+  still keeps the C5 and C6 from linking. Re-cut it as a clean pair; #751 as it stands would
+  regress the C5 sizing #726 landed.
+- **#752, a 433 MHz RF device**: a design sketch for driving a Brilliant ceiling fan whose state
+  can only be inferred, with four named pieces missing.
 
 ## Dated entries
 
