@@ -98,7 +98,7 @@ nothrow @nogc:
         }
     }
 
-    bool start(ActiveObject owner, ushort default_port = 0, bool tls = false)
+    bool start(ActiveObject owner, ushort default_port = 0, bool tls = false, BaseObject client_cert = null, BaseObject ca = null)
     {
         if (_stream)
             return true;
@@ -150,8 +150,15 @@ nothrow @nogc:
                 else
                     return false;
 
-                _stream = Collection!TLSStream().create(new_name, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary),
+                TLSStream t = Collection!TLSStream().create(new_name, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary),
                     NamedArgument("remote", host_with_port), NamedArgument("keepalive", _keepalive));
+                if (t)
+                {
+                    import protocol.tls : Certificate;
+                    t.client_cert = dyn_cast!Certificate(client_cert);
+                    t.ca = dyn_cast!Certificate(ca);
+                }
+                _stream = t;
             }
         }
         else if (!clean_host.empty)
