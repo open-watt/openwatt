@@ -1,5 +1,10 @@
 # TODO
 
+- **Linux boot guard cannot recover a repeatedly crashing configured image**: after the crash
+  threshold it selects the bring-up-defaults rung, but this Pi has no `default.conf`; it then
+  skips the existing `conf/startup.conf` and exits 255 forever. Define and implement a recovery
+  rung that always yields a runnable configuration, and cover repeated crash/restart behaviour.
+
 - Validate boot-guard OTA handoff on ESP32 hardware with NVS write/commit failures
   and power loss before/after image acceptance and rollback slot selection. Also
   exercise record loss/corruption and the power-on gesture on embedded targets.
