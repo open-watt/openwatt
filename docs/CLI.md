@@ -477,7 +477,7 @@ A serial stream opens a host serial device or an embedded UART.
 
 | Property | Values | Default | Description |
 | --- | --- | --- | --- |
-| `device` | device path, COM name, or `uartN` | required | Serial device to open. |
+| `device` | device path, COM name, or `uartN` | required | Serial device to open. Embedded `uartN` follows the datasheet numbering, so it starts at `uart1` on parts whose first UART is UART1 (MT7621). |
 | `baud-rate` | positive integer | `9600` | Symbol rate. |
 | `data-bits` | `5` to `8`; some embedded UARTs allow `9` | `8` | Data bits per character. |
 | `parity` | `none`, `even`, `odd`, `mark`, `space` | `none` | Parity mode. Embedded UARTs currently support `none`, `even`, and `odd`. |

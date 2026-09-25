@@ -37,6 +37,7 @@ ifdef BOARD
         $(error BOARD='$(BOARD)' must declare BOARD_PSRAM_SIZE in $(BOARD_MAKEFILES))
     endif
     PLATFORM ?= $(BOARD_PLATFORM)
+    CPU_HZ ?= $(BOARD_CPU_HZ)
 endif
 
 ifeq ($(PLATFORM),esp32-s2)
@@ -201,6 +202,8 @@ else ifeq ($(PLATFORM),esp32-p4)
     CONF_DIR := platforms/esp32p4
 else ifeq ($(PLATFORM),esp32-p4x)
     CONF_DIR := platforms/esp32p4x
+else ifeq ($(PLATFORM),mt7621)
+    CONF_DIR := platforms/mt7621
 endif
 
 ifeq ($(PLATFORM),bl808)
@@ -263,6 +266,10 @@ ifdef BAREMETAL_DIR
     BAREMETAL_LD := $(URT_PLATFORMS)/bk7231/$(PLATFORM).ld
   else ifeq ($(PLATFORM),rp2350)
     BAREMETAL_LD := $(URT_PLATFORMS)/rp2350/rp2350.ld
+  else ifeq ($(PLATFORM),mt7621)
+    BAREMETAL_LD := $(URT_PLATFORMS)/mt7621/mt7621.ld
+    BOARD_RAM_SIZE ?= 64MB
+    DFLAGS := $(DFLAGS) -L--defsym=__ram_size=$(BOARD_RAM_SIZE:MB=M)
   else ifdef STM32_VARIANT
     BAREMETAL_LD := $(URT_PLATFORMS)/stm32/stm32_$(STM32_VARIANT).ld
   endif
@@ -391,6 +398,10 @@ ifneq ($(filter bk7231n bk7231t,$(PLATFORM)),)
 endif
 ifeq ($(PLATFORM),rp2350)
 	arm-none-eabi-objcopy -O binary -R .bss -R .tbss -R '.tbss.*' -R .ARM.attributes -R '.debug*' $(TARGET) $(TARGETDIR)/fw.bin
+endif
+ifeq ($(PLATFORM),mt7621)
+	@# RouterBOOT loads an ELF, over TFTP or as the `kernel` file in flash.
+	$(BAREMETAL_GCC:-gcc=-strip) -o $(TARGETDIR)/kernel $(TARGET)
 endif
 ifneq ($(filter esp%,$(PLATFORM)),)
 	@echo ""
