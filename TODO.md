@@ -551,6 +551,40 @@ The current implementation and remaining phases are described in
 8. **Energy intent surface**: let automations propose and dispose requests on `Control`; keep
    arbitration and ownership of contended outputs in the allocator.
 
+9. **`if=` cannot read `$value`**: `condition_holds()` evaluates the condition with an empty
+   `EvalContext`, so `$value` exists only inside `do={}`. Dispatching on an enum element, such as
+   a button's `event`, needs the trigger value in the condition's context; a `for=` deadline can
+   use the snapshot it already keeps.
+
+## System IO
+
+Buttons, relays and lights as data-model components, the `system` device as the node's own
+surface, and the recovery and status behaviour built on them. The design, examples and open
+decisions are in [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md). Nothing is built.
+
+1. **Land the `system` device** (#532): rebase it onto master; it depends on urt#232.
+
+2. **`Button` and `Light` templates**: add both to `g_well_known_elements` and
+   COMPONENT_TEMPLATES.md. Migrate the six `Switch{type=light}` gangs in the zigbee profile and
+   the SmartEVSE's ad hoc `Buttons` component, with UX_TODO actions.
+
+3. **Local IO bindings**: `/binding/button`, `/binding/switch` and `/binding/light` over GPIO,
+   in `src/driver/` so the `switch` tier has them, with the output acting on its input locally.
+
+4. **Component alias**: `/element/alias` creates a mirror of a component and registers itself as
+   the writer, so sync accepts remote writes. `/element/link` has no CLI.md section; document it
+   alongside.
+
+5. **System slots**: the `panel.reset` hold ladder, the `panel.status` indication,
+   `/system/factory-reset` and `/system/identify`. The recovery stage needs #747's one-shot
+   defaults boot.
+
+6. **LED drivers**: `/driver/led/pwm` for the SmartEVSE's RGB LED, then `/driver/led/ws2812` for
+   each chip family (RMT, PIO, the BL808 bit-bang, or SPI encoding).
+
+7. **Network indication**: once #749's wifi mirror moves from the SmartEVSE binding into
+   `system.status.network`.
+
 ## Data model
 
 - **A numeric-to-text format change with history crashes the next text read**: `text_value`
@@ -1322,7 +1356,9 @@ at 12MHz by clean UART framing. Outstanding:
   EP0, enumeration, bulk endpoints); until then the board does not enumerate at all once
   our image is running, and the UART is the only console.
 - **The on-board RGB LED is undriven.** It is the only peripheral on the Core, and a
-  wire-free liveness signal, but needs PIO or bit-banged WS2812 timing.
+  wire-free liveness signal, but needs PIO or bit-banged WS2812 timing, and a GPIO backend
+  before either. The `/driver/led/ws2812` it would plug into is in
+  [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md).
 
 ### Template instantiation is 32% of the BK7231N image (2026-09-12)
 
