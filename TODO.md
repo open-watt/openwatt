@@ -152,6 +152,18 @@ holding action, not an answer. Options, cheapest first:
   - The reset gesture on a BOOT button; safe-state indication in the beacon and on an LED.
   - Wire up retained wall time on BK7231, BL618 and STM32; verify counter registers and
     reset/power-loss behavior on hardware.
+- **A firmware update renamed a deployed unit's ethernet interface.** SocketCAN (#503) stopped
+  enumerating CAN adapters as ethernet interfaces, so on the prod Pi (one NIC plus an mcp251x)
+  `eth0` moved from `ether2` to `ether1`. Its `startup.conf` names `ether2` as the VLAN parent,
+  so after the update it had no VLAN 3, no DHCP client, no in-stack addresses and no fleet
+  peering, and said nothing beyond one failed-create line. Fixed by hand on 2026-09-23
+  (`conf/startup.conf.bak-2026-09-23-ether`). Interface names are deployment identifiers:
+  either derive them so they do not shift when an unrelated device class moves, or detect the
+  shift and migrate. Unknown names in a saved config should also be loud, not a single line.
+- **A SocketCAN interface with no bit timing retries forever.** The Pi's auto-created `can1`
+  logs `CAN adapter 'can0' has no bit timing; set baud-rate` on every retry (26 times in one
+  log tail) and never starts. Either do not auto-create an interface that cannot run, or fail
+  it once and stay quiet.
 - **The BK7231N `switch-ip` build no longer fits**: `make PLATFORM=bk7231n CONFIG=release
   FEATURES=switch-ip HEADLESS=1 MODBUS=0` links but the packed image is 157,830 bytes over
   `_image_limit` on master (2026-09-22); the last ledger row (2026-09-09) had 4,640 bytes spare.
