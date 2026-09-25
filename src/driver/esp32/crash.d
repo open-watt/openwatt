@@ -54,8 +54,8 @@ void export_pending_crash_dump()
     }
     file.close();
 
-    char[11] sequence = void;
-    write_number(sequence[0 .. 10], number);
+    char[10] sequence = void;
+    write_number(sequence[], number);
     if (!save_file("crash.seq", sequence[]))
     {
         log.error("could not record crash dump sequence");
@@ -87,7 +87,7 @@ uint next_dump_number()
 {
     const(char)[] sequence = cast(const(char)[])load_file("crash.seq");
     uint number;
-    foreach (char c; sequence)
+    foreach (char c; sequence[0 .. (sequence.length < 10 ? sequence.length : 10)])
     {
         if (!c.is_numeric)
             continue;

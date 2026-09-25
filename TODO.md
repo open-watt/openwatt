@@ -965,7 +965,9 @@ this is what remains.
   every peer introduces at once. Find what runs long enough to starve the heartbeat at boot (the
   `log_slow_phase` subdivisions and `collection.update.*` warnings are the handles) rather than
   raising the deadline. Related: `collection.update.interface.sync1-ws<n>` sits at a steady 70ms
-  per frame against a 50ms budget, also pre-existing, with occasional 500-600ms spikes.
+  per frame against a 50ms budget, also pre-existing, with occasional 500-600ms spikes. The
+  supervisor now emits all child thread stacks through bounded GDB before the kill; capture the
+  next miss and trace the blocking path.
 
 - **Make backpressure a channel property**: the bulk walks (registry and model introduction,
   live re-arm, history backfill, template refresh) now run as the transport's `tx_handler` and ask
