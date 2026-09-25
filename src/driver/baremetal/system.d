@@ -100,6 +100,16 @@ void classify()
     // reboot sets nothing else, so the record decides there too.
     static if (!has_reset_record)
     {
+        version (MT7621)
+        {
+            import urt.driver.mt7621.watchdog : reset_by_watchdog;
+            if (reset_by_watchdog())
+            {
+                g_class = ResetClass.crash;
+                g_reason = "watchdog";
+                return;
+            }
+        }
         g_class = ResetClass.unknown;
         return;
     }
