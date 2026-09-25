@@ -7,6 +7,7 @@ static if (num_ethernet > 0)
 
 import urt.atomic;
 import urt.log;
+import urt.string;
 import urt.time;
 
 import manager;
@@ -37,6 +38,12 @@ nothrow @nogc:
         _max_l2mtu = 1500;
         _l2mtu = _max_l2mtu;
     }
+
+    final String device() const pure => _device;
+    final void device(String value) { set_wiring!"device"(_device, value); }
+
+    final ubyte port() const pure => _port;
+    final void port(ubyte value) { set_wiring!"port"(_port, value); }
 
     final EthPhy phy() const pure => _config.phy;
     final void phy(EthPhy value) { set_wiring!"phy"(_config.phy, value); }
@@ -130,7 +137,9 @@ nothrow @nogc:
         apply_link_mode();
     }
 
-    alias CommonProperties = AliasSeq!(Prop!("phy", phy),
+    alias CommonProperties = AliasSeq!(Prop!("device", device),
+                                       Prop!("port", port),
+                                       Prop!("phy", phy),
                                        Prop!("phy-address", phy_address),
                                        Prop!("mdc-gpio", mdc_gpio),
                                        Prop!("mdio-gpio", mdio_gpio),
@@ -160,13 +169,21 @@ nothrow @nogc:
         alias TxChecksumProperties = AliasSeq!();
     alias Properties = AliasSeq!(CommonProperties, PinSelectProperties, TxChecksumProperties);
 
-    final Duplex duplex() const pure => _duplex;
+    final Duplex duplex() const pure
+        => _duplex;
 
     override const(char)[] status_message() const
     {
         if (_eth.is_open && !_link_up)
             return "Cable unplugged";
         return super.status_message();
+    }
+
+    // TODO: say why; an unknown device or a port the MAC does not have fails silently.
+    override bool validate() const
+    {
+        immutable mac = resolve_mac();
+        return mac < num_ethernet && _port < eth_ports(mac);
     }
 
     override void heartbeat(MonoTime now)
@@ -181,12 +198,18 @@ protected:
     {
         if (!_eth.is_open)
         {
-            if (eth_open(_eth, 0, _config).failed)
+            immutable mac = resolve_mac();
+            if (eth_open(_eth, mac, _port, _config, &rx_thunk, &link_thunk, cast(void*)this).failed)
             {
                 log.error("ethernet MAC or PHY init failed");
                 return CompletionStatus.error;
             }
-            _active[_eth.port] = this;
+            // A reopened MAC's clock starts over, so the last pairing no longer places its stamps.
+            static if (has_eth_timestamp)
+            {
+                _mono_sample = MonoTime.init;
+                _mac_sample = EthTime.init;
+            }
             set_connected(false);
             _caps &= ~(InterfaceCaps.hw_timestamp | InterfaceCaps.tx_checksum);
             if (_config.timestamp)
@@ -194,8 +217,6 @@ protected:
             if (_config.tx_checksum)
                 _caps |= InterfaceCaps.tx_checksum;
             mark_set!(typeof(this), "caps")();
-            eth_set_rx_callback(_eth, &rx_dispatch);
-            eth_set_link_callback(_eth, &link_dispatch);
             eth_set_ready_callback(&request_service);
 
             ubyte[6] hw = void;
@@ -204,7 +225,7 @@ protected:
                 if (eth_set_address(_eth, _assigned_mac.b).failed)
                     log.warning("driver rejected hardware address");
             }
-            else if (eth_get_hardware_address(0, hw))
+            else if (eth_get_hardware_address(mac, _port, hw))
                 adopt_mac(MACAddress(hw));
 
             if (!_auto_negotiate)
@@ -218,16 +239,15 @@ protected:
     {
         if (_eth.is_open)
         {
-            eth_set_ready_callback(null);
-            bool first_attempt = _active[_eth.port] !is null;
-            _active[_eth.port] = null;
             if (eth_close(_eth).failed)
             {
-                if (first_attempt)
+                if (!_close_refused)
                     log.warning("driver refused to uninstall; retrying");
+                _close_refused = true;
                 return CompletionStatus.continue_;
             }
         }
+        _close_refused = false;
         _link_up = false;
         return super.shutdown();
     }
@@ -255,17 +275,32 @@ protected:
     }
 
 private:
-    EthMac _eth;
+    EthPort _eth;
     EthernetConfig _config;
+    String _device;
     MACAddress _assigned_mac;
+    ubyte _port;
     EthSpeed _speed = EthSpeed.s100m;
     bool _auto_negotiate = true;
     bool _full_duplex = true;
     bool _link_up;
+    bool _close_refused;
     Duplex _duplex = Duplex.unknown;
 
-    __gshared BuiltinEthernet[num_ethernet] _active;
     __gshared shared(uint) _service_pending;
+
+    // Unnamed means the first MAC, so single-MAC boards need no device property.
+    ubyte resolve_mac() const
+    {
+        if (!_device)
+            return 0;
+        foreach (mac; 0 .. num_ethernet)
+        {
+            if (eth_name(cast(ubyte)mac) == _device[])
+                return cast(ubyte)mac;
+        }
+        return ubyte.max;
+    }
 
     void set_wiring(string prop, T)(ref T field, T value)
     {
@@ -289,9 +324,7 @@ private:
     {
         if (!_eth.is_open)
             return;
-        static if (has_eth_timestamp)
-            sample_clocks();
-        if (eth_service(_eth))
+        if (eth_service(_eth.mac))
             request_service();
         uint dropped = eth_take_rx_drops(_eth);
         if (dropped != 0)
@@ -353,59 +386,61 @@ private:
         void event(MonoTime) nothrow @nogc
         {
             atomicStore!(MemoryOrder.release)(_service_pending, 0u);
-            foreach (iface; _active)
-                if (iface !is null)
-                    iface.service();
+            foreach (mac; 0 .. num_ethernet)
+            {
+                if (eth_service(cast(ubyte)mac))
+                    request_service();
+            }
         }
     }
     __gshared ServiceSweep _service_sweep;
 
-    static void rx_dispatch(EthMac eth, const(ubyte)[] frame, ref const EthRxInfo info)
+    static void rx_thunk(void* context, const(ubyte)[] frame, ref const EthRxInfo info)
     {
-        if (eth.port >= num_ethernet)
-            return;
-        auto iface = _active[eth.port];
-        if (iface is null || !iface.running)
+        auto iface = cast(BuiltinEthernet)context;
+        if (!iface.running)
             return;
         HwTimestamp hw = HwTimestamp(info.timestamp.seconds, info.timestamp.nanoseconds);
         iface.incoming_ethernet_frame(frame, iface.receive_time(info), 0, 0, info.has_timestamp ? &hw : null, info.checksum_verified);
     }
 
-    // The MAC clock and MonoTime run off the same crystal, so one paired sample per service
-    // pass places every stamp in the batch on the MonoTime line without drift between them.
+    static void link_thunk(void* context, EthLinkEvent event)
+    {
+        (cast(BuiltinEthernet)context).on_link(event);
+    }
+
+    // The MAC clock and MonoTime run off the same crystal, so one paired sample, taken at the first
+    // stamp newer than the last one, places every stamp in the batch on the MonoTime line without
+    // drift between them.
     static if (has_eth_timestamp)
     {
         MonoTime _mono_sample;
         EthTime _mac_sample;
-
-        void sample_clocks()
-        {
-            if (_config.timestamp && eth_get_time(_eth, _mac_sample))
-                _mono_sample = getTime();
-        }
     }
 
     MonoTime receive_time(ref const EthRxInfo info)
     {
         static if (has_eth_timestamp)
         {
-            if (info.has_timestamp && _mono_sample != MonoTime.init)
+            if (info.has_timestamp)
             {
-                long age = (long(_mac_sample.seconds) - info.timestamp.seconds) * 1_000_000_000 + (long(_mac_sample.nanoseconds) - info.timestamp.nanoseconds);
-                if (age >= 0)
+                long age = stamp_age(info.timestamp);
+                if (age < 0 && eth_get_time(_eth.mac, _mac_sample))
+                {
+                    _mono_sample = getTime();
+                    age = stamp_age(info.timestamp);
+                }
+                if (_mono_sample != MonoTime.init && age >= 0)
                     return _mono_sample - nsecs(age);
             }
         }
         return getTime();
     }
 
-    static void link_dispatch(EthMac eth, EthLinkEvent event)
+    static if (has_eth_timestamp)
     {
-        if (eth.port >= num_ethernet)
-            return;
-        auto iface = _active[eth.port];
-        if (iface !is null)
-            iface.on_link(event);
+        long stamp_age(ref const EthTime stamp) const
+            => (long(_mac_sample.seconds) - stamp.seconds) * 1_000_000_000 + (long(_mac_sample.nanoseconds) - stamp.nanoseconds);
     }
 }
 
