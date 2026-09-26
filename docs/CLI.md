@@ -748,13 +748,14 @@ after a repeated start. The board's `system.conf` creates it.
 
 An SFP port: an Ethernet interface whose MAC reaches the cage through a SerDes PHY, plus the cage
 itself. The board's `system.conf` creates it. On a platform that drives the port's MAC it adds
-`device` (the MAC), `phy` and `phy-address` (the SerDes PHY on the management bus); elsewhere it is
-the cage alone.
+`device` (the MAC, required), `phy` and `phy-address` (the SerDes PHY on the management bus);
+elsewhere it is the cage alone.
 
 The cage runs on its I2C and GPIO wiring alone: it watches presence and LOS by interrupt, reads the
 module's SFF-8472 identity 300 ms after insertion, and its diagnostics every 5 s while present.
-The MAC half joins only when `device` names a MAC the platform drives; until then the interface
-has no link and the laser stays off.
+The laser lights once the port is up and a module is present, and goes off when either ends. On
+the hEX S the PHY's cage side speaks 1000BASE-X only, so a copper module links at 1000BASE-T alone,
+and only once its own PHY has been set to 1000BASE-X over the cage's I2C bus, which is not done yet.
 
 | Property | Default | Description |
 | --- | --- | --- |
