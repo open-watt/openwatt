@@ -6,3 +6,9 @@ BOARD_FLASH_SIZE := 16MB
 BOARD_PSRAM_SIZE := 0MB
 BOARD_RAM_SIZE := 256MB
 BOARD_CPU_HZ := 880000000
+
+ifneq ($(VERSIONS),)
+    VERSIONS := $(VERSIONS),RouterBoot
+else
+    VERSIONS := RouterBoot
+endif
