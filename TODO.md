@@ -983,6 +983,11 @@ this is what remains.
 
 ## Infrastructure
 
+- **urt's platforms.mk drops MbedTLS when a caller sets `VERSIONS`**: it appends `MbedTLS` to
+  `VERSIONS` with a plain assignment, which a command-line `VERSIONS` overrides, so
+  `VERSIONS=Foo` on an mbedTLS platform builds without `version (MbedTLS)`. Add it to `DFLAGS`
+  directly, as OpenWatt's `BOARD_VERSIONS` does.
+
 - **Link follow-ups**: interfaces signal `link_up`/`link_down`, but every Ethernet driver except
   the SFP port still links with its lifecycle, waiting in Starting for carrier and restarting when
   it drops. Move them onto the SFP port's model (run from attach, signal the carrier through
@@ -1390,6 +1395,18 @@ also broadcasts console output as UDP. Outstanding:
   Linux's mt7621 memory probe does (write a marker, find where it aliases) and size the heap from
   that. RouterBOOT's resident footprint is also unverified: the heap takes everything above the
   image; nothing has broken, but nothing has proven it either.
+- **Flash and persistence.** 16MB SPI NOR: RouterBOOT occupies `0x0-0x40000` (hard_config
+  holds the base MAC, soft_config the boot settings), and `0x40000-0x1000000` is a YAFFS2-like
+  "minor" filesystem holding `kernel`. Flash boot needs that written; config persistence needs
+  somewhere that is not RouterBOOT's. The NOR has a PIO driver private to the platform
+  (`urt.driver.mt7621.spi_nor`), used only to arm netboot; it is not a `urt.driver.spi` backend.
+- **The recovery rung wears the soft_config sector.** A firmware that crashes on its defaults
+  arms netboot every fourth boot, and RouterBOOT disarms it again: two erases of one 4K sector
+  per cycle, about 70 days of a one-minute crash loop to the NOR's 100k-cycle endurance. Back off
+  (only every Nth descent) if a crash loop that long is plausible.
+- **Check the model against the build.** hard_config carries the board code (`RB760iGS`) and the
+  RAM size (tag 0x0D); warn when an image runs on a board it was not built for, and take the RAM
+  size from there instead of `board.mk`.
 - **No wall clock.** Neither the SoC nor the board has an RTC; the default config needs an NTP
   client. There is no TRNG driver either, so `crypto_random_bytes` is unsupported.
 - **Audit the `align(1)` structs.** LDC loads `align(1)` fields at their natural alignment, so a
