@@ -89,7 +89,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        platform: [bl808, bl808_m0, rp2350]  # stm4xx, stm7xx -- no linker script yet
+        platform: [bl808, bl808_m0, rp2350, stm32h7]
         include:
           - platform: bl808
             toolchain: riscv64-unknown-elf
@@ -98,10 +98,9 @@ jobs:
             make_args: PROCESSOR=e907
           - platform: rp2350
             toolchain: arm-none-eabi
-          # - platform: stm4xx
-          #   toolchain: arm-none-eabi
-          # - platform: stm7xx
-          #   toolchain: arm-none-eabi
+          - platform: stm32h7
+            toolchain: arm-none-eabi
+            make_args: BOARD=devebox-h7xx-m
       fail-fast: false
     steps:
       - uses: actions/checkout@v5

@@ -83,6 +83,8 @@ network.
 | Waveshare ESP32-S3-RS485-CAN | `waveshare-esp32-s3-rs485-can` | `esp32-s3` | 16 MB | 8 MB |
 | ESP32-S31-Function-CoreBoard-1 | `esp32-s31-function-coreboard-1` | `esp32-s31` | 16 MB | 16 MB |
 | Wireless-Tag WT99P4C5-S1 | `wt99p4c5-s1` | `esp32-p4` | 16 MB | 32 MB |
+| mcudev DevEBox STM32H7XX_M | `devebox-h7xx-m` | `stm32h7` | 2 MB | none |
+| JZ-F407VET6 | `jz-f407vet6` | `stm32f4` | 512 KB | none |
 
 **ESP32-S31-Function-CoreBoard-1** enables the fitted 16 MB octal PSRAM at 200 MHz.
 Its setup AP is at `192.168.4.1`. The RJ45 is `eth1`, a Motorcomm YT8531 on RGMII (`phy=yt8531`), built but not yet run.
@@ -103,6 +105,18 @@ waits on `object:rtc?state=online` before proceeding), the USB-serial console, L
 and WiFi running access point and station concurrently alongside BLE scanning. Its setup access
 point is WPA2 (`OpenWatt-Waveshare`, password `openwatt-setup`) and it also opens a telnet
 console.
+
+The STM32 boards build with `make BOARD=<name> CONFIG=release` and flash over the ROM's USB DFU
+with `make BOARD=<name> CONFIG=release stm32-flash`. They bring up only a console on USART1
+(PA9/PA10); no network yet.
+
+**mcudev DevEBox STM32H7XX_M** carries an STM32H743VIT6 with a 25 MHz crystal. It has no BOOT
+button, so K1 (PE3) held through reset enters the ROM bootloader, as does
+`/system/reboot bootloader=1` from a running image.
+
+**JZ-F407VET6** is a Chinese industrial board (RS232, RS485, two CAN ports, RMII Ethernet)
+carrying a Geehy APM32F407VET6, which builds as `stm32f4`. Its image does not fit yet: the
+`switch` build is about 70 KB over the 512 KB flash. DFU is through the BOOT0 jumper.
 
 **Wireless-Tag WT99P4C5-S1** is a WT0132P4-A1 module (ESP32-P4 N16R32, 16 MB flash and 32 MB HEX
 PSRAM) on a carrier with a 10/100 Ethernet port, an ESP32-C5-WROOM-1 for Wi-Fi 6, BLE and

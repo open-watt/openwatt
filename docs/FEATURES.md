@@ -97,7 +97,8 @@ from the [README](../README.md); outstanding work is in [TODO.md](../TODO.md).
 | SmartEVSE v3.0 | Beta | In-place replacement firmware for the SmartEVSE: EVSE driver, front panel, RS485, setup AP, stock-firmware return path over OTA. `BOARD=smartevse-v30`; see [BOARDS.md](BOARDS.md). |
 | Bouffalo BL808 and BL618 | WIP | Bare-metal D runtime, dual-core IPC, WiFi on the M0 coprocessor. |
 | Beken BK7231N/T | WIP | Switch tier; station associates. |
-| RP2350, STM32, esp8266 | Alpha | Build targets present; bring-up in progress. |
+| STM32 F4, F7, H7 | Alpha | The H7 runs on the DevEBox board (`BOARD=devebox-h7xx-m`): console, a TLSF pool per memory bank with an uncached DMA pool, and ROM DFU recovery from a button or the console. F4 and F7 build but have not run. |
+| RP2350, esp8266 | Alpha | Build targets present; bring-up in progress. |
 
 ## Device support
 
