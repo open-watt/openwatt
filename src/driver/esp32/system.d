@@ -44,6 +44,8 @@ version (ESP32)
 else
     enum bool has_download_mode = false;
 
+enum bool has_recovery_boot = false;
+
 bool reboot_pending() => false;
 
 // Why the chip came up. A restart that never reached the panic handler leaves no

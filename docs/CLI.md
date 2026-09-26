@@ -161,7 +161,13 @@ instead, where the part exposes its factory firmware-update interface. `bootload
 is the usual form; the value selects between loaders on a part offering more than one,
 which none currently does. Only targets whose silicon provides such an entry point
 implement this, and elsewhere the command reports that the platform has no bootloader
-mode and does not reboot.
+mode and does not reboot. On MikroTik RouterBOOT boards it arms RouterBOOT's
+"try Ethernet once" instead: the next boot asks BOOTP/TFTP for an image and falls back to
+the image in flash when nobody answers.
+
+Where the recovery boot comes back on its own like that, the boot guard also takes it
+unattended: after three crashes on the bring-up defaults with no previous firmware image to
+revert to, the node reboots into it.
 
 ### `/ping`
 

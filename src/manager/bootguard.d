@@ -11,7 +11,7 @@ import urt.time;
 
 import manager : g_app, TimerHandler;
 
-import driver.system : ResetClass, ImageId, OtaImage, reset_class, reset_reason, ota_running_image, ota_accept_image, ota_previous_image, ota_revert, system_reboot;
+import driver.system : ResetClass, ImageId, OtaImage, has_recovery_boot, reset_class, reset_reason, ota_running_image, ota_accept_image, ota_previous_image, ota_revert, system_reboot;
 
 nothrow @nogc:
 
@@ -197,6 +197,7 @@ __gshared bool _healthy;
 __gshared bool _have_stored;
 __gshared bool _image_known;
 __gshared bool _accept_pending;
+__gshared bool _recover;
 
 static if (has_reset_record)
     ref Trial trial() => *cast(Trial*)reset_record_scratch().ptr;
@@ -236,13 +237,18 @@ void descend(ref BootDecision d)
 
         case Rung.defaults:
             _why = max_strikes.stringof ~ " crashes on bring-up defaults";
-            if (!pending)
-                return;
-            log_error("system", "boot guard: firmware crashes on bring-up defaults; reverting to the previous image");
-            if (!ota_previous_image(_state.rollback) || _state.rollback == _state.image)
+            if (pending)
             {
+                log_error("system", "boot guard: firmware crashes on bring-up defaults; reverting to the previous image");
+                if (ota_previous_image(_state.rollback) && _state.rollback != _state.image)
+                    return;
                 _state.rollback = ImageId.init;
                 log_error("system", "boot guard: no previous image to revert to");
+            }
+            static if (has_recovery_boot)
+            {
+                log_error("system", "boot guard: nothing left to fall back to; rebooting into recovery");
+                _recover = true;
             }
             return;
     }
@@ -296,16 +302,27 @@ void checkpoint()
     g_app.schedule(getTime() + 5.seconds, retry_handler());
 }
 
-bool commit_transition(alias persist = write_state, alias accept = ota_accept_image, alias revert = ota_revert, alias reboot = system_reboot)()
+static if (has_recovery_boot)
+    import driver.system : recovery_reboot = system_reboot_to_recovery;
+else
+    void recovery_reboot() {}
+
+bool commit_transition(alias persist = write_state, alias accept = ota_accept_image, alias revert = ota_revert, alias reboot = system_reboot, alias recover = recovery_reboot)()
 {
     if (!persist())
         return false;
-    // Slot selection and bootloader acceptance must follow the durable recovery record.
+    // Slot selection, recovery and bootloader acceptance must follow the durable recovery record.
     if (_image_known && _state.rollback != ImageId.init)
     {
         if (!revert(_state.rollback))
             return false;
         reboot();
+        return true;
+    }
+    if (_recover)
+    {
+        _recover = false;
+        recover();
         return true;
     }
     if (_accept_pending && !accept())
@@ -550,13 +567,14 @@ unittest
     _state = BootState.init;
     _image_known = true;
     _accept_pending = true;
-    uint saves, accepts, selections, reboots;
+    uint saves, accepts, selections, reboots, recoveries;
     bool saved, accepted, selected;
     bool persist() { ++saves; return saved; }
     bool accept() { assert(saved); ++accepts; return accepted; }
     bool revert(ref const ImageId image) { assert(saved && image == _state.rollback); ++selections; return selected; }
     void reboot() { assert(selected); ++reboots; }
-    alias commit = commit_transition!(persist, accept, revert, reboot);
+    void recover() { assert(saved); ++recoveries; }
+    alias commit = commit_transition!(persist, accept, revert, reboot, recover);
     assert(!commit() && saves == 1 && accepts == 0 && selections == 0);
     saved = true;
     assert(!commit() && accepts == 1 && _accept_pending);
@@ -571,4 +589,9 @@ unittest
     assert(commit() && selections == 2 && reboots == 1);
     _image_known = false;
     assert(commit() && selections == 2 && reboots == 1);
+    _recover = true;
+    saved = false;
+    assert(!commit() && recoveries == 0 && _recover);
+    saved = true;
+    assert(commit() && recoveries == 1 && !_recover && accepts == 2);
 }

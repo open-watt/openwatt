@@ -46,6 +46,7 @@ void system_reboot()
 // with its SD card, not the board
 ulong unique_device_id() => 0;
 enum bool has_download_mode = false;
+enum bool has_recovery_boot = false;
 
 bool reboot_pending() => g_reboot;
 

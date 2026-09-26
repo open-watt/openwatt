@@ -66,8 +66,33 @@ version (RP2350)
         rom_reboot(RebootType.bootsel);
     }
 }
+else version (RouterBoot)
+{
+    enum bool has_download_mode = true;
+
+    void system_reboot_to_bootloader(uint)
+    {
+        system_reboot_to_recovery();
+    }
+}
 else
     enum bool has_download_mode = false;
+
+// A recovery boot must come back on its own when nobody answers, so the boot guard can take it unattended.
+version (RouterBoot)
+{
+    enum bool has_recovery_boot = true;
+
+    void system_reboot_to_recovery()
+    {
+        import urt.driver.routerboot : netboot_once;
+        if (!netboot_once())
+            log_error("system", "RouterBOOT: could not arm the netboot");
+        system_reboot();
+    }
+}
+else
+    enum bool has_recovery_boot = false;
 
 bool   reboot_pending() => false;
 bool   ota_supported() => false;
