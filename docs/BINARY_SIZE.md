@@ -172,6 +172,10 @@ a netbooted image is bounded by RAM instead.
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-09-26 | ow/mt7621-board | ldc 1.43.0 | 2,762,180 | 49,640 | 16,515,072 | first row; console only |
 | 2026-09-26 | ow/mt7621-network | ldc 1.43.0 | 2,784,052 | 51,096 | 16,515,072 | frame engine in urt; network defaults |
+| 2026-09-26 | ow/mt7621-sfp-board | ldc 1.43.0 | 2,787,780 | 51,096 | 16,515,072 | GPIO, event links and I2C in urt; board SFP config |
+| 2026-09-26 | all MT7621 PRs merged | ldc 1.43.0 | 2,822,632 | 56,092 | 16,515,072 | + SFP interface and binding (#774), RouterBOOT identity (#778), recovery rung (#776), urt #337 time, BOARD_CPU_HZ; RAM is routerboot's 4 KB sector buffer |
+| 2026-09-26 | all MT7621 PRs merged | ldc 1.43.0 | 2,822,360 | 52,028 | 16,515,072 | port-as-handle Ethernet API (urt#332, #772, #774): no dispatch tables; routerboot's sector buffer on the stack |
+| 2026-09-27 | all MT7621 PRs merged + #782 | ldc 1.43.0 | 2,824,760 | 52,044 | 16,515,072 | GE2 and the AR8033 fibre PHY in urt (urt#347); sfp1 data path |
 
 ### bl808 e907, `make PLATFORM=bl808 PROCESSOR=e907 CONFIG=release`
 
