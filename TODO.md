@@ -553,6 +553,11 @@ The current implementation and remaining phases are described in
 
 ## Data model
 
+- **The console prints quantities badly**: `/device/print` shows an integer 1310 nm as
+  `1.31e+3nm` and a float supply of 3.2616 V as `3.2616000175476074V`. The stored values are
+  right; the tree view's quantity formatting wants integers printed as integers and floats to a
+  precision that matches their resolution.
+
 - **A numeric-to-text format change with history crashes the next text read**: `text_value`
   reads the tail bucket without checking that bucket's format, so after `format` switches a
   numeric element with recorded history to text, it takes the scalar bucket's samples as `ushort`
