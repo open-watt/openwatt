@@ -98,6 +98,7 @@ from the [README](../README.md); outstanding work is in [TODO.md](../TODO.md).
 | Bouffalo BL808 and BL618 | WIP | Bare-metal D runtime, dual-core IPC, WiFi on the M0 coprocessor. |
 | Beken BK7231N/T | WIP | Switch tier; station associates. |
 | RP2350, STM32, esp8266 | Alpha | Build targets present; bring-up in progress. |
+| MediaTek MT7621A (MikroTik hEX S) | Alpha | Bare-metal, netbooted through RouterBOOT. |
 
 ## Device support
 
