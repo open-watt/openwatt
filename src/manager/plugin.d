@@ -177,6 +177,9 @@ void register_modules(Application app)
         import driver.rtc.pcf85063;
         register_module!(driver.rtc.pcf85063)(app);
 
+        import driver.sfp;
+        register_module!(driver.sfp)(app);
+
         import protocol;
         register_module!(protocol.ble)(app);
 
