@@ -39,6 +39,11 @@ ulong unique_device_id()
         import urt.driver.rp2350.identity : chip_unique_id;
         return chip_unique_id();
     }
+    else version (RouterBoot)
+    {
+        import urt.driver.routerboot : board_unique_id;
+        return board_unique_id();
+    }
     else
         return 0;
 }
