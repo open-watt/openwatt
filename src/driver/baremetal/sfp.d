@@ -61,14 +61,11 @@ nothrow @nogc:
 
 protected:
 
-    // TODO: a `device` this build does not drive leaves the port cage-only; refuse it once every SFP MAC is driven.
     override bool data_path_valid() const
-        => !has_mac || port_valid(_port);
+        => _port.device.length != 0 && port_valid(_port);
 
     override CompletionStatus data_path_up()
     {
-        if (!has_mac)
-            return CompletionStatus.complete;
         if (!_port.eth.is_open)
         {
             if (const(char)[] error = port_attach(_port))
@@ -80,7 +77,7 @@ protected:
             ubyte[6] hw = void;
             if (port_hardware_address(_port, hw))
                 adopt_mac(MACAddress(hw));
-            // TODO: set the SerDes media from the module (eth_set_media), then set_laser(true).
+            set_laser(true);
         }
         port_service(_port);
         return _port.link_up ? CompletionStatus.complete : CompletionStatus.continue_;
@@ -88,6 +85,7 @@ protected:
 
     override bool data_path_down()
     {
+        set_laser(false);
         bool first_attempt;
         if (port_detach(_port, first_attempt))
             return true;
@@ -101,9 +99,6 @@ protected:
 
 private:
     MacPort _port;
-
-    bool has_mac() const
-        => _port.device.length != 0 && port_resolve(_port) < num_ethernet;
 
     void set_wiring(string prop, T)(ref T field, T value)
     {
