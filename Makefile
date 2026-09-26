@@ -47,6 +47,11 @@ ifneq ($(filter bk7231n bk7231t,$(PLATFORM)),)
     RAM_IMAGE ?= deflate
 endif
 
+# Recursive, and set before platforms.mk: urt's vendored C rules expand OBJDIR while it is parsed.
+# system.conf is baked into the D object, so boards need isolated outputs.
+OBJDIR    = obj/$(BUILDNAME)$(if $(BOARD),_$(BOARD))_$(CONFIG)$(BUILD_VARIANT_SUFFIX)
+TARGETDIR = bin/$(BUILDNAME)$(if $(BOARD),_$(BOARD))_$(CONFIG)$(BUILD_VARIANT_SUFFIX)
+
 include $(URT_DIR)/platforms.mk
 include features.mk
 
@@ -174,9 +179,6 @@ ifdef BOARD_CONFIG_DIR
         $(error BOARD='$(BOARD)' is missing $(BOARD_CONFIG_DIR)/system.conf)
     endif
     CONF_DIR := $(BOARD_CONFIG_DIR)
-    # system.conf is baked into the D object, so boards need isolated outputs.
-    OBJDIR    := obj/$(BUILDNAME)_$(BOARD)_$(CONFIG)$(BUILD_VARIANT_SUFFIX)
-    TARGETDIR := bin/$(BUILDNAME)_$(BOARD)_$(CONFIG)$(BUILD_VARIANT_SUFFIX)
 else ifeq ($(PLATFORM),esp32)
     CONF_DIR := platforms/esp32
 else ifeq ($(PLATFORM),esp32-s2)
@@ -201,12 +203,6 @@ else ifeq ($(PLATFORM),esp32-p4x)
     CONF_DIR := platforms/esp32p4x
 endif
 
-ifneq ($(BUILD_VARIANT_SUFFIX),)
-    ifndef BOARD_CONFIG_DIR
-        OBJDIR := $(OBJDIR)$(BUILD_VARIANT_SUFFIX)
-        TARGETDIR := $(TARGETDIR)$(BUILD_VARIANT_SUFFIX)
-    endif
-endif
 ifeq ($(PLATFORM),bl808)
   ifeq ($(PROCESSOR),c906)
     CONF_DIR := platforms/bl808
