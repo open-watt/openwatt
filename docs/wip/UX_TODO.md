@@ -3,6 +3,14 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-09-26: SFP modules as devices
+
+- A new device type `sfp-module` (from `/binding/sfp`) carries a new `OpticalTransceiver`
+  component: `present`, `los`, `tx_enabled`, `standard`, `wavelength`, `temperature`,
+  `supply_voltage`, `tx_bias`, `tx_power`, `rx_power`. Optical powers arrive in mW; present them in dBm as well,
+  which is how optics are read. Identity is in `DeviceInfo`. `status.online` is false while the
+  cage is empty, which is normal, not a fault.
+
 ## 2026-09-23: boot guard recovery status
 
 - `/system/sysinfo` adds `Boot:` with the configuration rung and recovery reason;

@@ -726,6 +726,53 @@ does not forward.
 /interface/ethernet/add name=ether1 device=ge1 port=0
 ```
 
+### `/interface/i2c`
+
+An I2C bus master. Devices on the bus (an RTC, an SFP cage) reference the interface and exchange
+request and response frames through it: a request writes its bytes, then reads `read_length` bytes
+after a repeated start. The board's `system.conf` creates it.
+
+| Property | Default | Description |
+| --- | --- | --- |
+| `device` | required | The controller, `i2c0` upward in the chip's numbering. |
+| `frequency` | `100000` | SCL rate in Hz. |
+| `sda-gpio`, `scl-gpio` | required | The bus pins. Where the controller's pins are fixed (the MT7621 uses 3 and 4), they must name those. |
+| `internal-pullups` | `false` | Enable the pads' pull-ups, where the part has them. |
+| `last-error` | read-only | The outcome of the latest transfer: `none`, `nack`, `timeout`, `arbitration_lost` or `bus`. |
+
+```text
+/interface/i2c add name=i2c1 device=i2c0 sda-gpio=3 scl-gpio=4
+```
+
+### `/interface/sfp`
+
+An SFP port: an Ethernet interface whose MAC reaches the cage through a SerDes PHY, plus the cage
+itself. The board's `system.conf` creates it. On a platform that drives the port's MAC it adds
+`device` (the MAC), `phy` and `phy-address` (the SerDes PHY on the management bus); elsewhere it is
+the cage alone.
+
+The cage runs on its I2C and GPIO wiring alone: it watches presence and LOS by interrupt, reads the
+module's SFF-8472 identity 300 ms after insertion, and its diagnostics every 5 s while present.
+The MAC half joins only when `device` names a MAC the platform drives; until then the interface
+has no link and the laser stays off.
+
+| Property | Default | Description |
+| --- | --- | --- |
+| `i2c` | unset | The `/interface/i2c` bus the module's EEPROM (0x50) and diagnostics (0x51) sit on. Unset reads nothing. |
+| `mod-def0-gpio` | `-1` | Module present, active low; `-1` treats the cage as always occupied. |
+| `los-gpio` | `-1` | Loss of signal from the module, active high. |
+| `tx-disable-gpio` | `-1` | Laser disable. The laser runs only while a module is present and the data path is up. |
+| `present` | read-only | A module is seated. |
+| `los` | read-only | The module sees no light on its receiver. |
+| `tx-enabled` | read-only | The laser is on. Without `tx-disable-gpio` it follows `present`, as such cages wire the laser on. |
+
+Module identity and diagnostics are published through `/binding/sfp`, not on the interface.
+
+```text
+/interface/i2c add name=i2c1 device=i2c0 sda-gpio=3 scl-gpio=4
+/interface/sfp add name=sfp1 device=ge2 phy-address=7 i2c=i2c1 mod-def0-gpio=8 los-gpio=6 tx-disable-gpio=10
+```
+
 ### `/interface/obd`
 
 An OBD interface speaks OBD-II diagnostics to a vehicle: requests and responses
@@ -930,6 +977,22 @@ is the functional broadcast). Mode `0x22` pids are 16-bit UDS data identifiers.
 ```text
 /interface/obd/add name=car-obd stream=obd0
 /binding/obd/add name=car device=mg profile=j1979
+```
+
+### `/binding/sfp`
+
+Projects the module in an SFP cage into a Device: `info` (`DeviceInfo`, type `sfp-module`) carries
+the vendor, part number, serial and revision, and `transceiver` (`OpticalTransceiver`) carries
+presence, LOS, the Ethernet standard, wavelength and the live diagnostics. `status.online` follows
+presence. Diagnostics are published only for internally calibrated modules.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `interface` | SFP interface name | required | The cage to project. |
+| `device` | device name | required | Device to create or populate. |
+
+```text
+/binding/sfp add name=sfp1 interface=sfp1 device=sfp1
 ```
 
 ### `/driver/power/regulator`
