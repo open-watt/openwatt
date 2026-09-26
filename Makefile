@@ -39,6 +39,24 @@ ifdef BOARD
     PLATFORM ?= $(BOARD_PLATFORM)
 endif
 
+# Flash coredumps require both ESP-IDF support and a dedicated partition. Keep
+# the feature opt-in so ordinary images retain all available storage.
+COREDUMP ?= 0
+ifeq ($(filter 0 1,$(COREDUMP)),)
+    $(error COREDUMP must be 0 or 1)
+endif
+ifeq ($(COREDUMP),1)
+    ifeq ($(filter esp32-s3 esp32-s31 esp32-c5 esp32-c6,$(PLATFORM)),)
+        $(error COREDUMP=1 is supported only on PLATFORM=esp32-s3, esp32-s31, esp32-c5 or esp32-c6)
+    endif
+    BUILD_VARIANT_SUFFIX := _coredump
+endif
+
+# Deferred, and set before platforms.mk so its vendor compile rules see the final paths. A board
+# bakes its system.conf into the D object, so boards need isolated outputs.
+OBJDIR    = obj/$(BUILDNAME)$(if $(BOARD),_$(BOARD))_$(CONFIG)$(BUILD_VARIANT_SUFFIX)
+TARGETDIR = bin/$(BUILDNAME)$(if $(BOARD),_$(BOARD))_$(CONFIG)$(BUILD_VARIANT_SUFFIX)
+
 ifeq ($(PLATFORM),esp32-s2)
     TINY ?= 0
 endif
@@ -50,18 +68,8 @@ endif
 include $(URT_DIR)/platforms.mk
 include features.mk
 
-# Flash coredumps require both ESP-IDF support and a dedicated partition. Keep
-# the feature opt-in so ordinary images retain all available storage.
-COREDUMP ?= 0
-ifeq ($(filter 0 1,$(COREDUMP)),)
-    $(error COREDUMP must be 0 or 1)
-endif
 ifeq ($(COREDUMP),1)
-    ifeq ($(filter esp32-s3 esp32-s31 esp32-c5 esp32-c6,$(PLATFORM)),)
-        $(error COREDUMP=1 is supported only on PLATFORM=esp32-s3, esp32-s31, esp32-c5 or esp32-c6)
-    endif
     DFLAGS := $(DFLAGS) $(VERSION_FLAG)CoreDump
-    BUILD_VARIANT_SUFFIX := _coredump
 endif
 
 # =======================================================================
@@ -174,9 +182,6 @@ ifdef BOARD_CONFIG_DIR
         $(error BOARD='$(BOARD)' is missing $(BOARD_CONFIG_DIR)/system.conf)
     endif
     CONF_DIR := $(BOARD_CONFIG_DIR)
-    # system.conf is baked into the D object, so boards need isolated outputs.
-    OBJDIR    := obj/$(BUILDNAME)_$(BOARD)_$(CONFIG)$(BUILD_VARIANT_SUFFIX)
-    TARGETDIR := bin/$(BUILDNAME)_$(BOARD)_$(CONFIG)$(BUILD_VARIANT_SUFFIX)
 else ifeq ($(PLATFORM),esp32)
     CONF_DIR := platforms/esp32
 else ifeq ($(PLATFORM),esp32-s2)
@@ -201,12 +206,6 @@ else ifeq ($(PLATFORM),esp32-p4x)
     CONF_DIR := platforms/esp32p4x
 endif
 
-ifneq ($(BUILD_VARIANT_SUFFIX),)
-    ifndef BOARD_CONFIG_DIR
-        OBJDIR := $(OBJDIR)$(BUILD_VARIANT_SUFFIX)
-        TARGETDIR := $(TARGETDIR)$(BUILD_VARIANT_SUFFIX)
-    endif
-endif
 ifeq ($(PLATFORM),bl808)
   ifeq ($(PROCESSOR),c906)
     CONF_DIR := platforms/bl808
