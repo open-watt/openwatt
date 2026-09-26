@@ -1352,14 +1352,25 @@ also broadcasts console output as UDP. Outstanding:
     front port pass inline both ways (ether1.3 takes a DHCP lease); 802.1ad is untested.
   - DMA buffers are uncached and transmit waits for each release; move to cached buffers with MIPS L1/L2
     cache maintenance and reclaim from the release ring.
+- **sfp1's link has never been seen up.** GE2 and the AR8033 behind the cage are driven
+  (urt#347) and the laser lights once the port opens, but the bench has no fibre partner or
+  loopback cord, so link-up and traffic on sfp1 are untested. The AR8033's cage side speaks
+  1000BASE-X only, so a copper SFP links at 1000BASE-T alone and only after the cage sets the
+  module's own PHY to 1000BASE-X over I2C (MDIO at 0x56, as Linux's sfp.c does): not written.
+  A host with an SGMII SerDes would instead want a media hook driven from the module's EEPROM.
+  The query is per interface and shared with copper ports: one port-media description (media
+  kind; supported, advertised and partner link modes; identity from the PHY ID or the module
+  EEPROM; diagnostics from PHY cable test/temperature or SFP DDM), assembled from the PHY via the
+  ethernet driver or switch side-channel plus the bound cage, with absent fields creating no
+  Element.
 - **Check whether BL618, BL808 M0 and BK7231N corrupt their TLSF heaps.** `vendor.mk` forces
   `TLSF_ALIGN_SIZE_LOG2=3` on them (urt 51f84f0) so 8-byte requests skip memalign's gap, but on
   32-bit TLSF's 4-byte size field then makes blocks alternate between 8- and 4-aligned and its size
   arithmetic stops matching the physical layout: the MT7621 corrupted its heap within the first
   unittest module, and builds without the define. Getting the no-gap intent back needs TLSF
   patched to an 8-byte header overhead on 32-bit.
-- **Only the timer compare and the frame engine take interrupts.** Shared lines route to CPU pin 0
-  of VPE 0 and dispatch through `_irq_dispatch`; the UART and the switch are still polled. The
+- **Only the timer compare, the frame engine and GPIO take interrupts.** Shared lines route to CPU
+  pin 0 of VPE 0 and dispatch through `_irq_dispatch`; the UART, the switch and I2C are still polled. The
   periodic and one-shot compare share one register, as on BL618.
 - **The CPU clock is derived, not measured.** `cpu_rate()` follows Linux's clk-mt7621 and the
   timing looks right, but nothing has checked it against a reference.
@@ -1380,7 +1391,9 @@ also broadcasts console output as UDP. Outstanding:
   interrupt-driven UART TX is affected; the MT7621 netconsole hides it by mirroring the input.
 - **UART2/UART3 are pinmuxed to GPIO on the hEX S** (per the OpenWrt DTS), and the UART driver
   does not touch GPIOMODE.
-- **Only one VPE of one core runs.** The 1004Kc pair has four VPEs.
+- **Only one VPE of one core runs.** The 1004Kc pair has four VPEs. A second VPE running only reflex
+  tasks, with the GIC routing their sources to it, is also how this chip would reach the event
+  layer's unmaskable tier: the NMI vectors into RouterBOOT's flash, and there is no trigger matrix.
 - **TLS is emulated.** `-emulated-tls` with urt's own single-threaded `__emutls_get_address`,
   since the UserLocal register is optional in MIPS32r2. Native TLS would be cheaper if the
   1004Kc has Config3.ULRI.
