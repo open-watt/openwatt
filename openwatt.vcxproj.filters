@@ -1299,9 +1299,6 @@
     <DCompile Include="third_party\urt\src\urt\driver\rp2350\uart.d">
       <Filter>third_party\urt\driver\rp2350</Filter>
     </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\stm32\alloc.d">
-      <Filter>third_party\urt\driver\stm32</Filter>
-    </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\stm32\irq.d">
       <Filter>third_party\urt\driver\stm32</Filter>
     </DCompile>

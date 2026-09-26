@@ -39,6 +39,11 @@ ulong unique_device_id()
         import urt.driver.rp2350.identity : chip_unique_id;
         return chip_unique_id();
     }
+    else version (STM32)
+    {
+        import urt.driver.stm32.identity : chip_unique_id;
+        return chip_unique_id();
+    }
     else
         return 0;
 }
@@ -64,6 +69,19 @@ version (RP2350)
     {
         import urt.driver.rp2350.bootrom : rom_reboot, RebootType;
         rom_reboot(RebootType.bootsel);
+    }
+}
+else version (STM32)
+{
+    enum bool has_download_mode = true;
+
+    // The ROM bootloader speaks USB DFU; urt has no USB device stack of its own yet.
+    void system_reboot_to_bootloader(uint)
+    {
+        import urt.driver.reset : ResetMark, reset_record_mark;
+        import urt.driver.stm32 : reboot_to_bootloader;
+        reset_record_mark(ResetMark.deliberate);
+        reboot_to_bootloader();
     }
 }
 else

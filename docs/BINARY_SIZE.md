@@ -175,6 +175,12 @@ carries 16MB.
 | 2026-09-23 | #747 | ldc 1.43.0 | 2,237,328 | 53,248 | - | first row; boot guard ladder and retained reset record |
 | 2026-09-23 | ba8561fb | ldc 1.43.0 | 2,237,392 | 53,248 | - | RTC persistence changes; BL618 wall-time retention remains unimplemented |
 
+### DevEBox STM32H7XX_M, `make BOARD=devebox-h7xx-m CONFIG=release`
+
+| date | commit | compiler | flash | ram | limit | note |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2026-09-26 | #781 | ldc 1.43.0 | 1,623,936 | 58,372 | 2,097,152 | first row; per-bank TLSF pools and DFU recovery (urt #339-#345) |
+
 Add a section for any other configuration the first time it is deployed. Keep the make
 invocation in the heading exact, including FEATURES, HEADLESS, IPV6 and GATEWAY when they
 differ from the defaults; a different invocation is a different table.

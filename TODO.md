@@ -1268,6 +1268,60 @@ this is what remains.
   accumulator source paths, element metadata, profile enums, protocol element descriptors,
   and other slices into profile string/section storage.
 
+### STM32 bring-up follow-ups (2026-09-26)
+
+The DevEBox H7 boots and runs OpenWatt with a console, per-bank TLSF pools and DFU recovery.
+
+- **The JZ-F407VET6 image is ~70 KB over its 512 KB flash** (`BOARD=jz-f407vet6`, `switch`,
+  TINY). Candidates: CLI helpers (~76 KB), the element catalogue (15.5 KB), libm trig (~15 KB),
+  the two sync encoders; `HEADLESS=1` gates almost nothing. The APM32's ROM DFU reports a 1 MB
+  sector layout, so read the factory flash-size register before trimming: the part may be a VG.
+- **F4 and F7 have never run on hardware.** The APM32F407 board is the first F4 candidate.
+- **The reset reason after a DFU `:leave` is wrong**: one flash read `power-on`, the next
+  `watchdog` (a `running` mark left in place), never `deliberate`. Unexplained: either the ROM
+  clobbers the DTCM record, or an image boot and an unmarked reset happen around the hand-off.
+- **No stack guard.** The stack sits at the top of core RAM with statics below it; an overflow
+  silently corrupts them. An MPU no-access region under `_stack_low`, or a PSP/MSP split.
+- **No watchdog.** IWDG is never armed, so a hang never resets and the boot guard cannot count it.
+- **Reset-cause flags are not read** (RCC_RSR on H7, RCC_CSR on F4/F7); the reset class comes
+  only from the retained record.
+- **Queued console output is lost on a deliberate reset.** `system_reset` does not drain the TX
+  ring; only the fault path writes through the blocking `uart0_hw_puts`. MT7621's fault report
+  flushes its netconsole before resetting; one console flush inside urt's `system_reset` would
+  serve every part and every reset path.
+- **The UART rings are reserved for every port**: RX 256 and TX 1024 bytes each, 7.7 KB of F4
+  core RAM and 10 KB on H7, though only the console opens. Settle with the event-driven UART
+  contract for all micros (page delivery on RX idle, TX pulled from a submission queue).
+- **No reflex/event backend.** EXTI, and on H7 EXTI to DMAMUX to DMA to BSRR, would give STM32
+  what the ESP32 event links do.
+- **Check whether the page pool's DMA pages belong in the H7's uncached SRAM1-3.** It takes 9 KB
+  there at boot.
+
+Bare-metal follow-ups from the same series:
+
+- **The shared TLSF heap core has not run on Bouffalo or BK7231N.** urt's `driver/baremetal/heap`
+  replaced both private heaps; only the STM32H7 has run it. Run the unit-test images on a BL618,
+  a BL808 and a BK7231N.
+- **MT7621 keeps its own single-pool TLSF allocator**; it could take the shared core with a
+  one-pool topology.
+- **The MT7621 fault report prints no backtrace.** `urt.exception.write_backtrace` is shared by
+  every bare-metal part and MIPS already unwinds in `capture_trace`; walking from the faulting
+  frame needs the unwind seeded from the trapped epc, ra and sp rather than the handler's own.
+- **A bare-metal assert spins forever**, so no boot guard counts it. It should record a crash
+  and reset, as the Cortex-M fault report does.
+- **The bare-metal assert backtrace skip is a fixed count**, and the number of frames the
+  capture wrappers leave differs between builds: the skip is right in the RP2350 unittest image
+  (per the #341 review) but the fault frames on an STM32H7 release image imply one frame more.
+  The Cortex-M fault path anchors on EXC_RETURN instead; the assert path wants a similar anchor,
+  such as starting after the last return address inside `urt_assert`.
+- **The RP2350 periodic tick silently caps at 111 ms.** It runs on SysTick, whose 24-bit reload
+  holds 2^24 cycles at 150 MHz; a longer `periodic_set` interval is clamped with no error. STM32
+  moved its tick to a TIM5 compare channel stepped by the period (urt #343); TIMER0's alarms
+  would do the same on RP2350.
+- **Check the RP2350 console for truncated output.** Its UART write fills the 32-byte FIFO and
+  returns short, and the console treats a short write as sent; the STM32 console lost output the
+  same way until its UART went interrupt driven.
+
 ### RP2350 bring-up follow-ups (2026-09-20)
 
 Boots and runs on a WeAct RP2350B Core, with an interactive console on UART1 (GPIO8 TX,
@@ -1287,8 +1341,6 @@ at 12MHz by clean UART framing. Outstanding:
 - **The app is silent after the unit tests finish.** The runner prints `Process restarting...`
   and nothing follows. A release image boots to a working console, so this is specific to the
   `CONFIG=unittest` image, not to app startup.
-- **The hard-float fix is unverified on STM32.** `arm: select the hard-float ABI explicitly`
-  changes codegen for every ARM baremetal target, and only RP2350 has been run.
 - **More of the boot ROM is worth taking.** `urt/driver/rp2350/bootrom.d` has the table
   lookup, so each addition is a signature and a code. Still unused:
   `CONNECT_INTERNAL_FLASH`, `FLASH_EXIT_XIP`, `FLASH_RANGE_ERASE`, `FLASH_RANGE_PROGRAM`,
