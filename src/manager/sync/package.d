@@ -58,7 +58,7 @@ import manager.collection;
 import manager.component : Component;
 import manager.device : Device, DeviceBuilder, DeviceLifecycleEvent, register_device_lifecycle_handler;
 import manager.element : Access, add_feed_listener, Cursor, Element, ElementLifecycleEvent,
-                         register_element_lifecycle_handler, remove_feed_listener, SampleUpdate, sweep_dirty;
+                         register_element_lifecycle_handler, remove_feed_listener, SampleUpdate, Subscriber, sweep_dirty;
 import manager.id : EID;
 import manager.path : Address, match_path, pattern_matches, walk_elements, walk_elements_until;
 import manager.series : Constraint, DataFormat, format_info, FormatId, RecordBlock, register_format, Scalar,
@@ -1624,8 +1624,8 @@ nothrow @nogc:
             if (const(Access)* acc = enum_from_key!Access(access))
                 remote_access = *acc;
         }
-        if (v && !v.isNull)
-            merge_remote_value(e, *v, t_ms);
+        if (v)
+            merge_remote_value(e, *v, t_ms, &on_mirror_write);
         EID eid = e.ensure_eid();
         from.attach_model_element(dev, e, remote_access);
 
@@ -1713,7 +1713,7 @@ nothrow @nogc:
             log.debug_("val for dead handle ", handle);
             return true;
         }
-        merge_remote_value(e, value, t_ms);
+        merge_remote_value(e, value, t_ms, &on_mirror_write);
         return true;
     }
 
@@ -2641,19 +2641,22 @@ nothrow @nogc:
         return writer;
     }
 
-    void merge_remote_value(Element* e, ref Variant value, ulong t_ms)
+    // Judged against last_update, the clock a sender stamps with, so an invalidated mirror keeps its place in time.
+    // `who` is the forwarding subscriber, so the authority's own data never echoes back.
+    static void merge_remote_value(Element* e, ref Variant value, ulong t_ms, Subscriber who)
     {
         import urt.time : from_unix_time_ns;
 
-        if (t_ms > max_model_time_ms)
+        // a null with no time is no value to report; with one, the value stopped being known then
+        if (t_ms > max_model_time_ms || (value.isNull && !t_ms))
             return;
         SysTime timestamp = t_ms ? from_unix_time_ns(t_ms * 1_000_000) : getSysTime();
-        SysTime current = e.record_update();
-        if (!model_value_is_newer(current, t_ms, timestamp))
+        if (!model_value_is_newer(e.last_update, t_ms, timestamp))
             return;
-
-        // written as the forwarding subscriber so the authority's own data never echoes back
-        e.value(value, timestamp, &on_mirror_write);
+        if (value.isNull)
+            e.invalidate(timestamp, who);
+        else
+            e.value(value, timestamp, who);
     }
 
     // TODO: a mirrored element must not store a local write; it offers the write to the authority and adopts only
@@ -3040,4 +3043,69 @@ unittest
         builder.commit();
     }
     assert(watch.reclassified == 0);
+}
+
+unittest
+{
+    import urt.si.quantity : Quantity;
+    import urt.si.unit : ScaledUnit, Volt;
+    import urt.time : from_unix_time_ns, unix_time_ns;
+    import manager.series : SeriesKind, ValueType;
+
+    // A source's invalidation reaches its mirror as it would on the wire: null, stamped with the source's last_update.
+    static immutable DataFormat volts = DataFormat(ValueType.f64, SeriesKind.held, ScaledUnit(Volt));
+    Element source, mirror;
+    source.format = register_format(volts);
+    mirror.format = register_format(volts);
+    ulong stamp(ref Element e) => unix_time_ns(e.last_update) / 1_000_000;
+
+    source.value(Quantity!double(3.3, ScaledUnit(Volt)), from_unix_time_ns(1_000_000_000));
+    Variant sent = source.value;
+    SyncModule.merge_remote_value(&mirror, sent, stamp(source), null);
+    assert(mirror.value.isQuantity);
+
+    source.invalidate(from_unix_time_ns(2_000_000_000));
+    Variant gone = source.value;
+    assert(gone.isNull);
+    SyncModule.merge_remote_value(&mirror, gone, stamp(source), null);
+    assert(mirror.value.isNull);
+
+    // an older sample replayed after the invalidation does not revive the reading; a newer one does
+    Variant replay = Variant(Quantity!double(3.3, ScaledUnit(Volt)));
+    SyncModule.merge_remote_value(&mirror, replay, 1000, null);
+    assert(mirror.value.isNull);
+    Variant fresh = Variant(Quantity!double(3.1, ScaledUnit(Volt)));
+    SyncModule.merge_remote_value(&mirror, fresh, 3000, null);
+    assert(mirror.value.isQuantity);
+
+    // an invalidation while disconnected reaches the mirror through the reintroduction
+    source.value(Quantity!double(3.2, ScaledUnit(Volt)), from_unix_time_ns(4_000_000_000));
+    Variant live = source.value;
+    SyncModule.merge_remote_value(&mirror, live, stamp(source), null);
+    assert(mirror.value.isQuantity);
+    source.invalidate(from_unix_time_ns(5_000_000_000));
+    Variant intro;
+    ulong intro_t;
+    intro_value(&source, intro, intro_t);
+    assert(intro.isNull && intro_t == 5000);
+    SyncModule.merge_remote_value(&mirror, intro, intro_t, null);
+    assert(mirror.value.isNull);
+
+    // a mirror with no value keeps an invalidation's time, and an older replay does not land behind it
+    Element unset;
+    unset.format = register_format(volts);
+    Variant none;
+    SyncModule.merge_remote_value(&unset, none, 2000, null);
+    Variant older = Variant(Quantity!double(3.3, ScaledUnit(Volt)));
+    SyncModule.merge_remote_value(&unset, older, 1000, null);
+    assert(unset.value.isNull);
+
+    // an untimed null reports nothing
+    SyncModule.merge_remote_value(&mirror, live, 6000, null);
+    SyncModule.merge_remote_value(&mirror, none, 0, null);
+    assert(mirror.value.isQuantity);
+
+    source.teardown();
+    mirror.teardown();
+    unset.teardown();
 }

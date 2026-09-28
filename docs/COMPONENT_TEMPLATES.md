@@ -28,6 +28,7 @@ Quick reference for standard component templates and their expected elements.
 | `Shutter` | Window/door shutter control | `position` |
 | `ContactSensor` | Contact/door sensor | `open` or `alarm` |
 | `Network` | Network connectivity | - |
+| `OpticalTransceiver` | Pluggable optical module (SFP) | `present` |
 | `Configuration` | Device settings | varies |
 | **Capability primitive (energy app contract)** |||
 | `PowerControl` | Unified actuator surface | `kind`, `setpoint` |
@@ -105,6 +106,28 @@ Device runtime and operating status.
 - `running_time: s/min/hr` - Total running time (from installation)
 - `running_time_with_load: s/min/hr` - Running time under load
 - `network: Network` - Network connectivity status (sub-component)
+
+---
+
+## OpticalTransceiver
+
+A pluggable transceiver in a cage, such as an SFP module. Identity lives in the device's
+`DeviceInfo` (`type="sfp-module"`, `manufacturer_name`, `model_name`, `serial_number`,
+`hardware_version`).
+
+### Required
+- `present: bool` - A module is seated
+
+### Optional
+- `los: bool` - Loss of signal: no light on the receiver
+- `tx_enabled: bool` - The laser is on
+- `standard: string` - Ethernet compliance, e.g. "1000BASE-LX", "BASE-BX10"
+- `wavelength: nm` - Transmit wavelength
+- `temperature: °C` - Module temperature
+- `supply_voltage: V` - Module supply
+- `tx_bias: mA` - Laser bias current
+- `tx_power: mW` - Transmitted optical power
+- `rx_power: mW` - Received optical power
 
 ---
 

@@ -167,6 +167,12 @@ void register_modules(Application app)
         register_module!(driver.wifi)(app);
         static if (is(WpanModule))
             register_module!(driver.wpan)(app);
+
+        static if (has_sfp)
+        {
+            import driver.sfp;
+            register_module!(driver.sfp)(app);
+        }
     }
 
     static if (has_all)

@@ -480,7 +480,6 @@ nothrow @nogc:
 
     override void encode_add(SyncPeer peer, SyncHandle h, const(char)[] path, const(char)[] node_class, const(char)[] templates, uint ft, Element* e, ulong peer_id, bool include_value = true)
     {
-        import urt.time : unix_time_ns;
         import manager.element : Access;
 
         begin_frame(Verb.add);
@@ -496,13 +495,8 @@ nothrow @nogc:
 
             Variant v;
             ulong t_ms = 0;
-            if (include_value && e.data_format.kind != SeriesKind.point)
-            {
-                // events retain no value; occurrences replay via backfill
-                v = e.value;
-                if (!v.isNull)
-                    t_ms = unix_time_ns(e.last_update) / 1_000_000;
-            }
+            if (include_value)
+                intro_value(e, v, t_ms);
             _buf.put_variant(v);
             _buf.put_varint(t_ms);
         }
@@ -957,7 +951,7 @@ nothrow @nogc:
                     templates = r.str();
                 if (!r.fail)
                 {
-                    Variant* value = v.isNull ? null : &v;
+                    Variant* value = has_element ? &v : null;
                     sync.inbound_model_add(peer, h, path, node_class, templates, ft, access, value, t_ms, peer_id);
                 }
                 break;

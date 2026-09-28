@@ -435,6 +435,21 @@ nothrow @nogc:
         mark_series_gap(who);
     }
 
+    // The value stops being known at `t`: history takes a gap, and the element reads as unset until its next sample.
+    void invalidate(SysTime t = getSysTime(), Subscriber who = null)
+    {
+        if (t > last_update)
+            last_update = t;
+        if (_last_update == SysTime())
+            return;
+        mark_series_gap(who);
+        release_register();
+        _latest.u = 0;
+        _status &= ~Flags.unrecorded;
+        _last_update = SysTime();
+        mark_dirty();
+    }
+
     EID eid() const pure
         => _eid;
 
@@ -1637,6 +1652,20 @@ unittest
     Variant wrong_type = Variant("volts");
     assert(ce.try_set(wrong_type) == "incompatible value");
     assert(ce.latest_record.f64_ == 3.0);
+
+    // invalidation leaves the element unset, with history closed by a gap, until the next sample
+    n.invalidate(from_unix_time_ns(3_500_000_000));
+    assert(n.value.isNull && n.record_count == 3 && n.last_update == from_unix_time_ns(3_500_000_000));
+    n.value(Variant(true), from_unix_time_ns(4_000_000_000));
+    assert(n.value.asBool && n.record_count == 4);
+    q.invalidate();
+    assert(q.value.isNull);
+
+    // an element with nothing to clear still keeps the moment its value became unknown
+    Element fresh;
+    fresh.format = register_format(volts_held);
+    fresh.invalidate(from_unix_time_ns(5_000_000_000));
+    assert(fresh.value.isNull && fresh.last_update == from_unix_time_ns(5_000_000_000));
     n.teardown();
 }
 

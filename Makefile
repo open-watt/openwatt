@@ -98,7 +98,7 @@ endif
 # =======================================================================
 
 APP_SOURCES := $(SRCDIR)/main.d \
-    $(foreach d,$(FEATURE_DIRS),$(shell find "$(SRCDIR)/$(d)" -type f -name '*.d'))
+    $(filter-out $(addprefix $(SRCDIR)/,$(FEATURE_EXCLUDES)),$(foreach d,$(FEATURE_DIRS),$(shell find "$(SRCDIR)/$(d)" -type f -name '*.d')))
 SOURCES := $(APP_SOURCES) $(URT_SOURCES)
 
 DFLAGS := $(DFLAGS) $(FEATURE_DFLAGS)

@@ -4,7 +4,8 @@ module manager.features;
 // IDE/IDE-launched builds (Visual Studio), and tools that don't go
 // through features.mk get a full standalone build. To drop a feature,
 // pass -version=NoSwitch / NoAll / NoIP / NoTLS / NoHTTP / NoIPv6 /
-// NoGateway.
+// NoGateway. SFP is the exception: few boards have a cage, so it is
+// off unless -version=HasSFP.
 //
 // The has_* enums let code compose features with static if -- D's
 // version (...) clause is non-composable.
@@ -24,6 +25,7 @@ version (NoIPv6)   enum has_ipv6   = false; else enum has_ipv6 = has_ip;
 version (NoGateway) enum has_gateway = false; else enum has_gateway = true;
 version (HasAPI)   enum has_api    = true; else version (NoAll) enum has_api = false; else enum has_api = true;
 version (HasOTA)   enum has_ota    = true; else version (NoAll) enum has_ota = false; else enum has_ota = true;
+version (HasSFP)   enum has_sfp    = true; else enum has_sfp = false;
 
 version (MbedTLS)       enum has_aes_gcm = true;
 else version (Windows) enum has_aes_gcm = true;

@@ -6,6 +6,7 @@
 #   FEATURE_DIRS    Source-tree subdirs (relative to $(SRCDIR)) included
 #                   for the chosen preset.
 #   FEATURE_DFLAGS  D version flags appended to $(DFLAGS).
+#   FEATURE_EXCLUDES Sources (relative to $(SRCDIR)) dropped from those dirs.
 #
 # Axes (orthogonal, can combine freely):
 #
@@ -49,6 +50,13 @@
 #                   no transit forwarding and no DHCP server or leases.
 #                   DHCP clients and diagnostics stay. Defaults to 1, except
 #                   TINY targets which default to 0.
+#
+#   SFP             SFP=1 builds the SFP cage, its module decoder and
+#                   /interface/sfp. Few boards have a cage, so it defaults
+#                   to 0 on embedded targets: a board with one sets SFP ?= 1
+#                   in its board.mk. Windows and Linux take pluggable
+#                   hardware, and unittest builds test it, so both default
+#                   to 1.
 # =======================================================================
 
 # -- Per-platform defaults -----------------------------------------------
@@ -78,14 +86,18 @@ ifeq ($(TINY),1)
   GATEWAY ?= 0
 endif
 GATEWAY ?= 1
+ifneq ($(filter windows linux,$(OS))$(filter unittest,$(CONFIG)),)
+  SFP ?= 1
+endif
+SFP ?= 0
 
 # -- Validate ------------------------------------------------------------
 
 ifeq ($(filter $(FEATURES),switch switch-ip switch-http switch-https full),)
     $(error Unknown FEATURES='$(FEATURES)'; valid: switch | switch-ip | switch-http | switch-https | full)
 endif
-ifneq ($(filter-out 0 1,$(MODBUS) $(HTTP_CLIENT) $(HTTP_FILESERVER) $(IPV6) $(GATEWAY)),)
-    $(error MODBUS, HTTP_CLIENT, HTTP_FILESERVER, IPV6 and GATEWAY must be 0 or 1)
+ifneq ($(filter-out 0 1,$(MODBUS) $(HTTP_CLIENT) $(HTTP_FILESERVER) $(IPV6) $(GATEWAY) $(SFP)),)
+    $(error MODBUS, HTTP_CLIENT, HTTP_FILESERVER, IPV6, GATEWAY and SFP must be 0 or 1)
 endif
 
 # -- Source-tree subset per preset ---------------------------------------
@@ -119,6 +131,11 @@ ifeq ($(IPV6),0)
 endif
 ifeq ($(GATEWAY),0)
     FEATURE_DFLAGS += $(VERSION_FLAG)NoGateway
+endif
+ifeq ($(SFP),1)
+    FEATURE_DFLAGS += $(VERSION_FLAG)HasSFP
+else
+    FEATURE_EXCLUDES += router/iface/sfp.d router/iface/sff8472.d driver/sfp.d driver/baremetal/sfp.d
 endif
 
 # -- D version flags per preset ------------------------------------------

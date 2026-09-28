@@ -307,6 +307,19 @@ nothrow @nogc:
     abstract void tick_dirty(SyncPeer peer);
 }
 
+// An introduction carries the element's value and its time; an invalidated element carries null and the moment of invalidation.
+void intro_value(Element* e, ref Variant value, ref ulong t_ms)
+{
+    import urt.time : SysTime, unix_time_ns;
+
+    // events retain no value; occurrences replay via backfill
+    if (e.data_format.kind == SeriesKind.point)
+        return;
+    value = e.value;
+    if (e.last_update != SysTime())
+        t_ms = unix_time_ns(e.last_update) / 1_000_000;
+}
+
 
 unittest
 {
