@@ -3,6 +3,15 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-09-28: Ethernet interfaces name their MAC and port
+
+- `/interface/ethernet` gains `device` (the MAC, by the vendor's name for it; unset is the part's
+  first MAC) and `port` (a switch port behind that MAC, default 0). Interface editors should offer
+  both and identify an Ethernet interface by (`device`, `port`) rather than assuming it is the
+  device's only one.
+- A MAC wired to a switch carries several Ethernet interfaces, one per port, each with its own
+  address. Views that assumed one Ethernet interface per device must list them all.
+
 ## 2026-09-23: boot guard recovery status
 
 - `/system/sysinfo` adds `Boot:` with the configuration rung and recovery reason;

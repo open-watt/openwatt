@@ -712,6 +712,19 @@ adds:
 /interface/ethernet/add name=eth1 phy=yt8531 phy-reset-gpio=7
 ```
 
+Most boards have one MAC wired to one PHY and need neither property below. On a part with more
+than one MAC, `device` picks the MAC. Where a MAC is wired to a switch chip, each of the switch's
+ports is its own interface, picked with `port`, and a port no interface uses stays off.
+
+| Property | Default | Description |
+| --- | --- | --- |
+| `device` | unset | The MAC, by the vendor's name for it. Unset means the part's first MAC. |
+| `port` | `0` | The switch port behind `device`, in the chip's numbering. Only for a MAC wired to a switch. |
+
+```text
+/interface/ethernet/add name=ether2 port=1
+```
+
 ### `/interface/obd`
 
 An OBD interface speaks OBD-II diagnostics to a vehicle: requests and responses
