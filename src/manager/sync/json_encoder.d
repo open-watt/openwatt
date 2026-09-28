@@ -814,7 +814,7 @@ nothrow @nogc:
                 if (bad_frame)
                     break;
                 const(StateSignal)* sig = enum_from_key!StateSignal(sig_str);
-                if (!sig || *sig == StateSignal.destroyed)
+                if (!sig || *sig > StateSignal.offline)
                 {
                     log.warning("bad state signal: ", sig_str);
                     break;

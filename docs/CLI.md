@@ -522,7 +522,7 @@ managed-item properties above:
 | `pcap` | write-only | Attaches the interface to a named packet capture. |
 | `last-status-change-time` | read-only | Time of the most recent link-status change. |
 | `connected` | read-only | Connection state: `unknown`, `disconnected`, or `connected`. |
-| `link-status` | read-only | Operational state: `unknown`, `down`, or `up`. |
+| `link-status` | read-only | The link: `unknown`, `down`, or `up`. Most interfaces have a link exactly while running; one that tracks its carrier apart can run with its link `down`. |
 | `link-downs` | read-only | Number of link-down transitions. |
 | `tx-link-speed` | read-only | Underlying transmit signalling rate in bits per second; `0` when unknown. |
 | `rx-link-speed` | read-only | Underlying receive signalling rate in bits per second; `0` when unknown. |

@@ -978,6 +978,13 @@ this is what remains.
 
 ## Infrastructure
 
+- **Link follow-ups**: interfaces signal `link_up`/`link_down`, but every Ethernet driver still
+  links with its lifecycle, waiting in Starting for carrier and restarting when it drops. Move them
+  to running from attach and signalling the carrier through `carrier()`/`set_link()`, once the link
+  consumers are proven on an interface that does. IPv6 does not redo DAD when a link comes back,
+  as RFC 4862 wants, and the automation `object:` provider cannot trigger on link transitions,
+  since the manager cannot read an interface's link.
+
 - **A bare ESP32-H2 release build does not fit**: `FEATURES` defaults to `full`, which links at
   about 2.7 MB against the 1.8125 MB OTA slot, so `make esp-idf-build PLATFORM=esp32-h2
   CONFIG=release` fails the partition check. The IP tiers buy nothing on a part with no IP

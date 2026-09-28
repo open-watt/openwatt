@@ -2063,7 +2063,7 @@ nothrow @nogc:
             // no-op.
             fan_out_unbind(obj);
         }
-        else
+        else if (lifecycle_signal(sig))
             fan_out_state(obj, sig);
     }
 

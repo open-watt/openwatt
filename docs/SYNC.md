@@ -84,7 +84,7 @@ descendants) arms it, and `unsub` disarms it.
 | `add_name` | a syncable object's name and type, ahead of any reference to it |
 | `bind` / `unbind` | a subscription binding a handle to a named object, with its properties |
 | `create` / `destroy` | object lifecycle, as the console's `add`/`remove` would |
-| `state` | a `StateSignal` transition |
+| `state` | an `online` or `offline` transition; link signals stay local, their state travels as `link-status` |
 | `set` / `reset` | a property write, or restore of its initial value |
 | `enum_req` / `enum` | a property's enum dictionary, on request |
 

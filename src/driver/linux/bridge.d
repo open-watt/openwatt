@@ -136,6 +136,9 @@ private:
             case StateSignal.destroyed:
                 disengage(bridge);
                 break;
+            case StateSignal.link_up:
+            case StateSignal.link_down:
+                break;
         }
     }
 

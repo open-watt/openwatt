@@ -200,6 +200,8 @@ When a BaseObject holds a reference to another BaseObject (e.g., an interface re
 
 **Offline detection via state subscriptions**: Don't poll `!dependency.running` in `update()` — this misses offline→online bounces between update cycles. Subscribe to `StateSignal.offline` on the dependency and call `restart()` from the handler.
 
+**Link detection**: interfaces also signal `link_up` / `link_down`. Most have a link exactly while running; one that tracks carrier apart from its lifetime runs dark and signals the carrier alone, and a running interface always signals `link_down` before it goes. Whatever depends on the medium (a DHCP lease, RA, a cached egress) waits for `link_up` in `startup()` and restarts on `link_down`; whatever only holds the object handles `offline`.
+
 **Subscription lifecycle rule**: Subscribe at the end of `startup()`, unsubscribe in `shutdown()`. Track with an explicit `_subscribed` flag (placed in struct padding). The flag ensures visibly symmetrical bookkeeping — every subscribe has a matching unsubscribe, no no-ops. Property setters unsubscribe and clear the flag when `_subscribed` is true, then store the new reference and `restart()` — startup will re-subscribe. This prevents use-after-free: destruction cycles through shutdown, which unsubscribes before the object is freed.
 
 ```d

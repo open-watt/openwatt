@@ -94,7 +94,7 @@ protected:
 
     override CompletionStatus startup()
     {
-        if (!_iface || !_iface.running)
+        if (!_iface || !_iface.link_up)
             return CompletionStatus.continue_;
 
         if (!_subscribed)
@@ -115,7 +115,7 @@ protected:
         cancel_timers();
 
         bool held_lease = _phase == Phase.bound || _phase == Phase.renewing || _phase == Phase.rebinding;
-        if (held_lease && _iface && _iface.running && _server_id != IPAddr.any)
+        if (held_lease && _iface && _iface.link_up && _server_id != IPAddr.any)
             send_release();
 
         if (_subscribed)
@@ -182,7 +182,7 @@ private:
 
     void iface_state_change(ActiveObject, StateSignal signal)
     {
-        if (signal == StateSignal.offline)
+        if (signal == StateSignal.link_down)
             restart();
     }
 

@@ -118,7 +118,7 @@ nothrow @nogc:
     void on_state(ActiveObject, StateSignal value)
     {
         // any real transition supersedes the deferred initial notification
-        if (initial_scheduled)
+        if (initial_scheduled && lifecycle_signal(value))
         {
             g_app.cancel(&on_initial);
             initial_scheduled = false;

@@ -117,7 +117,7 @@ protected:
 
     override CompletionStatus startup()
     {
-        if (!_iface || !_iface.running)
+        if (!_iface || !_iface.link_up)
             return CompletionStatus.continue_;
 
         if (!_subscribed)
@@ -137,7 +137,7 @@ protected:
     {
         cancel_timers();
 
-        if (_iface && _iface.running && _server_duid_len && !_lease.empty)
+        if (_iface && _iface.link_up && _server_duid_len && !_lease.empty)
             send_ia_message(Dhcp6MsgType.release_);
 
         if (_subscribed)
@@ -209,7 +209,7 @@ private:
 
     void iface_state_change(ActiveObject, StateSignal signal)
     {
-        if (signal == StateSignal.offline)
+        if (signal == StateSignal.link_down)
             restart();
     }
 

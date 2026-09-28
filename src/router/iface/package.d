@@ -298,6 +298,7 @@ nothrow @nogc:
     final SysTime last_status_change_time() const => _status.link_status_change_time;
     final ConnectionStatus connected() const => _status.connected;
     final LinkStatus link_status() const => _status.link_status;
+    final bool link_up() const => _status.link_status == LinkStatus.up;
     final ulong link_downs() const => _status.link_downs;
     final ulong tx_link_speed() const => _status.tx_link_speed;
     final ulong rx_link_speed() const => _status.rx_link_speed;
@@ -566,28 +567,45 @@ protected:
     override void online()
     {
         subscribe_master();
-        _status.link_status = LinkStatus.up;
-        _status.link_status_change_time = getSysTime();
         _last_bitrate_sample = MonoTime.init;   // next heartbeat establishes the rate baseline
-        mark_set!(typeof(this), [ "link-status", "last-status-change-time" ])();
+        if (carrier())
+            set_link(true);
     }
 
     override void offline()
     {
         unsubscribe_master();
-        _status.link_status = LinkStatus.down;
-        _status.link_status_change_time = getSysTime();
-        ++_status.link_downs;
+        set_link(false);
         _status.tx_rate = 0;
         _status.rx_rate = 0;
         _status.avg_queue_us = 0;
         _status.avg_service_us = 0;
         _status.max_service_us = 0;
-        mark_set!(typeof(this), [ "link-status", "last-status-change-time", "link-downs", "tx-rate", "rx-rate",
-                                  "avg-queue-time", "avg-service-time", "max-service-time" ])();
+        mark_set!(typeof(this), [ "tx-rate", "rx-rate", "avg-queue-time", "avg-service-time", "max-service-time" ])();
 
         set_link_speed(0);
         _tx_handler = null;
+    }
+
+    // An interface whose carrier is apart from its lifetime reports it here and drives set_link() while running.
+    bool carrier() const
+        => true;
+
+    void link_changed(bool up)
+    {
+    }
+
+    final void set_link(bool up)
+    {
+        if (link_up == up)
+            return;
+        _status.link_status = up ? LinkStatus.up : LinkStatus.down;
+        _status.link_status_change_time = getSysTime();
+        if (!up)
+            ++_status.link_downs;
+        mark_set!(typeof(this), [ "link-status", "last-status-change-time", "link-downs" ])();
+        link_changed(up);
+        signal_link(up);
     }
 
     abstract int transmit(ref Packet packet, MessageCallback callback = null, const(QueuePolicy)* queue_policy = null);
@@ -857,9 +875,10 @@ private:
 
     void master_state_change(ActiveObject, StateSignal signal)
     {
-        _master_running = signal == StateSignal.online;
         if (signal == StateSignal.destroyed)
             unsubscribe_master();
+        else if (lifecycle_signal(signal))
+            _master_running = signal == StateSignal.online;
     }
 }
 
@@ -1589,4 +1608,90 @@ unittest
     assert(bounded.tx_handler !is null);
     bounded.release_tx_handler(&held.produce);
     assert(bounded.tx_handler is null);
+
+    static final class Port : BaseInterface
+    {
+        enum type_name = "link-test-port";
+    nothrow @nogc:
+        this(CID id, ObjectFlags flags = ObjectFlags.none)
+        {
+            super(collection_type_info!Port, id, flags);
+        }
+        void start()
+        {
+            set_state(State.starting);
+        }
+        void carrier_change(bool up)
+        {
+            set_link(up);
+        }
+        override bool carrier() const
+            => has_carrier;
+        override int transmit(ref Packet, MessageCallback, const(QueuePolicy)*)
+            => -1;
+        bool has_carrier = true;
+    }
+
+    struct Signals
+    {
+        StateSignal[8] seen;
+        uint count;
+        void record(ActiveObject, StateSignal signal) nothrow @nogc
+        {
+            seen[count++] = signal;
+        }
+    }
+
+    // Without a carrier of its own, the link follows the lifecycle.
+    Port follows = Collection!Port().alloc("link-test-follows");
+    Signals s1;
+    follows.subscribe(&s1.record);
+    Collection!Port().add(follows);
+    follows.start();
+    assert(follows.running && follows.link_up);
+    follows.disabled = true;
+    assert(!follows.link_up && follows.link_downs == 1);
+    assert(s1.count == 4 && s1.seen[0 .. 4] == [StateSignal.link_up, StateSignal.online, StateSignal.offline, StateSignal.link_down]);
+
+    // With one, it comes online dark and signals the carrier alone.
+    Port own = Collection!Port().alloc("link-test-own");
+    own.has_carrier = false;
+    Signals s2;
+    own.subscribe(&s2.record);
+    Collection!Port().add(own);
+    own.start();
+    assert(own.running && !own.link_up);
+    own.carrier_change(true);
+    own.carrier_change(true);
+    own.carrier_change(false);
+    own.carrier_change(true);
+    own.disabled = true;
+    assert(s2.count == 6 && s2.seen[0 .. 6] == [StateSignal.online, StateSignal.link_up, StateSignal.link_down, StateSignal.link_up, StateSignal.offline, StateSignal.link_down]);
+    assert(own.link_downs == 2);
+
+    // A VLAN carries its parent's link.
+    import manager.expression : NamedArgument;
+    import router.iface.vlan : VLANInterface;
+    Port dark = Collection!Port().alloc("link-test-dark");
+    dark.has_carrier = false;
+    Collection!Port().add(dark);
+    dark.start();
+    VLANInterface vlan = Collection!VLANInterface().create("link-test-vlan", ObjectFlags.none, NamedArgument("interface", dark), NamedArgument("vlan", 10));
+    assert(vlan && vlan.running && !vlan.link_up);
+    dark.carrier_change(true);
+    assert(vlan.link_up);
+    dark.carrier_change(false);
+    assert(!vlan.link_up);
+    dark.carrier_change(true);
+    dark.disabled = true;
+    assert(vlan.running && !vlan.link_up && vlan.link_downs == 2);
+
+    Collection!VLANInterface().remove(vlan);
+    Collection!Port().remove(follows);
+    Collection!Port().remove(own);
+    Collection!Port().remove(dark);
+    free(vlan);
+    free(follows);
+    free(own);
+    free(dark);
 }

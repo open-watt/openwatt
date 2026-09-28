@@ -203,7 +203,7 @@ protected:
     override CompletionStatus startup()
     {
         EthernetStation s = dyn_cast!EthernetStation(_iface.get);
-        if (!s || !s.running || link_local_of(s) == IPv6Addr.any)
+        if (!s || !s.link_up || link_local_of(s) == IPv6Addr.any)
             return CompletionStatus.continue_;
         _station = s;
         if (!_joined)
@@ -256,7 +256,7 @@ protected:
         if (_prefix.prefix_len)
         {
             MonoTime now = getTime();
-            if (s && s.running)
+            if (s && s.link_up)
             {
                 if (now < _last_ra + min_delay_between_ras)
                     return CompletionStatus.continue_;
@@ -317,7 +317,7 @@ private:
 
     void iface_state_change(ActiveObject, StateSignal signal)
     {
-        if (signal == StateSignal.offline && running)
+        if (signal == StateSignal.link_down && running)
             restart();
     }
 

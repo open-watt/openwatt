@@ -346,7 +346,7 @@ nothrow @nogc:
 
     void on_state(ActiveObject obj, StateSignal sig)
     {
-        if (sig != StateSignal.offline)
+        if (sig != StateSignal.offline && sig != StateSignal.link_down)
             return;
         auto iface = dyn_cast!BaseInterface(obj);
         foreach (pcb; _pcbs[])
