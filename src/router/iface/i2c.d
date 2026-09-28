@@ -189,12 +189,21 @@ nothrow @nogc:
 
     override void abort(int message_handle, MessageState reason = MessageState.aborted)
     {
-        if (message_handle == _active_tag)
+        ubyte tag = cast(ubyte)message_handle;
+        if (tag != _active_tag)
         {
-            _active_cancelled = true;
+            _queue.abort(tag, reason);
             return;
         }
-        _queue.abort(cast(ubyte)message_handle, reason);
+        // The bus still owns the frame's buffers; it retires silently when the transfer ends.
+        QueuedFrame* frame = _queue.find_in_flight(tag);
+        if (!frame)
+            return;
+        _active_cancelled = true;
+        MessageCallback callback = frame.callback;
+        frame.callback = null;
+        if (callback)
+            callback(message_handle, reason);
     }
 
     override MessageState msg_state(int message_handle) const
@@ -298,7 +307,8 @@ protected:
             add_tx_drop();
             return -1;
         }
-        drive_queue();
+        if (!drive_queue(cast(ubyte)tag))
+            return -1;
         return tag;
     }
 
@@ -363,42 +373,49 @@ private:
             service_completion();
     }
 
-    void drive_queue()
+    // A refused `submitted` frame retires without its callback, so transmit() can report it by return value.
+    bool drive_queue(ubyte submitted = 0)
     {
-        if (!running || _operation.is_pending || _active_tag != 0)
-            return;
-
-        QueuedFrame* queued = _queue.dequeue();
-        if (!queued)
-            return;
-
-        ref frame = queued.packet.hdr!I2CFrame;
-        void[] read_data;
-        if (frame.read_length)
+        bool accepted = true;
+        while (running && !_operation.is_pending && _active_tag == 0)
         {
-            _read_buffer.clear();
-            read_data = _read_buffer.extend(frame.read_length);
-        }
+            QueuedFrame* queued = _queue.dequeue();
+            if (!queued)
+                break;
 
-        I2cTransfer transfer;
-        transfer.address = frame.address;
-        transfer.address_mode = frame.flags & I2CFrameFlags.ten_bit_address ? I2cAddressMode.ten_bit : I2cAddressMode.seven_bit;
-        transfer.write_data = queued.packet.data;
-        transfer.read_data = read_data;
-        transfer.timeout = 100.msecs;
+            ref frame = queued.packet.hdr!I2CFrame;
+            void[] read_data;
+            if (frame.read_length)
+            {
+                _read_buffer.clear();
+                read_data = _read_buffer.extend(frame.read_length);
+            }
 
-        _operation.reset();
-        _active_tag = queued.tag;
-        _active_cancelled = false;
-        if (!i2c_submit(_bus, _operation, transfer))
-        {
+            I2cTransfer transfer;
+            transfer.address = frame.address;
+            transfer.address_mode = frame.flags & I2CFrameFlags.ten_bit_address ? I2cAddressMode.ten_bit : I2cAddressMode.seven_bit;
+            transfer.write_data = queued.packet.data;
+            transfer.read_data = read_data;
+            transfer.timeout = 100.msecs;
+
+            _operation.reset();
+            _active_tag = queued.tag;
+            _active_cancelled = false;
+            if (i2c_submit(_bus, _operation, transfer))
+                break;
+
             _last_error = I2cError.bus;
             mark_set!(typeof(this), "last-error")();
+            add_tx_drop();
+            if (queued.tag == submitted)
+            {
+                queued.callback = null;
+                accepted = false;
+            }
             _queue.complete(_active_tag, MessageState.failed);
             _active_tag = 0;
-            add_tx_drop();
-            drive_queue();
         }
+        return accepted;
     }
 
     void service_completion()
