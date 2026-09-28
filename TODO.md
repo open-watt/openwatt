@@ -1277,12 +1277,9 @@ The DevEBox H7 boots and runs OpenWatt with a console, per-bank TLSF pools and D
   the two sync encoders; `HEADLESS=1` gates almost nothing. The APM32's ROM DFU reports a 1 MB
   sector layout, so read the factory flash-size register before trimming: the part may be a VG.
 - **F4 and F7 have never run on hardware.** The APM32F407 board is the first F4 candidate.
-- **The reset record moves between builds.** `.persist` follows `.bss` and the linker orders its
-  contents, so after a firmware update the new image reads the record, and the boot guard's trial
-  bytes, from wherever its own layout puts them. Give the record and trial a fixed-layout struct at
-  a fixed address that every build agrees on, and let the rest of `@persist` move with the image,
-  re-initialised when the build changes. (The DFU misclassification itself was a lost partial
-  write on the H7's ECC RAM, fixed in urt #353.)
+- **Console session restarts slow down each time.** On the H7, each Ctrl-C restart of the UART
+  session logged a longer `console.session.update` tick (245, 285, 340 ms over three restarts in
+  one boot), and the restart often swallows a command sent right after it. Find what accumulates.
 - **No stack guard.** The stack sits at the top of core RAM with statics below it; an overflow
   silently corrupts them. An MPU no-access region under `_stack_low`, or a PSP/MSP split.
 - **No watchdog.** IWDG is never armed, so a hang never resets and the boot guard cannot count it.

@@ -127,5 +127,6 @@ void classify()
         case ResetMark.deliberate: g_class = ResetClass.deliberate; g_reason = "software"; return;
         case ResetMark.crashed:    g_class = ResetClass.crash;      g_reason = "fault"; return;
         case ResetMark.running:    g_class = ResetClass.crash;      g_reason = "watchdog"; return;
+        case ResetMark.updated:    g_class = ResetClass.deliberate; g_reason = "firmware update"; return;
     }
 }

@@ -3,6 +3,13 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-09-28: build identity and firmware-update resets
+
+- `/system/sysinfo` adds `Build:` (and the `build` property): the source revision the image came
+  from, `git describe` form, or `unknown`. Show it wherever the firmware version is shown.
+- The reset reason can now read `firmware update` on bare-metal targets, a deliberate reset.
+  Clients that map reset reasons to health must treat it like `software`, not as a crash.
+
 ## 2026-09-23: boot guard recovery status
 
 - `/system/sysinfo` adds `Boot:` with the configuration rung and recovery reason;
