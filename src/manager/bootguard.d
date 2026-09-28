@@ -42,6 +42,11 @@ BootDecision boot_guard_begin(int newest_revision, bool has_startup)
     _has_saved = newest_revision > 0;
     _has_startup = has_startup;
     ResetClass reset = reset_class();
+    static if (has_reset_record)
+    {
+        ubyte[2] retained = reset_record_scratch();
+        _trial = Trial(retained[0], retained[1]);
+    }
     if (!read_state())
     {
         // Without a trustworthy record, existing configurations are never disposable trials.
@@ -198,8 +203,12 @@ __gshared bool _have_stored;
 __gshared bool _image_known;
 __gshared bool _accept_pending;
 
+// The retained record carries the trial where the platform has one; checkpoint() writes it back.
 static if (has_reset_record)
-    ref Trial trial() => *cast(Trial*)reset_record_scratch().ptr;
+{
+    __gshared Trial _trial;
+    ref Trial trial() => _trial;
+}
 else
     ref Trial trial() => _state.trial;
 
@@ -287,6 +296,8 @@ TimerHandler retry_handler()
 
 void checkpoint()
 {
+    static if (has_reset_record)
+        reset_record_scratch([trial.strikes, trial.rung]);
     static if (!has_boot_store)
         return;
     g_app.cancel(retry_handler());
