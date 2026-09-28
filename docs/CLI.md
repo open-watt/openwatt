@@ -131,13 +131,20 @@ Node-wide state and lifecycle. The sub-scopes `/system/config`, `/system/fs` and
 `/system/hostname` prints the node's hostname; `/system/set-hostname <name>` sets it, and
 also stamps the log HOSTNAME field.
 
-`/system/sysinfo` prints hostname, node id, OS, CPU, build, memory pools, uptime, wall time
-and whether the saved configuration is dirty, plus the reset reason where the platform has
-one. The build is the source revision the image came from (`git describe --always --dirty`,
-or `unknown` where the build had none). Given property names instead, it prints only those
-values, one per line: `build`, `hostname`, `node-id`, `os`, `processor`, `total`, `used`,
-`peak`, `largest`, `ext-total`, `ext-used`, `ext-peak`, `ext-largest`, `uptime`, `time`,
-`config-dirty`, `reset-reason`.
+`/system/sysinfo` prints hostname, node id, OS, CPU, build, memory pools, main stack use,
+uptime, wall time and whether the saved configuration is dirty, plus the reset reason where the
+platform has one. The build is the source revision the image came from
+(`git describe --always --dirty`, or `unknown` where the build had none). Given property names
+instead, it prints only those values, one per line: `build`, `hostname`, `node-id`, `os`,
+`processor`, `total`, `used`, `peak`, `largest`, `ext-total`, `ext-used`, `ext-peak`,
+`ext-largest`, `stack-peak`, `stack-size`, `uptime`, `time`, `config-dirty`, `reset-reason`.
+
+`Stack:` is the deepest main stack use since boot over the stack's capacity. Bare-metal
+targets paint the stack at reset and find the deepest overwritten word; ESP32 reports the
+main task's FreeRTOS high-water mark; Windows and Linux scan the committed stack for the
+deepest non-zero word, against the thread's reservation or `RLIMIT_STACK`. A deepest write
+of zero reads as unused, so hosts can under-report by the tail of the deepest frame. With
+no stack limit, Linux prints the peak alone.
 
 `/system/uptime` prints time since start, and `/system/time` the current date and time.
 `/system/sysinfo time` marks it `(unsynchronised)` until wall time is set.

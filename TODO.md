@@ -1285,6 +1285,13 @@ this is what remains.
   accumulator source paths, element metadata, profile enums, protocol element descriptors,
   and other slices into profile string/section storage.
 
+- **Stack high-water marks beyond the main stack**: `sysinfo` reports only the main stack.
+  Fibre stacks (16 KB embedded, 64 KB hosted; used by zigbee and ezsp) could be painted in
+  `co_create` and reported per fibre, which is where an undersized stack would hide. BK7231's
+  `bk_init_mode_stacks` colours its IRQ, FIQ and SYS stacks, but they live in `.bss.stacks`,
+  which the reset path's bss zero wipes straight after; paint them after the zero and the IRQ
+  and FIQ marks are a scan away.
+
 ### STM32 bring-up follow-ups (2026-09-26)
 
 The DevEBox H7 boots and runs OpenWatt with a console, per-bank TLSF pools and DFU recovery.
