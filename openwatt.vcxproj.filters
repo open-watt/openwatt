@@ -1206,9 +1206,6 @@
     <DCompile Include="third_party\urt\src\urt\driver\bl808\xram.d">
       <Filter>third_party\urt\driver\bl808</Filter>
     </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl_common\alloc.d">
-      <Filter>third_party\urt\driver\bl_common</Filter>
-    </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\bl_common\exception.d">
       <Filter>third_party\urt\driver\bl_common</Filter>
     </DCompile>
@@ -1281,9 +1278,6 @@
     <DCompile Include="third_party\urt\src\urt\driver\posix\gpio.d">
       <Filter>third_party\urt\driver\posix</Filter>
     </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\rp2350\alloc.d">
-      <Filter>third_party\urt\driver\rp2350</Filter>
-    </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\rp2350\irq.d">
       <Filter>third_party\urt\driver\rp2350</Filter>
     </DCompile>
@@ -1298,9 +1292,6 @@
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\rp2350\uart.d">
       <Filter>third_party\urt\driver\rp2350</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\stm32\alloc.d">
-      <Filter>third_party\urt\driver\stm32</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\stm32\irq.d">
       <Filter>third_party\urt\driver\stm32</Filter>
