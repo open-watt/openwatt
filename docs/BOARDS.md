@@ -28,6 +28,8 @@ A board lives at `platforms/<family>/boards/<name>/` and contains:
   A board on a part whose clock is configured rather than fixed (MT7621) sets
   `BOARD_CPU_HZ`, so timekeeping reads the counter directly instead of scaling
   a clock measured at boot; boot reports a board value the part disagrees with.
+  An embedded board with an SFP cage sets `SFP ?= 1`; the cage and
+  `/interface/sfp` are not built for embedded targets otherwise.
 - `system.conf`, required. It replaces the platform's baked-in startup script.
 - `sdkconfig.defaults`, required for Espressif boards. ESP-IDF applies it after
   the platform defaults, so board values override the reference development

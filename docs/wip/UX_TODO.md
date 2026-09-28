@@ -12,6 +12,20 @@ through them and remove sections as they are absorbed.
 - A MAC wired to a switch carries several Ethernet interfaces, one per port, each with its own
   address. Views that assumed one Ethernet interface per device must list them all.
 
+## 2026-09-26: SFP modules as devices
+
+- A new device type `sfp-module` (from `/binding/sfp`) carries a new `OpticalTransceiver`
+  component: `present`, `los`, `tx_enabled`, `standard`, `wavelength`, `temperature`,
+  `supply_voltage`, `tx_bias`, `tx_power`, `rx_power`. Optical powers arrive in mW; present them in dBm as well,
+  which is how optics are read. Identity is in `DeviceInfo`. `status.online` is false while the
+  cage is empty, which is normal, not a fault.
+- An SFP interface is `running` with or without a link; show its link from `link-status`, not from
+  `running`.
+- An element can return to unset after holding a value: an SFP module's identity and diagnostics
+  do when the cage empties, and its diagnostics when a replacement reports none. Render the null
+  as no reading, not as the last value, an empty string or zero. It arrives as a `val` sample
+  whose value is null, or as an `add` with `"v":null` and a `t`.
+
 ## 2026-09-23: boot guard recovery status
 
 - `/system/sysinfo` adds `Boot:` with the configuration rung and recovery reason;

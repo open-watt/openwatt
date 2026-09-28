@@ -86,8 +86,13 @@ enum StateSignal
 {
     online,
     offline,
-    destroyed
+    destroyed,
+    link_up,
+    link_down,
 }
+
+bool lifecycle_signal(StateSignal signal) pure nothrow @nogc
+    => signal <= StateSignal.destroyed;
 
 alias StateSignalHandler = void delegate(ActiveObject object, StateSignal signal) nothrow @nogc;
 
@@ -958,6 +963,9 @@ nothrow @nogc:
                 _subscribers.clear();
                 super.destroy();
                 break;
+            case StateSignal.link_up:
+            case StateSignal.link_down:
+                assert(false, "link state does not travel on the wire");
         }
     }
 
@@ -1123,6 +1131,11 @@ protected:
 
     void offline()
     {
+    }
+
+    final void signal_link(bool up)
+    {
+        signal_state_change(up ? StateSignal.link_up : StateSignal.link_down);
     }
 
     // push the derived views: state transitions (and any subclass state feeding status_message)

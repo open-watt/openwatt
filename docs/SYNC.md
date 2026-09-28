@@ -84,7 +84,7 @@ descendants) arms it, and `unsub` disarms it.
 | `add_name` | a syncable object's name and type, ahead of any reference to it |
 | `bind` / `unbind` | a subscription binding a handle to a named object, with its properties |
 | `create` / `destroy` | object lifecycle, as the console's `add`/`remove` would |
-| `state` | a `StateSignal` transition |
+| `state` | an `online` or `offline` transition; link signals stay local, their state travels as `link-status` |
 | `set` / `reset` | a property write, or restore of its initial value |
 | `enum_req` / `enum` | a property's enum dictionary, on request |
 
@@ -168,7 +168,11 @@ with zero segments.
   a mature link and every field multiplies by sample count. `lost` reports overrun rather than
   hiding it, the difference between a mirror that is wrong and one that knows where. There is no
   staleness field: staleness is the absence of frames, and `t` plus a disciplined clock lets the
-  receiver compute age itself. `val_block` carries a record block for history and backfill.
+  receiver compute age itself. A null `v` says the value stopped being known at `t`: the mirror
+  invalidates rather than stores, and judges it newer-wins like any sample. An `add` introduces an
+  invalidated element the same way, with a null value and its `t`; a null with no `t` reports
+  nothing. `val_block` carries a
+  record block for history and backfill.
 - **`model_set {seq, h|path, value}` or `{seq, h|path, reset:true}`** writes an element. The path
   form serves one-shot writers with no binding. `reset` carries no value, because null is a
   legitimate value here, and the receiver never infers the post-reset value: `res {seq, value}`

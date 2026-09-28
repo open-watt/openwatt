@@ -557,6 +557,8 @@ nothrow @nogc:
                 break;
 
             case StateSignal.offline:
+            case StateSignal.link_up:
+            case StateSignal.link_down:
                 break;
 
             case StateSignal.destroyed:

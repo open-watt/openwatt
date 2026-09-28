@@ -83,7 +83,7 @@ nothrow @nogc:
                 return tconcat("interface ", value.name, " of type ", value.type, " does not support vlans");
             }
         }
-        unsubscribe_parent_mac();
+        unsubscribe_parent();
         _interface = value;
         if (auto station = dyn_cast!EthernetStation(value))
             adopt_parent_mac(station);
@@ -117,22 +117,29 @@ protected:
         auto result = super.startup();
         if (result != CompletionStatus.complete)
             return result;
-        if (!_mac_subscribed)
+        if (!_subscribed)
         {
             if (auto station = dyn_cast!EthernetStation(_interface.get))
             {
                 adopt_parent_mac(station);
                 station.prop_element(prop_index!(EthernetStation, "mac")).subscribe(&parent_mac_changed);
-                _mac_subscribed = true;
             }
+            _interface.subscribe(&parent_state_change);
+            _subscribed = true;
         }
         return CompletionStatus.complete;
     }
 
     override CompletionStatus shutdown()
     {
-        unsubscribe_parent_mac();
+        unsubscribe_parent();
         return super.shutdown();
+    }
+
+    override bool carrier() const
+    {
+        const(BaseInterface) i = _interface.get;
+        return i && i.link_up;
     }
 
     override void online()
@@ -203,7 +210,7 @@ private:
     ObjectRef!BaseInterface _interface;
     ushort _vlan;
     VlanTag _tag = VlanTag._8100;
-    bool _mac_subscribed;
+    bool _subscribed;
 
     void adopt_parent_mac(EthernetStation station)
     {
@@ -223,12 +230,21 @@ private:
             adopt_parent_mac(station);
     }
 
-    void unsubscribe_parent_mac()
+    void parent_state_change(ActiveObject, StateSignal signal)
     {
-        if (!_mac_subscribed)
+        if (signal == StateSignal.destroyed)
+            restart();
+        else if (running && (signal == StateSignal.link_up || signal == StateSignal.link_down))
+            set_link(signal == StateSignal.link_up);
+    }
+
+    void unsubscribe_parent()
+    {
+        if (!_subscribed)
             return;
         if (auto station = dyn_cast!EthernetStation(_interface.get))
             station.prop_element(prop_index!(EthernetStation, "mac")).unsubscribe(&parent_mac_changed);
-        _mac_subscribed = false;
+        _interface.unsubscribe(&parent_state_change);
+        _subscribed = false;
     }
 }

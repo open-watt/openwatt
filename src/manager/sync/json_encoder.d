@@ -531,7 +531,6 @@ nothrow @nogc:
 
     override void encode_add(SyncPeer peer, SyncHandle h, const(char)[] path, const(char)[] node_class, const(char)[] templates, uint ft, Element* e, ulong peer_id, bool include_value = true)
     {
-        import urt.time : unix_time_ns;
         import manager.element : Access;
 
         begin_frame("add");
@@ -551,16 +550,15 @@ nothrow @nogc:
             _buf.append(",\"ft\":", ft);
             if (e.access != Access.read)
                 _buf.append(",\"access\":\"", enum_key_from_value!Access(e.access), '\"');
-            if (include_value && e.data_format.kind != SeriesKind.point)
+            Variant v;
+            ulong t_ms = 0;
+            if (include_value)
+                intro_value(e, v, t_ms);
+            if (t_ms)
             {
-                // events retain no value; occurrences replay via `from`
-                Variant v = e.value;
-                if (!v.isNull)
-                {
-                    _buf ~= ",\"v\":";
-                    write_variant(v);
-                    _buf.append(",\"t\":", unix_time_ns(e.last_update) / 1_000_000);
-                }
+                _buf ~= ",\"v\":";
+                write_variant(v);
+                _buf.append(",\"t\":", t_ms);
             }
         }
         if (templates.length)
@@ -814,7 +812,7 @@ nothrow @nogc:
                 if (bad_frame)
                     break;
                 const(StateSignal)* sig = enum_from_key!StateSignal(sig_str);
-                if (!sig || *sig == StateSignal.destroyed)
+                if (!sig || *sig > StateSignal.offline)
                 {
                     log.warning("bad state signal: ", sig_str);
                     break;

@@ -205,21 +205,19 @@ protected:
         dispatch(packet);
     }
 
-    override void online()
+    // Station state is segment-derived: a link primes it, and it dies with the link.
+    override void link_changed(bool up)
     {
-        super.online();
-
-        // prime the neighbour table: ask the segment for everyone's exotic addresses
-        station_link_up();
+        super.link_changed(up);
+        if (up)
+            station_link_up();
+        else
+            forget_segment();
     }
 
     override CompletionStatus shutdown()
     {
-        // station state is segment-derived; it dies with the link
-        _neighbours.clear();
-        _local_addresses.clear();
-        _who_has_sent.clear();
-        _pending_reports.clear();
+        forget_segment();
         return super.shutdown();
     }
 
@@ -266,6 +264,14 @@ protected:
                 return *r;
         }
         return MACAddress.broadcast;
+    }
+
+    final void forget_segment()
+    {
+        _neighbours.clear();
+        _local_addresses.clear();
+        _who_has_sent.clear();
+        _pending_reports.clear();
     }
 
     final void station_link_up()

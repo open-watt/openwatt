@@ -553,6 +553,11 @@ The current implementation and remaining phases are described in
 
 ## Data model
 
+- **The console prints quantities badly**: `/device/print` shows an integer 1310 nm as
+  `1.31e+3nm` and a float supply of 3.2616 V as `3.2616000175476074V`. The stored values are
+  right; the tree view's quantity formatting wants integers printed as integers and floats to a
+  precision that matches their resolution.
+
 - **A numeric-to-text format change with history crashes the next text read**: `text_value`
   reads the tail bucket without checking that bucket's format, so after `format` switches a
   numeric element with recorded history to text, it takes the scalar bucket's samples as `ushort`
@@ -977,6 +982,13 @@ this is what remains.
   control plane, and make the mirror re-evaluate its peer binding.
 
 ## Infrastructure
+
+- **Link follow-ups**: interfaces signal `link_up`/`link_down`, but every Ethernet driver except
+  the SFP port still links with its lifecycle, waiting in Starting for carrier and restarting when
+  it drops. Move them onto the SFP port's model (run from attach, signal the carrier through
+  `carrier()`/`set_link()`) once the link consumers are proven on SFP. IPv6 does not redo DAD when
+  a link comes back, as RFC 4862 wants, and the automation `object:` provider cannot trigger on
+  link transitions, since the manager cannot read an interface's link.
 
 - **A bare ESP32-H2 release build does not fit**: `FEATURES` defaults to `full`, which links at
   about 2.7 MB against the 1.8125 MB OTA slot, so `make esp-idf-build PLATFORM=esp32-h2

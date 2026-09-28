@@ -89,7 +89,7 @@ nothrow @nogc:
         return false;
     }
 
-    const(QueuedFrame)* find_in_flight(ubyte tag) const pure
+    inout(QueuedFrame)* find_in_flight(ubyte tag) inout pure
     {
         foreach (frame; _in_flight[])
         {
