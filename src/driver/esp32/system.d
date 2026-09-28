@@ -31,7 +31,7 @@ version (ESP32)
 {
     enum bool has_download_mode = true;
 
-    void system_reboot_to_bootloader(uint)
+    bool system_reboot_to_bootloader(uint)
     {
         enum int rtc_gpio_mode_output_only = 1;
         rtc_gpio_init(0);
@@ -39,6 +39,7 @@ version (ESP32)
         rtc_gpio_set_level(0, 0);
         rtc_gpio_hold_en(0);
         esp_restart();
+        return true;
     }
 }
 else

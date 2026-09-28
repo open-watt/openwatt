@@ -163,7 +163,10 @@ instead, where the part exposes its factory firmware-update interface. `bootload
 is the usual form; the value selects between loaders on a part offering more than one,
 which none currently does. Only targets whose silicon provides such an entry point
 implement this, and elsewhere the command reports that the platform has no bootloader
-mode and does not reboot.
+mode and does not reboot. On a RouterBOOT board it arms RouterBOOT's "try Ethernet once"
+instead: the next boot asks BOOTP/TFTP for an image and falls back to the image in flash when
+nobody answers. If the bootloader cannot be entered, the command says so and the node keeps
+running.
 
 ### `/ping`
 
