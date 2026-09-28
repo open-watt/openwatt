@@ -70,10 +70,10 @@ version (RP2350)
     enum bool has_download_mode = true;
 
     // urt has no USB device stack, so ROM BOOTSEL is this part's only update path.
-    void system_reboot_to_bootloader(uint)
+    bool system_reboot_to_bootloader(uint)
     {
         import urt.driver.rp2350.bootrom : rom_reboot, RebootType;
-        rom_reboot(RebootType.bootsel);
+        return rom_reboot(RebootType.bootsel);
     }
 }
 else version (STM32)
@@ -81,12 +81,26 @@ else version (STM32)
     enum bool has_download_mode = true;
 
     // The ROM bootloader speaks USB DFU; urt has no USB device stack of its own yet.
-    void system_reboot_to_bootloader(uint)
+    bool system_reboot_to_bootloader(uint)
     {
         import urt.driver.reset : ResetMark, reset_record_mark;
         import urt.driver.stm32 : reboot_to_bootloader;
         reset_record_mark(ResetMark.deliberate);
-        reboot_to_bootloader();
+        return reboot_to_bootloader();
+    }
+}
+else version (RouterBoot)
+{
+    enum bool has_download_mode = true;
+
+    // RouterBOOT asks BOOTP/TFTP for an image once and boots flash when nobody answers.
+    bool system_reboot_to_bootloader(uint)
+    {
+        import urt.driver.routerboot : netboot_once;
+        if (!netboot_once())
+            return false;
+        system_reboot();
+        return true;
     }
 }
 else

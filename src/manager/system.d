@@ -269,7 +269,8 @@ void reboot(Session session, Nullable!uint bootloader, Nullable!bool crash)
         static if (has_download_mode)
         {
             session.write_line("reboot: entering bootloader...");
-            system_reboot_to_bootloader(bootloader.value);
+            if (!system_reboot_to_bootloader(bootloader.value))
+                session.write_line("reboot: could not enter the bootloader");
             return;
         }
         else

@@ -146,6 +146,23 @@ holding action, not an answer. Options, cheapest first:
     app's ladder and should defer to it.
   - A fixed recovery image, built once and never updated over the air, as the final rung on
     parts with no A/B slot.
+  - **A recovery boot as the last rung** (the automatic half of #776; the manual
+    `/system/reboot bootloader=1` landed). When the bring-up defaults crash out with no previous
+    image, a platform whose recovery boot comes back on its own when nobody answers (RouterBOOT's
+    try-Ethernet-once; not RP2350 BOOTSEL or the ESP32 ROM, which wait forever) could reboot into
+    it unattended: the boot guard decides when, a `has_recovery_boot` /
+    `system_reboot_to_recovery()` pair decides how. It needs, in order:
+    - boot-state persistence on MT7621, its only candidate, which today keeps no boot-guard state
+      across a reset at all (see the MT7621 entry below), so `checkpoint()` never commits a rung;
+    - a failure contract: arming reports failure, and the boot guard keeps the transition pending
+      and retries instead of clearing it;
+    - recovery once per crash episode, recorded in the boot state and cleared by a healthy boot,
+      since arming RouterBOOT erases its settings sector and RouterBOOT rewrites it to disarm, so
+      re-arming every three crashes in an unattended loop wears that sector;
+    - a defined state after the recovery boot (MT7621 classifies a software reset as `unknown`,
+      and the deliberate-reset branch does not reset the rung);
+    - an end-to-end test of crash, checkpoint, recovery and fallback on the board.
+    An ESP32 factory app partition is the natural second implementation.
   - **A stepped-down unit stays down until someone reboots it**, even after the fault clears; on
     the bring-up defaults it is off the site network. Decide whether a healthy lower rung
     schedules its own retry of the top, with backoff (10 min, 1 h, 6 h, ...).
