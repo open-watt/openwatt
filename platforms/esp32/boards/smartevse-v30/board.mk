@@ -14,8 +14,4 @@ PRESERVE_NVS ?= 1
 USE_SPIFFS := 1
 BOARD_OTA_FILENAME := firmware.bin
 
-ifneq ($(VERSIONS),)
-    VERSIONS := $(VERSIONS),SmartEVSE,SmartEVSE_v30,NoECSecret,Iram8BitSlowMemory
-else
-    VERSIONS := SmartEVSE,SmartEVSE_v30,NoECSecret,Iram8BitSlowMemory
-endif
+BOARD_VERSIONS := SmartEVSE,SmartEVSE_v30,NoECSecret,Iram8BitSlowMemory

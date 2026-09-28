@@ -69,6 +69,12 @@ endif
 include $(URT_DIR)/platforms.mk
 include features.mk
 
+# A board's own version idents stay apart from VERSIONS, which a caller may set on the command line.
+ifdef BOARD_VERSIONS
+    board_comma := ,
+    DFLAGS := $(DFLAGS) $(addprefix $(VERSION_FLAG),$(subst $(board_comma), ,$(BOARD_VERSIONS)))
+endif
+
 ifeq ($(COREDUMP),1)
     DFLAGS := $(DFLAGS) $(VERSION_FLAG)CoreDump
 endif

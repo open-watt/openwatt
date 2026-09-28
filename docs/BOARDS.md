@@ -21,8 +21,11 @@ make BOARD=smartevse-v30 PLATFORM=esp32
 A board lives at `platforms/<family>/boards/<name>/` and contains:
 
 - `board.mk`, required. It declares `BOARD_PLATFORM`, `BOARD_FLASH_SIZE`, and
-  `BOARD_PSRAM_SIZE`. Product defaults such as `FEATURES`, `HEADLESS`, `TINY`,
-  and `VERSIONS` also belong here. Use `?=` for values users may override.
+  `BOARD_PSRAM_SIZE`. Product defaults such as `FEATURES`, `HEADLESS` and
+  `TINY` also belong here. Use `?=` for values users may override. The board's
+  own D version idents go in `BOARD_VERSIONS` (comma-separated), never
+  `VERSIONS`: a caller's `VERSIONS` on the command line would silently replace
+  them.
   A board that wires a PHY to an Espressif EMAC sets `USE_ETHERNET := 1`; the
   driver is never built otherwise, since the MAC alone is not a port.
   A board on a part whose clock is configured rather than fixed (MT7621) sets
