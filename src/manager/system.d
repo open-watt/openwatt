@@ -118,7 +118,8 @@ Array!String sysinfo_suggest(bool, const(char)[] arg_name, const(char)[]) nothro
 {
     import urt.string : startsWith;
 
-    __gshared const String[16] properties = [
+    __gshared const String[17] properties = [
+        StringLit!"build",
         StringLit!"config-dirty",
         StringLit!"hostname",
         StringLit!"node-id",
@@ -180,6 +181,7 @@ void sysinfo(Session session, const(Variant)[] args)
         session.write_line("Node-Id:  ", format_node_id());
         session.write_line("OS:       ", info.os_name);
         session.write_line("CPU:      ", info.processor);
+        session.write_line("Build:    ", info.build);
         foreach (ref p; info.pools)
         {
             if (p.total > 0)
@@ -211,6 +213,8 @@ void sysinfo(Session session, const(Variant)[] args)
             session.write_line(info.os_name);
         else if (icmp(prop, "processor") == 0)
             session.write_line(info.processor);
+        else if (icmp(prop, "build") == 0)
+            session.write_line(info.build);
         else if (icmp(prop, "total") == 0)
             session.write_line(info.pools[0].total.format_bytes());
         else if (icmp(prop, "used") == 0)

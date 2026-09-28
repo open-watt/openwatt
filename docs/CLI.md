@@ -131,11 +131,13 @@ Node-wide state and lifecycle. The sub-scopes `/system/config`, `/system/fs` and
 `/system/hostname` prints the node's hostname; `/system/set-hostname <name>` sets it, and
 also stamps the log HOSTNAME field.
 
-`/system/sysinfo` prints hostname, node id, OS, CPU, memory pools, uptime, wall time and
-whether the saved configuration is dirty, plus the reset reason where the platform has
-one. Given property names instead, it prints only those values, one per line: `hostname`,
-`node-id`, `os`, `processor`, `total`, `used`, `peak`, `largest`, `ext-total`, `ext-used`,
-`ext-peak`, `ext-largest`, `uptime`, `time`, `config-dirty`, `reset-reason`.
+`/system/sysinfo` prints hostname, node id, OS, CPU, build, memory pools, uptime, wall time
+and whether the saved configuration is dirty, plus the reset reason where the platform has
+one. The build is the source revision the image came from (`git describe --always --dirty`,
+or `unknown` where the build had none). Given property names instead, it prints only those
+values, one per line: `build`, `hostname`, `node-id`, `os`, `processor`, `total`, `used`,
+`peak`, `largest`, `ext-total`, `ext-used`, `ext-peak`, `ext-largest`, `uptime`, `time`,
+`config-dirty`, `reset-reason`.
 
 `/system/uptime` prints time since start, and `/system/time` the current date and time.
 `/system/sysinfo time` marks it `(unsynchronised)` until wall time is set.

@@ -213,6 +213,8 @@ else ifeq ($(PLATFORM),esp32-p4x)
     CONF_DIR := platforms/esp32p4x
 else ifeq ($(PLATFORM),mt7621)
     CONF_DIR := platforms/mt7621
+else ifdef STM32_VARIANT
+    CONF_DIR := platforms/stm32
 endif
 
 ifeq ($(PLATFORM),bl808)
@@ -227,9 +229,6 @@ ifeq ($(PLATFORM),bl618)
 endif
 ifeq ($(PLATFORM),rp2350)
     CONF_DIR := platforms/rp2350
-endif
-ifdef STM32_VARIANT
-    CONF_DIR := platforms/stm32
 endif
 ifneq ($(filter bk7231n bk7231t,$(PLATFORM)),)
     BK_PLATFORM_DIR := platforms/bk7231
@@ -280,7 +279,7 @@ ifdef BAREMETAL_DIR
     BOARD_RAM_SIZE ?= 64MB
     DFLAGS := $(DFLAGS) -L--defsym=__ram_size=$(BOARD_RAM_SIZE:MB=M)
   else ifdef STM32_VARIANT
-    BAREMETAL_LD := $(URT_PLATFORMS)/stm32/stm32_$(STM32_VARIANT).ld
+    BAREMETAL_LD := $(STM32_LD)
   endif
 
   ifdef BAREMETAL_LD
@@ -353,7 +352,7 @@ else
     BINSTATS := rdmd --compiler=$(DC) tools/binstats.d
 endif
 BINSTATS_LEDGER = $(if $(filter release,$(CONFIG)),--ledger "$$("$(DC)" --version 2>/dev/null | head -1)" --commit "$$(git rev-parse --short HEAD 2>/dev/null || echo -)" --date "$$(date +%F)")
-BINSTATS_IMAGE := $(if $(filter bl808,$(PLATFORM)),$(if $(filter c906,$(PROCESSOR)),d0fw.bin,m0fw.bin),$(if $(filter bl618 bk7231n bk7231t rp2350,$(PLATFORM)),fw.bin))
+BINSTATS_IMAGE := $(if $(filter bl808,$(PLATFORM)),$(if $(filter c906,$(PROCESSOR)),d0fw.bin,m0fw.bin),$(if $(filter bl618 bk7231n bk7231t rp2350 stm32%,$(PLATFORM)),fw.bin))
 
 ifeq ($(PLATFORM),rp2350)
     EXTRA_ARTEFACTS := $(TARGETDIR)/fw.uf2
@@ -362,11 +361,19 @@ endif
 .PHONY: build
 build: $(TARGET) $(EXTRA_ARTEFACTS)
 
-$(TARGET): $(SOURCES) $(CONF_SOURCES) $(BAREMETAL_OBJS) $(VENDOR_OBJS) $(BAREMETAL_LD) $(BK_BEKEN_LIB) $(if $(RAM_IMAGE),$(RAM_IMAGE_PACKER))
+$(TARGET): $(SOURCES) $(CONF_SOURCES) $(BAREMETAL_OBJS) $(VENDOR_OBJS) $(BAREMETAL_LD) $(BAREMETAL_LD_DEPS) $(BUILD_CONFIG_DIR)/build_id $(BK_BEKEN_LIB) $(if $(RAM_IMAGE),$(RAM_IMAGE_PACKER))
 
 ifeq ($(PLATFORM),rp2350)
 $(TARGETDIR)/fw.uf2: $(TARGET)
 	@if command -v picotool >/dev/null 2>&1; then picotool uf2 convert -t elf $< $@ || { rm -f $@; exit 1; }; else rm -f $@; echo "picotool not found; no UF2 produced"; fi
+endif
+
+# The part must already sit in its ROM DFU bootloader: BOOT0 at reset, the board's DFU button,
+# or `/system/reboot bootloader=1`. DFU_ARGS picks one device when several are attached.
+ifdef STM32_VARIANT
+.PHONY: stm32-flash
+stm32-flash: build
+	dfu-util -a 0 -s 0x08000000:leave $(DFU_ARGS) -D $(TARGETDIR)/fw.bin
 endif
 
 # -- BK7231 SDK build (must come after $(TARGET) so it doesn't become default goal)
@@ -405,7 +412,7 @@ ifneq ($(filter bk7231n bk7231t,$(PLATFORM)),)
 	arm-none-eabi-objcopy -O binary -R .bss -R .tbss -R '.tbss.*' -R .ARM.attributes -R '.debug*' $(TARGET) $(TARGETDIR)/fw.bin
 	python3 $(RAM_IMAGE_PACKER) --nm $(BAREMETAL_NM) --format $(RAM_IMAGE) $(TARGET) $(TARGETDIR)/fw.bin
 endif
-ifeq ($(PLATFORM),rp2350)
+ifneq ($(filter rp2350 stm32%,$(PLATFORM)),)
 	arm-none-eabi-objcopy -O binary -R .bss -R .tbss -R '.tbss.*' -R .ARM.attributes -R '.debug*' $(TARGET) $(TARGETDIR)/fw.bin
 endif
 ifeq ($(PLATFORM),mt7621)
