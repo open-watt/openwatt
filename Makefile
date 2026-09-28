@@ -65,11 +65,6 @@ ifneq ($(filter bk7231n bk7231t,$(PLATFORM)),)
     RAM_IMAGE ?= deflate
 endif
 
-# Recursive, and set before platforms.mk: urt's vendored C rules expand OBJDIR while it is parsed.
-# system.conf is baked into the D object, so boards need isolated outputs.
-OBJDIR    = obj/$(BUILDNAME)$(if $(BOARD),_$(BOARD))_$(CONFIG)$(BUILD_VARIANT_SUFFIX)
-TARGETDIR = bin/$(BUILDNAME)$(if $(BOARD),_$(BOARD))_$(CONFIG)$(BUILD_VARIANT_SUFFIX)
-
 include $(URT_DIR)/platforms.mk
 include features.mk
 
