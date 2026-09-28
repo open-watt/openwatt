@@ -118,7 +118,7 @@ Array!String sysinfo_suggest(bool, const(char)[] arg_name, const(char)[]) nothro
 {
     import urt.string : startsWith;
 
-    __gshared const String[17] properties = [
+    __gshared const String[19] properties = [
         StringLit!"build",
         StringLit!"config-dirty",
         StringLit!"hostname",
@@ -133,6 +133,8 @@ Array!String sysinfo_suggest(bool, const(char)[] arg_name, const(char)[]) nothro
         StringLit!"ext-used",
         StringLit!"ext-peak",
         StringLit!"ext-largest",
+        StringLit!"stack-peak",
+        StringLit!"stack-size",
         StringLit!"uptime",
         StringLit!"time",
         StringLit!"reset-reason"
@@ -187,6 +189,10 @@ void sysinfo(Session session, const(Variant)[] args)
             if (p.total > 0)
                 session.write_pool_line(p);
         }
+        if (info.stack_size > 0)
+            session.write_line("Stack:    ", info.stack_peak.format_bytes(), " / ", info.stack_size.format_bytes());
+        else if (info.stack_peak > 0)
+            session.write_line("Stack:    ", info.stack_peak.format_bytes());
         session.write_line("Uptime:   ", seconds(getAppTime().as!"seconds"));
         session.write_line("Time:     ", getDateTime(), wall_time_set() ? "" : "  (unsynchronised)");
         session.write_line("Config:   ", g_app.config_dirty ? "modified" : "saved");
@@ -231,6 +237,10 @@ void sysinfo(Session session, const(Variant)[] args)
             session.write_line(info.pools[1].peak_used.format_bytes());
         else if (icmp(prop, "ext-largest") == 0)
             session.write_line(info.pools[1].largest_free.format_bytes());
+        else if (icmp(prop, "stack-peak") == 0)
+            session.write_line(info.stack_peak.format_bytes());
+        else if (icmp(prop, "stack-size") == 0)
+            session.write_line(info.stack_size.format_bytes());
         else if (icmp(prop, "uptime") == 0)
             session.write_line(seconds(getAppTime().as!"seconds"));
         else if (icmp(prop, "time") == 0)

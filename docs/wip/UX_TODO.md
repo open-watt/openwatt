@@ -3,6 +3,14 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-09-29: main stack high-water mark
+
+- `/system/sysinfo` adds `Stack: <peak> / <size>` after the memory pools; the size is
+  omitted where unknown (Linux with no stack limit). Clients parsing the human output must
+  tolerate this line.
+- `/system/sysinfo stack-peak stack-size` return the values alone. Suggested UX: show the
+  stack beside the memory pools as a bar, warning as the peak nears the size.
+
 ## 2026-09-28: Ethernet interfaces name their MAC and port
 
 - `/interface/ethernet` gains `device` (the MAC, by the vendor's name for it; unset is the part's
