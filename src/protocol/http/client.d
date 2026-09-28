@@ -31,7 +31,8 @@ nothrow @nogc:
 final class HTTPClient : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("remote", remote),
-                                 Prop!("stream", stream));
+                                 Prop!("stream", stream),
+                                 Prop!("timeout", timeout));
 nothrow @nogc:
 
     enum type_name = "http-client";
@@ -94,6 +95,14 @@ nothrow @nogc:
         mark_set!(typeof(this), [ "stream", "remote" ])();
         restart();
         return null;
+    }
+
+    Duration timeout() const pure
+        => _timeout;
+    void timeout(Duration value)
+    {
+        _timeout = value;
+        mark_set!(typeof(this), "timeout")();
     }
 
     // API...
@@ -177,7 +186,7 @@ protected:
         for (size_t i = 0; i < requests.length; )
         {
             HTTPMessage* r = requests[i];
-            if (now - r.timestamp > 5.seconds)
+            if (now - r.timestamp > _timeout)
             {
                 sendNext |= i == 0;
                 HTTPMessage empty;
@@ -196,6 +205,7 @@ protected:
 private:
     ObjectRef!Stream _stream;
     IPClient _conn;
+    Duration _timeout = 5.seconds;
     bool _tls;
     bool _dispatching;
 
@@ -331,17 +341,26 @@ unittest
             client.stream(wire);
             Collection!HTTPClient().update_all();
             assert(client.running);
+            assert(client.timeout == 5.seconds);
+            if (timeout)
+                client.timeout = 30.seconds;
             Handler handler = Handler(client, timeout, destroy_client);
             client.request(HTTPMethod.GET, "/first", &handler.stop);
             client.request(HTTPMethod.GET, "/second", &handler.stop);
             if (timeout)
+            {
                 foreach (request; client.requests)
                     request.timestamp = getSysTime() - 10.seconds;
+                client.update();
+                assert(handler.calls == 0 && client.requests.length == 2 && wire.writes == 1);
+                foreach (request; client.requests)
+                    request.timestamp = getSysTime() - 40.seconds;
+            }
             else
                 wire.input = cast(const(ubyte)[])("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"
                     ~ "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
             client.update();
-            assert(handler.calls == 1 && wire.reads == 1 && wire.writes == 1 && client.requests.empty && !client.running);
+            assert(handler.calls == 1 && wire.reads == (timeout ? 2 : 1) && wire.writes == 1 && client.requests.empty && !client.running);
             if (!destroy_client)
             {
                 wire.input = null;
