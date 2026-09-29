@@ -31,6 +31,17 @@ through them and remove sections as they are absorbed.
   Every interface gains a writable `led` naming the `Light` that shows its link; interface
   editors should offer it with component completion.
 
+## 2026-09-29: the node's panel, identify and locate
+
+- `system.panel.status` is now driven by the node: lit while running, and its `indicate` shows the
+  system's gesture (`breathe` booting, `blink` upgrading, `flash` identify, `fast_blink` a reset
+  armed). Show it as node status; writes to its `indicate` are overwritten by the next gesture.
+- `system.panel.reset`: a click reboots the node; a hold arms a factory reset that a release
+  within 15 s carries out. Warn users before they press it.
+- New commands `/system/identify [duration]` and `/interface/locate iface=<name> [duration]`
+  (`duration=0` stops). Offer both as "identify" actions on the node and on interfaces with an
+  `led`.
+
 ## 2026-09-29: HTTP client timeout
 
 - `/protocol/http/client` gains a writable `timeout` duration, default `5s`. Expose it in

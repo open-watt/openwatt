@@ -20,6 +20,7 @@ import manager.collection;
 import manager.console;
 import manager.element : Element, ElementLifecycleEvent, register_element_lifecycle_handler;
 import manager.features;
+import manager.panel : LightEffect;
 import manager.plugin;
 
 import router.iface.endpoint;
@@ -303,10 +304,22 @@ nothrow @nogc:
     {
         if (_led[] == value)
             return;
+        locate(Duration.zero);
         show_link(false);
         _led = value.make_string();
         mark_set!(typeof(this), "led")();
         show_link(link_up);
+    }
+
+    // zero ends it; Duration.max blinks until ended
+    final void locate(Duration duration)
+    {
+        if (!_led)
+            return;
+        g_app.cancel(&locate_elapsed);
+        show_locate(duration != Duration.zero);
+        if (duration != Duration.zero && duration != Duration.max)
+            g_app.schedule(getTime() + duration, &locate_elapsed);
     }
 
     final SysTime last_status_change_time() const => _status.link_status_change_time;
@@ -588,6 +601,7 @@ protected:
 
     override void offline()
     {
+        locate(Duration.zero);
         unsubscribe_master();
         set_link(false);
         _status.tx_rate = 0;
@@ -880,6 +894,18 @@ private:
                 e.value(up);
     }
 
+    void show_locate(bool on)
+    {
+        if (_led)
+            if (Element* e = g_app.find_element(tconcat(_led[], ".indicate")))
+                e.value(on ? LightEffect.blink : LightEffect.none);
+    }
+
+    void locate_elapsed(MonoTime)
+    {
+        show_locate(false);
+    }
+
     // one pulse per period at most: the light blanks for half of it, and ignores traffic for the rest
     void show_activity()
     {
@@ -1023,6 +1049,7 @@ nothrow @nogc:
         // post_init: the platform ethernet collections own the scope by now, so these extend it
         g_app.console.register_command!(ping, "ping")("/", this);
         g_app.console.register_command!(mac_discover, "discover")("/interface/ethernet", this);
+        g_app.console.register_command!locate("/interface", this);
     }
 
     override void deinit()
@@ -1040,6 +1067,16 @@ nothrow @nogc:
         Collection!BaseInterface().update_all();
         update_udp_endpoints();
         expire_mac_probes();
+    }
+
+    void locate(Session session, BaseInterface iface, Nullable!Duration duration)
+    {
+        if (!iface.running || !iface._led)
+        {
+            session.write_line(iface.name, " has no running light to locate with");
+            return;
+        }
+        iface.locate(duration ? duration.value : Duration.max);
     }
 
     void led_created(Element* e, ElementLifecycleEvent event)

@@ -16,6 +16,7 @@ import manager.collection;
 import manager.component;
 import manager.device;
 import manager.element;
+import manager.panel : ButtonEvent, LightEffect;
 import manager.plugin;
 import manager.reactor;
 
@@ -34,24 +35,6 @@ enum ActiveLevel : ubyte
 {
     high,
     low,
-}
-
-enum ButtonEvent : ubyte
-{
-    click,
-    double_,
-    triple,
-    hold,
-    release,
-}
-
-enum LightEffect : ubyte
-{
-    none,
-    blink,
-    fast_blink,
-    breathe,
-    flash,
 }
 
 final class GpioBinding : ProtocolBinding

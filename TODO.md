@@ -604,17 +604,25 @@ decisions are in [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md). The
    the writer, so sync accepts remote writes. `/element/link` has no CLI.md section; document it
    alongside.
 
-6. **System slots**: the `panel.reset` hold ladder, the `panel.status` indication,
-   `/system/factory-reset` and `/system/identify`. The recovery stage needs #747's one-shot
-   defaults boot.
+6. **System slots**: gestures for recovery, unconfigured and an image on trial;
+   `system.status.state`; `/system/factory-reset` sharing the reset slot's code; a recovery
+   reset stage on #747's one-shot defaults boot; and a hold-only reset for a button shared with
+   an output (see the open decisions in the plan).
 
 7. **LED drivers**: `/driver/led/pwm` for the SmartEVSE's RGB LED, then `/driver/led/ws2812` for
-   each chip family (RMT, PIO, the BL808 bit-bang, or SPI encoding).
+   each chip family (RMT, PIO, the BL808 bit-bang, or SPI encoding). The MT7621 has no PWM
+   controller; dimming the hEX S LEDs, and a real `breathe`, needs software PWM from a timer
+   interrupt in urt.
 
 8. **Network indication**: once #749's wifi mirror moves from the SmartEVSE binding into
    `system.status.network`.
 
 ## Data model
+
+- **`system_reboot()` loses the last log lines on bare metal**: log sinks flush from the main
+  loop and the reset is immediate, so the reset button's "factory reset" notice never reaches the
+  netconsole, and neither does anything `/system/reboot` or the boot guard's revert logs last.
+  Drain the sinks before resetting.
 
 - **`/element/set` swallows rejected values**: `element_set` calls `Element.value(Variant)`, which
   drops the error `update_typed_series` returns, so `value=1` on a bool element does nothing and

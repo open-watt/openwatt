@@ -30,6 +30,8 @@ nothrow @nogc:
 
 alias log = Log!"peering";
 
+enum fleet_id_file = "conf/fleet.id";
+
 class SyncPeeringModule : Module
 {
     mixin DeclareModule!"sync.peering";
@@ -408,7 +410,7 @@ nothrow @nogc:
     {
         import urt.file : delete_file;
 
-        delete_file(fleet_id_path);
+        delete_file(fleet_id_file);
         _secret = String();
         _allegiance_cluster = String();
         _adopted_cluster = String();
@@ -497,7 +499,6 @@ private:
     enum sweep_interval = 5.seconds;
     enum claim_timeout = 10.seconds;
     enum beacon_grace = 5.seconds;
-    enum fleet_id_path = "conf/fleet.id";
 
     struct ClaimAttempt
     {
@@ -596,7 +597,7 @@ private:
     {
         import urt.file : load_file;
 
-        char[] stored = cast(char[])load_file(fleet_id_path);
+        char[] stored = cast(char[])load_file(fleet_id_file);
         if (!stored)
             return;
         scope(exit) free(stored);
@@ -624,8 +625,8 @@ private:
         buf[cluster.length] = '\n';
         buf[cluster.length + 1 .. len - 1] = _secret[];
         buf[len - 1] = '\n';
-        if (save_file(fleet_id_path, buf[0 .. len]).failed)
-            log.warning("couldn't persist fleet allegiance to ", fleet_id_path, "; adoption is ephemeral this boot");
+        if (save_file(fleet_id_file, buf[0 .. len]).failed)
+            log.warning("couldn't persist fleet allegiance to ", fleet_id_file, "; adoption is ephemeral this boot");
     }
 
     void apply_peering_state()

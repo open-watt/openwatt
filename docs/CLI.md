@@ -182,6 +182,9 @@ instead: the next boot asks BOOTP/TFTP for an image and falls back to the image 
 nobody answers. If the bootloader cannot be entered, the command says so and the node keeps
 running.
 
+`/system/identify [duration=<duration>]` shows the identify gesture on the node's status light,
+`system.panel.status`, for `duration` (default `10s`). A node without a status light ignores it.
+
 ### `/ping`
 
 `/ping address=<IPv4|IPv6|MAC> [count=<count>] [iface=<interface>]` selects
@@ -559,6 +562,10 @@ managed-item properties above:
 | `avg-queue-time` | read-only | Average transmit queue time in milliseconds. |
 | `avg-service-time` | read-only | Average packet service time in milliseconds. |
 | `max-service-time` | read-only | Maximum packet service time in milliseconds. |
+
+`/interface/locate iface=<interface> [duration=<duration>]` blinks the interface's `led` so the
+port can be found: for `duration`, or until it is run again with `duration=0`. It needs a running
+interface with an `led`.
 
 ### Ethernet station properties
 

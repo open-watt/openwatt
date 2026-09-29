@@ -1,8 +1,7 @@
 # System IO: buttons, lights and the system device
 
-Status: the `Button` and `Light` templates are in place, and `/binding/gpio` builds buttons,
-switches and lights; the hEX S puts its buttons and LEDs in `system.panel`. Nothing drives the
-slots yet. The work items are
+Status: the `Button` and `Light` templates, `/binding/gpio`, interface `led=`, the gesture API
+and the `panel.status` and `panel.reset` policies are built, and the hEX S uses all of them. The work items are
 tracked under "System IO" in [TODO.md](../../TODO.md). Delete this file once they land, and move
 whatever is left into TODO.md.
 
@@ -147,89 +146,85 @@ It must do two things that links do not:
 
 [#532](https://github.com/open-watt/openwatt/pull/532) creates `system` in the `Application`
 constructor, before any startup script runs, so `system.conf` can populate it. It carries `mem`
-and `cpu`. This plan adds:
-
-- `info` (`DeviceInfo`): hostname, firmware version and board;
-- `state`, the configuration rung and the reset class, under `status` (`DeviceStatus`, which
-  every device already has, for `status.online`);
-- `panel`, which holds the slots.
+and `cpu`, and `panel` holds the node's own controls:
 
 | Slot | Template | Behaviour |
 | --- | --- | --- |
-| `panel.reset` | `Button` | the hold ladder |
-| `panel.status` | `Light` | system indication |
+| `panel.reset` | `Button` | click reboots; a hold arms a factory reset |
+| `panel.status` | `Light` | lit while running; shows the system's gestures |
 | `panel.network` (later) | `Light` | link state |
 
-A slot is filled either by an alias or by a binding writing there directly. The policy lives in
-`manager`. It attaches to a filled slot whose template matches, warns on a mismatch, and does
-nothing for an empty slot. One light may fill several slots, the way OpenWrt aliases a single LED
-as `led-boot`, `led-failsafe`, `led-running` and `led-upgrade`; the precedence order under "The
-status slot" resolves them.
+A slot is filled either by an alias or by a binding writing there directly.
+[manager/panel.d](../../src/manager/panel.d) claims a slot when its elements appear, whatever
+created them, and does nothing while a slot is empty. The hEX S fills all its slots from
+`system.conf`.
+
+Still to add: `info` (`DeviceInfo`: hostname, firmware version and board), and `state`, the
+configuration rung and the reset class, under `status`.
+
+### Gestures
+
+Code that wants to show something asks for a gesture, not a light pattern:
+`indicate(Gesture, duration)` returns a token, and `end_indication(token)` withdraws it; a
+duration of `Duration.max` lasts until it is ended. The highest-precedence live gesture is
+expressed, so a lower one resumes when a higher one ends. The expression is a table from gesture
+to what the panel has: today an `indicate` effect on `panel.status`, later a colour or a sounder.
+
+| Gesture | Raised by | Status light |
+| --- | --- | --- |
+| `reset_armed` | a reset hold | fast blink |
+| `upgrading` | an OTA transfer | blink |
+| `identify` | `/system/identify` | flash |
+| `booting` | startup, until the scripts finish | breathe (a slow blink on a plain line) |
+
+Still to add: recovery (running below the top rung, the indication #747 defers), unconfigured
+(running `default.conf` because nothing else exists), an image on trial, and publishing the
+winning gesture as `system.status.state` for UIs. Network state, which users most want from a
+status light, has no source yet. It will come when the wifi mirror in
+[#749](https://github.com/open-watt/openwatt/pull/749) moves from the SmartEVSE binding into
+`system.status.network`.
 
 ### The reset slot
 
-The action happens on release. While the button is held, the status light shows which stage is
-armed.
+- A click reboots.
+- A hold (the button's `hold`, 5 s on the hEX S) arms a factory reset and raises `reset_armed`
+  for 15 s.
+- Releasing while armed performs the factory reset and reboots. Holding past the window lets it
+  lapse, and the release does nothing.
 
-| Held for | On release | Status light while held |
-| --- | --- | --- |
-| under 5 s | nothing | unchanged |
-| 5 s | reboot | slow blink |
-| 10 s | recovery: `default.conf` once, erase nothing | fast blink |
-| 20 s | factory reset | steady (red on a colour light) |
-| 30 s | cancelled | unchanged |
-
-Leaving everything under 5 s alone is what lets a Tuya plug's single button toggle the relay and
-also be the reset button.
+A factory reset deletes what OpenWatt writes: the saved configuration revisions, the secret store
+and the fleet allegiance. It keeps the node identity, the firmware, the boot guard's state (which
+carries any firmware trial) and files the user put there, such as certificates.
 
 A button held through power-on cannot be read, because the boot guard picks a rung before
 `system.conf` creates the button. The guard's crash ladder and its power-cycle gesture already
 cover a unit that never reaches runtime.
 
-### The status slot
-
-The policy writes `indicate`, and `indicate_colour` on a colour light, for the first state in this
-list that applies:
-
-1. hold feedback (the table above);
-2. identify, from `/system/identify`;
-3. updating, while an OTA transfer runs or an image is on trial;
-4. recovery: running below the top rung, whether the guard stepped down or the operator asked
-   (this is the LED indication #747 defers);
-5. booting, until the startup script finishes;
-6. unconfigured: running `default.conf` because no other configuration exists;
-7. running: `indicate=none`, which hands the light back to its owner.
-
-The winning state is also published as `system.status.state` for UIs. Network state, which users
-most want from a status light, has no source yet. It will come when the wifi mirror in
-[#749](https://github.com/open-watt/openwatt/pull/749) moves from the SmartEVSE binding into
-`system.status.network`.
-
 ## Actions
 
-- **Reboot.** `/system/reboot` already exists, and the reset slot calls it.
-- **Recovery.** This is the same one-shot defaults boot as #747's power-cycle gesture
-  (`BootDecision.one_shot`). The boot store needs a way for a running system to request it before
-  rebooting.
-- **Factory reset.** A new `/system/factory-reset`, which takes a confirming argument and shares
-  its code with the 20 s stage. The recommendation is to erase everything OpenWatt persisted
-  (format the configuration filesystem and clear the boot store) but never the firmware or the
-  chip's identity. The SmartEVSE needs care, because it keeps the stock NVS and SPIFFS partitions
-  so a unit can migrate back.
-- **Identify.** DATA_MODEL rule 6 names identify as a device function. Until device functions
-  exist, `/system/identify [duration]` sets `panel.status.indicate` and clears it when the
-  duration ends.
+- **Reboot.** `system_reboot()`, as `/system/reboot` uses.
+- **Factory reset.** Built for the reset slot. A console form, `/system/factory-reset` with a
+  confirming argument, should share its code. The SmartEVSE needs care, because it keeps the stock
+  NVS and SPIFFS partitions so a unit can migrate back.
+- **Recovery.** A reset stage that boots `default.conf` once, erasing nothing, is the same one-shot
+  defaults boot as #747's power-cycle gesture (`BootDecision.one_shot`). The boot store needs a way
+  for a running system to request it before rebooting.
+- **Identify.** `/system/identify [duration]` raises `identify`, 10 s by default. DATA_MODEL
+  rule 6 names identify as a device function; this is the node's until device functions exist.
+- **Locate.** `/interface/locate iface=<name> [duration]` blinks the interface's `led`.
 - **Wifi on and off.** This already works with `/interface/wifi/set wifi1 disabled=true`. It is
   not a built-in gesture, because turning wifi off strands a wifi-only unit. Instead it is an
-  automation on a button's `event`, and that has two gaps. `if=` cannot read `$value` today (see
+  automation on a button's `event`, which needs automation conditions to compare enums (see
   Automation in TODO.md), and the `switch` tier has no automation engine.
 
 ## Hardware support today
 
-- **GPIO:** backends exist for ESP32, Bouffalo, BK7231 and Linux. RP2350 and STM32 have none.
-- **GPIO interrupts:** ESP32 only, with two ports (`num_gpio_interrupts`).
+- **GPIO:** backends exist for ESP32, Bouffalo, BK7231, MT7621 and Linux. RP2350 and STM32 have
+  none.
+- **GPIO edges:** event links on ESP32 and MT7621; elsewhere a button samples its line.
 - **PWM:** ESP32 only, with four LEDC ports. The SmartEVSE control pilot takes one, which leaves
-  exactly three for its RGB LED.
+  exactly three for its RGB LED. The MT7621 has no PWM controller, so dimming its LEDs would need
+  software PWM from a timer interrupt.
 - **WS2812:** the only driver is
   [urt/driver/bl808/led.d](../../third_party/urt/src/urt/driver/bl808/led.d). It is bit-banged,
   with loop counts calibrated for the D0 core at 480 MHz, on the M1s Dock's pin. ESP32 needs RMT
@@ -265,9 +260,8 @@ fill the slots directly:
 2. Couple an output's nested `input` and `indicator` in `/binding/gpio`, and move the binding
    to the `switch` tier.
 3. Build the component alias.
-4. Build the system slots: the hold ladder, the status indication, `system.status.state`,
-   `/system/factory-reset` and `/system/identify`. The recovery stage uses #747's one-shot
-   defaults boot.
+4. Finish the system slots: the remaining gestures, `system.status.state`,
+   `/system/factory-reset`, and the recovery stage on #747's one-shot defaults boot.
 5. Add `/driver/led/pwm` for the SmartEVSE, then `/driver/led/ws2812` for each chip family.
 6. Let `if=` read `$value`.
 7. Add network indication, once the #749 mirror moves to `system`.
@@ -276,13 +270,12 @@ fill the slots directly:
 
 1. Should `colour` be stored as sRGB, which is what LEDs and colour pickers use, or as CIE xy,
    which Zigbee and Matter use natively? The lean is sRGB, converted in the bindings.
-2. What does a factory reset erase: everything, including vehicle keys such as `tesla.pem` and
-   the recordings, or configuration only?
-3. Are the hold timings right, and does reboot deserve a stage of its own?
-4. What should a dedicated status light show while running: nothing, a steady light, or a
-   heartbeat flash?
-5. Should the alias be `/element/alias`, or a flag on `/element/link`?
-6. May the energy app dim a `Light` that has `level`, as a continuous control? Lights are only
+2. A click reboots, which suits a dedicated reset button. A button shared with an output, like
+   the Tuya plug's, toggles the relay on a click, so aliasing it to `panel.reset` as the example
+   does would reboot the plug instead. Should a shared button reset on hold only, and who says
+   which kind a slot has?
+3. Should the alias be `/element/alias`, or a flag on `/element/link`?
+4. May the energy app dim a `Light` that has `level`, as a continuous control? Lights are only
    adopted when configured as an appliance, so the question is whether that is ever wanted.
 
 ## Related
