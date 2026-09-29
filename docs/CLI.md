@@ -70,6 +70,13 @@ recoverable plaintext. Missing secrets must be re-entered.
 - HTTP-server, MQTT-broker and TLS `certificates` getters return arrays of certificate names.
   TLS `certificate` is a singular setter; exports use the canonical `certificates` property.
 
+### Device names
+
+Element paths (`@system.cpu.load`, `element=system.panel.status.switch`) and a binding's `device=`
+name a device by its bare name. That is the global device of that name if there is one, and
+otherwise this node's own peer-local device, such as `system`. A binding whose `device=` names
+neither creates a global device.
+
 ### Common Commands
 
 Here are some of the common commands used in the `conf/startup.conf` file:

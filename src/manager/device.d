@@ -53,6 +53,8 @@ struct DeviceTable
 {
 nothrow @nogc:
 
+    ulong node;     // this node's id, for resolve()
+
     Device* opBinaryRight(string op : "in")(const(char)[] name)
         => _machine.lookup(name);
 
@@ -82,9 +84,17 @@ nothrow @nogc:
         return builder;
     }
 
+    // A bare name is the global device, else this node's own peer-local one. Sync keeps to find().
+    Device resolve(const(char)[] name) pure
+    {
+        if (Device d = find(name, 0))
+            return d;
+        return node ? find(name, node) : null;
+    }
+
     DeviceBuilder open(const(char)[] id, ulong peer_id = 0, bool private_ = false)
     {
-        if (Device d = find(id, peer_id))
+        if (Device d = peer_id ? find(id, peer_id) : resolve(id))
             return d.edit();
         return create(id, peer_id, private_);
     }
