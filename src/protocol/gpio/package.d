@@ -253,9 +253,14 @@ nothrow @nogc:
                 break;
             }
             case GpioKind.light:
+            {
                 _effect = report(bind_element(builder, c, "effect", register_value_format!LightEffect(), Access.read_write));
                 _indicate = report(bind_element(builder, c, "indicate", register_value_format!LightEffect(), Access.read_write));
+                DataFormat pulse = data_format_of!bool();
+                pulse.kind = SeriesKind.point;
+                _pulse = report(bind_element(builder, c, "pulse", register_format(pulse), Access.write));
                 goto case;
+            }
             case GpioKind.switch_:
                 _element = report(bind_element(builder, c, "switch", register_value_format!bool(), Access.read_write));
                 break;
@@ -296,7 +301,8 @@ nothrow @nogc:
         g_app.cancel(&hold_elapsed);
         g_app.cancel(&gap_elapsed);
         g_app.cancel(&phase_elapsed);
-        Element*[3] outputs = [ _element, _effect, _indicate ];
+        g_app.cancel(&pulse_elapsed);
+        Element*[4] outputs = [ _element, _effect, _indicate, _pulse ];
         foreach (e; outputs)
         {
             if (e)
@@ -309,7 +315,7 @@ nothrow @nogc:
         }
         _claimed = uint.max;
         _element = null;
-        _effect = _indicate = null;
+        _effect = _indicate = _pulse = null;
         _clicks = 0;
         _unsettled = false;
         return super.shutdown();
@@ -363,6 +369,7 @@ private:
     static immutable ushort[GpioKind.max + 1] default_debounce_ms = [ 0, 30, 0, 0 ];
     static immutable ButtonEvent[3] click_events = [ ButtonEvent.click, ButtonEvent.double_, ButtonEvent.triple ];
     static immutable ushort[2][LightEffect.max + 1] effect_ms = [ [0, 0], [500, 500], [125, 125], [1000, 1000], [100, 900] ];
+    enum pulse_length = 50.msecs;
 
     Element* _element;          // capture series, button state, or output switch
     union
@@ -372,6 +379,7 @@ private:
         {
             Element* _effect;
             Element* _indicate;
+            Element* _pulse;
         }
     }
     String _component;
@@ -577,6 +585,7 @@ private:
                     _indicate.value(LightEffect.none);
                 _effect.subscribe(&output_changed);
                 _indicate.subscribe(&output_changed);
+                _pulse.subscribe(&output_changed);
             }
             _element.subscribe(&output_changed);
             gpio_output_init(_gpio, _active == ActiveLevel.low);
@@ -594,14 +603,34 @@ private:
 
     void output_changed(ref const SampleUpdate update)
     {
-        if (update.value_ready)
+        if (!update.value_ready)
+            return;
+        if (update.element is _pulse)
+            pulse();
+        else
             render();
+    }
+
+    // a steady light inverts briefly; a pattern already shows its own motion
+    void pulse()
+    {
+        if (_pattern != LightEffect.none)
+            return;
+        g_app.cancel(&pulse_elapsed);
+        drive(!_phase);
+        g_app.schedule(getTime() + pulse_length, &pulse_elapsed);
+    }
+
+    void pulse_elapsed(MonoTime)
+    {
+        drive(_phase);
     }
 
     // indicate overrides the owner's state; while it is none the owner's switch and effect show
     void render()
     {
         g_app.cancel(&phase_elapsed);
+        g_app.cancel(&pulse_elapsed);
         bool lit = _element.value.asBool;
         _pattern = LightEffect.none;
         if (_kind == GpioKind.light)

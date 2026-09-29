@@ -1149,6 +1149,7 @@ As an energy control a `Light` is discrete, as a `Switch` is.
 - `effect: enum` (writable) - `none`, `blink`, `fast_blink`, `breathe`, `flash`: the owner's steady appearance
 - `indicate: enum` (writable) - Same values as `effect`. While not `none` it replaces the output; clearing it restores whatever the owner last set. This lets the system, or a UI's "identify", borrow a light without disturbing its state.
 - `indicate_colour` (writable) - Colour for `indicate`, on colour outputs
+- `pulse` (write-only) - A point series; each write briefly inverts a steady output, as an activity light does. An interface with `led=` sends one per burst of traffic.
 - All optional elements of [`Switch`](#switch)
 
 ---

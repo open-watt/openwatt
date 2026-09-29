@@ -18,6 +18,7 @@ import urt.time;
 import manager.base;
 import manager.collection;
 import manager.console;
+import manager.element : Element, ElementLifecycleEvent, register_element_lifecycle_handler;
 import manager.features;
 import manager.plugin;
 
@@ -221,6 +222,7 @@ class BaseInterface : ActiveObject
                                  Prop!("l2mtu", l2mtu),
                                  Prop!("max-l2mtu", max_l2mtu, null, "d"),
                                  Prop!("pcap", pcap),
+                                 Prop!("led", led),
                                  Prop!("last-status-change-time", last_status_change_time, "status"),
                                  Prop!("connected", connected, "status", "d"),
                                  Prop!("link-status", link_status, "status", "d"),
@@ -293,6 +295,18 @@ nothrow @nogc:
             cap.subscribe_interface(this);
         mark_set!(typeof(this), "pcap")();
         return null;
+    }
+
+    final const(char)[] led() const pure
+        => _led[];
+    final void led(const(char)[] value)
+    {
+        if (_led[] == value)
+            return;
+        show_link(false);
+        _led = value.make_string();
+        mark_set!(typeof(this), "led")();
+        show_link(link_up);
     }
 
     final SysTime last_status_change_time() const => _status.link_status_change_time;
@@ -604,6 +618,7 @@ protected:
         if (!up)
             ++_status.link_downs;
         mark_set!(typeof(this), [ "link-status", "last-status-change-time", "link-downs" ])();
+        show_link(up);
         link_changed(up);
         signal_link(up);
     }
@@ -805,6 +820,7 @@ protected:
         ++_status.tx_packets;
         _status.tx_bytes += bytes;
         mark_set!(typeof(this), [ "tx-bytes", "tx-packets" ])();
+        show_activity();
     }
 
     final void add_rx_frame(size_t bytes)
@@ -812,6 +828,7 @@ protected:
         ++_status.rx_packets;
         _status.rx_bytes += bytes;
         mark_set!(typeof(this), [ "rx-bytes", "rx-packets" ])();
+        show_activity();
     }
 
     final void add_tx_drop()
@@ -851,6 +868,31 @@ protected: // TODO: should probably be private?
     Array!VLANInterface _vlans;
 
 private:
+    enum led_pulse_period = 100.msecs;
+
+    String _led;
+    MonoTime _led_pulse;
+
+    void show_link(bool up)
+    {
+        if (_led)
+            if (Element* e = g_app.find_element(tconcat(_led[], ".switch")))
+                e.value(up);
+    }
+
+    // one pulse per period at most: the light blanks for half of it, and ignores traffic for the rest
+    void show_activity()
+    {
+        if (!_led)
+            return;
+        MonoTime now = getTime();
+        if (now - _led_pulse < led_pulse_period)
+            return;
+        _led_pulse = now;
+        if (Element* e = g_app.find_element(tconcat(_led[], ".pulse")))
+            e.value(true);
+    }
+
     void subscribe_master()
     {
         if (!_master_subscribed && running)
@@ -966,6 +1008,7 @@ nothrow @nogc:
     override void init()
     {
         register_inet_scope_provider(&g_scope_provider);
+        register_element_lifecycle_handler(&led_created);
         version (UseInternalIPStack) {}
         else
             register_frame_handler(PacketType.ethernet, &on_ethernet_frame);
@@ -997,6 +1040,22 @@ nothrow @nogc:
         Collection!BaseInterface().update_all();
         update_udp_endpoints();
         expire_mac_probes();
+    }
+
+    void led_created(Element* e, ElementLifecycleEvent event)
+    {
+        if (event != ElementLifecycleEvent.created || e.id[] != "switch")
+            return;
+        char[256] buf = void;
+        ptrdiff_t len = e.full_path(buf);
+        if (len <= 0 || len > buf.length)
+            return;
+        const(char)[] light = buf[0 .. len - ".switch".length];
+        foreach (iface; Collection!BaseInterface().values)
+        {
+            if (iface._led[] == light)
+                iface.show_link(iface.link_up);
+        }
     }
 
     CommandState ping(Session session, const(char)[] address, Nullable!uint count, Nullable!BaseInterface iface)

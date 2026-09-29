@@ -2337,6 +2337,7 @@ __gshared immutable KnownElementTemplate[] g_Light_elements = g_Switch_elements 
     make_element_template!("effect", null, "Effect", "none | blink | fast_blink | breathe | flash", Frequency.realtime),
     make_element_template!("indicate", null, "Indicate", "Override of the output while not none; same values as effect", Frequency.realtime),
     make_element_template!("indicate_colour", null, "Indicate Colour", null, Frequency.realtime),
+    make_element_template!("pulse", "Boolean", "Pulse", "Each write briefly inverts a steady output", Frequency.realtime),
 ];
 
 __gshared immutable KnownElementTemplate[] g_Button_elements = [

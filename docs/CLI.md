@@ -539,6 +539,7 @@ managed-item properties above:
 | `l2mtu` | read/write | Link-layer MTU in bytes. |
 | `max-l2mtu` | read-only | Maximum link-layer MTU reported by the driver; `0` when unknown. |
 | `pcap` | write-only | Attaches the interface to a named packet capture. |
+| `led` | read/write | A [`Light`](COMPONENT_TEMPLATES.md#light) that shows the link, such as `system.panel.sfp`: its `switch` follows `link-status`, and traffic sends it a `pulse` at most every 100ms. The light may appear after the interface. |
 | `last-status-change-time` | read-only | Time of the most recent link-status change. |
 | `connected` | read-only | Connection state: `unknown`, `disconnected`, or `connected`. |
 | `link-status` | read-only | The link: `unknown`, `down`, or `up`. Most interfaces have a link exactly while running; one that tracks its carrier apart, such as an SFP port, can run with its link `down`. |
@@ -983,7 +984,7 @@ lines are, and the binding builds the matching component at `component` in
 | `capture` | `gpio` | a timestamped edge series `state`; Linux only |
 | `button` | `gpio` | a [`Button`](COMPONENT_TEMPLATES.md#button): `mode`, `state` and a point series `event` of `click`, `double`, `triple`, `hold` and `release` |
 | `switch` | `gpio` | a [`Switch`](COMPONENT_TEMPLATES.md#switch) whose writable `switch` drives the line |
-| `light` | `gpio` | a [`Light`](COMPONENT_TEMPLATES.md#light) with `switch`, `effect` and `indicate`; `indicate` overrides the owner's state while it is not `none` |
+| `light` | `gpio` | a [`Light`](COMPONENT_TEMPLATES.md#light) with `switch`, `effect`, `indicate` and `pulse`; `indicate` overrides the owner's state while it is not `none`, and each `pulse` inverts a steady output for 50ms |
 
 A button reacts to edge interrupts where the platform has them (ESP32, MT7621)
 and otherwise samples its line every `debounce`. Gestures are timed from the

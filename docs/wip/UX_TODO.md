@@ -27,6 +27,9 @@ through them and remove sections as they are absorbed.
   Binding editors should offer the kind first and the properties it uses.
 - The hEX S `system` device gains `panel.reset` and `panel.mode` (`Button`) and `panel.status`
   and `panel.sfp` (`Light`). Show `system.panel` as the node's own controls.
+- `Light` gains `pulse`, a write-only point series of activity blips; do not plot it as state.
+  Every interface gains a writable `led` naming the `Light` that shows its link; interface
+  editors should offer it with component completion.
 
 ## 2026-09-29: HTTP client timeout
 
