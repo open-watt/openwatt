@@ -37,6 +37,7 @@ set(LITTLEFS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/urt/third_par
 set(ESP32_SYS_SOURCES "${ESP32_SYS_DIR}/main.c"
                       "${ESP32_SYS_DIR}/ow_shim.c"
                       "${ESP32_SYS_DIR}/littlefs_port.c"
+                      "${URT_INTERNAL_DIR}/littlefs.c"
                       "${LITTLEFS_DIR}/lfs.c"
                       "${LITTLEFS_DIR}/lfs_util.c"
                       "${URT_INTERNAL_DIR}/mbedtls.c")
