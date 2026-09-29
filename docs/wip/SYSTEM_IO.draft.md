@@ -82,21 +82,16 @@ remote                          scene remote
 Local hardware goes through one binding, `/binding/gpio`, whose `kind` says what the lines are
 and so which component it builds; see [CLI.md](../CLI.md). `button`, `switch` and `light` exist
 today. Kinds that combine lines follow the same shape, with role-prefixed properties as
-`/interface/sfp` has (`set-gpio`, `reset-gpio`): `bistable-switch`, `pwm-light`, `encoder`,
+`/interface/sfp` has (`set-gpio`, `reset-gpio`): `bistable-switch`, `encoder`,
 `shutter`. As with every binding, `device=` names the equipment and `component=` gives the path
 within it. The binding is registered only in the `full` tier today; it should move to
 `src/driver/` so the `switch` tier, the BK7231 default, has it too.
 
-- **Light sources.** `kind=light` drives one line on and off. Anything richer goes through
-  `output=<driver>`, plus `index=` for one pixel of a strip. The driver owns the peripheral and
-  reports its capabilities, and the binding creates only the elements that output supports. The
-  binding renders effects and `indicate` from a scheduled timer, so a plain GPIO LED can blink as
-  well as a WS2812 can. This is the same split as the SmartEVSE: a driver object owns the
-  hardware, and a binding references it.
-- **LED drivers.** `/driver/led/pwm` takes one to five channels: one for level, two for warm and
-  cool white, three for RGB, four for RGBW, five for RGBCW. `/driver/led/ws2812` takes `gpio`,
-  `count` and the colour order. The two-wire LED driver chips in Tuya bulbs (SM2135, BP5758D) come
-  later.
+- **Light sources.** `drive` says how a light reaches its line: `io` switches it, `pwm` dims it,
+  and `ws2812` makes it one pixel (`index`) of a chain on the line. The binding creates only the
+  elements its drive supports, and renders effects and `indicate` from scheduled timers for every
+  drive. The two-wire LED driver chips in Tuya bulbs (SM2135, BP5758D) would be further drives,
+  and several dies on several lines (`red-gpio` and the rest) a later form of `pwm`.
 - **Coupling.** The output binding couples the `input` and `indicator` components nested under
   its own, whichever binding fills them. That keeps a wall switch working when the network or
   the configuration is broken, and on builds with no automation engine. Momentary coupling acts
@@ -219,18 +214,18 @@ cover a unit that never reaches runtime.
 
 ## Hardware support today
 
-- **GPIO:** backends exist for ESP32, Bouffalo, BK7231, MT7621 and Linux. RP2350 and STM32 have
-  none.
+- **GPIO:** backends exist for ESP32, Bouffalo, BK7231, MT7621, RP2350, STM32 and Linux.
 - **GPIO edges:** event links on ESP32 and MT7621; elsewhere a button samples its line.
-- **PWM:** ESP32 only, with four LEDC ports. The SmartEVSE control pilot takes one, which leaves
-  exactly three for its RGB LED. The MT7621 has no PWM controller, so dimming its LEDs would need
-  software PWM from a timer interrupt.
-- **WS2812:** the only driver is
-  [urt/driver/bl808/led.d](../../third_party/urt/src/urt/driver/bl808/led.d). It is bit-banged,
-  with loop counts calibrated for the D0 core at 480 MHz, on the M1s Dock's pin. ESP32 needs RMT
-  transmit, which urt does not drive yet. RP2350 needs PIO, and a GPIO backend before that.
-  Encoding the bit stream over SPI would work anywhere urt has SPI, which today means ESP32 only;
-  the BL808 SPI driver is a stub.
+- **PWM:** urt's allocator takes a PWM block where one reaches the line (ESP32's four LEDC ports,
+  the RP2350's 24 slice channels) and otherwise one of eight software channels, density-modulated
+  from a 4 kHz timer interrupt. Software channels need a timer compare, which Beken, ESP32 and
+  Bouffalo lack. The SmartEVSE control pilot takes one LEDC port, which leaves exactly three for
+  its RGB LED; the hEX S and the DevEBox H7 dim their LEDs in software.
+- **WS2812:** `urt.driver.ws2812` owns the chains behind a small backend contract. The RP2350
+  runs a chain on a PIO state machine; the BL808 D0 bit-bangs it with loop counts calibrated for
+  480 MHz. ESP32 needs RMT transmit, which urt does not drive yet. Encoding the bit stream over
+  SPI would work anywhere urt has SPI, which today means ESP32 only; the BL808 SPI driver is a
+  stub.
 
 ## Examples
 
@@ -249,9 +244,8 @@ An ESP32-C3-DevKitM-1. Its BOOT button and WS2812 belong to nothing but the node
 fill the slots directly:
 
 ```
-/driver/led/ws2812 add name=pixel gpio=8 count=1
 /binding/gpio add name=boot device=system component=panel.reset kind=button gpio=9 active=low pull=up
-/binding/gpio add name=status device=system component=panel.status kind=light output=pixel
+/binding/gpio add name=status device=system component=panel.status kind=light gpio=8 drive=ws2812
 ```
 
 ## Order of work
@@ -262,20 +256,18 @@ fill the slots directly:
 3. Build the component alias.
 4. Finish the system slots: the remaining gestures, `system.status.state`,
    `/system/factory-reset`, and the recovery stage on #747's one-shot defaults boot.
-5. Add `/driver/led/pwm` for the SmartEVSE, then `/driver/led/ws2812` for each chip family.
+5. WS2812 on more chips (ESP32 RMT, SPI encoding, a cycle-timed bit-bang), and multi-die lights.
 6. Let `if=` read `$value`.
 7. Add network indication, once the #749 mirror moves to `system`.
 
 ## Open decisions
 
-1. Should `colour` be stored as sRGB, which is what LEDs and colour pickers use, or as CIE xy,
-   which Zigbee and Matter use natively? The lean is sRGB, converted in the bindings.
-2. A click reboots, which suits a dedicated reset button. A button shared with an output, like
+1. A click reboots, which suits a dedicated reset button. A button shared with an output, like
    the Tuya plug's, toggles the relay on a click, so aliasing it to `panel.reset` as the example
    does would reboot the plug instead. Should a shared button reset on hold only, and who says
    which kind a slot has?
-3. Should the alias be `/element/alias`, or a flag on `/element/link`?
-4. May the energy app dim a `Light` that has `level`, as a continuous control? Lights are only
+2. Should the alias be `/element/alias`, or a flag on `/element/link`?
+3. May the energy app dim a `Light` that has `level`, as a continuous control? Lights are only
    adopted when configured as an appliance, so the question is whether that is ever wanted.
 
 ## Related

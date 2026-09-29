@@ -58,7 +58,7 @@ Result hardware_open(ref SmartEVSEHardware hardware, ref const SmartEVSEHardware
     AdcInputConfig input_config;
     CounterConfig counter_config;
 
-    hardware.pilot_pwm.port = ubyte.max;
+    hardware.pilot_pwm.slot = ubyte.max;
     hardware.adc.unit = ubyte.max;
     hardware.pilot_input.channel = ubyte.max;
     hardware.pilot_input.calibration_source = AdcCalibrationSource.unavailable;

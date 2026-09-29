@@ -4,10 +4,15 @@ import urt.atomic;
 import urt.attribute : critical, isr_safe;
 import urt.driver.event;
 import urt.driver.gpio;
+import urt.driver.pwm;
+import urt.driver.ws2812;
 import urt.meta : AliasSeq;
 import urt.result;
+import urt.si.quantity : Quantity;
+import urt.si.unit : Percent;
 import urt.string;
 import urt.time;
+import urt.variant : Variant;
 
 import manager;
 import manager.base;
@@ -16,7 +21,7 @@ import manager.collection;
 import manager.component;
 import manager.device;
 import manager.element;
-import manager.panel : ButtonEvent, LightEffect;
+import manager.panel : ButtonEvent, Colour, LightEffect;
 import manager.plugin;
 import manager.reactor;
 
@@ -37,6 +42,20 @@ enum ActiveLevel : ubyte
     low,
 }
 
+enum PwmChannel : ubyte
+{
+    none,
+    hardware,
+    software,
+}
+
+enum LightDrive : ubyte
+{
+    io,
+    pwm,
+    ws2812,
+}
+
 final class GpioBinding : ProtocolBinding
 {
     alias Properties = AliasSeq!(Prop!("kind", kind),
@@ -48,6 +67,9 @@ final class GpioBinding : ProtocolBinding
                                  Prop!("debounce", debounce),
                                  Prop!("hold", hold),
                                  Prop!("click-gap", click_gap),
+                                 Prop!("drive", drive),
+                                 Prop!("index", index),
+                                 Prop!("pwm-channel", pwm_channel, "status"),
                                  Prop!("records", records, "status", "d"),
                                  Prop!("buckets", buckets, "status", "d"),
                                  Prop!("edge-rate", edge_rate, "status", "d"),
@@ -166,6 +188,31 @@ nothrow @nogc:
         mark_set!(typeof(this), "click-gap")();
     }
 
+    final LightDrive drive() const pure
+        => _drive;
+    final void drive(LightDrive value)
+    {
+        if (_drive == value)
+            return;
+        _drive = value;
+        mark_set!(typeof(this), "drive")();
+        restart();
+    }
+
+    final ubyte index() const pure
+        => _index;
+    final void index(ubyte value)
+    {
+        if (_index == value)
+            return;
+        _index = value;
+        mark_set!(typeof(this), "index")();
+        restart();
+    }
+
+    final PwmChannel pwm_channel() const
+        => !_pwm.is_open ? PwmChannel.none : _pwm.is_hardware ? PwmChannel.hardware : PwmChannel.software;
+
     final ulong records() const pure
         => _element ? _element.record_count : 0;
 
@@ -242,6 +289,11 @@ nothrow @nogc:
                 DataFormat pulse = data_format_of!bool();
                 pulse.kind = SeriesKind.point;
                 _pulse = report(bind_element(builder, c, "pulse", register_format(pulse), Access.write));
+                _level = _pwm.is_open || _ws.is_open ? report(bind_element(builder, c, "level", register_value_format!Level(), Access.read_write)) : null;
+                _colour = _ws.is_open ? report(bind_element(builder, c, "colour", register_value_format!Colour(), Access.read_write)) : null;
+                _indicate_colour = _ws.is_open ? report(bind_element(builder, c, "indicate_colour", register_value_format!Colour(), Access.read_write)) : null;
+                if (_ws.is_open)
+                    builder.constant(c, "channels", "RGB");
                 goto case;
             }
             case GpioKind.switch_:
@@ -253,6 +305,27 @@ nothrow @nogc:
 
     override CompletionStatus startup()
     {
+        if (_kind == GpioKind.light)
+        {
+            final switch (_drive)
+            {
+                case LightDrive.io:
+                    break;
+                case LightDrive.pwm:
+                    if (!pwm_acquire(_pwm, PwmConfig(GpioLine(_chip, _gpio), pwm_frequency, pwm_period, 0, _active == ActiveLevel.low)))
+                        log.warning("no PWM channel for gpio ", _gpio, "; it switches on and off only");
+                    mark_set!(typeof(this), "pwm-channel")();
+                    break;
+                case LightDrive.ws2812:
+                    if (!ws2812_open(_ws, GpioLine(_chip, _gpio)))
+                    {
+                        log.error("cannot drive a WS2812 chain on gpio ", _gpio);
+                        return CompletionStatus.error;
+                    }
+                    _pixel = _index;
+                    break;
+            }
+        }
         if (!materialise())
             return CompletionStatus.error;
         final switch (_kind)
@@ -285,12 +358,20 @@ nothrow @nogc:
         g_app.cancel(&gap_elapsed);
         g_app.cancel(&phase_elapsed);
         g_app.cancel(&pulse_elapsed);
-        Element*[4] outputs = [ _element, _effect, _indicate, _pulse ];
+        g_app.cancel(&breathe_step);
+        g_app.cancel(&rainbow_step);
+        Element*[7] outputs = [ _element, _effect, _indicate, _pulse, _level, _colour, _indicate_colour ];
         foreach (e; outputs)
         {
             if (e)
                 e.unsubscribe(&output_changed);
         }
+        if (_ws.is_open)
+        {
+            ws2812_set(_ws, _pixel, 0);
+            ws2812_close(_ws);
+        }
+        pwm_close(_pwm);
         static if (has_gpio)
         {
             if (_claimed != uint.max)
@@ -298,7 +379,7 @@ nothrow @nogc:
         }
         _claimed = uint.max;
         _element = null;
-        _effect = _indicate = _pulse = null;
+        _effect = _indicate = _pulse = _level = _colour = _indicate_colour = null;
         _clicks = 0;
         _unsettled = false;
         return super.shutdown();
@@ -351,8 +432,14 @@ private:
     static immutable string[GpioKind.max + 1] templates = [ null, "Button", "Switch", "Light" ];
     static immutable ushort[GpioKind.max + 1] default_debounce_ms = [ 0, 30, 0, 0 ];
     static immutable ButtonEvent[3] click_events = [ ButtonEvent.click, ButtonEvent.double_, ButtonEvent.triple ];
-    static immutable ushort[2][LightEffect.max + 1] effect_ms = [ [0, 0], [500, 500], [125, 125], [1000, 1000], [100, 900] ];
+    static immutable ushort[2][LightEffect.max + 1] effect_ms = [ [0, 0], [500, 500], [125, 125], [1000, 1000], [100, 900], [0, 0] ];
     enum pulse_length = 50.msecs;
+    enum breathe_step_time = 20.msecs;
+    enum ubyte breathe_steps = 100;
+    enum uint pwm_frequency = 4000;
+    enum uint pwm_period = 256;
+
+    alias Level = Quantity!(ubyte, Percent);
 
     Element* _element;          // capture series, button state, or output switch
     union
@@ -363,6 +450,9 @@ private:
             Element* _effect;
             Element* _indicate;
             Element* _pulse;
+            Element* _level;
+            Element* _colour;
+            Element* _indicate_colour;
         }
     }
     String _component;
@@ -380,12 +470,19 @@ private:
     MonoTime _window_start;
     SysTime _stream_start;
     Link _link;
+    Pwm _pwm;
+    Ws2812 _ws;
     shared uint _signalled;
     GpioKind _kind;
     ActiveLevel _active;
     Pull _pull;
     LightEffect _pattern;
     ubyte _clicks;
+    ubyte _step;
+    LightDrive _drive;
+    ubyte _index;
+    ubyte _pixel;
+    bool _indicating;
     bool _pressed;
     bool _unsettled;
     bool _phase;
@@ -569,10 +666,26 @@ private:
                 _effect.subscribe(&output_changed);
                 _indicate.subscribe(&output_changed);
                 _pulse.subscribe(&output_changed);
+                if (_level)
+                {
+                    if (_level.value.isNull)
+                        _level.value(Level(100));
+                    _level.subscribe(&output_changed);
+                }
+                if (_colour)
+                {
+                    if (_colour.value.isNull)
+                        _colour.value(Colour(255, 255, 255));
+                    _colour.subscribe(&output_changed);
+                    _indicate_colour.subscribe(&output_changed);
+                }
             }
             _element.subscribe(&output_changed);
-            gpio_output_init(_gpio, _active == ActiveLevel.low);
-            _claimed = _gpio;
+            if (!_pwm.is_open && !_ws.is_open)
+            {
+                gpio_output_init(_gpio, _active == ActiveLevel.low);
+                _claimed = _gpio;
+            }
             render();
             set_device_online(true);
             return CompletionStatus.complete;
@@ -600,13 +713,13 @@ private:
         if (_pattern != LightEffect.none)
             return;
         g_app.cancel(&pulse_elapsed);
-        drive(!_phase);
+        show(!_phase);
         g_app.schedule(getTime() + pulse_length, &pulse_elapsed);
     }
 
     void pulse_elapsed(MonoTime)
     {
-        drive(_phase);
+        show(_phase);
     }
 
     // indicate overrides the owner's state; while it is none the owner's switch and effect show
@@ -614,12 +727,15 @@ private:
     {
         g_app.cancel(&phase_elapsed);
         g_app.cancel(&pulse_elapsed);
+        g_app.cancel(&breathe_step);
+        g_app.cancel(&rainbow_step);
         bool lit = _element.value.asBool;
         _pattern = LightEffect.none;
         if (_kind == GpioKind.light)
         {
             LightEffect indicate = cast(LightEffect)_indicate.value.asLong;
-            if (indicate != LightEffect.none)
+            _indicating = indicate != LightEffect.none;
+            if (_indicating)
             {
                 lit = true;
                 _pattern = indicate;
@@ -628,22 +744,94 @@ private:
                 _pattern = cast(LightEffect)_effect.value.asLong;
         }
         _phase = lit;
-        drive(lit);
+        if (_pattern == LightEffect.rainbow && !_ws.is_open)
+            _pattern = LightEffect.none;
+        if (_pattern == LightEffect.breathe && (_pwm.is_open || _ws.is_open))
+        {
+            _step = 0;
+            breathe_step(getTime());
+            return;
+        }
+        if (_pattern == LightEffect.rainbow)
+        {
+            _step = 0;
+            rainbow_step(getTime());
+            return;
+        }
+        show(lit);
         if (_pattern != LightEffect.none)
             g_app.schedule(getTime() + msecs(effect_ms[_pattern][0]), &phase_elapsed);
+    }
+
+    // a triangle over breathe_steps, squared so the fade looks even to the eye
+    void breathe_step(MonoTime scheduled)
+    {
+        uint t = _step < breathe_steps / 2 ? _step : breathe_steps - _step;
+        output(brightness() * t * t / (breathe_steps / 2 * breathe_steps / 2));
+        if (++_step == breathe_steps)
+            _step = 0;
+        g_app.schedule(scheduled + breathe_step_time, &breathe_step);
+    }
+
+    // one turn of the hue wheel every 256 steps
+    void rainbow_step(MonoTime scheduled)
+    {
+        pixel(wheel(_step++), brightness());
+        g_app.schedule(scheduled + breathe_step_time, &rainbow_step);
+    }
+
+    static Colour wheel(ubyte position)
+    {
+        if (position < 85)
+            return Colour(cast(ubyte)(255 - position * 3), cast(ubyte)(position * 3), 0);
+        if (position < 170)
+            return Colour(0, cast(ubyte)(255 - (position - 85) * 3), cast(ubyte)((position - 85) * 3));
+        return Colour(cast(ubyte)((position - 170) * 3), 0, cast(ubyte)(255 - (position - 170) * 3));
+    }
+
+    // the owner's level out of pwm_period, squared for the eye
+    uint brightness()
+    {
+        uint p = _level ? (cast(Level)_level.value.asQuantity()).value : 100;
+        return p * p * pwm_period / 10_000;
     }
 
     void phase_elapsed(MonoTime scheduled)
     {
         _phase = !_phase;
-        drive(_phase);
+        show(_phase);
         g_app.schedule(scheduled + msecs(effect_ms[_pattern][_phase ? 0 : 1]), &phase_elapsed);
     }
 
-    void drive(bool on)
+    void show(bool on)
     {
-        static if (has_gpio)
-            gpio_output_set(_gpio, on != (_active == ActiveLevel.low));
+        output(on ? brightness() : 0);
+    }
+
+    // intensity runs to pwm_period
+    void output(uint intensity)
+    {
+        if (_ws.is_open)
+            pixel(colour(), intensity);
+        else if (_pwm.is_open)
+            pwm_set_duty(_pwm, intensity);
+        else static if (has_gpio)
+            gpio_output_set(_gpio, (intensity != 0) != (_active == ActiveLevel.low));
+    }
+
+    void pixel(Colour c, uint intensity)
+    {
+        ws2812_set(_ws, _pixel, (c.r * intensity / pwm_period) << 16 | (c.g * intensity / pwm_period) << 8 | c.b * intensity / pwm_period);
+    }
+
+    Colour colour()
+    {
+        Variant v;
+        if (_indicating)
+            v = _indicate_colour.value;
+        if (!v.isUser!Colour)
+            v = _colour.value;
+        return v.isUser!Colour ? v.asUser!Colour : Colour(255, 255, 255);
     }
 
     static if (has_gpio_sampler)
@@ -744,6 +932,7 @@ nothrow @nogc:
         g_app.register_enum!Pull();
         g_app.register_enum!GpioKind();
         g_app.register_enum!ActiveLevel();
+        g_app.register_enum!PwmChannel();
         g_app.console.register_collection!GpioBinding();
     }
 }

@@ -3,6 +3,7 @@ module manager.panel;
 import urt.file : delete_file;
 import urt.log;
 import urt.meta.nullable;
+import urt.string.format : FormatArg;
 import urt.time;
 
 import manager;
@@ -37,6 +38,49 @@ enum LightEffect : ubyte
     fast_blink,
     breathe,
     flash,
+    rainbow,
+}
+
+// sRGB, written #rrggbb
+struct Colour
+{
+nothrow @nogc:
+    ubyte r, g, b;
+
+    uint rgb() const pure
+        => r << 16 | g << 8 | b;
+
+    ptrdiff_t toString(char[] buffer, const(char)[], const(FormatArg)[]) const pure
+    {
+        if (!buffer.ptr)
+            return 7;
+        if (buffer.length < 7)
+            return -1;
+        static immutable char[16] digits = "0123456789abcdef";
+        buffer[0] = '#';
+        foreach (i; 0 .. 6)
+            buffer[1 + i] = digits[rgb >> (20 - i * 4) & 0xF];
+        return 7;
+    }
+
+    ptrdiff_t fromString(const(char)[] s)
+    {
+        size_t start = s.length && s[0] == '#';
+        if (s.length < start + 6)
+            return -1;
+        uint v;
+        foreach (c; s[start .. start + 6])
+        {
+            uint d = c >= '0' && c <= '9' ? c - '0' : (c | 0x20) >= 'a' && (c | 0x20) <= 'f' ? (c | 0x20) - 'a' + 10 : 16;
+            if (d == 16)
+                return -1;
+            v = v << 4 | d;
+        }
+        r = cast(ubyte)(v >> 16);
+        g = cast(ubyte)(v >> 8);
+        b = cast(ubyte)v;
+        return start + 6;
+    }
 }
 
 // ascending precedence: the highest live gesture is the one expressed
@@ -87,7 +131,19 @@ nothrow @nogc:
 private:
     enum armed_window = 15.seconds;
 
-    static immutable LightEffect[Gesture.max + 1] expression = [ LightEffect.breathe, LightEffect.flash, LightEffect.blink, LightEffect.fast_blink ];
+    struct Expression
+    {
+        LightEffect effect;
+        Colour colour;
+    }
+
+    static immutable Expression[Gesture.max + 1] expression = [
+        Expression(LightEffect.breathe, Colour(0, 0, 255)),
+        Expression(LightEffect.flash, Colour(255, 255, 255)),
+        Expression(LightEffect.blink, Colour(0, 255, 255)),
+        Expression(LightEffect.fast_blink, Colour(255, 0, 0)),
+    ];
+    static immutable running = Colour(0, 255, 0);
 
     struct Slot
     {
@@ -99,6 +155,7 @@ private:
 
     Slot[8] _slots;
     Element* _status;
+    Element* _status_colour;
     Indication _armed;
 
     Indication start(Gesture gesture, Duration duration)
@@ -157,8 +214,13 @@ private:
         }
         if (next != MonoTime())
             g_app.schedule(next, &expire);
+        if (_status_colour && any)
+        {
+            Colour colour = expression[shown].colour;
+            _status_colour.value(colour);
+        }
         if (_status)
-            _status.value(any ? expression[shown] : LightEffect.none);
+            _status.value(any ? expression[shown].effect : LightEffect.none);
     }
 
     void element_lifecycle(Element* e, ElementLifecycleEvent event)
@@ -167,6 +229,8 @@ private:
         {
             if (e is _status)
                 _status = null;
+            if (e is _status_colour)
+                _status_colour = null;
             return;
         }
         Device owner = e.parent ? e.parent.root_device() : null;
@@ -179,6 +243,16 @@ private:
         const(char)[] path = buf[0 .. len];
         if (path == "system.panel.status.switch")
             e.value(true);
+        else if (path == "system.panel.status.colour")
+        {
+            Colour colour = running;
+            e.value(colour);
+        }
+        else if (path == "system.panel.status.indicate_colour")
+        {
+            _status_colour = e;
+            changed();
+        }
         else if (path == "system.panel.status.indicate")
         {
             _status = e;

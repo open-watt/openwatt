@@ -27,6 +27,8 @@ through them and remove sections as they are absorbed.
   Binding editors should offer the kind first and the properties it uses.
 - The hEX S `system` device gains `panel.reset` and `panel.mode` (`Button`) and `panel.status`
   and `panel.sfp` (`Light`). Show `system.panel` as the node's own controls.
+- The DevEBox H7 `system` device gains `panel.status` (`Light`) and `panel.k1` and `panel.k2`
+  (`Button`).
 - `Light` gains `pulse`, a write-only point series of activity blips; do not plot it as state.
   Every interface gains a writable `led` naming the `Light` that shows its link; interface
   editors should offer it with component completion.
@@ -38,6 +40,13 @@ through them and remove sections as they are absorbed.
   armed). Show it as node status; writes to its `indicate` are overwritten by the next gesture.
 - `system.panel.reset`: a click reboots the node; a hold arms a factory reset that a release
   within 15 s carries out. Warn users before they press it.
+- `/binding/gpio` lights gain `drive` (`io`, `pwm`, `ws2812`), `index`, and a read-only
+  `pwm-channel` (`none`, `hardware`, `software`). A light with `level` (%) gets a brightness
+  slider; one with `colour` gets a colour picker, limited to what the constant `channels` (such
+  as `RGB`) can show. `colour` and `indicate_colour` are sRGB,
+  written `#rrggbb`. `effect` gains `rainbow`, for colour lights.
+- On a colour status light the panel's gestures have colours (blue booting, cyan upgrading,
+  white identify, red reset armed) and the running colour is green.
 - New commands `/system/identify [duration]` and `/interface/locate iface=<name> [duration]`
   (`duration=0` stops). Offer both as "identify" actions on the node and on interfaces with an
   `led`.

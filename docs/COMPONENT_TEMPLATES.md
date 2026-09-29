@@ -1145,8 +1145,9 @@ As an energy control a `Light` is discrete, as a `Switch` is.
 - `level: %` (writable) - Brightness
 - `cct: K` (writable) - Colour temperature; bindings convert ZCL mireds
 - `min_cct: K`, `max_cct: K` - Colour temperature range
-- `colour` (writable) - Colour; the representation is not yet settled
-- `effect: enum` (writable) - `none`, `blink`, `fast_blink`, `breathe`, `flash`: the owner's steady appearance
+- `colour` (writable) - sRGB, written `#rrggbb`
+- `channels` (constant) - The light's colour dies, in the order `R`, `G`, `B`, `W`, `C` (cool white): `RGB` for an RGB LED or pixel, `RB` for a red and blue indicator. Absent on a single-colour light.
+- `effect: enum` (writable) - `none`, `blink`, `fast_blink`, `breathe`, `flash`, `rainbow` (colour outputs; a turn of the hue wheel): the owner's steady appearance
 - `indicate: enum` (writable) - Same values as `effect`. While not `none` it replaces the output; clearing it restores whatever the owner last set. This lets the system, or a UI's "identify", borrow a light without disturbing its state.
 - `indicate_colour` (writable) - Colour for `indicate`, on colour outputs
 - `pulse` (write-only) - A point series; each write briefly inverts a steady output, as an activity light does. An interface with `led=` sends one per burst of traffic.
