@@ -1,6 +1,8 @@
 # System IO: buttons, lights and the system device
 
-Status: the `Button` and `Light` templates are in place; nothing else is built. The work items are
+Status: the `Button` and `Light` templates are in place, and `/binding/gpio` builds buttons,
+switches and lights; the hEX S puts its buttons and LEDs in `system.panel`. Nothing drives the
+slots yet. The work items are
 tracked under "System IO" in [TODO.md](../../TODO.md). Delete this file once they land, and move
 whatever is left into TODO.md.
 
@@ -78,17 +80,15 @@ remote                          scene remote
 
 ## Bindings and drivers
 
-There are three local-hardware bindings. They live in `src/driver/`, so every `FEATURES` tier
-compiles them, including `switch`, the BK7231 default, which has no automation engine. As with
-every binding, `device=` names the equipment and `component=` gives the path within it.
+Local hardware goes through one binding, `/binding/gpio`, whose `kind` says what the lines are
+and so which component it builds; see [CLI.md](../CLI.md). `button`, `switch` and `light` exist
+today. Kinds that combine lines follow the same shape, with role-prefixed properties as
+`/interface/sfp` has (`set-gpio`, `reset-gpio`): `bistable-switch`, `pwm-light`, `encoder`,
+`shutter`. As with every binding, `device=` names the equipment and `component=` gives the path
+within it. The binding is registered only in the `full` tier today; it should move to
+`src/driver/` so the `switch` tier, the BK7231 default, has it too.
 
-| Binding | Hardware | Properties (proposed defaults in brackets) |
-| --- | --- | --- |
-| `/binding/button` | a GPIO input | `gpio`, `active=low\|high`, `pull`, `mode`, `debounce` (30ms), `click-gap` (300ms), `hold` (1s) |
-| `/binding/switch` | a GPIO output | `gpio`, `active`, `coupling` (`on`) |
-| `/binding/light` | a GPIO output, or an LED driver | `gpio` and `active`, or `output` and `index`; `coupling` (`on`) |
-
-- **Light sources.** `gpio=` is the shorthand for plain on/off. Anything richer goes through
+- **Light sources.** `kind=light` drives one line on and off. Anything richer goes through
   `output=<driver>`, plus `index=` for one pixel of a strip. The driver owns the peripheral and
   reports its capabilities, and the binding creates only the elements that output supports. The
   binding renders effects and `indicate` from a scheduled timer, so a plain GPIO LED can blink as
@@ -103,8 +103,8 @@ every binding, `device=` names the equipment and `component=` gives the path wit
   the configuration is broken, and on builds with no automation engine. Momentary coupling acts
   on the press edge, not on `click`, so it has no multi-click delay. `coupling=off` leaves the
   input to an automation and the indicator to its own writers.
-- **Sampling.** GPIO interrupts exist only on ESP32, with two ports. A button therefore samples on
-  a scheduled timer everywhere, and may wake from an interrupt where a port is free.
+- **Sampling.** Buttons take edges from an event link where the platform has them (ESP32 and
+  MT7621) and sample their line every `debounce` elsewhere.
 - **Topology.** A relay that should appear in the energy model needs its `Port`. A naked device
   profile declares it through the existing `/device/add id=plug profile=...`, and the bindings
   fill in the leaves.
@@ -243,9 +243,9 @@ A Tuya plug (pins vary by product):
 
 ```
 /device/add id=plug profile=tuya-plug
-/binding/switch add name=relay device=plug component=outlet1.switch gpio=12
-/binding/button add name=button device=plug component=outlet1.switch.input gpio=3 active=low
-/binding/light add name=led device=plug component=outlet1.switch.indicator gpio=5 active=low
+/binding/gpio add name=relay device=plug component=outlet1.switch kind=switch gpio=12
+/binding/gpio add name=button device=plug component=outlet1.switch.input kind=button gpio=3 active=low
+/binding/gpio add name=led device=plug component=outlet1.switch.indicator kind=light gpio=5 active=low
 /element/alias add source=plug.outlet1.switch.input target=system.panel.reset
 /element/alias add source=plug.outlet1.switch.indicator target=system.panel.status
 ```
@@ -255,14 +255,15 @@ fill the slots directly:
 
 ```
 /driver/led/ws2812 add name=pixel gpio=8 count=1
-/binding/button add name=boot device=system component=panel.reset gpio=9 active=low pull=up
-/binding/light add name=status device=system component=panel.status output=pixel
+/binding/gpio add name=boot device=system component=panel.reset kind=button gpio=9 active=low pull=up
+/binding/gpio add name=status device=system component=panel.status kind=light output=pixel
 ```
 
 ## Order of work
 
 1. Land #532, which depends on urt#232.
-2. Build the three GPIO bindings, with coupling, and write their CLI.md sections.
+2. Couple an output's nested `input` and `indicator` in `/binding/gpio`, and move the binding
+   to the `switch` tier.
 3. Build the component alias.
 4. Build the system slots: the hold ladder, the status indication, `system.status.state`,
    `/system/factory-reset` and `/system/identify`. The recovery stage uses #747's one-shot

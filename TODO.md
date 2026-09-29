@@ -573,6 +573,11 @@ The current implementation and remaining phases are described in
    a button's `event`, needs the trigger value in the condition's context; a `for=` deadline can
    use the snapshot it already keeps.
 
+10. **Enums and bools do not compare with their names**: `(@system.panel.reset.event == "hold")`
+    and `(@x.switch == false)` are false on a matching value, so an action cannot branch on a
+    button's `event`. `Type.eq` compares the two Variants raw; an enum operand should compare by
+    key against a string, and `true`/`false` should be literals.
+
 ## System IO
 
 Buttons, relays and lights as data-model components, the `system` device as the node's own
@@ -580,28 +585,41 @@ surface, and the recovery and status behaviour built on them. The design, exampl
 decisions are in [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md). The `Button` and
 `Light` templates exist; nothing drives them yet.
 
-1. **Local IO bindings**: `/binding/button`, `/binding/switch` and `/binding/light` over GPIO,
-   in `src/driver/` so the `switch` tier has them. An output binding couples the `input` and
-   `indicator` components nested under its own.
+1. **`/binding/gpio` coupling and tier**: a `switch` or `light` should couple the `input` and
+   `indicator` components nested under its own. The binding registers only in the `full` tier;
+   move it to `src/driver/` so the `switch` tier (BK7231) has it. Latching buttons need a way to
+   say so (`mode` is always `momentary`).
 
-2. **SmartEVSE button gestures**: its three `Button`s report `state` only; `event` needs the
-   gesture inference the button binding will have.
+2. **`/binding/gpio` multi-line types**: `bistable-switch`, `pwm-light`, `encoder`, `shutter`,
+   with role-prefixed line properties (`set-gpio`, `reset-gpio`, `a-gpio`, `b-gpio`).
 
-3. **Component alias**: `/element/alias` creates a mirror of a component and registers itself as
+3. **SmartEVSE button gestures**: its three `Button`s report `state` only; `event` needs the
+   gesture timing `/binding/gpio` has, factored out where the board binding can use it.
+
+4. **MT7621 GPIO misconfiguration asserts**: a line in a pin group urt reserves, or a pull on a
+   part with no pad pulls, asserts in the driver instead of failing the binding; urt should
+   offer a query `validate()` can use.
+
+5. **Component alias**: `/element/alias` creates a mirror of a component and registers itself as
    the writer, so sync accepts remote writes. `/element/link` has no CLI.md section; document it
    alongside.
 
-4. **System slots**: the `panel.reset` hold ladder, the `panel.status` indication,
+6. **System slots**: the `panel.reset` hold ladder, the `panel.status` indication,
    `/system/factory-reset` and `/system/identify`. The recovery stage needs #747's one-shot
    defaults boot.
 
-5. **LED drivers**: `/driver/led/pwm` for the SmartEVSE's RGB LED, then `/driver/led/ws2812` for
+7. **LED drivers**: `/driver/led/pwm` for the SmartEVSE's RGB LED, then `/driver/led/ws2812` for
    each chip family (RMT, PIO, the BL808 bit-bang, or SPI encoding).
 
-6. **Network indication**: once #749's wifi mirror moves from the SmartEVSE binding into
+8. **Network indication**: once #749's wifi mirror moves from the SmartEVSE binding into
    `system.status.network`.
 
 ## Data model
+
+- **`/element/set` swallows rejected values**: `element_set` calls `Element.value(Variant)`, which
+  drops the error `update_typed_series` returns, so `value=1` on a bool element does nothing and
+  says nothing (`value=true` works). Report the error, and decide whether 0 and 1 should convert
+  to bool.
 
 - **The console prints quantities badly**: `/device/print` shows an integer 1310 nm as
   `1.31e+3nm` and a float supply of 3.2616 V as `3.2616000175476074V`. The stored values are

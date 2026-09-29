@@ -972,6 +972,46 @@ other source remains online, the device becomes offline until fresh activity.
 | `device` | device name | required | Device to create or populate. |
 | `offline-timeout` | duration | `0` (disabled; `30s` for CAN and Tesla TWC) | Marks the device offline when no data has arrived for this long, even while the transport stays up. |
 
+### `/binding/gpio`
+
+A GPIO binding models local hardware wired to GPIO lines. `kind` says what the
+lines are, and the binding builds the matching component at `component` in
+`device`, which may be an existing device such as `system`.
+
+| Kind | Lines | Component |
+| --- | --- | --- |
+| `capture` | `gpio` | a timestamped edge series `state`; Linux only |
+| `button` | `gpio` | a [`Button`](COMPONENT_TEMPLATES.md#button): `mode`, `state` and a point series `event` of `click`, `double`, `triple`, `hold` and `release` |
+| `switch` | `gpio` | a [`Switch`](COMPONENT_TEMPLATES.md#switch) whose writable `switch` drives the line |
+| `light` | `gpio` | a [`Light`](COMPONENT_TEMPLATES.md#light) with `switch`, `effect` and `indicate`; `indicate` overrides the owner's state while it is not `none` |
+
+A button reacts to edge interrupts where the platform has them (ESP32, MT7621)
+and otherwise samples its line every `debounce`. Gestures are timed from the
+debounced level: a press held for `hold` is a `hold`, followed by `release`;
+otherwise one to three presses each within `click-gap` of the last are a
+`click`, `double` or `triple`.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `kind` | `capture`, `button`, `switch`, `light` | `capture` | What the line is. |
+| `gpio` | line number | required | The line. |
+| `chip` | controller index | `0` | The GPIO controller, on hosts with several (`/dev/gpiochipN`). |
+| `component` | component path | required except for `capture` | Where the component goes in `device`. |
+| `active` | `high`, `low` | `high` | The line level that means pressed or on. |
+| `pull` | `none`, `up`, `down` | `none` | Pad pull, where the platform drives one. |
+| `debounce` | duration | `30ms` for `button`, `0` otherwise | How long a level must hold. |
+| `hold` | duration | `1s` | Press duration that makes a `hold`. |
+| `click-gap` | duration | `300ms` | Longest gap between the presses of a multi-click. |
+
+`capture` also reports `records`, `buckets`, `edge-rate`, `last-edge`,
+`backend`, `clock`, `stream-start` and `anchor-error` as status.
+
+```
+/binding/gpio add name=reset-button device=system component=panel.reset kind=button gpio=18 active=low
+/binding/gpio add name=power-led device=system component=panel.status kind=light gpio=16
+/element/set element=system.panel.status.indicate value=blink
+```
+
 ### `/binding/obd`
 
 An OBD binding polls a vehicle through an OBD interface and materialises the

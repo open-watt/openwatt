@@ -19,6 +19,15 @@ through them and remove sections as they are absorbed.
   pressed level moves from `buttons.<name>` to `buttons.<name>.state`.
 - Brilliant 22034 fan: `light` is now a `Light`, and its `on` element is renamed `switch`.
 
+## 2026-09-29: `/binding/gpio` builds buttons, switches and lights
+
+- `/binding/gpio` gains `kind` (`capture`, `button`, `switch`, `light`), `component`, `active`,
+  `hold` and `click-gap`. `rx-line` is renamed `gpio`; `element` and `tx-line` are gone, and a
+  capture's series is `<component>.state` (the device's `state` when `component` is unset).
+  Binding editors should offer the kind first and the properties it uses.
+- The hEX S `system` device gains `panel.reset` and `panel.mode` (`Button`) and `panel.status`
+  and `panel.sfp` (`Light`). Show `system.panel` as the node's own controls.
+
 ## 2026-09-29: HTTP client timeout
 
 - `/protocol/http/client` gains a writable `timeout` duration, default `5s`. Expose it in
