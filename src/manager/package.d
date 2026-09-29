@@ -526,6 +526,9 @@ nothrow @nogc:
             abort();
         }
 
+        import manager.stats : create_system_device;
+        create_system_device();
+
         MonoTime now = getTime();
         schedule(now, &tick);
         schedule(now + 1.seconds, &heartbeat);
@@ -1661,13 +1664,6 @@ private:
         foreach (handler; _heartbeat_handlers)
             handler(now);
 
-        version (Embedded)
-        {
-            import urt.log : writeInfo;
-            import urt.system : get_cpu_load;
-            writeInfo("hb=", ++_heartbeats, " load=", get_cpu_load(), "%");
-        }
-
         MonoTime next = scheduled + 1.seconds;
         now = getTime();
         if (next <= now) // stalled: skip missed beats but hold the 1s grid
@@ -1676,8 +1672,6 @@ private:
     }
 
     Array!HeartbeatHandler _heartbeat_handlers;
-    version (Embedded)
-        uint _heartbeats;
 }
 
 Element* resolve_element(EID eid) nothrow @nogc
