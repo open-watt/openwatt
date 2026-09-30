@@ -122,9 +122,9 @@ holding action, not an answer. Options, cheapest first:
   and RTC offset restoration. Reconcile the RTC stop/reset contract with the
   ESP32 no-op and RP2350 stop-only implementations.
 - **Boot guard follow-ups**:
-  - **Bare-metal parts have no hardware watchdog armed.** `driver.baremetal.watchdog` is a no-op
-    except on the BL808 M0, so a hang on RP2350, BK7231 or BL618 never resets and never counts.
-    Arm each part's watchdog from `watchdog_init`; the record already classifies the resulting
+  - **BK7231 and BL618 arm no hardware watchdog.** `driver.baremetal.watchdog` drives one only on
+    the BL808 M0, MT7621, RP2350 and STM32, so a hang elsewhere never resets and never counts. Arm
+    each part's watchdog from `watchdog_init`; the record already classifies the resulting
     reset (`running` left in place reads as a watchdog). Bouffalo also has no `system_reset()`:
     its reset needs the vendor's clock-switch sequence from TCM (`GLB_SW_System_Reset`), so its
     fault paths still halt and the crash only ends with a power cycle, which erases the record.
@@ -172,6 +172,54 @@ holding action, not an answer. Options, cheapest first:
 - **The BK7231N `switch-ip` build no longer fits**: `make PLATFORM=bk7231n CONFIG=release
   FEATURES=switch-ip HEADLESS=1 MODBUS=0` links but the packed image is 157,830 bytes over
   `_image_limit` on master (2026-09-22); the last ledger row (2026-09-09) had 4,640 bytes spare.
+
+## Driver audit (2026-09-30): STM32, RP2350, serial, panel
+
+What an adversarial review of the STM32 and RP2350 drivers, the serial event path, the boot guard
+and the panel left outstanding.
+
+- **The RP2350 warm-boot console stall was never explained.** After a core-only (AIRCR) reset the
+  IRQ UART once left the console silent. `system_reset()` now resets the whole chip, and the UART
+  resets itself on open; with AIRCR forced back in, six core-only resets came up live, and without
+  the open-time reset only the first input was lost. A debugger's SYSRESETREQ is still core-only:
+  if a silent console follows one, the cause is open.
+
+- **DMA** for UART RX and TX on every family (**F4 and F7 take an interrupt per byte**, see the
+  STM32 section), for WS2812 frames, and for PIO in general.
+- **The RX latency bound is a byte count, not a clock**, on every platform: a steady stream meets
+  ~350 us, a trickle can take N times its spacing. A strict bound needs a timer armed on the first
+  undelivered byte.
+- **F4 has no receiver timeout**: its gap is the one-character IDLE line, not 3.5 characters.
+- **The RP2350's gap is the PL011's fixed 32 bit times** (3.2 characters at 8N1).
+- **ESP32 RX thresholds** are the IDF defaults (TOUT about 10 symbols, 120 bytes), not the gap and
+  ~350 us the others use.
+- **UART errors and overflow restart the stream**, discarding up to a ring of good data and all
+  queued TX; count them instead of treating them as fatal. Possibly the cause of the CP210x
+  "session restarts on open" (a break on open raises FE).
+- STM32 UART: 7-bit framing (parity always forces M), 1.5 stop bits, OVER8 for high baud on F4,
+  the error callback with `rx_avail == 0`, H7 kernel-clock selection.
+- STM32 PWM, per family: TIM9-14 on F4/F7 (TIM9-11 AF3, TIM12-14 AF9), TIM12-17 on H7, LPTIM and
+  the H7 HRTIM, each with its own alternate functions and clock; TIM1/TIM8 complementary outputs
+  (CHxN), dead time and break inputs; PB3/PB4 are SWO/NJTRST at reset and should not be taken
+  silently; the achieved frequency is not reported; `apb1_timer_hz` hard-codes x2 (TIMPRE
+  unhandled).
+- STM32 IWDG: WWDG and its early-wakeup interrupt (which could stamp the reset record with the hung
+  PC) unused; the timeout rides the uncalibrated LSI (F4: 3.4-9.4 s for 5 s);
+  LPWR/CPU/D1/D2 reset flags unreported.
+- STM32 EXTI: edge direction thrown away on `gpio_change`; no autonomous tier (TIM capture to DMA
+  to BSRR, H7 DMAMUX); lines 16+ (PVD, RTC, COMP) unused; no arbitration with a future GPIO
+  interrupt API.
+- RP2350: POWMAN reset flags unread; the reset record
+  still overlaps SCRATCH2-3, which ROM `reboot()` writes, so a ROM reboot reads as an update; PWM
+  phase-correct mode, input capture and in-phase start unused; the PWM CC update is not ISR-safe;
+  WS2812 frames block the main loop and the line floats after close; **PIO allocation**: the
+  WS2812 driver hard-claims PIO0 and its state machines 0-3, and never sets PIO `GPIOBASE`, so the
+  RP2350B's pins 32-47 are out of reach (a PIO block addresses 32 pins, 0-31 or 16-47, shared by
+  its four state machines): PIO blocks, state machines and instruction memory want an allocator;
+  RP2350 hardware PWM has never run on hardware (the Y23A's only light is the WS2812); RP2350-E9 (the pull-down latch) is undocumented for inputs.
+- GpioBinding: no GPIO ownership arbitration (two bindings on a pin, or a binding on a UART pin,
+  work until one releases); `led=` writes a synced peer's light (no ownership check, unlike the
+  panel).
 
 ## Retrospective merge reconciliation (2026-09-08)
 
@@ -1441,11 +1489,6 @@ The DevEBox H7 boots and runs OpenWatt with a console, per-bank TLSF pools and D
 - **F4 and F7 have never run on hardware.** The APM32F407 board is the first F4 candidate.
 - **No stack guard.** The stack sits at the top of core RAM with statics below it; an overflow
   silently corrupts them. An MPU no-access region under `_stack_low`, or a PSP/MSP split.
-- **No watchdog.** IWDG is never armed, so a hang never resets and the boot guard cannot count it.
-- **Reset-cause flags are not read** (RCC_RSR on H7, RCC_CSR on F4/F7); the reset class comes
-  only from the retained record, so pressing RST on a running board reads as a watchdog crash and
-  three presses descend the ladder. Every reset source drives NRST, so a press is PINRSTF with no
-  other flag; it should count as an operator reset toward the gesture, as a power cycle does.
 - **Queued console output is lost on a deliberate reset.** `system_reset` does not drain the TX
   ring; only the fault path writes through the blocking `uart0_hw_puts`. MT7621's fault report
   flushes its netconsole before resetting; one console flush inside urt's `system_reset` would

@@ -45,7 +45,11 @@ at boot.
 After three crashes before 60 seconds of uptime, recovery steps down from saved
 configuration to `startup.conf`, then bring-up defaults. An unproven revision is
 replaced by an older one; previously successful revisions are preserved. `/system/sysinfo` reports the active configuration and
-recovery reason. Power loss and deliberate restarts do not count as crashes.
+recovery reason. Power loss and deliberate restarts do not count as crashes, and nor does a
+press of the reset button where the chip reports its reset pin (STM32); that counts as a
+power-on. A board whose reset line is driven by a supervisor or an external watchdog therefore
+reads those resets as presses, and a hang loop there never steps down the configuration. A
+debugger's reset reads as deliberate, and a watchdog reset is always a crash.
 
 Five power-ons that each end within five seconds select bring-up defaults for one
 boot, skipping `user.conf` without erasing anything. On supported OTA platforms, a
@@ -168,9 +172,11 @@ command says so.
 `/system/sleep <duration>` pauses the session for the given duration. It is latent, so
 Ctrl-C cancels it, which makes it useful for pacing a startup script.
 
-`/system/reboot [bootloader=<n>] [crash=<bool>]` restarts the node. Without arguments it
-performs a normal restart. `crash=true` aborts the process instead, which the boot guard
-counts as a crash; it exists to exercise the guard.
+`/system/reboot [bootloader=<n>] [crash=<bool>] [hang=<bool>]` restarts the node. Without
+arguments it performs a normal restart. `crash=true` aborts the process instead, which the
+boot guard counts as a crash; it exists to exercise the guard. `hang=true` stalls the main
+loop until the watchdog resets the node, to exercise the watchdog; where none is armed it
+hangs for good.
 
 `<n>` is an integer, and any non-zero value restarts into the chip's own ROM loader
 instead, where the part exposes its factory firmware-update interface. `bootloader=1`

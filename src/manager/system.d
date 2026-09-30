@@ -257,12 +257,18 @@ void show_time(Session session)
     session.write_line(getDateTime());
 }
 
-void reboot(Session session, Nullable!uint bootloader, Nullable!bool crash)
+void reboot(Session session, Nullable!uint bootloader, Nullable!bool crash, Nullable!bool hang)
 {
     if (crash && crash.value)
     {
         session.write_line("reboot: crashing...");
         abort();
+    }
+    if (hang && hang.value)
+    {
+        session.write_line("reboot: hanging until the watchdog bites...");
+        for (;;)
+        {}
     }
     if (bootloader && bootloader.value)
     {
