@@ -1048,10 +1048,12 @@ this is what remains.
   collection methods, `enum_req` the push-only `type` form. Gated on property projection in
   `id.d`. Keep the sibling transport class buildable on the way: handles are already `ulong`, but
   `IdAllocator` and `g_formats` allocate through `defaultAllocator`, so shared-memory residency
-  needs a writer/reader ownership rule before the BL808 M0/D0 ring exists.
+  needs a writer/reader ownership rule before a sibling transport shares them across the BL808
+  cores.
 
-- **Build the remaining transports**: the shared-memory ring for BL808 M0/D0 (sibling class,
-  length-prefixed SPSC rings, ring-full is queue-and-wait), a `CPCEndpoint` transport for UART/SPI
+- **Build the remaining transports**: the sibling class for BL808 M0/D0 (raw EIDs as handles; the
+  cores peer today over `/stream/xram` and `/interface/framed` with the reliability sublayer), a
+  `CPCEndpoint` transport for UART/SPI
   point links (I2C deferred until a data-ready GPIO exists), the RS485 multi-drop envelope (valid
   Modbus RTU frames with a user-space function code, token is the poll, one scheduler shared with
   the Modbus master, per-slave baud as addressing metadata from day one), and one-way multicast
@@ -1464,7 +1466,8 @@ Bare-metal follow-ups from the same series:
 ### BL808 follow-ups (2026-09-30)
 
 M0 is the BL808's network node: it boots one image carrying D0, brings up the provisioning AP and
-the standard services, and drives the M1s Dock's panel, its LED on hardware PWM.
+the standard services, drives the M1s Dock's panel, its LED on hardware PWM, and claims D0 over XRAM
+so D0's devices appear on M0 only.
 
 - **M0 takes 6-9 s to inflate D0 at boot.** Inflate runs from XIP flash into PSRAM; measure where
   it goes (flash reads, PSRAM writes, the inflater) before choosing between placing the inflater in
@@ -1483,6 +1486,11 @@ the standard services, and drives the M1s Dock's panel, its LED on hardware PWM.
 - **M0's clock is whatever the boot header chose** (`mcu_clk`, the WiFi PLL's 320 MHz), and
   `bl_common/clock.d` trusts it for the shared 160 MHz timebase. Read M0's clock mux at boot, or set
   it, so a different boot header cannot silently skew the timers.
+- **A doorbell event lost to a full event queue** leaves XRAM bytes waiting for the peer's next
+  doorbell; a quiet peer strands them. Re-post from the sweep, or poll once on overflow.
+- **`/stream/xram` has no carrier**: neither end knows whether the other is attached, so bytes
+  written early are lost. Sync copes through its sublayer; a consumer without one would want a
+  per-side open word in the ring header.
 - **The heap core keeps a pool it failed to add**: reject it so its bytes are not counted as free.
 - **The BL618 has no `system_reset`/`por_reset`**; only the BL808 cores do.
 - **M0's provisioning AP is open**, where the Waveshare board's defaults run a WPA2 AP on a known

@@ -288,7 +288,7 @@ never sees the link. A link adapter provides:
 | --- | --- | --- | --- | --- |
 | UDP unicast (IP or bare MAC) | datagram | UDP checksum | sublayer above | built |
 | WebSocket | message | TCP | inherent | built |
-| shared-memory ring (BL808 M0/D0) | length prefix | memory | inherent | designed |
+| shared-memory ring (BL808 M0/D0) | COBS (`/interface/framed`) | memory | sublayer above | built |
 | UART / RS232 / SPI point link | CPC | CPC CRC | CPC retransmit | designed |
 | RS485 multi-drop | Modbus RTU envelope | CRC16 | poll/response | designed |
 | UDP multicast feed | datagram | UDP checksum | gap-detect, unicast backfill | designed |
