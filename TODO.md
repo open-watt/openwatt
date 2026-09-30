@@ -1372,6 +1372,12 @@ this is what remains.
   S2/S3 for the reflex NMI vector and GPIO register layout, and a per-part ISR-safe SAR path or
   an honest "not in ISR" contract for the ADC.
 
+- **Bare-metal serial RX is drained from the tick**: the STM32 and RP2350 UARTs fill an RX ring
+  from their interrupts, but `SerialStream.update()` empties it with `uart_poll()` every frame;
+  only ESP32 posts an RX event. Give the bare-metal backends the `uart_hw_open(port, cfg, rx_cb)`
+  form, fired from the ISR on the line going idle (STM32 IDLE or the F7/H7 receiver timeout, the
+  PL011 receive timeout) or a byte-count threshold, and deliver through the ESP32 event path.
+
 - **Move WebSocket RX off the tick**: `WebSocket.update()` still polls `_stream.read()` each
   frame; it should install `rx_handler` and decode on delivery. TX is now pull-driven by the
   stream, so the tick carries only RX.
@@ -1455,6 +1461,9 @@ Boots and runs on a WeAct RP2350B Core, with an interactive console on UART1 (GP
 GPIO21 RX): commands echo and execute, and the heartbeat ticks idle. `xosc_hz` is confirmed
 at 12MHz by clean UART framing. Outstanding:
 
+- **The status WS2812 once held solid orange** with `colour` at `#00ff00`, from a flash until the
+  next; not reproduced since. A light re-sends only on a change, so one garbled frame would
+  persist; look at what reaches the chain before the first frame if it recurs.
 - **`UartConfig.tx_gpio`/`rx_gpio` are ignored.** The driver routes a fixed default pair per
   port, so a stream cannot pick its own pins. Picking them needs a funcsel per pin, not per
   port: most UART pins are funcsel 2, but the alternates (GPIO6, 10, 14, 18, 22, 23) are 0x0b.

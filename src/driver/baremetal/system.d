@@ -11,12 +11,7 @@ nothrow @nogc:
 void system_reboot()
 {
     reset_record_mark(ResetMark.deliberate);
-    version (RP2350)
-    {
-        import urt.driver.rp2350.bootrom : rom_reboot, RebootType;
-        rom_reboot(RebootType.normal);
-    }
-    else static if (has_system_reset)
+    static if (has_system_reset)
         system_reset();
     else
         log_notice("system", "system_reboot: not implemented on this platform");

@@ -162,6 +162,7 @@ Limit is the linker script's `FLASH` region, not the board: the Y23A-RP2350B car
 | 2026-09-23 | #747 | ldc 1.43.0 | 1,597,272 | 41,456 | 4,194,304 | boot guard ladder and retained reset record |
 | 2026-09-23 | ba8561fb | ldc 1.43.0 | 1,597,768 | 41,488 | 4,194,304 | POWMAN always-on timer keeps the wall clock across a reset |
 | 2026-09-30 | ow/system-panel | ldc 1.43.0 | 1,633,316 | 46,490 | 4,194,304 | panel, GPIO buttons and lights, PWM and WS2812 drives |
+| 2026-09-30 | ow/rp2350-uart-irq | ldc 1.43.0 | 1,635,604 | 49,626 | 4,194,304 | interrupt-driven UART with RX events; system reset through the watchdog |
 
 ### MT7621 hEX S, `make BOARD=rb760igs CONFIG=release`
 
