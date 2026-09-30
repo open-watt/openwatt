@@ -993,11 +993,11 @@ lines are, and the binding builds the matching component at `component` in
 | `switch` | `gpio` | a [`Switch`](COMPONENT_TEMPLATES.md#switch) whose writable `switch` drives the line |
 | `light` | `gpio` | a [`Light`](COMPONENT_TEMPLATES.md#light) with `switch`, `effect`, `indicate` and `pulse`; `indicate` overrides the owner's state while it is not `none`, and each `pulse` inverts a steady output for 50ms; `drive` adds `level` and, for `ws2812`, `colour` |
 
-A button reacts to edge interrupts where the platform has them (ESP32, MT7621)
+A button reacts to edge interrupts where the platform has them (ESP32, MT7621, BL808 M0)
 and otherwise samples its line every `debounce`. A WS2812 chain runs on the RP2350's PIO, or is
-bit-banged on the BL808's D0 core; other platforms do not drive one yet. PWM comes from the chip's PWM block (ESP32
-LEDC) where one is free, and otherwise from software, driven by a 4 kHz timer interrupt that runs
-only while some light is at a level between off and full. The MT7621 has no PWM block. Gestures are timed from the
+sent by the BL808's GPIO transmit FIFO; other platforms do not drive one yet. PWM comes from the chip's PWM block (ESP32
+LEDC, BL808) where one reaches the line and is free, and otherwise from software, driven by a 4 kHz timer interrupt that
+runs only while some light is at a level between off and full. The MT7621 has no PWM block. Gestures are timed from the
 debounced level: a press held for `hold` is a `hold`, followed by `release`;
 otherwise one to three presses each within `click-gap` of the last are a
 `click`, `double` or `triple`.
@@ -1015,6 +1015,7 @@ otherwise one to three presses each within `click-gap` of the last are a
 | `click-gap` | duration | `300ms` | Longest gap between the presses of a multi-click. |
 | `drive` | `io`, `pwm`, `ws2812` | `io` | How a `light` reaches its line. `io` switches it. `pwm` takes a PWM channel and gains `level`, and `breathe` fades; with no channel free it warns and switches on and off only. `ws2812` makes the line a WS2812 chain and the light one pixel of it, with `level`, `colour`, `indicate_colour` and `channels` (`RGB`), and the `rainbow` effect. |
 | `index` | `0` to `15` | `0` | The light's pixel on a `ws2812` chain; several lights on one `gpio` share the chain. |
+| `backend` | read-only | | How the line is watched: `interrupt` for edges from an event link, `poll` for a button sampled every `debounce`, or the capture sampler's name. |
 | `pwm-channel` | read-only | | `none`, `hardware` or `software`: what the light holds. A channel other code needs exact moves from hardware to software, so this can change. |
 
 `capture` also reports `records`, `buckets`, `edge-rate`, `last-edge`,

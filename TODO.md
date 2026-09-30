@@ -1449,6 +1449,18 @@ Bare-metal follow-ups from the same series:
   returns short, and the console treats a short write as sent; the STM32 console lost output the
   same way until its UART went interrupt driven.
 
+### Bouffalo driver follow-ups (2026-09-30)
+
+- **The BL808 PWM pin map is inferred** (pin n reaches output n % 8) from the vendor dev kit's
+  wiring, and confirmed only for GPIO8 on block 0.
+- **The WS2812 FIFO driver has never met a WS2812**: the M1s Dock's LED is a plain one.
+- **GPIO interrupts and event links are M0's only.** D0 takes the GPIO block's interrupt on its
+  PLIC, and the BL618 on its own CLIC line; give both the same backend.
+- **An unrecorded reset of a running BL808 reads as `watchdog`**: the reset record still says
+  running, so a bare-metal assert followed by any reset is classed as a watchdog reset. Confirm
+  against the watchdog's latched status (`TIMER_WSR`) and call the rest an unrecorded crash.
+- **The BL618 has no watchdog**: give it the MCU timer watchdog the BL808 M0 uses.
+
 ### RP2350 bring-up follow-ups (2026-09-20)
 
 Boots and runs on a WeAct RP2350B Core, with an interactive console on UART1 (GPIO8 TX,
