@@ -872,6 +872,22 @@ For example, if `can1` names the controller you want to configure:
 /interface/can/set can1 baud-rate=250000
 ```
 
+### `/interface/framed`
+
+A framed interface carries raw packets over any byte stream: each packet is
+COBS-encoded and closed with a zero byte, so a receiver that attaches mid-frame
+resynchronises at the next delimiter. It adds no checksum and advertises no
+reliability, so a sync peer over it runs the reliability sublayer.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `stream` | stream name | required | Byte stream to frame. |
+
+```text
+/interface/framed/add name=d0link stream=d0
+/sync/peer/add name=d0 transport=d0link
+```
+
 ### `/interface/udp`
 
 A UDP interface is a raw-packet interface over UDP datagrams: one datagram is
@@ -1757,7 +1773,7 @@ opens a connected UDP endpoint owned by the peer. The last of `transport` and
 
 | Property | Values | Default | Description |
 | --- | --- | --- | --- |
-| `transport` | interface | none | An interface delivering raw frames (a WebSocket, a UDP interface). |
+| `transport` | interface | none | An interface delivering raw frames (a WebSocket, a UDP interface, a framed stream). |
 | `remote` | `address:port`, `[ipv6]:port`, `[mac]:port` | none | Remote UDP peer. The address and port are both required. |
 | `encoder` | `json`, `binary` | `binary` | Wire encoding for this session. |
 | `time-authority` | `yes`/`no` | `no` | Take this peer as the local clock source. A peering claim sets it on the member for its first claimant. |
