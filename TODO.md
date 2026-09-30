@@ -1372,6 +1372,29 @@ this is what remains.
   S2/S3 for the reflex NMI vector and GPIO register layout, and a per-part ISR-safe SAR path or
   an honest "not in ISR" contract for the ADC.
 
+- **UART writes disagree on a full ring**: ESP32 writes what fits and returns short; STM32 and
+  RP2350 block while the line drains it, and STM32 ends short once the line stops (CTS held off)
+  for 50 ms. The console treats a short write as sent, so a short-write contract truncates large
+  prints until session output is pull-driven. Settle one contract (short writes with a TX-space
+  event) once pull-driven print lands, and make every backend follow it.
+
+- **Serial RX is still drained from the tick on BK7231, Bouffalo and MT7621**:
+  `SerialStream.update()` polls where a backend has no `has_rx_callback`. ESP32, RP2350 and STM32
+  signal from the ISR on a line gap or a few hundred microseconds of characters. Give the others
+  the `uart_hw_open(port, cfg, rx_cb)` form and delete the polled path.
+
+- **`/log/print` without `--stream` redraws its pager every tick**: on the RP2350 it held the CPU
+  at 64% and logged an 80 ms `console-session` update each frame while idle. The live view should
+  redraw on a new entry or a key, not per tick.
+
+- **Console session restarts leak and slow down each time**, on the H7 and the RP2350 alike.
+  Each Ctrl-C restart of a UART session logged a longer `console.session.update` tick on the H7
+  (245, 285, 340 ms over three restarts, 820 ms later), and a restart often swallows the command
+  sent right after it. The H7's AXI heap grew from 38 KB to 418 KB over a few dozen restarts
+  until a 10,248-byte allocation failed, and the RP2350 grew about 5 KB per port open while idle
+  time added nothing. Opening the port over a CP210x seems to restart the session by itself on
+  alternate opens. Find what a restart keeps.
+
 - **Move WebSocket RX off the tick**: `WebSocket.update()` still polls `_stream.read()` each
   frame; it should install `rx_handler` and decode on delivery. TX is now pull-driven by the
   stream, so the tick carries only RX.
@@ -1403,14 +1426,19 @@ this is what remains.
 
 The DevEBox H7 boots and runs OpenWatt with a console, per-bank TLSF pools and DFU recovery.
 
+- **!!! F4 AND F7 SERIAL RECEIVE IS ONE INTERRUPT PER BYTE. DO NOT PUT A FAST LINK ON ONE UNTIL
+  THIS IS DONE. !!!** Neither family has a U(S)ART FIFO, so urt's STM32 UART takes an interrupt
+  for every received and every transmitted byte: 100,000 a second each way at 1 Mbaud, with any
+  interrupt or critical section longer than one character time overrunning RX. The H7 runs its
+  16-byte FIFOs and is fine. Receive on F4/F7 wants circular DMA into the RX ring, with the IDLE
+  line (F4) or the receiver timeout at 3.5 characters (F7) and the half/full transfer interrupts
+  raising the RX event; transmit wants DMA from the TX ring. Neither family has run on hardware.
+
 - **The JZ-F407VET6 image is ~70 KB over its 512 KB flash** (`BOARD=jz-f407vet6`, `switch`,
   TINY). Candidates: CLI helpers (~76 KB), the element catalogue (15.5 KB), libm trig (~15 KB),
   the two sync encoders; `HEADLESS=1` gates almost nothing. The APM32's ROM DFU reports a 1 MB
   sector layout, so read the factory flash-size register before trimming: the part may be a VG.
 - **F4 and F7 have never run on hardware.** The APM32F407 board is the first F4 candidate.
-- **Console session restarts slow down each time.** On the H7, each Ctrl-C restart of the UART
-  session logged a longer `console.session.update` tick (245, 285, 340 ms over three restarts in
-  one boot), and the restart often swallows a command sent right after it. Find what accumulates.
 - **No stack guard.** The stack sits at the top of core RAM with statics below it; an overflow
   silently corrupts them. An MPU no-access region under `_stack_low`, or a PSP/MSP split.
 - **No watchdog.** IWDG is never armed, so a hang never resets and the boot guard cannot count it.

@@ -45,6 +45,9 @@ else version (FreeStanding)
 else
     static assert(false, "Unsupported platform!");
 
+version (Embedded) {} else
+    private enum bool has_rx_callback = false;
+
 nothrow @nogc:
 
 
@@ -256,6 +259,7 @@ nothrow @nogc:
             cfg.data_bits = data_bits;
             cfg.stop_bits = stop_bits_map[stop_bits];
             cfg.parity = parity_map[parity];
+            cfg.flow_control = cast(bm.FlowControl)flow_control;
             if (tx_gpio >= 0)
                 cfg.tx_gpio = cast(ubyte)tx_gpio;
             if (rx_gpio >= 0)
@@ -271,19 +275,19 @@ nothrow @nogc:
             }
 
             Result opened;
-            version (Espressif)
+            static if (has_rx_callback)
             {
                 import urt.atomic : atomicStore, MemoryOrder;
 
                 atomicStore!(MemoryOrder.relaxed)(_rx_event_pending, 0u);
                 atomicStore!(MemoryOrder.relaxed)(_rx_event_retry, 0u);
                 ubyte port = cast(ubyte)_uart_port;
-                if (_active_uarts[port] !is null && _active_uarts[port] !is this)
+                if (_active_uarts[port - first_uart] !is null && _active_uarts[port - first_uart] !is this)
                 {
                     log.error("UART controller is already in use");
                     return CompletionStatus.error;
                 }
-                _active_uarts[port] = this;
+                _active_uarts[port - first_uart] = this;
                 opened = uart_open(_uart, port, cfg, 0, &uart_rx_ready);
             }
             else
@@ -291,8 +295,8 @@ nothrow @nogc:
 
             if (!opened)
             {
-                version (Espressif)
-                    _active_uarts[cast(ubyte)_uart_port] = null;
+                static if (has_rx_callback)
+                    _active_uarts[_uart_port - first_uart] = null;
                 return CompletionStatus.error;
             }
         }
@@ -599,12 +603,12 @@ nothrow @nogc:
         }
         else version (Embedded)
         {
-            version (Espressif)
+            static if (has_rx_callback)
             {
                 ubyte port = _uart.port;
                 uart_close(_uart);
-                if (port < num_uarts && _active_uarts[port] is this)
-                    _active_uarts[port] = null;
+                if (port - first_uart < num_uarts && _active_uarts[port - first_uart] is this)
+                    _active_uarts[port - first_uart] = null;
                 import urt.atomic : atomicStore, MemoryOrder;
                 atomicStore!(MemoryOrder.release)(_rx_event_pending, 0u);
                 atomicStore!(MemoryOrder.release)(_rx_event_retry, 0u);
@@ -628,7 +632,7 @@ nothrow @nogc:
         }
         else version (Embedded)
         {
-            version (Espressif)
+            static if (has_rx_callback)
             {
                 import urt.atomic : atomicExchange, MemoryOrder;
                 // Normal RX is reactor-dispatched; only a rejected event post reaches this path.
@@ -678,13 +682,13 @@ nothrow @nogc:
         }
     }
 
-    version (Espressif)
+    static if (has_rx_callback)
     {
         static bool uart_rx_ready(Uart uart, size_t, UartCallbackContext context)
         {
-            if (uart.port >= num_uarts || g_app is null)
+            if (uart.port - first_uart >= num_uarts || g_app is null)
                 return false;
-            SerialStream instance = _active_uarts[uart.port];
+            SerialStream instance = _active_uarts[uart.port - first_uart];
             if (instance is null)
                 return false;
 
@@ -970,7 +974,7 @@ private:
     {
         Uart _uart;
         byte _uart_port = -1;
-        version (Espressif)
+        static if (has_rx_callback)
         {
             shared uint _rx_event_pending;
             shared uint _rx_event_retry;

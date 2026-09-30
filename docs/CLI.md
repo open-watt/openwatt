@@ -499,17 +499,17 @@ A serial stream opens a host serial device or an embedded UART.
 
 | Property | Values | Default | Description |
 | --- | --- | --- | --- |
-| `device` | device path, COM name, or `uartN` | required | Serial device to open. Embedded `uartN` follows the datasheet numbering, so it starts at `uart1` on parts whose first UART is UART1. |
+| `device` | device path, COM name, or `uartN` | required | Serial device to open. Embedded `uartN` follows the datasheet numbering, so it starts at `uart1` on parts whose first UART is UART1. On STM32, `uart0` is USART1 through `uart7` UART8, and on H7 `uart8` is LPUART1. |
 | `baud-rate` | positive integer | `9600` | Symbol rate. |
 | `data-bits` | `5` to `8`; some embedded UARTs allow `9` | `8` | Data bits per character. |
 | `parity` | `none`, `even`, `odd`, `mark`, `space` | `none` | Parity mode. Embedded UARTs currently support `none`, `even`, and `odd`. |
 | `stop-bits` | `one`, `one_point_five`, `two` | `one` | Stop-bit mode. |
-| `flow-control` | `none`, `hardware`, `software`, `dsr_dtr` | `none` | Flow control. `rts_cts` aliases `hardware`; `xon_xoff` aliases `software`. |
+| `flow-control` | `none`, `hardware`, `software`, `dsr_dtr` | `none` | Flow control. `rts_cts` aliases `hardware`; `xon_xoff` aliases `software`. An STM32 UART takes `hardware` in its RTS/CTS lines, which need `rts-gpio` and `cts-gpio` (F4's UART4 and UART5 have none), and refuses the others. |
 | `tx-gpio` | GPIO number | platform default | Embedded-only transmit pin override. |
 | `rx-gpio` | GPIO number | platform default | Embedded-only receive pin override. |
 | `rts-gpio` | GPIO number | platform default | Embedded-only RTS pin override. |
 | `cts-gpio` | GPIO number | platform default | Embedded-only CTS pin override. |
-| `de-gpio` | GPIO number | platform default | Embedded-only driver-enable pin override. |
+| `de-gpio` | GPIO number | platform default | Embedded-only driver-enable pin override. Setting it makes the port RS-485: on STM32 F7 and H7 the UART drives DE in hardware on its RTS pin, and F4, which cannot, refuses to open. |
 
 Additional commands:
 
