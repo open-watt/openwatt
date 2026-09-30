@@ -1015,6 +1015,7 @@ otherwise one to three presses each within `click-gap` of the last are a
 | `click-gap` | duration | `300ms` | Longest gap between the presses of a multi-click. |
 | `drive` | `io`, `pwm`, `ws2812` | `io` | How a `light` reaches its line. `io` switches it. `pwm` takes a PWM channel and gains `level`, and `breathe` fades; with no channel free it warns and switches on and off only. `ws2812` makes the line a WS2812 chain and the light one pixel of it, with `level`, `colour`, `indicate_colour` and `channels` (`RGB`), and the `rainbow` effect. |
 | `index` | `0` to `15` | `0` | The light's pixel on a `ws2812` chain; several lights on one `gpio` share the chain. |
+| `backend` | read-only | | How the line is watched: `interrupt` for edges from an event link, `poll` for a button sampled every `debounce`, or the capture sampler's name. |
 | `pwm-channel` | read-only | | `none`, `hardware` or `software`: what the light holds. A channel other code needs exact moves from hardware to software, so this can change. |
 
 `capture` also reports `records`, `buckets`, `edge-rate`, `last-edge`,
