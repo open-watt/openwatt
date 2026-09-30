@@ -89,6 +89,18 @@ else version (STM32)
         return reboot_to_bootloader();
     }
 }
+else version (BL808)
+{
+    enum bool has_download_mode = true;
+
+    // The boot ROM's UART/USB download mode, the one the vendor flash tools speak.
+    bool system_reboot_to_bootloader(uint)
+    {
+        import urt.driver.bl_common.reset : por_reset;
+        reset_record_mark(ResetMark.deliberate);
+        por_reset(true);
+    }
+}
 else version (RouterBoot)
 {
     enum bool has_download_mode = true;

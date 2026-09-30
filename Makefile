@@ -357,11 +357,27 @@ BINSTATS_IMAGE := $(if $(filter bl808,$(PLATFORM)),$(if $(filter c906,$(PROCESSO
 ifeq ($(PLATFORM),rp2350)
     EXTRA_ARTEFACTS := $(TARGETDIR)/fw.uf2
 endif
+BL808_IMAGE_TOOL := $(URT_DIR)/tools/bl808_image.py
+ifeq ($(PLATFORM)$(PROCESSOR),bl808e907)
+    D0_PAYLOAD := bin/bl808-d0_$(CONFIG)$(BUILD_VARIANT_SUFFIX)/d0fw.bin
+    EXTRA_ARTEFACTS := $(TARGETDIR)/fw.bin
+endif
 
 .PHONY: build
 build: $(TARGET) $(EXTRA_ARTEFACTS)
 
 $(TARGET): $(SOURCES) $(CONF_SOURCES) $(BAREMETAL_OBJS) $(VENDOR_OBJS) $(BAREMETAL_LD) $(BAREMETAL_LD_DEPS) $(BUILD_CONFIG_DIR)/build_id $(BK_BEKEN_LIB) $(if $(RAM_IMAGE),$(RAM_IMAGE_PACKER))
+
+ifdef D0_PAYLOAD
+# D0 is its own build; its make decides whether anything needs relinking.
+.PHONY: $(D0_PAYLOAD)
+$(D0_PAYLOAD):
+	@$(MAKE) --no-print-directory PLATFORM=bl808 PROCESSOR=c906 CONFIG=$(CONFIG)
+
+$(TARGETDIR)/fw.bin: $(TARGET) $(D0_PAYLOAD) $(BL808_IMAGE_TOOL)
+	cp $(TARGETDIR)/m0fw.bin $@
+	python3 $(BL808_IMAGE_TOOL) append --nm $(BAREMETAL_NM) $(TARGET) $@ $(D0_PAYLOAD)
+endif
 
 ifeq ($(PLATFORM),rp2350)
 $(TARGETDIR)/fw.uf2: $(TARGET)
@@ -397,10 +413,7 @@ $(TARGET):
 	$(COMPILE_CMD)
 ifeq ($(PLATFORM),bl808)
   ifeq ($(PROCESSOR),c906)
-	riscv64-unknown-elf-objcopy -O binary $(TARGET) $(TARGETDIR)/d0fw.bin
-	@# Gzipped variant for faster flash turnaround. M0's d0_image_load sniffs
-	@# the gzip magic at offset 0 and decompresses straight to PSRAM.
-	gzip -9 -n -c $(TARGETDIR)/d0fw.bin > $(TARGETDIR)/d0fw.bin.gz
+	python3 $(BL808_IMAGE_TOOL) pack $(TARGET) $(TARGETDIR)/d0fw.bin
   else ifeq ($(PROCESSOR),e907)
 	riscv64-unknown-elf-objcopy -O binary $(TARGET) $(TARGETDIR)/m0fw.bin
   endif

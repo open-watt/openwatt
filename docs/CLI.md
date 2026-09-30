@@ -529,6 +529,22 @@ no transport properties.
 /console/session/add name=default stream=console profile=vt100 initial-command="/log/print --stream"
 ```
 
+### `/stream/xram`
+
+An xram stream is a byte pipe to the other core of a BL808, over a pair of
+rings in the shared XRAM and the inter-core doorbells. Each core adds one
+stream per channel; neither end can tell whether the other is attached, so
+anything written before the far end opens its stream is not guaranteed to
+arrive. Carry sync over it with `/interface/framed`.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `channel` | `0` to `1` | `0` | Ring pair to use; both cores name the same channel. |
+
+```text
+/stream/xram/add name=d0 channel=0
+```
+
 ### `/interface/*`
 
 All interface collections expose these properties in addition to the common
