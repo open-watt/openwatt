@@ -5,4 +5,5 @@ enum IpcId : ubyte
 {
     xram_frame = 1,
     xram_space,
+    d0_heartbeat,
 }

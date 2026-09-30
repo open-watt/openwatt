@@ -274,6 +274,11 @@ and the panel left outstanding.
   come from M0; the BL618 has its own CLIC line and wants the M0 backend.
 - **The BL618 has no watchdog**: give it the MCU timer watchdog the BL808 M0 uses.
 - **M0 SRAM runs near full**: 20 of 21 KB with two telnet sessions, 768 B to spare.
+- **M0 resets by watchdog without a known cause**: once during a night idle on the full image, and
+  two or three times in the first minute of a `D0=0` image on the bring-up defaults rung, after which
+  it ran clean. Log the stalled main-loop work before the bite, then reproduce.
+- **D0's heartbeat rides the 1 s application heartbeat**: its 500 ms is a minimum interval, not
+  a cadence. Schedule it if 500 ms is meant.
 - **M0 takes 6-9 s to inflate D0 at boot.** Inflate runs from XIP flash into PSRAM; measure where
   it goes (flash reads, PSRAM writes, the inflater) before choosing between placing the inflater in
   RAM, raising the clocks first, or letting D0 inflate its own image.
@@ -1674,6 +1679,9 @@ so D0's devices appear on M0 only.
   both cores. The review's probes over a mocked platform are a start.
 - **M0's PSRAM slice is 1 MB**, leaving the full build about 800 KB of heap, of which a full log
   history takes about 110 KB. Widen the slice at D0's expense (both linker scripts).
+- **A D0 that never beats is not watched.** M0 stands for D0 only once D0's heartbeat has moved, so
+  a missing image or a D0 that dies before its first beat leaves the chip up without it; that
+  needs a boot deadline that cannot loop the chip on a bad D0 image.
 - **M0's clock is whatever the boot header chose** (`mcu_clk`, the WiFi PLL's 320 MHz), and
   `bl_common/clock.d` trusts it for the shared 160 MHz timebase. Read M0's clock mux at boot, or set
   it, so a different boot header cannot silently skew the timers.
@@ -1698,7 +1706,6 @@ so D0's devices appear on M0 only.
 - **M0's provisioning AP is open**, where the Waveshare board's defaults run a WPA2 AP on a known
   setup secret with non-anonymous pcap. Bring M0's `default.conf` into line once a WPA2 AP and the
   secret's effect on the web config's API access are checked on the BL808.
-- **Size ledger rows for the BL808** wait until M0's build settles.
 
 ### RP2350 bring-up follow-ups (2026-09-20)
 
