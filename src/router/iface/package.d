@@ -25,6 +25,7 @@ import manager.plugin;
 
 import router.iface.endpoint;
 import router.iface.ethernet;
+import router.iface.framed;
 import router.iface.group;
 import router.iface.udp;
 import router.iface.vlan;
@@ -36,6 +37,7 @@ public import router.status;
 public static import router.iface.bridge;
 public static import router.iface.endpoint;
 public static import router.iface.ethernet;
+public static import router.iface.framed;
 public static import router.iface.group;
 public static import router.iface.i2c;
 public static import router.iface.udp;
@@ -1039,6 +1041,7 @@ nothrow @nogc:
         else
             register_frame_handler(PacketType.ethernet, &on_ethernet_frame);
 
+        g_app.console.register_collection!FramedInterface();
         g_app.console.register_collection!InterfaceGroup();
         g_app.console.register_collection!UDPInterface();
         g_app.console.register_collection!VLANInterface();

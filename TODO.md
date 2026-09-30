@@ -1060,6 +1060,9 @@ this is what remains.
   schemes beyond UDP, arrive with those. RS485 slave-to-slave goes through the master first;
   multicast groups are configured before derived.
 
+- **`/interface/framed` has no checksum.** A memory link does not corrupt, but a UART does: add a
+  CRC to the framing before it carries sync over a wire.
+
 - **Take the fleet to micros and to the box**: `conf/fleet.id` and `conf/node.id` need an NVS
   backing where there is no filesystem (`peering.d:595`). Out-of-box onboarding is unbuilt: SoftAP
   provisioning serving the existing HTTP config surface is nearly free, BLE provisioning needs the
