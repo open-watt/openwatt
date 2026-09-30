@@ -45,7 +45,12 @@ at boot.
 After three crashes before 60 seconds of uptime, recovery steps down from saved
 configuration to `startup.conf`, then bring-up defaults. An unproven revision is
 replaced by an older one; previously successful revisions are preserved. `/system/sysinfo` reports the active configuration and
-recovery reason. Power loss and deliberate restarts do not count as crashes.
+recovery reason. Power loss and deliberate restarts do not count as crashes, and nor does a
+press of the reset button where the chip reports its reset pin; that counts as a power-on. A
+board whose reset line is driven by a supervisor or an external watchdog therefore reads those
+resets as presses, and a hang loop there never steps down the configuration. A debugger's reset
+reads as deliberate, and a watchdog reset is always a crash. A chip that cannot name a watchdog
+reset reads a reset its record never saw coming as one.
 
 Five power-ons that each end within five seconds select bring-up defaults for one
 boot, skipping `user.conf` without erasing anything. On supported OTA platforms, a
@@ -58,6 +63,11 @@ corrupt scripts and crashes; it does not verify remote connectivity.
 Saved passwords use a separate `conf/secret.store.<revision>` file. Keep it with the
 configuration when backing up or restoring, and protect it: its contents are
 recoverable plaintext. Missing secrets must be re-entered.
+
+**Platform notes**
+
+- STM32 reports its reset pin, so a press reads as a power-on.
+- The BL808 cannot name a watchdog reset.
 
 ### Configuration property round trips
 
@@ -168,19 +178,26 @@ command says so.
 `/system/sleep <duration>` pauses the session for the given duration. It is latent, so
 Ctrl-C cancels it, which makes it useful for pacing a startup script.
 
-`/system/reboot [bootloader=<n>] [crash=<bool>]` restarts the node. Without arguments it
-performs a normal restart. `crash=true` aborts the process instead, which the boot guard
-counts as a crash; it exists to exercise the guard.
+`/system/reboot [bootloader=<n>] [crash=<bool>] [hang=<bool>]` restarts the node. Without
+arguments it performs a normal restart. `crash=true` aborts the process instead, which the
+boot guard counts as a crash; it exists to exercise the guard. `hang=true` stalls the main
+loop until the watchdog resets the node, to exercise the watchdog; where none is armed it
+hangs for good.
 
 `<n>` is an integer, and any non-zero value restarts into the chip's own ROM loader
 instead, where the part exposes its factory firmware-update interface. `bootloader=1`
 is the usual form; the value selects between loaders on a part offering more than one,
 which none currently does. Only targets whose silicon provides such an entry point
 implement this, and elsewhere the command reports that the platform has no bootloader
-mode and does not reboot. On a RouterBOOT board it arms RouterBOOT's "try Ethernet once"
-instead: the next boot asks BOOTP/TFTP for an image and falls back to the image in flash when
-nobody answers. If the bootloader cannot be entered, the command says so and the node keeps
-running.
+mode and does not reboot. If the bootloader cannot be entered, the command says so and the
+node keeps running.
+
+**Platform notes**
+
+- RouterBOOT boards: `bootloader=` arms RouterBOOT's "try Ethernet once" instead. The next boot
+  asks BOOTP/TFTP for an image and falls back to the image in flash when nobody answers.
+- BL808: `bootloader=` enters the boot ROM's UART/USB download mode, which the vendor flash tools
+  speak.
 
 `/system/identify [duration=<duration>]` shows the identify gesture on the node's status light,
 `system.panel.status`, for `duration` (default `10s`). A node without a status light ignores it.
