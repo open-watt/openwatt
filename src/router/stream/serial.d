@@ -45,6 +45,9 @@ else version (FreeStanding)
 else
     static assert(false, "Unsupported platform!");
 
+version (Embedded) {} else
+    private enum bool has_rx_callback = false;
+
 nothrow @nogc:
 
 
@@ -271,7 +274,7 @@ nothrow @nogc:
             }
 
             Result opened;
-            version (Espressif)
+            static if (has_rx_callback)
             {
                 import urt.atomic : atomicStore, MemoryOrder;
 
@@ -291,7 +294,7 @@ nothrow @nogc:
 
             if (!opened)
             {
-                version (Espressif)
+                static if (has_rx_callback)
                     _active_uarts[cast(ubyte)_uart_port] = null;
                 return CompletionStatus.error;
             }
@@ -599,7 +602,7 @@ nothrow @nogc:
         }
         else version (Embedded)
         {
-            version (Espressif)
+            static if (has_rx_callback)
             {
                 ubyte port = _uart.port;
                 uart_close(_uart);
@@ -628,7 +631,7 @@ nothrow @nogc:
         }
         else version (Embedded)
         {
-            version (Espressif)
+            static if (has_rx_callback)
             {
                 import urt.atomic : atomicExchange, MemoryOrder;
                 // Normal RX is reactor-dispatched; only a rejected event post reaches this path.
@@ -678,7 +681,7 @@ nothrow @nogc:
         }
     }
 
-    version (Espressif)
+    static if (has_rx_callback)
     {
         static bool uart_rx_ready(Uart uart, size_t, UartCallbackContext context)
         {
@@ -970,7 +973,7 @@ private:
     {
         Uart _uart;
         byte _uart_port = -1;
-        version (Espressif)
+        static if (has_rx_callback)
         {
             shared uint _rx_event_pending;
             shared uint _rx_event_retry;
