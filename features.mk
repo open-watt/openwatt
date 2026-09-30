@@ -26,8 +26,8 @@
 #                               bottom of this file.)
 #
 #   TINY            Set by third_party/urt/platforms.mk for <~350KB-RAM,
-#                   <2MB-flash targets (esp8266, bk7231n/t, esp32-c2/h2/s2,
-#                   bl808-e907), overridable via TINY=1/0. Strips verbose
+#                   <2MB-flash targets (esp8266, bk7231n/t, esp32-c2/h2/s2),
+#                   overridable via TINY=1/0. Strips verbose
 #                   strings, simplifies CLI help, drops heavy-weight
 #                   helpers. Lives in platforms.mk because urt itself
 #                   gates against it.
@@ -62,13 +62,6 @@
 # -- Per-platform defaults -----------------------------------------------
 # Set BEFORE the ?= fallbacks below.
 
-# BL808 e907 is the bouffalo wifi coprocessor.
-ifeq ($(PLATFORM),bl808)
-  ifeq ($(PROCESSOR),e907)
-    FEATURES ?= switch-ip
-    HEADLESS ?= 1
-  endif
-endif
 ifneq ($(filter bk7231n bk7231t,$(PLATFORM)),)
     FEATURES ?= switch
     HEADLESS ?= 1
