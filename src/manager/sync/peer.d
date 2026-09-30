@@ -69,7 +69,8 @@ class SyncPeer : ActiveObject
     alias Properties = AliasSeq!(Prop!("transport",      transport),
                                  Prop!("remote",         remote),
                                  Prop!("encoder",        encoder),
-                                 Prop!("time-authority", time_authority));
+                                 Prop!("time-authority", time_authority),
+                                 Prop!("claim",          claim));
 nothrow @nogc:
 
     enum type_name = "peer";
@@ -143,6 +144,21 @@ nothrow @nogc:
     {
         _time_authority_from_claim = false;
         set_time_authority(value);
+    }
+
+    // the hello announces authority on this session alone, whatever the node's peering role
+    final bool claim() const pure
+        => (_peer_flags & PeerFlags.claims) != 0;
+    final void claim(bool value)
+    {
+        if (value == claim)
+            return;
+        if (value)
+            _peer_flags |= PeerFlags.claims;
+        else
+            _peer_flags &= ~PeerFlags.claims;
+        mark_set!(typeof(this), "claim")();
+        restart();
     }
 
     final void bind_remote(ref const InetAddress addr)
@@ -846,6 +862,7 @@ private:
         uses_udp_endpoint          = 1 << 4,
         owns_udp_endpoint          = 1 << 5,
         tx_producing               = 1 << 6,
+        claims                     = 1 << 7,
     }
 
     struct SentFrame

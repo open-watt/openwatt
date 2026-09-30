@@ -180,21 +180,19 @@ nothrow @nogc:
         if (handover && !_secret.length)
             mint_fleet_key();
 
-        char[64] auth = void;
-        bool have_auth = false;
-        if (_secret.length)
-        {
-            if (!p._remote_nonce_set)
-                return;   // the claim proves the key against their hello nonce
-            have_auth = claim_auth(p._remote_nonce[], _cluster[], auth);
-        }
+        if (issue_claim(p, node_id, now, handover ? _secret[] : null))
+            log.info("claiming node ", hex_id(node_id)[], " ('", n.name, "') over its session", handover ? " (adoption)" : "");
+    }
 
-        IssuedClaim* c = _issued.insert(node_id, IssuedClaim());
-        c.peer = p;
-        c.seq = get_module!SyncModule.alloc_seq();
-        c.sent_at = now;
-        encoder_for(p._encoder).encode_claim(p, c.seq, _cluster[], _priority, have_auth ? auth[] : null, handover ? _secret[] : null);
-        log.info("claiming node ", hex_id(node_id)[], " ('", n.name, "') over its session", handover ? " (adoption)" : "");
+    // A claim= peer is a fixed pair: no neighbour table, claim filter or key handover.
+    final void claim_sibling(SyncPeer p, MonoTime now)
+    {
+        prune_issued();
+        ulong node_id = p._remote_node_id;
+        if (!p.running || p._remote_role != PeerRole.member || !node_id || node_id in _issued)
+            return;
+        if (issue_claim(p, node_id, now, null))
+            log.info("claiming node ", hex_id(node_id)[], " over '", p.name[], "'");
     }
 
     // An inbound session is the member's to keep alive; when it goes, so does the claim.
@@ -545,6 +543,25 @@ private:
         return id;
     }
 
+    bool issue_claim(SyncPeer p, ulong node_id, MonoTime now, const(char)[] key)
+    {
+        char[64] auth = void;
+        bool have_auth = false;
+        if (_secret.length)
+        {
+            if (!p._remote_nonce_set)
+                return false;   // the claim proves the key against their hello nonce
+            have_auth = claim_auth(p._remote_nonce[], _cluster[], auth);
+        }
+
+        IssuedClaim* c = _issued.insert(node_id, IssuedClaim());
+        c.peer = p;
+        c.seq = get_module!SyncModule.alloc_seq();
+        c.sent_at = now;
+        encoder_for(p._encoder).encode_claim(p, c.seq, _cluster[], _priority, have_auth ? auth[] : null, key);
+        return true;
+    }
+
     // claim auth: hex(HMAC-SHA256(secret, member_nonce || cluster)). the nonce is fresh per
     // session, so a captured claim cannot replay; the secret never travels.
     bool claim_auth(const(ubyte)[] nonce, const(char)[] cluster, ref char[64] hex_out)
@@ -835,6 +852,14 @@ unittest
         assert(!m.claim_response(replacement, 42, true, null, null));
         assert(m.claim_response(old_peer, 43, false, "access_denied", null));
         assert((0xA in m._issued) is null);
+
+        old_peer._remote_role = PeerRole.authority;
+        m.claim_sibling(old_peer, now);
+        assert((0xA in m._issued) is null);
+        old_peer._remote_role = PeerRole.member;
+        m._issued.insert(0xA, SyncPeeringModule.IssuedClaim(old_peer, 44));
+        m.claim_sibling(old_peer, now);
+        assert((0xA in m._issued).seq == 44);
     }
 
     {
