@@ -800,7 +800,11 @@ unittest
         Peering m = alloc!Peering();
         scope(exit) free(m);
         Peer old_peer = alloc!Peer(CID(1));
-        scope(exit) free(old_peer);
+        scope(exit)
+        {
+            old_peer.set_live(false);
+            free(old_peer);
+        }
         Peer replacement = alloc!Peer(CID(2));
         scope(exit) free(replacement);
 

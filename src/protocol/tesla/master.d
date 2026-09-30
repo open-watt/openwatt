@@ -915,8 +915,8 @@ unittest
     Collection!TestInterface().add(iface);
     scope(exit)
     {
-        Collection!TestInterface().remove(iface);
-        free(iface);
+        iface.destroy();
+        Collection!BaseInterface().update_all();
     }
     iface.start();
     assert(iface.running);
@@ -925,8 +925,8 @@ unittest
     Collection!TeslaTWCMaster().add(master);
     scope(exit)
     {
-        Collection!TeslaTWCMaster().remove(master);
-        free(master);
+        master.destroy();
+        Collection!TeslaTWCMaster().update_all();
     }
     master.iface = iface;
     assert(master.startup() == CompletionStatus.continue_);
