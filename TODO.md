@@ -122,9 +122,10 @@ holding action, not an answer. Options, cheapest first:
   and RTC offset restoration. Reconcile the RTC stop/reset contract with the
   ESP32 no-op and RP2350 stop-only implementations.
 - **Boot guard follow-ups**:
-  - **Bare-metal parts have no hardware watchdog armed.** `driver.baremetal.watchdog` is a no-op
-    except on the BL808 M0, so a hang on RP2350, BK7231 or BL618 never resets and never counts.
-    Arm each part's watchdog from `watchdog_init`; the record already classifies the resulting
+  - **BK7231 and BL618 arm no hardware watchdog.** `driver.baremetal.watchdog` drives one only on
+    the BL808 M0, MT7621 and RP2350, so a hang elsewhere never resets and never counts. The
+    RP2350's watchdog REASON register tells a timeout from a forced reset; report it through
+    `reset_cause()` once that lands (urt#361). Arm each part's watchdog from `watchdog_init`; the record already classifies the resulting
     reset (`running` left in place reads as a watchdog). Bouffalo also has no `system_reset()`:
     its reset needs the vendor's clock-switch sequence from TCM (`GLB_SW_System_Reset`), so its
     fault paths still halt and the crash only ends with a power cycle, which erases the record.
