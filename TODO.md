@@ -1474,6 +1474,9 @@ so D0's devices appear on M0 only.
   RAM, raising the clocks first, or letting D0 inflate its own image.
 - **M0's PSRAM slice is 1 MB**, leaving the full build about 800 KB of heap, of which a full log
   history takes about 110 KB. Widen the slice at D0's expense (both linker scripts).
+- **A D0 that never beats is not watched.** M0 stands for D0 only once D0's heartbeat has moved, so
+  a missing image or a D0 that dies before its first beat leaves the chip up without it; that
+  needs a boot deadline that cannot loop the chip on a bad D0 image.
 - **`/system/reboot bootloader=1` hands the ROM a chip on RC32M**, since `por_reset` drops the clocks
   before the reset; the flash tool's loader then cannot hold 1.2 Mbaud (500 kbaud works). Leave the
   crystal selected on the download path.
