@@ -31,6 +31,7 @@ public static import router.stream.file;
 public static import router.stream.memory;
 public static import router.stream.serial;
 public static import router.stream.usb_serial;
+public static import router.stream.xram;
 
 version = SupportLogging;
 
