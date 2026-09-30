@@ -215,12 +215,14 @@ cover a unit that never reaches runtime.
 ## Hardware support today
 
 - **GPIO:** backends exist for ESP32, Bouffalo, BK7231, MT7621, RP2350, STM32 and Linux.
-- **GPIO edges:** event links on ESP32 and MT7621; elsewhere a button samples its line.
+- **GPIO edges:** event links on ESP32, MT7621, STM32 and RP2350 (not yet run there); elsewhere a
+  button samples its line.
 - **PWM:** urt's allocator takes a PWM block where one reaches the line (ESP32's four LEDC ports,
-  the RP2350's 24 slice channels) and otherwise one of eight software channels, density-modulated
+  the RP2350's 24 slice channels, the STM32's TIM1-4 and TIM8 channels) and otherwise one of eight
+  software channels, density-modulated
   from a 4 kHz timer interrupt. Software channels need a timer compare, which Beken, ESP32 and
   Bouffalo lack. The SmartEVSE control pilot takes one LEDC port, which leaves exactly three for
-  its RGB LED; the hEX S and the DevEBox H7 dim their LEDs in software.
+  its RGB LED; the hEX S dims its LEDs in software, the DevEBox H7 on TIM2.
 - **WS2812:** `urt.driver.ws2812` owns the chains behind a small backend contract. The RP2350
   runs a chain on a PIO state machine; the BL808 D0 bit-bangs it with loop counts calibrated for
   480 MHz. ESP32 needs RMT transmit, which urt does not drive yet. Encoding the bit stream over
