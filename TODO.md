@@ -943,6 +943,14 @@ role from a concrete deployment need before implementing or advertising it.
 The built surface is documented in [docs/SYNC.md](docs/SYNC.md) and [docs/PEERING.md](docs/PEERING.md);
 this is what remains.
 
+- **Devices mirrored from a `claim=` sibling need a naming rule.** The claimant files them under
+  the sibling's peer id, so one named like a local device is ambiguous to anything addressing by
+  name, and how the network sees a claimed sibling's devices is undecided.
+- **`/element/set` cannot reach a device keyed by a peer id**, such as the energy app's device,
+  which `create_energy_device` keys by the local node id.
+- **`/device/print` renders negative ages as `-209.-6s`** when a remote timestamp is ahead of the
+  local clock.
+
 - **A cleared template can survive a reconnect on a wholly unclassified path**: an introduction
   omits `tmpl` when nothing on the path carries a template, and an absent chain is silence, so a
   mirror that missed a clear while its session was down keeps the stale label if every node on

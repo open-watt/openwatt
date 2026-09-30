@@ -1293,6 +1293,9 @@ nothrow @nogc:
                     log.warning("peer '", p.name[], "' also carries node ", nid[], "; configured peers are not superseded");
             }
         }
+
+        if (from.claim)
+            get_module!SyncPeeringModule.claim_sibling(from, getTime());
     }
 
     void inbound_claim(SyncPeer from, uint seq, const(char)[] cluster, uint priority, const(char)[] auth, const(char)[] key)

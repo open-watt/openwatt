@@ -398,8 +398,9 @@ nothrow @nogc:
         hex_encode(peer.local_nonce(), nonce[]);
         _buf.append(",\"nonce\":\"", nonce[], '\"');
         auto disco = get_module!SyncDiscoveryModule;
-        if (disco.local_role != PeerRole.none)
-            _buf.append(",\"role\":\"", role_name(disco.local_role), '\"');
+        PeerRole role = peer.claim ? PeerRole.authority : disco.local_role;
+        if (role != PeerRole.none)
+            _buf.append(",\"role\":\"", role_name(role), '\"');
         if (disco.local_cluster.length)
         {
             _buf ~= ",\"cluster\":";

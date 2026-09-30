@@ -114,6 +114,12 @@ reassembles itself. A restarted authority is rejoined by its members rather than
 rediscover them, and a member that reboots out from under a session the datagram link cannot
 pronounce dead is detected by its unbound beacon and re-claimed.
 
+A statically wired pair skips discovery: `/sync/peer ... claim=yes` claims the node at the other
+end of that one session, and its hello announces `authority` for that session alone. The node keeps
+its own peering role toward everything else, so a node can be a member of its fleet and at the same
+time the authority of a sibling behind it. The BL808 M0 claims its D0 this way over XRAM and
+mirrors D0's devices, so D0 never appears on the network. The claim is re-issued on each new session.
+
 ### What a claim confers
 
 A successful claim makes the first claimant the member's time authority. After the member
