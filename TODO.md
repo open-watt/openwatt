@@ -1459,11 +1459,12 @@ the standard services, and drives the M1s Dock's panel, its LED on hardware PWM.
   RAM, raising the clocks first, or letting D0 inflate its own image.
 - **M0's PSRAM slice is 1 MB**, leaving the full build about 800 KB of heap, of which a full log
   history takes about 110 KB. Widen the slice at D0's expense (both linker scripts).
-- **No hardware watchdog on the BL808.** M0's hang reporter only prints a hung PC and never resets,
-  so the boot guard cannot count a hang, and D0 and the BL618 have nothing. Drive the TIMER block's
-  watchdog from the main-loop feed, keep the hung-PC report on its interrupt if it has one, and
-  retire the reporter: that also frees M0's periodic timer, so a pin no PWM channel reaches falls
-  back to software PWM on M0 as it does elsewhere.
+- **D0 and the BL618 have no watchdog.** M0's resets the chip; D0's own sits in the MM timer block,
+  but a D0-only reset would restart an image whose `.data` is not reloaded. Have M0 restart the
+  chip when D0's peer goes silent instead, and give the BL618 the MCU timer watchdog M0 uses.
+- **An unrecorded reset of a running BL808 reads as `watchdog`**: the reset record still says
+  running, so a bare-metal assert followed by any reset is classed as a watchdog reset. Confirm
+  against the watchdog's latched status (`TIMER_WSR`) and call the rest an unrecorded crash.
 - **`/system/reboot bootloader=1` hands the ROM a chip on RC32M**, since `por_reset` drops the clocks
   before the reset; the flash tool's loader then cannot hold 1.2 Mbaud (500 kbaud works). Leave the
   crystal selected on the download path.

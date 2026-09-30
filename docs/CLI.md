@@ -997,8 +997,7 @@ A button reacts to edge interrupts where the platform has them (ESP32, MT7621)
 and otherwise samples its line every `debounce`. A WS2812 chain runs on the RP2350's PIO, or is
 sent by the BL808's GPIO transmit FIFO; other platforms do not drive one yet. PWM comes from the chip's PWM block (ESP32
 LEDC, BL808) where one reaches the line and is free, and otherwise from software, driven by a 4 kHz timer interrupt that
-runs only while some light is at a level between off and full; the BL808 M0 has no software PWM while its hang reporter
-holds the periodic timer. The MT7621 has no PWM block. Gestures are timed from the
+runs only while some light is at a level between off and full. The MT7621 has no PWM block. Gestures are timed from the
 debounced level: a press held for `hold` is a `hold`, followed by `release`;
 otherwise one to three presses each within `click-gap` of the last are a
 `click`, `double` or `triple`.
