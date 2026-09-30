@@ -227,10 +227,12 @@ nothrow @nogc:
 
     final const(char)[] backend() const pure
     {
+        if (_link.is_open)
+            return "interrupt";
         static if (has_gpio_sampler)
             return _sampler.backend_name();
         else
-            return "none";
+            return _kind == GpioKind.button && running ? "poll" : "none";
     }
 
     final uint clock() const pure
