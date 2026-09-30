@@ -285,6 +285,8 @@ nothrow @nogc:
 
     const(char)[] check(ref const Scalar v, ref const DataFormat fmt) const
     {
+        if ((has & (Has.min | Has.max)) && (fmt.type == ValueType.f32 ? v.f32_ != v.f32_ : fmt.type == ValueType.f64 && v.f64_ != v.f64_))
+            return "not a number";
         if ((has & Has.min) && compare_scalar(v, min, fmt.type) < 0)
             return "below minimum";
         if ((has & Has.max) && compare_scalar(v, max, fmt.type) > 0)
@@ -1463,6 +1465,14 @@ unittest
     assert(unbox_scalar_checked(outside, u16, sc) == "above maximum");
     assert(unbox_scalar_checked(under, u16, sc) == "below minimum");
     assert(unbox_scalar_checked(negative, u16, sc) == "incompatible value");
+    DataFormat ratio = DataFormat(ValueType.f32, SeriesKind.held);
+    Constraint unit_range;
+    unit_range.min = Scalar.of(0.0f);
+    unit_range.max = Scalar.of(1.0f);
+    unit_range.has = Constraint.Has.min | Constraint.Has.max;
+    ratio.constraint = &unit_range;
+    assert(unit_range.check(Scalar.of(0.5f), ratio) is null);
+    assert(unit_range.check(Scalar.of(float.nan), ratio) == "not a number");
 
     DataFormat amps = DataFormat(ValueType.u16, SeriesKind.held, ScaledUnit(Ampere));
     DataFormat milliamps = DataFormat(ValueType.u16, SeriesKind.held, ScaledUnit(Ampere, -3));

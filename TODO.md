@@ -173,6 +173,42 @@ holding action, not an answer. Options, cheapest first:
   FEATURES=switch-ip HEADLESS=1 MODBUS=0` links but the packed image is 157,830 bytes over
   `_image_limit` on master (2026-09-22); the last ledger row (2026-09-09) had 4,640 bytes spare.
 
+## UART follow-ups (2026-10-02)
+
+- **RX and TX through pages, not rings.** A driver keeps a page sized for its baud and the RX
+  latency; the ISR copies the FIFO into it and raises the RX event on the empty-to-non-empty
+  transition; the handler allocates a fresh page, swaps it in and hands the full one to the
+  stream, whose `rx_handler` takes a `Page*`. TX queues pages; the ISR walks the chain and posts
+  finished ones back for release in one event. A spin lock around the swap only where `has_smp`.
+  One copy (FIFO to page) instead of two, and no ring to size.
+- **Main-thread latency is not measured.** ISR-posted events dispatch with age 0, and the worst
+  handler, event age and loop iteration are logged only past 50 ms. Stamp ISR posts and keep
+  running maxima as stats, so `rx-latency` and buffer sizes can be set from measurement.
+- **A console session loses input around Ctrl-C.** Ctrl-C on a configured session's initial
+  `/log/print --stream` restarts the session, and bytes that arrive meanwhile are dropped or fed to
+  the restarted stream; a long line pasted soon after loses its head. The UART delivers every byte
+  (counted at the stream on both BL808 cores at 2 Mbaud).
+- **Console output loses chunks on the BL808 at 2 Mbaud**: the console session's update spends
+  51 ms in each UART write, past the 50 ms stall limit, and the stream takes a short write as
+  sent, so long output (the echo of a 500-character line, `/log/print`) arrives with holes on
+  both cores. The stack before the 2026-10-04 review fixes does the same. Find what holds TX for
+  50 ms, and have the stream keep an unsent tail rather than drop it.
+- **ESP32 could offer `rx-latency` and `rx-gap`**: ESP-IDF sets the RX FIFO threshold and the RX
+  timeout (in characters) on a running port (`uart_set_rx_full_threshold`, `uart_set_rx_timeout`).
+  Once urt's ESP32 backend uses them it declares `has_rx_timing`, and the properties appear.
+- **STM32H7 `rx-latency` waits for the port to reopen**: RXFTCFG is written only with the USART
+  disabled; on the DevEBox H7 a live write is ignored. A pending threshold applied from the TX
+  complete interrupt (hold TX until TC with an idle receiver, toggle UE, write, refill) worked in a
+  traced build, but the untraced build hung the board on its first latency change, twice. Find why
+  before reviving it; LPUART1 is untested either way.
+- **SerialStream's embedded branches have no host tests**: the RX callback, a failed open, a
+  reopen and a live retime are covered by urt's register models, not at the stream. The split of
+  `rx-latency` (configured, exported) from `actual-rx-latency` was run on hardware: export and
+  reopen across a deferred change on the DevEBox H7, save and reboot on the BL808 M0. A save while
+  an H7 change waits, then a reboot, needs a board with both.
+- **`Duration` properties print as raw nanoseconds** (`get` shows `3e+10ns` for `30s`): the value
+  reaches the console as a quantity rather than through `Duration`'s own formatting.
+
 ## Retrospective merge reconciliation (2026-09-08)
 
 - **[#669, deferred until removal is needed] Define device/subtree removal lifetime**:
@@ -1372,6 +1408,29 @@ this is what remains.
   S2/S3 for the reflex NMI vector and GPIO register layout, and a per-part ISR-safe SAR path or
   an honest "not in ISR" contract for the ADC.
 
+- **UART writes disagree on a full ring**: ESP32 writes what fits and returns short; STM32 and
+  RP2350 block while the line drains it, and STM32 ends short once the line stops (CTS held off)
+  for 50 ms. The console treats a short write as sent, so a short-write contract truncates large
+  prints until session output is pull-driven. Settle one contract (short writes with a TX-space
+  event) once pull-driven print lands, and make every backend follow it.
+
+- **Serial RX is still drained from the tick on BK7231, Bouffalo and MT7621**:
+  `SerialStream.update()` polls where a backend has no `has_rx_callback`. ESP32, RP2350 and STM32
+  signal from the ISR on a line gap or a few hundred microseconds of characters. Give the others
+  the `uart_hw_open(port, cfg, rx_cb)` form and delete the polled path.
+
+- **`/log/print` without `--stream` redraws its pager every tick**: on the RP2350 it held the CPU
+  at 64% and logged an 80 ms `console-session` update each frame while idle. The live view should
+  redraw on a new entry or a key, not per tick.
+
+- **Console session restarts leak and slow down each time**, on the H7 and the RP2350 alike.
+  Each Ctrl-C restart of a UART session logged a longer `console.session.update` tick on the H7
+  (245, 285, 340 ms over three restarts, 820 ms later), and a restart often swallows the command
+  sent right after it. The H7's AXI heap grew from 38 KB to 418 KB over a few dozen restarts
+  until a 10,248-byte allocation failed, and the RP2350 grew about 5 KB per port open while idle
+  time added nothing. Opening the port over a CP210x seems to restart the session by itself on
+  alternate opens. Find what a restart keeps.
+
 - **Move WebSocket RX off the tick**: `WebSocket.update()` still polls `_stream.read()` each
   frame; it should install `rx_handler` and decode on delivery. TX is now pull-driven by the
   stream, so the tick carries only RX.
@@ -1403,14 +1462,19 @@ this is what remains.
 
 The DevEBox H7 boots and runs OpenWatt with a console, per-bank TLSF pools and DFU recovery.
 
+- **!!! F4 AND F7 SERIAL RECEIVE IS ONE INTERRUPT PER BYTE. DO NOT PUT A FAST LINK ON ONE UNTIL
+  THIS IS DONE. !!!** Neither family has a U(S)ART FIFO, so urt's STM32 UART takes an interrupt
+  for every received and every transmitted byte: 100,000 a second each way at 1 Mbaud, with any
+  interrupt or critical section longer than one character time overrunning RX. The H7 runs its
+  16-byte FIFOs and is fine. Receive on F4/F7 wants circular DMA into the RX ring, with the IDLE
+  line (F4) or the receiver timeout at 3.5 characters (F7) and the half/full transfer interrupts
+  raising the RX event; transmit wants DMA from the TX ring. Neither family has run on hardware.
+
 - **The JZ-F407VET6 image is ~70 KB over its 512 KB flash** (`BOARD=jz-f407vet6`, `switch`,
   TINY). Candidates: CLI helpers (~76 KB), the element catalogue (15.5 KB), libm trig (~15 KB),
   the two sync encoders; `HEADLESS=1` gates almost nothing. The APM32's ROM DFU reports a 1 MB
   sector layout, so read the factory flash-size register before trimming: the part may be a VG.
 - **F4 and F7 have never run on hardware.** The APM32F407 board is the first F4 candidate.
-- **Console session restarts slow down each time.** On the H7, each Ctrl-C restart of the UART
-  session logged a longer `console.session.update` tick (245, 285, 340 ms over three restarts in
-  one boot), and the restart often swallows a command sent right after it. Find what accumulates.
 - **No stack guard.** The stack sits at the top of core RAM with statics below it; an overflow
   silently corrupts them. An MPU no-access region under `_stack_low`, or a PSP/MSP split.
 - **No watchdog.** IWDG is never armed, so a hang never resets and the boot guard cannot count it.

@@ -3,6 +3,15 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-10-02: serial RX timing
+
+- `/stream/serial` gains `rx-latency` (duration, default `350us`) and `rx-gap` (characters, `0.1`
+  to `25.5`, default `3.5`) on embedded builds whose UART applies them; a port without them does
+  not have the property, so offer the control only when it is present. A change never reopens the
+  port, but on some UARTs `rx-latency` takes effect only when the port next opens. Each reads back
+  what was set; read-only `actual-rx-latency` and `actual-rx-gap` give what the UART runs with,
+  which can differ, and read `0` while the port is closed. Edit the setting, display the actual.
+
 ## 2026-09-29: `Button` and `Light` templates
 
 - New component template `Light`, which extends `Switch`: `switch` is its on/off, and the optional

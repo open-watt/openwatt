@@ -274,7 +274,7 @@ const(char[]) from_variant(T)(ref const Variant v, out T r) nothrow @nogc
         const(char)[] s = v.asString;
         size_t taken;
         r = cast(T)s.parse_float(&taken);
-        if (taken != s.length)
+        if (taken != s.length || r != r)
             return "Invalid float value";
     }
     else

@@ -1808,7 +1808,8 @@ unittest
                                      Elem!("timeout", Duration, Default!(msecs(800))),
                                      Elem!("power", Quantity!(int, ScaledUnit(Watt))),
                                      Elem!("delay", Quantity!(int, ScaledUnit(Second, -3))),
-                                     Elem!("peer", ElemTestObject));
+                                     Elem!("peer", ElemTestObject),
+                                     Elem!("ratio", float, Default!0.5f, Min!0.0f, Max!1.0f));
     nothrow @nogc:
 
         uint changes;
@@ -1933,6 +1934,10 @@ unittest
     assert(r.failed && r.message == "above maximum");
     assert(o.prop_read!(ElemTestObject, "gain") == 5);
     assert(o.changes == 1);
+    Variant nan_text = Variant("nan"), nan_value = Variant(double.nan);
+    assert(o.set("ratio", nan_text).message == "Invalid float value");
+    assert(o.set("ratio", nan_value).message == "not a number");
+    assert(o.prop_read!(ElemTestObject, "ratio") == 0.5f);
 
     // enums arrive as strings from the console; change handlers see the previous value
     Variant mode = Variant("run");

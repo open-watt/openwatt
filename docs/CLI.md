@@ -501,15 +501,23 @@ A serial stream opens a host serial device or an embedded UART.
 | --- | --- | --- | --- |
 | `device` | device path, COM name, or `uartN` | required | Serial device to open. Embedded `uartN` follows the datasheet numbering, so it starts at `uart1` on parts whose first UART is UART1. |
 | `baud-rate` | positive integer | `9600` | Symbol rate. |
-| `data-bits` | `5` to `8`; some embedded UARTs allow `9` | `8` | Data bits per character. |
+| `data-bits` | `5` to `8` | `8` | Data bits per character. |
 | `parity` | `none`, `even`, `odd`, `mark`, `space` | `none` | Parity mode. Embedded UARTs currently support `none`, `even`, and `odd`. |
 | `stop-bits` | `one`, `one_point_five`, `two` | `one` | Stop-bit mode. |
-| `flow-control` | `none`, `hardware`, `software`, `dsr_dtr` | `none` | Flow control. `rts_cts` aliases `hardware`; `xon_xoff` aliases `software`. |
+| `flow-control` | `none`, `hardware`, `software`, `dsr_dtr` | `none` | Flow control. `rts_cts` aliases `hardware`; `xon_xoff` aliases `software`. An embedded UART takes `hardware` on the RTS and CTS pins given in `rts-gpio` and `cts-gpio`, where its port has them. |
 | `tx-gpio` | GPIO number | platform default | Embedded-only transmit pin override. |
 | `rx-gpio` | GPIO number | platform default | Embedded-only receive pin override. |
 | `rts-gpio` | GPIO number | platform default | Embedded-only RTS pin override. |
 | `cts-gpio` | GPIO number | platform default | Embedded-only CTS pin override. |
-| `de-gpio` | GPIO number | platform default | Embedded-only driver-enable pin override. |
+| `de-gpio` | GPIO number | platform default | Embedded-only driver-enable pin override. Setting it makes the port RS-485, the UART driving DE around each transmission. |
+| `rx-latency` | duration | `350us` | Embedded-only, where the UART applies it. How long a continuous stream batches before it is delivered: the UART interrupts at the deepest FIFO threshold within it, and a pause (`rx-gap`) delivers sooner. A change may not take effect until the port next opens. |
+| `actual-rx-latency` | duration, read-only | none | The RX latency the UART runs with, once its hardware has clamped `rx-latency`; `0` while the port is closed. |
+| `rx-gap` | characters, `0.1` to `25.5` | `3.5` | Embedded-only, where the UART reports it. A quiet line this long delivers what preceded it. A change takes effect on the open port. |
+| `actual-rx-gap` | characters, read-only | none | The gap the hardware gives; `0` while the port is closed. |
+
+An embedded UART refuses what it cannot honour rather than open on something else: a framing,
+flow control, RS-485 or pin it does not support, and a baud rate its divider cannot reach within
+3%.
 
 Additional commands:
 
@@ -517,6 +525,19 @@ Additional commands:
 | --- | --- | --- |
 | `/stream/serial/devices` | POSIX hosts | Lists detected serial devices. |
 | `/stream/serial/lines <name>` | all platforms | Prints the current modem-line state for an open serial stream, including RTS, CTS, DTR, DSR, DCD, and RI where supported. |
+
+**Platform notes**
+
+- STM32: `uart0` is USART1 through `uart7` UART8, and on H7 `uart8` is LPUART1. Data is 8 bits.
+  A pin is taken only where it carries the signal asked of it; F4's UART4 and UART5 have no RTS
+  or CTS. F7 and H7 drive DE in hardware on the RTS pin; F4 cannot, so it refuses RS-485. F4 times
+  its gap as one character. On H7 an `rx-latency` change takes effect when the port next opens.
+- RP2350: the gap is fixed at 32 bit times, 3.2 characters at 8N1.
+- ESP32: RS-485 is ESP-IDF's half-duplex mode on the RTS pin. RX thresholds are ESP-IDF's, so it
+  offers neither `rx-latency` nor `rx-gap`.
+- BL808, BL618, BK7231 and MT7621 take their default pins only, without flow control or RS-485.
+  BK7231 runs no slower than about 3.2 kbaud and offers no `rx-gap`. The MT7621 UART is polled,
+  so it raises no RX event and offers neither `rx-latency` nor `rx-gap`.
 
 ### `/stream/usb-serial`
 
