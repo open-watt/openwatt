@@ -162,6 +162,7 @@ Limit is the linker script's `FLASH` region, not the board: the Y23A-RP2350B car
 | 2026-09-23 | #747 | ldc 1.43.0 | 1,597,272 | 41,456 | 4,194,304 | boot guard ladder and retained reset record |
 | 2026-09-23 | ba8561fb | ldc 1.43.0 | 1,597,768 | 41,488 | 4,194,304 | POWMAN always-on timer keeps the wall clock across a reset |
 | 2026-09-30 | ow/system-panel | ldc 1.43.0 | 1,633,316 | 46,490 | 4,194,304 | panel, GPIO buttons and lights, PWM and WS2812 drives |
+| 2026-09-30 | ow/stm32-exti | ldc 1.43.0 | 1,633,412 | 46,490 | 4,194,304 | a button's backend reports interrupt or sampled |
 
 ### MT7621 hEX S, `make BOARD=rb760igs CONFIG=release`
 
@@ -196,6 +197,7 @@ a netbooted image is bounded by RAM instead.
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-09-26 | #781 | ldc 1.43.0 | 1,623,936 | 58,372 | 2,097,152 | first row; per-bank TLSF pools and DFU recovery (urt #339-#345) |
 | 2026-09-30 | ow/system-panel | ldc 1.43.0 | 1,650,256 | 59,588 | 2,097,152 | status LED and K1/K2 on system.panel |
+| 2026-09-30 | ow/stm32-exti | ldc 1.43.0 | 1,651,696 | 59,892 | 2,097,152 | K1/K2 on EXTI event links |
 
 Add a section for any other configuration the first time it is deployed. Keep the make
 invocation in the heading exact, including FEATURES, HEADLESS, IPV6 and GATEWAY when they

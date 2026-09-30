@@ -993,7 +993,7 @@ lines are, and the binding builds the matching component at `component` in
 | `switch` | `gpio` | a [`Switch`](COMPONENT_TEMPLATES.md#switch) whose writable `switch` drives the line |
 | `light` | `gpio` | a [`Light`](COMPONENT_TEMPLATES.md#light) with `switch`, `effect`, `indicate` and `pulse`; `indicate` overrides the owner's state while it is not `none`, and each `pulse` inverts a steady output for 50ms; `drive` adds `level` and, for `ws2812`, `colour` |
 
-A button reacts to edge interrupts where the platform has them (ESP32, MT7621)
+A button reacts to edge interrupts where the platform has them (ESP32, MT7621, STM32)
 and otherwise samples its line every `debounce`. A WS2812 chain runs on the RP2350's PIO, or is
 bit-banged on the BL808's D0 core; other platforms do not drive one yet. PWM comes from the chip's PWM block (ESP32
 LEDC) where one is free, and otherwise from software, driven by a 4 kHz timer interrupt that runs
@@ -1018,7 +1018,9 @@ otherwise one to three presses each within `click-gap` of the last are a
 | `pwm-channel` | read-only | | `none`, `hardware` or `software`: what the light holds. A channel other code needs exact moves from hardware to software, so this can change. |
 
 `capture` also reports `records`, `buckets`, `edge-rate`, `last-edge`,
-`backend`, `clock`, `stream-start` and `anchor-error` as status.
+`backend`, `clock`, `stream-start` and `anchor-error` as status. A `button`'s `backend` is
+`interrupt` where its edges arrive on an event link, or `sampled` where it reads the line
+every `debounce`.
 
 ```
 /binding/gpio add name=reset-button device=system component=panel.reset kind=button gpio=18 active=low

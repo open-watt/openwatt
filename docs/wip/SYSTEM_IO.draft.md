@@ -215,7 +215,7 @@ cover a unit that never reaches runtime.
 ## Hardware support today
 
 - **GPIO:** backends exist for ESP32, Bouffalo, BK7231, MT7621, RP2350, STM32 and Linux.
-- **GPIO edges:** event links on ESP32 and MT7621; elsewhere a button samples its line.
+- **GPIO edges:** event links on ESP32, MT7621 and STM32; elsewhere a button samples its line.
 - **PWM:** urt's allocator takes a PWM block where one reaches the line (ESP32's four LEDC ports,
   the RP2350's 24 slice channels) and otherwise one of eight software channels, density-modulated
   from a 4 kHz timer interrupt. Software channels need a timer compare, which Beken, ESP32 and

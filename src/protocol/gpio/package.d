@@ -227,6 +227,8 @@ nothrow @nogc:
 
     final const(char)[] backend() const pure
     {
+        if (_kind == GpioKind.button)
+            return _link.is_open ? "interrupt" : "sampled";
         static if (has_gpio_sampler)
             return _sampler.backend_name();
         else
