@@ -1581,8 +1581,8 @@ unittest
 
 
     // destruction leaves the id dangling; recreation at the same name reclaims it, a new name never does
-    Collection!Link().remove(a);
-    free(a);
+    a.destroy();
+    Collection!BaseInterface().update_all();
     assert(interface_for_scope(sa) is null);
     assert(!inet_scope_to_native(AddressFamily.ipv6, sa, native));
     assert(tmp[0 .. on_a.toString(tmp, null, null)] == "[fe80::1%scope-test-a]:0");
@@ -1591,12 +1591,10 @@ unittest
     Link c = Collection!Link().create("scope-test-c");
     scope(exit)
     {
-        Collection!Link().remove(a2);
-        Collection!Link().remove(b);
-        Collection!Link().remove(c);
-        free(a2);
-        free(b);
-        free(c);
+        a2.destroy();
+        b.destroy();
+        c.destroy();
+        Collection!BaseInterface().update_all();
     }
     assert(a2.scope_id == sa && interface_for_scope(sa) is a2);
     assert(c.scope_id != sa && c.scope_id != sb);
@@ -1673,10 +1671,9 @@ unittest
     Bounded bounded = Collection!Bounded().create("tx-handler-test-bounded");
     scope(exit)
     {
-        Collection!Sink().remove(open);
-        Collection!Bounded().remove(bounded);
-        free(open);
-        free(bounded);
+        open.destroy();
+        bounded.destroy();
+        Collection!BaseInterface().update_all();
     }
 
     Producer whole = Producer(400);
@@ -1782,12 +1779,9 @@ unittest
     dark.disabled = true;
     assert(vlan.running && !vlan.link_up && vlan.link_downs == 2);
 
-    Collection!VLANInterface().remove(vlan);
-    Collection!Port().remove(follows);
-    Collection!Port().remove(own);
-    Collection!Port().remove(dark);
-    free(vlan);
-    free(follows);
-    free(own);
-    free(dark);
+    vlan.destroy();
+    follows.destroy();
+    own.destroy();
+    dark.destroy();
+    Collection!BaseInterface().update_all();
 }
