@@ -1449,6 +1449,43 @@ Bare-metal follow-ups from the same series:
   returns short, and the console treats a short write as sent; the STM32 console lost output the
   same way until its UART went interrupt driven.
 
+### BL808 follow-ups (2026-09-30)
+
+M0 is the BL808's network node: it boots one image carrying D0, brings up the provisioning AP and
+the standard services, and drives the M1s Dock's panel, its LED on hardware PWM.
+
+- **M0 takes 6-9 s to inflate D0 at boot.** Inflate runs from XIP flash into PSRAM; measure where
+  it goes (flash reads, PSRAM writes, the inflater) before choosing between placing the inflater in
+  RAM, raising the clocks first, or letting D0 inflate its own image.
+- **M0's PSRAM slice is 1 MB**, leaving the full build about 800 KB of heap, of which a full log
+  history takes about 110 KB. Widen the slice at D0's expense (both linker scripts).
+- **No hardware watchdog on the BL808.** M0's hang reporter only prints a hung PC and never resets,
+  so the boot guard cannot count a hang, and D0 and the BL618 have nothing. Drive the TIMER block's
+  watchdog from the main-loop feed, keep the hung-PC report on its interrupt if it has one, and
+  retire the reporter: that also frees M0's periodic timer, so a pin no PWM channel reaches falls
+  back to software PWM on M0 as it does elsewhere.
+- **`/system/reboot bootloader=1` hands the ROM a chip on RC32M**, since `por_reset` drops the clocks
+  before the reset; the flash tool's loader then cannot hold 1.2 Mbaud (500 kbaud works). Leave the
+  crystal selected on the download path.
+- **The flash tool's own reset stopped working** on the M1s Dock during 2026-09-30: after a write the
+  chip stays in the loader until RST, and a fresh flash cannot handshake unless the chip is already
+  in download mode. Find what changed; nothing that runs before the reset looks responsible.
+- **M0's console is fragile**: RX is polled and overruns on lines longer than the 32-byte FIFO, and
+  output is truncated mid-line under load. Make both interrupt driven.
+- **D0's picolibc `_write` goes to UART0** rather than D0's console on the MM UART.
+- **M0's clock is whatever the boot header chose** (`mcu_clk`, the WiFi PLL's 320 MHz), and
+  `bl_common/clock.d` trusts it for the shared 160 MHz timebase. Read M0's clock mux at boot, or set
+  it, so a different boot header cannot silently skew the timers.
+- **The PWM pin map is inferred** (pin n reaches output n % 8) from the vendor dev kit's wiring, and
+  confirmed only for GPIO8 on block 0.
+- **The WS2812 FIFO driver has never met a WS2812**: the M1s Dock's LED is a plain one.
+- **The heap core keeps a pool it failed to add**: reject it so its bytes are not counted as free.
+- **The BL618 has no `system_reset`/`por_reset`**; only the BL808 cores do.
+- **M0's provisioning AP is open**, where the Waveshare board's defaults run a WPA2 AP on a known
+  setup secret with non-anonymous pcap. Bring M0's `default.conf` into line once a WPA2 AP and the
+  secret's effect on the web config's API access are checked on the BL808.
+- **Size ledger rows for the BL808** wait until M0's build settles.
+
 ### RP2350 bring-up follow-ups (2026-09-20)
 
 Boots and runs on a WeAct RP2350B Core, with an interactive console on UART1 (GPIO8 TX,
