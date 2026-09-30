@@ -1,300 +1,220 @@
 ---
 name: bouffalo-port
-description: Bouffalo Labs (BL808/BL618) platform port -- build, flash, debug, bare-metal D runtime, dual-core IPC, vendor blob integration, and known pitfalls. Use when working on any Bouffalo variant, fixing bare-metal issues, or debugging the RISC-V startup/memory/interrupt stack.
+description: Bouffalo Labs (BL808/BL618) platform port -- build, flash, debug, bare-metal D runtime, the BL808 single image and inter-core XRAM link, vendor blob integration, and known pitfalls. Use when working on any Bouffalo variant, fixing bare-metal issues, or debugging the RISC-V startup/memory/interrupt stack.
 ---
 
 # Bouffalo Labs Platform Skill
 
 OpenWatt on Bouffalo RISC-V, bare-metal. LDC cross-compiles D for two chips:
 
-- **BL808** -- Dual-core: T-Head C906 (RV64GC, "D0", 480MHz) + T-Head E907 (RV32IMAFC, "M0", 400MHz). OpenWatt runs as two clustered instances bridged through XRAM IPC.
+- **BL808** -- Dual-core: T-Head C906 (RV64GC, "D0", 480 MHz) + T-Head E907 (RV32IMAFC, "M0", 320 MHz). Two OpenWatt instances, peered over XRAM.
 - **BL618** -- Single-core: T-Head E907 (RV32IMAFC, 320MHz). Single OpenWatt instance.
 
-Dev boards: Sipeed M1s Dock (BL808), Sipeed M0P Dock (BL618). USB-CDC is via a separate **BL702 bridge chip** on both -- M0/BL618 only drives UART, baud rate setting is irrelevant (BL702 fakes it).
+Dev boards: Sipeed M1s Dock (BL808), Sipeed M0P Dock (BL618). USB-CDC is via a separate **BL702 bridge chip** on both; baud rate settings are cosmetic (the BL702 fakes them).
 
 ## Product Roles
 
 ### BL808 (dual-core)
 
-Two clustered OpenWatt instances on the same chip, talking over XRAM rings:
+**M0 -- the network node.** Owns the radios (vendor `libwifi.a` + `libbl606p_phyrf.a`), EMAC, flash and the MCU-domain peripherals, and all chip-wide bring-up: MM domain power, PLLs, PSRAM, L2 SRAM, then inflates D0 into PSRAM and releases it. Full build with its console (not Tiny, not headless); runs the provisioning AP and services from `platforms/bl808_m0/default.conf`, and the board panel from its `system.conf`. Owns UART0 (MCU domain, polled).
 
-**D0 -- control plane.** Has PSRAM (59MB+ data). Runs all protocol decoders/bindings (Modbus, MQTT, Zigbee, CAN, HTTP, TLS, ESPHome, SNMP, BLE, Tesla, GoodWe), the Device/Component/Element data model, apps (energy, automation, OTA), console/Telnet/Web. Owns UART3 (MM domain, IRQ-driven). No direct access to radios.
+**D0 -- the compute assistant.** Runs from PSRAM (60 MB), full feature set, no network path of its own. Owns the MM domain (camera, display, NPU) and the MM UART (UART3, IRQ-driven).
 
-**M0 -- data plane.** Tight memory (~1MB PSRAM slice). Owns WiFi (vendor `libwifi.a`+`libbl606p_phyrf.a` link into the M0 binary), EMAC, MM-domain hardware. Bridges packets to D0 via XRAM. Performs all chip-wide bring-up before D0 starts (MM domain power, PLLs, PSRAM init, L2 SRAM, TZC), then loads D0 firmware from flash to PSRAM and releases D0. Strips most modules via `version(DataPlane)`. Owns UART0 (MCU domain, polled).
-
-The split is hardware-driven: PSRAM is on the MM domain (powered by M0), radios are wired to M0's bus.
+M0 claims D0 over XRAM (M0's `/sync/peer` for D0 carries `claim=yes`; D0 is a peering `member`) and mirrors D0's devices, so D0 never appears on the network; M0 stays a peering `member` toward its fleet.
 
 ### BL618 (single-core)
 
-Cheaper single-chip variant for cost-sensitive deployments. Same codebase, smaller targets: 480KB OCRAM (no PSRAM), 4-8MB flash, lower CPU. Uses `Tiny` builds with optional protocols compiled out.
+Cheaper single-chip variant: 480KB OCRAM (no PSRAM in use yet), 4-8MB flash. `Tiny` builds.
 
 ## Build
 
+Build in WSL; the Windows shell has no `riscv64-unknown-elf-gcc`/picolibc.
+
 ```bash
-# BL808 D0 (default)                   ARCH: rv64gc
-make PLATFORM=bl808 CONFIG=release
+# BL808: M0, with D0 built by a sub-make and appended; D0=0 leaves D0 out and halted
+wsl -e bash -lc "cd /mnt/d/<tree> && make PLATFORM=bl808 CONFIG=release -j8"
 
-# BL808 M0                             ARCH: rv32imafc
-make PLATFORM=bl808 CONFIG=release
+# BL808 D0 alone                          ARCH: rv64gc
+make PLATFORM=bl808_d0 CONFIG=release
 
-# BL618                                ARCH: rv32imafc
+# BL618                                   ARCH: rv32imafc
 make PLATFORM=bl618 CONFIG=release
 ```
 
-**Always use `timeout 90` for BL808 D0 builds** -- LDC riscv-isel hangs on certain patterns with `+unaligned-scalar-mem`. If it hangs, bisect on source files to find the trigger.
+**Wrap BL808 D0 builds in `timeout`** -- LDC riscv-isel has hung on some patterns with `+unaligned-scalar-mem`. If it hangs, bisect on source files.
 
 Outputs:
 
 | Platform | Output | Path |
 |----------|--------|------|
-| BL808 D0 | `d0fw.bin` + `d0fw.bin.gz` (M0 auto-detects gzip magic at flash offset 0) | `bin/bl808_d0_release/` |
-| BL808 M0 | `m0fw.bin` | `bin/bl808_release/` |
+| BL808 | `fw.bin` = `m0fw.bin` + D0 payload (flash this) | `bin/bl808_release/` |
+| BL808 D0 | `d0fw.bin` (input to the payload) | `bin/bl808_d0_release/` |
 | BL618 | `fw.bin` | `bin/bl618_release/` |
 
-D versions set: `Bouffalo`, `BL808` (also for M0), `BL808_M0` (M0 only), `BL618`, `CRuntime_Picolibc`, `BareMetal`, `Embedded`. `Tiny` is auto-set for M0 and BL618.
+`third_party/urt/tools/bl808_image.py append` packs D0's ELF load segments into a run table (entry, count, then `(dest, size)` pairs) followed by one raw-deflate stream per run, and appends it after M0's last flash-resident byte (`_d0_image`). The build prints `M0 x + D0 y = z of <bank>`.
+
+D versions: `Bouffalo`, `BL808` (both cores), `BL808_M0` or `BL808_D0` (the core being built), `BL618`, `CRuntime_Picolibc`, `BareMetal`, `Embedded`. `Tiny` is auto-set for the BL618.
+
+## Flash and console
+
+```bash
+cd /d/dev/BouffaloLabDevCube-v1.9.0 && ./bflb_iot_tool.exe --chipname=bl808 --port=COM11 --baudrate=1000000 \
+  --pt=<tree>/platforms/bl808/partition.toml \
+  --boot2=chips/bl808/builtin_imgs/boot2_isp_bl808_v6.6.2/boot2_isp_release.bin \
+  --dts=chips/bl808/device_tree/bl_factory_params_IoTKitA_auto.dts \
+  --firmware=<tree>/bin/bl808_release/fw.bin
+```
+
+The tool is meant to reset the board into the ROM and back, but since 2026-09-30 its reset often fails (`shake hand fail`, `RESET CPU FAIL`): then put the chip in the downloader from D0 with `/system/reboot bootloader=1` on COM12 and flash with `--baudrate=500000` (that entry leaves the chip on RC32M, which cannot hold 1.2 Mbaud), and press RST afterwards. Never retry in a loop: it wedges the BL702 until a USB replug. On the M1s Dock the BL702 exposes M0's UART0 as COM11 and D0's MM UART as COM12, both 2 Mbaud. Wait ~15 s after reset before talking to D0: M0 inflates D0 first (6-9 s).
+
+M0's console RX is polled: send commands in chunks of 16 bytes or fewer with a short gap, or the 32-byte FIFO overruns. From Git Bash, set `MSYS_NO_PATHCONV=1` or `/stream/...` arguments get rewritten into Windows paths.
+
+`/system/reboot` resets both cores (POR); `bootloader=1` sets the boot ROM's hand-off in HBN_RSV2 first.
+
+## Flash layout (`platforms/bl808/partition.toml`)
+
+| Region | Offset | Size | Notes |
+|---|---|---|---|
+| Boot2 | 0x0 | 0xE000 | vendor stage 2, header added by the tool |
+| partition table | 0xE000/0xF000 | 4K x2 | |
+| FW bank A / B | 0x10000 / 0x410000 | 4 MB each | M0 image + D0 payload; boot2 maps the active bank at 0x58000000 |
+| kv | 0x810000 | 64K | reserved for NVS |
+| media | 0x820000 | 0x6E0000 | littlefs (M0 mounts it; `/system/fs format`) |
+| factory | 0xF00000 | | written by the flash tool from the dts; never by firmware |
 
 ## File Layout
 
 ```
-platforms/bl808/              partition.toml
-platforms/bl808_d0/           D0 build inputs: system.conf
-platforms/bl808/firmware/     firmware_20230227.bin -- vendor M0 blob (still used in prod)
-platforms/bl808_m0/           M0 build inputs: system.conf
-platforms/bl808_m0/vendor/    Vendor C linked into M0:
-    wifi/{src,include,lib}/   WiFi driver C + libwifi.a + libbl606p_phyrf.a
-    psram/{src,include}/      Vendor PSRAM init: bl_psram.c, bl808_psram_uhs.c, bl808_glb_pll.c
-    tlsf/                     TLSF allocator (mspace_* backing for M0 multi-pool heap)
-platforms/bl618/              BL618 build inputs
-
-third_party/urt/platforms/bl808_d0/bl808_d0.ld   D0 linker script
-third_party/urt/platforms/bl808_m0/bl808_m0.ld   M0 linker script (multi-pool heap)
-third_party/urt/platforms/bl618/bl618.ld      BL618 linker script
-
-third_party/urt/src/urt/driver/bl808/         D0 drivers: UART (4-port, IRQ), GPIO, I2C, SPI, IRQ, timer,
-                                                 xram (IPC), wifi, alloc, crash, exception, ipc, start.S
-third_party/urt/src/urt/driver/bl808_m0/      M0-specific forks/extras: start.S + start.d (chip bring-up + D0 launch),
-                                                 alloc.d (multi-pool TLSF), wifi.d, bl_ops.d
-third_party/urt/src/urt/driver/bl618/         Shared E907 driver pool (used by BL618 AND BL808 M0):
-                                                 UART, IRQ, timer, syscalls, alloc, gpio
+platforms/bl808/                         partition.toml
+platforms/bl808_m0/                      system.conf, default.conf (M0)
+platforms/bl808_d0/                      system.conf (D0)
+third_party/urt/vendor.mk                vendor C rules and flags
+third_party/urt/platforms/bl808_m0/vendor/wifi/   WiFi driver C + libwifi.a + libbl606p_phyrf.a
+third_party/urt/platforms/bl808_m0/vendor/bl808_std/  slice of the SDK's std driver: PSRAM init and the CPU PLL
+third_party/urt/platforms/bl808_m0/      bl808_m0.ld, vendor C (above)
+third_party/urt/platforms/bl808_d0/      bl808_d0.ld, D0's mbedtls archive
+third_party/urt/src/urt/driver/bl808/    both BL808 cores: clock, ipc (mailbox), xram (frame channels), pwm, reset, watchdog, ws2812
+third_party/urt/src/urt/driver/bl808_d0/ D0: start.S, I2C, SPI, IRQ (PLIC), timer
+third_party/urt/src/urt/driver/bl808_m0/ M0: start.S + start.d (chip bring-up, D0 inflate and launch), flash.d (native, runs from RAM), event, WiFi
+third_party/urt/src/urt/driver/bl618/    shared E907 pool (BL618 and M0): UART, IRQ (CLIC), timer, syscalls
+third_party/urt/src/urt/driver/bl_common/ BL808 and BL618: heap, uart, gpio, hbn, identity, system, trng, exception
+src/driver/bl808/xram.d                  /interface/xram
+src/driver/bl808/ipc_ids.d               mailbox ids both cores use
 ```
 
-Source selection in `platforms.mk`:
-- D0: `urt/driver/bl808/*.d`
-- M0: `urt/driver/bl618/*.d` + `urt/driver/bl808_m0/*.d` + `urt/driver/bl808/{wifi,bl_ops,hbn}.d`
-- BL618: `urt/driver/bl618/*.d`
-
-### Driver organization: shared vs forked
-
-`urt/driver/bl618/` is the **shared E907 driver pool** -- the same files serve BL618 standalone AND the BL808 M0 core (both pull them in via platforms.mk). Two gating patterns coexist:
-
-**1. Shared file with inline divergence (~90% identical, e.g. UART, GPIO, IRQ, timer):**
-Unguarded code = shared truth for both chips. Carve-outs gate the minority case:
-
-```d
-version (BL808_M0) enum console_tx_pin = 22;  // M0 on M1s Dock
-else                enum console_tx_pin = 14; // BL618 default
-
-version (BL808_M0) { ... M0-specific extra register write ... }
-```
-
-Compose `enum` at the top of a function, then `static if` on it -- per CLAUDE.md *"Keep one definition of each function and struct. Put `version` blocks inside at the exact point of divergence."*
-
-**2. Forked file (shape meaningfully differs, e.g. `alloc.d`):**
-M0 gets its own `bl808_m0/<name>.d` with a different module name. The **`bl618/<name>.d` is gated with `version (BL618):` at the top** so it compiles to nothing on M0 builds. Both files still appear in the M0 source list, but only one contributes symbols. Examples already forked this way:
-- `alloc.d` -- M0 has three-pool TLSF (DTCM+OCRAM+PSRAM), BL618 has single-pool OCRAM
-- `start.S`/`start.d` -- M0 has chip bring-up + D0 launch, BL618 has none
-
-Fork only when the implementation *shape* differs (different memory model, lifecycle, programming model). Don't fork because a constant or a single branch differs -- that's pattern (1).
+Source selection is in `platforms.mk`. Shared files diverge inline with `version (BL808_M0)` at the exact point of divergence; fork into `bl808_m0/` only when the shape differs.
 
 ### Vendor C build flags
 
 - WiFi: `-DCFG_CHIP_BL808 -DCFG_TXDESC=4 -DCFG_STA_MAX=5 -fcommon`
-- PSRAM: `-DBL808 -DARCH_RISCV -fcommon` (`-DARCH_RISCV` is required so `bl808.h` picks the RISC-V CSI include branch -- otherwise `__NOP` is undefined)
+- std driver: `-DBL808 -DARCH_RISCV -fcommon` (`-DARCH_RISCV` picks the RISC-V CSI branch of `bl808.h`)
 
-One vendor patch: `vendor/psram/include/bl808_glb.h` has `GLB_AHB_CLOCK_IP_UART4` added to an enum -- vendor's own `bl808_glb_pll.c` references it but the matching header omits it. Commented inline.
+`vendor/bl808_std/include/bl808_glb.h` carries one patch: `GLB_AHB_CLOCK_IP_UART4` added to an enum the vendor's own `bl808_glb_pll.c` references.
 
 ## Memory Layout
 
-### BL808 D0 (C906 RV64GC)
+### BL808 D0 (C906)
 
 ```
-CODE   (rx)   0x50100000   4MB    .text, .rodata, .eh_frame  (PSRAM, M0-loaded)
-DATA   (rwx)  0x50500000   59MB   .data, .bss, heap
-SRAM   (rwx)  0x3EFF8000   64KB   .got, .tdata/.tbss, stack  (fast on-chip)
-HBNRAM (rw)   0x20010000   4KB    Hibernate-persistent
+PSRAM  (rwx)  0x50100000   60M    code, data, heap (M0 inflates the load runs here)
+SRAM   (rwx)  0x3EFF8000   64K    .got, TLS, stack, fast heap
+HBNRAM (rw)   0x20010000   4K     survives reset
 ```
 
-D0 executes from PSRAM, not Flash XIP. M0 copies the image from the D0FW partition (flash 0x210000, XIP 0x58210000) to PSRAM 0x50100000 before releasing D0.
-
-CODE region size (4 MB) must stay in sync across three files: `bl808_d0.ld` MEMORY block, `partition.toml` D0FW `size0`, and `bl808_m0/start.d` `D0_PSRAM_LOAD_SIZE`/`D0_IMAGE_FLASH_SIZE`. Touch one, touch all four.
-
-### BL808 M0 (E907 RV32IMAFC) -- multi-pool heap
+### BL808 M0 (E907) -- no TCM
 
 ```
-FLASH         0x58000000   2MB    XIP: .text, .rodata, .eh_frame, .init_array
-ITCM          0x62028000   28KB   @critical (.ramfunc), copied at boot
-DTCM          0x6202F000   4KB    fastest heap (uncached, single-cycle, no DMA)
-XRAM          0x40000000   16KB   EMI shared with D0/LP -- IPC (reserved, no sections)
-OCRAM         0x22020000   64KB   .got + @fast_data + fast/DMA heap + stack
-WIFIRAM       0x22030000   96KB   vendor .wifibss + WiFi @fast_data tail (base is HW-fixed)
-PSRAM         0x50000000   1MB    .data/.bss/.tdata/.tbss + @bulk_data + slow heap
+FLASH   0x58000000   ~4M    XIP: .text, .rodata; D0 payload after _d0_image
+ITCM    0x6202E000   8K     @critical / .ramfunc (the flash driver), copied at boot
+OCRAM   0x22020000   64K    .got, fast data, fast/DMA heap, stack (below ITCM's alias)
+WIFIRAM 0x22030000   96K    vendor .wifibss; base is fixed by the PHY DMA routing
+XRAM    0x40000000   16K    inter-core rings; no sections
+PSRAM   0x50000000   1M     .data/.bss/TLS, slow heap; D0 starts at 0x50100000
 ```
 
-Allocator routes by `MemFlags`: `fastest` -> DTCM, `fast`/`dma` -> OCRAM, default/`slow`/`large` -> PSRAM. Backed by TLSF (vendor `tlsf.c`).
+"ITCM" and "DTCM" are OCRAM through its cached alias at 0x62020000, not tightly coupled memory. Code cannot execute below 0x62028000 in that alias; 0x6202E000 works.
 
-D0's PSRAM slice starts at 0x50100000 -- M0's slice ends just below at 0x50100000.
+Heap pools route by `MemFlags` (`bl_common/heap.d`): `fast`/`dma` to OCRAM, default/`slow` to PSRAM. Heap regions start 8-aligned in the linker script; TLSF rejects a misaligned pool.
 
-### BL616 / BL618 (E907 RV32IMAFC) -- Sipeed M0P Dock
+## Boot
 
-Authoritative map: BL616/BL618 datasheet + vendor `bouffalo_sdk` bl616dk
-linker template. **No TCM** -- the vendor MEMORY{} has none; `.tcm_*` fold
-into RAM. Cacheability is address-based: bit 30 set = cached (`0x62..`/`0x63..`),
-clear = non-cache (`0x22..`/`0x23..`) -- same physical RAM, two windows. Code
-and data run cached; only DMA uses the non-cache alias.
+### M0 (`bl808_m0/start.S`, `start.d`)
 
-```
-FLASH    0xA0000000   8M     XIP, I-cached: .text/.rodata
-OCRAM    0x62FC0000   320K   cached; top 64K aliased non-cache (0x23000000) for DMA
-WRAM     0x23010000   160K   reserved (non-cache) for WiFi DMA
-PSRAM    0xA8000000   4M     M0P pseudo-SRAM; needs bl_psram_init before use
-HBN      0x20010000   4K     @persist
-```
+Boot2 hands over with the E907 D-cache **on and write-back** (MHCR 0x103F) and a SYSMAP making everything from 0x40000000 up cacheable. `m0_bringup()` (before `sys_init`):
 
-Allocator: `fast`/`fastest`/`slow` -> cached OCRAM; `dma` -> non-cache OCRAM
-alias. PSRAM is reserved but not yet a pool (no boot-time init wired).
+1. `mtime_config` on M0's own timer (160 MHz; see Timebase)
+2. `xram_uncached`: extend SYSMAP region 0 (strongly ordered) to 0x40004000 so XRAM bypasses M0's cache
+3. MM domain power (`PDS_CTL2`), CPU PLL to 480 MHz (`bl_cpupll_480m`), MM clocks (D0 on the CPU PLL, MM UART clock from XCLK), bus threshold, UART signal mux, UART0 early init (GPIO14 TX / GPIO15 RX)
+4. WiFi EM carve-out, PSRAM init (vendor `bl_psram_init`), L2 SRAM partition
+5. `launch_d0`: inflate each payload run to its address, set D0's console pads (GPIO16/17, MM UART function 21), D0 timer divider (160 MHz from 480 MHz), halt D0 (clock gate + reset), set boot address, `xram_reset`, clean the D-cache (`th.dcache.call; th.sync.s`, emitted as `.word`), release D0, zero both timers together (`mtime_zero`)
 
-`0x20000000` is **GLB peripheral register space, NOT DTCM**. Earlier docs and
-the old `bl618.ld` carried a fabricated "DTCM @ 0x20000000 64K" (copied from a
-bad assumption, never on hardware) -- there is no TCM on this part.
+No TrustZone setup: assigning D0 a TZC group or enabling a PSRAM region without a range locks D0 out of its own code.
 
-## Boot Sequence
+### D0 (`bl808/start.S`)
 
-### BL808 cold boot: BootROM -> Boot2 -> M0
+Spins ~80ms (M0 finishes D0's clocks after release), sets up traps (vectored; PLIC at 0xE0000000), gp/tp/sp, zeroes .bss/.tbss (the image is already in place), enables caches, then `sys_init` -> `.init_array` -> `main`. D0 caches XRAM.
 
-Mask ROM reads the bootheader at flash 0, loads vendor "Boot2" (stage-2 loader at flash 0x00000) which reads the partition table at 0xE000/0xF000 (two copies) and loads FW partition (M0 firmware at 0x10000-0x210000) into memory.
+## Inter-core link
 
-Boot2 and FW partitions have **vendor 4KB boot headers** (magic `"BFNP"`/`"BFAP"`, flash config, PLL config, image hash). Vendor flash tools (DevCube / `bflb_iot_tool`) read `platforms/bl808/partition.toml` and prepend these automatically.
+`ipc.d` is the mailbox: a ring of short records (6-bit id, up to 60 bytes) per direction at the base of XRAM, and the IPC doorbell that says a ring has records or room. IPC blocks: M0 0x2000A800 (CLIC 16+3), D0 0x30005000 (PLIC 16+38); words: 0 set, 9 status, 10 clear, 11 unmask, 12 mask. `ipc_send` never blocks; a full ring raises the space handler on the peer's next drain.
 
-**D0FW partition has `header = 0`** -- M0 loads D0 directly without parsing a vendor header. D0 image is flashed raw to flash offset 0x210000; `partition.toml` and `bl808_m0/start.d` (`D0_IMAGE_FLASH_ADDR`) are the authority. Writing it at 0x100000 lands inside the M0 image and crashes M0.
+`xram.d` lays frame channels over the rest of XRAM: per channel, one ring per direction, each side writing only its own cache line: a cursor word (frame count in the high 16 bits, position in the low 16) and a space-request count (sender) or the last request answered (receiver). Positions run modulo twice the ring's capacity. A frame is 8-aligned, built and read in place, and announced on the mailbox as `{position, length}`; an announcement a ring or more behind the consumed position is stale and dropped. The link is a handshake on the same mailbox id: open, ack, close. A peer that opens while linked is a new session: the receiver drops its unread frames, acks, and `xram_link` reports a new number, which `/interface/xram` turns into a link bounce. D0 cleans/invalidates around each access; M0 does not cache XRAM.
 
-OpenWatt build produces raw `.bin` via `objcopy -O binary`. Headers (if any) come from the flash tool, not the build.
+```text
+# D0 (COM12)
+/interface/xram add name=m0 channel=0
+/sync/peering set role=member
+/sync/peer add name=m0 transport=m0
 
-### Flashing (M1s Dock)
-
-The build makes two files, not one image. `bflb_iot_tool.exe` from BouffaloLabDevCube (on PATH as
-`D:\dev\BouffaloLabDevCube-v1.9.0`) talks to the ROM on the M0 console port, the BL702 bridge's
-`VID_FFFF` interface that prints `BL808 M0:`; the other interface is the D0 console. The tool
-enters download mode itself, but leaves the chip there: press RST afterwards.
-
-```
-bflb_iot_tool.exe --chipname bl808 --port COM11 --baudrate 2000000 --pt platforms/bl808/partition.toml --firmware bin/bl808-m0_release/m0fw.bin
-bflb_iot_tool.exe --chipname bl808 --port COM11 --baudrate 2000000 --single --addr 0x210000 --firmware bin/bl808-d0_release/d0fw.bin.gz
+# M0 (COM11)
+/interface/xram add name=d0 channel=0
+/sync/peer add name=d0 transport=d0 claim=yes
 ```
 
-The first writes the partition table and the M0 image with its vendor header; the second writes
-the D0 image raw into D0FW, which M0 unpacks (gzip is detected by magic).
+D0's `/sync/peering print` then reads `state: claimed`, and M0's `/device/print` shows D0's devices.
 
-### M0 boot (`urt/driver/bl808_m0/start.S` + `start.d`)
+## Timebase
 
-`start.S` (asm):
+Each core's `mtime` divides its own core clock (`MCU_E907_RTC` 0x20009014 for M0, `MM_MISC_CPU_RTC` 0x30000018 for D0: DIV [9:0], bit 30 holds the counter at zero, bit 31 enables). There is no shared timer, but both clocks come from the one 40 MHz crystal, so equal rates never drift. `bl_common/clock.d` sets both to 160 MHz (M0 320/2, D0 480/3) and M0 zeroes the two counters together right after releasing D0, whose counter does not run while it is halted. The cores read one timebase, measured within 125 ns over XRAM.
 
-1. Disable IRQ, enable T-Head ext (THEADISAEE + MM in mxstatus), FPU
-2. **HBN/PDS retention bit clear** -- zero stale sleep-state bits at `0x2000F034`, `0x2000E020`, `0x2000E028`
-3. Set `mtvec` + `mtvt` to `__vectors`
-4. gp/tp/sp; copy .got -> OCRAM, .tdata -> PSRAM, zero .tbss; copy .data -> PSRAM, zero .bss
-5. Enable I-cache (MHCR); MEIE + MIE
-6. **Call `m0_bringup()`** (start.d) -> `sys_init` -> `.init_array` -> `main`
+## GPIO, PWM and the M1s Dock panel
 
-`start.d` `m0_bringup()` (D, runs before `sys_init`):
+`GPIO_CFG` n at 0x200008C4 + 4n: input enable 0, schmitt 1, pull-up 4, pull-down 5, output enable 6, function 12:8 (11 = SWGPIO, 16/17 = PWM0/1), output 24, input 28, mode 31:30 (2 = the transmit FIFO). Older urt code used a layout neither chip has.
 
-1. MM domain power-on (`PDS_CTL2` @ 0x2000E010 -- clear bits 1, 5, 17, 13, 9 with 45us delay after step 1)
-2. MM clock config (`MM_CLK_CTRL_CPU` @ 0x30007000 -- 6 bitfields: XCLK=XTAL, BCLK=160M, CPU root=PLL, CPU=400M, UART/I2C=XCLK)
-3. UART signal mux (`GLB_PARM_CFG0` @ 0x20000510 -- bits 3+5)
-4. `bl_psram_init()` (vendor C: `GLB_Config_UHS_PLL` + `Psram_UHS_x16_Init(2000)`)
-5. L2 SRAM/VRAM partition (`MM_MISC_VRAM_CTRL` @ 0x30000050 -- 64KB L2 / 0KB VRAM)
-6. TZC for D0: set D0 master group=1 (`TZC_MM_BMX_TZMID` @ 0x20005300), enable PSRAMA/B region-0 for group 1 (`TZC_PSRAMA_TZSRG_CTRL` @ 0x20005380, PSRAMB @ 0x200053A0)
-7. **Launch D0** (chained `launch_d0()`):
-   - Read D0 image from flash 0x58210000; sniff gzip magic at offset 0 -> `gzip_uncompress` into PSRAM, else raw memcpy. D-cache off around the write.
-   - D0 mtimer divider (`MM_MISC_CPU_RTC` @ 0x30000018 -- DIV=39 for 10MHz from 400MHz)
-   - Halt D0 (`MM_GLB_SW_SYS_RESET` @ 0x30007040 bit 8 set) -> set boot address (`MM_MISC_CPU0_BOOT` @ 0x30000000) -> release (clear bit 8)
+PWM (`bl_common/pwm.d`): two blocks at 0x2000A440 and 0x2000A480, four channels each with positive and negative outputs, XCLK through a whole divider, per-output active level. Pin n reaches output n % 8 of either block (channel (n % 8) / 2, negative on odd pins); only GPIO8 has been checked. The block's clock gate is `GLB_CGEN_CFG1` bit 20. Software PWM covers pins no channel reaches.
 
-D0 runs from this point in parallel; M0 returns and continues with `sys_init` and `main`.
+WS2812 (`bl_common/ws2812.d`): the GPIO transmit FIFO, `GPIO_CFG142`-`144`, XCLK counts per code; untested on a real WS2812.
 
-### D0 boot (`urt/driver/bl808/start.S`)
-
-1. Spin ~1M cycles (~80ms at 24MHz, ~5ms at 400MHz) -- waits for M0 clock setup. **Do not shorten** -- M0 switches D0's clock XTAL->PLL after release; the wait avoids pipeline glitches.
-2. Disable IRQ; THEAD ext; FPU (FS=Initial) + RV-V vector
-3. `mtvec` = `__vectors | 1` (vectored)
-4. gp/tp/sp (sp -> SRAM at 0x3F008000)
-5. Clear PLIC enables/pending (PLIC base 0xE0000000, enables 0xE0002000, pending 0xE0001000, claim 0xE0200004)
-6. Copy .got -> SRAM, .tdata -> SRAM, zero .tbss; copy .data -> PSRAM, zero .bss
-7. Enable I+D cache (MHCR) and prefetch hints (MHINT)
-8. MEIE + MIE; `sys_init` -> `.init_array` -> `main`
-
-Trap vectored table (`__vectors`) routes M-mode exception to `_trap_exception` (saves 32 GPRs, redirects mtvec to spin to avoid double-fault recursion, calls D-side `_crash_handler`), M-timer to `_trap_mtimer`, M-external to `_trap_mext` (PLIC claim -> `_irq_dispatch` -> complete). Current PLIC user: UART3 IRQ 20.
-
-### BL618 boot (`urt/driver/bl618/start.S`)
-
-No MM domain, no PSRAM, no D-cache, no D0 launch. Just disable IRQ, enable T-Head ext + FPU, set mtvec, gp/tp/sp, copy/zero sections, enable I-cache, MEIE+MIE, `sys_init` -> `.init_array` -> `main`.
-
-## Dual-Core IPC (BL808)
-
-16KB at `0x22020000` is partitioned into rings. Each ring has volatile 16-bit head/tail cursors with a payload region. Both cores see the same physical memory; neither has cache coherency with the other -- `fence rw, rw` after writes.
-
-| ID | Name | Direction | Purpose |
-|----|------|-----------|---------|
-| 0 | LOG_C906 | D0 -> M0 | D0 log out (M0 forwards to UART0) |
-| 1 | LOG_E907 | M0 -> D0 | M0 log out |
-| 2 | NET | bidirectional | Frame bridge (mapped as `BaseInterface` on both sides) |
-| 3 | PERIPHERAL | D0 -> M0 req, M0 -> D0 resp | RPC for hardware M0 owns |
-| 4 | RPC | bidirectional | Generic control/status RPC |
-
-Net ring frames: 16-bit magic, 16-bit length, type, CRC16. Other rings: length-prefixed.
-
-M0 zeros all rings during bring-up before releasing D0. After release, both cores update head/tail concurrently -- no locks (single-producer/single-consumer per direction).
-
-Module gating: `version(DataPlane)` on M0, `version(ControlPlane)` on D0, picked in `plugin.d`.
-
-## UART
-
-**D0 (`urt/driver/bl808/uart.d`, full):** 4 peripherals -- UART0/1/2 at `0x2000_A000`/`A100`/`AA00` (MCU domain, polled only), UART3 at `0x3000_2000` (MM domain, IRQ-driven, PLIC IRQ 20). 512-byte rings, configurable baud/parity, RX timeout at 80 bit-periods. Early-boot helpers `uart0_puts()`/`uart3_puts()` for pre-ring-buffer output.
-
-**M0 / BL618 (`urt/driver/bl618/uart.d`, full polled):** 2 peripherals -- UART0/1 at `0x2000_A000`/`A100`. Polled-only (CLIC IRQ dispatch not yet wired). Same register layout as D0, ported with `size_t` casts for RV32. 512-byte rings. Early-boot helpers:
-- `uart0_early_init(tx_pin, rx_pin, baud)` -- pad mux + signal routing + reg init, callable from `m0_bringup()` before `sys_init`
-- `uart0_putc` / `uart0_hw_puts` / `uart0_hex` -- blocking polled output for boot markers
-
-The early-init does GPIO mux inline (raw MMIO to `GLB_GPIO_CFG{n}` and `GLB_UART_CFG1/2`) rather than going through `bl618/gpio.d` -- two pads at boot isn't worth a driver call. The full `uart_hw_open()` re-applies the same setup harmlessly.
-
-`m0_bringup()` issues single-byte progress markers (`A`-`E`) between each step after UART comes up -- if boot hangs, the last byte on the wire tells you which step died.
-
-Pin assignments (M1s Dock): UART0 TX=GPIO22, RX=GPIO21, 2Mbaud (BL702 fakes baud anyway). BL618 pins TBD when that board comes up -- gate with `version (BL808_M0)` per the driver-organization rules.
-
-`src/router/stream/serial.d` picks via `version(BL808)` vs else (-> `urt.driver.bl618.uart`). M0 builds set both `BL808` and `BL808_M0` but the source list (not the version) is what selects the bl618 uart module.
+M1s Dock: a plain active-low LED on GPIO8 (not a WS2812, despite old code), S1 on GPIO22 and S2 on GPIO23 (active low, pull-up). RST is the hardware reset line; BOOT is not readable from the BL808 (pressing it makes the BL702 toggle GPIO20/21).
 
 ## Key Addresses
 
 | | D0 | M0 | BL618 |
 |--|------|------|------|
 | Flash XIP | 0x58000000 | 0x58000000 | 0xA0000000 |
-| Code origin | 0x50100000 (PSRAM) | 0x58000000 (XIP) | 0xA0000000 (XIP) |
-| Data RAM | 0x50500000 PSRAM 59MB | 0x50000000 PSRAM 1MB | 0x62FC0000 OCRAM 320K (+0xA8000000 PSRAM 4M) |
-| Fast RAM | 0x3EFF8000 SRAM 64KB | 0x6202F000 DTCM 4KB | 0x62FC0000 OCRAM cached (no TCM) |
-| OCRAM | -- | 0x22020000 64K (+WIFIRAM 0x22030000 96K) | 0x62FC0000 320K |
-| UART console | UART3 @ 0x3000_2000 | UART0 @ 0x2000_A000 | UART0 @ 0x2000_A000 |
+| Code | 0x50100000 (PSRAM) | 0x58000000 (XIP) | 0xA0000000 (XIP) |
+| Fast RAM | 0x3EFF8000 SRAM 64K | 0x22020000 OCRAM 64K | 0x62FC0000 OCRAM |
+| Console | MM UART @ 0x3000_2000 | UART0 @ 0x2000_A000 | UART0 @ 0x2000_A000 |
 | IRQ controller | PLIC @ 0xE0000000 | CLIC | CLIC |
-| XRAM (IPC) | 0x2202_0000 16KB | 0x4000_0000 16KB | -- |
-| TZC PSRAMA/B | M0 owns | 0x2000_5380 / 0x2000_53A0 | -- |
-| MM domain regs | -- | PDS_CTL2 0x2000_E010, MM_CLK 0x3000_7000, MM_RST 0x3000_7040, CPU0_BOOT 0x3000_0000, CPU_RTC 0x3000_0018 | -- |
+| XRAM | 0x4000_0000 16K | 0x4000_0000 16K | -- |
+| IPC doorbell | 0x3000_5000 | 0x2000_A800 | -- |
 
-## Pitfalls (recurring)
+M0-side MM registers: PDS_CTL2 0x2000E010, MM_CLK_CTRL_CPU 0x30007000, MM_CLK_CTRL_PERI 0x30007010, MM_GLB_SW_SYS_RESET 0x30007040, MM_MISC_CPU0_BOOT 0x30000000, MM_MISC_CPU_RTC 0x30000018, SYSMAP 0xEFFFF000.
 
-- **LLVM riscv-isel hang** on `+unaligned-scalar-mem`: always wrap BL808 builds in `timeout 90`. If it hangs, bisect to find the trigger pattern (typically store->memcmp slice equality).
-- **`lw` sign-extends on RV64.** Use `lwu` for unsigned 32-bit loads when comparing against values with bit 31 set (e.g. flash addresses `0x58xxxxxx`).
-- **DTCM on M0 has no DMA path.** Allocator routes `MemFlags.dma` to OCRAM only.
-- **No D-cache on E907** (M0, BL618). I-cache only. Don't extrapolate cache patterns from D0.
-- **M0 OCRAM heap starts at `0x22030000`, not `0x22024000`.** The lower 48KB is libwifi.a's private working RAM.
-- **`0x20000000` is peripheral register space on BL808, RAM on BL618.** Same chip family, different memory maps. Don't extrapolate.
-- **M0 switches D0's clock AFTER releasing D0 from reset.** D0 start.S's ~80ms spin loop is required; don't shorten.
-- **Vendor PSRAM C requires `-DARCH_RISCV`** so `bl808.h` picks the RISC-V CSI include branch instead of Cortex-M.
-- **M1s/M0P Dock UART is USB CDC via BL702** -- baud rate setting is cosmetic, BL702 fakes it.
-- **`gzip_uncompress` byte-tracking** relies on `urt.zip.uncompress`'s `getbits` doing minimal-pull byte reads. If anyone rewrites getbits to bulk-load 32 bits, gzip CRC validation breaks. Comment is in zip.d.
+### BL616 / BL618 (M0P Dock)
+
+No TCM. Cacheability is address-based: bit 30 set = cached (`0x62..`), clear = non-cache (`0x22..`/`0x23..`), same RAM. OCRAM 0x62FC0000 320K cached (top 64K aliased non-cache at 0x23000000 for DMA), WRAM 0x23010000 160K reserved for WiFi, PSRAM 0xA8000000 4M (not yet a pool), HBN 0x20010000 4K. `0x20000000` is GLB register space on these parts, not RAM.
+
+## Pitfalls
+
+- **The E907 on M0 has a write-back D-cache, on from boot2.** Anything another master reads (D0 reading the image, XRAM) needs a clean or an uncached mapping.
+- **The boot ROM API table has unimplemented entries** (`0xdeedbeef`). Flash operations use the vendored SF driver in RAM, with the flash config derived from the JEDEC id.
+- **Code that runs while flash is busy must be entirely in RAM**, including helpers like `arch_delay_us` (`@critical`) and switch tables (the no-jump-table flags).
+- **The CPU PLL's "400M" name is nominal.** Boot2 programs it with the vendor's 380 MHz table; M0 reprograms it to 480 MHz. Measure a core's real rate against the host clock (sample `/system/sysinfo` time over serial ~40 s apart), never against its own cycle counter.
+- **Anything counting mtime ticks as microseconds is wrong on the BL808**: scale by `mtime_freq_hz`.
+- **`lw` sign-extends on RV64.** Use `lwu` in D0 asm for addresses with bit 31 set.
+- **M0's LLVM target has no T-Head cache instructions**: emit them as `.word`. D0's target takes the `th.*` mnemonics.
+- **WIFIRAM base must stay 0x22030000**; the PHY DMA is routed to that bank.
+- **Vendor PSRAM C requires `-DARCH_RISCV`.**
+- **A register that reads and writes may still be unclocked.** Peripherals behind a clock gate (PWM: `GLB_CGEN_CFG1` bit 20) accept writes but never change status, so a wait on a status bit spins forever. Bound such waits.
+- **M0 has a hardware watchdog** (`bl808/watchdog.d`, MCU timer block): a main loop stalled for 5 s resets the chip and boots as `crash (watchdog)`. Resolve a crash report's addresses with `riscv64-unknown-elf-addr2line -e bin/bl808_release/openwatt`.

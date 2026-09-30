@@ -3,6 +3,15 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-10-05: BL808 is one node
+
+- A BL808 now presents as one node, its M0: the network talks to M0, and D0's devices arrive
+  mirrored under it, as a claimed sibling's do. D0 is never a separate node on the network.
+- The M1s Dock's panel moves to M0's `system` device: `panel.status` (`Light`) and `panel.s1` and
+  `panel.s2` (`Button`). D0's `system` device no longer has a panel.
+- `/interface/xram` is a new interface type, the link between the two cores; show it like any
+  point-to-point interface.
+
 ## 2026-10-05: `/sync/peer` gains `claim`
 
 - `/sync/peer` gains `claim` (`yes`/`no`, default `no`). A peer editor should offer it as "claim the

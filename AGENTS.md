@@ -38,7 +38,7 @@ make ARCH=riscv64                      # Generic RISC-V 64-bit build
 make FEATURES=switch                   # L2 packet-fabric only, no IP/protocols/apps
 make FEATURES=full                     # Default: full standalone instance
 make HEADLESS=1                        # Embedded role: no human shell/web; gates CLI help, prompts, banners
-make PLATFORM=bl808                    # BL808 M0 coprocessor (auto-defaults to switch + headless)
+make PLATFORM=bl808                    # BL808: M0 (the network node) with D0 appended; D0=0 leaves D0 out
 
 # Testing
 make CONFIG=unittest                    # Build with unit tests enabled
@@ -52,7 +52,7 @@ make CONFIG=unittest                    # Build with unit tests enabled
 - `ARCH`: Target architecture (`x86_64`, `arm64`, `riscv64`, etc.) - auto-detected or set by PLATFORM
 - `OS`: Target OS (`windows`, `linux`, `freertos`) - usually auto-detected
 - `FEATURES`: `switch` (L2 fabric only) or `full` (default; protocols+apps+devices+tools). `minimal` is deferred. See [features.mk](features.mk).
-- `HEADLESS`: `0` (default) or `1`. Orthogonal to FEATURES; strips human-facing CLI affordances. Auto-set with BL808 e907.
+- `HEADLESS`: `0` (default) or `1`. Orthogonal to FEATURES; strips human-facing CLI affordances.
 - `IPV6`: `1` (default) or `0`. `IPV6=0` drops the IPv6 side of the in-tree IP stack and its address, route, and pool collections.
 - `GATEWAY`: `1` (default) or `0`. `GATEWAY=0` disables transit forwarding and DHCP server/lease objects while retaining clients and diagnostics; TINY targets default to `0`.
 - `SFP`: `0` or `1`. Builds the SFP cage and `/interface/sfp`. Defaults to `1` on Windows, Linux and unittest builds, `0` on embedded targets, where a board with a cage sets it in its `board.mk`.
