@@ -1373,11 +1373,10 @@ this is what remains.
   S2/S3 for the reflex NMI vector and GPIO register layout, and a per-part ISR-safe SAR path or
   an honest "not in ISR" contract for the ADC.
 
-- **Serial RX is still drained from the tick on STM32, BK7231, Bouffalo and MT7621**:
-  `SerialStream.update()` polls where a backend has no `has_rx_callback`. ESP32 and RP2350 signal
-  from the ISR on a line gap or a few hundred microseconds of characters. Give the others the
-  `uart_hw_open(port, cfg, rx_cb)` form (STM32: IDLE, or the F7/H7 receiver timeout at 3.5
-  characters) and delete the polled path.
+- **Serial RX is still drained from the tick on BK7231, Bouffalo and MT7621**:
+  `SerialStream.update()` polls where a backend has no `has_rx_callback`. ESP32, RP2350 and STM32
+  signal from the ISR on a line gap or a few hundred microseconds of characters. Give the others
+  the `uart_hw_open(port, cfg, rx_cb)` form and delete the polled path.
 
 - **`/log/print` without `--stream` redraws its pager every tick**: on the RP2350 it held the CPU
   at 64% and logged an 80 ms `console-session` update each frame while idle. The live view should
@@ -1413,6 +1412,14 @@ this is what remains.
 ### STM32 bring-up follow-ups (2026-09-26)
 
 The DevEBox H7 boots and runs OpenWatt with a console, per-bank TLSF pools and DFU recovery.
+
+- **!!! F4 AND F7 SERIAL RECEIVE IS ONE INTERRUPT PER BYTE. DO NOT PUT A FAST LINK ON ONE UNTIL
+  THIS IS DONE. !!!** Neither family has a U(S)ART FIFO, so urt's STM32 UART takes an interrupt
+  for every received and every transmitted byte: 100,000 a second each way at 1 Mbaud, with any
+  interrupt or critical section longer than one character time overrunning RX. The H7 runs its
+  16-byte FIFOs and is fine. Receive on F4/F7 wants circular DMA into the RX ring, with the IDLE
+  line (F4) or the receiver timeout at 3.5 characters (F7) and the half/full transfer interrupts
+  raising the RX event; transmit wants DMA from the TX ring. Neither family has run on hardware.
 
 - **The JZ-F407VET6 image is ~70 KB over its 512 KB flash** (`BOARD=jz-f407vet6`, `switch`,
   TINY). Candidates: CLI helpers (~76 KB), the element catalogue (15.5 KB), libm trig (~15 KB),

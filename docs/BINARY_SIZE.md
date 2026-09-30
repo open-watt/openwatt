@@ -197,6 +197,7 @@ a netbooted image is bounded by RAM instead.
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-09-26 | #781 | ldc 1.43.0 | 1,623,936 | 58,372 | 2,097,152 | first row; per-bank TLSF pools and DFU recovery (urt #339-#345) |
 | 2026-09-30 | ow/system-panel | ldc 1.43.0 | 1,650,256 | 59,588 | 2,097,152 | status LED and K1/K2 on system.panel |
+| 2026-09-30 | ow/stm32-uart-rx | ldc 1.43.0 | 1,651,600 | 61,756 | 2,097,152 | UART RX by event on a 3.5-character gap or 350 us; H7 FIFOs |
 
 Add a section for any other configuration the first time it is deployed. Keep the make
 invocation in the heading exact, including FEATURES, HEADLESS, IPV6 and GATEWAY when they
