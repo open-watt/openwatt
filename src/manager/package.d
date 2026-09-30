@@ -527,6 +527,7 @@ nothrow @nogc:
         }
 
         import manager.stats : create_system_device;
+        devices.node = node_id();
         create_system_device();
 
         MonoTime now = getTime();
@@ -619,14 +620,12 @@ nothrow @nogc:
     }
 
     Device find_device(const(char)[] device_id, ulong peer_id = 0) pure
-    {
-        return devices.find(device_id, peer_id);
-    }
+        => peer_id ? devices.find(device_id, peer_id) : devices.resolve(device_id);
 
     Component find_component(const(char)[] name, ulong peer_id = 0) pure
     {
         const(char)[] device_name = name.split!'.';
-        if (Device d = devices.find(device_name, peer_id))
+        if (Device d = find_device(device_name, peer_id))
             return name.empty ? d : d.find_component(name);
         return null;
     }
@@ -634,7 +633,7 @@ nothrow @nogc:
     Element* find_element(const(char)[] name, ulong peer_id = 0) pure
     {
         const(char)[] device_name = name.split!'.';
-        if (Device d = devices.find(device_name, peer_id))
+        if (Device d = find_device(device_name, peer_id))
             return name.empty ? null : d.find_element(name);
         return null;
     }
