@@ -12,6 +12,7 @@ import manager;
 import manager.bootguard;
 import manager.collection;
 import manager.console.session : Session, default_console_session_name;
+import manager.panel : Gesture, Indication, end_indication, indicate;
 import manager.log : default_log_sink_name, format_log_text,
                      retire_bootstrap_log_sink, set_bootstrap_log_sink;
 import manager.saved_config : saved_config_file, valid_saved_config;
@@ -278,6 +279,7 @@ int main(string[] args)
             return -1;
     }
 
+    Indication booting = indicate(Gesture.booting);
     bool startup_pending = false;
     if (combined_config.length > 0)
     {
@@ -301,7 +303,7 @@ int main(string[] args)
 
     if (!startup_pending)
     {
-        finish_startup(startup_session, interactive_mode, interactive_session);
+        finish_startup(startup_session, booting, interactive_mode, interactive_session);
         if (interactive_mode && !interactive_session)
         {
             log_error("system", "Interactive console session failed to start");
@@ -323,7 +325,7 @@ int main(string[] args)
         if (startup_pending && startup_session.is_idle())
         {
             startup_pending = false;
-            finish_startup(startup_session, interactive_mode, interactive_session);
+            finish_startup(startup_session, booting, interactive_mode, interactive_session);
             if (interactive_mode && !interactive_session)
             {
                 log_error("system", "Interactive console session failed to start");
@@ -388,10 +390,11 @@ void activate_interactive_session(ref Array!char config)
     config ~= " disabled=false\n";
 }
 
-void finish_startup(ref Session startup_session, bool interactive_mode, ref ObjectRef!Session interactive_session)
+void finish_startup(ref Session startup_session, ref Indication booting, bool interactive_mode, ref ObjectRef!Session interactive_session)
 {
     g_app.console.destroy_session(startup_session);
     startup_session = null;
+    end_indication(booting);
     retire_bootstrap_log_sink();
 
     // the boot config is the baseline; only post-boot mutations count as divergence

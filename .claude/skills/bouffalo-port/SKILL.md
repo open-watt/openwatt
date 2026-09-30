@@ -123,7 +123,7 @@ SRAM   (rwx)  0x3EFF8000   64KB   .got, .tdata/.tbss, stack  (fast on-chip)
 HBNRAM (rw)   0x20010000   4KB    Hibernate-persistent
 ```
 
-D0 executes from PSRAM, not Flash XIP. M0 copies the image from flash partition (XIP 0x58100000) to PSRAM 0x50100000 before releasing D0.
+D0 executes from PSRAM, not Flash XIP. M0 copies the image from the D0FW partition (flash 0x210000, XIP 0x58210000) to PSRAM 0x50100000 before releasing D0.
 
 CODE region size (4 MB) must stay in sync across three files: `bl808_d0.ld` MEMORY block, `partition.toml` D0FW `size0`, and `bl808_m0/start.d` `D0_PSRAM_LOAD_SIZE`/`D0_IMAGE_FLASH_SIZE`. Touch one, touch all four.
 
@@ -170,13 +170,28 @@ bad assumption, never on hardware) -- there is no TCM on this part.
 
 ### BL808 cold boot: BootROM -> Boot2 -> M0
 
-Mask ROM reads the bootheader at flash 0, loads vendor "Boot2" (stage-2 loader at flash 0x00000) which reads the partition table at 0xE000/0xF000 (two copies) and loads FW partition (M0 firmware at 0x10000-0x100000) into memory.
+Mask ROM reads the bootheader at flash 0, loads vendor "Boot2" (stage-2 loader at flash 0x00000) which reads the partition table at 0xE000/0xF000 (two copies) and loads FW partition (M0 firmware at 0x10000-0x210000) into memory.
 
 Boot2 and FW partitions have **vendor 4KB boot headers** (magic `"BFNP"`/`"BFAP"`, flash config, PLL config, image hash). Vendor flash tools (DevCube / `bflb_iot_tool`) read `platforms/bl808/partition.toml` and prepend these automatically.
 
-**D0FW partition has `header = 0`** -- M0 loads D0 directly without parsing a vendor header. D0 image is flashed raw to flash offset 0x100000.
+**D0FW partition has `header = 0`** -- M0 loads D0 directly without parsing a vendor header. D0 image is flashed raw to flash offset 0x210000; `partition.toml` and `bl808_m0/start.d` (`D0_IMAGE_FLASH_ADDR`) are the authority. Writing it at 0x100000 lands inside the M0 image and crashes M0.
 
 OpenWatt build produces raw `.bin` via `objcopy -O binary`. Headers (if any) come from the flash tool, not the build.
+
+### Flashing (M1s Dock)
+
+The build makes two files, not one image. `bflb_iot_tool.exe` from BouffaloLabDevCube (on PATH as
+`D:\dev\BouffaloLabDevCube-v1.9.0`) talks to the ROM on the M0 console port, the BL702 bridge's
+`VID_FFFF` interface that prints `BL808 M0:`; the other interface is the D0 console. The tool
+enters download mode itself, but leaves the chip there: press RST afterwards.
+
+```
+bflb_iot_tool.exe --chipname bl808 --port COM11 --baudrate 2000000 --pt platforms/bl808/partition.toml --firmware bin/bl808-m0_release/m0fw.bin
+bflb_iot_tool.exe --chipname bl808 --port COM11 --baudrate 2000000 --single --addr 0x210000 --firmware bin/bl808-d0_release/d0fw.bin.gz
+```
+
+The first writes the partition table and the M0 image with its vendor header; the second writes
+the D0 image raw into D0FW, which M0 unpacks (gzip is detected by magic).
 
 ### M0 boot (`urt/driver/bl808_m0/start.S` + `start.d`)
 
@@ -198,7 +213,7 @@ OpenWatt build produces raw `.bin` via `objcopy -O binary`. Headers (if any) com
 5. L2 SRAM/VRAM partition (`MM_MISC_VRAM_CTRL` @ 0x30000050 -- 64KB L2 / 0KB VRAM)
 6. TZC for D0: set D0 master group=1 (`TZC_MM_BMX_TZMID` @ 0x20005300), enable PSRAMA/B region-0 for group 1 (`TZC_PSRAMA_TZSRG_CTRL` @ 0x20005380, PSRAMB @ 0x200053A0)
 7. **Launch D0** (chained `launch_d0()`):
-   - Read D0 image from flash 0x58100000; sniff gzip magic at offset 0 -> `gzip_uncompress` into PSRAM, else raw memcpy. D-cache off around the write.
+   - Read D0 image from flash 0x58210000; sniff gzip magic at offset 0 -> `gzip_uncompress` into PSRAM, else raw memcpy. D-cache off around the write.
    - D0 mtimer divider (`MM_MISC_CPU_RTC` @ 0x30000018 -- DIV=39 for 10MHz from 400MHz)
    - Halt D0 (`MM_GLB_SW_SYS_RESET` @ 0x30007040 bit 8 set) -> set boot address (`MM_MISC_CPU0_BOOT` @ 0x30000000) -> release (clear bit 8)
 

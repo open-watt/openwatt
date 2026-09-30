@@ -182,6 +182,9 @@ instead: the next boot asks BOOTP/TFTP for an image and falls back to the image 
 nobody answers. If the bootloader cannot be entered, the command says so and the node keeps
 running.
 
+`/system/identify [duration=<duration>]` shows the identify gesture on the node's status light,
+`system.panel.status`, for `duration` (default `10s`). A node without a status light ignores it.
+
 ### `/ping`
 
 `/ping address=<IPv4|IPv6|MAC> [count=<count>] [iface=<interface>]` selects
@@ -539,6 +542,7 @@ managed-item properties above:
 | `l2mtu` | read/write | Link-layer MTU in bytes. |
 | `max-l2mtu` | read-only | Maximum link-layer MTU reported by the driver; `0` when unknown. |
 | `pcap` | write-only | Attaches the interface to a named packet capture. |
+| `led` | read/write | A [`Light`](COMPONENT_TEMPLATES.md#light) that shows the link, such as `system.panel.sfp`: its `switch` follows `link-status`, and traffic sends it a `pulse` at most every 100ms. The light may appear after the interface. |
 | `last-status-change-time` | read-only | Time of the most recent link-status change. |
 | `connected` | read-only | Connection state: `unknown`, `disconnected`, or `connected`. |
 | `link-status` | read-only | The link: `unknown`, `down`, or `up`. Most interfaces have a link exactly while running; one that tracks its carrier apart, such as an SFP port, can run with its link `down`. |
@@ -558,6 +562,10 @@ managed-item properties above:
 | `avg-queue-time` | read-only | Average transmit queue time in milliseconds. |
 | `avg-service-time` | read-only | Average packet service time in milliseconds. |
 | `max-service-time` | read-only | Maximum packet service time in milliseconds. |
+
+`/interface/locate iface=<interface> [duration=<duration>]` blinks the interface's `led` so the
+port can be found: for `duration`, or until it is run again with `duration=0`. It needs a running
+interface with an `led`.
 
 ### Ethernet station properties
 
@@ -971,6 +979,52 @@ other source remains online, the device becomes offline until fresh activity.
 | --- | --- | --- | --- |
 | `device` | device name | required | Device to create or populate. |
 | `offline-timeout` | duration | `0` (disabled; `30s` for CAN and Tesla TWC) | Marks the device offline when no data has arrived for this long, even while the transport stays up. |
+
+### `/binding/gpio`
+
+A GPIO binding models local hardware wired to GPIO lines. `kind` says what the
+lines are, and the binding builds the matching component at `component` in
+`device`, which may be an existing device such as `system`.
+
+| Kind | Lines | Component |
+| --- | --- | --- |
+| `capture` | `gpio` | a timestamped edge series `state`; Linux only |
+| `button` | `gpio` | a [`Button`](COMPONENT_TEMPLATES.md#button): `mode`, `state` and a point series `event` of `click`, `double`, `triple`, `hold` and `release` |
+| `switch` | `gpio` | a [`Switch`](COMPONENT_TEMPLATES.md#switch) whose writable `switch` drives the line |
+| `light` | `gpio` | a [`Light`](COMPONENT_TEMPLATES.md#light) with `switch`, `effect`, `indicate` and `pulse`; `indicate` overrides the owner's state while it is not `none`, and each `pulse` inverts a steady output for 50ms; `drive` adds `level` and, for `ws2812`, `colour` |
+
+A button reacts to edge interrupts where the platform has them (ESP32, MT7621)
+and otherwise samples its line every `debounce`. A WS2812 chain runs on the RP2350's PIO, or is
+bit-banged on the BL808's D0 core; other platforms do not drive one yet. PWM comes from the chip's PWM block (ESP32
+LEDC) where one is free, and otherwise from software, driven by a 4 kHz timer interrupt that runs
+only while some light is at a level between off and full. The MT7621 has no PWM block. Gestures are timed from the
+debounced level: a press held for `hold` is a `hold`, followed by `release`;
+otherwise one to three presses each within `click-gap` of the last are a
+`click`, `double` or `triple`.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `kind` | `capture`, `button`, `switch`, `light` | `capture` | What the line is. |
+| `gpio` | line number | required | The line. |
+| `chip` | controller index | `0` | The GPIO controller, on hosts with several (`/dev/gpiochipN`). |
+| `component` | component path | required except for `capture` | Where the component goes in `device`. |
+| `active` | `high`, `low` | `high` | The line level that means pressed or on. |
+| `pull` | `none`, `up`, `down` | `none` | Pad pull, where the platform drives one. |
+| `debounce` | duration | `30ms` for `button`, `0` otherwise | How long a level must hold. |
+| `hold` | duration | `1s` | Press duration that makes a `hold`. |
+| `click-gap` | duration | `300ms` | Longest gap between the presses of a multi-click. |
+| `drive` | `io`, `pwm`, `ws2812` | `io` | How a `light` reaches its line. `io` switches it. `pwm` takes a PWM channel and gains `level`, and `breathe` fades; with no channel free it warns and switches on and off only. `ws2812` makes the line a WS2812 chain and the light one pixel of it, with `level`, `colour`, `indicate_colour` and `channels` (`RGB`), and the `rainbow` effect. |
+| `index` | `0` to `15` | `0` | The light's pixel on a `ws2812` chain; several lights on one `gpio` share the chain. |
+| `pwm-channel` | read-only | | `none`, `hardware` or `software`: what the light holds. A channel other code needs exact moves from hardware to software, so this can change. |
+
+`capture` also reports `records`, `buckets`, `edge-rate`, `last-edge`,
+`backend`, `clock`, `stream-start` and `anchor-error` as status.
+
+```
+/binding/gpio add name=reset-button device=system component=panel.reset kind=button gpio=18 active=low
+/binding/gpio add name=power-led device=system component=panel.status kind=light gpio=16
+/element/set element=system.panel.status.indicate value=blink
+```
 
 ### `/binding/obd`
 

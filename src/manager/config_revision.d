@@ -114,6 +114,17 @@ int newest_config_revision(const(char)[] base)
     return revisions.empty ? 0 : revisions[0];
 }
 
+void erase_config_revisions(const(char)[] base)
+{
+    auto revisions = list_revisions(base, true);
+    foreach (revision; revisions[])
+    {
+        delete_file(tconcat(base, '.', revision));
+        delete_file(tconcat(base, '.', revision, ".tmp"));
+        delete_file(tconcat(base, '.', revision, ".bad"));
+    }
+}
+
 bool has_config_revisions(const(char)[] base)
 {
     auto revisions = list_revisions(base, true);

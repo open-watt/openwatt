@@ -573,6 +573,11 @@ The current implementation and remaining phases are described in
    a button's `event`, needs the trigger value in the condition's context; a `for=` deadline can
    use the snapshot it already keeps.
 
+10. **Enums and bools do not compare with their names**: `(@system.panel.reset.event == "hold")`
+    and `(@x.switch == false)` are false on a matching value, so an action cannot branch on a
+    button's `event`. `Type.eq` compares the two Variants raw; an enum operand should compare by
+    key against a string, and `true`/`false` should be literals.
+
 ## System IO
 
 Buttons, relays and lights as data-model components, the `system` device as the node's own
@@ -580,28 +585,67 @@ surface, and the recovery and status behaviour built on them. The design, exampl
 decisions are in [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md). The `Button` and
 `Light` templates exist; nothing drives them yet.
 
-1. **Local IO bindings**: `/binding/button`, `/binding/switch` and `/binding/light` over GPIO,
-   in `src/driver/` so the `switch` tier has them. An output binding couples the `input` and
-   `indicator` components nested under its own.
+1. **`/binding/gpio` coupling and tier**: a `switch` or `light` should couple the `input` and
+   `indicator` components nested under its own. The binding registers only in the `full` tier;
+   move it to `src/driver/` so the `switch` tier (BK7231) has it. Latching buttons need a way to
+   say so (`mode` is always `momentary`).
 
-2. **SmartEVSE button gestures**: its three `Button`s report `state` only; `event` needs the
-   gesture inference the button binding will have.
+2. **`/binding/gpio` multi-line types**: `bistable-switch`, `encoder`, `shutter`,
+   with role-prefixed line properties (`set-gpio`, `reset-gpio`, `a-gpio`, `b-gpio`).
 
-3. **Component alias**: `/element/alias` creates a mirror of a component and registers itself as
+3. **SmartEVSE button gestures**: its three `Button`s report `state` only; `event` needs the
+   gesture timing `/binding/gpio` has, factored out where the board binding can use it.
+
+4. **MT7621 GPIO misconfiguration asserts**: a line in a pin group urt reserves, or a pull on a
+   part with no pad pulls, asserts in the driver instead of failing the binding; urt should
+   offer a query `validate()` can use.
+
+5. **Component alias**: `/element/alias` creates a mirror of a component and registers itself as
    the writer, so sync accepts remote writes. `/element/link` has no CLI.md section; document it
    alongside.
 
-4. **System slots**: the `panel.reset` hold ladder, the `panel.status` indication,
-   `/system/factory-reset` and `/system/identify`. The recovery stage needs #747's one-shot
-   defaults boot.
+6. **System slots**: gestures for recovery, unconfigured and an image on trial;
+   `system.status.state`; `/system/factory-reset` sharing the reset slot's code; a recovery
+   reset stage on #747's one-shot defaults boot; and a hold-only reset for a button shared with
+   an output (see the open decisions in the plan).
 
-5. **LED drivers**: `/driver/led/pwm` for the SmartEVSE's RGB LED, then `/driver/led/ws2812` for
-   each chip family (RMT, PIO, the BL808 bit-bang, or SPI encoding).
+7. **LED drivers**: `drive=ws2812` runs on the RP2350's PIO and the BL808 D0 bit-bang. ESP32
+   wants RMT; SPI encoding would serve any chip with SPI; and a bit-bang timed from the cycle
+   counter, with interrupts off per frame, would cover small chains elsewhere. The driver is sized
+   for status LEDs: every pixel change sends the chain at once and blocks for the frame and latch.
+   A strip wants writes batched behind a flush, one send per chain per frame, completion without
+   blocking, and DMA feeding the PIO or SPI. The BL808 backend
+   has not run since it moved behind the driver. urt's PWM allocator puts a
+   channel on a PWM block where one is free and in software otherwise, moving flexible channels
+   to software to make room for `hardware_required` ones. Software channels need the timer
+   layer's periodic interrupt: ESP32 has none in urt yet (a gptimer backend), and Bouffalo's
+   system tick holds the single periodic slot, so the slot needs multiplexing. urt drives PWM
+   blocks only on ESP32 and RP2350; Bouffalo, BK7231 and STM32 have them too, with fixed pin
+   routing that `pwm_hw_reaches` must describe. On STM32 that is the general-purpose timers other
+   than TIM5, which the timer layer holds: the DevEBox H7's status LED on PA1 reaches TIM2_CH2 and
+   runs in software until then. Demotion has not run on hardware.
 
-6. **Network indication**: once #749's wifi mirror moves from the SmartEVSE binding into
+8. **Multi-die lights**: `drive=pwm` should take `red-`, `green-`, `blue-`, `white-`, `warm-` and
+   `cool-gpio`, report a read-only `channels` such as `RB` or `RGBW`, and gain `colour` and
+   `indicate_colour` (or `cct` for warm and cool) from its dies, as `drive=ws2812` does.
+
+9. **Network indication**: once #749's wifi mirror moves from the SmartEVSE binding into
    `system.status.network`.
 
+10. **A light's `level` prints as `1e+2%`**: `/device/print` shows the `Quantity!(ubyte, Percent)`
+    at 100 in exponent form. Find where an integral quantity is formatted as a float.
+
 ## Data model
+
+- **`system_reboot()` loses the last log lines on bare metal**: log sinks flush from the main
+  loop and the reset is immediate, so the reset button's "factory reset" notice never reaches the
+  netconsole, and neither does anything `/system/reboot` or the boot guard's revert logs last.
+  Drain the sinks before resetting.
+
+- **`/element/set` swallows rejected values**: `element_set` calls `Element.value(Variant)`, which
+  drops the error `update_typed_series` returns, so `value=1` on a bool element does nothing and
+  says nothing (`value=true` works). Report the error, and decide whether 0 and 1 should convert
+  to bool.
 
 - **The console prints quantities badly**: `/device/print` shows an integer 1310 nm as
   `1.31e+3nm` and a float supply of 3.2616 V as `3.2616000175476074V`. The stored values are
@@ -1371,7 +1415,9 @@ The DevEBox H7 boots and runs OpenWatt with a console, per-bank TLSF pools and D
   silently corrupts them. An MPU no-access region under `_stack_low`, or a PSP/MSP split.
 - **No watchdog.** IWDG is never armed, so a hang never resets and the boot guard cannot count it.
 - **Reset-cause flags are not read** (RCC_RSR on H7, RCC_CSR on F4/F7); the reset class comes
-  only from the retained record.
+  only from the retained record, so pressing RST on a running board reads as a watchdog crash and
+  three presses descend the ladder. Every reset source drives NRST, so a press is PINRSTF with no
+  other flag; it should count as an operator reset toward the gesture, as a power cycle does.
 - **Queued console output is lost on a deliberate reset.** `system_reset` does not drain the TX
   ring; only the fault path writes through the blocking `uart0_hw_puts`. MT7621's fault report
   flushes its netconsole before resetting; one console flush inside urt's `system_reset` would
@@ -1454,10 +1500,16 @@ at 12MHz by clean UART framing. Outstanding:
   hardware USB-Serial-JTAG block. RP2350 needs a real CDC-ACM driver (controller bring-up,
   EP0, enumeration, bulk endpoints); until then the board does not enumerate at all once
   our image is running, and the UART is the only console.
-- **The on-board RGB LED is undriven.** It is the only peripheral on the Core, and a
-  wire-free liveness signal, but needs PIO or bit-banged WS2812 timing, and a GPIO backend
-  before either. The `/driver/led/ws2812` it would plug into is in
-  [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md).
+- **The board is a Y23A-RP2350B**, not the WeAct whose pico-sdk header bring-up used; its WS2812
+  on GP20 is `system.panel.status`. Its other pins, and any user key, are unverified.
+
+### BL808 on the M1s Dock (2026-09-29)
+
+- **M0 runs out of DMA memory at boot** on this branch: `heap.alloc: OOM! size=344 flags=4` right
+  after `BL808 M0: ready`, and D0 never prints. Nothing had been flashed since May, so whether
+  master does the same is unknown; start there.
+- **The WS2812 on GPIO8 has not lit**, because D0 has not run; the D0 bit-bang backend moved
+  behind `urt.driver.ws2812` untested.
 
 ### MT7621 bring-up follow-ups (2026-09-26)
 

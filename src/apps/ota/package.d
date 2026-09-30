@@ -9,6 +9,7 @@ import urt.time;
 import manager;
 import manager.base;
 import manager.collection;
+import manager.panel : Gesture, Indication, end_indication, indicate;
 import apps.automation : AutomationModule;
 import manager.plugin;
 
@@ -153,6 +154,7 @@ protected:
         {
             ota_abort(_handle);
             _handle = 0;
+            end_indication(_upgrading);
         }
         return CompletionStatus.complete;
     }
@@ -169,6 +171,7 @@ private:
     uint _max_fail;
     bool _registered;
     bool _subscribed;
+    Indication _upgrading;
     uint _handle;
     size_t _total;
     size_t _received;
@@ -201,6 +204,7 @@ private:
             return reject(stream, req, 500, "ota_begin failed");
         }
 
+        _upgrading = indicate(Gesture.upgrading);
         _total = req.contentLength;
         _received = 0;
         _next_progress_log = _total / 10;
@@ -222,6 +226,7 @@ private:
                 log.error("ota_write failed: ", err);
                 ota_abort(_handle);
                 _handle = 0;
+                end_indication(_upgrading);
                 send_response(stream, req, 500, "ota_write failed");
                 return -1;
             }
@@ -248,6 +253,7 @@ private:
             if (err != 0)
             {
                 log.error("ota_end failed: ", err);
+                end_indication(_upgrading);
                 send_response(stream, req, 500, "ota_end failed");
                 return -1;
             }
