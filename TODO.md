@@ -1372,11 +1372,11 @@ this is what remains.
   S2/S3 for the reflex NMI vector and GPIO register layout, and a per-part ISR-safe SAR path or
   an honest "not in ISR" contract for the ADC.
 
-- **Bare-metal serial RX is drained from the tick**: the STM32 and RP2350 UARTs fill an RX ring
-  from their interrupts, but `SerialStream.update()` empties it with `uart_poll()` every frame;
-  only ESP32 posts an RX event. Give the bare-metal backends the `uart_hw_open(port, cfg, rx_cb)`
-  form, fired from the ISR on the line going idle (STM32 IDLE or the F7/H7 receiver timeout, the
-  PL011 receive timeout) or a byte-count threshold, and deliver through the ESP32 event path.
+- **Serial RX is still drained from the tick on STM32, BK7231, Bouffalo and MT7621**:
+  `SerialStream.update()` polls where a backend has no `has_rx_callback`. ESP32 and RP2350 signal
+  from the ISR on a line gap or a few hundred microseconds of characters. Give the others the
+  `uart_hw_open(port, cfg, rx_cb)` form (STM32: IDLE, or the F7/H7 receiver timeout at 3.5
+  characters) and delete the polled path.
 
 - **Move WebSocket RX off the tick**: `WebSocket.update()` still polls `_stream.read()` each
   frame; it should install `rx_handler` and decode on delivery. TX is now pull-driven by the
