@@ -36,6 +36,8 @@ final class DHCPClient : ActiveObject
                                  Prop!("add-default-route", add_default_route));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "dhcp-client";
     enum path = "/protocol/dhcp/client";
     enum collection_id = CollectionType.dhcp_client;

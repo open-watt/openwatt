@@ -31,6 +31,8 @@ final class EnergyLink : ActiveObject
                                  Prop!("meter", meter));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "link";
     enum path = "/apps/energy/link";
     enum collection_id = CollectionType.link;

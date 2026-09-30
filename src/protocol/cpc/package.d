@@ -1287,6 +1287,8 @@ final class CPCEndpoint : BaseInterface
                                  Prop!("endpoint", endpoint));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "cpc-ep";
     enum path = "/interface/cpc/endpoint";
 

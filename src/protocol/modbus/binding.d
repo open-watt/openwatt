@@ -50,6 +50,8 @@ final class ModbusBinding : ProfileBinding
                                  Prop!("serve", serve));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "mb-binding";
     enum path = "/binding/modbus";
 

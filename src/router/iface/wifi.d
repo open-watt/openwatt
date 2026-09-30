@@ -198,6 +198,8 @@ abstract class WiFiInterface : BaseInterface
                                  Prop!("phy-capability", phy_capability, "radio"));
 nothrow @nogc:
 
+    ~this() {}
+
     protected this(const CollectionTypeInfo* typeInfo, CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(typeInfo, id, flags);
@@ -418,6 +420,8 @@ abstract class WLANBaseInterface : EthernetInterface
                                  Prop!("phy-mode", phy_mode, "configuration"));
 nothrow @nogc:
 
+    ~this() {}
+
     // Properties
 
     final const(char)[] phy_mode() const pure
@@ -586,6 +590,8 @@ abstract class WLANInterface : WLANBaseInterface
                                  Prop!("signal-quality", signal_quality, "configuration"));
 nothrow @nogc:
 
+    ~this() {}
+
     protected this(const CollectionTypeInfo* typeInfo, CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(typeInfo, id, flags);
@@ -623,6 +629,8 @@ abstract class APInterface : WLANBaseInterface
                                  Prop!("hidden",           hidden,           "configuration"),
                                  Prop!("installation",     installation,     "configuration"));
 nothrow @nogc:
+
+    ~this() {}
 
     protected this(const CollectionTypeInfo* typeInfo, CID id, ObjectFlags flags = ObjectFlags.none)
     {

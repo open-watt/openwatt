@@ -197,6 +197,8 @@ a netbooted image is bounded by RAM instead.
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-09-26 | #781 | ldc 1.43.0 | 1,623,936 | 58,372 | 2,097,152 | first row; per-bank TLSF pools and DFU recovery (urt #339-#345) |
 | 2026-09-30 | ow/system-panel | ldc 1.43.0 | 1,650,256 | 59,588 | 2,097,152 | status LED and K1/K2 on system.panel |
+| 2026-09-30 | 6d4d0ca1 | ldc 1.43.0 | 1,631,616 | 58,920 | 2,097,152 | master (28848010) plus #789's test-only change |
+| 2026-09-30 | #790 | ldc 1.43.0 | 1,637,136 | 58,920 | 2,097,152 | virtual destructors: +4,288 destructors, -1,452 vtables |
 | 2026-10-02 | ow/drivers-to-spec | ldc 1.43.0 | 1,657,824 | 50,444 | 2,097,152 | UART RX by event with H7 FIFOs, RS-485 DE, RTS/CTS, LPUART1 and rings at open; PWM on TIM1-4 and TIM8; IWDG and reset cause; EXTI buttons; debug freeze |
 
 Add a section for any other configuration the first time it is deployed. Keep the make

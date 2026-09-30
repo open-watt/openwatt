@@ -1240,6 +1240,8 @@ abstract class EnergyTableView : LiveViewState
 {
 nothrow @nogc:
 
+    ~this() {}
+
     this(Session session, EnergyAppModule mod)
     {
         super(session, null);
@@ -1274,6 +1276,8 @@ final class EnergyLiveView : EnergyTableView
 {
 nothrow @nogc:
 
+    ~this() {}
+
     this(Session session, EnergyAppModule mod)
     {
         super(session, mod);
@@ -1301,6 +1305,8 @@ final class TopologyWatchState : EnergyTableView
 {
 nothrow @nogc:
 
+    ~this() {}
+
     this(Session session, EnergyAppModule mod)
     {
         super(session, mod);
@@ -1326,6 +1332,8 @@ protected:
 final class CircuitWatchState : EnergyTableView
 {
 nothrow @nogc:
+
+    ~this() {}
 
     this(Session session, EnergyAppModule mod)
     {

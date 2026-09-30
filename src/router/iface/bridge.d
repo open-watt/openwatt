@@ -1007,6 +1007,8 @@ final class BridgePort : BaseObject
                                  Prop!("untagged-egress", untagged_egress));
 nothrow @nogc:
 
+    ~this() {}
+
     alias ChangedHandler = void delegate(BridgePort) nothrow @nogc;
 
     void subscribe(ChangedHandler handler)
@@ -1228,7 +1230,7 @@ nothrow @nogc:
 private:
     void ports_changed(BaseObject obj, CollectionEvent event)
     {
-        auto port = cast(BridgePort)obj;
+        auto port = dyn_cast!BridgePort(obj);
         if (event == CollectionEvent.removed)
         {
             port.unsubscribe(&port_changed);
@@ -1275,6 +1277,8 @@ unittest
     {
         enum type_name = "bridge-test-port";
     nothrow @nogc:
+
+        ~this() {}
         this(CID id, ObjectFlags flags = ObjectFlags.none)
         {
             super(collection_type_info!TestPort, id, flags);

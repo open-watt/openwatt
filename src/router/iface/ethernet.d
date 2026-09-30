@@ -65,6 +65,8 @@ abstract class EthernetStation : BaseInterface
                                  Elem!("mac", MACAddress, Check!mac_check));
 nothrow @nogc:
 
+    ~this() {}
+
     final MACAddress mac() const
         => prop_read!(EthernetStation, "mac")();
 
@@ -810,6 +812,8 @@ abstract class EthernetInterface : EthernetStation
 {
 nothrow @nogc:
 
+    ~this() {}
+
 protected:
 
     this(const CollectionTypeInfo* typeInfo, CID id, ObjectFlags flags = ObjectFlags.none)
@@ -965,6 +969,8 @@ unittest
     {
         enum type_name = "mac-ping-test-link";
     nothrow @nogc:
+
+        ~this() {}
         this(CID id, ObjectFlags flags = ObjectFlags.none)
         {
             super(collection_type_info!Link, id, flags);
@@ -1024,6 +1030,8 @@ unittest
     {
         enum type_name = "checksum-test-wire";
     nothrow @nogc:
+
+        ~this() {}
         ubyte[64] sent;
         bool offload, mac_asked;
 

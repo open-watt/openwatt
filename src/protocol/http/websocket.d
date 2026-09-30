@@ -68,6 +68,8 @@ final class WebSocket : BaseInterface
                                  Prop!("stream", stream));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "websocket";
     enum path = "/interface/websocket";
 
@@ -771,6 +773,8 @@ final class WebSocketServer : ActiveObject
     alias Properties = AliasSeq!(Prop!("http-server", http_server),
                                  Prop!("uri", uri));
 nothrow @nogc:
+
+    ~this() {}
 
     enum type_name = "ws-server";
     enum path = "/protocol/websocket/server";

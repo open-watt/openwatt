@@ -143,8 +143,10 @@ nothrow @nogc:
          : "No help available for this command.";
 }
 
+extern(C++)
 class CommandState
 {
+extern(D):
 nothrow @nogc:
 
     Session session;
@@ -156,6 +158,9 @@ nothrow @nogc:
         this.session = session;
         this.command = command;
     }
+
+    // declared, not implied by `result`, so the extern(C++) destructor is virtual
+    ~this() {}
 
     CommandCompletionState update()
     {
@@ -174,6 +179,8 @@ nothrow @nogc:
 final class Context : CommandState
 {
 nothrow @nogc:
+
+    ~this() {}
 
     enum FrameKind : ubyte
     {
@@ -507,6 +514,38 @@ private void run_script(ref Console console, const(char)[] script_text, out Muta
     }
 
     output = s.takeOutput();
+}
+
+unittest
+{
+    import urt.mem : alloc, free;
+
+    static class Parent : CommandState
+    {
+    nothrow @nogc:
+        uint* destroyed;
+
+        this(uint* destroyed)
+        {
+            super(null);
+            this.destroyed = destroyed;
+        }
+
+        ~this() { *destroyed |= 1; }
+        override void request_cancel() {}
+    }
+
+    static final class Child : Parent
+    {
+    nothrow @nogc:
+        this(uint* destroyed) { super(destroyed); }
+        ~this() { *destroyed |= 2; }
+    }
+
+    uint destroyed;
+    CommandState state = alloc!Child(&destroyed);
+    free(state);
+    assert(destroyed == 3, "free through CommandState runs the derived and parent destructors");
 }
 
 unittest

@@ -712,6 +712,8 @@ unittest
     {
 nothrow @nogc:
 
+        ~this() {}
+
         this(CID id, ObjectFlags flags = ObjectFlags.none)
         {
             super(id, flags);

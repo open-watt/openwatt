@@ -34,6 +34,8 @@ final class SNMPAgent : ActiveObject
                                  Prop!("community", community));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "snmp-agent";
     enum path = "/protocol/snmp/agent";
     enum collection_id = CollectionType.snmp_agent;

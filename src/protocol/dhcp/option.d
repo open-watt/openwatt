@@ -37,6 +37,8 @@ final class DHCPOption : BaseObject
                                  Prop!("value", value));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "dhcp-option";
     enum path = "/protocol/dhcp/option";
     enum collection_id = CollectionType.dhcp_option;

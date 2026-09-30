@@ -956,6 +956,8 @@ unittest
         {
             enum type_name = "icmp6-test-link";
         nothrow @nogc:
+
+            ~this() {}
             uint transmissions;
             Array!ubyte captured;
             this(CID id, ObjectFlags flags = ObjectFlags.none)

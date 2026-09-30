@@ -49,6 +49,8 @@ final class Automation : ActiveObject
                                  Prop!("last_run", last_run, "status", "d"));
 @nogc nothrow:
 
+    ~this() {}
+
     enum type_name = "automation";
     enum path = "/automation";
     enum collection_id = CollectionType.automation;

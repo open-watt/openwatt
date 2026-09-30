@@ -236,6 +236,8 @@ abstract class WpanInterface : BaseInterface
                                  Prop!("promiscuous",      promiscuous,      "radio"));
 nothrow @nogc:
 
+    ~this() {}
+
     protected this(const CollectionTypeInfo* type_info, CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(type_info, id, flags);

@@ -25,6 +25,8 @@ abstract class ProtocolBinding : ActiveObject
                                  Prop!("offline-timeout", offline_timeout));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "binding";
     enum path = "/binding";
     enum collection_id = CollectionType.binding;
@@ -168,6 +170,8 @@ abstract class ProfileBinding : ProtocolBinding
 {
 nothrow @nogc:
 
+    ~this() {}
+
     this(const CollectionTypeInfo* type_info, CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(type_info, id, flags);
@@ -296,6 +300,8 @@ unittest
         enum type_name = "liveness-test-binding";
         enum collection_id = cast(CollectionType)0;
     nothrow @nogc:
+
+        ~this() {}
 
         Device target;
         uint startups, fail_first;

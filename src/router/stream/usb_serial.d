@@ -75,6 +75,8 @@ class USBSerialStream : Stream
     alias Properties = AliasSeq!();
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "usb-serial";
     enum path = "/stream/usb-serial";
 

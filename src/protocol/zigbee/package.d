@@ -962,6 +962,8 @@ final class EnergyScanState : CommandState
 {
 nothrow @nogc:
 
+    ~this() {}
+
     CommandCompletionState state = CommandCompletionState.in_progress;
 
     EZSPClient client;
@@ -1059,6 +1061,8 @@ nothrow @nogc:
 final class ZCLReadState : CommandState
 {
 nothrow @nogc:
+
+    ~this() {}
 
     CommandCompletionState state = CommandCompletionState.in_progress;
     MonoTime start_time;
@@ -1261,6 +1265,8 @@ final class TuyaReadState : CommandState
 {
 nothrow @nogc:
 
+    ~this() {}
+
     CommandCompletionState state = CommandCompletionState.in_progress;
     MonoTime start_time;
 
@@ -1339,6 +1345,8 @@ private:
 final class ZCLWriteState : CommandState
 {
 nothrow @nogc:
+
+    ~this() {}
 
     CommandCompletionState state = CommandCompletionState.in_progress;
     MonoTime start_time;

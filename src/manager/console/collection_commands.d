@@ -441,6 +441,8 @@ final class CollectionWatchState : LiveViewState
 {
 nothrow @nogc:
 
+    ~this() {}
+
     this(Session session, Command* command, BaseCollection collection)
     {
         super(session, command);

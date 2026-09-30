@@ -40,6 +40,8 @@ final class GoodWeBinding : ProfileBinding
                                  Prop!("model", model));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "goodwe-binding";
     enum path = "/binding/goodwe";
 

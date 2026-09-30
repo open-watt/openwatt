@@ -34,6 +34,8 @@ class SmartEVSEBinding : ProtocolBinding
     alias Properties = AliasSeq!(Prop!("evse", evse));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "smartevse-binding";
     enum path = "/binding/smartevse";
 

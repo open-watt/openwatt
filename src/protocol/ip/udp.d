@@ -742,6 +742,8 @@ unittest
         {
             enum type_name = "udp6-test-link";
         nothrow @nogc:
+
+            ~this() {}
             this(CID id, ObjectFlags flags = ObjectFlags.none)
             {
                 super(collection_type_info!Link, id, flags);

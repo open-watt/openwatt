@@ -400,6 +400,8 @@ final class WhileLoopState : CommandState
 {
 nothrow @nogc:
 
+    ~this() {}
+
     this(Session session, Context parent, ref const Script cond_body, ref const Script do_body)
     {
         super(session);
@@ -530,6 +532,8 @@ CommandState wait_exec(ref Command, Session session, Scope*, const Variant[] arg
 final class WaitCommandState : CommandState
 {
 nothrow @nogc:
+
+    ~this() {}
 
     this(Session session, const(char)[] signal, Duration timeout)
     {

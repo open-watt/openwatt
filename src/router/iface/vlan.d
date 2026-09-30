@@ -22,6 +22,8 @@ final class VLANInterface : EthernetStation
                                  Prop!("tag", tag));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "vlan";
     enum path = "/interface/vlan";
 

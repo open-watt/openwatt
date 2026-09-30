@@ -73,6 +73,8 @@ class ZigbeeNode : ActiveObject
                                  Prop!("node-id", node_id));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "zb-node";
     enum path = "/protocol/zigbee/node";
     enum collection_id = CollectionType.zigbee;

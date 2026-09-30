@@ -1023,6 +1023,8 @@ unittest
         enum collection_id = cast(CollectionType)0;
     nothrow @nogc:
 
+        ~this() {}
+
         this(CID id, ObjectFlags flags = ObjectFlags.none)
         {
             super(collection_type_info!TestBinding, id, flags);

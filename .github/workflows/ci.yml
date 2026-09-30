@@ -33,6 +33,9 @@ jobs:
             arch: arm
           - arch: arm # TODO: not yet working...
           - arch: riscv64 # TODO: not yet working...
+          # TODO: x86 needs the 2.114 frontend (dlang/dmd#23605); restore when LDC carries it
+          - compiler: ldc
+            arch: x86
       fail-fast: false
     steps:
       - uses: actions/checkout@v5
@@ -43,7 +46,7 @@ jobs:
       - name: Setup D Compiler
         uses: dlang-community/setup-dlang@v2
         with:
-          compiler: ${{ matrix.compiler }}
+          compiler: ${{ matrix.compiler == 'dmd' && 'dmd-master' || matrix.compiler }}
 
       # Linux needs mbedtls for TLS/crypto support
       - name: Install mbedtls (Linux)

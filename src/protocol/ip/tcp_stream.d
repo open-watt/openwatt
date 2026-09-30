@@ -35,6 +35,8 @@ final class TCPStream : Stream
                                  Prop!("keepalive", keepalive));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "tcp";
     enum path = "/stream/tcp-client";
 
@@ -371,6 +373,8 @@ class TCPServer : ActiveObject
     alias Properties = AliasSeq!(Prop!("port", port));
 
 nothrow @nogc:
+
+    ~this() {}
 
     enum type_name = "tcp-server";
     enum path = "/stream/tcp-server";

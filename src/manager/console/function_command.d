@@ -50,6 +50,8 @@ nothrow @nogc:
 final class FunctionCommandState : CommandState
 {
 nothrow @nogc:
+
+    ~this() {}
     this(Session session)
     {
         super(session);

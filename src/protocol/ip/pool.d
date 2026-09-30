@@ -26,6 +26,8 @@ final class IPPool : BaseObject
                                  Prop!("end", end));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "ip-pool";
     enum path = "/protocol/ip/pool";
     enum collection_id = CollectionType.ip_pool;
@@ -204,6 +206,8 @@ class IPv6Pool : ActiveObject
     alias Properties = AliasSeq!(Prop!("prefix", prefix),
                                  Prop!("pool", pool));
 nothrow @nogc:
+
+    ~this() {}
 
     enum type_name = "ipv6-pool";
     enum path = "/protocol/ip/pool6";
@@ -877,6 +881,8 @@ unittest
     static class TestPool : IPv6Pool
     {
     nothrow @nogc:
+
+        ~this() {}
         IPv6Addr reservation;
         uint online_count;
         uint offline_count;

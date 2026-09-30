@@ -36,6 +36,8 @@ final class UDPSyncServer : ActiveObject
                                  Prop!("timeout", timeout));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "sync-udp";
     enum path = "/sync/udp-server";
     enum collection_id = CollectionType.sync_udp_server;

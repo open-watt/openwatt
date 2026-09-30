@@ -138,6 +138,8 @@ class OBDBinding : ProfileBinding
                                  Prop!("model", model));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "obd-binding";
     enum path = "/binding/obd";
 
@@ -899,6 +901,8 @@ unittest
     static class TestBinding : OBDBinding
     {
     nothrow @nogc:
+
+        ~this() {}
         uint submits;
         bool fail_submit;
         bool defer_dispatch;

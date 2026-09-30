@@ -62,6 +62,8 @@ final class DNSServer : ActiveObject
                                  Prop!("doh-uri", doh_uri));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "dns-server";
     enum path = "/protocol/dns/server";
     enum collection_id = CollectionType.dns_server;

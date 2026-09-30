@@ -23,6 +23,8 @@ class LiveViewState : CommandState
 {
 nothrow @nogc:
 
+    ~this() {}
+
     this(Session session, Command* command, LiveViewMode mode = LiveViewMode.auto_)
     {
         super(session, command);
@@ -336,6 +338,8 @@ private:
 final class TextViewState : LiveViewState
 {
 nothrow @nogc:
+
+    ~this() {}
 
     alias LineArray = Array!(MutableString!0);
 

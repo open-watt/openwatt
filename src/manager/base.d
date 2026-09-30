@@ -10,6 +10,7 @@ import urt.meta;
 import urt.meta.enuminfo : bitfield;
 import urt.result;
 import urt.string;
+import urt.string.format : FormatArg;
 import urt.time;
 import urt.traits : Parameters, ReturnType, Unqual;
 import urt.util : min;
@@ -289,21 +290,16 @@ struct Property
 
 struct SyncState
 {
-    Object channel;     // opaque owner identity (a SyncPeer, the kernel mirror, ...); compared by `is`, never dereferenced
+    BaseObject channel;     // opaque owner identity (a SyncPeer, the kernel mirror, ...); compared by `is`, never dereferenced
     ulong props_dirty;
     ushort next;
 }
 
 
+extern(C++)
 class BaseObject
 {
-    alias dyn_cast = manager.base.dyn_cast;
-
-    alias Properties = AliasSeq!(Prop!("name", name, null, "*"),
-                                 Prop!("type", type, null, "*"),
-                                 Prop!("disabled", disabled, null, "h"),
-                                 Prop!("comment", comment, null, "h"),
-                                 Prop!("flags", flags, null, "*"));
+extern(D):
 nothrow @nogc:
 
     this(const CollectionTypeInfo* type_info, CID id, ObjectFlags flags = ObjectFlags.none)
@@ -380,6 +376,18 @@ nothrow @nogc:
         return null;
     }
 
+    final ptrdiff_t toString(char[] buffer, const(char)[], const(FormatArg)[]) const
+    {
+        String n = name();
+        if (buffer.ptr)
+        {
+            if (buffer.length < n.length)
+                return -1;
+            buffer[0 .. n.length] = n[];
+        }
+        return n.length;
+    }
+
     final ref const(String) comment() const pure
         => _comment;
     final void comment(ref String value)
@@ -402,6 +410,13 @@ nothrow @nogc:
 
     ObjectFlags flags() const
         => cast(ObjectFlags)(_flags | (validate() ? ObjectFlags.none : ObjectFlags.invalid));
+
+    // below the accessors: naming them earlier lays virtuals out ahead of ~this(), which corrupts the MSVC vtbl before dlang/dmd#23946
+    alias Properties = AliasSeq!(Prop!("name", name, null, "*"),
+                                 Prop!("type", type, null, "*"),
+                                 Prop!("disabled", disabled, null, "h"),
+                                 Prop!("comment", comment, null, "h"),
+                                 Prop!("flags", flags, null, "*"));
 
     // Object API...
 
@@ -693,7 +708,7 @@ protected:
         }
     }
 
-    public final ushort attach_delta_slot(Object owner) nothrow @nogc
+    public final ushort attach_delta_slot(BaseObject owner) nothrow @nogc
     {
         ushort slot = sync_state_alloc(owner);
         sync_state(slot).next = _sync_slot;
@@ -1305,7 +1320,7 @@ template total_prop_count(T)
         enum num_props = T.Properties.length;
     else
         enum num_props = 0;
-    static if (is(T S == super) && !is(S[0] == Object))
+    static if (is(T S == super) && S.length && !is(S[0] == Object))
         enum total_prop_count = total_prop_count!S + num_props;
     else
         enum total_prop_count = num_props;
@@ -1313,7 +1328,7 @@ template total_prop_count(T)
 
 template prop_index(T, string prop)
 {
-    static if (is(T S == super) && !is(S[0] == Object))
+    static if (is(T S == super) && S.length && !is(S[0] == Object))
         enum _parent_index = prop_index!(S[0], prop);
     else
         enum _parent_index = -2;
@@ -1360,7 +1375,7 @@ void register_object_state_handler(StateSignalHandler handler) nothrow @nogc
     _on_object_state ~= handler;
 }
 
-ushort sync_state_alloc(Object channel) nothrow @nogc
+ushort sync_state_alloc(BaseObject channel) nothrow @nogc
 {
     ushort slot;
     if (_free_sync_slots.length > 0)
@@ -1496,7 +1511,7 @@ template elem_decl(Type, string prop)
     }
     static if (is(typeof(local)))
         alias elem_decl = local;
-    else static if (is(Type S == super) && !is(S[0] == Object))
+    else static if (is(Type S == super) && S.length && !is(S[0] == Object))
         alias elem_decl = elem_decl!(S[0], prop);
     else
         static assert(false, "no element-backed property '" ~ prop ~ "' on " ~ Type.stringof);
@@ -1508,7 +1523,7 @@ auto all_properties_impl(Type, size_t allocCount)()
 {
     import urt.traits : Unqual;
 
-    static if (is(Type S == super) && !is(Unqual!S == Object))
+    static if (is(Type S == super) && S.length && !is(Unqual!(S[0]) == Object))
     {
         alias Super = Unqual!(S[0]);
         static if (has_local_properties!Type)
@@ -1753,6 +1768,39 @@ template SynthSuggest(Setters...)
 
 unittest
 {
+    import urt.mem : alloc, free;
+
+    static abstract class Parent : BaseObject
+    {
+    nothrow @nogc:
+        enum type_name = "destructor-test";
+        enum collection_id = cast(CollectionType)0;
+        uint* destroyed;
+
+        this(CID id, uint* destroyed)
+        {
+            super(collection_type_info!Parent(), id);
+            this.destroyed = destroyed;
+        }
+
+        ~this() { *destroyed |= 1; }
+    }
+
+    static final class Child : Parent
+    {
+    nothrow @nogc:
+        this(CID id, uint* destroyed) { super(id, destroyed); }
+        ~this() { *destroyed |= 2; }
+    }
+
+    uint destroyed;
+    BaseObject object = alloc!Child(CID(1), &destroyed);
+    free(object);
+    assert(destroyed == 3, "free through BaseObject runs the derived and parent destructors");
+}
+
+unittest
+{
     import urt.mem;
     import urt.si.quantity : Quantity;
     import urt.si.unit : ScaledUnit, Second, Watt;
@@ -1766,6 +1814,8 @@ unittest
     {
     nothrow @nogc:
 
+        ~this() {}
+
         this(const CollectionTypeInfo* type_info, CID id, ObjectFlags flags)
         {
             super(type_info, id, flags);
@@ -1775,6 +1825,8 @@ unittest
     static abstract class ElemTestSibling : ElemTestBase
     {
     nothrow @nogc:
+
+        ~this() {}
 
         this(const CollectionTypeInfo* type_info, CID id, ObjectFlags flags)
         {
@@ -1787,6 +1839,8 @@ unittest
         enum type_name = "active-test";
         enum collection_id = cast(CollectionType)0;
     nothrow @nogc:
+
+        ~this() {}
 
         this(CID id, ObjectFlags flags = ObjectFlags.none)
         {
@@ -1811,6 +1865,8 @@ unittest
                                      Elem!("peer", ElemTestObject),
                                      Elem!("ratio", float, Default!0.5f, Min!0.0f, Max!1.0f));
     nothrow @nogc:
+
+        ~this() {}
 
         uint changes;
         uint checks;
@@ -1844,6 +1900,8 @@ unittest
         enum type_name = "lifecycle-test";
         enum collection_id = cast(CollectionType)0;
     nothrow @nogc:
+
+        ~this() {}
 
         uint startups, shutdowns, holds;
 
@@ -1887,18 +1945,8 @@ unittest
     const(BaseObject) const_o = o;
     assert(dyn_cast!ElemTestObject(const_o) is o);
 
-    BaseObject base = o;
-    ElemTestBase parent = o;
-    assert(BaseObject.dyn_cast!ElemTestObject(base) is o);
-    assert(cast(ElemTestObject)base is o);
-    assert(cast(ElemTestObject)parent is o);
-    assert(cast(ElemTestBase)base is o);
-    assert(cast(ElemTestSibling)base is null);
-    assert(cast(ActiveObject)base is null);
-    assert(cast(const(ElemTestObject))const_o is o);
-    static assert(is(typeof(BaseObject.dyn_cast!ElemTestObject(cast(immutable(BaseObject))null)) == immutable(ElemTestObject)));
-    base = null;
-    assert(cast(ElemTestObject)base is null);
+    assert(dyn_cast!ElemTestSibling(o) is null);
+    assert(dyn_cast!ElemTestObject(cast(BaseObject)null) is null);
 
     assert(dyn_type_info!ActiveTestObject().parent is &DynTypeOf!ActiveObject.info);
 

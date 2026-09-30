@@ -41,6 +41,8 @@ final class MQTTClient : ActiveObject
                                  Prop!("will-retain", will_retain));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "mqtt-client";
     enum path = "/protocol/mqtt/client";
     enum collection_id = CollectionType.mqtt_client;

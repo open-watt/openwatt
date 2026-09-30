@@ -788,6 +788,8 @@ unittest
         static class Peer : SyncPeer
         {
         nothrow @nogc:
+
+            ~this() {}
             this(CID id)
             {
                 super(id);

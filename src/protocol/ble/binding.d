@@ -40,6 +40,8 @@ final class BLEClientBinding : ProfileBinding
                                  Prop!("model", model));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "ble-client-binding";
     enum path = "/binding/ble/client";
 

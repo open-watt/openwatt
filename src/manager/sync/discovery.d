@@ -149,6 +149,8 @@ final class UDPDiscovery : ActiveObject
                                  Prop!("interval", interval));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "udp-discovery";
     enum path = "/sync/discover/udp";
     enum collection_id = CollectionType.sync_discovery;

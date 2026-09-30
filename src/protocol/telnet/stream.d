@@ -48,6 +48,8 @@ final class TelnetStream : Stream
                                  Prop!("role", role));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "telnet";
     enum path = "/stream/telnet";
 
