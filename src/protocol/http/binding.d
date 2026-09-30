@@ -73,6 +73,8 @@ final class HTTPClientBinding : ProfileBinding
                                  Prop!("model", model));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "http-client-binding";
     enum path = "/binding/http/client";
 

@@ -28,6 +28,8 @@ class ZigbeeRouter : ZigbeeNode
                                  Prop!("pan-id", pan_id));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "zb-router";
     enum path = "/protocol/zigbee/router";
 

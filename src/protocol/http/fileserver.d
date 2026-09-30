@@ -49,6 +49,8 @@ final class FileServer : ActiveObject
                                  Prop!("allowed-origin", allowed_origin));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "fileserver";
     enum path = "/protocol/http/fileserver";
     enum collection_id = CollectionType.http_fileserver;

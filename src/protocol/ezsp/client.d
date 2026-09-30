@@ -81,6 +81,8 @@ final class EZSPClient : ActiveObject
                                  Prop!("peak-queue", peak_queue, "status"));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "ezsp";
     enum path = "/protocol/ezsp/client";
     enum collection_id = CollectionType.ezsp;

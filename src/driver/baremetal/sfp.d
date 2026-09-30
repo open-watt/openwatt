@@ -30,6 +30,8 @@ final class BuiltinSFP : SFPInterface
                                  Prop!("phy-address", phy_address));
 nothrow @nogc:
 
+    ~this() {}
+
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!BuiltinSFP, id, flags);

@@ -81,6 +81,8 @@ final class MQTTBinding : ProfileBinding
                                  Prop!("model",   model));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "mqtt-binding";
     enum path = "/binding/mqtt";
 

@@ -32,6 +32,8 @@ final class ZigbeeCoordinator : ZigbeeRouter
     alias Properties = AliasSeq!(Prop!("channel", channel));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "zb-coordinator";
     enum path = "/protocol/zigbee/coordinator";
 

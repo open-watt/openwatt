@@ -38,6 +38,8 @@ class TeslaTWCBinding : ProtocolBinding
                                  Prop!("slave_id", slave_id));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "twc-binding";
     enum path = "/binding/tesla/twc";
 
@@ -428,6 +430,8 @@ unittest
     static class TestBinding : TeslaTWCBinding
     {
     nothrow @nogc:
+
+        ~this() {}
         DeviceTable* fixtures;
         this(CID id, ObjectFlags flags = ObjectFlags.none) { super(id, flags); }
         void attach_device(Device device) { _bound_device = device; }
@@ -496,6 +500,8 @@ unittest
     static final class TestMaster : TeslaTWCMaster
     {
     nothrow @nogc:
+
+        ~this() {}
         this(CID id) { super(id); }
         void start() { set_state(State.running); }
         void stop() { set_state_deferred(State.stopping); }

@@ -106,6 +106,8 @@ final class SerialStream : Stream
                                      Elem!("flow-control", FlowControl, Default!(FlowControl.none), OnChange!flow_control_changed));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "serial";
     enum path = "/stream/serial";
 

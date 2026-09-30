@@ -242,6 +242,8 @@ class BaseInterface : ActiveObject
                                  Prop!("max-service-time", max_service_time, "traffic"));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "interface";
     enum path = "/interface";
     enum collection_id = CollectionType.interface_;
@@ -541,12 +543,6 @@ nothrow @nogc:
     {
     }
 
-    final ptrdiff_t toString(char[] buffer, const(char)[] format, const(FormatArg)[] format_args) const nothrow @nogc
-    {
-        if (buffer.length < "interface:".length + name.length)
-            return -1; // Not enough space
-        return buffer.concat("interface:", name[]).length;
-    }
 
 protected:
     IfStatus _status;
@@ -1265,6 +1261,8 @@ nothrow @nogc:
     {
     nothrow @nogc:
 
+        ~this() {}
+
         CommandCompletionState state = CommandCompletionState.in_progress;
 
         uint txid;
@@ -1432,6 +1430,8 @@ unittest
     {
         enum type_name = "scope-test-link";
     nothrow @nogc:
+
+        ~this() {}
         this(CID id, ObjectFlags flags = ObjectFlags.none)
         {
             super(collection_type_info!Link, id, flags);
@@ -1509,6 +1509,8 @@ unittest
     {
         enum type_name = "tx-handler-test-sink";
     nothrow @nogc:
+
+        ~this() {}
         this(const CollectionTypeInfo* type_info, CID id, ObjectFlags flags = ObjectFlags.none)
         {
             super(type_info, id, flags);
@@ -1530,6 +1532,8 @@ unittest
     {
         enum type_name = "tx-handler-test-bounded";
     nothrow @nogc:
+
+        ~this() {}
         this(CID id, ObjectFlags flags = ObjectFlags.none)
         {
             super(collection_type_info!Bounded, id, flags);
@@ -1610,6 +1614,8 @@ unittest
     {
         enum type_name = "link-test-port";
     nothrow @nogc:
+
+        ~this() {}
         this(CID id, ObjectFlags flags = ObjectFlags.none)
         {
             super(collection_type_info!Port, id, flags);

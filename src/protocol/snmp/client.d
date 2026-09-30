@@ -40,6 +40,8 @@ final class SNMPClient : ActiveObject
                                  Prop!("retries", retries));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "snmp-client";
     enum path = "/protocol/snmp/client";
     enum collection_id = CollectionType.snmp_client;

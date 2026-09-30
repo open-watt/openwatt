@@ -28,6 +28,8 @@ final class DHCPLease : BaseObject
                                  Prop!("declined", declined, "status", "d"));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "dhcp-lease";
     enum path = "/protocol/dhcp/lease";
     enum collection_id = CollectionType.dhcp_lease;

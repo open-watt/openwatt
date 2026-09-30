@@ -49,6 +49,8 @@ final class TeslaVehicleScanner : ActiveObject
                                  Prop!("vins", vins));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "tesla-vehicle-scanner";
     enum path = "/protocol/tesla/vehicle-scanner";
     enum collection_id = CollectionType.tesla_vehicle_scanner;

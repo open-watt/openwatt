@@ -46,6 +46,8 @@ final class MemoryStream : Stream
                                  Prop!("rx-size", rx_size));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "memory";
     enum path = "/stream/memory";
 

@@ -380,6 +380,8 @@ version (HasFilesystem)
     {
     nothrow @nogc:
 
+        ~this() {}
+
         this(Session session)
         {
             super(session, null);
@@ -475,6 +477,8 @@ auto sleep(Session session, Duration duration)
     static class SleepCommandState : CommandState
     {
     nothrow @nogc:
+
+        ~this() {}
         MonoTime wake_time;
 
         this(Session session, Duration duration)

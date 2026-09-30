@@ -113,6 +113,8 @@ final class CANInterface : BaseInterface
 
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "can";
     enum path = "/interface/can";
 

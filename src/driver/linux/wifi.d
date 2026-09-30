@@ -72,6 +72,8 @@ final class LinuxWifiRadio : WiFiInterface
                                  Prop!("netdev", netdev));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "wifi";
     enum path = "/interface/wifi";
 
@@ -1163,6 +1165,8 @@ final class LinuxWlan : WLANInterface
 {
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "wlan";
     enum path = "/interface/wlan";
 
@@ -1743,6 +1747,8 @@ private:
 final class LinuxAP : APInterface
 {
 nothrow @nogc:
+
+    ~this() {}
 
     enum type_name = "ap";
     enum path = "/interface/ap";

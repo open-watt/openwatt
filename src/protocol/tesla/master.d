@@ -36,6 +36,8 @@ class TeslaTWCMaster : ActiveObject
                                  Prop!("max-current", max_current));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "tesla-twc-master";
     enum path = "/protocol/tesla/twc";
     enum collection_id = CollectionType.tesla_twc;
@@ -889,6 +891,8 @@ unittest
     {
         enum type_name = "twc-test-interface";
     nothrow @nogc:
+
+        ~this() {}
         bool subscribed;
 
         this(CID id, ObjectFlags flags = ObjectFlags.none)
@@ -905,6 +909,8 @@ unittest
     static class TestMaster : TeslaTWCMaster
     {
     nothrow @nogc:
+
+        ~this() {}
         this(CID id) { super(id); }
         void start() { set_state(State.running); }
         void stop() { set_state_deferred(State.stopping); }

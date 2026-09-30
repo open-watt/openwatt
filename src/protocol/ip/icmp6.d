@@ -494,6 +494,8 @@ unittest
     static class Link : BaseInterface
     {
     nothrow @nogc:
+
+        ~this() {}
         this(CID id, ObjectFlags flags = ObjectFlags.none) { super(collection_type_info!Link, id, flags); }
         override int transmit(ref Packet packet, MessageCallback callback, const(QueuePolicy)* policy) { return 0; }
     }

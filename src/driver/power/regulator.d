@@ -52,6 +52,8 @@ class PowerRegulator : ProtocolBinding
                                  Prop!("zc-ok", zc_ok, "status", "d"));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "power-regulator";
     enum path = "/driver/power/regulator";
 

@@ -31,6 +31,8 @@ final class PCF85063 : ActiveObject
                                  Prop!("last-error", last_error, "status", "d"));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "pcf85063";
     enum path = "/driver/rtc/pcf85063";
     enum collection_id = CollectionType.rtc;

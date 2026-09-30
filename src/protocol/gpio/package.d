@@ -36,6 +36,8 @@ final class GpioBinding : ProtocolBinding
                                  Prop!("anchor-error", anchor_error, "status", "d"));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "gpio-binding";
     enum path = "/binding/gpio";
 

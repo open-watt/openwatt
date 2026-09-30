@@ -37,6 +37,8 @@ final class BuiltinBLEInterface : BLEInterface
     alias Properties = AliasSeq!(Prop!("port", port));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "ble";
     enum path = "/interface/ble";
 

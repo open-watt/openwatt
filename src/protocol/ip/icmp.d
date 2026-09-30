@@ -509,6 +509,8 @@ unittest
     {
         enum type_name = "icmp-echo-test-link";
     nothrow @nogc:
+
+        ~this() {}
         Array!ubyte captured;
         this(CID id, ObjectFlags flags = ObjectFlags.none)
         {

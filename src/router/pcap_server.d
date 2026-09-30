@@ -31,6 +31,8 @@ final class PCAPServer : ActiveObject
                                  Prop!("allow-anonymous", allow_anonymous));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "pcap-server";
     enum path = "/tools/pcap/server";
     enum collection_id = CollectionType.pcap_server;

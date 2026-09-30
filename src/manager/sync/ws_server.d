@@ -43,6 +43,8 @@ final class WebSocketSyncServer : ActiveObject
                                  Prop!("encoder",     encoder));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "sync-ws";
     enum path = "/sync/ws-server";
     enum collection_id = CollectionType.sync_ws_server;

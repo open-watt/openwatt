@@ -348,6 +348,8 @@ final class AA55Client : ActiveObject
     alias Properties = AliasSeq!(Prop!("remote", remote));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "aa55";
     enum path = "/protocol/goodwe/aa55";
     enum collection_id = CollectionType.aa55;

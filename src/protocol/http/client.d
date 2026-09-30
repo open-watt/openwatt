@@ -35,6 +35,8 @@ final class HTTPClient : ActiveObject
                                  Prop!("timeout", timeout));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "http-client";
     enum path = "/protocol/http/client";
     enum collection_id = CollectionType.http_client;
@@ -279,6 +281,8 @@ unittest
     static class TestStream : Stream
     {
     nothrow @nogc:
+
+        ~this() {}
         enum type_name = "http-test-stream";
         const(ubyte)[] input;
         uint reads, writes;

@@ -45,6 +45,8 @@ final class LinuxBLEInterface : BLEInterface
     alias Properties = AliasSeq!(Prop!("hci-index", hci_index));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "ble";
     enum path = "/interface/ble";
 

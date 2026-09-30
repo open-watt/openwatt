@@ -101,6 +101,8 @@ class OBDInterface : BaseInterface
                                  Elem!("vehicle", VehicleState, ReadOnly));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "obd";
     enum path = "/interface/obd";
 
@@ -758,6 +760,8 @@ unittest
     static class TestOBD : OBDInterface
     {
     nothrow @nogc:
+
+        ~this() {}
         uint notifications;
         bool saw_packet;
         VehicleState at_delivery;

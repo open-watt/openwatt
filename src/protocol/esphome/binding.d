@@ -41,6 +41,8 @@ final class ESPHomeBinding : ProfileBinding
                                  Prop!("model", model));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "esphome-binding";
     enum path = "/binding/esphome";
 

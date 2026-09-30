@@ -37,6 +37,8 @@ final class SpinelClient : ActiveObject
                                  Prop!("ncp-version", ncp_version, "status"));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "spinel";
     enum path = "/protocol/spinel/client";
     enum collection_id = CollectionType.spinel;

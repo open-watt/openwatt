@@ -64,6 +64,8 @@ final class Certificate : ActiveObject
                                  Prop!("expiry", expiry));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "certificate";
     enum path = "/certificate";
     enum collection_id = CollectionType.certificate;

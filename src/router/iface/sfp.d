@@ -51,6 +51,8 @@ class SFPInterface : EthernetInterface
                                  Elem!("tx-enabled", bool, ReadOnly));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "sfp";
     enum path = "/interface/sfp";
 
@@ -521,6 +523,8 @@ final class SFPBinding : ProtocolBinding
 {
     alias Properties = AliasSeq!(Prop!("interface", iface));
 nothrow @nogc:
+
+    ~this() {}
 
     enum type_name = "sfp-binding";
     enum path = "/binding/sfp";

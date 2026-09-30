@@ -195,6 +195,8 @@ a netbooted image is bounded by RAM instead.
 | date | commit | compiler | flash | ram | limit | note |
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-09-26 | #781 | ldc 1.43.0 | 1,623,936 | 58,372 | 2,097,152 | first row; per-bank TLSF pools and DFU recovery (urt #339-#345) |
+| 2026-09-30 | 6d4d0ca1 | ldc 1.43.0 | 1,631,616 | 58,920 | 2,097,152 | master (28848010) plus #789's test-only change |
+| 2026-09-30 | #790 | ldc 1.43.0 | 1,637,136 | 58,920 | 2,097,152 | virtual destructors: +4,288 destructors, -1,452 vtables |
 
 Add a section for any other configuration the first time it is deployed. Keep the make
 invocation in the heading exact, including FEATURES, HEADLESS, IPV6 and GATEWAY when they

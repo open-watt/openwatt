@@ -42,6 +42,8 @@ final class CANBinding : ProfileBinding
                                  Prop!("model", model));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "can-binding";
     enum path = "/binding/can";
 

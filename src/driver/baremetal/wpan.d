@@ -31,6 +31,8 @@ final class BuiltinWpan : WpanInterface
     alias Properties = AliasSeq!(Prop!("cca", cca, "radio"));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "wpan";
     enum path = "/interface/wpan";
 

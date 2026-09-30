@@ -143,8 +143,10 @@ nothrow @nogc:
          : "No help available for this command.";
 }
 
+extern(C++)
 class CommandState
 {
+extern(D):
 nothrow @nogc:
 
     Session session;
@@ -156,6 +158,9 @@ nothrow @nogc:
         this.session = session;
         this.command = command;
     }
+
+    // declared, not implied by `result`, so the extern(C++) destructor is virtual
+    ~this() {}
 
     CommandCompletionState update()
     {
@@ -174,6 +179,8 @@ nothrow @nogc:
 final class Context : CommandState
 {
 nothrow @nogc:
+
+    ~this() {}
 
     enum FrameKind : ubyte
     {

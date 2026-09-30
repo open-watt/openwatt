@@ -21,6 +21,8 @@ final class PPPClient : BaseInterface
                                  Prop!("protocol", protocol));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "ppp";
     enum path = "/protocol/ppp/client";
 

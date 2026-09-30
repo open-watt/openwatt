@@ -45,6 +45,8 @@ final class MQTTBroker : ActiveObject
                                  Prop!("discover", discover));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "mqtt-broker";
     enum path = "/protocol/mqtt/broker";
     enum collection_id = CollectionType.mqtt_broker;

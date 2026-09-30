@@ -50,6 +50,8 @@ final class ConsoleStream : Stream
                                  Prop!("output", output));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "console";
     enum path = "/stream/console";
 

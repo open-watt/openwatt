@@ -19,6 +19,8 @@ final class PPPServer : BaseInterface
                                  Prop!("protocol", protocol));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "ppp-server";
     enum path = "/protocol/ppp/server";
     enum collection_id = CollectionType.ppp_server;

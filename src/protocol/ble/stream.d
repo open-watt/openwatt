@@ -37,6 +37,8 @@ final class BLESerialStream : Stream
                                  Elem!("write-mode", BLEWriteMode, Default!(BLEWriteMode.auto_), OnChange!restart));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "ble-serial";
     enum path = "/stream/ble-serial";
 

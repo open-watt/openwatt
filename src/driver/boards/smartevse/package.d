@@ -270,6 +270,8 @@ class SmartEVSE : ActiveObject
                                  Prop!("contactor2", contactor2, "status", "d"));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "smartevse";
     enum path = "/driver/boards/smartevse";
     enum collection_id = CollectionType.smartevse;
