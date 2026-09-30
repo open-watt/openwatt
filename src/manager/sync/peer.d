@@ -1508,8 +1508,8 @@ unittest
     scope(exit)
     {
         free(peer);
-        Collection!Narrow().remove(link);
-        free(link);
+        link.destroy();
+        Collection!Narrow().table.free_pending();
     }
     peer._transport = link;
 

@@ -815,7 +815,7 @@ nothrow @nogc:
 
     ~this()
     {
-        assert(_state & _destroyed, "ActiveObject was not destroyed before destruction!");
+        assert((_state & _destroyed) || (_state & ~_disabled) == 0, "ActiveObject was started but not destroyed before destruction!");
     }
 
 

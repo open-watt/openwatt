@@ -976,10 +976,9 @@ unittest
     Link second = Collection!Link().create("mac-ping-test-second");
     scope(exit)
     {
-        Collection!Link().remove(first);
-        Collection!Link().remove(second);
-        free(first);
-        free(second);
+        first.destroy();
+        second.destroy();
+        Collection!BaseInterface().update_all();
     }
     struct Results
     {
@@ -1051,8 +1050,8 @@ unittest
     Wire wire = Collection!Wire().create("checksum-test-wire");
     scope(exit)
     {
-        Collection!Wire().remove(wire);
-        free(wire);
+        wire.destroy();
+        Collection!BaseInterface().update_all();
     }
 
     ubyte[30] datagram = [0x45, 0, 0, 30, 0, 0, 0, 0, 64, 17, 0, 0, 10, 0, 0, 1, 10, 0, 0, 2,
