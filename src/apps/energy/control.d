@@ -95,7 +95,7 @@ nothrow @nogc:
         if (kind_e)
             if (const(ControlKind)* p = enum_from_key!ControlKind(kind_e.text_value()))
                 return *p;
-        if (source && source.template_[] == "Switch")
+        if (source && is_switch(source))
             return ControlKind.discrete;
         return ControlKind.unknown;
     }
@@ -105,7 +105,7 @@ nothrow @nogc:
         if (direction_e)
             if (const(ControlDirection)* p = enum_from_key!ControlDirection(direction_e.text_value()))
                 return *p;
-        if (source && source.template_[] == "Switch")
+        if (source && is_switch(source))
             return ControlDirection.consume;
         return ControlDirection.unknown;
     }
@@ -115,7 +115,7 @@ nothrow @nogc:
         if (unit_e)
             if (const(ControlUnit)* p = enum_from_key!ControlUnit(unit_e.text_value()))
                 return *p;
-        if (source && source.template_[] == "Switch")
+        if (source && is_switch(source))
             return ControlUnit.boolean;
         return ControlUnit.unknown;
     }
@@ -323,13 +323,13 @@ private:
     {
         if (root is null)
             return null;
-        if (root.template_[] == "PowerControl" || root.template_[] == "Switch")
+        if (root.template_[] == "PowerControl" || is_switch(root))
             return root;
         if (Component pc = root.find_first_component_by_template_recursive("PowerControl"))
             return pc;
         if (Component sw = root.find_first_component_by_template_recursive("Switch"))
             return sw;
-        return null;
+        return root.find_first_component_by_template_recursive("Light");
     }
 
     void synthesize(Appliance owner, Component source, ref Control ctl)
@@ -342,7 +342,7 @@ private:
             c = c.parent;
         ctl.device = cast(Device)c;
 
-        if (source.template_[] == "Switch")
+        if (is_switch(source))
             populate_from_switch(ctl, source);
         else
             populate_from_power_control(ctl, source);
@@ -428,6 +428,9 @@ private:
 
 
 private:
+
+bool is_switch(const Component c)
+    => c.template_[] == "Switch" || c.template_[] == "Light";
 
 // Scalar comparisons use SI base units regardless of device storage scale.
 float read_float(const(Element)* e)

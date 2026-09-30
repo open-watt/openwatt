@@ -1,0 +1,295 @@
+# System IO: buttons, lights and the system device
+
+Status: the `Button` and `Light` templates are in place; nothing else is built. The work items are
+tracked under "System IO" in [TODO.md](../../TODO.md). Delete this file once they land, and move
+whatever is left into TODO.md.
+
+A node has no physical controls today. No button can reboot, recover or factory-reset it, no
+light shows what state it is in, and there is no factory reset at all, from the console or
+otherwise. This plan drives buttons, relays and lights from local hardware, gives the `system`
+device fixed slots that the node's own behaviour keys on, and builds recovery and status
+indication on those slots.
+
+The target products are Tuya-module plugs and wall switches on BK7231 (a button, a relay and an
+LED on bare GPIO), ESP devkits (a BOOT button and a WS2812), the SmartEVSE (three front-panel
+buttons and an RGB LED), and later smart bulbs.
+
+## Principles
+
+- Hardware is modelled with the same templates any other equipment would use. What the system
+  does with it is declared on the system side, by aliasing, never by flags on the hardware.
+- Structure is declared; behaviour comes from ownership. Nesting never generates an automation.
+- Recovery must not depend on configuration, the automation engine or the network. It lives in
+  `manager` and works in every `FEATURES` tier.
+- A factory reset is a deliberate act, as in the boot guard (#747). It takes either a long hold
+  with visible stages or an explicit command.
+- Board wiring belongs in `system.conf`, which states what the board is and runs under every
+  configuration rung.
+
+## The model
+
+The element lists are in [COMPONENT_TEMPLATES.md](../COMPONENT_TEMPLATES.md). This section records
+why they have the shape they do.
+
+- **Three primitives, one per physical thing.** `Button` is an input, `Switch` is an actuator,
+  `Light` is a light emitter. A `Button` is never an actuator, and is not a mode of `Switch`: the
+  energy app adopts any `Switch` as a control it can drive, so an input filed there would become a
+  load. Matter's Generic Switch and Shelly's Input also put momentary versus latching on the input.
+- **`Light` extends `Switch`.** A light is an actuator too, and the energy app treats either as a
+  discrete control. The template names what the device can do to the output, not what hangs off
+  it: a bare contact on a lighting circuit is a `Switch` with the load hint `type=light`, and
+  anything that can set `level`, `cct`, `colour`, `effect` or `indicate` is a `Light`, whether or
+  not a relay sits behind `switch`. A light with `switch` alone is indistinguishable from
+  `Switch{type=light}` to every consumer except the UI.
+- **A component exists only if it is independently observable or controllable.** Most Zigbee
+  lights and wall switches own their button and indicator in firmware, so they are a flat
+  `Switch` or `Light`. An input or LED that we can read or drive ourselves is a component.
+- **Nesting is association.** An input nests under the output it is wired to, as `input`; an
+  indicator nests as `indicator`. Detached inputs and lights that belong to no output sit at
+  device level.
+- **Behaviour comes from ownership.** The profile looks identical whether the firmware couples an
+  input to its output or nothing does, so nesting cannot imply behaviour. A local output binding
+  that owns a `Switch` or `Light` couples its own `input` and `indicator` children: a momentary
+  press toggles the output on the press edge, a latching input is followed, and the indicator
+  mirrors the output. A profile-driven device has no such binding, so nothing is coupled twice.
+- **`indicate` lets two users share a light.** A Tuya plug has one LED, which shows the relay
+  state and is also the status light. The system writes only `indicate`, so the owner's state
+  survives every indication. The same element serves "find this bulb" from a UI.
+
+```
+plug                            Tuya plug on local GPIO
+  supply         Port
+  outlet1        Port
+    switch       Switch         switch, type=outlet
+      input      Button         mode=momentary, state, event
+      indicator  Light          switch, indicate
+
+wallsw                          Zigbee 2-gang; firmware owns the buttons and LEDs
+  gang1          Switch         switch, type=light
+  gang2          Switch         switch, type=light
+
+dimmer                          wall dimmer on local hardware
+  light          Light          switch, level, cct
+    input        Button         mode=momentary, state, event
+
+remote                          scene remote
+  button1..4     Button         state, event
+```
+
+## Bindings and drivers
+
+There are three local-hardware bindings. They live in `src/driver/`, so every `FEATURES` tier
+compiles them, including `switch`, the BK7231 default, which has no automation engine. As with
+every binding, `device=` names the equipment and `component=` gives the path within it.
+
+| Binding | Hardware | Properties (proposed defaults in brackets) |
+| --- | --- | --- |
+| `/binding/button` | a GPIO input | `gpio`, `active=low\|high`, `pull`, `mode`, `debounce` (30ms), `click-gap` (300ms), `hold` (1s) |
+| `/binding/switch` | a GPIO output | `gpio`, `active`, `coupling` (`on`) |
+| `/binding/light` | a GPIO output, or an LED driver | `gpio` and `active`, or `output` and `index`; `coupling` (`on`) |
+
+- **Light sources.** `gpio=` is the shorthand for plain on/off. Anything richer goes through
+  `output=<driver>`, plus `index=` for one pixel of a strip. The driver owns the peripheral and
+  reports its capabilities, and the binding creates only the elements that output supports. The
+  binding renders effects and `indicate` from a scheduled timer, so a plain GPIO LED can blink as
+  well as a WS2812 can. This is the same split as the SmartEVSE: a driver object owns the
+  hardware, and a binding references it.
+- **LED drivers.** `/driver/led/pwm` takes one to five channels: one for level, two for warm and
+  cool white, three for RGB, four for RGBW, five for RGBCW. `/driver/led/ws2812` takes `gpio`,
+  `count` and the colour order. The two-wire LED driver chips in Tuya bulbs (SM2135, BP5758D) come
+  later.
+- **Coupling.** The output binding couples the `input` and `indicator` components nested under
+  its own, whichever binding fills them. That keeps a wall switch working when the network or
+  the configuration is broken, and on builds with no automation engine. Momentary coupling acts
+  on the press edge, not on `click`, so it has no multi-click delay. `coupling=off` leaves the
+  input to an automation and the indicator to its own writers.
+- **Sampling.** GPIO interrupts exist only on ESP32, with two ports. A button therefore samples on
+  a scheduled timer everywhere, and may wake from an interrupt where a port is free.
+- **Topology.** A relay that should appear in the energy model needs its `Port`. A naked device
+  profile declares it through the existing `/device/add id=plug profile=...`, and the bindings
+  fill in the leaves.
+
+## Component alias
+
+The `system` device borrows components from the devices that own the hardware. Nothing can do
+that today:
+
+- `/element/link` wires two elements in both directions, binding each end when it appears. It
+  never creates an element (`ElementLink` in [src/manager/package.d](../../src/manager/package.d)).
+  Given two components, `ComponentLink` pairs up the relative paths found on either side and
+  creates nothing, so a target that nothing populates never binds.
+- A profile's `element-alias: id, .device.path` creates the local element, takes the source's
+  format once the source resolves, and links the two
+  ([src/manager/device.d](../../src/manager/device.d), `ComputationKind.alias_`). It works one
+  element at a time, and only from a profile.
+
+The alias combines them. `/element/alias add source=<path> target=<path>` creates the target
+component with the source's template, creates one alias element per source element, and picks up
+elements the source gains later. It is a mirror kept in sync by bidirectional links, as
+`element-alias` is, not a symlink. A component has one parent and one path, and sync, the recorder
+and the UI all address it by path. The facility is generic: the system device is its first user,
+and a room or site device could collect lights the same way.
+
+It must do two things that links do not:
+
+- **Register as the writer.** Sync takes an element's writer from its binding entries
+  (`remote_writer` in [src/manager/sync/package.d](../../src/manager/sync/package.d)). A mirrored
+  element has none, so a remote write to it fails with `no writable provider`. The alias attaches
+  itself with the source's access and forwards the write through the link. Local writes already
+  propagate.
+- **Show that it is an alias.** Sync carries no alias relationship, so a frontend would see
+  `plug.led` and `system.panel.status` as two separate lights. That needs a flag on the wire and a
+  [UX_TODO](UX_TODO.md) action when the alias lands.
+
+`/element/link` has no section in [CLI.md](../CLI.md). Document it together with the alias.
+
+## The system device
+
+[#532](https://github.com/open-watt/openwatt/pull/532) creates `system` in the `Application`
+constructor, before any startup script runs, so `system.conf` can populate it. It carries `mem`
+and `cpu`. This plan adds:
+
+- `info` (`DeviceInfo`): hostname, firmware version and board;
+- `state`, the configuration rung and the reset class, under `status` (`DeviceStatus`, which
+  every device already has, for `status.online`);
+- `panel`, which holds the slots.
+
+| Slot | Template | Behaviour |
+| --- | --- | --- |
+| `panel.reset` | `Button` | the hold ladder |
+| `panel.status` | `Light` | system indication |
+| `panel.network` (later) | `Light` | link state |
+
+A slot is filled either by an alias or by a binding writing there directly. The policy lives in
+`manager`. It attaches to a filled slot whose template matches, warns on a mismatch, and does
+nothing for an empty slot. One light may fill several slots, the way OpenWrt aliases a single LED
+as `led-boot`, `led-failsafe`, `led-running` and `led-upgrade`; the precedence order under "The
+status slot" resolves them.
+
+### The reset slot
+
+The action happens on release. While the button is held, the status light shows which stage is
+armed.
+
+| Held for | On release | Status light while held |
+| --- | --- | --- |
+| under 5 s | nothing | unchanged |
+| 5 s | reboot | slow blink |
+| 10 s | recovery: `default.conf` once, erase nothing | fast blink |
+| 20 s | factory reset | steady (red on a colour light) |
+| 30 s | cancelled | unchanged |
+
+Leaving everything under 5 s alone is what lets a Tuya plug's single button toggle the relay and
+also be the reset button.
+
+A button held through power-on cannot be read, because the boot guard picks a rung before
+`system.conf` creates the button. The guard's crash ladder and its power-cycle gesture already
+cover a unit that never reaches runtime.
+
+### The status slot
+
+The policy writes `indicate`, and `indicate_colour` on a colour light, for the first state in this
+list that applies:
+
+1. hold feedback (the table above);
+2. identify, from `/system/identify`;
+3. updating, while an OTA transfer runs or an image is on trial;
+4. recovery: running below the top rung, whether the guard stepped down or the operator asked
+   (this is the LED indication #747 defers);
+5. booting, until the startup script finishes;
+6. unconfigured: running `default.conf` because no other configuration exists;
+7. running: `indicate=none`, which hands the light back to its owner.
+
+The winning state is also published as `system.status.state` for UIs. Network state, which users
+most want from a status light, has no source yet. It will come when the wifi mirror in
+[#749](https://github.com/open-watt/openwatt/pull/749) moves from the SmartEVSE binding into
+`system.status.network`.
+
+## Actions
+
+- **Reboot.** `/system/reboot` already exists, and the reset slot calls it.
+- **Recovery.** This is the same one-shot defaults boot as #747's power-cycle gesture
+  (`BootDecision.one_shot`). The boot store needs a way for a running system to request it before
+  rebooting.
+- **Factory reset.** A new `/system/factory-reset`, which takes a confirming argument and shares
+  its code with the 20 s stage. The recommendation is to erase everything OpenWatt persisted
+  (format the configuration filesystem and clear the boot store) but never the firmware or the
+  chip's identity. The SmartEVSE needs care, because it keeps the stock NVS and SPIFFS partitions
+  so a unit can migrate back.
+- **Identify.** DATA_MODEL rule 6 names identify as a device function. Until device functions
+  exist, `/system/identify [duration]` sets `panel.status.indicate` and clears it when the
+  duration ends.
+- **Wifi on and off.** This already works with `/interface/wifi/set wifi1 disabled=true`. It is
+  not a built-in gesture, because turning wifi off strands a wifi-only unit. Instead it is an
+  automation on a button's `event`, and that has two gaps. `if=` cannot read `$value` today (see
+  Automation in TODO.md), and the `switch` tier has no automation engine.
+
+## Hardware support today
+
+- **GPIO:** backends exist for ESP32, Bouffalo, BK7231 and Linux. RP2350 and STM32 have none.
+- **GPIO interrupts:** ESP32 only, with two ports (`num_gpio_interrupts`).
+- **PWM:** ESP32 only, with four LEDC ports. The SmartEVSE control pilot takes one, which leaves
+  exactly three for its RGB LED.
+- **WS2812:** the only driver is
+  [urt/driver/bl808/led.d](../../third_party/urt/src/urt/driver/bl808/led.d). It is bit-banged,
+  with loop counts calibrated for the D0 core at 480 MHz, on the M1s Dock's pin. ESP32 needs RMT
+  transmit, which urt does not drive yet. RP2350 needs PIO, and a GPIO backend before that.
+  Encoding the bit stream over SPI would work anywhere urt has SPI, which today means ESP32 only;
+  the BL808 SPI driver is a stub.
+
+## Examples
+
+A Tuya plug (pins vary by product):
+
+```
+/device/add id=plug profile=tuya-plug
+/binding/switch add name=relay device=plug component=outlet1.switch gpio=12
+/binding/button add name=button device=plug component=outlet1.switch.input gpio=3 active=low
+/binding/light add name=led device=plug component=outlet1.switch.indicator gpio=5 active=low
+/element/alias add source=plug.outlet1.switch.input target=system.panel.reset
+/element/alias add source=plug.outlet1.switch.indicator target=system.panel.status
+```
+
+An ESP32-C3-DevKitM-1. Its BOOT button and WS2812 belong to nothing but the node, so the bindings
+fill the slots directly:
+
+```
+/driver/led/ws2812 add name=pixel gpio=8 count=1
+/binding/button add name=boot device=system component=panel.reset gpio=9 active=low pull=up
+/binding/light add name=status device=system component=panel.status output=pixel
+```
+
+## Order of work
+
+1. Land #532, which depends on urt#232.
+2. Build the three GPIO bindings, with coupling, and write their CLI.md sections.
+3. Build the component alias.
+4. Build the system slots: the hold ladder, the status indication, `system.status.state`,
+   `/system/factory-reset` and `/system/identify`. The recovery stage uses #747's one-shot
+   defaults boot.
+5. Add `/driver/led/pwm` for the SmartEVSE, then `/driver/led/ws2812` for each chip family.
+6. Let `if=` read `$value`.
+7. Add network indication, once the #749 mirror moves to `system`.
+
+## Open decisions
+
+1. Should `colour` be stored as sRGB, which is what LEDs and colour pickers use, or as CIE xy,
+   which Zigbee and Matter use natively? The lean is sRGB, converted in the bindings.
+2. What does a factory reset erase: everything, including vehicle keys such as `tesla.pem` and
+   the recordings, or configuration only?
+3. Are the hold timings right, and does reboot deserve a stage of its own?
+4. What should a dedicated status light show while running: nothing, a steady light, or a
+   heartbeat flash?
+5. Should the alias be `/element/alias`, or a flag on `/element/link`?
+6. May the energy app dim a `Light` that has `level`, as a continuous control? Lights are only
+   adopted when configured as an appliance, so the question is whether that is ever wanted.
+
+## Related
+
+- #532 and urt#232: the system device.
+- #747: the boot guard, which defers its LED indication and button gesture to this plan.
+- #749: the SmartEVSE front panel and the wifi status mirror.
+- TODO.md, RP2350 bring-up: the undriven on-board RGB LED.
+- The parity list at the top of
+  [src/driver/boards/smartevse/package.d](../../src/driver/boards/smartevse/package.d): the RGB
+  status LED, the buttons and the external switch modes.

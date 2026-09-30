@@ -151,10 +151,10 @@ protected:
         _contactor1 = add_element!bool(builder, diagnostic, "contactor1");
         _contactor2 = add_element!bool(builder, diagnostic, "contactor2");
 
-        Component buttons = builder.component("buttons", "Buttons");
-        _button_left = add_element!bool(builder, buttons, "left");
-        _button_middle = add_element!bool(builder, buttons, "middle");
-        _button_right = add_element!bool(builder, buttons, "right");
+        Component buttons = builder.component("buttons");
+        _button_left = add_button(builder, buttons, "left");
+        _button_middle = add_button(builder, buttons, "middle");
+        _button_right = add_button(builder, buttons, "right");
 
         Component display = builder.component("display", "Display");
         builder.constant(display, "width", display_width);
@@ -220,6 +220,13 @@ private:
         Element* element = bind_element(b, parent, id, register_format(format), access);
         element.sampling_mode = SamplingMode.report;
         return element;
+    }
+
+    Element* add_button(ref DeviceBuilder b, Component parent, const(char)[] id)
+    {
+        Component button = b.component(parent, id, "Button");
+        b.constant(button, "mode", "momentary");
+        return add_element!bool(b, button, "state");
     }
 
     void subscribe_elements()
