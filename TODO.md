@@ -1378,6 +1378,10 @@ this is what remains.
   `uart_hw_open(port, cfg, rx_cb)` form (STM32: IDLE, or the F7/H7 receiver timeout at 3.5
   characters) and delete the polled path.
 
+- **`/log/print` without `--stream` redraws its pager every tick**: on the RP2350 it held the CPU
+  at 64% and logged an 80 ms `console-session` update each frame while idle. The live view should
+  redraw on a new entry or a key, not per tick.
+
 - **Move WebSocket RX off the tick**: `WebSocket.update()` still polls `_stream.read()` each
   frame; it should install `rx_handler` and decode on delivery. TX is now pull-driven by the
   stream, so the tick carries only RX.
