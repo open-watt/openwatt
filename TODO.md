@@ -280,6 +280,31 @@ and the panel left outstanding.
 - **`Duration` properties print as raw nanoseconds** (`get` shows `3e+10ns` for `30s`): the value
   reaches the console as a quantity rather than through `Duration`'s own formatting.
 
+## Driver contracts (2026-10-04)
+
+urt's driver contract suite (`test/driver/`, CI only) runs the UART and event-link cases
+against every bare-metal backend over register models. What it does not reach, or what the
+backends still cannot do:
+
+- **ESP32 is outside the suite**: its UART and GPIO logic is C in `ow_shim.c` over IDF. To test the
+  real code, split the UART and GPIO-interrupt sections into their own files and compile them in
+  the suite against a small fake IDF. The suite would fail it today: an RX overflow calls
+  `uart_flush_input`, discarding the whole RX buffer rather than keeping the oldest bytes. It
+  reports no RX timing, and the watchdog adapter ignores the requested timeout and stop.
+- **BK7231 writes synchronously**: its TX interrupt never fires, so a write returns what the FIFO
+  took. Nothing shows the shifter, so a flush waits a character time after the FIFO empties
+  rather than for a status. It reports no RX gap.
+- **MT7621's UART is polled**, its I2C synchronous, and the netconsole copies the console UART
+  until OpenWatt carries a UDP log sink.
+- **Bouffalo delivers bytes that failed parity**: the FIFO keeps them, so the error is reported
+  but the byte is not dropped.
+- **The suite covers UART and links only**: PWM, WS2812, watchdog and reset, I2C and SPI want the
+  same treatment.
+- **The parity rework is unrun on hardware**: the BK7231 and MT7621 UART changes, MT7621 edge
+  ownership and the ESP32 pin claims are built and model-tested only.
+- **Bouffalo's vendor printf** (picolibc stdout) still writes the console directly; hook it into
+  urt.log as BK7231 does with `ow_log_vendor`.
+
 ## Retrospective merge reconciliation (2026-09-08)
 
 - **[#669, deferred until removal is needed] Define device/subtree removal lifetime**:
@@ -727,10 +752,8 @@ decisions are in [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md). The
    to software to make room for `hardware_required` ones. Software channels need the timer
    layer's periodic interrupt: ESP32 has none in urt yet (a gptimer backend), and Bouffalo's
    system tick holds the single periodic slot, so the slot needs multiplexing. urt drives PWM
-   blocks only on ESP32 and RP2350; Bouffalo, BK7231 and STM32 have them too, with fixed pin
-   routing that `pwm_hw_reaches` must describe. On STM32 that is the general-purpose timers other
-   than TIM5, which the timer layer holds: the DevEBox H7's status LED on PA1 reaches TIM2_CH2 and
-   runs in software until then. Demotion has not run on hardware.
+   blocks on ESP32, RP2350 and STM32 (TIM1-4 and TIM8); Bouffalo and BK7231 have them too, with
+   fixed pin routing that `pwm_hw_reaches` must describe. Demotion has not run on hardware.
 
 8. **Multi-die lights**: `drive=pwm` should take `red-`, `green-`, `blue-`, `white-`, `warm-` and
    `cool-gpio`, report a read-only `channels` such as `RB` or `RGBW`, and gain `colour` and
@@ -741,6 +764,11 @@ decisions are in [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md). The
 
 10. **A light's `level` prints as `1e+2%`**: `/device/print` shows the `Quantity!(ubyte, Percent)`
     at 100 in exponent form. Find where an integral quantity is formatted as a float.
+
+11. **Changing a binding's `kind` leaves the old kind's elements**: a `light` made a `button`
+    keeps `effect`, `indicate`, `pulse`, `level` and `switch` beside `mode`, `state` and `event`,
+    stale under a component now templated `Button`. Elements outlive a restart by design; a kind
+    change should drop the ones the new kind does not bind.
 
 ## Data model
 
@@ -1585,6 +1613,12 @@ Boots and runs on a WeAct RP2350B Core, with an interactive console on UART1 (GP
 GPIO21 RX): commands echo and execute, and the heartbeat ticks idle. `xosc_hz` is confirmed
 at 12MHz by clean UART framing. Outstanding:
 
+- **A light does not retry a failed WS2812 frame**: `ws2812_set` now fails when the PIO stalls
+  and resends the whole chain on the next set, but the GPIO binding ignores the result, so a
+  steady light keeps a lost frame until its output next changes. Retry from the binding.
+- **The status WS2812 once held solid orange** with `colour` at `#00ff00`, from a flash until the
+  next; not reproduced since. A light re-sends only on a change, so one garbled frame would
+  persist; look at what reaches the chain before the first frame if it recurs.
 - **`UartConfig.tx_gpio`/`rx_gpio` are ignored.** The driver routes a fixed default pair per
   port, so a stream cannot pick its own pins. Picking them needs a funcsel per pin, not per
   port: most UART pins are funcsel 2, but the alternates (GPIO6, 10, 14, 18, 22, 23) are 0x0b.

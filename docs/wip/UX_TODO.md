@@ -3,6 +3,14 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-10-04: button `backend`
+
+- A GPIO `button` binding reports `backend`: `interrupt` where its edges arrive on an event link,
+  `sampled` where it reads its line every `debounce`. It is diagnostic; show it with the binding's
+  status, not as a control.
+- A button's `state` reads unset while its binding is stopped (disabled, removed or reconfigured);
+  show it as unknown, not as released.
+
 ## 2026-10-02: serial RX timing
 
 - `/stream/serial` gains `rx-latency` (duration, default `350us`) and `rx-gap` (characters, `0.1`

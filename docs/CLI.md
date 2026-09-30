@@ -1026,16 +1026,16 @@ lines are, and the binding builds the matching component at `component` in
 
 | Kind | Lines | Component |
 | --- | --- | --- |
-| `capture` | `gpio` | a timestamped edge series `state`; Linux only |
+| `capture` | `gpio` | a timestamped edge series `state` |
 | `button` | `gpio` | a [`Button`](COMPONENT_TEMPLATES.md#button): `mode`, `state` and a point series `event` of `click`, `double`, `triple`, `hold` and `release` |
 | `switch` | `gpio` | a [`Switch`](COMPONENT_TEMPLATES.md#switch) whose writable `switch` drives the line |
 | `light` | `gpio` | a [`Light`](COMPONENT_TEMPLATES.md#light) with `switch`, `effect`, `indicate` and `pulse`; `indicate` overrides the owner's state while it is not `none`, and each `pulse` inverts a steady output for 50ms; `drive` adds `level` and, for `ws2812`, `colour` |
 
-A button reacts to edge interrupts where the platform has them (ESP32, MT7621)
-and otherwise samples its line every `debounce`. A WS2812 chain runs on the RP2350's PIO, or is
-bit-banged on the BL808's D0 core; other platforms do not drive one yet. PWM comes from the chip's PWM block (ESP32
-LEDC) where one is free, and otherwise from software, driven by a 4 kHz timer interrupt that runs
-only while some light is at a level between off and full. The MT7621 has no PWM block. Gestures are timed from the
+A button reacts to edge interrupts where the platform has them and otherwise samples its line
+every `debounce`. A WS2812 chain needs a platform that drives one. PWM comes from the chip's PWM
+block where one reaches the pin and is free, and otherwise from software, driven by a 4 kHz timer
+interrupt that runs only while some light is at a level between off and full. Gestures are timed
+from the
 debounced level: a press held for `hold` is a `hold`, followed by `release`;
 otherwise one to three presses each within `click-gap` of the last are a
 `click`, `double` or `triple`.
@@ -1044,7 +1044,7 @@ otherwise one to three presses each within `click-gap` of the last are a
 | --- | --- | --- | --- |
 | `kind` | `capture`, `button`, `switch`, `light` | `capture` | What the line is. |
 | `gpio` | line number | required | The line. |
-| `chip` | controller index | `0` | The GPIO controller, on hosts with several (`/dev/gpiochipN`). |
+| `chip` | controller index | `0` | The GPIO controller, on hosts with several (`/dev/gpiochipN`). Only `capture` reaches a controller other than `0`. |
 | `component` | component path | required except for `capture` | Where the component goes in `device`. |
 | `active` | `high`, `low` | `high` | The line level that means pressed or on. |
 | `pull` | `none`, `up`, `down` | `none` | Pad pull, where the platform drives one. |
@@ -1056,13 +1056,23 @@ otherwise one to three presses each within `click-gap` of the last are a
 | `pwm-channel` | read-only | | `none`, `hardware` or `software`: what the light holds. A channel other code needs exact moves from hardware to software, so this can change. |
 
 `capture` also reports `records`, `buckets`, `edge-rate`, `last-edge`,
-`backend`, `clock`, `stream-start` and `anchor-error` as status.
+`backend`, `clock`, `stream-start` and `anchor-error` as status. A `button`'s `backend` is
+`interrupt` where its edges arrive on an event link, or `sampled` where it reads the line
+every `debounce`.
 
 ```
 /binding/gpio add name=reset-button device=system component=panel.reset kind=button gpio=18 active=low
 /binding/gpio add name=power-led device=system component=panel.status kind=light gpio=16
 /element/set element=system.panel.status.indicate value=blink
 ```
+
+**Platform notes**
+
+- `capture` is Linux only.
+- Edge interrupts: ESP32, MT7621, STM32, the BL808's M0, and RP2350, where they have not yet run.
+- WS2812 chains: the RP2350's PIO and the BL808's GPIO transmit FIFO.
+- PWM blocks: ESP32 LEDC, RP2350 slices, STM32 TIM1-4 and TIM8, and the BL808's two PWM blocks.
+  The MT7621 has none.
 
 ### `/binding/obd`
 

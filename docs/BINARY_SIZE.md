@@ -162,6 +162,7 @@ Limit is the linker script's `FLASH` region, not the board: the Y23A-RP2350B car
 | 2026-09-23 | #747 | ldc 1.43.0 | 1,597,272 | 41,456 | 4,194,304 | boot guard ladder and retained reset record |
 | 2026-09-23 | ba8561fb | ldc 1.43.0 | 1,597,768 | 41,488 | 4,194,304 | POWMAN always-on timer keeps the wall clock across a reset |
 | 2026-09-30 | ow/system-panel | ldc 1.43.0 | 1,633,316 | 46,490 | 4,194,304 | panel, GPIO buttons and lights, PWM and WS2812 drives |
+| 2026-10-02 | ow/drivers-to-spec | ldc 1.43.0 | 1,638,676 | 46,890 | 4,194,304 | interrupt-driven UART with RX events, rings at open; system reset through the watchdog; watchdog armed and its REASON read; GPIO edge links; debug freeze |
 
 ### MT7621 hEX S, `make BOARD=rb760igs CONFIG=release`
 
@@ -196,6 +197,7 @@ a netbooted image is bounded by RAM instead.
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-09-26 | #781 | ldc 1.43.0 | 1,623,936 | 58,372 | 2,097,152 | first row; per-bank TLSF pools and DFU recovery (urt #339-#345) |
 | 2026-09-30 | ow/system-panel | ldc 1.43.0 | 1,650,256 | 59,588 | 2,097,152 | status LED and K1/K2 on system.panel |
+| 2026-10-02 | ow/drivers-to-spec | ldc 1.43.0 | 1,657,824 | 50,444 | 2,097,152 | UART RX by event with H7 FIFOs, RS-485 DE, RTS/CTS, LPUART1 and rings at open; PWM on TIM1-4 and TIM8; IWDG and reset cause; EXTI buttons; debug freeze |
 
 Add a section for any other configuration the first time it is deployed. Keep the make
 invocation in the heading exact, including FEATURES, HEADLESS, IPV6 and GATEWAY when they
