@@ -635,6 +635,11 @@ decisions are in [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md). The
 10. **A light's `level` prints as `1e+2%`**: `/device/print` shows the `Quantity!(ubyte, Percent)`
     at 100 in exponent form. Find where an integral quantity is formatted as a float.
 
+11. **Changing a binding's `kind` leaves the old kind's elements**: a `light` made a `button`
+    keeps `effect`, `indicate`, `pulse`, `level` and `switch` beside `mode`, `state` and `event`,
+    stale under a component now templated `Button`. Elements outlive a restart by design; a kind
+    change should drop the ones the new kind does not bind.
+
 ## Data model
 
 - **`system_reboot()` loses the last log lines on bare metal**: log sinks flush from the main
@@ -1372,6 +1377,14 @@ this is what remains.
   S2/S3 for the reflex NMI vector and GPIO register layout, and a per-part ISR-safe SAR path or
   an honest "not in ISR" contract for the ADC.
 
+- **Console session restarts leak and slow down each time**, on the H7 and the RP2350 alike.
+  Each Ctrl-C restart of a UART session logged a longer `console.session.update` tick on the H7
+  (245, 285, 340 ms over three restarts, 820 ms later), and a restart often swallows the command
+  sent right after it. The H7's AXI heap grew from 38 KB to 418 KB over a few dozen restarts
+  until a 10,248-byte allocation failed, and the RP2350 grew about 5 KB per port open while idle
+  time added nothing. Opening the port over a CP210x seems to restart the session by itself on
+  alternate opens. Find what a restart keeps.
+
 - **Move WebSocket RX off the tick**: `WebSocket.update()` still polls `_stream.read()` each
   frame; it should install `rx_handler` and decode on delivery. TX is now pull-driven by the
   stream, so the tick carries only RX.
@@ -1408,16 +1421,8 @@ The DevEBox H7 boots and runs OpenWatt with a console, per-bank TLSF pools and D
   the two sync encoders; `HEADLESS=1` gates almost nothing. The APM32's ROM DFU reports a 1 MB
   sector layout, so read the factory flash-size register before trimming: the part may be a VG.
 - **F4 and F7 have never run on hardware.** The APM32F407 board is the first F4 candidate.
-- **Console session restarts slow down each time.** On the H7, each Ctrl-C restart of the UART
-  session logged a longer `console.session.update` tick (245, 285, 340 ms over three restarts in
-  one boot), and the restart often swallows a command sent right after it. Find what accumulates.
 - **No stack guard.** The stack sits at the top of core RAM with statics below it; an overflow
   silently corrupts them. An MPU no-access region under `_stack_low`, or a PSP/MSP split.
-- **No watchdog.** IWDG is never armed, so a hang never resets and the boot guard cannot count it.
-- **Reset-cause flags are not read** (RCC_RSR on H7, RCC_CSR on F4/F7); the reset class comes
-  only from the retained record, so pressing RST on a running board reads as a watchdog crash and
-  three presses descend the ladder. Every reset source drives NRST, so a press is PINRSTF with no
-  other flag; it should count as an operator reset toward the gesture, as a power cycle does.
 - **Queued console output is lost on a deliberate reset.** `system_reset` does not drain the TX
   ring; only the fault path writes through the blocking `uart0_hw_puts`. MT7621's fault report
   flushes its netconsole before resetting; one console flush inside urt's `system_reset` would

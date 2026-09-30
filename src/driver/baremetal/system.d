@@ -1,6 +1,6 @@
 module driver.baremetal.system;
 
-import urt.driver.reset : ResetMark, has_reset_record, has_system_reset, reset_record_mark, reset_record_take, system_reset;
+import urt.driver.reset : ResetCause, ResetMark, has_reset_record, has_system_reset, reset_cause, reset_record_mark, reset_record_take, system_reset;
 import urt.log;
 
 import driver.system : ResetClass, ImageId, OtaImage;
@@ -133,19 +133,16 @@ void classify()
         return;
     g_classified = true;
     ResetMark mark = reset_record_take();
+    immutable ResetCause cause = reset_cause();
     // RP2350's POWMAN.CHIP_RESET is no help: its HAD_* bits are sticky from power-on and a ROM
     // reboot sets nothing else, so the record decides there too.
     static if (!has_reset_record)
     {
-        version (MT7621)
+        if (cause == ResetCause.watchdog)
         {
-            import urt.driver.mt7621.watchdog : reset_by_watchdog;
-            if (reset_by_watchdog())
-            {
-                g_class = ResetClass.crash;
-                g_reason = "watchdog";
-                return;
-            }
+            g_class = ResetClass.crash;
+            g_reason = "watchdog";
+            return;
         }
         g_class = ResetClass.unknown;
         return;
@@ -155,7 +152,17 @@ void classify()
         case ResetMark.none:       g_class = ResetClass.power;      g_reason = "power-on"; return;
         case ResetMark.deliberate: g_class = ResetClass.deliberate; g_reason = "software"; return;
         case ResetMark.crashed:    g_class = ResetClass.crash;      g_reason = "fault"; return;
-        case ResetMark.running:    g_class = ResetClass.crash;      g_reason = "watchdog"; return;
+        case ResetMark.running:
+            // the reset line pressed by hand counts as a power cycle does
+            if (cause == ResetCause.pin)
+            {
+                g_class = ResetClass.power;
+                g_reason = "reset pin";
+                return;
+            }
+            g_class = ResetClass.crash;
+            g_reason = "watchdog";
+            return;
         case ResetMark.updated:    g_class = ResetClass.deliberate; g_reason = "firmware update"; return;
     }
 }
