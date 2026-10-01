@@ -1,3 +1,6 @@
+Warning: truncated output (original token count: 41843)
+Total output lines: 2353
+
 # TODO
 
 - Validate boot-guard OTA handoff on ESP32 hardware with NVS write/commit failures
@@ -856,659 +859,7 @@ decisions are in [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md). The
   customer is the RF433 fan profile and waveform transmitter.
 
 - **Implement element deadband with a maximum refresh interval**: deadband belongs to each
-  subscription, with its own last-delivered anchor. Element metadata supplies the default and
-  subscribers may override it; `Element.latest` always remains exact. Deliver current truth
-  when the absolute movement crosses the band or `refresh=<duration>` expires, then re-anchor.
-  Non-numeric values ignore the band. Recorder and automation subscriptions must use the same
-  mechanism. A later optional EMA decision signal may reduce alternating boundary bias without
-  replacing the delivered value.
-
-- **Recorder durable-holder cutover**: `RecordStream` (`src/manager/record.d`) keys its intake off
-  a raw `Element*` plus a transient pinned `Cursor`, so a destroyed-and-recreated element leaves the
-  stream dangling. Move it onto the durable `EID` (deref-and-heal). This already landed on the
-  `sample-transactions` line, where the recorder reads via `eid.deref`; it rides in when that work
-  rebases on top. Fold the remaining `ElementCursor` decision into that cutover:
-
-  - `ElementCursor.next()` (`src/manager/element.d`) reuses a cursor bit claimed on the *previous*
-    element after an EID heal, so it null-derefs a fresh series or corrupts another cursor's pin.
-    Either make it re-register on the resolved element, or delete it in favour of the bare-EID
-    approach the recorder already took.
-  - `open_series_cursor` aborts with `assert(false, "out of cursors")` on the 17th concurrent
-    cursor; return an invalid cursor instead of aborting in release.
-
-- **Element.value() drops unconvertible values silently**: `value()` discards
-  `update_typed_series`'s failure, so a value that cannot unbox to the element's format (wrong
-  dimension, overflow, non-string to a text element) vanishes with no log and no caller feedback.
-  Decide whether to return the status, warn (rate-limited; this is on every write), or keep it
-  silent by design. As written it hides bring-up bugs.
-
-## DHCPv4 audit
-
-Static audit of `8b17d83f` (client, server, lease, option and message modules). These
-are code findings, not an attribution of the reported S3 Wi-Fi incident. No runtime
-reproduction or packet capture was performed. The P1 findings (NAK recovery, exchange
-scoping, configuration reconciliation, DISCOVER shortening committed leases, lease
-ownership, option-buffer overrun), the INIT-REBOOT silence rule and monotonic lease
-expiry landed: a lease arms its own expiry and returns its own reservation to the pool
-that made it, so no server reaps. What follows is still open.
-
-- **P2: receive validation bypasses transport checks** (both `incoming_packet`
-  methods): raw interface subscriptions do not check IPv4 checksum, fragmentation,
-  or nonzero UDP checksum. UDP length is bounded by the frame rather than IPv4
-  total length. Share a validated DHCP datagram decoder and reject malformed packets
-  before changing lease state; preserve legal IPv4 zero UDP checksums.
-- **P2: pool edits discard live reservations** (`ip/pool.d`, `start`, `end`):
-  changing either endpoint clears the allocation bitmap without reconciling active
-  leases; the running DHCP server can then allocate an already leased address.
-  Rebuild reservations from their owners when changing pool geometry.
-- **Remaining protocol/lifecycle work**: honour client identifiers instead of
-  keying solely by MAC; implement or explicitly delimit relay and DHCPINFORM
-  support; validate infinite lease values; implement conflict detection; consume requested
-  DNS configuration; replace the client's 1s hostname poll with a `manager.system`
-  change signal; ARP-resolve the server for unicast RENEW/RELEASE instead of
-  broadcasting at L2. Audit subscription-capacity failure handling as part of
-  bring-up.
-- **Diagnostics and verification**: packet-level DHCP logs require a compile-time
-  flag. Add a deterministic client/server packet harness covering acquisition, loss,
-  duplicates, NAK recovery, renewal changes, multiple scopes, DECLINE followed by
-  DISCOVER and by quarantine expiry, and a clock jump followed by a duplicate DISCOVER;
-  only the option
-  builder's fit boundaries and the client's T1/T2 derivation are unit-tested today,
-  because NAK recovery, ACK reconciliation and pool ownership all run through the
-  collection and scheduler and need that harness.
-
-## DHCPv6 features
-
-The codec from `67e83fb4` has no operational client, server or relay. The reserved
-client/lease/server collection IDs have no implementations or commands. These
-are feature follow-ups, outside the retrospective merge fixes; choose the first
-role from a concrete deployment need before implementing or advertising it.
-
-- **Client** (`/protocol/dhcp/client6`, IA_NA + IA_PD): landed. Remaining gaps: during a
-  prefix renumbering overlap only the freshest delegated prefix reaches the pool, so the
-  downstream `ra` withdraws the old /64 outright instead of advertising it deprecated
-  alongside the new one; a NoBinding reply
-  restarts from Solicit rather than sending a fresh Request; DNS servers from the ORO are
-  ignored; replies are not checked against the interface's own link-local destination.
-- **Server and leases**: define address/prefix allocation and lease policy,
-  then implement the server and lease collections.
-- **Relay**: define the required relay deployment and supported message forms,
-  then implement request/reply forwarding.
-- **Temporary addresses (IA_TA)**: decide whether support is needed. If so,
-  add its separate four-byte header and codec coverage; the existing twelve-byte
-  IA helpers explicitly accept only IA_NA/IA_PD.
-
-## Sync and peering
-
-The built surface is documented in [docs/SYNC.md](docs/SYNC.md) and [docs/PEERING.md](docs/PEERING.md);
-this is what remains.
-
-- **A cleared template can survive a reconnect on a wholly unclassified path**: an introduction
-  omits `tmpl` when nothing on the path carries a template, and an absent chain is silence, so a
-  mirror that missed a clear while its session was down keeps the stale label if every node on
-  that path, the device included, ended up unclassified. Live clears always travel (refresh
-  frames state unclassified nodes explicitly), and any template left anywhere on the path makes
-  the introduction's chain present and therefore corrective. Closing it means stating `/`-only
-  chains on every introduction, which is most of the bytes of a large unclassified device; nothing
-  clears a template today, so the trade stays as it is until something does.
-
-- **Two nodes race to author a mirror's `status.online`**: every node fabricates `status.online` when
-  it creates a device, mirrors included, so a downstream session may announce its own copy to a relay
-  before the relay introduces the authority's. The relay then sees that session as the node's author
-  and, by the usual rule, never introduces it back, so neither an introduction nor a template refresh
-  ever carries `status`'s shape to it. Seen on the four-node rig: `status` arrived typed or bare
-  depending on which side won. Decide who authors a mirror's liveness element.
-
-- **Refresh filtering scans handles linearly**: `pump_refresh` asks `SyncPeer.handle_of` for each
-  element under each templated component, and `handle_of` is a linear scan of the session's
-  handle tables. A reclassification of a large device on a session holding thousands of handles is
-  O(elements x handles), once per event. Fine at fleet scale and only at configuration time; a
-  keyed handle lookup fixes it if a device ever churns templates.
-
-- **The sync capability byte is full**: `templates` took bit 7 of `SyncCaps`, which is a `ubyte`
-  on the wire (binary `hello`) and in `SyncPeer._remote_caps`. The next capability needs the field
-  widened first; JSON names capabilities as strings and has no such limit.
-
-- **Intern the `add` frame's template chain**: `tmpl` repeats the same short chain on every
-  element of a component, so a full intro pays for it once per element rather than once per
-  component. Formats and enum dictionaries already intern per session (`to.ft_of`,
-  `to.enum_seen`); give the chain the same treatment if intro size becomes the binding
-  constraint. It is a few percent of a burst that is already paced, so it is not urgent.
-
-- **Elect an active authority**: two authorities of one cluster already share a member (each holds
-  its own session), but nothing elects between them. Build the authority-to-authority session
-  carrying membership view, epoch and liveness, elect by `priority` then node-id, and have members
-  follow the elected-active for time discipline and routine control instead of the first claimant
-  (`src/manager/sync/peering.d:410`). That session carries coordination only, never fleet state, so
-  the A-B-member triangle never becomes a sync loop. `/sync/peering print` should show the
-  membership delta under partition.
-
-- **Highly desirable expansion: rank paths and fail over without a restart**:
-  Defer this architectural work from the reconciliation point fix. `discovery.d:137` prefers by link
-  speed then recency. One logical peer owns a set of discovered/configured paths; claims,
-  subscriptions, mirrored state, sequence/ACK state and queued work must survive path changes.
-  The user's provisional default order is MAC > IPv6 > IPv4 > high-bandwidth serial > radio >
-  low-bandwidth serial. Settle how that order combines physical-medium cost with encapsulation,
-  operator overrides, health and recovery hysteresis. IPv6 discovery is not implemented today.
-  Collect RTT per link from acknowledged exchanges (Karn-filtered) to drive the retransmit clock
-  and demote degraded paths. Bind additional paths to the same established remote/session before
-  transferring traffic, and distinguish link failure from a remote reboot/session epoch change.
-  Beacons stay link-local; reachability through the fabric is a separate propagation mechanism.
-
-- **The Pi trips the 5s supervisor watchdog on first boot after an OTA**: observed 2026-09-16,
-  two `no heartbeat for 5000ms; killing app` kills in 40s on the first two launches of a new slot,
-  then the third launch soaked and committed and has been clean since. Slot 156 shows the same kill
-  on 2026-09-15 three times, so this predates the sync tx-feed work and is not caused by it, but
-  first-boot is clearly the worst case: every binding starts, the whole device tree is built and
-  every peer introduces at once. Find what runs long enough to starve the heartbeat at boot (the
-  `log_slow_phase` subdivisions and `collection.update.*` warnings are the handles) rather than
-  raising the deadline. Related: `collection.update.interface.sync1-ws<n>` sits at a steady 70ms
-  per frame against a 50ms budget, also pre-existing, with occasional 500-600ms spikes.
-
-- **Make backpressure a channel property**: the bulk walks (registry and model introduction,
-  live re-arm, history backfill, template refresh) now run as the transport's `tx_handler` and ask
-  `tx_ready` before every frame, so a model larger than the websocket's 128 KB bound mirrors
-  instead of restarting the session, and a paced queue holds 16 KB plus one frame.
-  Every other emitter still pushes: the `val` and `log` queues (`flush_pending_vals` drains an
-  armed event series to its head in one burst; it only stays behind a parked backfill), `tick_dirty`, the
-  `model_sub`/`sub` fan-out, lifecycle fan-out, `result` and `history`, and on a reliable
-  transport a refused push is dropped with no retry path. Move them onto the same feed; oversize
-  control frames must be refused at encode time against `hello.max_frame` rather than dropped in
-  the interface; `val_block` chunking must honour `max_frame` instead of a fixed 256 records; and
-  control frames should ride PCP >= ca with DEI=0 on the underlying packets. `BaseInterface`'s
-  handler slot is single-owner like `Stream`'s, which suits the one-peer websocket; a shared
-  bounded interface would need per-peer arbitration.
-
-- **Harden clock discipline**: gate member sampling, recording and shipping on wall time (an ESP32
-  ships 1970-stamped samples until its first pull), carry a synced flag in `hello`, add a
-  minimum-delta threshold so steady-state polls do not step, and make `adjust_utc_time` step the OS
-  clock on Posix (today it rewrites the current time, so a chained authority drops pushes and
-  forwards them). NTP versus peer discipline needs an owner.
-
-- **Finish claimed device mirroring**: acknowledged claims already subscribe to `device:**`.
-  The remaining model work needs node-scoped naming for remote
-  devices (flat `g_app.devices` collides on `energy`/`system`; a colliding `add_name` adopts onto
-  the local CID), offline/gone on detach (remote devices persist forever with stale values), a paced
-  `model_sub` burst, one quiet skip per unknown type per session, and write routing to the authority;
-  until that lands a console `set` on a proxy diverges it silently.
-
-- **Finish the model plane**: `model_sub` takes patterns, `once` and a `from`/`to` window, nothing
-  else. Still to build: `meta`/`depth` structure browsing, `rate`/`deadband`/`mode` (tightest wins
-  when patterns overlap), `move` and `gone`, `call` with the signature form of `type` (lands with
-  the first callable node; `cancel` reserved), constraint min/max/step on the format block together
-  with element-write enforcement, echo suppression for `set` writers via `SampleUpdate.who`,
-  pinned-cursor paced backfill (backfill serves synchronously inside the burst today), and an
-  element lifecycle hook that carries the element. Formats failing `ows.container_serialisable` are
-  skipped with a log rather than answered `err`, because per-node errors inside a glob burst are
-  unresolved. Confirm `device` is registered as a namespace in `g_app.types`.
-
-- **Converge the object mirror into the model plane**: `add_name`/`bind`/`unbind` become
-  `add`/`sub`/`unsub` on object subtrees, property `set` becomes `set` on projected elements,
-  `reset` becomes `set {reset:true}`, `state` a built-in event node, `create`/`destroy` a `call` on
-  collection methods, `enum_req` the push-only `type` form. Gated on property projection in
-  `id.d`. Keep the sibling transport class buildable on the way: handles are already `ulong`, but
-  `IdAllocator` and `g_formats` allocate through `defaultAllocator`, so shared-memory residency
-  needs a writer/reader ownership rule before the BL808 M0/D0 ring exists.
-
-- **Build the remaining transports**: the shared-memory ring for BL808 M0/D0 (sibling class,
-  length-prefixed SPSC rings, ring-full is queue-and-wait), a `CPCEndpoint` transport for UART/SPI
-  point links (I2C deferred until a data-ready GPIO exists), the RS485 multi-drop envelope (valid
-  Modbus RTU frames with a user-space function code, token is the poll, one scheduler shared with
-  the Modbus master, per-slave baud as addressing metadata from day one), and one-way multicast
-  feeds (publisher-owned handle namespace, gap detection by datagram seq, unicast backfill, never
-  acks on the group). `stream=` on `/sync/peer` materialising the CPC stack, and `remote=` URI
-  schemes beyond UDP, arrive with those. RS485 slave-to-slave goes through the master first;
-  multicast groups are configured before derived.
-
-- **Take the fleet to micros and to the box**: `conf/fleet.id` and `conf/node.id` need an NVS
-  backing where there is no filesystem (`peering.d:595`). Out-of-box onboarding is unbuilt: SoftAP
-  provisioning serving the existing HTTP config surface is nearly free, BLE provisioning needs the
-  peripheral role the stack does not have. An approval mode where the neighbour table is the
-  "waiting for adoption" list is authority policy, not protocol. A member preferring its previous
-  claimant on reconnect is cheap and undecided.
-
-- **Build config authority**: the mesh's genuinely new subsystem. Desired state at the owner,
-  actual state at the executor, and a convergence loop between them: pushed-down config persists
-  at the executor with provenance so it survives a reboot during partition, the owner reasserts on
-  reconnect, deletions need desired-state tombstones, and conflicts resolve by authority tag. Write
-  arbitration generalises `who` to node-scoped provenance. Barriers to clear first: `Prop!`/`Event!`
-  schema fingerprints across mixed-version fleets, first-class node-scoped name syntax, and
-  config-plane authn/authz.
-
-- **Log sync residue**: render origin hostname and producer timestamp in the text sink, and cap the
-  severity a remote can raise on ingress (both left from `#582`). Parked with owners elsewhere: a
-  module-level sync test harness (the reliable sublayer and decoder are unit-testable in isolation),
-  an allocation-flag placement API for `Array`/`MutableString`, and pool-backed packet buffers
-  (`#518`).
-
-- **Re-announce an element whose access changes**: `access` is emitted once, at model-add time
-  (`src/manager/sync/json_encoder.d:551`). A provider that becomes writable later - a Tesla vehicle
-  session reaching `Phase.ready`, or a TWC master taking over or standing down - leaves
-  already-introduced mirrors holding stale access, so
-  their UIs may hide available controls or offer controls without agency. Emit an access change on the
-  control plane, and make the mirror re-evaluate its peer binding.
-
-## Infrastructure
-
-- **urt's platforms.mk drops MbedTLS when a caller sets `VERSIONS`**: it appends `MbedTLS` to
-  `VERSIONS` with a plain assignment, which a command-line `VERSIONS` overrides, so
-  `VERSIONS=Foo` on an mbedTLS platform builds without `version (MbedTLS)`. Add it to `DFLAGS`
-  directly, as OpenWatt's `BOARD_VERSIONS` does.
-
-- **Link follow-ups**: interfaces signal `link_up`/`link_down`, but every Ethernet driver except
-  the SFP port still links with its lifecycle, waiting in Starting for carrier and restarting when
-  it drops. Move them onto the SFP port's model (run from attach, signal the carrier through
-  `carrier()`/`set_link()`) once the link consumers are proven on SFP. IPv6 does not redo DAD when
-  a link comes back, as RFC 4862 wants, and the automation `object:` provider cannot trigger on
-  link transitions, since the manager cannot read an interface's link.
-
-- **A bare ESP32-H2 release build does not fit**: `FEATURES` defaults to `full`, which links at
-  about 2.7 MB against the 1.8125 MB OTA slot, so `make esp-idf-build PLATFORM=esp32-h2
-  CONFIG=release` fails the partition check. The IP tiers buy nothing on a part with no IP
-  interface, so the choice is `switch`, which fits with room to spare but drops the BLE and
-  Zigbee stacks, or `full` in a single-app layout, which gives up OTA. Set it in `features.mk`.
-
-- **`/stream/serial device=uart0` produces nothing on the ESP32-H2**: `device=uart1` with
-  `tx-gpio=24 rx-gpio=23` (UART0's IO_MUX pins, per IDF `soc/esp32h2/uart_pins.h`) drives the
-  DevKitM-1's CH343 bridge and gives a fully interactive console, so the stream and the shim are
-  fine; uart0 stays silent whether IDF's console is on it, on USB-JTAG, or disabled. Something
-  about UART0 after the ROM leaves it is not being re-initialised. Until that is understood the
-  H2's console stays on `usb-serial`.
-
-- **The H2's `usb-serial` console wedges the host USB link**: the firmware logs
-  `usb-serial 'console': online`, but the CDC device drops into Windows error 31 within seconds
-  and only a physical replug clears it; the board never resets meanwhile. Suspect the endpoint
-  being written continuously with nothing draining it. The C3/C6/S3 use the same config without
-  trouble.
-
-- **`/system/fs/format` did not take on the H2**: the command returns no output and littlefs
-  still reports `Corrupted dir pair at {0x0, 0x1}` on the next boot, so `manager.ows` cannot pass
-  on hardware. The format runs as a latent `CommandState` on its own task, and nothing reports
-  whether it failed or never ran.
-
-- **Nothing formats a fresh filesystem**: a failed `lfs_mount` latches `mount_state = -1` and only
-  an explicit `/system/fs/format` clears it. A unittest image has no console, so `manager.ows`
-  can never pass on a board whose storage partition has not been formatted by hand first.
-
-- **A full-tier unittest image leaves the ESP32-H2 29.6 KB of heap**: it fits the fused 3.625 MB
-  test partition but `manager.element` cannot allocate its own assertion buffers. Switch tier
-  leaves 57.6 KB and is the realistic configuration. Either size the heavier element cases
-  against available heap, or state that embedded test runs are switch-tier only.
-
-- **Reduce embedded unittest metadata's internal-RAM cost.** The C5 run for #728
-  retained 29,072 bytes of `TypeInfo_Class` and 15,368 of `ModuleInfo`, leaving about
-  6 KB of DMA-capable heap; the priority-queue depth test failed at its 23rd packet.
-  The runner needs ModuleInfo to discover tests. Investigate flash placement or a
-  smaller test index while preserving required relocation and startup writes.
-
-- **Run remaining embedded tests after an assertion failure.** Without exceptions,
-  `urt.package.run_test` aborts at the first failed assertion. Add test selection or
-  isolated recovery so finding the next failure does not require changing and
-  reflashing the image. Any recovery must handle skipped destructors and dirty
-  shared state; an assertion-handler `longjmp` alone is not sufficient.
-
-- **Application recreation leaves the global page pool initialized**: `Application.~this` does not
-  deinitialize the pool, so a second `create_application()` in the same process asserts in
-  `page_pool_init`. Define ownership and teardown for shared pool users before adding more
-  application-backed integration unittests (found reviewing #718).
-
-- **The low-level `/element/set` command ignores element access**: `Application.element_set`
-  calls `Element.value` without checking `Access.write`, allowing CLI writes to reported
-  read-only identities such as a port's `circuit`. Define whether this command is an explicit
-  diagnostic override or should enforce the same write contract as clients (found in #718).
-
-- **`FEATURES=switch` does not link.** `driver/linux/bridge.d` and `driver/linux/wifi.d` import
-  `protocol.ip.linux_mirror.mirror_refresh_interface` unconditionally, but the switch tier drops
-  `protocol.ip`, so the symbol is undefined at link. Found while testing another branch on
-  2026-09-20; `IPV6=0 GATEWAY=0` builds clean, so it is this tier specifically. Gate the import
-  and its call sites on `has_ip`.
-
-- **`EUILit` is unusable under LDC.** Building an EUI-64 from a string literal at compile time
-  makes LDC 1.42 emit `ICE: overlapping initializers for struct literal`, from `EUI`'s union of a
-  `ulong` and a `ubyte[8]`. DMD accepts it, and every ESP build uses LDC, so the template cannot
-  be used in anything that targets hardware; use the `EUI64(0x01, ...)` constructor instead.
-  Nothing had ever instantiated it, which is also why its own length check was wrong until now.
-  The C-style `EUI64 x = { b: [...] }` initialiser is not an escape: D refuses brace initialisers
-  on a struct that declares a constructor, and `EUI` declares one.
-
-- Fix `urt.conv.parse_uint` overflow: reject values outside `ulong` range using the existing zero-consumption error contract. Revision filenames use checked `parse_int_fast`.
-
-- **Unsubscribe during packet dispatch walks a stale slice**: `BaseInterface.fire_subscribers`
-  and `send` iterate `_subscribers[0 .. _num_subscribers]` captured before the loop, and
-  `unsubscribe` swap-removes into that range. A handler that calls `restart()` (the dhcp6
-  client's declined-reply path, any offline handler) unsubscribes and re-subscribes inside the
-  walk, so the moved-in and re-added entries can receive the same packet again. Snapshot the
-  subscriber set or defer removals until the walk ends.
-
-- **Make clock-sensitive unittests hermetic**: tests that leave a `MonoTime` member at
-  `MonoTime.init` and then compare it against a real `getTime()` only pass once the monotonic
-  clock exceeds the interval under test, so they fail on a freshly booted CI runner. The tesla
-  poll test is fixed; `protocol.obd`'s asleep-probe case still sets `_sent_time = MonoTime.init`
-  and needs the clock past `probe_interval` (`src/protocol/obd/package.d:1034`). The structural
-  answer is to stop reading the real clock in these tests: `handle_protocol_fault` and
-  `issue_requests` call `getTime()` internally, so the time source has to be injectable before
-  the tests can anchor on a synthetic base the way `protocol.tesla.vehicle_session`'s first
-  unittest already does.
-
-- **Repair the runtime test harness**: `test/test_harness.py` pipes stdin into
-  `--interactive`, but startup requires a terminal and the Windows console
-  stream reads console events. Use a terminal or supported session transport.
-  Drain stderr during execution and terminate before waiting for EOF; the
-  current shutdown reads stderr before stopping the process and can hang.
-  `test/test_runner.py` also looks for `bin/x86_64_debug/openwatt` while the makefile emits
-  `bin/x86_64_linux_debug/`, so it finds no Linux build at all.
-
-- **`assert(classref)` still segfaults LDC debug builds**: under `--fno-rtti`, `assert(o)` on a
-  class reference runs the invariant, and urt's `_d_invariant_impl` walks `typeid(o)`, which is
-  gone. #710 moved the two `device.d` sites to `!is null`, but others remain: `debug assert(s)`
-  in `ModbusInterface.startup` (`src/protocol/modbus/iface.d`) kills any debug instance whose
-  startup script creates a Modbus interface. Sweeping every site is whack-a-mole; having
-  `_d_invariant_impl` skip the ClassInfo walk when RTTI is compiled out fixes them all at once.
-
-- **Move Xtensa to LDC 1.43 when esp-clang reaches LLVM 22**: LDC 1.43 emits LLVM 22 bitcode,
-  which no esp-clang yet reads (the latest, esp-21.1.3, is LLVM 21), so Xtensa firmware is
-  pinned to LDC 1.42 and the makefile refuses a newer one. Espressif has shipped a major every
-  six months or so; re-check when the next esp-clang lands.
-
-- **Harden bindings against malformed remote input**: the `ow/dm` review found protocol
-  bindings that abort or deref on data an attacker controls, and these survive. ESPHome still
-  carries `assert(false, "what here?")` on `proto_deserialise` length mismatch
-  (`src/protocol/esphome/client.d`), which is a remote abort on a malformed frame. MQTT's
-  `desc_by_index(mqtt.desc)` (`src/protocol/mqtt/binding.d:216`) has no `desc == ushort.max`
-  check. `ows.load` still reads `first_index`/`last_index`/`stride` off disk unvalidated
-  (`src/manager/ows.d:59`), so a corrupt or hostile container is trusted. External state
-  rejects, it does not assert.
-
-- **Close the descriptor grammar gaps**: `strN` widths parse but are ignored entirely, so any
-  `N` compiles unvalidated while the span comes from the register map
-  (`src/manager/sample/spec.d`). Integer text records no longer accept exponent notation
-  (`"1e3"` parsed on the old `Quantity!long` path and now fails), which is a silent behaviour
-  regression for profiles that used it. `sample_record`'s integer case asserts `pre_scale == 1`
-  while the encode side accepts it (`src/manager/sample/package.d:154`), breaking the
-  encode/decode symmetry. Confirm each is intended before closing.
-
-- **Settle the remaining binding asymmetries**: Tesla's `materialise` fires
-  `notify_element_created` per element but never `tree_changed` or `online`
-  (`src/protocol/tesla/binding.d:291`), where SunSpec does (`sunspec.d:1160`); consumers that
-  rebuild on `tree_changed` miss Tesla devices. MQTT accepts `ip6addr` and other non-scalar
-  user types it cannot then sample (`src/protocol/mqtt/package.d:112`), and reverse-projects a
-  `SysTime` into `MonoTime` by cast. `held_repeat` sets `_last_update` unconditionally on an
-  out-of-order equal sample (`src/manager/element.d:974`), regressing record time. Expression
-  format inference runs `Type.call` intrinsics against exemplar values
-  (`src/manager/expression.d`), which executes code to infer a type.
-
-- **Finish identity follow-ups**:
-
-  - assign deterministic element indices from profile/template and property positions
-    (`src/manager/id.d:382` still allocates sequentially from `_slots.length`);
-  - run an end-to-end sync identity smoke test; and
-  - add ID reclamation and high-watermark telemetry only if distinct-name churn justifies it.
-
-- **Harden reactor clients**:
-
-  - make Linux WiFi raw/monitor paths drop or restart persistently errored pooled FDs so epoll
-    cannot spin;
-  - pass the embedded UART RX callback and buffer size through `uart_open` to the hardware
-    drivers and wake the main loop from RX IRQ/DMA;
-  - move serial writes to on-demand async completion if flow control causes material
-    main-thread stalls; and
-  - move recorder storage I/O to a helper or future async backend if slow media blocks the
-    reactor.
-  The remaining ASH, EZSP, and Zigbee timers should move to scheduled callbacks separately;
-  they are not I/O readiness work.
-
-- **Complete the GPIO sampler backends**:
-
-  - turn cdev `line_seqno` gaps into series gap events (`urt/driver/posix/gpio.d:289`);
-  - enforce live retention ceilings for open-squelch edge streams; and
-  - add the waveform generator API needed by RF433 transmit.
-
-- **Complete `/port` eventing**: replace tty discovery polling with uevents or
-  inotify-backed rescans.
-
-- **Complete the Linux kernel mirror** (`src/protocol/ip/linux_mirror.d`): a netlink transport
-  failure stalls the main loop on the writer's 1s `SO_RCVTIMEO` backstop; move the ACK wait onto
-  the reactor. A netdev that appears after its addresses exist (hot-plugged NIC) is only
-  re-pushed by a property edit or the bridge offload's refresh; hook netdev appearance from the
-  route-netlink watch above. The startup sweep of stale `RTPROT_OPENWATT` entries relies on
-  `IFA_PROTO` for addresses, which kernels before 5.18 ignore; on those only routes are swept.
-
-- **Neighbour table as a collection** (agreed 2026-09-09, next PR after #681): make
-  `/protocol/ip/neighbour` and `neighbour6` collections (`address`, `mac`, `interface`, read-only
-  `state`) on every build. Learned entries are dynamic objects, D-flagged like SLAAC addresses:
-  on kernel-mirror builds created, updated and destroyed from `RTNLGRP_NEIGH` events on the
-  shared listener in `driver/linux/netlink.d` (seeded by one `RTM_GETNEIGH` dump), on the
-  internal stack from the existing cache. Static entries sync back: the mirror tracks them like
-  addresses and routes and pushes `NUD_PERMANENT | NTF_EXT_LEARNED`, the flag doubling as the
-  ownership marker for the startup sweep since neighbours carry no protocol tag; the internal
-  stack installs them as permanent cache entries. The function-style neighbour prints go away.
-  While there, move the listener off its per-tick non-blocking recv onto the reactor via
-  `fdwatch`.
-
-- **Fix the HTTP binding request-state wedge**: reproduce with request tracing, then replace
-  FIFO response correlation with request handles. A rejected or timed-out submission must
-  clear `in_flight`; late responses must not complete a different request.
-
-- **Bound the TCP push backlog once its writers can take a partial write**: `TCPConnection.send()`
-  queues pages without limit because MQTT packet emission (`src/protocol/mqtt/connection.d`),
-  HTTP `write_message`/`format_message` responses, the `/api` JSON dumps (`/api/get` responses
-  around 140 KB already truncate) and console session output push a whole message in one
-  `write()` and ignore the return; a cap would truncate their protocol streams. Migrate each to a
-  `tx_handler` producer (the fileserver and the API schema endpoint are the pattern), or have it
-  check `tx_backlog` before committing a message, then enforce a backlog bound in `send()`.
-
-- **The websocket's 128 KB hard bound is sized for the desktop, not for a micro**: pulled
-  producers now stop at 16 KB, but every pushed emitter can still drive `_tx_pending` to the hard
-  bound against a stalled reader, as one contiguous allocation per session. The bound exists only
-  to exceed the largest committed frame (sync: 64 KB), so it falls with `hello.max_frame`: once
-  pushed emitters are on the feed and `max_frame` is negotiated per platform, derive the bound
-  from it. Until then a no-PSRAM ESP32 serving two stalled browsers can be asked for 256 KB of
-  contiguous heap it does not have. Measure the heap headroom on each target that serves `/sync`
-  over a websocket, and check what `_tx_pending` does when that allocation fails.
-
-- **WebSocket TX should retain frame descriptors, not a byte array**: `_tx_pending` is a contiguous
-  buffer compacted on each append, so the pending backlog is copied on every drain cycle. Keep a
-  bounded ring of frame pages with framing progress instead, and stop masking in place. With the
-  ring in place a `tx_handler` producer can hand over page-backed packets, as `Stream`'s hands over
-  pages, and the pulled path stops copying the encoder buffer into the queue.
-
-- **Take the caller's `MemFlags` through the page-pool jumbo path**: `pagepool.d` hard-codes
-  `MemFlags.dma` for any request above the largest slab category, which on ESP32 confines a
-  large page to internal SRAM while PSRAM sits idle. Only a page that reaches a NIC ring needs
-  DMA; ESP32 WiFi copies on `esp_wifi_internal_tx`, and TCP TX pages are copied into the pcb
-  send buffer. Nothing in tree hands a pool jumbo to hardware, so the default should be the
-  caller's flags with no DMA bit. Alongside that, surface `page_pool_stats()` and the ESP
-  `heap_caps` per-capability free/largest figures through a release-safe console command; the
-  pool collects per-category and jumbo histograms, counts and high-water marks and nothing
-  reads them.
-
-- **Diagnose the ESP32-S3 DHCP client's cold-boot DISCOVER loop**: `openwatt-4547` (WiFi
-  station, node `2BF1FA7C63674547`) broadcasts DISCOVER every 4 to 30 s from a cold boot and never
-  sends REQUEST. On its LAN two servers share one L2: `192.168.0.1` and `192.168.3.1` (the same
-  MikroTik). Only the `.3.1` OFFER (`192.168.3.11`, 600 s) is ever seen on the wire and the client
-  ignores it, while the `.0.1` server that leased it `192.168.0.88` for 396 renewals no longer
-  answers. No ARP probe, DECLINE or REQUEST leaves the node. The node's own log is needed; it
-  ships over sync only once peered, and the Pi is not ingesting the node's AF_ETHERNET beacon
-  either (`/sync/neighbor print` is empty while the `0x88b5` beacon lands on `eth0` every 30 s,
-  although the same beacon produced `appeared via ether2` earlier).
-
-- **A stalled sync log subscriber blinds local logging**: the log router holds each record in its
-  128-record delivery queue until every consumer acks, and a `log_sub` peer whose transport has
-  stopped draining never acks, so new records are dropped at ingress for every sink, including
-  stderr and history. Verified on Windows with a stalled WebSocket subscriber: the transport's own
-  `tx overflow` warning never reached the log. Evict or bypass a consumer that holds the queue past
-  a bound rather than dropping for everyone.
-
-- **Symbolised traces are garbage on DMD/Windows**: `_resolve_batch` resolves every frame to
-  `RtlUserThreadStart` with vctools file names, in crash traces and in `capture_trace` callers
-  alike, so a trace from a debug build on Windows identifies nothing.
-
-- **The phase-angle delay LUT interpolates a cube root linearly at both extremes**:
-  `phase_delay_frac` indexes a 33-entry table by `level_q16 >> 11` and interpolates linearly
-  across each 3.125%-wide interval, but a(P) approaches a cube root at both ends, so the chord
-  departs badly from the curve there. Mid-way through the bottom interval a commanded 1.56%
-  delivers about 0.39%, a 4x error exactly where a diversion controller wants fine trickle
-  control; the top interval errs about 1.2 points the other way. Breakpoints are exact, and
-  mid-range is fine. Fix with non-uniform breakpoints clustered at the extremes, or more
-  entries; burst-fire is unaffected.
-
-- **Verify phase-angle linearity against a trusted instrument**: the regulator now locks and
-  fires on an ESP32-S3 (bench Waveshare, BTA16 + CT3021 gate opto + PC817 detector, 50 Hz lock,
-  100 clean edges/s). Burst-fire tracks the commanded level, but phase-angle measured low at
-  50%: a bench meter read 165.1 V where the 25% point's 124.3 V implies 175.8 V, about 44% power
-  for a commanded 50%. That meter is average-responding on a chopped waveform and is the prime
-  suspect; a constant zero-cross timing offset was ruled out arithmetically, since a late offset
-  raises the ratio rather than lowering it and an early offset large enough to fit implies an
-  impossible 211 V mains. Re-measure with a true-RMS or power meter before touching the phase
-  LUT, and add the signed `zc-offset` property from the design note only if a real lead time
-  shows up.
-
-- **Port the last two classic-only ESP32 primitives**: counters, GPIO interrupts, link slots and
-  the ADC (oneshot reads, calibration by the IDF's own scheme macro) are available
-  across the family. Two remain gated to classic ESP32 in
-  `urt/driver/esp32`: the reflex (NMI-tier link) synthesises Xtensa `xt_nmi` code against classic
-  pin ranges, and the ISR-side raw ADC read drives the classic SAR registers directly
-  (`adc_hw_can_read_critical` is false elsewhere). Each needs its own port and hardware check:
-  S2/S3 for the reflex NMI vector and GPIO register layout, and a per-part ISR-safe SAR path or
-  an honest "not in ISR" contract for the ADC.
-
-- **Move WebSocket RX off the tick**: `WebSocket.update()` still polls `_stream.read()` each
-  frame; it should install `rx_handler` and decode on delivery. TX is now pull-driven by the
-  stream, so the tick carries only RX.
-
-- **Fix `/device/print` on non-terminal sessions**: `/api/cli/execute` crashes the process and
-  a piped interactive session prints nothing. Audit `DeviceTreeView` and other live views for
-  terminal-channel assumptions.
-
-- **Document `/protocol/mqtt/broker` in CLI.md**: the broker, its `discover` prefixes and the Home
-  Assistant discovery it drives (entity mapping, writers, availability aggregated into
-  `status.online`) have no CLI.md section at all.
-
-- **Clarify TLS server transport ownership**: ensure shutdown cannot destroy a listener twice
-  when a server-side TCP stream takes multiple ticks to stop.
-
-- **Make profile lifetime explicit**: either keep profiles process-lifetime and enforce that
-  contract, or give borrowers ownership before allowing reload/free. Borrowers include
-  accumulator source paths, element metadata, profile enums, protocol element descriptors,
-  and other slices into profile string/section storage.
-
-- **Stack high-water marks beyond the main stack**: `sysinfo` reports only the main stack.
-  Fibre stacks (16 KB embedded, 64 KB hosted; used by zigbee and ezsp) could be painted in
-  `co_create` and reported per fibre, which is where an undersized stack would hide. BK7231's
-  `bk_init_mode_stacks` colours its IRQ, FIQ and SYS stacks, but they live in `.bss.stacks`,
-  which the reset path's bss zero wipes straight after; paint them after the zero and the IRQ
-  and FIQ marks are a scan away.
-
-### STM32 bring-up follow-ups (2026-09-26)
-
-The DevEBox H7 boots and runs OpenWatt with a console, per-bank TLSF pools and DFU recovery.
-
-- **The JZ-F407VET6 image is ~70 KB over its 512 KB flash** (`BOARD=jz-f407vet6`, `switch`,
-  TINY). Candidates: CLI helpers (~76 KB), the element catalogue (15.5 KB), libm trig (~15 KB),
-  the two sync encoders; `HEADLESS=1` gates almost nothing. The APM32's ROM DFU reports a 1 MB
-  sector layout, so read the factory flash-size register before trimming: the part may be a VG.
-- **F4 and F7 have never run on hardware.** The APM32F407 board is the first F4 candidate.
-- **Console session restarts slow down each time.** On the H7, each Ctrl-C restart of the UART
-  session logged a longer `console.session.update` tick (245, 285, 340 ms over three restarts in
-  one boot), and the restart often swallows a command sent right after it. Find what accumulates.
-- **No stack guard.** The stack sits at the top of core RAM with statics below it; an overflow
-  silently corrupts them. An MPU no-access region under `_stack_low`, or a PSP/MSP split.
-- **No watchdog.** IWDG is never armed, so a hang never resets and the boot guard cannot count it.
-- **Reset-cause flags are not read** (RCC_RSR on H7, RCC_CSR on F4/F7); the reset class comes
-  only from the retained record, so pressing RST on a running board reads as a watchdog crash and
-  three presses descend the ladder. Every reset source drives NRST, so a press is PINRSTF with no
-  other flag; it should count as an operator reset toward the gesture, as a power cycle does.
-- **Queued console output is lost on a deliberate reset.** `system_reset` does not drain the TX
-  ring; only the fault path writes through the blocking `uart0_hw_puts`. MT7621's fault report
-  flushes its netconsole before resetting; one console flush inside urt's `system_reset` would
-  serve every part and every reset path.
-- **The UART rings are reserved for every port**: RX 256 and TX 1024 bytes each, 7.7 KB of F4
-  core RAM and 10 KB on H7, though only the console opens. Settle with the event-driven UART
-  contract for all micros (page delivery on RX idle, TX pulled from a submission queue).
-- **No reflex/event backend.** EXTI, and on H7 EXTI to DMAMUX to DMA to BSRR, would give STM32
-  what the ESP32 event links do.
-- **Check whether the page pool's DMA pages belong in the H7's uncached SRAM1-3.** It takes 9 KB
-  there at boot.
-
-Bare-metal follow-ups from the same series:
-
-- **The shared TLSF heap core has not run on Bouffalo, BK7231N/T or MT7621 hardware.** urt's
-  `driver/baremetal/heap` now serves every bare-metal platform; only the STM32H7 and RP2350 have
-  run it. Run the unit-test images on a BL618, a BL808, a BK7231N and the MT7621.
-- **The MT7621 fault report prints no backtrace.** `urt.exception.write_backtrace` is shared by
-  every bare-metal part and MIPS already unwinds in `capture_trace`; walking from the faulting
-  frame needs the unwind seeded from the trapped epc, ra and sp rather than the handler's own.
-- **A bare-metal assert spins forever**, so no boot guard counts it. It should record a crash
-  and reset, as the Cortex-M fault report does.
-- **The bare-metal assert backtrace skip is a fixed count**, and the number of frames the
-  capture wrappers leave differs between builds: the skip is right in the RP2350 unittest image
-  (per the #341 review) but the fault frames on an STM32H7 release image imply one frame more.
-  The Cortex-M fault path anchors on EXC_RETURN instead; the assert path wants a similar anchor,
-  such as starting after the last return address inside `urt_assert`.
-- **Check the RP2350 console for truncated output.** Its UART write fills the 32-byte FIFO and
-  returns short, and the console treats a short write as sent; the STM32 console lost output the
-  same way until its UART went interrupt driven.
-
-### RP2350 bring-up follow-ups (2026-09-20)
-
-Boots and runs on a WeAct RP2350B Core, with an interactive console on UART1 (GPIO8 TX,
-GPIO21 RX): commands echo and execute, and the heartbeat ticks idle. `xosc_hz` is confirmed
-at 12MHz by clean UART framing. Outstanding:
-
-- **`UartConfig.tx_gpio`/`rx_gpio` are ignored.** The driver routes a fixed default pair per
-  port, so a stream cannot pick its own pins. Picking them needs a funcsel per pin, not per
-  port: most UART pins are funcsel 2, but the alternates (GPIO6, 10, 14, 18, 22, 23) are 0x0b.
-- **The `FLASH` region caps at 4MB.** The Core carries 16MB and there is no partition table,
-  so the ceiling is the linker script's alone.
-- **Unit tests stop at the first failure on hardware.** All 180 modules pass now, and
-  reflashing no longer needs the button, so a regression costs a build cycle rather than a
-  trip to the bench. `NOEXCEPTIONS=0`, which would let `run_test` catch and carry on, still
-  does not build on baremetal: `dwarfeh.d` casts `Throwable` to `Error` and urt's no-RTTI
-  `_d_cast` wants a `dyn_cast!Error` contract that `Throwable` does not declare.
-- **The app is silent after the unit tests finish.** The runner prints `Process restarting...`
-  and nothing follows. A release image boots to a working console, so this is specific to the
-  `CONFIG=unittest` image, not to app startup.
-- **More of the boot ROM is worth taking.** `urt/driver/rp2350/bootrom.d` has the table
-  lookup, so each addition is a signature and a code. Still unused:
-  `CONNECT_INTERNAL_FLASH`, `FLASH_EXIT_XIP`, `FLASH_RANGE_ERASE`, `FLASH_RANGE_PROGRAM`,
-  `FLASH_FLUSH_CACHE` and `FLASH_ENTER_CMD_XIP` are the whole erase/program sequence, so
-  littlefs and config persistence need no QMI driver; `OTP_ACCESS` reaches the OTP where a
-  durable identity or MAC would live; and `LOAD_PARTITION_TABLE`/`PICK_AB_PARTITION`/
-  `CHAIN_IMAGE`/`EXPLICIT_BUY` are an A/B OTA framework already in silicon, `EXPLICIT_BUY`
-  being the commit step that gives rollback. No crypto is exported, so none of this touches
-  the AES-GCM gap.
-
-  Note `RESET_USB_BOOT` is RP2040 only. RP2350 reboots through `REBOOT` with
-  `BOOT_TYPE_BOOTSEL`, and the lookup pointer sits at `0x16`, not the RP2040 `0x18`; the
-  wrong one reads a bogus pointer and hard faults inside ROM.
-
-- **Drive the RP2350 SHA256 block.** `SHA256_BASE 0x400F8000` (`CSR`, `WDATA`, `SUM0..7`)
-  is still unused. It is an optimisation rather than a gap, since urt already has software
-  SHA-256. The TRNG beside it is driven.
-- **Measure the TRNG sample interval.** `trng.d` leaves `SAMPLE_CNT1` at its `0xFFFF` reset
-  value, the slowest the block offers, because a conservative interval is the safe default
-  for entropy and nothing had measured the alternative. That is roughly 12.6M cycles per
-  192-bit collection before the von Neumann decorrelator discards anything, so a key or a
-  nonce costs real time. The rate against entropy quality wants measuring before it is
-  tuned.
-- **Generate register definitions instead of hand-writing them.** Three constants in the
-  RP2350 driver were wrong (`PLL_SYS_BASE`, `RESET_IO_BANK0`, and pad ISO never cleared)
-  because nothing checked them against a primary source. A small generator emitting
-  `regs.d` from the pico-sdk headers would be authoritative and re-runnable; pico-sdk is
-  BSD-3-Clause against urt's MIT, so the attribution question needs deciding first.
-- **No USB device stack.** `router/stream/usb_serial.d` is ESP32-only and rides that part's
-  hardware USB-Serial-JTAG block. RP2350 needs a real CDC-ACM driver (controller bring-up,
-  EP0, enumeration, bulk endpoints); until then the board does not enumerate at all once
-  our image is running, and the UART is the only console.
-- **The board is a Y23A-RP2350B**, not the WeAct whose pico-sdk header bring-up used; its WS2812
-  on GP20 is `system.panel.status`. Its other pins, and any user key, are unverified.
-
-### BL808 on the M1s Dock (2026-09-29)
-
-- **M0 runs out of DMA memory at boot** on this branch: `heap.alloc: OOM! size=344 flags=4` right
-  after `BL808 M0: ready`, and D0 never prints. Nothing had been flashed since May, so whether
-  master does the same is unknown; start there.
-- **The WS2812 on GPIO8 has not lit**, because D0 has not run; the D0 bit-bang backend moved
+  subscription, with its own…11843 tokens truncated…ved
   behind `urt.driver.ws2812` untested.
 
 ### MT7621 bring-up follow-ups (2026-09-26)
@@ -2023,3 +1374,331 @@ report, tuya-datapoint, read-response and priming paths.
 - **`conf/profiles` is a submodule.** A profile change ships separately from the binary and
   has to be deployed to a target in its own right, so a binary that expects the new mapping
   can meet an old profile and vice versa.
+
+- **OpenWatt #735 ESP32-S31 board follow-up**: verify fitted PSRAM detection,
+  boot memory test and external-heap operation on the function coreboard; finish
+  Ethernet and filesystem provisioning checks and decide preferred-heap behavior.
+  Complete the C5/C6 radio creation gap and unittest build-policy integration (#728);
+  the review's fresh debug/release builds did not flash hardware or repeat a full
+  coredump build.
+
+- **OpenWatt #742 H2 readiness**: choose and document a supported default or board
+  profile whose release image fits the OTA slot, align `default.conf` services with
+  that feature preset, and verify a fresh boot. Establish the committed USB console
+  on the intended board. Merge uRT #317 atomics support and pin the resulting
+  revision before relying on H2. Existing partition arithmetic is validated; the
+  review had no H2 firmware build or hardware run.
+
+
+## Legacy subsystem audit (2026-09-21)
+
+This is the consolidated action list from the retrospective audit; detailed
+evidence reports remain outside this checklist PR. The audit does not implement
+these changes.
+
+### Cross-subsystem repair order
+
+Treat this order as the working plan; the subsystem bullets below are the complete
+action list. The recurring cause is
+unclear ownership at asynchronous boundaries: accepted bytes, pending callbacks,
+timeouts and parser tails outlive or disagree with their owners.
+
+1. **Repair stream contracts first.** Forward RX through wrappers; distinguish
+   connection generations, discard, flush and drain; retain accepted TX suffixes;
+   bound progress under backpressure. This unblocks Telnet, MQTT, HTTP, WebSocket,
+   CPC, CAN/Ebyte, TWC, ESPHome and PPP work. ST-04/05's FIFO rollover/alignment
+   remains a separate ring correction.
+2. **Unify request ownership.** Use stable handles, retire pending records before
+   callbacks, cancel on owner teardown, and deliver one terminal result. Keep retry
+   policy protocol-specific. Apply across Modbus, GoodWe, HTTP, CPC, SNMP, ESPHome
+   and OBD; cover inline completion, late replies, restart and two owners issuing
+   equivalent requests.
+3. **Share checked byte-reading mechanics.** A bounded slice cursor should report
+   incomplete, invalid or complete input distinctly. Keep protocol semantics in
+   their codecs: DNS compression, HTTP status/body context, MQTT variable lengths,
+   Telnet IAC, WebSocket masking/continuation, TWC escapes, Spinel varints, BER and
+   CAN/ISO-TP each have different rules. Test every truncation point and capacity
+   boundary; malformed input must return errors without assertions or unbounded
+   retention. A shared cursor does not prove alignment for casts.
+4. **Restore protocol semantics and fail closed.** After ownership/framing is sound,
+   fix full response matching, register/PID spans, negotiated versions, status and
+   write transactions. Keep unfinished capabilities explicit: PPP stubs, dormant
+   SNMP without MIB integration, DNS master outline with existing `ow/dns` work,
+   and Spinel/Thread groundwork must not be presented as complete service.
+5. **Simplify after behavior is explicit.** Candidate shared helpers are framed
+   stream ownership, callback-safe transaction retirement, checked cursors,
+   IP endpoint parsing via `IPClient` where ownership fits, sample completion and
+   neutral observation hooks independent of file logging. Preserve real differences:
+   protocol cadence and priority are not interchangeable (OBD realtime is 400ms;
+   Modbus carries priority policy). Remove derivable state and measure layout only
+   after the owning repair.
+
+- **Modbus transaction correctness and lifetime (MB-01/02/11/12)**: match response
+  destination and frame role as well as sequence/server; revoke binding/node
+  callbacks before shutdown frees their owners; unify competing request timers
+  and retry ownership; derive TCP mode from protocol and validate the full wire
+  transaction ID. Cover concurrent nodes, owner removal/rebind, inline completion,
+  queue delay and late responses. See Modbus audit.
+- **Modbus framing and checked PDU views (MB-03/04/05/06)**: repair TCP request
+  classification, implement or explicitly reject ASCII, preserve fragmented
+  auto-detection input, correct RTU CRC/consumed-length accounting and minimum
+  frames, and share function-aware length validation across consumers.
+- **Modbus ranges and encoder consolidation (MB-07/08/09/10/14)**: make batch
+  ranges monotonic for overlapping fields, share operation limits (125 read
+  registers, 1968 written coils), use widened address arithmetic in serving, fold
+  legacy coil encoding into the packed encoder, and remove the shifted exception
+  name table. Executed codec probes and boundary acceptance cases are in the audit.
+- **Modbus registry and hook ownership (MB-13 and consolidation table)**: reconcile
+  persistent/ephemeral address allocation, report exhaustion/conflicts without
+  assertions, give mappings managed interface lifetime, and make serving/snooping
+  hook ownership explicit. Measure pending-record layout and remove duplicated
+  state as part of the owning structural change.
+
+- **Stream contracts and composition (ST-01/06/07)**: forward RX events through
+  wrappers, define connection-generation queue boundaries, and separate RX discard
+  from TX flush/drain. Preserve polling compatibility until all producers deliver
+  events. See stream audit.
+- **BridgeStream event-driven forwarding (ST-02/03)**: replace synchronous retry
+  loops and per-frame reads with bounded per-member progress driven by RX/TX
+  events; handle offline members, signed read results and partial acceptance.
+- **Memory FIFO contract (ST-04/05)**: fix non-power-of-two counter rollover,
+  validate atomic cursor alignment and capacity, and consider a shared ring view
+  rather than another independent implementation. An executed reproduction is
+  included in the stream audit.
+- **Stream efficiency and observability (ST-08/09/10/11/12)**: share accepted-prefix
+  tap/accounting logic independently of file logging, use monotonic scheduled
+  retries, avoid repeated front-removal copies, remove unused Stream state/options,
+  and migrate deprecated update polling with explicit platform recovery behavior.
+  Review USB serial global-driver ownership and partial vector-write reporting as
+  described in the audit's bounded follow-up.
+
+- **Telnet incremental RX and ordered events (TN-01/03/04/05/06)**: preserve output
+  beyond caller capacity, replace truncating tail scans with bounded incremental
+  decoding, unescape subnegotiation before validation, preserve interrupt ordering,
+  and migrate transport-wrapper-Session receive/terminal propagation to events.
+  See Telnet audit for executed probes and limits.
+- **Telnet output ownership and observation (TN-02/07)**: share bounded ordered
+  output for normal/page/control writes; preserve accepted-prefix semantics and
+  partial escapes; handle backpressure in Session and client command callers;
+  share logical-byte counters/taps independently of file logging with ST-08.
+- **Telnet negotiation and shared endpoint parsing (audit follow-up)**: validate
+  option numbers beyond bitmap width, decline or implement CHARSET, and replace
+  first-colon parsing with a hostname/IPv6-aware endpoint helper. Review command
+  completion/state redundancy as part of the shared event migration; measure layout
+  after simplification. Newer master's managed TelnetServer conversion is excluded.
+
+- **MQTT topic and subscription ownership (MQ-01/02/09)**: share topic-level
+  semantics across live/direct/retained matching, preserve trailing empty levels,
+  make each wire filter own its local callbacks, and use full delegate identity
+  for broker callbacks. Cover duplicate add, shared-filter removal and reconnect.
+  See MQTT audit for executed reproductions.
+- **MQTT framed I/O and event migration (MQ-03/04/05/10)**: share incremental
+  framing and bounded output ownership, preserve partial writes, drain final
+  responses explicitly, schedule keep-alive/expiry, and replace per-frame reads.
+  Remove 64-KiB transient subscription buffers and duplicated/dead state; measure
+  small-target stack/layout and idle-work costs.
+- **MQTT session and delivery semantics (MQ-06/07/08)**: honour retain-as-published,
+  settle/reconfigure Wills during session takeover, and update all topic-mapped
+  elements. Validate empty text samples, expiry before session resume, repeated
+  CONNECT transitions, and packet-ID ownership across pending acknowledgements.
+- **MQTT supported capabilities and bounded resources (audit follow-up)**: define
+  MQTT 5 property/capability support including negotiated limits, assigned IDs,
+  subscription IDs/shared subscriptions, message expiry and Will delay; finish or
+  explicitly scope QoS machinery. Prune empty trie nodes, validate public broker
+  input, and establish mutation-safe callback dispatch. Keep existing descriptor,
+  sample-format and discovery migrations linked rather than duplicating their work.
+
+- **GoodWe request ownership (GW-01/02/04)**: dispatch the retired request's own
+  callback and context, support/reject coalesced read ownership explicitly, and
+  revoke binding callbacks on teardown. Test array mutation/reentrancy across
+  response, timeout and shutdown. See GoodWe audit.
+- **GoodWe checked data and endpoints (GW-05/06/07)**: validate handshake/profile
+  payload spans before decoding, complete constants only after successful samples,
+  reconcile frame capacity with payload admission, and route by full UDP endpoint.
+  Consolidate endpoint parsing/getters and reject invalid port text.
+- **GoodWe event-driven cadence and health (GW-03/08)**: replace the never-advanced
+  sampling clock and function bitset with scheduled function requests, migrate UDP
+  receive and deadlines to events, define idle health probes and socket recovery,
+  and remove duplicate state/checks. Resolve execute-request completion, verify
+  negotiated destination addressing offline, and define validated receive activity.
+
+- **Wall Connector framing and checked codec (TWC-01/02/03/04)**: retain fragmented
+  input, escape checksum bytes, validate every decoded message span/version and
+  worst-case TX size, and preserve short-write suffixes. Share bounded escape/TX
+  helpers where PPP SLIP policy permits. See the executed round-trip/fragmentation
+  probes and acceptance cases in TWC audit.
+- **Wall Connector event lifecycle and pacing (TWC-05/06)**: move interface RX and
+  dependency supervision to callbacks/subscriptions, recover from read errors,
+  skip missed timer slots instead of bursting bus sends, and reconcile heartbeat
+  and request-sequence bookkeeping with accepted TX. Preserve fleet reservations;
+  simplify redundant state and measure layout with the repaired ownership model.
+
+- **HTTP incremental codec and response semantics (HT-01/02/03/05/06)**: distinguish
+  partial first lines from errors, share case-insensitive field/token handling,
+  implement response method/status/EOF framing and interim response ownership,
+  terminate Basic fields, and frame empty responses correctly. See
+  HTTP audit for executed local evidence.
+- **HTTP encoding and resource contracts (HT-04; bounded follow-up)**: advertise
+  only supported decoding, replace unsupported-content assertions with completion
+  errors, bound incomplete headers and decoded bodies, define chunk extensions,
+  and share URL/form/JSON escaping and authority parsing (including the host stub).
+- **HTTP write intent and submission options (HT-08/09)**: separate per-element
+  write intent from read cadence, clear only accepted snapshots, preserve changes
+  during in-flight requests, set one-shot flags before submission, and define
+  constant-read retries and bounded redirect handling.
+- **HTTP event-driven transport and shared output (HT-10)**: migrate client RX and
+  deadlines, server session reaping and binding cadence from updates to events;
+  retain partial TX and drain before close. Verify session RX-handler release on
+  offline/upgrade/reclamation, remove unnecessary full-body copies, and consolidate
+  derived scheduling/sample state before measuring layout. Newer master's client
+  callback/cleanup fixes are excluded from this audit's new work.
+
+- **WebSocket receive correctness (WS-01/02/03/06)**: share masked/unmasked message
+  assembly, process two-byte empty frames promptly, correct extended-length limits,
+  bound reassembly, and enforce role/control/UTF-8/negotiated-extension rules. See
+  WebSocket audit for executed ordinary-frame
+  probes. Define subprotocol/extension support and optional outbound fragmentation.
+- **WebSocket lifecycle and retained handshake/close output (WS-04/05)**: own and
+  revoke HTTP handler registrations, retain configured URI across restart, and
+  complete opening/closing only after output drains or a deadline expires. Verify
+  server/URI replacement, multiple hooks and callback-triggered destruction.
+- **WebSocket event migration and portability (WS-07)**: replace receive polling
+  and read-error assertions with callbacks/recovery, schedule handshake/close and
+  optional ping/pong deadlines, align the TX mask buffer, remove empty updates and
+  unused negotiation state, then measure layout. Preserve master's newer TX pull
+  and low-water support rather than reimplementing it.
+
+- **PPP/SLIP/PPPoE support boundary (PP-01/02)**: gate or reject unsupported
+  collections/modes instead of entering assertion stubs, fix PPPoE defaults and
+  nonterminating server startup, and admit only implemented transports. The feature
+  table now correctly says Outline. See PPP audit.
+- **PPP lifecycle and shared framing (PP-03/04)**: move packet subscriptions into
+  balanced startup/shutdown/state handling; replace the incomplete polling parser
+  with bounded incremental RX and completion-driven TX. Share session/role and
+  escaping primitives where semantics match TWC SLIP, keep PPP framing/FCS separate,
+  remove unused tail/duplicate stubs, and add offline acceptance tests before
+  claiming functional support.
+
+- **Spinel/Thread groundwork correlation and readiness (SP-01/04)**: validate IID,
+  route replies by IID/TID and expected property, distinguish reset/error status,
+  require valid supported version/capability evidence, restart interrogation after
+  a radio reset, and publish cleared status on shutdown. Historical PR #26 was
+  closed unmerged; #408 is the current lineage. See Spinel/Thread review.
+- **Spinel checked shared codec (SP-02/03)**: replace three disagreeing packed-int
+  readers with one bounded cursor, fix three-byte length accounting, validate all
+  format families and spans, and make borrowed/temporary ownership explicit.
+  Probe dormant scalar-array/D templates before expanding use; consider lazy arrays
+  instead of two-pass decoding. Preserve master's typed-allocation improvement.
+- **Spinel architecture follow-up**: keep CPC envelopes at the transport edge,
+  validate rather than mask IID values, simplify startup flags/state and layout,
+  and use transaction completion/scheduled deadlines for added operations. Define
+  the RCP/NCP and WPAN/IP boundary before claiming Thread data-plane support.
+
+- **CPC completion and command lifetime (CP-01/03/04/07)**: ensure exactly one
+  async callback across endpoint/trunk, retain handles through ACK/failure/abort,
+  cancel detached owners' unsent control commands, allow the final connect reply,
+  and honour queue deadline/urgency policy. Test mismatched/late replies and sequence
+  reuse. See CPC audit.
+- **CPC registration, wire ownership and timers (CP-02/05/06)**: initialize callback
+  state before synchronous buffered RX delivery, retain/drain partial I/S/U output,
+  schedule retry/command/restart events, remove empty endpoint updates, and test
+  callback-driven teardown. Share recycling/wire helpers, measure Channel layout
+  and set a global retained-memory budget in addition to per-channel bounds.
+- **CPC/Spinel capability roadmap**: explicitly decide native HDLC transport,
+  Bluetooth HCI, secure CPC sessions, v4 compatibility and larger/adaptive windows;
+  preserve clear unsupported-mode refusal until implemented and tested. These
+  source TODOs are capability follow-ups, not defects in the supported v5 mode.
+
+- **NTP response admission and independent deadline (NT-01/02)**: reject invalid
+  synchronization/version/stratum/timestamp/delay evidence before clock updates,
+  handle KoD explicitly, and let invalid/stale traffic neither extend the deadline
+  nor complete another request. See the clock-recorder-only NTP audit.
+- **NTP event-driven transport and time ownership (NT-03/04)**: use UDP receive
+  callbacks and scheduled cadence/retries/deadlines, validate/reschedule interval
+  and port changes, back off terminal socket failures, and timestamp at arrival.
+  Include multiple NTP clients, era unfolding and range validation in the existing
+  NTP/peer clock-owner work; consolidate duplicate timestamps/endpoint state and
+  endian helpers, then measure layout.
+
+- **CAN/Ebyte admission and framing (CA-01/02/03)**: return failure for oversize
+  drops, validate IDs, retain short-write suffixes, and restrict resynchronisation
+  lookahead so bad following bytes do not discard proven frames. Executed probes
+  and repair boundaries: CAN audit.
+- **CAN transport lifecycle and events (CA-04/06)**: restart/reset on running-stream
+  replacement and native/Ebyte mode changes, subscribe to stream RX/state, recover
+  read errors, and replace the native event-overflow tick fallback only with a
+  mechanism that preserves lost-wakeup recovery. Test reentrant teardown.
+- **CAN checked binding and consolidation (CA-05; follow-up)**: validate descriptor
+  spans, match RTR/standard/extended semantics, count activity only after valid
+  decode, and index complete frame keys. Reuse shared sample/formatting helpers,
+  validate vector/user boxing and alignment, remove stale dump code and measure
+  sample-state layout. Preserve existing binding packet/state subscriptions.
+
+- **DNS codec integration acceptance (DN-01/02/03)**: review the existing `ow/dns`
+  implementation against response QR flags, compressed-name separators and bounded
+  traversal, all record sections, checked writer capacity and normalized compressed
+  RDATA. Do not duplicate the unmerged engine. Current-tree reproductions and branch
+  context: DNS audit.
+- **DNS listener and subscription lifecycle (DN-04/05)**: remove interface/DoH
+  delegates on teardown and swap; use managed references/state subscriptions;
+  propagate bind/create/child-listener failures, correct mDNS failure accounting and
+  reconcile live protocol changes. The existing branch addresses some but not all.
+- **DNS transport and service completion (DN-06/07/08)**: integrate bounded TCP/DoT
+  length framing and complete-buffer draining, terminal/cancellable lookup outcomes,
+  explicit unsupported-mode behavior, callback RX and scheduled expiry/probes.
+  Validate the existing branch rather than start parallel resolver/cache/DoH work.
+  Remove or consolidate raw packet-sniffing stubs, duplicated IP/UDP headers and
+  listener cleanup, unused codec locals and unchecked NBNS encoding; retain the
+  separate IPv6 multicast policy TODO. Run feature-gated builds and interoperability
+  acceptance when that branch is brought forward.
+
+- **ESPHome framing and close (ES-01/02/03)**: replace the fixed-buffer stall with
+  bounded incremental decoding, retain partial TX frames and define connected versus
+  handshake close semantics. See executed probes in the ESPHome audit.
+- **ESPHome session and discovery progress (ES-04/05/06/09)**: reset receive/session
+  state on offline, check stream creation before subscription, schedule handshake/
+  ping/discovery deadlines, respect send admission and validate negotiated versions.
+  Migrate reads/health to RX/state callbacks, test reentrant delivery/removal, and
+  consolidate IPClient ownership, checked varints and frame queues.
+- **ESPHome identity, liveness and simplification (ES-07/08; follow-up)**: use stable
+  entity identity instead of normalized display names (include frontend/profile
+  migration when implemented), distinguish unavailable/invalid traffic from useful
+  samples, and settle stale-value policy. Remove write-only/redundant discovery and
+  map-entry fields, measure layout, consolidate decode-only entity cases, repair
+  moved-name metadata, Wi-Fi assumptions and hard-coded timezone, and document the
+  supported entity/plaintext capability. Error admission is also tracked under the
+  existing malformed-binding-input item below.
+
+- **SNMP enablement and SET transactions (SN-01/05)**: keep the dormant module's
+  capability explicit; before enabling it, integrate the MIB/property lifecycle,
+  transactional validation/commit/undo, supported version/PDU matrix, notification
+  handling and admission policy, and CLI docs. See the SNMP audit
+  and corrected feature table; this review does not enable the service.
+- **SNMP codec and bounded responses (SN-02/06; follow-up)**: repair legal OID upper
+  boundaries/first-arc overflow, continuation and textual identity validation;
+  enforce exact BER/PDU consumption, field ranges and unsigned syntax; bound table
+  walking by encoded response/work budgets with correct truncation/tooBig behavior.
+  Consolidate GETNEXT construction and measure a smaller owned VarBindValue layout.
+- **SNMP request lifecycle and events (SN-03/04/07)**: retire pending entries before
+  callbacks, add cancellation/ownership, retain expected endpoint/version/community,
+  test reentrant restart/destruction/submission, use monotonic scheduled deadlines
+  and RX callbacks, and validate retries/timeouts without narrowing wrap. Reuse shared
+  transaction and datagram ownership helpers; bound pending and per-dispatch work.
+
+- **OBD payload and transaction correctness (OB-01/02/03/05)**: use full protocol PID
+  lengths independently of sample spans, preserve write failure through reentrant
+  teardown, acknowledge ELM configuration before caching/dispatch, and correlate
+  only dispatched interface-owned transactions across bindings. Verify selected
+  adapter protocol. Evidence and acceptance: OBD audit.
+- **OBD bounded reassembly/progress (OB-04/06)**: define ISO-TP slot admission and
+  expiry without silent eviction, check FC submission, bound overall response-pending
+  and functional collection windows, and test fake-time/callback teardown behavior.
+  Preserve the existing RX/state/timer migration rather than reintroducing polling.
+- **OBD sample completion and shared helpers (OB-07; follow-up)**: only mark samples
+  complete after successful decode/write; check text/vector capacity and alignment;
+  share cadence and typed sample completion helpers without erasing protocol policy.
+  Remove unused per-sample fields/measure layout, validate classic-CAN/ELM frames
+  before liveness, discard overlong lines explicitly, state asymmetric MTU/segmented
+  TX/addressing limits, and honor or reject QueuePolicy. Keep transport health and
+  vehicle awake/asleep distinct under the existing richer-liveness task.
+
