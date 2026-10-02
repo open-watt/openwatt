@@ -1,6 +1,7 @@
 module driver.baremetal.system;
 
-import urt.driver.reset : ResetCause, ResetMark, has_reset_record, has_system_reset, reset_cause, reset_record_mark, reset_record_take, system_reset;
+import urt.driver.reset : ResetCause, ResetMark, has_reset_record, has_system_reset, has_watchdog_cause, reset_cause, reset_record_mark,
+    reset_record_take, system_reset;
 import urt.log;
 
 import driver.system : ResetClass, ImageId, OtaImage;
@@ -84,6 +85,18 @@ else version (STM32)
         return reboot_to_bootloader();
     }
 }
+else version (BL808)
+{
+    enum bool has_download_mode = true;
+
+    // The boot ROM's UART/USB download mode, the one the vendor flash tools speak.
+    bool system_reboot_to_bootloader(uint)
+    {
+        import urt.driver.bl_common.reset : por_reset;
+        reset_record_mark(ResetMark.deliberate);
+        por_reset(true);
+    }
+}
 else version (RouterBoot)
 {
     enum bool has_download_mode = true;
@@ -141,7 +154,7 @@ void classify()
         case ResetMark.running:
             // a reset line pressed by hand counts as a power cycle does; a debugger's reset is deliberate
             if (cause == ResetCause.unknown)
-                return set_class(ResetClass.crash, "unknown");
+                return set_class(ResetClass.crash, has_watchdog_cause ? "unknown" : "watchdog");
             break;
     }
     set_class(by_cause[cause].cls, by_cause[cause].reason);

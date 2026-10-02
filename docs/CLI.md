@@ -49,7 +49,8 @@ recovery reason. Power loss and deliberate restarts do not count as crashes, and
 press of the reset button where the chip reports its reset pin (STM32); that counts as a
 power-on. A board whose reset line is driven by a supervisor or an external watchdog therefore
 reads those resets as presses, and a hang loop there never steps down the configuration. A
-debugger's reset reads as deliberate, and a watchdog reset is always a crash.
+debugger's reset reads as deliberate, and a watchdog reset is always a crash. A chip that cannot
+name a watchdog reset (the BL808) reads a reset its record never saw coming as one.
 
 Five power-ons that each end within five seconds select bring-up defaults for one
 boot, skipping `user.conf` without erasing anything. On supported OTA platforms, a
@@ -185,7 +186,8 @@ which none currently does. Only targets whose silicon provides such an entry poi
 implement this, and elsewhere the command reports that the platform has no bootloader
 mode and does not reboot. On a RouterBOOT board it arms RouterBOOT's "try Ethernet once"
 instead: the next boot asks BOOTP/TFTP for an image and falls back to the image in flash when
-nobody answers. If the bootloader cannot be entered, the command says so and the node keeps
+nobody answers. On a BL808 it enters the boot ROM's UART/USB download mode, which the vendor
+flash tools speak. If the bootloader cannot be entered, the command says so and the node keeps
 running.
 
 `/system/identify [duration=<duration>]` shows the identify gesture on the node's status light,
@@ -516,6 +518,8 @@ A serial stream opens a host serial device or an embedded UART.
 | `rts-gpio` | GPIO number | platform default | Embedded-only RTS pin override. |
 | `cts-gpio` | GPIO number | platform default | Embedded-only CTS pin override. |
 | `de-gpio` | GPIO number | platform default | Embedded-only driver-enable pin override. Setting it makes the port RS-485: on STM32 F7 and H7 the UART drives DE in hardware on its RTS pin, and F4, which cannot, refuses to open. |
+| `rx-latency` | duration | `350us` | Embedded-only. Longest received bytes may wait before they are delivered: the UART interrupts at the deepest FIFO threshold within it. While open it reads what the UART runs with. |
+| `rx-gap` | characters, above `0` to `25.5` | `3.5` | Embedded-only. A quiet line this long delivers a burst early. While open it reads what the hardware gives: STM32 F4 times one character, the RP2350 a fixed 32 bit times (3.2 characters at 8N1). |
 
 Additional commands:
 
@@ -999,11 +1003,11 @@ lines are, and the binding builds the matching component at `component` in
 | `switch` | `gpio` | a [`Switch`](COMPONENT_TEMPLATES.md#switch) whose writable `switch` drives the line |
 | `light` | `gpio` | a [`Light`](COMPONENT_TEMPLATES.md#light) with `switch`, `effect`, `indicate` and `pulse`; `indicate` overrides the owner's state while it is not `none`, and each `pulse` inverts a steady output for 50ms; `drive` adds `level` and, for `ws2812`, `colour` |
 
-A button reacts to edge interrupts where the platform has them (ESP32, MT7621, STM32, and RP2350,
-where they have not yet run)
+A button reacts to edge interrupts where the platform has them (ESP32, MT7621, STM32, the BL808's
+M0, and RP2350, where they have not yet run)
 and otherwise samples its line every `debounce`. A WS2812 chain runs on the RP2350's PIO, or is
-bit-banged on the BL808's D0 core; other platforms do not drive one yet. PWM comes from the chip's PWM block (ESP32
-LEDC, RP2350 slices, STM32 TIM1-4 and TIM8) where one reaches the pin and is free, and otherwise from software, driven by a 4 kHz timer interrupt that runs
+sent by the BL808's GPIO transmit FIFO; other platforms do not drive one yet. PWM comes from the chip's PWM block (ESP32
+LEDC, RP2350 slices, STM32 TIM1-4 and TIM8, the BL808's two PWM blocks) where one reaches the pin and is free, and otherwise from software, driven by a 4 kHz timer interrupt that runs
 only while some light is at a level between off and full. The MT7621 has no PWM block. Gestures are timed from the
 debounced level: a press held for `hold` is a `hold`, followed by `release`;
 otherwise one to three presses each within `click-gap` of the last are a

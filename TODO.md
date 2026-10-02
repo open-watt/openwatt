@@ -221,6 +221,52 @@ and the panel left outstanding.
   work until one releases); `led=` writes a synced peer's light (no ownership check, unlike the
   panel).
 
+## Bouffalo drivers (2026-10-02)
+
+- **The BL808 cannot name its resets.** HBN_RESET_EVENT and PDS_RESET_EVENT read the same after
+  power-on, the reset pin, a software reset and a watchdog bite, and the watchdog's WTS flag dies
+  with the reset it causes, so `reset_cause()` is `unknown` and an unrecorded reset reads as the
+  watchdog. A pre-bite latch (a timer compare just short of the watchdog, whose ISR stamps the
+  record) would name hangs that keep interrupts enabled.
+- **D0 reads a chip reset M0 starts as a crash**: its own record still says running. D0 should
+  take the chip's classification from M0, or both cores read one chip-level record.
+- **Flashing through the M1s Dock's BL702 at 1.2 Mbaud loses bulk data** from the chip since
+  2026-10-02, whatever image runs (handshake and short commands pass; a 4 KB read stalls);
+  500 kbaud works. It flashed and read 16 MB at 1.2 Mbaud on 2026-09-30. Also unexplained: from
+  2026-09-30 07:48 the tool's own entry never got a handshake through the bridge, and from 10:32
+  neither did `bootloader=1`, until the board was restored from a backup through a USB-UART on
+  GPIO14/15; it has not recurred since.
+- **The BL808 PWM pin map is inferred** (pin n reaches output n % 8) from the vendor dev kit's
+  wiring, and confirmed only for GPIO8 on block 0.
+- **The WS2812 FIFO driver has never met a WS2812**: the M1s Dock's LED is a plain one.
+- **GPIO interrupts and event links are M0's only.** D0's PLIC has no GPIO line, so its edges must
+  come from M0; the BL618 has its own CLIC line and wants the M0 backend.
+- **The BL618 has no watchdog**: give it the MCU timer watchdog the BL808 M0 uses.
+- **M0 SRAM runs near full**: 20 of 21 KB with two telnet sessions, 768 B to spare.
+- **M0 takes 6-9 s to inflate D0 at boot.** Inflate runs from XIP flash into PSRAM; measure where
+  it goes (flash reads, PSRAM writes, the inflater) before choosing between placing the inflater in
+  RAM, raising the clocks first, or letting D0 inflate its own image.
+
+## UART follow-ups (2026-10-02)
+
+- **RX and TX through pages, not rings.** A driver keeps a page sized for its baud and the RX
+  latency; the ISR copies the FIFO into it and raises the RX event on the empty-to-non-empty
+  transition; the handler allocates a fresh page, swaps it in and hands the full one to the
+  stream, whose `rx_handler` takes a `Page*`. TX queues pages; the ISR walks the chain and posts
+  finished ones back for release in one event. A spin lock around the swap only where `has_smp`.
+  One copy (FIFO to page) instead of two, and no ring to size.
+- **Main-thread latency is not measured.** ISR-posted events dispatch with age 0, and the worst
+  handler, event age and loop iteration are logged only past 50 ms. Stamp ISR posts and keep
+  running maxima as stats, so `rx-latency` and buffer sizes can be set from measurement.
+- **A console session loses input around Ctrl-C.** Ctrl-C on a configured session's initial
+  `/log/print --stream` restarts the session, and bytes that arrive meanwhile are dropped or fed to
+  the restarted stream; a long line pasted soon after loses its head. The UART delivers every byte
+  (counted at the stream on both BL808 cores at 2 Mbaud).
+- **`Duration` properties print as raw nanoseconds** (`get` shows `3e+10ns` for `30s`): the value
+  reaches the console as a quantity rather than through `Duration`'s own formatting.
+- **`rx_latency_us` is a byte count per interrupt**, so a trickle can wait several byte times past
+  it; see the Driver audit entry.
+
 ## Retrospective merge reconciliation (2026-09-08)
 
 - **[#669, deferred until removal is needed] Define device/subtree removal lifetime**:

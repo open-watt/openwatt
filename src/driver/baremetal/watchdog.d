@@ -5,7 +5,10 @@ import urt.time : Duration;
 nothrow @nogc:
 
 version (BL808_M0)
-    private extern(C) void ow_hang_watchdog_feed() nothrow @nogc;
+{
+    import urt.driver.bl_common.watchdog : wdt_feed, wdt_start, wdt_stop;
+    version = HardwareWatchdog;
+}
 else version (MT7621)
 {
     import urt.driver.mt7621.watchdog : wdt_feed, wdt_start, wdt_stop;
@@ -31,9 +34,7 @@ void watchdog_init(Duration timeout)
 
 void watchdog_feed()
 {
-    version (BL808_M0)
-        ow_hang_watchdog_feed();
-    else version (HardwareWatchdog)
+    version (HardwareWatchdog)
         wdt_feed();
 }
 

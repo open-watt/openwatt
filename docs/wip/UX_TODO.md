@@ -3,6 +3,12 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-10-02: serial RX timing
+
+- `/stream/serial` gains `rx-latency` (duration, default `350us`) and `rx-gap` (characters, default
+  `3.5`) on embedded builds. While the port is open each reads what the UART actually runs with,
+  which can differ from what was set; show the value, not the request.
+
 ## 2026-09-29: `Button` and `Light` templates
 
 - New component template `Light`, which extends `Switch`: `switch` is its on/off, and the optional

@@ -99,7 +99,9 @@ final class SerialStream : Stream
                                      Elem!("rx-gpio", byte, Default!(-1), OnChange!restart),
                                      Elem!("rts-gpio", byte, Default!(-1), OnChange!restart),
                                      Elem!("cts-gpio", byte, Default!(-1), OnChange!restart),
-                                     Elem!("de-gpio", byte, Default!(-1), OnChange!restart));
+                                     Elem!("de-gpio", byte, Default!(-1), OnChange!restart),
+                                     Prop!("rx-latency", rx_latency),
+                                     Prop!("rx-gap", rx_gap));
     else
         alias Properties = AliasSeq!(Prop!("device", device),
                                      Elem!("baud-rate", uint, Default!9600, Min!1, OnChange!restart),
@@ -193,6 +195,47 @@ nothrow @nogc:
 
         static const(char)[] parity_check(ref Parity value)
             => value > Parity.odd ? "UART only supports none, even, or odd parity" : null;
+
+        // While the port is open these read what the UART runs with, once its hardware has clamped the request.
+        final Duration rx_latency() const
+        {
+            if (_uart.is_open)
+            {
+                if (uint us = uart_rx_timing(_uart).latency_us)
+                    return usecs(us);
+            }
+            return usecs(_rx_latency_us);
+        }
+        final StringResult rx_latency(Duration value)
+        {
+            immutable long us = value.as!"usecs";
+            if (us <= 0 || us > uint.max)
+                return StringResult("rx-latency must be positive");
+            _rx_latency_us = cast(uint)us;
+            mark_set!(typeof(this), "rx-latency")();
+            restart();
+            return StringResult.success;
+        }
+
+        final float rx_gap() const
+        {
+            ubyte tenths = _rx_gap;
+            if (_uart.is_open)
+            {
+                if (ubyte effective = uart_rx_timing(_uart).gap)
+                    tenths = effective;
+            }
+            return tenths / 10.0f;
+        }
+        final StringResult rx_gap(float value)
+        {
+            if (!(value > 0 && value <= 25.5f))
+                return StringResult("rx-gap must be above 0 and at most 25.5 characters");
+            _rx_gap = cast(ubyte)(value * 10 + 0.5f);
+            mark_set!(typeof(this), "rx-gap")();
+            restart();
+            return StringResult.success;
+        }
     }
 
     void flow_control_changed()
@@ -256,6 +299,8 @@ nothrow @nogc:
 
             bm.UartConfig cfg;
             cfg.baud_rate = baud_rate;
+            cfg.rx_latency_us = _rx_latency_us;
+            cfg.rx_gap = _rx_gap;
             cfg.data_bits = data_bits;
             cfg.stop_bits = stop_bits_map[stop_bits];
             cfg.parity = parity_map[parity];
@@ -974,6 +1019,8 @@ private:
     {
         Uart _uart;
         byte _uart_port = -1;
+        ubyte _rx_gap = 35;
+        uint _rx_latency_us = 350;
         static if (has_rx_callback)
         {
             shared uint _rx_event_pending;
