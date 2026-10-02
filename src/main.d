@@ -1,6 +1,7 @@
 module main;
 
 import urt.array;
+import urt.driver.debugger : DebugFreeze, debug_freeze;
 import urt.file : load_file, file_exists;
 import urt.log;
 import urt.mem;
@@ -129,6 +130,7 @@ int main(string[] args)
     else
         g_app.register_heartbeat_handler((MonoTime) { watchdog_feed(); });
 
+    debug_freeze(DebugFreeze.all);
     watchdog_init(5.seconds);
 
     Session startup_session = g_app.console.createSession!Session();

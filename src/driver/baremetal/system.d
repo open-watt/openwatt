@@ -1,6 +1,6 @@
 module driver.baremetal.system;
 
-import urt.driver.reset : ResetMark, has_reset_record, has_system_reset, reset_record_mark, reset_record_take, system_reset;
+import urt.driver.reset : ResetCause, ResetMark, has_reset_record, has_system_reset, reset_cause, reset_record_mark, reset_record_take, system_reset;
 import urt.log;
 
 import driver.system : ResetClass, ImageId, OtaImage;
@@ -11,12 +11,7 @@ nothrow @nogc:
 void system_reboot()
 {
     reset_record_mark(ResetMark.deliberate);
-    version (RP2350)
-    {
-        import urt.driver.rp2350.bootrom : rom_reboot, RebootType;
-        rom_reboot(RebootType.normal);
-    }
-    else static if (has_system_reset)
+    static if (has_system_reset)
         system_reset();
     else
         log_notice("system", "system_reboot: not implemented on this platform");
@@ -133,29 +128,38 @@ void classify()
         return;
     g_classified = true;
     ResetMark mark = reset_record_take();
-    // RP2350's POWMAN.CHIP_RESET is no help: its HAD_* bits are sticky from power-on and a ROM
-    // reboot sets nothing else, so the record decides there too.
-    static if (!has_reset_record)
+    immutable ResetCause cause = reset_cause();
+    // a watchdog bite is a hang, whatever the run before it managed to record
+    if (cause == ResetCause.watchdog)
+        return set_class(ResetClass.crash, "watchdog");
+    static if (has_reset_record) final switch (mark)
     {
-        version (MT7621)
-        {
-            import urt.driver.mt7621.watchdog : reset_by_watchdog;
-            if (reset_by_watchdog())
-            {
-                g_class = ResetClass.crash;
-                g_reason = "watchdog";
-                return;
-            }
-        }
-        g_class = ResetClass.unknown;
-        return;
+        case ResetMark.none:       return set_class(ResetClass.power, "power-on");
+        case ResetMark.deliberate: return set_class(ResetClass.deliberate, "software");
+        case ResetMark.crashed:    return set_class(ResetClass.crash, "fault");
+        case ResetMark.updated:    return set_class(ResetClass.deliberate, "firmware update");
+        case ResetMark.running:
+            // a reset line pressed by hand counts as a power cycle does; a debugger's reset is deliberate
+            if (cause == ResetCause.unknown)
+                return set_class(ResetClass.crash, "unknown");
+            break;
     }
-    else final switch (mark)
-    {
-        case ResetMark.none:       g_class = ResetClass.power;      g_reason = "power-on"; return;
-        case ResetMark.deliberate: g_class = ResetClass.deliberate; g_reason = "software"; return;
-        case ResetMark.crashed:    g_class = ResetClass.crash;      g_reason = "fault"; return;
-        case ResetMark.running:    g_class = ResetClass.crash;      g_reason = "watchdog"; return;
-        case ResetMark.updated:    g_class = ResetClass.deliberate; g_reason = "firmware update"; return;
-    }
+    set_class(by_cause[cause].cls, by_cause[cause].reason);
+}
+
+struct Classified
+{
+    ResetClass cls;
+    string reason;
+}
+
+static immutable Classified[ResetCause.max + 1] by_cause = [
+    Classified(ResetClass.unknown, null), Classified(ResetClass.power, "power-on"), Classified(ResetClass.power, "reset pin"),
+    Classified(ResetClass.deliberate, "software"), Classified(ResetClass.crash, "watchdog"),
+];
+
+void set_class(ResetClass cls, const(char)[] reason)
+{
+    g_class = cls;
+    g_reason = reason;
 }

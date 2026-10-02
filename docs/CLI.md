@@ -45,7 +45,11 @@ at boot.
 After three crashes before 60 seconds of uptime, recovery steps down from saved
 configuration to `startup.conf`, then bring-up defaults. An unproven revision is
 replaced by an older one; previously successful revisions are preserved. `/system/sysinfo` reports the active configuration and
-recovery reason. Power loss and deliberate restarts do not count as crashes.
+recovery reason. Power loss and deliberate restarts do not count as crashes, and nor does a
+press of the reset button where the chip reports its reset pin (STM32); that counts as a
+power-on. A board whose reset line is driven by a supervisor or an external watchdog therefore
+reads those resets as presses, and a hang loop there never steps down the configuration. A
+debugger's reset reads as deliberate, and a watchdog reset is always a crash.
 
 Five power-ons that each end within five seconds select bring-up defaults for one
 boot, skipping `user.conf` without erasing anything. On supported OTA platforms, a
@@ -168,9 +172,11 @@ command says so.
 `/system/sleep <duration>` pauses the session for the given duration. It is latent, so
 Ctrl-C cancels it, which makes it useful for pacing a startup script.
 
-`/system/reboot [bootloader=<n>] [crash=<bool>]` restarts the node. Without arguments it
-performs a normal restart. `crash=true` aborts the process instead, which the boot guard
-counts as a crash; it exists to exercise the guard.
+`/system/reboot [bootloader=<n>] [crash=<bool>] [hang=<bool>]` restarts the node. Without
+arguments it performs a normal restart. `crash=true` aborts the process instead, which the
+boot guard counts as a crash; it exists to exercise the guard. `hang=true` stalls the main
+loop until the watchdog resets the node, to exercise the watchdog; where none is armed it
+hangs for good.
 
 `<n>` is an integer, and any non-zero value restarts into the chip's own ROM loader
 instead, where the part exposes its factory firmware-update interface. `bootloader=1`
@@ -499,17 +505,17 @@ A serial stream opens a host serial device or an embedded UART.
 
 | Property | Values | Default | Description |
 | --- | --- | --- | --- |
-| `device` | device path, COM name, or `uartN` | required | Serial device to open. Embedded `uartN` follows the datasheet numbering, so it starts at `uart1` on parts whose first UART is UART1. |
+| `device` | device path, COM name, or `uartN` | required | Serial device to open. Embedded `uartN` follows the datasheet numbering, so it starts at `uart1` on parts whose first UART is UART1. On STM32, `uart0` is USART1 through `uart7` UART8, and on H7 `uart8` is LPUART1. |
 | `baud-rate` | positive integer | `9600` | Symbol rate. |
 | `data-bits` | `5` to `8`; some embedded UARTs allow `9` | `8` | Data bits per character. |
 | `parity` | `none`, `even`, `odd`, `mark`, `space` | `none` | Parity mode. Embedded UARTs currently support `none`, `even`, and `odd`. |
 | `stop-bits` | `one`, `one_point_five`, `two` | `one` | Stop-bit mode. |
-| `flow-control` | `none`, `hardware`, `software`, `dsr_dtr` | `none` | Flow control. `rts_cts` aliases `hardware`; `xon_xoff` aliases `software`. |
+| `flow-control` | `none`, `hardware`, `software`, `dsr_dtr` | `none` | Flow control. `rts_cts` aliases `hardware`; `xon_xoff` aliases `software`. An STM32 UART takes `hardware` in its RTS/CTS lines, which need `rts-gpio` and `cts-gpio` (F4's UART4 and UART5 have none), and refuses the others. |
 | `tx-gpio` | GPIO number | platform default | Embedded-only transmit pin override. |
 | `rx-gpio` | GPIO number | platform default | Embedded-only receive pin override. |
 | `rts-gpio` | GPIO number | platform default | Embedded-only RTS pin override. |
 | `cts-gpio` | GPIO number | platform default | Embedded-only CTS pin override. |
-| `de-gpio` | GPIO number | platform default | Embedded-only driver-enable pin override. |
+| `de-gpio` | GPIO number | platform default | Embedded-only driver-enable pin override. Setting it makes the port RS-485: on STM32 F7 and H7 the UART drives DE in hardware on its RTS pin, and F4, which cannot, refuses to open. |
 
 Additional commands:
 
@@ -993,10 +999,11 @@ lines are, and the binding builds the matching component at `component` in
 | `switch` | `gpio` | a [`Switch`](COMPONENT_TEMPLATES.md#switch) whose writable `switch` drives the line |
 | `light` | `gpio` | a [`Light`](COMPONENT_TEMPLATES.md#light) with `switch`, `effect`, `indicate` and `pulse`; `indicate` overrides the owner's state while it is not `none`, and each `pulse` inverts a steady output for 50ms; `drive` adds `level` and, for `ws2812`, `colour` |
 
-A button reacts to edge interrupts where the platform has them (ESP32, MT7621)
+A button reacts to edge interrupts where the platform has them (ESP32, MT7621, STM32, and RP2350,
+where they have not yet run)
 and otherwise samples its line every `debounce`. A WS2812 chain runs on the RP2350's PIO, or is
 bit-banged on the BL808's D0 core; other platforms do not drive one yet. PWM comes from the chip's PWM block (ESP32
-LEDC) where one is free, and otherwise from software, driven by a 4 kHz timer interrupt that runs
+LEDC, RP2350 slices, STM32 TIM1-4 and TIM8) where one reaches the pin and is free, and otherwise from software, driven by a 4 kHz timer interrupt that runs
 only while some light is at a level between off and full. The MT7621 has no PWM block. Gestures are timed from the
 debounced level: a press held for `hold` is a `hold`, followed by `release`;
 otherwise one to three presses each within `click-gap` of the last are a
@@ -1006,7 +1013,7 @@ otherwise one to three presses each within `click-gap` of the last are a
 | --- | --- | --- | --- |
 | `kind` | `capture`, `button`, `switch`, `light` | `capture` | What the line is. |
 | `gpio` | line number | required | The line. |
-| `chip` | controller index | `0` | The GPIO controller, on hosts with several (`/dev/gpiochipN`). |
+| `chip` | controller index | `0` | The GPIO controller, on hosts with several (`/dev/gpiochipN`). Only `capture` reaches a controller other than `0`. |
 | `component` | component path | required except for `capture` | Where the component goes in `device`. |
 | `active` | `high`, `low` | `high` | The line level that means pressed or on. |
 | `pull` | `none`, `up`, `down` | `none` | Pad pull, where the platform drives one. |
@@ -1018,7 +1025,9 @@ otherwise one to three presses each within `click-gap` of the last are a
 | `pwm-channel` | read-only | | `none`, `hardware` or `software`: what the light holds. A channel other code needs exact moves from hardware to software, so this can change. |
 
 `capture` also reports `records`, `buckets`, `edge-rate`, `last-edge`,
-`backend`, `clock`, `stream-start` and `anchor-error` as status.
+`backend`, `clock`, `stream-start` and `anchor-error` as status. A `button`'s `backend` is
+`interrupt` where its edges arrive on an event link, or `sampled` where it reads the line
+every `debounce`.
 
 ```
 /binding/gpio add name=reset-button device=system component=panel.reset kind=button gpio=18 active=low

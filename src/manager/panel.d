@@ -130,6 +130,7 @@ nothrow @nogc:
 
 private:
     enum armed_window = 15.seconds;
+    enum factory_hold = 5.seconds;
 
     struct Expression
     {
@@ -157,6 +158,7 @@ private:
     Element* _status;
     Element* _status_colour;
     Indication _armed;
+    MonoTime _pressed_at;
 
     Indication start(Gesture gesture, Duration duration)
     {
@@ -260,9 +262,32 @@ private:
         }
         else if (path == "system.panel.reset.event")
             e.subscribe(&reset_event);
+        else if (path == "system.panel.reset.state")
+            e.subscribe(&reset_state);
     }
 
-    // click reboots; a hold arms a factory reset that the release carries out, unless the armed window lapses first
+    void reset_state(ref const SampleUpdate update)
+    {
+        if (!update.value_ready)
+            return;
+        if (update.value.asBool)
+            _pressed_at = getTime();
+        else
+        {
+            _pressed_at = MonoTime();
+            g_app.cancel(&arm);
+        }
+    }
+
+    // a factory reset takes factory_hold of pressing, however short the binding's own hold
+    void arm(MonoTime)
+    {
+        if (_pressed_at != MonoTime())
+            _armed = indicate(Gesture.reset_armed, armed_window);
+    }
+
+    // click reboots; a hold of factory_hold arms a factory reset that the release carries out, unless the armed
+    // window lapses first
     void reset_event(ref const SampleUpdate update)
     {
         if (!update.value_ready)
@@ -274,7 +299,8 @@ private:
                 system_reboot();
                 break;
             case ButtonEvent.hold:
-                _armed = indicate(Gesture.reset_armed, armed_window);
+                if (_pressed_at != MonoTime())
+                    g_app.schedule(_pressed_at + factory_hold, &arm);
                 break;
             case ButtonEvent.release:
                 if (indicating(_armed))
