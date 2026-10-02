@@ -192,6 +192,10 @@ timers, and completion callbacks:
   counters, and fires only while Running.
 - **TX is self-clocking**: transmit on submission when the link is idle; send the next queued item
   from the completion event (ack callback, prompt, response), never from a tick.
+- **Bulk output is pulled**: a producer whose output grows with the data answers the stream's
+  `tx_handler` page requests (console commands: `session.feed_output`, tables: `TablePrint`);
+  it never formats the whole output into one buffer, and returns at its next yield point once the
+  request's deadline has passed.
 
 ##### ObjectRef and Dependency Management
 

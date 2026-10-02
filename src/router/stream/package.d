@@ -346,6 +346,15 @@ nothrow @nogc:
         return running && queued < tx_queue_limit ? tx_queue_limit - queued : 0;
     }
 
+    // what the base queue holds for the line
+    final size_t tx_queued() const
+    {
+        size_t bytes;
+        for (const(Page)* page = _tx_queue; page; page = (cast(Page*)page).next)
+            bytes += page.length;
+        return bytes;
+    }
+
     TerminalChannel* terminal_channel()
     {
         return null;
@@ -598,14 +607,6 @@ private:
     bool _tx_retrying;
     bool _tx_continuing;
     bool _rx_polling;
-
-    size_t tx_queued() const
-    {
-        size_t bytes;
-        for (const(Page)* page = _tx_queue; page; page = (cast(Page*)page).next)
-            bytes += page.length;
-        return bytes;
-    }
 
     void consume_tx(size_t n)
     {

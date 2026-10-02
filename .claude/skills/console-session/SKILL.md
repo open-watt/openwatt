@@ -137,6 +137,25 @@ void write_output(const(char)[] text, bool newline)
 
 Session always writes `\r\n` for newlines. Streams are transparent byte pipes — no outbound translation. `StringSession` overrides this to capture output to a buffer (used for API command execution).
 
+### Paced Output
+
+Output that grows with the data (prints, dumps) is pulled, never written whole. A command installs
+`session.feed_output(&producer)`. An `OutputProducer` fills the chunk it is given, returns the bytes
+written, and reports what follows as a `SendHandler` does: `more`, `yield` once the request's
+deadline has passed (checked at its own yield points, a row for a table), `idle`, or `end`. The
+session's stream pulls pages through its `tx_handler` as it drains, a turn at a time, and the
+session hands a chunk larger than a grant out in parts. A session without a stream pulls the same
+pages into `write_output`. `session.output_busy` stays true until the stream has taken the last of
+it, so a command finishes only then and its prompt follows the output. Cancelling calls
+`release_output`, which drops what is not yet taken. Producers write their own newlines (`\r\n`
+when the client has `crlf`).
+
+Tables derive `TablePrint` (`manager/console/table.d`): `walk()` visits the rows in order, calling
+`begin_block(key)` per top-level block (keys ascend; resume from `resume_key()`), `row(...)` per row
+and `end(depth)` as each subtree closes. The first pulls measure the columns, a top-level block at a
+time; each chunk then ends at the last whole block of the shallowest depth it holds, or after a
+row once the deadline passes, and the next chunk resumes there.
+
 ### Command I/O API
 
 Commands that need interactive input use `read_input` to consume bytes from the session's buffer:

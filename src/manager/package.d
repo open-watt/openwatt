@@ -1203,140 +1203,7 @@ nothrow @nogc:
             return view;
         }
 
-        build_device_table(pattern).render(session);
-        return null;
-    }
-
-    Table build_device_table(const(char)[] pattern)
-    {
-        import urt.mem.temp : tconcat;
-
-        enum t_branch = "├─ ";
-        enum t_last   = "└─ ";
-        enum t_pipe   = "│  ";
-        enum t_blank  = "   ";
-
-        Table table;
-        table.add_column("name");
-        table.add_column("value");
-        table.add_column("age", Table.TextAlign.right);
-
-        SysTime now = getSysTime();
-
-        const(char)[] format_age(Duration d)
-        {
-            long ds = d.as!"msecs" / 100;
-            if (ds < 600)
-                return tconcat(ds / 10, ".", ds % 10, "s");
-            long s = ds / 10;
-            if (s < 3600)
-                return tconcat(s / 60, "m", s % 60, "s");
-            return tconcat(s / 3600, "h", (s / 60) % 60, "m");
-        }
-
-        Array!char path;
-        Array!char prefix;
-
-        bool path_matches()
-            => pattern.length == 0 || wildcard_match(pattern, path[]);
-
-        void push(const(char)[] id)
-        {
-            path ~= '.';
-            path ~= id;
-        }
-
-        bool subtree_matches(Component c)
-        {
-            if (path_matches())
-                return true;
-            size_t reset = path.length;
-            scope(exit) path.resize(reset);
-            foreach (e; c.elements)
-            {
-                push(e.id[]);
-                if (path_matches())
-                    return true;
-                path.resize(reset);
-            }
-            foreach (sc; c.components)
-            {
-                push(sc.id[]);
-                if (subtree_matches(sc))
-                    return true;
-                path.resize(reset);
-            }
-            return false;
-        }
-
-        void emit_node(Component c, bool is_last, bool is_root)
-        {
-            const(char)[] branch = is_root ? "" : (is_last ? t_last : t_branch);
-            const(char)[] label = c.name.length ? tconcat(c.id[], " (", c.name[], ")") : c.id[];
-            table.add_row();
-            table.cell(tconcat(prefix[], branch, label));
-            table.cell(c.template_.length ? tconcat("[", c.template_[], "]") : "");
-            table.cell("");
-
-            size_t path_reset = path.length;
-            size_t prefix_reset = prefix.length;
-            scope(exit) { path.resize(path_reset); prefix.resize(prefix_reset); }
-
-            if (!is_root)
-                prefix ~= (is_last ? t_blank : t_pipe);
-
-            size_t visible;
-            foreach (e; c.elements)
-            {
-                push(e.id[]);
-                if (path_matches())
-                    ++visible;
-                path.resize(path_reset);
-            }
-            foreach (sc; c.components)
-            {
-                push(sc.id[]);
-                if (subtree_matches(sc))
-                    ++visible;
-                path.resize(path_reset);
-            }
-
-            size_t emitted;
-            foreach (e; c.elements)
-            {
-                push(e.id[]);
-                scope(exit) path.resize(path_reset);
-                if (!path_matches())
-                    continue;
-                ++emitted;
-                bool last = emitted == visible;
-                table.add_row();
-                table.cell(tconcat(prefix[], last ? t_last : t_branch, e.id[]));
-                table.cell(e.value);
-                table.cell(e.last_update && e.sampling_mode != SamplingMode.constant ? format_age(now - e.last_update) : "");
-            }
-            foreach (sc; c.components)
-            {
-                push(sc.id[]);
-                scope(exit) path.resize(path_reset);
-                if (!subtree_matches(sc))
-                    continue;
-                ++emitted;
-                bool last = emitted == visible;
-                emit_node(sc, last, false);
-            }
-        }
-
-        foreach (dev; devices.values)
-        {
-            path.clear();
-            prefix.clear();
-            path ~= dev.id[];
-            if (!subtree_matches(dev))
-                continue;
-            emit_node(dev, true, true);
-        }
-        return table;
+        return alloc!DevicePrint(session, this, pattern);
     }
 
     void element_set(Session session, const(char)[] element, Variant value)
@@ -1721,6 +1588,162 @@ Component resolve_global_component(const(char)[] path) nothrow @nogc
         return (*d).find_component(rest);
     }
     return null;
+}
+
+
+final class DevicePrint : TablePrint
+{
+nothrow @nogc:
+
+    ~this() {}
+
+    this(Session session, Application app, const(char)[] pattern)
+    {
+        super(session);
+        _app = app;
+        _pattern = pattern.make_string();
+        table.add_column("name");
+        table.add_column("value");
+        table.add_column("age", Table.TextAlign.right);
+        start();
+    }
+
+protected:
+    override void walk()
+    {
+        import urt.mem.temp : tconcat;
+
+        enum t_branch = "├─ ";
+        enum t_last   = "└─ ";
+        enum t_pipe   = "│  ";
+        enum t_blank  = "   ";
+
+        SysTime now = getSysTime();
+
+        const(char)[] format_age(Duration d)
+        {
+            long ds = d.as!"msecs" / 100;
+            if (ds < 600)
+                return tconcat(ds / 10, ".", ds % 10, "s");
+            long s = ds / 10;
+            if (s < 3600)
+                return tconcat(s / 60, "m", s % 60, "s");
+            return tconcat(s / 3600, "h", (s / 60) % 60, "m");
+        }
+
+        Array!char path;
+        Array!char prefix;
+
+        bool path_matches()
+            => _pattern.length == 0 || wildcard_match(_pattern[], path[]);
+
+        void push(const(char)[] id)
+        {
+            path ~= '.';
+            path ~= id;
+        }
+
+        bool subtree_matches(Component c)
+        {
+            if (path_matches())
+                return true;
+            size_t reset = path.length;
+            scope(exit) path.resize(reset);
+            foreach (e; c.elements)
+            {
+                push(e.id[]);
+                if (path_matches())
+                    return true;
+                path.resize(reset);
+            }
+            foreach (sc; c.components)
+            {
+                push(sc.id[]);
+                if (subtree_matches(sc))
+                    return true;
+                path.resize(reset);
+            }
+            return false;
+        }
+
+        bool emit_node(Component c, bool is_last, bool is_root, ubyte depth)
+        {
+            const(char)[] branch = is_root ? "" : (is_last ? t_last : t_branch);
+            const(char)[] label = c.name.length ? tconcat(c.id[], " (", c.name[], ")") : c.id[];
+            if (!row(tconcat(prefix[], branch, label), c.template_.length ? tconcat("[", c.template_[], "]") : "", ""))
+                return false;
+
+            size_t path_reset = path.length;
+            size_t prefix_reset = prefix.length;
+            scope(exit) { path.resize(path_reset); prefix.resize(prefix_reset); }
+
+            if (!is_root)
+                prefix ~= (is_last ? t_blank : t_pipe);
+
+            size_t visible;
+            foreach (e; c.elements)
+            {
+                push(e.id[]);
+                if (path_matches())
+                    ++visible;
+                path.resize(path_reset);
+            }
+            foreach (sc; c.components)
+            {
+                push(sc.id[]);
+                if (subtree_matches(sc))
+                    ++visible;
+                path.resize(path_reset);
+            }
+
+            size_t emitted;
+            foreach (e; c.elements)
+            {
+                push(e.id[]);
+                scope(exit) path.resize(path_reset);
+                if (!path_matches())
+                    continue;
+                ++emitted;
+                bool last = emitted == visible;
+                if (!row(tconcat(prefix[], last ? t_last : t_branch, e.id[]), e.value, e.last_update && e.sampling_mode != SamplingMode.constant ? format_age(now - e.last_update) : ""))
+                    return false;
+                end(depth);
+            }
+            foreach (sc; c.components)
+            {
+                push(sc.id[]);
+                scope(exit) path.resize(path_reset);
+                if (!subtree_matches(sc))
+                    continue;
+                ++emitted;
+                bool last = emitted == visible;
+                if (!emit_node(sc, last, false, cast(ubyte)(depth + 1)))
+                    return false;
+                end(depth);
+            }
+            return true;
+        }
+
+        foreach (slot; resume_key .. _app.devices.slot_count + 1)
+        {
+            Device dev = _app.devices.at(slot);
+            if (!dev)
+                continue;
+            path.clear();
+            prefix.clear();
+            path ~= dev.id[];
+            if (!subtree_matches(dev))
+                continue;
+            begin_block(slot);
+            if (!emit_node(dev, true, true, 1))
+                return;
+            end(0);
+        }
+    }
+
+private:
+    Application _app;
+    String _pattern;
 }
 
 

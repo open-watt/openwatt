@@ -415,11 +415,7 @@ CommandState collection_print_exec(ref Command cmd, Session session, Scope* _sco
 
     if (watch_mode)
         return alloc!CollectionWatchState(session, &cmd, collection);
-
-    Table table;
-    populate_collection_table(table, collection);
-    table.render(session);
-    return null;
+    return alloc!CollectionPrint(session, &cmd, collection);
 }
 
 
@@ -480,36 +476,81 @@ private:
     uint _prev_width;
 }
 
+
+final class CollectionPrint : TablePrint
+{
+nothrow @nogc:
+
+    ~this() {}
+
+    this(Session session, Command* command, BaseCollection collection)
+    {
+        super(session, command);
+        _collection = collection;
+        add_collection_columns(table, collection);
+        start();
+    }
+
+protected:
+    override void walk()
+    {
+        uint key;
+        foreach (item; _collection.values)
+        {
+            if (++key < resume_key)
+                continue;
+            begin_block(key);
+            if (!skip_row())
+            {
+                add_collection_cells(table, _collection, item);
+                commit_row();
+            }
+            if (stopped)
+                return;
+            end(0);
+        }
+    }
+
+private:
+    BaseCollection _collection;
+}
+
 private:
 
 void populate_collection_table(ref Table table, BaseCollection collection)
 {
-    const(char)[][16] proplist;
-    auto properties = collection.type_info.properties;
-
-    table.add_column("");
-    foreach (p; properties)
+    add_collection_columns(table, collection);
+    foreach (item; collection.values)
     {
-        if (!p.get || p.name[] == "flags")
-            continue;
-        if (!prop_visible(p.flags, proplist, p.name[]))
+        table.add_row();
+        add_collection_cells(table, collection, item);
+    }
+}
+
+void add_collection_columns(ref Table table, BaseCollection collection)
+{
+    table.add_column("");
+    foreach (p; collection.type_info.properties)
+    {
+        if (!is_printed(p))
             continue;
         auto alignment = is_numeric_prop(p.type[0][]) ? Table.TextAlign.right : Table.TextAlign.left;
         table.add_column(p.name[], alignment);
     }
-    foreach (item; collection.values)
-    {
-        table.add_row();
-        table.cell(format_flags(item.flags));
-        foreach (p; properties)
-        {
-            if (!p.get || p.name[] == "flags")
-                continue;
-            if (!prop_visible(p.flags, proplist, p.name[]))
-                continue;
+}
+
+void add_collection_cells(ref Table table, BaseCollection collection, BaseObject item)
+{
+    table.cell(format_flags(item.flags));
+    foreach (p; collection.type_info.properties)
+        if (is_printed(p))
             table.cell(p.get(item, *p));
-        }
-    }
+}
+
+bool is_printed(const(Property)* p)
+{
+    const(char)[][16] proplist;
+    return p.get && p.name[] != "flags" && prop_visible(p.flags, proplist, p.name[]);
 }
 
 const(char)[] format_flags(ObjectFlags f)

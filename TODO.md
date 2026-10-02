@@ -1679,9 +1679,47 @@ this is what remains.
   time added nothing. Opening the port over a CP210x seems to restart the session by itself on
   alternate opens. Find what a restart keeps.
 
-- **Fix `/device/print` on non-terminal sessions**: `/api/cli/execute` crashes the process and
-  a piped interactive session prints nothing. Audit `DeviceTreeView` and other live views for
-  terminal-channel assumptions.
+- **Stream `/api/cli/execute` output**: the handler collects output in a `StringSession`, whose
+  `MutableString` asserts past 32 KB, so `/device/print` with ~20 devices kills the process.
+  Give the request a session whose `feed_output` pulls into a chunked JSON response (as the
+  schema transfer does) instead of a whole-output buffer. Windows also drops `--interactive`
+  on a piped stdin, which is why a piped session prints nothing. Audit `DeviceTreeView` and the
+  other live views for terminal-channel assumptions on such sessions.
+
+- **Move the remaining prints onto the model design, not onto `TablePrint`**: a node and leaf
+  model (collections, objects and devices as nodes; properties and elements as leaves; bespoke
+  tables such as the MQTT broker's maps behind the same interface), encoders (table, tree, JSON,
+  CSV) and pacers (print, live view), read through point cursors (copy-on-write snapshots) or span
+  cursors (series ranges). It replaces `Table`'s cell store, `TablePrint`'s walk and resume, the
+  duplicate print and view walkers, and the API's whole-buffer JSON; a design note goes in
+  `docs/wip/` first. Still whole-output today: `/protocol/ip/tcp`, `neighbour`,
+  `neighbour6`, `/sync/neighbor`, `/sync/peering`, `/protocol/ble/device`, `/port`,
+  `/element/link`, `/system/linux` and `/log/print` still render whole-output; `--json` prints
+  still build one `Variant`. `CollectionPrint` resumes by iteration index, so an add or remove
+  mid-print can skip or repeat one item; `DevicePrint` resumes by device slot, and inside a
+  device by row count, so an element or component added between chunks repeats or loses a row
+  and can leave the tree glyphs disagreeing.
+
+- **Pulled print follow-ups** (2026-10-06, #817):
+  - Cancelling a print drops the untaken tail of a page the stream has started, so the line
+    ends mid-row, possibly mid-glyph or mid escape sequence, and the prompt lands on it. Keep
+    the rest of a started page and drop only output not yet begun.
+  - `TablePrint`'s destructor does nothing, so a path that frees one before `update()` finishes
+    leaves the session holding `&produce`. Every path today finishes first.
+  - `walk` and `emit` (a 512-byte row plus the recursion in `DevicePrint.emit_node`) now run
+    inside the stream and TCP pumps; measure the stack headroom on the embedded targets.
+  - A pull is not strictly bounded (the #817 review): measuring stops only between top-level
+    blocks, so one device is measured whole; `DevicePrint`'s filter rescans each subtree from
+    every ancestor, twice per component; and a resume re-walks the current device from its first
+    row, skipping what was sent. Cheap for real devices, and the model design replaces it.
+  - A print streams across many pulls and packets, so its rows show values from different moments
+    and its widths were measured at another; a point cursor holding T fixes values and membership.
+  - The live views (`CollectionWatchState`, `TreeViewState`) format and measure every row on every
+    tick and render only the visible slice; they should format and fit only the slice.
+
+- **Document `/device` in CLI.md**: `add`, `print` (`filter=`, `--watch`, `--expand`) and
+  `/element/set` have no reference entry. A bare `print m1*` does not bind `filter`; it lands
+  in the variadic `args` and prints everything.
 
 - **Document `/protocol/mqtt/broker` in CLI.md**: the broker, its `discover` prefixes and the Home
   Assistant discovery it drives (entity mapping, writers, availability aggregated into
