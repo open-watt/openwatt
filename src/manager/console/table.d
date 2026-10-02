@@ -4,7 +4,8 @@ import urt.array;
 import urt.string.ansi : visible_width, visible_slice;
 import urt.variant;
 
-import manager.console.session : Session;
+import manager.console.command : Command, CommandCompletionState, CommandState;
+import manager.console.session : ClientFeatures, Session;
 
 nothrow @nogc:
 
@@ -17,8 +18,18 @@ nothrow @nogc:
     enum gap = 2;
     enum max_cols = 32;
 
+    struct ColumnStats
+    {
+        size_t[max_cols] natural;
+        size_t[max_cols] total;
+        uint rows;
+    }
+
     uint num_rows() const pure
         => _num_rows;
+
+    uint num_cols() const pure
+        => cast(uint)_columns.length;
 
     void highlight_row(uint row, const(char)[] prefix = "\x1b[7m", const(char)[] suffix = "\x1b[27m")
     {
@@ -112,7 +123,6 @@ nothrow @nogc:
 
         pad_incomplete_row();
 
-        enum max_cols = 32;
         assert(num_cols <= max_cols);
 
         size_t[max_cols] alloc = void;
@@ -133,7 +143,6 @@ nothrow @nogc:
 
         pad_incomplete_row();
 
-        enum max_cols = 32;
         assert(num_cols <= max_cols);
 
         size_t[max_cols] alloc = void;
@@ -164,44 +173,22 @@ nothrow @nogc:
     void clear()
     {
         _columns.clear();
+        clear_rows();
+        _highlight_row = uint.max;
+    }
+
+    void clear_rows()
+    {
         _text_buf.clear();
         _cell_ends.clear();
         _cell_spans.clear();
         _num_rows = 0;
-        _highlight_row = uint.max;
     }
 
-private:
-
-    struct ColumnDef
-    {
-        const(char)[] header;
-        TextAlign alignment;
-    }
-
-    Array!ColumnDef _columns;
-    Array!char _text_buf;
-    Array!uint _cell_ends;
-    Array!ubyte _cell_spans;
-    const(char)[] _highlight_prefix;
-    const(char)[] _highlight_suffix;
-    uint _highlight_row = uint.max;
-    uint _num_rows;
-
-    void compute_column_widths(Session session, size_t[] alloc)
+    void measure(ref ColumnStats stats)
     {
         immutable num_cols = _columns.length;
-        enum max_cols = 32;
-
-        size_t[max_cols] natural = void;
-        size_t[max_cols] col_total = void;
-        size_t[max_cols] avg = void;
-
-        foreach (col; 0 .. num_cols)
-        {
-            natural[col] = visible_width(_columns[col].header);
-            col_total[col] = 0;
-        }
+        pad_incomplete_row();
         foreach (row; 0 .. _num_rows)
         {
             uint col = 0;
@@ -212,30 +199,38 @@ private:
                 if (span == 1)
                 {
                     size_t cell_w = visible_width(get_cell_text(row, col));
-                    if (cell_w > natural[col])
-                        natural[col] = cell_w;
-                    col_total[col] += cell_w;
+                    if (cell_w > stats.natural[col])
+                        stats.natural[col] = cell_w;
+                    stats.total[col] += cell_w;
                     ++col;
                 }
                 else
-                {
-                    uint skip = (span == 0) ? cast(uint)num_cols - col : span;
-                    col += skip;
-                }
+                    col += (span == 0) ? cast(uint)num_cols - col : span;
             }
         }
+        stats.rows += _num_rows;
+    }
+
+    void fit_widths(ref const ColumnStats stats, size_t term_width, size_t[] alloc)
+    {
+        immutable num_cols = _columns.length;
+
+        size_t[max_cols] natural = void;
+        size_t[max_cols] avg = void;
+
         foreach (col; 0 .. num_cols)
         {
-            if (_num_rows > 0)
-                avg[col] = (col_total[col] + _num_rows - 1) / _num_rows;
-            else
-                avg[col] = 0;
+            natural[col] = visible_width(_columns[col].header);
+            if (stats.natural[col] > natural[col])
+                natural[col] = stats.natural[col];
+            avg[col] = stats.rows > 0 ? (stats.total[col] + stats.rows - 1) / stats.rows : 0;
         }
 
         foreach (col; 0 .. num_cols)
             alloc[col] = natural[col];
         immutable size_t gap_total = (num_cols > 1) ? (num_cols - 1) * gap : 0;
-        immutable size_t term_width = session.width > 0 ? session.width : 80;
+        if (term_width == 0)
+            term_width = 80;
 
         size_t content_width = gap_total;
         foreach (col; 0 .. num_cols)
@@ -381,41 +376,39 @@ private:
         }
     }
 
-    const(char)[] get_cell_text(uint row, uint col)
-    {
-        uint idx = row * cast(uint)_columns.length + col;
-        uint start = (idx == 0) ? 0 : _cell_ends[idx - 1];
-        uint end = _cell_ends[idx];
-        return _text_buf[start .. end];
-    }
-
-    void pad_incomplete_row()
-    {
-        if (_num_rows == 0)
-            return;
-        size_t expected = _num_rows * _columns.length;
-        while (_cell_ends.length < expected)
-        {
-            _cell_ends ~= cast(uint)_text_buf.length;
-            _cell_spans ~= cast(ubyte)1;
-        }
-    }
-
-    void write_row(Session session, const size_t[] widths, int row)
+    // A cell wider than its column truncates only where the column was fitted below `natural`.
+    size_t format_row(char[] buf, const size_t[] widths, int row, const(size_t)[] natural = null)
     {
         import urt.string.ascii : to_upper;
 
         const num_cols = _columns.length;
-        char[512] buf = void;
+        const is_highlighted = row >= 0 && row == _highlight_row;
+        const(char)[] suffix = is_highlighted ? _highlight_suffix : null;
+        immutable size_t limit = buf.length - 3 - suffix.length;
         size_t pos;
 
-        const is_highlighted = row >= 0 && row == _highlight_row;
-        if (is_highlighted && _highlight_prefix.length > 0)
+        void put(const(char)[] text, bool upper = false)
         {
-            buf[pos .. pos + _highlight_prefix.length] = _highlight_prefix;
-            pos += _highlight_prefix.length;
+            size_t n = text.length < limit - pos ? text.length : limit - pos;
+            if (upper)
+                to_upper(text[0 .. n], buf[pos .. pos + n]);
+            else
+                buf[pos .. pos + n] = text[0 .. n];
+            pos += n;
         }
 
+        void fill(size_t n)
+        {
+            if (n > limit - pos)
+                n = limit - pos;
+            buf[pos .. pos + n] = ' ';
+            pos += n;
+        }
+
+        if (is_highlighted)
+            put(_highlight_prefix);
+
+        char[256] slice_buf = void;
         uint col = 0;
         while (col < num_cols)
         {
@@ -450,11 +443,10 @@ private:
             // TODO: truncation with visible_width needs byte-level truncation
             // that respects UTF-8/ANSI boundaries. For now, only truncate if
             // the visible width exceeds the column width.
-            if (vis_w > w && w >= 3)
+            if (vis_w > w && w >= 3 && (natural.length == 0 || w < natural[col]))
             {
                 vis_w = w - 2;
                 truncated = true;
-                char[256] slice_buf = void;
                 text = text.visible_slice(slice_buf, 0, vis_w);
             }
 
@@ -463,39 +455,264 @@ private:
             TextAlign alignment = (span == 1) ? _columns[col].alignment : TextAlign.left;
 
             if (alignment == TextAlign.right)
-            {
-                buf[pos .. pos + pad] = ' ';
-                pos += pad;
-            }
+                fill(pad);
 
-            if (is_header)
-                to_upper(text, buf[pos .. pos + text.length]);
-            else
-                buf[pos .. pos + text.length] = text;
-            pos += text.length;
+            put(text, is_header);
             if (truncated)
-                buf[pos++] = '.', buf[pos++] = '.';
+                put("..");
 
             if (!is_last)
-            {
-                size_t trail = (alignment == TextAlign.left ? pad : 0) + gap;
-                buf[pos .. pos + trail] = ' ';
-                pos += trail;
-            }
+                fill((alignment == TextAlign.left ? pad : 0) + gap);
 
             col += span_cols;
         }
 
         buf[pos .. pos + 3] = "\x1b[K";
         pos += 3;
-        if (is_highlighted && _highlight_suffix.length > 0)
+        buf[pos .. pos + suffix.length] = suffix[];
+        return pos + suffix.length;
+    }
+
+private:
+
+    struct ColumnDef
+    {
+        const(char)[] header;
+        TextAlign alignment;
+    }
+
+    Array!ColumnDef _columns;
+    Array!char _text_buf;
+    Array!uint _cell_ends;
+    Array!ubyte _cell_spans;
+    const(char)[] _highlight_prefix;
+    const(char)[] _highlight_suffix;
+    uint _highlight_row = uint.max;
+    uint _num_rows;
+
+    void compute_column_widths(Session session, size_t[] alloc)
+    {
+        ColumnStats stats;
+        measure(stats);
+        fit_widths(stats, session.width, alloc);
+    }
+
+    const(char)[] get_cell_text(uint row, uint col)
+    {
+        uint idx = row * cast(uint)_columns.length + col;
+        uint start = (idx == 0) ? 0 : _cell_ends[idx - 1];
+        uint end = _cell_ends[idx];
+        return _text_buf[start .. end];
+    }
+
+    void pad_incomplete_row()
+    {
+        if (_num_rows == 0)
+            return;
+        size_t expected = _num_rows * _columns.length;
+        while (_cell_ends.length < expected)
         {
-            buf[pos .. pos + _highlight_suffix.length] = _highlight_suffix;
-            pos += _highlight_suffix.length;
+            _cell_ends ~= cast(uint)_text_buf.length;
+            _cell_spans ~= cast(ubyte)1;
         }
-        session.write_output(buf[0 .. pos], true);
+    }
+
+    void write_row(Session session, const size_t[] widths, int row)
+    {
+        char[512] buf = void;
+        session.write_output(buf[0 .. format_row(buf[], widths, row)], true);
     }
 }
+
+
+// walk() runs once to measure, then once per chunk from the resume point; a chunk ends at the last
+// whole block of the shallowest depth it holds, so a top-level block splits only when it cannot fit.
+abstract class TablePrint : CommandState
+{
+nothrow @nogc:
+
+    this(Session session, Command* command = null)
+    {
+        super(session, command);
+    }
+
+    override CommandCompletionState update()
+        => _done ? CommandCompletionState.finished : CommandCompletionState.in_progress;
+
+    override void request_cancel()
+    {
+        finish();
+    }
+
+protected:
+    Table table;
+
+    abstract void walk();
+
+    // commands are freed through their base type, which skips derived destructors
+    void release()
+    {
+    }
+
+    final void start()
+    {
+        _crlf = (session.features & ClientFeatures.crlf) != 0;
+        measure();
+        session.feed_output(&produce);
+    }
+
+    final uint resume_key() const pure
+        => _resume_key;
+
+    final bool stopped() const pure
+        => _stopped;
+
+    // keys ascend through a walk; walk() starts from resume_key()
+    final void begin_block(uint key)
+    {
+        _key = key;
+        _rows = 0;
+        _skip = key == _resume_key ? _resume_rows : 0;
+    }
+
+    // true: the row was emitted by an earlier chunk; otherwise fill table's row, then commit_row()
+    final bool skip_row()
+    {
+        if (!_measuring && _rows < _skip)
+        {
+            ++_rows;
+            return true;
+        }
+        table.clear_rows();
+        table.add_row();
+        return false;
+    }
+
+    final void commit_row()
+    {
+        if (_measuring)
+        {
+            table.measure(_stats);
+            return;
+        }
+        emit(0);
+        if (_stopped)
+            return;
+        ++_rows;
+        mark(ubyte.max, _key, _rows);
+    }
+
+    final bool row(Args...)(auto ref Args cells)
+    {
+        if (!skip_row())
+        {
+            foreach (ref c; cells)
+                table.cell(c);
+            commit_row();
+        }
+        return !_stopped;
+    }
+
+    // closes a subtree at `depth` below the top-level block; 0 closes the block
+    final void end(ubyte depth)
+    {
+        if (_measuring || _rows <= _skip)
+            return;
+        if (depth == 0)
+            mark(0, _key + 1, 0);
+        else
+            mark(depth, _key, _rows);
+    }
+
+private:
+    struct Mark
+    {
+        size_t len;
+        uint key;
+        uint rows;
+        ubyte depth = ubyte.max;
+    }
+
+    Table.ColumnStats _stats;
+    size_t[Table.max_cols] _widths;
+    char[] _chunk;
+    size_t _len;
+    Mark _mark;
+    uint _resume_key;
+    uint _resume_rows;
+    uint _key;
+    uint _rows;
+    uint _skip;
+    bool _measuring;
+    bool _stopped;
+    bool _header_sent;
+    bool _crlf;
+    bool _done;
+
+    void measure()
+    {
+        _measuring = true;
+        walk();
+        _measuring = false;
+        table.fit_widths(_stats, session.width, _widths[0 .. table.num_cols]);
+    }
+
+    size_t produce(char[] chunk)
+    {
+        _chunk = chunk;
+        _len = 0;
+        _mark = Mark();
+        _stopped = false;
+        if (!_header_sent)
+        {
+            emit(-1);
+            _header_sent = true;
+            mark(ubyte.max, _resume_key, _resume_rows);
+        }
+        walk();
+        if (!_stopped)
+            finish();
+        _chunk = null;
+        return _len;
+    }
+
+    void finish()
+    {
+        if (_done)
+            return;
+        _done = true;
+        session.release_output(&produce);
+        table = Table();
+        release();
+    }
+
+    void mark(ubyte depth, uint key, uint rows)
+    {
+        if (depth <= _mark.depth)
+            _mark = Mark(_len, key, rows, depth);
+    }
+
+    void emit(int row)
+    {
+        const(char)[] newline = _crlf ? "\r\n" : "\n";
+        char[Session.min_output_chunk] line = void;
+        size_t n = table.format_row(line[0 .. $ - newline.length], _widths[0 .. table.num_cols], row, _stats.natural[]);
+        line[n .. n + newline.length] = newline[];
+        n += newline.length;
+        if (_len + n > _chunk.length)
+        {
+            debug assert(_len != 0, "a row always fits an empty chunk");
+            _len = _mark.len;
+            _resume_key = _mark.key;
+            _resume_rows = _mark.rows;
+            _stopped = true;
+            return;
+        }
+        _chunk[_len .. _len + n] = line[0 .. n];
+        _len += n;
+    }
+}
+
 
 const(char)[] enum_key_for(ref const Variant value)
 {
@@ -570,5 +787,113 @@ unittest
         assert(t.get_cell_text(0, 2) == "");
 
         t.clear();
+    }
+
+    // TablePrint chunks at the shallowest whole block and never loses or repeats a row
+    {
+        import urt.mem : alloc, free;
+        import urt.mem.temp : tconcat;
+        import urt.string : StringLit;
+        import manager.collection : Collection;
+        import manager.console.command : front_is;
+        import manager.console.console : Console;
+        import manager.console.session : StringSession;
+
+        static final class TreePrint : TablePrint
+        {
+        nothrow @nogc:
+
+            this(Session session, uint devices, uint components, uint elements)
+            {
+                super(session);
+                _devices = devices;
+                _components = components;
+                _elements = elements;
+                table.add_column("name");
+                table.add_column("value");
+                measure();
+            }
+
+            override void walk()
+            {
+                foreach (d; (resume_key ? resume_key : 1) .. _devices + 1)
+                {
+                    begin_block(d);
+                    if (!row(tconcat("device", d), ""))
+                        return;
+                    foreach (c; 0 .. _components)
+                    {
+                        if (!row(tconcat("  component", c), ""))
+                            return;
+                        foreach (e; 0 .. _elements)
+                        {
+                            if (!row(tconcat("    element", e), "0123456789"))
+                                return;
+                            end(2);
+                        }
+                        end(1);
+                    }
+                    end(0);
+                }
+            }
+
+            uint _devices, _components, _elements;
+        }
+
+        Console* console = alloc!Console(null, StringLit!"test.table-print");
+        StringSession session = console.createSession!StringSession();
+        scope(exit)
+        {
+            console.destroy_session(session);
+            Collection!Session().update_all();
+        }
+
+        static bool ends_at(const(char)[] text, const(char)[] next_row_prefix, size_t offset)
+            => offset == text.length || text[offset .. $].front_is(next_row_prefix);
+
+        static immutable uint[3][3] shapes = [[6, 2, 2], [2, 12, 6], [1, 1, 60]];
+        static immutable size_t[3] chunk_sizes = [512, 700, 1600];
+        foreach (ref shape; shapes)
+        {
+            TreePrint whole = alloc!TreePrint(session, shape[0], shape[1], shape[2]);
+            char[16384] full_buf = void;
+            const(char)[] full = full_buf[0 .. whole.produce(full_buf[])];
+            assert(whole._done && full.length > 0);
+            free(whole);
+
+            immutable uint device_rows = 1 + shape[1] * (shape[2] + 1);
+            foreach (chunk_size; chunk_sizes)
+            {
+                TreePrint paged = alloc!TreePrint(session, shape[0], shape[1], shape[2]);
+                Array!char joined;
+                char[1600] chunk = void;
+                while (!paged._done)
+                {
+                    size_t n = paged.produce(chunk[0 .. chunk_size]);
+                    assert(n > 0 || paged._done);
+                    size_t at = joined.length;
+                    joined ~= chunk[0 .. n];
+                    size_t cut = joined.length;
+                    if (paged._done || at == 0)
+                        continue;
+                    // a device that fits whole is never split from the chunk before it
+                    bool device_cut = ends_at(full, "device", cut);
+                    bool component_cut = device_cut || ends_at(full, "  component", cut);
+                    if ((device_rows + 1) * 32 < chunk_size)
+                        assert(device_cut);
+                    else if ((shape[2] + 2) * 32 < chunk_size)
+                        assert(component_cut);
+                }
+                assert(joined[] == full);
+                free(paged);
+            }
+        }
+
+        TreePrint cancelled = alloc!TreePrint(session, 4, 4, 4);
+        char[512] chunk = void;
+        assert(cancelled.produce(chunk[]) > 0 && cancelled.update() == CommandCompletionState.in_progress);
+        cancelled.request_cancel();
+        assert(cancelled.update() == CommandCompletionState.finished);
+        free(cancelled);
     }
 }

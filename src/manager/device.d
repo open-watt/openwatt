@@ -130,6 +130,11 @@ public:
     auto values() => _machine.values();
     auto keys() => _machine.names();
 
+    uint slot_count() const pure
+        => _machine.slot_count;
+    inout(Device) at(uint slot) inout pure
+        => _machine.at(slot);
+
     size_t length()
     {
         size_t n = 0;

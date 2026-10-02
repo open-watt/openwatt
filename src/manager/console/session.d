@@ -6,10 +6,12 @@ import urt.lifetime;
 import urt.log;
 import urt.map;
 import urt.mem;
+import urt.mem.pagepool : Page, page_alloc, page_free;
 import urt.mem.reclaim;
 import urt.result;
 import urt.string;
 import urt.string.ansi;
+import urt.time;
 import urt.util;
 import urt.variant;
 
@@ -102,6 +104,9 @@ struct TerminalChannel
     TerminalEvents pending_events;
 }
 
+// Fills buffer with the next output and returns the bytes written; 0 idles the feed until feed_output() re-arms it.
+alias OutputProducer = size_t delegate(char[] buffer) nothrow @nogc;
+
 class Session : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("stream", stream),
@@ -115,6 +120,8 @@ nothrow @nogc:
     enum collection_id = CollectionType.console_session;
     enum syncable = false;
     enum max_history_entries = 50;
+    enum min_output_chunk = 512;
+    enum max_output_chunk = 1600;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
@@ -238,6 +245,11 @@ nothrow @nogc:
     final override CompletionStatus shutdown()
     {
         unsubscribe_stream();
+        if (_output_waking)
+        {
+            g_app.cancel(&output_wake);
+            _output_waking = false;
+        }
 
         if (_current_command)
         {
@@ -413,10 +425,17 @@ nothrow @nogc:
             if (newline)
                 _stream.write((_features & ClientFeatures.crlf) ? "\r\n" : "\n");
         }
-        else if (text.length > 0)
+        else
         {
             import urt.log : writeInfo;
-            writeInfo("session: ", text);
+            while (text.length > 0)
+            {
+                const(char)[] line = text.split!('\n', false);
+                if (line.length > 0 && line[$ - 1] == '\r')
+                    line = line[0 .. $ - 1];
+                if (line.length > 0)
+                    writeInfo("session: ", line);
+            }
         }
     }
 
@@ -454,6 +473,31 @@ nothrow @nogc:
         import urt.string.format;
 
         write_output(tformat(format, forward!args), false);
+    }
+
+    // the stream pulls pages at its own pace; a session without one takes them as they are made
+    final void feed_output(OutputProducer producer)
+    {
+        _producer = producer;
+        if (Stream s = _stream)
+        {
+            s.tx_handler(&provide_output_page);
+            return;
+        }
+        while (Page* page = provide_output_page(null, max_output_chunk))
+        {
+            write_output(cast(const(char)[])page.data, false);
+            page_free(page);
+        }
+    }
+
+    final void release_output(OutputProducer producer)
+    {
+        if (_producer !is producer)
+            return;
+        _producer = null;
+        if (Stream s = _stream)
+            s.release_tx_handler(&provide_output_page);
     }
 
     final bool show_prompt(bool show)
@@ -887,6 +931,7 @@ private:
     bool _stream_subscribed = false;
     bool _features_override = false;
     bool _profile_set = false;
+    bool _output_waking = false;
 
     const(char)[] _prompt_suffix;
     MutableString!0 _prompt;
@@ -894,6 +939,7 @@ private:
     uint _position = 0;
 
     CommandState _current_command = null;
+    OutputProducer _producer;
 
     Array!(MutableString!0) _history;
     uint _history_cursor = 0;
@@ -914,9 +960,44 @@ private:
     {
         if (_stream_subscribed)
         {
+            if (Stream s = _stream)
+                s.release_tx_handler(&provide_output_page);
             _stream.unsubscribe(&stream_state_change);
             _stream_subscribed = false;
         }
+    }
+
+    Page* provide_output_page(Stream, size_t requested)
+    {
+        if (!_producer)
+            return null;
+        size_t size = requested < min_output_chunk ? min_output_chunk : requested < max_output_chunk ? requested : max_output_chunk;
+        Page* page = page_alloc(size);
+        if (!page)
+        {
+            // the stream disarms on null; one outstanding timer re-arms it rather than waiting for the next frame
+            if (!_output_waking)
+            {
+                _output_waking = true;
+                g_app.schedule(getTime() + msecs(20), &output_wake);
+            }
+            return null;
+        }
+        size_t n = _producer(cast(char[])page.data);
+        if (n == 0)
+        {
+            page_free(page);
+            return null;
+        }
+        page.length = cast(ushort)n;
+        return page;
+    }
+
+    void output_wake(MonoTime)
+    {
+        _output_waking = false;
+        if (_producer)
+            feed_output(_producer);
     }
 
     void finish_close()

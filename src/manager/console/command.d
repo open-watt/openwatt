@@ -292,13 +292,10 @@ nothrow @nogc:
                     {
                         ++_stmt;
                         _state = State.next_stmt;
+                        break;
                     }
-                    else
-                    {
-                        _state = State.awaiting_result;
-                        return CommandCompletionState.in_progress;
-                    }
-                    break;
+                    _state = State.awaiting_result;
+                    goto case State.awaiting_result;
 
                 case State.awaiting_result:
                     CommandCompletionState cs = _waiting_on.update();
