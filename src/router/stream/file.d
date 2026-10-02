@@ -129,9 +129,6 @@ nothrow @nogc:
     override size_t tx_request() const
         => _tx.is_open ? 1600 : 0;
 
-    override bool supports_tx_pages() const
-        => true;
-
     override ptrdiff_t pending()
         => 0;
 
