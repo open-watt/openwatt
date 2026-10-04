@@ -130,6 +130,7 @@ nothrow @nogc:
 
 private:
     enum armed_window = 15.seconds;
+    enum factory_hold = 5.seconds;
 
     struct Expression
     {
@@ -156,7 +157,9 @@ private:
     Slot[8] _slots;
     Element* _status;
     Element* _status_colour;
+    Element* _reset_state;
     Indication _armed;
+    bool _held;
 
     Indication start(Gesture gesture, Duration duration)
     {
@@ -231,6 +234,11 @@ private:
                 _status = null;
             if (e is _status_colour)
                 _status_colour = null;
+            if (e is _reset_state)
+            {
+                _reset_state = null;
+                disarm();
+            }
             return;
         }
         Device owner = e.parent ? e.parent.root_device() : null;
@@ -260,29 +268,55 @@ private:
         }
         else if (path == "system.panel.reset.event")
             e.subscribe(&reset_event);
+        else if (path == "system.panel.reset.state")
+        {
+            _reset_state = e;
+            e.subscribe(&reset_state);
+        }
     }
 
-    // click reboots; a hold arms a factory reset that the release carries out, unless the armed window lapses first
-    void reset_event(ref const SampleUpdate update)
+    // Pressing for factory_hold arms a factory reset, whatever the binding's own hold; releasing carries it out unless
+    // the armed window has lapsed. A press counts only while the button is watched throughout.
+    void reset_state(ref const SampleUpdate update)
     {
         if (!update.value_ready)
-            return;
-        switch (cast(ButtonEvent)update.value.asLong)
         {
-            case ButtonEvent.click:
-                log_notice("panel", "reset button: reboot");
-                system_reboot();
-                break;
-            case ButtonEvent.hold:
-                _armed = indicate(Gesture.reset_armed, armed_window);
-                break;
-            case ButtonEvent.release:
-                if (indicating(_armed))
-                    factory_reset();
-                break;
-            default:
-                break;
+            if (update.event == SeriesEvent.gap || update.event == SeriesEvent.offline)
+                disarm();
+            return;
         }
+        if (update.value.asBool)
+        {
+            _held = false;
+            g_app.schedule(getTime() + factory_hold, &arm);
+        }
+        else
+        {
+            g_app.cancel(&arm);
+            if (indicating(_armed))
+                factory_reset();
+        }
+    }
+
+    void disarm()
+    {
+        g_app.cancel(&arm);
+        end_indication(_armed);
+    }
+
+    void arm(MonoTime)
+    {
+        _held = true;
+        _armed = indicate(Gesture.reset_armed, armed_window);
+    }
+
+    // a click reboots, unless the press reached factory_hold: a long hold setting reads it as a click
+    void reset_event(ref const SampleUpdate update)
+    {
+        if (!update.value_ready || cast(ButtonEvent)update.value.asLong != ButtonEvent.click || _held)
+            return;
+        log_notice("panel", "reset button: reboot");
+        system_reboot();
     }
 
     void factory_reset()

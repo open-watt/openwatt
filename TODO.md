@@ -277,6 +277,10 @@ and the panel left outstanding.
   `rx-latency` (configured, exported) from `actual-rx-latency` was run on hardware: export and
   reopen across a deferred change on the DevEBox H7, save and reboot on the BL808 M0. A save while
   an H7 change waits, then a reboot, needs a board with both.
+- **The panel's reset gestures have no test**, including a reset binding stopped or replaced mid-gesture
+  (a review probe confirmed it disarms): a module test would build its own Application, and an
+  Application cannot be created twice in one process, since its destructor releases neither the page
+  pool nor the event queues, intrinsics and signal providers its constructor registers.
 - **`Duration` properties print as raw nanoseconds** (`get` shows `3e+10ns` for `30s`): the value
   reaches the console as a quantity rather than through `Duration`'s own formatting.
 
