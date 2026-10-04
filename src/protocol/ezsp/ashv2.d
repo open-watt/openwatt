@@ -36,6 +36,8 @@ final class ASHInterface : BaseInterface
                                  Prop!("ack-timeout", ack_timeout));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "ash";
     enum path = "/interface/ezsp/ash";
 

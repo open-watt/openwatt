@@ -36,6 +36,8 @@ final class WindowsPcapEthernet : EthernetInterface
     alias Properties = AliasSeq!(Prop!("adapter", adapter));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "ether";
     enum path = "/interface/ethernet";
 

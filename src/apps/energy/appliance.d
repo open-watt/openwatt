@@ -40,6 +40,8 @@ final class Appliance : ActiveObject
                                  Prop!("state", state));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "appliance";
     enum path = "/apps/energy/appliance";
     enum collection_id = CollectionType.appliance;

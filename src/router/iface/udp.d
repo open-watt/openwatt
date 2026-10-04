@@ -105,6 +105,8 @@ final class UDPInterface : BaseInterface
                                  Prop!("remote-port", remote_port));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "udp";
     enum path = "/interface/udp";
 

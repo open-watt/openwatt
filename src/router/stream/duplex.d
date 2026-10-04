@@ -21,6 +21,8 @@ final class DuplexStream : Stream
                                  Prop!("rx", rx));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "duplex";
     enum path = "/stream/duplex";
 

@@ -442,6 +442,8 @@ final class ModbusRequestState : CommandState
 {
 nothrow @nogc:
 
+    ~this() {}
+
     CommandCompletionState state = CommandCompletionState.in_progress;
 
     String slave;

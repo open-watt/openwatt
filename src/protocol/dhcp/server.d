@@ -42,6 +42,8 @@ final class DHCPServer : ActiveObject
                                  Prop!("options", options));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "dhcp-server";
     enum path = "/protocol/dhcp/server";
     enum collection_id = CollectionType.dhcp_server;

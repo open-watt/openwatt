@@ -441,6 +441,8 @@ nothrow @nogc:
     {
     nothrow @nogc:
 
+        ~this() {}
+
         CommandCompletionState state = CommandCompletionState.in_progress;
 
         this(Session session)

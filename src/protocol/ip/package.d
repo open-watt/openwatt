@@ -2444,6 +2444,8 @@ nothrow @nogc:
                 import router.iface.packet : Packet, QueuePolicy;
                 enum type_name = "ping-test-link";
             nothrow @nogc:
+
+                ~this() {}
                 this(CID id, ObjectFlags flags = ObjectFlags.none)
                 {
                     super(collection_type_info!Link, id, flags);

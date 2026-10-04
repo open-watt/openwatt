@@ -42,6 +42,8 @@ final class APIManager : ActiveObject
                                  Prop!("uri", uri));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "api";
     enum path = "/apps/api";
     enum collection_id = CollectionType.api;

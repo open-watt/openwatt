@@ -118,6 +118,8 @@ final class ModbusInterface : BaseInterface
 {
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "modbus";
     enum path = "/interface/modbus";
 

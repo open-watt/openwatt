@@ -85,6 +85,8 @@ final class TLSStream : Stream
                                  Prop!("certificates", certificates));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "tls";
     enum path = "/stream/tls";
 
@@ -1188,6 +1190,8 @@ final class TLSServer : TCPServer
     alias Properties = AliasSeq!(Prop!("certificate", certificate),
                                  Prop!("certificates", certificates));
 nothrow @nogc:
+
+    ~this() {}
     enum type_name = "tls-server";
     enum path = "/protocol/tls/server";
     enum collection_id = CollectionType.tls_server;

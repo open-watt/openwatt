@@ -1713,6 +1713,8 @@ final class DeviceTreeView : TreeViewState
 {
 nothrow @nogc:
 
+    ~this() {}
+
     this(Session session, Application app, const(char)[] pattern)
     {
         super(session, null);

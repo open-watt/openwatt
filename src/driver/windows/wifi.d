@@ -99,6 +99,8 @@ final class WindowsWifiRadio : WiFiInterface
     alias Properties = AliasSeq!(Prop!("adapter", adapter));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "wifi";
     enum path = "/interface/wifi";
 
@@ -246,6 +248,8 @@ private:
 final class WindowsWlan : WLANInterface
 {
 nothrow @nogc:
+
+    ~this() {}
 
     enum type_name = "wlan";
     enum path = "/interface/wlan";

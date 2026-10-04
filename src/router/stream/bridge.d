@@ -21,6 +21,8 @@ final class BridgeStream : Stream
     alias Properties = AliasSeq!(Prop!("streams", streams));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "bridge-stream";
     enum path = "/stream/bridge";
 

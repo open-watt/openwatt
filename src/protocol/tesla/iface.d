@@ -87,6 +87,8 @@ final class TeslaInterface : BaseInterface
     alias Properties = AliasSeq!(Prop!("stream", stream));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "tesla-twc";
     enum path = "/interface/tesla-twc";
 

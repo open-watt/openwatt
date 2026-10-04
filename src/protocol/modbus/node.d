@@ -41,6 +41,8 @@ final class ModbusNode : ActiveObject
                                  Prop!("snoop", snoop));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "mb-node";
     enum path = "/protocol/modbus/node";
     enum collection_id = CollectionType.mb_node;

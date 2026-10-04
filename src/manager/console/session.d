@@ -110,6 +110,8 @@ class Session : ActiveObject
                                  Prop!("initial-command", initial_command));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "console-session";
     enum path = "/console/session";
     enum collection_id = CollectionType.console_session;
@@ -1256,6 +1258,8 @@ final class StringSession : Session
 {
 nothrow @nogc:
 
+    ~this() {}
+
     this(CID id, ObjectFlags flags, ref Console console)
     {
         super(id, flags, console);
@@ -1339,6 +1343,8 @@ version (unittest):
 private final class SessionTestStream : Stream
 {
 nothrow @nogc:
+
+    ~this() {}
 
     enum type_name = "session-test-stream";
 

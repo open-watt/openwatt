@@ -29,6 +29,8 @@ final class BuiltinEthernet : EthernetInterface
 {
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "ether";
     enum path = "/interface/ethernet";
 

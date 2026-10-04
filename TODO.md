@@ -1,5 +1,39 @@
 # TODO
 
+- **CI is held off release compilers by dlang/dmd#23605**: on 32-bit x86, a D-declared subclass of
+  an `extern(C++)` root gets its generated `__aggrDtor` with D linkage while the virtual call uses
+  the C++ convention, so the destructor receives the vtbl pointer as `this` (fixed by #23606 in
+  2.114). Host CI builds DMD with `dmd-master` and excludes LDC x86, since LDC is still on the 2.113
+  frontend. Restore the release DMD and the LDC x86 jobs once both releases carry the fix.
+
+## URGENT: undo at the next compiler update
+
+These work around compiler bugs. Undo each as soon as the minimum DMD **and** LDC carry the fix;
+left in place they are dead weight whose reason is invisible in the code.
+
+- **Delete every `~this() {}` in `src`** (179: every class in the `BaseObject`, `CommandState` and
+  `Component` hierarchies; `grep -rn '~this() {}' src` finds exactly these) once the minimum
+  frontend is 2.114. Before dlang/dmd#22931, a C++ destructor below a class that does not declare
+  one is not virtual. Delete uRT's `cpp_dtor_chain_declared` check in `urt/mem/alloc.d` in the same
+  change; it switches itself off at `__VERSION__ >= 2114` and would stop enforcing anything.
+- **Move `BaseObject.alias Properties` back above `flags()`** in `manager/base.d` once the minimum
+  DMD carries dlang/dmd#23946. On Windows targets, an overload inserted in front of the reserved
+  C++ destructor slot does not move it, and the destructor overwrites the shifted function. Until
+  then, an `extern(C++)` root must lay out `~this()` before its other virtuals: declare it first,
+  and name no virtuals in a class-scope alias above it.
+
+- uRT's class `free` passes the static type's instance size, so freeing a derived object through
+  a base reference (every collection free) under-reports it to `MemoryThreats` accounting on targets
+  whose allocator does not report usable size (Windows, Linux, ESP); the accounted total drifts up.
+  Bare-metal heaps use `_memsize` and are exact. Needs the dynamic size at free.
+- Each executed console script appears to leak about 80 bytes (two 40-byte blocks); suspected
+  `Expression` nodes from parsing, see the expression ownership rework. Measured with the
+  `ALLOC_TRACKING=1` console-restart probe after the destructor fixes; unconfirmed, because the
+  tracker cannot attribute it on Windows (next entry).
+- `urt.mem.profile.record` call-site names are garbled on Windows DMD debug builds (file names
+  overwrite each other and every site resolves to one unrelated function), which makes
+  `/system/alloc/leaks` unusable for attribution there.
+
 - Validate boot-guard OTA handoff on ESP32 hardware with NVS write/commit failures
   and power loss before/after image acceptance and rollback slot selection. Also
   exercise record loss/corruption and the power-on gesture on embedded targets.

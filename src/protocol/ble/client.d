@@ -34,6 +34,8 @@ class BLEClient : ActiveObject
                                  Prop!("peer", peer));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "ble-client";
     enum path = "/protocol/ble/client";
     enum collection_id = CollectionType.ble_client;
@@ -925,6 +927,8 @@ unittest
     static class TestClient : BLEClient
     {
     nothrow @nogc:
+
+        ~this() {}
         ubyte[64] last_req;
         size_t req_len;
         uint sends;

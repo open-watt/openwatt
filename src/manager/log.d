@@ -615,6 +615,8 @@ final class LogSink : ActiveObject
                                  Prop!("tag", tag));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "log-sink";
     enum path = "/log/sink";
     enum collection_id = CollectionType.log_sink;

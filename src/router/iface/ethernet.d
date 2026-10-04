@@ -65,6 +65,8 @@ abstract class EthernetStation : BaseInterface
                                  Elem!("mac", MACAddress, Check!mac_check));
 nothrow @nogc:
 
+    ~this() {}
+
     final MACAddress mac() const
         => prop_read!(EthernetStation, "mac")();
 
@@ -810,6 +812,8 @@ abstract class EthernetInterface : EthernetStation
 {
 nothrow @nogc:
 
+    ~this() {}
+
 protected:
 
     this(const CollectionTypeInfo* typeInfo, CID id, ObjectFlags flags = ObjectFlags.none)
@@ -965,6 +969,8 @@ unittest
     {
         enum type_name = "mac-ping-test-link";
     nothrow @nogc:
+
+        ~this() {}
         this(CID id, ObjectFlags flags = ObjectFlags.none)
         {
             super(collection_type_info!Link, id, flags);
@@ -976,10 +982,9 @@ unittest
     Link second = Collection!Link().create("mac-ping-test-second");
     scope(exit)
     {
-        Collection!Link().remove(first);
-        Collection!Link().remove(second);
-        free(first);
-        free(second);
+        first.destroy();
+        second.destroy();
+        Collection!BaseInterface().update_all();
     }
     struct Results
     {
@@ -1025,6 +1030,8 @@ unittest
     {
         enum type_name = "checksum-test-wire";
     nothrow @nogc:
+
+        ~this() {}
         ubyte[64] sent;
         bool offload, mac_asked;
 
@@ -1051,8 +1058,8 @@ unittest
     Wire wire = Collection!Wire().create("checksum-test-wire");
     scope(exit)
     {
-        Collection!Wire().remove(wire);
-        free(wire);
+        wire.destroy();
+        Collection!BaseInterface().update_all();
     }
 
     ubyte[30] datagram = [0x45, 0, 0, 30, 0, 0, 0, 0, 64, 17, 0, 0, 10, 0, 0, 1, 10, 0, 0, 2,

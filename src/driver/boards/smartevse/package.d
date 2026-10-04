@@ -270,6 +270,8 @@ class SmartEVSE : ActiveObject
                                  Prop!("contactor2", contactor2, "status", "d"));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "smartevse";
     enum path = "/driver/boards/smartevse";
     enum collection_id = CollectionType.smartevse;
@@ -526,13 +528,12 @@ protected:
             log.error("SmartEVSE hardware is unavailable");
             return CompletionStatus.error;
         }
-        if (_hardware_owner !is _hardware_module)
+        if (_active_hardware_owner !is null)
         {
             log.error("SmartEVSE hardware is already owned by another object");
             return CompletionStatus.error;
         }
 
-        _hardware_owner = this;
         _active_hardware_owner = this;
 
         apply_current();
@@ -593,7 +594,6 @@ protected:
         }
         _active_hardware_owner = null;
         hardware_offline();
-        _hardware_owner = _hardware_module;
         if (!_rcm_fault)
             sync_status(changes);
         return CompletionStatus.complete;
@@ -879,13 +879,9 @@ nothrow @nogc:
         g_app.console.register_command!(cmd_stop, "stop")("/driver/boards/smartevse", this);
         g_app.console.register_command!(cmd_display, "display")("/driver/boards/smartevse", this);
 
-        _hardware_module = this;
-        _hardware_owner = this;
         if (setup() != 0)
         {
             hardware_shutdown();
-            _hardware_owner = null;
-            _hardware_module = null;
             log.error("could not initialise SmartEVSE hardware");
             return;
         }
@@ -901,8 +897,6 @@ nothrow @nogc:
             hardware_offline();
             hardware_shutdown();
         }
-        _hardware_owner = null;
-        _hardware_module = null;
         _hardware_ready = false;
     }
 
@@ -982,8 +976,6 @@ bool rcm_fault_signalled()
     return atomicLoad!(MemoryOrder.acquire)(_rcm_fault_pending) != 0;
 }
 
-__gshared Object _hardware_owner;
-__gshared SmartEVSEModule _hardware_module;
 __gshared SmartEVSE _active_hardware_owner;
 __gshared bool _hardware_ready;
 shared uint _rcm_fault_pending;

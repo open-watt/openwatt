@@ -3,6 +3,11 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-10-05: managed object text formatting
+
+- Managed objects formatted as text now use their bare name. Remove assumptions that stream or
+  interface formatting carries a `stream:` or `interface:` prefix; use the object's type metadata.
+
 ## 2026-10-04: button `backend`
 
 - A GPIO `button` binding reports `backend`: `interrupt` where its edges arrive on an event link,

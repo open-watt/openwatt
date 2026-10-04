@@ -71,6 +71,7 @@ recoverable plaintext. Missing secrets must be re-entered.
 
 ### Configuration property round trips
 
+- Managed objects formatted as text use their bare name, without a `stream:` or `interface:` prefix.
 - `/protocol/telnet/server` is a managed collection with `add`, `remove`, `get`, `set`,
   `reset`, `list`, and `print`. Its `port` property is a nonzero unsigned 16-bit port;
   changing it restarts the listener. Example: `/protocol/telnet/server/add name=console port=23`.

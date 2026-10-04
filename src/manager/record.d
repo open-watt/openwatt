@@ -478,6 +478,8 @@ final class Recorder : ActiveObject
                                  Prop!("filter", filter));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "recorder";
     enum path = "/record";
     enum collection_id = CollectionType.recorder;
@@ -794,6 +796,8 @@ abstract class RecordFetchCommand : CommandState
 {
 nothrow @nogc:
 
+    ~this() {}
+
     SeriesFetch fetch;
 
     this(Session session)
@@ -828,6 +832,8 @@ final class RecordQueryCommand : RecordFetchCommand
 {
 nothrow @nogc:
 
+    ~this() {}
+
     this(Session session, const(char)[] path)
     {
         super(session);
@@ -854,6 +860,8 @@ private:
 final class RecordGraphCommand : RecordFetchCommand
 {
 nothrow @nogc:
+
+    ~this() {}
 
     this(Session session, uint cols, uint rows, GraphOptions opt)
     {
@@ -997,6 +1005,8 @@ final class GraphViewState : LiveViewState
     import urt.mem.temp : tconcat;
     import manager.console.command : CommandCompletionState;
 nothrow @nogc:
+
+    ~this() {}
 
     this(Session session, RecordModule mod, Array!String paths, Duration span, GraphOptions opt, uint height)
     {

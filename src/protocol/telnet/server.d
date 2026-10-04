@@ -28,6 +28,8 @@ final class TelnetServer : ActiveObject
     alias Properties = AliasSeq!(Prop!("port", port));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "telnet-server";
     enum path = "/protocol/telnet/server";
     enum collection_id = CollectionType.telnet_server;

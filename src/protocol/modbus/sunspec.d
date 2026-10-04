@@ -554,6 +554,8 @@ final class SunspecBinding : ProtocolBinding
                                  Prop!("slave", slave));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "sunspec-binding";
     enum path = "/binding/sunspec";
 

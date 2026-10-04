@@ -55,6 +55,8 @@ final package class SyncConsoleStream : Stream
                                  Prop!("sequence", sequence));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "sync-console";
     enum syncable = false;
     enum chunk_size = 8192;

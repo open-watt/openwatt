@@ -34,6 +34,8 @@ final class OTAUpdater : ActiveObject
                                  Prop!("max-fail", max_fail));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "ota";
     enum path = "/apps/ota";
     enum collection_id = CollectionType.ota;

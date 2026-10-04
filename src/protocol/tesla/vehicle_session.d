@@ -44,6 +44,8 @@ class TeslaVehicleSession : ActiveObject
 {
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "tesla-vehicle-session";
     enum path = "/protocol/tesla/session";
     enum collection_id = CollectionType.tesla_vehicle_session;
@@ -1566,6 +1568,8 @@ unittest
     static class Session : TeslaVehicleSession
     {
     nothrow @nogc:
+
+        ~this() {}
         this() { super(CID(2)); }
         bool accept;
         uint charges, climates, vehicles;
@@ -1629,6 +1633,8 @@ unittest
     static class Receiver : TeslaVehicleSession
     {
     nothrow @nogc:
+
+        ~this() {}
         this() { super(CID(3)); }
         override bool signer_unchanged() => true;
     }
@@ -1803,6 +1809,8 @@ unittest
     static class Session : TeslaVehicleSession
     {
     nothrow @nogc:
+
+        ~this() {}
         this() { super(CID(4)); }
         VehicleRetryState retry;
         uint charges, climates;

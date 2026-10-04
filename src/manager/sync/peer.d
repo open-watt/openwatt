@@ -1483,6 +1483,8 @@ unittest
     {
         enum type_name = "sync-test-narrow";
     nothrow @nogc:
+
+        ~this() {}
         this(CID id, ObjectFlags flags = ObjectFlags.none)
         {
             super(collection_type_info!Narrow, id, flags);
@@ -1508,8 +1510,8 @@ unittest
     scope(exit)
     {
         free(peer);
-        Collection!Narrow().remove(link);
-        free(link);
+        link.destroy();
+        Collection!Narrow().table.free_pending();
     }
     peer._transport = link;
 

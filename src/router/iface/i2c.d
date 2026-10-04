@@ -111,6 +111,8 @@ final class I2CInterface : BaseInterface
                                  Prop!("last-error", last_error, "status", "d"));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "i2c";
     enum path = "/interface/i2c";
 

@@ -28,6 +28,8 @@ abstract class TreeViewState : LiveViewState
 {
 nothrow @nogc:
 
+    ~this() {}
+
     this(Session session, Command* command)
     {
         super(session, command);

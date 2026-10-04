@@ -39,6 +39,8 @@ final class ESPHomeClient : ActiveObject
                                  Prop!("server_info", server_info));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "esphome";
     enum path = "/protocol/esphome/client";
     enum collection_id = CollectionType.esphome;

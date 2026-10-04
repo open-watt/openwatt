@@ -22,6 +22,8 @@ final class NTPClient : ActiveObject
                                  Prop!("offset",   offset));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "ntp-client";
     enum path = "/protocol/ntp/client";
     enum collection_id = CollectionType.ntp_client;

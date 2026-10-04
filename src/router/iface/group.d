@@ -19,6 +19,8 @@ final class InterfaceGroup : BaseObject
                                  Prop!("group", group));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "interface-group";
     enum path = "/interface/group";
     enum collection_id = CollectionType.interface_group;

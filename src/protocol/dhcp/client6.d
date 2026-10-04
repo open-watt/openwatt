@@ -46,6 +46,8 @@ class DHCP6Client : ActiveObject
                                  Prop!("pool-name", pool_name));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "dhcp6-client";
     enum path = "/protocol/dhcp/client6";
     enum collection_id = CollectionType.dhcp6_client;

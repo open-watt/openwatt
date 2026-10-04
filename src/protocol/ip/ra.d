@@ -53,6 +53,8 @@ class RAService : ActiveObject
                                  Prop!("dns", dns));
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "ipv6-ra";
     enum path = "/protocol/ip/ra";
     enum collection_id = CollectionType.ip_ra;

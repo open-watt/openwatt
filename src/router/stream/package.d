@@ -301,13 +301,6 @@ nothrow @nogc:
         }
     }
 
-    final ptrdiff_t toString(char[] buffer, const(char)[] format, const(FormatArg)[] format_args) const nothrow @nogc
-    {
-        if (buffer.length < "stream:".length + name.length)
-            return -1; // Not enough space
-        return buffer.concat("stream:", name[]).length;
-    }
-
 protected:
 
     void tx_handler_changed()
@@ -518,6 +511,8 @@ unittest
     class TestTxStream : Stream
     {
     nothrow @nogc:
+
+        ~this() {}
 
         enum type_name = "test-tx-stream";
 

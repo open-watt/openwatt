@@ -29,6 +29,8 @@ final class BuiltinWiFi : WiFiInterface
 {
 nothrow @nogc:
 
+    ~this() {}
+
     version (Espressif) enum bool supports_apsta = true;
     else enum bool supports_apsta = false;
 
@@ -629,6 +631,8 @@ final class BuiltinWlan : WLANInterface
 {
 nothrow @nogc:
 
+    ~this() {}
+
     enum type_name = "wlan";
     enum path = "/interface/wlan";
 
@@ -931,6 +935,8 @@ private:
 final class BuiltinAp : APInterface
 {
 nothrow @nogc:
+
+    ~this() {}
 
     enum type_name = "wifi-ap";
     enum path = "/interface/ap";

@@ -163,6 +163,8 @@ abstract class BLEInterface : BaseInterface
     alias Properties = AliasSeq!(Prop!("max-in-flight", max_in_flight));
 nothrow @nogc:
 
+    ~this() {}
+
     MACAddress _bd_addr; // synthetic local BD_ADDR; the radio's real address is below this layer
 
     protected this(const CollectionTypeInfo* type_info, CID id, ObjectFlags flags = ObjectFlags.none)
