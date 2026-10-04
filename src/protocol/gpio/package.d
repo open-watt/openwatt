@@ -227,6 +227,8 @@ nothrow @nogc:
 
     final const(char)[] backend() const pure
     {
+        if (_kind == GpioKind.button)
+            return _link.is_open ? "interrupt" : "sampled";
         static if (has_gpio_sampler)
             return _sampler.backend_name();
         else
@@ -251,7 +253,7 @@ nothrow @nogc:
             return false;
         if (_kind == GpioKind.capture)
             return true;
-        if (_component.empty || _gpio >= gpio_count())
+        if (_component.empty || _chip != 0 || _gpio >= gpio_count())
             return false;
         if ((_pull == Pull.up && !has_pull_up) || (_pull == Pull.down && !has_pull_down))
             return false;
@@ -351,6 +353,9 @@ nothrow @nogc:
             _sampler.close();
         }
         link_close(_link);
+        if (_observing)
+            _element.invalidate();
+        _observing = false;
         g_app.cancel(&baseline);
         g_app.cancel(&settle);
         g_app.cancel(&sample);
@@ -484,6 +489,7 @@ private:
     ubyte _pixel;
     bool _indicating;
     bool _pressed;
+    bool _observing;
     bool _unsettled;
     bool _phase;
 
@@ -551,6 +557,7 @@ private:
     {
         _pressed = read_pressed();
         _element.value(_pressed);
+        _observing = true;
         if (!link_acquire(_link, gpio_event(GpioLine(_chip, _gpio), GpioInterruptTrigger.change), isr_task!input_edge(cast(void*)this)))
             g_app.schedule(now + debounce, &sample);
     }
@@ -793,6 +800,8 @@ private:
     uint brightness()
     {
         uint p = _level ? (cast(Level)_level.value.asQuantity()).value : 100;
+        if (p > 100)
+            p = 100;
         return p * p * pwm_period / 10_000;
     }
 

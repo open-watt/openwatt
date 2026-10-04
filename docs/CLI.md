@@ -45,7 +45,12 @@ at boot.
 After three crashes before 60 seconds of uptime, recovery steps down from saved
 configuration to `startup.conf`, then bring-up defaults. An unproven revision is
 replaced by an older one; previously successful revisions are preserved. `/system/sysinfo` reports the active configuration and
-recovery reason. Power loss and deliberate restarts do not count as crashes.
+recovery reason. Power loss and deliberate restarts do not count as crashes, and nor does a
+press of the reset button where the chip reports its reset pin; that counts as a power-on. A
+board whose reset line is driven by a supervisor or an external watchdog therefore reads those
+resets as presses, and a hang loop there never steps down the configuration. A debugger's reset
+reads as deliberate, and a watchdog reset is always a crash. A chip that cannot name a watchdog
+reset reads a reset its record never saw coming as one.
 
 Five power-ons that each end within five seconds select bring-up defaults for one
 boot, skipping `user.conf` without erasing anything. On supported OTA platforms, a
@@ -58,6 +63,11 @@ corrupt scripts and crashes; it does not verify remote connectivity.
 Saved passwords use a separate `conf/secret.store.<revision>` file. Keep it with the
 configuration when backing up or restoring, and protect it: its contents are
 recoverable plaintext. Missing secrets must be re-entered.
+
+**Platform notes**
+
+- STM32 reports its reset pin, so a press reads as a power-on.
+- The BL808 cannot name a watchdog reset.
 
 ### Configuration property round trips
 
@@ -168,19 +178,26 @@ command says so.
 `/system/sleep <duration>` pauses the session for the given duration. It is latent, so
 Ctrl-C cancels it, which makes it useful for pacing a startup script.
 
-`/system/reboot [bootloader=<n>] [crash=<bool>]` restarts the node. Without arguments it
-performs a normal restart. `crash=true` aborts the process instead, which the boot guard
-counts as a crash; it exists to exercise the guard.
+`/system/reboot [bootloader=<n>] [crash=<bool>] [hang=<bool>]` restarts the node. Without
+arguments it performs a normal restart. `crash=true` aborts the process instead, which the
+boot guard counts as a crash; it exists to exercise the guard. `hang=true` stalls the main
+loop until the watchdog resets the node, to exercise the watchdog; where none is armed it
+hangs for good.
 
 `<n>` is an integer, and any non-zero value restarts into the chip's own ROM loader
 instead, where the part exposes its factory firmware-update interface. `bootloader=1`
 is the usual form; the value selects between loaders on a part offering more than one,
 which none currently does. Only targets whose silicon provides such an entry point
 implement this, and elsewhere the command reports that the platform has no bootloader
-mode and does not reboot. On a RouterBOOT board it arms RouterBOOT's "try Ethernet once"
-instead: the next boot asks BOOTP/TFTP for an image and falls back to the image in flash when
-nobody answers. If the bootloader cannot be entered, the command says so and the node keeps
-running.
+mode and does not reboot. If the bootloader cannot be entered, the command says so and the
+node keeps running.
+
+**Platform notes**
+
+- RouterBOOT boards: `bootloader=` arms RouterBOOT's "try Ethernet once" instead. The next boot
+  asks BOOTP/TFTP for an image and falls back to the image in flash when nobody answers.
+- BL808: `bootloader=` enters the boot ROM's UART/USB download mode, which the vendor flash tools
+  speak.
 
 `/system/identify [duration=<duration>]` shows the identify gesture on the node's status light,
 `system.panel.status`, for `duration` (default `10s`). A node without a status light ignores it.
@@ -501,15 +518,23 @@ A serial stream opens a host serial device or an embedded UART.
 | --- | --- | --- | --- |
 | `device` | device path, COM name, or `uartN` | required | Serial device to open. Embedded `uartN` follows the datasheet numbering, so it starts at `uart1` on parts whose first UART is UART1. |
 | `baud-rate` | positive integer | `9600` | Symbol rate. |
-| `data-bits` | `5` to `8`; some embedded UARTs allow `9` | `8` | Data bits per character. |
+| `data-bits` | `5` to `8` | `8` | Data bits per character. |
 | `parity` | `none`, `even`, `odd`, `mark`, `space` | `none` | Parity mode. Embedded UARTs currently support `none`, `even`, and `odd`. |
 | `stop-bits` | `one`, `one_point_five`, `two` | `one` | Stop-bit mode. |
-| `flow-control` | `none`, `hardware`, `software`, `dsr_dtr` | `none` | Flow control. `rts_cts` aliases `hardware`; `xon_xoff` aliases `software`. |
+| `flow-control` | `none`, `hardware`, `software`, `dsr_dtr` | `none` | Flow control. `rts_cts` aliases `hardware`; `xon_xoff` aliases `software`. An embedded UART takes `hardware` on the RTS and CTS pins given in `rts-gpio` and `cts-gpio`, where its port has them. |
 | `tx-gpio` | GPIO number | platform default | Embedded-only transmit pin override. |
 | `rx-gpio` | GPIO number | platform default | Embedded-only receive pin override. |
 | `rts-gpio` | GPIO number | platform default | Embedded-only RTS pin override. |
 | `cts-gpio` | GPIO number | platform default | Embedded-only CTS pin override. |
-| `de-gpio` | GPIO number | platform default | Embedded-only driver-enable pin override. |
+| `de-gpio` | GPIO number | platform default | Embedded-only driver-enable pin override. Setting it makes the port RS-485, the UART driving DE around each transmission. |
+| `rx-latency` | duration | `350us` | Embedded-only, where the UART applies it. How long a continuous stream batches before it is delivered: the UART interrupts at the deepest FIFO threshold within it, and a pause (`rx-gap`) delivers sooner. A change may not take effect until the port next opens. |
+| `actual-rx-latency` | duration, read-only | none | The RX latency the UART runs with, once its hardware has clamped `rx-latency`; `0` while the port is closed. |
+| `rx-gap` | characters, `0.1` to `25.5` | `3.5` | Embedded-only, where the UART reports it. A quiet line this long delivers what preceded it. A change takes effect on the open port. |
+| `actual-rx-gap` | characters, read-only | none | The gap the hardware gives; `0` while the port is closed. |
+
+An embedded UART refuses what it cannot honour rather than open on something else: a framing,
+flow control, RS-485 or pin it does not support, and a baud rate its divider cannot reach within
+3%.
 
 Additional commands:
 
@@ -517,6 +542,19 @@ Additional commands:
 | --- | --- | --- |
 | `/stream/serial/devices` | POSIX hosts | Lists detected serial devices. |
 | `/stream/serial/lines <name>` | all platforms | Prints the current modem-line state for an open serial stream, including RTS, CTS, DTR, DSR, DCD, and RI where supported. |
+
+**Platform notes**
+
+- STM32: `uart0` is USART1 through `uart7` UART8, and on H7 `uart8` is LPUART1. Data is 8 bits.
+  A pin is taken only where it carries the signal asked of it; F4's UART4 and UART5 have no RTS
+  or CTS. F7 and H7 drive DE in hardware on the RTS pin; F4 cannot, so it refuses RS-485. F4 times
+  its gap as one character. On H7 an `rx-latency` change takes effect when the port next opens.
+- RP2350: the gap is fixed at 32 bit times, 3.2 characters at 8N1.
+- ESP32: RS-485 is ESP-IDF's half-duplex mode on the RTS pin. RX thresholds are ESP-IDF's, so it
+  offers neither `rx-latency` nor `rx-gap`.
+- BL808, BL618, BK7231 and MT7621 take their default pins only, without flow control or RS-485.
+  BK7231 runs no slower than about 3.2 kbaud and offers no `rx-gap`. The MT7621 UART is polled,
+  so it raises no RX event and offers neither `rx-latency` nor `rx-gap`.
 
 ### `/stream/usb-serial`
 
@@ -988,16 +1026,16 @@ lines are, and the binding builds the matching component at `component` in
 
 | Kind | Lines | Component |
 | --- | --- | --- |
-| `capture` | `gpio` | a timestamped edge series `state`; Linux only |
+| `capture` | `gpio` | a timestamped edge series `state` |
 | `button` | `gpio` | a [`Button`](COMPONENT_TEMPLATES.md#button): `mode`, `state` and a point series `event` of `click`, `double`, `triple`, `hold` and `release` |
 | `switch` | `gpio` | a [`Switch`](COMPONENT_TEMPLATES.md#switch) whose writable `switch` drives the line |
 | `light` | `gpio` | a [`Light`](COMPONENT_TEMPLATES.md#light) with `switch`, `effect`, `indicate` and `pulse`; `indicate` overrides the owner's state while it is not `none`, and each `pulse` inverts a steady output for 50ms; `drive` adds `level` and, for `ws2812`, `colour` |
 
-A button reacts to edge interrupts where the platform has them (ESP32, MT7621)
-and otherwise samples its line every `debounce`. A WS2812 chain runs on the RP2350's PIO, or is
-bit-banged on the BL808's D0 core; other platforms do not drive one yet. PWM comes from the chip's PWM block (ESP32
-LEDC) where one is free, and otherwise from software, driven by a 4 kHz timer interrupt that runs
-only while some light is at a level between off and full. The MT7621 has no PWM block. Gestures are timed from the
+A button reacts to edge interrupts where the platform has them and otherwise samples its line
+every `debounce`. A WS2812 chain needs a platform that drives one. PWM comes from the chip's PWM
+block where one reaches the pin and is free, and otherwise from software, driven by a 4 kHz timer
+interrupt that runs only while some light is at a level between off and full. Gestures are timed
+from the
 debounced level: a press held for `hold` is a `hold`, followed by `release`;
 otherwise one to three presses each within `click-gap` of the last are a
 `click`, `double` or `triple`.
@@ -1006,7 +1044,7 @@ otherwise one to three presses each within `click-gap` of the last are a
 | --- | --- | --- | --- |
 | `kind` | `capture`, `button`, `switch`, `light` | `capture` | What the line is. |
 | `gpio` | line number | required | The line. |
-| `chip` | controller index | `0` | The GPIO controller, on hosts with several (`/dev/gpiochipN`). |
+| `chip` | controller index | `0` | The GPIO controller, on hosts with several (`/dev/gpiochipN`). Only `capture` reaches a controller other than `0`. |
 | `component` | component path | required except for `capture` | Where the component goes in `device`. |
 | `active` | `high`, `low` | `high` | The line level that means pressed or on. |
 | `pull` | `none`, `up`, `down` | `none` | Pad pull, where the platform drives one. |
@@ -1018,13 +1056,23 @@ otherwise one to three presses each within `click-gap` of the last are a
 | `pwm-channel` | read-only | | `none`, `hardware` or `software`: what the light holds. A channel other code needs exact moves from hardware to software, so this can change. |
 
 `capture` also reports `records`, `buckets`, `edge-rate`, `last-edge`,
-`backend`, `clock`, `stream-start` and `anchor-error` as status.
+`backend`, `clock`, `stream-start` and `anchor-error` as status. A `button`'s `backend` is
+`interrupt` where its edges arrive on an event link, or `sampled` where it reads the line
+every `debounce`.
 
 ```
 /binding/gpio add name=reset-button device=system component=panel.reset kind=button gpio=18 active=low
 /binding/gpio add name=power-led device=system component=panel.status kind=light gpio=16
 /element/set element=system.panel.status.indicate value=blink
 ```
+
+**Platform notes**
+
+- `capture` is Linux only.
+- Edge interrupts: ESP32, MT7621, STM32, the BL808's M0, and RP2350, where they have not yet run.
+- WS2812 chains: the RP2350's PIO and the BL808's GPIO transmit FIFO.
+- PWM blocks: ESP32 LEDC, RP2350 slices, STM32 TIM1-4 and TIM8, and the BL808's two PWM blocks.
+  The MT7621 has none.
 
 ### `/binding/obd`
 

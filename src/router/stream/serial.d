@@ -45,6 +45,9 @@ else version (FreeStanding)
 else
     static assert(false, "Unsupported platform!");
 
+version (Embedded) {} else
+    private enum bool has_rx_callback = false;
+
 nothrow @nogc:
 
 
@@ -85,18 +88,8 @@ struct ModemLines
 
 final class SerialStream : Stream
 {
-    version (Embedded)
-        alias Properties = AliasSeq!(Prop!("device", device),
-                                     Elem!("baud-rate", uint, Default!9600, Min!1, OnChange!restart),
-                                     Elem!("data-bits", ubyte, Default!8, Min!5, Max!9, OnChange!restart),
-                                     Elem!("parity", Parity, Default!(Parity.none), Check!parity_check, OnChange!restart),
-                                     Elem!("stop-bits", StopBits, Default!(StopBits.one), OnChange!restart),
-                                     Elem!("flow-control", FlowControl, Default!(FlowControl.none), OnChange!flow_control_changed),
-                                     Elem!("tx-gpio", byte, Default!(-1), OnChange!restart),
-                                     Elem!("rx-gpio", byte, Default!(-1), OnChange!restart),
-                                     Elem!("rts-gpio", byte, Default!(-1), OnChange!restart),
-                                     Elem!("cts-gpio", byte, Default!(-1), OnChange!restart),
-                                     Elem!("de-gpio", byte, Default!(-1), OnChange!restart));
+    // An embedded build declares its Properties below the RX timing setters, which exist only where the UART has them.
+    version (Embedded) {}
     else
         alias Properties = AliasSeq!(Prop!("device", device),
                                      Elem!("baud-rate", uint, Default!9600, Min!1, OnChange!restart),
@@ -190,6 +183,84 @@ nothrow @nogc:
 
         static const(char)[] parity_check(ref Parity value)
             => value > Parity.odd ? "UART only supports none, even, or odd parity" : null;
+
+        // Only where the UART applies them; the actual- properties read what it runs with, once its hardware has
+        // clamped the request, and zero while the port is closed.
+        static if (has_rx_timing)
+        {
+            final Duration actual_rx_latency() const
+                => usecs(uart_rx_timing(_uart).latency_us);
+
+            static const(char)[] rx_latency_check(ref Duration value)
+                => value > Duration.zero && value <= usecs(uint.max) ? null : "rx-latency must be positive";
+
+            void retime()
+            {
+                if (_uart.is_open)
+                    uart_set_rx_timing(_uart, uart_config());
+            }
+
+            alias RxLatency = AliasSeq!(Elem!("rx-latency", Duration, Default!(usecs(350)), Check!rx_latency_check, OnChange!retime),
+                                        Prop!("actual-rx-latency", actual_rx_latency, null, "d"));
+        }
+        else
+            alias RxLatency = AliasSeq!();
+
+        static if (uart_reports_rx_gap)
+        {
+            final float actual_rx_gap() const
+                => uart_rx_timing(_uart).gap / 10.0f;
+
+            alias RxGap = AliasSeq!(Elem!("rx-gap", float, Default!3.5f, Min!0.1f, Max!25.5f, OnChange!retime),
+                                    Prop!("actual-rx-gap", actual_rx_gap, null, "d"));
+        }
+        else
+            alias RxGap = AliasSeq!();
+
+        alias Properties = AliasSeq!(Prop!("device", device),
+                                     Elem!("baud-rate", uint, Default!9600, Min!1, OnChange!restart),
+                                     Elem!("data-bits", ubyte, Default!8, Min!5, Max!8, OnChange!restart),
+                                     Elem!("parity", Parity, Default!(Parity.none), Check!parity_check, OnChange!restart),
+                                     Elem!("stop-bits", StopBits, Default!(StopBits.one), OnChange!restart),
+                                     Elem!("flow-control", FlowControl, Default!(FlowControl.none), OnChange!flow_control_changed),
+                                     Elem!("tx-gpio", byte, Default!(-1), OnChange!restart),
+                                     Elem!("rx-gpio", byte, Default!(-1), OnChange!restart),
+                                     Elem!("rts-gpio", byte, Default!(-1), OnChange!restart),
+                                     Elem!("cts-gpio", byte, Default!(-1), OnChange!restart),
+                                     Elem!("de-gpio", byte, Default!(-1), OnChange!restart),
+                                     RxLatency, RxGap);
+
+        auto uart_config() const
+        {
+            static import bm = urt.driver.uart;
+            __gshared immutable bm.StopBits[3] stop_bits_map = [ bm.StopBits.one, bm.StopBits.one_point_five, bm.StopBits.two ];
+            __gshared immutable bm.Parity[5] parity_map = [ bm.Parity.none, bm.Parity.even, bm.Parity.odd, bm.Parity.none, bm.Parity.none ];
+
+            bm.UartConfig cfg;
+            cfg.baud_rate = baud_rate;
+            static if (has_rx_timing)
+                cfg.rx_latency_us = cast(uint)prop_read!(SerialStream, "rx-latency").as!"usecs";
+            static if (uart_reports_rx_gap)
+                cfg.rx_gap = cast(ubyte)(prop_read!(SerialStream, "rx-gap") * 10 + 0.5f);
+            cfg.data_bits = data_bits;
+            cfg.stop_bits = stop_bits_map[stop_bits];
+            cfg.parity = parity_map[parity];
+            cfg.flow_control = cast(bm.FlowControl)flow_control;
+            if (tx_gpio >= 0)
+                cfg.tx_gpio = cast(ubyte)tx_gpio;
+            if (rx_gpio >= 0)
+                cfg.rx_gpio = cast(ubyte)rx_gpio;
+            if (rts_gpio >= 0)
+                cfg.rts_gpio = cast(ubyte)rts_gpio;
+            if (cts_gpio >= 0)
+                cfg.cts_gpio = cast(ubyte)cts_gpio;
+            if (de_gpio >= 0)
+            {
+                cfg.rs485.enabled = true;
+                cfg.rs485.de_gpio = cast(ubyte)de_gpio;
+            }
+            return cfg;
+        }
     }
 
     void flow_control_changed()
@@ -247,43 +318,22 @@ nothrow @nogc:
         }
         else version (Embedded)
         {
-            static import bm = urt.driver.uart;
-            __gshared immutable bm.StopBits[3] stop_bits_map = [ bm.StopBits.one, bm.StopBits.one_point_five, bm.StopBits.two ];
-            __gshared immutable bm.Parity[5] parity_map = [ bm.Parity.none, bm.Parity.even, bm.Parity.odd, bm.Parity.none, bm.Parity.none ];
-
-            bm.UartConfig cfg;
-            cfg.baud_rate = baud_rate;
-            cfg.data_bits = data_bits;
-            cfg.stop_bits = stop_bits_map[stop_bits];
-            cfg.parity = parity_map[parity];
-            if (tx_gpio >= 0)
-                cfg.tx_gpio = cast(ubyte)tx_gpio;
-            if (rx_gpio >= 0)
-                cfg.rx_gpio = cast(ubyte)rx_gpio;
-            if (rts_gpio >= 0)
-                cfg.rts_gpio = cast(ubyte)rts_gpio;
-            if (cts_gpio >= 0)
-                cfg.cts_gpio = cast(ubyte)cts_gpio;
-            if (de_gpio >= 0)
-            {
-                cfg.rs485.enabled = true;
-                cfg.rs485.de_gpio = cast(ubyte)de_gpio;
-            }
+            immutable cfg = uart_config();
 
             Result opened;
-            version (Espressif)
+            static if (has_rx_callback)
             {
                 import urt.atomic : atomicStore, MemoryOrder;
 
                 atomicStore!(MemoryOrder.relaxed)(_rx_event_pending, 0u);
                 atomicStore!(MemoryOrder.relaxed)(_rx_event_retry, 0u);
                 ubyte port = cast(ubyte)_uart_port;
-                if (_active_uarts[port] !is null && _active_uarts[port] !is this)
+                if (_active_uarts[port - first_uart] !is null && _active_uarts[port - first_uart] !is this)
                 {
                     log.error("UART controller is already in use");
                     return CompletionStatus.error;
                 }
-                _active_uarts[port] = this;
+                _active_uarts[port - first_uart] = this;
                 opened = uart_open(_uart, port, cfg, 0, &uart_rx_ready);
             }
             else
@@ -291,8 +341,8 @@ nothrow @nogc:
 
             if (!opened)
             {
-                version (Espressif)
-                    _active_uarts[cast(ubyte)_uart_port] = null;
+                static if (has_rx_callback)
+                    _active_uarts[_uart_port - first_uart] = null;
                 return CompletionStatus.error;
             }
         }
@@ -599,12 +649,12 @@ nothrow @nogc:
         }
         else version (Embedded)
         {
-            version (Espressif)
+            static if (has_rx_callback)
             {
                 ubyte port = _uart.port;
                 uart_close(_uart);
-                if (port < num_uarts && _active_uarts[port] is this)
-                    _active_uarts[port] = null;
+                if (port - first_uart < num_uarts && _active_uarts[port - first_uart] is this)
+                    _active_uarts[port - first_uart] = null;
                 import urt.atomic : atomicStore, MemoryOrder;
                 atomicStore!(MemoryOrder.release)(_rx_event_pending, 0u);
                 atomicStore!(MemoryOrder.release)(_rx_event_retry, 0u);
@@ -628,7 +678,7 @@ nothrow @nogc:
         }
         else version (Embedded)
         {
-            version (Espressif)
+            static if (has_rx_callback)
             {
                 import urt.atomic : atomicExchange, MemoryOrder;
                 // Normal RX is reactor-dispatched; only a rejected event post reaches this path.
@@ -678,13 +728,13 @@ nothrow @nogc:
         }
     }
 
-    version (Espressif)
+    static if (has_rx_callback)
     {
         static bool uart_rx_ready(Uart uart, size_t, UartCallbackContext context)
         {
-            if (uart.port >= num_uarts || g_app is null)
+            if (uart.port - first_uart >= num_uarts || g_app is null)
                 return false;
-            SerialStream instance = _active_uarts[uart.port];
+            SerialStream instance = _active_uarts[uart.port - first_uart];
             if (instance is null)
                 return false;
 
@@ -970,7 +1020,7 @@ private:
     {
         Uart _uart;
         byte _uart_port = -1;
-        version (Espressif)
+        static if (has_rx_callback)
         {
             shared uint _rx_event_pending;
             shared uint _rx_event_retry;

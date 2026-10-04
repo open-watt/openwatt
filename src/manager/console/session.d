@@ -546,13 +546,17 @@ nothrow @nogc:
                     goto close_session;
                 }
                 else if (t[i] == '\n')
-                    return i;
+                {
+                    len = i;
+                    break;
+                }
                 else if (t[i] == '\r')
                 {
                     // Normalize: consume \n or \0 (NVT stuffing) after \r
                     if (i + 1 < len && (t[i + 1] == '\n' || (_nvt_input && t[i + 1] == '\0')))
                         ++i;
-                    return i;
+                    len = i;
+                    break;
                 }
                 else if (t[i] == '\b')
                 {
@@ -584,10 +588,7 @@ nothrow @nogc:
                     _position = 0;
                 }
                 else if (t[i] == '\a')
-                {
-                    i += 1;
                     do_bell();
-                }
             }
             else
             {
