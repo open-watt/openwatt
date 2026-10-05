@@ -273,7 +273,8 @@ nothrow @nogc:
     abstract void encode_add(SyncPeer peer, SyncHandle h, const(char)[] path, const(char)[] node_class, const(char)[] templates, uint ft, Element* e, ulong peer_id, bool include_value = true);
 
     abstract void encode_val(SyncPeer peer, SyncHandle h, Element* e);
-    abstract void encode_val_block(SyncPeer peer, SyncHandle h, ref const RecordBlock blk);
+    // the leading records the send limit holds, at least one; returns the count consumed, 0 when refused for now (an unsendable record goes as lost)
+    abstract uint encode_val_block(SyncPeer peer, SyncHandle h, ref const RecordBlock blk);
 
     abstract void encode_res(SyncPeer peer, uint seq);
     abstract void encode_res(SyncPeer peer, uint seq, ref const Variant value);
@@ -305,6 +306,14 @@ nothrow @nogc:
     // Clears the dirty bits on emit.
 
     abstract void tick_dirty(SyncPeer peer);
+
+protected:
+    final void warn_unsendable(SyncPeer peer, SyncHandle h)
+    {
+        import urt.mem.temp : tconcat;
+        if (peer.first_sighting(tconcat("val:", h)))
+            log.warning("a value of handle ", h, " exceeds the largest message peer '", peer.name[], "' takes; sent as lost");
+    }
 }
 
 // An introduction carries the element's value and its time; an invalidated element carries null and the moment of invalidation.

@@ -535,21 +535,52 @@ nothrow @nogc:
         send_frame(peer, TxQueue.val);
     }
 
-    override void encode_val_block(SyncPeer peer, SyncHandle h, ref const RecordBlock blk)
+    override uint encode_val_block(SyncPeer peer, SyncHandle h, ref const RecordBlock blk)
     {
         import urt.time : unix_time_ns;
 
         begin_frame(Verb.val);
         _buf.put_varint(h);
         _buf.put_varint(blk.lost);
-        _buf.put_varint(blk.count);
-        foreach (i; 0 .. blk.count)
+        size_t count_at = _buf.length;
+        size_t limit = peer.send_limit;
+        uint count;
+        while (count < blk.count)
         {
-            _buf.put_varint(unix_time_ns(blk.time(i)) / 1_000_000);
-            Variant v = blk.box(i);
+            size_t mark = _buf.length;
+            _buf.put_varint(unix_time_ns(blk.time(count)) / 1_000_000);
+            Variant v = blk.box(count);
             _buf.put_variant(v);
+            // five bytes hold the count, which goes in front once known
+            if (count && _buf.length + 5 > limit)
+            {
+                _buf.resize(mark);
+                break;
+            }
+            ++count;
         }
-        send_frame(peer, TxQueue.val);
+        ubyte[5] prefix = void;
+        size_t n;
+        for (uint c = count; ; c >>= 7)
+        {
+            prefix[n++] = cast(ubyte)(c >= 0x80 ? c | 0x80 : c);
+            if (c < 0x80)
+                break;
+        }
+        if (count == 1 && _buf.length + n > peer.max_message(false))
+        {
+            warn_unsendable(peer, h);
+            begin_frame(Verb.val);
+            _buf.put_varint(h);
+            _buf.put_varint(blk.lost + 1);
+            _buf ~= ubyte(0);
+        }
+        else
+        {
+            foreach_reverse (b; prefix[0 .. n])
+                _buf.insert(count_at, b);
+        }
+        return send_frame(peer, TxQueue.val) < 0 ? 0 : count;
     }
 
     override void encode_res(SyncPeer peer, uint seq)

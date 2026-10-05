@@ -77,6 +77,11 @@ A message over the budget, toward an older peer, or in JSON is refused and logge
 stands. A malformed fragment, a reassembly over the budget or a fragment nested in a fragment resets
 the session; hello is never fragmented.
 
+A `val` block carries the records the send limit holds, and the producer resumes after the last
+record an accepted frame carried. A single record larger than any message the peer takes goes as an
+empty `val` block whose `lost` counts it, so the series moves on and the receiver knows. The console
+relay still sends output in 8 KB messages, which travel as fragments over a narrow link.
+
 Session handles name everything addressable. The introducer allocates them, dense and ascending,
 session-scoped and never reused; the low bit says who allocated the handle relative to the frame's
 sender, so both directions share one space without a negotiation. A handle is an `EID` underneath,
@@ -267,9 +272,12 @@ Armed, every frame carries `[src_session:4][dst_session:4][kind:1]`. Two planes 
   strictly in order through a small reorder hold. The window is 64 frames, with 16 held back from
   bulk walks so the session's other control frames always find room.
 - **Data** (`val`, `log`) is reliable but lazy: no retransmit timer and no urgency, but nothing is
-  willingly lost. Each queue has its own id space and a backlog (32 frames, 1 KiB), every data
-  frame refolds the entire unacked backlog, and the receiver's per-queue watermark dedups replays
-  while keeping application in order. A record the receiver cannot apply yet, a `val` racing its
+  willingly lost. Each queue has its own id space and a backlog (32 frames, and 1 KiB or two
+  segments, whichever is larger); every data frame refolds the oldest unacked records one segment
+  holds, and the receiver's per-queue watermark dedups replays while keeping application in order.
+  A newly queued record goes out at once when it fits behind the backlog's head, and otherwise
+  when an ack frees the segment. Bulk producers (backfill, event series) wait for room for one more
+  segment rather than evict. A record the receiver cannot apply yet, a `val` racing its
   `add` through the control plane, is left unacked so the refold resupplies it until the `add`
   lands; because handles are announced ascending over the in-order control plane, a `val` citing
   a handle below the announced high-water mark that still does not resolve is dead and skipped as
