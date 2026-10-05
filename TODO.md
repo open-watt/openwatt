@@ -1656,6 +1656,16 @@ this is what remains.
   - `SerialStream.write()` never blocks until the line has taken the bytes, so Modbus RTU's
     transport timeout starts while its frame is still on the wire. The timeout's margin of two
     frame times absorbs one queued frame; timing from the line's completion would not need it.
+  - No test drives a pump's continuation: `pump_tx` yielding into `continue_tx`, `invite_tx`
+    standing back while one is scheduled, and `offline()` cancelling it; nor `TCPConnection`'s, where
+    a second invitation while one is pending must not schedule another (the #816 review's probe:
+    an open connection, a producer that yields at its deadline, `tx_handler` twice, one continuation,
+    then `drop_tx_handler` cancels it). Both need a scheduler: an `Application` in the test, which
+    waits on an Application that can be created twice in one process. (#816)
+
+- **`router.iface`'s unittest failed once on Windows** (2026-10-07, at the `set_l2mtu(1514)` mtu
+  assertion, package.d:1872) and passed on three reruns of the same binary. A value assertion right
+  after a setter should not be flaky; look for state another test leaves behind.
 
 - **`/log/print` without `--stream` redraws its pager every tick**: on the RP2350 it held the CPU
   at 64% and logged an 80 ms `console-session` update each frame while idle. The live view should

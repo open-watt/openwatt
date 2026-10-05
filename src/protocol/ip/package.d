@@ -867,8 +867,6 @@ private:
 
     enum Phase : ubyte { connecting, open, dead }
     enum size_t max_tx_refill = 16 * 1024;
-    enum size_t max_tx_service = 64 * 1024;          // per service_tx() call
-    enum Duration tx_service_time = msecs(2);
     enum size_t max_page_data = 1600;
 
     Phase _phase;
@@ -889,11 +887,37 @@ private:
     SendHandler _outgoing;
     PageWaiter _tx_waiter;
     bool _servicing_tx;
+    bool _tx_continuing;
 
     void drop_tx_handler()
     {
         _outgoing = null;
         page_unwait(&_tx_waiter);
+        if (_tx_continuing)
+        {
+            _tx_continuing = false;
+            g_app.cancel(&resume_tx);
+            static if (use_iocp)
+                --_outstanding;
+        }
+    }
+
+    // one turn per pass: the next runs behind that pass's I/O, events and timers, and invitations wait for it
+    void continue_tx()
+    {
+        _tx_continuing = true;
+        static if (use_iocp)
+            ++_outstanding;
+        g_app.schedule(getTime(), &resume_tx);
+    }
+
+    void resume_tx(MonoTime)
+    {
+        _tx_continuing = false;
+        static if (use_iocp)
+            --_outstanding;
+        if (!_closing)
+            service_tx();
     }
 
     void fail(IPEvent ev)
@@ -945,21 +969,20 @@ private:
 
     void service_tx()
     {
-        if (_servicing_tx || _phase != Phase.open)
+        if (_servicing_tx || _tx_continuing || _phase != Phase.open)
             return;
         _servicing_tx = true;
         scope (exit) _servicing_tx = false;
 
         // pulled pages are flushed in the same pass until the producer runs dry, the transport
-        // stops accepting, or the budget is spent; a spent budget resumes on the next loop pass
-        size_t budget = max_tx_service;
-        MonoTime deadline = getTime() + tx_service_time;
+        // stops accepting, or the turn is spent; a spent turn resumes on the next loop pass
+        MonoTime deadline = getTime() + tx_slice;
         bool yield = false;
         for (;;)
         {
             while (_outgoing && !yield)
             {
-                TxRequest req = TxRequest(tx_request());
+                TxRequest req = TxRequest(tx_request(), deadline);
                 if (req.bytes < min_tx_request)
                     break;
                 uint generation = page_free_generation();
@@ -977,7 +1000,7 @@ private:
                     if (page_wait(&_tx_waiter, generation))
                         break;
                 }
-                yield = getTime() >= deadline;
+                yield = status == TxStatus.yield || getTime() >= deadline;
             }
 
             static if (use_iocp)
@@ -990,18 +1013,26 @@ private:
                 flush_tx();
                 if (_phase != Phase.open || _tx_bytes == queued)
                     break;
-                size_t sent = queued - _tx_bytes;
-                if (yield || sent >= budget || getTime() >= deadline)
+                if (yield || getTime() >= deadline)
                 {
                     yield = true;
                     break;
                 }
-                budget -= sent;
             }
         }
 
-        version (UseInternalIPStack) {}
-        else static if (!use_iocp)
+        // a spent turn resumes on the next loop pass
+        version (UseInternalIPStack)
+        {
+            if (yield && _phase == Phase.open)
+                continue_tx();
+        }
+        else static if (use_iocp)
+        {
+            if (yield && !_send && _phase == Phase.open)
+                continue_tx();
+        }
+        else
         {
             if (_phase == Phase.open)
                 want_write(yield || _tx_head !is null);
@@ -3048,9 +3079,8 @@ version (UseInternalIPStack) {} else version (linux)
         }
 
         enum size_t page_size = 1600;
-        enum size_t call_cap = TCPConnection.max_tx_service + TCPConnection.max_tx_refill;   // a flush may overshoot by one refill
 
-        // one invitation drains what fits in its budget, not one refill's worth
+        // one invitation drains what fits in its turn, not one refill's worth
         {
             TCPConnection c;
             int[2] fds;
@@ -3064,8 +3094,7 @@ version (UseInternalIPStack) {} else version (linux)
             assert(receive(fds[1], received) == p.total);
         }
 
-        // a reader that keeps up cannot hold the loop: each call stops at the byte budget, the
-        // next resumes, and under partial kernel writes the bytes still arrive whole and in order
+        // each writable event resumes the transfer, and under partial kernel writes the bytes still arrive whole and in order
         {
             TCPConnection c;
             int[2] fds;
@@ -3078,15 +3107,13 @@ version (UseInternalIPStack) {} else version (linux)
             for (uint passes = 0; received < p.total; ++passes)
             {
                 assert(passes < 10_000, "transmit stalled");
-                size_t before = received;
                 receive(fds[1], received);
-                assert(received - before <= call_cap, "one call sent past its budget");
                 c.on_ready(IoReady.writable);
             }
             assert(p.produced == p.total && c._tx_head is null);
         }
 
-        // a slow producer stops at the time budget
+        // a slow producer stops when the turn is spent
         {
             TCPConnection c;
             int[2] fds;
@@ -3095,7 +3122,7 @@ version (UseInternalIPStack) {} else version (linux)
 
             Producer p = Producer(1024 * 1024, 0, usecs(500));
             c.tx_handler(&p.produce);
-            assert(p.produced >= page_size && p.produced <= 8 * page_size, "slow producer ran past the time budget");
+            assert(p.produced >= page_size && p.produced <= (tx_slice.as!"usecs" / 500 + 2) * page_size, "slow producer ran past its turn");
         }
     }
 }

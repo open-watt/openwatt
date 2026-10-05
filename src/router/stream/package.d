@@ -46,14 +46,19 @@ alias TapHandler = void delegate(Stream source, bool tx, const(void)[] data, Mon
 // A sink never asks for less; below this a producer cannot make progress through its framing.
 enum size_t min_tx_request = 64;
 
+// A pump's turn; a sink with room left after it takes its next turn behind the other bulk work.
+enum Duration tx_slice = msecs(5);
+
 struct TxRequest
 {
     size_t bytes;
+    MonoTime deadline;  // the producer returns at its next yield point once this has passed
 }
 
 enum TxStatus : ubyte
 {
     more,       // further pages follow; a null page with more is a contract violation
+    yield,      // the deadline passed; the pull returns what it has, and the next turn pulls again
     idle,       // nothing more for now; the producer re-arms with tx_handler()
     starved,    // page_alloc failed; the sink waits for a free page and pulls again
     end,        // complete; a page returned with it is the last
@@ -116,9 +121,10 @@ Page* pull_tx_page(ref SendHandler slot, ref const TxRequest req, out TxStatus s
             debug assert(false, "producer returned no page with more");
             status = TxStatus.idle;
         }
+        debug assert(status != TxStatus.yield || getTime() >= req.deadline, "producer yielded before its deadline");
         if (slot is handler)
         {
-            if (status != TxStatus.more && status != TxStatus.starved)
+            if (status != TxStatus.more && status != TxStatus.yield && status != TxStatus.starved)
                 slot = null;
             return page;
         }
@@ -269,6 +275,7 @@ nothrow @nogc:
     {
         page_unwait(&_tx_waiter);
         release_tx_queue();
+        cancel_tx_continuation();
         if (_rx_polling)
         {
             _rx_polling = false;
@@ -384,10 +391,10 @@ protected:
         invite_tx();
     }
 
-    // a pull already running takes the room itself
+    // a pull already running, or a continuation queued, takes the room itself
     final void invite_tx()
     {
-        if (_outgoing && !_pumping_tx)
+        if (_outgoing && !_pumping_tx && !_tx_continuing)
             pump_tx();
     }
 
@@ -399,9 +406,10 @@ protected:
         _pumping_tx = true;
         scope (exit) _pumping_tx = false;
 
+        MonoTime deadline = getTime() + tx_slice;
         while (_outgoing)
         {
-            TxRequest req = TxRequest(tx_request());
+            TxRequest req = TxRequest(tx_request(), deadline);
             if (req.bytes < min_tx_request)
                 break;
             uint generation = page_free_generation();
@@ -421,6 +429,12 @@ protected:
                 _tx_waiter.wake = &pump_tx;
                 if (page_wait(&_tx_waiter, generation))
                     break;
+            }
+            if (status == TxStatus.yield || getTime() >= deadline)
+            {
+                if (_outgoing && tx_request() >= min_tx_request)
+                    continue_tx();
+                break;
             }
         }
     }
@@ -582,6 +596,7 @@ private:
     Page* _tx_queue;    // for the line, oldest first; the head's offset advances as the line takes it
     bool _pumping_tx;
     bool _tx_retrying;
+    bool _tx_continuing;
     bool _rx_polling;
 
     size_t tx_queued() const
@@ -623,6 +638,29 @@ private:
             page_free(_tx_queue);
             _tx_queue = next;
         }
+    }
+
+    // one continuation per sink, on the next loop pass, after that pass's I/O and events, so busy sinks share the thread
+    final void continue_tx()
+    {
+        if (_tx_continuing)
+            return;
+        _tx_continuing = true;
+        g_app.schedule(getTime(), &tx_continue);
+    }
+
+    void tx_continue(MonoTime)
+    {
+        _tx_continuing = false;
+        invite_tx();
+    }
+
+    final void cancel_tx_continuation()
+    {
+        if (!_tx_continuing)
+            return;
+        _tx_continuing = false;
+        g_app.cancel(&tx_continue);
     }
 
     final void arm_rx_poll()
@@ -844,6 +882,12 @@ unittest
                 status = TxStatus.abort;
                 return null;
             }
+            if (out_of_time && getTime() >= req.deadline)
+            {
+                out_of_time = false;
+                status = TxStatus.yield;
+                return null;
+            }
             if (remaining == 0)
             {
                 status = TxStatus.idle;
@@ -876,6 +920,7 @@ unittest
         bool starve;
         bool freed_meanwhile;
         bool fail;
+        bool out_of_time;
         SendHandler replacement;
     }
 
@@ -1015,6 +1060,21 @@ unittest
         line.broken = true;
         line.open(10);
         assert(!line.running && line.tx_queued() == 0, "a failed line restarts and drops what it held");
+    }
+
+    // a producer past its deadline yields and stays armed, and makes progress on the next turn
+    {
+        TestTxProducer yielding;
+        yielding.out_of_time = true;
+        yielding.remaining = 10;
+        SendHandler slot = &yielding.produce;
+        TxRequest req = TxRequest(100, getTime());
+        TxStatus status;
+        assert(pull_tx_page(slot, req, status) is null && status == TxStatus.yield && slot !is null);
+        req.deadline = getTime() + tx_slice;
+        Page* page = pull_tx_page(slot, req, status);
+        assert(page && page.length == 10 && status == TxStatus.more && slot !is null);
+        page_free(page);
     }
 
     Page* chain = page_alloc(100);
