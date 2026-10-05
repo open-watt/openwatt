@@ -381,7 +381,7 @@ nothrow @nogc:
     {
         import manager : get_module;
         import manager.system : hostname, node_id;
-        import manager.sync.discovery : SyncDiscoveryModule;
+        import manager.sync.discovery : PeerRole, SyncDiscoveryModule;
 
         begin_frame(Verb.hello);
         _buf.put_varint(model_protocol_version);
@@ -392,7 +392,7 @@ nothrow @nogc:
         // identity tail; pre-identity decoders stop at max_frame and ignore it
         auto disco = get_module!SyncDiscoveryModule;
         _buf.put_varint(node_id());
-        _buf ~= disco.local_role;
+        _buf ~= peer.claim ? PeerRole.authority : disco.local_role;
         _buf.put_str(disco.local_cluster[]);
         _buf.put_str(cast(const(char)[])peer.local_nonce());
         send_frame(peer);

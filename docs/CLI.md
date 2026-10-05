@@ -1810,6 +1810,7 @@ opens a connected UDP endpoint owned by the peer. The last of `transport` and
 | `remote` | `address:port`, `[ipv6]:port`, `[mac]:port` | none | Remote UDP peer. The address and port are both required. |
 | `encoder` | `json`, `binary` | `binary` | Wire encoding for this session. |
 | `time-authority` | `yes`/`no` | `no` | Take this peer as the local clock source. A peering claim sets it on the member for its first claimant. |
+| `claim` | `yes`/`no` | `no` | Claim the remote over this session as the authority of a statically wired pair, whatever this node's own peering role. The remote must be a peering `member`. |
 
 ### `/sync/ws-server`
 
