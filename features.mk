@@ -62,12 +62,10 @@
 # -- Per-platform defaults -----------------------------------------------
 # Set BEFORE the ?= fallbacks below.
 
-# BL808 e907 is the bouffalo wifi coprocessor.
+# BL808 M0 is the bouffalo wifi coprocessor.
 ifeq ($(PLATFORM),bl808)
-  ifeq ($(PROCESSOR),e907)
     FEATURES ?= switch-ip
     HEADLESS ?= 1
-  endif
 endif
 ifneq ($(filter bk7231n bk7231t,$(PLATFORM)),)
     FEATURES ?= switch

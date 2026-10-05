@@ -38,7 +38,7 @@ make ARCH=riscv64                      # Generic RISC-V 64-bit build
 make FEATURES=switch                   # L2 packet-fabric only, no IP/protocols/apps
 make FEATURES=full                     # Default: full standalone instance
 make HEADLESS=1                        # Embedded role: no human shell/web; gates CLI help, prompts, banners
-make PLATFORM=bl808 PROCESSOR=e907     # BL808 M0 coprocessor (auto-defaults to switch + headless)
+make PLATFORM=bl808                    # BL808 M0 coprocessor (auto-defaults to switch + headless)
 
 # Testing
 make CONFIG=unittest                    # Build with unit tests enabled

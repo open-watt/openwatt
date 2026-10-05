@@ -179,7 +179,7 @@ a netbooted image is bounded by RAM instead.
 | 2026-09-26 | all MT7621 PRs merged | ldc 1.43.0 | 2,822,360 | 52,028 | 16,515,072 | port-as-handle Ethernet API (urt#332, #772, #774): no dispatch tables; routerboot's sector buffer on the stack |
 | 2026-09-27 | all MT7621 PRs merged + #782 | ldc 1.43.0 | 2,824,760 | 52,044 | 16,515,072 | GE2 and the AR8033 fibre PHY in urt (urt#347); sfp1 data path |
 
-### bl808 e907, `make PLATFORM=bl808 PROCESSOR=e907 CONFIG=release`
+### BL808, `make PLATFORM=bl808 CONFIG=release`
 
 | date | commit | compiler | flash | ram | limit | note |
 | --- | --- | --- | --- | --- | --- | --- |

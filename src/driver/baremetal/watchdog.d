@@ -6,7 +6,7 @@ nothrow @nogc:
 
 version (BL808_M0)
 {
-    import urt.driver.bl_common.watchdog : wdt_feed, wdt_start, wdt_stop;
+    import urt.driver.bl808.watchdog : wdt_feed, wdt_start, wdt_stop;
     version = HardwareWatchdog;
 }
 else version (MT7621)

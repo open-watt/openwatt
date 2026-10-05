@@ -35,7 +35,7 @@ Cheaper single-chip variant for cost-sensitive deployments. Same codebase, small
 make PLATFORM=bl808 CONFIG=release
 
 # BL808 M0                             ARCH: rv32imafc
-make PLATFORM=bl808 PROCESSOR=e907 CONFIG=release
+make PLATFORM=bl808 CONFIG=release
 
 # BL618                                ARCH: rv32imafc
 make PLATFORM=bl618 CONFIG=release
@@ -47,8 +47,8 @@ Outputs:
 
 | Platform | Output | Path |
 |----------|--------|------|
-| BL808 D0 | `d0fw.bin` + `d0fw.bin.gz` (M0 auto-detects gzip magic at flash offset 0) | `bin/bl808-d0_release/` |
-| BL808 M0 | `m0fw.bin` | `bin/bl808-m0_release/` |
+| BL808 D0 | `d0fw.bin` + `d0fw.bin.gz` (M0 auto-detects gzip magic at flash offset 0) | `bin/bl808_d0_release/` |
+| BL808 M0 | `m0fw.bin` | `bin/bl808_release/` |
 | BL618 | `fw.bin` | `bin/bl618_release/` |
 
 D versions set: `Bouffalo`, `BL808` (also for M0), `BL808_M0` (M0 only), `BL618`, `CRuntime_Picolibc`, `BareMetal`, `Embedded`. `Tiny` is auto-set for M0 and BL618.
@@ -56,7 +56,8 @@ D versions set: `Bouffalo`, `BL808` (also for M0), `BL808_M0` (M0 only), `BL618`
 ## File Layout
 
 ```
-platforms/bl808/              D0 build inputs: ld/, system.conf, partition.toml, include/
+platforms/bl808/              partition.toml
+platforms/bl808_d0/           D0 build inputs: system.conf
 platforms/bl808/firmware/     firmware_20230227.bin -- vendor M0 blob (still used in prod)
 platforms/bl808_m0/           M0 build inputs: system.conf
 platforms/bl808_m0/vendor/    Vendor C linked into M0:
@@ -65,8 +66,8 @@ platforms/bl808_m0/vendor/    Vendor C linked into M0:
     tlsf/                     TLSF allocator (mspace_* backing for M0 multi-pool heap)
 platforms/bl618/              BL618 build inputs
 
-third_party/urt/platforms/bl808/bl808_d0.ld   D0 linker script
-third_party/urt/platforms/bl808/bl808_m0.ld   M0 linker script (multi-pool heap)
+third_party/urt/platforms/bl808_d0/bl808_d0.ld   D0 linker script
+third_party/urt/platforms/bl808_m0/bl808_m0.ld   M0 linker script (multi-pool heap)
 third_party/urt/platforms/bl618/bl618.ld      BL618 linker script
 
 third_party/urt/src/urt/driver/bl808/         D0 drivers: UART (4-port, IRQ), GPIO, I2C, SPI, IRQ, timer,

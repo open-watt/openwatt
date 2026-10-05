@@ -218,11 +218,10 @@ else ifdef STM32_VARIANT
 endif
 
 ifeq ($(PLATFORM),bl808)
-  ifeq ($(PROCESSOR),c906)
-    CONF_DIR := platforms/bl808
-  else ifeq ($(PROCESSOR),e907)
     CONF_DIR := platforms/bl808_m0
-  endif
+endif
+ifeq ($(PLATFORM),bl808_d0)
+    CONF_DIR := platforms/bl808_d0
 endif
 ifeq ($(PLATFORM),bl618)
     CONF_DIR := platforms/bl618
@@ -263,11 +262,9 @@ ifdef BAREMETAL_DIR
   # URT-side unittest builds).
   URT_PLATFORMS := $(URT_DIR)/platforms
   ifeq ($(PLATFORM),bl808)
-    ifeq ($(PROCESSOR),c906)
-      BAREMETAL_LD := $(URT_PLATFORMS)/bl808/bl808_d0.ld
-    else ifeq ($(PROCESSOR),e907)
-      BAREMETAL_LD := $(URT_PLATFORMS)/bl808/bl808_m0.ld
-    endif
+    BAREMETAL_LD := $(URT_PLATFORMS)/bl808_m0/bl808_m0.ld
+  else ifeq ($(PLATFORM),bl808_d0)
+    BAREMETAL_LD := $(URT_PLATFORMS)/bl808_d0/bl808_d0.ld
   else ifeq ($(PLATFORM),bl618)
     BAREMETAL_LD := $(URT_PLATFORMS)/bl618/bl618.ld
   else ifneq ($(filter bk7231n bk7231t,$(PLATFORM)),)
@@ -352,7 +349,7 @@ else
     BINSTATS := rdmd --compiler=$(DC) tools/binstats.d
 endif
 BINSTATS_LEDGER = $(if $(filter release,$(CONFIG)),--ledger "$$("$(DC)" --version 2>/dev/null | head -1)" --commit "$$(git rev-parse --short HEAD 2>/dev/null || echo -)" --date "$$(date +%F)")
-BINSTATS_IMAGE := $(if $(filter bl808,$(PLATFORM)),$(if $(filter c906,$(PROCESSOR)),d0fw.bin,m0fw.bin),$(if $(filter bl618 bk7231n bk7231t rp2350 stm32%,$(PLATFORM)),fw.bin))
+BINSTATS_IMAGE := $(if $(filter bl808,$(PLATFORM)),m0fw.bin,$(if $(filter bl808_d0,$(PLATFORM)),d0fw.bin,$(if $(filter bl618 bk7231n bk7231t rp2350 stm32%,$(PLATFORM)),fw.bin)))
 
 ifeq ($(PLATFORM),rp2350)
     EXTRA_ARTEFACTS := $(TARGETDIR)/fw.uf2
@@ -396,14 +393,13 @@ $(TARGET):
 	echo $(URT_SOURCES) >> $(RSPFILE)
 	$(COMPILE_CMD)
 ifeq ($(PLATFORM),bl808)
-  ifeq ($(PROCESSOR),c906)
+	riscv64-unknown-elf-objcopy -O binary $(TARGET) $(TARGETDIR)/m0fw.bin
+endif
+ifeq ($(PLATFORM),bl808_d0)
 	riscv64-unknown-elf-objcopy -O binary $(TARGET) $(TARGETDIR)/d0fw.bin
 	@# Gzipped variant for faster flash turnaround. M0's d0_image_load sniffs
 	@# the gzip magic at offset 0 and decompresses straight to PSRAM.
 	gzip -9 -n -c $(TARGETDIR)/d0fw.bin > $(TARGETDIR)/d0fw.bin.gz
-  else ifeq ($(PROCESSOR),e907)
-	riscv64-unknown-elf-objcopy -O binary $(TARGET) $(TARGETDIR)/m0fw.bin
-  endif
 endif
 ifeq ($(PLATFORM),bl618)
 	riscv64-unknown-elf-objcopy -O binary $(TARGET) $(TARGETDIR)/fw.bin
