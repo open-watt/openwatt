@@ -194,6 +194,41 @@ nothrow @nogc:
     // and re-bases. Destination-session matching prevents stale streams from delivering
     // or acknowledging frames. Reliable, ordered transports skip this sublayer.
 
+    // the largest sync frame one packet carries from here: the transport's limit less the carrier and the sublayer
+    final uint local_segment()
+    {
+        import router.iface.udp : udp_carrier_ether, udp_carrier_v4, udp_carrier_v6;
+
+        uint link;
+        if (uses_udp_endpoint)
+        {
+            uint carrier = _remote.family == AddressFamily.ipv6 ? udp_carrier_v6 : _remote.family == AddressFamily.ether ? udp_carrier_ether : udp_carrier_v4;
+            // a host stack routes for itself and names no egress; assume no more than the IPv6 minimum link
+            BaseInterface egress = _udp_endpoint ? _udp_endpoint.egress_iface(_remote) : null;
+            uint mtu = egress ? egress.actual_mtu : 1280;
+            link = mtu > carrier ? mtu - carrier : 0;
+        }
+        else if (BaseInterface transport = _transport)
+            link = transport.actual_mtu;
+        uint overhead = sublayer_armed ? sublayer_overhead : 0;
+        return link > overhead ? link - overhead : 0;
+    }
+
+    // what this side can take in one message; without fragmentation that is one packet
+    final uint local_max_message()
+        => local_segment;
+
+    // the largest frame both ends carry in one packet
+    final uint send_limit()
+    {
+        uint limit = local_segment;
+        if (_remote_segment != 0 && _remote_segment < limit)
+            limit = _remote_segment;
+        if (_remote_max_message != 0 && _remote_max_message < limit)
+            limit = _remote_max_message;
+        return limit;
+    }
+
     final int transmit_frame(const(ubyte)[] frame, bool is_text = false, TxQueue queue = TxQueue.control)
     {
         if (!transport_ready)
@@ -201,6 +236,9 @@ nothrow @nogc:
             _send_failed = true;
             return -1;
         }
+        // refused before it is sequenced, so neither the session nor a burst fails with it
+        if (frame.length > send_limit)
+            return -1;
         if (!sublayer_armed)
         {
             int r = raw_tx(frame, is_text);
@@ -486,11 +524,17 @@ protected:
         }
 
         uint gen = begin_burst();
-        encoder_for(_encoder).encode_hello(this);
+        int hello = encoder_for(_encoder).encode_hello(this);
         if (!send_ok(gen))
             return CompletionStatus.continue_;   // the refusal restarted us; a session without hello must not run
+        if (hello < 0)
+        {
+            log.error("cannot fit hello in a ", send_limit, "-byte segment");
+            return CompletionStatus.error;
+        }
         get_module!SyncModule.attach_peer(this);
         _peer_flags |= PeerFlags.in_session;
+        encoder_for(_encoder).encode_identity(this);
 
         // frames that arrived before the session existed join it now, in arrival order
         while (!_pre_start.empty)
@@ -758,6 +802,8 @@ package:
     uint             _session_gen;       // bumped by detach_peer; a burst spanning it is dead
 
     ubyte            _remote_caps;       // hello negotiation; 0 = no hello received
+    uint             _remote_max_message; // 0 until hello
+    uint             _remote_segment;    // 0 until hello, and from a peer that predates it
     ulong            _remote_node_id;    // hello identity; 0 = peer announced none
     PeerRole         _remote_role;
     String           _remote_cluster;
@@ -838,6 +884,8 @@ private:
     enum reorder_cap = 16;
     enum reorder_span = 32;
     enum backlog_max_frames = 32;
+    // a data frame's header (sessions, kind, epochs and base) and one record's id and length; control's is smaller
+    enum sublayer_overhead = 9 + 4 + 3;
     enum backlog_max_bytes = 1024;
     enum data_flush_ms = 300;
     // the retransmit schedule's full span: doubling intervals through max_retries
@@ -1033,6 +1081,9 @@ private:
 
     void detach_transport()
     {
+        // the endpoint shares the transport's storage
+        if (uses_udp_endpoint)
+            return;
         BaseInterface transport = _transport;
         if (transport)
             transport.release_tx_handler(&produce_tx);
@@ -1590,4 +1641,48 @@ unittest
     // The live flush must not duplicate the completed backfill.
     SyncModule.send_live_events(peer, enc, power, handle, gen);
     assert(link.frames == (records + 1 + 255) / 256);
+
+    // A frame over what both ends carry in one packet is refused before it is sequenced; the session stands.
+    assert(peer.local_segment == ushort.max && peer.send_limit == ushort.max);
+    peer._remote_segment = 1000;
+    assert(peer.send_limit == 1000);
+    ubyte[1001] frame;
+    link.frames = 0;
+    link.pending = 0;
+    uint burst = peer.begin_burst();
+    assert(peer.transmit_frame(frame[]) < 0 && peer.send_ok(burst) && link.frames == 0);
+    assert(peer.transmit_frame(frame[0 .. 1000]) == 0 && link.frames == 1);
+    assert(link.mtu(300) is null && peer.local_segment == 300 && peer.send_limit == 300);
+    peer._remote_max_message = 200;
+    assert(peer.send_limit == 200);
+
+    // A server's peer shares its unconnected endpoint; the segment comes from the station toward the peer's own
+    // destination, less the ether carrier and the sublayer.
+    {
+        import router.iface.bridge : BridgeInterface;
+        import router.iface.endpoint : UDPReceiveInfo, udp_open;
+        import router.iface.udp : udp_carrier_ether;
+
+        static struct Sink
+        {
+            void recv(UDPEndpoint*, const(void)[], ref UDPReceiveInfo) nothrow @nogc {}
+        }
+        Sink sink;
+        BridgeInterface station = Collection!BridgeInterface().create("sync-test-station");
+        InetAddress local = InetAddress(station.mac.b, 4201);
+        UDPEndpoint* shared_endpoint = udp_open(&local, null, &sink.recv, station);
+        assert(shared_endpoint);
+        SyncPeer served = alloc!SyncPeer(CID(10));
+        scope (exit)
+        {
+            free(served);
+            shared_endpoint.close();
+            station.destroy();
+            Collection!BridgeInterface().table.free_pending();
+        }
+        InetAddress destination = InetAddress(MACAddress(0x02, 0, 0, 0, 0, 9).b, 4201);
+        served.bind_udp_endpoint(shared_endpoint, destination);
+        assert(station.mtu(600) is null);
+        assert(served.local_segment == 600 - udp_carrier_ether - SyncPeer.sublayer_overhead);
+    }
 }

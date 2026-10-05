@@ -44,7 +44,6 @@ enum SyncEncoderKind : ubyte
 }
 
 enum uint model_protocol_version = 1;
-enum uint max_frame_size = 65_536;
 
 enum SyncConsoleEvent : ubyte
 {
@@ -253,7 +252,8 @@ nothrow @nogc:
     // interning, node introduction and value feed. Handle resolution and
     // interning decisions stay on the peer; encoders only serialize.
 
-    abstract void encode_hello(SyncPeer peer);
+    abstract int encode_hello(SyncPeer peer);
+    abstract void encode_identity(SyncPeer peer);
 
     // Peering claim (docs/PEERING.draft.md): authority asks the member to bind to
     // its cluster. The member answers res(seq) or err(seq, "claimed"/"access_denied").

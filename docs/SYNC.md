@@ -49,11 +49,20 @@ tick where JSON favours a frame per element.
 
 ## Sessions
 
-`hello` is the first frame in each direction: protocol version, hostname, capability bits,
-`max_frame`, and node-id, role, cluster and a fresh 16-byte nonce for peering. Capability names the
-verb families this build serves: `objects` (the object mirror), `model` (the data-model plane),
-`history`, `console`, `logs`, `time`, `console_session` and `templates`. `max_frame` bounds every response;
-history already caps at 2000 points to fit one 64 KB packet.
+`hello` is the first frame in each direction: protocol version, capability bits, `max_frame`,
+node-id, role and a fresh 16-byte nonce for peering, then `segment`. It has a fixed size of about 40
+bytes, so it fits every link but raw CAN; a peer that cannot fit it fails to start rather than run
+without a handshake. The hostname and cluster follow in `identity`, the next frame; on the binary
+wire hello keeps their old slots empty so older decoders read on.
+Capability names the verb families this build serves: `objects` (the object mirror), `model` (the
+data-model plane), `history`, `console`, `logs`, `time`, `console_session` and `templates`.
+`max_frame` is the largest message the sender takes and `segment` the largest frame it takes in one
+packet: its transport's `actual-mtu` less the carrier (a UDP endpoint uses the datagram that fits a
+1500-byte link without IP fragmentation) and less the sublayer header where the sublayer is armed.
+Until fragmentation lands the two are equal. Each side sends nothing larger than the smaller of its
+own segment and the remote's `segment` and `max_frame`; a larger frame is refused before it is
+sequenced and logged, and the session stands. `segment` rides at the end of the tail, so a peer that
+predates it ignores it and is held to its own `max_frame`.
 
 Session handles name everything addressable. The introducer allocates them, dense and ascending,
 session-scoped and never reused; the low bit says who allocated the handle relative to the frame's
@@ -284,7 +293,7 @@ never sees the link. A link adapter provides:
 4. **Best effort is acceptable for the data plane.** Lost values self-heal: latest-value elements
    on the next update, history by backfill from the series cursor. Retransmitting stale telemetry
    is worse than re-reading it.
-5. **MTU**, advertised via `hello.max_frame`.
+5. **MTU**: the transport's `actual-mtu`, from which `hello` derives `segment`.
 6. **Channels**, where a link carries more than sync: datagram links use distinct ports; point
    streams will use CPC endpoints; RS485 will use an envelope channel byte.
 
@@ -324,8 +333,8 @@ Settled design that is not built, tracked in [TODO.md](../TODO.md) under *Sync a
   now: never bypass the peer's resolve methods, introduction is a peer policy, interning is a peer
   policy, handles are wide enough for raw EIDs (already `ulong`), and nothing downstream requires
   having seen a name.
-- **Backpressure as a channel property.** Producers ask for room and suspend; oversize control
-  frames are refused at encode time against `max_frame`; control rides PCP >= ca with DEI=0.
+- **Backpressure as a channel property.** Producers ask for room and suspend; control rides PCP >=
+  ca with DEI=0.
   The bulk control walks (registry introduction, model introduction, live re-arm) run as the
   transport's `tx_handler`: the interface invites the peer, the walk asks `tx_ready` before every
   frame and returns whether it wants another invitation, and a bounded transport such as the

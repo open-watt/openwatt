@@ -377,17 +377,15 @@ nothrow @nogc:
 
     // Outbound: model plane
 
-    override void encode_hello(SyncPeer peer)
+    override int encode_hello(SyncPeer peer)
     {
         import urt.conv : format_uint;
         import manager : get_module;
-        import manager.system : hostname, node_id;
+        import manager.system : node_id;
         import manager.sync.discovery : SyncDiscoveryModule, PeerRole, role_name;
 
         begin_frame("hello");
         _buf.append(",\"ver\":", model_protocol_version);
-        _buf.append(",\"host\":");
-        write_str(hostname[]);
 
         char[16] id = void;
         format_uint(node_id(), id[], 16, 16, '0');
@@ -397,15 +395,9 @@ nothrow @nogc:
         char[32] nonce = void;
         hex_encode(peer.local_nonce(), nonce[]);
         _buf.append(",\"nonce\":\"", nonce[], '\"');
-        auto disco = get_module!SyncDiscoveryModule;
-        PeerRole role = peer.claim ? PeerRole.authority : disco.local_role;
+        PeerRole role = peer.claim ? PeerRole.authority : get_module!SyncDiscoveryModule.local_role;
         if (role != PeerRole.none)
             _buf.append(",\"role\":\"", role_name(role), '\"');
-        if (disco.local_cluster.length)
-        {
-            _buf ~= ",\"cluster\":";
-            write_str(disco.local_cluster[]);
-        }
         _buf ~= ",\"caps\":[";
         bool first = true;
         foreach (bit; 0 .. 8)
@@ -418,7 +410,25 @@ nothrow @nogc:
             _buf.append('\"', enum_key_from_value!SyncCaps(cast(SyncCaps)(1 << bit)), '\"');
         }
         _buf ~= "],\"encoders\":[\"json\"]";
-        _buf.append(",\"max_frame\":", max_frame_size);
+        _buf.append(",\"max_frame\":", peer.local_max_message, ",\"segment\":", peer.local_segment);
+        return send_frame(peer);
+    }
+
+    override void encode_identity(SyncPeer peer)
+    {
+        import manager : get_module;
+        import manager.system : hostname;
+        import manager.sync.discovery : SyncDiscoveryModule;
+
+        begin_frame("identity");
+        _buf ~= ",\"host\":";
+        write_str(hostname[]);
+        auto disco = get_module!SyncDiscoveryModule;
+        if (disco.local_cluster.length)
+        {
+            _buf ~= ",\"cluster\":";
+            write_str(disco.local_cluster[]);
+        }
         send_frame(peer);
     }
 
@@ -985,7 +995,8 @@ nothrow @nogc:
                             caps |= *c;
                     }
                 }
-                uint max_frame = optional_uint(json, "max_frame");
+                uint max_message = optional_uint(json, "max_frame");
+                uint segment = optional_uint(json, "segment");
 
                 import urt.conv : parse_uint;
                 import urt.encoding : hex_decode;
@@ -996,7 +1007,6 @@ nothrow @nogc:
                 PeerRole role;
                 if (const(char)[] role_str = optional_str(json, "role"))
                     role_from_name(role_str, role);
-                const(char)[] cluster = optional_str(json, "cluster");
                 ubyte[16] nonce_buf = void;
                 const(ubyte)[] nonce;
                 if (const(char)[] nonce_str = optional_str(json, "nonce"))
@@ -1005,12 +1015,16 @@ nothrow @nogc:
                         nonce = nonce_buf[];
                 }
                 uint ver = optional_uint(json, "ver");
-                const(char)[] host = optional_str(json, "host");
 
                 if (!bad_frame)
-                    sync.inbound_hello(peer, ver, host, caps, max_frame, nid, role, cluster, nonce);
+                    sync.inbound_hello(peer, ver, caps, max_message, nid, role, nonce, segment);
                 break;
             }
+
+            case "identity":
+                if (!bad_frame)
+                    sync.inbound_identity(peer, optional_str(json, "host"), optional_str(json, "cluster"));
+                break;
 
             case "claim":
             {

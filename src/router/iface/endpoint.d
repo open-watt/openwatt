@@ -253,12 +253,13 @@ nothrow @nogc:
     InetAddress remote() const pure
         => _remote;
 
-    BaseInterface egress_iface()
+    // a server's unconnected endpoint serves many destinations, so the caller names one
+    BaseInterface egress_iface(InetAddress destination)
     {
         if (_family == AddressFamily.ether)
-            return _ether.egress_iface(_remote);
+            return _ether.egress_iface(destination);
         static if (has_ip)
-            return _ip.egress_iface(_remote);
+            return _ip.egress_iface(destination);
         else
             return null;
     }
