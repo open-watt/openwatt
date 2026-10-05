@@ -48,6 +48,10 @@ nothrow @nogc:
     {
     }
 
+    void export_config(ref MutableString!0 buf)
+    {
+    }
+
 protected:
     this(Application app, String name)
     {

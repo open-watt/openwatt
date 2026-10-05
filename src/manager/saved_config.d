@@ -29,6 +29,9 @@ void export_all(ref MutableString!0 buf)
         buf.append('\n');
     }
 
+    foreach (m; g_app.modules)
+        m.export_config(buf);
+
     static immutable string[3] phase_names = [ "Create", "Configure", "Enable" ];
     foreach (phase; 0 .. 3)
     {
