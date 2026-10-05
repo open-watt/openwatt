@@ -59,10 +59,23 @@ data-model plane), `history`, `console`, `logs`, `time`, `console_session` and `
 `max_frame` is the largest message the sender takes and `segment` the largest frame it takes in one
 packet: its transport's `actual-mtu` less the carrier (a UDP endpoint uses the datagram that fits a
 1500-byte link without IP fragmentation) and less the sublayer header where the sublayer is armed.
-Until fragmentation lands the two are equal. Each side sends nothing larger than the smaller of its
-own segment and the remote's `segment` and `max_frame`; a larger frame is refused before it is
-sequenced and logged, and the session stands. `segment` rides at the end of the tail, so a peer that
-predates it ignores it and is held to its own `max_frame`.
+`max_frame` is the receiver's reassembly budget, 64 KiB (8 KiB on tiny targets) and never less than
+its `segment`. Each side sends no frame larger than the smaller of its own segment and the remote's
+`segment`; `segment` rides at the end of the tail, so a peer that predates it ignores it. A hello
+advertising either limit below 32 bytes, less than hello itself, restarts the session, and so does
+a send limit that falls below it while a fragmented message is pending.
+
+A binary message that does not fit is sent as `fragment` frames: a flags byte (`first` on the first,
+`more` on all but the last) and the next slice of the encoded message. Reassembly relies on the
+control plane being ordered and free of duplicates, so a fragment carries no id or offset; the
+receiver appends until the last and dispatches the whole message. A sender fragments only toward a
+remote whose hello reports protocol version 2 or later, checks the whole message against the
+remote's `max_frame` before the first fragment, and keeps one fragmented message pending at a time,
+submitting fragments as the control window or the transport has room. While it is pending, other
+control messages are refused and logged, so two messages never interleave; data frames still flow.
+A message over the budget, toward an older peer, or in JSON is refused and logged, and the session
+stands. A malformed fragment, a reassembly over the budget or a fragment nested in a fragment resets
+the session; hello is never fragmented.
 
 Session handles name everything addressable. The introducer allocates them, dense and ascending,
 session-scoped and never reused; the low bit says who allocated the handle relative to the frame's
@@ -228,7 +241,7 @@ timestamp the subordinate collects until the next push. The authority is either 
 
 | capability | verbs |
 | --- | --- |
-| session | `hello`, `res`, `err`, `claim` |
+| session | `hello`, `identity`, `res`, `err`, `claim`, `fragment` |
 | `objects` | `add_name`, `bind`, `unbind`, `create`, `destroy`, `state`, `set`, `reset`, `enum_req`, `enum`, `sub`, `unsub` |
 | `model` | `model_sub`, `type`, `add`, `val`, `val_block`, `model_set` |
 | `history` | `history_req`, `history` |

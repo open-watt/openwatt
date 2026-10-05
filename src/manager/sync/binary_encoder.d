@@ -74,6 +74,7 @@ enum Verb : ubyte
     claim,
     console,
     identity,
+    fragment,
 }
 
 
@@ -859,6 +860,14 @@ nothrow @nogc:
                 }
                 if (!r.fail)
                     sync.inbound_hello(peer, ver, caps, max_message, nid, role, nonce, segment);
+                break;
+            }
+
+            case Verb.fragment:
+            {
+                ubyte flags = r.u8();
+                if (!r.fail)
+                    peer.accept_fragment(flags, frame[2 .. $]);
                 break;
             }
 

@@ -3,6 +3,11 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-10-06: sync protocol version 2
+
+- A node's `hello` reports protocol version 2: binary sessions may now carry a message larger than
+  one packet as `fragment` frames. JSON sessions are unchanged; accept any version from 1 up.
+
 ## 2026-10-06: sync `hello` carries `segment`
 
 - A node's `hello` now ends with `segment`, the largest frame it takes in one packet, and its

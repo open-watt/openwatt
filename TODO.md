@@ -1284,12 +1284,20 @@ this is what remains.
 
 ## Infrastructure
 
-- **Sync frames over the segment are refused, not delivered** (2026-10-06): since `hello` carries
-  `segment`, a frame larger than both ends carry in one packet is refused before it is sequenced
-  instead of restarting the session, so a history reply or a 256-record backfill block over UDP is
-  lost rather than looping. Fragmentation and byte-sized producers deliver them (Y2 in
-  `docs/wip/STREAMING.md`). The data plane's refold still concatenates its backlog into one frame
-  that can exceed the segment; Y2 packs it to fit.
+- **Sync producers are not sized to the segment** (2026-10-06): an oversized binary message now
+  travels as fragments, but backfill and live events still cut at 256 records and the console relay
+  at 8 KB, so a large block holds the control plane as one long fragmented message, and an
+  event-driven control message encoded meanwhile is refused. The data plane's refold
+  (`send_data_frame`) still concatenates its whole backlog into one frame and sends it with
+  `raw_tx`, past the segment check and fragmentation, so a backlog over the segment is dropped by
+  the interface. Y2b in `docs/wip/STREAMING.md`: byte budgets and refold packing.
+
+- **A Windows UDP socket that sends to a closed port stops receiving** (2026-10-06): two instances
+  peering over `/interface/udp` on loopback, the one whose hello went out before the other bound
+  its port never hears the other again. The ICMP port-unreachable surfaces as `WSAECONNRESET` on
+  the next `recvfrom`; urt's `recvfrom` swallows it as success with 0 bytes, and the reception path
+  appears to stop draining there. Disable `SIO_UDP_CONNRESET` on UDP sockets, or keep reading past
+  the reset.
 
 - **Interface sizes the MTU work left open** (2026-10-06): `l2mtu` should be writable on Ethernet,
   where jumbo frames make it meaningful, and read-only elsewhere, with `max-l2mtu` (the largest
