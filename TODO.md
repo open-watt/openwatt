@@ -1284,6 +1284,24 @@ this is what remains.
 
 ## Infrastructure
 
+- **Bounded streaming and MTU migration** (2026-10-05): senders build whole messages and push
+  them into sinks that never refuse (TCP `send()`, WebSocket `_tx_pending`, the sync encoders),
+  and nothing above L2 reads `actual_mtu`; an oversized sync control frame restarts the session
+  in a loop. Staged in [docs/wip/STREAMING.md](docs/wip/STREAMING.md) as five tracks of
+  one-or-two-concern PRs: the stream contract and its producers (the contract lands ahead of
+  #803, which rebases onto it), event-driven receive, interface MTU sizes, sync over a
+  negotiated segment with a reliability and congestion specification after it, and streaming
+  parsers.
+  It subsumes the "Bound the TCP push backlog", "websocket's 128 KB hard bound", "WebSocket TX
+  should retain frame descriptors", "Make backpressure a channel property", "UART writes
+  disagree on a full ring" and "Move WebSocket RX off the tick" entries, which reduce as its
+  steps land. Deferred out of it: **atomic source views for resumable producers**. A walker that
+  resumes by key sees the source as it is at each pull and tears across a change between pulls,
+  where the whole-message buffer it replaces gave one consistent view. Prints accept tearing at
+  block boundaries (#803); a producer whose consumer needs a consistent document (a sync `bind`
+  of all properties, `/api/list` as a whole) needs a snapshot or generation check from the data
+  model. Future challenge, not scheduled.
+
 - **Sync frames over the segment are refused, not delivered** (2026-10-06): since `hello` carries
   `segment`, a frame larger than both ends carry in one packet is refused before it is sequenced
   instead of restarting the session, so a history reply or a 256-record backfill block over UDP is
