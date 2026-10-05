@@ -116,36 +116,26 @@ private:
     {
     nothrow @nogc:
 
-        Page* produce(Stream, size_t requested)
+        Page* produce(ref const TxRequest req, out TxStatus status)
         {
-            if (complete)
-            {
-                owner.schema_finished(&this, true);
-                return null;
-            }
             if (!header_sent)
-                return produce_header(requested);
+                return produce_header(req, status);
 
             if (sent == pending.length)
                 prepare_pending();
 
+            static assert(min_tx_request >= chunk_framing + 1 + final_chunk_size);
             size_t terminal_size = closed ? final_chunk_size : 0;
-            size_t page_size = requested < max_page_size ? requested : max_page_size;
-            size_t minimum = chunk_framing + 1 + terminal_size;
-            if (page_size < minimum)
-                page_size = minimum;
+            size_t page_size = req.bytes < max_page_size ? req.bytes : max_page_size;
 
             size_t take = pending.length - sent;
             size_t room = page_size - chunk_framing - terminal_size;
             if (take > room)
                 take = room;
 
-            Page* page = page_alloc(page_size);
+            Page* page = alloc_tx_page(req, page_size, status);
             if (!page)
-            {
-                owner.schema_finished(&this, false);
                 return null;
-            }
 
             char[] output = cast(char[])page.data;
             size_t length = write_chunk(output, pending[sent .. sent + take]);
@@ -154,7 +144,8 @@ private:
             {
                 output[length .. length + final_chunk_size] = "0\r\n\r\n";
                 length += final_chunk_size;
-                complete = true;
+                owner.schema_finished(&this, true);
+                status = TxStatus.end;
             }
             page.length = cast(ushort)length;
             return page;
@@ -176,20 +167,17 @@ private:
         bool closed;
         bool complete;
 
-        Page* produce_header(size_t requested)
+        Page* produce_header(ref const TxRequest req, ref TxStatus status)
         {
             size_t take = pending.length - sent;
             if (take > max_page_size)
                 take = max_page_size;
-            if (take > requested)
-                take = requested;
+            if (take > req.bytes)
+                take = req.bytes;
 
-            Page* page = page_alloc(take);
+            Page* page = alloc_tx_page(req, take, status);
             if (!page)
-            {
-                owner.schema_finished(&this, false);
                 return null;
-            }
             (cast(char[])page.data)[] = pending[sent .. sent + take];
             sent += take;
             if (sent == pending.length)
@@ -1101,15 +1089,28 @@ unittest
     bool owns_pool = page_pool_init();
     scope (exit) if (owns_pool) page_pool_deinit();
 
-    APIManager.SchemaTx tx;
-    tx.header_sent = true;
+    APIManager owner = alloc!APIManager(CID(1));
+    scope (exit) free(owner);
 
-    Page* page = tx.produce(null, 1);
-    assert(page && cast(const(char)[])page.data == "1\r\n{\r\n");
+    APIManager.SchemaTx tx;
+    tx.owner = owner;
+    tx.header_sent = true;
+    tx.opened = true;
+    foreach (i; 0 .. 60)
+        tx.pending ~= 'x';
+
+    TxRequest req = TxRequest(min_tx_request);
+    TxStatus status;
+    Page* page = tx.produce(req, status);
+    assert(page && page.length == 62 && status == TxStatus.more);
+    assert((cast(const(char)[])page.data)[0 .. 4] == "38\r\n");
     page_free(page);
 
-    page = tx.produce(null, 1);
-    assert(page && cast(const(char)[])page.data == "1\r\n}\r\n0\r\n\r\n");
-    assert(tx.complete);
+    page = tx.produce(req, status);
+    assert(page && cast(const(char)[])page.data == "4\r\nxxxx\r\n" && status == TxStatus.more);
+    page_free(page);
+
+    page = tx.produce(req, status);
+    assert(page && cast(const(char)[])page.data == "1\r\n}\r\n0\r\n\r\n" && status == TxStatus.end);
     page_free(page);
 }

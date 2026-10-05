@@ -397,7 +397,7 @@ nothrow @nogc:
         assert(!g_app, "Application already created!");
         g_app = this;
 
-        import urt.mem.pagepool : page_pool_init;
+        import urt.mem.pagepool : page_pool_init, page_pool_wake_hook;
         bool pool_ready = page_pool_init();
         debug assert(pool_ready, "page pool initialisation failed");
 
@@ -407,6 +407,7 @@ nothrow @nogc:
         bool reactor_ok = _wake_event.init();
         g_priority_events.init();
         g_bulk_events.init();
+        page_pool_wake_hook(&note_pages_freed);
 
         import urt.time : subscribe_clock_change;
         subscribe_clock_change(&notify_wallclock_change);
@@ -933,8 +934,9 @@ nothrow @nogc:
 
     void process_events()
     {
-        import urt.atomic : atomicFetchAdd, MemoryOrder;
+        import urt.atomic : atomicExchange, atomicFetchAdd, MemoryOrder;
         import urt.log : writeWarning;
+        import urt.mem.pagepool : page_pool_wake;
 
         enum Duration bulk_slice = msecs(500);
         enum SlowEventHandlerMs = 50;
@@ -952,6 +954,8 @@ nothrow @nogc:
         for (;;)
         {
             ++passes;
+            if (atomicExchange(&_pages_freed, 0))
+                page_pool_wake();
             bool any_priority = false;
             while (g_priority_events.dequeue(e))
             {
@@ -1543,6 +1547,14 @@ nothrow @nogc:
 
 private:
 
+    // runs in the freeing context, possibly an ISR; must not depend on event queue capacity
+    static void note_pages_freed()
+    {
+        import urt.atomic : atomicStore;
+        atomicStore(g_app._pages_freed, 1);
+        g_app.wake_from_isr();
+    }
+
     bool enqueue_event(EventHandler handler, MonoTime when, EventPriority priority, bool report_overflow)
     {
         import urt.atomic : atomicFetchAdd, atomicFetchSub, MemoryOrder;
@@ -1607,6 +1619,7 @@ private:
 
     Reactor _wake_event;
 
+    shared uint _pages_freed;
     shared uint _priority_events_posted;
     shared uint _bulk_events_posted;
     shared uint _priority_events_processed;

@@ -41,6 +41,7 @@ version (UseInternalIPStack)
 import router.iface;
 import router.iface.endpoint;
 import router.iface.ethernet;
+import router.stream : SendHandler, TxRequest, TxStatus, min_tx_request, pull_tx_page;
 
 version(Windows)
 {
@@ -332,7 +333,6 @@ enum IPEvent : ubyte
 private static immutable ubyte[6] zero_mac;
 
 alias TCPRecvHandler = void delegate(TCPConnection* conn, const(void)[] data, MonoTime rx_time) nothrow @nogc;
-alias TCPSendHandler = Page* delegate(TCPConnection* conn, size_t requested) nothrow @nogc;
 alias TCPEventHandler = void delegate(TCPConnection* conn, IPEvent event) nothrow @nogc;
 alias TCPAcceptHandler = void delegate(TCPListener* listener, TCPConnection* conn, MonoTime rx_time) nothrow @nogc;
 
@@ -574,16 +574,11 @@ nothrow @nogc:
             enum size_t ceiling = TcpSendBufSize;
         else
             enum size_t ceiling = max_tx_refill;
-        size_t queued = tx_backlog;
-        return queued < ceiling / 2 ? ceiling - queued : 0;
-    }
-
-    size_t tx_backlog() const pure
-    {
         version (UseInternalIPStack)
-            return _tx_bytes + (_pcb ? _pcb.send_buf.length : 0);
+            size_t queued = _tx_bytes + (_pcb ? _pcb.send_buf.length : 0);
         else
-            return _tx_bytes;
+            size_t queued = _tx_bytes;
+        return queued < ceiling / 2 ? ceiling - queued : 0;
     }
 
     void recv_handler(TCPRecvHandler handler)
@@ -599,13 +594,13 @@ nothrow @nogc:
         _on_event = handler;
     }
 
-    void tx_handler(TCPSendHandler handler)
+    void tx_handler(SendHandler handler)
     {
         _outgoing = handler;
         service_tx();
     }
 
-    void release_tx_handler(TCPSendHandler handler)
+    void release_tx_handler(SendHandler handler)
     {
         if (_outgoing is handler)
             _outgoing = null;
@@ -755,7 +750,7 @@ nothrow @nogc:
             }
             _phase = Phase.dead;
             _closing = true;
-            _outgoing = null;
+            drop_tx_handler();
             clear_tx();
         }
     }
@@ -787,7 +782,7 @@ nothrow @nogc:
             _on_recv = null;
             _on_event = null;
             _phase = Phase.dead;
-            _outgoing = null;
+            drop_tx_handler();
             if (_handle != INVALID_SOCKET)
             {
                 CancelIoEx(cast(HANDLE)_handle, null);
@@ -833,7 +828,7 @@ nothrow @nogc:
                 return;
             _closing = true;
             _phase = Phase.dead;
-            _outgoing = null;
+            drop_tx_handler();
             detach_watch();
             if (_socket)
             {
@@ -874,15 +869,22 @@ private:
     Page* _tx_head;
     Page* _tx_tail;
     size_t _tx_bytes;
-    TCPSendHandler _outgoing;
+    SendHandler _outgoing;
+    PageWaiter _tx_waiter;
     bool _servicing_tx;
+
+    void drop_tx_handler()
+    {
+        _outgoing = null;
+        page_unwait(&_tx_waiter);
+    }
 
     void fail(IPEvent ev)
     {
         if (_phase == Phase.dead)
             return;
         _phase = Phase.dead;
-        _outgoing = null;
+        drop_tx_handler();
         clear_tx();
         TCPEventHandler handler = _on_event;
         _on_recv = null;
@@ -938,25 +940,26 @@ private:
         bool yield = false;
         for (;;)
         {
-            size_t requested = tx_request();
-            while (_outgoing && requested != 0 && !yield)
+            while (_outgoing && !yield)
             {
-                TCPSendHandler handler = _outgoing;
-                Page* page = handler(&this, requested);
-                if (!page)
-                {
-                    if (_outgoing is handler)
-                        _outgoing = null;
-                    continue;
-                }
-                if (page.length == 0 || !send_page(page))
+                TxRequest req = TxRequest(tx_request());
+                if (req.bytes < min_tx_request)
+                    break;
+                uint generation = page_free_generation();
+                TxStatus status;
+                Page* page = pull_tx_page(_outgoing, req, status);
+                if (page && (page.length == 0 || !send_page(page)))
                 {
                     page_free(page);
-                    if (_outgoing is handler)
-                        _outgoing = null;
+                    _outgoing = null;
                     break;
                 }
-                requested = tx_request();
+                if (status == TxStatus.starved)
+                {
+                    _tx_waiter.wake = &service_tx;
+                    if (page_wait(&_tx_waiter, generation))
+                        break;
+                }
                 yield = getTime() >= deadline;
             }
 
@@ -2965,15 +2968,18 @@ version (UseInternalIPStack) {} else version (linux)
             size_t total, produced;
             Duration cost;      // simulated production time per page
 
-            Page* produce(TCPConnection*, size_t requested)
+            Page* produce(ref const TxRequest req, out TxStatus status)
             {
                 size_t take = total - produced;
-                if (take > requested)
-                    take = requested;
+                if (take > req.bytes)
+                    take = req.bytes;
                 if (take > 1600)
                     take = 1600;
                 if (take == 0)
+                {
+                    status = TxStatus.idle;
                     return null;
+                }
                 for (MonoTime until = getTime() + cost; getTime() < until; ) {}
                 Page* page = page_alloc(take);
                 foreach (i, ref b; cast(ubyte[])page.data)

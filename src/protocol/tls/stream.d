@@ -526,115 +526,38 @@ nothrow @nogc:
             return -1;
         }
 
-        ptrdiff_t result = -1;
-
-        version (MbedTLS)
+        bool idle = !_tx_pending;
+        ptrdiff_t total = 0;
+        queue: foreach (ref d; data)
         {
-            ptrdiff_t total = 0;
-            foreach (ref d; data)
+            const(ubyte)[] chunk = cast(const(ubyte)[])d;
+            while (chunk.length)
             {
-                auto chunk = cast(const(ubyte)[])d;
-                while (chunk.length > 0)
+                size_t n = chunk.length < tx_page_payload ? chunk.length : tx_page_payload;
+                Page* input = page_alloc(n);
+                if (!input)
+                    break queue;
+                (cast(ubyte[])input.data)[] = chunk[0 .. n];
+                Page* output = encrypt_page(input);
+                if (!output)
                 {
-                    int ret = mbedtls_ssl_write(_ssl, chunk.ptr, chunk.length);
-                    if (ret > 0)
-                    {
-                        chunk = chunk[ret .. $];
-                        total += ret;
-                    }
-                    else
-                        return -1;
+                    fail_session();
+                    return -1;
                 }
+                append_tx_chain(_tx_pending, output);
+                add_tx_bytes(n);
+                if (_logging)
+                    write_to_log(false, chunk[0 .. n]);
+                chunk = chunk[n .. $];
+                total += n;
             }
-
-            result = total;
         }
-        else version (Windows)
-        {
-            SecPkgContext_StreamSizes sizes;
-            auto status = QueryContextAttributesA(&_context, SECPKG_ATTR_STREAM_SIZES, &sizes);
-            if (status != SEC_E_OK)
-            {
-                log.errorf("QueryContextAttributes failed: {0,08x}", cast(uint)status);
-                return -1;
-            }
-
-            SecBuffer[35] bufs = void;
-            assert(data.length <= bufs.length - 3, "Too many buffers!");
-
-            auto buffer = Array!(ubyte)(Alloc, sizes.cbHeader + sizes.cbTrailer);
-
-            bufs[0].pvBuffer = &buffer[0];
-            bufs[0].cbBuffer = sizes.cbHeader;
-            bufs[0].BufferType = SECBUFFER_STREAM_HEADER;
-
-            ULONG i = 1;
-            foreach (ref d; data)
-            {
-                assert(d.length <= ULONG.max, "Buffer too large for Windows API");
-                bufs[i].pvBuffer = cast(void*)d.ptr;
-                bufs[i].cbBuffer = cast(ULONG)d.length;
-                bufs[i++].BufferType = SECBUFFER_DATA;
-            }
-
-            bufs[i].pvBuffer = &buffer[sizes.cbHeader];
-            bufs[i].cbBuffer = sizes.cbTrailer;
-            bufs[i++].BufferType = SECBUFFER_STREAM_TRAILER;
-
-            bufs[i].pvBuffer = null;
-            bufs[i].cbBuffer = 0;
-            bufs[i++].BufferType = SECBUFFER_EMPTY;
-
-            SecBufferDesc buf_desc;
-            buf_desc.ulVersion = 0;
-            buf_desc.cBuffers = i;
-            buf_desc.pBuffers = bufs.ptr;
-
-            status = EncryptMessage(&_context, 0, &buf_desc, 0);
-            if (status != SEC_E_OK)
-            {
-                log.errorf("EncryptMessage failed: {0,08x}", cast(uint)status);
-                return -1;
-            }
-
-            ref SecBuffer hdr = bufs[0];
-            ref SecBuffer tail = bufs[buf_desc.cBuffers - 2];
-
-            const(void)[][34] send_bufs = void;
-            size_t total_len = hdr.cbBuffer + tail.cbBuffer;
-            send_bufs[0] = hdr.pvBuffer[0 .. hdr.cbBuffer];
-            send_bufs[1 + data.length] = tail.pvBuffer[0 .. tail.cbBuffer];
-            size_t data_len = 0;
-            for (i = 1; i <= data.length; ++i)
-            {
-                data_len += bufs[i].cbBuffer;
-                send_bufs[i] = bufs[i].pvBuffer[0 .. bufs[i].cbBuffer];
-            }
-            total_len += data_len;
-
-            ptrdiff_t bytes_sent = _stream.write(send_bufs[0 .. 2 + data.length]);
-            if (bytes_sent != total_len)
-            {
-                log.warning("underlying write failed: sent=", bytes_sent, " expected=", total_len);
-                return -1;
-            }
-
-            result = data_len;
-        }
-
-        if (result >= 0 && _logging)
-        {
-            foreach (ref d; data)
-                write_to_log(false, d[]);
-        }
-        return result;
-    }
-
-    final override size_t tx_backlog() const
-    {
-        if (auto s = _stream.get)
-            return s.tx_backlog;
-        return 0;
+        Stream stream = _stream.get;
+        if (stream && !stream.supports_tx_pages)
+            push_pending(stream);
+        else if (idle && _tx_pending)
+            tx_handler_changed();
+        return total;
     }
 
     final override size_t tx_request() const
@@ -679,6 +602,7 @@ protected:
 private:
     IPClient _conn;
     bool _close_notify = false;
+    TxStatus _tx_pending_status;
 
     Array!(ObjectRef!Certificate) _certificates;
     BaseObject _selected_cert;
@@ -694,12 +618,12 @@ private:
             stream.release_tx_handler(&provide_tx_page);
     }
 
-    Page* provide_tx_page(Stream, size_t requested)
+    Page* provide_tx_page(ref const TxRequest req, out TxStatus status)
     {
         if (_tx_pending)
-            return take_pending_tx();
+            return take_pending_tx(req, status);
 
-        Page* input = request_tx_page(requested);
+        Page* input = request_tx_page(req, status);
         if (!input)
             return null;
 
@@ -707,29 +631,61 @@ private:
         if (_logging)
             write_to_log(false, input.data);
 
-        Page* output;
-        version (MbedTLS)
-            output = encrypt_page_mbedtls(input);
-        else version (Windows)
-            output = encrypt_page_schannel(input);
+        Page* output = encrypt_page(input);
         if (!output)
         {
-            tx_handler(null);
-            _handshake_state = HandshakeState.failed;
-            restart();
+            fail_session();
+            status = TxStatus.abort;
             return null;
         }
         add_tx_bytes(input_length);
         _tx_pending = output;
-        return take_pending_tx();
+        _tx_pending_status = status;
+        return take_pending_tx(req, status);
     }
 
-    Page* take_pending_tx()
+    Page* take_pending_tx(ref const TxRequest req, out TxStatus status)
     {
-        Page* page = _tx_pending;
-        _tx_pending = page.next;
-        page.next = null;
+        Page* page = take_tx_page(_tx_pending, req, status);
+        if (page)
+            status = _tx_pending || tx_handler ? TxStatus.more : _tx_pending_status;
         return page;
+    }
+
+    // consumes input
+    Page* encrypt_page(Page* input)
+    {
+        version (MbedTLS)
+            return encrypt_page_mbedtls(input);
+        else version (Windows)
+            return encrypt_page_schannel(input);
+        else
+        {
+            page_free(input);
+            return null;
+        }
+    }
+
+    // a record may have advanced the cipher state before its ciphertext was lost, so the session cannot continue
+    void fail_session()
+    {
+        free_pending_tx();
+        tx_handler(null);
+        _handshake_state = HandshakeState.failed;
+        restart();
+    }
+
+    // TODO: delete with S3 of docs/wip/STREAMING.md; until serial is a sink it takes the ciphertext as it is made
+    void push_pending(Stream stream)
+    {
+        while (_tx_pending)
+        {
+            Page* page = _tx_pending;
+            _tx_pending = page.next;
+            page.next = null;
+            stream.write(page.data);
+            page_free(page);
+        }
     }
 
     void free_pending_tx()
@@ -796,10 +752,10 @@ private:
     }
     HandshakeState _handshake_state;
 
+    enum size_t tx_page_payload = 1600;
+
     version (MbedTLS)
     {
-        enum size_t tx_page_payload = 1600;
-
         mbedtls_ssl_context* _ssl;
         mbedtls_ssl_config* _ssl_conf;
         Page* _tx_output_head;
@@ -1462,4 +1418,63 @@ version (Windows)
         SECURITY_STATUS DeleteSecurityContext(PCtxtHandle);
     }
 }
+
+
+unittest
+{
+    import urt.mem : alloc, free;
+
+    class PushOnlyStream : Stream
+    {
+    nothrow @nogc:
+
+        ~this() {}
+
+        enum type_name = "push-only-stream";
+
+        this(CID id, ObjectFlags flags = ObjectFlags.none)
+        {
+            super(collection_type_info!PushOnlyStream, id, flags);
+        }
+
+        override ptrdiff_t write(const(void[])[] data...)
+        {
+            ptrdiff_t n;
+            foreach (d; data)
+            {
+                output ~= cast(const(ubyte)[])d;
+                n += d.length;
+            }
+            return n;
+        }
+
+        Array!ubyte output;
+    }
+
+    bool owns_pool = page_pool_init();
+    scope (exit) if (owns_pool) page_pool_deinit();
+
+    TLSStream tls = alloc!TLSStream(CID(1));
+    scope (exit) free(tls);
+    PushOnlyStream sink = alloc!PushOnlyStream(CID(2));
+    scope (exit) free(sink);
+
+    static immutable ubyte[5] ciphertext = [1, 2, 3, 4, 5];
+    Page* first = page_alloc(3);
+    (cast(ubyte[])first.data)[] = ciphertext[0 .. 3];
+    Page* second = page_alloc(2);
+    (cast(ubyte[])second.data)[] = ciphertext[3 .. 5];
+    tls._tx_pending = first;
+    append_tx_chain(tls._tx_pending, second);
+    tls.push_pending(sink);
+    assert(sink.output[] == ciphertext[] && tls._tx_pending is null);
+
+    tls._tx_pending = page_alloc(4);
+    tls._handshake_state = TLSStream.HandshakeState.completed;
+    tls.fail_session();
+    assert(tls._tx_pending is null && tls._handshake_state == TLSStream.HandshakeState.failed);
+    ubyte[1] more;
+    assert(tls.write(more[]) == -1);
+}
+
 }

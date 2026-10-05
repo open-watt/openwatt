@@ -141,9 +141,6 @@ nothrow @nogc:
         return accepted;
     }
 
-    override size_t tx_backlog() const
-        => _tx_buffer.length + (_await_ack ? 1 : 0);
-
 protected:
 
     override bool validate() const
