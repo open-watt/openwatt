@@ -83,8 +83,10 @@ nothrow @nogc:
         super(collection_type_info!SyncPeer, id, flags);
     }
 
+    // subscriptions outlive the session, so destruction from any state releases them
     ~this()
     {
+        detach_transport();
         close_udp_endpoint();
     }
 
@@ -452,19 +454,20 @@ protected:
 
     // Idempotent; WS-spawned peers call this at accept time, because the client's
     // first frames can arrive before our first startup tick and unsubscribed
-    // packets are dropped.
+    // packets are dropped. Held across session restarts, until the transport is
+    // destroyed or the peer stops.
     final package void subscribe_transport()
     {
         if (uses_udp_endpoint || (_peer_flags & PeerFlags.transport_subscribed) || !_transport)
             return;
+        _transport.subscribe(&on_transport_state);
         // a remote-bound peer shares a multi-drop transport: its server routes rx by source
         // (deliver_frame). the interface holds few subscriber slots, so per-peer packet
         // subscriptions must not scale with peers.
-        if (_peer_flags & PeerFlags.remote_bound)
-            return;
         // unknown = all types; the handler takes raw and udp frames, so one peer object
         // sits on connected pipes and datagram transports alike
-        _transport.subscribe(&on_transport_packet, PacketFilter(PacketType.unknown, PacketDirection.incoming));
+        if (!(_peer_flags & PeerFlags.remote_bound))
+            _transport.subscribe(&on_transport_packet, PacketFilter(PacketType.unknown, PacketDirection.incoming));
         _peer_flags |= PeerFlags.transport_subscribed;
     }
 
@@ -472,6 +475,7 @@ protected:
     {
         if (owns_udp_endpoint && !_udp_endpoint && !create_remote_endpoint())
             return CompletionStatus.error;
+        subscribe_transport();
         if (!transport_ready)
             return CompletionStatus.continue_;
 
@@ -481,13 +485,12 @@ protected:
             return CompletionStatus.error;   // gapped intake; establish from a fresh exchange
         }
 
-        subscribe_transport();
-
         uint gen = begin_burst();
         encoder_for(_encoder).encode_hello(this);
         if (!send_ok(gen))
             return CompletionStatus.continue_;   // the refusal restarted us; a session without hello must not run
         get_module!SyncModule.attach_peer(this);
+        _peer_flags |= PeerFlags.in_session;
 
         // frames that arrived before the session existed join it now, in arrival order
         while (!_pre_start.empty)
@@ -505,24 +508,10 @@ protected:
         return CompletionStatus.complete;
     }
 
-    // the transport's state matters to a live session only: the subscription is the running window
     override void online()
     {
-        if (!uses_udp_endpoint)
-        {
-            if (BaseInterface transport = _transport)
-            {
-                transport.subscribe(&on_transport_state);
-                _peer_flags |= PeerFlags.transport_state_subscribed;
-            }
-        }
         if (claim)
             get_module!SyncPeeringModule.claim_sibling(this, getTime());
-    }
-
-    override void offline()
-    {
-        release_transport_state();
     }
 
     override CompletionStatus shutdown()
@@ -531,10 +520,15 @@ protected:
             return CompletionStatus.continue_;
 
         get_module!SyncModule.detach_peer(this);
-        detach_transport();
-        // Session restarts retain their transport, as externally owned interfaces do.
+        _peer_flags &= ~PeerFlags.in_session;
+        // a session restart keeps its transport, and holds the next session's first frames for it
         if (_state == State.stopping || _state == State.destroying)
+        {
+            detach_transport();
             close_udp_endpoint();
+        }
+        else if (BaseInterface transport = _transport)
+            transport.release_tx_handler(&produce_tx);
 
         // Peer-derived tap state dies with the stream; the desire to receive
         // (_want_*) persists so a reconnect re-subscribes.
@@ -860,13 +854,13 @@ private:
     {
         none                       = 0,
         transport_subscribed       = 1 << 0,
-        transport_state_subscribed = 1 << 1,
         remote_bound               = 1 << 2,
         ctl_ack_pending            = 1 << 3,
         uses_udp_endpoint          = 1 << 4,
         owns_udp_endpoint          = 1 << 5,
         tx_producing               = 1 << 6,
         claims                     = 1 << 7,
+        in_session                 = 1 << 8,
     }
 
     struct SentFrame
@@ -1039,27 +1033,21 @@ private:
 
     void detach_transport()
     {
-        release_transport_state();
-        if (BaseInterface transport = _transport)
+        BaseInterface transport = _transport;
+        if (transport)
             transport.release_tx_handler(&produce_tx);
         if (!(_peer_flags & PeerFlags.transport_subscribed))
             return;
-        if (BaseInterface transport = _transport)
+        if (transport)
+        {
+            transport.unsubscribe(&on_transport_state);
             transport.unsubscribe(&on_transport_packet);
+        }
         _peer_flags &= ~PeerFlags.transport_subscribed;
     }
 
-    void release_transport_state()
-    {
-        if (!(_peer_flags & PeerFlags.transport_state_subscribed))
-            return;
-        if (BaseInterface transport = _transport)
-            transport.unsubscribe(&on_transport_state);
-        _peer_flags &= ~PeerFlags.transport_state_subscribed;
-    }
-
     bool transport_ready()
-        => uses_udp_endpoint ? _udp_endpoint !is null : _transport && _transport.running;
+        => uses_udp_endpoint ? _udp_endpoint !is null : _transport && _transport.link_up;
 
     bool create_remote_endpoint()
     {
@@ -1081,8 +1069,8 @@ private:
     {
         if (disabled)
             return;
-        // frames are processed only inside a session; pre-start arrivals wait for startup to drain them
-        if (_state != State.starting && _state != State.running)
+        // frames are processed only inside a session; others wait for startup to drain them
+        if (!(_peer_flags & PeerFlags.in_session))
         {
             if (_pre_start_overflow)
                 return;
@@ -1276,9 +1264,12 @@ private:
         deliver_frame(cast(const(ubyte)[])data);
     }
 
+    // a recreated transport is a new object, so a destroyed one takes the subscriptions with it
     void on_transport_state(ActiveObject, StateSignal sig) nothrow @nogc
     {
-        if (sig == StateSignal.offline)
+        if (sig == StateSignal.destroyed)
+            _peer_flags &= ~PeerFlags.transport_subscribed;
+        else if ((sig == StateSignal.offline || sig == StateSignal.link_down) && running)
             restart();
     }
 
@@ -1511,6 +1502,7 @@ unittest
             super(collection_type_info!Narrow, id, flags);
             _caps = cast(InterfaceCaps)(InterfaceCaps.reliable | InterfaceCaps.ordered);
             _state = State.running;
+            set_link(true);
         }
         override bool tx_ready() const
             => pending < cap;

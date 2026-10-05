@@ -29,6 +29,10 @@ A session is a `/sync/peer`. It binds to a link one of two ways, the last set wi
 connected UDP endpoint the peer owns. `encoder=json|binary` selects the wire encoding, and
 `time-authority=yes` designates the remote as this node's clock source by hand.
 
+A session runs while its transport's link is up: a link that drops restarts it, and the next
+session opens when the link returns. Frames that arrive between sessions wait for the next one's
+`hello`, so a remote that speaks first loses nothing.
+
 Listeners spawn peers. `/sync/udp-server` owns one UDP endpoint per selected local endpoint and
 spawns a dynamic peer for the first datagram from each unknown `(local endpoint, remote endpoint)`
 pair; each spawned peer replies through the endpoint that received it, several peers share one
