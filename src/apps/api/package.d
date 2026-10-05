@@ -407,8 +407,6 @@ private:
             stream.write(response.format_message()[]);
             return 0;
         }
-        if (!stream.supports_tx_pages)
-            return reject_schema(request, stream, "{\"error\":\"schema streaming unavailable\"}");
 
         HTTPMessage head;
         head.http_version = request.http_version;
@@ -445,8 +443,7 @@ private:
         }
         _schema = tx;
         stream.subscribe(&schema_stream_state_change);
-        if (!stream.tx_handler(&tx.produce))
-            schema_finished(tx, false);
+        stream.tx_handler(&tx.produce);
         return 0;
     }
 

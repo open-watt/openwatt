@@ -1572,9 +1572,34 @@ this is what remains.
   frame; it should install `rx_handler` and decode on delivery. TX is now pull-driven by the
   stream, so the tick carries only RX.
 
-- **Fix `/device/print` on non-terminal sessions**: `/api/cli/execute` crashes the process and
-  a piped interactive session prints nothing. Audit `DeviceTreeView` and other live views for
-  terminal-channel assumptions.
+- **Stream `/api/cli/execute` output**: the handler collects output in a `StringSession`, whose
+  `MutableString` asserts past 32 KB, so `/device/print` with ~20 devices kills the process.
+  Give the request a session whose `feed_output` pulls into a chunked JSON response (as the
+  schema transfer does) instead of a whole-output buffer. Windows also drops `--interactive`
+  on a piped stdin, which is why a piped session prints nothing. Audit `DeviceTreeView` and the
+  other live views for terminal-channel assumptions on such sessions.
+
+- **Pace the serial and console transports**: `SerialStream`, `ConsoleStream`,
+  `USBSerialStream`, `BLESerialStream` and `SyncConsoleStream` take the base `Stream`'s
+  synchronous `tx_request`, so a producer drains in one call and `write()` blocks per driver; a
+  short write disarms the producer, which stalls a print until it is cancelled. The UART driver
+  needs a TX-space query and a wired TX-ready event (`tx_cb` is declared but unused) before
+  `SerialStream` can request by free space and re-pump on drain.
+
+- **Move the remaining prints onto `TablePrint`**: `/protocol/ip/tcp`, `neighbour`,
+  `neighbour6`, `/sync/neighbor`, `/sync/peering`, `/protocol/ble/device`, `/port`,
+  `/element/link`, `/system/linux` and `/log/print` still render whole-output; `--json` prints
+  still build one `Variant`. `CollectionPrint` resumes by iteration index, so an add or remove
+  mid-print can skip or repeat one item; `DevicePrint` resumes by device slot.
+
+- **Drop `TablePrint.release()` once class destructors chain**: commands are freed through
+  `CommandState`, which skips derived destructors, so `finish()` frees the table and the
+  subclass strings by hand. The live views (`DeviceTreeView`, `CollectionWatchState`,
+  `TreeViewState`) have no such release and leak their members on every exit.
+
+- **Document `/device` in CLI.md**: `add`, `print` (`filter=`, `--watch`, `--expand`) and
+  `/element/set` have no reference entry. A bare `print m1*` does not bind `filter`; it lands
+  in the variadic `args` and prints everything.
 
 - **Document `/protocol/mqtt/broker` in CLI.md**: the broker, its `discover` prefixes and the Home
   Assistant discovery it drives (entity mapping, writers, availability aggregated into

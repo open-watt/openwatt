@@ -209,13 +209,10 @@ nothrow @nogc:
             _incoming = null;
     }
 
-    final bool tx_handler(SendHandler handler)
+    final void tx_handler(SendHandler handler)
     {
-        if (handler && !supports_tx_pages)
-            return false;
         _outgoing = handler;
         tx_handler_changed();
-        return true;
     }
     final SendHandler tx_handler() const pure
         => _outgoing;
@@ -259,11 +256,9 @@ nothrow @nogc:
     size_t tx_backlog() const
         => 0;
 
+    // a synchronous sink takes every page as it is offered
     size_t tx_request() const
-        => 0;
-
-    bool supports_tx_pages() const
-        => false;
+        => running ? 1600 : 0;
 
     ptrdiff_t pending()
         => _rx_buffer.length;
@@ -526,9 +521,6 @@ unittest
         override size_t tx_request() const
             => _space;
 
-        override bool supports_tx_pages() const
-            => supported;
-
         void grant(size_t space)
         {
             _space += space;
@@ -542,7 +534,6 @@ unittest
         }
 
         Array!ubyte output;
-        bool supported = true;
 
     protected:
         override bool queue_tx_page(Page* page)
@@ -658,9 +649,5 @@ unittest
     sleeping.remaining = 1;
     stream.tx_handler(&sleeping.produce);
     assert(sleeping.calls == 3 && stream.output.length == 1 && stream.tx_handler is null);
-
-    stream.supported = false;
-    assert(!stream.tx_handler(&first.produce));
-    assert(stream.tx_handler is null);
 }
 

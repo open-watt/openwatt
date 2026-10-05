@@ -276,9 +276,6 @@ nothrow @nogc:
     override size_t tx_request() const
         => _conn ? _conn.tx_request : 0;
 
-    override bool supports_tx_pages() const
-        => true;
-
 protected:
 
     override void tx_handler_changed()

@@ -646,13 +646,6 @@ nothrow @nogc:
         return 0;
     }
 
-    final override bool supports_tx_pages() const
-    {
-        if (auto stream = _stream.get)
-            return stream.supports_tx_pages;
-        return _conn.has_remote;
-    }
-
     final override ptrdiff_t pending()
         => _app_buffer.length;
 

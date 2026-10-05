@@ -615,12 +615,6 @@ private:
 
         if (size > Download.buffer_threshold)
         {
-            if (!stream.supports_tx_pages)
-            {
-                f.close();
-                return send_status(ver, stream, 503, request) >= 0;
-            }
-
             HTTPMessage response;
             response.http_version = ver;
             response.status_code = 200;
@@ -651,8 +645,7 @@ private:
 
             stream.subscribe(&d.stream_state);
             _downloads ~= d;
-            if (!stream.tx_handler(&d.produce))
-                download_finished(d, false);
+            stream.tx_handler(&d.produce);
             return true;
         }
 
