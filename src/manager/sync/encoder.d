@@ -43,7 +43,7 @@ enum SyncEncoderKind : ubyte
     json,
 }
 
-enum uint model_protocol_version = 1;
+enum uint model_protocol_version = 2;   // 2: fragment
 
 enum SyncConsoleEvent : ubyte
 {

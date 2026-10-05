@@ -533,6 +533,7 @@ nothrow @nogc:
         p._adopted.clear();
         p._warned_name_count = 0;
         p._remote_caps = 0;
+        p._remote_version = 0;
         p._remote_max_message = 0;
         p._remote_segment = 0;
         p._remote_node_id = 0;
@@ -1270,7 +1271,14 @@ nothrow @nogc:
     {
         import urt.conv : format_uint;
 
+        if ((segment && segment < SyncPeer.min_segment) || (max_message && max_message < SyncPeer.min_segment))
+        {
+            log.warning("peer '", from.name[], "' advertised a limit below ", SyncPeer.min_segment, " bytes; restarting session");
+            from.restart();
+            return;
+        }
         from._remote_caps = caps;
+        from._remote_version = ver;
         from._remote_max_message = max_message;
         from._remote_segment = segment;
         from._remote_node_id = node_id;

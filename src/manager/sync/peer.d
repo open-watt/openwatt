@@ -19,11 +19,13 @@ import manager.collection;
 import manager.console.session : Session;
 import manager.device : Device, DeviceBuilder, DeviceTable;
 import manager.element : Access, Element;
+import manager.features : is_tiny;
 import manager.id : EID;
 import manager.log;
 import manager.series : FormatId;
 import manager.syslog;
 import manager.sync;
+import manager.sync.binary_encoder : Verb;
 import manager.sync.discovery : PeerRole;
 import manager.sync.encoder;
 import manager.sync.peering : SyncPeeringModule;
@@ -214,9 +216,12 @@ nothrow @nogc:
         return link > overhead ? link - overhead : 0;
     }
 
-    // what this side can take in one message; without fragmentation that is one packet
+    // what this side reassembles from fragments, never less than one segment
     final uint local_max_message()
-        => local_segment;
+    {
+        uint segment = local_segment;
+        return segment > reassembly_budget ? segment : reassembly_budget;
+    }
 
     // the largest frame both ends carry in one packet
     final uint send_limit()
@@ -236,50 +241,21 @@ nothrow @nogc:
             _send_failed = true;
             return -1;
         }
-        // refused before it is sequenced, so neither the session nor a burst fails with it
+        // refusals come before a frame is sequenced, so neither the session nor a burst fails with them
         if (frame.length > send_limit)
-            return -1;
-        if (!sublayer_armed)
         {
-            int r = raw_tx(frame, is_text);
-            if (r < 0)
-            {
-                _send_failed = true;
-                // control has no gap semantics: a refusal invalidates the session
-                if (queue == TxQueue.control && (_state == State.running || _state == State.starting))
-                {
-                    log.warning("peer '", name[], "' control frame refused; restarting session");
-                    restart();
-                }
-            }
-            return r;
-        }
-
-        if (queue == TxQueue.control)
-        {
-            if (_resend.length >= max_unacked)
-            {
-                log.warning("peer '", name[], "' control queue overflow; restarting session");
-                _send_failed = true;
-                restart();
+            // the control plane carries it as fragments, toward a remote that reads them, one message at a time
+            if (is_text || _frag_tx.length || _remote_version < fragments_since || frame.length > _remote_max_message)
                 return -1;
-            }
-            begin_header(TxQueue.control);
-            _rel_buf ~= ++_tx_seq;
-            _rel_buf ~= _rx_delivered;
-            _peer_flags &= ~PeerFlags.ctl_ack_pending;
-            _rel_buf ~= frame[];
-
-            SentFrame s;
-            s.seq = _tx_seq;
-            s.sent = getTime();
-            s.bytes ~= _rel_buf[];
-            _resend ~= s.move;
-            // accepted-means-enqueued: a failed first send just leaves the frame
-            // to the retransmit path
-            raw_tx(_rel_buf[], false);
+            start_fragments(frame);
             return 0;
         }
+        if (queue == TxQueue.control && _frag_tx.length)
+            return -1;
+        if (!sublayer_armed)
+            return send_unwrapped(frame, is_text, queue == TxQueue.control);
+        if (queue == TxQueue.control)
+            return send_sequenced(frame);
 
         DataQueue* q = &_queues[queue - 1];
         DataEntry e;
@@ -754,8 +730,12 @@ package:
     final bool control_starved()
         => sublayer_armed && _resend.length + control_reserve >= max_unacked;
 
+    final bool control_room()
+        => !control_starved() && (uses_udp_endpoint || _transport.tx_ready);
+
+    // a pending fragmented message holds the control plane until its last fragment is submitted
     final bool tx_blocked()
-        => control_starved() || (!uses_udp_endpoint && !_transport.tx_ready);
+        => _frag_tx.length != 0 || !control_room();
 
     // Transport readiness re-invites; control-window starvation waits for an ACK.
     final bool tx_full()
@@ -765,7 +745,32 @@ package:
     {
         _peer_flags |= PeerFlags.tx_producing;
         scope (exit) _peer_flags &= ~PeerFlags.tx_producing;
+        if (!pump_fragments())
+            return tx_full();
         return get_module!SyncModule.produce(this);
+    }
+
+    // fragments arrive in order and once each, on the session's control stream; a framing error resets the session
+    final package void accept_fragment(ubyte flags, const(ubyte)[] slice)
+    {
+        bool first = (flags & fragment_first) != 0;
+        if (slice.length == 0 || first == (_frag_rx.length != 0) || _frag_rx.length + slice.length > local_max_message)
+        {
+            log.warning("peer '", name[], "' sent a malformed fragment; restarting session");
+            restart();
+            return;
+        }
+        _frag_rx ~= slice;
+        if (flags & fragment_more)
+            return;
+        Array!ubyte message = _frag_rx.move;
+        if (message[0] == Verb.fragment)
+        {
+            log.warning("peer '", name[], "' nested a fragment; restarting session");
+            restart();
+            return;
+        }
+        encoder_for(_encoder).decode_and_dispatch(this, message[]);
     }
 
     final void arm_tx()
@@ -801,7 +806,10 @@ package:
     bool             _send_failed;
     uint             _session_gen;       // bumped by detach_peer; a burst spanning it is dead
 
+    enum uint min_segment = 32;   // below hello's size, so a peer that can handshake clears it
+
     ubyte            _remote_caps;       // hello negotiation; 0 = no hello received
+    uint             _remote_version;    // 0 until hello
     uint             _remote_max_message; // 0 until hello
     uint             _remote_segment;    // 0 until hello, and from a peer that predates it
     ulong            _remote_node_id;    // hello identity; 0 = peer announced none
@@ -884,6 +892,10 @@ private:
     enum reorder_cap = 16;
     enum reorder_span = 32;
     enum backlog_max_frames = 32;
+    enum uint fragments_since = 2;
+    enum uint reassembly_budget = is_tiny ? 8 * 1024 : ushort.max;
+    enum ubyte fragment_first = 1 << 0;
+    enum ubyte fragment_more = 1 << 1;
     // a data frame's header (sessions, kind, epochs and base) and one record's id and length; control's is smaller
     enum sublayer_overhead = 9 + 4 + 3;
     enum backlog_max_bytes = 1024;
@@ -959,6 +971,9 @@ private:
     Array!SentFrame         _resend;
     Array!HeldFrame         _reorder;
     Array!ubyte             _rel_buf;
+    Array!ubyte             _frag_tx;        // the pending fragmented message, behind two spare bytes
+    Array!ubyte             _frag_rx;        // the message being reassembled
+    uint                    _frag_tx_sent;   // bytes of it submitted
     DataQueue[2]            _queues;         // val, log
 
     bool sublayer_armed()
@@ -1077,6 +1092,88 @@ private:
         get_module!LogModule.unregister_consumer(_log_consumer);
         _log_consumer = LogConsumerHandle.init;
         _log_active = false;
+    }
+
+    // control has no gap semantics: a refusal invalidates the session
+    int send_unwrapped(const(ubyte)[] frame, bool is_text, bool control)
+    {
+        int r = raw_tx(frame, is_text);
+        if (r < 0)
+        {
+            _send_failed = true;
+            if (control && (_state == State.running || _state == State.starting))
+            {
+                log.warning("peer '", name[], "' control frame refused; restarting session");
+                restart();
+            }
+        }
+        return r;
+    }
+
+    int send_sequenced(const(ubyte)[] frame)
+    {
+        if (_resend.length >= max_unacked)
+        {
+            log.warning("peer '", name[], "' control queue overflow; restarting session");
+            _send_failed = true;
+            restart();
+            return -1;
+        }
+        begin_header(TxQueue.control);
+        _rel_buf ~= ++_tx_seq;
+        _rel_buf ~= _rx_delivered;
+        _peer_flags &= ~PeerFlags.ctl_ack_pending;
+        _rel_buf ~= frame[];
+
+        SentFrame s;
+        s.seq = _tx_seq;
+        s.sent = getTime();
+        s.bytes ~= _rel_buf[];
+        _resend ~= s.move;
+        // accepted-means-enqueued: a failed first send just leaves the frame
+        // to the retransmit path
+        raw_tx(_rel_buf[], false);
+        return 0;
+    }
+
+    void start_fragments(const(ubyte)[] message)
+    {
+        // two spare bytes in front: each fragment's verb and flags overwrite bytes already sent
+        _frag_tx.resize(2 + message.length);
+        _frag_tx[2 .. $] = message[];
+        _frag_tx_sent = 0;
+        if (!pump_fragments())
+            arm_tx();
+    }
+
+    // true once the pending message has been submitted whole
+    bool pump_fragments()
+    {
+        while (_frag_tx.length)
+        {
+            uint limit = send_limit;
+            if (limit < min_segment)
+            {
+                log.warning("peer '", name[], "' segment fell to ", limit, " bytes mid-message; restarting session");
+                _frag_tx.clear();
+                restart();
+                return true;
+            }
+            if (!control_room())
+                return false;
+            size_t remaining = _frag_tx.length - 2 - _frag_tx_sent;
+            size_t slice = limit - 2;
+            if (slice > remaining)
+                slice = remaining;
+            ubyte[] frame = _frag_tx[_frag_tx_sent .. _frag_tx_sent + 2 + slice];
+            frame[0] = Verb.fragment;
+            frame[1] = cast(ubyte)((_frag_tx_sent == 0 ? fragment_first : 0) | (slice < remaining ? fragment_more : 0));
+            int sent = sublayer_armed ? send_sequenced(frame) : send_unwrapped(frame, false, true);
+            _frag_tx_sent += cast(uint)slice;
+            if (sent < 0 || slice == remaining)
+                _frag_tx.clear();   // done, or the session is restarting
+        }
+        return true;
     }
 
     void detach_transport()
@@ -1281,6 +1378,9 @@ private:
 
     final package void reset_sublayer()
     {
+        _frag_tx.clear();
+        _frag_rx.clear();
+        _frag_tx_sent = 0;
         _resend.clear();
         _reorder.clear();
         _tx_session = 0;
@@ -1685,4 +1785,250 @@ unittest
         assert(station.mtu(600) is null);
         assert(served.local_segment == 600 - udp_carrier_ether - SyncPeer.sublayer_overhead);
     }
+}
+
+unittest
+{
+    import manager.sync.binary_encoder : BinaryEncoder;
+
+    static final class Capture : BaseInterface
+    {
+        enum type_name = "sync-test-capture";
+    nothrow @nogc:
+
+        ~this() {}
+        this(CID id, ObjectFlags flags = ObjectFlags.none)
+        {
+            super(collection_type_info!Capture, id, flags);
+            _state = State.running;
+            set_link(true);
+        }
+        void reliable(bool on)
+        {
+            _caps = on ? cast(InterfaceCaps)(InterfaceCaps.reliable | InterfaceCaps.ordered) : InterfaceCaps.none;
+        }
+        override bool tx_ready() const
+            => frames.length < room;
+        // a bounded link: the producer is invited when the test drains it, never inline
+        override void tx_handler_changed() {}
+        override int transmit(ref Packet packet, MessageCallback, const(QueuePolicy)*)
+        {
+            Array!ubyte f;
+            f ~= cast(const(ubyte)[])packet.data;
+            frames ~= f.move;
+            return 0;
+        }
+        Array!(Array!ubyte) frames;
+        size_t room = size_t.max;
+    }
+
+    static class Live : SyncPeer
+    {
+    nothrow @nogc:
+
+        ~this() {}
+        this(CID id)
+        {
+            super(id);
+        }
+        void live(bool v) { _state = v ? State.running : State.disabled; }
+
+        // the session teardown needs the sync module; a reset is what the tests observe
+        override CompletionStatus shutdown()
+        {
+            ++resets;
+            return CompletionStatus.complete;
+        }
+        uint resets;
+    }
+
+    Capture link = Collection!Capture().create("sync-test-capture");
+    Live peer = alloc!Live(CID(11));
+    scope (exit)
+    {
+        peer.live(false);
+        free(peer);
+        link.destroy();
+        Collection!Capture().table.free_pending();
+    }
+    peer._transport = link;
+    link.reliable(true);
+    assert(link.mtu(200) is null && peer.send_limit == 200);
+
+    ubyte[1000] message;
+    foreach (i, ref b; message)
+        b = cast(ubyte)(i * 7);
+
+    // toward a version-1 remote nothing is fragmented: an oversized message is refused as before
+    peer._remote_version = 1;
+    peer._remote_max_message = 65535;
+    assert(peer.transmit_frame(message[]) < 0 && link.frames.length == 0);
+
+    // a version-2 remote takes the message as flagged fragments that reassemble to it
+    peer._remote_version = 2;
+    assert(peer.transmit_frame(message[]) == 0 && !peer.tx_blocked());
+    assert(link.frames.length == (message.length + 197) / 198);
+    Array!ubyte joined;
+    foreach (i, ref f; link.frames[])
+    {
+        assert(f.length <= 200 && f[0] == Verb.fragment);
+        assert(((f[1] & SyncPeer.fragment_first) != 0) == (i == 0));
+        assert(((f[1] & SyncPeer.fragment_more) != 0) == (i + 1 < link.frames.length));
+        joined ~= f[2 .. $];
+    }
+    assert(joined[] == message[]);
+
+    // backpressure halfway pauses it; another control message is refused meanwhile, data still flows
+    link.frames.clear();
+    link.room = 2;
+    assert(peer.transmit_frame(message[]) == 0 && link.frames.length == 2 && peer.tx_blocked());
+    ubyte[4] small = [1, 2, 3, 4];
+    assert(peer.transmit_frame(small[]) < 0 && link.frames.length == 2);
+    assert(peer.transmit_frame(small[], false, TxQueue.val) == 0 && link.frames.length == 3);
+    link.room = size_t.max;
+    assert(peer.pump_fragments() && !peer.tx_blocked());
+    joined.clear();
+    foreach (i, ref f; link.frames[])
+        if (i != 2)
+            joined ~= f[2 .. $];
+    assert(joined[] == message[] && link.frames[2][] == small[]);
+
+    // a message over the remote's budget is refused before its first fragment
+    link.frames.clear();
+    peer._remote_max_message = 500;
+    assert(peer.transmit_frame(message[]) < 0 && link.frames.length == 0);
+
+    // a limit with no room past the fragment header, met as a paused message resumes, restarts the session
+    peer._remote_max_message = 65535;
+    static immutable uint[3] limits = [1, 2, 3];
+    foreach (limit; limits)
+    {
+        peer.live(true);
+        peer._remote_segment = 0;
+        link.frames.clear();
+        link.room = 1;
+        assert(peer.transmit_frame(message[]) == 0 && link.frames.length == 1 && peer._frag_tx.length);
+        peer._remote_segment = limit;
+        link.room = size_t.max;
+        assert(peer.pump_fragments() && !peer._frag_tx.length && link.frames.length == 1);
+        assert(!peer.running);
+    }
+
+    // two peers over lossy links, under the sublayer
+    Capture link_b = Collection!Capture().create("sync-test-capture-b");
+    Live remote = alloc!Live(CID(12));
+    scope (exit)
+    {
+        remote.live(false);
+        free(remote);
+        link_b.destroy();
+    }
+    SyncEncoder enc = alloc!BinaryEncoder(null);
+    scope (exit) free(enc);
+    SyncEncoder previous = g_encoders[peer._encoder];
+    g_encoders[peer._encoder] = enc;
+    scope (exit) g_encoders[peer._encoder] = previous;
+
+    remote._transport = link_b;
+    link.reliable(false);
+    link_b.reliable(false);
+    peer._remote_segment = 0;
+    assert(link_b.mtu(200) is null && peer.send_limit == 184 && remote.send_limit == 184);
+    peer.live(true);
+    remote.live(true);
+    peer._tx_session = 0x1111;
+    peer._rx_session = 0x2222;
+    remote._tx_session = 0x2222;
+    remote._rx_session = 0x1111;
+    peer._peer_flags |= SyncPeer.PeerFlags.in_session;
+    remote._peer_flags |= SyncPeer.PeerFlags.in_session;
+
+    // a lost fragment, a lost last fragment and a duplicate: retransmission fills the gaps and the message arrives once
+    ubyte[3000] lossy;
+    foreach (i, ref b; lossy)
+        b = cast(ubyte)(i * 5 + 1);
+    lossy[0] = 0xFE;
+    enum slice = 184 - 2;
+    link.frames.clear();
+    assert(peer.transmit_frame(lossy[]) == 0 && !peer._frag_tx.length);
+    size_t count = link.frames.length;
+    assert(count == (lossy.length + slice - 1) / slice);
+    foreach (i, ref f; link.frames[])
+    {
+        if (i == 2 || i == count - 1)
+            continue;
+        remote.deliver_frame(f[]);
+        if (i == 5)
+            remote.deliver_frame(f[]);
+    }
+    assert(remote._frag_rx[] == lossy[0 .. 2 * slice] && remote._reorder.length == count - 4);
+
+    link_b.frames.clear();
+    remote.update();
+    assert(link_b.frames.length == 1);
+    peer.deliver_frame(link_b.frames[0][]);
+    assert(peer._resend.length == count - 2);
+
+    peer._resend[0].sent = getTime() - msecs(1000);
+    peer._resend[$ - 1].sent = getTime() - msecs(1000);
+    link.frames.clear();
+    peer.update();
+    assert(link.frames.length == 2);
+    remote.deliver_frame(link.frames[0][]);
+    assert(remote._frag_rx[] == lossy[0 .. (count - 1) * slice] && remote._reorder.empty);
+    remote.deliver_frame(link.frames[1][]);
+    assert(remote._frag_rx.empty && remote.running);
+
+    // a message larger than the control window goes out a window at a time, each resumed by the remote's ack
+    ubyte[65535] large;
+    foreach (i, ref b; large)
+        b = cast(ubyte)(i * 13);
+    large[0] = 0xFE;
+    link_b.frames.clear();
+    remote.update();
+    peer.deliver_frame(link_b.frames[0][]);
+    link.frames.clear();
+    assert(peer.transmit_frame(large[]) == 0 && peer.tx_blocked());
+    enum window = SyncPeer.max_unacked - SyncPeer.control_reserve;
+    size_t rounds;
+    while (link.frames.length)
+    {
+        assert(link.frames.length <= window);
+        foreach (ref f; link.frames[])
+            remote.deliver_frame(f[]);
+        link.frames.clear();
+        assert(remote._frag_rx[] == large[0 .. remote._frag_rx.length]);
+        link_b.frames.clear();
+        remote.update();
+        link.release_tx_handler(link.tx_handler);
+        foreach (ref f; link_b.frames[])
+            peer.deliver_frame(f[]);
+        assert(peer._resend.empty && link.tx_handler !is null);
+        peer.pump_fragments();
+        ++rounds;
+    }
+    assert(rounds == ((large.length + slice - 1) / slice + window - 1) / window);
+    assert(!peer._frag_tx.length && remote._frag_rx.empty && remote.running);
+
+    // a session reset mid-message discards the partial message, and the next one starts clean
+    link.frames.clear();
+    assert(peer.transmit_frame(lossy[]) == 0);
+    remote.deliver_frame(link.frames[0][]);
+    assert(remote._frag_rx.length == slice);
+    remote.reset_sublayer();
+    assert(remote._frag_rx.empty);
+    remote.accept_fragment(SyncPeer.fragment_first | SyncPeer.fragment_more, lossy[0 .. slice]);
+    assert(remote._frag_rx[] == lossy[0 .. slice] && remote.running);
+
+    // framing errors reset the session: a second first fragment, a stray continuation, a nested fragment
+    remote.accept_fragment(SyncPeer.fragment_first, lossy[0 .. 10]);
+    assert(!remote.running);
+    remote.live(true);
+    remote._frag_rx.clear();
+    remote.accept_fragment(0, lossy[0 .. 10]);
+    assert(!remote.running);
+    remote.live(true);
+    ubyte[3] nested = [Verb.fragment, SyncPeer.fragment_first, 0];
+    remote.accept_fragment(SyncPeer.fragment_first, nested[]);
+    assert(!remote.running && remote._frag_rx.empty);
 }
