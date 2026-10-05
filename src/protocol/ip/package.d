@@ -667,13 +667,6 @@ nothrow @nogc:
         if (_phase != Phase.open || !page || page.length == 0)
             return false;
 
-        version (UseInternalIPStack)
-            enum use_iocp = false;
-        else version (Windows)
-            enum use_iocp = true;
-        else
-            enum use_iocp = false;
-
         static if (use_iocp)
         {
             if (_send)
@@ -720,7 +713,7 @@ nothrow @nogc:
             else
             {
                 if (empty)
-                    g_app.reactor.modify_fd(_socket.handle, true);
+                    want_write(true);
             }
         }
         return true;
@@ -853,6 +846,13 @@ nothrow @nogc:
     }
 
 private:
+    version (UseInternalIPStack)
+        enum use_iocp = false;
+    else version (Windows)
+        enum use_iocp = true;
+    else
+        enum use_iocp = false;
+
     enum Phase : ubyte { connecting, open, dead }
     enum size_t max_tx_refill = 16 * 1024;
     enum size_t max_page_data = 1600;
@@ -929,25 +929,49 @@ private:
         _servicing_tx = true;
         scope (exit) _servicing_tx = false;
 
-        size_t requested = tx_request();
-        while (_outgoing && requested != 0)
+        // pulled pages are flushed in the same pass until the producer runs dry or the
+        // transport stops accepting; left queued, each refill waits a main-loop pass
+        for (;;)
         {
-            TCPSendHandler handler = _outgoing;
-            Page* page = handler(&this, requested);
-            if (!page)
+            size_t requested = tx_request();
+            while (_outgoing && requested != 0)
             {
-                if (_outgoing is handler)
-                    _outgoing = null;
-                continue;
+                TCPSendHandler handler = _outgoing;
+                Page* page = handler(&this, requested);
+                if (!page)
+                {
+                    if (_outgoing is handler)
+                        _outgoing = null;
+                    continue;
+                }
+                if (page.length == 0 || !send_page(page))
+                {
+                    page_free(page);
+                    if (_outgoing is handler)
+                        _outgoing = null;
+                    break;
+                }
+                requested = tx_request();
             }
-            if (page.length == 0 || !send_page(page))
-            {
-                page_free(page);
-                if (_outgoing is handler)
-                    _outgoing = null;
+
+            static if (use_iocp)
                 break;
+            else
+            {
+                if (!_tx_head)
+                    break;
+                size_t queued = _tx_bytes;
+                flush_tx();
+                if (_phase != Phase.open || _tx_bytes == queued)
+                    break;
             }
-            requested = tx_request();
+        }
+
+        version (UseInternalIPStack) {}
+        else static if (!use_iocp)
+        {
+            if (_phase == Phase.open)
+                want_write(_tx_head !is null);
         }
     }
 
@@ -1245,6 +1269,12 @@ private:
             }
         }
 
+        void want_write(bool enable)
+        {
+            if (_watched)
+                g_app.reactor.modify_fd(_socket.handle, enable);
+        }
+
         void on_ready(IoReady ready)
         {
             if (_closing)
@@ -1287,7 +1317,7 @@ private:
                 flush_tx();
                 if (_closing || _phase != Phase.open)
                     return;
-                g_app.reactor.modify_fd(_socket.handle, _tx_head !is null);
+                want_write(_tx_head !is null);
                 service_tx();
             }
         }
@@ -2900,5 +2930,103 @@ else
         c._remote = remote;
         _tcp_conns ~= c;
         return c;
+    }
+}
+
+
+version (UseInternalIPStack) {} else version (linux)
+{
+    private extern (C) int socketpair(int domain, int type, int protocol, int* sockets) nothrow @nogc;
+
+    unittest
+    {
+        import core.sys.posix.sys.socket : AF_UNIX, SOCK_STREAM;
+        import core.sys.posix.unistd : close;
+
+        bool owns_pool = page_pool_init();
+        scope (exit) if (owns_pool) page_pool_deinit();
+
+        static struct Producer
+        {
+        nothrow @nogc:
+            size_t total, produced;
+
+            Page* produce(TCPConnection*, size_t requested)
+            {
+                size_t take = total - produced;
+                if (take > requested)
+                    take = requested;
+                if (take > 1600)
+                    take = 1600;
+                if (take == 0)
+                    return null;
+                Page* page = page_alloc(take);
+                foreach (i, ref b; cast(ubyte[])page.data)
+                    b = cast(ubyte)((produced + i) * 7);
+                produced += take;
+                return page;
+            }
+        }
+
+        static size_t receive(int fd, ref size_t received)
+        {
+            ubyte[4096] buf = void;
+            size_t got;
+            while (recv(Socket(fd), buf[], MsgFlags.none, &got).succeeded && got != 0)
+            {
+                foreach (i, b; buf[0 .. got])
+                    assert(b == cast(ubyte)((received + i) * 7), "bytes out of order");
+                received += got;
+            }
+            return received;
+        }
+
+        void run(size_t total)
+        {
+            int[2] fds;
+            assert(socketpair(AF_UNIX, SOCK_STREAM, 0, fds.ptr) == 0);
+            scope (exit) close(fds[1]);
+            set_socket_option(Socket(fds[0]), SocketOption.non_blocking, true);
+            set_socket_option(Socket(fds[1]), SocketOption.non_blocking, true);
+
+            TCPConnection c;
+            c._socket = Socket(fds[0]);
+            c._phase = TCPConnection.Phase.open;
+            scope (exit) c.close();
+
+            Producer p = Producer(total);
+            size_t received;
+            c.tx_handler(&p.produce);
+            for (uint passes = 0; received < total; ++passes)
+            {
+                assert(passes < 10_000, "transmit stalled");
+                receive(fds[1], received);
+                c.on_ready(IoReady.writable);
+            }
+            assert(p.produced == total && c._tx_head is null);
+        }
+
+        // one invitation drains everything the kernel will take, not one refill's worth
+        {
+            int[2] fds;
+            assert(socketpair(AF_UNIX, SOCK_STREAM, 0, fds.ptr) == 0);
+            scope (exit) close(fds[1]);
+            set_socket_option(Socket(fds[0]), SocketOption.non_blocking, true);
+            set_socket_option(Socket(fds[1]), SocketOption.non_blocking, true);
+
+            TCPConnection c;
+            c._socket = Socket(fds[0]);
+            c._phase = TCPConnection.Phase.open;
+            scope (exit) c.close();
+
+            Producer p = Producer(64 * 1024);
+            c.tx_handler(&p.produce);
+            assert(p.produced == p.total && c._tx_head is null && c._tx_bytes == 0);
+            size_t received;
+            assert(receive(fds[1], received) == p.total);
+        }
+
+        // backpressure: the kernel takes partial pages; the tail of each goes first, in order
+        run(4 * 1024 * 1024);
     }
 }
