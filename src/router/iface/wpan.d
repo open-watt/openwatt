@@ -241,8 +241,7 @@ nothrow @nogc:
     protected this(const CollectionTypeInfo* type_info, CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(type_info, id, flags);
-        _max_l2mtu = 125; // aMaxPhyPacketSize less the FCS; the MHR is inside it
-        _l2mtu = _max_l2mtu;
+        set_l2mtu(125); // aMaxPhyPacketSize less the FCS; the MHR is inside it
     }
 
     final ubyte channel() const pure

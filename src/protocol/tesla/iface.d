@@ -95,6 +95,7 @@ nothrow @nogc:
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!TeslaInterface, id, flags);
+        set_l2mtu(max_message);
     }
 
     // Properties...
@@ -217,7 +218,7 @@ protected:
 
         const(ubyte)[] msg = cast(ubyte[])packet.data;
 
-        ubyte[64] t = void;
+        ubyte[1 + 2 * max_message + 3] t = void;
         size_t offset = 1;
         ubyte checksum = 0;
 
@@ -263,6 +264,9 @@ protected:
     }
 
 private:
+    // a message SLIP-escaped with its start, checksum and end bytes fills the 64-byte transmit buffer
+    enum ushort max_message = 30;
+
     ObjectRef!Stream _stream;
 
     void incoming_frame(const(ubyte)[] msg, MonoTime recv_time)

@@ -51,7 +51,7 @@ nothrow @nogc:
 
     override int transmit(ref Packet packet, MessageCallback callback, const(QueuePolicy)* policy)
     {
-        if (packet.type != PacketType.wpan || !_wpan.is_open || packet.length == 0 || packet.length > _max_l2mtu)
+        if (packet.type != PacketType.wpan || !_wpan.is_open || packet.length == 0)
         {
             add_tx_drop();
             return -1;

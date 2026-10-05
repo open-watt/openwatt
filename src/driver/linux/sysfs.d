@@ -18,7 +18,6 @@ import driver.linux.raw : ioctl, ifreq, IFNAMSIZ, socket, bind, sendto, recv;
 nothrow @nogc:
 
 
-enum linux_max_l2mtu = 9000;
 enum SIOCSIFMTU = 0x8922;
 enum ARPHRD_ETHER = 1;
 enum ARPHRD_CAN = 280;
@@ -28,28 +27,12 @@ enum LINUX_SOCK_DGRAM = 2;
 enum AdapterChange : uint
 {
     none      = 0,
-    mtu       = 1 << 0,
-    max_mtu   = 1 << 1,
-    connected = 1 << 2,
+    connected = 1 << 0,
 }
 
-AdapterChange apply_os_adapter_info(BaseInterface iface, ref ushort l2mtu, ref ushort max_l2mtu, ref IfStatus status, ref const OSAdapterInfo info)
+AdapterChange apply_os_adapter_info(BaseInterface iface, ref IfStatus status, ref const OSAdapterInfo info)
 {
     AdapterChange changed;
-
-    if (info.mtu != 0 && info.mtu != l2mtu)
-    {
-        l2mtu = cast(ushort)info.mtu;
-        changed |= AdapterChange.mtu;
-    }
-    uint declared_max = info.max_mtu != 0 ? info.max_mtu : linux_max_l2mtu;
-    if (declared_max > ushort.max)
-        declared_max = ushort.max;
-    if (max_l2mtu != declared_max)
-    {
-        max_l2mtu = cast(ushort)declared_max;
-        changed |= AdapterChange.max_mtu;
-    }
 
     if (status.connected != info.connection)
     {

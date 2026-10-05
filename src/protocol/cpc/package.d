@@ -130,12 +130,8 @@ nothrow @nogc:
         _caps |= InterfaceCaps.reliable | InterfaceCaps.ordered;
         mark_set!(typeof(this), "caps")();
 
-        // max-l2mtu is the driver's payload cap; the 9-byte CPC framing is transport overhead, not counted
-        // in the MTU (same as CAN/BLE). l2mtu defaults to the cap and is user-reducible; mtu derives from
-        // l2mtu. The cap is narrowed to the secondary's rx_capability once the handshake learns it.
-        _max_l2mtu = cpc_max_payload;
-        l2mtu = _max_l2mtu;
-        mark_set!(typeof(this), "max-l2mtu")();
+        // the 9-byte CPC framing is not counted; the handshake narrows this to the secondary's rx_capability
+        set_l2mtu(cpc_max_payload);
         retransmits(10);
         ack_timeout(500);
 
@@ -219,7 +215,7 @@ protected:
             return -1;
         CPCFrame f = packet.hdr!CPCFrame;
         const(ubyte)[] payload = cast(const(ubyte)[])packet.data;
-        if (payload.length == 0 || payload.length > actual_mtu)
+        if (payload.length == 0)
             return -1;
 
         Channel* ch = channel_for(f.endpoint);
@@ -764,13 +760,7 @@ private:
             {
                 if (value.length >= 2)
                     _rx_capability = value[0 .. 2][0 .. 2].littleEndianToNative!ushort;
-                // clamp the driver max to the secondary's advertised payload capacity; l2mtu follows down
-                // if it was still pinned at the old max (a smaller user-set l2mtu is left alone)
-                ushort new_max = _rx_capability != 0 && _rx_capability < cpc_max_payload ? _rx_capability : cpc_max_payload;
-                if (_l2mtu == _max_l2mtu || _l2mtu > new_max)
-                    l2mtu = new_max;
-                _max_l2mtu = new_max;
-                mark_set!(typeof(this), "max-l2mtu")();
+                set_l2mtu(_rx_capability != 0 && _rx_capability < cpc_max_payload ? _rx_capability : cpc_max_payload);
                 _phase = Phase.protocol_version;
                 break;
             }
@@ -1298,11 +1288,8 @@ nothrow @nogc:
         _caps |= InterfaceCaps.reliable | InterfaceCaps.ordered;
         mark_set!(typeof(this), "caps")();
 
-        // same payload cap as the trunk (both carry the CPC payload; framing is the trunk's transport
-        // overhead). max-l2mtu starts at the cap and is narrowed to the trunk's learned limit on connect.
-        _max_l2mtu = cpc_max_payload;
-        l2mtu = cpc_max_payload;
-        mark_set!(typeof(this), "max-l2mtu")();
+        // narrowed to the trunk's learned limit on connect
+        set_l2mtu(cpc_max_payload);
     }
 
     // Properties...
@@ -1477,16 +1464,8 @@ package:
             _refused = false;
             _connect_attempts = 0;
             _connected = true;
-            // adopt the trunk's learned payload limit as our L2 cap (the trunk finished its handshake before
-            // we could connect); l2mtu follows down only if it was still pinned at the old max
             if (CPCInterface trunk = _cpc.get)
-            {
-                ushort cap = trunk.actual_mtu;
-                if (_l2mtu == _max_l2mtu || _l2mtu > cap)
-                    l2mtu = cap;
-                _max_l2mtu = cap;
-                mark_set!(typeof(this), "max-l2mtu")();
-            }
+                set_l2mtu(trunk.l2mtu);
             log.info("endpoint ", _endpoint, " connected");
         }
         else

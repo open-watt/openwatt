@@ -35,8 +35,7 @@ nothrow @nogc:
     {
         super(collection_type_info!XramInterface, id, flags);
         _caps = cast(InterfaceCaps)(InterfaceCaps.reliable | InterfaceCaps.ordered);
-        _max_l2mtu = cast(ushort)xram_mtu();
-        _l2mtu = _max_l2mtu;
+        set_l2mtu(cast(ushort)xram_mtu());
     }
 
     // Properties
@@ -82,7 +81,7 @@ nothrow @nogc:
         if (packet.type != PacketType.raw)
             return -1;
         auto payload = cast(const(ubyte)[])packet.data();
-        if (link_up && payload.length != 0 && payload.length <= xram_mtu())
+        if (link_up && payload.length != 0)
         {
             if (void[] frame = xram_reserve(_channel, payload.length))
             {

@@ -37,8 +37,6 @@ nothrow @nogc:
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!BuiltinEthernet, id, flags);
-        _max_l2mtu = 1500;
-        _l2mtu = _max_l2mtu;
         _port.owner = this;
         _port.on_rx = &on_rx;
         _port.on_link = &on_link;

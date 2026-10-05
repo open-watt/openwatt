@@ -964,7 +964,7 @@ unittest
             {
                 super(collection_type_info!Link, id, flags);
                 _state = State.running;
-                _l2mtu = 1280;
+                set_l2mtu(1280 + 14);
             }
             override void medium_tx(ref Packet packet)
             {

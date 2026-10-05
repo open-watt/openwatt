@@ -73,6 +73,7 @@ nothrow @nogc:
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!ZigbeeInterface, id, flags);
+        set_l2mtu(max_aps_frame);
     }
 
     // Properties...
@@ -166,6 +167,10 @@ nothrow @nogc:
     }
 
 protected:
+
+    // a unicast APS data frame header
+    override ushort l2_header() const pure
+        => 8;
 
     override bool validate() const
         => _ezsp_client !is null;
@@ -406,6 +411,9 @@ protected:
     }
 
 private:
+
+    // the 127-byte PSDU less FCS 2, intra-PAN MAC header 9, NWK header 8, and NWK security 18
+    enum ushort max_aps_frame = 90;
 
     version (DebugZigbeeLatency)
     {

@@ -4,6 +4,7 @@ nothrow @nogc:
 
 
 enum isotp_max_message = 512;
+enum isotp_single_frame_payload = 7;
 
 enum IsoTpResult : ubyte
 {

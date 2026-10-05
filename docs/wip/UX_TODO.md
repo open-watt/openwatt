@@ -3,6 +3,19 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-10-06: interface MTU properties
+
+- `l2mtu` is read-only: what the link carries, set by the driver; on Ethernet it is the frame,
+  header included. Stop offering it for editing. `max-l2mtu` equals it for now.
+- `mtu` is never `0`: until configured it reads the link's default (`l2mtu` less the 14-byte
+  header on Ethernet, or 1500 where `l2mtu` is 65535). It may be set above `l2mtu`; `actual-mtu`
+  is the smaller of `mtu` and the link's payload, and is what the interface sends.
+- Changed values: Ethernet and WiFi report `l2mtu` 1514 instead of the OS MTU and 9000 maximum;
+  BLE `mtu` 251 (the LL data payload; was 247); OBD 7 (the single frame it can send, was 512); ASH 128, Tesla TWC 30,
+  Zigbee 90 (the APS frame; `mtu` 82); bridges, WebSockets and PPP report 65535 where they reported `0`; a VLAN reports its
+  parent's, less 4 on Ethernet.
+- `mtu 0` is refused.
+
 ## 2026-10-05: BL808 is one node
 
 - A BL808 now presents as one node, its M0: the network talks to M0, and D0's devices arrive

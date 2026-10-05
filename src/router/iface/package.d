@@ -220,7 +220,7 @@ class BaseInterface : ActiveObject
     alias Properties = AliasSeq!(Prop!("caps", caps),
                                  Prop!("actual-mtu", actual_mtu, null, "d"),
                                  Prop!("mtu", mtu, null, "d"),
-                                 Prop!("l2mtu", l2mtu),
+                                 Prop!("l2mtu", l2mtu, null, "d"),
                                  Prop!("max-l2mtu", max_l2mtu, null, "d"),
                                  Prop!("pcap", pcap),
                                  Prop!("led", led),
@@ -258,27 +258,29 @@ nothrow @nogc:
 
     // Properties...
 
+    // the packet size requested from and accepted by producers; it may exceed l2mtu, which bounds it in actual_mtu
     final ushort mtu() const pure
         => _mtu;
-    final void mtu(ushort value)
+    final const(char)[] mtu(ushort value)
     {
+        if (value == 0)
+            return "mtu must be at least 1";
         _mtu = value;
-        mark_set!(typeof(this), "mtu")();
-        mark_set!(typeof(this), "actual-mtu")();
+        mark_set!(typeof(this), [ "mtu", "actual-mtu" ])();
         on_mtu_changed();
+        return null;
     }
     final ushort actual_mtu() const pure
-        => _mtu == 0 ? _l2mtu : _mtu;
+    {
+        ushort room = cast(ushort)(_l2mtu - l2_header);
+        return _mtu < room ? _mtu : room;
+    }
 
-    // TODO: the L2MTU properties should be available only to actual L2 interfaces...
+    // what the link carries, including the l2_header the interface adds; set by the driver, 65535 where the
+    // interface imposes no limit
     final ushort l2mtu() const pure
         => _l2mtu;
-    final void l2mtu(ushort value)
-    {
-        _l2mtu = value;
-        mark_set!(typeof(this), "l2mtu")();
-        mark_set!(typeof(this), "actual-mtu")();
-    }
+    // TODO: the largest jumbo the hardware takes, once l2mtu is writable on Ethernet
     final ushort max_l2mtu() const pure
         => _max_l2mtu;
 
@@ -529,12 +531,8 @@ nothrow @nogc:
 
     int forward(ref Packet packet, MessageCallback callback = null, const(QueuePolicy)* queue_policy = null)
     {
-        if (!running)
-        {
-            if (callback)
-                callback(-1, MessageState.failed);
+        if (!admit(packet, callback))
             return -1;
-        }
 
         foreach (ref subscriber; _subscribers[0.._num_subscribers])
         {
@@ -574,9 +572,9 @@ nothrow @nogc:
 protected:
     IfStatus _status;
     InterfaceCaps _caps;
-    ushort _mtu;        // 0 = auto
-    ushort _l2mtu;
-    ushort _max_l2mtu;  // 0 = unspecified/unknown
+    ushort _mtu = default_mtu;
+    ushort _l2mtu = ushort.max;
+    ushort _max_l2mtu = ushort.max;
 
     BufferOverflowBehaviour _send_behaviour;
     BufferOverflowBehaviour _recv_behaviour;
@@ -585,7 +583,45 @@ protected:
     ulong _last_tx_bytes;
     ulong _last_rx_bytes;
 
+    enum ushort default_mtu = 1500;
+
     void on_mtu_changed() {}
+
+    ushort l2_header() const pure
+        => 0;
+
+    final bool mtu_configured() const pure
+        => (_props_set & (ulong(1) << prop_index!(BaseInterface, "mtu"))) != 0;
+
+    // an mtu the user has not configured follows the link: l2mtu less its header, or default_mtu where nothing
+    // limits the link
+    // every forward() passes this before outgoing subscribers see the packet
+    final bool admit(ref const Packet packet, MessageCallback callback)
+    {
+        if (running && packet.length <= actual_mtu)
+            return true;
+        if (running)
+            add_tx_drop();
+        if (callback)
+            callback(-1, MessageState.failed);
+        return false;
+    }
+
+    final void set_l2mtu(ushort value)
+        => set_l2mtu(value, value);
+
+    final void set_l2mtu(ushort value, ushort max)
+    {
+        _l2mtu = value;
+        _max_l2mtu = max;
+        ulong dirty = prop_mask!(BaseInterface, [ "l2mtu", "max-l2mtu", "actual-mtu" ]);
+        if (!mtu_configured)
+        {
+            _mtu = value == ushort.max ? default_mtu : cast(ushort)(value - l2_header);
+            dirty |= prop_mask!(BaseInterface, [ "mtu" ]);
+        }
+        _mark_dirty(dirty);
+    }
 
     override void online()
     {
@@ -1777,6 +1813,8 @@ unittest
     dark.start();
     VLANInterface vlan = Collection!VLANInterface().create("link-test-vlan", ObjectFlags.none, NamedArgument("interface", dark), NamedArgument("vlan", 10));
     assert(vlan && vlan.running && !vlan.link_up);
+    // on a parent that is not ethernet the vlan decaps: no tag, no header
+    assert(vlan.l2mtu == dark.l2mtu && vlan.max_l2mtu == dark.max_l2mtu && vlan.actual_mtu == 1500);
     dark.carrier_change(true);
     assert(vlan.link_up);
     dark.carrier_change(false);
@@ -1789,5 +1827,102 @@ unittest
     follows.destroy();
     own.destroy();
     dark.destroy();
+    Collection!BaseInterface().update_all();
+
+    // a vlan takes its parent's capacity again each time the parent comes up
+    Port narrow = Collection!Port().alloc("link-test-narrow");
+    narrow.set_l2mtu(256);
+    Collection!Port().add(narrow);
+    VLANInterface child = Collection!VLANInterface().create("link-test-child", ObjectFlags.none, NamedArgument("interface", narrow), NamedArgument("vlan", 30));
+    assert(child && child.l2mtu == 256);
+    narrow.set_l2mtu(180);
+    narrow.start();
+    assert(narrow.running && child.l2mtu == 180 && child.max_l2mtu == 180);
+    narrow.disabled = true;
+    narrow.set_l2mtu(120);
+    narrow.disabled = false;
+    narrow.start();
+    assert(narrow.running && child.l2mtu == 120 && child.actual_mtu == 120);
+    child.destroy();
+    narrow.destroy();
+    Collection!BaseInterface().update_all();
+
+    static final class Sized : BaseInterface
+    {
+        enum type_name = "mtu-test-link";
+    nothrow @nogc:
+
+        ~this() {}
+        this(CID id, ObjectFlags flags = ObjectFlags.none)
+        {
+            super(collection_type_info!Sized, id, flags);
+            _state = State.running;
+        }
+        override int transmit(ref Packet, MessageCallback, const(QueuePolicy)*)
+        {
+            ++sent;
+            return 0;
+        }
+
+        uint sent;
+    }
+
+    // an ethernet station's l2mtu is the frame: the default mtu leaves room for the header
+    a.set_l2mtu(1514);
+    assert(a.mtu == 1500 && a.actual_mtu == 1500);
+    assert(a.mtu(1514) is null && a.actual_mtu == 1500);
+
+    {
+        import router.iface.i2c : I2CFrame;
+        register_packet_codec!I2CFrame();
+        ubyte[1488] payload;
+
+        // an exotic packet is checked again once its ow envelope (5 bytes plus an 8-byte i2c header) is built
+        Packet exotic;
+        exotic.init!I2CFrame(payload[0 .. 1487]);
+        assert(a.forward(exotic) == 0);
+        ulong drops = a.tx_dropped;
+        exotic.init!I2CFrame(payload[]);
+        assert(a.forward(exotic) < 0 && a.tx_dropped == drops + 1);
+
+        // a vlan admits against its own mtu, which its parent cannot know
+        VLANInterface tagged = Collection!VLANInterface().create("mtu-test-vlan", ObjectFlags.none, NamedArgument("interface", a), NamedArgument("vlan", 20));
+        assert(tagged && tagged.running);
+        assert(tagged.l2mtu == 1510 && tagged.max_l2mtu == 1510 && tagged.actual_mtu == 1496);
+        assert(tagged.mtu(100) is null);
+        Packet framed;
+        framed.init!Ethernet(payload[0 .. 200]);
+        BaseInterface through = tagged;
+        assert(through.forward(framed) < 0 && tagged.tx_dropped == 1);
+        framed.init!Ethernet(payload[0 .. 100]);
+        assert(through.forward(framed) >= 0);
+        tagged.destroy();
+    }
+
+    Sized link = Collection!Sized().create("mtu-test-a");
+    assert(link.l2mtu == ushort.max && link.max_l2mtu == ushort.max && link.mtu == 1500 && link.actual_mtu == 1500);
+
+    ubyte[2000] bytes;
+    Packet big;
+    big.init!RawFrame(bytes[]);
+    assert(link.forward(big) < 0 && link.sent == 0 && link.tx_dropped == 1);
+
+    link.set_l2mtu(100);
+    assert(link.mtu == 100 && link.actual_mtu == 100);
+    assert(link.mtu(0) !is null && link.mtu == 100);
+    assert(link.mtu(2000) is null && link.mtu == 2000 && link.actual_mtu == 100);
+    link.set_l2mtu(1800);
+    assert(link.mtu == 2000 && link.actual_mtu == 1800);
+    assert(link.mtu(60) is null && link.actual_mtu == 60);
+    link.set_l2mtu(50);
+    assert(link.mtu == 60 && link.actual_mtu == 50);
+
+    Packet fits, over;
+    fits.init!RawFrame(bytes[0 .. 50]);
+    over.init!RawFrame(bytes[0 .. 51]);
+    assert(link.forward(fits) == 0 && link.sent == 1);
+    assert(link.forward(over) < 0 && link.sent == 1 && link.tx_dropped == 2);
+
+    link.destroy();
     Collection!BaseInterface().update_all();
 }

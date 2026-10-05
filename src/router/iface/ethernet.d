@@ -123,6 +123,9 @@ nothrow @nogc:
 
 protected:
 
+    override ushort l2_header() const pure
+        => 14;
+
     this(const CollectionTypeInfo* typeInfo, CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(typeInfo, id, flags);
@@ -175,9 +178,10 @@ protected:
 
             default:
                 // exotic frames are OW-encapsulated for transit across the segment
-                if (!station_egress(packet))
-                    add_tx_drop();
-                return 0;
+                if (station_egress(packet))
+                    return 0;
+                add_tx_drop();
+                return -1;
         }
     }
 
@@ -299,7 +303,7 @@ protected:
 
         align(size_t.sizeof) ubyte[1518] buffer = void;
         ptrdiff_t len = build_ow_payload(packet, *codec, buffer);
-        if (len <= 0)
+        if (len <= 0 || len > actual_mtu)
             return false;
 
         Packet wrapped;
@@ -819,13 +823,8 @@ protected:
     this(const CollectionTypeInfo* typeInfo, CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(typeInfo, id, flags);
-
-        // TODO: proper values?
-//        _mtu = 1500;
-//        _max_l2mtu = _mtu;
-//        _l2mtu = 1500;
-
-//        mark_set!(typeof(this), "max-l2mtu")();
+        // TODO: jumbo frames need medium_tx's frame buffer sized from what the hardware carries
+        set_l2mtu(1514);
     }
 
     final void incoming_ethernet_frame(const(ubyte)[] data, MonoTime ts, ushort vlan_tci = 0, ushort vlan_tpid = 0, const(HwTimestamp)* hw_time = null, bool checksum_verified = false)

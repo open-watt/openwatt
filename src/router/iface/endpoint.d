@@ -518,9 +518,6 @@ nothrow @nogc:
     private:
         bool emit(EthernetStation station, MACAddress dst, const(ubyte)[] frame)
         {
-            ushort mtu = station.actual_mtu;
-            if (mtu && frame.length > mtu)
-                return false;
             Packet packet;
             ref ether = packet.init!Ethernet(frame);
             ether.dst = dst;

@@ -237,7 +237,7 @@ private:
 
     void apply_configured_mtu()
     {
-        if (_mtu == 0 || _adapter.empty)
+        if (!mtu_configured || _adapter.empty)
             return;
         if (!set_adapter_mtu(_adapter[], actual_mtu))
             log.warning("failed to set MTU ", actual_mtu, " on '", _adapter, "'");
@@ -248,9 +248,7 @@ private:
         OSAdapterInfo info;
         if (!query_adapter(_adapter[], info))
             return;
-        AdapterChange c = apply_os_adapter_info(this, _l2mtu, _max_l2mtu, _status, info);
-        if (c & AdapterChange.mtu)       mark_set!(typeof(this), [ "l2mtu", "actual-mtu" ])();
-        if (c & AdapterChange.max_mtu)   mark_set!(typeof(this), "max-l2mtu")();
+        AdapterChange c = apply_os_adapter_info(this, _status, info);
         if (c & AdapterChange.connected) { mark_set!(typeof(this), "connected")(); write_status(); }
         set_link_speed(info.tx_link_speed, info.rx_link_speed);
     }

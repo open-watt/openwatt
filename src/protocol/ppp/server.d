@@ -30,7 +30,7 @@ nothrow @nogc:
         super(collection_type_info!PPPServer, id, flags);
 
         // Default protocol is PPP
-        mtu = 1500;
+        set_l2mtu(1500);
     }
 
     // Properties...
