@@ -162,6 +162,11 @@ void register_modules(Application app)
         register_module!(router.iface.i2c)(app);
         register_module!(router.iface.wifi)(app);
         register_module!(router.iface.wpan)(app);
+        version (BL808)
+        {
+            import driver.bl808.xram;
+            register_module!(driver.bl808.xram)(app);
+        }
 
         import driver.ethernet, driver.wifi, driver.wpan;
         register_module!(driver.ethernet)(app);

@@ -999,6 +999,24 @@ A WLAN interface is one station association bound to a WiFi radio.
 | `rssi` | read-only | dBm | `0` | Received signal strength; `0` means unavailable. |
 | `signal-quality` | read-only | `0` to `100` | `0` | Normalized signal quality. |
 
+### `/interface/xram`
+
+A raw-frame link to the other core of a BL808, over a pair of frame rings in the cores' shared XRAM
+announced through the inter-core mailbox. Each core adds one per channel. The link is up while both
+ends are, and goes down and back up when the other end restarts. A frame the ring cannot take is
+refused, and one it takes is delivered in order and never lost, so sync runs over it without its
+reliability sublayer; sync paces its bulk traffic so the ring keeps room for its other frames. A
+frame is at most a quarter of a ring, so three are in flight even across its wrap: 1856 bytes with
+one channel, reported as its `l2mtu`.
+
+| Property | Access | Values | Default | Description |
+| --- | --- | --- | --- | --- |
+| `channel` | read/write | `0` | `0` | Ring pair to use; both cores name the same channel. |
+
+```text
+/interface/xram/add name=d0 channel=0
+```
+
 ### `/binding` common properties
 
 Every binding tracks whether its device is reachable and mirrors the verdict

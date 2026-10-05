@@ -1201,7 +1201,8 @@ this is what remains.
   `model_sub`/`sub` fan-out, lifecycle fan-out, `result` and `history`, and on a reliable
   transport a refused push is dropped with no retry path. Move them onto the same feed; oversize
   control frames must be refused at encode time against `hello.max_frame` rather than dropped in
-  the interface; `val_block` chunking must honour `max_frame` instead of a fixed 256 records; and
+  the interface; `val_block` chunking must honour `max_frame` and the transport's MTU instead of a
+  fixed 256 records (a block of 256 doubles is 3,845 bytes, over `/interface/xram`'s 1,856); and
   control frames should ride PCP >= ca with DEI=0 on the underlying packets. `BaseInterface`'s
   handler slot is single-owner like `Stream`'s, which suits the one-peer websocket; a shared
   bounded interface would need per-peer arbitration.
