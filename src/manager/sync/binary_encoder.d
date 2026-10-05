@@ -73,6 +73,7 @@ enum Verb : ubyte
     suggestions,
     claim,
     console,
+    identity,
 }
 
 
@@ -377,24 +378,38 @@ nothrow @nogc:
 
     // Outbound: model plane
 
-    override void encode_hello(SyncPeer peer)
+    // fixed size, so it fits the smallest segment; the names follow in identity, and their empty slots keep older
+    // decoders reading
+    override int encode_hello(SyncPeer peer)
     {
         import manager : get_module;
-        import manager.system : hostname, node_id;
+        import manager.system : node_id;
         import manager.sync.discovery : PeerRole, SyncDiscoveryModule;
 
         begin_frame(Verb.hello);
         _buf.put_varint(model_protocol_version);
-        _buf.put_str(hostname[]);
+        _buf.put_str(null);
         _buf ~= local_sync_caps;
-        _buf.put_varint(max_frame_size);
+        _buf.put_varint(peer.local_max_message);
 
-        // identity tail; pre-identity decoders stop at max_frame and ignore it
-        auto disco = get_module!SyncDiscoveryModule;
+        // identity tail; pre-identity decoders stop at max_message and ignore it, and older ones stop at the nonce
         _buf.put_varint(node_id());
-        _buf ~= peer.claim ? PeerRole.authority : disco.local_role;
-        _buf.put_str(disco.local_cluster[]);
+        _buf ~= peer.claim ? PeerRole.authority : get_module!SyncDiscoveryModule.local_role;
+        _buf.put_str(null);
         _buf.put_str(cast(const(char)[])peer.local_nonce());
+        _buf.put_varint(peer.local_segment);
+        return send_frame(peer);
+    }
+
+    override void encode_identity(SyncPeer peer)
+    {
+        import manager : get_module;
+        import manager.system : hostname;
+        import manager.sync.discovery : SyncDiscoveryModule;
+
+        begin_frame(Verb.identity);
+        _buf.put_str(hostname[]);
+        _buf.put_str(get_module!SyncDiscoveryModule.local_cluster[]);
         send_frame(peer);
     }
 
@@ -822,26 +837,37 @@ nothrow @nogc:
                 import manager.sync.discovery : PeerRole;
 
                 uint ver = cast(uint)r.varint();
-                const(char)[] host = r.str();
+                r.str();    // the hostname's slot; it arrives in identity
                 ubyte caps = r.u8();
-                uint max_frame = cast(uint)r.varint();
+                uint max_message = cast(uint)r.varint();
 
                 ulong nid = 0;
                 PeerRole role;
-                const(char)[] cluster;
                 const(ubyte)[] nonce;
+                uint segment = 0;
                 if (!r.fail && r.more)
                 {
                     nid = r.varint();
                     ubyte rb = r.u8();
                     if (rb <= PeerRole.max)
                         role = cast(PeerRole)rb;
-                    cluster = r.str();
+                    r.str();    // the cluster's slot; it arrives in identity
                     if (!r.fail && r.more)
                         nonce = cast(const(ubyte)[])r.str();
+                    if (!r.fail && r.more)
+                        segment = cast(uint)r.varint();
                 }
                 if (!r.fail)
-                    sync.inbound_hello(peer, ver, host, caps, max_frame, nid, role, cluster, nonce);
+                    sync.inbound_hello(peer, ver, caps, max_message, nid, role, nonce, segment);
+                break;
+            }
+
+            case Verb.identity:
+            {
+                const(char)[] host = r.str();
+                const(char)[] cluster = r.str();
+                if (!r.fail)
+                    sync.inbound_identity(peer, host, cluster);
                 break;
             }
 
@@ -864,7 +890,7 @@ nothrow @nogc:
                 ulong from_ms = r.varint();
                 ulong to_ms = r.varint();
                 size_t count = cast(size_t)r.varint();
-                if (r.fail || count > max_frame_size)
+                if (r.fail || count > r.remaining)
                     break;
                 Array!(const(char)[]) patterns;
                 foreach (i; 0 .. count)
@@ -877,7 +903,7 @@ nothrow @nogc:
             case Verb.model_unsub:
             {
                 size_t count = cast(size_t)r.varint();
-                if (r.fail || count > max_frame_size)
+                if (r.fail || count > r.remaining)
                     break;
                 Array!(const(char)[]) patterns;
                 foreach (i; 0 .. count)
@@ -909,7 +935,7 @@ nothrow @nogc:
             {
                 const(char)[] name = r.str();
                 size_t count = cast(size_t)r.varint();
-                if (r.fail || count > max_frame_size)
+                if (r.fail || count > r.remaining)
                     break;
                 Variant members;
                 foreach (i; 0 .. count)
@@ -962,7 +988,7 @@ nothrow @nogc:
                 SyncHandle h = r.varint();
                 r.varint();   // lost - informational, mirror ignores it (same as JSON)
                 size_t count = cast(size_t)r.varint();
-                if (r.fail || count > max_frame_size)
+                if (r.fail || count > r.remaining)
                     break;
                 foreach (i; 0 .. count)
                 {
@@ -1021,7 +1047,7 @@ nothrow @nogc:
                 r.varint();
                 r.str();
                 size_t count = cast(size_t)r.varint();
-                if (r.fail || count > max_frame_size)
+                if (r.fail || count > r.remaining)
                     break;
                 foreach (i; 0 .. count)
                     r.str();
@@ -1290,6 +1316,9 @@ nothrow @nogc:
 
     bool more() const pure
         => pos < buf.length;
+
+    size_t remaining() const pure
+        => buf.length - pos;
 
     ubyte u8()
     {

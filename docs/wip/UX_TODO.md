@@ -3,6 +3,16 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-10-06: sync `hello` carries `segment`
+
+- A node's `hello` now ends with `segment`, the largest frame it takes in one packet, and its
+  `max_frame` is that real limit (65535 over a WebSocket) instead of a fixed 65536. A client may
+  advertise both; a node sends it nothing larger than the client's values.
+- A node refuses to send a frame larger than those limits and logs it instead of restarting the
+  session; over a WebSocket this changes nothing until a client advertises less.
+- `host` and `cluster` move out of `hello` into a new `identity` frame that follows it. Read the
+  node's name from `identity`; a client may send its own `identity` after its `hello`.
+
 ## 2026-10-06: interface MTU properties
 
 - `l2mtu` is read-only: what the link carries, set by the driver; on Ethernet it is the frame,

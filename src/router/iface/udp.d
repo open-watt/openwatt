@@ -96,6 +96,11 @@ nothrow @nogc:
     }
 }
 
+// what a datagram's payload gives up to the link: IP and UDP headers, or the ow transport and UDP header on ether
+enum ushort udp_carrier_v4 = 28;
+enum ushort udp_carrier_v6 = 48;
+enum ushort udp_carrier_ether = 14;
+
 final class UDPInterface : BaseInterface
 {
     alias Properties = AliasSeq!(Prop!("interface", iface),
@@ -313,7 +318,7 @@ protected:
         super.online();
 
         // a multi-drop endpoint has no single egress, so this only resolves for a connected peer
-        BaseInterface egress = _ep ? _ep.egress_iface : null;
+        BaseInterface egress = _ep ? _ep.egress_iface(_ep.remote) : null;
         if (egress)
             set_link_speed(egress.tx_link_speed, egress.rx_link_speed);
     }
@@ -366,9 +371,10 @@ protected:
     }
 
 private:
-    enum default_payload_v4 = 1500 - 28; // 1500 link MTU less IPv4 + UDP headers
-    enum default_payload_v6 = 1500 - 48;
-    enum default_payload_ether = 1500 - 14; // ow framing + transport protocol + UDP header
+    // datagrams that fit a 1500-byte link without IP fragmentation, which embedded peers cannot reassemble
+    enum default_payload_v4 = 1500 - udp_carrier_v4;
+    enum default_payload_v6 = 1500 - udp_carrier_v6;
+    enum default_payload_ether = 1500 - udp_carrier_ether;
 
     ObjectRef!EthernetStation _iface;
     bool _bound;        // iface was configured; a detached ref must wait for rebind, not go wildcard

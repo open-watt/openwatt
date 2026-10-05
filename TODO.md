@@ -1284,6 +1284,13 @@ this is what remains.
 
 ## Infrastructure
 
+- **Sync frames over the segment are refused, not delivered** (2026-10-06): since `hello` carries
+  `segment`, a frame larger than both ends carry in one packet is refused before it is sequenced
+  instead of restarting the session, so a history reply or a 256-record backfill block over UDP is
+  lost rather than looping. Fragmentation and byte-sized producers deliver them (Y2 in
+  `docs/wip/STREAMING.md`). The data plane's refold still concatenates its backlog into one frame
+  that can exceed the segment; Y2 packs it to fit.
+
 - **Interface sizes the MTU work left open** (2026-10-06): `l2mtu` should be writable on Ethernet,
   where jumbo frames make it meaningful, and read-only elsewhere, with `max-l2mtu` (the largest
   jumbo the hardware takes) present only there; the property system cannot yet let a derived class
