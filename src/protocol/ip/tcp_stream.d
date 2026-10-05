@@ -270,9 +270,6 @@ nothrow @nogc:
         return n;
     }
 
-    override size_t tx_backlog() const
-        => _conn ? _conn.tx_backlog : 0;
-
     override size_t tx_request() const
         => _conn ? _conn.tx_request : 0;
 
@@ -304,9 +301,9 @@ private:
     Duration _keep_idle;
     Duration _keep_interval;
 
-    Page* provide_tx_page(TCPConnection*, size_t requested)
+    Page* provide_tx_page(ref const TxRequest req, out TxStatus status)
     {
-        Page* page = request_tx_page(requested);
+        Page* page = request_tx_page(req, status);
         if (!page)
             return null;
         add_tx_bytes(page.length);

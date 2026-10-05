@@ -573,7 +573,6 @@ private:
     bool _subscribed;
     bool _close_sent;
     bool _tx_closing;
-    bool _tx_waking;
     bool _tx_pulling;
 
     HTTPParser* _handshake_parser; // non-null while client handshake is in flight
@@ -652,9 +651,7 @@ private:
     void detach_stream()
     {
         g_app.cancel(&tx_overflow);
-        g_app.cancel(&tx_wake);
         _tx_closing = false;
-        _tx_waking = false;
         if (_stream)
             _stream.release_tx_handler(&produce_tx);
         if (_subscribed)
@@ -689,12 +686,6 @@ private:
         restart();
     }
 
-    void tx_wake(MonoTime)
-    {
-        _tx_waking = false;
-        arm_tx();
-    }
-
     void arm_tx()
     {
         if (_stream && _stream.tx_handler is null)
@@ -714,26 +705,21 @@ private:
         arm_tx();
     }
 
-    Page* produce_tx(Stream, size_t requested)
+    Page* produce_tx(ref const TxRequest req, out TxStatus status)
     {
         pull_tx();
         size_t pending = _tx_pending.length - _tx_offset;
         if (pending == 0)
-            return null;
-        size_t take = pending < requested ? pending : requested;
-        if (take > max_tx_page)
-            take = max_tx_page;
-        Page* page = page_alloc(take);
-        if (!page)
         {
-            // the stream disarms on null; one outstanding timer re-arms it rather than waiting for the next frame
-            if (!_tx_waking)
-            {
-                _tx_waking = true;
-                g_app.schedule(getTime() + msecs(20), &tx_wake);
-            }
+            status = TxStatus.idle;
             return null;
         }
+        size_t take = pending < req.bytes ? pending : req.bytes;
+        if (take > max_tx_page)
+            take = max_tx_page;
+        Page* page = alloc_tx_page(req, take, status);
+        if (!page)
+            return null;
         page.data[] = _tx_pending[_tx_offset .. _tx_offset + take];
         _tx_offset += take;
         return page;

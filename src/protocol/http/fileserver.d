@@ -292,25 +292,17 @@ private:
     {
     nothrow @nogc:
 
-        Page* produce(Stream, size_t requested)
+        Page* produce(ref const TxRequest req, out TxStatus status)
         {
             if (!head.empty)
-                return produce_head(requested);
-            if (remaining == 0)
-            {
-                owner.download_finished(&this, true);
-                return null;
-            }
+                return produce_head(req, status);
 
-            size_t take = remaining < requested ? cast(size_t)remaining : requested;
+            size_t take = remaining < req.bytes ? cast(size_t)remaining : req.bytes;
             if (take > max_page_size)
                 take = max_page_size;
-            Page* page = page_alloc(take);
+            Page* page = alloc_tx_page(req, take, status);
             if (!page)
-            {
-                owner.download_finished(&this, false);
                 return null;
-            }
 
             size_t got;
             Result r = file.read(page.data, got);
@@ -319,9 +311,15 @@ private:
                 page_free(page);
                 writeWarning("fileserver: transfer failed mid-body, dropping connection");
                 owner.download_finished(&this, false);
+                status = TxStatus.abort;
                 return null;
             }
             remaining -= got;
+            if (remaining == 0)
+            {
+                owner.download_finished(&this, true);
+                status = TxStatus.end;
+            }
             return page;
         }
 
@@ -338,19 +336,16 @@ private:
         bool finished;
         bool successful;
 
-        Page* produce_head(size_t requested)
+        Page* produce_head(ref const TxRequest req, ref TxStatus status)
         {
             size_t take = head.length - head_sent;
-            if (take > requested)
-                take = requested;
+            if (take > req.bytes)
+                take = req.bytes;
             if (take > max_page_size)
                 take = max_page_size;
-            Page* page = page_alloc(take);
+            Page* page = alloc_tx_page(req, take, status);
             if (!page)
-            {
-                owner.download_finished(&this, false);
                 return null;
-            }
             (cast(char[])page.data)[] = head[head_sent .. head_sent + take];
             head_sent += take;
             if (head_sent == head.length)

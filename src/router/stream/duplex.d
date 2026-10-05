@@ -72,9 +72,6 @@ nothrow @nogc:
     override ulong rx_link_speed() const
         => _rx ? _rx.rx_link_speed : 0;
 
-    override size_t tx_backlog() const
-        => _tx ? _tx.tx_backlog : 0;
-
     override size_t tx_request() const
         => _tx ? _tx.tx_request : 0;
 
@@ -174,9 +171,9 @@ private:
     bool _tx_subscribed;
     bool _rx_subscribed;
 
-    Page* provide_tx_page(Stream, size_t requested)
+    Page* provide_tx_page(ref const TxRequest req, out TxStatus status)
     {
-        Page* page = request_tx_page(requested);
+        Page* page = request_tx_page(req, status);
         if (!page)
             return null;
         add_tx_bytes(page.length);

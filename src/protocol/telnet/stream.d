@@ -265,6 +265,8 @@ nothrow @nogc:
     {
         if (!_inner)
             return -1;
+        if (_tx_pending)
+            return queue_behind_pending(data);
 
         // Only need to escape 0xFF (IAC) bytes
         ptrdiff_t total = 0;
@@ -321,9 +323,6 @@ nothrow @nogc:
         => _inner ? _inner.tx_link_speed : 0;
     override ulong rx_link_speed() const
         => _inner ? _inner.rx_link_speed : 0;
-
-    override size_t tx_backlog() const
-        => _inner ? _inner.tx_backlog : 0;
 
     override size_t tx_request() const
         => _inner ? _inner.tx_request : 0;
@@ -418,6 +417,7 @@ private:
     Page* _tx_pending;
     bool _subscribed;
     bool _terminal_aware;
+    TxStatus _tx_pending_status;
     TelnetRole _role;
 
     ulong _server_state;
@@ -425,96 +425,130 @@ private:
     ulong _client_state;
     ulong _client_state_req;
 
-    Page* provide_tx_page(Stream, size_t requested)
+    Page* provide_tx_page(ref const TxRequest req, out TxStatus status)
     {
         if (_tx_pending)
-            return take_pending_tx();
+            return take_pending_tx(req, status);
 
-        Page* page = request_tx_page(requested);
+        Page* page = request_tx_page(req, status);
         if (!page)
             return null;
 
-        size_t input_length = page.length;
-        const(ubyte)[] input = cast(const(ubyte)[])page.data;
-        add_tx_bytes(input_length);
+        add_tx_bytes(page.length);
         if (_logging)
-            write_to_log(false, input);
-        size_t escaped_length = input_length;
-        foreach (b; input)
-            escaped_length += b == NVT.IAC;
-
-        if (escaped_length != input_length)
+            write_to_log(false, page.data);
+        Page* output = escape_page(page);
+        if (!output)
         {
-            if (escaped_length - input_length <= page.tailroom)
-            {
-                ubyte[] storage = (cast(ubyte*)page)[0 .. page.capacity];
-                size_t source = page.offset + input_length;
-                size_t destination = page.offset + escaped_length;
-                while (source != destination)
-                {
-                    ubyte b = storage[--source];
-                    storage[--destination] = b;
-                    if (b == NVT.IAC)
-                        storage[--destination] = b;
-                }
-                page.length = cast(ushort)escaped_length;
-            }
-            else
-            {
-                size_t input_position;
-                bool repeat;
-                size_t output_position;
-                Page* head;
-                Page* tail;
-                while (output_position != escaped_length)
-                {
-                    size_t length = escaped_length - output_position;
-                    if (length > tx_page_payload)
-                        length = tx_page_payload;
-                    Page* output = page_alloc(length, size_t.sizeof, page.headroom, page.tailroom);
-                    if (!output)
-                    {
-                        free_page_chain(head);
-                        page_free(page);
-                        tx_handler(null);
-                        return null;
-                    }
-                    if (tail)
-                        tail.next = output;
-                    else
-                        head = output;
-                    tail = output;
-
-                    ubyte[] bytes = cast(ubyte[])output.data;
-                    foreach (ref b; bytes)
-                    {
-                        ubyte value = input[input_position];
-                        b = value;
-                        if (value == NVT.IAC && !repeat)
-                            repeat = true;
-                        else
-                        {
-                            repeat = false;
-                            ++input_position;
-                        }
-                    }
-                    output_position += length;
-                }
-                page_free(page);
-                _tx_pending = head;
-                page = take_pending_tx();
-            }
+            tx_handler(null);
+            status = TxStatus.abort;
+            return null;
         }
+        _tx_pending = output;
+        _tx_pending_status = status;
+        return take_pending_tx(req, status);
+    }
 
+    Page* take_pending_tx(ref const TxRequest req, out TxStatus status)
+    {
+        Page* page = take_tx_page(_tx_pending, req, status);
+        if (page)
+            status = _tx_pending || tx_handler ? TxStatus.more : _tx_pending_status;
         return page;
     }
 
-    Page* take_pending_tx()
+    // pending output was produced earlier, so written bytes queue behind it
+    ptrdiff_t queue_behind_pending(const(void[])[] data)
     {
-        Page* page = _tx_pending;
-        _tx_pending = page.next;
-        page.next = null;
-        return page;
+        ptrdiff_t total = 0;
+        foreach (d; data)
+        {
+            const(ubyte)[] bytes = cast(const(ubyte)[])d;
+            while (bytes.length)
+            {
+                size_t n = bytes.length < tx_page_payload ? bytes.length : tx_page_payload;
+                Page* page = page_alloc(n);
+                if (!page)
+                    return total;
+                (cast(ubyte[])page.data)[] = bytes[0 .. n];
+                Page* output = escape_page(page);
+                if (!output)
+                    return total;
+                append_tx_chain(_tx_pending, output);
+                bytes = bytes[n .. $];
+                total += n;
+            }
+        }
+        return total;
+    }
+
+    // consumes page
+    Page* escape_page(Page* page)
+    {
+        size_t input_length = page.length;
+        const(ubyte)[] input = cast(const(ubyte)[])page.data;
+        size_t escaped_length = input_length;
+        foreach (b; input)
+            escaped_length += b == NVT.IAC;
+        if (escaped_length == input_length)
+            return page;
+
+        if (escaped_length - input_length <= page.tailroom)
+        {
+            ubyte[] storage = (cast(ubyte*)page)[0 .. page.capacity];
+            size_t source = page.offset + input_length;
+            size_t destination = page.offset + escaped_length;
+            while (source != destination)
+            {
+                ubyte b = storage[--source];
+                storage[--destination] = b;
+                if (b == NVT.IAC)
+                    storage[--destination] = b;
+            }
+            page.length = cast(ushort)escaped_length;
+            return page;
+        }
+
+        size_t input_position;
+        bool repeat;
+        size_t output_position;
+        Page* head;
+        Page* tail;
+        while (output_position != escaped_length)
+        {
+            size_t length = escaped_length - output_position;
+            if (length > tx_page_payload)
+                length = tx_page_payload;
+            Page* output = page_alloc(length, size_t.sizeof, page.headroom, page.tailroom);
+            if (!output)
+            {
+                free_page_chain(head);
+                page_free(page);
+                return null;
+            }
+            if (tail)
+                tail.next = output;
+            else
+                head = output;
+            tail = output;
+
+            ubyte[] bytes = cast(ubyte[])output.data;
+            foreach (ref b; bytes)
+            {
+                ubyte value = input[input_position];
+                b = value;
+                if (value == NVT.IAC && !repeat)
+                    repeat = true;
+                else
+                {
+                    repeat = false;
+                    ++input_position;
+                }
+            }
+            output_position += length;
+        }
+        page_free(page);
+        return head;
     }
 
     void free_pending_tx()
@@ -844,4 +878,45 @@ enum NVT : ubyte
     DO   = 0xfd,
     DONT = 0xfe,
     IAC  = 0xff
+}
+
+
+unittest
+{
+    import urt.mem : alloc, free;
+
+    bool owns_pool = page_pool_init();
+    scope (exit) if (owns_pool) page_pool_deinit();
+
+    TelnetStream telnet = alloc!TelnetStream(CID(1));
+    scope (exit) free(telnet);
+
+    Page* iacs = page_alloc(64);
+    (cast(ubyte[])iacs.data)[] = NVT.IAC;
+    telnet._tx_pending = telnet.escape_page(iacs);
+    telnet._tx_pending_status = TxStatus.idle;
+
+    ubyte[3] later = [1, 2, 3];
+    const(void)[][1] data = [later[]];
+    assert(telnet.queue_behind_pending(data[]) == 3);
+
+    TxRequest small = TxRequest(min_tx_request);
+    TxStatus status;
+    size_t sent;
+    while (telnet._tx_pending)
+    {
+        Page* page = telnet.take_pending_tx(small, status);
+        assert(page && page.length <= small.bytes);
+        foreach (b; cast(const(ubyte)[])page.data)
+        {
+            if (sent < 128)
+                assert(b == NVT.IAC);
+            else
+                assert(b == later[sent - 128]);
+            ++sent;
+        }
+        assert(status == (telnet._tx_pending ? TxStatus.more : TxStatus.idle));
+        page_free(page);
+    }
+    assert(sent == 131);
 }
