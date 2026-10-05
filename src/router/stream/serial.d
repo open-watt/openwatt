@@ -668,39 +668,43 @@ nothrow @nogc:
     }
 
 
-    override void update()
+    version (ReactorRx)
+        enum polls_rx = false;
+    else version (Embedded)
+        enum polls_rx = !has_rx_callback;
+    else
+        enum polls_rx = true;
+
+    version (Embedded)
     {
-        version (ReactorRx)
+        static if (has_rx_callback)
+        override void update()
         {
-            // rx and read errors are delivered by the reactor via incoming()/restart()
+            import urt.atomic : atomicExchange, MemoryOrder;
+            // Normal RX is event-dispatched; only a rejected event post reaches this path.
+            if (atomicExchange!(MemoryOrder.acq_rel)(&_rx_event_retry, 0u) != 0)
+                uart_rx_event(getTime());
+            super.update();
         }
-        else version (Posix)
+    }
+
+    static if (polls_rx)
+    {
+        protected override Duration rx_poll_interval() const
+            => msecs(10);
+
+        protected override void poll_rx(MonoTime now)
         {
-            drain_rx(getTime());
-        }
-        else version (Embedded)
-        {
-            static if (has_rx_callback)
-            {
-                import urt.atomic : atomicExchange, MemoryOrder;
-                // Normal RX is reactor-dispatched; only a rejected event post reaches this path.
-                if (atomicExchange!(MemoryOrder.acq_rel)(&_rx_event_retry, 0u) != 0)
-                    uart_rx_event(getTime());
-            }
-            else
+            version (Embedded)
             {
                 uart_poll(_uart);
                 if (uart_check_errors(_uart) != UartError.none)
-                    restart();
-                else
-                    drain_rx(getTime());
+                    return restart();
             }
+            drain_rx(now);
         }
-
-        super.update();
     }
 
-    // All receive routes converge on the base Stream _rx_buffer / rx_handler, so read() and pending() use the base buffer-backed implementations.
     version (ReactorRx) {} else
     private void drain_rx(MonoTime now)
     {
@@ -903,25 +907,6 @@ nothrow @nogc:
         if (bytes_written > 0)
             add_tx_bytes(bytes_written);
         return bytes_written;
-    }
-
-    override ptrdiff_t flush()
-    {
-        version (Windows)
-        {
-            PurgeComm(_h_com, PURGE_RXABORT | PURGE_RXCLEAR);
-            return 0;
-        }
-        else version (Posix)
-        {
-            tcflush(_fd, TCIFLUSH);
-            return 0;
-        }
-        else version (Embedded)
-        {
-            uart_tx_flush(_uart);
-            return 0;
-        }
     }
 
     // Manually drive the modem control lines. Only meaningful when flow-control doesn't own the

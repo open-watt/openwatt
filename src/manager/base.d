@@ -903,6 +903,13 @@ nothrow @nogc:
     // Object API...
 
     final void restart()
+        => restart_impl(true);
+
+    // the shutdown runs on the state machine's next pass, outside the delivery that asked for it
+    final void restart_deferred()
+        => restart_impl(false);
+
+    private void restart_impl(bool dispatch)
     {
         assert(!(_state & _destroyed), "Cannot restart a destroyed object!");
 
@@ -911,15 +918,12 @@ nothrow @nogc:
 
         if (_state == State.init_failed)
         {
-            set_state(State.validate);
+            set_state_impl(State.validate, dispatch);
             return;
         }
 
         if (_state & _valid)
-        {
-            State new_state = cast(State)((_state & ~_start) | _stop);
-            set_state(new_state);
-        }
+            set_state_impl(cast(State)((_state & ~_start) | _stop), dispatch);
     }
 
     final override void destroy()

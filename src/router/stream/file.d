@@ -5,6 +5,7 @@ import urt.lifetime;
 import urt.mem.temp;
 import urt.string;
 import urt.string.format;
+import urt.time;
 
 import manager.base;
 import manager.collection;
@@ -77,23 +78,6 @@ nothrow @nogc:
 
     // API
 
-    override ptrdiff_t read(void[] buffer)
-    {
-        if (!_rx.is_open)
-            return 0;
-        size_t n;
-        Result r = _rx.read(buffer, n);
-        if (!r)
-            return 0;
-        if (n)
-        {
-            add_rx_bytes(n);
-            if (_logging)
-                write_to_log(true, buffer[0 .. n]);
-        }
-        return n;
-    }
-
     override ptrdiff_t write(const(void[])[] data...)
     {
         if (!_tx.is_open)
@@ -132,16 +116,6 @@ nothrow @nogc:
     override bool supports_tx_pages() const
         => true;
 
-    override ptrdiff_t pending()
-        => 0;
-
-    override ptrdiff_t flush()
-    {
-        if (_tx.is_open)
-            _tx.flush();
-        return 0;
-    }
-
 protected:
     override bool validate() const pure
         => _tx_path.length != 0 || _rx_path.length != 0;
@@ -171,6 +145,19 @@ protected:
     {
         close_files();
         return CompletionStatus.complete;
+    }
+
+    // the rx file replays a chunk per poll until its end, so a large file takes many turns
+    override Duration rx_poll_interval() const
+        => _rx.is_open ? msecs(10) : Duration.zero;
+
+    override void poll_rx(MonoTime now)
+    {
+        ubyte[1024] buffer = void;
+        size_t n;
+        if (!_rx.read(buffer[], n) || n == 0)
+            return _rx.close();
+        incoming(buffer[0 .. n], now);
     }
 
 private:

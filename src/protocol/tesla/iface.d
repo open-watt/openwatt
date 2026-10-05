@@ -108,6 +108,8 @@ nothrow @nogc:
             return "stream cannot be null";
         if (_stream is value)
             return null;
+        if (Stream old = _stream)
+            old.release_rx_handler(&stream_rx);
         _stream = value;
         mark_set!(typeof(this), "stream")();
 
@@ -126,9 +128,18 @@ protected:
     {
         if (!_stream)
             return CompletionStatus.error;
-        if (_stream.running)
-            return CompletionStatus.complete;
-        return CompletionStatus.continue_;
+        if (!_stream.running)
+            return CompletionStatus.continue_;
+        _stream.rx_handler(&stream_rx);
+        return CompletionStatus.complete;
+    }
+
+    override CompletionStatus shutdown()
+    {
+        if (Stream s = _stream)
+            s.release_rx_handler(&stream_rx);
+        _rx_length = 0;
+        return CompletionStatus.complete;
     }
 
     override void online()
@@ -148,64 +159,6 @@ protected:
 
         if (!_stream || !_stream.running)
             return restart();
-
-        MonoTime now = getTime();
-
-        // check for data
-        ubyte[1024] buffer = void;
-        ptrdiff_t bytes = _stream.read(buffer);
-        if (bytes < 0)
-        {
-            assert(false, "what causes read to fail?");
-            // TODO...
-        }
-        if (bytes == 0)
-            return;
-
-        size_t offset = 0;
-        while (offset < bytes)
-        {
-            // scan for start of message
-            while (offset < bytes && buffer[offset] != 0xC0)
-                ++offset;
-            size_t end = offset + 1;
-            for (; end < bytes; ++end)
-            {
-                if (buffer[end] == 0xC0)
-                    break;
-            }
-
-            if (offset == bytes || end == bytes)
-            {
-                if (bytes != buffer.length || offset == 0)
-                    break;
-                for (size_t i = offset; i < bytes; ++i)
-                    buffer[i - offset] = buffer[i];
-                bytes = bytes - offset;
-                offset = 0;
-                bytes += _stream.read(buffer[bytes .. $]);
-                continue;
-            }
-
-            ubyte[] msg = buffer[offset + 1 .. end];
-            offset = end;
-
-            // let's check if the message looks valid...
-            if (msg.length < 13)
-                continue;
-            msg = unescape_msg(msg);
-            if (!msg)
-                continue;
-            ubyte checksum = 0;
-            for (size_t i = 1; i < msg.length - 1; i++)
-                checksum += msg[i];
-            if (checksum != msg[$ - 1])
-                continue;
-            msg = msg[0 .. $-1];
-
-            // we seem to have a valid packet...
-            incoming_frame(msg, now);
-        }
     }
 
     override int transmit(ref const Packet packet, MessageCallback, const(QueuePolicy)*) nothrow @nogc
@@ -268,6 +221,42 @@ private:
     enum ushort max_message = 30;
 
     ObjectRef!Stream _stream;
+    ubyte[2 * max_message + 2] _rx;   // the escaped bytes since the last frame byte
+    ubyte _rx_length;
+
+    // every 0xC0 ends what came before it; whatever is not a valid message is dropped
+    void stream_rx(Stream, const(void)[] data, MonoTime rx_time)
+    {
+        foreach (b; cast(const(ubyte)[])data)
+        {
+            if (b == 0xC0)
+            {
+                if (_rx_length)
+                    frame_received(_rx[0 .. _rx_length], rx_time);
+                _rx_length = 0;
+            }
+            else if (_rx_length < _rx.length)
+                _rx[_rx_length++] = b;
+        }
+    }
+
+    void frame_received(ubyte[] msg, MonoTime rx_time)
+    {
+        // let's check if the message looks valid...
+        if (msg.length < 13)
+            return;
+        msg = unescape_msg(msg);
+        if (!msg)
+            return;
+        ubyte checksum = 0;
+        for (size_t i = 1; i < msg.length - 1; i++)
+            checksum += msg[i];
+        if (checksum != msg[$ - 1])
+            return;
+        msg = msg[0 .. $-1];
+
+        incoming_frame(msg, rx_time);
+    }
 
     void incoming_frame(const(ubyte)[] msg, MonoTime recv_time)
     {

@@ -511,7 +511,6 @@ protected:
                 incoming_request(buffer[0 .. bytes], sender, NSProtocol.nbns);
         }
 
-        // read from the streams
         for (size_t i = 0; i < _clients.length; )
         {
             ref client = _clients[i];
@@ -522,19 +521,6 @@ protected:
                 client.stream.destroy();
                 _clients.remove(i);
                 continue;
-            }
-
-            ptrdiff_t read = client.stream.read(buffer);
-            if (read > 0)
-            {
-                client.buffer ~= buffer[0 .. read];
-                client.last_activity = now;
-
-                ptrdiff_t taken = incoming_request(client.buffer[], InetAddress(/+ TODO: PASS THROUGH! +/), NSProtocol.dns);
-                if (taken < 0)
-                    client.buffer.clear(); // malformed message; flush the buffer
-                else if (taken > 0)
-                    client.buffer.remove(0, taken);
             }
             ++i;
         }
@@ -634,6 +620,25 @@ private:
     void new_client(Stream client, ref const InetAddress remote, void* user_data)
     {
         _clients ~= Client(client, last_activity: getTime());
+        client.rx_handler(&client_rx);
+    }
+
+    void client_rx(Stream stream, const(void)[] data, MonoTime rx_time)
+    {
+        foreach (ref client; _clients[])
+        {
+            if (client.stream !is stream)
+                continue;
+            client.buffer ~= cast(const(ubyte)[])data;
+            client.last_activity = rx_time;
+
+            ptrdiff_t taken = incoming_request(client.buffer[], InetAddress(/+ TODO: PASS THROUGH! +/), NSProtocol.dns);
+            if (taken < 0)
+                client.buffer.clear(); // malformed message; flush the buffer
+            else if (taken > 0)
+                client.buffer.remove(0, taken);
+            return;
+        }
     }
 
     void doh_subscribe(HTTPServer unsub, HTTPServer sub)

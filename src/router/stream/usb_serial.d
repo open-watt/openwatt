@@ -25,6 +25,7 @@ else version (USBCDC)
 version (USBSerialAvailable)
 {
     import urt.meta;
+    import urt.time;
 
     import manager;
     import manager.base;
@@ -49,8 +50,6 @@ version (USBSerialJTAG)
         bool usb_serial_jtag_is_driver_installed();
         int usb_serial_jtag_read_bytes(void* buffer, uint length, uint ticks_to_wait);
         int usb_serial_jtag_write_bytes(const(void)* data, size_t length, uint ticks_to_wait);
-        int usb_serial_jtag_wait_tx_done(uint ticks_to_wait);
-        size_t usb_serial_jtag_get_read_bytes_available();
     }
 }
 else version (USBCDC)
@@ -61,8 +60,6 @@ else version (USBCDC)
         bool esp_usb_console_is_installed();
         ptrdiff_t esp_usb_console_read_buf(char* buffer, size_t length);
         ptrdiff_t esp_usb_console_write_buf(const(char)* data, size_t length);
-        ptrdiff_t esp_usb_console_flush();
-        ptrdiff_t esp_usb_console_available_for_read();
     }
 }
 
@@ -85,17 +82,6 @@ nothrow @nogc:
         super(collection_type_info!USBSerialStream, id, flags);
     }
 
-    override ptrdiff_t read(void[] buffer)
-    {
-        version (USBSerialJTAG)
-            ptrdiff_t bytes = usb_serial_jtag_read_bytes(buffer.ptr, cast(uint)buffer.length, 0);
-        else
-            ptrdiff_t bytes = esp_usb_console_read_buf(cast(char*)buffer.ptr, buffer.length);
-        if (bytes > 0)
-            add_rx_bytes(bytes);
-        return bytes;
-    }
-
     override ptrdiff_t write(const(void[])[] data...)
     {
         ptrdiff_t total;
@@ -113,22 +99,6 @@ nothrow @nogc:
                 break;
         }
         return total;
-    }
-
-    override ptrdiff_t pending()
-    {
-        version (USBSerialJTAG)
-            return cast(ptrdiff_t)usb_serial_jtag_get_read_bytes_available();
-        else
-            return esp_usb_console_available_for_read();
-    }
-
-    override ptrdiff_t flush()
-    {
-        version (USBSerialJTAG)
-            return usb_serial_jtag_wait_tx_done(0) == 0 ? 0 : -1;
-        else
-            return esp_usb_console_flush();
     }
 
     override CompletionStatus startup()
@@ -163,6 +133,26 @@ nothrow @nogc:
             }
         }
         return CompletionStatus.complete;
+    }
+
+protected:
+    // the IDF drivers raise no receive event to this thread, so the RX side is polled
+    override Duration rx_poll_interval() const
+        => msecs(10);
+
+    override void poll_rx(MonoTime now)
+    {
+        ubyte[256] buffer = void;
+        for (;;)
+        {
+            version (USBSerialJTAG)
+                ptrdiff_t bytes = usb_serial_jtag_read_bytes(buffer.ptr, cast(uint)buffer.length, 0);
+            else
+                ptrdiff_t bytes = esp_usb_console_read_buf(cast(char*)buffer.ptr, buffer.length);
+            if (bytes <= 0)
+                return;
+            incoming(buffer[0 .. bytes], now);
+        }
     }
 
 private:

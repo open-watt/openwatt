@@ -29,7 +29,6 @@ enum ConnectionState : ubyte
 }
 
 enum int    connect_timeout_secs = 10;
-enum size_t read_chunk_size      = 4096;
 enum size_t max_packet_size      = 256 * 1024;
 
 struct Connection
@@ -45,7 +44,10 @@ nothrow @nogc:
         this.last_contact = getTime();
         this.connect_deadline = this.last_contact + connect_timeout_secs.seconds;
         if (stream)
+        {
             stream.subscribe(&stream_state_change);
+            stream.rx_handler(&stream_rx);
+        }
     }
 
     ~this()
@@ -60,46 +62,6 @@ nothrow @nogc:
     {
         if (!stream || !stream.running)
             return false;
-
-        ubyte[read_chunk_size] scratch = void;
-        for (;;)
-        {
-            ptrdiff_t n = stream.read(scratch[]);
-            if (n < 0)
-                return false;
-            if (n == 0)
-                break;
-            parse_buf ~= scratch[0 .. n];
-            last_contact = getTime();
-            if (parse_buf.length > max_packet_size)
-                return false;
-        }
-
-        const(ubyte)[] view = parse_buf[];
-        while (view.length > 0)
-        {
-            const(ubyte)[] before = view;
-            FixedHeader hdr;
-            if (!decode_header(view, hdr))
-            {
-                view = before;
-                break;
-            }
-            if (view.length < hdr.body_length)
-            {
-                view = before;
-                break;
-            }
-
-            const(ubyte)[] body = view[0 .. hdr.body_length];
-            view = view[hdr.body_length .. $];
-
-            if (!dispatch(hdr, body))
-                return false;
-        }
-        size_t consumed = parse_buf.length - view.length;
-        if (consumed > 0)
-            parse_buf.remove(0, consumed);
 
         MonoTime now = getTime();
         if (state == ConnectionState.waiting_connect)
@@ -193,8 +155,44 @@ private:
     {
         if (!stream)
             return;
+        stream.release_rx_handler(&stream_rx);
         stream.destroy();
         stream = null;
+    }
+
+    // a failure terminates the connection; the broker reaps it on its next update
+    void stream_rx(Stream, const(void)[] data, MonoTime rx_time)
+    {
+        parse_buf ~= cast(const(ubyte)[])data;
+        last_contact = rx_time;
+        if (parse_buf.length > max_packet_size)
+            return terminate();
+
+        const(ubyte)[] view = parse_buf[];
+        while (view.length > 0 && stream)
+        {
+            const(ubyte)[] before = view;
+            FixedHeader hdr;
+            if (!decode_header(view, hdr))
+            {
+                view = before;
+                break;
+            }
+            if (view.length < hdr.body_length)
+            {
+                view = before;
+                break;
+            }
+
+            const(ubyte)[] body = view[0 .. hdr.body_length];
+            view = view[hdr.body_length .. $];
+
+            if (!dispatch(hdr, body))
+                return terminate();
+        }
+        size_t consumed = parse_buf.length - view.length;
+        if (consumed > 0)
+            parse_buf.remove(0, consumed);
     }
 
     void stream_state_change(ActiveObject obj, StateSignal signal)

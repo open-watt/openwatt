@@ -75,6 +75,7 @@ protected:
     {
         if (_protocol < TunnelProtocol.PPPoE && _stream.running)
         {
+            _stream.rx_handler(&stream_rx);
             assert(false, "TODO: begin PPP handshake...");
 
             return CompletionStatus.complete;
@@ -92,6 +93,8 @@ protected:
 
     final override CompletionStatus shutdown()
     {
+        if (Stream s = _stream)
+            s.release_rx_handler(&stream_rx);
         _tail.clear();
         return CompletionStatus.complete;
     }
@@ -100,89 +103,8 @@ protected:
     {
         super.update();
 
-        ubyte[2048] buffer = void;
-        MonoTime now = getTime();
-
-        const ubyte FRAME_END = (_protocol == TunnelProtocol.PPP) ? 0x7E : 0xC0;
-
         if (!_stream)
             restart();
-
-        // check for data
-        ptrdiff_t frameStart = 0;
-        ptrdiff_t offset = 0;
-        ptrdiff_t length = 0;
-        read_loop: while (true)
-        {
-            ptrdiff_t r = _stream.read(buffer[offset .. $]);
-            if (r < 0)
-            {
-                // TODO: do we care what causes read to fail?
-                restart();
-                return;
-            }
-            if (r == 0)
-            {
-                // if there were no extra bytes available, stash the tail until later
-                assert(false);
-                break read_loop;
-            }
-            length = offset + r;
-
-            for (size_t i = 0; i < length; ++i)
-            {
-                ubyte b = buffer[frameStart + i];
-                if (b == FRAME_END)
-                {
-                    if (offset > frameStart)
-                    {
-                        if (_protocol == TunnelProtocol.PPP)
-                        {
-                            assert(false, "TODO");
-
-                            // validate MTU...
-
-                            // validate the CRC...
-
-                            // check frame type...
-                        }
-                        else
-                        {
-                            assert(false, "TODO");
-
-                            // validate MTU...
-
-                            // SLIP transmits IP frames...
-                            assert(false, "TODO: what do we do with an IP frame...");
-                        }
-
-                        frameStart = offset + 1;
-                    }
-                }
-                else if (b == 0xDB)
-                {
-                    // handle escape byte
-                    if (i + 1 < length)
-                    {
-                        b = buffer[++i];
-                        if (b == 0xDC)
-                            buffer[offset++] = FRAME_END;
-                        else if (b == 0xDD)
-                            buffer[offset++] = 0xDB;
-                        else
-                            assert(false, "TODO: invalid frame... drop this one");
-                    }
-                }
-                else if (i > offset)
-                    buffer[offset] = b;
-                ++offset;
-            }
-
-            assert(false, "TODO");
-            // shuffle buffer[frameStart .. offset] to the front
-
-            // and start over...
-        }
     }
 
     override int transmit(ref const Packet packet, MessageCallback, const(QueuePolicy)*)
@@ -194,6 +116,69 @@ private:
     ObjectRef!Stream _stream;
     TunnelProtocol _protocol;
     Array!ubyte _tail;
+
+    void stream_rx(Stream, const(void)[] data, MonoTime)
+    {
+        ubyte[2048] buffer = void;
+        const ubyte FRAME_END = (_protocol == TunnelProtocol.PPP) ? 0x7E : 0xC0;
+
+        ptrdiff_t frameStart = 0;
+        ptrdiff_t offset = 0;
+        size_t length = data.length < buffer.length ? data.length : buffer.length;
+        buffer[0 .. length] = (cast(const(ubyte)[])data)[0 .. length];
+
+        for (size_t i = 0; i < length; ++i)
+        {
+            ubyte b = buffer[frameStart + i];
+            if (b == FRAME_END)
+            {
+                if (offset > frameStart)
+                {
+                    if (_protocol == TunnelProtocol.PPP)
+                    {
+                        assert(false, "TODO");
+
+                        // validate MTU...
+
+                        // validate the CRC...
+
+                        // check frame type...
+                    }
+                    else
+                    {
+                        assert(false, "TODO");
+
+                        // validate MTU...
+
+                        // SLIP transmits IP frames...
+                        assert(false, "TODO: what do we do with an IP frame...");
+                    }
+
+                    frameStart = offset + 1;
+                }
+            }
+            else if (b == 0xDB)
+            {
+                // handle escape byte
+                if (i + 1 < length)
+                {
+                    b = buffer[++i];
+                    if (b == 0xDC)
+                        buffer[offset++] = FRAME_END;
+                    else if (b == 0xDD)
+                        buffer[offset++] = 0xDB;
+                    else
+                        assert(false, "TODO: invalid frame... drop this one");
+                }
+            }
+            else if (i > offset)
+                buffer[offset] = b;
+            ++offset;
+        }
+
+        assert(false, "TODO");
+        // shuffle buffer[frameStart .. offset] to _tail, and take any input beyond the buffer
+    }
 }
 
 

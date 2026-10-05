@@ -4,6 +4,7 @@ import urt.array;
 import urt.conv : parse_uint;
 import urt.mem;
 import urt.string;
+import urt.time : MonoTime;
 
 import manager.base;
 import manager.collection;
@@ -89,12 +90,14 @@ nothrow @nogc:
         super(session, null);
         _telnet = telnet;
         telnet.subscribe(&telnet_state_change);
+        telnet.rx_handler(&telnet_rx);
     }
 
     ~this()
     {
         if (_telnet)
         {
+            _telnet.release_rx_handler(&telnet_rx);
             _telnet.destroy();
             _telnet = null;
         }
@@ -150,22 +153,6 @@ nothrow @nogc:
         else
             return CommandCompletionState.in_progress; // still connecting
 
-        ubyte[512] buf = void;
-        ptrdiff_t r;
-        do
-        {
-            r = _telnet.read(buf[]);
-            if (r < 0)
-            {
-                session.write_line("");
-                session.write_line("[connection closed]");
-                return CommandCompletionState.finished;
-            }
-            if (r > 0)
-                session.write_raw(buf[0 .. r]);
-        }
-        while (r == buf.length);
-
         auto local = session.stream;
         if (local !is null)
         {
@@ -186,10 +173,16 @@ nothrow @nogc:
     }
 
 private:
+    void telnet_rx(Stream, const(void)[] data, MonoTime)
+    {
+        session.write_raw(data);
+    }
+
     void telnet_state_change(ActiveObject, StateSignal signal)
     {
         if (signal == StateSignal.online)
             return;
+        _telnet.release_rx_handler(&telnet_rx);
         _telnet.unsubscribe(&telnet_state_change);
         _telnet = null;
         _remote_closed = true;

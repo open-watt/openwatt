@@ -180,22 +180,17 @@ protected:
 
             const(char)[] new_name = Collection!Stream().generate_name(name[]);
             _stream = Collection!TCPStream().create(new_name, ObjectFlags.dynamic, NamedArgument("remote", _host ? Variant(_host) : Variant(_remote)), NamedArgument("port", Variant(_port)));
-            _stream.subscribe(&stream_state_handler);
             version (DebugESPHomeClient)
                 writeDebug("esphome - created tcp stream with name: ", new_name);
             if (!_stream)
                 return CompletionStatus.error;
+            _stream.subscribe(&stream_state_handler);
+            _stream.rx_handler(&stream_rx);
         }
         if (_stream.running)
         {
-            if (_state == 0)
-            {
-                if (!send_hello())
-                    return CompletionStatus.error;
-            }
-            else
-                service_stream();
-
+            if (_state == 0 && !send_hello())
+                return CompletionStatus.error;
             if (_state == 2)
                 return CompletionStatus.complete;
         }
@@ -232,8 +227,6 @@ protected:
         }
 
         MonoTime now = getTime();
-
-        service_stream();
 
         if (now - last_contact_time > 1.seconds)
             send_message(PingRequest());
@@ -300,33 +293,26 @@ private:
         return sent;
     }
 
-    void service_stream()
+    void stream_rx(Stream, const(void)[] data, MonoTime)
     {
-        // check for data
+        const(ubyte)[] input = cast(const(ubyte)[])data;
         ubyte[1024] buffer = void;
         assert(_tail.length <= buffer.length);
         buffer[0 .. _tail.length] = _tail[]; // TODO: what if message is longer than the stack buffer?
-        ptrdiff_t length = _tail.length;
-        _tail.clear();
-        read_loop: while (true)
+        size_t length = _tail.length;
+        while (input.length)
         {
-            ptrdiff_t r = _stream.read(buffer[length .. $]);
-            if (r < 0)
+            if (length == buffer.length)
             {
-                assert(false, "TODO: what causes read to fail?");
-                break read_loop;
+                // a message longer than the buffer cannot be framed, and the stream has lost its place
+                _tail.clear();
+                restart();
+                return;
             }
-            if (r == 0)
-            {
-                // if there were no extra bytes available, stash the _tail until later
-                _tail = buffer[0 .. length];
-                break read_loop;
-            }
-            length += r;
-            assert(length <= buffer.sizeof);
-
-//            if (connParams.logDataStream)
-//                logStream.rawWrite(buffer[0 .. length]);
+            size_t take = input.length < buffer.length - length ? input.length : buffer.length - length;
+            buffer[length .. length + take] = input[0 .. take];
+            input = input[take .. $];
+            length += take;
 
             ubyte[] frame = buffer[0 .. length];
             while (!frame.empty)
@@ -363,6 +349,7 @@ private:
             if (length > 0)
                 memmove(buffer.ptr, frame.ptr, length);
         }
+        _tail = buffer[0 .. length];
     }
 
     void incoming_frame(uint msg_type, const(ubyte)[] frame)

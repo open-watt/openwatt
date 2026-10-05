@@ -57,7 +57,7 @@ nothrow @nogc:
     {
         _conn.remote(value);
         _tls = false;
-        _stream = null;
+        drop_stream();
         mark_set!(typeof(this), [ "remote", "stream" ])();
         restart();
     }
@@ -78,7 +78,7 @@ nothrow @nogc:
         if (r.failed)
             return r;
         _tls = tls;
-        _stream = null;
+        drop_stream();
         mark_set!(typeof(this), [ "remote", "stream" ])();
         restart();
         return StringResult.success;
@@ -92,6 +92,7 @@ nothrow @nogc:
             return "stream cannot be null";
         if (_stream is value)
             return null;
+        drop_stream();
         _conn.clear_remote();
         _stream = value;
         mark_set!(typeof(this), [ "stream", "remote" ])();
@@ -150,13 +151,16 @@ protected:
         }
         if (!_stream)
             return CompletionStatus.error;
-        if (_stream.running)
-            return CompletionStatus.complete;
-        return CompletionStatus.continue_;
+        if (!_stream.running)
+            return CompletionStatus.continue_;
+        _stream.rx_handler(&stream_rx);
+        return CompletionStatus.complete;
     }
 
     override CompletionStatus shutdown()
     {
+        if (Stream s = _stream)
+            s.release_rx_handler(&stream_rx);
         foreach (request; requests)
             free(request);
         requests.clear();
@@ -172,15 +176,6 @@ protected:
     {
         if (requests.empty)
             return;
-
-        int result = parser.update(stream);
-        if (!running)
-            return;
-        if (result != 0)
-        {
-            restart();
-            return;
-        }
 
         bool sendNext = false;
         // check for request timeouts...
@@ -215,6 +210,19 @@ private:
 
     HTTPParser parser;
     Array!(HTTPMessage*) requests;
+
+    void drop_stream()
+    {
+        if (Stream s = _stream)
+            s.release_rx_handler(&stream_rx);
+        _stream = null;
+    }
+
+    void stream_rx(Stream stream, const(void)[] data, MonoTime)
+    {
+        if (parser.feed(cast(const(ubyte)[])data, stream) != 0 && running)
+            restart();
+    }
 
     void complete_request(size_t index, ref const HTTPMessage response)
     {
@@ -284,19 +292,11 @@ unittest
 
         ~this() {}
         enum type_name = "http-test-stream";
-        const(ubyte)[] input;
-        uint reads, writes;
+        uint writes;
         bool fail_write;
         this(CID id, ObjectFlags flags = ObjectFlags.none) { super(collection_type_info!TestStream, id, flags); }
         void activate() { set_state(State.running); }
-        override ptrdiff_t read(void[] buffer)
-        {
-            ++reads;
-            size_t count = min(buffer.length, input.length);
-            (cast(ubyte[])buffer)[0 .. count] = input[0 .. count];
-            input = input[count .. $];
-            return count;
-        }
+        void push(const(char)[] text) { incoming(text, getTime()); }
         override ptrdiff_t write(const(void[])[] data...)
         {
             ++writes;
@@ -361,13 +361,12 @@ unittest
                     request.timestamp = getSysTime() - 40.seconds;
             }
             else
-                wire.input = cast(const(ubyte)[])("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"
-                    ~ "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
-            client.update();
-            assert(handler.calls == 1 && wire.reads == (timeout ? 2 : 1) && wire.writes == 1 && client.requests.empty && !client.running);
+                wire.push("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\nHTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+            if (client.running)
+                client.update();
+            assert(handler.calls == 1 && wire.writes == 1 && client.requests.empty && !client.running);
             if (!destroy_client)
             {
-                wire.input = null;
                 Collection!HTTPClient().update_all();
                 assert(client.running);
                 client.update();
@@ -393,7 +392,7 @@ unittest
         if (timeout)
             request.timestamp = getSysTime() - 10.seconds;
         else
-            wire.input = cast(const(ubyte)[])"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n";
+            wire.push("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
         client.update();
         assert(handler.calls == 1 && wire.writes == 2 && client.requests.length == 1);
         client.request(HTTPMethod.GET, "/expired-queued", null).timestamp = getSysTime() - 10.seconds;

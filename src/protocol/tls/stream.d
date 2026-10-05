@@ -105,6 +105,15 @@ nothrow @nogc:
         if (value is _stream)
             return null;
         release_tx_service();
+        if (auto stream = _stream.get)
+        {
+            stream.release_rx_handler(&inner_rx);
+            if (_subscribed)
+            {
+                stream.unsubscribe(&inner_state_change);
+                _subscribed = false;
+            }
+        }
         if (_conn.get !is null)
             _conn.stop();
         _stream = value;
@@ -219,6 +228,9 @@ nothrow @nogc:
             return CompletionStatus.continue_;
         }
 
+        if (_stream.rx_handler !is &inner_rx)
+            _stream.rx_handler(&inner_rx);
+
         // Start handshake timeout when the stream first becomes available.
         if (_handshake_start == SysTime())
             _handshake_start = getSysTime();
@@ -227,13 +239,7 @@ nothrow @nogc:
         {
             if (is_server)
             {
-                // Buffer ClientHello for SNI extraction
-                ubyte[8192] buf = void;
-                ptrdiff_t n = _stream.read(buf[]);
-                if (n > 0)
-                    _receive_buffer ~= buf[0 .. n];
-
-                // Wait for full TLS record
+                // Wait for the full ClientHello record, for SNI
                 if (_receive_buffer.length < 5)
                     return CompletionStatus.continue_;
                 ushort rec_len = (_receive_buffer[3] << 8) | _receive_buffer[4];
@@ -301,26 +307,21 @@ nothrow @nogc:
             }
             else version (Windows)
             {
-                while (true)
-                {
-                    ubyte[8192] read_buffer = void;
-                    ptrdiff_t bytes_received = _stream.read(read_buffer[]);
-                    if (bytes_received == 0)
-                        break;
-                    else if (bytes_received < 0)
-                    {
-                        _handshake_state = HandshakeState.failed;
-                        return CompletionStatus.error;
-                    }
-                    _receive_buffer ~= read_buffer[0 .. bytes_received];
+                if (_receive_buffer.length)
                     advance_handshake(_conn.host[], is_server);
-                }
             }
         }
 
         if (_handshake_state == HandshakeState.completed)
         {
+            // an owned connection restarts us through IPClient; a stream handed to us is watched here
+            if (!_conn.has_remote())
+            {
+                _stream.subscribe(&inner_state_change);
+                _subscribed = true;
+            }
             tx_handler_changed();
+            rx_handler_changed();
             if (_selected_cert)
                 log.info("HTTPS session on ", _stream.name, " cert='", _selected_cert.name, "'");
             else
@@ -344,7 +345,15 @@ nothrow @nogc:
 
     final override CompletionStatus shutdown()
     {
+        g_app.cancel(&resume_rx);
         release_tx_service();
+        if (auto stream = _stream.get)
+        {
+            stream.release_rx_handler(&inner_rx);
+            if (_subscribed)
+                stream.unsubscribe(&inner_state_change);
+        }
+        _subscribed = false;
         free_pending_tx();
         version (MbedTLS)
         {
@@ -358,7 +367,7 @@ nothrow @nogc:
                 FreeCredentialsHandle(&_credentials);
         }
 
-        _app_buffer.clear();
+        _receive_buffer.clear();
         _close_notify = false;
         _selected_cert = null;
         _handshake_start = SysTime();
@@ -372,149 +381,6 @@ nothrow @nogc:
         _handshake_state = HandshakeState.not_started;
 
         return CompletionStatus.complete;
-    }
-
-    final override void update()
-    {
-        if (!_stream || !_stream.running || _handshake_state == HandshakeState.failed)
-        {
-            restart();
-            return;
-        }
-
-        // After close_notify, just check if consumer drained _app_buffer
-        if (_close_notify)
-        {
-            if (_app_buffer.length == 0)
-                restart();
-            return;
-        }
-
-        version (MbedTLS)
-        {
-            ubyte[8192] read_buf = void;
-            while (true)
-            {
-                int ret = mbedtls_ssl_read(_ssl, read_buf.ptr, read_buf.length);
-                if (ret > 0)
-                    incoming_message(read_buf[0 .. ret]);
-                else if (ret == 0 || ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY)
-                {
-                    version (DebugTLS)
-                        log.trace("close_notify received");
-                    _close_notify = true;
-                    return;
-                }
-                else if (ret == MBEDTLS_ERR_SSL_WANT_READ)
-                    return;
-                else
-                {
-                    version (DebugTLS)
-                        log.trace("TLS read error: -", cast(uint)(-ret));
-                    _handshake_state = HandshakeState.failed;
-                    return;
-                }
-            }
-        }
-        else version (Windows)
-        {
-            ubyte[8192] read_buffer = void;
-            ptrdiff_t bytes_received = _stream.read(read_buffer[]);
-            if (bytes_received < 0)
-            {
-                // TODO: handle error?? restart maybe? we need a policy around this!
-                return;
-            }
-            if (bytes_received > 0)
-                _receive_buffer ~= read_buffer[0 .. bytes_received];
-
-            while (_receive_buffer.length > 0)
-            {
-                SecBuffer[4] bufs;
-                bufs[0].pvBuffer = &_receive_buffer[0];
-                bufs[0].cbBuffer = cast(ULONG)_receive_buffer.length;
-                bufs[0].BufferType = SECBUFFER_DATA;
-                bufs[1].BufferType = SECBUFFER_EMPTY;
-                bufs[2].BufferType = SECBUFFER_EMPTY;
-                bufs[3].BufferType = SECBUFFER_EMPTY;
-
-                SecBufferDesc buf_desc;
-                buf_desc.ulVersion = 0;
-                buf_desc.cBuffers = 4;
-                buf_desc.pBuffers = bufs.ptr;
-
-                auto status = DecryptMessage(&_context, &buf_desc, 0, null);
-
-                if (status == SEC_I_RENEGOTIATE)
-                {
-                    // TODO: Handle renegotiation by resetting state
-                    log.warning("renegotiation requested (not supported)");
-                    _handshake_state = HandshakeState.failed;
-                    return;
-                }
-                else if (status == SEC_I_CONTEXT_EXPIRED)
-                {
-                    version (DebugTLS)
-                        log.trace("close_notify received");
-                    _receive_buffer.clear();
-                    _close_notify = true;
-                    return;
-                }
-                else if (status == SEC_E_INCOMPLETE_MESSAGE)
-                {
-                    // Not enough data to form a full TLS record, wait for more.
-                    return;
-                }
-
-                if (status != SEC_E_OK)
-                {
-                    log.warningf("decryption failed, status={0,08x}", cast(uint)status);
-                    _handshake_state = HandshakeState.failed;
-                    _receive_buffer.clear();
-                    return;
-                }
-
-                // Find and process the decrypted application data.
-                SecBuffer* data_buf = null;
-                for (int i = 0; i < 4; ++i)
-                {
-                    if (bufs[i].BufferType == SECBUFFER_DATA)
-                    {
-                        data_buf = &bufs[i];
-                        break;
-                    }
-                }
-
-                if (data_buf !is null)
-                    incoming_message( (cast(ubyte*)data_buf.pvBuffer)[0 .. data_buf.cbBuffer] );
-
-                // Find any leftover data from the transport.
-                SecBuffer* extra_buf = null;
-                for (int i = 0; i < 4; ++i)
-                {
-                    if (bufs[i].BufferType == SECBUFFER_EXTRA)
-                    {
-                        extra_buf = &bufs[i];
-                        break;
-                    }
-                }
-
-                if (extra_buf !is null)
-                    _receive_buffer.remove(0, _receive_buffer.length - extra_buf.cbBuffer);
-                else
-                    _receive_buffer.clear();
-            }
-        }
-    }
-
-    final override ptrdiff_t read(void[] buffer)
-    {
-        if (_app_buffer.length == 0)
-            return 0;
-        size_t n = buffer.length < _app_buffer.length ? buffer.length : _app_buffer.length;
-        buffer[0 .. n] = _app_buffer[0 .. n];
-        _app_buffer.remove(0, n);
-        return n;
     }
 
     final override ptrdiff_t write(const(void[])[] data...)
@@ -576,17 +442,16 @@ nothrow @nogc:
         return _conn.has_remote;
     }
 
-    final override ptrdiff_t pending()
-        => _app_buffer.length;
-
-    final override ptrdiff_t flush()
-    {
-        size_t n = _app_buffer.length;
-        _app_buffer.clear();
-        return n;
-    }
-
 protected:
+
+    // a consumer that returns is served on the next pass, and the transport reads again after it
+    final override void rx_handler_changed()
+    {
+        if (!rx_handler || _handshake_state != HandshakeState.completed || _close_notify)
+            return;
+        g_app.cancel(&resume_rx);
+        g_app.schedule(getTime(), &resume_rx);
+    }
 
     final override void tx_handler_changed()
     {
@@ -602,13 +467,14 @@ protected:
 private:
     IPClient _conn;
     bool _close_notify = false;
+    bool _decrypting;
+    bool _subscribed;
     TxStatus _tx_pending_status;
 
     Array!(ObjectRef!Certificate) _certificates;
     BaseObject _selected_cert;
     ObjectRef!Stream _stream;
     Array!ubyte _receive_buffer;
-    Array!ubyte _app_buffer;
     Page* _tx_pending;
     SysTime _handshake_start;
 
@@ -704,9 +570,160 @@ private:
         }
     }
 
-    void incoming_message(const(void)[] message)
+    void inner_state_change(ActiveObject, StateSignal signal)
     {
-        _app_buffer ~= cast(const(ubyte)[])message;
+        if (signal != StateSignal.offline)
+            return;
+        // a temporary stream destroys itself as it goes offline, so it is let go rather than destroyed again
+        Stream stream = _stream.get;
+        if (stream && (stream.flags & ObjectFlags.temporary))
+        {
+            stream.release_rx_handler(&inner_rx);
+            stream.unsubscribe(&inner_state_change);
+            _subscribed = false;
+            _stream = null;
+        }
+        restart();
+    }
+
+    // once established, ciphertext is read only while there is a consumer for the plaintext
+    void inner_rx(Stream stream, const(void)[] data, MonoTime rx_time)
+    {
+        _receive_buffer ~= cast(const(ubyte)[])data;
+        if (_handshake_state != HandshakeState.completed || _close_notify)
+            return;
+        if (rx_handler)
+            decrypt_received(rx_time);
+        if (!rx_handler)
+            stream.release_rx_handler(&inner_rx);
+    }
+
+    void resume_rx(MonoTime now)
+    {
+        Stream stream = _stream.get;
+        if (!stream || !rx_handler || _handshake_state != HandshakeState.completed || _close_notify)
+            return;
+        decrypt_received(now);
+        if (rx_handler && _handshake_state == HandshakeState.completed && !_close_notify && stream.rx_handler !is &inner_rx)
+            stream.rx_handler(&inner_rx);
+    }
+
+    // ciphertext waits in the receive buffer until this stream has a consumer for the plaintext
+    void decrypt_received(MonoTime rx_time)
+    {
+        // a consumer that re-arms from inside its delivery is served by the loop already running
+        if (_decrypting)
+            return;
+        _decrypting = true;
+        scope (exit)
+        {
+            _decrypting = false;
+            if (_close_notify || _handshake_state == HandshakeState.failed)
+                restart_deferred();
+        }
+
+        version (MbedTLS)
+        {
+            ubyte[8192] read_buf = void;
+            while (rx_handler)
+            {
+                int ret = mbedtls_ssl_read(_ssl, read_buf.ptr, read_buf.length);
+                if (ret > 0)
+                {
+                    incoming(read_buf[0 .. ret], rx_time);
+                    if (_handshake_state != HandshakeState.completed)
+                        return;   // the consumer ended the session
+                }
+                else if (ret == 0 || ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY)
+                {
+                    version (DebugTLS)
+                        log.trace("close_notify received");
+                    _close_notify = true;
+                    return;
+                }
+                else if (ret == MBEDTLS_ERR_SSL_WANT_READ)
+                    return;
+                else
+                {
+                    version (DebugTLS)
+                        log.trace("TLS read error: -", cast(uint)(-ret));
+                    _handshake_state = HandshakeState.failed;
+                    return;
+                }
+            }
+        }
+        else version (Windows)
+        {
+            while (rx_handler && _receive_buffer.length > 0)
+            {
+                SecBuffer[4] bufs;
+                bufs[0].pvBuffer = &_receive_buffer[0];
+                bufs[0].cbBuffer = cast(ULONG)_receive_buffer.length;
+                bufs[0].BufferType = SECBUFFER_DATA;
+                bufs[1].BufferType = SECBUFFER_EMPTY;
+                bufs[2].BufferType = SECBUFFER_EMPTY;
+                bufs[3].BufferType = SECBUFFER_EMPTY;
+
+                SecBufferDesc buf_desc;
+                buf_desc.ulVersion = 0;
+                buf_desc.cBuffers = 4;
+                buf_desc.pBuffers = bufs.ptr;
+
+                auto status = DecryptMessage(&_context, &buf_desc, 0, null);
+
+                if (status == SEC_I_RENEGOTIATE)
+                {
+                    // TODO: Handle renegotiation by resetting state
+                    log.warning("renegotiation requested (not supported)");
+                    _handshake_state = HandshakeState.failed;
+                    return;
+                }
+                else if (status == SEC_I_CONTEXT_EXPIRED)
+                {
+                    version (DebugTLS)
+                        log.trace("close_notify received");
+                    _receive_buffer.clear();
+                    _close_notify = true;
+                    return;
+                }
+                else if (status == SEC_E_INCOMPLETE_MESSAGE)
+                {
+                    // Not enough data to form a full TLS record, wait for more.
+                    return;
+                }
+
+                if (status != SEC_E_OK)
+                {
+                    log.warningf("decryption failed, status={0,08x}", cast(uint)status);
+                    _handshake_state = HandshakeState.failed;
+                    _receive_buffer.clear();
+                    return;
+                }
+
+                SecBuffer* data_buf = null;
+                SecBuffer* extra_buf = null;
+                foreach (ref buf; bufs)
+                {
+                    if (buf.BufferType == SECBUFFER_DATA && !data_buf)
+                        data_buf = &buf;
+                    else if (buf.BufferType == SECBUFFER_EXTRA && !extra_buf)
+                        extra_buf = &buf;
+                }
+                size_t extra = extra_buf ? extra_buf.cbBuffer : 0;
+
+                if (data_buf)
+                {
+                    incoming((cast(ubyte*)data_buf.pvBuffer)[0 .. data_buf.cbBuffer], rx_time);
+                    if (_handshake_state != HandshakeState.completed)
+                        return;   // the consumer ended the session
+                }
+
+                if (extra)
+                    _receive_buffer.remove(0, _receive_buffer.length - extra);
+                else
+                    _receive_buffer.clear();
+            }
+        }
     }
 
     Certificate select_certificate()
@@ -1341,7 +1358,6 @@ version (MbedTLS)
     {
         auto self = cast(TLSStream)ctx;
 
-        // drain any pre-buffered data (e.g., ClientHello read before mbedtls init)
         if (self._receive_buffer.length > 0)
         {
             size_t n = len < self._receive_buffer.length ? len : self._receive_buffer.length;
@@ -1350,9 +1366,6 @@ version (MbedTLS)
             return cast(int)n;
         }
 
-        ptrdiff_t n = self._stream.read(buf[0 .. len]);
-        if (n > 0)
-            return cast(int)n;
         return MBEDTLS_ERR_SSL_WANT_READ;
     }
 
@@ -1475,6 +1488,20 @@ unittest
     assert(tls._tx_pending is null && tls._handshake_state == TLSStream.HandshakeState.failed);
     ubyte[1] more;
     assert(tls.write(more[]) == -1);
+
+    // once established, ciphertext that arrives with no consumer pauses the transport, so no more is read
+    {
+        TLSStream session = alloc!TLSStream(CID(3));
+        scope (exit) free(session);
+        PushOnlyStream transport = alloc!PushOnlyStream(CID(4));
+        scope (exit) free(transport);
+        session._handshake_state = TLSStream.HandshakeState.completed;
+        transport.rx_handler(&session.inner_rx);
+        ubyte[4] record = [23, 3, 3, 0];
+        session.inner_rx(transport, record[], MonoTime());
+        assert(session._receive_buffer[] == record[] && transport.rx_handler is null);
+        session._receive_buffer.clear();
+    }
 }
 
 }

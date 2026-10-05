@@ -136,6 +136,7 @@ nothrow @nogc:
             return "stream cannot be null";
         if (_stream is value)
             return null;
+        drop_stream();
         _stream = value;
         _adapter = String();
         mark_set!(typeof(this), [ "stream", "adapter" ])();
@@ -177,7 +178,7 @@ nothrow @nogc:
             _can_port = value.empty ? -1 : cast(byte)(value[4] - '0');
         if (!value.empty)
         {
-            _stream = null;
+            drop_stream();
             _protocol = CANInterfaceProtocol.unknown;
         }
         mark_set!(typeof(this), [ "adapter", "stream", "protocol" ])();
@@ -316,9 +317,10 @@ protected:
 
         if (!_stream)
             return CompletionStatus.error;
-        if (_stream.running)
-            return CompletionStatus.complete;
-        return CompletionStatus.continue_;
+        if (!_stream.running)
+            return CompletionStatus.continue_;
+        _stream.rx_handler(&stream_rx);
+        return CompletionStatus.complete;
     }
 
     override void online()
@@ -335,6 +337,8 @@ protected:
 
     override CompletionStatus shutdown()
     {
+        if (Stream s = _stream)
+            s.release_rx_handler(&stream_rx);
         _tail_bytes = 0;
         _resyncing = false;
         static if (has_socketcan)
@@ -382,111 +386,6 @@ protected:
             return restart();
 
         super.update();
-
-        MonoTime now = getTime();
-
-        // check for data
-        ubyte[1024] buffer = void;
-        buffer[0 .. _tail_bytes] = _tail[0 .. _tail_bytes];
-        ptrdiff_t readOffset = _tail_bytes;
-        ptrdiff_t length = _tail_bytes;
-        _tail_bytes = 0;
-        read_loop: while (true)
-        {
-            assert(length < LargestProtocolFrame);
-
-            ptrdiff_t r = stream.read(buffer[readOffset .. $]);
-            if (r < 0)
-            {
-                assert(false, "TODO: what causes read to fail?");
-                break read_loop;
-            }
-            if (r == 0)
-            {
-                // if there were no extra bytes available, stash the _tail until later
-                _tail[0 .. length] = buffer[0 .. length];
-                _tail_bytes = cast(ushort)length;
-                break read_loop;
-            }
-            length += r;
-            assert(length <= buffer.sizeof);
-
-            // TODO: implement stream dump...
-//            if (connParams.logDataStream)
-//                logStream.rawWrite(buffer[0 .. length]);
-
-            Packet packet;
-
-            size_t offset = 0;
-            parse_loop: while (offset < length)
-            {
-                ref CANFrame can = packet.init!CANFrame(null, now);
-
-                size_t taken = 0;
-                switch (protocol)
-                {
-                    case CANInterfaceProtocol.ebyte:
-                        if (length - offset < EbyteFrameSize)
-                            break parse_loop;
-
-                        const ubyte[] ebyte_frame = buffer[offset .. offset + EbyteFrameSize];
-                        if (!validate_ebyte_frame(ebyte_frame))
-                        {
-                            // out of sync; slide one byte and try again
-                            if (!_resyncing)
-                            {
-                                add_rx_drop();
-                                _resyncing = true;
-                            }
-                            ++offset;
-                            continue parse_loop;
-                        }
-
-                        // confidence check: if any bytes follow, validate as much of the next frame as we can
-                        size_t next = offset + EbyteFrameSize;
-                        if (next < length)
-                        {
-                            size_t avail = length - next;
-                            if (!validate_ebyte_frame(buffer[next .. next + min(avail, EbyteFrameSize)]))
-                            {
-                                if (!_resyncing)
-                                {
-                                    add_rx_drop();
-                                    _resyncing = true;
-                                }
-                                ++offset;
-                                continue parse_loop;
-                            }
-                        }
-
-                        _resyncing = false;
-
-                        can.remote_transmission_request = (ebyte_frame[0] & 0x40) != 0;
-                        can.extended = (ebyte_frame[0] & 0x80) != 0;
-                        can.id = ebyte_frame[1 .. 5].bigEndianToNative!uint;
-                        packet.data = ebyte_frame[5 .. 5 + (ebyte_frame[0] & 0xF)];
-                        taken = EbyteFrameSize;
-                        break;
-
-                    default:
-                        assert(false);
-                }
-
-                offset += taken;
-
-                version (DebugCANInterface)
-                    writeDebug("CAN packet received from interface '", name, "': id=", can.id, " (", packet.length , ")[ ", packet.data, " - ", packet.data.bin_to_ascii(), " ]");
-
-                incoming_packet(packet);
-            }
-
-            // shuffle remaining unparsed bytes to the front for the next read
-            size_t remain = length - offset;
-            if (remain > 0 && offset > 0)
-                memmove(buffer.ptr, buffer.ptr + offset, remain);
-            length = remain;
-            readOffset = remain;
-        }
     }
 
     override int transmit(ref const Packet packet, MessageCallback, const(QueuePolicy)*)
@@ -609,6 +508,7 @@ protected:
     }
 
 private:
+
     String _adapter;
     ObjectRef!Stream _stream;
     uint _baud_rate = has_socketcan ? 0 : 500_000;
@@ -627,6 +527,102 @@ private:
     Can _can;
     shared uint _native_rx_pending;
     shared uint _native_rx_retry;
+
+    void drop_stream()
+    {
+        if (Stream s = _stream)
+            s.release_rx_handler(&stream_rx);
+        _stream = null;
+    }
+
+    void stream_rx(Stream, const(void)[] data, MonoTime rx_time)
+    {
+        const(ubyte)[] input = cast(const(ubyte)[])data;
+        ubyte[1024] buffer = void;
+        buffer[0 .. _tail_bytes] = _tail[0 .. _tail_bytes];
+        size_t length = _tail_bytes;
+        while (input.length)
+        {
+            assert(length < LargestProtocolFrame);
+            size_t take = input.length < buffer.length - length ? input.length : buffer.length - length;
+            buffer[length .. length + take] = input[0 .. take];
+            input = input[take .. $];
+            length += take;
+
+            Packet packet;
+
+            size_t offset = 0;
+            parse_loop: while (offset < length)
+            {
+                ref CANFrame can = packet.init!CANFrame(null, rx_time);
+
+                size_t taken = 0;
+                switch (protocol)
+                {
+                    case CANInterfaceProtocol.ebyte:
+                        if (length - offset < EbyteFrameSize)
+                            break parse_loop;
+
+                        const ubyte[] ebyte_frame = buffer[offset .. offset + EbyteFrameSize];
+                        if (!validate_ebyte_frame(ebyte_frame))
+                        {
+                            // out of sync; slide one byte and try again
+                            if (!_resyncing)
+                            {
+                                add_rx_drop();
+                                _resyncing = true;
+                            }
+                            ++offset;
+                            continue parse_loop;
+                        }
+
+                        // confidence check: if any bytes follow, validate as much of the next frame as we can
+                        size_t next = offset + EbyteFrameSize;
+                        if (next < length)
+                        {
+                            size_t avail = length - next;
+                            if (!validate_ebyte_frame(buffer[next .. next + min(avail, EbyteFrameSize)]))
+                            {
+                                if (!_resyncing)
+                                {
+                                    add_rx_drop();
+                                    _resyncing = true;
+                                }
+                                ++offset;
+                                continue parse_loop;
+                            }
+                        }
+
+                        _resyncing = false;
+
+                        can.remote_transmission_request = (ebyte_frame[0] & 0x40) != 0;
+                        can.extended = (ebyte_frame[0] & 0x80) != 0;
+                        can.id = ebyte_frame[1 .. 5].bigEndianToNative!uint;
+                        packet.data = ebyte_frame[5 .. 5 + (ebyte_frame[0] & 0xF)];
+                        taken = EbyteFrameSize;
+                        break;
+
+                    default:
+                        assert(false);
+                }
+
+                offset += taken;
+
+                version (DebugCANInterface)
+                    writeDebug("CAN packet received from interface '", name, "': id=", can.id, " (", packet.length , ")[ ", packet.data, " - ", packet.data.bin_to_ascii(), " ]");
+
+                incoming_packet(packet);
+            }
+
+            // shuffle remaining unparsed bytes to the front for the next chunk
+            size_t remain = length - offset;
+            if (remain > 0 && offset > 0)
+                memmove(buffer.ptr, buffer.ptr + offset, remain);
+            length = remain;
+        }
+        _tail[0 .. length] = buffer[0 .. length];
+        _tail_bytes = cast(ushort)length;
+    }
 
     static bool valid_adapter_name(const(char)[] value)
     {

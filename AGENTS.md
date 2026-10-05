@@ -179,7 +179,10 @@ OpenWatt is event-driven. New code never polls; work is initiated by data arriva
 timers, and completion callbacks:
 
 - **Bytes push**: install `stream.rx_handler(&handler)` (release it in `shutdown()`); the reactor
-  delivers data the moment it arrives. Never call `stream.read()` from a tick.
+  delivers data the moment it arrives. It is the only way bytes leave a stream, and bytes that
+  arrive with no handler installed are not kept: TCP holds them in its window, a device drops
+  them. A filter installs its handler on the inner stream only while it has a consumer itself. A
+  source with no receive event overrides `rx_poll_interval()` and `poll_rx()`.
 - **Packets push**: subscribe to the interface with a `PacketFilter`; handlers fire on dispatch.
 - **State pushes**: subscribe `StateSignal` handlers; never poll `dependency.running` (see
   ObjectRef section below).

@@ -272,6 +272,7 @@ protected:
         if (!_subscribed)
         {
             _stream.subscribe(&stream_state_change);
+            _stream.rx_handler(&stream_rx);
             _subscribed = true;
         }
 
@@ -283,9 +284,6 @@ protected:
             _last_contact = getTime();
             _connect_deadline = _last_contact + connect_timeout_secs.seconds;
         }
-
-        if (!pump_reads())
-            return CompletionStatus.error;
 
         if (_state == ClientState.active)
         {
@@ -323,12 +321,6 @@ protected:
             return;
         }
 
-        if (!pump_reads())
-        {
-            restart();
-            return;
-        }
-
         MonoTime now = getTime();
         if (_keep_alive != 0)
         {
@@ -356,7 +348,6 @@ private:
     }
 
     enum int connect_timeout_secs = 10;
-    enum size_t read_chunk_size   = 4096;
     enum size_t max_packet_size   = 256 * 1024;
 
     struct ClientSubscription
@@ -412,6 +403,7 @@ private:
     {
         if (_subscribed && _stream)
         {
+            _stream.release_rx_handler(&stream_rx);
             _stream.unsubscribe(&stream_state_change);
             _subscribed = false;
         }
@@ -428,22 +420,16 @@ private:
             restart();
     }
 
-    bool pump_reads()
+    void stream_rx(Stream, const(void)[] data, MonoTime rx_time)
     {
-        ubyte[read_chunk_size] scratch = void;
-        for (;;)
-        {
-            ptrdiff_t n = _stream.read(scratch[]);
-            if (n < 0)
-                return false;
-            if (n == 0)
-                break;
-            _parse_buf ~= scratch[0 .. n];
-            _last_contact = getTime();
-            if (_parse_buf.length > max_packet_size)
-                return false;
-        }
+        _parse_buf ~= cast(const(ubyte)[])data;
+        _last_contact = rx_time;
+        if (_parse_buf.length > max_packet_size || !parse_received())
+            restart();
+    }
 
+    bool parse_received()
+    {
         const(ubyte)[] view = _parse_buf[];
         while (view.length > 0)
         {

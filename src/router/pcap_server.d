@@ -145,12 +145,14 @@ private:
         bool capturing;
 
         Array!ubyte tail;
+        enum size_t max_request = 16 * 1024;
 
         this(PCAPServer server, Stream stream)
         {
             this.server = server;
             this.stream = stream;
             stream.subscribe(&stream_destroyed);
+            stream.rx_handler(&stream_rx);
         }
 
         void close()
@@ -178,6 +180,7 @@ private:
 
             if (stream)
             {
+                stream.release_rx_handler(&stream_rx);
                 stream.unsubscribe(&stream_destroyed);
                 stream.destroy();
                 stream = null;
@@ -185,35 +188,21 @@ private:
         }
 
         int update()
+            => stream ? 0 : -1;
+
+        void stream_rx(Stream, const(void)[] data, MonoTime)
         {
-            if (!stream)
-                return -1;
+            tail ~= cast(const(ubyte)[])data;
+            if (tail.length > max_request)
+                return close();
 
-            ubyte[1024] buffer = void;
-            size_t buf_len = 0;
-
-            if (!tail.empty)
+            ubyte[] buf = tail[];
+            while (stream && buf.length >= RpcapHeader.sizeof)
             {
-                buf_len = tail.length;
-                buffer[0 .. buf_len] = tail[];
-                tail.clear();
-            }
-
-            while (buf_len < buffer.length)
-            {
-                ptrdiff_t n = stream.read(buffer[buf_len .. $]);
-                if (n <= 0)
+                auto hdr = buf[0 .. RpcapHeader.sizeof].bigEndianToNative!RpcapHeader;
+                if (buf.length - RpcapHeader.sizeof < hdr.plen)
                     break;
-                buf_len += n;
-            }
-
-            ubyte[] buf = buffer[0 .. buf_len];
-            while (buf.length >= RpcapHeader.sizeof)
-            {
-                auto hdr = buf.takeFront!(RpcapHeader.sizeof).bigEndianToNative!RpcapHeader;
-
-                if (buf.length < hdr.plen)
-                    break;
+                buf = buf[RpcapHeader.sizeof .. $];
                 ubyte[] payload = buf.takeFront(hdr.plen);
 
                 switch (hdr.type)
@@ -248,10 +237,7 @@ private:
                 }
             }
 
-            if (!buf.empty)
-                tail = buf[];
-
-            return 0;
+            tail.remove(0, tail.length - buf.length);
         }
 
         void handle_auth(ubyte[] payload)
