@@ -684,6 +684,18 @@ protected:
     }
 
     pragma(inline, true)
+    void mark_unset(T, string[] props)() nothrow @nogc
+    {
+        enum mask = prop_mask!(T, props);
+        _props_set &= ~mask;
+        _mark_dirty(mask);
+    }
+    void mark_unset(T, string prop)() nothrow @nogc
+    {
+        return mark_unset!(T, [ prop ])();
+    }
+
+    pragma(inline, true)
     void mark_assigned(T, string[] props)() nothrow @nogc
     {
         _props_set |= prop_mask!(T, props);
