@@ -145,9 +145,7 @@ private:
         set_kernel_ifindex(int(info.if_index), int(info.if_index6));
         if (info.mac != MACAddress())
             adopt_mac(info.mac);
-        AdapterChange c = apply_os_adapter_info(this, _l2mtu, _max_l2mtu, _status, info);
-        if (c & AdapterChange.mtu)       mark_set!(typeof(this), [ "l2mtu", "actual-mtu" ])();
-        if (c & AdapterChange.max_mtu)   mark_set!(typeof(this), "max-l2mtu")();
+        AdapterChange c = apply_os_adapter_info(this, _status, info);
         if (c & AdapterChange.connected) { mark_set!(typeof(this), "connected")(); write_status(); }
         set_link_speed(info.tx_link_speed, info.rx_link_speed);
     }

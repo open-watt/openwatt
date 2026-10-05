@@ -113,9 +113,7 @@ nothrow @nogc:
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!UDPInterface, id, flags);
-        _max_l2mtu = max_udp_payload;
-        l2mtu = default_payload_v4;
-        mark_set!(typeof(this), "max-l2mtu")();
+        set_l2mtu(default_payload_v4);
     }
 
     final inout(EthernetStation) iface() inout pure
@@ -300,10 +298,7 @@ protected:
             return CompletionStatus.error;
         }
 
-        if (family == AddressFamily.ipv6 && _l2mtu == default_payload_v4)
-            l2mtu = default_payload_v6;
-        else if (family == AddressFamily.ether && _l2mtu == default_payload_v4)
-            l2mtu = default_payload_ether;
+        set_l2mtu(family == AddressFamily.ipv6 ? default_payload_v6 : family == AddressFamily.ether ? default_payload_ether : default_payload_v4);
 
         if (_bound)
         {
@@ -355,7 +350,7 @@ protected:
             return -1;
         }
 
-        if (dst.family <= AddressFamily.unspecified || packet.data.length > actual_mtu)
+        if (dst.family <= AddressFamily.unspecified)
         {
             add_tx_drop();
             return -1;
@@ -371,7 +366,6 @@ protected:
     }
 
 private:
-    enum max_udp_payload = 65_507;
     enum default_payload_v4 = 1500 - 28; // 1500 link MTU less IPv4 + UDP headers
     enum default_payload_v6 = 1500 - 48;
     enum default_payload_ether = 1500 - 14; // ow framing + transport protocol + UDP header

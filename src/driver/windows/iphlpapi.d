@@ -316,37 +316,18 @@ const(char)[] parse_npf_guid(const(char)[] adapter_name) pure
     return adapter_name[prefix.length .. $];
 }
 
-// Max L2 MTU we'll declare on Windows. 9000 is the practical jumbo ceiling
-// that essentially any modern Windows NIC driver accepts; going higher (e.g.
-// 9216) is rejected by some drivers. There's no userland API to query the
-// adapter's true max, so this is a safe upper bound.
-enum WINDOWS_MAX_L2MTU = 9000;
-
 // link speed is not in here: it goes to the interface through set_link_speed(), which propagates it
 // to anything layered above, and lets a driver with a better source than the adapter table (wifi
 // reads the association) simply not call this with it
 enum AdapterChange : uint
 {
     none      = 0,
-    mtu       = 1 << 0,
-    max_mtu   = 1 << 1,
-    connected = 1 << 2,
+    connected = 1 << 0,
 }
 
-AdapterChange apply_os_adapter_info(BaseInterface iface, ref ushort l2mtu, ref ushort max_l2mtu, ref IfStatus status, ref const OSAdapterInfo info)
+AdapterChange apply_os_adapter_info(BaseInterface iface, ref IfStatus status, ref const OSAdapterInfo info)
 {
     AdapterChange changed;
-
-    if (info.mtu != 0 && info.mtu != l2mtu)
-    {
-        l2mtu = cast(ushort)info.mtu;
-        changed |= AdapterChange.mtu;
-    }
-    if (max_l2mtu != WINDOWS_MAX_L2MTU)
-    {
-        max_l2mtu = WINDOWS_MAX_L2MTU;
-        changed |= AdapterChange.max_mtu;
-    }
 
     if (status.connected != info.connection)
     {

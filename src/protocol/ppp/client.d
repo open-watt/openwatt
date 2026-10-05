@@ -31,7 +31,7 @@ nothrow @nogc:
         super(collection_type_info!PPPClient, id, flags);
 
         // Default protocol is PPP
-        mtu = 1500;
+        set_l2mtu(1500);
     }
 
     // Properties...
@@ -211,7 +211,7 @@ nothrow @nogc:
         super(collection_type_info!PPPoEClient, id, flags);
 
         // Default protocol is PPPoE
-        mtu = 1492; // TODO: what about 'baby jumbo' (RFC 4638) which supports 1500 inside pppoe?
+        set_l2mtu(1492); // TODO: what about 'baby jumbo' (RFC 4638) which supports 1500 inside pppoe?
     }
 
     ~this()

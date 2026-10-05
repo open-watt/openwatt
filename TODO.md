@@ -1284,6 +1284,16 @@ this is what remains.
 
 ## Infrastructure
 
+- **Interface sizes the MTU work left open** (2026-10-06): `l2mtu` should be writable on Ethernet,
+  where jumbo frames make it meaningful, and read-only elsewhere, with `max-l2mtu` (the largest
+  jumbo the hardware takes) present only there; the property system cannot yet let a derived class
+  add a setter to an inherited read-only property (it would redeclare the name and replace the entry
+  at its index). Jumbo frames also need the Ethernet `medium_tx` frame buffer (1522 bytes) sized
+  from the hardware. Setting `mtu` back to its default on Linux never restores the OS value.
+  Zigbee's 90-byte APS frame assumes the minimum NWK header; source routing or a longer APS header
+  leaves less. Tesla TWC transmits its checksum byte unescaped, so a checksum of `0xC0` or `0xDB`
+  corrupts the frame.
+
 - **urt's platforms.mk drops MbedTLS when a caller sets `VERSIONS`**: it appends `MbedTLS` to
   `VERSIONS` with a plain assignment, which a command-line `VERSIONS` overrides, so
   `VERSIONS=Foo` on an mbedTLS platform builds without `version (MbedTLS)`. Add it to `DFLAGS`

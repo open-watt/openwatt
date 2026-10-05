@@ -119,8 +119,7 @@ nothrow @nogc:
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!I2CInterface, id, flags);
-        _max_l2mtu = 4096;
-        _l2mtu = 256;
+        set_l2mtu(256);
         mark_set!(typeof(this), "max-l2mtu")();
 
         _queue.init(1, 0, PCP.vo, this);
@@ -297,7 +296,7 @@ protected:
         ref frame = packet.hdr!I2CFrame;
         bool ten_bit = (frame.flags & I2CFrameFlags.ten_bit_address) != 0;
         if (frame.type != I2CFrameType.request || (packet.data.length == 0 && frame.read_length == 0) ||
-            packet.data.length > l2mtu || frame.read_length > l2mtu || (!ten_bit && frame.address > 0x7F) || (ten_bit && frame.address > 0x3FF))
+            frame.read_length > l2mtu || (!ten_bit && frame.address > 0x7F) || (ten_bit && frame.address > 0x3FF))
         {
             add_tx_drop();
             return -1;

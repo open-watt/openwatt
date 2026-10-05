@@ -122,15 +122,7 @@ nothrow @nogc:
     {
         super(collection_type_info!CANInterface, id, flags);
 
-        // this is the proper value for canbus, irrespective of the L2 MTU
-        // can jumbo's are theoretically possible if all hops support it... (fragmentation is not possible (?))
-        mtu = 8; // or 64 for FD-CAN...
-
-        // this would be 8 or 64 for physical canbus, or larger if another carrier...?
-        _max_l2mtu = mtu;
-        l2mtu = _max_l2mtu;
-
-        mark_set!(typeof(this), "max-l2mtu")();
+        set_l2mtu(8); // 64 for CAN FD
     }
 
 
@@ -506,13 +498,6 @@ protected:
             return -1;
         }
 
-        if (packet.data.length > 8)
-        {
-            version (DebugCANInterface)
-                writeDebug("CAN packet dropped on interface '", name, "': invalid frame - data too long");
-            add_tx_drop();
-            return -1;
-        }
 
         ref can = packet.hdr!CANFrame;
 

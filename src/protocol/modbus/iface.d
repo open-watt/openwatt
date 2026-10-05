@@ -129,11 +129,9 @@ nothrow @nogc:
 
         // this is the proper value for modbus, irrespective of the L2 MTU
         // modbus jumbo's are theoretically possible if all hops support it... (fragmentation is not possible)
-        _mtu = 253; // function + 252 byte payload (address is considered framing (?))
+        set_l2mtu(253); // function + 252 byte payload; the address is framing
 
         // this would be 253 for the RS485 bus, or larger if another carrier...?
-        _max_l2mtu = _mtu;
-        _l2mtu = _max_l2mtu;
 
         mark_set!(typeof(this), "max-l2mtu")();
 

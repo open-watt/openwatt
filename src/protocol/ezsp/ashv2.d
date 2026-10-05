@@ -44,6 +44,7 @@ nothrow @nogc:
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!ASHInterface, id, flags);
+        set_l2mtu(ASH_MAX_MSG_LENGTH);
         _caps |= InterfaceCaps.reliable | InterfaceCaps.ordered;
         mark_set!(typeof(this), "caps")();
     }
@@ -257,8 +258,6 @@ protected:
         if (packet.type != PacketType.raw)
             return -1;
         const(ubyte)[] message = cast(ubyte[])packet.data();
-        if (message.length > ASH_MAX_MSG_LENGTH)
-            return -1;
 
         // bound the tx queue; unbounded growth during a link stall just delays failure detection
         if (_tx_queue_len >= max_tx_queue)

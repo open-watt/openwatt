@@ -601,15 +601,13 @@ private:
         OSAdapterInfo info;
         if (!query_adapter(_netdev[], info))
             return;
-        AdapterChange c = apply_os_adapter_info(this, _l2mtu, _max_l2mtu, _status, info);
-        if (c & AdapterChange.mtu)       mark_set!(typeof(this), [ "l2mtu", "actual-mtu" ])();
-        if (c & AdapterChange.max_mtu)   mark_set!(typeof(this), "max-l2mtu")();
+        AdapterChange c = apply_os_adapter_info(this, _status, info);
         if (c & AdapterChange.connected) mark_set!(typeof(this), "connected")();
     }
 
     void apply_configured_mtu()
     {
-        if (_mtu == 0 || _netdev.empty)
+        if (!mtu_configured || _netdev.empty)
             return;
         if (!set_adapter_mtu(_netdev[], actual_mtu))
             log.warning("failed to set MTU ", actual_mtu, " on '", _netdev, "'");
@@ -1441,7 +1439,7 @@ private:
 
     void apply_configured_mtu()
     {
-        if (_mtu == 0)
+        if (!mtu_configured)
             return;
         auto r = dyn_cast!LinuxWifiRadio(radio);
         if (!r)
@@ -1460,9 +1458,7 @@ private:
             return;
         // note the sysfs path carries no link speed: /sys/class/net/<if>/speed is an ethtool field
         // that wireless drivers leave at -1 or stale. refresh_link_rate() owns the rate here.
-        AdapterChange c = apply_os_adapter_info(this, _l2mtu, _max_l2mtu, _status, info);
-        if (c & AdapterChange.mtu)     mark_set!(typeof(this), [ "l2mtu", "actual-mtu" ])();
-        if (c & AdapterChange.max_mtu) mark_set!(typeof(this), "max-l2mtu")();
+        AdapterChange c = apply_os_adapter_info(this, _status, info);
     }
 
     void open_link_socket()
@@ -1990,7 +1986,7 @@ private:
 
     void apply_configured_mtu()
     {
-        if (_mtu == 0)
+        if (!mtu_configured)
             return;
         auto vif = current_vif();
         if (vif.length == 0)
@@ -2004,9 +2000,7 @@ private:
         OSAdapterInfo info;
         if (!query_adapter(vif, info))
             return;
-        AdapterChange c = apply_os_adapter_info(this, _l2mtu, _max_l2mtu, _status, info);
-        if (c & AdapterChange.mtu)     mark_set!(typeof(this), [ "l2mtu", "actual-mtu" ])();
-        if (c & AdapterChange.max_mtu) mark_set!(typeof(this), "max-l2mtu")();
+        AdapterChange c = apply_os_adapter_info(this, _status, info);
     }
 
     void register_fdwatch()

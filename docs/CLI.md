@@ -576,10 +576,10 @@ managed-item properties above:
 | Property | Access | Description |
 | --- | --- | --- |
 | `caps` | read-only | Interface capability flags. |
-| `actual-mtu` | read-only | Effective MTU after resolving an automatic `mtu`. |
-| `mtu` | read/write | Configured MTU; `0` uses `l2mtu`. |
-| `l2mtu` | read/write | Link-layer MTU in bytes. |
-| `max-l2mtu` | read-only | Maximum link-layer MTU reported by the driver; `0` when unknown. |
+| `actual-mtu` | read-only | The largest packet the interface sends: the smaller of `mtu` and `l2mtu` less the frame header the interface adds (14 on Ethernet, 0 elsewhere). A larger packet is dropped and counted in `tx-dropped`. |
+| `mtu` | read/write | The packet size requested from and accepted by producers. It may exceed `l2mtu`, which then bounds `actual-mtu`, so a configured value survives a link whose capacity changes. Until set it follows the link: `l2mtu` less the frame header, or 1500 where nothing limits the link. |
+| `l2mtu` | read-only | What the link carries, set by the driver: the 1514-byte frame on Ethernet and WiFi (header included, FCS excluded), the link's own limit elsewhere (CAN 8, BLE 251 for the largest LL data payload, CPC 256 or less after its handshake), and 65535 where the interface imposes none (bridge, WebSocket). A VLAN reports its parent's, less 4 on an Ethernet port or bridge with a finite size. |
+| `max-l2mtu` | read-only | Set by the driver beside `l2mtu` and equal to it for now; a VLAN derives it from its parent's as it does `l2mtu`. It will carry the hardware's largest jumbo once `l2mtu` is writable on Ethernet. |
 | `pcap` | write-only | Attaches the interface to a named packet capture. |
 | `led` | read/write | A [`Light`](COMPONENT_TEMPLATES.md#light) that shows the link, such as `system.panel.sfp`: its `switch` follows `link-status`, and traffic sends it a `pulse` at most every 100ms. The light may appear after the interface. |
 | `last-status-change-time` | read-only | Time of the most recent link-status change. |
@@ -932,9 +932,9 @@ sub-interface shares its parent's address. A bound station is a dependency: the
 interface waits for it to come up, restarts when it goes offline, and holds
 rather than falling back to a wildcard endpoint if it disappears.
 
-The interface self-configures its L2MTU from the peer's datagram payload MTU
-(assuming a 1500-byte link MTU: 1472 for IPv4, 1452 for IPv6, 1474 for ether);
-`l2mtu` may be lowered by the user.
+The interface sets its `l2mtu` from the peer's datagram payload (assuming a
+1500-byte link MTU: 1472 for IPv4, 1452 for IPv6, 1486 for ether); set `mtu`
+lower to send smaller datagrams.
 
 | Property | Values | Default | Description |
 | --- | --- | --- | --- |

@@ -1501,6 +1501,7 @@ unittest
         {
             super(collection_type_info!Narrow, id, flags);
             _caps = cast(InterfaceCaps)(InterfaceCaps.reliable | InterfaceCaps.ordered);
+            _mtu = ushort.max;
             _state = State.running;
             set_link(true);
         }

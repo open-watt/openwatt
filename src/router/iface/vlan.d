@@ -111,6 +111,9 @@ nothrow @nogc:
 
 protected:
 
+    override ushort l2_header() const pure
+        => on_ethernet ? 14 : 0;
+
     override bool validate() const
         => _interface !is null && _vlan != 0 && _tag != VlanTag.none;
 
@@ -119,6 +122,7 @@ protected:
         auto result = super.startup();
         if (result != CompletionStatus.complete)
             return result;
+        take_parent_limits();
         if (!_subscribed)
         {
             if (auto station = dyn_cast!EthernetStation(_interface.get))
@@ -175,13 +179,8 @@ protected:
     {
         if (packet.type != PacketType.ethernet)
             return super.forward(packet, callback, queue_policy);
-
-        if (!running)
-        {
-            if (callback)
-                callback(-1, MessageState.failed);
+        if (!admit(packet, callback))
             return -1;
-        }
 
         debug assert(packet.vid == 0 && packet.vlan_tag == VlanTag.none, "packet already has a vlan tag");
         packet.vlan = (packet.vlan & 0xF000) | (_vlan & 0xFFF);
@@ -214,6 +213,18 @@ private:
     VlanTag _tag = VlanTag._8100;
     bool _subscribed;
 
+    // a tag rides only in an ethernet header (a port or a bridge); on any other parent the vlan is a decap of its pvid
+    bool on_ethernet() const pure
+        => dyn_cast!EthernetStation(_interface.get) !is null;
+
+    // an unlimited parent stays unlimited
+    ushort inside_tag(ushort size) const pure
+        => on_ethernet && size != ushort.max ? cast(ushort)(size - 4) : size;
+
+    // a parent settles its capacity as it comes up (a CPC handshake, a renegotiation), so it is taken again then
+    void take_parent_limits()
+        => set_l2mtu(inside_tag(_interface.l2mtu), inside_tag(_interface.max_l2mtu));
+
     void adopt_parent_mac(EthernetStation station)
     {
         if (mac == station.mac)
@@ -236,6 +247,8 @@ private:
     {
         if (signal == StateSignal.destroyed)
             restart();
+        else if (signal == StateSignal.online)
+            take_parent_limits();
         else if (running && (signal == StateSignal.link_up || signal == StateSignal.link_down))
             set_link(signal == StateSignal.link_up);
     }

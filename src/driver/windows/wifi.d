@@ -237,9 +237,7 @@ private:
         if (!query_adapter(_adapter[], info))
             return;
         // the rate is a property of the association, so it lives on the bound WLAN, not on the radio
-        AdapterChange c = apply_os_adapter_info(this, _l2mtu, _max_l2mtu, _status, info);
-        if (c & AdapterChange.mtu)       mark_set!(typeof(this), [ "l2mtu", "actual-mtu" ])();
-        if (c & AdapterChange.max_mtu)   mark_set!(typeof(this), "max-l2mtu")();
+        AdapterChange c = apply_os_adapter_info(this, _status, info);
         if (c & AdapterChange.connected) mark_set!(typeof(this), "connected")();
     }
 }
@@ -449,9 +447,7 @@ private:
         // note the sysfs/iphlpapi path carries no link speed: iphlpapi's figure is fabricated for a
         // native 802.11 miniport (an Intel AC 3168 reports a flat 120Mb/s while disassociated), so the
         // association rate set above stands
-        AdapterChange c = apply_os_adapter_info(this, _l2mtu, _max_l2mtu, _status, info);
-        if (c & AdapterChange.mtu)       mark_set!(typeof(this), [ "l2mtu", "actual-mtu" ])();
-        if (c & AdapterChange.max_mtu)   mark_set!(typeof(this), "max-l2mtu")();
+        AdapterChange c = apply_os_adapter_info(this, _status, info);
         if (c & AdapterChange.connected) mark_set!(typeof(this), "connected")();
     }
 

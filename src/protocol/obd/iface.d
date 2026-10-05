@@ -110,10 +110,8 @@ nothrow @nogc:
     {
         super(collection_type_info!OBDInterface, id, flags);
 
-        mtu = isotp_max_message;
-        _max_l2mtu = mtu;
-        l2mtu = _max_l2mtu;
-        mark_set!(typeof(this), "max-l2mtu")();
+        // TODO: multi-frame transmit (ISO-TP FF/CF with flow control) raises this to isotp_max_message
+        set_l2mtu(isotp_single_frame_payload);
     }
 
     // Properties...
@@ -304,8 +302,7 @@ protected:
         ref const f = packet.hdr!OBDFrame;
         const(ubyte)[] payload = cast(const(ubyte)[])packet.data;
 
-        // TODO: multi-frame transmit (ISO-TP FF/CF with flow control); no OBD polling request needs it
-        if (payload.length == 0 || payload.length > 7)
+        if (payload.length == 0)
         {
             add_tx_drop();
             return -1;

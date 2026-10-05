@@ -170,12 +170,9 @@ nothrow @nogc:
     protected this(const CollectionTypeInfo* type_info, CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(type_info, id, flags);
-        _mtu = 247; // BLE 5.x max ATT MTU (251 - 4 byte L2CAP header)
-        _max_l2mtu = 251;
-        _l2mtu = _max_l2mtu;
+        set_l2mtu(251); // the largest LL data PDU payload (data length extension), as a raw radio sends it
         _bd_addr = generate_mac_address(name[]);
 
-        mark_set!(typeof(this), "max-l2mtu")();
     }
 
 
