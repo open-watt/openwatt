@@ -188,8 +188,6 @@ nothrow @nogc:
     override size_t tx_request() const
         => _inner ? _inner.tx_request : 0;
 
-    override bool supports_tx_pages() const
-        => _inner && _inner.supports_tx_pages;
 
 protected:
 

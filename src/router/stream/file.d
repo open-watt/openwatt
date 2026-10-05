@@ -78,6 +78,9 @@ nothrow @nogc:
 
     // API
 
+    override size_t tx_request() const
+        => _tx.is_open ? super.tx_request() : 0;
+
     override ptrdiff_t write(const(void[])[] data...)
     {
         if (!_tx.is_open)
@@ -110,11 +113,6 @@ nothrow @nogc:
         return total;
     }
 
-    override size_t tx_request() const
-        => _tx.is_open ? 1600 : 0;
-
-    override bool supports_tx_pages() const
-        => true;
 
 protected:
     override bool validate() const pure

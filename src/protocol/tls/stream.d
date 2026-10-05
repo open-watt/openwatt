@@ -418,10 +418,7 @@ nothrow @nogc:
                 total += n;
             }
         }
-        Stream stream = _stream.get;
-        if (stream && !stream.supports_tx_pages)
-            push_pending(stream);
-        else if (idle && _tx_pending)
+        if (idle && _tx_pending)
             tx_handler_changed();
         return total;
     }
@@ -433,13 +430,6 @@ nothrow @nogc:
         if (auto stream = _stream.get)
             return stream.tx_request;
         return 0;
-    }
-
-    final override bool supports_tx_pages() const
-    {
-        if (auto stream = _stream.get)
-            return stream.supports_tx_pages;
-        return _conn.has_remote;
     }
 
 protected:
@@ -539,19 +529,6 @@ private:
         tx_handler(null);
         _handshake_state = HandshakeState.failed;
         restart();
-    }
-
-    // TODO: delete with S3 of docs/wip/STREAMING.md; until serial is a sink it takes the ciphertext as it is made
-    void push_pending(Stream stream)
-    {
-        while (_tx_pending)
-        {
-            Page* page = _tx_pending;
-            _tx_pending = page.next;
-            page.next = null;
-            stream.write(page.data);
-            page_free(page);
-        }
     }
 
     void free_pending_tx()
@@ -1437,31 +1414,21 @@ unittest
 {
     import urt.mem : alloc, free;
 
-    class PushOnlyStream : Stream
+    class Transport : Stream
     {
     nothrow @nogc:
 
         ~this() {}
 
-        enum type_name = "push-only-stream";
+        enum type_name = "test-transport";
 
         this(CID id, ObjectFlags flags = ObjectFlags.none)
         {
-            super(collection_type_info!PushOnlyStream, id, flags);
+            super(collection_type_info!Transport, id, flags);
         }
 
         override ptrdiff_t write(const(void[])[] data...)
-        {
-            ptrdiff_t n;
-            foreach (d; data)
-            {
-                output ~= cast(const(ubyte)[])d;
-                n += d.length;
-            }
-            return n;
-        }
-
-        Array!ubyte output;
+            => 0;
     }
 
     bool owns_pool = page_pool_init();
@@ -1469,18 +1436,6 @@ unittest
 
     TLSStream tls = alloc!TLSStream(CID(1));
     scope (exit) free(tls);
-    PushOnlyStream sink = alloc!PushOnlyStream(CID(2));
-    scope (exit) free(sink);
-
-    static immutable ubyte[5] ciphertext = [1, 2, 3, 4, 5];
-    Page* first = page_alloc(3);
-    (cast(ubyte[])first.data)[] = ciphertext[0 .. 3];
-    Page* second = page_alloc(2);
-    (cast(ubyte[])second.data)[] = ciphertext[3 .. 5];
-    tls._tx_pending = first;
-    append_tx_chain(tls._tx_pending, second);
-    tls.push_pending(sink);
-    assert(sink.output[] == ciphertext[] && tls._tx_pending is null);
 
     tls._tx_pending = page_alloc(4);
     tls._handshake_state = TLSStream.HandshakeState.completed;
@@ -1493,7 +1448,7 @@ unittest
     {
         TLSStream session = alloc!TLSStream(CID(3));
         scope (exit) free(session);
-        PushOnlyStream transport = alloc!PushOnlyStream(CID(4));
+        Transport transport = alloc!Transport(CID(4));
         scope (exit) free(transport);
         session._handshake_state = TLSStream.HandshakeState.completed;
         transport.rx_handler(&session.inner_rx);

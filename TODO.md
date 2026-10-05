@@ -222,11 +222,6 @@ and the panel left outstanding.
   STM32 section), for WS2812 frames, and for PIO in general.
 - **F4 has no receiver timeout**: its gap is the one-character IDLE line, not 3.5 characters.
 - **The RP2350's gap is the PL011's fixed 32 bit times** (3.2 characters at 8N1).
-- **ESP32 RX thresholds** are the IDF defaults (TOUT about 10 symbols, 120 bytes), not the gap and
-  ~350 us the others use.
-- **UART errors and overflow restart the stream**, discarding up to a ring of good data and all
-  queued TX; count them instead of treating them as fatal. Possibly the cause of the CP210x
-  "session restarts on open" (a break on open raises FE).
 - STM32 UART: 7-bit framing (parity always forces M), 1.5 stop bits, OVER8 for high baud on F4,
   the error callback with `rx_avail == 0`, H7 kernel-clock selection.
 - STM32 PWM, per family: TIM9-14 on F4/F7 (TIM9-11 AF3, TIM12-14 AF9), TIM12-17 on H7, LPTIM and
@@ -285,12 +280,31 @@ and the panel left outstanding.
 
 ## UART follow-ups (2026-10-02)
 
-- **RX and TX through pages, not rings.** A driver keeps a page sized for its baud and the RX
-  latency; the ISR copies the FIFO into it and raises the RX event on the empty-to-non-empty
-  transition; the handler allocates a fresh page, swaps it in and hands the full one to the
-  stream, whose `rx_handler` takes a `Page*`. TX queues pages; the ISR walks the chain and posts
-  finished ones back for release in one event. A spin lock around the swap only where `has_smp`.
-  One copy (FIFO to page) instead of two, and no ring to size.
+- **RS485 in the driver on BK7231, Bouffalo, RP2350, MT7621 and the STM32F4**: software DE needs
+  the moment the shifter empties. STM32F4 has a transmit-complete interrupt and ESP32 already
+  times DE in the IDF's half-duplex mode; BK7231's `TX_STOP_END` is unverified, Bouffalo's TX-end
+  interrupt belongs to its transfer-length mode, and RP2350 and MT7621 raise nothing, so they need a
+  driver-owned timer alarm or a spin in the ISR of up to a character (a millisecond at 9600).
+  `turnaround_us` is refused everywhere yet.
+- **Line activity callback**: report when the RX line goes active (the first edge after idle) and
+  idle again, once per transition, with the edge interrupt armed only while idle. A receiver sees
+  activity, not drive: an idle biased bus and a driven 1 read the same, unless the board drives DE
+  from inverted TX with DI low, which makes the bus wired-AND and lets readback arbitrate. Capture
+  per part: EXTI on STM32's RX pin, a GPIO edge on RP2350, ESP32 and Bouffalo (to confirm), likely
+  unsupported on MT7621; report unsupported from the call.
+- **UART DMA**: STM32 (the F4 most, with no FIFO), RP2350, Bouffalo and ESP32's UHCI can move the
+  lent pages and the RX ring by DMA behind the same API.
+- **RX pages when consumers keep buffers**: the driver fills pages, but SerialStream copies each
+  burst into `incoming`; once packets can be views onto refcounted pages, hand the pages up.
+- **Hosts report no RX gap**: a USB adapter delivers in blocks on its own timer (a CP2102 256 bytes
+  every 22 ms on Linux, 512 every 44 ms on Windows), so the quiet that ends a frame never reaches
+  the host, and serial bursts come up open; a gap-framed protocol on a host (Modbus RTU) frames by
+  length and CRC. A board's own UART may do better: the 8250 and PL011 drivers push on their
+  receive timeout, so a Pi's ttyAMA/ttyS might deliver promptly enough to time gaps from reads.
+  Explore it when there is a rig (TODO at `uart_reports_rx_gap` in urt's posix backend).
+- **Windows serial ports carry no USB identity**, find only COM names, and leave FTDI adapters at
+  their 16 ms latency timer; SetupAPI, a name table and the driver's registry setting, each a
+  TODO inline in urt's `driver/windows/uart.d`.
 - **Main-thread latency is not measured.** ISR-posted events dispatch with age 0, and the worst
   handler, event age and loop iteration are logged only past 50 ms. Stamp ISR posts and keep
   running maxima as stats, so `rx-latency` and buffer sizes can be set from measurement.
@@ -298,24 +312,36 @@ and the panel left outstanding.
   `/log/print --stream` restarts the session, and bytes that arrive meanwhile are dropped or fed to
   the restarted stream; a long line pasted soon after loses its head. The UART delivers every byte
   (counted at the stream on both BL808 cores at 2 Mbaud).
-- **Console output loses chunks on the BL808 at 2 Mbaud**: the console session's update spends
-  51 ms in each UART write, past the 50 ms stall limit, and the stream takes a short write as
-  sent, so long output (the echo of a 500-character line, `/log/print`) arrives with holes on
-  both cores. The stack before the 2026-10-04 review fixes does the same. Find what holds TX for
-  50 ms, and have the stream keep an unsent tail rather than drop it.
-- **ESP32 could offer `rx-latency` and `rx-gap`**: ESP-IDF sets the RX FIFO threshold and the RX
-  timeout (in characters) on a running port (`uart_set_rx_full_threshold`, `uart_set_rx_timeout`).
-  Once urt's ESP32 backend uses them it declares `has_rx_timing`, and the properties appear.
-- **STM32H7 `rx-latency` waits for the port to reopen**: RXFTCFG is written only with the USART
-  disabled; on the DevEBox H7 a live write is ignored. A pending threshold applied from the TX
-  complete interrupt (hold TX until TC with an idle receiver, toggle UE, write, refill) worked in a
-  traced build, but the untraced build hung the board on its first latency change, twice. Find why
-  before reviving it; LPUART1 is untested either way.
-- **SerialStream's embedded branches have no host tests**: the RX callback, a failed open, a
-  reopen and a live retime are covered by urt's register models, not at the stream. The split of
-  `rx-latency` (configured, exported) from `actual-rx-latency` was run on hardware: export and
-  reopen across a deferred change on the DevEBox H7, save and reboot on the BL808 M0. A save while
-  an H7 change waits, then a reboot, needs a board with both.
+- **Console output lost chunks on the BL808 at 2 Mbaud**: the console session's update spent
+  51 ms in each UART write, and the stream took a short write as sent, so long output (the echo of
+  a 500-character line, `/log/print`) arrived with holes on both cores. The stream now queues what
+  the line has not taken and a UART write never waits; retest on both cores, and find what held
+  TX for 50 ms if the stall remains.
+- **Console output past a serial stream's TX bound is lost until S4**: `Session` writes with
+  `write()` and ignores a short write, and `SerialStream.write()` refuses once 2 KB waits in the
+  driver, which drains asynchronously. Replies that outrun the line lose everything past the bound:
+  40 queued `/system/sysinfo` over a pty with a slow reader gave 29 replies. Master hid it on Linux
+  behind the kernel's tty buffer and spun up to 50 ms per ring-full on embedded parts. Pull-driven
+  print (S4, #817/#803) retires it.
+- **Type-ahead is echoed again after every command**: the session redraws all pending input with
+  each prompt, so n queued commands echo n(n+1)/2 times (40 queued: 755 copies, 13 KB). Echo
+  pending input once.
+- **ESP32 UART close leaves the module clock on**: the port is set up through IDF's public calls
+  (`uart_param_config`, `uart_set_pin`), and IDF marks the module enabled in its driver's state;
+  only `uart_driver_delete` on an installed driver turns it off, so turning it off ourselves would
+  leave the next open with a dead UART. Pins are released on close. A trimmed copy of the IDF
+  driver's setup would own the clock too, at the cost of tracking IDF's private internals.
+- **The ESP32 UART interrupt is not IRAM-resident**: IDF holds it off while flash is written, so
+  a long littlefs write at a high baud can overrun the RX FIFO. Allocate it with
+  `ESP_INTR_FLAG_IRAM`, with the ISR path and the core it calls placed in IRAM.
+- **Live reconfigure is unrun on embedded hardware**: every backend re-initialises its UART in
+  place under a critical section, which the register models pass. An earlier live RXFTCFG change
+  on the DevEBox H7 (a pending threshold applied from the TX complete interrupt) hung the board
+  twice, so change baud and `rx-latency` on a running H7 and BL808 before relying on it; LPUART1
+  is untested either way.
+- **SerialStream has no tests of its own**: urt's pseudo-terminal test and register models cover
+  the driver, and the hosts ran on a CP2102, but the stream's restart on a lost device, its
+  reconfigure fallback and its burst delivery are untested at the stream.
 - **The panel's reset gestures have no test**, including a reset binding stopped or replaced mid-gesture
   (a review probe confirmed it disarms): a module test would build its own Application, and an
   Application cannot be created twice in one process, since its destructor releases neither the page
@@ -329,16 +355,18 @@ urt's driver contract suite (`test/driver/`, CI only) runs the UART and event-li
 against every bare-metal backend over register models. What it does not reach, or what the
 backends still cannot do:
 
-- **ESP32 is outside the suite**: its UART and GPIO logic is C in `ow_shim.c` over IDF. To test the
-  real code, split the UART and GPIO-interrupt sections into their own files and compile them in
-  the suite against a small fake IDF. The suite would fail it today: an RX overflow calls
-  `uart_flush_input`, discarding the whole RX buffer rather than keeping the oldest bytes. It
-  reports no RX timing, and the watchdog adapter ignores the requested timeout and stop.
-- **BK7231 writes synchronously**: its TX interrupt never fires, so a write returns what the FIFO
-  took. Nothing shows the shifter, so a flush waits a character time after the FIFO empties
-  rather than for a status. It reports no RX gap.
-- **MT7621's UART is polled**, its I2C synchronous, and the netconsole copies the console UART
-  until OpenWatt carries a UDP log sink.
+- **ESP32 is outside the suite**: its UART ISR is D on the shared core, over a C shim of HAL calls in
+  `ow_shim.c`, and its GPIO logic is C. A fake of those shim calls would put the UART in the suite;
+  the new ISR has not run on hardware. The watchdog adapter ignores the requested timeout and stop.
+- **BK7231 refills TX from Timer2**: its `TX_FIFO_NEED_WRITE` never fired at bring-up, so Timer2
+  refills the FIFO every half FIFO's worth of line time while a port has pages queued. If the
+  interrupt is edge-triggered on the FIFO falling below its threshold, enabling it only after a fill
+  above the threshold would make it work and retire Timer2: try it on hardware. `TX_STOP_END` may be
+  the transmit-complete event RS485 needs. Nothing shows the shifter, so a flush waits a character
+  time after the FIFO empties rather than for a status. It reports no RX gap.
+- **MT7621's UART interrupts are unverified on hardware**: it moved onto its 16550 interrupts (GIC
+  26-28) and runs only in the model, since no board here exposes its UART. Its I2C is synchronous,
+  and the netconsole copies the console UART until OpenWatt carries a UDP log sink.
 - **Bouffalo delivers bytes that failed parity**: the FIFO keeps them, so the error is reported
   but the byte is not dropped.
 - **The suite covers UART and links only**: PWM, WS2812, watchdog and reset, I2C and SPI want the
@@ -1286,7 +1314,7 @@ this is what remains.
   which the state machine re-drives each frame, rather than from the bytes' arrival; the DNS
   server polls its UDP sockets with `recvfrom` each frame; `Session` polls terminal events.
   Sources with no receive event (Windows console input, a shared-memory FIFO, the IDF USB drivers,
-  a replayed file, serial without a reactor or an RX interrupt) poll themselves through
+  a replayed file) poll themselves through
   `poll_rx()`; each wants an event where its platform offers one (a reactor `watch_io` for stdin
   on Linux, the IDF drivers' callbacks).
 
@@ -1621,16 +1649,13 @@ this is what remains.
   S2/S3 for the reflex NMI vector and GPIO register layout, and a per-part ISR-safe SAR path or
   an honest "not in ISR" contract for the ADC.
 
-- **UART writes disagree on a full ring**: ESP32 writes what fits and returns short; STM32 and
-  RP2350 block while the line drains it, and STM32 ends short once the line stops (CTS held off)
-  for 50 ms. The console treats a short write as sent, so a short-write contract truncates large
-  prints until session output is pull-driven. Settle one contract (short writes with a TX-space
-  event) once pull-driven print lands, and make every backend follow it.
-
-- **Serial RX is still drained from the tick on BK7231, Bouffalo and MT7621**:
-  `SerialStream.update()` polls where a backend has no `has_rx_callback`. ESP32, RP2350 and STM32
-  signal from the ISR on a line gap or a few hundred microseconds of characters. Give the others
-  the `uart_hw_open(port, cfg, rx_cb)` form and delete the polled path.
+- **Stream TX queue follow-ups** (2026-10-06, #815):
+  - A stream whose `transmit()` is the default `write()` still lets a direct `write()` reach the
+    line ahead of pages already queued. Retire `write()` as a line path: subclasses implement
+    `transmit()`, and `write()` becomes `queue_copy()` everywhere, as `SerialStream` does now.
+  - `SerialStream.write()` never blocks until the line has taken the bytes, so Modbus RTU's
+    transport timeout starts while its frame is still on the wire. The timeout's margin of two
+    frame times absorbs one queued frame; timing from the line's completion would not need it.
 
 - **`/log/print` without `--stream` redraws its pager every tick**: on the RP2350 it held the CPU
   at 64% and logged an 80 ms `console-session` update each frame while idle. The live view should
@@ -1686,13 +1711,10 @@ The DevEBox H7 boots and runs OpenWatt with a console, per-bank TLSF pools and D
 - **F4 and F7 have never run on hardware.** The APM32F407 board is the first F4 candidate.
 - **No stack guard.** The stack sits at the top of core RAM with statics below it; an overflow
   silently corrupts them. An MPU no-access region under `_stack_low`, or a PSP/MSP split.
-- **Queued console output is lost on a deliberate reset.** `system_reset` does not drain the TX
-  ring; only the fault path writes through the blocking `uart0_hw_puts`. MT7621's fault report
+- **Queued console output is lost on a deliberate reset.** `system_reset` does not drain the
+  UART's queued pages; only the fault path writes through the blocking `uart0_hw_puts`. MT7621's fault report
   flushes its netconsole before resetting; one console flush inside urt's `system_reset` would
   serve every part and every reset path.
-- **The UART rings are reserved for every port**: RX 256 and TX 1024 bytes each, 7.7 KB of F4
-  core RAM and 10 KB on H7, though only the console opens. Settle with the event-driven UART
-  contract for all micros (page delivery on RX idle, TX pulled from a submission queue).
 - **No reflex/event backend.** EXTI, and on H7 EXTI to DMAMUX to DMA to BSRR, would give STM32
   what the ESP32 event links do.
 - **Check whether the page pool's DMA pages belong in the H7's uncached SRAM1-3.** It takes 9 KB
@@ -1872,7 +1894,7 @@ also broadcasts console output as UDP. Outstanding:
   unittest module, and builds without the define. Getting the no-gap intent back needs TLSF
   patched to an 8-byte header overhead on 32-bit.
 - **Only the timer compare, the frame engine and GPIO take interrupts.** Shared lines route to CPU
-  pin 0 of VPE 0 and dispatch through `_irq_dispatch`; the UART, the switch and I2C are still polled. The
+  pin 0 of VPE 0 and dispatch through `_irq_dispatch`; the switch and I2C are still polled. The
   periodic and one-shot compare share one register, as on BL618.
 - **The CPU clock is derived, not measured.** `cpu_rate()` follows Linux's clk-mt7621 and the
   timing looks right, but nothing has checked it against a reference.
@@ -1899,10 +1921,6 @@ also broadcasts console output as UDP. Outstanding:
   bytes; the DHCP message, TCP header, GoodWe AA55 and Linux mgmt structs are unaudited. Worth an
   upstream LDC report: `DtoAlignment(VarDeclaration*)` knows the field alignment but member loads
   ignore it.
-- **The console drops output on a non-blocking UART.** `Session` ignores short writes from
-  `_stream.write`, and a bare-metal `uart_hw_write` takes only what the FIFO holds (16 bytes on
-  MT7621), so a burst loses everything past the first FIFO-full. Any platform without
-  interrupt-driven UART TX is affected; the MT7621 netconsole hides it by mirroring the input.
 - **UART2/UART3 are pinmuxed to GPIO on the hEX S** (per the OpenWrt DTS), and the UART driver
   does not touch GPIOMODE.
 - **Only one VPE of one core runs.** The 1004Kc pair has four VPEs. A second VPE running only reflex

@@ -539,7 +539,9 @@ nothrow @nogc:
     ~this()
     {
         import manager.sample.codec : clear_encoding_registry;
+        import urt.mem.pagepool : page_pool_wake_hook;
         import urt.time : unsubscribe_clock_change;
+        page_pool_wake_hook(null);
         clear_encoding_registry();
         unregister_reclaimer(&reclaim_element_history);
         unsubscribe_clock_change(&notify_wallclock_change);

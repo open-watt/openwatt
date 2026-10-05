@@ -35,7 +35,7 @@ endif()
 set(LITTLEFS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/urt/third_party/littlefs")
 
 set(ESP32_SYS_SOURCES "${ESP32_SYS_DIR}/main.c"
-                      "${ESP32_SYS_DIR}/ow_shim.c"
+                      "${ESP32_SYS_DIR}/idf_shim.c"
                       "${ESP32_SYS_DIR}/littlefs_port.c"
                       "${URT_INTERNAL_DIR}/littlefs.c"
                       "${LITTLEFS_DIR}/lfs.c"

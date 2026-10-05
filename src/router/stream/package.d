@@ -268,6 +268,7 @@ nothrow @nogc:
     final override void offline()
     {
         page_unwait(&_tx_waiter);
+        release_tx_queue();
         if (_rx_polling)
         {
             _rx_polling = false;
@@ -300,13 +301,10 @@ nothrow @nogc:
         arm_rx_poll();
     }
 
-    final bool tx_handler(SendHandler handler)
+    final void tx_handler(SendHandler handler)
     {
-        if (handler && !supports_tx_pages)
-            return false;
         _outgoing = handler;
         tx_handler_changed();
-        return true;
     }
     final SendHandler tx_handler() const pure
         => _outgoing;
@@ -334,11 +332,12 @@ nothrow @nogc:
 
     abstract ptrdiff_t write(const(void[])[] data...);
 
+    // a stream that takes pages itself overrides this with queue_tx_page; the rest queue them here for transmit()
     size_t tx_request() const
-        => 0;
-
-    bool supports_tx_pages() const
-        => false;
+    {
+        size_t queued = tx_queued();
+        return running && queued < tx_queue_limit ? tx_queue_limit - queued : 0;
+    }
 
     TerminalChannel* terminal_channel()
     {
@@ -382,6 +381,12 @@ protected:
 
     void tx_handler_changed()
     {
+        invite_tx();
+    }
+
+    // a pull already running takes the room itself
+    final void invite_tx()
+    {
         if (_outgoing && !_pumping_tx)
             pump_tx();
     }
@@ -402,13 +407,15 @@ protected:
             uint generation = page_free_generation();
             TxStatus status;
             Page* page = request_tx_page(req, status);
-            if (page && (page.length == 0 || !queue_tx_page(page)))
+            if (page && page.length == 0)
             {
-                debug assert(page.length != 0);
+                debug assert(false, "producer returned an empty page");
                 page_free(page);
                 _outgoing = null;
                 break;
             }
+            if (page)
+                queue_tx_page(page);
             if (status == TxStatus.starved)
             {
                 _tx_waiter.wake = &pump_tx;
@@ -418,14 +425,96 @@ protected:
         }
     }
 
-    bool queue_tx_page(Page* page)
+    enum size_t tx_queue_limit = 2048;
+    enum size_t tx_page_payload = 1600;
+
+    void queue_tx_page(Page* page)
     {
-        ptrdiff_t written = write(cast(const(void)[])page.data);
-        if (written != page.length)
-            return false;
-        page_free(page);
-        return true;
+        if (!running)
+        {
+            while (page)
+            {
+                Page* next = page.next;
+                page_free(page);
+                page = next;
+            }
+            return;
+        }
+        append_tx_chain(_tx_queue, page);
+        drain_tx();
     }
+
+    // what the line takes of data now; a failed line returns -1
+    ptrdiff_t transmit(const(void)[] data)
+        => write(data);
+
+    // a line that raises nothing when it has room again is retried at this interval while it holds a backlog
+    Duration tx_retry_interval() const
+        => msecs(2);
+
+    // copies data behind what is queued, up to a page past the queue's limit, so one write of a frame fits whole; short
+    // writes fill the last page before another is taken
+    final size_t queue_copy(const(void[])[] data...)
+    {
+        if (!running)
+            return 0;
+        size_t queued = tx_queued();
+        size_t room = queued < tx_queue_limit + tx_page_payload ? tx_queue_limit + tx_page_payload - queued : 0;
+        size_t total;
+        Page* tail = _tx_queue;
+        while (tail && tail.next)
+            tail = tail.next;
+        copy: foreach (d; data)
+        {
+            const(ubyte)[] bytes = cast(const(ubyte)[])d;
+            while (bytes.length && total < room)
+            {
+                if (!tail || !tail.tailroom || !page_unique(tail))
+                {
+                    size_t want = bytes.length < tx_page_payload ? bytes.length : tx_page_payload;
+                    Page* page = page_alloc(want < room - total ? want : room - total);
+                    if (!page)
+                        break copy;
+                    page.length = 0;
+                    append_tx_chain(_tx_queue, page);
+                    tail = page;
+                }
+                size_t n = bytes.length < tail.tailroom ? bytes.length : tail.tailroom;
+                if (n > room - total)
+                    n = room - total;
+                (cast(ubyte*)tail)[tail.offset + tail.length .. tail.offset + tail.length + n] = bytes[0 .. n];
+                tail.length += cast(ushort)n;
+                bytes = bytes[n .. $];
+                total += n;
+            }
+        }
+        drain_tx();
+        return total;
+    }
+
+    // the line has room again
+    final void drain_tx()
+    {
+        while (_tx_queue)
+        {
+            size_t length = _tx_queue.length;
+            ptrdiff_t n = transmit(_tx_queue.data);
+            if (n < 0)
+                return restart();
+            if (n == 0)
+                break;
+            consume_tx(n);
+            if (n < length)
+                break;
+        }
+        if (_tx_queue && tx_retry_interval != Duration.zero && !_tx_retrying)
+        {
+            _tx_retrying = true;
+            g_app.schedule(getTime() + tx_retry_interval, &tx_retry);
+        }
+        invite_tx();
+    }
+
     StreamStatus _status;
     StreamOptions _options;
 
@@ -490,8 +579,51 @@ protected:
 private:
     SendHandler _outgoing;
     PageWaiter _tx_waiter;
+    Page* _tx_queue;    // for the line, oldest first; the head's offset advances as the line takes it
     bool _pumping_tx;
+    bool _tx_retrying;
     bool _rx_polling;
+
+    size_t tx_queued() const
+    {
+        size_t bytes;
+        for (const(Page)* page = _tx_queue; page; page = (cast(Page*)page).next)
+            bytes += page.length;
+        return bytes;
+    }
+
+    void consume_tx(size_t n)
+    {
+        Page* head = _tx_queue;
+        head.offset += cast(ushort)n;
+        head.length -= cast(ushort)n;
+        if (head.length)
+            return;
+        _tx_queue = head.next;
+        page_free(head);
+    }
+
+    void tx_retry(MonoTime)
+    {
+        _tx_retrying = false;
+        if (running)
+            drain_tx();
+    }
+
+    final void release_tx_queue()
+    {
+        if (_tx_retrying)
+        {
+            g_app.cancel(&tx_retry);
+            _tx_retrying = false;
+        }
+        while (_tx_queue)
+        {
+            Page* next = _tx_queue.next;
+            page_free(_tx_queue);
+            _tx_queue = next;
+        }
+    }
 
     final void arm_rx_poll()
     {
@@ -606,9 +738,6 @@ unittest
         override size_t tx_request() const
             => _space;
 
-        override bool supports_tx_pages() const
-            => supported;
-
         void grant(size_t space)
         {
             _space += space;
@@ -622,19 +751,69 @@ unittest
         }
 
         Array!ubyte output;
-        bool supported = true;
 
     protected:
-        override bool queue_tx_page(Page* page)
+        override void queue_tx_page(Page* page)
         {
             output ~= cast(const(ubyte)[])page.data;
             _space = page.length < _space ? _space - page.length : 0;
             page_free(page);
-            return true;
         }
 
     private:
         size_t _space;
+    }
+
+    // takes what its room allows per write, as a line with a small buffer does
+    class ShortStream : Stream
+    {
+    nothrow @nogc:
+
+        ~this() {}
+
+        enum type_name = "test-short-stream";
+
+        this(CID id, ObjectFlags flags = ObjectFlags.none)
+        {
+            super(collection_type_info!ShortStream, id, flags);
+            _state = State.running;
+        }
+
+        override ptrdiff_t write(const(void[])[] data...)
+        {
+            if (broken)
+                return -1;
+            size_t total;
+            foreach (d; data)
+            {
+                size_t n = d.length < room ? d.length : room;
+                output ~= (cast(const(ubyte)[])d)[0 .. n];
+                room -= n;
+                total += n;
+                if (n < d.length)
+                    break;
+            }
+            return total;
+        }
+
+        void open(size_t bytes)
+        {
+            room = bytes;
+            drain_tx();
+        }
+
+        void halt()
+        {
+            _state = State.disabled;
+        }
+
+        Array!ubyte output;
+        size_t room;
+        bool broken;
+
+    protected:
+        override Duration tx_retry_interval() const
+            => Duration.zero;
     }
 
     struct TestTxProducer
@@ -793,9 +972,50 @@ unittest
     stream.tx_handler(&sleeping.produce);
     assert(sleeping.calls == 3 && stream.output.length == 1 && stream.tx_handler is null);
 
-    stream.supported = false;
-    assert(!stream.tx_handler(&first.produce));
-    assert(stream.tx_handler is null);
+    // a short-writing line keeps what it did not take and stays armed; the bytes arrive whole and in order
+    {
+        ShortStream line = alloc!ShortStream(CID(2));
+        scope(exit)
+        {
+            line.halt();
+            free(line);
+        }
+        TestTxProducer slow = TestTxProducer(5000);
+        slow.stream = line;
+        line.tx_handler(&slow.produce);
+        assert(line.output.length == 0 && line.tx_request == 0 && line.tx_handler !is null, "a line that takes nothing holds the queue's worth");
+        foreach (step; [1000, 1, 700, 3000])
+            line.open(step);
+        line.open(10_000);
+        assert(line.output.length == 5000 && line.tx_handler is null);
+        foreach (i, b; line.output[])
+            assert(b == cast(ubyte)i);
+    }
+
+    // a copy stops a page past the queue's limit, and a line that fails drops its queue
+    {
+        ShortStream line = alloc!ShortStream(CID(3));
+        scope(exit)
+        {
+            line.halt();
+            free(line);
+        }
+        ubyte[5000] bytes;
+        foreach (i, ref b; bytes)
+            b = cast(ubyte)i;
+        size_t taken = line.queue_copy(bytes[]);
+        assert(taken == Stream.tx_queue_limit + Stream.tx_page_payload, "a copy is bounded");
+        assert(line.queue_copy(bytes[]) == 0, "a full queue takes nothing");
+        line.open(10_000);
+        assert(line.output.length == taken && line.output[] == bytes[0 .. taken]);
+
+        line.room = 0;
+        line.queue_copy(bytes[0 .. 100]);
+        assert(line.tx_queued() == 100);
+        line.broken = true;
+        line.open(10);
+        assert(!line.running && line.tx_queued() == 0, "a failed line restarts and drops what it held");
+    }
 
     Page* chain = page_alloc(100);
     foreach (i, ref b; cast(ubyte[])chain.data)
