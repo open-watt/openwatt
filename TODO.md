@@ -277,6 +277,14 @@ and the panel left outstanding.
 - **M0 resets by watchdog without a known cause**: once during a night idle on the full image, and
   two or three times in the first minute of a `D0=0` image on the bring-up defaults rung, after which
   it ran clean. Log the stalled main-loop work before the bite, then reproduce.
+- **200 console commands pasted into D0 at once reset the chip by watchdog** (2026-10-05, merged
+  master): both cores restarted within seconds, reset cause `watchdog`. Which core stalled, M0's
+  loop or D0's heartbeat, is not known yet.
+- **Re-enabling M0's radio crashes the vendor blob**: `/interface/wifi set wifi1 disabled=no` after
+  a disable asserts in `ipc_host_msgack_handler` (`msga2e_cnt` mismatch) and resets the chip, so
+  the LMAC cannot be reopened at runtime. Refuse a radio restart, or reset the LMAC properly.
+- **M0's station RSSI is unknown (0)**: the vendor hands received frames over without their RX
+  vector. Find the LMAC's RSSI report, or read it from beacons of the bound BSS.
 - **D0's heartbeat rides the 1 s application heartbeat**: its 500 ms is a minimum interval, not
   a cadence. Schedule it if 500 ms is meant.
 - **M0 takes 6-9 s to inflate D0 at boot.** Inflate runs from XIP flash into PSRAM; measure where
