@@ -26,6 +26,7 @@ import manager.syslog;
 import manager.sync;
 import manager.sync.discovery : PeerRole;
 import manager.sync.encoder;
+import manager.sync.peering : SyncPeeringModule;
 
 import router.iface;
 import router.iface.endpoint : UDPEndpoint, UDPReceiveInfo, udp_open;
@@ -69,7 +70,8 @@ class SyncPeer : ActiveObject
     alias Properties = AliasSeq!(Prop!("transport",      transport),
                                  Prop!("remote",         remote),
                                  Prop!("encoder",        encoder),
-                                 Prop!("time-authority", time_authority));
+                                 Prop!("time-authority", time_authority),
+                                 Prop!("claim",          claim));
 nothrow @nogc:
 
     enum type_name = "peer";
@@ -143,6 +145,21 @@ nothrow @nogc:
     {
         _time_authority_from_claim = false;
         set_time_authority(value);
+    }
+
+    // the hello announces authority on this session alone, whatever the node's peering role
+    final bool claim() const pure
+        => (_peer_flags & PeerFlags.claims) != 0;
+    final void claim(bool value)
+    {
+        if (value == claim)
+            return;
+        if (value)
+            _peer_flags |= PeerFlags.claims;
+        else
+            _peer_flags &= ~PeerFlags.claims;
+        mark_set!(typeof(this), "claim")();
+        restart();
     }
 
     final void bind_remote(ref const InetAddress addr)
@@ -491,13 +508,16 @@ protected:
     // the transport's state matters to a live session only: the subscription is the running window
     override void online()
     {
-        if (uses_udp_endpoint)
-            return;
-        if (BaseInterface transport = _transport)
+        if (!uses_udp_endpoint)
         {
-            transport.subscribe(&on_transport_state);
-            _peer_flags |= PeerFlags.transport_state_subscribed;
+            if (BaseInterface transport = _transport)
+            {
+                transport.subscribe(&on_transport_state);
+                _peer_flags |= PeerFlags.transport_state_subscribed;
+            }
         }
+        if (claim)
+            get_module!SyncPeeringModule.claim_sibling(this, getTime());
     }
 
     override void offline()
@@ -846,6 +866,7 @@ private:
         uses_udp_endpoint          = 1 << 4,
         owns_udp_endpoint          = 1 << 5,
         tx_producing               = 1 << 6,
+        claims                     = 1 << 7,
     }
 
     struct SentFrame

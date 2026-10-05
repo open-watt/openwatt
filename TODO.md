@@ -1116,6 +1116,20 @@ role from a concrete deployment need before implementing or advertising it.
 The built surface is documented in [docs/SYNC.md](docs/SYNC.md) and [docs/PEERING.md](docs/PEERING.md);
 this is what remains.
 
+- **Devices mirrored from a `claim=` sibling need a naming rule.** The claimant files them under
+  the sibling's peer id, so one named like a local device is ambiguous to anything addressing by
+  name, and how the network sees a claimed sibling's devices is undecided.
+- **A `claim=` sibling warns on every boot that it was claimed with no cluster.** The pair has no
+  fleet of its own; decide whether the sibling inherits the claimant's cluster or the warning
+  skips sibling claims.
+- **The `claim=` session lifecycle has no unittest**: issuing a claim needs the sync modules, so an
+  application, and one test binary cannot host two (collections outlive an application). It is
+  verified on the BL808 only.
+- **`/element/set` cannot reach a device keyed by a peer id**, such as the energy app's device,
+  which `create_energy_device` keys by the local node id.
+- **`/device/print` renders negative ages as `-209.-6s`** when a remote timestamp is ahead of the
+  local clock.
+
 - **A cleared template can survive a reconnect on a wholly unclassified path**: an introduction
   omits `tmpl` when nothing on the path carries a template, and an absent chain is silence, so a
   mirror that missed a clear while its session was down keeps the stale label if every node on

@@ -533,6 +533,8 @@ nothrow @nogc:
         p._adopted.clear();
         p._warned_name_count = 0;
         p._remote_caps = 0;
+        p._remote_node_id = 0;
+        p._remote_role = PeerRole.none;
         p.reset_sublayer();           // seq spaces are session state
         p._remote_nonce_set = false;
         p._local_nonce_set = false;   // a reconnect is a new session; fresh nonce
@@ -1293,6 +1295,9 @@ nothrow @nogc:
                     log.warning("peer '", p.name[], "' also carries node ", nid[], "; configured peers are not superseded");
             }
         }
+
+        if (from.claim)
+            get_module!SyncPeeringModule.claim_sibling(from, getTime());
     }
 
     void inbound_claim(SyncPeer from, uint seq, const(char)[] cluster, uint priority, const(char)[] auth, const(char)[] key)

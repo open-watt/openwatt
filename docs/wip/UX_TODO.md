@@ -3,6 +3,16 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-10-05: `/sync/peer` gains `claim`
+
+- `/sync/peer` gains `claim` (`yes`/`no`, default `no`). A peer editor should offer it as "claim the
+  node at the other end"; it applies to that one session.
+- A node's hello may now say `authority` on a `claim=yes` session while its peering role is
+  `member` (or none) everywhere else. Do not read a node's fleet role from a single session's hello;
+  show the peering role from `/sync/peering`.
+- Devices of a claimed sibling arrive mirrored under that sibling's node, exactly as a fleet member's
+  do (the BL808 D0 behind its M0, for one).
+
 ## 2026-10-05: managed object text formatting
 
 - Managed objects formatted as text now use their bare name. Remove assumptions that stream or
