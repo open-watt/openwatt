@@ -29,6 +29,10 @@ A session is a `/sync/peer`. It binds to a link one of two ways, the last set wi
 connected UDP endpoint the peer owns. `encoder=json|binary` selects the wire encoding, and
 `time-authority=yes` designates the remote as this node's clock source by hand.
 
+A session runs while its transport's link is up: a link that drops restarts it, and the next
+session opens when the link returns. Frames that arrive between sessions wait for the next one's
+`hello`, so a remote that speaks first loses nothing.
+
 Listeners spawn peers. `/sync/udp-server` owns one UDP endpoint per selected local endpoint and
 spawns a dynamic peer for the first datagram from each unknown `(local endpoint, remote endpoint)`
 pair; each spawned peer replies through the endpoint that received it, several peers share one
@@ -288,7 +292,7 @@ never sees the link. A link adapter provides:
 | --- | --- | --- | --- | --- |
 | UDP unicast (IP or bare MAC) | datagram | UDP checksum | sublayer above | built |
 | WebSocket | message | TCP | inherent | built |
-| shared-memory ring (BL808 M0/D0) | length prefix | memory | inherent | designed |
+| shared-memory ring (BL808 M0/D0) | frame per mailbox announcement (`/interface/xram`) | memory | inherent | built |
 | UART / RS232 / SPI point link | CPC | CPC CRC | CPC retransmit | designed |
 | RS485 multi-drop | Modbus RTU envelope | CRC16 | poll/response | designed |
 | UDP multicast feed | datagram | UDP checksum | gap-detect, unicast backfill | designed |

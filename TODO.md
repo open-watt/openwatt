@@ -274,6 +274,11 @@ and the panel left outstanding.
   come from M0; the BL618 has its own CLIC line and wants the M0 backend.
 - **The BL618 has no watchdog**: give it the MCU timer watchdog the BL808 M0 uses.
 - **M0 SRAM runs near full**: 20 of 21 KB with two telnet sessions, 768 B to spare.
+- **M0 resets by watchdog without a known cause**: once during a night idle on the full image, and
+  two or three times in the first minute of a `D0=0` image on the bring-up defaults rung, after which
+  it ran clean. Log the stalled main-loop work before the bite, then reproduce.
+- **D0's heartbeat rides the 1 s application heartbeat**: its 500 ms is a minimum interval, not
+  a cadence. Schedule it if 500 ms is meant.
 - **M0 takes 6-9 s to inflate D0 at boot.** Inflate runs from XIP flash into PSRAM; measure where
   it goes (flash reads, PSRAM writes, the inflater) before choosing between placing the inflater in
   RAM, raising the clocks first, or letting D0 inflate its own image.
@@ -1201,7 +1206,8 @@ this is what remains.
   `model_sub`/`sub` fan-out, lifecycle fan-out, `result` and `history`, and on a reliable
   transport a refused push is dropped with no retry path. Move them onto the same feed; oversize
   control frames must be refused at encode time against `hello.max_frame` rather than dropped in
-  the interface; `val_block` chunking must honour `max_frame` instead of a fixed 256 records; and
+  the interface; `val_block` chunking must honour `max_frame` and the transport's MTU instead of a
+  fixed 256 records (a block of 256 doubles is 3,845 bytes, over `/interface/xram`'s 1,856); and
   control frames should ride PCP >= ca with DEI=0 on the underlying packets. `BaseInterface`'s
   handler slot is single-owner like `Stream`'s, which suits the one-peer websocket; a shared
   bounded interface would need per-peer arbitration.
@@ -1235,10 +1241,11 @@ this is what remains.
   collection methods, `enum_req` the push-only `type` form. Gated on property projection in
   `id.d`. Keep the sibling transport class buildable on the way: handles are already `ulong`, but
   `IdAllocator` and `g_formats` allocate through `defaultAllocator`, so shared-memory residency
-  needs a writer/reader ownership rule before the BL808 M0/D0 ring exists.
+  needs a writer/reader ownership rule before a sibling transport shares them across the BL808
+  cores.
 
-- **Build the remaining transports**: the shared-memory ring for BL808 M0/D0 (sibling class,
-  length-prefixed SPSC rings, ring-full is queue-and-wait), a `CPCEndpoint` transport for UART/SPI
+- **Build the remaining transports**: the sibling class for BL808 M0/D0 (raw EIDs as handles; the
+  cores peer today over `/interface/xram`), a `CPCEndpoint` transport for UART/SPI
   point links (I2C deferred until a data-ready GPIO exists), the RS485 multi-drop envelope (valid
   Modbus RTU frames with a user-space function code, token is the poll, one scheduler shared with
   the Modbus master, per-slave baud as addressing metadata from day one), and one-way multicast
@@ -1658,6 +1665,47 @@ Bare-metal follow-ups from the same series:
 - **Check the RP2350 console for truncated output.** Its UART write fills the 32-byte FIFO and
   returns short, and the console treats a short write as sent; the STM32 console lost output the
   same way until its UART went interrupt driven.
+
+### BL808 follow-ups (2026-09-30)
+
+M0 is the BL808's network node: it boots one image carrying D0, brings up the provisioning AP and
+the standard services, drives the M1s Dock's panel, its LED on hardware PWM, and claims D0 over XRAM
+so D0's devices appear on M0 only.
+
+- **`d0fw.bin` is a side effect of linking D0's ELF**: changing the packer, or deleting only
+  `d0fw.bin`, does not rebuild it. Make it an explicit output of the ELF and the packer.
+- **The M0/D0 link has no permanent tests**: a link answer before and after Running, interface
+  disable and re-enable, a transport destroyed and recreated, frames over the MTU, and load across
+  both cores. The review's probes over a mocked platform are a start.
+- **M0's PSRAM slice is 1 MB**, leaving the full build about 800 KB of heap, of which a full log
+  history takes about 110 KB. Widen the slice at D0's expense (both linker scripts).
+- **A D0 that never beats is not watched.** M0 stands for D0 only once D0's heartbeat has moved, so
+  a missing image or a D0 that dies before its first beat leaves the chip up without it; that
+  needs a boot deadline that cannot loop the chip on a bad D0 image.
+- **M0's clock is whatever the boot header chose** (`mcu_clk`, the WiFi PLL's 320 MHz), and
+  `bl_common/clock.d` trusts it for the shared 160 MHz timebase. Read M0's clock mux at boot, or set
+  it, so a different boot header cannot silently skew the timers.
+- **M0's new subsystems have no host tests**: the mailbox (wrap, full, space signal, count rollover),
+  the partition table (both copies, bad CRCs, a newer backup), flash command failures, the image
+  packer and loader, and the shared littlefs glue over each block device. Each needs a host seam.
+- **`flash_program` reads its source after XIP is taken away**: fine for littlefs's RAM cache, its
+  only caller, but a source in flash faults. Bounce through RAM, or make RAM-only the contract.
+- **The D0 loader trusts its payload**: destinations, entry and segment ranges are bounded only by
+  the bank. Validate them before OTA or recovery produce payloads.
+- **A valid partition table's geometry is not bounded by the flash**: the media partition is checked
+  for alignment only. Bound it by the flash size before littlefs erases and programs there.
+- **Packets between the cores ride sync**: D0 reaches the network through M0 by a sync frame kind
+  carrying packets, on the one raw XRAM channel, as `/interface/tunnel` in
+  [TAPS_AND_TUNNELS.draft.md](docs/TAPS_AND_TUNNELS.draft.md); no Ethernet channel over XRAM.
+- **Sync copies each frame into XRAM**: `/interface/xram` offers `tx_reserve`/`tx_commit`, so the
+  sync encoders could build a frame where D0 or M0 reads it. Worth it once the M0/D0 link carries
+  bulk traffic.
+- **A doorbell event the full event queue refuses waits for the next heartbeat**, up to a second.
+- **The heap core keeps a pool it failed to add**: reject it so its bytes are not counted as free.
+- **The BL618 has no `system_reset`/`por_reset`**; only the BL808 cores do.
+- **M0's provisioning AP is open**, where the Waveshare board's defaults run a WPA2 AP on a known
+  setup secret with non-anonymous pcap. Bring M0's `default.conf` into line once a WPA2 AP and the
+  secret's effect on the web config's API access are checked on the BL808.
 
 ### RP2350 bring-up follow-ups (2026-09-20)
 

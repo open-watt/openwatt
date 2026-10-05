@@ -179,10 +179,11 @@ a netbooted image is bounded by RAM instead.
 | 2026-09-26 | all MT7621 PRs merged | ldc 1.43.0 | 2,822,360 | 52,028 | 16,515,072 | port-as-handle Ethernet API (urt#332, #772, #774): no dispatch tables; routerboot's sector buffer on the stack |
 | 2026-09-27 | all MT7621 PRs merged + #782 | ldc 1.43.0 | 2,824,760 | 52,044 | 16,515,072 | GE2 and the AR8033 fibre PHY in urt (urt#347); sfp1 data path |
 
-### bl808 e907, `make PLATFORM=bl808 PROCESSOR=e907 CONFIG=release`
+### BL808, `make PLATFORM=bl808 CONFIG=release`
 
 | date | commit | compiler | flash | ram | limit | note |
 | --- | --- | --- | --- | --- | --- | --- |
+| 2026-10-05 | ow/bl808-single-image | ldc 1.43.0 | 2,621,944 | 185,722 | 4,190,208 | first row; M0 image, which packs D0 (999,418 flash, 87,408 ram) into the same fw.bin |
 
 ### BL618, `make PLATFORM=bl618 CONFIG=release`
 
@@ -200,6 +201,7 @@ a netbooted image is bounded by RAM instead.
 | 2026-09-30 | 6d4d0ca1 | ldc 1.43.0 | 1,631,616 | 58,920 | 2,097,152 | master (28848010) plus #789's test-only change |
 | 2026-09-30 | #790 | ldc 1.43.0 | 1,637,136 | 58,920 | 2,097,152 | virtual destructors: +4,288 destructors, -1,452 vtables |
 | 2026-10-02 | ow/drivers-to-spec | ldc 1.43.0 | 1,657,824 | 50,444 | 2,097,152 | UART RX by event with H7 FIFOs, RS-485 DE, RTS/CTS, LPUART1 and rings at open; PWM on TIM1-4 and TIM8; IWDG and reset cause; EXTI buttons; debug freeze |
+| 2026-10-04 | #800 | ldc 1.43.0 | 1,661,480 | 50,332 | 2,097,152 | live RX retime, rx-latency and rx-gap with actual- read-backs |
 
 Add a section for any other configuration the first time it is deployed. Keep the make
 invocation in the heading exact, including FEATURES, HEADLESS, IPV6 and GATEWAY when they

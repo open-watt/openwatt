@@ -98,7 +98,7 @@ encodes onto the dataplane channel, the satellite endpoint injects into the real
   correlation, address translation, and PCP priority working unchanged. Zero new binding
   concepts.
 - Transport classes per the sync draft: foreign (TCP/websocket = reliable, adds RTT) and sibling
-  (the D0/M0 shmem rings from the tickless-queue plan = the fast path). Same abstraction at
+  (the BL808 D0/M0 link, `/interface/xram` = the fast path). Same abstraction at
   every class; only the pipe underneath changes.
 
 Configuration shape (sketch): the master drives it -- `/interface/tunnel add name=sat-can
@@ -126,7 +126,8 @@ link adaptor underneath, and the media split three ways:
   kinds multiplexed on the stream; NO link protocol is added. Running an ARQ over a reliable
   stream is the classic TCP-over-TCP pathology: the outer retransmit timer fires against the
   inner one's stalls and latency melts down. If it is a stream, mux and nothing else.
-- **Sibling rings** (BL808 D0/M0 shmem): lossless by construction; one SPSC ring per channel.
+- **Sibling rings** (BL808 D0/M0, `/interface/xram`): lossless and ordered by construction, so as on a
+  stream, channels are frame kinds multiplexed on the one raw sync channel; NO link protocol.
 - **Lossy media** (UART/RS485, UDP, raw 802.15.4): this is where the tunnel protocol lives, and
   the established protocol is already in the tree: **CPC** (protocol/cpc, 1.7k lines, live).
   Numbered endpoints each with their own seq/ack window, a system endpoint, CRC-16 framing that

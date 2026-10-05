@@ -218,11 +218,10 @@ else ifdef STM32_VARIANT
 endif
 
 ifeq ($(PLATFORM),bl808)
-  ifeq ($(PROCESSOR),c906)
-    CONF_DIR := platforms/bl808
-  else ifeq ($(PROCESSOR),e907)
     CONF_DIR := platforms/bl808_m0
-  endif
+endif
+ifeq ($(PLATFORM),bl808_d0)
+    CONF_DIR := platforms/bl808_d0
 endif
 ifeq ($(PLATFORM),bl618)
     CONF_DIR := platforms/bl618
@@ -263,11 +262,9 @@ ifdef BAREMETAL_DIR
   # URT-side unittest builds).
   URT_PLATFORMS := $(URT_DIR)/platforms
   ifeq ($(PLATFORM),bl808)
-    ifeq ($(PROCESSOR),c906)
-      BAREMETAL_LD := $(URT_PLATFORMS)/bl808/bl808_d0.ld
-    else ifeq ($(PROCESSOR),e907)
-      BAREMETAL_LD := $(URT_PLATFORMS)/bl808/bl808_m0.ld
-    endif
+    BAREMETAL_LD := $(URT_PLATFORMS)/bl808_m0/bl808_m0.ld
+  else ifeq ($(PLATFORM),bl808_d0)
+    BAREMETAL_LD := $(URT_PLATFORMS)/bl808_d0/bl808_d0.ld
   else ifeq ($(PLATFORM),bl618)
     BAREMETAL_LD := $(URT_PLATFORMS)/bl618/bl618.ld
   else ifneq ($(filter bk7231n bk7231t,$(PLATFORM)),)
@@ -352,16 +349,40 @@ else
     BINSTATS := rdmd --compiler=$(DC) tools/binstats.d
 endif
 BINSTATS_LEDGER = $(if $(filter release,$(CONFIG)),--ledger "$$("$(DC)" --version 2>/dev/null | head -1)" --commit "$$(git rev-parse --short HEAD 2>/dev/null || echo -)" --date "$$(date +%F)")
-BINSTATS_IMAGE := $(if $(filter bl808,$(PLATFORM)),$(if $(filter c906,$(PROCESSOR)),d0fw.bin,m0fw.bin),$(if $(filter bl618 bk7231n bk7231t rp2350 stm32%,$(PLATFORM)),fw.bin))
+BINSTATS_IMAGE := $(if $(filter bl808,$(PLATFORM)),m0fw.bin,$(if $(filter bl808_d0,$(PLATFORM)),d0fw.bin,$(if $(filter bl618 bk7231n bk7231t rp2350 stm32%,$(PLATFORM)),fw.bin)))
 
 ifeq ($(PLATFORM),rp2350)
     EXTRA_ARTEFACTS := $(TARGETDIR)/fw.uf2
+endif
+BL808_IMAGE_TOOL := $(URT_DIR)/tools/bl808_image.py
+# D0=0 leaves out the D0 expansion core: the image carries an empty payload and D0 stays halted.
+D0 ?= 1
+ifeq ($(PLATFORM),bl808)
+    ifeq ($(D0),1)
+        D0_PAYLOAD := bin/bl808_d0_$(CONFIG)$(BUILD_VARIANT_SUFFIX)/d0fw.bin
+    endif
+    EXTRA_ARTEFACTS := $(TARGETDIR)/fw.bin
 endif
 
 .PHONY: build
 build: $(TARGET) $(EXTRA_ARTEFACTS)
 
 $(TARGET): $(SOURCES) $(CONF_SOURCES) $(BAREMETAL_OBJS) $(VENDOR_OBJS) $(BAREMETAL_LD) $(BAREMETAL_LD_DEPS) $(BUILD_CONFIG_DIR)/build_id $(BK_BEKEN_LIB) $(if $(RAM_IMAGE),$(RAM_IMAGE_PACKER))
+
+ifdef D0_PAYLOAD
+# D0 is its own build; its make decides whether anything needs relinking.
+.PHONY: $(D0_PAYLOAD)
+$(D0_PAYLOAD):
+	@$(MAKE) --no-print-directory PLATFORM=bl808_d0 CONFIG=$(CONFIG)
+endif
+
+ifeq ($(PLATFORM),bl808)
+# Rebuilt every time, so a change of D0= never leaves the other image behind.
+.PHONY: $(TARGETDIR)/fw.bin
+$(TARGETDIR)/fw.bin: $(TARGET) $(D0_PAYLOAD) $(BL808_IMAGE_TOOL)
+	cp $(TARGETDIR)/m0fw.bin $@
+	python3 $(BL808_IMAGE_TOOL) append --nm $(BAREMETAL_NM) $(TARGET) $@ $(D0_PAYLOAD)
+endif
 
 ifeq ($(PLATFORM),rp2350)
 $(TARGETDIR)/fw.uf2: $(TARGET)
@@ -396,14 +417,10 @@ $(TARGET):
 	echo $(URT_SOURCES) >> $(RSPFILE)
 	$(COMPILE_CMD)
 ifeq ($(PLATFORM),bl808)
-  ifeq ($(PROCESSOR),c906)
-	riscv64-unknown-elf-objcopy -O binary $(TARGET) $(TARGETDIR)/d0fw.bin
-	@# Gzipped variant for faster flash turnaround. M0's d0_image_load sniffs
-	@# the gzip magic at offset 0 and decompresses straight to PSRAM.
-	gzip -9 -n -c $(TARGETDIR)/d0fw.bin > $(TARGETDIR)/d0fw.bin.gz
-  else ifeq ($(PROCESSOR),e907)
 	riscv64-unknown-elf-objcopy -O binary $(TARGET) $(TARGETDIR)/m0fw.bin
-  endif
+endif
+ifeq ($(PLATFORM),bl808_d0)
+	python3 $(BL808_IMAGE_TOOL) pack $(TARGET) $(TARGETDIR)/d0fw.bin
 endif
 ifeq ($(PLATFORM),bl618)
 	riscv64-unknown-elf-objcopy -O binary $(TARGET) $(TARGETDIR)/fw.bin

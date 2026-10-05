@@ -92,13 +92,12 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        platform: [bl808, bl808_m0, rp2350, stm32h7]
+        platform: [bl808, bl808_d0, rp2350, stm32h7]
         include:
           - platform: bl808
             toolchain: riscv64-unknown-elf
-          - platform: bl808_m0
+          - platform: bl808_d0
             toolchain: riscv64-unknown-elf
-            make_args: PROCESSOR=e907
           - platform: rp2350
             toolchain: arm-none-eabi
           - platform: stm32h7

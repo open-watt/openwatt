@@ -92,7 +92,7 @@ else version (BL808)
     // The boot ROM's UART/USB download mode, the one the vendor flash tools speak.
     bool system_reboot_to_bootloader(uint)
     {
-        import urt.driver.bl_common.reset : por_reset;
+        import urt.driver.bl808.reset : por_reset;
         reset_record_mark(ResetMark.deliberate);
         por_reset(true);
     }

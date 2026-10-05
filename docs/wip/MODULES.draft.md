@@ -257,7 +257,7 @@ a `MODULES` change rebuilds exactly once.
 
 **2. urt granularity.** urt's module table (hardware: `uart`, `i2c`, `spi`, `can`, `gpio`, `wifi`, `ble`,
 `rtc`; runtime: `crypto`, `zip`, ...), the per-platform availability sets, and the computed source sets
-replacing the globs. First real size win; measure it on bl808-m0 and esp32-c2.
+replacing the globs. First real size win; measure it on bl808 and esp32-c2.
 
 **3. openwatt protocol granularity.** Each `protocol/<x>` and `apps/<x>` becomes selectable, `sync_bin`
 splits from `sync_json`/`ws`, and `register_modules()` splits into per-module blocks. This is where the
@@ -276,7 +276,7 @@ its seam is cut, in the order the cuts demand:
 `board.mk` contract across all platforms, key output dirs on BOARD, and move the pcf85063 registration to
 a board-declared module.
 
-**5. Profiles for the real targets.** bl808-m0 coproc, esp32-c2 tiny node, Pi full, routeros. Record
+**5. Profiles for the real targets.** bl808 coproc, esp32-c2 tiny node, Pi full, routeros. Record
 per-profile binary sizes as the regression baseline.
 
 ## Challenges and alternatives
