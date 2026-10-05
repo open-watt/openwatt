@@ -855,6 +855,8 @@ private:
 
     enum Phase : ubyte { connecting, open, dead }
     enum size_t max_tx_refill = 16 * 1024;
+    enum size_t max_tx_service = 64 * 1024;          // per service_tx() call
+    enum Duration tx_service_time = msecs(2);
     enum size_t max_page_data = 1600;
 
     Phase _phase;
@@ -929,12 +931,15 @@ private:
         _servicing_tx = true;
         scope (exit) _servicing_tx = false;
 
-        // pulled pages are flushed in the same pass until the producer runs dry or the
-        // transport stops accepting; left queued, each refill waits a main-loop pass
+        // pulled pages are flushed in the same pass until the producer runs dry, the transport
+        // stops accepting, or the budget is spent; a spent budget resumes on the next loop pass
+        size_t budget = max_tx_service;
+        MonoTime deadline = getTime() + tx_service_time;
+        bool yield = false;
         for (;;)
         {
             size_t requested = tx_request();
-            while (_outgoing && requested != 0)
+            while (_outgoing && requested != 0 && !yield)
             {
                 TCPSendHandler handler = _outgoing;
                 Page* page = handler(&this, requested);
@@ -952,6 +957,7 @@ private:
                     break;
                 }
                 requested = tx_request();
+                yield = getTime() >= deadline;
             }
 
             static if (use_iocp)
@@ -964,6 +970,13 @@ private:
                 flush_tx();
                 if (_phase != Phase.open || _tx_bytes == queued)
                     break;
+                size_t sent = queued - _tx_bytes;
+                if (yield || sent >= budget || getTime() >= deadline)
+                {
+                    yield = true;
+                    break;
+                }
+                budget -= sent;
             }
         }
 
@@ -971,7 +984,7 @@ private:
         else static if (!use_iocp)
         {
             if (_phase == Phase.open)
-                want_write(_tx_head !is null);
+                want_write(yield || _tx_head !is null);
         }
     }
 
@@ -2950,6 +2963,7 @@ version (UseInternalIPStack) {} else version (linux)
         {
         nothrow @nogc:
             size_t total, produced;
+            Duration cost;      // simulated production time per page
 
             Page* produce(TCPConnection*, size_t requested)
             {
@@ -2960,6 +2974,7 @@ version (UseInternalIPStack) {} else version (linux)
                     take = 1600;
                 if (take == 0)
                     return null;
+                for (MonoTime until = getTime() + cost; getTime() < until; ) {}
                 Page* page = page_alloc(take);
                 foreach (i, ref b; cast(ubyte[])page.data)
                     b = cast(ubyte)((produced + i) * 7);
@@ -2981,52 +2996,64 @@ version (UseInternalIPStack) {} else version (linux)
             return received;
         }
 
-        void run(size_t total)
+        static void open_pair(ref TCPConnection c, ref int[2] fds)
         {
-            int[2] fds;
             assert(socketpair(AF_UNIX, SOCK_STREAM, 0, fds.ptr) == 0);
-            scope (exit) close(fds[1]);
             set_socket_option(Socket(fds[0]), SocketOption.non_blocking, true);
             set_socket_option(Socket(fds[1]), SocketOption.non_blocking, true);
-
-            TCPConnection c;
             c._socket = Socket(fds[0]);
             c._phase = TCPConnection.Phase.open;
-            scope (exit) c.close();
-
-            Producer p = Producer(total);
-            size_t received;
-            c.tx_handler(&p.produce);
-            for (uint passes = 0; received < total; ++passes)
-            {
-                assert(passes < 10_000, "transmit stalled");
-                receive(fds[1], received);
-                c.on_ready(IoReady.writable);
-            }
-            assert(p.produced == total && c._tx_head is null);
         }
 
-        // one invitation drains everything the kernel will take, not one refill's worth
+        enum size_t page_size = 1600;
+        enum size_t call_cap = TCPConnection.max_tx_service + TCPConnection.max_tx_refill;   // a flush may overshoot by one refill
+
+        // one invitation drains what fits in its budget, not one refill's worth
         {
-            int[2] fds;
-            assert(socketpair(AF_UNIX, SOCK_STREAM, 0, fds.ptr) == 0);
-            scope (exit) close(fds[1]);
-            set_socket_option(Socket(fds[0]), SocketOption.non_blocking, true);
-            set_socket_option(Socket(fds[1]), SocketOption.non_blocking, true);
-
             TCPConnection c;
-            c._socket = Socket(fds[0]);
-            c._phase = TCPConnection.Phase.open;
-            scope (exit) c.close();
+            int[2] fds;
+            open_pair(c, fds);
+            scope (exit) { c.close(); close(fds[1]); }
 
-            Producer p = Producer(64 * 1024);
+            Producer p = Producer(32 * 1024);
             c.tx_handler(&p.produce);
             assert(p.produced == p.total && c._tx_head is null && c._tx_bytes == 0);
             size_t received;
             assert(receive(fds[1], received) == p.total);
         }
 
-        // backpressure: the kernel takes partial pages; the tail of each goes first, in order
-        run(4 * 1024 * 1024);
+        // a reader that keeps up cannot hold the loop: each call stops at the byte budget, the
+        // next resumes, and under partial kernel writes the bytes still arrive whole and in order
+        {
+            TCPConnection c;
+            int[2] fds;
+            open_pair(c, fds);
+            scope (exit) { c.close(); close(fds[1]); }
+
+            Producer p = Producer(4 * 1024 * 1024);
+            size_t received;
+            c.tx_handler(&p.produce);
+            for (uint passes = 0; received < p.total; ++passes)
+            {
+                assert(passes < 10_000, "transmit stalled");
+                size_t before = received;
+                receive(fds[1], received);
+                assert(received - before <= call_cap, "one call sent past its budget");
+                c.on_ready(IoReady.writable);
+            }
+            assert(p.produced == p.total && c._tx_head is null);
+        }
+
+        // a slow producer stops at the time budget
+        {
+            TCPConnection c;
+            int[2] fds;
+            open_pair(c, fds);
+            scope (exit) { c.close(); close(fds[1]); }
+
+            Producer p = Producer(1024 * 1024, 0, usecs(500));
+            c.tx_handler(&p.produce);
+            assert(p.produced >= page_size && p.produced <= 8 * page_size, "slow producer ran past the time budget");
+        }
     }
 }
