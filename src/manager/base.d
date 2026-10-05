@@ -1465,7 +1465,7 @@ template MaterialProperties(Type)
     __gshared const MaterialProperties = _make();
 }
 
-package void append_config_value(ref MutableString!0 buf, ref const Variant v)
+package(manager) void append_config_value(ref MutableString!0 buf, ref const Variant v)
 {
     if (v.isArray)
     {
