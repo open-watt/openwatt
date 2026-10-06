@@ -581,12 +581,29 @@ nothrow @nogc:
         return queued < ceiling / 2 ? ceiling - queued : 0;
     }
 
+    // without a handler the connection stops reading, and what is unread holds the peer's window
     void recv_handler(TCPRecvHandler handler)
     {
         _on_recv = handler;
         version (UseInternalIPStack)
+        {
             if (handler && _pcb && _pcb.recv_buf.length != 0)
                 queue_service();
+        }
+        else version (Windows)
+        {
+            if (handler && _recv.held && !_recv.delivering && !_closing)
+            {
+                _recv.delivering = true;
+                ++_outstanding;
+                g_app.schedule(getTime(), &deliver_held);
+            }
+        }
+        else
+        {
+            if (_watched && _phase == Phase.open)
+                g_app.reactor.modify_fd(_socket.handle, _want_write, handler !is null);
+        }
     }
 
     void event_handler(TCPEventHandler handler)
@@ -1091,7 +1108,7 @@ private:
             IoOp io;
             Page* page;
         }
-        struct RecvOp { IoOp io; ubyte[16 * 1024] buf; }
+        struct RecvOp { IoOp io; uint held; bool delivering; ubyte[16 * 1024] buf; }   // held: completed bytes awaiting a handler
 
         IOCP_SOCKET _handle = INVALID_SOCKET;
         int  _outstanding;   // overlapped ops in flight; freed by the pump sweep once they drain
@@ -1193,8 +1210,26 @@ private:
                 fail(IPEvent.closed);
                 return;
             }
-            if (_on_recv)
-                _on_recv(&this, _recv.buf[0 .. bytes], getTime());
+            if (!_on_recv)
+            {
+                _recv.held = bytes;
+                return;
+            }
+            _on_recv(&this, _recv.buf[0 .. bytes], getTime());
+            if (!_closing && !post_recv())
+                fail(IPEvent.error);
+        }
+
+        // counted as an op in flight, so the connection is not reclaimed under it
+        void deliver_held(MonoTime)
+        {
+            --_outstanding;
+            _recv.delivering = false;
+            if (_closing || _phase != Phase.open || !_on_recv)
+                return;
+            uint held = _recv.held;
+            _recv.held = 0;
+            _on_recv(&this, _recv.buf[0 .. held], getTime());
             if (!_closing && !post_recv())
                 fail(IPEvent.error);
         }
@@ -1270,6 +1305,7 @@ private:
     {
         Socket _socket;
         bool _watched;
+        bool _want_write;
 
         void pump() {}
 
@@ -1287,8 +1323,9 @@ private:
 
         void want_write(bool enable)
         {
+            _want_write = enable;
             if (_watched)
-                g_app.reactor.modify_fd(_socket.handle, enable);
+                g_app.reactor.modify_fd(_socket.handle, enable, _on_recv !is null);
         }
 
         void on_ready(IoReady ready)
@@ -1306,7 +1343,7 @@ private:
                 if (ready & IoReady.writable)
                 {
                     _phase = Phase.open;
-                    g_app.reactor.modify_fd(_socket.handle, false);
+                    want_write(false);
                     _socket.get_peer_name(_remote);
                     if (_keepalive_set)
                         set_keepalive(_socket, _keepalive, _keep_idle, _keep_interval, _keep_count);
@@ -1341,7 +1378,7 @@ private:
         void drain_rx()
         {
             ubyte[4096] buf = void;
-            while (!_closing && _phase == Phase.open)
+            while (!_closing && _phase == Phase.open && _on_recv)
             {
                 size_t got;
                 Result r = _socket.recv(buf[], MsgFlags.none, &got);
@@ -1356,8 +1393,7 @@ private:
                 }
                 if (got == 0)
                     return;     // would-block reported as success+0
-                if (_on_recv)
-                    _on_recv(&this, buf[0 .. got], getTime());
+                _on_recv(&this, buf[0 .. got], getTime());
             }
         }
 

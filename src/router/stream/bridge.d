@@ -5,6 +5,7 @@ import urt.log;
 import urt.mem;
 import urt.string;
 import urt.string.format;
+import urt.time;
 
 import manager.base;
 import manager.collection;
@@ -37,11 +38,13 @@ nothrow @nogc:
         => m_streams[];
     void streams(Stream[] value...)
     {
+        unhook_members();
         m_streams.clear();
         m_streams.reserve(value.length);
         foreach (s; value)
             m_streams.emplaceBack(s);
         mark_set!(typeof(this), "streams")();
+        restart();
     }
 
     // API...
@@ -72,27 +75,6 @@ nothrow @nogc:
         return fastest;
     }
 
-    override ptrdiff_t read(void[] buffer)
-    {
-        size_t read;
-        if (buffer.length < m_inputBuffer.length)
-        {
-            read = buffer.length;
-            buffer[] = m_inputBuffer[0 .. read];
-            m_inputBuffer = m_inputBuffer[read .. $];
-        }
-        else
-        {
-            read = m_inputBuffer.length;
-            buffer[0 .. read] = m_inputBuffer[];
-            m_inputBuffer.clear();
-        }
-        add_rx_bytes(read);
-        if (_logging)
-            write_to_log(true, buffer[0 .. read]);
-        return read;
-    }
-
     override ptrdiff_t write(const(void[])[] data...)
     {
 
@@ -120,68 +102,66 @@ nothrow @nogc:
         return total;
     }
 
-    override ptrdiff_t pending()
-        =>m_inputBuffer.length;
-
-    override ptrdiff_t flush()
-    {
-        // what this even?
-        assert(0);
-        foreach (stream; m_streams)
-            stream.flush();
-        m_inputBuffer.clear();
-        return 0;
-    }
-
 protected:
 
-    override void update()
+    // a member that goes away restarts the bridge, and its replacement is hooked once it runs
+    override CompletionStatus startup()
     {
-        // TODO: this is shit; polling periodically sucks, and will result in sync issues!
-        //       ideally, sleeping threads blocking on a read, fill an input buffer...
-
-        // read all streams, echo to other streams, accumulate input buffer
-        foreach (i; 0 .. m_streams.length)
+        foreach (ref stream; m_streams[])
         {
-            if (!m_streams[i])
-            {
-                if (m_streams[i].detached || !m_streams[i].running)
-                    continue;
-            }
-
-            ubyte[1024] buf = void;
-            size_t bytes;
-            do
-            {
-                bytes = m_streams[i].read(buf);
-
-//                debug
-//                {
-//                    if (bytes)
-//                        writeDebugf("From {0}:\n{1}\n", i, cast(void[])buf[0..bytes]);
-//                }
-
-                if (bytes == 0)
-                    break;
-
-                foreach (j; 0 .. m_streams.length)
-                {
-                    if (j == i)
-                        continue;
-                    m_streams[j].write(buf[0..bytes]);
-                }
-
-                m_inputBuffer ~= buf[0..bytes];
-            }
-            while (bytes < buf.sizeof);
+            if (!stream || !stream.running)
+                return CompletionStatus.continue_;
         }
+        foreach (ref stream; m_streams[])
+        {
+            stream.rx_handler(&member_rx);
+            stream.subscribe(&member_state_change);
+        }
+        _subscribed = true;
+        return CompletionStatus.complete;
+    }
 
-        super.update();
+    override CompletionStatus shutdown()
+    {
+        unhook_members();
+        return CompletionStatus.complete;
     }
 
 private:
     Array!(ObjectRef!Stream) m_streams;
-    Array!ubyte m_inputBuffer;
+    bool _subscribed;
+
+    void unhook_members()
+    {
+        if (!_subscribed)
+            return;
+        foreach (ref stream; m_streams[])
+        {
+            if (Stream s = stream)
+            {
+                s.release_rx_handler(&member_rx);
+                s.unsubscribe(&member_state_change);
+            }
+        }
+        _subscribed = false;
+    }
+
+    void member_state_change(ActiveObject, StateSignal signal)
+    {
+        if (signal == StateSignal.offline)
+            restart();
+    }
+
+    // what one member receives goes to every other member, and to this stream's consumer
+    void member_rx(Stream source, const(void)[] data, MonoTime rx_time)
+    {
+        foreach (ref stream; m_streams[])
+        {
+            if (stream && stream.get !is source && stream.running)
+                stream.write(data);
+        }
+        incoming(data, rx_time);
+    }
 }
 
 
@@ -194,4 +174,70 @@ nothrow @nogc:
     {
         g_app.console.register_collection!BridgeStream();
     }
+}
+
+
+unittest
+{
+    static class Member : Stream
+    {
+    nothrow @nogc:
+        ~this() {}
+        enum type_name = "bridge-test-member";
+        this(CID id, ObjectFlags flags = ObjectFlags.none)
+        {
+            super(collection_type_info!Member, id, flags);
+        }
+        override ptrdiff_t write(const(void[])[] data...)
+        {
+            size_t n;
+            foreach (d; data)
+            {
+                output ~= cast(const(char)[])d;
+                n += d.length;
+            }
+            return n;
+        }
+        void feed(const(char)[] text)
+        {
+            incoming(text, MonoTime());
+        }
+        Array!char output;
+    }
+
+    static void settle()
+    {
+        foreach (_; 0 .. 4)
+            Collection!Stream().update_all();
+    }
+
+    auto members = Collection!Member();
+    Member a = members.create("bridge-test-a");
+    Member b = members.create("bridge-test-b");
+    BridgeStream bridge = Collection!BridgeStream().create("bridge-test");
+    scope (exit)
+    {
+        bridge.destroy();
+        if (Member m = members.get("bridge-test-a"))
+            m.destroy();
+        b.destroy();
+        settle();
+    }
+    bridge.streams(a, b);
+    settle();
+    assert(bridge.running && a.rx_handler is &bridge.member_rx && b.rx_handler is &bridge.member_rx);
+    a.feed("x");
+    assert(b.output[] == "x");
+
+    // a member destroyed and created again under its name is hooked once the replacement runs
+    a.destroy();
+    settle();
+    assert(!bridge.running);
+    Member again = members.create("bridge-test-a");
+    settle();
+    assert(again !is null && bridge.running && again.rx_handler is &bridge.member_rx);
+    again.feed("y");
+    assert(b.output[] == "xy");
+    b.feed("z");
+    assert(again.output[] == "z");
 }

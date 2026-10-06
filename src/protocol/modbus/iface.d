@@ -444,15 +444,6 @@ protected:
             estimate_remote_baud();
 
         send_queued_messages();
-
-        ubyte[512] buffer = void;
-        while (true)
-        {
-            ptrdiff_t r = s.read(buffer[]);
-            if (r <= 0)
-                break;
-            incoming_bytes(null, buffer[0 .. r], getTime());
-        }
     }
 
     override int transmit(ref const Packet packet, MessageCallback callback = null, const(QueuePolicy)* queue_policy = null) nothrow @nogc
@@ -615,7 +606,7 @@ private:
             if (Stream s = active_stream())
             {
                 s.unsubscribe(&stream_state);
-                s.rx_handler = null;
+                s.release_rx_handler(&incoming_bytes);
             }
             _subscribed = false;
         }

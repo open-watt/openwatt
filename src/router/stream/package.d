@@ -14,6 +14,7 @@ import urt.string;
 import urt.string.format;
 import urt.time;
 
+import manager : g_app;
 import manager.base;
 import manager.collection;
 import manager.console;
@@ -134,7 +135,6 @@ enum StreamOptions : ubyte
     none = 0,
 
     reverse_connect = 1 << 0, // For TCP connections where remote will initiate connection
-    buffer_data =     1 << 1, // Buffer read/write data when stream is not ready
     allow_broadcast = 1 << 2, // Allow broadcast messages
 }
 
@@ -262,11 +262,17 @@ nothrow @nogc:
         _last_bitrate_sample = MonoTime.init;   // next heartbeat establishes the rate baseline
         mark_set!(typeof(this), [ "link-status", "last-status-change-time" ])();
         tx_handler_changed();
+        arm_rx_poll();
     }
 
     final override void offline()
     {
         page_unwait(&_tx_waiter);
+        if (_rx_polling)
+        {
+            _rx_polling = false;
+            g_app.cancel(&rx_poll_due);
+        }
         _status.link_status = LinkStatus.down;
         _status.link_status_change_time = getSysTime();
         ++_status.link_downs;
@@ -275,22 +281,23 @@ nothrow @nogc:
         mark_set!(typeof(this), [ "link-status", "last-status-change-time", "link-downs", "tx-rate", "rx-rate" ])();
     }
 
+    // bytes that arrive with no handler installed are not kept
     final void rx_handler(RecvHandler handler)
     {
         _incoming = handler;
-        if (_incoming && _rx_buffer.length)
-        {
-            _incoming(this, _rx_buffer[], getTime());
-            _rx_buffer.clear();
-        }
+        rx_handler_changed();
+        arm_rx_poll();
     }
     final RecvHandler rx_handler() const pure
         => _incoming;
 
     final void release_rx_handler(RecvHandler handler)
     {
-        if (_incoming is handler)
-            _incoming = null;
+        if (_incoming !is handler)
+            return;
+        _incoming = null;
+        rx_handler_changed();
+        arm_rx_poll();
     }
 
     final bool tx_handler(SendHandler handler)
@@ -325,17 +332,6 @@ nothrow @nogc:
     final bool has_tap() const pure
         => _taps.length != 0;
 
-    ptrdiff_t read(void[] buffer)
-    {
-        size_t n = _rx_buffer.length < buffer.length ? _rx_buffer.length : buffer.length;
-        if (n > 0)
-        {
-            (cast(ubyte[])buffer)[0 .. n] = _rx_buffer[0 .. n];
-            _rx_buffer.remove(0, n);
-        }
-        return n;
-    }
-
     abstract ptrdiff_t write(const(void[])[] data...);
 
     size_t tx_request() const
@@ -343,16 +339,6 @@ nothrow @nogc:
 
     bool supports_tx_pages() const
         => false;
-
-    ptrdiff_t pending()
-        => _rx_buffer.length;
-
-    ptrdiff_t flush()
-    {
-        ptrdiff_t n = _rx_buffer.length;
-        _rx_buffer.clear();
-        return n;
-    }
 
     TerminalChannel* terminal_channel()
     {
@@ -381,6 +367,18 @@ nothrow @nogc:
     }
 
 protected:
+
+    // a source with no receive event is read through poll_rx, at this interval, while a handler takes its bytes
+    Duration rx_poll_interval() const
+        => Duration.zero;
+
+    void poll_rx(MonoTime now)
+    {
+    }
+
+    void rx_handler_changed()
+    {
+    }
 
     void tx_handler_changed()
     {
@@ -442,17 +440,8 @@ protected:
     else
         enum _logging = false;
 
-    uint _buffer_len = 0;
-    void[] _send_buffer;
-
     RecvHandler _incoming;
-    Array!ubyte _rx_buffer;
     Array!TapHandler _taps;
-
-    // When no rx_handler is installed, pushed bytes buffer here until a consumer polls read().
-    // A stream that is actively drained by a producer (e.g. the serial reader thread) but has no
-    // consumer would otherwise grow this without bound, so cap it and drop like a full device FIFO.
-    enum max_unread_rx = 256 * 1024;
 
     final void incoming(const(void)[] data, MonoTime rx_time)
     {
@@ -462,8 +451,6 @@ protected:
         write_to_log(true, data);
         if (_incoming)
             _incoming(this, data, rx_time);
-        else if (_rx_buffer.length < max_unread_rx)
-            _rx_buffer ~= cast(const(ubyte)[])data;
     }
 
     final void add_tx_bytes(size_t bytes)
@@ -504,6 +491,28 @@ private:
     SendHandler _outgoing;
     PageWaiter _tx_waiter;
     bool _pumping_tx;
+    bool _rx_polling;
+
+    final void arm_rx_poll()
+    {
+        bool want = _incoming && running && rx_poll_interval != Duration.zero;
+        if (want == _rx_polling)
+            return;
+        _rx_polling = want;
+        if (want)
+            g_app.schedule(getTime() + rx_poll_interval, &rx_poll_due);
+        else
+            g_app.cancel(&rx_poll_due);
+    }
+
+    void rx_poll_due(MonoTime)
+    {
+        _rx_polling = false;
+        if (!_incoming || !running)
+            return;
+        poll_rx(getTime());
+        arm_rx_poll();
+    }
 }
 
 final class StreamModule : Module

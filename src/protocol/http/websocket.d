@@ -162,6 +162,8 @@ protected:
 
         if (!_stream.running)
             return CompletionStatus.continue_;
+        if (_stream.rx_handler !is &stream_rx)
+            _stream.rx_handler(&stream_rx);
 
         if (!_is_server && _handshake_parser is null && !_subscribed)
         {
@@ -193,12 +195,8 @@ protected:
 
         if (_handshake_parser)
         {
-            int r = _handshake_parser.update(_stream);
-            if (r < 0)
-                return CompletionStatus.error;
-            if (r == 0)
+            if (!_upgraded)
                 return CompletionStatus.continue_;
-            // r > 0: upgrade handler claimed the connection
             free(_handshake_parser);
             _handshake_parser = null;
             _handshake_key = String();
@@ -215,6 +213,9 @@ protected:
 
         if (Stream s = _stream)
             set_link_speed(s.tx_link_speed, s.rx_link_speed);
+        // bytes that arrived before the session ran: past the upgrade, or seeded by the server
+        if (!_message.empty)
+            parse_frames(getTime());
     }
 
     override CompletionStatus shutdown()
@@ -230,6 +231,7 @@ protected:
             _handshake_parser = null;
             _handshake_key = String();
         }
+        _upgraded = false;
         if (!_is_server && _conn.has_remote())
         {
             _conn.stop();
@@ -244,248 +246,6 @@ protected:
         _tx_pending.clear();
         _tx_offset = 0;
         return CompletionStatus.complete;
-    }
-
-    final override void update()
-    {
-        super.update();
-
-        ubyte[1024] tmp = void;
-        ubyte[] buf = _message.empty ? tmp[] : _message[];
-        size_t read = _message.empty ? 0 : _message.length;
-        size_t frame_start = _decoded_bytes;
-
-        MonoTime timestamp = getTime();
-
-        while (true)
-        {
-            // shuffle tail bytes to the start of the buffer
-            if (frame_start > _decoded_bytes)
-            {
-                size_t tail = read - frame_start;
-                memmove(buf.ptr + _decoded_bytes, buf.ptr + frame_start, tail);
-                read = _decoded_bytes + tail;
-                frame_start = _decoded_bytes;
-            }
-
-            // parse any complete frames already in the buffer - important on the
-            // first iteration after an HTTP->WS upgrade, where _message was seeded
-            // with leftover bytes from the HTTP parser before any stream.read.
-            while (frame_start + 2 < read)
-            {
-                ubyte[] msg = buf[frame_start .. read];
-
-                ubyte opcode = msg[0] & 0xF; // OPCODE
-                bool rsv3 = (msg[0] >> 4) & 1; // RSV3
-                bool rsv2 = (msg[0] >> 5) & 1; // RSV2
-                bool rsv1 = (msg[0] >> 6) & 1; // RSV1
-                bool fin = msg[0] >> 7; // FIN
-                bool mask = msg[1] >> 7; // MASK
-                align(4) ubyte[4] mask_key;
-
-                // work out payload length
-                size_t payload_len = msg[1] & 0x7F;
-                size_t offset = 2;
-                if (payload_len == 0x7E)
-                {
-                    if (msg.length < offset + 2)
-                        break;
-                    payload_len = msg[offset .. offset + 2][0..2].bigEndianToNative!ushort;
-                    offset += 2;
-                }
-                else if (payload_len == 0x7F)
-                {
-                    if (msg.length < offset + 8)
-                        break;
-                    ulong len = msg[offset .. offset + 8][0..8].bigEndianToNative!ulong;
-                    offset += 8;
-
-                    if (len > size_t.sizeof) // we can't handle payloads larger than size_t!
-                    {
-                        add_rx_drop();
-                        restart();
-                        return;
-                    }
-                    payload_len = cast(size_t)len;
-                }
-
-                // if a mask was included
-                if (mask)
-                {
-                    if (msg.length < offset + 4)
-                        break;
-                    mask_key = msg[offset .. offset + 4];
-                    offset += 4;
-                }
-
-                // incomplete frame - break out; the outer loop reads more and the
-                // end-of-function stash persists buf into _message across update calls.
-                size_t msg_len = offset + payload_len;
-                if (read < frame_start + msg_len)
-                    break;
-
-                switch (opcode)
-                {
-                    case 0: // continuation frame
-                        if (_pending_message_type == WSMessageType.unknown)
-                        {
-                            // continuation frame without a prior frame
-                            add_rx_drop();
-                            restart();
-                            return;
-                        }
-                        break;
-
-                    case 1: // text frame
-                    case 2: // binary frame
-                        if (_pending_message_type != WSMessageType.unknown)
-                        {
-                            // must be the first frame in a series
-                            add_rx_drop();
-                            restart();
-                            return;
-                        }
-                        _pending_message_type = opcode == 1 ? WSMessageType.text : WSMessageType.binary;
-                        break;
-
-                    case 9: // ping
-                        // Control frames can't be fragmented and MUST be <= 125 bytes.
-                        if (!fin || payload_len > 125)
-                        {
-                            add_rx_drop();
-                            restart();
-                            return;
-                        }
-                        // Unmask the ping payload into a local buffer and echo it in the pong.
-                        ubyte[125] ping_payload = void;
-                        if (mask)
-                        {
-                            foreach (i; 0 .. payload_len)
-                                ping_payload[i] = cast(ubyte)(msg[offset + i] ^ mask_key[i & 3]);
-                        }
-                        else
-                            ping_payload[0 .. payload_len] = cast(const(ubyte)[])msg[offset .. offset + payload_len];
-                        send_control_frame(10, ping_payload[0 .. payload_len]);
-                        frame_start += msg_len;
-                        continue;
-
-                    case 10: // pong
-                        // TODO: record ping time...
-                        frame_start += msg_len;
-                        continue;
-
-                    case 8: // connection close
-                        send_close(1000); // echo a normal-closure frame before tearing down
-                        restart();
-                        return;
-
-                    default:
-                        // "If an unknown opcode is received, the receiving endpoint MUST _Fail the WebSocket Connection_"
-                        add_rx_drop();
-                        restart();
-                        return;
-                }
-
-                // Accumulate per-fragment framing overhead; applied at dispatch below.
-                // Drop paths (close/default, and the orphan/mid-series cases above) have
-                // already returned without bumping this.
-                _rx_overhead += offset;
-
-                if (mask)
-                {
-                    for (size_t i = 0; i < payload_len; ++i)
-                        buf[_decoded_bytes + i] = msg[offset + i] ^ mask_key[i & 3];
-                }
-                else
-                {
-                    if (_decoded_bytes == 0)
-                    {
-                        // shortcus for whole, self-contained frames.
-                        version (DebugWebSocket)
-                        {
-                            size_t plen = msg_len - offset;
-                            log.trace("dispatch ", _pending_message_type == WSMessageType.text ? "text" : "binary",
-                                      " (", plen, " bytes): ",
-                                      cast(void[])msg[offset .. offset + (plen <= 200 ? plen : 200)],
-                                      plen > 200 ? ", ..." : "");
-                        }
-
-                        Packet p;
-                        ref hdr = p.init!RawFrame(msg[offset .. msg_len], timestamp);
-                        hdr.is_text = _pending_message_type == WSMessageType.text;
-                        _status.rx_bytes += _rx_overhead; // incoming_packet() counts the payload; we add framing
-                        _rx_overhead = 0;
-                        incoming_packet(p);
-
-                        frame_start += msg_len;
-                        _pending_message_type = WSMessageType.unknown;
-                        continue;
-                    }
-                    else
-                        memmove(buf.ptr + _decoded_bytes, msg.ptr + offset, payload_len);
-                }
-                _decoded_bytes += payload_len;
-                frame_start += msg_len;
-
-                if (fin)
-                {
-                    version (DebugWebSocket)
-                        log.trace("dispatch ", _pending_message_type == WSMessageType.text ? "text" : "binary",
-                                  " (", _decoded_bytes, " bytes, reassembled): ",
-                                  cast(void[])buf[0 .. _decoded_bytes <= 200 ? _decoded_bytes : 200],
-                                  _decoded_bytes > 200 ? ", ..." : "");
-
-                    Packet p;
-                    ref hdr = p.init!RawFrame(buf[0 .. _decoded_bytes], timestamp);
-                    hdr.is_text = _pending_message_type == WSMessageType.text;
-                    _status.rx_bytes += _rx_overhead;
-                    _rx_overhead = 0;
-                    incoming_packet(p);
-
-                    _pending_message_type = WSMessageType.unknown;
-                    _decoded_bytes = 0;
-                }
-            }
-
-            // fetch more data from the stream
-            size_t available = _stream.pending();
-            if (available == 0)
-                break;
-            if (available > buf.length - read)
-            {
-                _message.resize(read + available);
-                if (buf.ptr is tmp.ptr)
-                    _message[0 .. read] = tmp[0 .. read];
-                buf = _message[];
-            }
-
-            ptrdiff_t r = _stream.read(buf[read .. read + available]);
-            if (r < 0)
-            {
-                assert(false, "TODO: handle errors?");
-                return;
-            }
-            timestamp = getTime();
-            version (DebugWebSocket)
-                log.trace("recv: (", r, ")[ ", cast(void[])buf[read .. read + (r <= 200 ? r : 200)], r > 200 ? ", ... ]" : " ]");
-            read += r;
-        }
-
-        // shuffle any undispatched tail back down before stashing - the outer loop
-        // may have exited via `pending == 0` right after parsing, before the top-of-loop
-        // shuffle reclaims the gap between _decoded_bytes and frame_start.
-        if (frame_start > _decoded_bytes)
-        {
-            size_t tail = read - frame_start;
-            memmove(buf.ptr + _decoded_bytes, buf.ptr + frame_start, tail);
-            read = _decoded_bytes + tail;
-            frame_start = _decoded_bytes;
-        }
-
-        // stash any remaining bytes...
-        _message.resize(read);
-        if (read > 0 && buf.ptr is tmp.ptr)
-            _message[] = tmp[0 .. read];
     }
 
     override int transmit(ref Packet packet, MessageCallback, const(QueuePolicy)*)
@@ -575,6 +335,7 @@ private:
     bool _close_sent;
     bool _tx_closing;
     bool _tx_pulling;
+    bool _upgraded;
 
     HTTPParser* _handshake_parser; // non-null while client handshake is in flight
     String _handshake_key;
@@ -591,6 +352,216 @@ private:
     enum size_t tx_low_water = 16 * 1024;                       // reserve room for one maximum frame
     static assert(tx_low_water + max_tx_frame <= max_tx_pending, "the last frame admitted must fit");
     enum size_t max_tx_page = 1600;
+
+    void stream_rx(Stream stream, const(void)[] data, MonoTime rx_time)
+    {
+        if (_handshake_parser && !_upgraded)
+        {
+            int r = _handshake_parser.feed(cast(const(ubyte)[])data, stream);
+            if (r < 0)
+                restart();
+            else if (r > 0)
+                _upgraded = true;
+            return;
+        }
+        version (DebugWebSocket)
+            log.trace("recv: (", data.length, ")[ ", data[0 .. data.length <= 200 ? data.length : 200], data.length > 200 ? ", ... ]" : " ]");
+        _message ~= cast(const(ubyte)[])data;
+        if (running)
+            parse_frames(rx_time);
+    }
+
+    // _message holds the decoded bytes of a fragmented message, then the undecoded tail
+    void parse_frames(MonoTime timestamp)
+    {
+        ubyte[] buf = _message[];
+        size_t read = _message.length;
+        size_t frame_start = _decoded_bytes;
+
+        while (frame_start + 2 <= read)
+        {
+            ubyte[] msg = buf[frame_start .. read];
+
+            ubyte opcode = msg[0] & 0xF; // OPCODE
+            bool rsv3 = (msg[0] >> 4) & 1; // RSV3
+            bool rsv2 = (msg[0] >> 5) & 1; // RSV2
+            bool rsv1 = (msg[0] >> 6) & 1; // RSV1
+            bool fin = msg[0] >> 7; // FIN
+            bool mask = msg[1] >> 7; // MASK
+            align(4) ubyte[4] mask_key;
+
+            // work out payload length
+            size_t payload_len = msg[1] & 0x7F;
+            size_t offset = 2;
+            if (payload_len == 0x7E)
+            {
+                if (msg.length < offset + 2)
+                    break;
+                payload_len = msg[offset .. offset + 2][0..2].bigEndianToNative!ushort;
+                offset += 2;
+            }
+            else if (payload_len == 0x7F)
+            {
+                if (msg.length < offset + 8)
+                    break;
+                ulong len = msg[offset .. offset + 8][0..8].bigEndianToNative!ulong;
+                offset += 8;
+
+                // the top bit must be clear (RFC 6455 5.2), and the length must fit this build's address space
+                if ((len >> 63) || len > size_t.max)
+                {
+                    add_rx_drop();
+                    restart();
+                    return;
+                }
+                payload_len = cast(size_t)len;
+            }
+
+            // if a mask was included
+            if (mask)
+            {
+                if (msg.length < offset + 4)
+                    break;
+                mask_key = msg[offset .. offset + 4];
+                offset += 4;
+            }
+
+            // incomplete frame: the tail waits in _message for the next chunk; compared by subtraction, so no sum can wrap
+            if (payload_len > msg.length - offset)
+                break;
+            size_t msg_len = offset + payload_len;
+
+            switch (opcode)
+            {
+                case 0: // continuation frame
+                    if (_pending_message_type == WSMessageType.unknown)
+                    {
+                        // continuation frame without a prior frame
+                        add_rx_drop();
+                        restart();
+                        return;
+                    }
+                    break;
+
+                case 1: // text frame
+                case 2: // binary frame
+                    if (_pending_message_type != WSMessageType.unknown)
+                    {
+                        // must be the first frame in a series
+                        add_rx_drop();
+                        restart();
+                        return;
+                    }
+                    _pending_message_type = opcode == 1 ? WSMessageType.text : WSMessageType.binary;
+                    break;
+
+                case 9: // ping
+                    // Control frames can't be fragmented and MUST be <= 125 bytes.
+                    if (!fin || payload_len > 125)
+                    {
+                        add_rx_drop();
+                        restart();
+                        return;
+                    }
+                    // Unmask the ping payload into a local buffer and echo it in the pong.
+                    ubyte[125] ping_payload = void;
+                    if (mask)
+                    {
+                        foreach (i; 0 .. payload_len)
+                            ping_payload[i] = cast(ubyte)(msg[offset + i] ^ mask_key[i & 3]);
+                    }
+                    else
+                        ping_payload[0 .. payload_len] = cast(const(ubyte)[])msg[offset .. offset + payload_len];
+                    send_control_frame(10, ping_payload[0 .. payload_len]);
+                    frame_start += msg_len;
+                    continue;
+
+                case 10: // pong
+                    // TODO: record ping time...
+                    frame_start += msg_len;
+                    continue;
+
+                case 8: // connection close
+                    send_close(1000); // echo a normal-closure frame before tearing down
+                    restart();
+                    return;
+
+                default:
+                    // "If an unknown opcode is received, the receiving endpoint MUST _Fail the WebSocket Connection_"
+                    add_rx_drop();
+                    restart();
+                    return;
+            }
+
+            // Accumulate per-fragment framing overhead; applied at dispatch below.
+            // Drop paths (close/default, and the orphan/mid-series cases above) have
+            // already returned without bumping this.
+            _rx_overhead += offset;
+
+            if (mask)
+            {
+                for (size_t i = 0; i < payload_len; ++i)
+                    buf[_decoded_bytes + i] = msg[offset + i] ^ mask_key[i & 3];
+            }
+            else
+            {
+                if (_decoded_bytes == 0)
+                {
+                    // shortcus for whole, self-contained frames.
+                    version (DebugWebSocket)
+                    {
+                        size_t plen = msg_len - offset;
+                        log.trace("dispatch ", _pending_message_type == WSMessageType.text ? "text" : "binary",
+                                  " (", plen, " bytes): ",
+                                  cast(void[])msg[offset .. offset + (plen <= 200 ? plen : 200)],
+                                  plen > 200 ? ", ..." : "");
+                    }
+
+                    Packet p;
+                    ref hdr = p.init!RawFrame(msg[offset .. msg_len], timestamp);
+                    hdr.is_text = _pending_message_type == WSMessageType.text;
+                    _status.rx_bytes += _rx_overhead; // incoming_packet() counts the payload; we add framing
+                    _rx_overhead = 0;
+                    incoming_packet(p);
+
+                    frame_start += msg_len;
+                    _pending_message_type = WSMessageType.unknown;
+                    continue;
+                }
+                else
+                    memmove(buf.ptr + _decoded_bytes, msg.ptr + offset, payload_len);
+            }
+            _decoded_bytes += payload_len;
+            frame_start += msg_len;
+
+            if (fin)
+            {
+                version (DebugWebSocket)
+                    log.trace("dispatch ", _pending_message_type == WSMessageType.text ? "text" : "binary",
+                              " (", _decoded_bytes, " bytes, reassembled): ",
+                              cast(void[])buf[0 .. _decoded_bytes <= 200 ? _decoded_bytes : 200],
+                              _decoded_bytes > 200 ? ", ..." : "");
+
+                Packet p;
+                ref hdr = p.init!RawFrame(buf[0 .. _decoded_bytes], timestamp);
+                hdr.is_text = _pending_message_type == WSMessageType.text;
+                _status.rx_bytes += _rx_overhead;
+                _rx_overhead = 0;
+                incoming_packet(p);
+
+                _pending_message_type = WSMessageType.unknown;
+                _decoded_bytes = 0;
+            }
+        }
+
+        if (frame_start > _decoded_bytes)
+        {
+            size_t tail = read - frame_start;
+            memmove(buf.ptr + _decoded_bytes, buf.ptr + frame_start, tail);
+            read = _decoded_bytes + tail;
+        }
+        _message.resize(read);
+    }
 
     void stream_state_change(ActiveObject, StateSignal signal)
     {
@@ -654,7 +625,10 @@ private:
         g_app.cancel(&tx_overflow);
         _tx_closing = false;
         if (_stream)
+        {
             _stream.release_tx_handler(&produce_tx);
+            _stream.release_rx_handler(&stream_rx);
+        }
         if (_subscribed)
         {
             _stream.unsubscribe(&stream_state_change);
@@ -825,10 +799,6 @@ protected:
         return CompletionStatus.complete;
     }
 
-    override void update()
-    {
-    }
-
 private:
     ObjectRef!HTTPServer _server;
     String _uri;
@@ -867,10 +837,10 @@ private:
             WebSocket ws = Collection!WebSocket().create(n, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary));
             ws._stream = stream;
             ws._is_server = true;
-            // any bytes the HTTP parser read past the upgrade request are the start of
-            // the first websocket frame; seed them into the rx buffer before the first read.
+            // bytes past the upgrade request start the first frame; what follows buffers until the session runs
             if (leftover.length)
                 ws._message = leftover[];
+            stream.rx_handler(&ws.stream_rx);
             stream = null;
 
             if (String proto = request.header("Sec-WebSocket-Protocol"))
@@ -957,3 +927,40 @@ __gshared immutable string[__traits(allMembers, WSExtensions).length] g_webSocke
 //    "channel-id-server",
 //    "channel-id-client-server"
 ];
+
+
+unittest
+{
+    import urt.mem : alloc, free;
+
+    WebSocket ws = alloc!WebSocket(CID(1));
+    scope (exit) free(ws);
+
+    // a header alone, declaring a 64-bit length: read as the parser would see it, with nothing behind
+    ulong parse(ulong len)
+    {
+        ws._message.clear();
+        ws._decoded_bytes = 0;
+        ubyte[14] frame = [0x82, 0xFF, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4];
+        foreach (i; 0 .. 8)
+            frame[2 + i] = cast(ubyte)(len >> (56 - 8 * i));
+        ws._message ~= frame[];
+        ulong dropped = ws.rx_dropped;
+        ws.parse_frames(MonoTime());
+        return ws.rx_dropped - dropped;
+    }
+
+    // the top bit set is invalid on every build
+    assert(parse(ulong.max) == 1 && parse(1UL << 63) == 1);
+    // a length this build cannot address is refused; one it can waits for its payload, however large
+    static if (size_t.sizeof == 8)
+        assert(parse(0x7FFF_FFFF_FFFF_FFFF) == 0 && ws._message.length == 14);
+    else
+    {
+        assert(parse(ulong(uint.max) + 1) == 1 && parse(0x7FFF_FFFF_FFFF_FFFF) == 1);
+        // the header plus these lengths wraps a 32-bit size_t
+        assert(parse(uint.max) == 0 && parse(uint.max - 13) == 0 && ws._message.length == 14);
+    }
+    assert(parse(1) == 0 && ws._message.length == 14);
+    ws._message.clear();
+}

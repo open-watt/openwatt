@@ -1281,6 +1281,31 @@ this is what remains.
 
 ## Infrastructure
 
+- **Receive still polled after the stream migration** (2026-10-06): streams push, but a few
+  consumers still learn of progress from a tick. TLS advances its handshake from `startup()`,
+  which the state machine re-drives each frame, rather than from the bytes' arrival; the DNS
+  server polls its UDP sockets with `recvfrom` each frame; `Session` polls terminal events.
+  Sources with no receive event (Windows console input, a shared-memory FIFO, the IDF USB drivers,
+  a replayed file, serial without a reactor or an RX interrupt) poll themselves through
+  `poll_rx()`; each wants an event where its platform offers one (a reactor `watch_io` for stdin
+  on Linux, the IDF drivers' callbacks).
+
+- **`BridgeStream.write` spins on a member that is not running**: it loops until each member has
+  taken all the data, and a stopped member takes nothing.
+
+- **Push-receive review follow-ups** (2026-10-06, #814):
+  - A connection paused by `recv_handler(null)` does not see the peer's FIN or a reset until it
+    reads again; epoll drops read interest and IOCP holds the one receive it has.
+  - Telnet subnegotiation is not clamped, so a peer that never sends `IAC SE` grows the buffer.
+  - A consumer that calls `restart()` from inside its delivery leaves the source's loop to finish
+    the chunk against a stopping object; such consumers should call `restart_deferred()`, and the
+    delivery loops want to stop on `!running`.
+  - An ISR whose event post is refused leaves serial RX to a retry flag `SerialStream.update()`
+    takes, and ethernet drops the wake. Give ISR posters an intrusive overflow node the reactor
+    wake drains, so a refused post is retried without a tick.
+  - A second `Application` in one process re-runs every module's registrations against globals the
+    first left behind, and crashes; so unit tests cannot drive `g_app.schedule`.
+
 - **Sync producer sizing follow-ups** (2026-10-06, review of #813):
   - An event series with no val room stays pending and retries from the tick; the ack's `arm_tx`
     never reaches `flush_pending_vals`. Drive it from the room event.
@@ -1618,10 +1643,6 @@ this is what remains.
   until a 10,248-byte allocation failed, and the RP2350 grew about 5 KB per port open while idle
   time added nothing. Opening the port over a CP210x seems to restart the session by itself on
   alternate opens. Find what a restart keeps.
-
-- **Move WebSocket RX off the tick**: `WebSocket.update()` still polls `_stream.read()` each
-  frame; it should install `rx_handler` and decode on delivery. TX is now pull-driven by the
-  stream, so the tick carries only RX.
 
 - **Fix `/device/print` on non-terminal sessions**: `/api/cli/execute` crashes the process and
   a piped interactive session prints nothing. Audit `DeviceTreeView` and other live views for

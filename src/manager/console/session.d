@@ -10,6 +10,7 @@ import urt.mem.reclaim;
 import urt.result;
 import urt.string;
 import urt.string.ansi;
+import urt.time : MonoTime;
 import urt.util;
 import urt.variant;
 
@@ -234,6 +235,8 @@ nothrow @nogc:
         }
         if (!(_flags & ObjectFlags.dynamic))
             show_prompt(true);
+        if (s)
+            s.rx_handler(&stream_rx);
         return CompletionStatus.complete;
     }
 
@@ -275,33 +278,8 @@ nothrow @nogc:
 
     final override void update()
     {
-        Stream s = _stream;
-        if (s)
-        {
-            enum BufLen = 512;
-            char[BufLen] recvbuf = void;
-
-            ptrdiff_t r;
-            do
-            {
-                r = s.read(recvbuf[]);
-                if (r < 0)
-                {
-                    restart();
-                    return;
-                }
-                if (r > 0)
-                {
-                    if (_current_command && _current_command.consumes_input())
-                        _current_command.receive_input(recvbuf[0 .. r]);
-                    else
-                        receive_input(recvbuf[0 .. r]);
-                }
-            }
-            while (r == recvbuf.length);
-
+        if (_stream)
             poll_terminal_events();
-        }
 
         // Poll async command completion
         if (_current_command)
@@ -917,9 +895,19 @@ private:
     {
         if (_stream_subscribed)
         {
+            _stream.release_rx_handler(&stream_rx);
             _stream.unsubscribe(&stream_state_change);
             _stream_subscribed = false;
         }
+    }
+
+    void stream_rx(Stream, const(void)[] data, MonoTime)
+    {
+        const(char)[] text = cast(const(char)[])data;
+        if (_current_command && _current_command.consumes_input())
+            _current_command.receive_input(text);
+        else
+            receive_input(text);
     }
 
     void finish_close()
@@ -1352,9 +1340,6 @@ nothrow @nogc:
     {
         super(collection_type_info!SessionTestStream, id, flags);
     }
-
-    override ptrdiff_t read(void[])
-        => 0;
 
     override ptrdiff_t write(const(void[])[] data...)
     {

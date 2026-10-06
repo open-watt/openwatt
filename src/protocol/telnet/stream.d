@@ -5,7 +5,9 @@ import urt.log;
 import urt.mem;
 import urt.mem.pagepool;
 import urt.string;
+import urt.time : MonoTime, getTime;
 
+import manager : g_app;
 import manager.base;
 import manager.base : ObjectRef, Property;
 import manager.collection;
@@ -69,6 +71,7 @@ nothrow @nogc:
             _inner.release_tx_handler(&provide_tx_page);
         if (_subscribed)
         {
+            _inner.release_rx_handler(&inner_rx);
             _inner.unsubscribe(&inner_state_change);
             _subscribed = false;
         }
@@ -133,133 +136,6 @@ nothrow @nogc:
 
     // Stream API
 
-    // Read clean data from the stream, stripping IAC sequences.
-    // IAC commands update the TerminalChannel and set pending events.
-    override ptrdiff_t read(void[] buffer)
-    {
-        if (!_inner)
-            return -1;
-
-        enum RawBufLen = 512;
-        ubyte[RawBufLen] rawbuf = void;
-
-        // Prepend any leftover bytes from previous incomplete IAC sequences
-        size_t raw_len = _tail.length;
-        if (raw_len > RawBufLen / 2)
-            raw_len = RawBufLen / 2; // clamp to leave room for new data
-        rawbuf[0 .. raw_len] = _tail[0 .. raw_len];
-        _tail.clear();
-
-        ptrdiff_t r = _inner.read(rawbuf[raw_len .. $]);
-        if (r < 0)
-            return -1;
-        if (r == 0 && raw_len == 0)
-            return 0;
-
-        raw_len += r;
-
-        size_t out_pos = 0;
-        ubyte[] out_buf = cast(ubyte[])buffer;
-
-        size_t i = 0;
-        parse_loop: for (; i < raw_len; ++i)
-        {
-            if (rawbuf[i] == NVT.IAC)
-            {
-                size_t iac_start = i;
-
-                if (i >= raw_len - 1)
-                    break; // incomplete - save for next read
-
-                NVT cmd = cast(NVT)rawbuf[++i];
-                switch (cmd)
-                {
-                    case NVT.NOP:
-                        break;
-
-                    case NVT.DM:
-                        break;
-
-                    case NVT.BRK:
-                    case NVT.IP:
-                        _terminal.pending_events |= TerminalEvents.interrupt;
-                        break;
-
-                    case NVT.AO:
-                        break;
-
-                    case NVT.AYT:
-                        _inner.write("\a");
-                        break;
-
-                    case NVT.EC:
-                        if (out_pos < buffer.length)
-                            out_buf[out_pos++] = '\b';
-                        break;
-
-                    case NVT.EL:
-                        if (out_pos < buffer.length)
-                            out_buf[out_pos++] = '\x15'; // Ctrl+U - kill line
-                        break;
-
-                    case NVT.GA:
-                        break;
-
-                    case NVT.SB:
-                        size_t sub_start = i + 1;
-                        while (sub_start < raw_len - 1 && !(rawbuf[sub_start] == NVT.IAC && rawbuf[sub_start + 1] == NVT.SE))
-                            ++sub_start;
-                        if (sub_start >= raw_len - 1)
-                        {
-                            // Incomplete subnegotiation - save from IAC start
-                            i = iac_start;
-                            break parse_loop;
-                        }
-
-                        const(ubyte)[] sub = rawbuf[i + 1 .. sub_start];
-                        i = sub_start + 1; // skip past IAC SE
-
-                        if (sub.length > 0)
-                            handle_subnegotiation(sub);
-                        break;
-
-                    case NVT.WILL:
-                    case NVT.WONT:
-                    case NVT.DO:
-                    case NVT.DONT:
-                        if (i >= raw_len - 1)
-                        {
-                            i = iac_start;
-                            break parse_loop;
-                        }
-                        TelnetOptions opt = cast(TelnetOptions)rawbuf[++i];
-                        handle_option(cmd, opt);
-                        break;
-
-                    case cast(NVT)0xff: // escaped IAC
-                        if (out_pos < buffer.length)
-                            out_buf[out_pos++] = 0xff;
-                        break;
-
-                    default:
-                        writeWarningf("Unknown NVT command: \\\\x{0, 02x}", cast(ubyte)cmd);
-                        break;
-                }
-            }
-            else
-            {
-                if (out_pos < buffer.length)
-                    out_buf[out_pos++] = rawbuf[i];
-            }
-        }
-
-        // Save unparsed tail for next read
-        if (i < raw_len)
-            _tail = rawbuf[i .. raw_len];
-
-        return cast(ptrdiff_t)out_pos;
-    }
-
     // Write data to the stream, escaping 0xFF bytes.
     override ptrdiff_t write(const(void[])[] data...)
     {
@@ -302,21 +178,6 @@ nothrow @nogc:
             }
         }
         return total;
-    }
-
-    override ptrdiff_t pending()
-    {
-        if (!_inner)
-            return -1;
-        // Can't know exactly how many clean bytes are pending since
-        // IAC sequences consume raw bytes. Return inner pending as estimate.
-        return _inner.pending() + cast(ptrdiff_t)_tail.length;
-    }
-
-    override ptrdiff_t flush()
-    {
-        _tail.clear();
-        return _inner ? _inner.flush() : 0;
     }
 
     override ulong tx_link_speed() const
@@ -369,6 +230,7 @@ protected:
                 break;
         }
 
+        _inner.rx_handler(&inner_rx);
         _inner.subscribe(&inner_state_change);
         _subscribed = true;
         tx_handler_changed();
@@ -380,9 +242,11 @@ protected:
     {
         if (_inner)
             _inner.release_tx_handler(&provide_tx_page);
+        g_app.cancel(&resume_rx);
         free_pending_tx();
         if (_subscribed)
         {
+            _inner.release_rx_handler(&inner_rx);
             _inner.unsubscribe(&inner_state_change);
             _subscribed = false;
         }
@@ -394,6 +258,16 @@ protected:
         _client_state_req = 0;
         _tail.clear();
         return CompletionStatus.complete;
+    }
+
+    // a consumer that returns takes what was held on the next pass, and the transport reads again after it
+    override void rx_handler_changed()
+    {
+        Stream stream = _inner.get;
+        if (!rx_handler || !_subscribed || !stream || stream.rx_handler is &inner_rx)
+            return;
+        g_app.cancel(&resume_rx);
+        g_app.schedule(getTime(), &resume_rx);
     }
 
     override void tx_handler_changed()
@@ -413,11 +287,139 @@ private:
     ObjectRef!Stream _inner;
     TerminalChannel _terminal;
     Array!char _terminal_type;
-    Array!ubyte _tail;
+    Array!ubyte _tail;          // input not yet parsed: an incomplete sequence, or what arrived with no consumer
     Page* _tx_pending;
     bool _subscribed;
     bool _terminal_aware;
     TxStatus _tx_pending_status;
+
+    // strips IAC sequences; commands update the TerminalChannel and set pending events
+    void inner_rx(Stream, const(void)[] data, MonoTime rx_time)
+    {
+        enum RawBufLen = 512;
+        const(ubyte)[] input = cast(const(ubyte)[])data;
+        while (input.length)
+        {
+            // with no consumer the rest waits unparsed, and the transport stops reading until one returns
+            if (!rx_handler)
+            {
+                _tail ~= input;
+                _inner.release_rx_handler(&inner_rx);
+                return;
+            }
+
+            ubyte[RawBufLen] rawbuf = void;
+            ubyte[RawBufLen] out_buf = void;
+
+            // an incomplete sequence from the previous chunk leads this one
+            size_t raw_len = _tail.length;
+            if (raw_len > RawBufLen / 2)
+                raw_len = RawBufLen / 2;
+            rawbuf[0 .. raw_len] = _tail[0 .. raw_len];
+            _tail.clear();
+            size_t take = input.length < RawBufLen - raw_len ? input.length : RawBufLen - raw_len;
+            rawbuf[raw_len .. raw_len + take] = input[0 .. take];
+            input = input[take .. $];
+            raw_len += take;
+
+            size_t out_pos = 0;
+            size_t i = 0;
+            parse_loop: for (; i < raw_len; ++i)
+            {
+                if (rawbuf[i] == NVT.IAC)
+                {
+                    size_t iac_start = i;
+
+                    if (i >= raw_len - 1)
+                        break; // incomplete - save for next read
+
+                    NVT cmd = cast(NVT)rawbuf[++i];
+                    switch (cmd)
+                    {
+                        case NVT.NOP:
+                            break;
+
+                        case NVT.DM:
+                            break;
+
+                        case NVT.BRK:
+                        case NVT.IP:
+                            _terminal.pending_events |= TerminalEvents.interrupt;
+                            break;
+
+                        case NVT.AO:
+                            break;
+
+                        case NVT.AYT:
+                            _inner.write("\a");
+                            break;
+
+                        case NVT.EC:
+                            if (out_pos < out_buf.length)
+                                out_buf[out_pos++] = '\b';
+                            break;
+
+                        case NVT.EL:
+                            if (out_pos < out_buf.length)
+                                out_buf[out_pos++] = '\x15'; // Ctrl+U - kill line
+                            break;
+
+                        case NVT.GA:
+                            break;
+
+                        case NVT.SB:
+                            size_t sub_start = i + 1;
+                            while (sub_start < raw_len - 1 && !(rawbuf[sub_start] == NVT.IAC && rawbuf[sub_start + 1] == NVT.SE))
+                                ++sub_start;
+                            if (sub_start >= raw_len - 1)
+                            {
+                                // Incomplete subnegotiation - save from IAC start
+                                i = iac_start;
+                                break parse_loop;
+                            }
+
+                            const(ubyte)[] sub = rawbuf[i + 1 .. sub_start];
+                            i = sub_start + 1; // skip past IAC SE
+
+                            if (sub.length > 0)
+                                handle_subnegotiation(sub);
+                            break;
+
+                        case NVT.WILL:
+                        case NVT.WONT:
+                        case NVT.DO:
+                        case NVT.DONT:
+                            if (i >= raw_len - 1)
+                            {
+                                i = iac_start;
+                                break parse_loop;
+                            }
+                            TelnetOptions opt = cast(TelnetOptions)rawbuf[++i];
+                            handle_option(cmd, opt);
+                            break;
+
+                        case cast(NVT)0xff: // escaped IAC
+                            if (out_pos < out_buf.length)
+                                out_buf[out_pos++] = 0xff;
+                            break;
+
+                        default:
+                            writeWarningf("Unknown NVT command: \\\\x{0, 02x}", cast(ubyte)cmd);
+                            break;
+                    }
+                }
+                else
+                {
+                    if (out_pos < out_buf.length)
+                        out_buf[out_pos++] = rawbuf[i];
+                }
+            }
+
+            if (i < raw_len)
+                _tail = rawbuf[i .. raw_len];
+            incoming(out_buf[0 .. out_pos], rx_time);
+        }
+    }
     TelnetRole _role;
 
     ulong _server_state;
@@ -565,6 +567,17 @@ private:
             page_free(page);
             page = next;
         }
+    }
+
+    void resume_rx(MonoTime now)
+    {
+        Stream stream = _inner.get;
+        if (!rx_handler || !_subscribed || !stream || stream.rx_handler is &inner_rx)
+            return;
+        Array!ubyte held = _tail.move;
+        inner_rx(stream, held[], now);
+        if (rx_handler && _subscribed)
+            stream.rx_handler(&inner_rx);
     }
 
     void inner_state_change(ActiveObject, StateSignal signal)
@@ -919,4 +932,62 @@ unittest
         page_free(page);
     }
     assert(sent == 131);
+
+    // with no consumer the transport is paused and the delivery held; a returning consumer gets it whole, in order
+    {
+        static class Transport : Stream
+        {
+        nothrow @nogc:
+            ~this() {}
+            enum type_name = "telnet-test-transport";
+            this(CID id, ObjectFlags flags = ObjectFlags.none)
+            {
+                super(collection_type_info!Transport, id, flags);
+            }
+            override ptrdiff_t write(const(void[])[] data...) => 0;
+            void feed(const(char)[] text)
+            {
+                incoming(text, MonoTime());
+            }
+        }
+        static struct Consumer
+        {
+            Array!char text;
+            void recv(Stream, const(void)[] data, MonoTime) nothrow @nogc
+            {
+                text ~= cast(const(char)[])data;
+            }
+        }
+
+        Transport transport = Collection!Transport().create("telnet-test-transport");
+        scope (exit)
+        {
+            transport.destroy();
+            Collection!Stream().update_all();
+        }
+        TelnetStream filter = alloc!TelnetStream(CID(2));
+        scope (exit) free(filter);
+        filter._inner = transport;
+        filter._subscribed = true;
+        transport.rx_handler(&filter.inner_rx);
+
+        transport.feed("hello \xFF\xF1world");
+        assert(transport.rx_handler is null && filter._tail[] == cast(const(ubyte)[])"hello \xFF\xF1world");
+
+        // the hook schedules the resume on the application; the test takes the timer's place
+        Consumer consumer;
+        filter._subscribed = false;
+        filter.rx_handler(&consumer.recv);
+        filter._subscribed = true;
+        assert(consumer.text.empty);
+        filter.resume_rx(MonoTime());
+        assert(consumer.text[] == "hello world" && transport.rx_handler is &filter.inner_rx);
+
+        transport.feed("more");
+        assert(consumer.text[] == "hello worldmore");
+        filter.release_rx_handler(&consumer.recv);
+        transport.feed("later");
+        assert(transport.rx_handler is null && filter._tail[] == cast(const(ubyte)[])"later");
+        filter._subscribed = false;
+    }
 }

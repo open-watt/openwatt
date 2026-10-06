@@ -188,8 +188,7 @@ nothrow @nogc:
                 return CompletionStatus.continue_;
             _last_retry = now;
 
-            _link = 0;
-            _conn = tcp_connect(_remote, &on_data, &on_event);
+            _conn = tcp_connect(_remote, rx_handler ? &on_data : null, &on_event);
             if (_conn is null)
                 return CompletionStatus.continue_;     // no route / refused outright; retry later
             tx_handler_changed();
@@ -197,14 +196,6 @@ nothrow @nogc:
                 _conn.enable_keepalive(_keep_enable, _keep_idle, _keep_interval, _keep_count);
         }
 
-        if (_link < 0)
-        {
-            // the connect attempt failed; tear down and retry after the backoff
-            close_conn();
-            return CompletionStatus.continue_;
-        }
-        if (_link > 0)
-            return CompletionStatus.complete;
         return CompletionStatus.continue_;
     }
 
@@ -217,16 +208,6 @@ nothrow @nogc:
         }
         close_conn();
         return CompletionStatus.complete;
-    }
-
-    final override void update()
-    {
-        if (_link < 0)
-        {
-            restart();
-            return;
-        }
-        super.update();
     }
 
     // programmatic tuning by owners (modbus etc); only the property setter marks user config
@@ -278,6 +259,13 @@ nothrow @nogc:
 
 protected:
 
+    // the connection reads only while this stream has a consumer
+    override void rx_handler_changed()
+    {
+        if (_conn)
+            _conn.recv_handler(rx_handler ? &on_data : null);
+    }
+
     override void tx_handler_changed()
     {
         if (!_conn)
@@ -294,7 +282,6 @@ private:
     ushort _port;
     SysTime _last_retry;
     String _host;
-    byte _link;
 
     bool _keep_enable = false;
     int _keep_count = 10;
@@ -321,15 +308,13 @@ private:
     {
         if (event == IPEvent.connected)
         {
-            _link = 1;
             if (_state == State.starting)
                 set_state(State.running);
+            return;
         }
-        else
-        {
-            _link = -1;
-            log.debug_(event == IPEvent.closed ? "closed by peer" : "connection error");
-        }
+        log.debug_(event == IPEvent.closed ? "closed by peer" : "connection error");
+        // a failed connect retries after startup's backoff; the connection is closed outside its own callback
+        restart_deferred();
     }
 
     void close_conn()
@@ -340,7 +325,6 @@ private:
             _conn.close();
             _conn = null;
         }
-        _link = 0;
     }
 
     bool update_port(ref InetAddress addr, ushort port)
@@ -470,9 +454,8 @@ protected:
         // adopt the accepted connection and bypass the startup/connect process
         stream._conn = conn;
         stream._remote = conn.remote();
-        stream._link = 1;
-        conn.recv_handler(&stream.on_data);
         conn.event_handler(&stream.on_event);
+        stream.rx_handler_changed();
         stream.set_state(State.running);
         Collection!TCPStream().add(stream);
         return stream;

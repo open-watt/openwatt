@@ -4,6 +4,7 @@ import urt.mem.page;
 import urt.mem.temp;
 import urt.string;
 import urt.string.format;
+import urt.time;
 
 import manager.base;
 import manager.collection;
@@ -57,6 +58,7 @@ nothrow @nogc:
             return;
         if (_rx_subscribed)
         {
+            _rx.release_rx_handler(&inner_rx);
             _rx.unsubscribe(&stream_state_change);
             _rx_subscribed = false;
         }
@@ -77,20 +79,6 @@ nothrow @nogc:
 
     override bool supports_tx_pages() const
         => _tx && _tx.supports_tx_pages;
-
-    override ptrdiff_t read(void[] buffer)
-    {
-        if (!_rx || !_rx.running)
-            return 0;
-        ptrdiff_t n = _rx.read(buffer);
-        if (n > 0)
-        {
-            add_rx_bytes(n);
-            if (_logging)
-                write_to_log(true, buffer[0 .. n]);
-        }
-        return n;
-    }
 
     override ptrdiff_t write(const(void[])[] data...)
     {
@@ -116,12 +104,6 @@ nothrow @nogc:
         return n;
     }
 
-    override ptrdiff_t pending()
-        => (_rx && _rx.running) ? _rx.pending() : 0;
-
-    override ptrdiff_t flush()
-        => (_rx && _rx.running) ? _rx.flush() : 0;
-
 protected:
 
     override bool validate() const pure
@@ -144,6 +126,7 @@ protected:
         {
             _rx.subscribe(&stream_state_change);
             _rx_subscribed = true;
+            rx_handler_changed();
         }
         return CompletionStatus.complete;
     }
@@ -152,6 +135,17 @@ protected:
     {
         unsubscribe();
         return CompletionStatus.complete;
+    }
+
+    // the rx stream holds its bytes until this stream has a consumer for them
+    override void rx_handler_changed()
+    {
+        if (!_rx_subscribed)
+            return;
+        if (rx_handler)
+            _rx.rx_handler(&inner_rx);
+        else
+            _rx.release_rx_handler(&inner_rx);
     }
 
     override void tx_handler_changed()
@@ -182,6 +176,11 @@ private:
         return page;
     }
 
+    void inner_rx(Stream, const(void)[] data, MonoTime rx_time)
+    {
+        incoming(data, rx_time);
+    }
+
     void stream_state_change(ActiveObject, StateSignal signal)
     {
         if (signal == StateSignal.offline)
@@ -202,6 +201,7 @@ private:
         }
         if (_rx_subscribed)
         {
+            _rx.release_rx_handler(&inner_rx);
             _rx.unsubscribe(&stream_state_change);
             _rx_subscribed = false;
         }

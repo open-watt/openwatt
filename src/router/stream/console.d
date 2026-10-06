@@ -6,6 +6,7 @@ import urt.mem;
 import urt.string : StringLit;
 import urt.string;
 import urt.string.ansi;
+import urt.time;
 
 import manager;
 import manager.base;
@@ -85,37 +86,6 @@ nothrow @nogc:
     override TerminalChannel* terminal_channel()
         => _input == ConsoleInput.stdin ? &_terminal : null;
 
-    override ptrdiff_t read(void[] buffer)
-    {
-        if (_input == ConsoleInput.none)
-            return 0;
-        version (Windows)
-            auto bytes = read_console_input(buffer);
-        else version (Posix)
-        {
-            auto bytes = urt.internal.sys.posix.read(STDIN_FILENO, buffer.ptr, buffer.length);
-            if (bytes < 0)
-            {
-                import urt.result : errno_result;
-                import urt.internal.stdc.errno : EAGAIN, EWOULDBLOCK, EINTR;
-                uint e = errno_result().system_code;
-                if (e == EAGAIN || e == EWOULDBLOCK || e == EINTR)
-                    bytes = 0;
-            }
-        }
-        else version (Embedded)
-            auto bytes = 0;
-        else
-            static assert(false, "Unsupported platform");
-        version (Embedded) {}
-        else
-        {
-            if (bytes > 0)
-                add_rx_bytes(bytes);
-        }
-        return bytes;
-    }
-
     override ptrdiff_t write(const(void[])[] data...)
     {
         ptrdiff_t total = 0;
@@ -130,26 +100,6 @@ nothrow @nogc:
                 return total;
         }
         return total;
-    }
-
-    override ptrdiff_t pending()
-    {
-        if (_input == ConsoleInput.none)
-            return 0;
-        version (Windows)
-        {
-            DWORD num_events = 0;
-            GetNumberOfConsoleInputEvents(_h_stdin, &num_events);
-            return cast(ptrdiff_t)num_events;
-        }
-        else
-            return 0;
-    }
-
-    override ptrdiff_t flush()
-    {
-        urt.io.flush!();
-        return 0;
     }
 
     override CompletionStatus startup()
@@ -172,6 +122,38 @@ nothrow @nogc:
         if (_input == ConsoleInput.stdin)
             restore_terminal();
         return CompletionStatus.complete;
+    }
+
+    // a console input handle signals no completion, so stdin is polled
+    override Duration rx_poll_interval() const
+    {
+        version (Embedded)
+            return Duration.zero;
+        else
+            return _input == ConsoleInput.stdin ? msecs(20) : Duration.zero;
+    }
+
+    override void poll_rx(MonoTime now)
+    {
+        version (Embedded) {}
+        else
+        {
+            ubyte[256] buffer = void;
+            for (;;)
+            {
+                version (Windows)
+                    ptrdiff_t bytes = read_console_input(buffer[]);
+                else
+                {
+                    ptrdiff_t bytes = urt.internal.sys.posix.read(STDIN_FILENO, buffer.ptr, buffer.length);
+                    if (bytes < 0)
+                        return;   // EAGAIN when drained; an error repeats on the next poll
+                }
+                if (bytes <= 0)
+                    return;
+                incoming(buffer[0 .. bytes], now);
+            }
+        }
     }
 
 private:

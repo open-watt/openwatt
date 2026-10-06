@@ -4,6 +4,7 @@ import urt.array;
 import urt.atomic;
 import urt.string;
 import urt.string.format;
+import urt.time;
 
 import manager.base;
 import manager.collection;
@@ -126,36 +127,6 @@ nothrow @nogc:
     final const(ubyte)[] captured() const pure
         => _dynamic[];
 
-    override ptrdiff_t read(void[] buffer)
-    {
-        ubyte[] dst = cast(ubyte[])buffer;
-        size_t got;
-        final switch (_rx_mode)
-        {
-            case MemoryMode.none:
-            case MemoryMode.dynamic:
-                return 0;
-
-            case MemoryMode.buffer:
-                size_t available = _rx.length - _rx_cursor;
-                got = available < dst.length ? available : dst.length;
-                dst[0 .. got] = (cast(ubyte[])_rx)[_rx_cursor .. _rx_cursor + got];
-                _rx_cursor += got;
-                break;
-
-            case MemoryMode.fifo:
-                got = fifo_read(_rx, dst);
-                break;
-        }
-        if (got)
-        {
-            add_rx_bytes(got);
-            if (_logging)
-                write_to_log(true, dst[0 .. got]);
-        }
-        return got;
-    }
-
     override ptrdiff_t write(const(void[])[] data...)
     {
         size_t total;
@@ -217,40 +188,25 @@ nothrow @nogc:
         return total;
     }
 
-    override ptrdiff_t pending()
-    {
-        final switch (_rx_mode)
-        {
-            case MemoryMode.none:
-            case MemoryMode.dynamic:
-                return 0;
-            case MemoryMode.buffer:
-                return _rx.length - _rx_cursor;
-            case MemoryMode.fifo:
-                return fifo_used(_rx);
-        }
-    }
-
-    override ptrdiff_t flush()
-    {
-        final switch (_rx_mode)
-        {
-            case MemoryMode.none:
-            case MemoryMode.dynamic:
-                return 0;
-            case MemoryMode.buffer:
-                size_t n = _rx.length - _rx_cursor;
-                _rx_cursor = _rx.length;
-                return n;
-            case MemoryMode.fifo:
-                uint w = fifo_load_write(_rx);
-                uint r = fifo_load_read(_rx);
-                fifo_store_read(_rx, w);
-                return cast(uint)(w - r);
-        }
-    }
-
 protected:
+    // the writer of a shared FIFO raises nothing, so the RX side is polled
+    override Duration rx_poll_interval() const
+        => _rx_mode == MemoryMode.fifo || (_rx_mode == MemoryMode.buffer && _rx_cursor < _rx.length) ? msecs(10) : Duration.zero;
+
+    override void poll_rx(MonoTime now)
+    {
+        if (_rx_mode == MemoryMode.buffer)
+        {
+            const(ubyte)[] rest = (cast(const(ubyte)[])_rx)[_rx_cursor .. $];
+            _rx_cursor = _rx.length;
+            incoming(rest, now);
+            return;
+        }
+        ubyte[512] buffer = void;
+        for (size_t got; (got = fifo_read(_rx, buffer[])) != 0; )
+            incoming(buffer[0 .. got], now);
+    }
+
     override bool validate() const pure
     {
         if (_tx_mode == MemoryMode.none && _rx_mode == MemoryMode.none)

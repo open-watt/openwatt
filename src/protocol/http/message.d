@@ -202,23 +202,6 @@ nothrow @nogc:
         this.message_handler = message_handler;
     }
 
-    int update(Stream stream)
-    {
-        ubyte[1024] buffer = void;
-        while (true)
-        {
-            ptrdiff_t bytes = stream.read(buffer[]);
-            if (bytes <= 0)
-                break;
-            int r = feed(buffer[0 .. bytes], stream);
-            if (r != 0)
-                return r;
-            if (bytes < buffer.length)
-                break;
-        }
-        return 0;
-    }
-
     int resume(Stream stream)
         => tail.empty ? 0 : feed(null, stream);
 

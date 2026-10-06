@@ -414,14 +414,14 @@ nothrow @nogc:
                 return true;
             }
 
-            void modify_fd(int fd, bool want_write)
+            void modify_fd(int fd, bool want_write, bool want_read = true)
             {
                 foreach (e; _watches[])
                 {
                     if (e.file != fd || e.dead)
                         continue;
                     epoll_event ev;
-                    ev.events = EPOLLIN | (want_write ? EPOLLOUT : 0);
+                    ev.events = (want_read ? EPOLLIN : 0) | (want_write ? EPOLLOUT : 0);
                     ev.data.ptr = e;
                     epoll_ctl(_epoll, EPOLL_CTL_MOD, fd, &ev);
                     return;

@@ -653,7 +653,6 @@ private:
             parser = HTTPParser(&request_callback);
             parser.headers_ready_handler = &headers_ready_callback;
             parser.max_buffered_body = server._max_request_body;
-            // registered last: rx_handler immediately flushes any already-buffered bytes
             stream.rx_handler(&on_data);
         }
 
@@ -661,7 +660,7 @@ private:
         {
             if (!stream)
                 return;
-            stream.rx_handler(null);
+            stream.release_rx_handler(&on_data);
             unsubscribe_signal(stream);
             stream.destroy();
             stream = null;
@@ -679,7 +678,7 @@ private:
             else if (!stream)
             {
                 // stream claimed (e.g. ws upgrade): drop our hooks so the new owner reads it
-                s.rx_handler(null);
+                s.release_rx_handler(&on_data);
                 unsubscribe_signal(s);
                 _finished = true;
             }
@@ -692,22 +691,6 @@ private:
             if (_finished)
             {
                 close();
-                return -1;
-            }
-            if (_deferred)
-                return 0;
-            // `stream` may be nulled out by signal_handler or by a request handler
-            // that claims the stream, so pin the reference for the final unsubscribe.
-            Stream s = stream;
-            int result = parser.update(s);
-            if (result < 0)
-            {
-                close();
-                return result;
-            }
-            if (!stream)
-            {
-                unsubscribe_signal(s);
                 return -1;
             }
             return 0;
@@ -779,7 +762,7 @@ private:
         {
             assert(!_deferred);
             _deferred = true;
-            stream.rx_handler(null);
+            stream.release_rx_handler(&on_data);
         }
 
         void resume_response()
@@ -793,7 +776,7 @@ private:
                 _finished = true;
             else if (!stream)
             {
-                s.rx_handler(null);
+                s.release_rx_handler(&on_data);
                 unsubscribe_signal(s);
                 _finished = true;
             }
