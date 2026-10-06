@@ -234,6 +234,10 @@ nothrow @nogc:
         return limit;
     }
 
+    // the largest frame transmit_frame takes this session; past send_limit it travels as fragments
+    final uint max_message(bool is_text)
+        => is_text || _remote_version < fragments_since ? send_limit : _remote_max_message;
+
     final int transmit_frame(const(ubyte)[] frame, bool is_text = false, TxQueue queue = TxQueue.control)
     {
         if (!transport_ready)
@@ -245,7 +249,7 @@ nothrow @nogc:
         if (frame.length > send_limit)
         {
             // the control plane carries it as fragments, toward a remote that reads them, one message at a time
-            if (is_text || _frag_tx.length || _remote_version < fragments_since || frame.length > _remote_max_message)
+            if (_frag_tx.length || frame.length > max_message(is_text))
                 return -1;
             start_fragments(frame);
             return 0;
@@ -268,7 +272,7 @@ nothrow @nogc:
         // absorbs later evictions so it never outruns the receiver by more than one.
         bool fresh_cycle = q.evicted == 0;
         bool evicted;
-        while (q.backlog.length > 1 && (q.backlog.length > backlog_max_frames || q.bytes > backlog_max_bytes))
+        while (q.backlog.length > 1 && (q.backlog.length > backlog_max_frames || q.bytes > backlog_limit))
         {
             q.bytes -= q.backlog[0].payload.length;
             q.backlog.remove(0);
@@ -596,7 +600,10 @@ protected:
             // an un-acked bump with nothing left to refold still needs announcing:
             // an empty frame carries the epoch until the receiver acks it
             if ((!q.backlog.empty || (q.evicted && !q.epoch_acked)) && now - q.last_tx >= msecs(data_flush_ms))
-                send_data_frame(cast(TxQueue)(i + 1));
+                send_data_frame(cast(TxQueue)(i + 1), true);
+            // ageing freed room no ack will announce
+            if (evicted)
+                arm_tx();
         }
 
         ref DataQueue lq = _queues[TxQueue.log - 1];
@@ -732,6 +739,10 @@ package:
 
     final bool control_room()
         => !control_starved() && (uses_udp_endpoint || _transport.tx_ready);
+
+    // a bulk producer waits for the val backlog to take one more segment rather than evict
+    final bool val_room()
+        => !sublayer_armed || (_queues[TxQueue.val - 1].backlog.length < backlog_max_frames && _queues[TxQueue.val - 1].bytes + send_limit <= backlog_limit);
 
     // a pending fragmented message holds the control plane until its last fragment is submitted
     final bool tx_blocked()
@@ -949,10 +960,11 @@ private:
         ubyte rx_epoch;      // the peer stream epoch the watermark belongs to
         bool  epoch_acked;   // the receiver has acked tx_epoch; gates repair and further bumps
         bool  ack_pending;
+        ubyte tx_sent;       // last id a frame has carried
         uint  evicted;       // entries lost since the last repair (repush / lost marker)
         MonoTime last_tx;
         size_t bytes;
-        Array!DataEntry backlog;   // unacked payloads, oldest first; every send refolds them all
+        Array!DataEntry backlog;   // unacked payloads, oldest first; every send refolds those one segment holds
     }
 
     union
@@ -975,6 +987,13 @@ private:
     Array!ubyte             _frag_rx;        // the message being reassembled
     uint                    _frag_tx_sent;   // bytes of it submitted
     DataQueue[2]            _queues;         // val, log
+
+    // two segments, so one can be in flight while the next is produced
+    uint backlog_limit()
+    {
+        uint two = 2 * send_limit;
+        return two > backlog_max_bytes ? two : backlog_max_bytes;
+    }
 
     bool sublayer_armed()
     {
@@ -1032,9 +1051,20 @@ private:
         _rel_buf ~= kind;
     }
 
-    void send_data_frame(TxQueue queue)
+    // new records go out as they are queued and as acks free the segment; the flush timer resends
+    void send_data_frame(TxQueue queue, bool resend = false)
     {
         DataQueue* q = &_queues[queue - 1];
+        size_t budget = send_limit + sublayer_overhead;
+        size_t take;
+        size_t wire = sublayer_overhead - 3;
+        while (take < q.backlog.length && (take == 0 || wire + 3 + q.backlog[take].payload.length <= budget))
+            wire += 3 + q.backlog[take++].payload.length;
+        ubyte last = take ? q.backlog[take - 1].id : q.tx_id;
+        if (!resend && last == q.tx_sent)
+            return;
+        q.tx_sent = last;
+
         begin_header(queue);
         _rel_buf ~= q.tx_epoch;
         _rel_buf ~= q.rx_epoch;
@@ -1043,7 +1073,7 @@ private:
         // which works even for the empty frame that announces a bump post-drain
         _rel_buf ~= q.backlog.empty ? q.tx_id : cast(ubyte)(q.backlog[0].id - 1);
         q.ack_pending = false;
-        foreach (ref e; q.backlog[])
+        foreach (ref e; q.backlog[0 .. take])
         {
             _rel_buf ~= e.id;
             _rel_buf ~= cast(ubyte)e.payload.length;
@@ -1063,13 +1093,20 @@ private:
             arm_tx();
     }
 
-    static void release_data(ref DataQueue q, ubyte ack)
+    void release_data(TxQueue queue, ubyte ack)
     {
+        DataQueue* q = &_queues[queue - 1];
+        size_t held = q.backlog.length;
         while (!q.backlog.empty && cast(ubyte)(ack - q.backlog[0].id) < 128)
         {
             q.bytes -= q.backlog[0].payload.length;
             q.backlog.remove(0);
         }
+        if (q.backlog.length == held)
+            return;
+        if (!q.backlog.empty)
+            send_data_frame(queue);
+        arm_tx();
     }
 
     static uint make_session_id()
@@ -1282,12 +1319,12 @@ private:
             release_control(frame[0]);
             if (frame[1] == _queues[0].tx_epoch)
             {
-                release_data(_queues[0], frame[2]);
+                release_data(TxQueue.val, frame[2]);
                 _queues[0].epoch_acked = true;
             }
             if (frame[3] == _queues[1].tx_epoch)
             {
-                release_data(_queues[1], frame[4]);
+                release_data(TxQueue.log, frame[4]);
                 _queues[1].epoch_acked = true;
             }
             return;
@@ -1301,7 +1338,7 @@ private:
             ubyte epoch = frame[0];
             if (frame[1] == q.tx_epoch)
             {
-                release_data(*q, frame[2]);
+                release_data(cast(TxQueue)kind, frame[2]);
                 q.epoch_acked = true;
             }
             ubyte base = frame[3];
@@ -1393,6 +1430,7 @@ private:
             q.backlog.clear();
             q.bytes = 0;
             q.tx_id = 0;
+            q.tx_sent = 0;
             q.tx_epoch = 0;
             q.rx_seen = 0;
             q.rx_epoch = 0;
@@ -1641,6 +1679,7 @@ unittest
 {
     import urt.mem;
     import manager.series : register_value_format;
+    import manager.sync.binary_encoder : Verb;
 
     static final class Narrow : BaseInterface
     {
@@ -1663,10 +1702,34 @@ unittest
             pending += packet.length;
             if (pending > peak)
                 peak = pending;
+            if (packet.length > largest)
+                largest = packet.length;
             ++frames;
+            const(ubyte)[] f = cast(const(ubyte)[])packet.data;
+            if (f.length && f[0] == Verb.val)
+            {
+                f = f[1 .. $];
+                take_varint(f);
+                lost += take_varint(f);
+                delivered += take_varint(f);
+            }
             return 0;
         }
-        size_t pending, peak, frames;
+        static ulong take_varint(ref const(ubyte)[] f)
+        {
+            ulong v;
+            for (uint shift = 0; f.length; shift += 7)
+            {
+                ubyte b = f[0];
+                f = f[1 .. $];
+                v |= ulong(b & 0x7F) << shift;
+                if (!(b & 0x80))
+                    break;
+            }
+            return v;
+        }
+        size_t pending, peak, frames, largest;
+        ulong delivered, lost;
         size_t cap = 4096;
     }
 
@@ -1713,7 +1776,7 @@ unittest
         ++passes;
     }
     assert(passes > 1 && resume == ulong.max && peer.send_ok(gen));
-    assert(link.frames == (records + 255) / 256);
+    assert(link.frames == (records + 255) / 256 && link.delivered == records && link.lost == 0);
 
     // The initial live cursor must not count as delivered history.
     peer._live_nodes.insert(power.ensure_eid().raw, power.record_count);
@@ -1741,6 +1804,38 @@ unittest
     // The live flush must not duplicate the completed backfill.
     SyncModule.send_live_events(peer, enc, power, handle, gen);
     assert(link.frames == (records + 1 + 255) / 256);
+
+    // Over a narrow link each block holds what one segment carries, and the walk still delivers every record.
+    assert(link.mtu(200) is null && peer.send_limit == 200);
+    link.frames = 0;
+    link.pending = 0;
+    link.largest = 0;
+    link.delivered = 0;
+    link.cap = size_t.max;
+    resume = ulong.max;
+    assert(SyncModule.send_backfill(peer, enc, power, 1, 0, gen, resume) && *live == records + 1);
+    assert(link.largest <= 200 && link.frames > 4 * ((records + 1 + 255) / 256));
+    assert(link.delivered == records + 1 && link.lost == 0);
+
+    // A range ending mid-block stops at its last record, however the blocks were cut.
+    resume = ulong.max;
+    link.delivered = 0;
+    assert(SyncModule.send_backfill(peer, enc, power, 1, 1000 * 1000, gen, resume) && *live == 1000);
+    assert(link.delivered == 1000);
+
+    // A record larger than any message the peer takes goes as an empty block declaring it lost, and the walk
+    // and the live flush move past it instead of parking on it.
+    assert(link.mtu(7) is null && peer.max_message(false) == 7);
+    link.frames = 0;
+    link.delivered = 0;
+    resume = ulong.max;
+    assert(SyncModule.send_backfill(peer, enc, power, 1, 1000 * 1000, gen, resume) && *live == 1000);
+    assert(link.frames == 1000 && link.delivered == 0 && link.lost == 1000);
+    assert(SyncModule.send_live_events(peer, enc, power, handle, gen) && *live == records + 1);
+    assert(link.lost == records + 1 && peer.send_ok(gen));
+    assert(link.mtu(200) is null);
+    link.cap = 4096;
+    assert(link.mtu(ushort.max) is null);
 
     // A frame over what both ends carry in one packet is refused before it is sequenced; the session stands.
     assert(peer.local_segment == ushort.max && peer.send_limit == ushort.max);
@@ -2009,6 +2104,28 @@ unittest
     }
     assert(rounds == ((large.length + slice - 1) / slice + window - 1) / window);
     assert(!peer._frag_tx.length && remote._frag_rx.empty && remote.running);
+
+    // the val backlog sends what one segment holds; the next record waits for the ack that frees the segment
+    ubyte[80] record;
+    record[0] = 0xFE;
+    link.frames.clear();
+    foreach (i; 0 .. 3)
+        assert(peer.transmit_frame(record[], false, TxQueue.val) == 0);
+    assert(link.frames.length == 2 && link.frames[1].length <= 200 && peer._queues[0].backlog.length == 3);
+    foreach (ref f; link.frames[])
+        remote.deliver_frame(f[]);
+    link.frames.clear();
+    link_b.frames.clear();
+    remote.update();
+    link.release_tx_handler(link.tx_handler);
+    peer.deliver_frame(link_b.frames[0][]);
+    assert(link.frames.length == 1 && peer._queues[0].backlog.length == 1 && link.tx_handler !is null);
+
+    // a bulk producer stops short of evicting: the backlog keeps room for one more segment or reports none
+    assert(peer.val_room());
+    while (peer.val_room())
+        assert(peer.transmit_frame(record[], false, TxQueue.val) == 0);
+    assert(peer._queues[0].evicted == 0 && peer._queues[0].bytes + peer.send_limit > peer.backlog_limit);
 
     // a session reset mid-message discards the partial message, and the next one starts clean
     link.frames.clear();

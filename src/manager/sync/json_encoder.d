@@ -593,7 +593,7 @@ nothrow @nogc:
         send_frame(peer, TxQueue.val);
     }
 
-    override void encode_val_block(SyncPeer peer, SyncHandle h, ref const RecordBlock blk)
+    override uint encode_val_block(SyncPeer peer, SyncHandle h, ref const RecordBlock blk)
     {
         import urt.time : unix_time_ns;
 
@@ -602,17 +602,33 @@ nothrow @nogc:
         if (blk.lost)
             _buf.append(",\"lost\":", blk.lost);
         _buf ~= ",\"s\":[";
-        foreach (i; 0 .. blk.count)
+        size_t limit = peer.send_limit;
+        uint count;
+        while (count < blk.count)
         {
-            if (i)
+            size_t mark = _buf.length;
+            if (count)
                 _buf ~= ',';
-            _buf.append('[', unix_time_ns(blk.time(i)) / 1_000_000, ',');
-            Variant v = blk.box(i);
+            _buf.append('[', unix_time_ns(blk.time(count)) / 1_000_000, ',');
+            Variant v = blk.box(count);
             write_variant(v);
             _buf ~= ']';
+            // the frame closes with "]}"
+            if (count && _buf.length + 2 > limit)
+            {
+                _buf.resize(mark);
+                break;
+            }
+            ++count;
         }
         _buf ~= ']';
-        send_frame(peer, TxQueue.val);
+        if (count == 1 && _buf.length + 1 > peer.max_message(true))
+        {
+            warn_unsendable(peer, h);
+            begin_frame("val");
+            _buf.append(",\"h\":", h, ",\"lost\":", blk.lost + 1, ",\"s\":[]");
+        }
+        return send_frame(peer, TxQueue.val) < 0 ? 0 : count;
     }
 
     override void encode_res(SyncPeer peer, uint seq)

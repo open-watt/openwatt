@@ -1202,13 +1202,10 @@ this is what remains.
   `tx_ready` before every frame, so a model larger than the websocket's 128 KB bound mirrors
   instead of restarting the session, and a paced queue holds 16 KB plus one frame.
   Every other emitter still pushes: the `val` and `log` queues (`flush_pending_vals` drains an
-  armed event series to its head in one burst; it only stays behind a parked backfill), `tick_dirty`, the
-  `model_sub`/`sub` fan-out, lifecycle fan-out, `result` and `history`, and on a reliable
-  transport a refused push is dropped with no retry path. Move them onto the same feed; oversize
-  control frames must be refused at encode time against `hello.max_frame` rather than dropped in
-  the interface; `val_block` chunking must honour `max_frame` and the transport's MTU instead of a
-  fixed 256 records (a block of 256 doubles is 3,845 bytes, over `/interface/xram`'s 1,856); and
-  control frames should ride PCP >= ca with DEI=0 on the underlying packets. `BaseInterface`'s
+  armed event series until the val backlog is full, then retries from the next tick), `tick_dirty`,
+  the `model_sub`/`sub` fan-out, lifecycle fan-out, `result` and `history`, and on a reliable
+  transport a refused push is dropped with no retry path. Move them onto the same feed, and let
+  control frames ride PCP >= ca with DEI=0 on the underlying packets. `BaseInterface`'s
   handler slot is single-owner like `Stream`'s, which suits the one-peer websocket; a shared
   bounded interface would need per-peer arbitration.
 
@@ -1284,13 +1281,21 @@ this is what remains.
 
 ## Infrastructure
 
-- **Sync producers are not sized to the segment** (2026-10-06): an oversized binary message now
-  travels as fragments, but backfill and live events still cut at 256 records and the console relay
-  at 8 KB, so a large block holds the control plane as one long fragmented message, and an
-  event-driven control message encoded meanwhile is refused. The data plane's refold
-  (`send_data_frame`) still concatenates its whole backlog into one frame and sends it with
-  `raw_tx`, past the segment check and fragmentation, so a backlog over the segment is dropped by
-  the interface. Y2b in `docs/wip/STREAMING.md`: byte budgets and refold packing.
+- **Sync producer sizing follow-ups** (2026-10-06, review of #813):
+  - An event series with no val room stays pending and retries from the tick; the ack's `arm_tx`
+    never reaches `flush_pending_vals`. Drive it from the room event.
+  - A partial val frame re-reads a 256-record block after `seek`, about 25 times the reads on a
+    200-byte segment. Advance within the block already read.
+  - An eviction that moves the backlog head without changing the last id that fits sends nothing,
+    so the new epoch waits for the 300 ms flush. Send when the head or epoch changed.
+  - A bounded backfill whose range holds no record no longer commits the live cursor to the first
+    block; decide whether records between `to` and arm time should stream.
+  - The parked-on-`val_room` path is not exercised over an armed sublayer, and no test decodes a
+    two-byte val count or the JSON paths.
+  - The console relay still cuts output at 8 KB and sends each part at once, so output past one
+    fragmented message is refused while the first is pending, and a burst can overrun the control
+    window. Size it to the segment once session output is pulled (S4): the console stream then
+    grants by window room and resumes on the ack, with a bounded buffer that splits on code points.
 
 - **A Windows UDP socket that sends to a closed port stops receiving** (2026-10-06): two instances
   peering over `/interface/udp` on loopback, the one whose hello went out before the other bound

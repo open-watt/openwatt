@@ -300,45 +300,63 @@ nothrow @nogc:
             return;
         SyncEncoder enc = encoder_for(p._encoder);
         uint gen = p.begin_burst();
+        size_t kept;
         foreach (node; p._pending_vals[])
         {
             Element* e = resolve_element(node);
             SyncHandle h = p.handle_of(node);
             if (!e || h == SyncPeer.invalid_handle)
                 continue;
+            bool done = true;
             if (e.data_format.kind == SeriesKind.point)
-                send_live_events(p, enc, e, h, gen);
+                done = send_live_events(p, enc, e, h, gen);
             else
                 enc.encode_val(p, h, e);
             if (!p.send_ok(gen))
                 return;   // the session went down under the burst; its pending set went with it
+            if (!done)
+                p._pending_vals[][kept++] = node;
         }
-        p._pending_vals.clear();
+        p._pending_vals.resize(kept);
     }
 
-    static void send_live_events(SyncPeer p, SyncEncoder enc, Element* e, SyncHandle h, uint gen)
+    // false while the val backlog has no room for the rest; the node stays pending for the next tick
+    static bool send_live_events(SyncPeer p, SyncEncoder enc, Element* e, SyncHandle h, uint gen)
     {
         EID node = e.ensure_eid();
         ulong* next = node.raw in p._live_nodes;
         // Backfill owns the cursor while parked and re-marks the node on completion.
         if (!next || (*next & SyncPeer.live_parked) || !e.has_history)
-            return;
+            return true;
         ulong committed = *next;
         auto c = e.open_series_cursor(committed);
+        bool done = true;
         for (;;)
         {
+            if (p.tx_blocked() || !p.val_room())
+            {
+                done = false;
+                break;
+            }
             RecordBlock blk = c.next(256);
             if (!blk.count)
                 break;
-            enc.encode_val_block(p, h, blk);
+            uint sent = enc.encode_val_block(p, h, blk);
             if (!p.send_ok(gen))
                 break;
-            committed = c.position;
+            if (!sent)
+            {
+                done = false;
+                break;
+            }
+            committed = blk.first_index + sent;
+            c.seek(committed);
         }
         // Sending can detach the session and invalidate the map entry.
         if (ulong* live = node.raw in p._live_nodes)
             *live = committed;
         e.close_series_cursor(c);
+        return done;
     }
 
     bool produce(SyncPeer p)
@@ -2400,39 +2418,42 @@ nothrow @nogc:
         Cursor cursor = e.open_series_cursor(idx);
         scope (exit) e.close_series_cursor(cursor);
         SysTime to_t = to_ms ? from_unix_time_ns(to_ms * 1_000_000) : SysTime();
+        bool park()
+        {
+            resume = idx;
+            if (ulong* live = node.raw in to._live_nodes)
+                *live = idx | SyncPeer.live_parked;
+            return false;
+        }
+
         for (;;)
         {
-            if (to.tx_blocked())
-            {
-                resume = idx;
-                if (ulong* live = node.raw in to._live_nodes)
-                    *live = idx | SyncPeer.live_parked;
-                return false;
-            }
+            if (to.tx_blocked() || !to.val_room())
+                return park();
             RecordBlock blk = cursor.next(256);
             if (!blk.count)
                 break;
-            idx = blk.first_index + blk.count;
+            uint in_range = blk.count;
             if (to_ms)
             {
-                uint full = blk.count;
-                while (blk.count && blk.time(blk.count - 1) > to_t)
-                    --blk.count;
-                if (blk.count)
-                    enc.encode_val_block(to, h, blk);
-                if (!to.send_ok(gen))
-                    return true;
-                commit_backfill(to, e, blk);
-                if (blk.count < full)
+                while (in_range && blk.time(in_range - 1) > to_t)
+                    --in_range;
+                if (!in_range)
                     break;
             }
-            else
-            {
-                enc.encode_val_block(to, h, blk);
-                if (!to.send_ok(gen))
-                    return true;
-                commit_backfill(to, e, blk);
-            }
+            uint read = blk.count;
+            blk.count = in_range;
+            blk.count = enc.encode_val_block(to, h, blk);
+            if (!to.send_ok(gen))
+                return true;
+            if (!blk.count)
+                return park();
+            commit_backfill(to, e, blk);
+            idx = blk.first_index + blk.count;
+            if (blk.count < in_range)
+                cursor.seek(idx);
+            else if (in_range < read)
+                break;
         }
         return true;
     }
