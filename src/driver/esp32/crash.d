@@ -14,7 +14,7 @@ alias log = Log!"crash";
 void export_pending_crash_dump()
 {
     size_t size;
-    if (!ow_crash_dump_size(&size) || size == 0)
+    if (!urt_crash_dump_size(&size) || size == 0)
         return;
 
     uint number = next_dump_number();
@@ -37,7 +37,7 @@ void export_pending_crash_dump()
         size_t length = size - offset;
         if (length > buffer.length)
             length = buffer.length;
-        if (!ow_crash_dump_read(offset, buffer.ptr, length) || !write_all(file, buffer[0 .. length]))
+        if (!urt_crash_dump_read(offset, buffer.ptr, length) || !write_all(file, buffer[0 .. length]))
         {
             file.close();
             log.error("could not save crash dump ", path[]);
@@ -61,7 +61,7 @@ void export_pending_crash_dump()
         log.error("could not record crash dump sequence");
         return;
     }
-    if (!ow_crash_dump_clear())
+    if (!urt_crash_dump_clear())
     {
         log.error("could not clear exported crash dump");
         return;
@@ -109,7 +109,7 @@ void write_number(char[] destination, uint value)
 
 private extern (C)
 {
-    bool ow_crash_dump_size(size_t* size);
-    bool ow_crash_dump_read(size_t offset, void* buffer, size_t length);
-    bool ow_crash_dump_clear();
+    bool urt_crash_dump_size(size_t* size);
+    bool urt_crash_dump_read(size_t offset, void* buffer, size_t length);
+    bool urt_crash_dump_clear();
 }

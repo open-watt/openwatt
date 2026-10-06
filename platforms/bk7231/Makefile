@@ -115,7 +115,7 @@ SRCS += $(S)/func/user_driver/BkDriverFlash.c
 SRCS += $(S)/func/user_driver/BkDriverRng.c
 
 URT_BK := ../../third_party/urt/src/urt/driver/bk7231
-SHIM_SRCS := $(URT_BK)/ow_rw.c $(URT_BK)/ow_shim.c $(URT_BK)/efuse.c
+SHIM_SRCS := $(URT_BK)/rw_shim.c $(URT_BK)/sdk_shim.c $(URT_BK)/efuse.c
 
 SRCS += $(S)/driver/common/dd.c
 SRCS += $(S)/driver/common/drv_model.c

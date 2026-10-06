@@ -77,8 +77,6 @@ nothrow @nogc:
     override size_t tx_request() const
         => _tx ? _tx.tx_request : 0;
 
-    override bool supports_tx_pages() const
-        => _tx && _tx.supports_tx_pages;
 
     override ptrdiff_t write(const(void[])[] data...)
     {

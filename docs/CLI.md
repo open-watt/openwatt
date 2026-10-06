@@ -513,11 +513,12 @@ At least one of `tx` and `rx` is required.
 
 ### `/stream/serial`
 
-A serial stream opens a host serial device or an embedded UART.
+A serial stream opens a host serial device or an embedded UART. Settings apply to the open port
+in place, so a peer watching its modem lines sees no reopen; a pin change reopens it.
 
 | Property | Values | Default | Description |
 | --- | --- | --- | --- |
-| `device` | device path, COM name, or `uartN` | required | Serial device to open. Embedded `uartN` follows the datasheet numbering, so it starts at `uart1` on parts whose first UART is UART1. |
+| `device` | device path, COM name, or `uartN` | required | Serial device to open, by any name the platform knows it by: on Linux a `/dev` node or its `by-id` and `by-path` links, on Windows `COMn`. A host looks the device up each time the stream opens, so a USB adapter plugged back in is reopened as the new device it is. Embedded `uartN` follows the datasheet numbering, so it starts at `uart1` on parts whose first UART is UART1. |
 | `baud-rate` | positive integer | `9600` | Symbol rate. |
 | `data-bits` | `5` to `8` | `8` | Data bits per character. |
 | `parity` | `none`, `even`, `odd`, `mark`, `space` | `none` | Parity mode. Embedded UARTs currently support `none`, `even`, and `odd`. |
@@ -528,9 +529,9 @@ A serial stream opens a host serial device or an embedded UART.
 | `rts-gpio` | GPIO number | platform default | Embedded-only RTS pin override. |
 | `cts-gpio` | GPIO number | platform default | Embedded-only CTS pin override. |
 | `de-gpio` | GPIO number | platform default | Embedded-only driver-enable pin override. Setting it makes the port RS-485, the UART driving DE around each transmission. |
-| `rx-latency` | duration | `350us` | Embedded-only, where the UART applies it. How long a continuous stream batches before it is delivered: the UART interrupts at the deepest FIFO threshold within it, and a pause (`rx-gap`) delivers sooner. A change may not take effect until the port next opens. |
-| `actual-rx-latency` | duration, read-only | none | The RX latency the UART runs with, once its hardware has clamped `rx-latency`; `0` while the port is closed. |
-| `rx-gap` | characters, `0.1` to `25.5` | `3.5` | Embedded-only, where the UART reports it. A quiet line this long delivers what preceded it. A change takes effect on the open port. |
+| `rx-latency` | duration | `350us` | How long a continuous stream batches before it is delivered, on an embedded UART: it interrupts at the deepest FIFO threshold within it, and a pause (`rx-gap`) delivers sooner. A host delivers each read as it lands. |
+| `actual-rx-latency` | duration, read-only | none | The RX latency the UART runs with, once its hardware has clamped `rx-latency`; `0` on a host, and while the port is closed. |
+| `rx-gap` | characters, `0.1` to `25.5` | `3.5` | Where the UART reports it. A quiet line this long ends a frame and delivers it, dated by when its last character ended. Hosts offer none: a USB adapter delivers in blocks on its own timer, so the line's quiet never reaches them. |
 | `actual-rx-gap` | characters, read-only | none | The gap the hardware gives; `0` while the port is closed. |
 
 An embedded UART refuses what it cannot honour rather than open on something else: a framing,
@@ -541,21 +542,22 @@ Additional commands:
 
 | Command | Availability | Description |
 | --- | --- | --- |
-| `/stream/serial/devices` | POSIX hosts | Lists detected serial devices. |
-| `/stream/serial/lines <name>` | all platforms | Prints the current modem-line state for an open serial stream, including RTS, CTS, DTR, DSR, DCD, and RI where supported. |
+| `/stream/serial/devices` | all platforms | Lists the serial ports the platform knows, with a description where it has one. |
+| `/stream/serial/lines <name>` | all platforms | Prints the current modem-line state for an open serial stream, including RTS, CTS, DTR, DSR, DCD, and RI where supported, and its byte and line error counts. |
 
 **Platform notes**
 
 - STM32: `uart0` is USART1 through `uart7` UART8, and on H7 `uart8` is LPUART1. Data is 8 bits.
   A pin is taken only where it carries the signal asked of it; F4's UART4 and UART5 have no RTS
   or CTS. F7 and H7 drive DE in hardware on the RTS pin; F4 cannot, so it refuses RS-485. F4 times
-  its gap as one character. On H7 an `rx-latency` change takes effect when the port next opens.
+  its gap as one character.
 - RP2350: the gap is fixed at 32 bit times, 3.2 characters at 8N1.
-- ESP32: RS-485 is ESP-IDF's half-duplex mode on the RTS pin. RX thresholds are ESP-IDF's, so it
-  offers neither `rx-latency` nor `rx-gap`.
-- BL808, BL618, BK7231 and MT7621 take their default pins only, without flow control or RS-485.
-  BK7231 runs no slower than about 3.2 kbaud and offers no `rx-gap`. The MT7621 UART is polled,
-  so it raises no RX event and offers neither `rx-latency` nor `rx-gap`.
+- ESP32: RS-485 is ESP-IDF's half-duplex mode on the RTS pin. The gap counts whole characters.
+- MT7621: the gap is fixed at four characters.
+- BL808, BL618, BK7231 and MT7621 take their default pins only, without RS-485; of them only BK7231
+  takes hardware flow control. BK7231 runs no slower than about 3.2 kbaud and offers no `rx-gap`.
+- Linux opens a port with low latency, which takes an FTDI adapter's read timer from 16 ms to 1.
+  Windows leaves it at the driver's setting.
 
 ### `/stream/usb-serial`
 

@@ -3,6 +3,16 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-10-06: serial ports on every platform
+
+- Windows hosts now list their serial ports in `/port` too, as `windows:serial:COMn`, alongside
+  Linux's `linux:serial:<path>`; a Windows entry has no USB identity yet.
+- `/stream/serial` has `rx-latency` and `actual-rx-latency` on every build; a host delivers each
+  read as it lands and reads `actual-rx-latency` as `0`. Hosts have no `rx-gap`, so keep offering
+  that control only when the property is present.
+- Every `/stream/serial` setting now applies to the open port, `rx-latency` included; only a pin
+  change reopens it. Drop any "takes effect on reopen" hint.
+
 ## 2026-10-06: sync protocol version 2
 
 - A node's `hello` reports protocol version 2: binary sessions may now carry a message larger than
@@ -68,7 +78,7 @@ through them and remove sections as they are absorbed.
 - `/stream/serial` gains `rx-latency` (duration, default `350us`) and `rx-gap` (characters, `0.1`
   to `25.5`, default `3.5`) on embedded builds whose UART applies them; a port without them does
   not have the property, so offer the control only when it is present. A change never reopens the
-  port, but on some UARTs `rx-latency` takes effect only when the port next opens. Each reads back
+  port. Each reads back
   what was set; read-only `actual-rx-latency` and `actual-rx-gap` give what the UART runs with,
   which can differ, and read `0` while the port is closed. Edit the setting, display the actual.
 
