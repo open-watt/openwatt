@@ -376,6 +376,37 @@ backends still cannot do:
 - **Bouffalo's vendor printf** (picolibc stdout) still writes the console directly; hook it into
   urt.log as BK7231 does with `ow_log_vendor`.
 
+## Flow-control duplication (2026-10-08)
+
+Windows, retransmit, backoff and rate machinery is reimplemented per protocol. Each cluster wants
+one primitive (most belong in urt) and its copies deleted:
+
+- **Wraparound sequence compare**: `seq_lt/le/gt/ge` in `protocol/ip/tcp.d`, inline
+  `cast(ubyte)(ack - x) < 128` in `manager/sync/peer.d` (`release_control`, `release_data`),
+  hand-rolled mod-8 in `protocol/ezsp/ashv2.d` and `protocol/cpc/package.d`, and
+  `cast(int)(l - r) < 0` in urt's `driver/esp32/ble.d`. One serial-number template over the bit
+  width (3, 8, 32).
+- **Capped exponential backoff**: `min(base << n, cap)` in `manager/base.d` (restart), sync
+  `peering.d`, `tesla/vehicle_retry.d`, `zigbee/controller.d`, `dhcp/client.d` and `client6.d`,
+  `tls/certificate.d`, `ip/linux_mirror.d`; retransmit timers in tcp.d (RTO), ashv2.d, cpc and
+  sync `peer.d` (bounded only by `max_retries`, so its last interval is 64 s). One `Backoff`
+  (base, cap, attempt, `next`, `reset`).
+- **Bitrate sampler**: `router/stream/package.d` and `router/iface/package.d` heartbeat samplers
+  are line-for-line copies, as are their status structs in `router/status.d`. One `RateMeter`.
+- **Debounce and pacers**: automation and `protocol/gpio` each schedule their own debounce;
+  automation also holds the only throttle and token bucket. Share them as general pacers.
+- **Window with reserve** (limit, in flight, headroom): TCP's free window, sync `max_unacked` with
+  `control_reserve`, `PriorityPacketQueue` `_max_in_flight` with `_reserved_slots`, and the
+  in-flight caps in BLE GATT, `driver/baremetal/ble.d`, `tesla/vehicle_session.d`. Sync channel
+  credit is the next instance.
+- **Go-back-N ARQ**: ASHv2, CPC (near copy of ASH) and the sync control plane each keep an
+  in-flight list, cumulative ack and doubling ack timeout. One engine built on the three above;
+  ASH and CPC need a dongle smoke before it lands.
+- **Bounded tx byte queues**: Stream `tx_queue_limit` (repeated in `router/stream/serial.d`),
+  websocket `_tx_pending` with low water, BLE stream `max_tx_backlog`, ASH `max_tx_queue`, and
+  unbounded page chains in `tls/stream.d` and the console session. These converge on page chains
+  under the stream contract (docs/wip/STREAMING.md), not a new abstraction.
+
 ## Retrospective merge reconciliation (2026-09-08)
 
 - **[#669, deferred until removal is needed] Define device/subtree removal lifetime**:
@@ -1236,6 +1267,12 @@ this is what remains.
   control frames ride PCP >= ca with DEI=0 on the underlying packets. `BaseInterface`'s
   handler slot is single-owner like `Stream`'s, which suits the one-peer websocket; a shared
   bounded interface would need per-peer arbitration.
+- **Viewing a peer's console loses output the local stream cannot drain**: `PeerConsoleCommand`
+  writes received output with `Session.write_raw`, which drops what its stream does not take, and
+  sync's acks report receipt, not consumption. Over a 115200 serial console an S3 viewing the Pi
+  dropped about 60% of a large print. The remote session needs pacing from the viewer's drain:
+  console-level credit returned from a `feed_output` producer, or a console session carried by an
+  end-to-end transport rather than sync verbs.
 
 - **Harden clock discipline**: gate member sampling, recording and shipping on wall time (an ESP32
   ships 1970-stamped samples until its first pull), carry a synced flag in `hello`, add a

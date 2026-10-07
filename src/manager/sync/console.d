@@ -1,5 +1,6 @@
 module manager.sync.console;
 
+import urt.log;
 import urt.mem;
 import urt.meta : AliasSeq;
 import urt.string;
@@ -59,7 +60,6 @@ nothrow @nogc:
 
     enum type_name = "sync-console";
     enum syncable = false;
-    enum chunk_size = 8192;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
@@ -113,25 +113,12 @@ nothrow @nogc:
     }
 
     override ptrdiff_t write(const(void[])[] data...)
-    {
-        SyncPeer peer = _peer;
-        if (!peer || !peer.running)
-            return -1;
+        => queue_copy(data);
 
-        size_t written;
-        foreach (part; data)
-        {
-            const(char)[] output = cast(const(char)[])part;
-            while (!output.empty)
-            {
-                size_t length = output.length < chunk_size ? output.length : chunk_size;
-                encoder_for(peer._encoder).encode_console(peer, _seq, SyncConsoleEvent.output, output[0 .. length]);
-                written += length;
-                output = output[length .. $];
-            }
-        }
-        add_tx_bytes(written);
-        return written;
+    // the peer's control plane has room again
+    final void room_returned()
+    {
+        drain_tx();
     }
 
     override TerminalChannel* terminal_channel()
@@ -143,6 +130,65 @@ protected:
     override bool validate() const pure
         => _peer !is null && _seq != 0;
 
+    // frames while the peer's control plane has room; the peer wakes the stream when acks or the transport free it
+    override ptrdiff_t transmit(const(void)[] data)
+    {
+        SyncPeer peer = _peer;
+        if (!peer || !peer.running)
+            return -1;
+        SyncEncoder encoder = encoder_for(peer._encoder);
+        immutable size_t payload = encoder.console_payload(peer);
+        // a frame must hold the widest code point
+        if (payload < 4)
+        {
+            log.warning("peer '", peer.name[], "' segment of ", peer.send_limit, " bytes cannot carry console output");
+            return -1;
+        }
+        const(char)[] text = cast(const(char)[])data;
+        size_t taken;
+        if (_carry_length)
+        {
+            // the page keeps the completing bytes until the code point is sent
+            if (peer.tx_blocked())
+                return stop_short(peer, 0);
+            char[4] point = _carry;
+            size_t length = _carry_length;
+            while (taken < text.length && length < sequence_length(point[0]) && (text[taken] & 0xC0) == 0x80)
+                point[length++] = text[taken++];
+            if (length < sequence_length(point[0]) && taken == text.length)
+            {
+                _carry = point;
+                _carry_length = cast(ubyte)length;
+                return taken;
+            }
+            if (encoder.encode_console(peer, _seq, SyncConsoleEvent.output, point[0 .. length]) < 0)
+                return stop_short(peer, 0);
+            _carry_length = 0;
+        }
+        while (taken < text.length)
+        {
+            if (peer.tx_blocked())
+                return stop_short(peer, taken);
+            size_t end = text.length - taken < payload ? text.length : taken + payload;
+            size_t cut = incomplete_tail(text[taken .. end]);
+            if (end - cut > taken && encoder.encode_console(peer, _seq, SyncConsoleEvent.output, text[taken .. end - cut]) < 0)
+                return stop_short(peer, taken);
+            taken = end - cut;
+            // a code point cut by the page's end completes from the next page
+            if (cut && end == text.length)
+            {
+                _carry[0 .. cut] = text[taken .. end];
+                _carry_length = cast(ubyte)cut;
+                taken = end;
+            }
+        }
+        add_tx_bytes(taken);
+        return taken;
+    }
+
+    override Duration tx_retry_interval() const
+        => Duration.zero;
+
     override CompletionStatus shutdown()
     {
         SyncPeer peer = _peer;
@@ -152,11 +198,24 @@ protected:
     }
 
 private:
+    alias log = Log!"sync.console";
+
     SyncPeer _peer;
     TerminalChannel _terminal;
     String _terminal_type;
     uint _seq;
     bool _notify_close = true;
+    ubyte _carry_length;
+    char[4] _carry;
+
+    // a full transport invites the peer back; a full control window waits for the ack that frees it
+    size_t stop_short(SyncPeer peer, size_t taken)
+    {
+        if (peer.tx_full())
+            peer.arm_tx();
+        add_tx_bytes(taken);
+        return taken;
+    }
 }
 
 
@@ -278,4 +337,22 @@ private:
         _features = session.features;
         _terminal_type = session.terminal_type().make_string();
     }
+}
+
+
+private:
+
+size_t sequence_length(char lead) pure
+    => lead >= 0xF0 ? 4 : lead >= 0xE0 ? 3 : lead >= 0xC0 ? 2 : 1;
+
+// trailing bytes of a code point the slice ends before completing
+size_t incomplete_tail(const(char)[] s) pure
+{
+    size_t i = s.length;
+    while (i > 0 && s.length - i < 3 && (s[i - 1] & 0xC0) == 0x80)
+        --i;
+    if (i == 0 || s[i - 1] < 0xC0)
+        return 0;
+    size_t have = s.length - i + 1;
+    return have < sequence_length(s[i - 1]) ? have : 0;
 }

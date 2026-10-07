@@ -252,7 +252,7 @@ nothrow @nogc:
         send_frame(peer);
     }
 
-    override void encode_console(SyncPeer peer, uint seq, SyncConsoleEvent event, const(char)[] data = null, SyncConsoleTerminal terminal = SyncConsoleTerminal())
+    override int encode_console(SyncPeer peer, uint seq, SyncConsoleEvent event, const(char)[] data = null, SyncConsoleTerminal terminal = SyncConsoleTerminal())
     {
         begin_frame(Verb.console);
         _buf.put_varint(seq);
@@ -274,8 +274,14 @@ nothrow @nogc:
             case SyncConsoleEvent.closed:
                 break;
         }
-        send_frame(peer);
+        return send_frame(peer);
     }
+
+    override size_t console_payload(SyncPeer peer) const
+        => peer.send_limit > console_overhead ? peer.send_limit - console_overhead : 0;
+
+    // verb, sequence, event and length prefix at their widest
+    enum size_t console_overhead = 1 + 5 + 1 + 3;
 
     override void encode_sub(SyncPeer peer, const(char)[] pattern)
     {
