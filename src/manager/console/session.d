@@ -6,11 +6,12 @@ import urt.lifetime;
 import urt.log;
 import urt.map;
 import urt.mem;
+import urt.mem.pagepool : Page, PageWaiter, page_alloc, page_free, page_free_generation, page_unwait, page_wait;
 import urt.mem.reclaim;
 import urt.result;
 import urt.string;
 import urt.string.ansi;
-import urt.time : MonoTime;
+import urt.time;
 import urt.util;
 import urt.variant;
 
@@ -103,6 +104,9 @@ struct TerminalChannel
     TerminalEvents pending_events;
 }
 
+// returns the bytes written to buffer, stopping at a yield point past the deadline; status as a SendHandler's
+alias OutputProducer = size_t delegate(char[] buffer, MonoTime deadline, out TxStatus status) nothrow @nogc;
+
 class Session : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("stream", stream),
@@ -118,6 +122,7 @@ nothrow @nogc:
     enum collection_id = CollectionType.console_session;
     enum syncable = false;
     enum max_history_entries = 50;
+    enum max_output_chunk = 1600;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
@@ -393,10 +398,17 @@ nothrow @nogc:
             if (newline)
                 _stream.write((_features & ClientFeatures.crlf) ? "\r\n" : "\n");
         }
-        else if (text.length > 0)
+        else
         {
             import urt.log : writeInfo;
-            writeInfo("session: ", text);
+            while (text.length > 0)
+            {
+                const(char)[] line = text.split!('\n', false);
+                if (line.length > 0 && line[$ - 1] == '\r')
+                    line = line[0 .. $ - 1];
+                if (line.length > 0)
+                    writeInfo("session: ", line);
+            }
         }
     }
 
@@ -435,6 +447,35 @@ nothrow @nogc:
 
         write_output(tformat(format, forward!args), false);
     }
+
+    // the stream pulls pages at its own pace; a session without one takes them as they are made
+    final void feed_output(OutputProducer producer)
+    {
+        _producer = producer;
+        if (Stream s = _stream)
+        {
+            s.tx_handler(&provide_output_page);
+            return;
+        }
+        pull_output();
+    }
+
+    // abandons the output, including what a producer that has ended made and the stream has not taken
+    final void release_output(OutputProducer producer)
+    {
+        if (_producer && _producer !is producer)
+            return;
+        _producer = null;
+        free_output_pending();
+        page_unwait(&_output_waiter);
+        cancel_output_continuation();
+        if (Stream s = _stream)
+            s.release_tx_handler(&provide_output_page);
+    }
+
+    // output is still being made, or waits for the stream or the line
+    final bool output_busy() const
+        => _producer !is null || _output_pending !is null || _output_continuing || (_stream && _stream.tx_queued() != 0);
 
     final bool show_prompt(bool show)
     {
@@ -868,6 +909,8 @@ private:
     bool _stream_subscribed = false;
     bool _features_override = false;
     bool _profile_set = false;
+    bool _output_continuing;    // a stream-less pull resumes on the next loop pass
+    TxStatus _output_status;    // what follows the pending output page
 
     const(char)[] _prompt_suffix;
     MutableString!0 _prompt;
@@ -875,6 +918,9 @@ private:
     uint _position = 0;
 
     CommandState _current_command = null;
+    OutputProducer _producer;
+    Page* _output_pending;      // made but not yet taken; a page larger than a grant is handed out in parts
+    PageWaiter _output_waiter;
 
     Array!(MutableString!0) _history;
     uint _history_cursor = 0;
@@ -896,8 +942,13 @@ private:
         if (_stream_subscribed)
         {
             _stream.release_rx_handler(&stream_rx);
+            if (Stream s = _stream)
+                s.release_tx_handler(&provide_output_page);
             _stream.unsubscribe(&stream_state_change);
             _stream_subscribed = false;
+            // nothing pulls what was made, so the output is abandoned
+            _producer = null;
+            free_output_pending();
         }
     }
 
@@ -908,6 +959,94 @@ private:
             _current_command.receive_input(text);
         else
             receive_input(text);
+    }
+
+    Page* provide_output_page(ref const TxRequest req, out TxStatus status)
+    {
+        if (!_output_pending)
+        {
+            if (!_producer)
+            {
+                status = TxStatus.idle;
+                return null;
+            }
+            Page* page = page_alloc(max_output_chunk);
+            if (!page)
+            {
+                status = TxStatus.starved;
+                return null;
+            }
+            size_t n = _producer(cast(char[])page.data, req.deadline, _output_status);
+            if (_output_status != TxStatus.more && _output_status != TxStatus.yield)
+                _producer = null;
+            if (n == 0)
+            {
+                page_free(page);
+                status = _output_status == TxStatus.more ? TxStatus.yield : _output_status;
+                return null;
+            }
+            page.length = cast(ushort)n;
+            _output_pending = page;
+        }
+        Page* page = take_tx_page(_output_pending, req, status);
+        if (page)
+            status = _output_pending ? TxStatus.more : _output_status == TxStatus.yield ? TxStatus.more : _output_status;
+        return page;
+    }
+
+    // a session without a stream takes the pages as they are made, a turn at a time, and waits for one when none is free
+    void pull_output()
+    {
+        TxRequest req = TxRequest(max_output_chunk, getTime() + tx_slice);
+        while (true)
+        {
+            uint generation = page_free_generation();
+            TxStatus status;
+            Page* page = provide_output_page(req, status);
+            if (page)
+            {
+                write_output(cast(const(char)[])page.data, false);
+                page_free(page);
+            }
+            if (status == TxStatus.starved)
+            {
+                _output_waiter.wake = &pull_output;
+                if (page_wait(&_output_waiter, generation))
+                    return;
+                continue;
+            }
+            if (status != TxStatus.more && status != TxStatus.yield)
+                return;
+            if (status == TxStatus.yield || getTime() >= req.deadline)
+            {
+                _output_continuing = true;
+                g_app.schedule(getTime(), &continue_output);
+                return;
+            }
+        }
+    }
+
+    void continue_output(MonoTime)
+    {
+        _output_continuing = false;
+        pull_output();
+    }
+
+    void cancel_output_continuation()
+    {
+        if (!_output_continuing)
+            return;
+        _output_continuing = false;
+        g_app.cancel(&continue_output);
+    }
+
+    void free_output_pending()
+    {
+        if (_output_pending)
+        {
+            page_free(_output_pending);
+            _output_pending = null;
+        }
     }
 
     void finish_close()
@@ -1352,8 +1491,13 @@ nothrow @nogc:
         return written;
     }
 
+    override size_t tx_request() const
+        => _output.length < limit ? limit - _output.length : 0;
+
     const(ubyte)[] output() const pure
         => _output[];
+
+    size_t limit = size_t.max;
 
 private:
     Array!ubyte _output;
@@ -1391,6 +1535,60 @@ unittest
     assert(session.reclaim_history(size_t.max, reclaimed) == ReclaimResult.exhausted && reclaimed);
     assert(session._history.empty);
     assert(session._history_cursor == 0);
+
+    // output that has ended can still be abandoned, with the part the stream has not taken
+    {
+        static struct Burst
+        {
+        nothrow @nogc:
+            size_t produce(char[] buffer, MonoTime, out TxStatus status)
+            {
+                buffer[0 .. 300] = 'x';
+                status = TxStatus.end;
+                return 300;
+            }
+        }
+        Burst burst;
+        stream.limit = stream.output.length + 100;
+        session.feed_output(&burst.produce);
+        assert(stream.output.length == stream.limit && session.output_busy, "the tail waits for the stream");
+        session.release_output(&burst.produce);
+        assert(!session.output_busy);
+        stream.limit = size_t.max;
+    }
+
+    // so is a print cancelled after it has produced its last row but before the stream has taken it
+    {
+        import manager.console.table : TablePrint;
+
+        static final class FinishedPrint : TablePrint
+        {
+        nothrow @nogc:
+            ~this() {}
+
+            this(Session s)
+            {
+                super(s);
+                table.add_column("value");
+                start();
+            }
+
+            override void walk()
+            {
+                begin_block(1);
+                if (!row("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"))
+                    return;
+                end(0);
+            }
+        }
+        stream.limit = stream.output.length + min_tx_request;
+        FinishedPrint print = alloc!FinishedPrint(session);
+        assert(session.output_busy, "the tail waits for the stream");
+        print.request_cancel();
+        assert(!session.output_busy && print.update() == CommandCompletionState.finished, "cancelling releases the tail");
+        free(print);
+        stream.limit = size_t.max;
+    }
 
     session.destroy();
     sessions.update_all();
