@@ -5,7 +5,7 @@ import urt.log;
 import urt.mem;
 import urt.mem.pagepool;
 import urt.string;
-import urt.time : MonoTime, getTime;
+import urt.time : Duration, MonoTime, getTime;
 
 import manager : g_app;
 import manager.base;
@@ -141,41 +141,12 @@ nothrow @nogc:
     {
         if (!_inner)
             return -1;
-        if (_tx_pending)
-            return queue_behind_pending(data);
-
-        // Only need to escape 0xFF (IAC) bytes
-        ptrdiff_t total = 0;
-        foreach (d; data)
+        bool idle = !_tx_pending;
+        ptrdiff_t total = queue_behind_pending(data);
+        if (idle && _tx_pending)
         {
-            const(ubyte)[] bytes = cast(const(ubyte)[])d;
-            size_t start = 0;
-            for (size_t j = 0; j < bytes.length; ++j)
-            {
-                if (bytes[j] == 0xFF)
-                {
-                    if (j > start)
-                    {
-                        auto r = _inner.write(bytes[start .. j]);
-                        if (r < 0)
-                            return -1;
-                        total += r;
-                    }
-                    ubyte[2] iac = [0xFF, 0xFF];
-                    auto r = _inner.write(iac[]);
-                    if (r < 0)
-                        return -1;
-                    total += 1;
-                    start = j + 1;
-                }
-            }
-            if (start < bytes.length)
-            {
-                auto r = _inner.write(bytes[start .. $]);
-                if (r < 0)
-                    return -1;
-                total += r;
-            }
+            _tx_pending_status = TxStatus.idle;
+            tx_handler_changed();
         }
         return total;
     }
@@ -457,15 +428,20 @@ private:
         return page;
     }
 
-    // pending output was produced earlier, so written bytes queue behind it
+    // written bytes queue behind what is pending, up to the queue limit, so a blocked line backs up into the writer
     ptrdiff_t queue_behind_pending(const(void[])[] data)
     {
+        size_t queued;
+        for (Page* page = _tx_pending; page; page = page.next)
+            queued += page.length;
         ptrdiff_t total = 0;
         foreach (d; data)
         {
             const(ubyte)[] bytes = cast(const(ubyte)[])d;
             while (bytes.length)
             {
+                if (queued >= tx_queue_limit)
+                    return total;
                 size_t n = bytes.length < tx_page_payload ? bytes.length : tx_page_payload;
                 Page* page = page_alloc(n);
                 if (!page)
@@ -474,7 +450,12 @@ private:
                 Page* output = escape_page(page);
                 if (!output)
                     return total;
+                for (Page* p = output; p; p = p.next)
+                    queued += p.length;
                 append_tx_chain(_tx_pending, output);
+                add_tx_bytes(n);
+                if (_logging)
+                    write_to_log(false, bytes[0 .. n]);
                 bytes = bytes[n .. $];
                 total += n;
             }
@@ -942,11 +923,35 @@ unittest
             {
                 super(collection_type_info!Transport, id, flags);
             }
-            override ptrdiff_t write(const(void[])[] data...) => 0;
+            override ptrdiff_t write(const(void[])[] data...)
+            {
+                size_t total;
+                foreach (d; data)
+                {
+                    size_t n = d.length < room ? d.length : room;
+                    output ~= (cast(const(char)[])d)[0 .. n];
+                    room -= n;
+                    total += n;
+                    if (n < d.length)
+                        break;
+                }
+                return total;
+            }
+            void open(size_t bytes)
+            {
+                room = bytes;
+                drain_tx();
+            }
             void feed(const(char)[] text)
             {
                 incoming(text, MonoTime());
             }
+            Array!char output;
+            size_t room = size_t.max;
+
+        protected:
+            override Duration tx_retry_interval() const
+                => Duration.zero;
         }
         static struct Consumer
         {
@@ -987,5 +992,46 @@ unittest
         transport.feed("later");
         assert(transport.rx_handler is null && filter._tail[] == cast(const(ubyte)[])"later");
         filter._subscribed = false;
+
+        // a write is escaped into pages the transport pulls, and the transport lets go once they are taken
+        foreach (_; 0 .. 4)
+            Collection!Stream().update_all();
+        assert(transport.running);
+        assert(filter.write("a\xFFb") == 3);
+        assert(transport.output[] == "a\xFF\xFFb" && !filter._tx_pending && transport.tx_handler is null);
+
+        // a blocked transport backs writes up into the writer; reopened, it takes every byte, escaped and in order
+        ubyte[8192] text;
+        foreach (i, ref b; text)
+            b = cast(ubyte)i;
+        Array!char expect;
+        foreach (b; text)
+        {
+            expect ~= cast(char)b;
+            if (b == NVT.IAC)
+                expect ~= cast(char)b;
+        }
+        transport.output.clear();
+        transport.room = 0;
+        size_t taken;
+        while (taken < text.length)
+        {
+            ptrdiff_t n = filter.write(text[taken .. $]);
+            assert(n >= 0);
+            if (n == 0)
+                break;
+            taken += n;
+        }
+        assert(taken < text.length && transport.output.empty, "a blocked line bounds what a write takes");
+        transport.open(100);
+        assert(transport.output[] == expect[0 .. 100]);
+        transport.open(size_t.max);
+        while (taken < text.length)
+        {
+            ptrdiff_t n = filter.write(text[taken .. $]);
+            assert(n > 0);
+            taken += n;
+        }
+        assert(transport.output[] == expect[] && !filter._tx_pending && transport.tx_handler is null);
     }
 }
