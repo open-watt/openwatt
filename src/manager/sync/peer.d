@@ -26,6 +26,7 @@ import manager.series : FormatId;
 import manager.syslog;
 import manager.sync;
 import manager.sync.binary_encoder : Verb;
+import manager.sync.console : SyncConsoleStream;
 import manager.sync.discovery : PeerRole;
 import manager.sync.encoder;
 import manager.sync.peering : SyncPeeringModule;
@@ -758,7 +759,18 @@ package:
         scope (exit) _peer_flags &= ~PeerFlags.tx_producing;
         if (!pump_fragments())
             return tx_full();
-        return get_module!SyncModule.produce(this);
+        bool console_waiting = produce_console();
+        return get_module!SyncModule.produce(this) || console_waiting;
+    }
+
+    // a remote console drains while the plane has room, and holds the producer while the transport is full
+    final bool produce_console()
+    {
+        SyncConsoleStream stream = _console_session ? dyn_cast!SyncConsoleStream(_console_session.stream) : null;
+        if (!stream)
+            return false;
+        stream.room_returned();
+        return stream.tx_queued() && tx_full();
     }
 
     // fragments arrive in order and once each, on the session's control stream; a framing error resets the session
@@ -2148,4 +2160,80 @@ unittest
     ubyte[3] nested = [Verb.fragment, SyncPeer.fragment_first, 0];
     remote.accept_fragment(SyncPeer.fragment_first, nested[]);
     assert(!remote.running && remote._frag_rx.empty);
+
+    // a remote console's output waits while the peer cannot take it, and follows the wake that frees it
+    {
+        import manager.console : Console;
+        import manager.sync.console : SyncConsoleStream;
+        import router.stream : Stream;
+
+        SyncConsoleStream stream = Collection!SyncConsoleStream().create("relay-test");
+        stream.peer(peer);
+        stream.sequence(1);
+        Collection!Stream().update_all();
+        assert(stream.running);
+        Console* console = alloc!Console(null, StringLit!"test.relay");
+        Session session = alloc!Session(Collection!Session().allocate_id("relay-session"), ObjectFlags.none, *console);
+        session.stream(stream);
+        Collection!Session().add(session);
+        peer._console_session = session;
+        peer.release_control(peer._tx_seq);
+        char[3000] text = 'a';
+
+        // a full transport invites the peer back, and the peer keeps its turn until the console drains
+        link.frames.clear();
+        link.release_tx_handler(link.tx_handler);
+        link.room = 0;
+        assert(stream.write(text[]) == text.length && link.frames.length == 0);
+        assert(link.tx_handler is &peer.produce_tx, "a full transport arms the peer");
+        link.room = 4;
+        assert(peer.produce_console() && link.frames.length == 4);
+        link.room = size_t.max;
+        assert(!peer.produce_console() && stream.tx_queued() == 0);
+
+        // a full control window waits for the ack, whose wake drains the console
+        ubyte[8] ping;
+        ping[0] = 0xFE;
+        link.frames.clear();
+        while (!peer.tx_blocked())
+            assert(peer.transmit_frame(ping[]) == 0);
+        size_t held = link.frames.length;
+        link.release_tx_handler(link.tx_handler);
+        assert(stream.write(text[]) == text.length && link.frames.length == held && link.tx_handler is null);
+        assert(!peer.produce_console() && stream.tx_queued() == text.length, "a starved window waits for the ack");
+        peer.release_control(peer._tx_seq);
+        assert(link.tx_handler is &peer.produce_tx);
+        assert(!peer.produce_console() && stream.tx_queued() == 0);
+
+        // a code point cut between pages goes out whole, though the line is full when it completes
+        char[2 + 3 * 100] euros = void;
+        euros[0 .. 2] = "ab";
+        foreach (i; 0 .. 100)
+            euros[2 + 3 * i .. 5 + 3 * i] = "€";
+        peer.release_control(peer._tx_seq);
+        link.frames.clear();
+        assert(stream.write(euros[0 .. 150]) == 150 && link.frames.length == 1);
+        link.room = 1;
+        assert(stream.write(euros[150 .. 152]) == 2 && link.frames.length == 1 && stream.tx_queued() == 2);
+        link.room = size_t.max;
+        assert(!peer.produce_console() && stream.tx_queued() == 0 && link.frames.length == 2);
+        assert(stream.write(euros[152 .. $]) == euros.length - 152 && stream.tx_queued() == 0);
+        Array!char relayed;
+        foreach (ref f; link.frames[])
+        {
+            size_t at = 11 + 3;
+            size_t length = f[at] & 0x7F;
+            if (f[at++] & 0x80)
+                length |= size_t(f[at++]) << 7;
+            const(char)[] data = cast(const(char)[])f[at .. $];
+            assert(data.length == length && (data[0] & 0xC0) != 0x80, "each frame starts on a code point");
+            relayed ~= data;
+        }
+        assert(link.frames.length == 3 && relayed[] == euros[]);
+
+        peer._console_session = null;
+        session.destroy();
+        Collection!Session().update_all();
+        stream.detach_peer();
+    }
 }

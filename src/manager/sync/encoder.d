@@ -219,7 +219,10 @@ nothrow @nogc:
     abstract void encode_suggest(SyncPeer peer, uint seq, const(char)[] text);
     abstract void encode_suggestions(SyncPeer peer, uint seq, const(String)[] suggestions, const(char)[] completed);
 
-    abstract void encode_console(SyncPeer peer, uint seq, SyncConsoleEvent event, const(char)[] data = null, SyncConsoleTerminal terminal = SyncConsoleTerminal());
+    // the send's result: a refused frame was not sent
+    abstract int encode_console(SyncPeer peer, uint seq, SyncConsoleEvent event, const(char)[] data = null, SyncConsoleTerminal terminal = SyncConsoleTerminal());
+    // console output that fits one frame of the session's segment, however it encodes
+    abstract size_t console_payload(SyncPeer peer) const;
 
     abstract void encode_sub(SyncPeer peer, const(char)[] pattern);
     abstract void encode_unsub(SyncPeer peer, const(char)[] pattern);

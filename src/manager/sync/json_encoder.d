@@ -229,7 +229,7 @@ nothrow @nogc:
         send_frame(peer);
     }
 
-    override void encode_console(SyncPeer peer, uint seq, SyncConsoleEvent event, const(char)[] data = null, SyncConsoleTerminal terminal = SyncConsoleTerminal())
+    override int encode_console(SyncPeer peer, uint seq, SyncConsoleEvent event, const(char)[] data = null, SyncConsoleTerminal terminal = SyncConsoleTerminal())
     {
         begin_frame("console");
         _buf.append(",\"seq\":", seq, ",\"event\":\"", enum_key_from_value!SyncConsoleEvent(event), '"');
@@ -250,8 +250,14 @@ nothrow @nogc:
             case SyncConsoleEvent.closed:
                 break;
         }
-        send_frame(peer);
+        return send_frame(peer);
     }
+
+    // a text frame cannot be fragmented, and an escaped control byte takes six
+    override size_t console_payload(SyncPeer peer) const
+        => peer.send_limit > console_overhead ? (peer.send_limit - console_overhead) / 6 : 0;
+
+    enum size_t console_overhead = `{"kind":"console","seq":4294967295,"event":"output","data":""}`.length;
 
     override void encode_sub(SyncPeer peer, const(char)[] pattern)
     {
