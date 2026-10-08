@@ -7,6 +7,7 @@ import urt.inet;
 import urt.lifetime;
 import urt.log;
 import urt.map;
+import urt.mem.alloc : default_alignment;
 import urt.mem.pagepool;
 import urt.meta.nullable;
 import urt.result;
@@ -44,15 +45,19 @@ alias RecvHandler = void delegate(Stream source, const(void)[] data, MonoTime rx
 alias TapHandler = void delegate(Stream source, bool tx, const(void)[] data, MonoTime time) nothrow @nogc;
 
 // A sink never asks for less; below this a producer cannot make progress through its framing.
-enum size_t min_tx_request = 64;
+enum size_t min_tx_request = 128;
 
 // A pump's turn; a sink with room left after it takes its next turn behind the other bulk work.
 enum Duration tx_slice = msecs(5);
 
+// bytes bound the whole page, framing included; headroom and tailroom are what the filters above the producer
+// write around its payload, in place
 struct TxRequest
 {
     size_t bytes;
     MonoTime deadline;  // the producer returns at its next yield point once this has passed
+    size_t headroom;
+    size_t tailroom;
 }
 
 enum TxStatus : ubyte
@@ -65,34 +70,45 @@ enum TxStatus : ubyte
     abort,      // failed; the producer's owner terminates the stream
 }
 
-// A returned page transfers to the sink. A producer never exceeds req.bytes.
+// A returned page transfers to the sink. A producer never exceeds req.bytes, and leaves req.headroom and req.tailroom
+// free around the payload.
 alias SendHandler = Page* delegate(ref const TxRequest req, out TxStatus status) nothrow @nogc;
 
 Page* alloc_tx_page(ref const TxRequest req, size_t bytes, ref TxStatus status)
 {
     debug assert(bytes <= req.bytes);
-    Page* page = page_alloc(bytes);
+    Page* page = page_alloc(bytes, default_alignment, req.headroom, req.tailroom);
     if (!page)
         status = TxStatus.starved;
     return page;
 }
 
-// hands out at most req.bytes from the front of chain, copying the front of a longer head into a fresh page
+// hands out at most req.bytes from the front of chain; a head that is longer, or lacks the room, is copied out
 Page* take_tx_page(ref Page* chain, ref const TxRequest req, ref TxStatus status)
 {
     Page* head = chain;
-    if (head.length <= req.bytes)
+    bool whole = head.length <= req.bytes;
+    if (whole && head.headroom >= req.headroom && head.tailroom >= req.tailroom)
     {
         chain = head.next;
         head.next = null;
         return head;
     }
-    Page* page = alloc_tx_page(req, req.bytes, status);
+    size_t n = whole ? head.length : req.bytes;
+    Page* page = alloc_tx_page(req, n, status);
     if (!page)
         return null;
-    page.data[] = head.data[0 .. req.bytes];
-    head.offset += cast(ushort)req.bytes;
-    head.length -= cast(ushort)req.bytes;
+    page.data[] = head.data[0 .. n];
+    if (whole)
+    {
+        chain = head.next;
+        page_free(head);
+    }
+    else
+    {
+        head.offset += cast(ushort)n;
+        head.length -= cast(ushort)n;
+    }
     return page;
 }
 
@@ -475,9 +491,28 @@ protected:
     Duration tx_retry_interval() const
         => msecs(2);
 
+    // a filter stream serves what was written to it through its own pull, rather than pushing it to a line
+    final Page* take_queued_tx(ref const TxRequest req, out TxStatus status)
+    {
+        if (!_tx_queue)
+        {
+            status = TxStatus.idle;
+            return null;
+        }
+        return take_tx_page(_tx_queue, req, status);
+    }
+
     // copies data behind what is queued, up to a page past the queue's limit, so one write of a frame fits whole; short
     // writes fill the last page before another is taken
     final size_t queue_copy(const(void[])[] data...)
+    {
+        size_t total = hold_copy(data);
+        drain_tx();
+        return total;
+    }
+
+    // copies as queue_copy does, but leaves the queue for a filter's own pull; nothing is pumped or drained
+    final size_t hold_copy(const(void[])[] data...)
     {
         if (!running)
             return 0;
@@ -511,7 +546,6 @@ protected:
                 total += n;
             }
         }
-        drain_tx();
         return total;
     }
 
@@ -777,6 +811,11 @@ unittest
         override size_t tx_request() const
             => _space;
 
+        void live(bool on)
+        {
+            _state = on ? State.running : State.disabled;
+        }
+
         void grant(size_t space)
         {
             _space += space;
@@ -938,43 +977,43 @@ unittest
     assert(stream.output.length == 6_000 && stream.tx_handler is null);
 
     stream.reset();
-    TestTxProducer paced = TestTxProducer(150);
-    stream.grant(100);
+    TestTxProducer paced = TestTxProducer(min_tx_request + min_tx_request / 2);
+    stream.grant(min_tx_request);
     stream.tx_handler(&paced.produce);
-    assert(paced.calls == 1 && paced.remaining == 50 && stream.output.length == 100);
-    stream.grant(64);
-    assert(paced.calls == 2 && paced.remaining == 0 && stream.output.length == 150);
-    stream.grant(64);
+    assert(paced.calls == 1 && paced.remaining == min_tx_request / 2 && stream.output.length == min_tx_request);
+    stream.grant(min_tx_request);
+    assert(paced.calls == 2 && paced.remaining == 0 && stream.output.length == min_tx_request + min_tx_request / 2);
+    stream.grant(min_tx_request);
     assert(paced.calls == 3 && stream.tx_handler is null);
 
     stream.reset();
-    TestTxProducer bounded = TestTxProducer(100);
-    stream.grant(63);
+    TestTxProducer bounded = TestTxProducer(min_tx_request + 36);
+    stream.grant(min_tx_request - 1);
     stream.tx_handler(&bounded.produce);
     assert(bounded.calls == 0);
     stream.grant(1);
-    assert(bounded.calls == 1 && stream.output.length == 64);
-    stream.grant(64);
-    assert(bounded.calls == 2 && bounded.remaining == 0 && stream.output.length == 100);
+    assert(bounded.calls == 1 && stream.output.length == min_tx_request);
+    stream.grant(min_tx_request);
+    assert(bounded.calls == 2 && bounded.remaining == 0 && stream.output.length == min_tx_request + 36);
 
     stream.reset();
     TestTxProducer finishing = TestTxProducer(5);
     finishing.finish = true;
-    stream.grant(100);
+    stream.grant(min_tx_request);
     stream.tx_handler(&finishing.produce);
     assert(finishing.calls == 1 && stream.output.length == 5 && stream.tx_handler is null);
 
     stream.reset();
     TestTxProducer failing;
     failing.fail = true;
-    stream.grant(100);
+    stream.grant(min_tx_request);
     stream.tx_handler(&failing.produce);
     assert(failing.calls == 1 && stream.output.length == 0 && stream.tx_handler is null);
 
     stream.reset();
     TestTxProducer starving = TestTxProducer(4);
     starving.starve = true;
-    stream.grant(100);
+    stream.grant(2 * min_tx_request);
     stream.tx_handler(&starving.produce);
     assert(starving.calls == 1 && stream.output.length == 0 && stream.tx_handler !is null);
     page_pool_wake();
@@ -984,7 +1023,7 @@ unittest
     TestTxProducer racing = TestTxProducer(4);
     racing.starve = true;
     racing.freed_meanwhile = true;
-    stream.grant(100);
+    stream.grant(2 * min_tx_request);
     stream.tx_handler(&racing.produce);
     assert(racing.calls == 3 && stream.output.length == 4 && stream.tx_handler is null);
 
@@ -993,30 +1032,42 @@ unittest
     TestTxProducer replacing;
     replacing.stream = stream;
     replacing.replacement = &replacement.produce;
-    stream.grant(64);
+    stream.grant(min_tx_request);
     stream.tx_handler(&replacing.produce);
     assert(replacing.calls == 1 && replacement.calls == 1 && stream.output.length == 3);
-    stream.grant(64);
+    stream.grant(min_tx_request);
     assert(replacement.calls == 2 && stream.tx_handler is null);
 
     stream.reset();
     TestTxProducer releasing = TestTxProducer(2);
     releasing.stream = stream;
     releasing.release = true;
-    stream.grant(64);
+    stream.grant(min_tx_request);
     stream.tx_handler(&releasing.produce);
     assert(releasing.calls == 1 && stream.output.length == 2 && stream.tx_handler is null);
 
     stream.reset();
     TestTxProducer sleeping;
-    stream.grant(64);
+    stream.grant(min_tx_request);
     stream.tx_handler(&sleeping.produce);
     assert(sleeping.calls == 1 && stream.tx_handler is null);
-    stream.grant(64);
+    stream.grant(min_tx_request);
     assert(sleeping.calls == 1);
     sleeping.remaining = 1;
     stream.tx_handler(&sleeping.produce);
     assert(sleeping.calls == 3 && stream.output.length == 1 && stream.tx_handler is null);
+
+    // bytes held for a filter's own pull start no pump: the producer waits for the line, however much room it has
+    stream.reset();
+    TestTxProducer held = TestTxProducer(1000);
+    stream.tx_handler(&held.produce);
+    stream._space = 8192;
+    stream.live(true);
+    ubyte[1] one = [1];
+    assert(stream.hold_copy(one[]) == 1 && held.calls == 0 && stream.tx_queued == 1);
+    stream.release_tx_handler(&held.produce);
+    stream.release_tx_queue();
+    stream.live(false);
 
     // a short-writing line keeps what it did not take and stays armed; the bytes arrive whole and in order
     {
@@ -1082,7 +1133,7 @@ unittest
     foreach (i, ref b; cast(ubyte[])chain.data)
         b = cast(ubyte)i;
     append_tx_chain(chain, page_alloc(10));
-    TxRequest small = TxRequest(min_tx_request);
+    TxRequest small = TxRequest(64);
     TxStatus status;
     Page* front = take_tx_page(chain, small, status);
     assert(front.length == 64 && (cast(ubyte[])front.data)[63] == 63);
@@ -1094,4 +1145,23 @@ unittest
     front = take_tx_page(chain, small, status);
     assert(front.length == 10 && chain is null);
     page_free(front);
+
+    // a page that keeps the room a filter asked for passes through as it stands; one that lacks it is copied out
+    {
+        TxRequest framed = TxRequest(min_tx_request, MonoTime(), 8, 16);
+        Page* roomy = page_alloc(20, default_alignment, 8, 16);
+        chain = roomy;
+        front = take_tx_page(chain, framed, status);
+        assert(front is roomy && chain is null);
+        page_free(front);
+
+        Page* bare = page_alloc(20);
+        (cast(ubyte[])bare.data)[] = 7;
+        chain = bare;
+        front = take_tx_page(chain, framed, status);
+        assert(front !is bare && chain is null && front.length == 20 && front.headroom >= 8 && front.tailroom >= 16);
+        foreach (b; cast(const(ubyte)[])front.data)
+            assert(b == 7);
+        page_free(front);
+    }
 }

@@ -354,7 +354,6 @@ nothrow @nogc:
                 stream.unsubscribe(&inner_state_change);
         }
         _subscribed = false;
-        free_pending_tx();
         version (MbedTLS)
         {
             free_mbedtls_contexts();
@@ -392,34 +391,8 @@ nothrow @nogc:
             return -1;
         }
 
-        bool idle = !_tx_pending;
-        ptrdiff_t total = 0;
-        queue: foreach (ref d; data)
-        {
-            const(ubyte)[] chunk = cast(const(ubyte)[])d;
-            while (chunk.length)
-            {
-                size_t n = chunk.length < tx_page_payload ? chunk.length : tx_page_payload;
-                Page* input = page_alloc(n);
-                if (!input)
-                    break queue;
-                (cast(ubyte[])input.data)[] = chunk[0 .. n];
-                Page* output = encrypt_page(input);
-                if (!output)
-                {
-                    fail_session();
-                    return -1;
-                }
-                append_tx_chain(_tx_pending, output);
-                add_tx_bytes(n);
-                if (_logging)
-                    write_to_log(false, chunk[0 .. n]);
-                chunk = chunk[n .. $];
-                total += n;
-            }
-        }
-        if (idle && _tx_pending)
-            tx_handler_changed();
+        size_t total = hold_copy(data);
+        tx_handler_changed();
         return total;
     }
 
@@ -448,7 +421,7 @@ protected:
         Stream stream = _stream.get;
         if (!stream)
             return;
-        if ((tx_handler || _tx_pending) && running && _handshake_state == HandshakeState.completed)
+        if ((tx_handler || tx_queued) && running && _handshake_state == HandshakeState.completed)
             stream.tx_handler(&provide_tx_page);
         else
             stream.release_tx_handler(&provide_tx_page);
@@ -459,13 +432,11 @@ private:
     bool _close_notify = false;
     bool _decrypting;
     bool _subscribed;
-    TxStatus _tx_pending_status;
 
     Array!(ObjectRef!Certificate) _certificates;
     BaseObject _selected_cert;
     ObjectRef!Stream _stream;
     Array!ubyte _receive_buffer;
-    Page* _tx_pending;
     SysTime _handshake_start;
 
     void release_tx_service()
@@ -474,41 +445,74 @@ private:
             stream.release_tx_handler(&provide_tx_page);
     }
 
+    // a record's framing comes out of the grant, and the record is made in the producer's page
     Page* provide_tx_page(ref const TxRequest req, out TxStatus status)
     {
-        if (_tx_pending)
-            return take_pending_tx(req, status);
-
-        Page* input = request_tx_page(req, status);
-        if (!input)
-            return null;
-
-        size_t input_length = input.length;
-        if (_logging)
-            write_to_log(false, input.data);
-
-        Page* output = encrypt_page(input);
-        if (!output)
+        size_t header, trailer, max_payload;
+        if (!record_framing(header, trailer, max_payload))
         {
             fail_session();
             status = TxStatus.abort;
             return null;
         }
-        add_tx_bytes(input_length);
-        _tx_pending = output;
-        _tx_pending_status = status;
-        return take_pending_tx(req, status);
+        debug assert(header + trailer < min_tx_request, "a grant carries a record's framing and some payload");
+        size_t payload = (req.bytes < tx_page_payload ? req.bytes : tx_page_payload) - header - trailer;
+        if (payload > max_payload)
+            payload = max_payload;
+        TxRequest inner = TxRequest(payload, req.deadline, req.headroom + header, req.tailroom + trailer);
+
+        Page* input;
+        if (tx_queued)
+        {
+            input = take_queued_tx(inner, status);
+            if (input)
+                status = tx_queued || tx_handler ? TxStatus.more : TxStatus.idle;
+        }
+        else
+            input = request_tx_page(inner, status);
+        if (!input)
+            return null;
+
+        add_tx_bytes(input.length);
+        if (_logging)
+            write_to_log(false, input.data);
+        Page* output = encrypt_page(input);
+        if (!output)
+        {
+            fail_session();
+            status = TxStatus.abort;
+        }
+        return output;
     }
 
-    Page* take_pending_tx(ref const TxRequest req, out TxStatus status)
+    // mbedtls writes its record over the payload, so all of its framing is room behind it
+    bool record_framing(out size_t header, out size_t trailer, out size_t max_payload)
     {
-        Page* page = take_tx_page(_tx_pending, req, status);
-        if (page)
-            status = _tx_pending || tx_handler ? TxStatus.more : _tx_pending_status;
-        return page;
+        version (MbedTLS)
+        {
+            int expansion = mbedtls_ssl_get_record_expansion(_ssl);
+            int most = mbedtls_ssl_get_max_out_record_payload(_ssl);
+            if (expansion < 0 || most <= 0)
+                return false;
+            trailer = expansion;
+            max_payload = most;
+            return true;
+        }
+        else version (Windows)
+        {
+            SecPkgContext_StreamSizes sizes;
+            if (QueryContextAttributesA(&_context, SECPKG_ATTR_STREAM_SIZES, &sizes) != SEC_E_OK || sizes.cbMaximumMessage == 0)
+                return false;
+            header = sizes.cbHeader;
+            trailer = sizes.cbTrailer;
+            max_payload = sizes.cbMaximumMessage;
+            return true;
+        }
+        else
+            return false;
     }
 
-    // consumes input
+    // consumes input, which becomes the record
     Page* encrypt_page(Page* input)
     {
         version (MbedTLS)
@@ -525,26 +529,9 @@ private:
     // a record may have advanced the cipher state before its ciphertext was lost, so the session cannot continue
     void fail_session()
     {
-        free_pending_tx();
         tx_handler(null);
         _handshake_state = HandshakeState.failed;
         restart();
-    }
-
-    void free_pending_tx()
-    {
-        free_page_chain(_tx_pending);
-        _tx_pending = null;
-    }
-
-    static void free_page_chain(Page* page)
-    {
-        while (page)
-        {
-            Page* next = page.next;
-            page_free(page);
-            page = next;
-        }
     }
 
     void inner_state_change(ActiveObject, StateSignal signal)
@@ -752,53 +739,27 @@ private:
     {
         mbedtls_ssl_context* _ssl;
         mbedtls_ssl_config* _ssl_conf;
-        Page* _tx_output_head;
-        Page* _tx_output_tail;
-        size_t _tx_output_page_limit;
-        size_t _tx_output_headroom;
-        size_t _tx_output_tailroom;
-        bool _capturing_tx;
-        bool _tx_output_failed;
+        Page* _tx_capture;
+        size_t _tx_captured;
+        size_t _tx_capture_limit;
 
+        // mbedtls copies the payload into its own record before sending it, so the record is captured over the payload
+        // and into the room the request reserved behind it
         Page* encrypt_page_mbedtls(Page* input)
         {
-            _tx_output_headroom = input.headroom;
-            _tx_output_tailroom = input.tailroom;
-            _capturing_tx = true;
-            _tx_output_failed = false;
-            const(ubyte)[] remaining = cast(const(ubyte)[])input.data;
-            while (remaining.length)
+            _tx_capture = input;
+            _tx_captured = 0;
+            _tx_capture_limit = input.length + input.tailroom;
+            int written = mbedtls_ssl_write(_ssl, cast(const(ubyte)*)input.data.ptr, input.length);
+            bool whole = written == input.length && _tx_capture;
+            _tx_capture = null;
+            if (!whole)
             {
-                int written = mbedtls_ssl_write(_ssl, remaining.ptr, remaining.length);
-                if (written <= 0)
-                {
-                    free_page_chain(_tx_output_head);
-                    clear_tx_output();
-                    page_free(input);
-                    return null;
-                }
-                remaining = remaining[written .. $];
+                page_free(input);
+                return null;
             }
-            Page* output = _tx_output_head;
-            if (_tx_output_failed || !output)
-            {
-                free_page_chain(output);
-                output = null;
-            }
-            clear_tx_output();
-            page_free(input);
-            return output;
-        }
-
-        void clear_tx_output()
-        {
-            _tx_output_head = null;
-            _tx_output_tail = null;
-            _tx_output_page_limit = 0;
-            _tx_output_headroom = 0;
-            _tx_output_tailroom = 0;
-            _capturing_tx = false;
-            _tx_output_failed = false;
+            input.length = cast(ushort)_tx_captured;
+            return input;
         }
 
         void init_mbedtls_context(bool is_server, Certificate cert)
@@ -833,6 +794,8 @@ private:
             }
 
             urt_ssl_attach_rng(_ssl_conf);
+            // a TLS 1.0 CBC write splits into two records, and the second would read payload the first was captured over
+            urt_ssl_conf_min_tls12(_ssl_conf);
 
             if (is_server && cert !is null)
             {
@@ -922,53 +885,17 @@ private:
                 return null;
             }
 
+            debug assert(input.length <= sizes.cbMaximumMessage && input.headroom >= sizes.cbHeader && input.tailroom >= sizes.cbTrailer,
+                         "the request reserves the record's framing around the payload");
             size_t input_length = input.length;
-            if (input_length <= sizes.cbMaximumMessage && input.headroom >= sizes.cbHeader && input.tailroom >= sizes.cbTrailer)
+            input.offset -= cast(ushort)sizes.cbHeader;
+            input.length += cast(ushort)(sizes.cbHeader + sizes.cbTrailer);
+            if (!encrypt_schannel_record(input, input_length, sizes))
             {
-                input.offset -= cast(ushort)sizes.cbHeader;
-                input.length += cast(ushort)(sizes.cbHeader + sizes.cbTrailer);
-                if (!encrypt_schannel_record(input, input_length, sizes))
-                {
-                    page_free(input);
-                    return null;
-                }
-                return input;
+                page_free(input);
+                return null;
             }
-
-            const(ubyte)[] plaintext = cast(const(ubyte)[])input.data;
-            size_t position;
-            Page* head;
-            Page* tail;
-            while (position != input_length)
-            {
-                size_t length = input_length - position;
-                if (length > sizes.cbMaximumMessage)
-                    length = sizes.cbMaximumMessage;
-                size_t output_length = sizes.cbHeader + length + sizes.cbTrailer;
-                Page* output = page_alloc(output_length, size_t.sizeof, input.headroom, input.tailroom);
-                if (!output)
-                {
-                    free_page_chain(head);
-                    page_free(input);
-                    return null;
-                }
-                (cast(ubyte[])output.data)[sizes.cbHeader .. sizes.cbHeader + length] = plaintext[position .. position + length];
-                if (!encrypt_schannel_record(output, length, sizes))
-                {
-                    page_free(output);
-                    free_page_chain(head);
-                    page_free(input);
-                    return null;
-                }
-                if (tail)
-                    tail.next = output;
-                else
-                    head = output;
-                tail = output;
-                position += length;
-            }
-            page_free(input);
-            return head;
+            return input;
         }
 
         bool encrypt_schannel_record(Page* output, size_t input_length,
@@ -1349,38 +1276,16 @@ version (MbedTLS)
     extern(C) int tls_bio_send(void* ctx, const(ubyte)* buf, size_t len) nothrow @nogc
     {
         auto self = cast(TLSStream)ctx;
-        if (self._capturing_tx)
+        if (Page* page = self._tx_capture)
         {
-            size_t consumed;
-            while (consumed != len)
+            if (len > self._tx_capture_limit - self._tx_captured)
             {
-                if (!self._tx_output_tail || self._tx_output_tail.length == self._tx_output_page_limit)
-                {
-                    size_t capacity = len - consumed;
-                    if (capacity > TLSStream.tx_page_payload)
-                        capacity = TLSStream.tx_page_payload;
-                    Page* page = page_alloc(0, size_t.sizeof, self._tx_output_headroom, capacity + self._tx_output_tailroom);
-                    if (!page)
-                    {
-                        self._tx_output_failed = true;
-                        return -1;
-                    }
-                    if (self._tx_output_tail)
-                        self._tx_output_tail.next = page;
-                    else
-                        self._tx_output_head = page;
-                    self._tx_output_tail = page;
-                    self._tx_output_page_limit = capacity;
-                }
-
-                size_t copied = self._tx_output_page_limit - self._tx_output_tail.length;
-                if (copied > len - consumed)
-                    copied = len - consumed;
-                size_t offset = self._tx_output_tail.length;
-                self._tx_output_tail.length += cast(ushort)copied;
-                (cast(ubyte[])self._tx_output_tail.data)[offset .. offset + copied] = buf[consumed .. consumed + copied];
-                consumed += copied;
+                self._tx_capture = null;
+                return -1;
             }
+            size_t at = page.offset + self._tx_captured;
+            (cast(ubyte*)page)[at .. at + len] = buf[0 .. len];
+            self._tx_captured += len;
             return cast(int)len;
         }
         ptrdiff_t n = self._stream.write(buf[0 .. len]);
@@ -1437,10 +1342,9 @@ unittest
     TLSStream tls = alloc!TLSStream(CID(1));
     scope (exit) free(tls);
 
-    tls._tx_pending = page_alloc(4);
     tls._handshake_state = TLSStream.HandshakeState.completed;
     tls.fail_session();
-    assert(tls._tx_pending is null && tls._handshake_state == TLSStream.HandshakeState.failed);
+    assert(tls._handshake_state == TLSStream.HandshakeState.failed);
     ubyte[1] more;
     assert(tls.write(more[]) == -1);
 
