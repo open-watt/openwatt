@@ -258,14 +258,6 @@ protected:
         return CompletionStatus.complete;
     }
 
-    override void update()
-    {
-        super.update();
-
-        if (atomicExchange!(MemoryOrder.acq_rel)(&_wifi_pump_retry, 0u) != 0)
-            service_wifi();
-    }
-
     override void on_wlan_bind_changed()
     {
         if (!running)
@@ -337,8 +329,8 @@ private:
     bool _scanning;
 
     __gshared BuiltinWiFi[num_wifi] _active_radios;
+    __gshared ubyte _pump_doorbell;
     shared uint _wifi_pump_pending;
-    shared uint _wifi_pump_retry;
 
     Result update_drv_mode()
     {
@@ -405,7 +397,6 @@ private:
             wifi_close(_wifi);
         }
         atomicStore!(MemoryOrder.release)(_wifi_pump_pending, 0u);
-        atomicStore!(MemoryOrder.release)(_wifi_pump_retry, 0u);
         sta_started = false;
         _mode_update_warned = false;
     }
@@ -417,62 +408,24 @@ private:
                 radio.request_wifi_pump_from_ready();
     }
 
-    // Queued events must not retain a radio that can be destroyed before dispatch.
-    static struct PumpSweep
+    static void pump_radios(MonoTime)
     {
-        void event(MonoTime when) nothrow @nogc
-        {
-            foreach (radio; _active_radios)
-                if (radio !is null && atomicLoad!(MemoryOrder.acquire)(radio._wifi_pump_pending) != 0)
-                    radio.wifi_pump_event(when);
-        }
-    }
-    __gshared PumpSweep _pump_sweep;
-
-    // Lands on the next loop iteration so a chain of work slices cannot starve scheduled events.
-    void request_wifi_pump_deferred()
-    {
-        if (!_wifi.is_open || g_app is null)
-            return;
-        if (!cas(&_wifi_pump_pending, 0u, 1u))
-            return;
-        g_app.schedule(getTime(), &_pump_sweep.event);
+        foreach (radio; _active_radios)
+            if (radio !is null && cas(&radio._wifi_pump_pending, 1u, 0u))
+                radio.service_wifi();
     }
 
+    // a ring from inside the pump lands on the next loop, so a chain of work slices cannot starve scheduled events
     void request_wifi_pump()
     {
-        if (!_wifi.is_open || g_app is null)
-            return;
-        if (!cas(&_wifi_pump_pending, 0u, 1u))
-            return;
-        if (!g_app.post_event(&_pump_sweep.event, getTime(), EventPriority.bulk))
-        {
-            atomicStore!(MemoryOrder.release)(_wifi_pump_pending, 0u);
-            atomicStore!(MemoryOrder.release)(_wifi_pump_retry, 1u);
-        }
+        if (_wifi.is_open && cas(&_wifi_pump_pending, 0u, 1u))
+            ring(_pump_doorbell);
     }
 
     void request_wifi_pump_from_ready()
     {
-        if (!_wifi.is_open || g_app is null)
-            return;
-        if (!cas(&_wifi_pump_pending, 0u, 1u))
-            return;
-
-        bool queued;
-        g_app.post_event_from_isr(&_pump_sweep.event, EventPriority.bulk, queued);
-        if (!queued)
-        {
-            atomicStore!(MemoryOrder.release)(_wifi_pump_pending, 0u);
-            atomicStore!(MemoryOrder.release)(_wifi_pump_retry, 1u);
-        }
-    }
-
-    void wifi_pump_event(MonoTime when)
-    {
-        atomicStore!(MemoryOrder.release)(_wifi_pump_retry, 0u);
-        atomicStore!(MemoryOrder.release)(_wifi_pump_pending, 0u);
-        service_wifi();
+        if (_wifi.is_open && cas(&_wifi_pump_pending, 0u, 1u))
+            ring_from_isr(_pump_doorbell);
     }
 
     void service_wifi()
@@ -513,7 +466,7 @@ private:
         if (hw_ch != 0)
             set_active_channel(hw_ch);
         if (pending)
-            request_wifi_pump_deferred();
+            request_wifi_pump();
     }
 
     void wifi_deadline_event(MonoTime when)
@@ -1178,6 +1131,7 @@ nothrow @nogc:
         g_app.console.register_collection!BuiltinWiFi();
         g_app.console.register_collection!BuiltinWlan();
         g_app.console.register_collection!BuiltinAp();
+        BuiltinWiFi._pump_doorbell = register_doorbell(&BuiltinWiFi.pump_radios, EventPriority.bulk);
     }
 }
 

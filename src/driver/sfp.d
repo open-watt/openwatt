@@ -33,6 +33,7 @@ nothrow @nogc:
     override void init()
     {
         g_app.console.register_collection!SFPPort();
+        SFPInterface.init_doorbell();
         static if (has_all)
             g_app.console.register_collection!SFPBinding();
     }

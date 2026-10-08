@@ -184,6 +184,8 @@ a netbooted image is bounded by RAM instead.
 | date | commit | compiler | flash | ram | limit | note |
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-10-05 | ow/bl808-single-image | ldc 1.43.0 | 2,621,944 | 185,722 | 4,190,208 | first row; M0 image, which packs D0 (999,418 flash, 87,408 ram) into the same fw.bin |
+| 2026-10-08 | 9f66b503 | ldc 1.43.0 | 2,646,776 | 186,110 | 4,190,208 | master, control for #825; D0 1,012,421 flash, 87,856 ram |
+| 2026-10-08 | #825 | ldc 1.43.0 | 2,646,184 | 186,238 | 4,190,208 | doorbells: -592 flash, +128 ram for the handler table; D0 1,012,294 flash, 88,104 ram |
 
 ### BL618, `make PLATFORM=bl618 CONFIG=release`
 
@@ -202,6 +204,7 @@ a netbooted image is bounded by RAM instead.
 | 2026-09-30 | #790 | ldc 1.43.0 | 1,637,136 | 58,920 | 2,097,152 | virtual destructors: +4,288 destructors, -1,452 vtables |
 | 2026-10-02 | ow/drivers-to-spec | ldc 1.43.0 | 1,657,824 | 50,444 | 2,097,152 | UART RX by event with H7 FIFOs, RS-485 DE, RTS/CTS, LPUART1 and rings at open; PWM on TIM1-4 and TIM8; IWDG and reset cause; EXTI buttons; debug freeze |
 | 2026-10-04 | #800 | ldc 1.43.0 | 1,661,480 | 50,332 | 2,097,152 | live RX retime, rx-latency and rx-gap with actual- read-backs |
+| 2026-10-08 | #825 | ldc 1.43.0 | 1,686,272 | 51,100 | 2,097,152 | doorbells; also the first row with the stream and sync series since #800 |
 
 Add a section for any other configuration the first time it is deployed. Keep the make
 invocation in the heading exact, including FEATURES, HEADLESS, IPV6 and GATEWAY when they

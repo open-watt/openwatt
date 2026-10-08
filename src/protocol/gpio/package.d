@@ -392,13 +392,6 @@ nothrow @nogc:
         return super.shutdown();
     }
 
-    // A sweep the event queue refused leaves its binding signalled; the heartbeat collects it.
-    final void heartbeat(MonoTime now)
-    {
-        if (_link.is_open && cas(&_signalled, 1u, 0u))
-            edged();
-    }
-
     static if (has_gpio_sampler)
     {
         override void update()
@@ -572,34 +565,21 @@ private:
             return false;
     }
 
-    // Button edges arrive in interrupt context; the sweep carries them to the main loop.
     @isr_safe @critical static bool input_edge(void* context, LinkContext)
     {
         atomicStore!(MemoryOrder.release)((cast(GpioBinding)context)._signalled, 1u);
-        if (g_app is null || !cas(&_sweep_pending, 0u, 1u))
-            return false;
-        bool queued;
-        immutable woke = g_app.post_event_from_isr(&_sweep.event, EventPriority.control, queued);
-        if (!queued)
-            atomicStore!(MemoryOrder.release)(_sweep_pending, 0u);
-        return woke;
+        return ring_from_isr(_edge_doorbell);
     }
 
-    // A posted event cannot be recalled, so it finds its bindings by walking the collection.
-    static struct EdgeSweep
+    static void sweep_edges(MonoTime)
     {
-        void event(MonoTime) nothrow @nogc
+        foreach (GpioBinding b; Collection!GpioBinding().values)
         {
-            atomicStore!(MemoryOrder.release)(_sweep_pending, 0u);
-            foreach (GpioBinding b; Collection!GpioBinding().values)
-            {
-                if (b._link.is_open && cas(&b._signalled, 1u, 0u))
-                    b.edged();
-            }
+            if (b._link.is_open && cas(&b._signalled, 1u, 0u))
+                b.edged();
         }
     }
-    __gshared EdgeSweep _sweep;
-    static shared uint _sweep_pending;
+    __gshared ubyte _edge_doorbell;
 
     void edged()
     {
@@ -945,5 +925,6 @@ nothrow @nogc:
         g_app.register_enum!ActiveLevel();
         g_app.register_enum!PwmChannel();
         g_app.console.register_collection!GpioBinding();
+        GpioBinding._edge_doorbell = register_doorbell(&GpioBinding.sweep_edges, EventPriority.control);
     }
 }

@@ -149,7 +149,7 @@ import urt.si.quantity : Quantity;
 import urt.si.unit : Ampere, ScaledUnit;
 import urt.time : MonoTime, getTime, msecs;
 
-import manager : g_app;
+import manager : EventPriority, g_app, register_doorbell;
 import manager.base : ActiveObject, CompletionStatus, ObjectFlags, Prop;
 import manager.collection : CID, Collection, CollectionType, collection_type_info;
 import manager.console.session : Session;
@@ -878,6 +878,7 @@ nothrow @nogc:
         g_app.console.register_command!(cmd_start, "start")("/driver/boards/smartevse", this);
         g_app.console.register_command!(cmd_stop, "stop")("/driver/boards/smartevse", this);
         g_app.console.register_command!(cmd_display, "display")("/driver/boards/smartevse", this);
+        g_display_doorbell = register_doorbell(&display_pump, EventPriority.control);
 
         if (setup() != 0)
         {

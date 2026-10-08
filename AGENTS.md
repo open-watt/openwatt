@@ -190,6 +190,10 @@ timers, and completion callbacks:
   `g_app.cancel(&handler)` (one-shot, main thread only) drive timeouts, retries, probes, and
   sampling cadence. The 1s `heartbeat()` hook is only for coarse periodic supervision such as rate
   counters, and fires only while Running.
+- **Interrupts ring a doorbell**: an ISR or a foreign thread calls `ring_from_isr()` / `ring()` on
+  a doorbell its module registered in `init()` with `register_doorbell()`; the next event flush
+  runs the handler once for every ring before it. A ring is never refused, so it needs no retry
+  path. Never post an event from an ISR.
 - **TX is self-clocking**: transmit on submission when the link is idle; send the next queued item
   from the completion event (ack callback, prompt, response), never from a tick.
 - **Bulk output is pulled**: a producer whose output grows with the data answers the stream's

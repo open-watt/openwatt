@@ -83,12 +83,6 @@ nothrow @nogc:
         return MessageState.complete;
     }
 
-    override void heartbeat(MonoTime now)
-    {
-        super.heartbeat(now);
-        service();
-    }
-
 protected:
 
     override CompletionStatus startup()
@@ -178,7 +172,7 @@ private:
     bool _deadline_armed;
 
     __gshared BuiltinWpan[num_wpan] _active_radios;
-    __gshared shared(uint) _service_pending;
+    __gshared ubyte _service_doorbell;
 
     void service()
     {
@@ -272,29 +266,18 @@ private:
         incoming_packet(pkt);
     }
 
-    // may run in the radio ISR; a post the reactor refuses is retried by the next radio event or the heartbeat
+    // may run in the radio ISR
     static void request_service()
     {
-        if (g_app is null || !cas(&_service_pending, 0u, 1u))
-            return;
-        bool queued;
-        g_app.post_event_from_isr(&_service_sweep.event, EventPriority.bulk, queued);
-        if (!queued)
-            atomicStore!(MemoryOrder.release)(_service_pending, 0u);
+        ring_from_isr(_service_doorbell);
     }
 
-    // a posted event cannot be recalled, so it must not retain a radio that may be destroyed before it runs
-    static struct ServiceSweep
+    static void service_radios(MonoTime)
     {
-        void event(MonoTime) nothrow @nogc
-        {
-            atomicStore!(MemoryOrder.release)(_service_pending, 0u);
-            foreach (radio; _active_radios)
-                if (radio !is null)
-                    radio.service();
-        }
+        foreach (radio; _active_radios)
+            if (radio !is null)
+                radio.service();
     }
-    __gshared ServiceSweep _service_sweep;
 
     static void rx_dispatch(Wpan wpan, Page* frame, ref const WpanRxInfo info)
     {
@@ -322,6 +305,7 @@ nothrow @nogc:
     override void init()
     {
         g_app.console.register_collection!BuiltinWpan();
+        BuiltinWpan._service_doorbell = register_doorbell(&BuiltinWpan.service_radios, EventPriority.bulk);
     }
 }
 

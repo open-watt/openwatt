@@ -39,7 +39,7 @@ nothrow @nogc:
         }
         _lines = cast(LineAssembler*)memory.ptr;
         reset_lines();
-        atomicStore!(MemoryOrder.relaxed)(_drain_pending, 0u);
+        g_drain_doorbell = register_doorbell(&drain_bridge, EventPriority.bulk);
         atomicStore!(MemoryOrder.release)(g_bridge, cast(size_t)cast(void*)this);
         idf_log_set_ready_callback(&idf_log_ready);
         _open = idf_log_open();
@@ -57,7 +57,6 @@ nothrow @nogc:
             idf_log_close();
         idf_log_set_ready_callback(null);
         atomicStore!(MemoryOrder.release)(g_bridge, 0);
-        atomicStore!(MemoryOrder.relaxed)(_drain_pending, 0u);
         _open = false;
         if (_lines)
         {
@@ -71,27 +70,13 @@ private:
     enum max_line_length = 512;
 
     LineAssembler* _lines;
-    shared uint _drain_pending;
     uint _activity;
     uint _drop_generation;
     bool _have_drop_generation;
     bool _open;
 
-    void request_drain()
-    {
-        if (g_app is null || !cas(&_drain_pending, 0u, 1u))
-            return;
-        MonoTime now = getTime();
-        bool queued = g_app.try_post_event(&g_drain_sweep.event, now, EventPriority.bulk);
-        if (!queued)
-            queued = g_app.try_post_event(&g_drain_sweep.event, now, EventPriority.control);
-        if (!queued)
-            atomicStore!(MemoryOrder.release)(_drain_pending, 0u);
-    }
-
     void drain(MonoTime)
     {
-        atomicStore!(MemoryOrder.release)(_drain_pending, 0u);
         IdfLogChunk chunk = void;
         while (idf_log_receive(chunk))
             consume(chunk);
@@ -220,22 +205,18 @@ struct LineAssembler
 
 __gshared shared(size_t) g_bridge;
 
-struct DrainSweep
-{
-    void event(MonoTime when) nothrow @nogc
-    {
-        size_t bridge = atomicLoad!(MemoryOrder.acquire)(g_bridge);
-        if (bridge != 0)
-            (cast(IDFLogBridgeModule)cast(void*)bridge).drain(when);
-    }
-}
-__gshared DrainSweep g_drain_sweep;
+__gshared ubyte g_drain_doorbell;
 
-void idf_log_ready()
+void drain_bridge(MonoTime when)
 {
     size_t bridge = atomicLoad!(MemoryOrder.acquire)(g_bridge);
     if (bridge != 0)
-        (cast(IDFLogBridgeModule)cast(void*)bridge).request_drain();
+        (cast(IDFLogBridgeModule)cast(void*)bridge).drain(when);
+}
+
+void idf_log_ready()
+{
+    ring(g_drain_doorbell);
 }
 }
 

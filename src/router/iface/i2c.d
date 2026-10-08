@@ -227,9 +227,6 @@ protected:
 
     override CompletionStatus startup()
     {
-        import urt.atomic : atomicStore, MemoryOrder;
-
-        atomicStore!(MemoryOrder.relaxed)(_completion_retry, 0u);
         if (_active_buses[_port] !is null && _active_buses[_port] !is this)
         {
             writeError("I2C controller is already in use");
@@ -264,9 +261,6 @@ protected:
         _queue.abort_all();
         _active_tag = 0;
         _active_cancelled = false;
-        import urt.atomic : atomicStore, MemoryOrder;
-
-        atomicStore!(MemoryOrder.release)(_completion_retry, 0u);
         if (_bus.is_open)
             i2c_close(_bus);
         if (_port >= 0 && _port < num_i2c && _active_buses[_port] is this)
@@ -276,11 +270,6 @@ protected:
 
     override void update()
     {
-        import urt.atomic : cas;
-
-        // Normal completion is reactor-dispatched; this recovers a rejected event post.
-        if (cas(&_completion_retry, 1u, 0u) && _operation.is_done)
-            service_completion();
         drive_queue();
         super.update();
     }
@@ -326,52 +315,23 @@ private:
     ushort _sequence_number;
     ubyte _active_tag;
     bool _active_cancelled;
-    shared uint _completion_retry;
 
     __gshared I2CInterface[num_i2c] _active_buses;
+    __gshared ubyte _completion_doorbell;
 
-    // Queued completion events bind this stable trampoline rather than an interface instance, so
-    // an interface destroyed while its event is still queued is simply absent from the sweep.
-    static struct CompletionSweep
+    static void complete_buses(MonoTime)
     {
-        void event(MonoTime when) nothrow @nogc
-        {
-            foreach (bus; _active_buses)
-                if (bus !is null)
-                    bus.completion_event(when);
-        }
+        foreach (bus; _active_buses)
+            if (bus !is null && bus._operation.is_done)
+                bus.service_completion();
     }
-    __gshared CompletionSweep _completion_sweep;
 
     static bool operation_complete(ref I2cOperation operation, I2cCallbackContext context)
     {
-        I2CInterface instance = cast(I2CInterface)operation.user_data;
-        if (!instance || !g_app)
-            return false;
-
-        bool queued;
-        bool higher_priority_task_woken;
-        final switch (context)
-        {
-            case I2cCallbackContext.thread:
-                queued = g_app.post_event(&_completion_sweep.event, getTime(), EventPriority.control);
-                break;
-            case I2cCallbackContext.interrupt:
-                higher_priority_task_woken = g_app.post_event_from_isr(&_completion_sweep.event, EventPriority.control, queued);
-                break;
-        }
-        if (!queued)
-        {
-            import urt.atomic : atomicStore, MemoryOrder;
-            atomicStore!(MemoryOrder.release)(instance._completion_retry, 1u);
-        }
-        return higher_priority_task_woken;
-    }
-
-    void completion_event(MonoTime)
-    {
-        if (_operation.is_done)
-            service_completion();
+        if (context == I2cCallbackContext.interrupt)
+            return ring_from_isr(_completion_doorbell);
+        ring(_completion_doorbell);
+        return false;
     }
 
     // A refused `submitted` frame retires without its callback, so transmit() can report it by return value.
@@ -478,6 +438,7 @@ nothrow @nogc:
         g_app.register_enum!I2CFrameType();
         g_app.register_enum!I2cError();
         g_app.console.register_collection!I2CInterface();
+        I2CInterface._completion_doorbell = register_doorbell(&I2CInterface.complete_buses, EventPriority.control);
     }
 }
 
