@@ -58,6 +58,39 @@ enum LightDrive : ubyte
 
 final class GpioBinding : ProtocolBinding
 {
+    static if (has_gpio_sampler)
+    {
+        alias CaptureProperties = AliasSeq!(Prop!("records", records, "status", "d"),
+                                            Prop!("buckets", buckets, "status", "d"),
+                                            Prop!("edge-rate", edge_rate, "status", "d"),
+                                            Prop!("last-edge", last_edge, "status", "d"),
+                                            Prop!("clock", clock, "status", "d"),
+                                            Prop!("stream-start", stream_start, "status", "d"),
+                                            Prop!("anchor-error", anchor_error, "status", "d"));
+    nothrow @nogc:
+        final ulong records() const pure
+            => _element ? _element.record_count : 0;
+
+        final uint buckets() const pure
+            => _element ? _element.bucket_count : 0;
+
+        final uint edge_rate() const pure
+            => _edge_rate;
+
+        final SysTime last_edge() const pure
+            => _element ? _element.last_update : SysTime();
+
+        final uint clock() const pure
+            => _clock.nominal_rate;
+
+        final SysTime stream_start() const pure
+            => _stream_start;
+
+        final Duration anchor_error() const pure
+            => _anchor_err;
+    }
+    else
+        alias CaptureProperties = AliasSeq!();
     alias Properties = AliasSeq!(Prop!("kind", kind),
                                  Prop!("chip", chip),
                                  Prop!("gpio", gpio),
@@ -70,14 +103,8 @@ final class GpioBinding : ProtocolBinding
                                  Prop!("drive", drive),
                                  Prop!("index", index),
                                  Prop!("pwm-channel", pwm_channel, "status"),
-                                 Prop!("records", records, "status", "d"),
-                                 Prop!("buckets", buckets, "status", "d"),
-                                 Prop!("edge-rate", edge_rate, "status", "d"),
-                                 Prop!("last-edge", last_edge, "status", "d"),
                                  Prop!("backend", backend, "status", "d"),
-                                 Prop!("clock", clock, "status", "d"),
-                                 Prop!("stream-start", stream_start, "status", "d"),
-                                 Prop!("anchor-error", anchor_error, "status", "d"));
+                                 CaptureProperties);
 nothrow @nogc:
 
     ~this() {}
@@ -88,9 +115,12 @@ nothrow @nogc:
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!GpioBinding, id, flags);
-        _fmt.type = ValueType.bool_;
-        _fmt.kind = SeriesKind.held;
-        _fmt.clock = &_clock;
+        static if (has_gpio_sampler)
+        {
+            _fmt.type = ValueType.bool_;
+            _fmt.kind = SeriesKind.held;
+            _fmt.clock = &_clock;
+        }
     }
 
     final GpioKind kind() const pure
@@ -215,18 +245,6 @@ nothrow @nogc:
     final PwmChannel pwm_channel() const
         => !_pwm.is_open ? PwmChannel.none : _pwm.is_hardware ? PwmChannel.hardware : PwmChannel.software;
 
-    final ulong records() const pure
-        => _element ? _element.record_count : 0;
-
-    final uint buckets() const pure
-        => _element ? _element.bucket_count : 0;
-
-    final uint edge_rate() const pure
-        => _edge_rate;
-
-    final SysTime last_edge() const pure
-        => _element ? _element.last_update : SysTime();
-
     final const(char)[] backend() const pure
     {
         if (_kind == GpioKind.button)
@@ -236,15 +254,6 @@ nothrow @nogc:
         else
             return "none";
     }
-
-    final uint clock() const pure
-        => _clock.nominal_rate;
-
-    final SysTime stream_start() const pure
-        => _stream_start;
-
-    final Duration anchor_error() const pure
-        => _anchor_err;
 
     final inout(Element)* element() inout pure
         => _element;
@@ -270,13 +279,14 @@ nothrow @nogc:
         final switch (_kind)
         {
             case GpioKind.capture:
-            {
-                Element* e = bind_element(builder, c, "state", register_format(_fmt));
-                if (_element is null)
-                    e.sampling_mode = SamplingMode.report;
-                _element = e;
+                static if (has_gpio_sampler)
+                {
+                    Element* e = bind_element(builder, c, "state", register_format(_fmt));
+                    if (_element is null)
+                        e.sampling_mode = SamplingMode.report;
+                    _element = e;
+                }
                 break;
-            }
             case GpioKind.button:
             {
                 builder.constant(c, "mode", "momentary");
@@ -463,19 +473,12 @@ private:
         }
     }
     String _component;
-    ClockDomain _clock;         // owned by this binding; _fmt.clock points at it
-    DataFormat _fmt;
     Duration _debounce;
     Duration _hold = 1.seconds;
     Duration _click_gap = 300.msecs;
-    Duration _anchor_err;
     uint _chip = 0;
     uint _gpio = uint.max;
     uint _claimed = uint.max;
-    uint _edge_rate;
-    ulong _edges_at_window;
-    MonoTime _window_start;
-    SysTime _stream_start;
     Link _link;
     Pwm _pwm;
     Ws2812 _ws;
@@ -847,11 +850,18 @@ private:
 
     static if (has_gpio_sampler)
     {
+        ClockDomain _clock;         // owned by this binding; _fmt.clock points at it
+        DataFormat _fmt;
         GpioSampler _sampler;
+        Duration _anchor_err;
+        ulong _stream_first_tick;
+        ulong _edges_at_window;
+        MonoTime _last_anchor;
+        MonoTime _window_start;
+        SysTime _stream_start;
+        uint _edge_rate;
         bool _watched;
         bool _have_stream;
-        ulong _stream_first_tick;
-        MonoTime _last_anchor;
 
         void on_ready(IoReady ready)
         {

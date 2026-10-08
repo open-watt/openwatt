@@ -163,6 +163,8 @@ Limit is the linker script's `FLASH` region, not the board: the Y23A-RP2350B car
 | 2026-09-23 | ba8561fb | ldc 1.43.0 | 1,597,768 | 41,488 | 4,194,304 | POWMAN always-on timer keeps the wall clock across a reset |
 | 2026-09-30 | ow/system-panel | ldc 1.43.0 | 1,633,316 | 46,490 | 4,194,304 | panel, GPIO buttons and lights, PWM and WS2812 drives |
 | 2026-10-02 | ow/drivers-to-spec | ldc 1.43.0 | 1,638,676 | 46,890 | 4,194,304 | interrupt-driven UART with RX events, rings at open; system reset through the watchdog; watchdog armed and its REASON read; GPIO edge links; debug freeze |
+| 2026-10-08 | 2de5b0d5 | ldc 1.43.0 | 1,664,172 | 46,812 | 4,194,304 | master, control for #822 |
+| 2026-10-08 | #822 | ldc 1.43.0 | 1,663,276 | 46,780 | 4,194,304 | GPIO capture properties and state only with a sampler: -896 flash, -68 per binding |
 
 ### MT7621 hEX S, `make BOARD=rb760igs CONFIG=release`
 
