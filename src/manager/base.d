@@ -1084,6 +1084,8 @@ protected:
             case State.running:
                 _backoff_ms = 0;
                 set_online();
+                if (_state != State.running)
+                    break;      // online() re-targeted us (restart, destroy)
                 goto do_update;
 
             case State.starting:
@@ -1119,6 +1121,8 @@ protected:
     final void set_online()
     {
         online();
+        if (_state != State.running)
+            return;
         signal_state_change(StateSignal.online);
 
         if (!(flags & ObjectFlags.temporary))
@@ -1908,10 +1912,17 @@ unittest
         ~this() {}
 
         uint startups, shutdowns, holds;
+        bool restart_online;
 
         this(CID id, ObjectFlags flags = ObjectFlags.none)
         {
             super(collection_type_info!LifecycleTestObject(), id, flags);
+        }
+
+        override void online()
+        {
+            if (restart_online)
+                restart();
         }
 
         override CompletionStatus startup()
@@ -2180,6 +2191,17 @@ unittest
     assert(t.running);
     t.restart();
     assert(t.shutdowns == 1 && t._state == ActiveObject.State.destroyed);
+
+    // a temporary that ends itself in online() is destroyed there, and never announced online
+    LifecycleTestObject early = alloc!LifecycleTestObject(table.allocate("lifecycle-early", 0), ObjectFlags.temporary);
+    table.bind(early.id, early);
+    early.restart_online = true;
+    Watcher wr;
+    early.subscribe(&wr.on_signal);
+    early.do_update();
+    assert(early.shutdowns == 1 && early._state == ActiveObject.State.destroyed);
+    foreach (s; wr.seen[0 .. wr.count < wr.seen.length ? wr.count : wr.seen.length])
+        assert(s != StateSignal.online);
 
     table.free_pending();
 
