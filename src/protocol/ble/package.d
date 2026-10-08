@@ -44,11 +44,7 @@ nothrow @nogc:
 
     override void init()
     {
-        import urt.atomic : atomicStore, MemoryOrder;
-
-        _ble_module = this;
-        atomicStore!(MemoryOrder.relaxed)(_service_pending, 0u);
-        atomicStore!(MemoryOrder.relaxed)(_service_retry, 0u);
+        _service_doorbell = register_doorbell(&service_radios, EventPriority.bulk);
         register_packet_codec!BLEFrame();
         register_frame_handler(PacketType.ble, &on_ble_frame);
 
@@ -121,41 +117,13 @@ nothrow @nogc:
 
     override void update()
     {
-        import urt.atomic : cas;
-
-        // Normal BLE delivery is reactor-dispatched; this recovers a rejected event post.
-        if (cas(&_service_retry, 1u, 0u))
-            service_radios(getTime());
         Collection!BLEClient().update_all();
         expire_devices();
     }
 
     void request_service()
     {
-        import urt.atomic : atomicStore, cas, MemoryOrder;
-        if (cas(&_service_pending, 0u, 1u))
-        {
-            if (!g_app.post_event(&service_radios, getTime(), EventPriority.bulk))
-            {
-                atomicStore!(MemoryOrder.release)(_service_pending, 0u);
-                atomicStore!(MemoryOrder.release)(_service_retry, 1u);
-            }
-        }
-    }
-
-    void request_service_from_ready()
-    {
-        import urt.atomic : atomicStore, cas, MemoryOrder;
-        if (g_app is null || !cas(&_service_pending, 0u, 1u))
-            return;
-
-        bool queued;
-        g_app.post_event_from_isr(&service_radios, EventPriority.bulk, queued);
-        if (!queued)
-        {
-            atomicStore!(MemoryOrder.release)(_service_pending, 0u);
-            atomicStore!(MemoryOrder.release)(_service_retry, 1u);
-        }
+        ring(_service_doorbell);
     }
 
     void on_ble_frame(ref Packet p, BaseInterface iface)
@@ -316,10 +284,8 @@ nothrow @nogc:
 
 private:
 
-    void service_radios(MonoTime)
+    static void service_radios(MonoTime)
     {
-        import urt.atomic : atomicStore;
-        atomicStore(_service_pending, 0u);
         foreach (radio; Collection!BLEInterface().values)
             radio.service();
     }
@@ -356,16 +322,11 @@ private:
     }
 }
 
-// HACK: not a member of BLEModule to avoid weird compile error!
-__gshared shared(uint) _service_pending;
-__gshared shared(uint) _service_retry;
-__gshared BLEModule _ble_module;
+__gshared ubyte _service_doorbell;
 
 void request_ble_service_from_ready()
 {
-    BLEModule module_ = _ble_module;
-    if (module_ !is null)
-        module_.request_service_from_ready();
+    ring_from_isr(_service_doorbell);
 }
 
 private:

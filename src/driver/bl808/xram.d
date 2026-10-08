@@ -94,14 +94,6 @@ nothrow @nogc:
         return -1;
     }
 
-    // Only a notify the full event queue refused reaches this.
-    override void heartbeat(MonoTime now)
-    {
-        if (atomicExchange(&_retry, 0u))
-            service(now);
-        super.heartbeat(now);
-    }
-
 protected:
 
     override bool validate() const pure
@@ -140,49 +132,30 @@ protected:
             }
         }
         _epoch = 0;
-        atomicStore(_queued, 0u);
         return super.shutdown();
     }
 
 private:
 
-    shared uint _queued;
-    shared uint _retry;
     uint _epoch;
     ubyte _channel;
 
     static void notify(uint channel)
     {
-        XramInterface link = _links[channel];
-        if (link is null || g_app is null)
-            return;
-        bool queued;
-        if (!cas(&link._queued, 0u, 1u))
-            return;
-        g_app.post_event_from_isr(&_sweep.event, EventPriority.bulk, queued);
-        if (!queued)
-        {
-            atomicStore(link._queued, 0u);
-            atomicStore(link._retry, 1u);
-        }
+        ring_from_isr(_doorbell);
     }
 
-    // Queued events bind this stable trampoline, so a link destroyed while one is in flight is simply absent.
-    static struct Sweep
+    static void service_links(MonoTime when)
     {
-        void event(MonoTime when) nothrow @nogc
-        {
-            foreach (link; _links)
-                if (link !is null)
-                    link.service(when);
-        }
+        foreach (link; _links)
+            if (link !is null)
+                link.service(when);
     }
-    __gshared Sweep _sweep;
     __gshared XramInterface[xram_channels] _links;
+    __gshared ubyte _doorbell;
 
     void service(MonoTime when)
     {
-        atomicStore(_queued, 0u);
         if (!running)
             return;
         immutable uint epoch = xram_link(_channel);
@@ -215,5 +188,6 @@ nothrow @nogc:
     override void init()
     {
         g_app.console.register_collection!XramInterface();
+        XramInterface._doorbell = register_doorbell(&XramInterface.service_links, EventPriority.bulk);
     }
 }

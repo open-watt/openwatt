@@ -165,7 +165,6 @@ nothrow @nogc:
         }
         import urt.atomic : atomicStore, MemoryOrder;
         atomicStore!(MemoryOrder.relaxed)(_events, 0u);
-        atomicStore!(MemoryOrder.relaxed)(_retry, 0u);
         _streams[slot] = this;
         immutable cfg = uart_config();
         if (!uart_open(_uart, port, cfg, &rx_ready, &tx_ready))
@@ -188,17 +187,7 @@ nothrow @nogc:
         }
         import urt.atomic : atomicStore, MemoryOrder;
         atomicStore!(MemoryOrder.release)(_events, 0u);
-        atomicStore!(MemoryOrder.release)(_retry, 0u);
         return CompletionStatus.complete;
-    }
-
-    override void update()
-    {
-        import urt.atomic : atomicExchange, MemoryOrder;
-        // UART events are dispatched as posted; only a refused post reaches this path.
-        if (atomicExchange!(MemoryOrder.acq_rel)(&_retry, 0u) != 0)
-            uart_event(atomicExchange!(MemoryOrder.acq_rel)(&_events, 0u), getTime());
-        super.update();
     }
 
     // the driver takes each page and frees it once sent, up to the queue's watermark in flight
@@ -260,11 +249,10 @@ private:
 
     Uart _uart;
     shared uint _events;    // UartEvent bits raised by the callbacks, taken by the sweep
-    shared uint _retry;     // a post was refused; update() takes the events instead
     String _device;
 
     __gshared SerialStream[num_uarts] _streams;
-    __gshared Sweep _sweep;
+    __gshared ubyte _doorbell;
 
     UartConfig uart_config() const
     {
@@ -353,49 +341,35 @@ private:
     static bool raise(Uart uart, uint event, UartCallbackContext context)
     {
         immutable uint slot = uart_slot(uart.port);
-        if (slot >= num_uarts || g_app is null)
+        if (slot >= num_uarts)
             return false;
         SerialStream instance = _streams[slot];
         if (instance is null)
             return false;
 
-        import urt.atomic : atomicLoad, atomicStore, cas, MemoryOrder;
+        import urt.atomic : atomicLoad, cas, MemoryOrder;
         uint pending;
         do
             pending = atomicLoad!(MemoryOrder.acquire)(instance._events);
         while (!cas(&instance._events, pending, pending | event));
         if (pending)
-            return false;   // the sweep already queued takes this event too
-
+            return false;   // the ring already pending takes this event too
         if (context == UartCallbackContext.interrupt)
-        {
-            bool queued;
-            bool wake = g_app.post_event_from_isr(&_sweep.event, EventPriority.bulk, queued);
-            if (!queued)
-                atomicStore!(MemoryOrder.release)(instance._retry, 1u);
-            return wake;
-        }
-
-        if (!g_app.post_event(&_sweep.event, getTime(), EventPriority.bulk))
-            atomicStore!(MemoryOrder.release)(instance._retry, 1u);
+            return ring_from_isr(_doorbell);
+        ring(_doorbell);
         return false;
     }
 
-    // Queued UART events bind this stable trampoline rather than a stream instance, so a stream destroyed while its
-    // event is still queued is simply absent from the sweep.
-    static struct Sweep
+    static void sweep(MonoTime when)
     {
-        void event(MonoTime when) nothrow @nogc
+        import urt.atomic : atomicExchange, MemoryOrder;
+        foreach (stream; _streams)
         {
-            import urt.atomic : atomicExchange, MemoryOrder;
-            foreach (stream; _streams)
-            {
-                if (stream is null)
-                    continue;
-                uint events = atomicExchange!(MemoryOrder.acq_rel)(&stream._events, 0u);
-                if (events)
-                    stream.uart_event(events, when);
-            }
+            if (stream is null)
+                continue;
+            uint events = atomicExchange!(MemoryOrder.acq_rel)(&stream._events, 0u);
+            if (events)
+                stream.uart_event(events, when);
         }
     }
 }
@@ -413,6 +387,7 @@ nothrow @nogc:
         g_app.register_enum!FlowControl();
 
         g_app.console.register_collection!SerialStream();
+        SerialStream._doorbell = register_doorbell(&SerialStream.sweep, EventPriority.bulk);
         g_app.console.register_command!(serial_lines, "lines")("/stream/serial", this);
         g_app.console.register_command!(serial_devices, "devices")("/stream/serial", this);
         version (Embedded) {} else

@@ -283,10 +283,6 @@ protected:
             }
             else static if (num_can > 0)
             {
-                import urt.atomic : atomicStore, MemoryOrder;
-
-                atomicStore!(MemoryOrder.relaxed)(_native_rx_pending, 0u);
-                atomicStore!(MemoryOrder.relaxed)(_native_rx_retry, 0u);
                 can_init();
                 CanConfig cfg;
                 cfg.bitrate = _baud_rate;
@@ -351,9 +347,6 @@ protected:
             ubyte port = _can.port;
             can_set_rx_callback(_can, null);
             can_close(_can);
-            import urt.atomic : atomicStore, MemoryOrder;
-            atomicStore!(MemoryOrder.release)(_native_rx_pending, 0u);
-            atomicStore!(MemoryOrder.release)(_native_rx_retry, 0u);
             static if (num_can > 0)
                 if (port < num_can && _native_interfaces[port] is this)
                     _native_interfaces[port] = null;
@@ -375,9 +368,6 @@ protected:
 
         if (_can.is_open)
         {
-            import urt.atomic : cas;
-            if (cas(&_native_rx_retry, 1u, 0u))
-                native_rx_event(getTime());
             super.update();
             return;
         }
@@ -525,8 +515,6 @@ private:
     }
 
     Can _can;
-    shared uint _native_rx_pending;
-    shared uint _native_rx_retry;
 
     void drop_stream()
     {
@@ -762,64 +750,21 @@ private:
     {
         __gshared CANInterface[num_can] _native_interfaces;
 
-        // Queued RX events bind this stable trampoline rather than an interface instance, so an
-        // interface destroyed while its event is still queued is simply absent from the sweep.
-        static struct RxSweep
+        package static void drain_natives(MonoTime when)
         {
-            void event(MonoTime when) nothrow @nogc
-            {
-                import urt.atomic : atomicLoad, MemoryOrder;
-                foreach (iface; _native_interfaces)
-                    if (iface !is null && atomicLoad!(MemoryOrder.acquire)(iface._native_rx_pending) != 0)
-                        iface.native_rx_event(when);
-            }
+            foreach (iface; _native_interfaces)
+                if (iface !is null && iface._can.is_open && iface.running)
+                    iface.drain_native(when);
         }
-        __gshared RxSweep _rx_sweep;
     }
+    package __gshared ubyte _native_rx_doorbell;
 
     static bool native_rx_ready(Can can, CanCallbackContext context)
     {
-        static if (num_can == 0)
-            return false;
-        else
-        {
-            if (can.port >= num_can || g_app is null)
-                return false;
-            CANInterface instance = _native_interfaces[can.port];
-            if (instance is null)
-                return false;
-
-            import urt.atomic : atomicStore, cas, MemoryOrder;
-            if (!cas(&instance._native_rx_pending, 0u, 1u))
-                return false;
-
-            bool queued;
-            bool higher_priority_task_woken;
-            final switch (context)
-            {
-                case CanCallbackContext.thread:
-                    queued = g_app.post_event(&_rx_sweep.event, getTime(), EventPriority.bulk);
-                    break;
-                case CanCallbackContext.interrupt:
-                    higher_priority_task_woken = g_app.post_event_from_isr(&_rx_sweep.event, EventPriority.bulk, queued);
-                    break;
-            }
-            if (!queued)
-            {
-                atomicStore!(MemoryOrder.release)(instance._native_rx_pending, 0u);
-                atomicStore!(MemoryOrder.release)(instance._native_rx_retry, 1u);
-            }
-            return higher_priority_task_woken;
-        }
-    }
-
-    void native_rx_event(MonoTime when)
-    {
-        import urt.atomic : atomicStore, MemoryOrder;
-        atomicStore!(MemoryOrder.release)(_native_rx_pending, 0u);
-        atomicStore!(MemoryOrder.release)(_native_rx_retry, 0u);
-        if (_can.is_open && running)
-            drain_native(when);
+        if (context == CanCallbackContext.interrupt)
+            return ring_from_isr(_native_rx_doorbell);
+        ring(_native_rx_doorbell);
+        return false;
     }
 
     void drain_native(MonoTime now)

@@ -449,39 +449,29 @@ nothrow @nogc:
     override void init()
     {
         g_app.console.register_collection!BuiltinEthernet();
+        _service = register_doorbell(&service, EventPriority.bulk);
     }
 }
 
 
 private:
 
-__gshared shared(uint) _service_pending;
+__gshared ubyte _service;
 
 // may run on the esp_eth receive task
 void request_service()
 {
-    if (g_app is null || !cas(&_service_pending, 0u, 1u))
-        return;
-    bool queued;
-    g_app.post_event_from_isr(&_service_sweep.event, EventPriority.bulk, queued);
-    if (!queued)
-        atomicStore!(MemoryOrder.release)(_service_pending, 0u);
+    ring_from_isr(_service);
 }
 
-// a posted event cannot be recalled, so it must not retain an interface that may be destroyed before it runs
-struct ServiceSweep
+void service(MonoTime)
 {
-    void event(MonoTime) nothrow @nogc
+    foreach (mac; 0 .. num_ethernet)
     {
-        atomicStore!(MemoryOrder.release)(_service_pending, 0u);
-        foreach (mac; 0 .. num_ethernet)
-        {
-            if (eth_service(cast(ubyte)mac))
-                request_service();
-        }
+        if (eth_service(cast(ubyte)mac))
+            request_service();
     }
 }
-__gshared ServiceSweep _service_sweep;
 
 void rx_thunk(void* context, const(ubyte)[] frame, ref const EthRxInfo info)
 {

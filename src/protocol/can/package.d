@@ -1,6 +1,7 @@
 module protocol.can;
 
 import urt.conv;
+import urt.driver.can : num_can;
 import urt.endian;
 import urt.map;
 import urt.mem;
@@ -39,6 +40,8 @@ nothrow @nogc:
         can_section_kind = register_profile_section("can", this);
 
         g_app.console.register_collection!CANInterface();
+        static if (num_can > 0)
+            CANInterface._native_rx_doorbell = register_doorbell(&CANInterface.drain_natives, EventPriority.bulk);
         g_app.console.register_collection!CANBinding();
     }
 

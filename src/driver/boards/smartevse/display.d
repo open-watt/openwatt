@@ -9,7 +9,7 @@ import urt.driver.spi;
 import urt.result : InternalResult, Result;
 import urt.time : Duration, MonoTime, getTime, msecs, usecs;
 
-import manager : EventPriority, g_app;
+import manager : ring_from_isr;
 
 import driver.boards.smartevse.pins;
 import driver.font.render;
@@ -24,15 +24,16 @@ enum uint display_pages = display_height / 8;
 
 // = void: a plain global lands in .data and pays flash for 2KB of buffer image.
 __gshared SmartEVSEDisplay g_display = void;
+package __gshared ubyte g_display_doorbell;
+
+package void display_pump(MonoTime)
+{
+    advance(g_display);
+}
 
 struct SmartEVSEDisplay
 {
 nothrow @nogc:
-    void pump(MonoTime)
-    {
-        advance(this);
-    }
-
 package:
     SpiBus bus;
     SpiOperation operation;
@@ -458,7 +459,6 @@ bool submit(ref SmartEVSEDisplay display, bool data, const(ubyte)[] bytes)
 {
     gpio_output_set(LCD_A0, data);
     display.operation.reset();
-    display.operation.user_data = &display;
     display.operation.callback = &transfer_complete;
 
     SpiTransfer transfer;
@@ -467,10 +467,7 @@ bool submit(ref SmartEVSEDisplay display, bool data, const(ubyte)[] bytes)
 }
 
 bool transfer_complete(ref SpiOperation operation, SpiCallbackContext)
-{
-    SmartEVSEDisplay* display = cast(SmartEVSEDisplay*)operation.user_data;
-    return g_app.post_event_from_isr(&display.pump, EventPriority.control);
-}
+    => ring_from_isr(g_display_doorbell);
 
 Result send_blocking(ref SmartEVSEDisplay display, bool data, const(ubyte)[] bytes)
 {

@@ -108,12 +108,9 @@ nothrow @nogc:
         _change_handlers.removeFirstSwapLast(handler);
     }
 
-    // A sweep the event queue refused leaves its cage signalled; the heartbeat collects it.
-    override void heartbeat(MonoTime now)
+    static void init_doorbell()
     {
-        super.heartbeat(now);
-        if (_cage_up && cas(&_signalled, 1u, 0u))
-            cage_changed();
+        _cage_doorbell = register_doorbell(&sweep_cages, EventPriority.control);
     }
 
     override bool validate() const
@@ -482,34 +479,21 @@ private:
             handler(this, changes);
     }
 
-    // Cage edges arrive in interrupt context; the sweep carries them to the main loop.
     @isr_safe @critical static bool cage_edge(void* context, LinkContext)
     {
         atomicStore!(MemoryOrder.release)((cast(SFPInterface)context)._signalled, 1u);
-        if (g_app is null || !cas(&_sweep_pending, 0u, 1u))
-            return false;
-        bool queued;
-        immutable woke = g_app.post_event_from_isr(&_sweep.event, EventPriority.control, queued);
-        if (!queued)
-            atomicStore!(MemoryOrder.release)(_sweep_pending, 0u);
-        return woke;
+        return ring_from_isr(_cage_doorbell);
     }
 
-    // A posted event cannot be recalled, so it finds its cages by walking the collection.
-    static struct CageSweep
+    static void sweep_cages(MonoTime)
     {
-        void event(MonoTime) nothrow @nogc
+        foreach (SFPInterface sfp; Collection!SFPInterface().values)
         {
-            atomicStore!(MemoryOrder.release)(_sweep_pending, 0u);
-            foreach (SFPInterface sfp; Collection!SFPInterface().values)
-            {
-                if (sfp._cage_up && cas(&sfp._signalled, 1u, 0u))
-                    sfp.cage_changed();
-            }
+            if (sfp._cage_up && cas(&sfp._signalled, 1u, 0u))
+                sfp.cage_changed();
         }
     }
-    __gshared CageSweep _sweep;
-    static shared uint _sweep_pending;
+    __gshared ubyte _cage_doorbell;
 }
 
 

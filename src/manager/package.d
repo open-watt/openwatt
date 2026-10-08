@@ -56,6 +56,7 @@ alias TimerHandler      = void delegate(MonoTime scheduled) nothrow @nogc;
 alias EventHandler      = void delegate(MonoTime when) nothrow @nogc;
 alias WallclockHandler  = void delegate(Duration delta) nothrow @nogc;
 alias HeartbeatHandler  = void delegate(MonoTime now) nothrow @nogc;
+alias DoorbellHandler   = void function(MonoTime now) nothrow @nogc;
 
 enum EventPriority : ubyte
 {
@@ -299,6 +300,21 @@ Application create_application()
     return alloc!Application();
 }
 
+// Main-loop work any context may ask for: a ring sets the doorbell's bit, and the next flush runs its handler once, in its
+// priority's phase. Nothing is queued, so a ring is never refused; a handler that stops short rings again.
+ubyte register_doorbell(DoorbellHandler handler, EventPriority priority)
+    => g_doorbells.register(handler, priority);
+
+void ring(ubyte doorbell)
+{
+    if (g_doorbells.ring(doorbell) && g_app)
+        g_app._wake_event.set();
+}
+
+// in an ISR; true when it woke a task of higher priority than the one it interrupted
+bool ring_from_isr(ubyte doorbell)
+    => g_doorbells.ring(doorbell) && g_app && g_app._wake_event.set_from_isr();
+
 void shutdown_application()
 {
     foreach (m; g_app.modules)
@@ -407,6 +423,7 @@ nothrow @nogc:
         bool reactor_ok = _wake_event.init();
         g_priority_events.init();
         g_bulk_events.init();
+        g_pages_freed = register_doorbell(&pages_freed, EventPriority.control);
         page_pool_wake_hook(&note_pages_freed);
 
         import urt.time : subscribe_clock_change;
@@ -897,11 +914,6 @@ nothrow @nogc:
         return higher_priority_task_woken;
     }
 
-    bool wake_from_isr()
-    {
-        return _wake_event.set_from_isr();
-    }
-
     void wait_for_wake(MonoTime deadline)
     {
         MonoTime now = getTime();
@@ -936,9 +948,8 @@ nothrow @nogc:
 
     void process_events()
     {
-        import urt.atomic : atomicExchange, atomicFetchAdd, MemoryOrder;
+        import urt.atomic : atomicExchange, atomicFetchAdd, atomicLoad, MemoryOrder;
         import urt.log : writeWarning;
-        import urt.mem.pagepool : page_pool_wake;
 
         enum Duration bulk_slice = msecs(500);
         enum SlowEventHandlerMs = 50;
@@ -953,56 +964,62 @@ nothrow @nogc:
         size_t worst_event_ctx;
         uint priority_count, bulk_count, passes, slices;
         PendingEvent e;
+
+        void timed(const(char)[] queue, MonoTime start, MonoTime when, size_t func, size_t ctx)
+        {
+            Duration d = getTime() - start;
+            Duration age = start - when;
+            if (d > worst_event_dur)
+            {
+                worst_event_dur = d;
+                worst_event_age = age;
+                worst_event_queue = queue;
+                worst_event_func = func;
+                worst_event_ctx = ctx;
+            }
+            if (d.as!"msecs" >= SlowEventHandlerMs)
+                writeWarning("slow-", queue, "-event: ", d.as!"msecs", "ms age=", age.as!"msecs", "ms handler=", func, " ctx=", ctx);
+        }
+
+        void dispatch(const(char)[] queue)
+        {
+            MonoTime start = getTime();
+            if (e.when == MonoTime.init)
+                e.when = start;
+            e.handler(e.when);
+            timed(queue, start, e.when, cast(size_t)e.handler.funcptr, cast(size_t)e.handler.ptr);
+        }
+
+        void answer(DoorbellHandler handler, ubyte doorbell)
+        {
+            MonoTime start = getTime();
+            handler(start);
+            timed("doorbell", start, start, cast(size_t)handler, doorbell);
+        }
+
+        // taken once a flush: a handler that rings again is answered on the next loop, after the timers
+        uint rung = g_doorbells.take();
         for (;;)
         {
             ++passes;
-            if (atomicExchange(&_pages_freed, 0))
-                page_pool_wake();
+            g_doorbells.answer(rung & g_doorbells.control, &answer);
             bool any_priority = false;
             while (g_priority_events.dequeue(e))
             {
                 atomicFetchAdd!(MemoryOrder.relaxed)(_priority_events_processed, 1);
-                MonoTime event_start = getTime();
-                if (e.when == MonoTime.init)
-                    e.when = event_start;
-                e.handler(e.when);
-                Duration d = getTime() - event_start;
-                Duration age = event_start - e.when;
-                if (d > worst_event_dur)
-                {
-                    worst_event_dur = d;
-                    worst_event_age = age;
-                    worst_event_queue = "priority";
-                    worst_event_func = cast(size_t)e.handler.funcptr;
-                    worst_event_ctx = cast(size_t)e.handler.ptr;
-                }
-                if (d.as!"msecs" >= SlowEventHandlerMs)
-                    writeWarning("slow-priority-event: ", d.as!"msecs", "ms age=", age.as!"msecs", "ms handler=", cast(size_t)e.handler.funcptr, " ctx=", cast(size_t)e.handler.ptr);
+                dispatch("priority");
                 ++priority_count;
                 any_priority = true;
             }
 
+            g_doorbells.answer(rung & ~g_doorbells.control, &answer);
+            rung = 0;
             MonoTime slice_end = getTime() + bulk_slice;
             bool any_bulk = false;
             while (g_bulk_events.dequeue(e))
             {
                 atomicFetchAdd!(MemoryOrder.relaxed)(_bulk_events_processed, 1);
-                MonoTime event_start = getTime();
-                if (e.when == MonoTime.init)
-                    e.when = event_start;
-                e.handler(e.when);
-                Duration d = getTime() - event_start;
-                Duration age = event_start - e.when;
-                if (d > worst_event_dur)
-                {
-                    worst_event_dur = d;
-                    worst_event_age = age;
-                    worst_event_queue = "bulk";
-                    worst_event_func = cast(size_t)e.handler.funcptr;
-                    worst_event_ctx = cast(size_t)e.handler.ptr;
-                }
-                if (d.as!"msecs" >= SlowEventHandlerMs)
-                    writeWarning("slow-bulk-event: ", d.as!"msecs", "ms age=", age.as!"msecs", "ms handler=", cast(size_t)e.handler.funcptr, " ctx=", cast(size_t)e.handler.ptr);
+                dispatch("bulk");
                 ++bulk_count;
                 any_bulk = true;
                 if (getTime() >= slice_end)
@@ -1416,12 +1433,16 @@ nothrow @nogc:
 
 private:
 
-    // runs in the freeing context, possibly an ISR; must not depend on event queue capacity
+    // runs in the freeing context, possibly an ISR
     static void note_pages_freed()
     {
-        import urt.atomic : atomicStore;
-        atomicStore(g_app._pages_freed, 1);
-        g_app.wake_from_isr();
+        ring_from_isr(g_pages_freed);
+    }
+
+    static void pages_freed(MonoTime)
+    {
+        import urt.mem.pagepool : page_pool_wake;
+        page_pool_wake();
     }
 
     bool enqueue_event(EventHandler handler, MonoTime when, EventPriority priority, bool report_overflow)
@@ -1488,7 +1509,6 @@ private:
 
     Reactor _wake_event;
 
-    shared uint _pages_freed;
     shared uint _priority_events_posted;
     shared uint _bulk_events_posted;
     shared uint _priority_events_processed;
@@ -2010,6 +2030,62 @@ struct PendingEvent
 __gshared MpscQueue!(PendingEvent, 32)  g_priority_events;
 __gshared MpscQueue!(PendingEvent, 256) g_bulk_events;
 
+struct Doorbells
+{
+nothrow @nogc:
+    ubyte register(DoorbellHandler handler, EventPriority priority)
+    {
+        assert(_count < _handlers.length, "out of doorbells");
+        immutable ubyte doorbell = _count++;
+        _handlers[doorbell] = handler;
+        if (priority == EventPriority.control)
+            _control |= 1u << doorbell;
+        return doorbell;
+    }
+
+    // true when this ring set the bit, so a run of rings wakes the loop once; a ring that finds it set still swaps,
+    // which publishes the ringer's writes to the flush that takes the bit
+    bool ring(ubyte doorbell)
+    {
+        import urt.atomic : atomicLoad, cas, MemoryOrder;
+        immutable uint bit = 1u << doorbell;
+        uint seen;
+        do
+            seen = atomicLoad!(MemoryOrder.relaxed)(_rung);
+        while (!cas(&_rung, seen, seen | bit));
+        return (seen & bit) == 0;
+    }
+
+    uint take()
+    {
+        import urt.atomic : atomicExchange, atomicLoad, MemoryOrder;
+        return atomicLoad!(MemoryOrder.relaxed)(_rung) ? atomicExchange(&_rung, 0u) : 0;
+    }
+
+    uint control() const pure
+        => _control;
+
+    void answer(uint rung, scope void delegate(DoorbellHandler handler, ubyte doorbell) nothrow @nogc run) const
+    {
+        import urt.util : ctz;
+        while (rung)
+        {
+            immutable ubyte doorbell = cast(ubyte)ctz!true(rung);
+            rung &= rung - 1;
+            run(_handlers[doorbell], doorbell);
+        }
+    }
+
+private:
+    DoorbellHandler[32] _handlers;
+    shared uint _rung;
+    uint _control;
+    ubyte _count;
+}
+
+__gshared Doorbells g_doorbells;
+__gshared ubyte g_pages_freed;
+
 enum MaxProfilePath = 1024;
 
 struct ProfileSearch
@@ -2514,4 +2590,106 @@ Variant reactive_shift(Variant[] args, bool add)
     an *= an; bn *= bn;
     double r = sqrt(add ? an + bn : an - bn);
     return Variant(VarQuantity(r, ScaledUnit(unit)));
+}
+
+
+unittest
+{
+    static struct Log
+    {
+        static __gshared char[16] seen;
+        static __gshared uint length;
+        static __gshared Doorbells* bells;
+        static __gshared ubyte again;
+        static __gshared bool keep_ringing;
+    nothrow @nogc:
+        static void control(MonoTime) { seen[length++] = 'c'; }
+        static void bulk(MonoTime) { seen[length++] = 'b'; }
+        static void rerun(MonoTime)
+        {
+            seen[length++] = 'r';
+            if (keep_ringing)
+                bells.ring(again);
+        }
+        void run(DoorbellHandler handler, ubyte)
+        {
+            handler(MonoTime());
+        }
+    }
+    Doorbells bells;
+    Log log;
+    Log.bells = &bells;
+    void flush()
+    {
+        immutable uint rung = bells.take();
+        bells.answer(rung & bells.control, &log.run);
+        bells.answer(rung & ~bells.control, &log.run);
+    }
+    const(char)[] seen()
+        => Log.seen[0 .. Log.length];
+
+    immutable ubyte bulk = bells.register(&Log.bulk, EventPriority.bulk);
+    immutable ubyte control = bells.register(&Log.control, EventPriority.control);
+    Log.again = bells.register(&Log.rerun, EventPriority.bulk);
+    assert(bells.control == 1u << control);
+
+    // rings coalesce until a flush takes them; control doorbells answer in the control phase whatever their order
+    assert(bells.ring(bulk) && !bells.ring(bulk) && bells.ring(control));
+    flush();
+    assert(seen == "cb" && !bells.take());
+
+    // a handler that rings again is answered by the next flush, not this one
+    Log.length = 0;
+    Log.keep_ringing = true;
+    bells.ring(Log.again);
+    flush();
+    assert(seen == "r");
+    Log.keep_ringing = false;
+    flush();
+    assert(seen == "rr" && !bells.take());
+}
+
+version (BareMetal) {} else
+unittest
+{
+    import urt.atomic : atomicLoad, atomicStore, MemoryOrder;
+    import urt.thread : thread_join, thread_spawn;
+
+    // a ring that finds its bit already set still publishes what the ringer wrote before it
+    enum ubyte doorbell = 0;
+    enum uint rounds = 200_000;
+    static struct Flush
+    {
+        static __gshared Doorbells bells;
+        static shared uint work, observed, begin, done;
+    nothrow @nogc:
+        void run()
+        {
+            foreach (i; 1 .. rounds + 1)
+            {
+                while (atomicLoad(begin) != i)
+                {}
+                bells.take();
+                atomicStore!(MemoryOrder.relaxed)(observed, atomicLoad!(MemoryOrder.acquire)(work));
+                atomicStore(done, i);
+            }
+        }
+    }
+    Flush flush;
+    void* consumer = thread_spawn(&flush.run);
+    assert(consumer);
+    uint lost;
+    foreach (i; 1 .. rounds + 1)
+    {
+        Flush.bells.ring(doorbell);
+        atomicStore(Flush.work, 0u);
+        atomicStore(Flush.begin, i);
+        atomicStore!(MemoryOrder.release)(Flush.work, 1u);
+        immutable bool fresh = Flush.bells.ring(doorbell);
+        while (atomicLoad(Flush.done) != i)
+        {}
+        lost += !fresh && atomicLoad(Flush.observed) == 0;
+    }
+    thread_join(consumer);
+    assert(lost == 0, "a coalesced ring lost the work before it");
 }
