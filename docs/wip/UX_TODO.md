@@ -3,6 +3,12 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-10-09: WebSocket message limit
+
+- A node closes a WebSocket with 1009 (message too big) when a client sends a message larger than
+  65535 bytes, the segment it advertises in `hello`, instead of buffering it. Keep each message a
+  client sends within the node's advertised `segment`.
+
 ## 2026-10-08: console print output
 
 - `/element/link/print` is a table with `A`, `B` and `STATUS` columns instead of
