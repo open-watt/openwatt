@@ -84,21 +84,7 @@ nothrow @nogc:
             return 0;
         ptrdiff_t n = _tx.write(data);
         if (n > 0)
-        {
-            add_tx_bytes(n);
-            if (_logging)
-            {
-                size_t remain = n;
-                foreach (d; data)
-                {
-                    if (remain == 0)
-                        break;
-                    size_t chunk = d.length < remain ? d.length : remain;
-                    write_to_log(false, d[0 .. chunk]);
-                    remain -= chunk;
-                }
-            }
-        }
+            sent(n, data);
         return n;
     }
 
@@ -168,9 +154,7 @@ private:
         Page* page = request_tx_page(req, status);
         if (!page)
             return null;
-        add_tx_bytes(page.length);
-        if (_logging)
-            write_to_log(false, page.data);
+        sent(page.length, page.data);
         return page;
     }
 

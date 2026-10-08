@@ -94,7 +94,7 @@ nothrow @nogc:
             auto n = write_console(cast(const(char)[])d);
             if (n < 0)
                 return -1;
-            add_tx_bytes(n);
+            sent(n, d);
             total += n;
             if (n < d.length)
                 return total;

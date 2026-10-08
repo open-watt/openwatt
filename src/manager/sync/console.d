@@ -150,7 +150,7 @@ protected:
         {
             // the page keeps the completing bytes until the code point is sent
             if (peer.tx_blocked())
-                return stop_short(peer, 0);
+                return stop_short(peer, text, 0);
             char[4] point = _carry;
             size_t length = _carry_length;
             while (taken < text.length && length < sequence_length(point[0]) && (text[taken] & 0xC0) == 0x80)
@@ -162,17 +162,17 @@ protected:
                 return taken;
             }
             if (encoder.encode_console(peer, _seq, SyncConsoleEvent.output, point[0 .. length]) < 0)
-                return stop_short(peer, 0);
+                return stop_short(peer, text, 0);
             _carry_length = 0;
         }
         while (taken < text.length)
         {
             if (peer.tx_blocked())
-                return stop_short(peer, taken);
+                return stop_short(peer, text, taken);
             size_t end = text.length - taken < payload ? text.length : taken + payload;
             size_t cut = incomplete_tail(text[taken .. end]);
             if (end - cut > taken && encoder.encode_console(peer, _seq, SyncConsoleEvent.output, text[taken .. end - cut]) < 0)
-                return stop_short(peer, taken);
+                return stop_short(peer, text, taken);
             taken = end - cut;
             // a code point cut by the page's end completes from the next page
             if (cut && end == text.length)
@@ -182,7 +182,7 @@ protected:
                 taken = end;
             }
         }
-        add_tx_bytes(taken);
+        sent(taken, text);
         return taken;
     }
 
@@ -209,11 +209,11 @@ private:
     char[4] _carry;
 
     // a full transport invites the peer back; a full control window waits for the ack that frees it
-    size_t stop_short(SyncPeer peer, size_t taken)
+    size_t stop_short(SyncPeer peer, const(char)[] text, size_t taken)
     {
         if (peer.tx_full())
             peer.arm_tx();
-        add_tx_bytes(taken);
+        sent(taken, text);
         return taken;
     }
 }

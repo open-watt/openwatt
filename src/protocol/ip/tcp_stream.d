@@ -232,20 +232,7 @@ nothrow @nogc:
 
         ptrdiff_t n = _conn.send(data);
         if (n > 0)
-        {
-            add_tx_bytes(n);
-            if (_logging)
-            {
-                import urt.util : min;
-                ptrdiff_t remain = n;
-                for (size_t i = 0; remain > 0; ++i)
-                {
-                    size_t len = min(data[i].length, remain);
-                    write_to_log(false, data[i][0 .. len]);
-                    remain -= len;
-                }
-            }
-        }
+            sent(n, data);
         if (n < cast(ptrdiff_t)total)
             log.warning("stream '", name[], "': short write -- ", n, " of ", total, " bytes sent, ", total - n, " dropped");
         return n;
@@ -291,9 +278,7 @@ private:
         Page* page = request_tx_page(req, status);
         if (!page)
             return null;
-        add_tx_bytes(page.length);
-        if (_logging)
-            write_to_log(false, page.data);
+        sent(page.length, page.data);
         return page;
     }
 

@@ -200,7 +200,7 @@ nothrow @nogc:
     override void queue_tx_page(Page* page)
     {
         for (Page* p = page; p; p = p.next)
-            sent(p.data);
+            sent(p.length, p.data);
         if (running && uart_send(_uart, page))
             return;
         while (page)
@@ -220,7 +220,7 @@ nothrow @nogc:
         foreach (d; data)
         {
             immutable size_t taken = uart_write(_uart, d);
-            sent(d[0 .. taken]);
+            sent(taken, d);
             total += taken;
             if (taken < d.length)
                 break;
@@ -284,13 +284,6 @@ private:
             }
         }
         return cfg;
-    }
-
-    void sent(const(void)[] data)
-    {
-        if (_logging || has_tap)
-            write_to_log(false, data);
-        add_tx_bytes(data.length);
     }
 
     // Each frame goes up whole, dated by when its last byte arrived; a frame still arriving goes up as it stands, dated

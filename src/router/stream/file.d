@@ -94,22 +94,7 @@ nothrow @nogc:
             if (!r || n < d.length)
                 break;
         }
-        if (total)
-        {
-            add_tx_bytes(total);
-            if (_logging)
-            {
-                size_t remain = total;
-                foreach (d; data)
-                {
-                    if (remain == 0)
-                        break;
-                    size_t chunk = d.length < remain ? d.length : remain;
-                    write_to_log(false, d[0 .. chunk]);
-                    remain -= chunk;
-                }
-            }
-        }
+        sent(total, data);
         return total;
     }
 

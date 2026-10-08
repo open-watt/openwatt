@@ -85,12 +85,8 @@ nothrow @nogc:
         }
         size_t total = 0;
         foreach (ref d; data)
-        {
             total += d.length;
-            if (_logging)
-                write_to_log(false, d[]);
-        }
-        add_tx_bytes(total);
+        sent(total, data);
         return total;
     }
 
