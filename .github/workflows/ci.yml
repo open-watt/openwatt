@@ -92,11 +92,9 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        platform: [bl808, bl808_d0, rp2350, stm32h7]
+        platform: [bl808, rp2350, stm32h7]
         include:
           - platform: bl808
-            toolchain: riscv64-unknown-elf
-          - platform: bl808_d0
             toolchain: riscv64-unknown-elf
           - platform: rp2350
             toolchain: arm-none-eabi
@@ -124,7 +122,7 @@ jobs:
           packages: gcc-${{ matrix.toolchain }} picolibc-${{ matrix.toolchain }}${{ matrix.toolchain == 'arm-none-eabi' && ' libnewlib-arm-none-eabi' || '' }}
 
       - name: Build
-        run: timeout 180 make PLATFORM=${{ matrix.platform }} CONFIG=release ${{ matrix.make_args || '' }}
+        run: timeout 180 make -j$(nproc) PLATFORM=${{ matrix.platform }} CONFIG=release ${{ matrix.make_args || '' }}
 
   cross-esp:
     runs-on: ubuntu-latest
