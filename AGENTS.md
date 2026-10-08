@@ -576,6 +576,10 @@ Hard rules:
 - **Never justify a change.** The bug you just fixed, why the old code was wrong, what you tried first, how
   clever the fix is: that is all commit-message material. Code describes what IS, not its own history.
   This is the single most common failure, and the urge peaks right after a hard debugging session. Resist it.
+- **Comments are not a change log.** NEVER leave a comment that explains why something was changed, moved,
+  removed or added: `// X now also does Y`, `// moved here from Z`, `// no longer needed`, `// builds D0 too`.
+  The reader sees the code as it is and has no "before" to compare with; the diff and its commit message
+  carry the why. This applies to every file a patch touches: source, build files, CI workflows, configs.
 - **No function or method headers.** Not for parameters, not for return values, not for behaviour. The only
   exception is a surprising *calling environment* (runs in an ISR, must not allocate, caller owns the buffer).
 - **No grouping or narration.** `// Schedule configuration`, `// Update counters`, `// now send the frame`.
@@ -767,6 +771,7 @@ The REPL method enables true interactive investigation: send a command, analyze 
 
 And remember,
 - NO GRATUITOUS COMMENTING! Default to none. One line if you must, never three. Never explain the language, never justify your change in the code, never write a function header. See the **Commenting** subsection under Coding Style.
+- COMMENTS ARE NOT A CHANGE LOG! Never comment on why something was changed, moved, removed or added, in any file: that is what the commit message is for.
 - NO EM-DASH EVER!
 - No unicode in source files unless it's string data that's meant to contain unicode.
 - Line-breaks should be avoided for single statements, unless they REALLY improve readibility! Use good taste, no gratuitous line breaking! Long lines are fine; break when a user would prefer to read as a list, or other genuinely better readibility moments.
