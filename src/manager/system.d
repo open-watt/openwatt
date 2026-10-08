@@ -294,9 +294,11 @@ version (UseLittleFS) version = HasFilesystem;
 
 version (HasFilesystem)
 {
-    import urt.file : delete_file, load_file, save_file;
+    import urt.file : close, delete_file, File, FileOpenMode, get_size, open, read, save_file;
+    import urt.lifetime : move;
     import urt.result : Result;
     import manager.console.command : CommandState, CommandCompletionState;
+    import router.stream : TxStatus;
 
     // Whichever backend is built; littlefs wins when both are.
     version (UseLittleFS)
@@ -334,18 +336,15 @@ version (HasFilesystem)
             session.write_line("write failed: ", r.system_code, " (backend error ", Fs.last_error(), ")");
     }
 
-    void fs_read(Session session, const(char)[] name)
+    CommandState fs_read(Session session, const(char)[] name)
     {
-        import urt.mem;
-
-        void[] data = load_file(name);
-        if (data is null)
+        File file;
+        if (!file.open(name, FileOpenMode.ReadExisting))
         {
             session.write_line("read failed / not found: '", name, "' (backend error ", Fs.last_error(), ")");
-            return;
+            return null;
         }
-        session.write_line(data.length, " bytes: ", cast(const(char)[])data);
-        free(data);
+        return alloc!FileRead(session, file);
     }
 
     void fs_ls(Session session, Nullable!(const(char)[]) path)
@@ -544,6 +543,117 @@ ulong generate_node_id()
     }
 }
 
+
+version (HasFilesystem)
+final class FileRead : CommandState
+{
+nothrow @nogc:
+
+    ~this() {}
+
+    this(Session session, ref File file)
+    {
+        super(session, null);
+        _file = file.move;
+        _crlf = (session.features & ClientFeatures.crlf) != 0;
+        session.feed_output(&produce);
+    }
+
+    override CommandCompletionState update()
+    {
+        if (!_released && session.output_busy)
+            return CommandCompletionState.in_progress;
+        finish();
+        return CommandCompletionState.finished;
+    }
+
+    override void request_cancel()
+    {
+        finish();
+    }
+
+private:
+    File _file;
+    bool _header_sent;
+    bool _crlf;
+    bool _after_cr;
+    bool _released;
+
+    size_t produce(char[] chunk, MonoTime deadline, out TxStatus status)
+    {
+        import urt.mem.temp : tconcat;
+
+        const(char)[] newline = _crlf ? "\r\n" : "\n";
+        size_t len;
+        if (!_header_sent)
+        {
+            const(char)[] header = tconcat(get_size(_file), " bytes: ");
+            chunk[0 .. header.length] = header[];
+            len = header.length;
+            _header_sent = true;
+        }
+        // a bare newline doubles for a crlf client, so read no more than half the room
+        size_t room = chunk.length - len - newline.length;
+        size_t want = _crlf ? room / 2 : room;
+        size_t n;
+        Result r = _file.read(chunk[len .. len + want], n);
+        if (!r || n == 0)
+        {
+            const(char)[] tail = r ? newline : tconcat(newline, "read failed: ", r.system_code, " (backend error ", Fs.last_error(), ")", newline);
+            chunk[len .. len + tail.length] = tail[];
+            status = TxStatus.end;
+            return len + tail.length;
+        }
+        if (_crlf)
+            n = expand_newlines(chunk[len .. len + 2 * n], n, _after_cr);
+        status = TxStatus.more;
+        return len + n;
+    }
+
+    void finish()
+    {
+        _released = true;
+        session.release_output(&produce);
+        _file.close();
+    }
+}
+
+// expands bare newlines in the first n bytes to crlf in place, buf holding 2n; after_cr carries across calls
+size_t expand_newlines(char[] buf, size_t n, ref bool after_cr) pure
+{
+    size_t bare;
+    bool prev_cr = after_cr;
+    foreach (c; buf[0 .. n])
+    {
+        if (c == '\n' && !prev_cr)
+            ++bare;
+        prev_cr = c == '\r';
+    }
+    size_t to = n + bare;
+    for (size_t from = n; from > 0; --from)
+    {
+        char c = buf[from - 1];
+        buf[--to] = c;
+        if (c == '\n' && !(from > 1 ? buf[from - 2] == '\r' : after_cr))
+            buf[--to] = '\r';
+    }
+    after_cr = prev_cr;
+    return n + bare;
+}
+
+unittest
+{
+    bool after_cr;
+    char[16] buf = void;
+    buf[0 .. 6] = "a\nb\r\nc";
+    assert(buf[0 .. expand_newlines(buf[], 6, after_cr)] == "a\r\nb\r\nc" && !after_cr);
+    buf[0 .. 2] = "x\r";
+    assert(buf[0 .. expand_newlines(buf[], 2, after_cr)] == "x\r" && after_cr);
+    buf[0 .. 2] = "\ny";
+    assert(buf[0 .. expand_newlines(buf[], 2, after_cr)] == "\ny" && !after_cr, "a crlf split between reads stays one");
+    buf[0 .. 2] = "\n\n";
+    assert(buf[0 .. expand_newlines(buf[], 2, after_cr)] == "\r\n\r\n");
+}
 
 // Helper function to format bytes with appropriate unit
 auto format_bytes(ulong bytes) nothrow @nogc

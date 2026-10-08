@@ -25,7 +25,7 @@ import manager.features : has_ipv6;
 import manager.plugin;
 import manager.console;
 import manager.console.session;
-import manager.console.table : Table;
+import manager.console.table : print_table, Table;
 
 import router.iface.bridge : BridgeInterface;
 
@@ -91,30 +91,30 @@ nothrow @nogc:
     }
 
     // The kernel owns ARP/ND on these builds; same paths as the internal stack's cache prints.
-    void neighbour_v4_print(Session session)
+    CommandState neighbour_v4_print(Session session)
     {
-        neighbour_print(session, AF_INET);
+        return neighbour_print(session, AF_INET);
     }
 
     static if (has_ipv6)
-    void neighbour_v6_print(Session session)
+    CommandState neighbour_v6_print(Session session)
     {
-        neighbour_print(session, AF_INET6);
+        return neighbour_print(session, AF_INET6);
     }
 
-    void neighbour_print(Session session, ubyte family)
+    CommandState neighbour_print(Session session, ubyte family)
     {
         g_links.clear();
         g_neighs.clear();
         if (!(nl_dump(RTM_GETLINK, AF_PACKET, &on_link) & nl_dump(RTM_GETNEIGH, family, &on_neigh)))
         {
             session.write_line("Failed to query the kernel neighbour table (see log)");
-            return;
+            return null;
         }
         if (g_neighs.length == 0)
         {
             session.write_line(family == AF_INET6 ? "No IPv6 neighbour entries" : "No IPv4 neighbour entries");
-            return;
+            return null;
         }
 
         Table t;
@@ -130,7 +130,7 @@ nothrow @nogc:
             t.cell(nud_name(n.state));
             t.cell(ifname(n.index));
         }
-        t.render(session);
+        return print_table(session, t);
     }
 }
 

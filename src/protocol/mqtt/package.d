@@ -164,49 +164,50 @@ nothrow @nogc:
         return true;
     }
 
-    void retained(Session session, Nullable!MQTTBroker broker, Nullable!String filter)
+    CommandState retained(Session session, Nullable!MQTTBroker broker, Nullable!String filter)
     {
         MQTTBroker b = resolve_broker(session, broker);
         if (!b)
-            return;
+            return null;
 
-        b.print_retained(session, filter ? filter.value[] : "#");
+        return b.print_retained(session, filter ? filter.value[] : "#");
     }
 
     static if (has_message_cache)
-    void cache(Session session, Nullable!MQTTBroker broker, Nullable!String filter)
+    CommandState cache(Session session, Nullable!MQTTBroker broker, Nullable!String filter)
     {
         MQTTBroker b = resolve_broker(session, broker);
         if (!b)
-            return;
+            return null;
 
-        b.print_cache(session, filter ? filter.value[] : "#");
+        return b.print_cache(session, filter ? filter.value[] : "#");
     }
 
-    void read(Session session, String topic, Nullable!MQTTBroker broker)
+    CommandState read(Session session, String topic, Nullable!MQTTBroker broker)
     {
         MQTTBroker b = resolve_broker(session, broker);
         if (!b)
-            return;
+            return null;
 
         static if (has_message_cache)
+        {
             b.read_payload(session, topic[]);
+            return null;
+        }
         else
-            b.print_retained(session, topic[]);
+            return b.print_retained(session, topic[]);
     }
 
-    void sessions(Session session, Nullable!MQTTBroker broker)
+    CommandState sessions(Session session, Nullable!MQTTBroker broker)
     {
         MQTTBroker b = resolve_broker(session, broker);
-        if (b)
-            b.print_sessions(session);
+        return b ? b.print_sessions(session) : null;
     }
 
-    void subscriptions(Session session, Nullable!MQTTBroker broker)
+    CommandState subscriptions(Session session, Nullable!MQTTBroker broker)
     {
         MQTTBroker b = resolve_broker(session, broker);
-        if (b)
-            b.print_subscriptions(session);
+        return b ? b.print_subscriptions(session) : null;
     }
 
     void local_publish(Session session, String topic, String payload, Nullable!MQTTBroker broker, Nullable!bool retain, Nullable!String client_id)

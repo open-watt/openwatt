@@ -1557,6 +1557,34 @@ unittest
         stream.limit = size_t.max;
     }
 
+    // a print the stream takes whole completes on its first update; one it cannot take waits for the line
+    {
+        import manager.console.table : print_table, Table;
+
+        Table small;
+        small.add_column("name");
+        small.add_row();
+        small.cell("one");
+        CommandState print = print_table(session, small);
+        assert(print.update() == CommandCompletionState.finished, "output the stream takes at once completes at once");
+        free(print);
+
+        Table large;
+        large.add_column("name");
+        foreach (i; 0 .. 200)
+        {
+            large.add_row();
+            large.cell("a row of some length");
+        }
+        stream.limit = stream.output.length + 1000;
+        print = print_table(session, large);
+        assert(print.update() == CommandCompletionState.in_progress);
+        print.request_cancel();
+        assert(print.update() == CommandCompletionState.finished);
+        free(print);
+        stream.limit = size_t.max;
+    }
+
     // so is a print cancelled after it has produced its last row but before the stream has taken it
     {
         import manager.console.table : TablePrint;

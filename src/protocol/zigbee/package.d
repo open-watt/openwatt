@@ -651,19 +651,19 @@ nothrow @nogc:
         return state;
     }
 
-    void nodes_print(Session session)
+    CommandState nodes_print(Session session)
     {
         if (nodes_by_eui.length == 0 && unknown_nodes.length == 0)
         {
             session.write_line("No zigbee nodes");
-            return;
+            return null;
         }
 
+        Table t;
         if (nodes_by_eui.length != 0)
         {
             MonoTime now = getTime();
             SysTime now_sys = getSysTime();
-            Table t;
             t.add_column("eui");
             t.add_column("interface");
             t.add_column("pan");
@@ -718,29 +718,25 @@ nothrow @nogc:
                 t.cell(seen ? tconcat(n.rssi) : "-");
                 t.cell(seen ? tconcat((now_sys - n.last_seen).as!"seconds", "s") : "-");
             }
-
-            t.render(session);
         }
 
-        if (unknown_nodes.length == 0)
-            return;
-
-        if (nodes_by_eui.length != 0)
-            session.write_line();
         Table u;
-        u.add_column("interface");
-        u.add_column("pan");
-        u.add_column("unresolved id");
-        u.add_column("state");
-        foreach (ref unk; unknown_nodes)
+        if (unknown_nodes.length != 0)
         {
-            u.add_row();
-            u.cell(unk.via ? unk.via.name[] : "-");
-            u.cell(tformat("{0,04x}", unk.pan_id));
-            u.cell(tformat("{0,04x}", unk.id));
-            u.cell(unk.scanning ? "probing" : "pending");
+            u.add_column("interface");
+            u.add_column("pan");
+            u.add_column("unresolved id");
+            u.add_column("state");
+            foreach (ref unk; unknown_nodes)
+            {
+                u.add_row();
+                u.cell(unk.via ? unk.via.name[] : "-");
+                u.cell(tformat("{0,04x}", unk.pan_id));
+                u.cell(tformat("{0,04x}", unk.id));
+                u.cell(unk.scanning ? "probing" : "pending");
+            }
         }
-        u.render(session);
+        return t.num_cols ? print_table(session, t, u) : print_table(session, u);
     }
 
     // /protocol/zigbee/read command

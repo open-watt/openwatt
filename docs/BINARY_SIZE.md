@@ -69,6 +69,7 @@ row alone. Sizes stay in bytes; round in the note if that reads better.
 | 2026-09-10 | #687 | ldc 1.43.0 | 5,622,160 | 494,512 | | first row; DeviceBuilder as the only tree writer, deployed to the Pi as slot 152 |
 | 2026-09-10 | #689 | ldc 1.43.0 | 5,635,616 | 494,512 | | integration image, master + #687 + #689, deployed to the Pi as slot 154 |
 | 2026-09-16 | 7c50cea4 | ldc 1.43.0 | 5,605,168 | 483,280 | | master + sync bulk walks on the transport tx feed |
+| 2026-10-08 | ow/console-prints | ldc 1.43.0 | 5,813,160 | 533,792 | | console tables and `/system/fs/read` print through the stream's pull |
 
 ### Waveshare ESP32-S3-RS485-CAN, `make esp-idf-build BOARD=waveshare-esp32-s3-rs485-can CONFIG=release`
 
@@ -186,6 +187,7 @@ a netbooted image is bounded by RAM instead.
 | 2026-10-05 | ow/bl808-single-image | ldc 1.43.0 | 2,621,944 | 185,722 | 4,190,208 | first row; M0 image, which packs D0 (999,418 flash, 87,408 ram) into the same fw.bin |
 | 2026-10-08 | 9f66b503 | ldc 1.43.0 | 2,646,776 | 186,110 | 4,190,208 | master, control for #825; D0 1,012,421 flash, 87,856 ram |
 | 2026-10-08 | #825 | ldc 1.43.0 | 2,646,184 | 186,238 | 4,190,208 | doorbells: -592 flash, +128 ram for the handler table; D0 1,012,294 flash, 88,104 ram |
+| 2026-10-08 | ow/console-prints | ldc 1.43.0 | 2,647,864 | 186,266 | 4,190,208 | M0 packing D0 (1,009,089 flash, 88,144 ram); console tables and `/system/fs/read` print through the stream's pull |
 
 ### BL618, `make PLATFORM=bl618 CONFIG=release`
 
