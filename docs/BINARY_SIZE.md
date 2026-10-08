@@ -70,6 +70,7 @@ row alone. Sizes stay in bytes; round in the note if that reads better.
 | 2026-09-10 | #689 | ldc 1.43.0 | 5,635,616 | 494,512 | | integration image, master + #687 + #689, deployed to the Pi as slot 154 |
 | 2026-09-16 | 7c50cea4 | ldc 1.43.0 | 5,605,168 | 483,280 | | master + sync bulk walks on the transport tx feed |
 | 2026-10-08 | ow/console-prints | ldc 1.43.0 | 5,813,160 | 533,792 | | console tables and `/system/fs/read` print through the stream's pull |
+| 2026-10-09 | ow/websocket-sink | ldc 1.43.0 | 5,814,504 | 533,816 | | websocket frames queue in pool pages; receive capped at the MTU |
 
 ### Waveshare ESP32-S3-RS485-CAN, `make esp-idf-build BOARD=waveshare-esp32-s3-rs485-can CONFIG=release`
 

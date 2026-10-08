@@ -243,8 +243,7 @@ protected:
         _decoded_bytes = 0;
         _rx_overhead = 0;
         _pending_message_type = WSMessageType.unknown;
-        _tx_pending.clear();
-        _tx_offset = 0;
+        free_tx_queue();
         return CompletionStatus.complete;
     }
 
@@ -300,16 +299,8 @@ protected:
                       cast(void[])data[0 .. data.length <= 200 ? data.length : 200], data.length > 200 ? ", ... ]" : " ]");
         }
 
-        compact_tx();
-        _tx_pending ~= header[0 .. header_len];
-        size_t body_off = _tx_pending.length;
-        _tx_pending ~= cast(const(ubyte)[])data;
-        if (!_is_server)
-        {
-            foreach (i; 0 .. data.length)
-                _tx_pending[body_off + i] ^= mask_key[i & 3];
-        }
-
+        if (!queue_frame(header[0 .. header_len], cast(const(ubyte)[])data, _is_server ? null : mask_key[]))
+            return -1;
         add_tx_frame(frame_len);
         arm_tx();
         return 0;
@@ -321,7 +312,7 @@ protected:
     }
 
     override bool tx_ready() const
-        => _tx_pending.length - _tx_offset < tx_low_water;
+        => !_tx_waiter.queued && tx_queued < tx_low_water;
 
 private:
     ObjectRef!Stream _stream;
@@ -345,8 +336,8 @@ private:
     size_t _rx_overhead; // framing bytes for fragments buffered but not yet dispatched
     WSMessageType _pending_message_type;
 
-    Array!ubyte _tx_pending;
-    size_t _tx_offset;
+    Page* _tx_queue;
+    PageWaiter _tx_waiter;
     enum size_t max_tx_frame = 64 * 1024 + 14;                  // maximum sync payload plus WebSocket header
     enum size_t max_tx_pending = 128 * 1024;
     enum size_t tx_low_water = 16 * 1024;                       // reserve room for one maximum frame
@@ -417,6 +408,22 @@ private:
                 payload_len = cast(size_t)len;
             }
 
+            // every header is judged before its payload is buffered: control frames are whole and at most 125 bytes
+            // (RFC 6455 5.5), and an unknown opcode fails the connection
+            if (opcode >= 8 ? opcode > 10 || !fin || payload_len > 125 : opcode > 2)
+            {
+                add_rx_drop();
+                restart();
+                return;
+            }
+            if (opcode <= 2 && payload_len > actual_mtu - _decoded_bytes)
+            {
+                add_rx_drop();
+                send_close(1009);
+                restart();
+                return;
+            }
+
             // if a mask was included
             if (mask)
             {
@@ -456,13 +463,6 @@ private:
                     break;
 
                 case 9: // ping
-                    // Control frames can't be fragmented and MUST be <= 125 bytes.
-                    if (!fin || payload_len > 125)
-                    {
-                        add_rx_drop();
-                        restart();
-                        return;
-                    }
                     // Unmask the ping payload into a local buffer and echo it in the pong.
                     ubyte[125] ping_payload = void;
                     if (mask)
@@ -487,10 +487,7 @@ private:
                     return;
 
                 default:
-                    // "If an unknown opcode is received, the receiving endpoint MUST _Fail the WebSocket Connection_"
-                    add_rx_drop();
-                    restart();
-                    return;
+                    assert(false, "unknown opcodes are refused with the header");
             }
 
             // Accumulate per-fragment framing overhead; applied at dispatch below.
@@ -600,29 +597,80 @@ private:
             frame[len .. len + payload.length] = payload[];
         len += payload.length;
 
-        if (!admit_tx(len))
+        if (!admit_tx(len) || !queue_frame(frame[0 .. len], null, null))
             return;
-        compact_tx();
-        _tx_pending ~= frame[0 .. len];
         arm_tx();
     }
 
-    // consumed bytes are reclaimed once per append rather than per page
-    void compact_tx()
+    // copies a frame into pages behind what is queued, masking the body with a client's key
+    // a frame the pages cannot hold is refused whole, and the producer is invited back when pages are freed
+    bool queue_frame(const(ubyte)[] header, const(ubyte)[] body, const(ubyte)[] mask)
     {
-        if (_tx_offset == 0)
-            return;
-        if (_tx_offset == _tx_pending.length)
-            _tx_pending.clear();
-        else
-            _tx_pending.remove(0, _tx_offset);
-        _tx_offset = 0;
+        uint generation = page_free_generation();
+        Page* frame;
+        size_t total = header.length + body.length;
+        for (size_t at = 0; at < total; )
+        {
+            size_t n = total - at < max_tx_page ? total - at : max_tx_page;
+            Page* page = page_alloc(n);
+            if (!page)
+            {
+                free_chain(frame);
+                add_tx_drop();
+                _tx_waiter.wake = &pull_tx;
+                page_wait(&_tx_waiter, generation);
+                return false;
+            }
+            ubyte[] dst = cast(ubyte[])page.data;
+            size_t h;
+            if (at < header.length)
+            {
+                h = header.length - at < n ? header.length - at : n;
+                dst[0 .. h] = header[at .. at + h];
+            }
+            size_t from = at + h - header.length;
+            dst[h .. n] = body[from .. from + n - h];
+            if (mask.length)
+            {
+                foreach (i; h .. n)
+                    dst[i] ^= mask[(from + i - h) & 3];
+            }
+            append_tx_chain(frame, page);
+            at += n;
+        }
+        append_tx_chain(_tx_queue, frame);
+        return true;
+    }
+
+    size_t tx_queued() const
+    {
+        size_t bytes;
+        for (const(Page)* page = _tx_queue; page; page = (cast(Page*)page).next)
+            bytes += page.length;
+        return bytes;
+    }
+
+    void free_tx_queue()
+    {
+        free_chain(_tx_queue);
+        _tx_queue = null;
+    }
+
+    static void free_chain(Page* page)
+    {
+        while (page)
+        {
+            Page* next = page.next;
+            page_free(page);
+            page = next;
+        }
     }
 
     // every callback and timer that references this object or the stream is released here
     void detach_stream()
     {
         g_app.cancel(&tx_overflow);
+        page_unwait(&_tx_waiter);
         _tx_closing = false;
         if (_stream)
         {
@@ -639,7 +687,7 @@ private:
     // one bound for data and control frames alike
     bool admit_tx(size_t bytes)
     {
-        if (_tx_pending.length - _tx_offset + bytes <= max_tx_pending)
+        if (tx_queued + bytes <= max_tx_pending)
             return true;
         add_tx_drop();
         close_tx();
@@ -657,7 +705,7 @@ private:
 
     void tx_overflow(MonoTime)
     {
-        log.warning("tx overflow: ", _tx_pending.length - _tx_offset, " bytes pending; closing");
+        log.warning("tx overflow: ", tx_queued, " bytes pending; closing");
         restart();
     }
 
@@ -683,21 +731,12 @@ private:
     Page* produce_tx(ref const TxRequest req, out TxStatus status)
     {
         pull_tx();
-        size_t pending = _tx_pending.length - _tx_offset;
-        if (pending == 0)
+        if (!_tx_queue)
         {
             status = TxStatus.idle;
             return null;
         }
-        size_t take = pending < req.bytes ? pending : req.bytes;
-        if (take > max_tx_page)
-            take = max_tx_page;
-        Page* page = alloc_tx_page(req, take, status);
-        if (!page)
-            return null;
-        page.data[] = _tx_pending[_tx_offset .. _tx_offset + take];
-        _tx_offset += take;
-        return page;
+        return take_tx_page(_tx_queue, req, status);
     }
 
     void send_close(ushort code)
@@ -937,11 +976,11 @@ unittest
     scope (exit) free(ws);
 
     // a header alone, declaring a 64-bit length: read as the parser would see it, with nothing behind
-    ulong parse(ulong len)
+    ulong parse(ulong len, ubyte first = 0x82)
     {
         ws._message.clear();
         ws._decoded_bytes = 0;
-        ubyte[14] frame = [0x82, 0xFF, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4];
+        ubyte[14] frame = [first, 0xFF, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4];
         foreach (i; 0 .. 8)
             frame[2 + i] = cast(ubyte)(len >> (56 - 8 * i));
         ws._message ~= frame[];
@@ -952,15 +991,37 @@ unittest
 
     // the top bit set is invalid on every build
     assert(parse(ulong.max) == 1 && parse(1UL << 63) == 1);
-    // a length this build cannot address is refused; one it can waits for its payload, however large
-    static if (size_t.sizeof == 8)
-        assert(parse(0x7FFF_FFFF_FFFF_FFFF) == 0 && ws._message.length == 14);
-    else
-    {
-        assert(parse(ulong(uint.max) + 1) == 1 && parse(0x7FFF_FFFF_FFFF_FFFF) == 1);
-        // the header plus these lengths wraps a 32-bit size_t
-        assert(parse(uint.max) == 0 && parse(uint.max - 13) == 0 && ws._message.length == 14);
-    }
+    // a message past the advertised size is refused before its payload arrives; one within it waits for it
+    assert(parse(0x7FFF_FFFF_FFFF_FFFF) == 1 && parse(uint.max) == 1 && parse(ws.actual_mtu + 1) == 1);
+    assert(parse(ws.actual_mtu) == 0 && ws._message.length == 14);
     assert(parse(1) == 0 && ws._message.length == 14);
+    // a control frame over 125 bytes, a fragmented one and an unknown opcode are refused with the header, before any payload
+    assert(parse(126, 0x89) == 1 && parse(70_000, 0x88) == 1 && parse(70_000, 0x8A) == 1 && parse(5, 0x09) == 1);
+    assert(parse(70_000, 0x83) == 1 && parse(70_000, 0x8B) == 1 && parse(1, 0x8F) == 1);
+    assert(parse(125, 0x89) == 0 && ws._message.length == 14);
     ws._message.clear();
+
+    // a frame larger than a page is queued across pages, and a client's body is masked in the copy
+    {
+        ubyte[4000] body = void;
+        foreach (i, ref b; body)
+            b = cast(ubyte)i;
+        ubyte[2] header = [0x82, 0x7E];
+        ubyte[4] mask = [0x11, 0x22, 0x33, 0x44];
+        assert(ws.queue_frame(header[], body[], mask[]) && ws.tx_queued == header.length + body.length);
+        assert(ws._tx_queue.length == WebSocket.max_tx_page && ws._tx_queue.next.next.next is null);
+        size_t at;
+        for (Page* page = ws._tx_queue; page; page = page.next)
+        {
+            foreach (b; cast(const(ubyte)[])page.data)
+            {
+                ubyte expect = at < header.length ? header[at] : cast(ubyte)(body[at - header.length] ^ mask[(at - header.length) & 3]);
+                assert(b == expect);
+                ++at;
+            }
+        }
+        assert(at == header.length + body.length);
+        ws.free_tx_queue();
+        assert(ws.tx_queued == 0);
+    }
 }

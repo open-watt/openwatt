@@ -403,7 +403,7 @@ one primitive (most belong in urt) and its copies deleted:
   in-flight list, cumulative ack and doubling ack timeout. One engine built on the three above;
   ASH and CPC need a dongle smoke before it lands.
 - **Bounded tx byte queues**: Stream `tx_queue_limit` (repeated in `router/stream/serial.d`),
-  websocket `_tx_pending` with low water, BLE stream `max_tx_backlog`, ASH `max_tx_queue`, and
+  websocket page queue with low water, BLE stream `max_tx_backlog`, ASH `max_tx_queue`, and
   unbounded page chains in `tls/stream.d` and the console session. These converge on page chains
   under the stream contract (docs/wip/STREAMING.md), not a new abstraction.
 
@@ -1612,19 +1612,16 @@ this is what remains.
   check `tx_backlog` before committing a message, then enforce a backlog bound in `send()`.
 
 - **The websocket's 128 KB hard bound is sized for the desktop, not for a micro**: pulled
-  producers now stop at 16 KB, but every pushed emitter can still drive `_tx_pending` to the hard
-  bound against a stalled reader, as one contiguous allocation per session. The bound exists only
-  to exceed the largest committed frame (sync: 64 KB), so it falls with `hello.max_frame`: once
-  pushed emitters are on the feed and `max_frame` is negotiated per platform, derive the bound
-  from it. Until then a no-PSRAM ESP32 serving two stalled browsers can be asked for 256 KB of
-  contiguous heap it does not have. Measure the heap headroom on each target that serves `/sync`
-  over a websocket, and check what `_tx_pending` does when that allocation fails.
+  producers stop at 16 KB, but every pushed emitter can still drive the page queue to the hard
+  bound against a stalled reader. The bound exists only to exceed the largest committed frame
+  (sync: 64 KB), so it falls with `hello.max_frame`: once pushed emitters are on the feed and
+  `max_frame` is negotiated per platform, derive the bound from it. The queue is pool pages now,
+  so a no-PSRAM ESP32 serving two stalled browsers needs 256 KB of pages, not of contiguous heap;
+  measure the pool headroom on each target that serves `/sync` over a websocket.
 
-- **WebSocket TX should retain frame descriptors, not a byte array**: `_tx_pending` is a contiguous
-  buffer compacted on each append, so the pending backlog is copied on every drain cycle. Keep a
-  bounded ring of frame pages with framing progress instead, and stop masking in place. With the
-  ring in place a `tx_handler` producer can hand over page-backed packets, as `Stream`'s hands over
-  pages, and the pulled path stops copying the encoder buffer into the queue.
+- **WebSocket TX copies every frame into its pages**: once encoders write into pages (STREAMING.md
+  B.2), a frame should be the producer's page with its header in headroom, queued as it stands,
+  and a stream producer should be framed by a `ws_frame` filter that sets FIN on `end`.
 
 - **Take the caller's `MemFlags` through the page-pool jumbo path**: `pagepool.d` hard-codes
   `MemFlags.dma` for any request above the largest slab category, which on ESP32 confines a
