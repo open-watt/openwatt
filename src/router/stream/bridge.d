@@ -75,22 +75,14 @@ nothrow @nogc:
         return fastest;
     }
 
+    // a member that takes less than all of it drops the rest; a fan-out holds no backlog per member
     override ptrdiff_t write(const(void[])[] data...)
     {
-
-        foreach (i; 0 .. m_streams.length)
+        foreach (ref stream; m_streams[])
         {
-            foreach (j; 0 .. data.length)
-            {
-                ptrdiff_t written = 0;
-                while (written < data[j].length)
-                {
-                    if (m_streams[i] && m_streams[i].running)
-                        written += m_streams[i].write(data[j][written .. $]);
-                }
-            }
+            if (stream && stream.running)
+                stream.write(data);
         }
-
         size_t total = 0;
         foreach (ref d; data)
         {
@@ -190,6 +182,8 @@ unittest
         }
         override ptrdiff_t write(const(void[])[] data...)
         {
+            if (full)
+                return 0;
             size_t n;
             foreach (d; data)
             {
@@ -203,6 +197,7 @@ unittest
             incoming(text, MonoTime());
         }
         Array!char output;
+        bool full;
     }
 
     static void settle()
@@ -228,6 +223,11 @@ unittest
     assert(bridge.running && a.rx_handler is &bridge.member_rx && b.rx_handler is &bridge.member_rx);
     a.feed("x");
     assert(b.output[] == "x");
+
+    // a member that refuses does not hold up the others
+    b.full = true;
+    assert(bridge.write("w") == 1 && a.output[] == "w" && b.output[] == "x");
+    b.full = false;
 
     // a member destroyed and created again under its name is hooked once the replacement runs
     a.destroy();
