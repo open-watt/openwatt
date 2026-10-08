@@ -298,9 +298,9 @@ private:
     void deliver(MonoTime now)
     {
         Page* chain = uart_rx_take(_uart);
-        foreach (i; 0 .. uart_burst_count(chain))
+        UartBurst burst;
+        for (UartBursts bursts = UartBursts(chain); bursts.next(burst); )
         {
-            UartBurst burst = uart_burst(chain, i);
             immutable MonoTime time = burst.end ? burst.end : now;
             for (size_t at = 0; at < burst.length; )
             {
