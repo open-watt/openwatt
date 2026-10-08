@@ -1755,16 +1755,17 @@ uint drain_ooo(TcpPcb* pcb)
 // -------------------------------------------------------------------------
 // Console
 
+import manager.console.command : CommandState;
 import manager.console.session : Session;
-import manager.console.table : Table;
+import manager.console.table : print_table, Table;
 import urt.mem.temp : tconcat, tformat;
 
-public void tcp_print(Session session)
+public CommandState tcp_print(Session session)
 {
     if (_pcbs.length == 0)
     {
         session.write_line("No TCP connections");
-        return;
+        return null;
     }
 
     Table t;
@@ -1798,7 +1799,7 @@ public void tcp_print(Session session)
         t.cell(pcb.ooo_buf.length ? tconcat(cast(uint)pcb.ooo_buf.length, '/', pcb.ooo_total_bytes, 'B') : "-");
     }
 
-    t.render(session);
+    return print_table(session, t);
 }
 
 

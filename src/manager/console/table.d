@@ -1,6 +1,8 @@
 module manager.console.table;
 
 import urt.array;
+import urt.lifetime : move;
+import urt.mem : alloc;
 import urt.string.ansi : visible_width, visible_slice;
 import urt.time : MonoTime, getTime, seconds;
 import urt.variant;
@@ -116,24 +118,6 @@ nothrow @nogc:
         }
         _cell_ends ~= cast(uint)_text_buf.length;
         _cell_spans ~= cast(ubyte)1;
-    }
-
-    void render(Session session)
-    {
-        immutable num_cols = _columns.length;
-        if (num_cols == 0 || session is null)
-            return;
-
-        pad_incomplete_row();
-
-        assert(num_cols <= max_cols);
-
-        size_t[max_cols] alloc = void;
-        compute_column_widths(session, alloc[0 .. num_cols]);
-
-        write_row(session, alloc[0 .. num_cols], uint.max);
-        foreach (row; 0 .. _num_rows)
-            write_row(session, alloc[0 .. num_cols], row);
     }
 
     // render a viewport: header + rows[offset .. offset+viewport_h]
@@ -753,6 +737,86 @@ private:
 }
 
 
+// prints tables built whole as the session's stream takes them, a second after the first and a blank line;
+// the tables' headers must outlive the print
+CommandState print_table(Session session, ref Table table)
+{
+    Table none;
+    return alloc!BuiltPrint(session, table, none);
+}
+
+CommandState print_table(Session session, ref Table first, ref Table second)
+    => alloc!BuiltPrint(session, first, second);
+
+final class BuiltPrint : TablePrint
+{
+nothrow @nogc:
+
+    ~this() {}
+
+    this(Session session, ref Table first, ref Table second)
+    {
+        super(session);
+        _built = first.move;
+        _next = second.move;
+        begin();
+    }
+
+    override CommandCompletionState update()
+    {
+        if (super.update() == CommandCompletionState.in_progress)
+            return CommandCompletionState.in_progress;
+        if (_next.num_cols == 0)
+            return CommandCompletionState.finished;
+        session.write_line();
+        _built = _next.move;
+        table.clear();
+        _stats = Table.ColumnStats();
+        _resume_key = 0;
+        _resume_rows = 0;
+        _header_sent = false;
+        _released = false;
+        begin();
+        return CommandCompletionState.in_progress;
+    }
+
+    override void request_cancel()
+    {
+        _next.clear();
+        super.request_cancel();
+    }
+
+protected:
+    override void walk()
+    {
+        immutable uint cols = _built.num_cols;
+        for (uint row = resume_key; row < _built.num_rows; ++row)
+        {
+            begin_block(row);
+            if (!skip_row())
+            {
+                foreach (col; 0 .. cols)
+                    table.cell_span(_built.get_cell_text(row, col), _built._cell_spans[row * cols + col]);
+                commit_row();
+            }
+            if (stopped)
+                return;
+            end(0);
+        }
+    }
+
+private:
+    Table _built;
+    Table _next;
+
+    void begin()
+    {
+        _built.pad_incomplete_row();
+        table._columns = _built._columns;
+        start();
+    }
+}
+
 const(char)[] enum_key_for(ref const Variant value)
 {
     import urt.meta.enuminfo : VoidEnumInfo;
@@ -954,5 +1018,25 @@ unittest
         cancelled.request_cancel();
         assert(cancelled._released && cancelled.update() == CommandCompletionState.finished);
         free(cancelled);
+
+        // a table built whole prints through the pull, and a second follows it after a blank line
+        session.clearOutput();
+        Table first, second;
+        first.add_column("key");
+        first.add_column("value", Table.TextAlign.right);
+        foreach (i; 0 .. 3)
+        {
+            first.add_row();
+            first.cell(tconcat("row", i));
+            first.cell(tconcat(i * 100));
+        }
+        second.add_column("other");
+        second.add_row();
+        second.cell("last");
+        CommandState built = print_table(session, first, second);
+        assert(first.num_cols == 0 && built.update() == CommandCompletionState.in_progress);
+        assert(built.update() == CommandCompletionState.finished);
+        free(built);
+        assert(session.getOutput() == "KEY   VALUE\x1b[K\nrow0      0\x1b[K\nrow1    100\x1b[K\nrow2    200\x1b[K\n\nOTHER\x1b[K\nlast\x1b[K\n");
     }
 }

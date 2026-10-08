@@ -304,10 +304,10 @@ nothrow @nogc:
         return tconcat(v, "W");
     }
 
-    void why(Session session)
+    CommandState why(Session session)
     {
         if (!require_started(session))
-            return;
+            return null;
 
         import urt.mem.temp : tconcat;
         import urt.meta.enuminfo : enum_key_from_value;
@@ -354,13 +354,13 @@ nothrow @nogc:
             table.cell((cmd_e && cmd_e.value.isNumber) ? tconcat(cmd_e.value.asFloat) : "-");
         }
 
-        table.render(session);
+        return print_table(session, table);
     }
 
-    void control_print(Session session)
+    CommandState control_print(Session session)
     {
         if (!require_started(session))
-            return;
+            return null;
 
         import urt.mem.temp : tconcat;
         import urt.meta.enuminfo : enum_key_from_value;
@@ -386,7 +386,7 @@ nothrow @nogc:
         foreach (ref ctl; registry.by_target.values)
             add_control_row(table, ctl, path_buf[]);
 
-        table.render(session);
+        return print_table(session, table);
     }
 
     void add_control_row(ref Table table, ref Control ctl, char[] path_buf)
@@ -482,8 +482,8 @@ nothrow @nogc:
         if (watch)
             return alloc!TopologyWatchState(session, this);
 
-        build_topology_table(session).render(session);
-        return null;
+        Table table = build_topology_table(session);
+        return print_table(session, table);
     }
 
     CommandState circuit_print(Session session, const(Variant)[] args)
@@ -502,8 +502,8 @@ nothrow @nogc:
         if (watch)
             return alloc!CircuitWatchState(session, this);
 
-        build_circuit_table(session).render(session);
-        return null;
+        Table table = build_circuit_table(session);
+        return print_table(session, table);
     }
 
     Table build_topology_table(Session)

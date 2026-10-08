@@ -1729,10 +1729,12 @@ this is what remains.
   CSV) and pacers (print, live view), read through point cursors (copy-on-write snapshots) or span
   cursors (series ranges). It replaces `Table`'s cell store, `TablePrint`'s walk and resume, the
   duplicate print and view walkers, and the API's whole-buffer JSON; a design note goes in
-  `docs/wip/` first. Still whole-output today: `/protocol/ip/tcp`, `neighbour`,
-  `neighbour6`, `/sync/neighbor`, `/sync/peering`, `/protocol/ble/device`, `/port`,
-  `/element/link`, `/system/linux` and `/log/print` still render whole-output; `--json` prints
-  still build one `Variant`. `CollectionPrint` resumes by iteration index, so an add or remove
+  `docs/wip/` first. Interim: every former `Table.render` site, `/protocol/ble/device` and
+  `/element/link` build their table whole and hand it to `print_table`, whose `BuiltPrint` paces
+  the rows; when the sites move to the model, delete `print_table` and `BuiltPrint`. Still
+  written whole: `/sync/neighbor`, `/sync/peering`, `/port`, `/system/linux`, `/record query`
+  (one line per sample, the largest) and `/protocol/ble/client` GATT; `--json` prints still build
+  one `Variant`. `CollectionPrint` resumes by iteration index, so an add or remove
   mid-print can skip or repeat one item; `DevicePrint` resumes by device slot, and inside a
   device by row count, so an element or component added between chunks repeats or loses a row
   and can leave the tree glyphs disagreeing.

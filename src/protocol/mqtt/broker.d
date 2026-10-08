@@ -15,8 +15,9 @@ import urt.time;
 import manager;
 import manager.base;
 import manager.collection;
+import manager.console.command : CommandState;
 import manager.console.session : ConsoleSession = Session;
-import manager.console.table : Table;
+import manager.console.table : print_table, Table;
 import manager.expression : NamedArgument;
 import manager.features : is_tiny;
 
@@ -185,14 +186,14 @@ nothrow @nogc:
         publish_internal(null, client_id, topic, payload, properties, retain, timestamp);
     }
 
-    void print_retained(ConsoleSession session, const(char)[] filter = "#")
+    CommandState print_retained(ConsoleSession session, const(char)[] filter = "#")
     {
         if (!filter)
             filter = "#";
         if (!validate_topic_filter(filter))
         {
             session.write_line("Invalid MQTT topic filter");
-            return;
+            return null;
         }
 
         Table table;
@@ -216,13 +217,13 @@ nothrow @nogc:
         if (count == 0)
         {
             session.write_line("No retained MQTT messages");
-            return;
+            return null;
         }
-        table.render(session);
+        return print_table(session, table);
     }
 
     static if (has_message_cache)
-    void print_cache(ConsoleSession session, const(char)[] filter = "#")
+    CommandState print_cache(ConsoleSession session, const(char)[] filter = "#")
     {
         _cache_in_use = true;
         scope (exit) _cache_in_use = false;
@@ -231,13 +232,13 @@ nothrow @nogc:
         if (!validate_topic_filter(filter))
         {
             session.write_line("Invalid MQTT topic filter");
-            return;
+            return null;
         }
 
         if (_cache.empty)
         {
             session.write_line("No cached MQTT messages");
-            return;
+            return null;
         }
 
         Table table;
@@ -272,9 +273,9 @@ nothrow @nogc:
         if (count == 0)
         {
             session.write_line("No cached MQTT messages");
-            return;
+            return null;
         }
-        table.render(session);
+        return print_table(session, table);
     }
 
     static if (has_message_cache)
@@ -298,14 +299,14 @@ nothrow @nogc:
         session.write_line(cast(const(char)[])message.payload[]);
     }
 
-    void print_sessions(ConsoleSession session)
+    CommandState print_sessions(ConsoleSession session)
     {
         import urt.mem.temp : tconcat;
 
         if (_sessions.empty)
         {
             session.write_line("No MQTT sessions");
-            return;
+            return null;
         }
 
         Table table;
@@ -337,10 +338,10 @@ nothrow @nogc:
             table.cell(tconcat(s.pending_outbound.length));
             table.cell(s.will.present ? (s.will.sent ? "sent" : "pending") : "-");
         }
-        table.render(session);
+        return print_table(session, table);
     }
 
-    void print_subscriptions(ConsoleSession session)
+    CommandState print_subscriptions(ConsoleSession session)
     {
         import urt.mem.temp : tconcat;
 
@@ -378,9 +379,9 @@ nothrow @nogc:
         if (count == 0)
         {
             session.write_line("No MQTT session subscriptions");
-            return;
+            return null;
         }
-        table.render(session);
+        return print_table(session, table);
     }
 
     package Session* claim_or_create_session(const(char)[] client_id, bool clean_start, ProtocolLevel level, ref bool present)

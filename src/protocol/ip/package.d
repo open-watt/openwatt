@@ -2272,17 +2272,17 @@ nothrow @nogc:
     }
 
     version (UseInternalIPStack)
-    void neighbour_v4_print(Session session)
+    CommandState neighbour_v4_print(Session session)
     {
         import router.iface.mac : MACAddress;
-        import manager.console.table : Table;
+        import manager.console.table : print_table, Table;
         import urt.mem.temp : tconcat;
 
         auto entries = _stack.neighbour_v4_cache.entries;
         if (entries.length == 0)
         {
             session.write_line("No IPv4 neighbour entries");
-            return;
+            return null;
         }
 
         Table t;
@@ -2306,22 +2306,22 @@ nothrow @nogc:
             t.cell(e.iface ? e.iface.name[] : "");
         }
 
-        t.render(session);
+        return print_table(session, t);
     }
 
     version (UseInternalIPStack)
     static if (has_ipv6)
-    void neighbour_v6_print(Session session)
+    CommandState neighbour_v6_print(Session session)
     {
         import urt.mem.temp : tconcat;
-        import manager.console.table : Table;
+        import manager.console.table : print_table, Table;
         import router.iface.mac : MACAddress;
 
         auto entries = _stack.neighbour_v6_cache.entries;
         if (entries.length == 0)
         {
             session.write_line("No IPv6 neighbour entries");
-            return;
+            return null;
         }
 
         Table t;
@@ -2345,7 +2345,7 @@ nothrow @nogc:
             t.cell(e.iface ? e.iface.name[] : "");
         }
 
-        t.render(session);
+        return print_table(session, t);
     }
 
     version (UseInternalIPStack)

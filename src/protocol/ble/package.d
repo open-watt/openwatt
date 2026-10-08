@@ -251,35 +251,36 @@ nothrow @nogc:
         }
     }
 
-    void print_devices(Session session)
+    CommandState print_devices(Session session)
     {
+        import urt.mem.temp : tconcat, tformat;
+        import manager.console.table : print_table, Table;
+
         if (devices.length == 0)
         {
             session.write_line("No BLE devices discovered");
-            return;
+            return null;
         }
 
-        session.writef("{0} devices\n\n", devices.length);
-
-        size_t name_len = 4;
-        foreach (dev; devices.values)
-            name_len = max(name_len, dev.name.length);
-
-        session.writef(" {0, -17}  {1, 5}  {2, -*3}  {4}\n", "ADDRESS", "RSSI", "NAME", name_len, "INFO");
-
+        Table table;
+        table.add_column("address");
+        table.add_column("rssi", Table.TextAlign.right);
+        table.add_column("name");
+        table.add_column("info");
         foreach (dev; devices.values)
         {
-            session.writef(" {0}  {1, 5}  {2, -*3} ", dev.addr, dev.rssi, dev.name[], name_len);
-
-            if (dev.connectable)
-                session.write(" conn");
+            table.add_row();
+            table.cell(tconcat(dev.addr));
+            table.cell(tconcat(dev.rssi));
+            table.cell(dev.name[]);
+            const(char)[] info = dev.connectable ? "conn" : "";
             if (dev.has_company)
-                session.writef(" mfr:{0,04x}", dev.company_id);
+                info = tformat("{0}{1}mfr:{2,04x}", info, info.length ? " " : "", dev.company_id);
             foreach (svc; dev.service_uuids_16[])
-                session.writef(" svc:{0,04x}", svc);
-
-            session.write_line("");
+                info = tformat("{0}{1}svc:{2,04x}", info, info.length ? " " : "", svc);
+            table.cell(info);
         }
+        return print_table(session, table);
     }
 
 private:

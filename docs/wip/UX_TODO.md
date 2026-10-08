@@ -3,6 +3,18 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-10-08: console print output
+
+- `/element/link/print` is a table with `A`, `B` and `STATUS` columns instead of
+  `a <-> b  [status]` lines; a component link's status reads `component: <n> linked, <m> pending`,
+  and with no links it prints `No element links`. A client that parsed the old lines reads the
+  columns instead.
+- `/protocol/ble/device/print` no longer starts with an `<n> devices` line; it is a table with
+  `ADDRESS`, `RSSI`, `NAME` and `INFO` columns, `INFO` holding `conn`, `mfr:<id>` and `svc:<uuid16>`
+  separated by spaces. Count the rows for the device count.
+- `/system/fs/read` returns files of any size where a larger file (a few KB) printed an empty line,
+  and a read that fails partway ends with `read failed: <code> (backend error <n>)`.
+
 ## 2026-10-06: serial ports on every platform
 
 - Windows hosts now list their serial ports in `/port` too, as `windows:serial:COMn`, alongside

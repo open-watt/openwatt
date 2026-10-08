@@ -1184,11 +1184,22 @@ half cycle.
 /driver/power/regulator/add name=dump device=dump-load psm-pin=25 zc-pin=26 level=100 droop-start=50.2 droop-full=52
 ```
 
+### `/element/link`
+
+A link keeps two elements' values in step: whichever updates, the other takes its value, and the
+newer of the two wins when the link resolves. Linking two components links every element they
+have in common, as elements appear.
+
+| Command | Syntax | Description |
+| --- | --- | --- |
+| `add` | `/element/link/add <a> <b>` | Links two elements, or two components, by path. A path that resolves to nothing yet is kept and decided when it appears. |
+| `print` | `/element/link/print` | A table of links: `a`, `b` and `status`, which is `linked`, `pending` while an end is missing, `undecided` while neither path resolves, or `component: <n> linked, <m> pending` for a component link. |
+
 ### `/protocol/ble/device`
 
 | Command | Syntax | Description |
 | --- | --- | --- |
-| `print` | `/protocol/ble/device/print` | Lists devices heard advertising, with RSSI, name, and advertised service and manufacturer identifiers. |
+| `print` | `/protocol/ble/device/print` | A table of devices heard advertising: `address`, `rssi`, `name` and `info`, which lists `conn` for a connectable device, `mfr:<id>` and each advertised `svc:<uuid16>`. |
 
 Entries expire twenty seconds after the last advertisement. A connected device
 stops advertising, so it leaves this list while a client holds it.

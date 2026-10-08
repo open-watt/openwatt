@@ -1394,8 +1394,14 @@ nothrow @nogc:
             undecided_links ~= UndecidedLink(source.make_string(), target.make_string());
     }
 
-    void link_print(Session session)
+    CommandState link_print(Session session)
     {
+        import manager.console.table : print_table, Table;
+
+        Table table;
+        table.add_column("a");
+        table.add_column("b");
+        table.add_column("status");
         char[256] buf_a = void, buf_b = void;
         foreach (link; links)
         {
@@ -1414,8 +1420,10 @@ nothrow @nogc:
                 ptrdiff_t len = link.b.elem.full_path(buf_b);
                 b = buf_b[0 .. len];
             }
-            const(char)[] status = link.resolved ? "linked" : "pending";
-            session.write_line(a, " <-> ", b, "  [", status, "]");
+            table.add_row();
+            table.cell(a);
+            table.cell(b);
+            table.cell(link.resolved ? "linked" : "pending");
         }
 
         foreach (cl; component_links)
@@ -1423,11 +1431,25 @@ nothrow @nogc:
             size_t bound, pending;
             foreach (l; cl.children.values)
                 l.resolved ? ++bound : ++pending;
-            session.write_line(cl.a_prefix, " <-> ", cl.b_prefix, "  [component: ", bound, " linked, ", pending, " pending]");
+            table.add_row();
+            table.cell(cl.a_prefix[]);
+            table.cell(cl.b_prefix[]);
+            table.cell(tconcat("component: ", bound, " linked, ", pending, " pending"));
         }
 
         foreach (ref u; undecided_links)
-            session.write_line(u.a, " <-> ", u.b, "  [undecided]");
+        {
+            table.add_row();
+            table.cell(u.a[]);
+            table.cell(u.b[]);
+            table.cell("undecided");
+        }
+        if (table.num_rows == 0)
+        {
+            session.write_line("No element links");
+            return null;
+        }
+        return print_table(session, table);
     }
 
 
