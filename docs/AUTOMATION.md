@@ -87,8 +87,10 @@ or the UI. Built-in providers are the `Application` itself (`element:`), cron
 ## Condition
 
 `if=<expr>` is an optional gate, a quoted expression on the same engine the energy policy layer
-runs on: it reads any element by `@path`, compares with units (`@site.power > 2000W`), and a falsey
-result skips the action. Two qualifiers operate on its resolutions, and both require it:
+runs on: it reads any element by `@path`, compares with units (`@site.power > 2000W`), matches an
+enum element against its key (`@panel.event == "hold"`), takes `true` and `false` as literals
+(`@door.open == false`), and a falsey result skips the action. Two qualifiers operate on its
+resolutions, and both require it:
 
 - `edge=level|rising|falling` (default `level`) picks which transitions fire. `level` fires on
   every trigger that finds the condition true. For a boolean element that already behaves like a

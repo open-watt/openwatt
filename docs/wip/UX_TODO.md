@@ -9,6 +9,15 @@ through them and remove sections as they are absorbed.
   65535 bytes, the segment it advertises in `hello`, instead of buffering it. Keep each message a
   client sends within the node's advertised `segment`.
 
+## 2026-10-09: expression and argument semantics
+
+- `true` and `false` are literals in expressions and command arguments: `set x=true` stores a
+  bool, not the string `"true"`; a string property still receives `true`/`false` as text.
+- `!=` now means not-equal (it evaluated as `==` before). An automation `if=` that relied on the
+  old behaviour inverts.
+- An enum element compares by key against a string (`@panel.event == "hold"`), and `if=` sees
+  `$value` (null for time triggers and at arm or reset).
+
 ## 2026-10-08: console print output
 
 - `/element/link/print` is a table with `A`, `B` and `STATUS` columns instead of
