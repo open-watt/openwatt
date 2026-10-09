@@ -54,7 +54,7 @@ left in place they are dead weight whose reason is invisible in the code.
   session interfaces. Use the shared bridge-port collection and dynamic endpoint
   cleanup rather than a separate membership path.
 - Fix the Windows empty-directory `get_temp_filename` contract in uRT; the native
-  console unit test fails creating its script file (command.d:590), including
+  console and uRT file unit tests fail creating their script files, including
   outside the sandbox. WSL unit tests pass.
 - Complete bridge VLAN membership tables beyond per-port PVID configuration;
   non-PVID ingress with filtering and non-PVID egress currently drop.
@@ -348,6 +348,10 @@ and the panel left outstanding.
   pool nor the event queues, intrinsics and signal providers its constructor registers.
 - **`Duration` properties print as raw nanoseconds** (`get` shows `3e+10ns` for `30s`): the value
   reaches the console as a quantity rather than through `Duration`'s own formatting.
+- **Duration compact-format footprint**: verify with the supported target compiler and linked
+  helpers. The assembly review is complete; isolated LDC 1.43 / LLVM 22 `-Oz` probes of both
+  functions and their numeric tables are 528 bytes below the original on ARM968E-S, 116 bytes
+  above on RV32IMAFC and 184 above on Cortex-M4. These are not firmware totals.
 
 ## Driver contracts (2026-10-04)
 
@@ -1193,8 +1197,6 @@ this is what remains.
   verified on the BL808 only.
 - **`/element/set` cannot reach a device keyed by a peer id**, such as the energy app's device,
   which `create_energy_device` keys by the local node id.
-- **`/device/print` renders negative ages as `-209.-6s`** when a remote timestamp is ahead of the
-  local clock.
 
 - **A cleared template can survive a reconnect on a wholly unclassified path**: an introduction
   omits `tmpl` when nothing on the path carries a template, and an absent chain is silence, so a

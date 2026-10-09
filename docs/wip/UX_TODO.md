@@ -3,10 +3,18 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
-## 2026-10-12: rejected console values
+## 2026-10-12: console values and duration text
 
 - `/element/set` reports a rejected value as `Cannot set <path>: <reason>`. Show the
   reason to the user; the element keeps its previous value.
+- Duration text uses decimal seconds (`1min10.01s`) and scales durations below a second
+  to `ms`, `us` or `ns` (`350ms`, `10us`). Accept a decimal fraction on the final term.
+- Replace minute inputs ending in `m` with `min`, including quoted strings and
+  `every:` signal URIs. The Duration parser accepts only `min`. Default output uses
+  `min` and round-trips; explicit compact output may use `m` and must stay display-only.
+- `/device/print` and `/device/print --watch` use Duration's `t2.1` format: at most two
+  nonzero unit terms and one fractional place. Expect omitted zero terms and trailing
+  zeros, days/weeks for longer ages, and a leading minus for clock skew (`-1m2.3s`).
 
 ## 2026-10-11: API responses stream
 

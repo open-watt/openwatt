@@ -2051,6 +2051,14 @@ unittest
     assert(o.get("timeout").asDuration == seconds(5));
     o.prop_write!(ElemTestObject, "timeout")(msecs(1500));
     assert(o.get("timeout").asDuration == msecs(1500));
+    timeout = Variant("10min");
+    assert(o.set("timeout", timeout) && o.get("timeout").asDuration == seconds(600));
+    assert(timeout.fromString("10min") == 5);
+    assert(o.set("timeout", timeout) && o.get("timeout").asDuration == seconds(600));
+    assert(timeout.fromString("10m") == 3);
+    assert(!o.set("timeout", timeout) && o.get("timeout").asDuration == seconds(600));
+    timeout = Variant("10m");
+    assert(!o.set("timeout", timeout));
 
     // Quantity round-trips through both doors and boxes with its unit
     o.prop_write!(ElemTestObject, "power")(Quantity!(int, ScaledUnit(Watt))(240));

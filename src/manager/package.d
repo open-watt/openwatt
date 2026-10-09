@@ -8,7 +8,7 @@ import urt.log : writeWarning;
 import urt.map;
 import urt.mem;
 import urt.mem.reclaim;
-import urt.mem.temp : tconcat;
+import urt.mem.temp : tconcat, tformat;
 import urt.meta.enuminfo : VoidEnumInfo;
 import urt.result : StringResult;
 import urt.si.quantity;
@@ -1663,17 +1663,6 @@ protected:
 
         SysTime now = getSysTime();
 
-        const(char)[] format_age(Duration d)
-        {
-            long ds = d.as!"msecs" / 100;
-            if (ds < 600)
-                return tconcat(ds / 10, ".", ds % 10, "s");
-            long s = ds / 10;
-            if (s < 3600)
-                return tconcat(s / 60, "m", s % 60, "s");
-            return tconcat(s / 3600, "h", (s / 60) % 60, "m");
-        }
-
         Array!char path;
         Array!char prefix;
 
@@ -1748,7 +1737,7 @@ protected:
                     continue;
                 ++emitted;
                 bool last = emitted == visible;
-                if (!row(tconcat(prefix[], last ? t_last : t_branch, e.id[]), e.value, e.last_update && e.sampling_mode != SamplingMode.constant ? format_age(now - e.last_update) : ""))
+                if (!row(tconcat(prefix[], last ? t_last : t_branch, e.id[]), e.value, e.last_update && e.sampling_mode != SamplingMode.constant ? tformat("{0,t2.1}", now - e.last_update) : ""))
                     return false;
                 end(depth);
             }
@@ -1836,24 +1825,13 @@ nothrow @nogc:
         SysTime now = getSysTime();
         Array!char path;
 
-        const(char)[] format_age(Duration d)
-        {
-            long ds = d.as!"msecs" / 100;
-            if (ds < 600)
-                return tconcat(ds / 10, ".", ds % 10, "s");
-            long s = ds / 10;
-            if (s < 3600)
-                return tconcat(s / 60, "m", s % 60, "s");
-            return tconcat(s / 3600, "h", (s / 60) % 60, "m");
-        }
-
         void emit_element(Element* e, uint depth, bool is_last)
         {
             TreeNodeInfo info = TreeNodeInfo(path[], e.id[], depth, is_last, false);
             yield(info, (ref Table t) {
                 t.cell(e.value);
                 t.cell(e.last_update && e.sampling_mode != SamplingMode.constant
-                    ? format_age(now - e.last_update) : "");
+                    ? tformat("{0,t2.1}", now - e.last_update) : "");
             });
         }
 
