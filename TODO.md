@@ -74,8 +74,6 @@ left in place they are dead weight whose reason is invisible in the code.
 
 - Separate Element's unseen state from a valid zero timestamp; held-value dedup
   currently treats SysTime.init as unseen on clocks whose epoch starts at zero.
-- Make Tesla BLE startup report unsupported AES-GCM/ECDH backends directly on
-  embedded targets instead of discovering the missing backend during a session.
 - Support or explicitly reject Linux builds without mbedTLS: uRT KeyPair currently
   fails a static assertion before the backend-independent unit tests can run.
 - Endian codegen follow-up: investigate LLVM array-return lowering for ARM native
@@ -792,16 +790,6 @@ The current implementation and remaining phases are described in
 8. **Energy intent surface**: let automations propose and dispose requests on `Control`; keep
    arbitration and ownership of contended outputs in the allocator.
 
-9. **`if=` cannot read `$value`**: `condition_holds()` evaluates the condition with an empty
-   `EvalContext`, so `$value` exists only inside `do={}`. Dispatching on an enum element, such as
-   a button's `event`, needs the trigger value in the condition's context; a `for=` deadline can
-   use the snapshot it already keeps.
-
-10. **Enums and bools do not compare with their names**: `(@system.panel.reset.event == "hold")`
-    and `(@x.switch == false)` are false on a matching value, so an action cannot branch on a
-    button's `event`. `Type.eq` compares the two Variants raw; an enum operand should compare by
-    key against a string, and `true`/`false` should be literals.
-
 ## System IO
 
 Buttons, relays and lights as data-model components, the `system` device as the node's own
@@ -929,14 +917,10 @@ decisions are in [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md). The
   has to be spelled `values=2,3` to avoid the collapse. Add a per-profile (or per-remote-server)
   quirk that pins writes to fn 16 / fn 15 regardless of count.
 
-- **`slave=` accepts only a named remote-server, and a raw unit address silently polls nothing**:
-  `/binding/modbus` leaves `_slave_server` null unless `slave=` names an
-  `/interface/modbus/remote-server` entry, and the poll path early-outs on
-  `if (_snooping || !_slave_server) return;` (`src/protocol/modbus/binding.d:238`). A binding
-  configured with a bare unit address therefore reaches Running and transmits nothing, with no
-  diagnostic. Either resolve a numeric `slave=` to an implicit server or refuse the config in
-  `validate()`. A `/interface/modbus` bus scan command would also have found the TAC1100's address
-  in seconds instead of by hand.
+- **`slave=` takes a name, not a unit address**: a bare unit address fails startup with
+  `slave '3' is not a remote-server or node`. Resolving a numeric `slave=` to an implicit server
+  needs a `remote-server` that can be released again (`add_remote_server` has no removal), and
+  a `/interface/modbus` bus scan command would find a unit's address in seconds instead of by hand.
 
 
 - **Device construction API, remaining pieces** (the builder landed: `DeviceBuilder`,
@@ -1031,11 +1015,6 @@ decisions are in [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md). The
   on disk, unify RAM/disk time queries, and add the decimation ladder described in
   [docs/DATA_MODEL.md](docs/DATA_MODEL.md).
 
-- **`bucket_capacity`/`text_bucket_capacity` do not scale with the target**: `text_heap_limit`
-  now does (8k under `Tiny`, 64k otherwise), but the record-count caps declared beside it are
-  still 256 and 64 on every part, so a bucket on a 320KB device costs what one on a Pi costs.
-  Fold all three into the same per-target sizing rather than leaving one scaled and two fixed.
-
 - **Bound recorder container growth**: `.ows` files grow without limit. Add a size or age budget
   per series or per recorder, and give the retention classes distinct policies: the short class
   (planner budget, allocation decisions, coverage and mismatch flags) wants days, while island
@@ -1054,9 +1033,12 @@ decisions are in [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md). The
   per-plane codec byte with raw fallback) are designed against the existing `SeriesCodec` registry
   and not written.
 
-- **Validate the series container on load**: `SeriesContainer.open_` (`src/manager/ows.d`) reads
-  block headers off disk unvalidated, so a corrupt or hostile container is trusted. External state
-  rejects, it does not assert.
+- **Harden the series container against hostile payloads**: `SeriesContainer.open_` now
+  rejects corrupt headers and truncates at the first bad block, but adopted blocks are trusted by
+  size only: a raw text payload's `heap_view` offsets are never checked against `heap_bytes`, so
+  a hostile record plane can index outside the heap on read, and every distinct anchor format
+  interns through `register_format`, which asserts when the registry fills (about 65k anchors).
+  External state rejects, it does not assert.
 
 - **Defer reactor-thread producers to the main loop**: a producer writing from a reactor thread
   must not dispatch observers or mark dirty inline (`src/manager/element.d:1261`); queue the
@@ -1123,11 +1105,6 @@ ownership, option-buffer overrun), the INIT-REBOOT silence rule and monotonic le
 expiry landed: a lease arms its own expiry and returns its own reservation to the pool
 that made it, so no server reaps. What follows is still open.
 
-- **P2: receive validation bypasses transport checks** (both `incoming_packet`
-  methods): raw interface subscriptions do not check IPv4 checksum, fragmentation,
-  or nonzero UDP checksum. UDP length is bounded by the frame rather than IPv4
-  total length. Share a validated DHCP datagram decoder and reject malformed packets
-  before changing lease state; preserve legal IPv4 zero UDP checksums.
 - **P2: pool edits discard live reservations** (`ip/pool.d`, `start`, `end`):
   changing either endpoint clears the allocation bitmap without reconciling active
   leases; the running DHCP server can then allocate an already leased address.
@@ -1209,10 +1186,6 @@ this is what remains.
   handle tables. A reclassification of a large device on a session holding thousands of handles is
   O(elements x handles), once per event. Fine at fleet scale and only at configuration time; a
   keyed handle lookup fixes it if a device ever churns templates.
-
-- **The sync capability byte is full**: `templates` took bit 7 of `SyncCaps`, which is a `ubyte`
-  on the wire (binary `hello`) and in `SyncPeer._remote_caps`. The next capability needs the field
-  widened first; JSON names capabilities as strings and has no such limit.
 
 - **Intern the `add` frame's template chain**: `tmpl` repeats the same short chain on every
   element of a component, so a full intro pays for it once per element rather than once per
@@ -1685,10 +1658,6 @@ this is what remains.
     an open connection, a producer that yields at its deadline, `tx_handler` twice, one continuation,
     then `drop_tx_handler` cancels it). Both need a scheduler: an `Application` in the test, which
     waits on an Application that can be created twice in one process. (#816)
-
-- **`router.iface`'s unittest failed once on Windows** (2026-10-07, at the `set_l2mtu(1514)` mtu
-  assertion, package.d:1872) and passed on three reruns of the same binary. A value assertion right
-  after a setter should not be flaky; look for state another test leaves behind.
 
 - **`/log/print` without `--stream` redraws its pager every tick**: on the RP2350 it held the CPU
   at 64% and logged an 80 ms `console-session` update each frame while idle. The live view should

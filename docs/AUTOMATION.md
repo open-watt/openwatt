@@ -67,7 +67,10 @@ rule arms the moment the element appears, which is the normal case for a Zigbee 
 scan completes. A valid, resolvable URI subscribes.
 
 **Trigger context** is the flat `$value`: the datum that fired, snapshotted at the moment of
-change, and null for value-less triggers such as time. Prefer it to re-reading `@path` in the
+change, and null for value-less triggers such as time. It is bound in both `if=` and `do={}`, so a
+rule can gate on the datum itself (`if="$value > 2000W"`). When the engine evaluates `if=` without
+an event, at arm and when `edge=`/`for=` are changed, `$value` is null; a `for=` deadline
+re-evaluates with the datum that began the episode. Prefer `$value` to re-reading `@path` in the
 action: a live re-read can race a later change, `$value` cannot.
 
 ### Providers
@@ -87,8 +90,10 @@ or the UI. Built-in providers are the `Application` itself (`element:`), cron
 ## Condition
 
 `if=<expr>` is an optional gate, a quoted expression on the same engine the energy policy layer
-runs on: it reads any element by `@path`, compares with units (`@site.power > 2000W`), and a falsey
-result skips the action. Two qualifiers operate on its resolutions, and both require it:
+runs on: it reads any element by `@path`, compares with units (`@site.power > 2000W`), matches an
+enum element against its key (`@panel.event == "hold"`), takes `true` and `false` as literals
+(`@door.open == false`), and a falsey result skips the action. Two qualifiers operate on its
+resolutions, and both require it:
 
 - `edge=level|rising|falling` (default `level`) picks which transitions fire. `level` fires on
   every trigger that finds the condition true. For a boolean element that already behaves like a

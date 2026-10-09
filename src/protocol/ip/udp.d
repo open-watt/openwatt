@@ -1,35 +1,86 @@
 module protocol.ip.udp;
 
-version (UseInternalIPStack):
-
-import urt.array;
 import urt.endian;
 import urt.hash;
 import urt.inet;
-import urt.mem;
-import urt.time;
 
-import manager.base : ObjectRef;
 import manager.features : has_ipv6;
 
-import router.iface;
 import router.iface.endpoint : UdpHeader;
-import router.iface.packet;
 
 import protocol.ip : IPv4Header, IPProtocol;
-import protocol.ip.address;
-import protocol.ip.icmp;
-import protocol.ip.igmp : igmp_join, igmp_leave;
-import protocol.ip.stack;
 
-static if (has_ipv6)
+version (UseInternalIPStack)
 {
-    import protocol.ip : IPv6Header, pseudo_header_checksum_v6;
-    import protocol.ip.icmp6;
-    import protocol.ip.mld : mld_join, mld_leave;
+    import urt.array;
+    import urt.mem;
+    import urt.time;
+
+    import manager.base : ObjectRef;
+
+    import router.iface;
+    import router.iface.packet;
+
+    import protocol.ip.address;
+    import protocol.ip.icmp;
+    import protocol.ip.igmp : igmp_join, igmp_leave;
+    import protocol.ip.stack;
+
+    static if (has_ipv6)
+    {
+        import protocol.ip : IPv6Header, pseudo_header_checksum_v6;
+        import protocol.ip.icmp6;
+        import protocol.ip.mld : mld_join, mld_leave;
+    }
 }
 
 nothrow @nogc:
+
+
+// RFC 768: a zero checksum means the sender opted out, and 0xFFFF on the wire is a computed zero.
+bool parse_udp4(const(ubyte)[] datagram, out const(IPv4Header)* ip, out ushort src_port, out ushort dst_port, out const(ubyte)[] payload, bool verified = false, bool header_verified = false)
+{
+    if (datagram.length < IPv4Header.sizeof + UdpHeader.sizeof)
+        return false;
+
+    const h = cast(const IPv4Header*)datagram.ptr;
+    size_t hdr_len = h.ihl * 4;
+    size_t total = bigEndianToNative!ushort(h.total_length);
+    if (h.version_ != 4 || hdr_len < IPv4Header.sizeof || total < hdr_len + UdpHeader.sizeof || total > datagram.length)
+        return false;
+    if (h.protocol != IPProtocol.udp || (bigEndianToNative!ushort(h.flags_frag) & 0x3FFF) != 0)
+        return false;
+    if (!verified && !header_verified && internet_checksum(datagram[0 .. hdr_len]) != 0)
+        return false;
+
+    const(ubyte)[] segment = datagram[hdr_len .. total];
+    ushort udp_len = bigEndianToNative!ushort(segment[4 .. 6][0 .. 2]);
+    if (udp_len < UdpHeader.sizeof || udp_len > segment.length)
+        return false;
+    ushort checksum = bigEndianToNative!ushort(segment[6 .. 8][0 .. 2]);
+    if (checksum != 0 && !verified && internet_checksum(segment[0 .. udp_len], pseudo_header_checksum(IPAddr(h.src), IPAddr(h.dst), IPProtocol.udp, udp_len)) != 0)
+        return false;
+
+    ip = h;
+    src_port = bigEndianToNative!ushort(segment[0 .. 2][0 .. 2]);
+    dst_port = bigEndianToNative!ushort(segment[2 .. 4][0 .. 2]);
+    payload = segment[UdpHeader.sizeof .. udp_len];
+    return true;
+}
+
+ushort pseudo_header_checksum(IPAddr src, IPAddr dst, ubyte protocol, ushort transport_length) pure
+{
+    align(4) ubyte[12] ph = void;
+    ph[0..4]   = src.b;
+    ph[4..8]   = dst.b;
+    ph[8]      = 0;
+    ph[9]      = protocol;
+    storeBigEndian(cast(ushort*)(ph.ptr + 10), transport_length);
+    return internet_checksum(ph[]);
+}
+
+
+version (UseInternalIPStack):
 
 
 // One datagram waiting in a UdpPcb's receive queue.
@@ -324,34 +375,12 @@ static if (has_ipv6)
 // pkt.data is the entire IP datagram.
 void udp_input(ref IPStack stack, ref Packet pkt, BaseInterface iface, bool group_destination)
 {
-    if (pkt.data.length < IPv4Header.sizeof + UdpHeader.sizeof)
+    const(IPv4Header)* ip;
+    ushort src_port, dst_port;
+    const(ubyte)[] body_;
+    if (!parse_udp4(cast(const(ubyte)[])pkt.data, ip, src_port, dst_port, body_, pkt.checksum_verified, true))
         return;
 
-    const ip = cast(const IPv4Header*)pkt.data.ptr;
-    size_t ip_hdr_len = ip.ihl * 4;
-    size_t ip_total = loadBigEndian(cast(const(ushort)*)&ip.total_length);
-    if (ip_total < ip_hdr_len + UdpHeader.sizeof || ip_total > pkt.data.length)
-        return;
-
-    const(ubyte)[] payload = (cast(const(ubyte)*)pkt.data.ptr)[ip_hdr_len .. ip_total];
-    const u = cast(const UdpHeader*)payload.ptr;
-
-    ushort udp_len = loadBigEndian(&u.length);
-    if (udp_len < UdpHeader.sizeof || udp_len > payload.length)
-        return;
-
-    // Verify checksum if present (zero means sender opted out).
-    ushort wire_csum = loadBigEndian(&u.checksum);
-    if (wire_csum != 0 && !pkt.checksum_verified)
-    {
-        ushort pseudo = pseudo_header_checksum(IPAddr(ip.src), IPAddr(ip.dst), IPProtocol.udp, udp_len);
-        ushort calc = internet_checksum(payload[0 .. udp_len], pseudo);
-        if (calc != 0)
-            return;     // bad checksum
-    }
-
-    ushort dst_port = loadBigEndian(&u.dst_port);
-    ushort src_port = loadBigEndian(&u.src_port);
     IPAddr dst = IPAddr(ip.dst);
     bool multicast = dst.is_multicast;
     bool broadcast = is_broadcast_for_interface(iface, dst);
@@ -392,7 +421,7 @@ void udp_input(ref IPStack stack, ref Packet pkt, BaseInterface iface, bool grou
 
         InetAddress src = InetAddress(IPAddr(ip.src), src_port);
         InetAddress dst_address = InetAddress(dst, dst_port);
-        deliver_to_pcb(pcb, src, dst_address, iface, payload[UdpHeader.sizeof .. udp_len], pkt.creation_time);
+        deliver_to_pcb(pcb, src, dst_address, iface, body_, pkt.creation_time);
         delivered = true;
         if (!multicast && !broadcast)
             return;
@@ -677,17 +706,6 @@ static if (has_ipv6)
 
     bool zone_admits(uint bound, uint zone) pure
         => bound == 0 || bound == zone;
-}
-
-ushort pseudo_header_checksum(IPAddr src, IPAddr dst, ubyte protocol, ushort transport_length) pure
-{
-    align(size_t.sizeof) ubyte[12] ph = void;
-    ph[0..4]   = src.b;
-    ph[4..8]   = dst.b;
-    ph[8]      = 0;
-    ph[9]      = protocol;
-    storeBigEndian(cast(ushort*)(ph.ptr + 10), transport_length);
-    return internet_checksum(ph[]);
 }
 
 

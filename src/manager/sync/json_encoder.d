@@ -406,14 +406,14 @@ nothrow @nogc:
             _buf.append(",\"role\":\"", role_name(role), '\"');
         _buf ~= ",\"caps\":[";
         bool first = true;
-        foreach (bit; 0 .. 8)
+        foreach (bit; 0 .. 32)
         {
-            if (!(local_sync_caps & (1 << bit)))
+            if (!(local_sync_caps & (1u << bit)))
                 continue;
             if (!first)
                 _buf ~= ',';
             first = false;
-            _buf.append('\"', enum_key_from_value!SyncCaps(cast(SyncCaps)(1 << bit)), '\"');
+            _buf.append('\"', enum_key_from_value!SyncCaps(cast(SyncCaps)(1u << bit)), '\"');
         }
         _buf ~= "],\"encoders\":[\"json\"]";
         _buf.append(",\"max_frame\":", peer.local_max_message, ",\"segment\":", peer.local_segment);
@@ -999,7 +999,7 @@ nothrow @nogc:
 
             case "hello":
             {
-                ubyte caps;
+                uint caps;
                 Variant* cv = json.getMember("caps");
                 if (cv && !cv.isArray)
                     bad("caps");

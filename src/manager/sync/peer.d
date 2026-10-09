@@ -45,7 +45,7 @@ alias log = Log!"sync";
 alias SyncHandle = ulong;
 
 // verb families served; negotiated by hello, build-time on each end
-enum SyncCaps : ubyte
+enum SyncCaps : uint
 {
     objects = 1 << 0,   // legacy object mirror
     model   = 1 << 1,   // data-model space (add/val/sub)
@@ -57,7 +57,7 @@ enum SyncCaps : ubyte
     templates = 1 << 7, // understands `add {class:"component"}` shape refreshes
 }
 
-enum ubyte local_sync_caps = SyncCaps.objects | SyncCaps.model | SyncCaps.history | SyncCaps.console | SyncCaps.logs | SyncCaps.time | SyncCaps.console_session | SyncCaps.templates;
+enum uint local_sync_caps = SyncCaps.objects | SyncCaps.model | SyncCaps.history | SyncCaps.console | SyncCaps.logs | SyncCaps.time | SyncCaps.console_session | SyncCaps.templates;
 
 // reliability sublayer classification; values are the wire kind byte
 enum TxQueue : ubyte
@@ -831,7 +831,7 @@ package:
 
     enum uint min_segment = 32;   // below hello's size, so a peer that can handshake clears it
 
-    ubyte            _remote_caps;       // hello negotiation; 0 = no hello received
+    uint             _remote_caps;       // hello negotiation; 0 = no hello received
     uint             _remote_version;    // 0 until hello
     uint             _remote_max_message; // 0 until hello
     uint             _remote_segment;    // 0 until hello, and from a peer that predates it

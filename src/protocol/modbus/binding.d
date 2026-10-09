@@ -125,7 +125,7 @@ nothrow @nogc:
     {
         if (!_node.get || _device.empty)
             return false;
-        if (_slave_name.empty && _profile_name_explicit.empty)
+        if (_slave_name.empty && (!_serve || _profile_name_explicit.empty))
             return false;
         return true;
     }
@@ -162,7 +162,7 @@ nothrow @nogc:
             }
             if (!_slave_server)
             {
-                log.warning("slave '", _slave_name, "' not found");
+                log.warning("slave '", _slave_name, "' is not a remote-server or node");
                 return CompletionStatus.error;
             }
             if (_slave_server.profile.empty)
