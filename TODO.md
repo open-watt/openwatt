@@ -346,8 +346,6 @@ and the panel left outstanding.
   (a review probe confirmed it disarms): a module test would build its own Application, and an
   Application cannot be created twice in one process, since its destructor releases neither the page
   pool nor the event queues, intrinsics and signal providers its constructor registers.
-- **`Duration` properties print as raw nanoseconds** (`get` shows `3e+10ns` for `30s`): the value
-  reaches the console as a quantity rather than through `Duration`'s own formatting.
 
 ## Driver contracts (2026-10-04)
 
@@ -475,10 +473,6 @@ one primitive (most belong in urt) and its copies deleted:
   and GTK rotation, but does not yet renegotiate a PTK on an established link.
   Add authenticated rekey transitions and retransmission tests without resetting
   receive counters when already installed key material is repeated.
-
-- **[uRT build, in passing] Respect the compiler's Tiny version flag**:
-  `platforms.mk` hard-codes `-d-version=Tiny`, so `TINY=1 COMPILER=dmd` fails
-  before compilation. Use the existing compiler-specific `VERSION_FLAG`.
 
 - **[Windows toolchain] Retire the default beta DMD and isolate LDC COMDAT failure**:
   PATH selects DMD 2.112.0-beta.1, whose unittest build fails copy-constructor
@@ -845,10 +839,7 @@ decisions are in [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md). The
 9. **Network indication**: once #749's wifi mirror moves from the SmartEVSE binding into
    `system.status.network`.
 
-10. **A light's `level` prints as `1e+2%`**: `/device/print` shows the `Quantity!(ubyte, Percent)`
-    at 100 in exponent form. Find where an integral quantity is formatted as a float.
-
-11. **Changing a binding's `kind` leaves the old kind's elements**: a `light` made a `button`
+10. **Changing a binding's `kind` leaves the old kind's elements**: a `light` made a `button`
     keeps `effect`, `indicate`, `pulse`, `level` and `switch` beside `mode`, `state` and `event`,
     stale under a component now templated `Button`. Elements outlive a restart by design; a kind
     change should drop the ones the new kind does not bind.
@@ -862,11 +853,6 @@ decisions are in [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md). The
 
 - **Decide whether `/element/set value=1` converts to bool**: the element rejects it today and
   the console now says so (`value=true` works).
-
-- **The console prints quantities badly**: `/device/print` shows an integer 1310 nm as
-  `1.31e+3nm` and a float supply of 3.2616 V as `3.2616000175476074V`. The stored values are
-  right; the tree view's quantity formatting wants integers printed as integers and floats to a
-  precision that matches their resolution.
 
 - **`system` device memory is the allocator's own accounting**: on desktop that counts uRT
   allocations only, not the process's working set, which stays in `/system/sysinfo`. On ESP32
@@ -1370,13 +1356,6 @@ this is what remains.
     window. Size it to the segment once session output is pulled (S4): the console stream then
     grants by window room and resumes on the ack, with a bounded buffer that splits on code points.
 
-- **A Windows UDP socket that sends to a closed port stops receiving** (2026-10-06): two instances
-  peering over `/interface/udp` on loopback, the one whose hello went out before the other bound
-  its port never hears the other again. The ICMP port-unreachable surfaces as `WSAECONNRESET` on
-  the next `recvfrom`; urt's `recvfrom` swallows it as success with 0 bytes, and the reception path
-  appears to stop draining there. Disable `SIO_UDP_CONNRESET` on UDP sockets, or keep reading past
-  the reset.
-
 - **Interface sizes the MTU work left open** (2026-10-06): `l2mtu` should be writable on Ethernet,
   where jumbo frames make it meaningful, and read-only elsewhere, with `max-l2mtu` (the largest
   jumbo the hardware takes) present only there; the property system cannot yet let a derived class
@@ -1386,11 +1365,6 @@ this is what remains.
   Zigbee's 90-byte APS frame assumes the minimum NWK header; source routing or a longer APS header
   leaves less. Tesla TWC transmits its checksum byte unescaped, so a checksum of `0xC0` or `0xDB`
   corrupts the frame.
-
-- **urt's platforms.mk drops MbedTLS when a caller sets `VERSIONS`**: it appends `MbedTLS` to
-  `VERSIONS` with a plain assignment, which a command-line `VERSIONS` overrides, so
-  `VERSIONS=Foo` on an mbedTLS platform builds without `version (MbedTLS)`. Add it to `DFLAGS`
-  directly, as OpenWatt's `BOARD_VERSIONS` does.
 
 - **Link follow-ups**: interfaces signal `link_up`/`link_down`, but every Ethernet driver except
   the SFP port still links with its lifecycle, waiting in Starting for carrier and restarting when
@@ -1456,8 +1430,6 @@ this is what remains.
 
 - **`FEATURES=switch` has not been linked since the `has_ip` gates landed** in `driver/linux/bridge.d`
   and `driver/linux/wifi.d`; the tier was found unlinkable on 2026-09-20. Build it on Linux.
-
-- Fix `urt.conv.parse_uint` overflow: reject values outside `ulong` range using the existing zero-consumption error contract. Revision filenames use checked `parse_int_fast`.
 
 - **A full subscriber table refuses a resubscribe during dispatch**: an entry removed mid-walk
   holds its slot until the outermost dispatch compacts the table, so with all eight slots taken
@@ -1809,7 +1781,6 @@ so D0's devices appear on M0 only.
   sync encoders could build a frame where D0 or M0 reads it. Worth it once the M0/D0 link carries
   bulk traffic.
 - **A doorbell event the full event queue refuses waits for the next heartbeat**, up to a second.
-- **The heap core keeps a pool it failed to add**: reject it so its bytes are not counted as free.
 - **The BL618 has no `system_reset`/`por_reset`**; only the BL808 cores do.
 - **M0's provisioning AP is open**, where the Waveshare board's defaults run a WPA2 AP on a known
   setup secret with non-anonymous pcap. Bring M0's `default.conf` into line once a WPA2 AP and the
