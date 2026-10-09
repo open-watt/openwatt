@@ -792,16 +792,11 @@ The current implementation and remaining phases are described in
 8. **Energy intent surface**: let automations propose and dispose requests on `Control`; keep
    arbitration and ownership of contended outputs in the allocator.
 
+
 9. **`if=` cannot read `$value`**: `condition_holds()` evaluates the condition with an empty
    `EvalContext`, so `$value` exists only inside `do={}`. Dispatching on an enum element, such as
    a button's `event`, needs the trigger value in the condition's context; a `for=` deadline can
    use the snapshot it already keeps.
-
-10. **Enums and bools do not compare with their names**: `(@system.panel.reset.event == "hold")`
-    and `(@x.switch == false)` are false on a matching value, so an action cannot branch on a
-    button's `event`. `Type.eq` compares the two Variants raw; an enum operand should compare by
-    key against a string, and `true`/`false` should be literals.
-
 ## System IO
 
 Buttons, relays and lights as data-model components, the `system` device as the node's own

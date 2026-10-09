@@ -11,6 +11,7 @@ import urt.si.unit;
 import urt.string;
 
 public import urt.variant;
+import urt.meta.enuminfo : VoidEnumInfo;
 
 import manager.value;
 import manager.series : FormatId;
@@ -64,6 +65,7 @@ enum Flags : ubyte
     constant = 1 << 3,
     no_quotes = 1 << 4,
     allocated = 1 << 5,
+    boolean = 1 << 6,
 }
 
 struct NamedArgument
@@ -235,6 +237,7 @@ nothrow @nogc:
     this(bool b)
     {
         ty = Type.num;
+        flags = Flags.boolean;
         f = b ? 1 : 0;
     }
 
@@ -418,10 +421,20 @@ nothrow @nogc:
             return false;
         }
 
+        static bool enum_matches(ref const Variant e, const(char)[] key)
+        {
+            const(VoidEnumInfo)* info = e.get_enum_info();
+            if (!info.bitfield)
+                return info.value_for(key) == e;
+            bool ok;
+            long bits = info.parse_flags(key, ok);
+            return ok && Variant(bits, info) == e;
+        }
+
         final switch (ty)
         {
             case Type.num:
-                return Variant(f);
+                return (flags & Flags.boolean) ? Variant(f.value != 0) : Variant(f);
             case Type.null_:
                 return Variant();
             case Type.str:
@@ -540,7 +553,9 @@ nothrow @nogc:
             case Type.ne:
                 Variant l = left.evaluate(ctx);
                 Variant r = right.evaluate(ctx);
-                bool cmp = l == r;
+                bool cmp = l.is_enum && r.isString ? enum_matches(l, r.asString) :
+                           r.is_enum && l.isString ? enum_matches(r, l.asString) :
+                                                     l == r;
                 return Variant(ty == Type.eq ? cmp : !cmp);
             case Type.lt:
             case Type.le:
@@ -1015,7 +1030,7 @@ private Expression* parse_equality_exp(ref Parser parser)
     {
         version (ExpressionDebug)
             writeDebug("EQ");
-        Type ty = parser.text.ptr[-1] == '=' ? Type.eq : Type.ne;
+        Type ty = parser.text.ptr[-2] == '!' ? Type.ne : Type.eq;
         parser.skip_whitespace();
         Expression* right = parse_relational_exp(parser);
         if (!right)
@@ -1359,6 +1374,15 @@ private Expression* parse_primary_exp(ref Parser parser, bool allow_slash = fals
         version (ExpressionDebug)
             writeDebug("NULL");
     }
+    else if (!is_var && !is_element && (parser.text[0 .. len] == "true" || parser.text[0 .. len] == "false"))
+    {
+        r = alloc_expression(Type.num);
+        r.flags = Flags.constant | Flags.boolean;
+        r.f = VarQuantity(parser.text[0] == 't');
+
+        version (ExpressionDebug)
+            writeDebug("BOOL: ", parser.text[0] == 't');
+    }
     else
     {
         size_t taken = 0;
@@ -1431,9 +1455,7 @@ Expression* fold(Type ty, Expression* l, Expression* r)
     switch (ty)
     {
         case Type.not:
-            bool lb = l.as_bool;
-            *l = Expression(Type.num);
-            l.f = VarQuantity(!lb);
+            *l = Expression(!l.as_bool);
             return l;
 
         case Type.neg:
@@ -1446,10 +1468,14 @@ Expression* fold(Type ty, Expression* l, Expression* r)
             MutableString!0 s;
             if (l.ty == Type.str)
                 s = l.get_str;
+            else if (l.flags & Flags.boolean)
+                s = l.as_bool ? "true" : "false";
             else
                 s ~= l.as_num;
             if (r.ty == Type.str)
                 s ~= r.get_str;
+            else if (r.flags & Flags.boolean)
+                s ~= r.as_bool ? "true" : "false";
             else
                 s ~= r.as_num;
             *l = Expression(s.move);
@@ -1459,8 +1485,7 @@ Expression* fold(Type ty, Expression* l, Expression* r)
         case Type.and:
             bool ltrue = l.as_bool;
             bool rtrue = r.as_bool;
-            *l = Expression(Type.num);
-            l.f = VarQuantity(ty == Type.or ? ltrue || rtrue : ltrue && rtrue);
+            *l = Expression(ty == Type.or ? ltrue || rtrue : ltrue && rtrue);
             return l;
 
         case Type.eq:
@@ -1471,11 +1496,10 @@ Expression* fold(Type ty, Expression* l, Expression* r)
             {
                 // string comparison
                 ptrdiff_t t = l.get_str().cmp(r.get_str());
-                *l = Expression(Type.num);
-                l.f = VarQuantity(ty == Type.eq ? t == 0 :
-                                  ty == Type.ne ? t != 0 :
-                                  ty == Type.lt ? t <  0 :
-                                                  t <= 0);
+                *l = Expression(ty == Type.eq ? t == 0 :
+                                ty == Type.ne ? t != 0 :
+                                ty == Type.lt ? t <  0 :
+                                                t <= 0);
                 return l;
             }
             goto case;
@@ -1499,6 +1523,8 @@ Expression* fold(Type ty, Expression* l, Expression* r)
                 case Type.div: l.f = lf / rf; break;
                 default: assert(0); // unreachable
             }
+            if (ty <= Type.le)
+                l.flags = Flags.boolean;
             return l;
 
         default:
@@ -1509,6 +1535,8 @@ Expression* fold(Type ty, Expression* l, Expression* r)
 
 unittest
 {
+    import urt.meta.enuminfo : enum_info;
+
     logLevel = Level.Debug;
 
     const(char)[] text = "$a .. 10 + (-10.2 * 2 / --3) .. (\"wow\" .. \"wee\")";
@@ -1531,6 +1559,40 @@ unittest
     assert(parse_expression(text).as_bool == true);
     text = "-3";
     assert(parse_expression(text).as_num == VarQuantity(-3));
+
+    // true/false are boolean literals, not barewords
+    text = "!false";
+    e = parse_expression(text);
+    assert(e.ty == Type.num && (e.flags & Flags.boolean) && e.as_bool);
+    assert(e.evaluate(ctx).isTrue);
+    text = "(true == 1)";
+    assert(parse_expression(text).as_bool);
+    text = "(1 != 2)";
+    assert(parse_expression(text).as_bool);
+    text = "(1 != 1)";
+    assert(!parse_expression(text).as_bool);
+    text = "\"a\" .. true";
+    assert(parse_expression(text).get_str() == "atrue");
+
+    // enums compare by key against a string; bools compare with the literals
+    enum Btn { press, hold }
+    Map!(String, Variant) locals;
+    locals[make_string("e")] = Variant(cast(ulong)Btn.hold, enum_info!Btn.make_void());
+    locals[make_string("b")] = Variant(false);
+    ctx.locals = &locals;
+    text = "$e == \"hold\"";
+    assert(parse_expression(text).evaluate(ctx).isTrue);
+    text = "\"hold\" == $e";
+    assert(parse_expression(text).evaluate(ctx).isTrue);
+    text = "$e != \"hold\"";
+    assert(!parse_expression(text).evaluate(ctx).asBool);
+    text = "$e == \"press\"";
+    assert(!parse_expression(text).evaluate(ctx).asBool);
+    text = "$b == false";
+    assert(parse_expression(text).evaluate(ctx).isTrue);
+    text = "$b == true";
+    assert(!parse_expression(text).evaluate(ctx).asBool);
+    ctx.locals = null;
 
     text = "{ /print hello }";
     e = parse_primary_exp(text);
@@ -1558,6 +1620,12 @@ unittest
     assert(cmds[0].command == ":set");
     assert(cmds[0].named_args.length == 1);
     assert(cmds[0].named_args[0].name.get_str() == "x");
+
+    text = ":set x=true";
+    cmds = parse_commands(text);
+    assert(cmds[0].named_args[0].value.ty == Type.num);
+    assert(cmds[0].named_args[0].value.flags & Flags.boolean);
+    assert(cmds[0].named_args[0].value.evaluate(ctx).isTrue);
 
     // path/command tokens split on '/', but an argument value keeps '/' literal (device paths)
     text = "/stream/serial/add name=com3 device=/dev/ttyUSB0";
