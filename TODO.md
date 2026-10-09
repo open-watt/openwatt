@@ -1665,10 +1665,6 @@ this is what remains.
     then `drop_tx_handler` cancels it). Both need a scheduler: an `Application` in the test, which
     waits on an Application that can be created twice in one process. (#816)
 
-- **`router.iface`'s unittest failed once on Windows** (2026-10-07, at the `set_l2mtu(1514)` mtu
-  assertion, package.d:1872) and passed on three reruns of the same binary. A value assertion right
-  after a setter should not be flaky; look for state another test leaves behind.
-
 - **`/log/print` without `--stream` redraws its pager every tick**: on the RP2350 it held the CPU
   at 64% and logged an 80 ms `console-session` update each frame while idle. The live view should
   redraw on a new entry or a key, not per tick.
