@@ -1095,7 +1095,7 @@ unittest
     foreach (i; 0 .. 60)
         tx.pending ~= 'x';
 
-    TxRequest req = TxRequest(min_tx_request);
+    TxRequest req = TxRequest(64);
     TxStatus status;
     Page* page = tx.produce(req, status);
     assert(page && page.length == 62 && status == TxStatus.more);

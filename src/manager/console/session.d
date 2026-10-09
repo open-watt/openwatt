@@ -970,7 +970,7 @@ private:
                 status = TxStatus.idle;
                 return null;
             }
-            Page* page = page_alloc(max_output_chunk);
+            Page* page = page_alloc(max_output_chunk, default_alignment, req.headroom, req.tailroom);
             if (!page)
             {
                 status = TxStatus.starved;
@@ -1549,7 +1549,7 @@ unittest
             }
         }
         Burst burst;
-        stream.limit = stream.output.length + 100;
+        stream.limit = stream.output.length + 200;
         session.feed_output(&burst.produce);
         assert(stream.output.length == stream.limit && session.output_busy, "the tail waits for the stream");
         session.release_output(&burst.produce);
@@ -1605,6 +1605,8 @@ unittest
             {
                 begin_block(1);
                 if (!row("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"))
+                    return;
+                if (!row("zyxwvutsrqponmlkjihgfedcbazyxwvutsrqponmlkjihgfedcbazyxwvutsrqponmlkjihgfedcbazyxwvutsrqponmlkjihgfedcba"))
                     return;
                 end(0);
             }

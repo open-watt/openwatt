@@ -136,18 +136,13 @@ nothrow @nogc:
 
     // Stream API
 
-    // Write data to the stream, escaping 0xFF bytes.
+    // written bytes wait in the queue and are escaped as the line pulls them, like a producer's
     override ptrdiff_t write(const(void[])[] data...)
     {
         if (!_inner)
             return -1;
-        bool idle = !_tx_pending;
-        ptrdiff_t total = queue_behind_pending(data);
-        if (idle && _tx_pending)
-        {
-            _tx_pending_status = TxStatus.idle;
-            tx_handler_changed();
-        }
+        size_t total = hold_copy(data);
+        tx_handler_changed();
         return total;
     }
 
@@ -212,7 +207,6 @@ protected:
         if (_inner)
             _inner.release_tx_handler(&provide_tx_page);
         g_app.cancel(&resume_rx);
-        free_pending_tx();
         if (_subscribed)
         {
             _inner.release_rx_handler(&inner_rx);
@@ -244,23 +238,20 @@ protected:
         Stream stream = _inner.get;
         if (!stream || !stream.running)
             return;
-        if (tx_handler || _tx_pending)
+        if (tx_handler || tx_queued)
             stream.tx_handler(&provide_tx_page);
         else
             stream.release_tx_handler(&provide_tx_page);
     }
 
 private:
-    enum size_t tx_page_payload = 1600;
 
     ObjectRef!Stream _inner;
     TerminalChannel _terminal;
     Array!char _terminal_type;
     Array!ubyte _tail;          // input not yet parsed: an incomplete sequence, or what arrived with no consumer
-    Page* _tx_pending;
     bool _subscribed;
     bool _terminal_aware;
-    TxStatus _tx_pending_status;
 
     // strips IAC sequences; commands update the TerminalChannel and set pending events
     void inner_rx(Stream, const(void)[] data, MonoTime rx_time)
@@ -396,156 +387,51 @@ private:
     ulong _client_state;
     ulong _client_state_req;
 
+    // every byte may be an IAC, which doubles: half the grant carries payload and the other half is room to escape it
     Page* provide_tx_page(ref const TxRequest req, out TxStatus status)
     {
-        if (_tx_pending)
-            return take_pending_tx(req, status);
-
-        Page* page = request_tx_page(req, status);
+        size_t payload = req.bytes / 2;
+        TxRequest inner = TxRequest(payload, req.deadline, req.headroom, req.tailroom + req.bytes - payload);
+        Page* page;
+        if (tx_queued)
+        {
+            page = take_queued_tx(inner, status);
+            if (page)
+                status = tx_queued || tx_handler ? TxStatus.more : TxStatus.idle;
+        }
+        else
+            page = request_tx_page(inner, status);
         if (!page)
             return null;
 
         add_tx_bytes(page.length);
         if (_logging)
             write_to_log(false, page.data);
-        Page* output = escape_page(page);
-        if (!output)
-        {
-            tx_handler(null);
-            status = TxStatus.abort;
-            return null;
-        }
-        _tx_pending = output;
-        _tx_pending_status = status;
-        return take_pending_tx(req, status);
-    }
-
-    Page* take_pending_tx(ref const TxRequest req, out TxStatus status)
-    {
-        Page* page = take_tx_page(_tx_pending, req, status);
-        if (page)
-            status = _tx_pending || tx_handler ? TxStatus.more : _tx_pending_status;
+        escape(page);
         return page;
     }
 
-    // written bytes queue behind what is pending, up to the queue limit, so a blocked line backs up into the writer
-    ptrdiff_t queue_behind_pending(const(void[])[] data)
+    // doubles each IAC in place, into the tailroom the request reserved
+    static void escape(Page* page)
     {
-        size_t queued;
-        for (Page* page = _tx_pending; page; page = page.next)
-            queued += page.length;
-        ptrdiff_t total = 0;
-        foreach (d; data)
-        {
-            const(ubyte)[] bytes = cast(const(ubyte)[])d;
-            while (bytes.length)
-            {
-                if (queued >= tx_queue_limit)
-                    return total;
-                size_t n = bytes.length < tx_page_payload ? bytes.length : tx_page_payload;
-                Page* page = page_alloc(n);
-                if (!page)
-                    return total;
-                (cast(ubyte[])page.data)[] = bytes[0 .. n];
-                Page* output = escape_page(page);
-                if (!output)
-                    return total;
-                for (Page* p = output; p; p = p.next)
-                    queued += p.length;
-                append_tx_chain(_tx_pending, output);
-                add_tx_bytes(n);
-                if (_logging)
-                    write_to_log(false, bytes[0 .. n]);
-                bytes = bytes[n .. $];
-                total += n;
-            }
-        }
-        return total;
-    }
-
-    // consumes page
-    Page* escape_page(Page* page)
-    {
-        size_t input_length = page.length;
         const(ubyte)[] input = cast(const(ubyte)[])page.data;
-        size_t escaped_length = input_length;
+        size_t escaped = input.length;
         foreach (b; input)
-            escaped_length += b == NVT.IAC;
-        if (escaped_length == input_length)
-            return page;
-
-        if (escaped_length - input_length <= page.tailroom)
+            escaped += b == NVT.IAC;
+        if (escaped == input.length)
+            return;
+        debug assert(escaped - input.length <= page.tailroom, "the request reserves room for every byte to double");
+        ubyte* storage = cast(ubyte*)page;
+        size_t source = page.offset + input.length;
+        size_t destination = page.offset + escaped;
+        while (source != destination)
         {
-            ubyte[] storage = (cast(ubyte*)page)[0 .. page.capacity];
-            size_t source = page.offset + input_length;
-            size_t destination = page.offset + escaped_length;
-            while (source != destination)
-            {
-                ubyte b = storage[--source];
+            ubyte b = storage[--source];
+            storage[--destination] = b;
+            if (b == NVT.IAC)
                 storage[--destination] = b;
-                if (b == NVT.IAC)
-                    storage[--destination] = b;
-            }
-            page.length = cast(ushort)escaped_length;
-            return page;
         }
-
-        size_t input_position;
-        bool repeat;
-        size_t output_position;
-        Page* head;
-        Page* tail;
-        while (output_position != escaped_length)
-        {
-            size_t length = escaped_length - output_position;
-            if (length > tx_page_payload)
-                length = tx_page_payload;
-            Page* output = page_alloc(length, size_t.sizeof, page.headroom, page.tailroom);
-            if (!output)
-            {
-                free_page_chain(head);
-                page_free(page);
-                return null;
-            }
-            if (tail)
-                tail.next = output;
-            else
-                head = output;
-            tail = output;
-
-            ubyte[] bytes = cast(ubyte[])output.data;
-            foreach (ref b; bytes)
-            {
-                ubyte value = input[input_position];
-                b = value;
-                if (value == NVT.IAC && !repeat)
-                    repeat = true;
-                else
-                {
-                    repeat = false;
-                    ++input_position;
-                }
-            }
-            output_position += length;
-        }
-        page_free(page);
-        return head;
-    }
-
-    void free_pending_tx()
-    {
-        free_page_chain(_tx_pending);
-        _tx_pending = null;
-    }
-
-    static void free_page_chain(Page* page)
-    {
-        while (page)
-        {
-            Page* next = page.next;
-            page_free(page);
-            page = next;
-        }
+        page.length = cast(ushort)escaped;
     }
 
     void resume_rx(MonoTime now)
@@ -883,34 +769,29 @@ unittest
     TelnetStream telnet = alloc!TelnetStream(CID(1));
     scope (exit) free(telnet);
 
-    Page* iacs = page_alloc(64);
-    (cast(ubyte[])iacs.data)[] = NVT.IAC;
-    telnet._tx_pending = telnet.escape_page(iacs);
-    telnet._tx_pending_status = TxStatus.idle;
-
-    ubyte[3] later = [1, 2, 3];
-    const(void)[][1] data = [later[]];
-    assert(telnet.queue_behind_pending(data[]) == 3);
-
-    TxRequest small = TxRequest(min_tx_request);
-    TxStatus status;
-    size_t sent;
-    while (telnet._tx_pending)
+    // a producer's page is escaped in place and stays within the grant, however many IACs it carries
     {
-        Page* page = telnet.take_pending_tx(small, status);
-        assert(page && page.length <= small.bytes);
-        foreach (b; cast(const(ubyte)[])page.data)
+        static struct AllIac
         {
-            if (sent < 128)
-                assert(b == NVT.IAC);
-            else
-                assert(b == later[sent - 128]);
-            ++sent;
+            Page* produce(ref const TxRequest req, out TxStatus status) nothrow @nogc
+            {
+                Page* page = alloc_tx_page(req, req.bytes, status);
+                if (page)
+                    (cast(ubyte[])page.data)[] = NVT.IAC;
+                return page;
+            }
         }
-        assert(status == (telnet._tx_pending ? TxStatus.more : TxStatus.idle));
+        AllIac producer;
+        telnet.tx_handler(&producer.produce);
+        TxRequest req = TxRequest(min_tx_request + 1, MonoTime(), 3, 5);
+        TxStatus status;
+        Page* page = telnet.provide_tx_page(req, status);
+        assert(page && page.length == 2 * (req.bytes / 2) && page.headroom >= 3 && page.tailroom >= 5);
+        foreach (b; cast(const(ubyte)[])page.data)
+            assert(b == NVT.IAC);
         page_free(page);
+        telnet.tx_handler(null);
     }
-    assert(sent == 131);
 
     // with no consumer the transport is paused and the delivery held; a returning consumer gets it whole, in order
     {
@@ -924,34 +805,11 @@ unittest
                 super(collection_type_info!Transport, id, flags);
             }
             override ptrdiff_t write(const(void[])[] data...)
-            {
-                size_t total;
-                foreach (d; data)
-                {
-                    size_t n = d.length < room ? d.length : room;
-                    output ~= (cast(const(char)[])d)[0 .. n];
-                    room -= n;
-                    total += n;
-                    if (n < d.length)
-                        break;
-                }
-                return total;
-            }
-            void open(size_t bytes)
-            {
-                room = bytes;
-                drain_tx();
-            }
+                => 0;
             void feed(const(char)[] text)
             {
                 incoming(text, MonoTime());
             }
-            Array!char output;
-            size_t room = size_t.max;
-
-        protected:
-            override Duration tx_retry_interval() const
-                => Duration.zero;
         }
         static struct Consumer
         {
@@ -992,46 +850,5 @@ unittest
         transport.feed("later");
         assert(transport.rx_handler is null && filter._tail[] == cast(const(ubyte)[])"later");
         filter._subscribed = false;
-
-        // a write is escaped into pages the transport pulls, and the transport lets go once they are taken
-        foreach (_; 0 .. 4)
-            Collection!Stream().update_all();
-        assert(transport.running);
-        assert(filter.write("a\xFFb") == 3);
-        assert(transport.output[] == "a\xFF\xFFb" && !filter._tx_pending && transport.tx_handler is null);
-
-        // a blocked transport backs writes up into the writer; reopened, it takes every byte, escaped and in order
-        ubyte[8192] text;
-        foreach (i, ref b; text)
-            b = cast(ubyte)i;
-        Array!char expect;
-        foreach (b; text)
-        {
-            expect ~= cast(char)b;
-            if (b == NVT.IAC)
-                expect ~= cast(char)b;
-        }
-        transport.output.clear();
-        transport.room = 0;
-        size_t taken;
-        while (taken < text.length)
-        {
-            ptrdiff_t n = filter.write(text[taken .. $]);
-            assert(n >= 0);
-            if (n == 0)
-                break;
-            taken += n;
-        }
-        assert(taken < text.length && transport.output.empty, "a blocked line bounds what a write takes");
-        transport.open(100);
-        assert(transport.output[] == expect[0 .. 100]);
-        transport.open(size_t.max);
-        while (taken < text.length)
-        {
-            ptrdiff_t n = filter.write(text[taken .. $]);
-            assert(n > 0);
-            taken += n;
-        }
-        assert(transport.output[] == expect[] && !filter._tx_pending && transport.tx_handler is null);
     }
 }

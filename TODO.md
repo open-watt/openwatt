@@ -404,7 +404,7 @@ one primitive (most belong in urt) and its copies deleted:
   ASH and CPC need a dongle smoke before it lands.
 - **Bounded tx byte queues**: Stream `tx_queue_limit` (repeated in `router/stream/serial.d`),
   websocket page queue with low water, BLE stream `max_tx_backlog`, ASH `max_tx_queue`, and
-  unbounded page chains in `tls/stream.d` and the console session. These converge on page chains
+  the console session's pending page. These converge on page chains
   under the stream contract (docs/wip/STREAMING.md), not a new abstraction.
 
 ## Retrospective merge reconciliation (2026-09-08)
@@ -1737,6 +1737,9 @@ this is what remains.
   and can leave the tree glyphs disagreeing.
 
 - **Pulled print follow-ups** (2026-10-06, #817):
+  - The session renders a fixed 1,600-byte chunk before it applies the grant, so a grant smaller than the
+    chunk (TLS takes its record framing out of a page) is still split and copied by `take_tx_page`. Make the
+    chunk follow the grant, within what a row needs (#832 review).
   - Cancelling a print drops the untaken tail of a page the stream has started, so the line
     ends mid-row, possibly mid-glyph or mid escape sequence, and the prompt lands on it. Keep
     the rest of a started page and drop only output not yet begun.

@@ -71,6 +71,7 @@ row alone. Sizes stay in bytes; round in the note if that reads better.
 | 2026-09-16 | 7c50cea4 | ldc 1.43.0 | 5,605,168 | 483,280 | | master + sync bulk walks on the transport tx feed |
 | 2026-10-08 | ow/console-prints | ldc 1.43.0 | 5,813,160 | 533,792 | | console tables and `/system/fs/read` print through the stream's pull |
 | 2026-10-09 | ow/websocket-sink | ldc 1.43.0 | 5,814,504 | 533,816 | | websocket frames queue in pool pages; receive capped at the MTU |
+| 2026-10-09 | ow/filter-in-place | ldc 1.43.0 | 5,790,344 | 533,784 | | Telnet and TLS frame in the request's reserved room; their pending chains go |
 
 ### Waveshare ESP32-S3-RS485-CAN, `make esp-idf-build BOARD=waveshare-esp32-s3-rs485-can CONFIG=release`
 
