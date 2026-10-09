@@ -711,8 +711,6 @@ one primitive (most belong in urt) and its copies deleted:
 
 ## 802.15.4 radio (WpanInterface)
 
-- Create `wpan1` in the C5 and C6 system profiles, as on S31; both currently require
-  manually adding the built-in radio.
 - **Receive is validated on hardware; transmit is not.** On an ESP32-C5 DevKitC-1,
   `/interface/wpan/add name=wpan1 channel=15 promiscuous=yes` comes up Running with
   link-status up and counts real traffic off the air: 54 packets and 1,568 bytes in the first
