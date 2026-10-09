@@ -3,6 +3,14 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-10-09: console value text
+
+- `/element/set` answers a rejected value with `Cannot set <path>: <reason>` instead of silently
+  keeping the old value; show the reason.
+- Property `get` and `/device/print` format a duration as a duration (`30s`, not `3e+10ns`), an
+  integer quantity whole (`1310nm`, not `1.31e+3nm`) and a float quantity at float precision
+  (`3.2616V`, not `3.2616000175476074V`). Parsers of printed values should accept the plain forms.
+
 ## 2026-10-09: `duplex` on every Ethernet interface
 
 - The read-only `duplex` status property (`unknown`, `half`, `full`) is now on every
