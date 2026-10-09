@@ -1451,8 +1451,6 @@ this is what remains.
   stream reads console events. Use a terminal or supported session transport.
   Drain stderr during execution and terminate before waiting for EOF; the
   current shutdown reads stderr before stopping the process and can hang.
-  `test/test_runner.py` also looks for `bin/x86_64_debug/openwatt` while the makefile emits
-  `bin/x86_64_linux_debug/`, so it finds no Linux build at all.
 
 - **Move Xtensa to LDC 1.43**: esp-clang `esp-22.1.4_20260825` (LLVM 22, released 2026-09-17)
   can read LDC 1.43's bitcode. Install it with `idf_tools.py install esp-clang` and build an

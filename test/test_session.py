@@ -74,7 +74,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(__file__))
 
-from test_harness import OpenWattProcess, OpenWattConsole
+from test_harness import OpenWattProcess, OpenWattConsole, DEFAULT_BINARY
 import re
 import time
 from typing import Optional, List, Dict, Any
@@ -83,7 +83,7 @@ from typing import Optional, List, Dict, Any
 class TestSession:
     """Persistent test session for iterative development"""
 
-    def __init__(self, binary_path='bin/x86_64_debug/openwatt', auto_start=False):
+    def __init__(self, binary_path=DEFAULT_BINARY, auto_start=False):
         self.process: Optional[OpenWattProcess] = None
         self.console: Optional[OpenWattConsole] = None
         self.binary_path = binary_path
