@@ -3,6 +3,13 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-10-09: `duplex` on every Ethernet interface
+
+- The read-only `duplex` status property (`unknown`, `half`, `full`) is now on every
+  `/interface/ethernet` (Linux reads it from the kernel, Windows reports `unknown`) and on the
+  interfaces derived from it, including `/interface/wifi`, where it stays `unknown`. It was
+  Espressif-only before.
+
 ## 2026-10-09: WebSocket message limit
 
 - A node closes a WebSocket with 1009 (message too big) when a client sends a message larger than

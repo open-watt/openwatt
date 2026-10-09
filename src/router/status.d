@@ -48,6 +48,7 @@ nothrow @nogc:
     SysTime link_status_change_time;
     ConnectionStatus connected = ConnectionStatus.unknown;
     LinkStatus link_status = LinkStatus.down;
+    Duplex duplex = Duplex.unknown;
     int link_downs;
 
     ulong tx_bytes;

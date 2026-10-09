@@ -2292,9 +2292,8 @@ status and live reinstall. **No frame has crossed a wire on any part**, for want
 - **Only ethernet headers can carry a hardware stamp.** `hw_time` lives in `Ethernet`, so a radio
   that stamps in hardware (802.15.4 does) has nowhere to put one without its own header field.
 
-- **Only the Espressif backend reports `duplex`.** The read-only property and `router.status.Duplex`
-  exist so every backend can; Linux has it in `/sys/class/net/<if>/duplex` and Windows in the adapter
-  info, and neither feeds it.
+- **Windows does not report `duplex`.** It needs `GetIfEntry2`'s `MediaDuplexState`, a new
+  IPHLPAPI query; Linux and Espressif feed it.
 
 - **Link detection is a 2s poll inside ESP-IDF.** Nothing of ours waits or polls, but esp_eth finds
   the link by reading the PHY status over MDIO on its own timer (`check_link_period_ms`), so a cable

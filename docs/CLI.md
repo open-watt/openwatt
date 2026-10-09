@@ -710,6 +710,12 @@ broadcast.
 | --- | --- | --- |
 | `discover` | `/interface/ethernet/discover` | Sweeps every segment for OpenWatt stations, listing each with its name and addresses. |
 
+Beyond the common interface properties, every Ethernet interface reports its link's duplex:
+
+| Property | Access | Description |
+| --- | --- | --- |
+| `duplex` | read-only | What this end of the link is running: `full`, `half`, or `unknown` while the link is down. Linux reads it from the kernel and Espressif boards from the PHY; Windows always reports `unknown`. |
+
 Without `iface`, MAC ping requests go out every running Ethernet station.
 Each reply prints as `reply from <mac>: time=<rtt>`, with the
 responder's name appended when its LBR carried a Sender ID TLV. A summary of
@@ -753,7 +759,6 @@ a wiring property reinstalls the MAC.
 | `auto-negotiate` | `true` | Negotiate speed and duplex with the link partner. Setting it `true` hands a forced link back to detection. The link drops while the mode changes. |
 | `speed` | `s100m` | Forces the link to `s10m`, `s100m`, or `s1000m` where the MAC is gigabit. Setting it turns `auto-negotiate` off. |
 | `full-duplex` | `true` | Forces the duplex. Setting it turns `auto-negotiate` off. A forced end facing a negotiating partner leaves that partner at half duplex, so force both ends or neither. |
-| `duplex` | read-only | What this end of the link is running: `full`, `half`, or `unknown` while it is down. |
 
 Receive checksum verification needs no setting on any part: the MAC discards a frame that fails it,
 and the stack skips the arithmetic for frames the driver reports the MAC checked (TCP or UDP over
