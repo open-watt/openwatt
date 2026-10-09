@@ -1462,11 +1462,8 @@ this is what remains.
   read-only identities such as a port's `circuit`. Define whether this command is an explicit
   diagnostic override or should enforce the same write contract as clients (found in #718).
 
-- **`FEATURES=switch` does not link.** `driver/linux/bridge.d` and `driver/linux/wifi.d` import
-  `protocol.ip.linux_mirror.mirror_refresh_interface` unconditionally, but the switch tier drops
-  `protocol.ip`, so the symbol is undefined at link. Found while testing another branch on
-  2026-09-20; `IPV6=0 GATEWAY=0` builds clean, so it is this tier specifically. Gate the import
-  and its call sites on `has_ip`.
+- **`FEATURES=switch` has not been linked since the `has_ip` gates landed** in `driver/linux/bridge.d`
+  and `driver/linux/wifi.d`; the tier was found unlinkable on 2026-09-20. Build it on Linux.
 
 - **`EUILit` is unusable under LDC.** Building an EUI-64 from a string literal at compile time
   makes LDC 1.42 emit `ICE: overlapping initializers for struct literal`, from `EUI`'s union of a

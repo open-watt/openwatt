@@ -27,6 +27,7 @@ import manager.console;
 import manager.console.command : CommandState, CommandCompletionState;
 import manager.console.live_view : LiveViewState;
 import manager.console.table : Table;
+import manager.features : has_ip;
 import manager.plugin;
 
 import driver.linux.netlink;
@@ -1267,7 +1268,8 @@ protected:
             if (kernel_ifindex() == 0)
             {
                 set_kernel_ifindex(read_ifindex(r.netdev));
-                mirror_refresh_interface(this);
+                static if (has_ip)
+                    mirror_refresh_interface(this);
             }
         }
 
@@ -1348,7 +1350,8 @@ protected:
             if (kernel_ifindex() != 0)
             {
                 set_kernel_ifindex(0);
-                mirror_refresh_interface(this);
+                static if (has_ip)
+                    mirror_refresh_interface(this);
             }
         }
         return super.shutdown();
@@ -1904,7 +1907,8 @@ protected:
         version (KernelMirror)
         {
             set_kernel_ifindex(read_ifindex(vif));
-            mirror_refresh_interface(this);
+            static if (has_ip)
+                mirror_refresh_interface(this);
         }
 
         return CompletionStatus.complete;
@@ -1928,7 +1932,8 @@ protected:
             if (kernel_ifindex() != 0)
             {
                 set_kernel_ifindex(0);
-                mirror_refresh_interface(this);
+                static if (has_ip)
+                    mirror_refresh_interface(this);
             }
         }
         return super.shutdown();
