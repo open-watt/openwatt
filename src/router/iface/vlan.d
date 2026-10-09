@@ -186,11 +186,7 @@ protected:
         packet.vlan = (packet.vlan & 0xF000) | (_vlan & 0xFFF);
         packet.vlan_tag = _tag;
 
-        foreach (ref sub; _subscribers[0 .. _num_subscribers])
-        {
-            if ((sub.filter.direction & PacketDirection.outgoing) && sub.filter.match(packet))
-                sub.recv_packet(packet, this, PacketDirection.outgoing, sub.user_data);
-        }
+        fire_subscribers(packet, PacketDirection.outgoing);
 
         int result = _interface.forward(packet, callback, queue_policy);
         if (result >= 0)
