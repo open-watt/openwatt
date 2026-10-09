@@ -49,13 +49,16 @@ tick where JSON favours a frame per element.
 
 ## Sessions
 
-`hello` is the first frame in each direction: protocol version, capability bits, `max_frame`,
-node-id, role and a fresh 16-byte nonce for peering, then `segment`. It has a fixed size of about 40
-bytes, so it fits every link but raw CAN; a peer that cannot fit it fails to start rather than run
+`hello` is the first frame in each direction: protocol version, capability bits 0-7 as one byte,
+`max_frame`, node-id, role and a fresh 16-byte nonce for peering, then `segment` and a varint
+carrying capability bits 8 and up (the caps word shifted right by 8). It has a fixed size of about
+40 bytes, so it fits every link but raw CAN; a peer that cannot fit it fails to start rather than run
 without a handshake. The hostname and cluster follow in `identity`, the next frame; on the binary
 wire hello keeps their old slots empty so older decoders read on.
 Capability names the verb families this build serves: `objects` (the object mirror), `model` (the
-data-model plane), `history`, `console`, `logs`, `time`, `console_session` and `templates`.
+data-model plane), `history`, `console`, `logs`, `time`, `console_session` and `templates`. Those
+eight fill the leading byte; the next capability takes bit 8, in the tail varint. JSON names
+capabilities as strings and has no such split.
 `max_frame` is the largest message the sender takes and `segment` the largest frame it takes in one
 packet: its transport's `actual-mtu` less the carrier (a UDP endpoint uses the datagram that fits a
 1500-byte link without IP fragmentation) and less the sublayer header where the sublayer is armed.
