@@ -1474,14 +1474,6 @@ this is what remains.
   2026-09-20; `IPV6=0 GATEWAY=0` builds clean, so it is this tier specifically. Gate the import
   and its call sites on `has_ip`.
 
-- **`EUILit` is unusable under LDC.** Building an EUI-64 from a string literal at compile time
-  makes LDC 1.42 emit `ICE: overlapping initializers for struct literal`, from `EUI`'s union of a
-  `ulong` and a `ubyte[8]`. DMD accepts it, and every ESP build uses LDC, so the template cannot
-  be used in anything that targets hardware; use the `EUI64(0x01, ...)` constructor instead.
-  Nothing had ever instantiated it, which is also why its own length check was wrong until now.
-  The C-style `EUI64 x = { b: [...] }` initialiser is not an escape: D refuses brace initialisers
-  on a struct that declares a constructor, and `EUI` declares one.
-
 - Fix `urt.conv.parse_uint` overflow: reject values outside `ulong` range using the existing zero-consumption error contract. Revision filenames use checked `parse_int_fast`.
 
 - **Unsubscribe during packet dispatch walks a stale slice**: `BaseInterface.fire_subscribers`
