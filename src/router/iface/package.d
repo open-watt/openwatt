@@ -1868,9 +1868,15 @@ unittest
     }
 
     // an ethernet station's l2mtu is the frame: the default mtu leaves room for the header
-    a.set_l2mtu(1514);
-    assert(a.mtu == 1500 && a.actual_mtu == 1500);
-    assert(a.mtu(1514) is null && a.actual_mtu == 1500);
+    Link eth = Collection!Link().create("mtu-test-eth");
+    scope(exit)
+    {
+        eth.destroy();
+        Collection!BaseInterface().update_all();
+    }
+    eth.set_l2mtu(1514);
+    assert(eth.mtu == 1500 && eth.actual_mtu == 1500);
+    assert(eth.mtu(1514) is null && eth.actual_mtu == 1500);
 
     {
         import router.iface.i2c : I2CFrame;
@@ -1880,13 +1886,13 @@ unittest
         // an exotic packet is checked again once its ow envelope (5 bytes plus an 8-byte i2c header) is built
         Packet exotic;
         exotic.init!I2CFrame(payload[0 .. 1487]);
-        assert(a.forward(exotic) == 0);
-        ulong drops = a.tx_dropped;
+        assert(eth.forward(exotic) == 0);
+        ulong drops = eth.tx_dropped;
         exotic.init!I2CFrame(payload[]);
-        assert(a.forward(exotic) < 0 && a.tx_dropped == drops + 1);
+        assert(eth.forward(exotic) < 0 && eth.tx_dropped == drops + 1);
 
         // a vlan admits against its own mtu, which its parent cannot know
-        VLANInterface tagged = Collection!VLANInterface().create("mtu-test-vlan", ObjectFlags.none, NamedArgument("interface", a), NamedArgument("vlan", 20));
+        VLANInterface tagged = Collection!VLANInterface().create("mtu-test-vlan", ObjectFlags.none, NamedArgument("interface", eth), NamedArgument("vlan", 20));
         assert(tagged && tagged.running);
         assert(tagged.l2mtu == 1510 && tagged.max_l2mtu == 1510 && tagged.actual_mtu == 1496);
         assert(tagged.mtu(100) is null);
