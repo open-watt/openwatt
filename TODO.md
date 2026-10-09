@@ -659,12 +659,6 @@ one primitive (most belong in urt) and its copies deleted:
   stale silently too: `pt100`/`tac1100` read `online false` with 11-hour-old values while
   `cabin_hot_water` still consumed them as current.
 
-- **The grid bus is flagged as an anomaly whenever the site imports**: `classify_bus_coverage`
-  (`src/apps/energy/topology.d:1701`) runs on the island root like any other bus, so the grid bus,
-  which has one metered port and no dark port to absorb the flow, goes `rogue-value` (and `anomaly`
-  when importing) above the 50 W noise floor. The accounts are unaffected because `add_island_rogue`
-  skips `island.root`, but the published bus state lies.
-
 ## Tesla TWC
 
 - Mark sampled series gaps when a binding loses observation. TWC master outages
