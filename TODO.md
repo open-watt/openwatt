@@ -810,8 +810,7 @@ decisions are in [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md). The
    offer a query `validate()` can use.
 
 5. **Component alias**: `/element/alias` creates a mirror of a component and registers itself as
-   the writer, so sync accepts remote writes. `/element/link` has no CLI.md section; document it
-   alongside.
+   the writer, so sync accepts remote writes.
 
 6. **System slots**: gestures for recovery, unconfigured and an image on trial;
    `system.status.state`; `/system/factory-reset` sharing the reset slot's code; a recovery
@@ -1674,13 +1673,11 @@ this is what remains.
   - The live views (`CollectionWatchState`, `TreeViewState`) format and measure every row on every
     tick and render only the visible slice; they should format and fit only the slice.
 
-- **Document `/device` in CLI.md**: `add`, `print` (`filter=`, `--watch`, `--expand`) and
-  `/element/set` have no reference entry. A bare `print m1*` does not bind `filter`; it lands
-  in the variadic `args` and prints everything.
+- **`/device/print` does not bind a bare pattern to `filter`**: a function with a variadic `args`
+  takes every unnamed argument, so `print m1*` prints everything; CLI.md documents `filter=` only.
 
-- **Document `/protocol/mqtt/broker` in CLI.md**: the broker, its `discover` prefixes and the Home
-  Assistant discovery it drives (entity mapping, writers, availability aggregated into
-  `status.online`) have no CLI.md section at all.
+- **Document `/protocol/mqtt/client` and `/binding/mqtt` in CLI.md**: the broker section now
+  covers only the client's `publish` command.
 
 - **Clarify TLS server transport ownership**: ensure shutdown cannot destroy a listener twice
   when a server-side TCP stream takes multiple ticks to stop.
