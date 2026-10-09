@@ -55,6 +55,7 @@ struct OSAdapterInfo
     uint mtu;
     uint max_mtu;
     ConnectionStatus connection = ConnectionStatus.unknown;
+    Duplex duplex = Duplex.unknown;
     ulong tx_link_speed;    // bps
     ulong rx_link_speed;    // bps
 }
@@ -200,6 +201,18 @@ bool query_adapter(const(char)[] adapter_name, out OSAdapterInfo info)
             info.tx_link_speed = cast(ulong)spd * 1_000_000UL;
             info.rx_link_speed = info.tx_link_speed;
         }
+    }
+
+    // "full", "half" or "unknown"; the read fails with EINVAL while the link is down
+    p = build_path(adapter_name, "/duplex");
+    data = read_file(p, buf[]);
+    if (data !is null)
+    {
+        auto s = data.trimBack;
+        if (s == "full")
+            info.duplex = Duplex.full;
+        else if (s == "half")
+            info.duplex = Duplex.half;
     }
 
     info.valid = true;
