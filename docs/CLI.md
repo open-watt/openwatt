@@ -1671,7 +1671,7 @@ URI containing `?`, `=` or `@`, since the argument parser reserves them.
 | `schedule` | duration | none | Write-only sugar for `on="every:<dur>"`. Shares the slot with `on`. |
 | `at` | `hh:mm` | none | Write-only sugar for `on="at:<hh:mm>"`. |
 | `when` | datetime | none | Write-only sugar for `on="when:<datetime>"`. |
-| `if` | expression | none | Quoted boolean gate; a falsey result skips the action. Reads elements by `@path`, compares with units. |
+| `if` | expression | none | Quoted boolean gate; a falsey result skips the action. Reads elements by `@path`, compares with units; `$value` is the trigger datum (null for time triggers and at arm/reset). |
 | `edge` | `level`, `rising`, `falling` | `level` | Which transitions of `if` fire. Requires `if`. |
 | `for` | duration | `0` | The qualifying state must hold this long before firing; one run per episode. Requires `if`. |
 | `debounce` | duration | `0` | Trailing edge: act once the trigger stream settles; `$value` is the settled datum. |

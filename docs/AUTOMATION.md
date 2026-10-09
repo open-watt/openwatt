@@ -67,7 +67,10 @@ rule arms the moment the element appears, which is the normal case for a Zigbee 
 scan completes. A valid, resolvable URI subscribes.
 
 **Trigger context** is the flat `$value`: the datum that fired, snapshotted at the moment of
-change, and null for value-less triggers such as time. Prefer it to re-reading `@path` in the
+change, and null for value-less triggers such as time. It is bound in both `if=` and `do={}`, so a
+rule can gate on the datum itself (`if="$value > 2000W"`). When the engine evaluates `if=` without
+an event, at arm and when `edge=`/`for=` are changed, `$value` is null; a `for=` deadline
+re-evaluates with the datum that began the episode. Prefer `$value` to re-reading `@path` in the
 action: a live re-read can race a later change, `$value` cannot.
 
 ### Providers
