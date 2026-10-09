@@ -8,7 +8,7 @@ There are three ways to interact with the console:
 
 **Interactive mode** — Local console at startup:
 ```bash
-./bin/x86_64_debug/openwatt --interactive
+./bin/x86_64_linux_debug/openwatt --interactive
 ```
 
 **Telnet** — Remote console session:
