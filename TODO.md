@@ -1474,6 +1474,14 @@ this is what remains.
 
 - Fix `urt.conv.parse_uint` overflow: reject values outside `ulong` range using the existing zero-consumption error contract. Revision filenames use checked `parse_int_fast`.
 
+- **Finish the remaining fixes from PR #833 after a second review**: the trivial subset
+  is split out. The subscriber tombstones lose a resubscribe when all eight slots are occupied;
+  the energy patch clears the utility anomaly flag but leaves rogue provenance and residuals;
+  the ESPHome patch still trusts truncated protobuf fields and continues the outer RX loop
+  after requesting a deferred restart. Resolve those before landing. Separately review the
+  Telnet overflow state, Ethernet duplex, resolved endpoint reporting, Linux switch-tier gates,
+  Windows UDP/uRT changes, and the remaining CLI documentation.
+
 - **Unsubscribe during packet dispatch walks a stale slice**: `BaseInterface.fire_subscribers`
   and `send` iterate `_subscribers[0 .. _num_subscribers]` captured before the loop, and
   `unsubscribe` swap-removes into that range. A handler that calls `restart()` (the dhcp6
@@ -1496,8 +1504,6 @@ this is what remains.
   stream reads console events. Use a terminal or supported session transport.
   Drain stderr during execution and terminate before waiting for EOF; the
   current shutdown reads stderr before stopping the process and can hang.
-  `test/test_runner.py` also looks for `bin/x86_64_debug/openwatt` while the makefile emits
-  `bin/x86_64_linux_debug/`, so it finds no Linux build at all.
 
 - **`assert(classref)` still segfaults LDC debug builds**: under `--fno-rtti`, `assert(o)` on a
   class reference runs the invariant, and urt's `_d_invariant_impl` walks `typeid(o)`, which is
