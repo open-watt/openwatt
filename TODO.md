@@ -1354,8 +1354,22 @@ this is what remains.
     reads again; epoll drops read interest and IOCP holds the one receive it has.
   - Telnet subnegotiation is not clamped, so a peer that never sends `IAC SE` grows the buffer.
   - A consumer that calls `restart()` from inside its delivery leaves the source's loop to finish
-    the chunk against a stopping object; such consumers should call `restart_deferred()`, and the
-    delivery loops want to stop on `!running`.
+    the chunk against a stopping object. `restart_deferred()` is not the whole answer (audited
+    2026-10-09): it postpones only `shutdown()`, a temporary object is destroyed synchronously
+    regardless, and `set_offline()` always fires inline, so the delivery loops need a `running`
+    check between deliveries whichever restart is used. Loops without one: `SerialStream.deliver`,
+    the console/memory/USB `poll_rx`, `TCPStream.on_data` (and `drain_rx` checks the connection,
+    not the stream), `TelnetStream.inner_rx`, ASH `on_bytes`/`parse_buffer`/`process_frame`,
+    websocket `parse_frames` (shutdown clears `_message` but the loop keeps the old buffer), the
+    ESPHome and OBD `stream_rx` loops, sync `deliver_frame`, `Session.receive_input` (checks
+    `is_attached`, so commands after `exit` in one chunk still run), `BridgeStream.member_rx`, and
+    BLE `att_notify`, whose `foreach` is mutated by `clear_notify` from a Tesla session's shutdown.
+    Restart sites reached from a delivery that keep executing afterwards: ASH `ack_in_flight` and
+    the ERROR-frame `_stream.restart()`, EZSP `dispatch_command`, ESPHome `terminate` (a later
+    frame in the chunk writes through the nulled stream), OBD `elm_fail`, `Session.finish_close`,
+    sync `accept_fragment`/`send_unwrapped`/`send_sequenced`/`pump_fragments`/`inbound_hello`,
+    `Stream.drain_tx` restarting the stream that is delivering, and the Tesla session faults (941
+    restarts twice in a row). One sweep, with a test per loop.
   - An ISR whose event post is refused leaves serial RX to a retry flag `SerialStream.update()`
     takes, and ethernet drops the wake. Give ISR posters an intrusive overflow node the reactor
     wake drains, so a refused post is retried without a tick.
