@@ -958,10 +958,19 @@ private:
     Subscription* _subs;
     SeriesStore* _history;
 
-    enum bucket_capacity = 256; // TODO: scale with rate (target a time span, not a record count)
-    enum text_bucket_capacity = 64;     // text series are low-rate; keep resident buckets small
     // u16 record offsets cap the bucket heap at 64k; a small target cannot serve that much contiguous
-    version (Tiny) enum text_heap_limit = 0x2000; else enum text_heap_limit = 0x1_0000;
+    version (Tiny)
+    {
+        enum bucket_capacity = 64;
+        enum text_bucket_capacity = 16;
+        enum text_heap_limit = 0x2000;
+    }
+    else
+    {
+        enum bucket_capacity = 256;
+        enum text_bucket_capacity = 64;
+        enum text_heap_limit = 0x1_0000;
+    }
 
     const(char)[] update_typed_series(ref const Variant v, SysTime timestamp, Subscriber who)
     {
@@ -2158,6 +2167,7 @@ unittest
     th.ensure_history();
     char[1200] big = 'x';
     enum per_bucket = Element.text_heap_limit / heap_entry_bytes(big.length);
+    static assert(per_bucket < Element.text_bucket_capacity);
     enum text_records = per_bucket + 6;   // a few past what one bucket heap holds
     foreach (i; 0 .. text_records)
     {

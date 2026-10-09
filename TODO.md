@@ -1017,11 +1017,6 @@ decisions are in [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md). The
   on disk, unify RAM/disk time queries, and add the decimation ladder described in
   [docs/DATA_MODEL.md](docs/DATA_MODEL.md).
 
-- **`bucket_capacity`/`text_bucket_capacity` do not scale with the target**: `text_heap_limit`
-  now does (8k under `Tiny`, 64k otherwise), but the record-count caps declared beside it are
-  still 256 and 64 on every part, so a bucket on a 320KB device costs what one on a Pi costs.
-  Fold all three into the same per-target sizing rather than leaving one scaled and two fixed.
-
 - **Bound recorder container growth**: `.ows` files grow without limit. Add a size or age budget
   per series or per recorder, and give the retention classes distinct policies: the short class
   (planner budget, allocation decisions, coverage and mismatch flags) wants days, while island
