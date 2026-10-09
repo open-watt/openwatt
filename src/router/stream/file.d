@@ -2,7 +2,9 @@ module router.stream.file;
 
 import urt.file;
 import urt.lifetime;
+import urt.mem.pagepool : Page, page_free;
 import urt.mem.temp;
+import urt.result : Result;
 import urt.string;
 import urt.string.format;
 import urt.time;
@@ -15,6 +17,51 @@ import manager.plugin;
 import router.stream;
 
 nothrow @nogc:
+
+
+// reads a file into the pages a sink pulls, ending after length bytes or at EOF; a read that fails aborts and keeps the result
+struct FileProducer
+{
+nothrow @nogc:
+    enum ulong to_eof = ulong.max;
+
+    File file;
+    ulong remaining;
+    Result failure;
+
+    this(ref File opened, ulong length)
+    {
+        file = opened.move;
+        remaining = length;
+    }
+
+    Page* produce(ref const TxRequest req, out TxStatus status)
+    {
+        if (remaining == 0)
+        {
+            status = TxStatus.end;
+            return null;
+        }
+        size_t take = remaining < req.bytes ? cast(size_t)remaining : req.bytes;
+        if (take > max_tx_page)
+            take = max_tx_page;
+        Page* page = alloc_tx_page(req, take, status);
+        if (!page)
+            return null;
+        size_t got;
+        failure = file.read(page.data, got);
+        if (!failure || got == 0 || (got != take && remaining != to_eof))
+        {
+            page_free(page);
+            status = failure && got == 0 && remaining == to_eof ? TxStatus.end : TxStatus.abort;
+            return null;
+        }
+        page.length = cast(ushort)got;
+        if (remaining != to_eof && (remaining -= got) == 0)
+            status = TxStatus.end;
+        return page;
+    }
+}
 
 
 enum FileMode : ubyte
@@ -185,4 +232,55 @@ nothrow @nogc:
         g_app.register_enum!FileMode();
         g_app.console.register_collection!FileStream();
     }
+}
+
+
+version (FreeStanding) {}
+else unittest
+{
+    import urt.mem.pagepool : page_pool_deinit, page_pool_init;
+
+    bool owns_pool = page_pool_init();
+    scope (exit) if (owns_pool) page_pool_deinit();
+
+    char[320] buffer = void;
+    char[] name = buffer[];
+    assert(get_temp_filename(name, "", "fileproducer"));
+    char[3000] text = 'x';
+    assert(save_file(name, text[]));
+    scope (exit) delete_file(name);
+
+    static size_t drain(ref FileProducer producer, out TxStatus status)
+    {
+        size_t total;
+        do
+        {
+            Page* page = producer.produce(TxRequest(4096), status);
+            if (!page)
+                continue;
+            total += page.length;
+            page_free(page);
+        }
+        while (status == TxStatus.more);
+        return total;
+    }
+
+    // a declared length bounds the read, and a file shorter than it aborts
+    TxStatus status;
+    File first, second, third;
+    assert(first.open(name, FileOpenMode.ReadExisting));
+    FileProducer bounded = FileProducer(first, 2000);
+    assert(drain(bounded, status) == 2000 && status == TxStatus.end);
+    bounded.file.close();
+    assert(second.open(name, FileOpenMode.ReadExisting));
+    FileProducer longer = FileProducer(second, 4000);
+    drain(longer, status);
+    assert(status == TxStatus.abort);
+    longer.file.close();
+
+    // read to EOF whatever the file claims
+    assert(third.open(name, FileOpenMode.ReadExisting));
+    FileProducer whole = FileProducer(third, FileProducer.to_eof);
+    assert(drain(whole, status) == 3000 && status == TxStatus.end && whole.failure);
+    whole.file.close();
 }

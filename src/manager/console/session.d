@@ -104,8 +104,59 @@ struct TerminalChannel
     TerminalEvents pending_events;
 }
 
-// returns the bytes written to buffer, stopping at a yield point past the deadline; status as a SendHandler's
-alias OutputProducer = size_t delegate(char[] buffer, MonoTime deadline, out TxStatus status) nothrow @nogc;
+// expands a CRLF terminal's bare newlines; each may double, so half the grant carries payload and half is room
+struct CrlfFilter
+{
+nothrow @nogc:
+    SendHandler inner;
+    bool after_cr;
+
+    Page* produce(ref const TxRequest req, out TxStatus status)
+    {
+        size_t grant = req.bytes < max_tx_page ? req.bytes : max_tx_page;
+        Page* page = inner(TxRequest(grant / 2, req.deadline, req.headroom, req.tailroom + grant - grant / 2), status);
+        if (page)
+            page.length = cast(ushort)expand_newlines((cast(char*)page)[page.offset .. page.offset + 2 * page.length], page.length, after_cr);
+        return page;
+    }
+}
+
+// expands bare newlines in the first n bytes to crlf in place, buf holding 2n; after_cr carries across calls
+size_t expand_newlines(char[] buf, size_t n, ref bool after_cr) pure
+{
+    size_t bare;
+    bool prev_cr = after_cr;
+    foreach (c; buf[0 .. n])
+    {
+        if (c == '\n' && !prev_cr)
+            ++bare;
+        prev_cr = c == '\r';
+    }
+    size_t to = n + bare;
+    for (size_t from = n; from > 0; --from)
+    {
+        char c = buf[from - 1];
+        buf[--to] = c;
+        if (c == '\n' && !(from > 1 ? buf[from - 2] == '\r' : after_cr))
+            buf[--to] = '\r';
+    }
+    after_cr = prev_cr;
+    return n + bare;
+}
+
+unittest
+{
+    bool after_cr;
+    char[16] buf = void;
+    buf[0 .. 6] = "a\nb\r\nc";
+    assert(buf[0 .. expand_newlines(buf[], 6, after_cr)] == "a\r\nb\r\nc" && !after_cr);
+    buf[0 .. 2] = "x\r";
+    assert(buf[0 .. expand_newlines(buf[], 2, after_cr)] == "x\r" && after_cr);
+    buf[0 .. 2] = "\ny";
+    assert(buf[0 .. expand_newlines(buf[], 2, after_cr)] == "\ny" && !after_cr, "a crlf split between reads stays one");
+    buf[0 .. 2] = "\n\n";
+    assert(buf[0 .. expand_newlines(buf[], 2, after_cr)] == "\r\n\r\n");
+}
 
 class Session : ActiveObject
 {
@@ -122,7 +173,6 @@ nothrow @nogc:
     enum collection_id = CollectionType.console_session;
     enum syncable = false;
     enum max_history_entries = 50;
-    enum max_output_chunk = 1600;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
@@ -449,9 +499,10 @@ nothrow @nogc:
     }
 
     // the stream pulls pages at its own pace; a session without one takes them as they are made
-    final void feed_output(OutputProducer producer)
+    final void feed_output(SendHandler producer)
     {
         _producer = producer;
+        _crlf = CrlfFilter(producer);
         if (Stream s = _stream)
         {
             s.tx_handler(&provide_output_page);
@@ -460,13 +511,12 @@ nothrow @nogc:
         pull_output();
     }
 
-    // abandons the output, including what a producer that has ended made and the stream has not taken
-    final void release_output(OutputProducer producer)
+    // abandons the output the stream has not yet pulled
+    final void release_output(SendHandler producer)
     {
         if (_producer && _producer !is producer)
             return;
         _producer = null;
-        free_output_pending();
         page_unwait(&_output_waiter);
         cancel_output_continuation();
         if (Stream s = _stream)
@@ -475,7 +525,7 @@ nothrow @nogc:
 
     // output is still being made, or waits for the stream or the line
     final bool output_busy() const
-        => _producer !is null || _output_pending !is null || _output_continuing || (_stream && _stream.tx_queued() != 0);
+        => _producer !is null || _output_continuing || (_stream && _stream.tx_queued() != 0);
 
     final bool show_prompt(bool show)
     {
@@ -910,7 +960,6 @@ private:
     bool _features_override = false;
     bool _profile_set = false;
     bool _output_continuing;    // a stream-less pull resumes on the next loop pass
-    TxStatus _output_status;    // what follows the pending output page
 
     const(char)[] _prompt_suffix;
     MutableString!0 _prompt;
@@ -918,8 +967,8 @@ private:
     uint _position = 0;
 
     CommandState _current_command = null;
-    OutputProducer _producer;
-    Page* _output_pending;      // made but not yet taken; a page larger than a grant is handed out in parts
+    SendHandler _producer;
+    CrlfFilter _crlf;
     PageWaiter _output_waiter;
 
     Array!(MutableString!0) _history;
@@ -946,9 +995,8 @@ private:
                 s.release_tx_handler(&provide_output_page);
             _stream.unsubscribe(&stream_state_change);
             _stream_subscribed = false;
-            // nothing pulls what was made, so the output is abandoned
+            // nothing pulls what is made, so the output is abandoned
             _producer = null;
-            free_output_pending();
         }
     }
 
@@ -963,41 +1011,21 @@ private:
 
     Page* provide_output_page(ref const TxRequest req, out TxStatus status)
     {
-        if (!_output_pending)
+        if (!_producer)
         {
-            if (!_producer)
-            {
-                status = TxStatus.idle;
-                return null;
-            }
-            Page* page = page_alloc(max_output_chunk, default_alignment, req.headroom, req.tailroom);
-            if (!page)
-            {
-                status = TxStatus.starved;
-                return null;
-            }
-            size_t n = _producer(cast(char[])page.data, req.deadline, _output_status);
-            if (_output_status != TxStatus.more && _output_status != TxStatus.yield)
-                _producer = null;
-            if (n == 0)
-            {
-                page_free(page);
-                status = _output_status == TxStatus.more ? TxStatus.yield : _output_status;
-                return null;
-            }
-            page.length = cast(ushort)n;
-            _output_pending = page;
+            status = TxStatus.idle;
+            return null;
         }
-        Page* page = take_tx_page(_output_pending, req, status);
-        if (page)
-            status = _output_pending ? TxStatus.more : _output_status == TxStatus.yield ? TxStatus.more : _output_status;
+        Page* page = (_features & ClientFeatures.crlf) ? _crlf.produce(req, status) : _producer(req, status);
+        if (status != TxStatus.more && status != TxStatus.yield && status != TxStatus.starved)
+            _producer = null;
         return page;
     }
 
     // a session without a stream takes the pages as they are made, a turn at a time, and waits for one when none is free
     void pull_output()
     {
-        TxRequest req = TxRequest(max_output_chunk, getTime() + tx_slice);
+        TxRequest req = TxRequest(max_tx_page, getTime() + tx_slice);
         while (true)
         {
             uint generation = page_free_generation();
@@ -1038,15 +1066,6 @@ private:
             return;
         _output_continuing = false;
         g_app.cancel(&continue_output);
-    }
-
-    void free_output_pending()
-    {
-        if (_output_pending)
-        {
-            page_free(_output_pending);
-            _output_pending = null;
-        }
     }
 
     void finish_close()
@@ -1549,10 +1568,13 @@ unittest
             }
         }
         Burst burst;
-        stream.limit = stream.output.length + 200;
-        session.feed_output(&burst.produce);
-        assert(stream.output.length == stream.limit && session.output_busy, "the tail waits for the stream");
-        session.release_output(&burst.produce);
+        FillProducer feed = FillProducer(&burst.produce, max_tx_page);
+        size_t before = stream.output.length;
+        stream.limit = before + 200;
+        session.feed_output(&feed.produce);
+        assert(stream.output.length > before && stream.output.length < before + 300 && session.output_busy, "the tail waits for the stream");
+        session.release_output(&feed.produce);
+        feed.release();
         assert(!session.output_busy);
         stream.limit = size_t.max;
     }

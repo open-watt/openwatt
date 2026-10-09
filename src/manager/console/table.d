@@ -8,9 +8,9 @@ import urt.time : MonoTime, getTime, seconds;
 import urt.variant;
 
 import manager.console.command : Command, CommandCompletionState, CommandState;
-import manager.console.session : ClientFeatures, Session;
+import manager.console.session : Session;
 
-import router.stream : TxStatus;
+import router.stream : FillProducer, max_tx_page, TxStatus;
 
 nothrow @nogc:
 
@@ -549,9 +549,9 @@ protected:
     // the columns are measured over the first pulls, then the rows are printed from the resume point
     final void start()
     {
-        _crlf = (session.features & ClientFeatures.crlf) != 0;
         _measuring = true;
-        session.feed_output(&produce);
+        _feed = FillProducer(&produce, max_tx_page);
+        session.feed_output(&_feed.produce);
     }
 
     final uint resume_key() const pure
@@ -642,6 +642,7 @@ private:
         ubyte depth = ubyte.max;
     }
 
+    FillProducer _feed;
     Table.ColumnStats _stats;
     size_t[Table.max_cols] _widths;
     char[] _chunk;
@@ -656,7 +657,6 @@ private:
     bool _measuring;
     bool _stopped;
     bool _header_sent;
-    bool _crlf;
     bool _released;
 
     size_t produce(char[] chunk, MonoTime deadline, out TxStatus status)
@@ -700,7 +700,8 @@ private:
     void finish()
     {
         _released = true;
-        session.release_output(&produce);
+        session.release_output(&_feed.produce);
+        _feed.release();
     }
 
     // the chunk ends at its last whole block, which the next chunk resumes from
@@ -720,12 +721,10 @@ private:
 
     void emit(int row)
     {
-        const(char)[] newline = _crlf ? "\r\n" : "\n";
         char[max_row] line = void;
         size_t room = _chunk.length < line.length ? _chunk.length : line.length;
-        size_t n = table.format_row(line[0 .. room - newline.length], _widths[0 .. table.num_cols], row, _stats.natural[]);
-        line[n .. n + newline.length] = newline[];
-        n += newline.length;
+        size_t n = table.format_row(line[0 .. room - 1], _widths[0 .. table.num_cols], row, _stats.natural[]);
+        line[n++] = '\n';
         if (_len + n > _chunk.length)
         {
             debug assert(_len != 0, "a row always fits an empty chunk");
