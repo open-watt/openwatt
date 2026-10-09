@@ -492,15 +492,18 @@ nothrow @nogc:
     {
         foreach (i, ref sub; _subscribers[0.._num_subscribers])
         {
-            if (sub.recv_packet is packet_handler)
+            if (sub.recv_packet !is packet_handler)
+                continue;
+            if (_dispatching)
             {
-                // remove this subscriber
-                if (i < --_num_subscribers)
-                    sub = _subscribers[_num_subscribers];
-                if (_num_subscribers == 0)
-                    on_subscribers_changed(false);
+                sub.recv_packet = null;
                 return;
             }
+            if (i < --_num_subscribers)
+                sub = _subscribers[_num_subscribers];
+            if (_num_subscribers == 0)
+                on_subscribers_changed(false);
+            return;
         }
     }
 
@@ -534,11 +537,7 @@ nothrow @nogc:
         if (!admit(packet, callback))
             return -1;
 
-        foreach (ref subscriber; _subscribers[0.._num_subscribers])
-        {
-            if ((subscriber.filter.direction & PacketDirection.outgoing) && subscriber.filter.match(packet))
-                subscriber.recv_packet(packet, this, PacketDirection.outgoing, subscriber.user_data);
-        }
+        fire_subscribers(packet, PacketDirection.outgoing);
 
         int result = transmit(packet, callback, queue_policy);
         if (result <= 0 && callback)
@@ -788,15 +787,25 @@ protected:
         assert(false, "Override this method to implement a _master interface");
     }
 
-    final void fire_subscribers(ref Packet packet)
+    // mid-dispatch, a new subscriber never sees the packet in flight and a removed one is nulled until the outermost dispatch returns
+    final void fire_subscribers(ref Packet packet, PacketDirection dir = PacketDirection.incoming)
     {
-        if (!_num_subscribers)
+        ubyte count = _num_subscribers;
+        if (!count)
             return;
-        foreach (ref subscriber; _subscribers[0.._num_subscribers])
+        ++_dispatching;
+        foreach (ref sub; _subscribers[0 .. count])
         {
-            if ((subscriber.filter.direction & PacketDirection.incoming) && subscriber.filter.match(packet))
-                subscriber.recv_packet(packet, this, PacketDirection.incoming, subscriber.user_data);
+            if (sub.recv_packet && (sub.filter.direction & dir) && sub.filter.match(packet))
+                sub.recv_packet(packet, this, dir, sub.user_data);
         }
+        if (--_dispatching)
+            return;
+        for (ubyte i = _num_subscribers; i-- > 0;)
+            if (!_subscribers[i].recv_packet && i < --_num_subscribers)
+                _subscribers[i] = _subscribers[_num_subscribers];
+        if (_num_subscribers == 0)
+            on_subscribers_changed(false);
     }
 
     bool bind_vlan(VLANInterface vlan_interface, bool remove)
@@ -907,6 +916,7 @@ package:
 protected: // TODO: should probably be private?
     InterfaceSubscriber[8] _subscribers;
     ubyte _num_subscribers;
+    ubyte _dispatching;
     TxHandler _tx_handler;
     int _kernel_ifindex;    // OS netdev ifindex when a platform backend backs this interface (0 = none)
     version (Windows)
@@ -1925,4 +1935,140 @@ unittest
 
     link.destroy();
     Collection!BaseInterface().update_all();
+}
+
+unittest
+{
+    import router.iface.packet : RawFrame;
+
+    static final class Tap : BaseInterface
+    {
+        enum type_name = "subscriber-test-tap";
+    nothrow @nogc:
+
+        ~this() {}
+        this(CID id, ObjectFlags flags = ObjectFlags.none)
+        {
+            super(collection_type_info!Tap, id, flags);
+            _state = State.running;
+        }
+        override int transmit(ref Packet, MessageCallback, const(QueuePolicy)*)
+            => 0;
+        override void on_subscribers_changed(bool any)
+        {
+            ++changes;
+        }
+        void feed(ref Packet p)
+        {
+            fire_subscribers(p);
+            assert(_dispatching == 0);
+        }
+        ubyte count() const
+            => _num_subscribers;
+        uint changes;
+    }
+
+    static struct Watcher
+    {
+    nothrow @nogc:
+        void recv(ref const Packet, BaseInterface i, PacketDirection dir, void*)
+        {
+            ++hits;
+            if (dir == PacketDirection.incoming && nest)
+            {
+                ubyte[8] buf;
+                Packet inner;
+                inner.init!RawFrame(buf[]);
+                i.forward(inner);
+            }
+            if (drop)
+                i.unsubscribe(drop);
+            if (restart)
+            {
+                i.unsubscribe(&recv);
+                i.subscribe(&recv, filter);
+            }
+        }
+        PacketFilter filter = PacketFilter(PacketType.unknown, PacketDirection.incoming);
+        InterfaceSubscriber.PacketHandler drop;
+        uint hits;
+        bool restart;
+        bool nest;
+    }
+
+    Tap tap = Collection!Tap().create("subscriber-test-tap");
+    scope(exit)
+    {
+        tap.destroy();
+        Collection!BaseInterface().update_all();
+    }
+
+    ubyte[8] bytes;
+    Packet p;
+    p.init!RawFrame(bytes[]);
+    Watcher a, b;
+
+    // self removal mid-dispatch is deferred past the walk and never revisits the slot
+    a.drop = &a.recv;
+    tap.subscribe(&a.recv, a.filter);
+    tap.subscribe(&b.recv, b.filter);
+    assert(tap.changes == 1);
+    tap.feed(p);
+    assert(a.hits == 1 && b.hits == 1 && tap.count == 1);
+    tap.feed(p);
+    assert(a.hits == 1 && b.hits == 2);
+    tap.unsubscribe(&b.recv);
+    assert(tap.count == 0 && tap.changes == 2);
+
+    // removing a later subscriber stops it seeing the packet in flight
+    a = Watcher(); b = Watcher();
+    a.drop = &b.recv;
+    tap.subscribe(&a.recv, a.filter);
+    tap.subscribe(&b.recv, b.filter);
+    tap.feed(p);
+    assert(a.hits == 1 && b.hits == 0 && tap.count == 1);
+    tap.unsubscribe(&a.recv);
+
+    // removing an earlier subscriber never swaps a live entry back under the walk
+    a = Watcher(); b = Watcher();
+    b.drop = &a.recv;
+    tap.subscribe(&a.recv, a.filter);
+    tap.subscribe(&b.recv, b.filter);
+    tap.feed(p);
+    assert(a.hits == 1 && b.hits == 1 && tap.count == 1);
+    tap.feed(p);
+    assert(a.hits == 1 && b.hits == 2);
+    tap.unsubscribe(&b.recv);
+
+    // a restart (unsubscribe and resubscribe) delivers the packet in flight exactly once
+    a = Watcher(); b = Watcher();
+    a.restart = true;
+    tap.subscribe(&a.recv, a.filter);
+    tap.subscribe(&b.recv, b.filter);
+    tap.feed(p);
+    assert(a.hits == 1 && b.hits == 1 && tap.count == 2);
+    tap.feed(p);
+    assert(a.hits == 2 && b.hits == 2 && tap.count == 2);
+    tap.unsubscribe(&a.recv);
+    tap.unsubscribe(&b.recv);
+
+    // the sole subscriber removing itself signals the empty table only after the walk
+    a = Watcher();
+    a.drop = &a.recv;
+    uint changes = tap.changes;
+    tap.subscribe(&a.recv, a.filter);
+    tap.feed(p);
+    assert(a.hits == 1 && tap.count == 0 && tap.changes == changes + 2);
+
+    // a nested dispatch from inside a handler defers compaction to the outermost walk
+    a = Watcher(); b = Watcher();
+    a.nest = true;
+    b.filter.direction = cast(PacketDirection)(PacketDirection.incoming | PacketDirection.outgoing);
+    b.drop = &b.recv;
+    tap.subscribe(&a.recv, a.filter);
+    tap.subscribe(&b.recv, b.filter);
+    tap.feed(p);
+    assert(a.hits == 1 && b.hits == 1 && tap.count == 1);
+    tap.unsubscribe(&a.recv);
+    assert(tap.count == 0);
 }

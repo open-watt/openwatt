@@ -1492,12 +1492,10 @@ this is what remains.
 
 - Fix `urt.conv.parse_uint` overflow: reject values outside `ulong` range using the existing zero-consumption error contract. Revision filenames use checked `parse_int_fast`.
 
-- **Unsubscribe during packet dispatch walks a stale slice**: `BaseInterface.fire_subscribers`
-  and `send` iterate `_subscribers[0 .. _num_subscribers]` captured before the loop, and
-  `unsubscribe` swap-removes into that range. A handler that calls `restart()` (the dhcp6
-  client's declined-reply path, any offline handler) unsubscribes and re-subscribes inside the
-  walk, so the moved-in and re-added entries can receive the same packet again. Snapshot the
-  subscriber set or defer removals until the walk ends.
+- **A full subscriber table refuses a resubscribe during dispatch**: an entry removed mid-walk
+  holds its slot until the outermost dispatch compacts the table, so with all eight slots taken
+  a handler that unsubscribes and resubscribes inline is refused. Nothing in tree does that on a
+  full table; a `restart()` resubscribes from the state machine, after the walk.
 
 - **Make clock-sensitive unittests hermetic**: tests that leave a `MonoTime` member at
   `MonoTime.init` and then compare it against a real `getTime()` only pass once the monotonic
