@@ -948,8 +948,6 @@ decisions are in [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md). The
   - Nesting a builder asserts, in release too, by choice: find misuse early. Revisit once the
     esphome, goodwe, zigbee, SunSpec, MQTT discovery and SmartEVSE paths have run under it; none of
     them were exercised on the bench.
-  - The esphome and goodwe `status.network.ip.address` elements are written once at connect and
-    never refreshed; they should follow the client's connection.
   - `open_commit()` (element.d) has no callers: every multi-element write still delivers per
     element, so a subscriber can run between two fields of one frame and the topology watch can
     rebuild mid-frame. Wrap each frame boundary in a `CommitScope`: the TWC push, the Modbus,

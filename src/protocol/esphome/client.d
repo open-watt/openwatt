@@ -237,18 +237,17 @@ package:
     const(char)[] get_address() const
     {
         import urt.mem.temp : tstring;
-        if (_host)
-            return _host[];
-        else if (_remote.family == AddressFamily.ipv4)
-            return _remote._a.ipv4.addr.tstring;
-        else if (_remote.family == AddressFamily.ipv6)
-            return _remote._a.ipv6.addr.tstring;
-        return null;
+        InetAddress remote = _stream ? _stream.remote_address : _remote;
+        if (remote.family == AddressFamily.ipv4)
+            return remote._a.ipv4.addr.tstring;
+        if (remote.family == AddressFamily.ipv6)
+            return remote._a.ipv6.addr.tstring;
+        return _host ? _host[] : null;
     }
 
 private:
     Array!ubyte _tail;
-    Stream _stream;
+    TCPStream _stream;
 
     Array!ESPHomeMessageHandler _subscribers;
 
