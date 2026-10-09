@@ -3,6 +3,11 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-10-12: rejected console values
+
+- `/element/set` reports a rejected value as `Cannot set <path>: <reason>`. Show the
+  reason to the user; the element keeps its previous value.
+
 ## 2026-10-11: API responses stream
 
 - `/api/cli/execute` answers `{"output":"...","result":...}`, output first, with

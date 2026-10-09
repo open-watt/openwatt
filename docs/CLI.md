@@ -1195,6 +1195,12 @@ have in common, as elements appear.
 | `add` | `/element/link/add <a> <b>` | Links two elements, or two components, by path. A path that resolves to nothing yet is kept and decided when it appears. |
 | `print` | `/element/link/print` | A table of links: `a`, `b` and `status`, which is `linked`, `pending` while an end is missing, `undecided` while neither path resolves, or `component: <n> linked, <m> pending` for a component link. |
 
+### `/element/set`
+
+`/element/set element=<path> value=<value>` writes a value to an existing element.
+A rejected value leaves the element unchanged and prints `Cannot set <path>: <reason>`.
+For boolean elements, use `value=true` or `value=false`; numeric `0` and `1` are rejected.
+
 ### `/protocol/ble/device`
 
 | Command | Syntax | Description |

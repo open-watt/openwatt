@@ -1231,7 +1231,8 @@ nothrow @nogc:
             session.write_line("Element not found: ", element);
             return;
         }
-        e.value(value.move);
+        if (const(char)[] error = e.try_set(value))
+            session.write_line("Cannot set ", element, ": ", error);
     }
 
     // element link API
