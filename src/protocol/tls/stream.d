@@ -411,9 +411,7 @@ nothrow @nogc:
                     return -1;
                 }
                 append_tx_chain(_tx_pending, output);
-                add_tx_bytes(n);
-                if (_logging)
-                    write_to_log(false, chunk[0 .. n]);
+                sent(n, chunk[0 .. n]);
                 chunk = chunk[n .. $];
                 total += n;
             }
@@ -483,9 +481,7 @@ private:
         if (!input)
             return null;
 
-        size_t input_length = input.length;
-        if (_logging)
-            write_to_log(false, input.data);
+        sent(input.length, input.data);
 
         Page* output = encrypt_page(input);
         if (!output)
@@ -494,7 +490,6 @@ private:
             status = TxStatus.abort;
             return null;
         }
-        add_tx_bytes(input_length);
         _tx_pending = output;
         _tx_pending_status = status;
         return take_pending_tx(req, status);

@@ -93,7 +93,7 @@ nothrow @nogc:
                 ptrdiff_t bytes = esp_usb_console_write_buf(cast(const(char)*)d.ptr, d.length);
             if (bytes < 0)
                 return -1;
-            add_tx_bytes(bytes);
+            sent(bytes, d);
             total += bytes;
             if (bytes < d.length)
                 break;

@@ -405,9 +405,7 @@ private:
         if (!page)
             return null;
 
-        add_tx_bytes(page.length);
-        if (_logging)
-            write_to_log(false, page.data);
+        sent(page.length, page.data);
         Page* output = escape_page(page);
         if (!output)
         {
@@ -453,9 +451,7 @@ private:
                 for (Page* p = output; p; p = p.next)
                     queued += p.length;
                 append_tx_chain(_tx_pending, output);
-                add_tx_bytes(n);
-                if (_logging)
-                    write_to_log(false, bytes[0 .. n]);
+                sent(n, bytes[0 .. n]);
                 bytes = bytes[n .. $];
                 total += n;
             }

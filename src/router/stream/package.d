@@ -565,6 +565,22 @@ protected:
             _incoming(this, data, rx_time);
     }
 
+    // the line took the first n bytes of data: counted, and shown to taps and the log
+    final void sent(size_t n, const(void[])[] data...)
+    {
+        if (n == 0)
+            return;
+        add_tx_bytes(n);
+        foreach (d; data)
+        {
+            size_t chunk = d.length < n ? d.length : n;
+            write_to_log(false, d[0 .. chunk]);
+            n -= chunk;
+            if (n == 0)
+                break;
+        }
+    }
+
     final void add_tx_bytes(size_t bytes)
     {
         _status.tx_bytes += bytes;

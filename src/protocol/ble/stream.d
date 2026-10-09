@@ -272,8 +272,7 @@ private:
                 _await_ack = false;
                 break;
             }
-            add_tx_bytes(n);
-            write_to_log(false, _tx_buffer[0 .. n]);
+            sent(n, _tx_buffer[0 .. n]);
             _tx_buffer.remove(0, n);
         }
     }
