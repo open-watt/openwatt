@@ -890,12 +890,6 @@ decisions are in [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md). The
   record. Either the readers ignore a tail whose format is not the element's, or the setter
   retires the tail.
 
-- **One more `realloc` result stored unchecked**: `router/iface/mac.d:407`
-  (`mem = realloc(mem, ...)`) assigns straight into the owning field, so an allocation failure
-  installs null over a live pointer. It wants the shape the series bucket lifecycle now has: grow
-  into a temporary, keep the old block when the grow fails, and let the caller refuse the
-  operation.
-
 - **Audit dynamic-object ownership across the tree**: `ObjectFlags.dynamic` means the object
   was created by something other than the user, is excluded from saved config, and is managed
   by its creator - so its creator must destroy it. Most spawners comply (sync `ws_server` and
