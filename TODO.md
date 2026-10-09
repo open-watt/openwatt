@@ -148,7 +148,6 @@ holding action, not an answer. Options, cheapest first:
   fault-injection tests do not establish the storage driver's power-loss guarantees.
 - Bound cleanup of crash-left `.tmp` and rejected `.bad` revision files without losing
   useful recovery evidence; successful-save retention currently prunes completed files.
-- Complete the config-dirty mutation coverage (`set-hostname` currently bypasses it).
 - **Retained reset/clock validation after uRT #322/#327**: the pin includes the
   merged watchdog-clock and reset-barrier fixes plus RTC restore. Verify Beken
   reset with its watchdog initially disabled, RP2350 mark/reset and wall-time

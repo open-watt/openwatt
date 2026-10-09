@@ -101,6 +101,7 @@ void set_hostname(Session session, const(char)[] hostname)
 {
     .hostname = hostname.make_string();
     hostname_explicit = true;
+    g_app.config_dirty = true;
     set_log_hostname(.hostname[]);   // keep log HOSTNAME stamping in sync
 }
 
