@@ -870,7 +870,11 @@ nothrow @nogc:
             }
             if (b.codec == ows_codec_raw)
             {
-                debug assert(b.packed_bytes == total, "raw payload size disagrees with the headers");
+                if (b.packed_bytes != total)
+                {
+                    free(fetched);
+                    return false;
+                }
                 mount_raw(b, fetched.ptr, offs_bytes, rec_bytes, irregular);
                 return true;
             }
@@ -895,7 +899,7 @@ nothrow @nogc:
         if (!ok)
         {
             free(img);
-            debug assert(false, "packed bucket failed to reconstitute");
+            debug assert(fetched.ptr, "packed bucket failed to reconstitute");
             return false;
         }
         mount_raw(b, img.ptr, offs_bytes, rec_bytes, irregular);

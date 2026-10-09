@@ -1033,9 +1033,12 @@ decisions are in [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md). The
   per-plane codec byte with raw fallback) are designed against the existing `SeriesCodec` registry
   and not written.
 
-- **Validate the series container on load**: `SeriesContainer.open_` (`src/manager/ows.d`) reads
-  block headers off disk unvalidated, so a corrupt or hostile container is trusted. External state
-  rejects, it does not assert.
+- **Harden the series container against hostile payloads**: `SeriesContainer.open_` now
+  rejects corrupt headers and truncates at the first bad block, but adopted blocks are trusted by
+  size only: a raw text payload's `heap_view` offsets are never checked against `heap_bytes`, so
+  a hostile record plane can index outside the heap on read, and every distinct anchor format
+  interns through `register_format`, which asserts when the registry fills (about 65k anchors).
+  External state rejects, it does not assert.
 
 - **Defer reactor-thread producers to the main loop**: a producer writing from a reactor thread
   must not dispatch observers or mark dirty inline (`src/manager/element.d:1261`); queue the
