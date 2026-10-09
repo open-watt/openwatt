@@ -456,7 +456,7 @@ private:
             return null;
         }
         debug assert(header + trailer < min_tx_request, "a grant carries a record's framing and some payload");
-        size_t payload = (req.bytes < tx_page_payload ? req.bytes : tx_page_payload) - header - trailer;
+        size_t payload = (req.bytes < max_tx_page ? req.bytes : max_tx_page) - header - trailer;
         if (payload > max_payload)
             payload = max_payload;
         TxRequest inner = TxRequest(payload, req.deadline, req.headroom + header, req.tailroom + trailer);
@@ -733,7 +733,6 @@ private:
     }
     HandshakeState _handshake_state;
 
-    enum size_t tx_page_payload = 1600;
 
     version (MbedTLS)
     {

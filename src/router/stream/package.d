@@ -47,6 +47,9 @@ alias TapHandler = void delegate(Stream source, bool tx, const(void)[] data, Mon
 // A sink never asks for less; below this a producer cannot make progress through its framing.
 enum size_t min_tx_request = 128;
 
+// the most one pull hands over
+enum size_t max_tx_page = 1600;
+
 // A pump's turn; a sink with room left after it takes its next turn behind the other bulk work.
 enum Duration tx_slice = msecs(5);
 
@@ -123,6 +126,62 @@ void append_tx_chain(ref Page* chain, Page* pages)
     while (tail.next)
         tail = tail.next;
     tail.next = pages;
+}
+
+// fills the buffer it is given and returns the bytes written, stopping at a yield point past the deadline
+alias Fill = size_t delegate(char[] buffer, MonoTime deadline, out TxStatus status) nothrow @nogc;
+
+// a producer for a fill that needs a whole chunk to make progress; the chunk is handed out as the grants allow
+struct FillProducer
+{
+nothrow @nogc:
+    Fill fill;
+    size_t chunk;
+
+    Page* produce(ref const TxRequest req, out TxStatus status)
+    {
+        if (!_pending)
+        {
+            if (_after == TxStatus.end || _after == TxStatus.abort)
+            {
+                status = _after;
+                return null;
+            }
+            Page* page = page_alloc(chunk, default_alignment, req.headroom, req.tailroom);
+            if (!page)
+            {
+                status = TxStatus.starved;
+                return null;
+            }
+            size_t n = fill(cast(char[])page.data, req.deadline, _after);
+            if (_after == TxStatus.yield)
+                _after = TxStatus.more;
+            if (n == 0)
+            {
+                page_free(page);
+                status = _after == TxStatus.more ? TxStatus.yield : _after;
+                return null;
+            }
+            page.length = cast(ushort)n;
+            _pending = page;
+        }
+        Page* page = take_tx_page(_pending, req, status);
+        if (page)
+            status = _pending ? TxStatus.more : _after;
+        return page;
+    }
+
+    // what was made and not taken is dropped
+    void release()
+    {
+        if (_pending)
+            page_free(_pending);
+        _pending = null;
+    }
+
+private:
+    Page* _pending;
+    TxStatus _after;
 }
 
 // a producer that installs a replacement and returns nothing is followed by a pull from the replacement
@@ -465,7 +524,6 @@ protected:
     }
 
     enum size_t tx_queue_limit = 2048;
-    enum size_t tx_page_payload = 1600;
 
     void queue_tx_page(Page* page)
     {
@@ -517,7 +575,7 @@ protected:
         if (!running)
             return 0;
         size_t queued = tx_queued();
-        size_t room = queued < tx_queue_limit + tx_page_payload ? tx_queue_limit + tx_page_payload - queued : 0;
+        size_t room = queued < tx_queue_limit + max_tx_page ? tx_queue_limit + max_tx_page - queued : 0;
         size_t total;
         Page* tail = _tx_queue;
         while (tail && tail.next)
@@ -529,7 +587,7 @@ protected:
             {
                 if (!tail || !tail.tailroom || !page_unique(tail))
                 {
-                    size_t want = bytes.length < tx_page_payload ? bytes.length : tx_page_payload;
+                    size_t want = bytes.length < max_tx_page ? bytes.length : max_tx_page;
                     Page* page = page_alloc(want < room - total ? want : room - total);
                     if (!page)
                         break copy;
@@ -1101,7 +1159,7 @@ unittest
         foreach (i, ref b; bytes)
             b = cast(ubyte)i;
         size_t taken = line.queue_copy(bytes[]);
-        assert(taken == Stream.tx_queue_limit + Stream.tx_page_payload, "a copy is bounded");
+        assert(taken == Stream.tx_queue_limit + max_tx_page, "a copy is bounded");
         assert(line.queue_copy(bytes[]) == 0, "a full queue takes nothing");
         line.open(10_000);
         assert(line.output.length == taken && line.output[] == bytes[0 .. taken]);
