@@ -402,9 +402,9 @@ nothrow @nogc:
             if (numElements >= _max_elements)
                 return false;
 
-            // expand the allocation
-            void[] mem = cast(void[])_elements;
-            mem = realloc(mem, min(mem.length * 2, _max_elements * Entry.sizeof));
+            void[] mem = realloc(cast(void[])_elements, min(numElements * Entry.sizeof * 2, _max_elements * Entry.sizeof));
+            if (!mem.ptr)
+                return false;
             _elements = cast(Entry[])mem;
             _free_list_head = cast(ushort)numElements;
             for (; numElements < _elements.length - 1; ++numElements)
