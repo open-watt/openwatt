@@ -863,10 +863,8 @@ decisions are in [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md). The
   netconsole, and neither does anything `/system/reboot` or the boot guard's revert logs last.
   Drain the sinks before resetting.
 
-- **`/element/set` swallows rejected values**: `element_set` calls `Element.value(Variant)`, which
-  drops the error `update_typed_series` returns, so `value=1` on a bool element does nothing and
-  says nothing (`value=true` works). Report the error, and decide whether 0 and 1 should convert
-  to bool.
+- **Decide whether `/element/set value=1` converts to bool**: the element rejects it today and
+  the console now says so (`value=true` works).
 
 - **The console prints quantities badly**: `/device/print` shows an integer 1310 nm as
   `1.31e+3nm` and a float supply of 3.2616 V as `3.2616000175476074V`. The stored values are
