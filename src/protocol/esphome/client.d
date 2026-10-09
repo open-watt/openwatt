@@ -338,8 +338,10 @@ private:
                 }
                 else
                 {
-                    // noise frame
-                    assert(false, "TODO");
+                    // only the plaintext protocol is supported; the stream has lost its place
+                    _tail.clear();
+                    restart();
+                    return;
                 }
 
                 frame = frame[offset .. $];
@@ -365,7 +367,11 @@ private:
             case HelloResponse.id:
                 HelloResponse res;
                 if (proto_deserialise(frame, res) != frame.length)
-                    assert(false, "what here?");
+                {
+                    log.warning("malformed ESPHome hello; restarting");
+                    restart_deferred();
+                    return;
+                }
 
                 _major = res.api_version_major;
                 _minor = res.api_version_minor;
