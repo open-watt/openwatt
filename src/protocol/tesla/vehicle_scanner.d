@@ -10,6 +10,7 @@ import manager;
 import manager.base;
 import manager.collection;
 import manager.device;
+import manager.features : has_aes_gcm;
 import manager.secret;
 
 import protocol.ble;
@@ -192,6 +193,12 @@ protected:
 
     override CompletionStatus startup()
     {
+        static if (!has_aes_gcm)
+        {
+            log.error("Tesla BLE needs AES-GCM and ECDH P-256; this build has no crypto backend (USE_MBEDTLS=1)");
+            _fail_reason = "No crypto backend";
+            return CompletionStatus.error;
+        }
         if (!_iface || !_iface.running)
             return CompletionStatus.continue_;
 
