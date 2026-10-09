@@ -1105,11 +1105,6 @@ ownership, option-buffer overrun), the INIT-REBOOT silence rule and monotonic le
 expiry landed: a lease arms its own expiry and returns its own reservation to the pool
 that made it, so no server reaps. What follows is still open.
 
-- **P2: receive validation bypasses transport checks** (both `incoming_packet`
-  methods): raw interface subscriptions do not check IPv4 checksum, fragmentation,
-  or nonzero UDP checksum. UDP length is bounded by the frame rather than IPv4
-  total length. Share a validated DHCP datagram decoder and reject malformed packets
-  before changing lease state; preserve legal IPv4 zero UDP checksums.
 - **P2: pool edits discard live reservations** (`ip/pool.d`, `start`, `end`):
   changing either endpoint clears the allocation bitmap without reconciling active
   leases; the running DHCP server can then allocate an already leased address.
