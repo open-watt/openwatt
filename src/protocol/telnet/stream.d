@@ -220,6 +220,7 @@ protected:
         _client_state = 0;
         _client_state_req = 0;
         _tail.clear();
+        _skip_sb = false;
         return CompletionStatus.complete;
     }
 
@@ -252,11 +253,13 @@ private:
     Array!ubyte _tail;          // input not yet parsed: an incomplete sequence, or what arrived with no consumer
     bool _subscribed;
     bool _terminal_aware;
+    bool _skip_sb;              // an overlong subnegotiation is discarded through to its IAC SE
 
     // strips IAC sequences; commands update the TerminalChannel and set pending events
     void inner_rx(Stream, const(void)[] data, MonoTime rx_time)
     {
         enum RawBufLen = 512;
+        enum SubnegLimit = 64;
         const(ubyte)[] input = cast(const(ubyte)[])data;
         while (input.length)
         {
@@ -286,7 +289,16 @@ private:
             size_t i = 0;
             parse_loop: for (; i < raw_len; ++i)
             {
-                if (rawbuf[i] == NVT.IAC)
+                if (_skip_sb)
+                {
+                    if (rawbuf[i] != NVT.IAC)
+                        continue;
+                    if (i == raw_len - 1)
+                        break;
+                    if (rawbuf[++i] == NVT.SE)
+                        _skip_sb = false;
+                }
+                else if (rawbuf[i] == NVT.IAC)
                 {
                     size_t iac_start = i;
 
@@ -333,9 +345,13 @@ private:
                                 ++sub_start;
                             if (sub_start >= raw_len - 1)
                             {
-                                // Incomplete subnegotiation - save from IAC start
-                                i = iac_start;
-                                break parse_loop;
+                                if (raw_len - iac_start <= SubnegLimit)
+                                {
+                                    i = iac_start;
+                                    break parse_loop;
+                                }
+                                _skip_sb = true;
+                                break;
                             }
 
                             const(ubyte)[] sub = rawbuf[i + 1 .. sub_start];
@@ -846,6 +862,22 @@ unittest
 
         transport.feed("more");
         assert(consumer.text[] == "hello worldmore");
+
+        // a subnegotiation that outgrows the bound is discarded through to its IAC SE, with no leak before it
+        char[3 + 100] overlong = 'x';
+        overlong[0 .. 3] = "\xFF\xFA\x1F";
+        transport.feed(overlong[]);
+        assert(filter._skip_sb && filter._tail.empty && consumer.text[] == "hello worldmore");
+        transport.feed("junk\xFF\xFF\xF0junk\xFF");
+        assert(filter._skip_sb && filter._tail[] == cast(const(ubyte)[])"\xFF" && consumer.text[] == "hello worldmore");
+        transport.feed("\xF0after");
+        assert(!filter._skip_sb && filter._tail.empty && consumer.text[] == "hello worldmoreafter");
+
+        // a well-formed NAWS still lands, split across deliveries
+        transport.feed("\xFF\xFA\x1F\x00\x50");
+        assert(filter._tail.length == 5 && consumer.text[] == "hello worldmoreafter");
+        transport.feed("\x00\x18\xFF\xF0!");
+        assert(filter._terminal.width == 80 && filter._terminal.height == 24 && consumer.text[] == "hello worldmoreafter!");
         filter.release_rx_handler(&consumer.recv);
         transport.feed("later");
         assert(transport.rx_handler is null && filter._tail[] == cast(const(ubyte)[])"later");

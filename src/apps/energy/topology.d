@@ -1689,6 +1689,7 @@ private:
         // Bracketing meters naturally differ by calibration and wiring loss.
         float noise_floor_w = flow_scale * 0.02f > 50 ? flow_scale * 0.02f : 50;
         bool balanced = absf(signed_power) <= noise_floor_w;
+        bool unexplained;
 
         if (b.dark_ports == 0)
         {
@@ -1698,26 +1699,27 @@ private:
             {
                 b.coverage = Coverage.rogue_value;
                 // Missing load is plausible; unexplained generation is anomalous.
-                if (signed_power > 0)
-                    b.anomaly = true;
+                unexplained = signed_power > 0;
                 b.balance.mark(MeterField.power, 0, Provenance.rogue);
             }
-            return;
-        }
-
-        b.coverage = Coverage.bounded;
-        if (signed_power < 0)
-        {
-            b.dark_power_bound = dark_can_sink ? -signed_power : 0;
-            if (!balanced && !dark_can_sink)
-                b.anomaly = true;
         }
         else
         {
-            b.dark_power_bound = dark_can_source ? signed_power : 0;
-            if (!balanced && !dark_can_source)
-                b.anomaly = true;
+            b.coverage = Coverage.bounded;
+            if (signed_power < 0)
+            {
+                b.dark_power_bound = dark_can_sink ? -signed_power : 0;
+                unexplained = !balanced && !dark_can_sink;
+            }
+            else
+            {
+                b.dark_power_bound = dark_can_source ? signed_power : 0;
+                unexplained = !balanced && !dark_can_source;
+            }
         }
+
+        // The utility exchange is the grid bus's expected residual.
+        b.anomaly = unexplained && !b.contains_grid;
     }
 
 
@@ -1834,5 +1836,25 @@ unittest
         }
         assert(absf(into - out_of) <= 0.01f);
         g2.clear();
+    }
+
+    // the same import shape is utility exchange on the grid bus and unexplained generation elsewhere
+    {
+        TopologyGraph g3;
+        Bus* grid_bus = g3.ensure_bus("grid");
+        Bus* house_bus = g3.ensure_bus("house");
+        Bus*[2] both = [grid_bus, house_bus];
+        foreach (bus; both[])
+        {
+            Port* p = g3.add_port(null, bus, PortRole.connection, FlowDomain.bidirectional, null, 0, MeterSign.normal, "main");
+            p.meter_data.write_value(MeterField.power, 0, 1000);
+            p.meter_data.mark(MeterField.power, 0, Provenance.measured);
+            g3.add_to_group(g3.add_group(bus.id[], PortGroupKind.handover), p);
+        }
+
+        g3.infer_graph();
+        assert(grid_bus.coverage == Coverage.rogue_value && !grid_bus.anomaly);
+        assert(house_bus.coverage == Coverage.rogue_value && house_bus.anomaly);
+        g3.clear();
     }
 }

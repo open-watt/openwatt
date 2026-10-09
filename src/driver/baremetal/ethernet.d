@@ -154,8 +154,7 @@ nothrow @nogc:
                                        Prop!("flow-control", flow_control),
                                        Prop!("speed", speed),
                                        Prop!("full-duplex", full_duplex),
-                                       Prop!("auto-negotiate", auto_negotiate),
-                                       Prop!("duplex", duplex, "status"));
+                                       Prop!("auto-negotiate", auto_negotiate));
     static if (has_eth_pin_select)
         alias PinSelectProperties = AliasSeq!(Prop!("tx-en-gpio", tx_en_gpio),
                                               Prop!("txd0-gpio", txd0_gpio),
@@ -172,9 +171,6 @@ nothrow @nogc:
     else
         alias TxChecksumProperties = AliasSeq!();
     alias Properties = AliasSeq!(CommonProperties, PinSelectProperties, TxChecksumProperties);
-
-    final Duplex duplex() const pure
-        => _duplex;
 
     override const(char)[] status_message() const
     {
@@ -252,7 +248,6 @@ protected:
 
 private:
     MacPort _port;
-    Duplex _duplex = Duplex.unknown;
 
     void set_wiring(string prop, T)(ref T field, T value)
     {
@@ -310,12 +305,6 @@ private:
             if (running)
                 restart();
         }
-    }
-
-    void set_duplex(Duplex value)
-    {
-        _duplex = value;
-        mark_set!(typeof(this), "duplex")();
     }
 }
 

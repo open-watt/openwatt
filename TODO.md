@@ -148,7 +148,6 @@ holding action, not an answer. Options, cheapest first:
   fault-injection tests do not establish the storage driver's power-loss guarantees.
 - Bound cleanup of crash-left `.tmp` and rejected `.bad` revision files without losing
   useful recovery evidence; successful-save retention currently prunes completed files.
-- Complete the config-dirty mutation coverage (`set-hostname` currently bypasses it).
 - **Retained reset/clock validation after uRT #322/#327**: the pin includes the
   merged watchdog-clock and reset-barrier fixes plus RTC restore. Verify Beken
   reset with its watchdog initially disabled, RP2350 mark/reset and wall-time
@@ -347,8 +346,6 @@ and the panel left outstanding.
   (a review probe confirmed it disarms): a module test would build its own Application, and an
   Application cannot be created twice in one process, since its destructor releases neither the page
   pool nor the event queues, intrinsics and signal providers its constructor registers.
-- **`Duration` properties print as raw nanoseconds** (`get` shows `3e+10ns` for `30s`): the value
-  reaches the console as a quantity rather than through `Duration`'s own formatting.
 
 ## Driver contracts (2026-10-04)
 
@@ -476,10 +473,6 @@ one primitive (most belong in urt) and its copies deleted:
   and GTK rotation, but does not yet renegotiate a PTK on an established link.
   Add authenticated rekey transitions and retransmission tests without resetting
   receive counters when already installed key material is repeated.
-
-- **[uRT build, in passing] Respect the compiler's Tiny version flag**:
-  `platforms.mk` hard-codes `-d-version=Tiny`, so `TINY=1 COMPILER=dmd` fails
-  before compilation. Use the existing compiler-specific `VERSION_FLAG`.
 
 - **[Windows toolchain] Retire the default beta DMD and isolate LDC COMDAT failure**:
   PATH selects DMD 2.112.0-beta.1, whose unittest build fails copy-constructor
@@ -659,12 +652,6 @@ one primitive (most belong in urt) and its copies deleted:
   stale silently too: `pt100`/`tac1100` read `online false` with 11-hour-old values while
   `cabin_hot_water` still consumed them as current.
 
-- **The grid bus is flagged as an anomaly whenever the site imports**: `classify_bus_coverage`
-  (`src/apps/energy/topology.d:1701`) runs on the island root like any other bus, so the grid bus,
-  which has one metered port and no dark port to absorb the flow, goes `rogue-value` (and `anomaly`
-  when importing) above the 50 W noise floor. The accounts are unaffected because `add_island_rogue`
-  skips `island.root`, but the published bus state lies.
-
 ## Tesla TWC
 
 - Mark sampled series gaps when a binding loses observation. TWC master outages
@@ -718,8 +705,6 @@ one primitive (most belong in urt) and its copies deleted:
 
 ## 802.15.4 radio (WpanInterface)
 
-- Create `wpan1` in the C5 and C6 system profiles, as on S31; both currently require
-  manually adding the built-in radio.
 - **Receive is validated on hardware; transmit is not.** On an ESP32-C5 DevKitC-1,
   `/interface/wpan/add name=wpan1 channel=15 promiscuous=yes` comes up Running with
   link-status up and counts real traffic off the air: 54 packets and 1,568 bytes in the first
@@ -825,8 +810,7 @@ decisions are in [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md). The
    offer a query `validate()` can use.
 
 5. **Component alias**: `/element/alias` creates a mirror of a component and registers itself as
-   the writer, so sync accepts remote writes. `/element/link` has no CLI.md section; document it
-   alongside.
+   the writer, so sync accepts remote writes.
 
 6. **System slots**: gestures for recovery, unconfigured and an image on trial;
    `system.status.state`; `/system/factory-reset` sharing the reset slot's code; a recovery
@@ -854,10 +838,7 @@ decisions are in [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md). The
 9. **Network indication**: once #749's wifi mirror moves from the SmartEVSE binding into
    `system.status.network`.
 
-10. **A light's `level` prints as `1e+2%`**: `/device/print` shows the `Quantity!(ubyte, Percent)`
-    at 100 in exponent form. Find where an integral quantity is formatted as a float.
-
-11. **Changing a binding's `kind` leaves the old kind's elements**: a `light` made a `button`
+10. **Changing a binding's `kind` leaves the old kind's elements**: a `light` made a `button`
     keeps `effect`, `indicate`, `pulse`, `level` and `switch` beside `mode`, `state` and `event`,
     stale under a component now templated `Button`. Elements outlive a restart by design; a kind
     change should drop the ones the new kind does not bind.
@@ -869,15 +850,8 @@ decisions are in [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md). The
   netconsole, and neither does anything `/system/reboot` or the boot guard's revert logs last.
   Drain the sinks before resetting.
 
-- **`/element/set` swallows rejected values**: `element_set` calls `Element.value(Variant)`, which
-  drops the error `update_typed_series` returns, so `value=1` on a bool element does nothing and
-  says nothing (`value=true` works). Report the error, and decide whether 0 and 1 should convert
-  to bool.
-
-- **The console prints quantities badly**: `/device/print` shows an integer 1310 nm as
-  `1.31e+3nm` and a float supply of 3.2616 V as `3.2616000175476074V`. The stored values are
-  right; the tree view's quantity formatting wants integers printed as integers and floats to a
-  precision that matches their resolution.
+- **Decide whether `/element/set value=1` converts to bool**: the element rejects it today and
+  the console now says so (`value=true` works).
 
 - **`system` device memory is the allocator's own accounting**: on desktop that counts uRT
   allocations only, not the process's working set, which stays in `/system/sysinfo`. On ESP32
@@ -898,12 +872,6 @@ decisions are in [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md). The
   heap offsets into a heap that is null. `tail_record` likewise hands back the previous format's
   record. Either the readers ignore a tail whose format is not the element's, or the setter
   retires the tail.
-
-- **One more `realloc` result stored unchecked**: `router/iface/mac.d:407`
-  (`mem = realloc(mem, ...)`) assigns straight into the owning field, so an allocation failure
-  installs null over a live pointer. It wants the shape the series bucket lifecycle now has: grow
-  into a temporary, keep the old block when the grow fails, and let the caller refuse the
-  operation.
 
 - **Audit dynamic-object ownership across the tree**: `ObjectFlags.dynamic` means the object
   was created by something other than the user, is excluded from saved config, and is managed
@@ -957,8 +925,6 @@ decisions are in [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md). The
   - Nesting a builder asserts, in release too, by choice: find misuse early. Revisit once the
     esphome, goodwe, zigbee, SunSpec, MQTT discovery and SmartEVSE paths have run under it; none of
     them were exercised on the bench.
-  - The esphome and goodwe `status.network.ip.address` elements are written once at connect and
-    never refreshed; they should follow the client's connection.
   - `open_commit()` (element.d) has no callers: every multi-element write still delivers per
     element, so a subscriber can run between two fields of one frame and the topology watch can
     rebuild mid-frame. Wrap each frame boundary in a `CommitScope`: the TWC push, the Modbus,
@@ -1185,8 +1151,6 @@ this is what remains.
   verified on the BL808 only.
 - **`/element/set` cannot reach a device keyed by a peer id**, such as the energy app's device,
   which `create_energy_device` keys by the local node id.
-- **`/device/print` renders negative ages as `-209.-6s`** when a remote timestamp is ahead of the
-  local clock.
 
 - **A cleared template can survive a reconnect on a wholly unclassified path**: an introduction
   omits `tmpl` when nothing on the path carries a template, and an absent chain is silence, so a
@@ -1352,7 +1316,6 @@ this is what remains.
 - **Push-receive review follow-ups** (2026-10-06, #814):
   - A connection paused by `recv_handler(null)` does not see the peer's FIN or a reset until it
     reads again; epoll drops read interest and IOCP holds the one receive it has.
-  - Telnet subnegotiation is not clamped, so a peer that never sends `IAC SE` grows the buffer.
   - A consumer that calls `restart()` from inside its delivery leaves the source's loop to finish
     the chunk against a stopping object. `restart_deferred()` is not the whole answer (audited
     2026-10-09): it postpones only `shutdown()`, a temporary object is destroyed synchronously
@@ -1392,13 +1355,6 @@ this is what remains.
     window. Size it to the segment once session output is pulled (S4): the console stream then
     grants by window room and resumes on the ack, with a bounded buffer that splits on code points.
 
-- **A Windows UDP socket that sends to a closed port stops receiving** (2026-10-06): two instances
-  peering over `/interface/udp` on loopback, the one whose hello went out before the other bound
-  its port never hears the other again. The ICMP port-unreachable surfaces as `WSAECONNRESET` on
-  the next `recvfrom`; urt's `recvfrom` swallows it as success with 0 bytes, and the reception path
-  appears to stop draining there. Disable `SIO_UDP_CONNRESET` on UDP sockets, or keep reading past
-  the reset.
-
 - **Interface sizes the MTU work left open** (2026-10-06): `l2mtu` should be writable on Ethernet,
   where jumbo frames make it meaningful, and read-only elsewhere, with `max-l2mtu` (the largest
   jumbo the hardware takes) present only there; the property system cannot yet let a derived class
@@ -1408,11 +1364,6 @@ this is what remains.
   Zigbee's 90-byte APS frame assumes the minimum NWK header; source routing or a longer APS header
   leaves less. Tesla TWC transmits its checksum byte unescaped, so a checksum of `0xC0` or `0xDB`
   corrupts the frame.
-
-- **urt's platforms.mk drops MbedTLS when a caller sets `VERSIONS`**: it appends `MbedTLS` to
-  `VERSIONS` with a plain assignment, which a command-line `VERSIONS` overrides, so
-  `VERSIONS=Foo` on an mbedTLS platform builds without `version (MbedTLS)`. Add it to `DFLAGS`
-  directly, as OpenWatt's `BOARD_VERSIONS` does.
 
 - **Link follow-ups**: interfaces signal `link_up`/`link_down`, but every Ethernet driver except
   the SFP port still links with its lifecycle, waiting in Starting for carrier and restarting when
@@ -1476,28 +1427,13 @@ this is what remains.
   read-only identities such as a port's `circuit`. Define whether this command is an explicit
   diagnostic override or should enforce the same write contract as clients (found in #718).
 
-- **`FEATURES=switch` does not link.** `driver/linux/bridge.d` and `driver/linux/wifi.d` import
-  `protocol.ip.linux_mirror.mirror_refresh_interface` unconditionally, but the switch tier drops
-  `protocol.ip`, so the symbol is undefined at link. Found while testing another branch on
-  2026-09-20; `IPV6=0 GATEWAY=0` builds clean, so it is this tier specifically. Gate the import
-  and its call sites on `has_ip`.
+- **`FEATURES=switch` has not been linked since the `has_ip` gates landed** in `driver/linux/bridge.d`
+  and `driver/linux/wifi.d`; the tier was found unlinkable on 2026-09-20. Build it on Linux.
 
-- **`EUILit` is unusable under LDC.** Building an EUI-64 from a string literal at compile time
-  makes LDC 1.42 emit `ICE: overlapping initializers for struct literal`, from `EUI`'s union of a
-  `ulong` and a `ubyte[8]`. DMD accepts it, and every ESP build uses LDC, so the template cannot
-  be used in anything that targets hardware; use the `EUI64(0x01, ...)` constructor instead.
-  Nothing had ever instantiated it, which is also why its own length check was wrong until now.
-  The C-style `EUI64 x = { b: [...] }` initialiser is not an escape: D refuses brace initialisers
-  on a struct that declares a constructor, and `EUI` declares one.
-
-- Fix `urt.conv.parse_uint` overflow: reject values outside `ulong` range using the existing zero-consumption error contract. Revision filenames use checked `parse_int_fast`.
-
-- **Unsubscribe during packet dispatch walks a stale slice**: `BaseInterface.fire_subscribers`
-  and `send` iterate `_subscribers[0 .. _num_subscribers]` captured before the loop, and
-  `unsubscribe` swap-removes into that range. A handler that calls `restart()` (the dhcp6
-  client's declined-reply path, any offline handler) unsubscribes and re-subscribes inside the
-  walk, so the moved-in and re-added entries can receive the same packet again. Snapshot the
-  subscriber set or defer removals until the walk ends.
+- **A full subscriber table refuses a resubscribe during dispatch**: an entry removed mid-walk
+  holds its slot until the outermost dispatch compacts the table, so with all eight slots taken
+  a handler that unsubscribes and resubscribes inline is refused. Nothing in tree does that on a
+  full table; a `restart()` resubscribes from the state machine, after the walk.
 
 - **Make clock-sensitive unittests hermetic**: tests that leave a `MonoTime` member at
   `MonoTime.init` and then compare it against a real `getTime()` only pass once the monotonic
@@ -1514,18 +1450,10 @@ this is what remains.
   stream reads console events. Use a terminal or supported session transport.
   Drain stderr during execution and terminate before waiting for EOF; the
   current shutdown reads stderr before stopping the process and can hang.
-  `test/test_runner.py` also looks for `bin/x86_64_debug/openwatt` while the makefile emits
-  `bin/x86_64_linux_debug/`, so it finds no Linux build at all.
 
 - **Move Xtensa to LDC 1.43**: esp-clang `esp-22.1.4_20260825` (LLVM 22, released 2026-09-17)
   can read LDC 1.43's bitcode. Install it with `idf_tools.py install esp-clang` and build an
   Xtensa target with LDC 1.43; the makefile's LLVM-major check lifts itself.
-
-- **Harden bindings against malformed remote input**: the `ow/dm` review found protocol
-  bindings that abort or deref on data an attacker controls, and one survives. ESPHome still
-  carries `assert(false, "what here?")` on `proto_deserialise` length mismatch
-  (`src/protocol/esphome/client.d`), which is a remote abort on a malformed frame. External
-  state rejects, it does not assert.
 
 - **Close the descriptor grammar gaps**: `strN` widths parse but are ignored entirely, so any
   `N` compiles unvalidated while the span comes from the register map
@@ -1745,13 +1673,11 @@ this is what remains.
   - The live views (`CollectionWatchState`, `TreeViewState`) format and measure every row on every
     tick and render only the visible slice; they should format and fit only the slice.
 
-- **Document `/device` in CLI.md**: `add`, `print` (`filter=`, `--watch`, `--expand`) and
-  `/element/set` have no reference entry. A bare `print m1*` does not bind `filter`; it lands
-  in the variadic `args` and prints everything.
+- **`/device/print` does not bind a bare pattern to `filter`**: a function with a variadic `args`
+  takes every unnamed argument, so `print m1*` prints everything; CLI.md documents `filter=` only.
 
-- **Document `/protocol/mqtt/broker` in CLI.md**: the broker, its `discover` prefixes and the Home
-  Assistant discovery it drives (entity mapping, writers, availability aggregated into
-  `status.online`) have no CLI.md section at all.
+- **Document `/protocol/mqtt/client` and `/binding/mqtt` in CLI.md**: the broker section now
+  covers only the client's `publish` command.
 
 - **Clarify TLS server transport ownership**: ensure shutdown cannot destroy a listener twice
   when a server-side TCP stream takes multiple ticks to stop.
@@ -1850,7 +1776,6 @@ so D0's devices appear on M0 only.
   sync encoders could build a frame where D0 or M0 reads it. Worth it once the M0/D0 link carries
   bulk traffic.
 - **A doorbell event the full event queue refuses waits for the next heartbeat**, up to a second.
-- **The heap core keeps a pool it failed to add**: reject it so its bytes are not counted as free.
 - **The BL618 has no `system_reset`/`por_reset`**; only the BL808 cores do.
 - **M0's provisioning AP is open**, where the Waveshare board's defaults run a WPA2 AP on a known
   setup secret with non-anonymous pcap. Bring M0's `default.conf` into line once a WPA2 AP and the
@@ -2301,9 +2226,8 @@ status and live reinstall. **No frame has crossed a wire on any part**, for want
 - **Only ethernet headers can carry a hardware stamp.** `hw_time` lives in `Ethernet`, so a radio
   that stamps in hardware (802.15.4 does) has nowhere to put one without its own header field.
 
-- **Only the Espressif backend reports `duplex`.** The read-only property and `router.status.Duplex`
-  exist so every backend can; Linux has it in `/sys/class/net/<if>/duplex` and Windows in the adapter
-  info, and neither feeds it.
+- **Windows does not report `duplex`.** It needs `GetIfEntry2`'s `MediaDuplexState`, a new
+  IPHLPAPI query; Linux and Espressif feed it.
 
 - **Link detection is a 2s poll inside ESP-IDF.** Nothing of ours waits or polls, but esp_eth finds
   the link by reading the PHY status over MDIO on its own timer (`check_link_period_ms`), so a cable

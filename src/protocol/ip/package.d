@@ -1705,7 +1705,10 @@ nothrow @nogc:
             IOCP_SOCKET socket = ws_socket(v6 ? WSA_AF_INET6 : WSA_AF_INET, WSA_SOCK_DGRAM, WSA_IPPROTO_UDP, null, 0, WSA_FLAG_OVERLAPPED);
             if (socket == INVALID_SOCKET)
                 return false;
-            int yes = 1;
+            int yes = 1, no = 0;
+            uint returned;
+            // an ICMP port-unreachable would otherwise fail every later receive with WSAECONNRESET
+            WSAIoctl(socket, SIO_UDP_CONNRESET, &no, int.sizeof, null, 0, &returned, null, null);
             bool configured = g_recv_msg !is null;
             if (v6)
                 configured = configured && ws_setsockopt(socket, WSA_IPPROTO_IPV6, WSA_IPV6_V6ONLY, &yes, int.sizeof) == 0 && ws_setsockopt(socket, WSA_IPPROTO_IPV6, WSA_IPV6_PKTINFO, &yes, int.sizeof) == 0;
@@ -2890,6 +2893,7 @@ else version (Windows)
     alias LPFN_RECVMSG   = extern(Windows) int function(IOCP_SOCKET, WSAMSG*, uint*, OVERLAPPED*, void*) nothrow @nogc;
 
     enum uint SIO_GET_EXTENSION_FUNCTION_POINTER = 0xC8000006;
+    enum uint SIO_UDP_CONNRESET = 0x9800000C;
     enum int  SO_UPDATE_CONNECT_CONTEXT = 0x7010;
     enum int  SO_UPDATE_ACCEPT_CONTEXT  = 0x700B;
 
