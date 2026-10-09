@@ -919,14 +919,10 @@ decisions are in [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md). The
   has to be spelled `values=2,3` to avoid the collapse. Add a per-profile (or per-remote-server)
   quirk that pins writes to fn 16 / fn 15 regardless of count.
 
-- **`slave=` accepts only a named remote-server, and a raw unit address silently polls nothing**:
-  `/binding/modbus` leaves `_slave_server` null unless `slave=` names an
-  `/interface/modbus/remote-server` entry, and the poll path early-outs on
-  `if (_snooping || !_slave_server) return;` (`src/protocol/modbus/binding.d:238`). A binding
-  configured with a bare unit address therefore reaches Running and transmits nothing, with no
-  diagnostic. Either resolve a numeric `slave=` to an implicit server or refuse the config in
-  `validate()`. A `/interface/modbus` bus scan command would also have found the TAC1100's address
-  in seconds instead of by hand.
+- **`slave=` takes a name, not a unit address**: a bare unit address fails startup with
+  `slave '3' is not a remote-server or node`. Resolving a numeric `slave=` to an implicit server
+  needs a `remote-server` that can be released again (`add_remote_server` has no removal), and
+  a `/interface/modbus` bus scan command would find a unit's address in seconds instead of by hand.
 
 
 - **Device construction API, remaining pieces** (the builder landed: `DeviceBuilder`,
