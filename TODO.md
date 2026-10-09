@@ -1177,8 +1177,6 @@ this is what remains.
   verified on the BL808 only.
 - **`/element/set` cannot reach a device keyed by a peer id**, such as the energy app's device,
   which `create_energy_device` keys by the local node id.
-- **`/device/print` renders negative ages as `-209.-6s`** when a remote timestamp is ahead of the
-  local clock.
 
 - **A cleared template can survive a reconnect on a wholly unclassified path**: an introduction
   omits `tmpl` when nothing on the path carries a template, and an absent chain is silence, so a
