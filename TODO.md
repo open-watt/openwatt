@@ -1507,12 +1507,6 @@ this is what remains.
   can read LDC 1.43's bitcode. Install it with `idf_tools.py install esp-clang` and build an
   Xtensa target with LDC 1.43; the makefile's LLVM-major check lifts itself.
 
-- **Harden bindings against malformed remote input**: the `ow/dm` review found protocol
-  bindings that abort or deref on data an attacker controls, and one survives. ESPHome still
-  carries `assert(false, "what here?")` on `proto_deserialise` length mismatch
-  (`src/protocol/esphome/client.d`), which is a remote abort on a malformed frame. External
-  state rejects, it does not assert.
-
 - **Close the descriptor grammar gaps**: `strN` widths parse but are ignored entirely, so any
   `N` compiles unvalidated while the span comes from the register map
   (`src/manager/sample/spec.d`). Integer text records no longer accept exponent notation
