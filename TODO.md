@@ -1189,10 +1189,6 @@ this is what remains.
   O(elements x handles), once per event. Fine at fleet scale and only at configuration time; a
   keyed handle lookup fixes it if a device ever churns templates.
 
-- **The sync capability byte is full**: `templates` took bit 7 of `SyncCaps`, which is a `ubyte`
-  on the wire (binary `hello`) and in `SyncPeer._remote_caps`. The next capability needs the field
-  widened first; JSON names capabilities as strings and has no such limit.
-
 - **Intern the `add` frame's template chain**: `tmpl` repeats the same short chain on every
   element of a component, so a full intro pays for it once per element rather than once per
   component. Formats and enum dictionaries already intern per session (`to.ft_of`,
