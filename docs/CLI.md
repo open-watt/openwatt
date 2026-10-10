@@ -32,7 +32,8 @@ Each of these top-level commands has its own set of sub-commands for more specif
 ### Saved Configuration
 
 - `/system/config/export` prints the running configuration as a command script,
-  excluding dynamic, temporary and remote objects.
+  excluding dynamic, temporary and remote objects. Module settings such as `/sync/peering`
+  are included; the fleet key is not, since an adopted node persists it with its allegiance.
 - `/system/config/save [file=<base>]` saves a numbered revision and keeps the latest five.
   The default is `conf/config.conf.1`, `.2`, etc.; the command reports the filename.
 - `/system/sysinfo` shows whether the configuration has unsaved changes. Saving to the
