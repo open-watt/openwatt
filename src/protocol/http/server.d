@@ -8,6 +8,7 @@ import urt.kvp;
 import urt.lifetime;
 import urt.log;
 import urt.mem;
+import urt.mem.pagepool : Page, page_alloc, page_free;
 import urt.mem.temp : talloc_array;
 import urt.string;
 import urt.string.format : tconcat, tstring;
@@ -26,6 +27,7 @@ import protocol.http.message;
 
 import protocol.ip.tcp_stream;
 import router.iface;
+import router.stream;
 
 version = DebugHTTPServer;
 
@@ -256,32 +258,6 @@ nothrow @nogc:
         return old;
     }
 
-    bool defer_response(Stream stream)
-    {
-        foreach (session; _sessions)
-        {
-            if (session.stream is stream)
-            {
-                session.defer_response();
-                return true;
-            }
-        }
-        return false;
-    }
-
-    bool resume_response(Stream stream)
-    {
-        foreach (session; _sessions)
-        {
-            if (session.stream is stream)
-            {
-                session.resume_response();
-                return true;
-            }
-        }
-        return false;
-    }
-
 
 protected:
 
@@ -432,6 +408,16 @@ private:
         bool _cert_subscribed;
         TCPServer _tls_server;
         Array!(ObjectRef!Certificate) _certificates;
+    }
+
+    Session* session_of(Stream stream)
+    {
+        foreach (session; _sessions)
+        {
+            if (session.stream is stream)
+                return session;
+        }
+        return null;
     }
 
     // a prefix matches at a path boundary: the target must equal the prefix, or continue
@@ -635,7 +621,7 @@ private:
         response.reason = StringLit!"Moved Permanently";
         response.headers ~= HTTPParam(StringLit!"Location", location.make_string());
         response.headers ~= HTTPParam(StringLit!"Content-Length", StringLit!"0");
-        stream.write(response.format_message()[]);
+        respond(stream, response);
         return 1;
     }
 
@@ -660,8 +646,7 @@ private:
         {
             if (!stream)
                 return;
-            stream.release_rx_handler(&on_data);
-            unsubscribe_signal(stream);
+            detach();
             stream.destroy();
             stream = null;
         }
@@ -743,7 +728,7 @@ private:
             }
 
             HTTPMessage response = create_response(request.http_version, 404, StringLit!"text/plain", status_text(404)[]);
-            stream.write(response.format_message()[]);
+            .respond(stream, response);
 
             return 0;
         }
@@ -754,6 +739,10 @@ private:
 
     private:
         HTTPParser parser;
+        Page* _out;
+        SendHandler _body;
+        ChunkedFilter _chunked;
+        ResponseEnd _ended;
         bool _subscribed;
         bool _finished;
         bool _deferred;
@@ -796,9 +785,317 @@ private:
         {
             if (signal != StateSignal.online)
             {
-                unsubscribe_signal(stream);
+                detach();
                 stream = null;
             }
         }
+
+        void detach()
+        {
+            if (_out || _body)
+                settle(false);
+            else if (_deferred)
+                g_app.cancel(&resume_parse);
+            stream.release_tx_handler(&produce_response);
+            stream.release_rx_handler(&on_data);
+            unsubscribe_signal(stream);
+        }
+
+        bool respond(ref HTTPMessage head, SendHandler body_, bool with_body, ulong length, ResponseEnd ended)
+        {
+            if (!stream || _out || _body)
+                return false;
+            if (body_ && length == unknown_length && head.http_version < HTTPVersion.V1_1)
+            {
+                HTTPMessage refusal = create_response(head.http_version, 505, StringLit!"text/plain", status_text(505)[]);
+                respond(refusal, null, true, refusal.content.length, null);
+                if (ended)
+                    ended(false);
+                return true;
+            }
+            Array!char text = format_message_head(head, null, with_body, length);
+            if (text.empty || !queue_out(text[]) || !queue_out(head.content[]))
+            {
+                free_out();
+                return false;
+            }
+            _chunked = ChunkedFilter(body_);
+            _body = body_ && length == unknown_length ? &_chunked.produce : body_;
+            _ended = ended;
+            stream.tx_handler(&produce_response);
+            if ((_out || _body) && !_deferred)
+                defer_response();
+            return true;
+        }
+
+        Page* produce_response(ref const TxRequest req, out TxStatus status)
+        {
+            Page* page;
+            if (_out)
+            {
+                page = take_tx_page(_out, req, status);
+                if (page)
+                    status = _out || _body ? TxStatus.more : TxStatus.end;
+            }
+            else if (_body)
+                page = _body(req, status);
+            else
+                status = TxStatus.end;
+            if (status == TxStatus.end || status == TxStatus.abort)
+                settle(status == TxStatus.end);
+            return page;
+        }
+
+        // the next request is parsed on the following pass, outside the pull that ended this response
+        void settle(bool sent)
+        {
+            ResponseEnd ended = _ended;
+            _body = null;
+            _ended = null;
+            free_out();
+            if (ended)
+                ended(sent);
+            if (!sent)
+                _finished = true;
+            else if (_deferred)
+                g_app.schedule(getTime(), &resume_parse);
+        }
+
+        void resume_parse(MonoTime)
+        {
+            if (_deferred && stream)
+                resume_response();
+        }
+
+        bool queue_out(const(void)[] bytes)
+        {
+            while (bytes.length)
+            {
+                size_t n = bytes.length < max_tx_page ? bytes.length : max_tx_page;
+                Page* page = page_alloc(n);
+                if (!page)
+                    return false;
+                page.data[] = bytes[0 .. n];
+                append_tx_chain(_out, page);
+                bytes = bytes[n .. $];
+            }
+            return true;
+        }
+
+        void free_out()
+        {
+            while (_out)
+            {
+                Page* next = _out.next;
+                page_free(_out);
+                _out = next;
+            }
+        }
     }
+}
+
+
+alias ResponseEnd = void delegate(bool sent) nothrow @nogc;
+
+// no further request is parsed until the body ends; HTTP/1.0 is answered 505 for a body of unknown length
+bool respond(ref Stream stream, ref HTTPMessage head, SendHandler body_, ulong length, ResponseEnd ended = null)
+{
+    HTTPServer.Session* session = session_of(stream);
+    return session && session.respond(head, body_, true, length, ended);
+}
+
+bool respond(ref Stream stream, ref HTTPMessage message)
+{
+    HTTPServer.Session* session = session_of(stream);
+    return session && session.respond(message, null, body_included(message), message.content.length, null);
+}
+
+// the session parses no further request until the handler responds, later
+bool respond_later(ref Stream stream)
+{
+    HTTPServer.Session* session = session_of(stream);
+    if (session)
+        session.defer_response();
+    return session !is null;
+}
+
+struct ChunkedFilter
+{
+nothrow @nogc:
+    SendHandler inner;
+
+    Page* produce(ref const TxRequest req, out TxStatus status)
+    {
+        size_t grant = (req.bytes < max_tx_page ? req.bytes : max_tx_page) - size_line - trailer;
+        Page* page = inner(TxRequest(grant, req.deadline, req.headroom + size_line, req.tailroom + trailer), status);
+        if (page)
+        {
+            char[size_line] line = void;
+            size_t n = format_uint(page.length, line[], 16);
+            line[n .. n + 2] = "\r\n";
+            n += 2;
+            page.offset -= cast(ushort)n;
+            page.length += cast(ushort)n;
+            (cast(char[])page.data)[0 .. n] = line[0 .. n];
+            append(page, "\r\n");
+        }
+        else if (status == TxStatus.end)
+            page = alloc_tx_page(TxRequest(last.length, req.deadline, req.headroom, req.tailroom + last.length), 0, status);
+        if (page && status == TxStatus.end)
+            append(page, last);
+        return page;
+    }
+
+private:
+    enum size_line = 6;
+    enum last = "0\r\n\r\n";
+    enum trailer = 2 + last.length;
+
+    static void append(Page* page, const(char)[] text)
+    {
+        (cast(char*)page)[page.offset + page.length .. page.offset + page.length + text.length] = text[];
+        page.length += cast(ushort)text.length;
+    }
+}
+
+
+private:
+
+HTTPServer.Session* session_of(Stream stream)
+{
+    foreach (server; Collection!HTTPServer().values)
+    {
+        if (HTTPServer.Session* session = server.session_of(stream))
+            return session;
+    }
+    return null;
+}
+
+
+unittest
+{
+    import urt.mem.pagepool : page_pool_deinit, page_pool_init;
+
+    bool owns_pool = page_pool_init();
+    scope (exit) if (owns_pool) page_pool_deinit();
+
+    static struct Text
+    {
+    nothrow @nogc:
+        const(char)[] text;
+
+        Page* produce(ref const TxRequest req, out TxStatus status)
+        {
+            if (!text.length)
+            {
+                status = TxStatus.end;
+                return null;
+            }
+            size_t n = text.length < req.bytes ? text.length : req.bytes;
+            Page* page = alloc_tx_page(req, n, status);
+            if (!page)
+                return null;
+            (cast(char[])page.data)[] = text[0 .. n];
+            text = text[n .. $];
+            if (!text.length)
+                status = TxStatus.end;
+            return page;
+        }
+    }
+
+    static const(char)[] take(Page* page, ref Array!char output)
+    {
+        size_t at = output.length;
+        output ~= cast(const(char)[])page.data;
+        page_free(page);
+        return output[at .. $];
+    }
+
+    // each page is framed as a chunk, and the page that ends the body carries the last chunk
+    {
+        char[60] body = 'x';
+        Text text = Text(body[]);
+        ChunkedFilter chunked = ChunkedFilter(&text.produce);
+        TxRequest req = TxRequest(64);
+        TxStatus status;
+        Array!char output;
+        Page* page = chunked.produce(req, status);
+        assert(page.length <= req.bytes && status == TxStatus.more);
+        const(char)[] chunk = take(page, output);
+        assert(chunk[0 .. 4] == "33\r\n" && chunk[4 .. 55] == body[0 .. 51] && chunk[55 .. $] == "\r\n");
+        page = chunked.produce(req, status);
+        chunk = take(page, output);
+        assert(status == TxStatus.end && chunk[0 .. 3] == "9\r\n" && chunk[3 .. 12] == body[0 .. 9] && chunk[12 .. $] == "\r\n0\r\n\r\n");
+
+        // a body that ends with nothing left still closes with the last chunk
+        Text empty;
+        chunked = ChunkedFilter(&empty.produce);
+        empty.text = "";
+        page = chunked.produce(req, status);
+        output.clear();
+        assert(status == TxStatus.end && take(page, output) == "0\r\n\r\n");
+    }
+
+    static class Line : Stream
+    {
+    nothrow @nogc:
+        enum type_name = "http-test-line";
+        ~this() {}
+        this(CID id, ObjectFlags flags = ObjectFlags.none)
+        {
+            super(collection_type_info!Line, id, flags);
+        }
+        override ptrdiff_t write(const(void[])[] data...)
+            => 0;
+        override size_t tx_request() const
+            => room;
+        override void queue_tx_page(Page* page)
+        {
+            room -= page.length;
+            take(page, output);
+        }
+        size_t room = size_t.max;
+        Array!char output;
+    }
+
+    HTTPServer server = alloc!HTTPServer(CID(1));
+    scope (exit) free(server);
+    Line line = alloc!Line(CID(2));
+    scope (exit) free(line);
+    HTTPServer.Session session = HTTPServer.Session(server, line, null);
+
+    // a response the line takes whole is sent before respond returns, and the next request is parsed at once
+    HTTPMessage fixed = create_response(HTTPVersion.V1_1, 200, StringLit!"text/plain", "hello");
+    assert(session.respond(fixed, null, body_included(fixed), fixed.content.length, null));
+    assert(line.output[][$ - 9 .. $] == "\r\n\r\nhello" && !session._deferred && !session._out);
+
+    // a body of unknown length is chunked
+    line.output.clear();
+    Text text = Text("hello");
+    HTTPMessage head = create_response(HTTPVersion.V1_1, 200, StringLit!"text/plain", null);
+    assert(session.respond(head, &text.produce, true, unknown_length, null));
+    assert(line.output[][$ - 15 .. $] == "5\r\nhello\r\n0\r\n\r\n" && !session._deferred && !session._body);
+
+    // HTTP/1.0 is refused a body of unknown length, and the body's owner is told
+    static struct End
+    {
+        bool sent = true;
+        void ended(bool s) nothrow @nogc { sent = s; }
+    }
+    End end;
+    line.output.clear();
+    text = Text("hello");
+    head = create_response(HTTPVersion.V1_0, 200, StringLit!"text/plain", null);
+    assert(session.respond(head, &text.produce, true, unknown_length, &end.ended));
+    assert(line.output[][0 .. 12] == "HTTP/1.0 505" && !end.sent && !session._body);
+
+    // a response the line cannot take yet holds the parser, and ends with its stream
+    end.sent = true;
+    line.room = 0;
+    text = Text("later");
+    head = create_response(HTTPVersion.V1_1, 200, StringLit!"text/plain", null);
+    assert(session.respond(head, &text.produce, true, 5, &end.ended));
+    assert(session._deferred && session._out);
+    session.signal_handler(null, StateSignal.offline);
+    assert(!end.sent && session._finished && !session._out && !session._body);
 }

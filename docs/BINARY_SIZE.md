@@ -72,6 +72,7 @@ row alone. Sizes stay in bytes; round in the note if that reads better.
 | 2026-10-08 | ow/console-prints | ldc 1.43.0 | 5,813,160 | 533,792 | | console tables and `/system/fs/read` print through the stream's pull |
 | 2026-10-09 | ow/websocket-sink | ldc 1.43.0 | 5,814,504 | 533,816 | | websocket frames queue in pool pages; receive capped at the MTU |
 | 2026-10-09 | ow/filter-in-place | ldc 1.43.0 | 5,790,344 | 533,784 | | Telnet and TLS frame in the request's reserved room; their pending chains go |
+| 2026-10-10 | ow/http-respond | ldc 1.43.0 | 5,789,952 | 533,840 | | console output and HTTP responses are producers the stream pulls |
 
 ### Waveshare ESP32-S3-RS485-CAN, `make esp-idf-build BOARD=waveshare-esp32-s3-rs485-can CONFIG=release`
 
@@ -87,6 +88,8 @@ Limit is the 4 MB `ota_0` partition. `ram` is internal DRAM only; PSRAM is heap.
 | 2026-09-22 | fc5efe57 | ldc 1.42.0 | 2,913,664 | 139,459 | 4,194,304 | `COREDUMP=1`, with the power regulator's ISR state moved out of PSRAM |
 | 2026-09-23 | #747 | ldc 1.42.0 | 2,917,648 | 139,515 | 4,194,304 | `COREDUMP=1`; boot guard ladder and retained reset record |
 | 2026-09-23 | ba8561fb | ldc 1.42.0 | 2,917,952 | 139,547 | 4,194,304 | `COREDUMP=1`; wall clock kept across a reset |
+| 2026-10-10 | ow/http-respond | ldc 1.42.0 | 2,976,000 | 138,507 | 4,194,304 | console output and HTTP responses are producers the stream pulls |
+| 2026-10-10 | ow/http-respond | ldc 1.42.0 | 2,985,264 | 141,871 | 4,194,304 | `COREDUMP=1`, as deployed to the bench S3 |
 
 ### ESP32-C5 DevKitC-1, `make esp-idf-build PLATFORM=esp32-c5 CONFIG=release`
 
@@ -190,6 +193,7 @@ a netbooted image is bounded by RAM instead.
 | 2026-10-08 | 9f66b503 | ldc 1.43.0 | 2,646,776 | 186,110 | 4,190,208 | master, control for #825; D0 1,012,421 flash, 87,856 ram |
 | 2026-10-08 | #825 | ldc 1.43.0 | 2,646,184 | 186,238 | 4,190,208 | doorbells: -592 flash, +128 ram for the handler table; D0 1,012,294 flash, 88,104 ram |
 | 2026-10-08 | ow/console-prints | ldc 1.43.0 | 2,647,864 | 186,266 | 4,190,208 | M0 packing D0 (1,009,089 flash, 88,144 ram); console tables and `/system/fs/read` print through the stream's pull |
+| 2026-10-10 | ow/http-respond | ldc 1.43.0 | 2,639,768 | 186,258 | 4,190,208 | M0 packing D0 (1,008,331 flash, 88,144 ram); console output and HTTP responses are producers the stream pulls |
 
 ### BL618, `make PLATFORM=bl618 CONFIG=release`
 

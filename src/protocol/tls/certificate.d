@@ -1363,7 +1363,7 @@ private:
         if (!_challenge_registered || _challenge_token.empty)
         {
             HTTPMessage response = create_response(request.http_version, 404, StringLit!"text/plain", "No pending challenge");
-            stream.write(response.format_message()[]);
+            respond(stream, response);
             return 0;
         }
 
@@ -1373,7 +1373,7 @@ private:
         if (!path.startsWith(challenge_prefix))
         {
             HTTPMessage response = create_response(request.http_version, 404, StringLit!"text/plain", "Not found");
-            stream.write(response.format_message()[]);
+            respond(stream, response);
             return 0;
         }
 
@@ -1381,7 +1381,7 @@ private:
         if (token != _challenge_token[])
         {
             HTTPMessage response = create_response(request.http_version, 404, StringLit!"text/plain", "Unknown token");
-            stream.write(response.format_message()[]);
+            respond(stream, response);
             return 0;
         }
 
@@ -1390,7 +1390,7 @@ private:
             writeDebug("Certificate '", name, "': serving challenge auth=", _challenge_auth);
         writeInfo("Certificate '", name, "': serving ACME challenge response");
         HTTPMessage response = create_response(request.http_version, 200, StringLit!"application/octet-stream", _challenge_auth[]);
-        stream.write(response.format_message()[]);
+        respond(stream, response);
         return 0;
     }
 

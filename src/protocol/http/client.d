@@ -237,15 +237,15 @@ private:
 
     void send_request(ref HTTPMessage request)
     {
-        Array!char message = request.format_message(_conn.host[]);
-        if (message.empty)
+        Array!char head = format_message_head(request, _conn.host[], body_included(request), request.content.length);
+        if (head.empty)
             return;
-        ptrdiff_t r = stream.write(message[]);
+        ptrdiff_t r = stream.write(head[], request.content[]);
         if (!running)
             return;
-        if (r != message.length)
+        if (r != head.length + request.content.length)
         {
-            writeWarning("HTTP client: write failed (", r, " of ", message.length, " bytes)");
+            writeWarning("HTTP client: write failed (", r, " of ", head.length + request.content.length, " bytes)");
             restart();
             return;
         }
