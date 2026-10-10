@@ -11,13 +11,14 @@
 These work around compiler bugs. Undo each as soon as the minimum DMD **and** LDC carry the fix;
 left in place they are dead weight whose reason is invisible in the code.
 
-- **Delete every `~this() {}` in `src`** (179: every class in the `BaseObject`, `CommandState` and
+- **Delete every `~this() {}` in `src`** (194: every class in the `BaseObject`, `CommandState` and
   `Component` hierarchies; `grep -rn '~this() {}' src` finds exactly these) once the minimum
   frontend is 2.114. Before dlang/dmd#22931, a C++ destructor below a class that does not declare
   one is not virtual. Delete uRT's `cpp_dtor_chain_declared` check in `urt/mem/alloc.d` in the same
   change; it switches itself off at `__VERSION__ >= 2114` and would stop enforcing anything.
 - **Move `BaseObject.alias Properties` back above `flags()`** in `manager/base.d` once the minimum
-  DMD carries dlang/dmd#23946. On Windows targets, an overload inserted in front of the reserved
+  DMD carries dlang/dmd#23946 (merged 2026-10-01, after the 2.114 beta, so 2.115 at the earliest).
+  On Windows targets, an overload inserted in front of the reserved
   C++ destructor slot does not move it, and the destructor overwrites the shifted function. Until
   then, an `extern(C++)` root must lay out `~this()` before its other virtuals: declare it first,
   and name no virtuals in a class-scope alias above it.
@@ -480,12 +481,6 @@ one primitive (most belong in urt) and its copies deleted:
   `platforms.mk` hard-codes `-d-version=Tiny`, so `TINY=1 COMPILER=dmd` fails
   before compilation. Use the existing compiler-specific `VERSION_FLAG`.
 
-- **[Host build, local work] Reconcile the unfinished power regulator**:
-  The untracked `src/driver/power/regulator.d` references `ComponentEvent.materialised`,
-  `set_device_online` and `note_activity`, which are absent from the current model.
-  It is discovered by the full source build; reconcile it with the intended model
-  work before expecting this working checkout's host build to pass.
-
 - **[Windows toolchain] Retire the default beta DMD and isolate LDC COMDAT failure**:
   PATH selects DMD 2.112.0-beta.1, whose unittest build fails copy-constructor
   detection at `urt.internal.traits:376`; installed stable DMD 2.113 passes the
@@ -740,11 +735,6 @@ one primitive (most belong in urt) and its copies deleted:
   `ESP_MAC_EFUSE_EXT` plus the base MAC and orders that pair the other way. Settle which order
   is on-air correct against the standard before changing anything, since the address we display
   is also the one we hand the radio.
-- **The H2 needs the soft-float processor entry the C5 and C6 got** and does not have it: it is
-  still on `e906`, which has no atomic extension, so every `__atomic_*` libcall is undefined at
-  link. IDF builds it `rv32imac` like the others. The H2 also cannot fit the full tier at all,
-  at 2.69 MB against the 1.75 MB OTA slots of its 4 MB flash.
-
 - **WiFi coexistence on C5/C6**: the 802.15.4 radio shares the RF path with WiFi;
   `CONFIG_ESP_COEX_SW_COEXIST_ENABLE=y` is required when both run and is not yet set.
 - **Multipurpose, fragment and extended frames are refused.** They carry their own header
@@ -915,11 +905,6 @@ decisions are in [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md). The
   into a temporary, keep the old block when the grow fails, and let the caller refuse the
   operation.
 
-- **`bucket_capacity`/`text_bucket_capacity` do not scale with the target**: `text_heap_limit`
-  now does (8k under `Tiny`, 64k otherwise), but the record-count caps declared beside it are
-  still 256 and 64 on every part, so a bucket on a 320KB device costs what one on a Pi costs.
-  Fold all three into the same per-target sizing rather than leaving one scaled and two fixed.
-
 - **Audit dynamic-object ownership across the tree**: `ObjectFlags.dynamic` means the object
   was created by something other than the user, is excluded from saved config, and is managed
   by its creator - so its creator must destroy it. Most spawners comply (sync `ws_server` and
@@ -1046,6 +1031,11 @@ decisions are in [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md). The
   on disk, unify RAM/disk time queries, and add the decimation ladder described in
   [docs/DATA_MODEL.md](docs/DATA_MODEL.md).
 
+- **`bucket_capacity`/`text_bucket_capacity` do not scale with the target**: `text_heap_limit`
+  now does (8k under `Tiny`, 64k otherwise), but the record-count caps declared beside it are
+  still 256 and 64 on every part, so a bucket on a 320KB device costs what one on a Pi costs.
+  Fold all three into the same per-target sizing rather than leaving one scaled and two fixed.
+
 - **Bound recorder container growth**: `.ows` files grow without limit. Add a size or age budget
   per series or per recorder, and give the retention classes distinct policies: the short class
   (planner budget, allocation decisions, coverage and mismatch flags) wants days, while island
@@ -1063,6 +1053,10 @@ decisions are in [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md). The
   The columnar codec planes (time-plane delta varint, value-plane bit-pack, zigzag-delta and XOR,
   per-plane codec byte with raw fallback) are designed against the existing `SeriesCodec` registry
   and not written.
+
+- **Validate the series container on load**: `SeriesContainer.open_` (`src/manager/ows.d`) reads
+  block headers off disk unvalidated, so a corrupt or hostile container is trusted. External state
+  rejects, it does not assert.
 
 - **Defer reactor-thread producers to the main loop**: a producer writing from a reactor thread
   must not dispatch observers or mark dirty inline (`src/manager/element.d:1261`); queue the
@@ -1355,16 +1349,27 @@ this is what remains.
   `poll_rx()`; each wants an event where its platform offers one (a reactor `watch_io` for stdin
   on Linux, the IDF drivers' callbacks).
 
-- **`BridgeStream.write` spins on a member that is not running**: it loops until each member has
-  taken all the data, and a stopped member takes nothing.
-
 - **Push-receive review follow-ups** (2026-10-06, #814):
   - A connection paused by `recv_handler(null)` does not see the peer's FIN or a reset until it
     reads again; epoll drops read interest and IOCP holds the one receive it has.
   - Telnet subnegotiation is not clamped, so a peer that never sends `IAC SE` grows the buffer.
   - A consumer that calls `restart()` from inside its delivery leaves the source's loop to finish
-    the chunk against a stopping object; such consumers should call `restart_deferred()`, and the
-    delivery loops want to stop on `!running`.
+    the chunk against a stopping object. `restart_deferred()` is not the whole answer (audited
+    2026-10-09): it postpones only `shutdown()`, a temporary object is destroyed synchronously
+    regardless, and `set_offline()` always fires inline, so the delivery loops need a `running`
+    check between deliveries whichever restart is used. Loops without one: `SerialStream.deliver`,
+    the console/memory/USB `poll_rx`, `TCPStream.on_data` (and `drain_rx` checks the connection,
+    not the stream), `TelnetStream.inner_rx`, ASH `on_bytes`/`parse_buffer`/`process_frame`,
+    websocket `parse_frames` (shutdown clears `_message` but the loop keeps the old buffer), the
+    ESPHome and OBD `stream_rx` loops, sync `deliver_frame`, `Session.receive_input` (checks
+    `is_attached`, so commands after `exit` in one chunk still run), `BridgeStream.member_rx`, and
+    BLE `att_notify`, whose `foreach` is mutated by `clear_notify` from a Tesla session's shutdown.
+    Restart sites reached from a delivery that keep executing afterwards: ASH `ack_in_flight` and
+    the ERROR-frame `_stream.restart()`, EZSP `dispatch_command`, ESPHome `terminate` (a later
+    frame in the chunk writes through the nulled stream), OBD `elm_fail`, `Session.finish_close`,
+    sync `accept_fragment`/`send_unwrapped`/`send_sequenced`/`pump_fragments`/`inbound_hello`,
+    `Stream.drain_tx` restarting the stream that is delivering, and the Tesla session faults (941
+    restarts twice in a row). One sweep, with a test per loop.
   - An ISR whose event post is refused leaves serial RX to a retry flag `SerialStream.update()`
     takes, and ethernet drops the wake. Give ISR posters an intrusive overflow node the reactor
     wake drains, so a refused post is retried without a tick.
@@ -1512,26 +1517,15 @@ this is what remains.
   `test/test_runner.py` also looks for `bin/x86_64_debug/openwatt` while the makefile emits
   `bin/x86_64_linux_debug/`, so it finds no Linux build at all.
 
-- **`assert(classref)` still segfaults LDC debug builds**: under `--fno-rtti`, `assert(o)` on a
-  class reference runs the invariant, and urt's `_d_invariant_impl` walks `typeid(o)`, which is
-  gone. #710 moved the two `device.d` sites to `!is null`, but others remain: `debug assert(s)`
-  in `ModbusInterface.startup` (`src/protocol/modbus/iface.d`) kills any debug instance whose
-  startup script creates a Modbus interface. Sweeping every site is whack-a-mole; having
-  `_d_invariant_impl` skip the ClassInfo walk when RTTI is compiled out fixes them all at once.
-
-- **Move Xtensa to LDC 1.43 when esp-clang reaches LLVM 22**: LDC 1.43 emits LLVM 22 bitcode,
-  which no esp-clang yet reads (the latest, esp-21.1.3, is LLVM 21), so Xtensa firmware is
-  pinned to LDC 1.42 and the makefile refuses a newer one. Espressif has shipped a major every
-  six months or so; re-check when the next esp-clang lands.
+- **Move Xtensa to LDC 1.43**: esp-clang `esp-22.1.4_20260825` (LLVM 22, released 2026-09-17)
+  can read LDC 1.43's bitcode. Install it with `idf_tools.py install esp-clang` and build an
+  Xtensa target with LDC 1.43; the makefile's LLVM-major check lifts itself.
 
 - **Harden bindings against malformed remote input**: the `ow/dm` review found protocol
-  bindings that abort or deref on data an attacker controls, and these survive. ESPHome still
+  bindings that abort or deref on data an attacker controls, and one survives. ESPHome still
   carries `assert(false, "what here?")` on `proto_deserialise` length mismatch
-  (`src/protocol/esphome/client.d`), which is a remote abort on a malformed frame. MQTT's
-  `desc_by_index(mqtt.desc)` (`src/protocol/mqtt/binding.d:216`) has no `desc == ushort.max`
-  check. `ows.load` still reads `first_index`/`last_index`/`stride` off disk unvalidated
-  (`src/manager/ows.d:59`), so a corrupt or hostile container is trusted. External state
-  rejects, it does not assert.
+  (`src/protocol/esphome/client.d`), which is a remote abort on a malformed frame. External
+  state rejects, it does not assert.
 
 - **Close the descriptor grammar gaps**: `strN` widths parse but are ignored entirely, so any
   `N` compiles unvalidated while the span comes from the register map
@@ -1541,15 +1535,10 @@ this is what remains.
   while the encode side accepts it (`src/manager/sample/package.d:154`), breaking the
   encode/decode symmetry. Confirm each is intended before closing.
 
-- **Settle the remaining binding asymmetries**: Tesla's `materialise` fires
-  `notify_element_created` per element but never `tree_changed` or `online`
-  (`src/protocol/tesla/binding.d:291`), where SunSpec does (`sunspec.d:1160`); consumers that
-  rebuild on `tree_changed` miss Tesla devices. MQTT accepts `ip6addr` and other non-scalar
+- **Settle the remaining binding asymmetries**: MQTT accepts `ip6addr` and other non-scalar
   user types it cannot then sample (`src/protocol/mqtt/package.d:112`), and reverse-projects a
-  `SysTime` into `MonoTime` by cast. `held_repeat` sets `_last_update` unconditionally on an
-  out-of-order equal sample (`src/manager/element.d:974`), regressing record time. Expression
-  format inference runs `Type.call` intrinsics against exemplar values
-  (`src/manager/expression.d`), which executes code to infer a type.
+  `SysTime` into `MonoTime` by cast. Expression format inference runs `Type.call` intrinsics
+  against exemplar values (`src/manager/expression.d`), which executes code to infer a type.
 
 - **Finish identity follow-ups**:
 
@@ -2018,10 +2007,6 @@ also broadcasts console output as UDP. Outstanding:
   1004Kc has Config3.ULRI.
 - **The sysroot is hand-built.** picolibc and compiler-rt builtins are built locally per
   `third_party/urt/platforms/mt7621/README.txt`; CI has no MIPS job.
-- **RP2350 and STM32 still run picolibc's malloc behind a stash-header wrapper**
-  (`urt/driver/{rp2350,stm32}/alloc.d`, identical copies). MT7621 moved to the vendored TLSF with
-  its own C entry points, so no libc allocator links; the same would suit them. RP2350's `_sbrk`
-  is dead code: picolibc's malloc calls its own weak `sbrk` over the same linker symbols.
 
 ### Template instantiation is 32% of the BK7231N image (2026-09-12)
 
