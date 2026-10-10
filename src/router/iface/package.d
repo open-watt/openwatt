@@ -15,10 +15,12 @@ import urt.string;
 import urt.string.format;
 import urt.time;
 
+import manager : resolve_element;
 import manager.base;
 import manager.collection;
 import manager.console;
 import manager.element : Element, ElementLifecycleEvent, register_element_lifecycle_handler;
+import manager.id : EID;
 import manager.features;
 import manager.panel : LightEffect;
 import manager.plugin;
@@ -311,6 +313,7 @@ nothrow @nogc:
         locate(Duration.zero);
         show_link(false);
         _led = value.make_string();
+        bind_led();
         mark_set!(typeof(this), "led")();
         show_link(link_up);
     }
@@ -917,20 +920,38 @@ private:
     enum led_pulse_period = 100.msecs;
 
     String _led;
-    MonoTime _led_pulse;
+    EID _led_switch;
+    EID _led_indicate;
+    EID _led_pulse;
+    MonoTime _led_pulsed;
+
+    // by EID, so a light that goes away is found absent rather than dangling
+    void bind_led()
+    {
+        _led_switch = led_part("switch");
+        _led_indicate = led_part("indicate");
+        _led_pulse = led_part("pulse");
+    }
+
+    EID led_part(const(char)[] id)
+    {
+        Element* e = _led ? g_app.find_element(tconcat(_led[], '.', id)) : null;
+        return e ? e.ensure_eid() : EID.invalid;
+    }
+
+    static Element* resolve(EID part)
+        => part ? resolve_element(part) : null;
 
     void show_link(bool up)
     {
-        if (_led)
-            if (Element* e = g_app.find_element(tconcat(_led[], ".switch")))
-                e.value(up);
+        if (Element* e = resolve(_led_switch))
+            e.value(up);
     }
 
     void show_locate(bool on)
     {
-        if (_led)
-            if (Element* e = g_app.find_element(tconcat(_led[], ".indicate")))
-                e.value(on ? LightEffect.blink : LightEffect.none);
+        if (Element* e = resolve(_led_indicate))
+            e.value(on ? LightEffect.blink : LightEffect.none);
     }
 
     void locate_elapsed(MonoTime)
@@ -941,13 +962,13 @@ private:
     // one pulse per period at most: the light blanks for half of it, and ignores traffic for the rest
     void show_activity()
     {
-        if (!_led)
+        if (!_led_pulse)
             return;
         MonoTime now = getTime();
-        if (now - _led_pulse < led_pulse_period)
+        if (now - _led_pulsed < led_pulse_period)
             return;
-        _led_pulse = now;
-        if (Element* e = g_app.find_element(tconcat(_led[], ".pulse")))
+        _led_pulsed = now;
+        if (Element* e = resolve(_led_pulse))
             e.value(true);
     }
 
@@ -1123,7 +1144,10 @@ nothrow @nogc:
         foreach (iface; Collection!BaseInterface().values)
         {
             if (iface._led[] == light)
+            {
+                iface.bind_led();
                 iface.show_link(iface.link_up);
+            }
         }
     }
 
