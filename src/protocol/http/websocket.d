@@ -186,7 +186,7 @@ protected:
             req.headers ~= HTTPParam(StringLit!"Sec-WebSocket-Key", _handshake_key);
             req.headers ~= HTTPParam(StringLit!"Sec-WebSocket-Version", StringLit!"13");
 
-            Array!char msg = req.format_message(_conn.host[]);
+            Array!char msg = format_message_head(req, _conn.host[], false, 0);
             if (msg.empty || _stream.write(msg[]) != msg.length)
                 return CompletionStatus.error;
 
@@ -342,7 +342,6 @@ private:
     enum size_t max_tx_pending = 128 * 1024;
     enum size_t tx_low_water = 16 * 1024;                       // reserve room for one maximum frame
     static assert(tx_low_water + max_tx_frame <= max_tx_pending, "the last frame admitted must fit");
-    enum size_t max_tx_page = 1600;
 
     void stream_rx(Stream stream, const(void)[] data, MonoTime rx_time)
     {
@@ -1009,7 +1008,7 @@ unittest
         ubyte[2] header = [0x82, 0x7E];
         ubyte[4] mask = [0x11, 0x22, 0x33, 0x44];
         assert(ws.queue_frame(header[], body[], mask[]) && ws.tx_queued == header.length + body.length);
-        assert(ws._tx_queue.length == WebSocket.max_tx_page && ws._tx_queue.next.next.next is null);
+        assert(ws._tx_queue.length == max_tx_page && ws._tx_queue.next.next.next is null);
         size_t at;
         for (Page* page = ws._tx_queue; page; page = page.next)
         {

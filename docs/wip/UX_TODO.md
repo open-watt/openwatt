@@ -3,6 +3,16 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-10-10: HTTP responses stream
+
+- Fileserver downloads of every size stream from disk with a `Content-Length` and are never
+  content-encoded; files under 64KB were previously gzipped when the request accepted it. Clients
+  should not assume a file arrives compressed.
+- A fileserver directory listing arrives with `Transfer-Encoding: chunked` (HTTP/1.1) instead of a
+  `Content-Length`; its JSON shape is unchanged.
+- A directory listing requested over HTTP/1.0 answers `505`, as `/api/schema` already did; HTTP/1.0
+  cannot frame a body whose length is unknown when it starts.
+
 ## 2026-10-09: WebSocket message limit
 
 - A node closes a WebSocket with 1009 (message too big) when a client sends a message larger than

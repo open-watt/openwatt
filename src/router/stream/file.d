@@ -2,7 +2,9 @@ module router.stream.file;
 
 import urt.file;
 import urt.lifetime;
+import urt.mem.pagepool : Page, page_free;
 import urt.mem.temp;
+import urt.result : Result;
 import urt.string;
 import urt.string.format;
 import urt.time;
@@ -15,6 +17,49 @@ import manager.plugin;
 import router.stream;
 
 nothrow @nogc:
+
+
+// reads a file into the pages a sink pulls, ending at its last byte; a read that fails aborts and keeps the result
+struct FileProducer
+{
+nothrow @nogc:
+    File file;
+    ulong remaining;
+    Result failure;
+
+    this(ref File opened)
+    {
+        file = opened.move;
+        remaining = file.get_size();
+    }
+
+    Page* produce(ref const TxRequest req, out TxStatus status)
+    {
+        if (remaining == 0)
+        {
+            status = TxStatus.end;
+            return null;
+        }
+        size_t take = remaining < req.bytes ? cast(size_t)remaining : req.bytes;
+        if (take > max_tx_page)
+            take = max_tx_page;
+        Page* page = alloc_tx_page(req, take, status);
+        if (!page)
+            return null;
+        size_t got;
+        failure = file.read(page.data, got);
+        if (!failure || got != take)
+        {
+            page_free(page);
+            status = TxStatus.abort;
+            return null;
+        }
+        remaining -= got;
+        if (remaining == 0)
+            status = TxStatus.end;
+        return page;
+    }
+}
 
 
 enum FileMode : ubyte

@@ -19,6 +19,7 @@ import protocol.http.message;
 import protocol.http.server;
 
 import router.stream;
+import router.stream.file : FileProducer;
 
 version (Tiny) {} else version = WebDAV;
 
@@ -193,19 +194,8 @@ protected:
             if (s)
                 s.destroy();
         }
-        if (_download_cleanup_scheduled)
-        {
-            g_app.cancel(&finish_downloads);
-            _download_cleanup_scheduled = false;
-        }
-        while (!_downloads.empty)
-        {
-            Download* d = _downloads[_downloads.length - 1];
-            Stream s = d.stream;
-            cleanup_download(d, false);
-            if (s)
-                s.destroy();
-        }
+        while (!_transfers.empty)
+            _transfers[_transfers.length - 1].destroy();
 
         if (_registered)
         {
@@ -288,82 +278,94 @@ private:
         }
     }
 
+    // frees itself when its response ends
     static struct Download
     {
     nothrow @nogc:
-
-        Page* produce(ref const TxRequest req, out TxStatus status)
-        {
-            if (!head.empty)
-                return produce_head(req, status);
-
-            size_t take = remaining < req.bytes ? cast(size_t)remaining : req.bytes;
-            if (take > max_page_size)
-                take = max_page_size;
-            Page* page = alloc_tx_page(req, take, status);
-            if (!page)
-                return null;
-
-            size_t got;
-            Result r = file.read(page.data, got);
-            if (!r || got != take)
-            {
-                page_free(page);
-                writeWarning("fileserver: transfer failed mid-body, dropping connection");
-                owner.download_finished(&this, false);
-                status = TxStatus.abort;
-                return null;
-            }
-            remaining -= got;
-            if (remaining == 0)
-            {
-                owner.download_finished(&this, true);
-                status = TxStatus.end;
-            }
-            return page;
-        }
-
-    private:
-        enum buffer_threshold = 8 * 1024;
-        enum max_page_size = 1600;
-
         FileServer owner;
         Stream stream;
-        File file;
-        Array!char head;
-        ulong remaining;
-        size_t head_sent;
-        bool finished;
-        bool successful;
+        FileProducer file;
 
-        Page* produce_head(ref const TxRequest req, ref TxStatus status)
+        void ended(bool)
         {
-            size_t take = head.length - head_sent;
-            if (take > req.bytes)
-                take = req.bytes;
-            if (take > max_page_size)
-                take = max_page_size;
-            Page* page = alloc_tx_page(req, take, status);
-            if (!page)
-                return null;
-            (cast(char[])page.data)[] = head[head_sent .. head_sent + take];
-            head_sent += take;
-            if (head_sent == head.length)
+            owner._transfers.removeFirstSwapLast(stream);
+            file.file.close();
+            free(&this);
+        }
+    }
+
+    // frees itself when its response ends
+    static struct Listing
+    {
+    nothrow @nogc:
+        FileServer owner;
+        Stream stream;
+        Directory dir;
+        Array!char path;
+        Array!char text;
+        FillProducer feed;
+        size_t sent;
+        bool listed;
+        bool closed;
+
+        size_t fill(char[] buffer, MonoTime, out TxStatus status)
+        {
+            size_t len;
+            while (true)
             {
-                head.clear();
-                head_sent = 0;
+                size_t take = text.length - sent;
+                if (take > buffer.length - len)
+                    take = buffer.length - len;
+                buffer[len .. len + take] = text[sent .. sent + take];
+                len += take;
+                sent += take;
+                if (sent < text.length)
+                {
+                    status = TxStatus.more;
+                    return len;
+                }
+                text.clear();
+                sent = 0;
+                if (closed)
+                {
+                    status = TxStatus.end;
+                    return len;
+                }
+                if (!next())
+                {
+                    text ~= "]}";
+                    closed = true;
+                }
             }
-            return page;
         }
 
-        void stream_state(ActiveObject, StateSignal signal)
+        bool next()
         {
-            if (signal != StateSignal.offline)
-                return;
-            stream.release_tx_handler(&produce);
-            stream.unsubscribe(&stream_state);
-            stream = null;
-            owner.download_finished(&this, false);
+            DirEntry e;
+            if (!dir.read(e))
+                return false;
+            text.append(listed ? `,{"name":"` : `{"name":"`);
+            listed = true;
+            append_json_escaped(text, e.name);
+            text.append(`","dir":`, e.is_directory ? "true" : "false");
+            if (!e.is_directory)
+                text.append(`,"size":`, e.size);
+            size_t base = path.length;
+            path ~= e.name;
+            FileAttributes attr;
+            if (get_file_attributes(path[], attr) && attr.writeTime != SysTime())
+                text.append(`,"mtime":`, attr.writeTime.unixTimeNs / 1_000_000_000);
+            path.resize(base);
+            text ~= '}';
+            return true;
+        }
+
+        void ended(bool)
+        {
+            owner._transfers.removeFirstSwapLast(stream);
+            feed.release();
+            dir.close();
+            free(&this);
         }
     }
 
@@ -377,8 +379,7 @@ private:
     version (WebDAV)
         uint _lock_seq;
     Array!(Upload*) _uploads;
-    Array!(Download*) _downloads;
-    bool _download_cleanup_scheduled;
+    Array!Stream _transfers;    // destroyed with the mount
 
     void remove_handlers(HTTPServer server)
     {
@@ -537,7 +538,7 @@ private:
             response.headers ~= HTTPParam(StringLit!"Access-Control-Allow-Headers", StringLit!"Authorization, Content-Type, Depth, Destination, Overwrite");
             response.headers ~= HTTPParam(StringLit!"Access-Control-Max-Age", StringLit!"86400");
         }
-        stream.write(response.format_message()[]);
+        respond(stream, response);
         return 0;
     }
 
@@ -591,84 +592,21 @@ private:
         if (!f.open(fs_path, FileOpenMode.ReadExisting, FileOpenFlags.Sequential))
             return false;
 
-        ulong size = f.get_size();
-
+        HTTPMessage response = create_response(ver, 200, mime_type(fs_path), null);
+        add_cors(response, request);
         if (request.method == HTTPMethod.HEAD)
         {
+            ulong size = f.get_size();
             f.close();
-            HTTPMessage response;
-            response.http_version = ver;
-            response.status_code = 200;
-            response.reason = status_text(200);
-            response.timestamp = getSysTime();
-            response.headers ~= HTTPParam(StringLit!"Content-Type", mime_type(fs_path));
-            response.headers ~= HTTPParam(StringLit!"Content-Length", tconcat(size).make_string());
-            add_cors(response, request);
-            stream.write(format_message_head(response)[]);
+            return respond(stream, response, null, size);
+        }
+
+        Download* d = alloc!Download(this, stream, FileProducer(f));
+        _transfers ~= stream;
+        if (respond(stream, response, &d.file.produce, d.file.remaining, &d.ended))
             return true;
-        }
-
-        if (size > Download.buffer_threshold)
-        {
-            HTTPMessage response;
-            response.http_version = ver;
-            response.status_code = 200;
-            response.reason = status_text(200);
-            response.timestamp = getSysTime();
-            response.headers ~= HTTPParam(StringLit!"Content-Type", mime_type(fs_path));
-            response.headers ~= HTTPParam(StringLit!"Content-Length", tconcat(size).make_string());
-            add_cors(response, request);
-
-            Download* d = alloc!Download();
-            if (!d)
-            {
-                f.close();
-                return send_status(ver, stream, 503, request) >= 0;
-            }
-            d.owner = this;
-            d.stream = stream;
-            d.file = f;
-            d.remaining = size;
-            d.head = format_message_head(response);
-            HTTPServer server = _server.get;
-            if (d.head.empty || !server || !server.defer_response(stream))
-            {
-                d.file.close();
-                free(d);
-                return send_status(ver, stream, 503, request) >= 0;
-            }
-
-            stream.subscribe(&d.stream_state);
-            _downloads ~= d;
-            stream.tx_handler(&d.produce);
-            return true;
-        }
-
-        HTTPMessage response;
-        response.http_version = ver;
-        response.status_code = 200;
-        response.reason = status_text(200);
-        response.timestamp = getSysTime();
-        response.content_type = mime_type(fs_path);
-        add_cors(response, request);
-
-        if (size > 0)
-        {
-            response.content.resize(cast(size_t)size);
-            size_t got;
-            Result r = f.read(response.content[], got);
-            f.close();
-            if (!r)
-                return send_status(ver, stream, 500, request) >= 0; // an existing file we failed to read
-
-            if (got != size)
-                response.content.resize(got);
-        }
-        else
-            f.close();
-
-        send_message(stream, response, &request);
-        return true;
+        d.ended(false);
+        return send_status(ver, stream, 503, request) >= 0;
     }
 
     // PUT streams the body to disk as it arrives, so uploads aren't subject to the server's
@@ -815,7 +753,7 @@ private:
 
             HTTPMessage response = create_response(ver, 207, StringLit!"application/xml; charset=utf-8", xml[]);
             add_cors(response, request);
-            stream.write(response.format_message()[]);
+            respond(stream, response);
             return 0;
         }
 
@@ -968,7 +906,7 @@ private:
             HTTPMessage response = create_response(request.http_version, 200, StringLit!"application/xml; charset=utf-8", xml[]);
             response.headers ~= HTTPParam(StringLit!"Lock-Token", tconcat("<", token[], ">").make_string());
             add_cors(response, request);
-            stream.write(response.format_message()[]);
+            respond(stream, response);
             return 0;
         }
     }
@@ -989,53 +927,36 @@ private:
         if (code == 401)
             response.headers ~= HTTPParam(StringLit!"WWW-Authenticate", StringLit!`Basic realm="OpenWatt", charset="UTF-8"`);
         add_cors(response, request);
-        stream.write(response.format_message()[]);
+        respond(stream, response);
         return 0;
     }
 
     int send_listing(ref const HTTPMessage request, ref Stream stream, const(char)[] fs_path)
     {
-        const(char)[] dpath = fs_path.length ? fs_path : ".";
         Directory dir;
-        if (!dir.open(dpath))
+        if (!dir.open(fs_path.length ? fs_path : "."))
             return send_status(request.http_version, stream, 404, request);
-
-        Array!char json;
-        json ~= `{"entries":[`;
-        bool first = true;
-        Array!char child_path;
-        DirEntry entry;
-        while (dir.read(entry))
-        {
-            if (!first)
-                json ~= ',';
-            first = false;
-            json ~= `{"name":"`;
-            append_json_escaped(json, entry.name);
-            json.append(`","dir":`, entry.is_directory ? "true" : "false");
-            if (!entry.is_directory)
-                json.append(`,"size":`, entry.size);
-
-            child_path.clear();
-            if (fs_path.length)
-                child_path.append(fs_path, fs_path[$-1] == '/' ? "" : "/");
-            child_path ~= entry.name;
-            FileAttributes attr;
-            if (get_file_attributes(child_path[], attr) && attr.writeTime != SysTime())
-                json.append(`,"mtime":`, attr.writeTime.unixTimeNs / 1_000_000_000);
-            json ~= '}';
-        }
-        dir.close();
-        json ~= "]}";
 
         // the +json suffix parses as JSON everywhere, but can never be mistaken
         // for a .json file fetched from disk
-        HTTPMessage response = create_response(request.http_version, 200, StringLit!"application/vnd.openwatt.dir+json; charset=utf-8", json[]);
+        HTTPMessage response = create_response(request.http_version, 200, StringLit!"application/vnd.openwatt.dir+json; charset=utf-8", null);
         add_cors(response, request);
         if (request.method == HTTPMethod.HEAD)
-            stream.write(format_message_head(response)[]);
-        else
-            stream.write(response.format_message()[]);
+        {
+            dir.close();
+            respond(stream, response, null, unknown_length);
+            return 0;
+        }
+
+        Listing* l = alloc!Listing(this, stream, dir.move);
+        l.path ~= fs_path;
+        if (fs_path.length && fs_path[$-1] != '/')
+            l.path ~= '/';
+        l.text ~= `{"entries":[`;
+        l.feed = FillProducer(&l.fill, max_tx_page);
+        _transfers ~= stream;
+        if (!respond(stream, response, &l.feed.produce, unknown_length, &l.ended))
+            l.ended(false);
         return 0;
     }
 
@@ -1045,7 +966,7 @@ private:
         response.flags = HTTPFlags.ForceBody; // a 301 without Content-Length reads as body-until-close
         response.headers ~= HTTPParam(StringLit!"Location", tconcat(request.request_target[], "/").make_string());
         add_cors(response, request);
-        stream.write(response.format_message()[]);
+        respond(stream, response);
         return 0;
     }
 
@@ -1058,50 +979,6 @@ private:
         free(u);
     }
 
-    void download_finished(Download* d, bool successful)
-    {
-        d.finished = true;
-        d.successful = successful;
-        if (!_download_cleanup_scheduled)
-        {
-            g_app.schedule(getTime(), &finish_downloads);
-            _download_cleanup_scheduled = true;
-        }
-    }
-
-    void finish_downloads(MonoTime)
-    {
-        _download_cleanup_scheduled = false;
-        for (size_t i = 0; i < _downloads.length; )
-        {
-            Download* d = _downloads[i];
-            if (!d.finished)
-                ++i;
-            else
-                cleanup_download(d, true);
-        }
-    }
-
-    void cleanup_download(Download* d, bool resume)
-    {
-        Stream stream = d.stream;
-        bool successful = d.successful;
-        if (d.file.is_open)
-            d.file.close();
-        if (stream)
-        {
-            stream.release_tx_handler(&d.produce);
-            stream.unsubscribe(&d.stream_state);
-        }
-        _downloads.removeFirstSwapLast(d);
-        free(d);
-
-        HTTPServer server = _server.get;
-        if (resume && successful && stream && stream.running && server && server.resume_response(stream))
-            return;
-        if (stream && stream.running)
-            stream.destroy();
-    }
 
 }
 
