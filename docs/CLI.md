@@ -1089,7 +1089,7 @@ every `debounce`.
 
 **Platform notes**
 
-- `capture` is Linux only.
+- `capture` depends on platform support.
 - Edge interrupts: ESP32, MT7621, STM32, the BL808's M0, and RP2350, where they have not yet run.
 - WS2812 chains: the RP2350's PIO and the BL808's GPIO transmit FIFO.
 - PWM blocks: ESP32 LEDC, RP2350 slices, STM32 TIM1-4 and TIM8, and the BL808's two PWM blocks.
