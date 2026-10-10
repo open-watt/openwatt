@@ -186,7 +186,7 @@ protected:
             req.headers ~= HTTPParam(StringLit!"Sec-WebSocket-Key", _handshake_key);
             req.headers ~= HTTPParam(StringLit!"Sec-WebSocket-Version", StringLit!"13");
 
-            Array!char msg = req.format_message(_conn.host[]);
+            Array!char msg = format_message_head(req, _conn.host[], false, 0);
             if (msg.empty || _stream.write(msg[]) != msg.length)
                 return CompletionStatus.error;
 
