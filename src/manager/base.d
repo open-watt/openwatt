@@ -1482,9 +1482,18 @@ package void append_config_value(ref MutableString!0 buf, ref const Variant v)
         buf.append('"');
         foreach (c; v.asString)
         {
-            if (c == '"' || c == '\\' || c == '$')
-                buf.append('\\');
-            buf.append(c);
+            if (c == '\n')
+                buf.append("\\n");
+            else if (c == '\r')
+                buf.append("\\r");
+            else if (c == '\t')
+                buf.append("\\t");
+            else
+            {
+                if (c == '"' || c == '\\' || c == '$')
+                    buf.append('\\');
+                buf.append(c);
+            }
         }
         buf.append('"');
         return;
