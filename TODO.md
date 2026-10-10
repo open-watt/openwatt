@@ -2443,3 +2443,330 @@ report, tuya-datapoint, read-response and priming paths.
 - **`conf/profiles` is a submodule.** A profile change ships separately from the binary and
   has to be deployed to a target in its own right, so a binary that expects the new mapping
   can meet an old profile and vice versa.
+
+- **OpenWatt #735 ESP32-S31 board follow-up**: verify fitted PSRAM detection,
+  boot memory test and external-heap operation on the function coreboard; finish
+  Ethernet and filesystem provisioning checks and decide preferred-heap behavior.
+  Complete the C5/C6 radio creation gap and unittest build-policy integration (#728);
+  the review's fresh debug/release builds did not flash hardware or repeat a full
+  coredump build.
+
+- **OpenWatt #742 H2 readiness**: choose and document a supported default or board
+  profile whose release image fits the OTA slot, align `default.conf` services with
+  that feature preset, and verify a fresh boot. Establish the committed USB console
+  on the intended board. Merge uRT #317 atomics support and pin the resulting
+  revision before relying on H2. Existing partition arithmetic is validated; the
+  review had no H2 firmware build or hardware run.
+
+
+## Legacy subsystem audit (2026-09-21)
+
+This is the consolidated action list from the retrospective audit; detailed
+evidence reports remain outside this checklist PR. The audit does not implement
+these changes.
+
+### Cross-subsystem repair order
+
+Treat this order as the working plan; the subsystem bullets below are the complete
+action list. The recurring cause is
+unclear ownership at asynchronous boundaries: accepted bytes, pending callbacks,
+timeouts and parser tails outlive or disagree with their owners.
+
+1. **Repair stream contracts first.** Forward RX through wrappers; distinguish
+   connection generations, discard, flush and drain; retain accepted TX suffixes;
+   bound progress under backpressure. This unblocks Telnet, MQTT, HTTP, WebSocket,
+   CPC, CAN/Ebyte, TWC, ESPHome and PPP work. ST-04/05's FIFO rollover/alignment
+   remains a separate ring correction.
+2. **Unify request ownership.** Use stable handles, retire pending records before
+   callbacks, cancel on owner teardown, and deliver one terminal result. Keep retry
+   policy protocol-specific. Apply across Modbus, GoodWe, HTTP, CPC, SNMP, ESPHome
+   and OBD; cover inline completion, late replies, restart and two owners issuing
+   equivalent requests.
+3. **Share checked byte-reading mechanics.** A bounded slice cursor should report
+   incomplete, invalid or complete input distinctly. Keep protocol semantics in
+   their codecs: DNS compression, HTTP status/body context, MQTT variable lengths,
+   Telnet IAC, WebSocket masking/continuation, TWC escapes, Spinel varints, BER and
+   CAN/ISO-TP each have different rules. Test every truncation point and capacity
+   boundary; malformed input must return errors without assertions or unbounded
+   retention. A shared cursor does not prove alignment for casts.
+4. **Restore protocol semantics and fail closed.** After ownership/framing is sound,
+   fix full response matching, register/PID spans, negotiated versions, status and
+   write transactions. Keep unfinished capabilities explicit: PPP stubs, dormant
+   SNMP without MIB integration, DNS master outline with existing `ow/dns` work,
+   and Spinel/Thread groundwork must not be presented as complete service.
+5. **Simplify after behavior is explicit.** Candidate shared helpers are framed
+   stream ownership, callback-safe transaction retirement, checked cursors,
+   IP endpoint parsing via `IPClient` where ownership fits, sample completion and
+   neutral observation hooks independent of file logging. Preserve real differences:
+   protocol cadence and priority are not interchangeable (OBD realtime is 400ms;
+   Modbus carries priority policy). Remove derivable state and measure layout only
+   after the owning repair.
+
+- **Modbus transaction correctness and lifetime (MB-01/02/11/12)**: match response
+  destination and frame role as well as sequence/server; revoke binding/node
+  callbacks before shutdown frees their owners; unify competing request timers
+  and retry ownership; derive TCP mode from protocol and validate the full wire
+  transaction ID. Cover concurrent nodes, owner removal/rebind, inline completion,
+  queue delay and late responses. See Modbus audit.
+- **Modbus framing and checked PDU views (MB-03/04/05/06)**: repair TCP request
+  classification, implement or explicitly reject ASCII, preserve fragmented
+  auto-detection input, correct RTU CRC/consumed-length accounting and minimum
+  frames, and share function-aware length validation across consumers.
+- **Modbus ranges and encoder consolidation (MB-07/08/09/10/14)**: make batch
+  ranges monotonic for overlapping fields, share operation limits (125 read
+  registers, 1968 written coils), use widened address arithmetic in serving, fold
+  legacy coil encoding into the packed encoder, and remove the shifted exception
+  name table. Executed codec probes and boundary acceptance cases are in the audit.
+- **Modbus registry and hook ownership (MB-13 and consolidation table)**: reconcile
+  persistent/ephemeral address allocation, report exhaustion/conflicts without
+  assertions, give mappings managed interface lifetime, and make serving/snooping
+  hook ownership explicit. Measure pending-record layout and remove duplicated
+  state as part of the owning structural change.
+
+- **Stream contracts and composition (ST-01/06/07)**: forward RX events through
+  wrappers, define connection-generation queue boundaries, and separate RX discard
+  from TX flush/drain. Preserve polling compatibility until all producers deliver
+  events. See stream audit.
+- **BridgeStream event-driven forwarding (ST-02/03)**: replace synchronous retry
+  loops and per-frame reads with bounded per-member progress driven by RX/TX
+  events; handle offline members, signed read results and partial acceptance.
+- **Memory FIFO contract (ST-04/05)**: fix non-power-of-two counter rollover,
+  validate atomic cursor alignment and capacity, and consider a shared ring view
+  rather than another independent implementation. An executed reproduction is
+  included in the stream audit.
+- **Stream efficiency and observability (ST-08/09/10/11/12)**: share accepted-prefix
+  tap/accounting logic independently of file logging, use monotonic scheduled
+  retries, avoid repeated front-removal copies, remove unused Stream state/options,
+  and migrate deprecated update polling with explicit platform recovery behavior.
+  Review USB serial global-driver ownership and partial vector-write reporting as
+  described in the audit's bounded follow-up.
+
+- **Telnet incremental RX and ordered events (TN-01/03/04/05/06)**: preserve output
+  beyond caller capacity, replace truncating tail scans with bounded incremental
+  decoding, unescape subnegotiation before validation, preserve interrupt ordering,
+  and migrate transport-wrapper-Session receive/terminal propagation to events.
+  See Telnet audit for executed probes and limits.
+- **Telnet output ownership and observation (TN-02/07)**: share bounded ordered
+  output for normal/page/control writes; preserve accepted-prefix semantics and
+  partial escapes; handle backpressure in Session and client command callers;
+  share logical-byte counters/taps independently of file logging with ST-08.
+- **Telnet negotiation and shared endpoint parsing (audit follow-up)**: validate
+  option numbers beyond bitmap width, decline or implement CHARSET, and replace
+  first-colon parsing with a hostname/IPv6-aware endpoint helper. Review command
+  completion/state redundancy as part of the shared event migration; measure layout
+  after simplification. Newer master's managed TelnetServer conversion is excluded.
+
+- **MQTT topic and subscription ownership (MQ-01/02/09)**: share topic-level
+  semantics across live/direct/retained matching, preserve trailing empty levels,
+  make each wire filter own its local callbacks, and use full delegate identity
+  for broker callbacks. Cover duplicate add, shared-filter removal and reconnect.
+  See MQTT audit for executed reproductions.
+- **MQTT framed I/O and event migration (MQ-03/04/05/10)**: share incremental
+  framing and bounded output ownership, preserve partial writes, drain final
+  responses explicitly, schedule keep-alive/expiry, and replace per-frame reads.
+  Remove 64-KiB transient subscription buffers and duplicated/dead state; measure
+  small-target stack/layout and idle-work costs.
+- **MQTT session and delivery semantics (MQ-06/07/08)**: honour retain-as-published,
+  settle/reconfigure Wills during session takeover, and update all topic-mapped
+  elements. Validate empty text samples, expiry before session resume, repeated
+  CONNECT transitions, and packet-ID ownership across pending acknowledgements.
+- **MQTT supported capabilities and bounded resources (audit follow-up)**: define
+  MQTT 5 property/capability support including negotiated limits, assigned IDs,
+  subscription IDs/shared subscriptions, message expiry and Will delay; finish or
+  explicitly scope QoS machinery. Prune empty trie nodes, validate public broker
+  input, and establish mutation-safe callback dispatch. Keep existing descriptor,
+  sample-format and discovery migrations linked rather than duplicating their work.
+
+- **GoodWe request ownership (GW-01/02/04)**: dispatch the retired request's own
+  callback and context, support/reject coalesced read ownership explicitly, and
+  revoke binding callbacks on teardown. Test array mutation/reentrancy across
+  response, timeout and shutdown. See GoodWe audit.
+- **GoodWe checked data and endpoints (GW-05/06/07)**: validate handshake/profile
+  payload spans before decoding, complete constants only after successful samples,
+  reconcile frame capacity with payload admission, and route by full UDP endpoint.
+  Consolidate endpoint parsing/getters and reject invalid port text.
+- **GoodWe event-driven cadence and health (GW-03/08)**: replace the never-advanced
+  sampling clock and function bitset with scheduled function requests, migrate UDP
+  receive and deadlines to events, define idle health probes and socket recovery,
+  and remove duplicate state/checks. Resolve execute-request completion, verify
+  negotiated destination addressing offline, and define validated receive activity.
+
+- **Wall Connector framing and checked codec (TWC-01/02/03/04)**: retain fragmented
+  input, escape checksum bytes, validate every decoded message span/version and
+  worst-case TX size, and preserve short-write suffixes. Share bounded escape/TX
+  helpers where PPP SLIP policy permits. See the executed round-trip/fragmentation
+  probes and acceptance cases in TWC audit.
+- **Wall Connector event lifecycle and pacing (TWC-05/06)**: move interface RX and
+  dependency supervision to callbacks/subscriptions, recover from read errors,
+  skip missed timer slots instead of bursting bus sends, and reconcile heartbeat
+  and request-sequence bookkeeping with accepted TX. Preserve fleet reservations;
+  simplify redundant state and measure layout with the repaired ownership model.
+
+- **HTTP incremental codec and response semantics (HT-01/02/03/05/06)**: distinguish
+  partial first lines from errors, share case-insensitive field/token handling,
+  implement response method/status/EOF framing and interim response ownership,
+  terminate Basic fields, and frame empty responses correctly. See
+  HTTP audit for executed local evidence.
+- **HTTP encoding and resource contracts (HT-04; bounded follow-up)**: advertise
+  only supported decoding, replace unsupported-content assertions with completion
+  errors, bound incomplete headers and decoded bodies, define chunk extensions,
+  and share URL/form/JSON escaping and authority parsing (including the host stub).
+- **HTTP write intent and submission options (HT-08/09)**: separate per-element
+  write intent from read cadence, clear only accepted snapshots, preserve changes
+  during in-flight requests, set one-shot flags before submission, and define
+  constant-read retries and bounded redirect handling.
+- **HTTP event-driven transport and shared output (HT-10)**: migrate client RX and
+  deadlines, server session reaping and binding cadence from updates to events;
+  retain partial TX and drain before close. Verify session RX-handler release on
+  offline/upgrade/reclamation, remove unnecessary full-body copies, and consolidate
+  derived scheduling/sample state before measuring layout. Newer master's client
+  callback/cleanup fixes are excluded from this audit's new work.
+
+- **WebSocket receive correctness (WS-01/02/03/06)**: share masked/unmasked message
+  assembly, process two-byte empty frames promptly, correct extended-length limits,
+  bound reassembly, and enforce role/control/UTF-8/negotiated-extension rules. See
+  WebSocket audit for executed ordinary-frame
+  probes. Define subprotocol/extension support and optional outbound fragmentation.
+- **WebSocket lifecycle and retained handshake/close output (WS-04/05)**: own and
+  revoke HTTP handler registrations, retain configured URI across restart, and
+  complete opening/closing only after output drains or a deadline expires. Verify
+  server/URI replacement, multiple hooks and callback-triggered destruction.
+- **WebSocket event migration and portability (WS-07)**: replace receive polling
+  and read-error assertions with callbacks/recovery, schedule handshake/close and
+  optional ping/pong deadlines, align the TX mask buffer, remove empty updates and
+  unused negotiation state, then measure layout. Preserve master's newer TX pull
+  and low-water support rather than reimplementing it.
+
+- **PPP/SLIP/PPPoE support boundary (PP-01/02)**: gate or reject unsupported
+  collections/modes instead of entering assertion stubs, fix PPPoE defaults and
+  nonterminating server startup, and admit only implemented transports. The feature
+  table now correctly says Outline. See PPP audit.
+- **PPP lifecycle and shared framing (PP-03/04)**: move packet subscriptions into
+  balanced startup/shutdown/state handling; replace the incomplete polling parser
+  with bounded incremental RX and completion-driven TX. Share session/role and
+  escaping primitives where semantics match TWC SLIP, keep PPP framing/FCS separate,
+  remove unused tail/duplicate stubs, and add offline acceptance tests before
+  claiming functional support.
+
+- **Spinel/Thread groundwork correlation and readiness (SP-01/04)**: validate IID,
+  route replies by IID/TID and expected property, distinguish reset/error status,
+  require valid supported version/capability evidence, restart interrogation after
+  a radio reset, and publish cleared status on shutdown. Historical PR #26 was
+  closed unmerged; #408 is the current lineage. See Spinel/Thread review.
+- **Spinel checked shared codec (SP-02/03)**: replace three disagreeing packed-int
+  readers with one bounded cursor, fix three-byte length accounting, validate all
+  format families and spans, and make borrowed/temporary ownership explicit.
+  Probe dormant scalar-array/D templates before expanding use; consider lazy arrays
+  instead of two-pass decoding. Preserve master's typed-allocation improvement.
+- **Spinel architecture follow-up**: keep CPC envelopes at the transport edge,
+  validate rather than mask IID values, simplify startup flags/state and layout,
+  and use transaction completion/scheduled deadlines for added operations. Define
+  the RCP/NCP and WPAN/IP boundary before claiming Thread data-plane support.
+
+- **CPC completion and command lifetime (CP-01/03/04/07)**: ensure exactly one
+  async callback across endpoint/trunk, retain handles through ACK/failure/abort,
+  cancel detached owners' unsent control commands, allow the final connect reply,
+  and honour queue deadline/urgency policy. Test mismatched/late replies and sequence
+  reuse. See CPC audit.
+- **CPC registration, wire ownership and timers (CP-02/05/06)**: initialize callback
+  state before synchronous buffered RX delivery, retain/drain partial I/S/U output,
+  schedule retry/command/restart events, remove empty endpoint updates, and test
+  callback-driven teardown. Share recycling/wire helpers, measure Channel layout
+  and set a global retained-memory budget in addition to per-channel bounds.
+- **CPC/Spinel capability roadmap**: explicitly decide native HDLC transport,
+  Bluetooth HCI, secure CPC sessions, v4 compatibility and larger/adaptive windows;
+  preserve clear unsupported-mode refusal until implemented and tested. These
+  source TODOs are capability follow-ups, not defects in the supported v5 mode.
+
+- **NTP response admission and independent deadline (NT-01/02)**: reject invalid
+  synchronization/version/stratum/timestamp/delay evidence before clock updates,
+  handle KoD explicitly, and let invalid/stale traffic neither extend the deadline
+  nor complete another request. See the clock-recorder-only NTP audit.
+- **NTP event-driven transport and time ownership (NT-03/04)**: use UDP receive
+  callbacks and scheduled cadence/retries/deadlines, validate/reschedule interval
+  and port changes, back off terminal socket failures, and timestamp at arrival.
+  Include multiple NTP clients, era unfolding and range validation in the existing
+  NTP/peer clock-owner work; consolidate duplicate timestamps/endpoint state and
+  endian helpers, then measure layout.
+
+- **CAN/Ebyte admission and framing (CA-01/02/03)**: return failure for oversize
+  drops, validate IDs, retain short-write suffixes, and restrict resynchronisation
+  lookahead so bad following bytes do not discard proven frames. Executed probes
+  and repair boundaries: CAN audit.
+- **CAN transport lifecycle and events (CA-04/06)**: restart/reset on running-stream
+  replacement and native/Ebyte mode changes, subscribe to stream RX/state, recover
+  read errors, and replace the native event-overflow tick fallback only with a
+  mechanism that preserves lost-wakeup recovery. Test reentrant teardown.
+- **CAN checked binding and consolidation (CA-05; follow-up)**: validate descriptor
+  spans, match RTR/standard/extended semantics, count activity only after valid
+  decode, and index complete frame keys. Reuse shared sample/formatting helpers,
+  validate vector/user boxing and alignment, remove stale dump code and measure
+  sample-state layout. Preserve existing binding packet/state subscriptions.
+
+- **DNS codec integration acceptance (DN-01/02/03)**: review the existing `ow/dns`
+  implementation against response QR flags, compressed-name separators and bounded
+  traversal, all record sections, checked writer capacity and normalized compressed
+  RDATA. Do not duplicate the unmerged engine. Current-tree reproductions and branch
+  context: DNS audit.
+- **DNS listener and subscription lifecycle (DN-04/05)**: remove interface/DoH
+  delegates on teardown and swap; use managed references/state subscriptions;
+  propagate bind/create/child-listener failures, correct mDNS failure accounting and
+  reconcile live protocol changes. The existing branch addresses some but not all.
+- **DNS transport and service completion (DN-06/07/08)**: integrate bounded TCP/DoT
+  length framing and complete-buffer draining, terminal/cancellable lookup outcomes,
+  explicit unsupported-mode behavior, callback RX and scheduled expiry/probes.
+  Validate the existing branch rather than start parallel resolver/cache/DoH work.
+  Remove or consolidate raw packet-sniffing stubs, duplicated IP/UDP headers and
+  listener cleanup, unused codec locals and unchecked NBNS encoding; retain the
+  separate IPv6 multicast policy TODO. Run feature-gated builds and interoperability
+  acceptance when that branch is brought forward.
+
+- **ESPHome framing and close (ES-01/02/03)**: replace the fixed-buffer stall with
+  bounded incremental decoding, retain partial TX frames and define connected versus
+  handshake close semantics. See executed probes in the ESPHome audit.
+- **ESPHome session and discovery progress (ES-04/05/06/09)**: reset receive/session
+  state on offline, check stream creation before subscription, schedule handshake/
+  ping/discovery deadlines, respect send admission and validate negotiated versions.
+  Migrate reads/health to RX/state callbacks, test reentrant delivery/removal, and
+  consolidate IPClient ownership, checked varints and frame queues.
+- **ESPHome identity, liveness and simplification (ES-07/08; follow-up)**: use stable
+  entity identity instead of normalized display names (include frontend/profile
+  migration when implemented), distinguish unavailable/invalid traffic from useful
+  samples, and settle stale-value policy. Remove write-only/redundant discovery and
+  map-entry fields, measure layout, consolidate decode-only entity cases, repair
+  moved-name metadata, Wi-Fi assumptions and hard-coded timezone, and document the
+  supported entity/plaintext capability. Error admission is also tracked under the
+  existing malformed-binding-input item below.
+
+- **SNMP enablement and SET transactions (SN-01/05)**: keep the dormant module's
+  capability explicit; before enabling it, integrate the MIB/property lifecycle,
+  transactional validation/commit/undo, supported version/PDU matrix, notification
+  handling and admission policy, and CLI docs. See the SNMP audit
+  and corrected feature table; this review does not enable the service.
+- **SNMP codec and bounded responses (SN-02/06; follow-up)**: repair legal OID upper
+  boundaries/first-arc overflow, continuation and textual identity validation;
+  enforce exact BER/PDU consumption, field ranges and unsigned syntax; bound table
+  walking by encoded response/work budgets with correct truncation/tooBig behavior.
+  Consolidate GETNEXT construction and measure a smaller owned VarBindValue layout.
+- **SNMP request lifecycle and events (SN-03/04/07)**: retire pending entries before
+  callbacks, add cancellation/ownership, retain expected endpoint/version/community,
+  test reentrant restart/destruction/submission, use monotonic scheduled deadlines
+  and RX callbacks, and validate retries/timeouts without narrowing wrap. Reuse shared
+  transaction and datagram ownership helpers; bound pending and per-dispatch work.
+
+- **OBD payload and transaction correctness (OB-01/02/03/05)**: use full protocol PID
+  lengths independently of sample spans, preserve write failure through reentrant
+  teardown, acknowledge ELM configuration before caching/dispatch, and correlate
+  only dispatched interface-owned transactions across bindings. Verify selected
+  adapter protocol. Evidence and acceptance: OBD audit.
+- **OBD bounded reassembly/progress (OB-04/06)**: define ISO-TP slot admission and
+  expiry without silent eviction, check FC submission, bound overall response-pending
+  and functional collection windows, and test fake-time/callback teardown behavior.
+  Preserve the existing RX/state/timer migration rather than reintroducing polling.
+- **OBD sample completion and shared helpers (OB-07; follow-up)**: only mark samples
+  complete after successful decode/write; check text/vector capacity and alignment;
+  share cadence and typed sample completion helpers without erasing protocol policy.
+  Remove unused per-sample fields/measure layout, validate classic-CAN/ELM frames
+  before liveness, discard overlong lines explicitly, state asymmetric MTU/segmented
+  TX/addressing limits, and honor or reject QueuePolicy. Keep transport health and
+  vehicle awake/asleep distinct under the existing richer-liveness task.
