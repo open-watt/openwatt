@@ -316,8 +316,6 @@ int main(string[] args)
 
     while (keep_running)
     {
-        boot_guard_update();
-
         // handle any expired timers (heartbeat-driven update() lives in here).
         MonoTime next_deadline = g_app.process_due();
 
