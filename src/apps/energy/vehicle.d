@@ -8,7 +8,7 @@ import urt.mem;
 import urt.meta : Alias;
 import urt.si.unit;
 import urt.string;
-import urt.time : SysTime;
+import urt.time : dur, getTime, MonoTime, SysTime;
 
 import apps.energy.appliance;
 
@@ -78,8 +78,10 @@ Component vehicle_for(const(char)[] vin)
     changed = materialise_vehicle(builder, vin, changed);
     builder.commit();
     if (changed)
+    {
         vehicle.notify(ComponentEvent.materialised);
-    enrich_from_nhtsa(vehicle, vin);
+        enrich_from_nhtsa(vehicle, vin);
+    }
     return vehicle;
 }
 
@@ -451,14 +453,20 @@ void enrich_from_nhtsa(Device vehicle, const(char)[] vin)
     if (!required)
         return;
 
-    import urt.mem.temp : tconcat;
+    auto lookup = alloc!NHTSALookup;
+    lookup.vin = vin.make_string();
+    lookup.send(getTime());
+}
 
-    auto ctx = alloc!NHTSALookup;
-    ctx.vin = vin.make_string();
-
-    const(char)[] url = tconcat("https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVin/", vin, "?format=json");
-    if (!http_request(url, &ctx.on_response))
-        free(ctx);
+const(Variant)* nhtsa_results(ref const HTTPMessage msg, ref Variant root)
+{
+    if (msg.status_code != 200 || msg.content.length == 0)
+        return null;
+    root = parse_json(cast(const(char)[])msg.content[]);
+    if (!root.isObject)
+        return null;
+    const(Variant)* results = root.getMember("Results");
+    return results && results.isArray ? results : null;
 }
 
 Component ensure_component(ref DeviceBuilder b, Component parent, const(char)[] id, const(char)[] template_, ref bool changed)
@@ -514,20 +522,28 @@ final class NHTSALookup
 {
 nothrow @nogc:
     String vin;
+    ubyte attempts;
+
+    void send(MonoTime)
+    {
+        import urt.mem.temp : tconcat;
+
+        const(char)[] url = tconcat("https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVin/", vin, "?format=json");
+        if (!http_request(url, &on_response))
+            retry();
+    }
 
     int on_response(ref const HTTPMessage msg)
     {
+        Variant root;
+        const(Variant)* results = nhtsa_results(msg, root);
+        if (!results)
+        {
+            retry();
+            return 0;
+        }
+
         scope(exit) free(this);
-
-        if (msg.status_code != 200 || msg.content.length == 0)
-            return 0;
-
-        Variant root = parse_json(cast(const(char)[])msg.content[]);
-        if (!root.isObject)
-            return 0;
-        const(Variant)* results = root.getMember("Results");
-        if (!results || !results.isArray)
-            return 0;
 
         Device* v = vin[] in g_app.devices;
         if (v is null)
@@ -579,6 +595,19 @@ nothrow @nogc:
 
         return 0;
     }
+
+private:
+    void retry()
+    {
+        if (!(vin[] in g_app.devices))
+        {
+            free(this);
+            return;
+        }
+        g_app.schedule(getTime() + dur!"minutes"(1L << attempts), &send);
+        if (attempts < 10)
+            ++attempts;
+    }
 }
 
 
@@ -621,4 +650,22 @@ unittest
 
     assert(decode_vin("").manufacturer_id == String());
     assert(decode_vin("TOO_SHORT").manufacturer_id == String());
+
+    bool answered(ushort status, const(char)[] body, size_t count = 0)
+    {
+        HTTPMessage msg;
+        msg.status_code = status;
+        msg.content = cast(ubyte[])body;
+        Variant root;
+        const(Variant)* results = nhtsa_results(msg, root);
+        return results && results.length == count;
+    }
+    assert(answered(200, `{"Count":0,"Results":[]}`));
+    assert(answered(200, `{"Results":[{"Variable":"Make","Value":"TESLA"}]}`, 1));
+    assert(!answered(200, `{"Results":[`));
+    assert(!answered(200, `not json`));
+    assert(!answered(200, `{"Message":"busy"}`));
+    assert(!answered(200, `{"Results":{}}`));
+    assert(!answered(200, ``));
+    assert(!answered(503, `{"Results":[]}`));
 }
