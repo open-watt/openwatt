@@ -1605,12 +1605,10 @@ this is what remains.
 
 - **Bound the TCP push backlog once its writers can take a partial write**: `TCPConnection.send()`
   queues pages without limit because MQTT packet emission (`src/protocol/mqtt/connection.d`),
-  HTTP responses whose content is built whole (the `/api` JSON dumps, where `/api/get` responses
-  around 140 KB already truncate, and the WebDAV `PROPFIND` multistatus) and console session
-  output push a whole message and ignore the return; a cap would truncate their protocol streams.
-  Give each a body producer for `respond()` (the fileserver's `Listing` and the API's `SchemaTx`
-  are the pattern), or have it check `tx_backlog` before committing a message, then enforce a
-  backlog bound in `send()`.
+  the WebDAV `PROPFIND` multistatus and console session output push a whole message and ignore
+  the return; a cap would truncate their protocol streams. Give each a body producer for
+  `respond()` (the fileserver's `Listing` and the API's `UnitProducer` are the pattern), or have
+  it check `tx_backlog` before committing a message, then enforce a backlog bound in `send()`.
 
 - **Compress HTTP responses**: the server sends no `Content-Encoding`, so fileserver downloads,
   listings and the `/api` JSON dumps go uncompressed (a 132 KB `.conf` gzips ~4.9x). A deflate
@@ -1637,6 +1635,16 @@ this is what remains.
   `max_frame` is negotiated per platform, derive the bound from it. The queue is pool pages now,
   so a no-PSRAM ESP32 serving two stalled browsers needs 256 KB of pages, not of contiguous heap;
   measure the pool headroom on each target that serves `/sync` over a websocket.
+
+- **Expanding filters reserve for the worst case**: a filter that transforms in place asks its inner
+  producer for the share of the grant that cannot overflow if every byte expands fully, so pages
+  run far below capacity: `JsonEscape` (the API's CLI output) takes a sixth, since a byte may
+  become `\u00XX`, though console text grows ~1.1x; `CrlfFilter` takes half; Telnet takes half for
+  IAC doubling. Stacked filters multiply: console text over telnet already fills a quarter of each
+  page, and JSON-escaped text through a CRLF telnet session would fill a twenty-fourth. Size the
+  request from a heuristic instead, such as the expansion of the previous page
+  or a running ratio, and let a page that overflows its room hand the unexpanded tail to the next
+  pull, held the way `FillProducer` holds a chunk's untaken tail.
 
 - **WebSocket TX copies every frame into its pages**: once encoders write into pages (STREAMING.md
   B.2), a frame should be the producer's page with its header in headroom, queued as it stands,
@@ -1736,12 +1744,19 @@ this is what remains.
   time added nothing. Opening the port over a CP210x seems to restart the session by itself on
   alternate opens. Find what a restart keeps.
 
-- **Stream `/api/cli/execute` output**: the handler collects output in a `StringSession`, whose
-  `MutableString` asserts past 32 KB, so `/device/print` with ~20 devices kills the process.
-  Give the request a session whose `feed_output` pulls into a chunked `respond()` body (as the
-  schema transfer does) instead of a whole-output buffer. Windows also drops `--interactive`
-  on a piped stdin, which is why a piped session prints nothing. Audit `DeviceTreeView` and the
-  other live views for terminal-channel assumptions on such sessions.
+- **Bound what a `ProducerSession` holds**: text a command writes (rather than feeds as a producer)
+  is held without limit until its reader takes it, in pages and then on the heap, so a command
+  that writes heavily to a slow HTTP client or a blocked sync peer, or a `-w` view, can take every
+  pool page and grow the heap. A write cannot wait, so the bound needs the writers to move onto
+  producers (the remaining `Table.render` prints, looping scripts) or a cap that ends the command
+  with an error. `JsonEscape` also asks for more tailroom than a full session page has, so each
+  such page is copied once on its way out.
+
+- **Live views on a session without a terminal**: `/api/cli/execute` runs on a
+  `ProducerSession`, so a watching command (`-w`) streams until the client disconnects. Audit
+  `DeviceTreeView` and the other live views for terminal-channel assumptions on such sessions.
+  Windows also drops `--interactive` on a piped stdin, which is why a piped session prints
+  nothing.
 
 - **Move the remaining prints onto the model design, not onto `TablePrint`**: a node and leaf
   model (collections, objects and devices as nodes; properties and elements as leaves; bespoke

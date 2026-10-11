@@ -3,6 +3,17 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-10-11: API responses stream
+
+- `/api/cli/execute` answers `{"output":"...","result":...}`, output first, with
+  `Transfer-Encoding: chunked`. The head and output arrive as the command makes them, so a long
+  command shows progress to a client that reads the body as it comes, and output is no longer
+  capped (it used to kill the node past 32 KB).
+- `/api/get` and `/api/list` arrive chunked instead of with a `Content-Length`; their JSON is
+  unchanged.
+- Over HTTP/1.0, `/api/cli/execute`, `/api/get` and `/api/list` answer `505` (a chunked body
+  cannot be framed); `/api/cli/execute` refuses before running the command. Use HTTP/1.1.
+
 ## 2026-10-10: HTTP responses stream
 
 - Fileserver downloads of every size stream from disk with a `Content-Length` and are never

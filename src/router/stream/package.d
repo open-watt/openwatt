@@ -128,6 +128,36 @@ void append_tx_chain(ref Page* chain, Page* pages)
     tail.next = pages;
 }
 
+// copies behind the chain's last page, filling it before a whole page is taken, up to limit or until no page is free
+size_t append_tx_copy(ref Page* chain, const(void)[] data, size_t limit = size_t.max)
+{
+    Page* tail = chain;
+    while (tail && tail.next)
+        tail = tail.next;
+    const(ubyte)[] bytes = cast(const(ubyte)[])data;
+    size_t total;
+    while (bytes.length && total < limit)
+    {
+        if (!tail || !tail.tailroom || !page_unique(tail))
+        {
+            Page* page = page_alloc(max_tx_page < limit - total ? max_tx_page : limit - total);
+            if (!page)
+                break;
+            page.length = 0;
+            append_tx_chain(chain, page);
+            tail = page;
+        }
+        size_t n = bytes.length < tail.tailroom ? bytes.length : tail.tailroom;
+        if (n > limit - total)
+            n = limit - total;
+        (cast(ubyte*)tail)[tail.offset + tail.length .. tail.offset + tail.length + n] = bytes[0 .. n];
+        tail.length += cast(ushort)n;
+        bytes = bytes[n .. $];
+        total += n;
+    }
+    return total;
+}
+
 // fills the buffer it is given and returns the bytes written, stopping at a yield point past the deadline
 alias Fill = size_t delegate(char[] buffer, MonoTime deadline, out TxStatus status) nothrow @nogc;
 
@@ -577,32 +607,12 @@ protected:
         size_t queued = tx_queued();
         size_t room = queued < tx_queue_limit + max_tx_page ? tx_queue_limit + max_tx_page - queued : 0;
         size_t total;
-        Page* tail = _tx_queue;
-        while (tail && tail.next)
-            tail = tail.next;
-        copy: foreach (d; data)
+        foreach (d; data)
         {
-            const(ubyte)[] bytes = cast(const(ubyte)[])d;
-            while (bytes.length && total < room)
-            {
-                if (!tail || !tail.tailroom || !page_unique(tail))
-                {
-                    size_t want = bytes.length < max_tx_page ? bytes.length : max_tx_page;
-                    Page* page = page_alloc(want < room - total ? want : room - total);
-                    if (!page)
-                        break copy;
-                    page.length = 0;
-                    append_tx_chain(_tx_queue, page);
-                    tail = page;
-                }
-                size_t n = bytes.length < tail.tailroom ? bytes.length : tail.tailroom;
-                if (n > room - total)
-                    n = room - total;
-                (cast(ubyte*)tail)[tail.offset + tail.length .. tail.offset + tail.length + n] = bytes[0 .. n];
-                tail.length += cast(ushort)n;
-                bytes = bytes[n .. $];
-                total += n;
-            }
+            size_t n = append_tx_copy(_tx_queue, d, room - total);
+            total += n;
+            if (n < d.length)
+                break;
         }
         return total;
     }
