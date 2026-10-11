@@ -277,7 +277,7 @@ private:
     void send_response(ref Stream stream, ref const HTTPMessage req, ushort code, const(char)[] body_)
     {
         HTTPMessage response = create_response(req.http_version, code, StringLit!"text/plain", body_);
-        stream.write(response.format_message()[]);
+        respond(stream, response);
     }
 }
 

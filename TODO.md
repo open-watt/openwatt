@@ -1605,11 +1605,30 @@ this is what remains.
 
 - **Bound the TCP push backlog once its writers can take a partial write**: `TCPConnection.send()`
   queues pages without limit because MQTT packet emission (`src/protocol/mqtt/connection.d`),
-  HTTP `write_message`/`format_message` responses, the `/api` JSON dumps (`/api/get` responses
-  around 140 KB already truncate) and console session output push a whole message in one
-  `write()` and ignore the return; a cap would truncate their protocol streams. Migrate each to a
-  `tx_handler` producer (the fileserver and the API schema endpoint are the pattern), or have it
-  check `tx_backlog` before committing a message, then enforce a backlog bound in `send()`.
+  HTTP responses whose content is built whole (the `/api` JSON dumps, where `/api/get` responses
+  around 140 KB already truncate, and the WebDAV `PROPFIND` multistatus) and console session
+  output push a whole message and ignore the return; a cap would truncate their protocol streams.
+  Give each a body producer for `respond()` (the fileserver's `Listing` and the API's `SchemaTx`
+  are the pattern), or have it check `tx_backlog` before committing a message, then enforce a
+  backlog bound in `send()`.
+
+- **Compress HTTP responses**: the server sends no `Content-Encoding`, so fileserver downloads,
+  listings and the `/api` JSON dumps go uncompressed (a 132 KB `.conf` gzips ~4.9x). A deflate
+  filter inside the chunked filter, chosen by `Accept-Encoding`, needs an incremental compressor;
+  `urt.zip` is whole-buffer only.
+
+- **Streams have no close-after-sent**: destroying a stream drops what its queue still holds, so
+  an HTTP server cannot delimit a body by closing, and refuses HTTP/1.0 a body of unknown length
+  (`505`, which fileserver listings and `/api/schema` get). A client that half-closes after its
+  request (netcat, some HTTP/1.0 tools) has its response cut short too: on Windows a 52 KB listing
+  with a `Content-Length` arrived truncated after the client's FIN (master d865a630). A stream
+  needs a close that lands once its queue drains, and a peer's FIN must not drop what is queued.
+
+- **A Windows TCP listener created early in startup never listens**: with
+  `/protocol/http/server add` as the first line of a config, `tcp_listen` fails on every retry for
+  any port, while a telnet server added after it listens; ordering the telnet server first makes
+  both listen. Find what the IOCP listen path needs that is not up yet, and why the retries never
+  recover.
 
 - **The websocket's 128 KB hard bound is sized for the desktop, not for a micro**: pulled
   producers stop at 16 KB, but every pushed emitter can still drive the page queue to the hard
@@ -1715,7 +1734,7 @@ this is what remains.
 
 - **Stream `/api/cli/execute` output**: the handler collects output in a `StringSession`, whose
   `MutableString` asserts past 32 KB, so `/device/print` with ~20 devices kills the process.
-  Give the request a session whose `feed_output` pulls into a chunked JSON response (as the
+  Give the request a session whose `feed_output` pulls into a chunked `respond()` body (as the
   schema transfer does) instead of a whole-output buffer. Windows also drops `--interactive`
   on a piped stdin, which is why a piped session prints nothing. Audit `DeviceTreeView` and the
   other live views for terminal-channel assumptions on such sessions.

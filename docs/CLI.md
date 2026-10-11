@@ -1551,8 +1551,8 @@ is always distinguishable from a file. A directory request serves
 mistakable for a `.json` file. Requesting with `Accept: application/json`
 returns the listing even where an index exists; this is how the web file
 browser enumerates, at every access level. `HEAD` answers with the headers
-alone. Responses larger than 64KB stream from disk instead of buffering,
-paced by the connection.
+alone. Files stream from disk as the connection takes them, and are never
+content-encoded; a listing streams chunked as the directory is read.
 
 Path mapping URL-decodes the request, rejects `..` traversal, and refuses
 path separators inside a segment, for reads and writes alike.

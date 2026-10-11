@@ -89,13 +89,6 @@ protected:
 
     override CompletionStatus shutdown()
     {
-        if (_schema_cleanup_scheduled)
-        {
-            g_app.cancel(&finish_schema);
-            _schema_cleanup_scheduled = false;
-        }
-        cleanup_schema(false);
-
         foreach (ref req; _pending_requests)
             req.command.request_cancel();
         update_pending_requests(false);
@@ -112,82 +105,40 @@ protected:
     }
 
 private:
+    // frees itself when its response ends
     static struct SchemaTx
     {
     nothrow @nogc:
+        typeof(g_app.types.values()) types;
 
         Page* produce(ref const TxRequest req, out TxStatus status)
         {
-            if (!header_sent)
-                return produce_header(req, status);
-
             if (sent == pending.length)
                 prepare_pending();
-
-            static assert(min_tx_request >= chunk_framing + 1 + final_chunk_size);
-            size_t terminal_size = closed ? final_chunk_size : 0;
-            size_t page_size = req.bytes < max_page_size ? req.bytes : max_page_size;
-
             size_t take = pending.length - sent;
-            size_t room = page_size - chunk_framing - terminal_size;
-            if (take > room)
-                take = room;
-
-            Page* page = alloc_tx_page(req, page_size, status);
-            if (!page)
-                return null;
-
-            char[] output = cast(char[])page.data;
-            size_t length = write_chunk(output, pending[sent .. sent + take]);
-            sent += take;
-            if (closed && sent == pending.length)
-            {
-                output[length .. length + final_chunk_size] = "0\r\n\r\n";
-                length += final_chunk_size;
-                owner.schema_finished(&this, true);
-                status = TxStatus.end;
-            }
-            page.length = cast(ushort)length;
-            return page;
-        }
-
-    private:
-        enum max_page_size = 1600;
-        enum chunk_framing = 8;
-        enum final_chunk_size = 5;
-
-        APIManager owner;
-        Stream stream;
-        typeof(g_app.types.values()) types;
-        Array!char pending;
-        size_t sent;
-        bool header_sent;
-        bool opened;
-        bool wrote_type;
-        bool closed;
-        bool complete;
-
-        Page* produce_header(ref const TxRequest req, ref TxStatus status)
-        {
-            size_t take = pending.length - sent;
-            if (take > max_page_size)
-                take = max_page_size;
             if (take > req.bytes)
                 take = req.bytes;
-
             Page* page = alloc_tx_page(req, take, status);
             if (!page)
                 return null;
             (cast(char[])page.data)[] = pending[sent .. sent + take];
             sent += take;
-            if (sent == pending.length)
-            {
-                pending.clear();
-                sent = 0;
-                header_sent = true;
-            }
+            if (closed && sent == pending.length)
+                status = TxStatus.end;
             return page;
         }
+
+        void ended(bool)
+        {
+            free(&this);
+        }
+
+    private:
+        Array!char pending;
+        size_t sent;
+        bool opened;
+        bool wrote_type;
+        bool closed;
 
         void prepare_pending()
         {
@@ -226,8 +177,6 @@ private:
     CID _server_id;
     String _uri;
     HTTPServer.RequestHandler _default_handler;
-    SchemaTx* _schema;
-    bool _schema_cleanup_scheduled;
     Array!PendingRequest _pending_requests;
 
     int handle_request(ref const HTTPMessage request, ref Stream stream, const(ubyte)[] leftover)
@@ -267,7 +216,7 @@ private:
         {
             HTTPMessage response = create_response(request.http_version, 404, StringLit!"application/json", "{\"error\":\"Not Found\"}");
             add_cors(response, request);
-            stream.write(response.format_message()[]);
+            respond(stream, response);
         }
 
         return 0;
@@ -291,7 +240,7 @@ private:
             response.headers ~= HTTPParam(StringLit!"Access-Control-Allow-Headers", StringLit!"Content-Type");
             response.headers ~= HTTPParam(StringLit!"Access-Control-Max-Age", StringLit!"86400");
         }
-        stream.write(response.format_message()[]);
+        respond(stream, response);
         return 0;
     }
 
@@ -302,7 +251,7 @@ private:
 
         HTTPMessage response = create_response(request.http_version, 200, StringLit!"application/json", tconcat("{\"status\":\"healthy\",\"uptime\":", getAppTime().as!"seconds", "}"));
         add_cors(response, request);
-        stream.write(response.format_message()[]);
+        respond(stream, response);
         return 0;
     }
 
@@ -327,7 +276,7 @@ private:
         {
             HTTPMessage response = create_response(request.http_version, 400, StringLit!"application/json", "{\"error\":\"Command body required\"}");
             add_cors(response, request);
-            stream.write(response.format_message()[]);
+            respond(stream, response);
             return 0;
         }
 
@@ -342,9 +291,7 @@ private:
             return 0;
         }
 
-        HTTPServer server = _server_id.get_item!HTTPServer;
-        assert(server);
-        bool deferred = server.defer_response(stream);
+        bool deferred = respond_later(stream);
         assert(deferred);
 
         String origin = request.header("Origin")[].make_string();
@@ -381,117 +328,20 @@ private:
         else
             response.content ~= "\"\"}";
         add_cors(response, origin);
-        stream.write(response.format_message()[]);
+        respond(stream, response);
     }
 
     int handle_schema(ref const HTTPMessage request, ref Stream stream)
     {
-        if (_schema)
-            return reject_schema(request, stream);
-        if (request.http_version != HTTPVersion.V1_1)
-        {
-            HTTPMessage response = create_response(request.http_version, 505, StringLit!"application/json", "{\"error\":\"HTTP/1.1 required\"}");
-            add_cors(response, request);
-            stream.write(response.format_message()[]);
-            return 0;
-        }
-        HTTPMessage head;
-        head.http_version = request.http_version;
-        head.status_code = 200;
-        head.reason = status_text(200);
-        head.timestamp = getSysTime();
-        head.headers ~= HTTPParam(StringLit!"Content-Type", StringLit!"application/json");
-        head.headers ~= HTTPParam(StringLit!"Transfer-Encoding", StringLit!"chunked");
+        HTTPMessage head = create_response(request.http_version, 200, StringLit!"application/json", null);
         add_cors(head, request);
-
-        SchemaTx* tx = alloc!SchemaTx();
-        if (!tx)
-            return reject_schema(request, stream, "{\"error\":\"schema streaming unavailable\"}");
-        tx.owner = this;
-        tx.stream = stream;
-        tx.types = g_app.types.values;
-        tx.pending = format_message_head(head);
-        if (tx.pending.empty)
+        SchemaTx* tx = alloc!SchemaTx(g_app.types.values);
+        if (!respond(stream, head, &tx.produce, unknown_length, &tx.ended))
         {
-            free(tx);
+            tx.ended(false);
             return -1;
         }
-
-        HTTPServer server = _server_id.get_item!HTTPServer;
-        if (!server)
-        {
-            free(tx);
-            return -1;
-        }
-        if (!server.defer_response(stream))
-        {
-            free(tx);
-            return -1;
-        }
-        _schema = tx;
-        stream.subscribe(&schema_stream_state_change);
-        stream.tx_handler(&tx.produce);
         return 0;
-    }
-
-    int reject_schema(ref const HTTPMessage request, ref Stream stream, const(void)[] content = "{\"error\":\"schema transfer in progress\"}")
-    {
-        HTTPMessage response = create_response(request.http_version, 503, StringLit!"application/json", content);
-        add_cors(response, request);
-        stream.write(response.format_message()[]);
-        return 0;
-    }
-
-    void schema_finished(SchemaTx* tx, bool complete)
-    {
-        if (_schema !is tx)
-            return;
-        tx.complete = complete;
-        if (!_schema_cleanup_scheduled)
-        {
-            g_app.schedule(getTime(), &finish_schema);
-            _schema_cleanup_scheduled = true;
-        }
-    }
-
-    void finish_schema(MonoTime)
-    {
-        _schema_cleanup_scheduled = false;
-        cleanup_schema(true);
-    }
-
-    void cleanup_schema(bool resume)
-    {
-        SchemaTx* tx = _schema;
-        if (!tx)
-            return;
-        _schema = null;
-
-        Stream stream = tx.stream;
-        bool complete = tx.complete;
-        if (stream)
-        {
-            stream.release_tx_handler(&tx.produce);
-            stream.unsubscribe(&schema_stream_state_change);
-        }
-        free(tx);
-
-        HTTPServer server = _server_id.get_item!HTTPServer;
-        if (resume && complete && stream && stream.running && server && server.resume_response(stream))
-            return;
-        if (stream && stream.running)
-            stream.destroy();
-    }
-
-    void schema_stream_state_change(ActiveObject object, StateSignal signal)
-    {
-        if (signal != StateSignal.offline || !_schema || _schema.stream !is object)
-            return;
-
-        _schema.stream.release_tx_handler(&_schema.produce);
-        _schema.stream.unsubscribe(&schema_stream_state_change);
-        _schema.stream = null;
-        schema_finished(_schema, false);
     }
 
     int handle_enum(ref const HTTPMessage request, ref Stream stream, const(char)[] name)
@@ -502,7 +352,7 @@ private:
             if (name[0] != '/')
             {
                 HTTPMessage response = create_response(request.http_version, 404, StringLit!"application/json", "{\"error\":\"Not Found\"}");
-                stream.write(response.format_message()[]);
+                respond(stream, response);
                 return 0;
             }
             name = name[1..$];
@@ -558,7 +408,7 @@ private:
 
         HTTPMessage response = create_response(request.http_version, 200, StringLit!"application/json", json[]);
         add_cors(response, request);
-        stream.write(response.format_message()[]);
+        respond(stream, response);
         return 0;
     }
 
@@ -574,7 +424,7 @@ private:
         {
             HTTPMessage response = create_response(request.http_version, 400, StringLit!"application/json", "{\"error\":\"Invalid JSON\"}");
             add_cors(response, request);
-            stream.write(response.format_message()[]);
+            respond(stream, response);
             return 0;
         }
 
@@ -586,7 +436,7 @@ private:
         {
             HTTPMessage response = create_response(request.http_version, 400, StringLit!"application/json", "{\"error\":\"Missing 'path' or 'paths' field\"}");
             add_cors(response, request);
-            stream.write(response.format_message()[]);
+            respond(stream, response);
             return 0;
         }
 
@@ -602,7 +452,7 @@ private:
         {
             HTTPMessage response = create_response(request.http_version, 400, StringLit!"application/json", "{\"error\":\"'path' or 'paths' must be string or array\"}");
             add_cors(response, request);
-            stream.write(response.format_message()[]);
+            respond(stream, response);
             return 0;
         }
 
@@ -627,7 +477,7 @@ private:
 
         HTTPMessage response = create_response(request.http_version, 200, StringLit!"application/json", response_json[]);
         add_cors(response, request);
-        stream.write(response.format_message()[]);
+        respond(stream, response);
 
         return 0;
     }
@@ -693,7 +543,7 @@ private:
         {
             HTTPMessage response = create_response(request.http_version, 400, StringLit!"application/json", "{\"error\":\"Invalid JSON\"}");
             add_cors(response, request);
-            stream.write(response.format_message()[]);
+            respond(stream, response);
             return 0;
         }
 
@@ -702,7 +552,7 @@ private:
         {
             HTTPMessage response = create_response(request.http_version, 400, StringLit!"application/json", "{\"error\":\"Missing 'values' object\"}");
             add_cors(response, request);
-            stream.write(response.format_message()[]);
+            respond(stream, response);
             return 0;
         }
 
@@ -768,7 +618,7 @@ private:
 
         HTTPMessage response = create_response(request.http_version, 200, StringLit!"application/json", response_json[]);
         add_cors(response, request);
-        stream.write(response.format_message()[]);
+        respond(stream, response);
 
         return 0;
     }
@@ -784,7 +634,7 @@ private:
         {
             HTTPMessage response = create_response(request.http_version, 400, StringLit!"application/json", "{\"error\":\"Invalid JSON\"}");
             add_cors(response, request);
-            stream.write(response.format_message()[]);
+            respond(stream, response);
             return 0;
         }
 
@@ -834,7 +684,7 @@ private:
 
         HTTPMessage response = create_response(request.http_version, 200, StringLit!"application/json", response_json[]);
         add_cors(response, request);
-        stream.write(response.format_message()[]);
+        respond(stream, response);
 
         return 0;
     }
@@ -934,13 +784,7 @@ private:
             free(cmd);
             g_app.console.destroy_session(s);
 
-            HTTPServer server = _server_id.get_item!HTTPServer;
-            if (send_response && stream_alive)
-            {
-                if (server)
-                    server.resume_response(stream);
-            }
-            else if (stream)
+            if (!(send_response && stream_alive) && stream)
                 stream.destroy();
         }
     }
@@ -1051,62 +895,4 @@ void emit_collection(ref Array!char json, ref const Application.RegisteredType c
         json ~= '}';
     }
     json ~= "}}";
-}
-
-size_t write_chunk(char[] dst, const(char)[] data)
-{
-    char[4] digits = void;
-    size_t d = 0;
-    size_t v = data.length;
-    while (v)
-    {
-        const ubyte nib = v & 0xF;
-        digits[d++] = cast(char)(nib < 10 ? '0' + nib : 'a' + nib - 10);
-        v >>= 4;
-    }
-    if (d == 0)
-        digits[d++] = '0';
-
-    size_t n = 0;
-    while (d)
-        dst[n++] = digits[--d];
-    dst[n++] = '\r';
-    dst[n++] = '\n';
-    dst[n .. n + data.length] = data[];
-    n += data.length;
-    dst[n++] = '\r';
-    dst[n++] = '\n';
-    return n;
-}
-
-
-unittest
-{
-    bool owns_pool = page_pool_init();
-    scope (exit) if (owns_pool) page_pool_deinit();
-
-    APIManager owner = alloc!APIManager(CID(1));
-    scope (exit) free(owner);
-
-    APIManager.SchemaTx tx;
-    tx.owner = owner;
-    tx.header_sent = true;
-    tx.opened = true;
-    foreach (i; 0 .. 60)
-        tx.pending ~= 'x';
-
-    TxRequest req = TxRequest(64);
-    TxStatus status;
-    Page* page = tx.produce(req, status);
-    assert(page && page.length == 62 && status == TxStatus.more);
-    assert((cast(const(char)[])page.data)[0 .. 4] == "38\r\n");
-    page_free(page);
-
-    page = tx.produce(req, status);
-    assert(page && cast(const(char)[])page.data == "4\r\nxxxx\r\n" && status == TxStatus.more);
-    page_free(page);
-
-    page = tx.produce(req, status);
-    assert(page && cast(const(char)[])page.data == "1\r\n}\r\n0\r\n\r\n" && status == TxStatus.end);
-    page_free(page);
 }

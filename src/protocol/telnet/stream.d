@@ -390,8 +390,8 @@ private:
     // every byte may be an IAC, which doubles: half the grant carries payload and the other half is room to escape it
     Page* provide_tx_page(ref const TxRequest req, out TxStatus status)
     {
-        size_t payload = req.bytes / 2;
-        TxRequest inner = TxRequest(payload, req.deadline, req.headroom, req.tailroom + req.bytes - payload);
+        size_t grant = req.bytes < max_tx_page ? req.bytes : max_tx_page;
+        TxRequest inner = TxRequest(grant / 2, req.deadline, req.headroom, req.tailroom + grant - grant / 2);
         Page* page;
         if (tx_queued)
         {
