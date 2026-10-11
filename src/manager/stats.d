@@ -1,6 +1,5 @@
 module manager.stats;
 
-import urt.log;
 import urt.si.quantity : Quantity;
 import urt.si.unit : Percent;
 import urt.string;
@@ -38,7 +37,6 @@ void create_system_device()
         Component pool = builder.component(mem, p.name.to_lower(lowered[0 .. p.name.length]));
 
         builder.constant(pool, "total", p.total).access = Access.read;
-        _pools[i].name = p.name;
         _pools[i].used = metric(builder, pool, "used", bytes);
         _pools[i].low = metric(builder, pool, "low", bytes);
         _pools[i].high = metric(builder, pool, "high", bytes);
@@ -81,7 +79,6 @@ Element* metric(ref DeviceBuilder builder, Component parent, const(char)[] name,
 
 struct PoolElements
 {
-    string name;
     Element* used;
     Element* low;
     Element* high;
@@ -97,8 +94,6 @@ struct CpuElements
 __gshared PoolElements[MaxMemoryPools] _pools;
 __gshared CpuElements _cpu;
 __gshared Element* _stack_peak;
-version (Embedded)
-    __gshared uint _beats;
 
 void publish()
 {
@@ -127,17 +122,6 @@ void publish()
             e.used.value(u.used, now);
             e.low.value(u.low, now);
             e.high.value(u.high, now);
-        }
-    }
-
-    // must not allocate: it would land in the next interval's watermarks
-    version (Embedded)
-    {
-        log_info("stats", "hb=", ++_beats, " cpu=", load, "% (", cpu_low, "-", cpu_high, ")");
-        foreach (i, ref u; usage)
-        {
-            if (_pools[i].used)
-                log_info("stats", _pools[i].name, " used=", u.used, " (", u.low, "-", u.high, ")");
         }
     }
 }
