@@ -814,9 +814,13 @@ private __gshared uint _next_sweep_txid = 1;
 
 abstract class EthernetInterface : EthernetStation
 {
+    alias Properties = AliasSeq!(Prop!("duplex", duplex, "status"));
 nothrow @nogc:
 
     ~this() {}
+
+    final Duplex duplex() const pure
+        => _status.duplex;
 
 protected:
 
@@ -825,6 +829,20 @@ protected:
         super(typeInfo, id, flags);
         // TODO: jumbo frames need medium_tx's frame buffer sized from what the hardware carries
         set_l2mtu(1514);
+    }
+
+    override void offline()
+    {
+        super.offline();
+        set_duplex(Duplex.unknown);
+    }
+
+    final void set_duplex(Duplex value)
+    {
+        if (_status.duplex == value)
+            return;
+        _status.duplex = value;
+        mark_set!(typeof(this), "duplex")();
     }
 
     final void incoming_ethernet_frame(const(ubyte)[] data, MonoTime ts, ushort vlan_tci = 0, ushort vlan_tpid = 0, const(HwTimestamp)* hw_time = null, bool checksum_verified = false)

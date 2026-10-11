@@ -664,13 +664,11 @@ package:
     const(char)[] get_address() const
     {
         import urt.mem.temp : tstring;
-        if (_host)
-            return _host[];
-        else if (_remote.family == AddressFamily.ipv4)
+        if (_remote.family == AddressFamily.ipv4)
             return _remote._a.ipv4.addr.tstring;
-        else if (_remote.family == AddressFamily.ipv6)
+        if (_remote.family == AddressFamily.ipv6)
             return _remote._a.ipv6.addr.tstring;
-        return null;
+        return _host ? _host[] : null;
     }
 
 

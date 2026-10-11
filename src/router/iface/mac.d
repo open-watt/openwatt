@@ -5,8 +5,6 @@ import urt.string.format : FormatArg;
 nothrow @nogc:
 
 
-enum MACAddress MACLit(string addr) = (){ MACAddress a; assert(a.fromString(addr) == addr.length, "Not a mac address"); return a; }();
-enum EUI64 EUILit(string addr) = (){ EUI64 a; assert(a.fromString(addr) == addr.length, "Not an eui64 address"); return a; }();
 
 alias MACAddress = EUI!48;
 alias EUI64 = EUI!64;
@@ -402,9 +400,9 @@ nothrow @nogc:
             if (numElements >= _max_elements)
                 return false;
 
-            // expand the allocation
-            void[] mem = cast(void[])_elements;
-            mem = realloc(mem, min(mem.length * 2, _max_elements * Entry.sizeof));
+            void[] mem = realloc(cast(void[])_elements, min(numElements * Entry.sizeof * 2, _max_elements * Entry.sizeof));
+            if (!mem.ptr)
+                return false;
             _elements = cast(Entry[])mem;
             _free_list_head = cast(ushort)numElements;
             for (; numElements < _elements.length - 1; ++numElements)

@@ -42,7 +42,7 @@ make PLATFORM=bl808                    # BL808: M0 (the network node) with D0 ap
 
 # Testing
 make CONFIG=unittest                    # Build with unit tests enabled
-./bin/x86_64_unittest/openwatt_test    # Run unit tests (adjust platform as needed)
+./bin/x86_64_linux_unittest/openwatt_test   # Run unit tests (adjust platform as needed)
 ```
 
 **Build variables:**
@@ -701,7 +701,7 @@ OpenWatt has two types of tests:
 
 **1. Unit Tests (D `unittest` blocks)** - For testing individual functions and data structures
 ```bash
-rm -rf obj bin && make CONFIG=unittest && ./bin/x86_64_unittest/openwatt_test 2>&1 | grep "passed"
+rm -rf obj bin && make CONFIG=unittest && ./bin/x86_64_linux_unittest/openwatt_test 2>&1 | grep "passed"
 ```
 
 **2. Runtime Tests (Python test harness in `test/`)** - For testing the full application
@@ -725,8 +725,8 @@ The test harness provides **3 core capabilities**:
 3. **Persistent REPL** - Interactive investigation (recommended for Claude)
    ```bash
    # Start background REPL with named pipe (cross-platform)
-   # Binary: bin/x86_64_debug/openwatt (Linux) or openwatt.exe (Windows)
-   BINARY="bin/x86_64_debug/openwatt$([ "$(uname -s | grep -i mingw)" ] && echo .exe)"
+   # Binary: bin/x86_64_linux_debug/openwatt (Linux) or bin/x86_64_windows_debug/openwatt.exe
+   BINARY=$(ls bin/x86_64_*_debug/openwatt bin/x86_64_*_debug/openwatt.exe 2>/dev/null | head -1)
    mkfifo /tmp/ow_stdin
    tail -f /tmp/ow_stdin | $BINARY --interactive > /tmp/ow_stdout.txt 2> /tmp/ow_stderr.txt &
 

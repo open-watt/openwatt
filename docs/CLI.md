@@ -25,6 +25,7 @@ The CLI is organized into a few top-level categories, each managing a different 
 -   `/stream`: Manages data streams, which are typically network connections (TCP, WebSocket), serial ports, etc.
 -   `/interface`: Configures hardware or logical interfaces, like Modbus, CAN, network bridges, etc.
 -   `/protocol`: Manages protocol-specific configuration, such as Modbus clients, MQTT brokers, HTTP servers, etc.
+-   `/device`, `/element`: Inspect the runtime data model, add naked devices, and write element values.
 -   `/apps`: High-level application functionality, like the energy management system.
 
 Each of these top-level commands has its own set of sub-commands for more specific configuration.
@@ -710,6 +711,12 @@ broadcast.
 | --- | --- | --- |
 | `discover` | `/interface/ethernet/discover` | Sweeps every segment for OpenWatt stations, listing each with its name and addresses. |
 
+Beyond the common interface properties, every Ethernet interface reports its link's duplex:
+
+| Property | Access | Description |
+| --- | --- | --- |
+| `duplex` | read-only | What this end of the link is running: `full`, `half`, or `unknown` while the link is down. Linux reads it from the kernel and Espressif boards from the PHY; Windows always reports `unknown`. |
+
 Without `iface`, MAC ping requests go out every running Ethernet station.
 Each reply prints as `reply from <mac>: time=<rtt>`, with the
 responder's name appended when its LBR carried a Sender ID TLV. A summary of
@@ -753,7 +760,6 @@ a wiring property reinstalls the MAC.
 | `auto-negotiate` | `true` | Negotiate speed and duplex with the link partner. Setting it `true` hands a forced link back to detection. The link drops while the mode changes. |
 | `speed` | `s100m` | Forces the link to `s10m`, `s100m`, or `s1000m` where the MAC is gigabit. Setting it turns `auto-negotiate` off. |
 | `full-duplex` | `true` | Forces the duplex. Setting it turns `auto-negotiate` off. A forced end facing a negotiating partner leaves that partner at half duplex, so force both ends or neither. |
-| `duplex` | read-only | What this end of the link is running: `full`, `half`, or `unknown` while it is down. |
 
 Receive checksum verification needs no setting on any part: the MAC discards a frame that fails it,
 and the stack skips the arithmetic for frames the driver reports the MAC checked (TCP or UDP over
@@ -1184,6 +1190,49 @@ half cycle.
 /driver/power/regulator/add name=dump device=dump-load psm-pin=25 zc-pin=26 level=100 droop-start=50.2 droop-full=52
 ```
 
+### `/device`
+
+A device is the root of a data-model tree. `/device` is not a collection: bindings create and
+own their devices, and this scope only adds naked devices from a profile and prints the trees.
+There is no `remove`.
+
+| Command | Syntax | Description |
+| --- | --- | --- |
+| `add` | `/device/add <id> <profile> [name=<name>] [model=<model>]` | Creates a device from a profile basename, resolved below `/system/profile-path`. Arguments bind by name (`id=`, `profile=`) or positionally in that order. A profile element that is protocol-coupled is rejected: a naked device carries data only. |
+| `print` | `/device/print [filter=<pattern>] [-w\|--watch] [-e\|--expand]` | Prints every device tree with `name`, `value` and `age` columns. Component rows show `id (name)` and their template in the value column. |
+
+`filter` is a wildcard pattern (`*` any run, spanning dots; `?` one character; `#` one digit)
+matched against the full dotted path of every component and element. A component is printed
+when it or anything below it matches and an element only when it matches, so an exact path
+prints that node alone, without its children. The pattern must be given as `filter=`: a bare
+word is taken as a flag and ignored.
+
+`age` is the time since the element last updated (`1.5s`, `4m5s`, `2h5m`), blank for elements
+never updated and for constant-sampled elements.
+
+`--watch` opens a live tree view. There `filter` hides nothing: it pre-expands the rows that
+match and their ancestors. `--expand` opens every node, and has no effect without `--watch`.
+
+```text
+/device/add id=hall profile=generic_room name="Hall"
+/device/print
+/device/print filter=inv.battery.*
+/device/print filter=*.voltage
+/device/print filter=inv.battery
+/device/print filter=inv.* -w
+```
+
+### `/element`
+
+| Command | Syntax | Description |
+| --- | --- | --- |
+| `set` | `/element/set <path> <value>` | Writes a value to one element by path, named (`element=`, `value=`) or positionally. The device is resolved as described under "Device names". The element's access mode is not checked: any element that resolves is written. |
+
+```text
+/element/set element=hall.light value=1
+/element/set hws.enable true
+```
+
 ### `/element/link`
 
 A link keeps two elements' values in step: whichever updates, the other takes its value, and the
@@ -1603,6 +1652,112 @@ preflights and normal responses use the effective policy.
 /protocol/http/server add name=webserver port=80
 /protocol/http/fileserver add name=files http-server=webserver uri=/files root="conf" access=webdav allowed-origin=http://192.168.0.5:8080
 ```
+
+### `/protocol/mqtt/broker`
+
+An MQTT broker accepts clients on a plain TCP listener, a TLS listener, or both, and holds their
+sessions, subscriptions and retained messages. It requires `port` or `tls-port`, and is running
+while at least one configured listener is accepting. With `discover` set it also consumes Home
+Assistant discovery announcements into the data model (see below).
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `port` | port | `0` | Plain TCP listener. |
+| `tls-port` | port | `0` | TLS listener, started once one of `certificates` is valid. |
+| `certificates` | certificate names | empty | Certificates offered by the TLS listener. The getter returns an array of names. |
+| `allow-anonymous` | boolean | `false` | Accepts a CONNECT without credentials. Credentials, when sent, are validated as a system login. |
+| `client-timeout` | duration | `0` | Stored and reported only; the broker does not currently enforce it. |
+| `discover` | topic prefix list | empty | Home Assistant discovery prefixes, such as `homeassistant`. Surrounding `/` are stripped. A change drops every discovered entity and replays the retained announcements under the new prefixes. |
+
+Every command below takes `broker=<broker>`, which may be omitted when exactly one broker
+exists.
+
+| Command | Syntax | Description |
+| --- | --- | --- |
+| `retained` | `/protocol/mqtt/broker/retained [broker=<broker>] [filter=<topic filter>]` | Retained messages matching a topic filter (default `#`): `broker`, `topic`, `bytes`, `props`, `payload`. |
+| `cache` | `/protocol/mqtt/broker/cache [broker=<broker>] [filter=<topic filter>]` | The last message seen per topic, retained or not: `broker`, `topic`, `age`, `retained`, `sender`, `bytes`, `props`, `payload`. Not built on TINY targets. |
+| `read` | `/protocol/mqtt/broker/read <topic> [broker=<broker>]` | Prints the cached payload of one topic verbatim. On TINY targets, which have no cache, it prints the retained message for that topic instead. |
+| `sessions` | `/protocol/mqtt/broker/sessions [broker=<broker>]` | Client sessions: `broker`, `client`, `state` (`connected` or `detached`), `stream`, `proto`, `expiry`, `subs`, `in`, `out` (pending inbound and outbound messages) and `will` (`pending`, `sent` or `-`). |
+| `subscriptions` | `/protocol/mqtt/broker/subscriptions [broker=<broker>]` | Every session subscription: `broker`, `client`, `state`, `filter`, `qos`, `no-local`, `rap`, `retain` (retain handling) and `sub-id`. |
+| `publish` | `/protocol/mqtt/broker/publish <topic> <payload> [broker=<broker>] [retain=<bool>] [client-id=<id>]` | Publishes into the broker from the console, attributed to `client-id` (default `console`). |
+
+The client-side counterpart is `/protocol/mqtt/client/publish <topic> <payload>
+[client=<client>] [retain=<bool>]`, which publishes at QoS 0 through a running client;
+`client=` may likewise be omitted when exactly one client exists.
+
+```text
+/protocol/mqtt/broker/add name=broker1 port=1883 tls-port=8883 certificates=mqtt-cert allow-anonymous=true discover=homeassistant
+/protocol/mqtt/broker/publish sensors/hall/temp 21.5 retain=true
+/protocol/mqtt/broker/retained filter=sensors/#
+/protocol/mqtt/broker/read sensors/hall/temp
+/protocol/mqtt/broker/sessions
+/protocol/mqtt/broker/subscriptions broker=broker1
+/protocol/mqtt/client/publish cmd/light ON client=cloud
+```
+
+#### Home Assistant discovery
+
+Announcements under each `discover` prefix create devices and elements. Abbreviated keys
+(`stat_t`, `cmd_t`, `dev`, `~`) are accepted; an empty payload removes the entities announced
+on that config topic; `device_automation` and `tag` are ignored.
+
+| Config topic | Content |
+| --- | --- |
+| `<prefix>/<domain>/<object_id>/config` | One entity. |
+| `<prefix>/<domain>/<node_id>/<object_id>/config` | One entity under a node. |
+| `<prefix>/device/<object_id>/config` | Bundled: one `device` block and a `components` map, each with its `platform` domain. |
+
+The device identity is the first `identifiers` string, else the address of the first
+`connections` pair, else `unique_id`, else `node_id`, else `object_id`, else the config topic.
+The device id is the identity lowered with runs of other characters folded to `_`, suffixed
+`2`, `3`, ... when taken; the name comes from the device `name`, else the identity. Device
+`manufacturer`, `model`, `model_id`, `serial_number`, `sw_version` and `hw_version` become
+`info.*` constants.
+
+Each entity is the element `ha.<entity_id>`, where `entity_id` is `object_id` sanitised the
+same way, with a leading `<device_id>_` stripped and suffixed on collision. The element name is
+the entity `name` (else `object_id`), its description `device_class`, its display unit
+`unit_of_measurement`.
+
+| Domain | Element format |
+| --- | --- |
+| `binary_sensor`, `switch` | boolean; payloads `payload_on`/`payload_off` (or `state_on`/`state_off`), default `ON`/`OFF`. |
+| `select` | enum synthesised from `options`. |
+| `number`, or any domain with a unit or `state_class` | `f64` in the parsed unit; `min`, `max` and `step` become constraints. |
+| anything else | text. |
+
+`unknown` and `unavailable` payloads clear the value. A `value_template` is a `{{ ... }}`
+Jinja subset over `value` and `value_json`: filters such as `int`, `float`, `round`, `abs`,
+`bool`, `string`, `trim`, `lower`, `upper`, `length`, `min`, `max`, `default`, `is_number` and
+`iif`, and the inline `a if c else b`.
+
+`switch`, `number`, `select` and `text` entities with a `command_topic` (and, if given, a
+`command_template` that compiles) are `read_write`: writing the element publishes to
+`command_topic`, a switch as `payload_on`/`payload_off`, a select as its option name, anything
+else through `command_template` or as JSON. Writers are attached only while the broker runs.
+
+Availability comes from `availability_topic` (with `availability_template`,
+`payload_available` and `payload_not_available`, default `online`/`offline`) or an
+`availability` list, combined per `availability_mode`: `latest` (default), `all` or `any`.
+Entity verdicts aggregate into the device's `status.online`: online while any entity reports
+available. Entities without availability, or none heard yet, do not vote, and every vote is
+retracted when the broker stops. Retained replays seed only topics not yet observed live.
+
+Entities with these ids are also aliased into `status.*`:
+
+| Entity id | Alias |
+| --- | --- |
+| `uptime`, `up_time`, `espuptime`, `esp_uptime` | `status.up_time` |
+| `esptemp`, `esp_temp` | `status.temp` |
+| `connected` | `status.connected` |
+| `ssid`, `wifissid`, `wifi_ssid` | `status.network.wifi.ssid` |
+| `bssid`, `wifibssid`, `wifi_bssid` | `status.network.wifi.bssid` |
+| `rssi`, `wifirssi`, `wifi_rssi` | `status.network.wifi.rssi` |
+| `wifistatus`, `wifi_status` | `status.network.wifi.status` |
+| `wificonnected`, `wifi_connected` | `status.network.wifi.connected` |
+| `wifichannel`, `wifi_channel` | `status.network.wifi.channel` |
+| `wifimac`, `wifi_mac`, `wifimacaddress`, `wifi_mac_address` | `status.network.wifi.mac_address` |
+| `wifiip`, `wifi_ip`, `wifiipaddress`, `wifi_ip_address` | `status.network.wifi.ip_address` |
 
 ### `/protocol/tesla/session`
 

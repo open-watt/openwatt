@@ -1231,7 +1231,8 @@ nothrow @nogc:
             session.write_line("Element not found: ", element);
             return;
         }
-        e.value(value.move);
+        if (const(char)[] error = e.try_set(value))
+            session.write_line("Cannot set ", element, ": ", error);
     }
 
     // element link API
@@ -1633,7 +1634,25 @@ Component resolve_global_component(const(char)[] path) nothrow @nogc
 }
 
 
+const(char)[] format_age(Duration d)
+{
+    long ds = d.as!"msecs" / 100;
+    const(char)[] sign = "";
+    if (ds < 0)
+    {
+        ds = -ds;
+        sign = "-";
+    }
+    if (ds < 600)
+        return tconcat(sign, ds / 10, ".", ds % 10, "s");
+    long s = ds / 10;
+    if (s < 3600)
+        return tconcat(sign, s / 60, "m", s % 60, "s");
+    return tconcat(sign, s / 3600, "h", (s / 60) % 60, "m");
+}
+
 final class DevicePrint : TablePrint
+
 {
 nothrow @nogc:
 
@@ -1661,17 +1680,6 @@ protected:
         enum t_blank  = "   ";
 
         SysTime now = getSysTime();
-
-        const(char)[] format_age(Duration d)
-        {
-            long ds = d.as!"msecs" / 100;
-            if (ds < 600)
-                return tconcat(ds / 10, ".", ds % 10, "s");
-            long s = ds / 10;
-            if (s < 3600)
-                return tconcat(s / 60, "m", s % 60, "s");
-            return tconcat(s / 3600, "h", (s / 60) % 60, "m");
-        }
 
         Array!char path;
         Array!char prefix;
@@ -1834,17 +1842,6 @@ nothrow @nogc:
 
         SysTime now = getSysTime();
         Array!char path;
-
-        const(char)[] format_age(Duration d)
-        {
-            long ds = d.as!"msecs" / 100;
-            if (ds < 600)
-                return tconcat(ds / 10, ".", ds % 10, "s");
-            long s = ds / 10;
-            if (s < 3600)
-                return tconcat(s / 60, "m", s % 60, "s");
-            return tconcat(s / 3600, "h", (s / 60) % 60, "m");
-        }
 
         void emit_element(Element* e, uint depth, bool is_last)
         {

@@ -112,7 +112,7 @@ relevant here:
 
 ## Verification
 
-- `make CONFIG=unittest` then run `./bin/x86_64_unittest/openwatt_test`.
+- `make CONFIG=unittest` then run `./bin/x86_64_linux_unittest/openwatt_test`.
 - `src/router/iface/ethernet.d` compiles on every target, including switch-tier
   and headless builds, so check a `FEATURES=switch` build too.
 - CI runs a baremetal matrix; `baremetal (bl808)` is the only 64-bit target that

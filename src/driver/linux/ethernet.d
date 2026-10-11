@@ -251,6 +251,7 @@ private:
         AdapterChange c = apply_os_adapter_info(this, _status, info);
         if (c & AdapterChange.connected) { mark_set!(typeof(this), "connected")(); write_status(); }
         set_link_speed(info.tx_link_speed, info.rx_link_speed);
+        set_duplex(info.duplex);
     }
 }
 
