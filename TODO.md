@@ -1715,6 +1715,10 @@ this is what remains.
     an open connection, a producer that yields at its deadline, `tx_handler` twice, one continuation,
     then `drop_tx_handler` cancels it). Both need a scheduler: an `Application` in the test, which
     waits on an Application that can be created twice in one process. (#816)
+    Add interface LED lifecycle regression coverage to that fixture too: bind an existing switch,
+    add indicate and pulse in separate device edits, verify locate and activity writes, then clear
+    led and verify the cached IDs and indication are cleared. The #829 review exercised this
+    successfully in isolation; adding another full Application breaks the later HA discovery test.
 
 - **`router.iface`'s unittest failed once on Windows** (2026-10-07, at the `set_l2mtu(1514)` mtu
   assertion, package.d:1872) and passed on three reruns of the same binary. A value assertion right
