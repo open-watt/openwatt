@@ -9,7 +9,7 @@ import urt.result : SizeResult;
 import urt.string.format : tconcat;
 import urt.time;
 
-import manager : g_app, TimerHandler;
+import manager : g_app;
 
 import driver.system : ResetClass, ImageId, OtaImage, reset_class, reset_reason, ota_running_image, ota_accept_image, ota_previous_image, ota_revert, system_reboot;
 
@@ -100,6 +100,9 @@ BootDecision boot_guard_begin(int newest_revision, bool has_startup)
     }
     d.rung = d.one_shot ? Rung.defaults : first_existing(cast(Rung)trial.rung);
     checkpoint();
+    immutable MonoTime started = getTime() - getAppTime();
+    g_app.schedule(started + gesture_window, &_timers.settled);
+    g_app.schedule(started + healthy_uptime, &_timers.healthy);
 
     const(char)[] reason = reset_reason();
     log_info("system", "boot guard: reset ", reset_name(reset), reason ? tconcat(" (", reason, ')') : "", ", strikes ", trial.strikes, '/', max_strikes,
@@ -111,37 +114,6 @@ void boot_guard_loaded(Rung rung, int revision)
 {
     _rung = rung;
     _revision = revision;
-}
-
-void boot_guard_update()
-{
-    if (!_begun || _healthy)
-        return;
-    Duration up = getAppTime();
-    if (!_settled && up >= gesture_window)
-    {
-        _settled = true;
-        if (_state.gesture)
-        {
-            _state.gesture = 0;
-            checkpoint();
-        }
-    }
-    if (up < healthy_uptime)
-        return;
-    _healthy = true;
-
-    if (_rung == Rung.saved && _revision > _state.trusted_revision)
-        _state.trusted_revision = _revision;
-    bool top = _rung == first_existing(Rung.saved);
-    if (pending && top && _state.rollback == ImageId.init)
-        _state.pending = false;
-    if (!pending)
-        trial.rung = Rung.saved;
-    trial.strikes = 0;
-    checkpoint();
-    if (!top)
-        log_notice("system", "boot guard: healthy on ", rung_name(_rung), pending ? "; firmware stays on trial until the top rung is healthy" : "");
 }
 
 void boot_guard_config_saved()
@@ -197,8 +169,6 @@ __gshared bool _trusted;
 __gshared bool _has_saved;
 __gshared bool _has_startup;
 __gshared bool _begun;
-__gshared bool _settled;
-__gshared bool _healthy;
 __gshared bool _have_stored;
 __gshared bool _image_known;
 __gshared bool _accept_pending;
@@ -289,10 +259,38 @@ bool reconcile_image(ref BootState state, ref const OtaImage image)
     return true;
 }
 
-TimerHandler retry_handler()
+struct Timers
 {
-    return (MonoTime) { checkpoint(); };
+nothrow @nogc:
+    void settled(MonoTime)
+    {
+        if (!_state.gesture)
+            return;
+        _state.gesture = 0;
+        checkpoint();
+    }
+
+    void healthy(MonoTime)
+    {
+        if (_rung == Rung.saved && _revision > _state.trusted_revision)
+            _state.trusted_revision = _revision;
+        bool top = _rung == first_existing(Rung.saved);
+        if (pending && top && _state.rollback == ImageId.init)
+            _state.pending = false;
+        if (!pending)
+            trial.rung = Rung.saved;
+        trial.strikes = 0;
+        checkpoint();
+        if (!top)
+            log_notice("system", "boot guard: healthy on ", rung_name(_rung), pending ? "; firmware stays on trial until the top rung is healthy" : "");
+    }
+
+    void retry(MonoTime)
+    {
+        checkpoint();
+    }
 }
+__gshared Timers _timers;
 
 void checkpoint()
 {
@@ -300,11 +298,11 @@ void checkpoint()
         reset_record_scratch([trial.strikes, trial.rung]);
     static if (!has_boot_store)
         return;
-    g_app.cancel(retry_handler());
+    g_app.cancel(&_timers.retry);
     if (commit_transition())
         return;
     log_error("system", "boot guard: recovery checkpoint failed; retrying in 5 seconds");
-    g_app.schedule(getTime() + 5.seconds, retry_handler());
+    g_app.schedule(getTime() + 5.seconds, &_timers.retry);
 }
 
 bool commit_transition(alias persist = write_state, alias accept = ota_accept_image, alias revert = ota_revert, alias reboot = system_reboot)()
