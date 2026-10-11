@@ -396,7 +396,7 @@ nothrow @nogc:
         begin_frame(Verb.hello);
         _buf.put_varint(model_protocol_version);
         _buf.put_str(null);
-        _buf ~= local_sync_caps;
+        _buf ~= cast(ubyte)local_sync_caps;
         _buf.put_varint(peer.local_max_message);
 
         // identity tail; pre-identity decoders stop at max_message and ignore it, and older ones stop at the nonce
@@ -405,6 +405,7 @@ nothrow @nogc:
         _buf.put_str(null);
         _buf.put_str(cast(const(char)[])peer.local_nonce());
         _buf.put_varint(peer.local_segment);
+        _buf.put_varint(local_sync_caps >> 8);
         return send_frame(peer);
     }
 
@@ -876,7 +877,7 @@ nothrow @nogc:
 
                 uint ver = cast(uint)r.varint();
                 r.str();    // the hostname's slot; it arrives in identity
-                ubyte caps = r.u8();
+                uint caps = r.u8();
                 uint max_message = cast(uint)r.varint();
 
                 ulong nid = 0;
@@ -894,6 +895,8 @@ nothrow @nogc:
                         nonce = cast(const(ubyte)[])r.str();
                     if (!r.fail && r.more)
                         segment = cast(uint)r.varint();
+                    if (!r.fail && r.more)
+                        caps |= cast(uint)r.varint() << 8;
                 }
                 if (!r.fail)
                     sync.inbound_hello(peer, ver, caps, max_message, nid, role, nonce, segment);

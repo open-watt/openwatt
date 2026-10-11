@@ -1,12 +1,15 @@
 module protocol.dhcp.message;
 
+import urt.endian;
 import urt.hash;
 import urt.inet;
 import urt.time;
 
 import protocol.ip : IPv4Header, IPProtocol;
+import protocol.ip.udp : parse_udp4, pseudo_header_checksum;
 
 import router.iface;
+import router.iface.endpoint : UdpHeader;
 import router.iface.ethernet;
 import router.iface.mac;
 import router.iface.packet;
@@ -56,16 +59,6 @@ enum DhcpOption : ubyte
     end                = 255,
 }
 
-
-struct UdpHeader
-{
-align(1):
-    ubyte[2] src_port;
-    ubyte[2] dst_port;
-    ubyte[2] length;
-    ubyte[2] checksum;
-}
-static assert(UdpHeader.sizeof == 8);
 
 struct DhcpHeader
 {
@@ -222,51 +215,42 @@ nothrow @nogc:
         return true;
     }
 
-    // Frame the IP+UDP+DHCP payload and hand it to the interface for transmission.
-    // src_port/dst_port choose the BOOTP direction (server -> client uses 67->68).
-    bool transmit(EthernetStation iface, IPAddr src, IPAddr dst, MACAddress eth_dst, ushort src_port, ushort dst_port)
+    // Frame the IP+UDP+DHCP payload; src_port/dst_port choose the BOOTP direction (server -> client uses 67->68).
+    ubyte[] frame(IPAddr src, IPAddr dst, ushort src_port, ushort dst_port)
     {
         if (failed || total_len == 0)
-            return false;
+            return null;
 
-        ubyte[] frame = buf[0 .. total_len];
-        size_t udp_len = total_len - IPv4Header.sizeof;
-        size_t ip_total = total_len;
+        ubyte[] f = buf[0 .. total_len];
+        ushort udp_len = cast(ushort)(total_len - IPv4Header.sizeof);
 
-        auto ip = cast(IPv4Header*)frame.ptr;
+        auto ip = cast(IPv4Header*)f.ptr;
         ip.ver_ihl = 0x45;
         ip.tos = 0;
-        ip.total_length[0] = cast(ubyte)(ip_total >> 8);
-        ip.total_length[1] = cast(ubyte)ip_total;
-        ip.ident[0] = 0;
-        ip.ident[1] = 0;
-        ip.flags_frag[0] = 0;
-        ip.flags_frag[1] = 0;
+        ip.total_length = nativeToBigEndian(cast(ushort)total_len);
+        ip.ident[] = 0;
+        ip.flags_frag[] = 0;
         ip.ttl = 64;
         ip.protocol = IPProtocol.udp;
         ip.checksum[] = 0;
         ip.src = src.b;
         ip.dst = dst.b;
-        ushort ihc = internet_checksum(frame[0 .. IPv4Header.sizeof]);
-        ip.checksum[0] = cast(ubyte)(ihc >> 8);
-        ip.checksum[1] = cast(ubyte)ihc;
+        ip.checksum = nativeToBigEndian(internet_checksum(f[0 .. IPv4Header.sizeof]));
 
-        auto u = cast(UdpHeader*)(frame.ptr + IPv4Header.sizeof);
-        u.src_port[0] = cast(ubyte)(src_port >> 8);
-        u.src_port[1] = cast(ubyte)src_port;
-        u.dst_port[0] = cast(ubyte)(dst_port >> 8);
-        u.dst_port[1] = cast(ubyte)dst_port;
-        u.length[0] = cast(ubyte)(udp_len >> 8);
-        u.length[1] = cast(ubyte)udp_len;
-        u.checksum[] = 0;
-        ushort pseudo = pseudo_header_checksum(src, dst, IPProtocol.udp, cast(ushort)udp_len);
-        ushort cc = internet_checksum(frame[IPv4Header.sizeof .. total_len], pseudo);
-        if (cc == 0)
-            cc = 0xFFFF;
-        u.checksum[0] = cast(ubyte)(cc >> 8);
-        u.checksum[1] = cast(ubyte)cc;
+        ubyte[] u = f[IPv4Header.sizeof .. IPv4Header.sizeof + UdpHeader.sizeof];
+        u[0 .. 2] = nativeToBigEndian(src_port);
+        u[2 .. 4] = nativeToBigEndian(dst_port);
+        u[4 .. 6] = nativeToBigEndian(udp_len);
+        u[6 .. 8] = 0;
+        ushort cc = internet_checksum(f[IPv4Header.sizeof .. total_len], pseudo_header_checksum(src, dst, IPProtocol.udp, udp_len));
+        u[6 .. 8] = nativeToBigEndian(cc == 0 ? ushort(0xFFFF) : cc);
+        return f;
+    }
 
-        return iface.send(eth_dst, frame, EtherType.ip4) >= 0;
+    bool transmit(EthernetStation iface, IPAddr src, IPAddr dst, MACAddress eth_dst, ushort src_port, ushort dst_port)
+    {
+        ubyte[] f = frame(src, dst, src_port, dst_port);
+        return f.length > 0 && iface.send(eth_dst, f, EtherType.ip4) >= 0;
     }
 }
 
@@ -377,18 +361,6 @@ nothrow @nogc:
 }
 
 
-ushort pseudo_header_checksum(IPAddr src, IPAddr dst, ubyte protocol, ushort transport_length) pure
-{
-    ubyte[12] ph = void;
-    ph[0..4]  = src.b[];
-    ph[4..8]  = dst.b[];
-    ph[8]     = 0;
-    ph[9]     = protocol;
-    ph[10]    = cast(ubyte)(transport_length >> 8);
-    ph[11]    = cast(ubyte)transport_length;
-    return internet_checksum(ph[]);
-}
-
 ubyte subnet_prefix_len(IPAddr mask) pure
 {
     uint m = (uint(mask.b[0]) << 24) | (uint(mask.b[1]) << 16) | (uint(mask.b[2]) << 8) | mask.b[3];
@@ -442,4 +414,50 @@ unittest
     ubyte[256] long_;
     b.start(BootpRequest, MACAddress.init, 1, 0, false);
     assert(!b.add_raw_option(200, long_[]) && b.failed);
+
+    // a framed DISCOVER round-trips through the receive decoder
+    b.start(BootpRequest, MACAddress(2, 0, 0, 0, 0, 1), 0x1234, 0, true);
+    assert(b.add_message_type(DhcpMessageType.discover) && b.finish());
+    ubyte[] f = b.frame(IPAddr.any, IPAddr.broadcast, DhcpClientPort, DhcpServerPort);
+    assert(f.length == IPv4Header.sizeof + UdpHeader.sizeof + 300);
+
+    const(IPv4Header)* ip;
+    ushort src_port, dst_port;
+    const(ubyte)[] dhcp;
+    bool parse(bool verified = false)
+        => parse_udp4(f, ip, src_port, dst_port, dhcp, verified);
+
+    assert(parse() && src_port == DhcpClientPort && dst_port == DhcpServerPort && dhcp.length == 300 && IPAddr.broadcast == ip.dst);
+    assert(dhcp[0] == BootpRequest && dhcp[DhcpHeader.sizeof] == DhcpOption.message_type);
+    assert(parse_udp4(b.buf[0 .. f.length + 4], ip, src_port, dst_port, dhcp) && dhcp.length == 300);
+
+    // a total_length shorter than the UDP length, even with the frame still holding the bytes
+    f[2 .. 4] = nativeToBigEndian(cast(ushort)(f.length - 1));
+    assert(!parse() && !parse(true));
+    f[2 .. 4] = nativeToBigEndian(cast(ushort)f.length);
+
+    // version 6, IHL 4, MF, a fragment offset: rejected even when the link vouches for the checksums
+    static immutable ubyte[2][4] header_faults = [ [ 0, 0x65 ], [ 0, 0x44 ], [ 6, 0x20 ], [ 7, 0x01 ] ];
+    foreach (fault; header_faults)
+    {
+        ubyte saved = f[fault[0]];
+        f[fault[0]] = fault[1];
+        assert(!parse() && !parse(true));
+        f[fault[0]] = saved;
+    }
+
+    // DF is not a fragment; a flipped header checksum byte is rejected until the link vouches for it
+    f[6] = 0x40;
+    assert(!parse() && parse(true));
+    f[6] = 0;
+    f[10] ^= 0xFF;
+    assert(!parse() && parse(true));
+    f[10] ^= 0xFF;
+    assert(parse());
+
+    // a corrupted UDP checksum is rejected until the link vouches for it; a zero checksum is accepted
+    f[IPv4Header.sizeof + 7] ^= 0xFF;
+    assert(!parse() && parse(true));
+    f[IPv4Header.sizeof + 6 .. IPv4Header.sizeof + 8] = 0;
+    assert(parse() && dhcp.length == 300);
 }

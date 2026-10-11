@@ -18,7 +18,8 @@ import manager.system : system_hostname = hostname;
 import protocol.dhcp.message;
 import protocol.ip.address;
 import protocol.ip.route;
-import protocol.ip : IPv4Header, IPProtocol;
+import protocol.ip : IPv4Header;
+import protocol.ip.udp : parse_udp4;
 
 import router.iface;
 import router.iface.ethernet;
@@ -450,32 +451,12 @@ private:
         if (pkt.type != PacketType.ethernet || pkt.eth.ether_type != EtherType.ip4)
             return;
 
-        const(ubyte)[] frame = cast(const(ubyte)[])pkt.data;
-        if (frame.length < IPv4Header.sizeof + UdpHeader.sizeof + DhcpHeader.sizeof)
+        const(IPv4Header)* ip;
+        ushort src_port, dst_port;
+        const(ubyte)[] dhcp;
+        if (!parse_udp4(cast(const(ubyte)[])pkt.data, ip, src_port, dst_port, dhcp, pkt.checksum_pending || pkt.checksum_verified))
             return;
-
-        const ip = cast(const IPv4Header*)frame.ptr;
-        if (ip.version_ != 4 || ip.ihl < 5)
-            return;
-        size_t ip_hdr_len = ip.ihl * 4;
-        size_t ip_total = (size_t(ip.total_length[0]) << 8) | ip.total_length[1];
-        if (ip_total < ip_hdr_len + UdpHeader.sizeof || ip_total > frame.length)
-            return;
-        if (ip.protocol != IPProtocol.udp)
-            return;
-
-        const u = cast(const UdpHeader*)(frame.ptr + ip_hdr_len);
-        ushort src_port = (ushort(u.src_port[0]) << 8) | u.src_port[1];
-        ushort dst_port = (ushort(u.dst_port[0]) << 8) | u.dst_port[1];
-        if (src_port != DhcpServerPort || dst_port != DhcpClientPort)
-            return;
-
-        ushort udp_len = (ushort(u.length[0]) << 8) | u.length[1];
-        if (udp_len < UdpHeader.sizeof || ip_hdr_len + udp_len > frame.length)
-            return;
-
-        const(ubyte)[] dhcp = frame[ip_hdr_len + UdpHeader.sizeof .. ip_hdr_len + udp_len];
-        if (dhcp.length < DhcpHeader.sizeof)
+        if (src_port != DhcpServerPort || dst_port != DhcpClientPort || dhcp.length < DhcpHeader.sizeof)
             return;
 
         const dh = cast(const DhcpHeader*)dhcp.ptr;

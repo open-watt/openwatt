@@ -3,6 +3,7 @@ module apps.automation.automation;
 import urt.array;
 import urt.lifetime;
 import urt.log;
+import urt.map;
 import urt.mem;
 import urt.mem.temp;
 import urt.result : StringResult;
@@ -27,6 +28,19 @@ enum Edge : ubyte
     level,
     rising,
     falling,
+}
+
+bool evaluate_condition(const(Expression)* e, ref Map!(String, Variant) locals, ref const Variant value)
+{
+    const(char)[] key = "value";
+    Variant* slot = key in locals;
+    if (!slot)
+        slot = &locals.replace(key.make_string(), Variant());
+    *slot = value;
+    EvalContext ctx = { null, &locals, null };
+    bool held = is_truthy(e.evaluate(ctx));
+    *slot = Variant();
+    return held;
 }
 
 
@@ -319,7 +333,7 @@ protected:
         if (_condition_expr && (_edge != Edge.level || _hold != Duration()))
         {
             // seed the tracker so an already-true condition doesn't read as an edge on arm
-            _last_condition = condition_holds();
+            _last_condition = condition_holds(Variant());
             // a level for= qualifies from state, so "open for 5m" spans a restart;
             // rising/falling qualify only from an observed transition
             if (_hold != Duration() && _edge == Edge.level && _last_condition)
@@ -389,6 +403,7 @@ private:
 
     String _condition;           // if= source expression
     Expression* _condition_expr; // parsed from _condition at startup
+    Map!(String, Variant) _condition_locals;   // $value for if=; the one node persists across evaluations
 
     Edge _edge;
     Duration _hold;              // for=: the qualifying state must hold this long before firing
@@ -458,7 +473,7 @@ private:
             // evaluated; commit_run stamps the lockout / spends the token only on a real run
             if (!shaping_available(when))
                 return;
-            if (_condition_expr && !condition_holds())
+            if (_condition_expr && !condition_holds(ev.value))
                 return;
             commit_run(when, ev);
             return;
@@ -466,7 +481,7 @@ private:
 
         // edge/for must observe the condition on every settled trigger or transitions are
         // missed; here shaping guards only the run itself
-        bool cond = _condition_expr ? condition_holds() : true;
+        bool cond = _condition_expr ? condition_holds(ev.value) : true;
         bool was = _last_condition;
         _last_condition = cond;
         bool qualifying = _edge == Edge.falling ? !cond : cond;
@@ -559,7 +574,7 @@ private:
         _hold_armed = false;
 
         // final authoritative check: catches a silent drop since the last observed trigger
-        bool cond = _condition_expr ? condition_holds() : true;
+        bool cond = _condition_expr ? condition_holds(_hold_value) : true;
         _last_condition = cond;
         bool qualifying = _edge == Edge.falling ? !cond : cond;
         if (qualifying)
@@ -580,15 +595,11 @@ private:
     void reset_condition_state()
     {
         cancel_hold();
-        _last_condition = _condition_expr ? condition_holds() : true;
+        _last_condition = _condition_expr ? condition_holds(Variant()) : true;
     }
 
-    bool condition_holds()
-    {
-        EvalContext ctx = { null, null, null };
-        Variant v = _condition_expr.evaluate(ctx);
-        return is_truthy(v);
-    }
+    bool condition_holds(ref const Variant value)
+        => evaluate_condition(_condition_expr, _condition_locals, value);
 
     void teardown_signals()
     {
@@ -692,4 +703,20 @@ private:
         else
             g_app.console.destroy_session(session);
     }
+}
+
+
+unittest
+{
+    const(char)[] text = "($value == 5)";
+    Expression* e = parse_expression(text);
+    assert(e && text.length == 0);
+
+    Map!(String, Variant) locals;
+    assert(evaluate_condition(e, locals, Variant(5)));
+    assert(!evaluate_condition(e, locals, Variant(4)));
+    assert(!evaluate_condition(e, locals, Variant()));
+    assert(locals.length == 1);
+
+    free_expression(e);
 }
