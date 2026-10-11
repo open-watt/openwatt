@@ -5,6 +5,12 @@
   the C++ convention, so the destructor receives the vtbl pointer as `this` (fixed by #23606 in
   2.114). Host CI builds DMD with `dmd-master` and excludes LDC x86, since LDC is still on the 2.113
   frontend. Restore the release DMD and the LDC x86 jobs once both releases carry the fix.
+- **CI's ESP firmware jobs fail on a fresh ESP-IDF install** (2026-10-11): with the `esp-idf-v6.0`
+  cache expired, master `d4fb4fbd` fails all four `cross-esp` jobs. The Xtensa jobs stop at the
+  Makefile's LLVM check (LDC 1.43 emits LLVM 22, the freshly installed esp-clang is LLVM 20); the C5
+  and C6 jobs fail to link every NimBLE symbol the D BLE driver calls. The cached install passed
+  until 2026-10-10. Pin what the cache held, or move CI to a toolchain set that builds from scratch
+  (an LLVM 22 esp-clang or LDC 1.42 for Xtensa; Bluetooth enabled in the C5/C6 IDF targets).
 
 ## URGENT: undo at the next compiler update
 
