@@ -1752,7 +1752,7 @@ this is what remains.
   with an error. `JsonEscape` also asks for more tailroom than a full session page has, so each
   such page is copied once on its way out.
 
-- **Live views on a session without a terminal**: `/api/cli/execute` runs on a
+- **Live views on a session without a terminal**: `/api/cli/execute` and sync commands run on a
   `ProducerSession`, so a watching command (`-w`) streams until the client disconnects. Audit
   `DeviceTreeView` and the other live views for terminal-channel assumptions on such sessions.
   Windows also drops `--interactive` on a piped stdin, which is why a piped session prints
@@ -1788,9 +1788,19 @@ this is what remains.
   - A pull is not strictly bounded (the #817 review): measuring stops only between top-level
     blocks, so one device is measured whole; `DevicePrint`'s filter rescans each subtree from
     every ancestor, twice per component; and a resume re-walks the current device from its first
-    row, skipping what was sent. Cheap for real devices, and the model design replaces it.
+    row, skipping what was sent, formatting each skipped row's cells. That is quadratic in a
+    device's rows: on the Pi the `energy` device has 5,406 of 6,704 rows, and `/device/print`
+    (563 KB) takes ~20 s, ~27 KB/s, over telnet, HTTP and sync alike, where the fileserver runs the
+    same link at wire speed. A cursor pinned at its position replaces the re-walk.
   - A print streams across many pulls and packets, so its rows show values from different moments
-    and its widths were measured at another; a point cursor holding T fixes values and membership.
+    and its widths were measured at another. Two cursor types fix tearing and resumption together:
+    - A **point cursor** anchors at a moment T. Elements with history serve T through their normal
+      pin; an element without history that changes after the pin keeps the pinned value for the
+      cursor by copy-on-write. Elements added or removed after T do not affect it.
+    - A **range cursor** spans T0 to T1. History blocks serve it directly; elements without
+      history buffer their revisions and flush them periodically.
+    - Either cursor also carries the producer's walk position, the offsets down the tree to where
+      the last pull stopped, so the next pull resumes in O(depth) rather than re-walking.
   - The live views (`CollectionWatchState`, `TreeViewState`) format and measure every row on every
     tick and render only the visible slice; they should format and fit only the slice.
 

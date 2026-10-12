@@ -13,6 +13,11 @@ through them and remove sections as they are absorbed.
   unchanged.
 - Over HTTP/1.0, `/api/cli/execute`, `/api/get` and `/api/list` answer `505` (a chunked body
   cannot be framed); `/api/cli/execute` refuses before running the command. Use HTTP/1.1.
+- A sync `cmd`'s output arrives as `console` frames with `event:"output"` and the command's `seq`,
+  as the command makes it, before its `result`; the `result` no longer carries the output in
+  `text`. Collect the output frames for a pending command's seq and show them as they come; a
+  command's output is no longer capped by the frame size or by 32 KB. A `cmd` must carry a
+  nonzero `seq`; `seq:0` is answered with an `error`.
 
 ## 2026-10-10: HTTP responses stream
 
