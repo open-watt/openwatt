@@ -541,7 +541,14 @@ protected:
 
     override CompletionStatus shutdown()
     {
-        if (get_module!SyncModule.cancel_inbound_cmds(this))
+        // the module's drain reaps the cancelled commands once they finish
+        foreach (cmd; _commands)
+        {
+            if (cmd.command)
+                cmd.command.request_cancel();
+            cmd.cancelled = true;
+        }
+        if (!_commands.empty)
             return CompletionStatus.continue_;
 
         get_module!SyncModule.detach_peer(this);
@@ -763,12 +770,19 @@ package:
         return get_module!SyncModule.produce(this) || console_waiting;
     }
 
-    // a remote console drains while the plane has room, and holds the producer while the transport is full
+    // remote consoles and commands drain while the plane has room, and hold the producer while the transport is full
     final bool produce_console()
     {
-        SyncConsoleStream stream = _console_session ? dyn_cast!SyncConsoleStream(_console_session.stream) : null;
-        if (!stream)
-            return false;
+        bool waiting;
+        if (SyncConsoleStream stream = _console_session ? dyn_cast!SyncConsoleStream(_console_session.stream) : null)
+            waiting = drain_console(stream);
+        foreach (cmd; _commands)
+            waiting |= drain_console(cmd.stream);
+        return waiting;
+    }
+
+    private final bool drain_console(SyncConsoleStream stream)
+    {
         stream.room_returned();
         return stream.tx_queued() && tx_full();
     }
@@ -890,6 +904,7 @@ package:
 
     Session _console_session;
     uint _console_seq;
+    Array!(InboundCmd*) _commands;
 
 private:
     PeerBinding model_binding(Device device)

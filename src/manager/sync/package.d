@@ -114,15 +114,33 @@ struct PendingForward
     SyncPeer    dest;
 }
 
-// Inbound command running locally on behalf of a peer. When execute() returns
-// a non-null CommandState (async completion), we hold onto it until its
-// update() transitions out of in_progress, then emit encode_result.
-struct PendingInboundCmd
+// a command run for a peer: its output goes out as console frames under the command's seq, then its result
+struct InboundCmd
 {
-    SyncPeer      peer;
-    uint          seq;
-    StringSession session;
-    CommandState  command;
+nothrow @nogc:
+    uint seq;
+    ProducerSession session;
+    SyncConsoleStream stream;
+    CommandState command;
+    Variant result;
+    bool cancelled;
+
+    this(this) @disable;
+
+    void wake()
+    {
+        stream.tx_handler(&session.produce);
+    }
+
+    void retire()
+    {
+        stream.release_tx_handler(&session.produce);
+        session.release();
+        g_app.console.destroy_session(session);
+        stream.close_from_peer();
+        stream.destroy();
+        free(&this);
+    }
 }
 
 final class SyncModule : Module
@@ -133,7 +151,6 @@ nothrow @nogc:
     Array!SyncPeer             peers;
     Map!(CID, SyncPeer)        authority;         // only remote auth; absence = local
     Map!(uint, PendingForward) pending_forwards;
-    Array!PendingInboundCmd    pending_inbound_cmds;
     Map!(uint, PendingSyncConsole) pending_sync_consoles;
     uint                       next_seq;
     uint                       _timebase_version;  // our version as a clock authority
@@ -243,20 +260,43 @@ nothrow @nogc:
 
         poll_time_authorities();
 
-        // Drain completed inbound commands and emit their results back.
-        for (size_t i = 0; i < pending_inbound_cmds.length; )
+        // a result follows the command's output, once the peer has it all, waiting out the control plane's backpressure
+        for (size_t n = 0; n < peers.length; ++n)
         {
-            ref PendingInboundCmd req = pending_inbound_cmds[i];
-            if (req.command.update() < CommandCompletionState.finished)
+            SyncPeer p = peers[n];
+            for (size_t i = 0; i < p._commands.length; )
             {
-                ++i;
-                continue;
+                InboundCmd* cmd = p._commands[i];
+                if (cmd.command)
+                {
+                    if (cmd.command.update() < CommandCompletionState.finished)
+                    {
+                        ++i;
+                        continue;
+                    }
+                    cmd.result = cmd.command.result;
+                    free(cmd.command);
+                    cmd.command = null;
+                }
+                if (!cmd.cancelled)
+                {
+                    // a stream that failed has dropped its peer, and its output can no longer drain
+                    bool lost = cmd.stream.peer is null;
+                    if (!lost && (!cmd.session.idle || cmd.stream.tx_queued() != 0 || p.tx_blocked()))
+                    {
+                        ++i;
+                        continue;
+                    }
+                    // a refusal past backpressure is final: the result exceeds the peer's message size, or the transport is gone
+                    SyncEncoder encoder = encoder_for(p._encoder);
+                    if (lost)
+                        encoder.encode_error(p, cmd.seq, "command output could not be sent");
+                    else if (encoder.encode_result(p, cmd.seq, cmd.result, "") < 0)
+                        encoder.encode_error(p, cmd.seq, "result too large for the peer");
+                }
+                cmd.retire();
+                p._commands.remove(i);
             }
-            encoder_for(req.peer._encoder)
-                .encode_result(req.peer, req.seq, req.command.result, req.session.takeOutput()[]);
-            free(req.command);
-            g_app.console.destroy_session(req.session);
-            pending_inbound_cmds.remove(i);
         }
     }
 
@@ -515,23 +555,6 @@ nothrow @nogc:
         }
     }
 
-    // Peer teardown: request cancellation of the peer's in-flight inbound commands;
-    // the update() drain reaps them (delivering results while the transport lasts).
-    // True while any remain, so the peer's shutdown() can wait on it.
-    bool cancel_inbound_cmds(SyncPeer p)
-    {
-        bool waiting = false;
-        foreach (ref cmd; pending_inbound_cmds)
-        {
-            if (cmd.peer is p)
-            {
-                cmd.command.request_cancel();
-                waiting = true;
-            }
-        }
-        return waiting;
-    }
-
     void detach_peer(SyncPeer p)
     {
         ++p._session_gen;   // any burst spanning this teardown is dead, even if its sends succeeded
@@ -621,8 +644,7 @@ nothrow @nogc:
             }
         }
 
-        debug foreach (ref cmd; pending_inbound_cmds)
-            assert(cmd.peer !is p, "detach with in-flight inbound commands; shutdown must drain them first");
+        debug assert(p._commands.empty, "detach with in-flight inbound commands; shutdown must drain them first");
 
         foreach (i, existing; peers[])
         {
@@ -1089,16 +1111,25 @@ nothrow @nogc:
 
     void inbound_cmd(SyncPeer from, uint seq, const(char)[] text)
     {
-        StringSession session = g_app.console.createSession!StringSession();
-        Variant result;
-        CommandState cmd = g_app.console.execute(session, text, result);
-        if (cmd is null)
+        // output frames are addressed by the command's seq, and a console stream has none at 0
+        if (!seq)
         {
-            encoder_for(from._encoder).encode_result(from, seq, result, session.takeOutput()[]);
-            g_app.console.destroy_session(session);
+            encoder_for(from._encoder).encode_error(from, seq, "cmd needs a nonzero seq");
             return;
         }
-        pending_inbound_cmds ~= PendingInboundCmd(from, seq, session, cmd);
+        auto streams = Collection!SyncConsoleStream();
+        SyncConsoleStream stream = streams.create(streams.generate_name("sync-cmd"), ObjectFlags.dynamic, NamedArgument("peer", from), NamedArgument("sequence", seq));
+        if (!stream)
+        {
+            encoder_for(from._encoder).encode_error(from, seq, "no console stream");
+            return;
+        }
+        ProducerSession session = g_app.console.createSession!ProducerSession();
+        InboundCmd* cmd = alloc!InboundCmd(seq, session, stream);
+        cmd.command = g_app.console.execute(session, text, cmd.result);
+        session.ready = &cmd.wake;
+        stream.tx_handler(&session.produce);
+        from._commands ~= cmd;
     }
 
     void inbound_suggest(SyncPeer from, uint seq, const(char)[] text)

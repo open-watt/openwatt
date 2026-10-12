@@ -73,6 +73,7 @@ row alone. Sizes stay in bytes; round in the note if that reads better.
 | 2026-10-09 | ow/websocket-sink | ldc 1.43.0 | 5,814,504 | 533,816 | | websocket frames queue in pool pages; receive capped at the MTU |
 | 2026-10-09 | ow/filter-in-place | ldc 1.43.0 | 5,790,344 | 533,784 | | Telnet and TLS frame in the request's reserved room; their pending chains go |
 | 2026-10-11 | ow/http-respond | ldc 1.43.0 | 5,782,096 | 533,848 | | console output and HTTP responses are producers the stream pulls |
+| 2026-10-12 | ow/api-producers | ldc 1.43.0 | 5,802,272 | 534,536 | | API responses and sync command output stream from producers |
 
 ### Waveshare ESP32-S3-RS485-CAN, `make esp-idf-build BOARD=waveshare-esp32-s3-rs485-can CONFIG=release`
 
@@ -90,6 +91,7 @@ Limit is the 4 MB `ota_0` partition. `ram` is internal DRAM only; PSRAM is heap.
 | 2026-09-23 | ba8561fb | ldc 1.42.0 | 2,917,952 | 139,547 | 4,194,304 | `COREDUMP=1`; wall clock kept across a reset |
 | 2026-10-10 | ow/http-respond | ldc 1.42.0 | 2,976,000 | 138,507 | 4,194,304 | console output and HTTP responses are producers the stream pulls |
 | 2026-10-11 | ow/http-respond | ldc 1.42.0 | 2,985,296 | 141,871 | 4,194,304 | `COREDUMP=1`, as deployed to the bench S3 |
+| 2026-10-12 | ow/api-producers | ldc 1.42.0 | 2,985,552 | 141,839 | 4,194,304 | `COREDUMP=1`; API responses and sync command output stream from producers |
 
 ### ESP32-C5 DevKitC-1, `make esp-idf-build PLATFORM=esp32-c5 CONFIG=release`
 

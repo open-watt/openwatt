@@ -89,10 +89,10 @@ protected:
 
     override CompletionStatus shutdown()
     {
-        foreach (ref req; _pending_requests)
-            req.command.request_cancel();
-        update_pending_requests(false);
-        if (!_pending_requests.empty)
+        foreach (cli; _cli)
+            cli.command.request_cancel();
+        update_commands();
+        if (!_cli.empty)
             return CompletionStatus.continue_;
 
         // TODO: need to unlink these things...
@@ -101,83 +101,14 @@ protected:
 
     override void update()
     {
-        update_pending_requests();
+        update_commands();
     }
 
 private:
-    // frees itself when its response ends
-    static struct SchemaTx
-    {
-    nothrow @nogc:
-        typeof(g_app.types.values()) types;
-
-        Page* produce(ref const TxRequest req, out TxStatus status)
-        {
-            if (sent == pending.length)
-                prepare_pending();
-            size_t take = pending.length - sent;
-            if (take > req.bytes)
-                take = req.bytes;
-            Page* page = alloc_tx_page(req, take, status);
-            if (!page)
-                return null;
-            (cast(char[])page.data)[] = pending[sent .. sent + take];
-            sent += take;
-            if (closed && sent == pending.length)
-                status = TxStatus.end;
-            return page;
-        }
-
-        void ended(bool)
-        {
-            free(&this);
-        }
-
-    private:
-        Array!char pending;
-        size_t sent;
-        bool opened;
-        bool wrote_type;
-        bool closed;
-
-        void prepare_pending()
-        {
-            pending.clear();
-            sent = 0;
-            if (!opened)
-            {
-                pending ~= '{';
-                opened = true;
-            }
-            if (!types.empty)
-            {
-                if (wrote_type)
-                    pending ~= ',';
-                wrote_type = true;
-                emit_collection(pending, types.front);
-                types.popFront();
-            }
-            else
-            {
-                pending ~= '}';
-                closed = true;
-            }
-        }
-    }
-
-    struct PendingRequest
-    {
-        HTTPVersion ver;
-        Stream stream;
-        StringSession session;
-        CommandState command;
-        String origin;
-    }
-
     CID _server_id;
     String _uri;
     HTTPServer.RequestHandler _default_handler;
-    Array!PendingRequest _pending_requests;
+    Array!(CliTx*) _cli;
 
     int handle_request(ref const HTTPMessage request, ref Stream stream, const(ubyte)[] leftover)
     {
@@ -280,68 +211,41 @@ private:
             return 0;
         }
 
-        Variant result;
-        StringSession session = g_app.console.createSession!StringSession();
-        CommandState cmd = g_app.console.execute(session, command_text, result);
-        if (cmd is null)
+        // the output streams chunked, which HTTP/1.0 cannot frame; refuse before the command runs
+        if (request.http_version < HTTPVersion.V1_1)
         {
-            MutableString!0 output = session.takeOutput();
-            send_cli_response(request.http_version, stream, output[], result, request.header("Origin")[]);
-            g_app.console.destroy_session(session);
+            HTTPMessage response = create_response(request.http_version, 505, StringLit!"application/json", "{\"error\":\"HTTP/1.1 required\"}");
+            add_cors(response, request);
+            respond(stream, response);
             return 0;
         }
 
-        bool deferred = respond_later(stream);
-        assert(deferred);
-
-        String origin = request.header("Origin")[].make_string();
-        stream.subscribe(&stream_state_change);
-        _pending_requests ~= PendingRequest(request.http_version, stream, session, cmd, origin.move);
-        return 0;
+        ProducerSession session = g_app.console.createSession!ProducerSession();
+        CliTx* cli = alloc!CliTx(stream, session);
+        cli.text = "{\"output\":\"";
+        cli.escape = JsonEscape(&session.produce);
+        cli.command = g_app.console.execute(session, command_text, cli.result);
+        cli.finished = cli.command is null;
+        if (!cli.finished)
+            _cli ~= cli;
+        session.ready = &cli.wake;
+        return respond_json(request, stream, &cli.produce, &cli.ended);
     }
 
-    void send_cli_response(HTTPVersion ver, ref Stream stream, const(char)[] output, ref Variant result, const(char)[] origin)
+    int respond_json(ref const HTTPMessage request, ref Stream stream, SendHandler body_, ResponseEnd ended)
     {
-        HTTPMessage response = create_response(ver, 200, StringLit!"application/json", "{\"result\":");
-
-        ptrdiff_t len = result.write_json(null, true, 0, 0);
-        if (len > 0)
-        {
-            auto tmp = Array!char(Reserve, len);
-            result.write_json(tmp.extend(len), true, 0, 0);
-            response.content ~= tmp[];
-        }
-        else
-            response.content ~= "null";
-        response.content ~= ",\"output\":";
-
-        if (output.length > 0)
-        {
-            import urt.format.json;
-
-            const v = Variant(output);
-            Array!char tmp;
-            append_json(tmp, v, "\"\"");
-            response.content ~= tmp[];
-            response.content ~= "}";
-        }
-        else
-            response.content ~= "\"\"}";
-        add_cors(response, origin);
-        respond(stream, response);
+        HTTPMessage head = create_response(request.http_version, 200, StringLit!"application/json", null);
+        add_cors(head, request);
+        if (respond(stream, head, body_, unknown_length, ended))
+            return 0;
+        ended(false);
+        return -1;
     }
 
     int handle_schema(ref const HTTPMessage request, ref Stream stream)
     {
-        HTTPMessage head = create_response(request.http_version, 200, StringLit!"application/json", null);
-        add_cors(head, request);
-        SchemaTx* tx = alloc!SchemaTx(g_app.types.values);
-        if (!respond(stream, head, &tx.produce, unknown_length, &tx.ended))
-        {
-            tx.ended(false);
-            return -1;
-        }
-        return 0;
+        auto tx = alloc!(UnitProducer!SchemaUnits)(SchemaUnits(g_app.types.values));
+        return respond_json(request, stream, &tx.produce, &tx.ended);
     }
 
     int handle_enum(ref const HTTPMessage request, ref Stream stream, const(char)[] name)
@@ -440,16 +344,17 @@ private:
             return 0;
         }
 
-        Array!(const(char)[]) paths;
+        auto tx = alloc!(UnitProducer!GetUnits)();
         if (paths_var.isArray)
         {
             for (size_t i = 0; i < paths_var.length(); ++i)
-                paths ~= (*paths_var)[i].asString();
+                tx.units.paths ~= (*paths_var)[i].asString().make_string();
         }
         else if (paths_var.isString)
-            paths ~= paths_var.asString();
+            tx.units.paths ~= paths_var.asString().make_string();
         else
         {
+            free(tx);
             HTTPMessage response = create_response(request.http_version, 400, StringLit!"application/json", "{\"error\":\"'path' or 'paths' must be string or array\"}");
             add_cors(response, request);
             respond(stream, response);
@@ -457,79 +362,11 @@ private:
         }
 
         version (DebugAPI)
-            writeDebug("API request: ", request.method, " ", request.request_target, " - ", paths);
+            writeDebug("API request: ", request.method, " ", request.request_target, " - ", tx.units.paths);
 
-        Array!char response_json;
-        response_json.reserve(4096);
-        response_json ~= '{';
-
-        bool first = true;
-
-        foreach (i, path; paths[])
-        {
-            foreach (dev; g_app.devices.values)
-                walk_elements(dev, path, (Element* e, const(char)[] p) {
-                    append_element(response_json, first, p, e);
-                }, true);
-        }
-
-        response_json ~= '}';
-
-        HTTPMessage response = create_response(request.http_version, 200, StringLit!"application/json", response_json[]);
-        add_cors(response, request);
-        respond(stream, response);
-
-        return 0;
-    }
-
-    void append_element(ref Array!char json, ref bool first, const(char)[] path, Element* elem)
-    {
-        import urt.si.quantity;
-        import urt.si.unit;
-
-        if (!first)
-            json ~= ',';
-        first = false;
-
-        json.append('\"', path, "\":{\"value\":");
-
-        Variant v = elem.value();
-        if (v.isQuantity)
-        {
-            auto quantity = v.asQuantity!double();
-
-            ScaledUnit su;
-            float pre_scale;
-
-            if (elem.display_unit && su.parseUnit(elem.display_unit[], pre_scale) > 0)
-            {
-                if (quantity.is_nan)
-                    json ~= "null";
-                else
-                    json ~= quantity.adjust_scale(su).value / pre_scale;
-                json.append(",\"unit\":\"", elem.display_unit[], '\"');
-            }
-            else
-            {
-                if (quantity.is_nan)
-                    json ~= "null";
-                else
-                    json ~= quantity.value;
-
-                if (quantity.unit.pack != 0)
-                    json.append(",\"unit\":\"", quantity.unit, '\"');
-            }
-        }
-        else
-            append_json(json, v);
-
-        if (elem.sampling_mode != SamplingMode.constant)
-        {
-            ulong age = (getTime() - elem.last_update).as!"seconds";
-            json.append(",\"age\":", age);
-        }
-
-        json ~= '}';
+        foreach (dev; g_app.devices.values)
+            tx.units.devices ~= dev.cid;
+        return respond_json(request, stream, &tx.produce, &tx.ended);
     }
 
     int handle_set(ref const HTTPMessage request, ref Stream stream)
@@ -648,160 +485,39 @@ private:
         if (shallow_var && shallow_var.isBool)
             shallow = shallow_var.asBool();
 
-        Array!char response_json;
-        response_json.reserve(4096);
-        response_json ~= '{';
-
+        auto tx = alloc!(UnitProducer!ListUnits)();
+        tx.units.shallow = shallow;
+        tx.units.rooted = !path.empty;
         if (path.empty)
         {
-            bool first = true;
             foreach (dev; g_app.devices.values)
-            {
-                if (!first)
-                    response_json ~= ',';
-                first = false;
-
-                build_component_list(dev, response_json, shallow, true);
-            }
+                tx.units.devices ~= dev.cid;
         }
         else
         {
-            const(char)[] device_id = path.split!'.';
-            if (Device* dev = device_id in g_app.devices)
-            {
-                if (path.empty)
-                    build_component_list(*dev, response_json, shallow, true, true);
-                else
-                {
-                    Component comp = dev.find_component(path);
-                    if (comp)
-                        build_component_list(comp, response_json, shallow, false, true);
-                }
-            }
+            if (Device* dev = path.split!'.' in g_app.devices)
+                tx.units.devices ~= dev.cid;
+            tx.units.component = path.make_string();
         }
-
-        response_json ~= '}';
-
-        HTTPMessage response = create_response(request.http_version, 200, StringLit!"application/json", response_json[]);
-        add_cors(response, request);
-        respond(stream, response);
-
-        return 0;
+        return respond_json(request, stream, &tx.produce, &tx.ended);
     }
 
-    void build_component_list(Component comp, ref Array!char json, bool shallow, bool is_device = false, bool as_root = false)
+    void update_commands()
     {
-        json.append('\"', comp.id[], "\":{\"type\":\"", is_device ? "device" : "component", "\",\"template\":\"", comp.template_[], '\"');
-        if (comp.hidden)
-            json ~= ",\"hidden\":true";
-
-        bool prune = comp.hidden && !as_root;
-
-        json.append(",\"components\":", shallow ? '[' : '{');
-
-        bool first = true;
-        if (!prune)
+        for (size_t i = 0; i < _cli.length; )
         {
-            foreach (child; comp.components)
-            {
-                if (!first)
-                    json ~= ',';
-                first = false;
-                if (shallow)
-                    json.append('\"', child.id[], '\"');
-                else
-                    build_component_list(child, json, false);
-            }
-        }
-
-        json.append(shallow ? ']' : '}', ",\"elements\":{");
-
-        first = true;
-        if (!prune)
-        foreach (ref Element* elem; comp.elements)
-        {
-            import urt.si.quantity;
-            import urt.si.unit;
-
-            if (!first)
-                json ~= ',';
-            first = false;
-
-            json.append('\"', elem.id[], "\":{");
-            if (!elem.name.empty)
-                json.append("\"name\":\"", elem.name[], "\",");
-            if (!elem.desc.empty)
-                json.append("\"desc\":\"", elem.desc[], "\",");
-            json.append("\"access\":\"", g_access_strings[elem.access], '\"');
-
-            const(char)[] mode = enum_key_from_value!SamplingMode(elem.sampling_mode);
-            if (mode)
-                json.append(",\"mode\":\"", mode, '\"');
-
-            if (!elem.display_unit.empty)
-                json.append(",\"unit\":\"", elem.display_unit[], '\"');
-            else if (elem.value.isQuantity)
-            {
-                auto quantity = elem.value.asQuantity!double();
-                if (quantity.unit.pack != 0)
-                    json.append(",\"unit\":\"", quantity.unit, '\"');
-            }
-
-            json ~= '}';
-        }
-        json ~= "}}";
-    }
-
-    void update_pending_requests(bool send_response = true)
-    {
-        size_t i = 0;
-        while (i < _pending_requests.length)
-        {
-            ref PendingRequest req = _pending_requests[i];
-
-            Stream stream = req.stream;
-            bool stream_alive = stream && stream.running;
-            if (!stream_alive)
-                req.command.request_cancel();
-
-            if (req.command.update() < CommandCompletionState.finished)
+            CliTx* cli = _cli[i];
+            if (cli.command.update() < CommandCompletionState.finished)
             {
                 ++i;
                 continue;
             }
-
-            if (send_response && stream_alive)
-            {
-                MutableString!0 output = req.session.takeOutput();
-                send_cli_response(req.ver, stream, output[], req.command.result, req.origin[]);
-            }
-
-            StringSession s = req.session;
-            CommandState cmd = req.command;
-            if (stream)
-                stream.unsubscribe(&stream_state_change);
-            _pending_requests.remove(i);
-            free(cmd);
-            g_app.console.destroy_session(s);
-
-            if (!(send_response && stream_alive) && stream)
-                stream.destroy();
-        }
-    }
-
-    void stream_state_change(ActiveObject object, StateSignal signal)
-    {
-        if (signal != StateSignal.offline)
-            return;
-
-        object.unsubscribe(&stream_state_change);
-        foreach (ref req; _pending_requests)
-        {
-            if (req.stream is object)
-            {
-                req.stream = null;
-                req.command.request_cancel();
-            }
+            cli.finished = true;
+            _cli.remove(i);
+            if (cli.ended_)
+                cli.retire();
+            else
+                respond_more(cli.stream);
         }
     }
 }
@@ -834,6 +550,119 @@ nothrow @nogc:
 private:
 
 __gshared immutable string[4] g_access_strings = [ "", "r", "w", "rw" ];
+
+void append_element(ref Array!char json, ref bool listed, const(char)[] path, Element* elem)
+{
+    import urt.si.quantity;
+    import urt.si.unit;
+
+    if (listed)
+        json ~= ',';
+    listed = true;
+
+    json.append('\"', path, "\":{\"value\":");
+
+    Variant v = elem.value();
+    if (v.isQuantity)
+    {
+        auto quantity = v.asQuantity!double();
+
+        ScaledUnit su;
+        float pre_scale;
+
+        if (elem.display_unit && su.parseUnit(elem.display_unit[], pre_scale) > 0)
+        {
+            if (quantity.is_nan)
+                json ~= "null";
+            else
+                json ~= quantity.adjust_scale(su).value / pre_scale;
+            json.append(",\"unit\":\"", elem.display_unit[], '\"');
+        }
+        else
+        {
+            if (quantity.is_nan)
+                json ~= "null";
+            else
+                json ~= quantity.value;
+
+            if (quantity.unit.pack != 0)
+                json.append(",\"unit\":\"", quantity.unit, '\"');
+        }
+    }
+    else
+        append_json(json, v);
+
+    if (elem.sampling_mode != SamplingMode.constant)
+    {
+        ulong age = (getTime() - elem.last_update).as!"seconds";
+        json.append(",\"age\":", age);
+    }
+
+    json ~= '}';
+}
+
+void build_component_list(Component comp, ref Array!char json, bool shallow, bool is_device = false, bool as_root = false)
+{
+    json.append('\"', comp.id[], "\":{\"type\":\"", is_device ? "device" : "component", "\",\"template\":\"", comp.template_[], '\"');
+    if (comp.hidden)
+        json ~= ",\"hidden\":true";
+
+    bool prune = comp.hidden && !as_root;
+
+    json.append(",\"components\":", shallow ? '[' : '{');
+
+    bool first = true;
+    if (!prune)
+    {
+        foreach (child; comp.components)
+        {
+            if (!first)
+                json ~= ',';
+            first = false;
+            if (shallow)
+                json.append('\"', child.id[], '\"');
+            else
+                build_component_list(child, json, false);
+        }
+    }
+
+    json.append(shallow ? ']' : '}', ",\"elements\":{");
+
+    first = true;
+    if (!prune)
+    foreach (ref Element* elem; comp.elements)
+    {
+        import urt.si.quantity;
+        import urt.si.unit;
+
+        if (!first)
+            json ~= ',';
+        first = false;
+
+        json.append('\"', elem.id[], "\":{");
+        if (!elem.name.empty)
+            json.append("\"name\":\"", elem.name[], "\",");
+        if (!elem.desc.empty)
+            json.append("\"desc\":\"", elem.desc[], "\",");
+        json.append("\"access\":\"", g_access_strings[elem.access], '\"');
+
+        const(char)[] mode = enum_key_from_value!SamplingMode(elem.sampling_mode);
+        if (mode)
+            json.append(",\"mode\":\"", mode, '\"');
+
+        if (!elem.display_unit.empty)
+            json.append(",\"unit\":\"", elem.display_unit[], '\"');
+        else if (elem.value.isQuantity)
+        {
+            auto quantity = elem.value.asQuantity!double();
+            if (quantity.unit.pack != 0)
+                json.append(",\"unit\":\"", quantity.unit, '\"');
+        }
+
+        json ~= '}';
+    }
+    json ~= "}}";
+}
 
 void emit_collection(ref Array!char json, ref const Application.RegisteredType col)
 {
@@ -895,4 +724,253 @@ void emit_collection(ref Array!char json, ref const Application.RegisteredType c
         json ~= '}';
     }
     json ~= "}}";
+}
+
+// a JSON object made a unit at a time as the stream pulls it; it frees itself when its response ends
+struct UnitProducer(Units)
+{
+nothrow @nogc:
+    Units units;
+
+    this(this) @disable;
+
+    Page* produce(ref const TxRequest req, out TxStatus status)
+    {
+        while (sent == pending.length)
+        {
+            if (closed)
+            {
+                status = TxStatus.end;
+                return null;
+            }
+            pending.clear();
+            sent = 0;
+            if (!opened)
+                pending ~= '{';
+            opened = true;
+            if (!units.next(pending, listed))
+            {
+                pending ~= '}';
+                closed = true;
+            }
+        }
+        size_t take = pending.length - sent;
+        if (take > req.bytes)
+            take = req.bytes;
+        Page* page = alloc_tx_page(req, take, status);
+        if (!page)
+            return null;
+        (cast(char[])page.data)[] = pending[sent .. sent + take];
+        sent += take;
+        if (closed && sent == pending.length)
+            status = TxStatus.end;
+        return page;
+    }
+
+    void ended(bool)
+    {
+        free(&this);
+    }
+
+private:
+    Array!char pending;
+    size_t sent;
+    bool opened;
+    bool closed;
+    bool listed;
+}
+
+struct SchemaUnits
+{
+nothrow @nogc:
+    typeof(g_app.types.values()) types;
+
+    bool next(ref Array!char json, ref bool listed)
+    {
+        if (types.empty)
+            return false;
+        if (listed)
+            json ~= ',';
+        listed = true;
+        emit_collection(json, types.front);
+        types.popFront();
+        return true;
+    }
+}
+
+struct GetUnits
+{
+nothrow @nogc:
+    Array!String paths;
+    Array!CID devices;
+    size_t path;
+    size_t device;
+
+    bool next(ref Array!char json, ref bool listed)
+    {
+        if (path == paths.length || devices.empty)
+            return false;
+        if (Device dev = g_app.devices.container(devices[device]))
+            walk_elements(dev, paths[path][], (Element* e, const(char)[] p) {
+                append_element(json, listed, p, e);
+            }, true);
+        if (++device == devices.length)
+        {
+            device = 0;
+            ++path;
+        }
+        return true;
+    }
+}
+
+struct ListUnits
+{
+nothrow @nogc:
+    Array!CID devices;
+    String component;
+    size_t device;
+    bool shallow;
+    bool rooted;
+
+    this(this) @disable;
+
+    bool next(ref Array!char json, ref bool listed)
+    {
+        if (device == devices.length)
+            return false;
+        Device dev = g_app.devices.container(devices[device++]);
+        Component comp = !dev ? null : component.empty ? dev : dev.find_component(component[]);
+        if (comp)
+        {
+            if (listed)
+                json ~= ',';
+            listed = true;
+            build_component_list(comp, json, shallow, component.empty, rooted);
+        }
+        return true;
+    }
+}
+
+// a command's output as it is made, then its result; it frees itself once both its response and its command are done
+struct CliTx
+{
+nothrow @nogc:
+    Stream stream;
+    ProducerSession session;
+    CommandState command;
+    Variant result;
+    JsonEscape escape;
+    Array!char text;
+    size_t sent;
+    bool closing;
+    bool finished;
+    bool ended_;
+
+    this(this) @disable;
+
+    Page* produce(ref const TxRequest req, out TxStatus status)
+    {
+        if (sent == text.length && !closing)
+        {
+            Page* page = escape.produce(req, status);
+            if (page || status != TxStatus.idle || !finished)
+                return page;
+            if (command)
+                result = command.result;
+            text.clear();
+            sent = 0;
+            text ~= "\",\"result\":";
+            append_json(text, result);
+            text ~= '}';
+            closing = true;
+        }
+        size_t take = text.length - sent;
+        if (take > req.bytes)
+            take = req.bytes;
+        Page* page = alloc_tx_page(req, take, status);
+        if (!page)
+            return null;
+        (cast(char[])page.data)[] = text[sent .. sent + take];
+        sent += take;
+        if (closing && sent == text.length)
+            status = TxStatus.end;
+        return page;
+    }
+
+    void wake()
+    {
+        respond_more(stream);
+    }
+
+    void ended(bool)
+    {
+        ended_ = true;
+        session.ready = null;
+        if (finished)
+            retire();
+        else
+            command.request_cancel();
+    }
+
+    void retire()
+    {
+        session.release();
+        g_app.console.destroy_session(session);
+        if (command)
+            free(command);
+        free(&this);
+    }
+}
+
+// escapes in place as JSON string content; a byte may grow to six, so a sixth of the grant is payload
+struct JsonEscape
+{
+nothrow @nogc:
+    SendHandler inner;
+
+    Page* produce(ref const TxRequest req, out TxStatus status)
+    {
+        size_t grant = req.bytes < max_tx_page ? req.bytes : max_tx_page;
+        Page* page = inner(TxRequest(grant / 6, req.deadline, req.headroom, req.tailroom + grant - grant / 6), status);
+        if (!page)
+            return null;
+        char[6] buffer = void;
+        size_t n = page.length;
+        size_t length = n;
+        foreach (c; cast(const(char)[])page.data)
+            length += escape(c, buffer).length - 1;
+        page.length = cast(ushort)length;
+        char[] text = cast(char[])page.data;
+        while (n)
+        {
+            const(char)[] e = escape(text[--n], buffer);
+            length -= e.length;
+            text[length .. length + e.length] = e[];
+        }
+        return page;
+    }
+
+private:
+    static const(char)[] escape(char c, return ref char[6] buffer)
+    {
+        buffer[0] = '\\';
+        switch (c)
+        {
+            case '"':  buffer[1] = '"';  return buffer[0 .. 2];
+            case '\\': buffer[1] = '\\'; return buffer[0 .. 2];
+            case '\n': buffer[1] = 'n';  return buffer[0 .. 2];
+            case '\r': buffer[1] = 'r';  return buffer[0 .. 2];
+            case '\t': buffer[1] = 't';  return buffer[0 .. 2];
+            default:
+                if (c >= 0x20)
+                {
+                    buffer[0] = c;
+                    return buffer[0 .. 1];
+                }
+                buffer[1 .. 4] = "u00";
+                buffer[4] = "0123456789abcdef"[c >> 4];
+                buffer[5] = "0123456789abcdef"[c & 0xF];
+                return buffer[0 .. 6];
+        }
+    }
 }

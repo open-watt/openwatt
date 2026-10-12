@@ -225,11 +225,13 @@ through the handle-bound surface.
 
 ## Console, logs and time
 
-The **console** plane runs a remote session: `cmd` carries a line, `result` and `error` its
-outcome, `suggest {seq, text}` is answered by `suggestions {seq, complete, suggestions[]}` for
-remote tab completion, and the `console_session` capability adds a `console` frame carrying
-session events (open, input, output, terminal geometry, close) for a full interactive terminal
-over the channel. `/sync console peer=` opens one from the local console.
+The **console** plane runs a remote session: `cmd {seq, text}` carries a line and needs a nonzero
+seq; its output streams back as `console {seq, event:"output", data}` frames under the command's
+seq as the command makes it, whatever capabilities the peer advertises, and `result` (the value,
+once the output is all sent) or `error` closes it. `suggest {seq, text}` is answered by
+`suggestions {seq, complete, suggestions[]}` for remote tab completion. The `console_session`
+capability adds the rest of the `console` events (open, input, terminal geometry, close) for a
+full interactive terminal over the channel. `/sync console peer=` opens one from the local console.
 
 The **log** plane is a tap: `log_sub` arms it and `log` frames carry lines (`/sync log-sub` from
 the console). A peering claim arms log delegation on the authority side so a fleet's logs converge

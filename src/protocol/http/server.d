@@ -860,6 +860,12 @@ private:
                 g_app.schedule(getTime(), &resume_parse);
         }
 
+        void pull_body()
+        {
+            if (_body)
+                stream.tx_handler(&produce_response);
+        }
+
         void resume_parse(MonoTime)
         {
             if (_deferred && stream)
@@ -916,6 +922,13 @@ bool respond_later(ref Stream stream)
     if (session)
         session.defer_response();
     return session !is null;
+}
+
+// a body that went idle has more for the stream to pull
+void respond_more(Stream stream)
+{
+    if (HTTPServer.Session* session = session_of(stream))
+        session.pull_body();
 }
 
 struct ChunkedFilter

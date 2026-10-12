@@ -130,6 +130,9 @@ protected:
     override bool validate() const pure
         => _peer !is null && _seq != 0;
 
+    override CompletionStatus startup()
+        => _peer.running ? CompletionStatus.complete : CompletionStatus.continue_;
+
     // frames while the peer's control plane has room; the peer wakes the stream when acks or the transport free it
     override ptrdiff_t transmit(const(void)[] data)
     {

@@ -180,7 +180,7 @@ nothrow @nogc:
         send_frame(peer);
     }
 
-    override void encode_result(SyncPeer peer, uint seq, ref const Variant value, const(char)[] out_text)
+    override int encode_result(SyncPeer peer, uint seq, ref const Variant value, const(char)[] out_text)
     {
         begin_frame("result");
         _buf.append(",\"seq\":", seq);
@@ -191,7 +191,7 @@ nothrow @nogc:
         }
         _buf.append(",\"text\":");
         write_str(out_text);
-        send_frame(peer);
+        return send_frame(peer);
     }
 
     override void encode_error(SyncPeer peer, uint seq, const(char)[] text)

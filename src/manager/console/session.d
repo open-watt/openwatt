@@ -711,6 +711,38 @@ nothrow @nogc:
     }
 
 protected:
+    // a session without a stream takes the pages as they are made, a turn at a time, and waits for one when none is free
+    void pull_output()
+    {
+        TxRequest req = TxRequest(max_tx_page, getTime() + tx_slice);
+        while (true)
+        {
+            uint generation = page_free_generation();
+            TxStatus status;
+            Page* page = provide_output_page(req, status);
+            if (page)
+            {
+                write_output(cast(const(char)[])page.data, false);
+                page_free(page);
+            }
+            if (status == TxStatus.starved)
+            {
+                _output_waiter.wake = &pull_output;
+                if (page_wait(&_output_waiter, generation))
+                    return;
+                continue;
+            }
+            if (status != TxStatus.more && status != TxStatus.yield)
+                return;
+            if (status == TxStatus.yield || getTime() >= req.deadline)
+            {
+                _output_continuing = true;
+                g_app.schedule(getTime(), &continue_output);
+                return;
+            }
+        }
+    }
+
     final void enter_command(const(char)[])
     {
         if (_features & ClientFeatures.escape)
@@ -1020,38 +1052,6 @@ private:
         if (status != TxStatus.more && status != TxStatus.yield && status != TxStatus.starved)
             _producer = null;
         return page;
-    }
-
-    // a session without a stream takes the pages as they are made, a turn at a time, and waits for one when none is free
-    void pull_output()
-    {
-        TxRequest req = TxRequest(max_tx_page, getTime() + tx_slice);
-        while (true)
-        {
-            uint generation = page_free_generation();
-            TxStatus status;
-            Page* page = provide_output_page(req, status);
-            if (page)
-            {
-                write_output(cast(const(char)[])page.data, false);
-                page_free(page);
-            }
-            if (status == TxStatus.starved)
-            {
-                _output_waiter.wake = &pull_output;
-                if (page_wait(&_output_waiter, generation))
-                    return;
-                continue;
-            }
-            if (status != TxStatus.more && status != TxStatus.yield)
-                return;
-            if (status == TxStatus.yield || getTime() >= req.deadline)
-            {
-                _output_continuing = true;
-                g_app.schedule(getTime(), &continue_output);
-                return;
-            }
-        }
     }
 
     void continue_output(MonoTime)
@@ -1399,7 +1399,111 @@ package:
     final ref CommandState current_command() => _current_command;
 }
 
-// TODO: DELETE THIS IF WE INTRODUCE A MemoryStream or BufferStream??
+// a session its owner pulls: text written to it is held in pages, and output fed to it waits for the owner's pull
+final class ProducerSession : Session
+{
+nothrow @nogc:
+
+    ~this()
+    {
+        release();
+    }
+
+    this(CID id, ObjectFlags flags, ref Console console)
+    {
+        super(id, flags, console);
+    }
+
+    // called on the loop pass after output becomes waiting
+    void delegate() nothrow @nogc ready;
+
+    // idle while nothing waits, though the command may make more; starved while held text waits for a page
+    Page* produce(ref const TxRequest req, out TxStatus status)
+    {
+        if (_text)
+        {
+            Page* page = take_tx_page(_text, req, status);
+            if (page)
+                status = TxStatus.more;
+            return page;
+        }
+        if (_held.length)
+        {
+            size_t take = _held.length < req.bytes ? _held.length : req.bytes;
+            Page* page = alloc_tx_page(req, take, status);
+            if (!page)
+                return null;
+            (cast(char[])page.data)[] = _held[0 .. take];
+            _held.remove(0, take);
+            status = TxStatus.more;
+            return page;
+        }
+        Page* page = provide_output_page(req, status);
+        if (status == TxStatus.end || status == TxStatus.abort)
+            status = page ? TxStatus.more : TxStatus.idle;
+        return page;
+    }
+
+    bool idle() const
+        => !_text && !_held.length && !output_busy;
+
+    void release()
+    {
+        if (_waking)
+            g_app.cancel(&wake);
+        _waking = false;
+        ready = null;
+        while (_text)
+        {
+            Page* next = _text.next;
+            page_free(_text);
+            _text = next;
+        }
+        _held.clear();
+    }
+
+    override void write_output(const(char)[] text, bool newline)
+    {
+        hold(text);
+        if (newline)
+            hold("\n");
+        announce();
+    }
+
+protected:
+    override void pull_output()
+    {
+        announce();
+    }
+
+private:
+    Page* _text;
+    Array!char _held;   // text no page could take, in order behind _text
+    bool _waking;
+
+    void hold(const(char)[] text)
+    {
+        if (!_held.length)
+            text = text[append_tx_copy(_text, text) .. $];
+        _held ~= text;
+    }
+
+    void announce()
+    {
+        if (_waking || !ready)
+            return;
+        _waking = true;
+        g_app.schedule(getTime(), &wake);
+    }
+
+    void wake(MonoTime)
+    {
+        _waking = false;
+        if (ready)
+            ready();
+    }
+}
+
 final class StringSession : Session
 {
 nothrow @nogc:
@@ -1605,6 +1709,25 @@ unittest
         assert(print.update() == CommandCompletionState.finished);
         free(print);
         stream.limit = size_t.max;
+    }
+
+    // text no page could take is held, and what is written after it queues behind it
+    {
+        CID producer_id = sessions.allocate_id("producer-session-test");
+        ProducerSession producer = alloc!ProducerSession(producer_id, ObjectFlags.dynamic, *console);
+        producer._held ~= "first\n";
+        producer.write_output("second", true);
+        assert(!producer._text && !producer.idle);
+        TxStatus status;
+        Array!char got;
+        while (Page* page = producer.produce(TxRequest(4), status))
+        {
+            got ~= cast(const(char)[])page.data;
+            page_free(page);
+        }
+        assert(got[] == "first\nsecond\n" && status == TxStatus.idle && producer.idle);
+        producer.release();
+        free(producer);
     }
 
     // so is a print cancelled after it has produced its last row but before the stream has taken it

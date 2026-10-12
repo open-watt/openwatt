@@ -211,7 +211,8 @@ nothrow @nogc:
     // Commands + errors + enum schema
 
     abstract void encode_cmd(SyncPeer peer, uint seq, const(char)[] text);
-    abstract void encode_result(SyncPeer peer, uint seq, ref const Variant value, const(char)[] out_text);
+    // the send's result: a refused frame was not sent
+    abstract int encode_result(SyncPeer peer, uint seq, ref const Variant value, const(char)[] out_text);
     abstract void encode_error(SyncPeer peer, uint seq, const(char)[] text);
 
     // Completion request for a partial command line; answered synchronously with
