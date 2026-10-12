@@ -29,6 +29,9 @@ void export_all(ref MutableString!0 buf)
         buf.append('\n');
     }
 
+    foreach (m; g_app.modules)
+        m.export_config(buf);
+
     static immutable string[3] phase_names = [ "Create", "Configure", "Enable" ];
     foreach (phase; 0 .. 3)
     {
@@ -111,4 +114,21 @@ bool valid_saved_config(const(char)[] source)
     if (error)
         log_warning("config", "saved config failed to parse: ", error);
     return error is null;
+}
+
+
+unittest
+{
+    import urt.inet;
+
+    MutableString!0 buf;
+    buf.append("/sync/peer/set p remote=");
+    Variant v = Variant(InetAddress(IPv6Addr.loopback, 4826));
+    append_config_value(buf, v);
+    buf.append("\n/sync/peer/set q remote=");
+    v = Variant(InetAddress(IPAddr(192, 168, 1, 5), 4826));
+    append_config_value(buf, v);
+    buf.append('\n');
+    assert(buf[] == "/sync/peer/set p remote=[::1]:4826\n/sync/peer/set q remote=192.168.1.5:4826\n");
+    assert(valid_saved_config(buf[]));
 }

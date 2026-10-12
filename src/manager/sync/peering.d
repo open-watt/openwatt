@@ -10,6 +10,7 @@ import urt.mem.temp : tconcat;
 import urt.meta.nullable;
 import urt.string;
 import urt.time;
+import urt.variant : Variant;
 
 import manager;
 import manager.base;
@@ -44,6 +45,36 @@ nothrow @nogc:
         g_app.console.register_command!(peering_print, "print")("/sync/peering", this);
         g_app.console.register_command!(peering_reset, "reset")("/sync/peering", this);
         load_allegiance();
+    }
+
+    // the fleet key stays out: an adopted node persists it with its allegiance
+    override void export_config(ref MutableString!0 buf)
+    {
+        if (!_enabled)
+            return;
+        buf.append("/sync/peering/set enabled=yes");
+        if (_role != PeerRole.none)
+            buf.append(" role=", _role);
+        if (_cluster.length)
+        {
+            Variant v = Variant(_cluster[]);
+            buf.append(" cluster=");
+            append_config_value(buf, v);
+        }
+        if (_priority != 100)
+            buf.append(" priority=", _priority);
+        if (_claim.length)
+        {
+            Variant v = Variant(_claim[]);
+            buf.append(" claim=");
+            append_config_value(buf, v);
+        }
+        if (!_collect_logs)
+            buf.append(" collect-logs=no");
+        if (_log_severity != Severity.info)
+            buf.append(" log-severity=", _log_severity);
+        buf.append('
+');
     }
 
     override void update()
@@ -934,5 +965,20 @@ unittest
 
         m.claim_peer_state(p, StateSignal.destroyed);
         assert(m._attempts.length == 1);
+    }
+
+    {
+        SyncPeeringModule m = alloc!SyncPeeringModule(null);
+        scope(exit) free(m);
+        MutableString!0 buf;
+        m.export_config(buf);
+        assert(buf.length == 0);
+        m._enabled = true;
+        m._role = PeerRole.member;
+        m._cluster = StringLit!"home";
+        m._priority = 50;
+        m._secret = StringLit!"key";
+        m.export_config(buf);
+        assert(buf[] == "/sync/peering/set enabled=yes role=member cluster=\"home\" priority=50\n");
     }
 }

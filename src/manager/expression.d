@@ -1229,6 +1229,15 @@ private Expression* parse_primary_exp(ref Parser parser, bool allow_slash = fals
         return expr;
     }
 
+    if (size_t len = address_literal_length(parser.text))
+    {
+        r = alloc_expression(Type.str);
+        r.s = parser.text[0 .. len];
+        r.flags |= Flags.constant;
+        parser.text = parser.text[len .. $];
+        return r;
+    }
+
     // parse command blocks
     if (parser.match('[') || parser.match('{'))
     {
@@ -1507,6 +1516,27 @@ Expression* fold(Type ty, Expression* l, Expression* r)
 }
 
 
+// no command name has two colons, so this cannot swallow a command block
+size_t address_literal_length(const(char)[] text) pure
+{
+    if (text.length < 2 || text[0] != '[')
+        return 0;
+    size_t i = 1;
+    uint colons = 0;
+    for (; i < text.length && (text[i].is_hex || text[i] == ':' || text[i] == '.'); ++i)
+        colons += text[i] == ':';
+    if (i == text.length || text[i] != ']' || colons < 2)
+        return 0;
+    ++i;
+    if (i + 1 < text.length && text[i] == ':' && text[i + 1].is_numeric)
+    {
+        ++i;
+        while (i < text.length && text[i].is_numeric)
+            ++i;
+    }
+    return i;
+}
+
 unittest
 {
     logLevel = Level.Debug;
@@ -1531,6 +1561,15 @@ unittest
     assert(parse_expression(text).as_bool == true);
     text = "-3";
     assert(parse_expression(text).as_num == VarQuantity(-3));
+
+    foreach (literal; ["[fe80::1]:4826", "[::]:0", "[::1]", "[B8:27:EB:93:9A:7D]:4826"])
+    {
+        text = literal;
+        Variant v = parse_primary_exp(text).evaluate(ctx);
+        assert(text.length == 0 && v.isString && v.asString == literal);
+    }
+    text = "[/print hello]";
+    assert(parse_primary_exp(text).ty == Type.cmd_list);
 
     text = "{ /print hello }";
     e = parse_primary_exp(text);
