@@ -3,6 +3,8 @@ module manager.system;
 import urt.array;
 import urt.log;
 import urt.mem;
+import urt.mem.pagepool;
+import urt.mem.temp : tconcat;
 import urt.meta.nullable;
 import urt.string;
 import urt.system;
@@ -189,6 +191,16 @@ void sysinfo(Session session, const(Variant)[] args)
         {
             if (p.total > 0)
                 session.write_pool_line(p);
+        }
+        static if (__traits(compiles, page_pool_stats(0)))
+        {
+            foreach (i; 0 .. page_pool_num_categories() + 1)
+            {
+                ubyte category = i < page_pool_num_categories() ? cast(ubyte)i : page_category_heap;
+                PagePoolStats s = page_pool_stats(category);
+                session.write_line(i ? "          " : "Pages:    ", category == page_category_heap ? "heap" : tconcat(page_payload_size(category), "B"),
+                                   ": ", s.pages_in_use, " (peak ", s.high_water, ", failed ", s.fail_count, ')');
+            }
         }
         if (info.stack_size > 0)
             session.write_line("Stack:    ", info.stack_peak.format_bytes(), " / ", info.stack_size.format_bytes());

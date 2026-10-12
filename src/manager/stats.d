@@ -1,6 +1,8 @@
 module manager.stats;
 
 import urt.log;
+import urt.mem.pagepool;
+import urt.mem.temp : tconcat;
 import urt.si.quantity : Quantity;
 import urt.si.unit : Percent;
 import urt.string;
@@ -52,6 +54,19 @@ void create_system_device()
         _stack_peak = metric(builder, stack, "peak", bytes);
     }
 
+    static if (pages_counted)
+    {
+        Component pages = builder.component(mem, "pages");
+        FormatId count = register_value_format!uint();
+        assert(page_pool_num_categories() == _pages.length - 1, "the stats hold small, normal and heap");
+        foreach (i, ref e; _pages)
+        {
+            ubyte category = i + 1 < _pages.length ? cast(ubyte)i : page_category_heap;
+            Component c = builder.component(pages, category == page_category_heap ? "heap" : tconcat("p", page_payload_size(category)));
+            e = PageElements(category, metric(builder, c, "live", count), metric(builder, c, "peak", count), metric(builder, c, "fails", count));
+        }
+    }
+
     Component cpu = builder.component("cpu");
 
     FormatId percent = register_value_format!Load();
@@ -94,7 +109,18 @@ struct CpuElements
     Element* high;
 }
 
+struct PageElements
+{
+    ubyte category;
+    Element* live;
+    Element* peak;
+    Element* fails;
+}
+
+enum bool pages_counted = __traits(compiles, page_pool_stats(0));
+
 __gshared PoolElements[MaxMemoryPools] _pools;
+__gshared PageElements[3] _pages;   // small, normal, heap
 __gshared CpuElements _cpu;
 __gshared Element* _stack_peak;
 version (Embedded)
@@ -127,6 +153,16 @@ void publish()
             e.used.value(u.used, now);
             e.low.value(u.low, now);
             e.high.value(u.high, now);
+        }
+        static if (pages_counted)
+        {
+            foreach (ref e; _pages)
+            {
+                PagePoolStats s = page_pool_stats(e.category);
+                e.live.value(s.pages_in_use, now);
+                e.peak.value(s.high_water, now);
+                e.fails.value(s.fail_count, now);
+            }
         }
     }
 
