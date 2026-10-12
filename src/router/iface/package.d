@@ -1892,9 +1892,9 @@ unittest
     }
 
     // an ethernet station's l2mtu is the frame: the default mtu leaves room for the header
-    a.set_l2mtu(1514);
-    assert(a.mtu == 1500 && a.actual_mtu == 1500);
-    assert(a.mtu(1514) is null && a.actual_mtu == 1500);
+    a2.set_l2mtu(1514);
+    assert(a2.mtu == 1500 && a2.actual_mtu == 1500);
+    assert(a2.mtu(1514) is null && a2.actual_mtu == 1500);
 
     {
         import router.iface.i2c : I2CFrame;
