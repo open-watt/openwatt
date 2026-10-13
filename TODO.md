@@ -45,14 +45,7 @@ or loses its forensic record.
    - An HTTP/1.1 request with `Connection: close` is answered and the connection kept: on the Pi and
      on Windows (2026-10-13, master 2700da61 too) the client waits for a close that never comes.
      Close after the response once the stream flushes on destroy.
-2. **Peering destroys a claimed peer twice**: `claim_peer_state`'s `offline` branch unsubscribes but
-   keeps `a.peer`, so a destroy it did not start (`/sync/peer/remove`) never nulls the pointer and
-   `teardown_attempt` destroys the peer again: the bench S3 aborted on `destroy() called twice` at
-   16:45 on 2026-10-13. Keep the subscription for exactly as long as `a.peer` is held: `offline`
-   only marks the attempt dead, `destroyed` nulls the peer, and `teardown_attempt` unsubscribes and
-   destroys a peer it still holds. Rewrite the unit test that asserts the old behaviour to replay a
-   real `destroy()` (`offline`, then `destroyed`, then teardown).
-3. **ESP32 crash dumps lose their numbering**: `crash.d` saves an 11-byte `char[11] sequence = void`
+2. **ESP32 crash dumps lose their numbering**: `crash.d` saves an 11-byte `char[11] sequence = void`
    with only 10 digits written, so a stack byte that happens to be a digit is parsed into the next
    number (61 -> 619 -> 6209 ...) until it saturates at 4294967295 and every dump overwrites
    `crash-4294967295.core`; `load_file`'s buffer is never freed. Save the 10 digits, free the
