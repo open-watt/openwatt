@@ -6,52 +6,6 @@
   2.114). Host CI builds DMD with `dmd-master` and excludes LDC x86, since LDC is still on the 2.113
   frontend. Restore the release DMD and the LDC x86 jobs once both releases carry the fix.
 
-## Up next, in this order
-
-Decided 2026-10-13, ahead of S11 and the rest of the list. Each is a confirmed fault that took down a fleet node
-or loses its forensic record.
-
-1. **A stream's close is asynchronous: flush in latent stopping, drop on error, never block**:
-   - Proven by the core dump: on 2026-10-13 at 09:21 UTC the Pi's main thread sat in `close()` in
-     `uart_hw_close`, called from `SerialStream.shutdown()` through `set_state_impl` from
-     `ASHInterface.process_frame` (an ERROR frame restarting the serial line), until `driver.watchdog`
-     aborted the process; the supervisor then lost a minute relaunching. Evidence, kept off the Pi:
-     `D:/tmp/evidence/2026-10-13-pi-serial-close-hang/` (core, the slot 184 binary it matches,
-     backtrace and log). The supervisor log shows eight more watchdog kills under slot 173 on
-     2026-10-10 and 11, one 16 s after launch like this one; their cores are gone, so the same cause
-     there is likely, not shown.
-   - Not yet shown: why `close()` blocked. `uart_hw_close` discards pending output (`tcflush`)
-     before closing but never sets `closing_wait`, so the reading is that Linux waits up to 30 s for
-     bytes the CP210x already holds while the dongle, on software flow control, is not taking them.
-     The repro below must confirm it.
-   - Both waits on that path go whatever the answer: urt's `uart_close` spins up to 250 ms in
-     `drain()` on every backend, and the kernel `close()` waited past the 5 s watchdog. Meanwhile
-     `destroy()` discards whatever a base queue holds. One model for every stream:
-   - `shutdown()` stops taking frames and returns `continue_` while output remains, so a graceful
-     `destroy()` flushes through the state machine; a failed line drops at once, and a deadline of
-     a few seconds drops for a peer that stopped reading, so neither the stream nor app shutdown
-     hangs. A reset requested for a peer in error (ASH's ERROR) drops rather than flushes.
-   - The base queue drains through `transmit`; streams with their own queue (`serial`,
-     `tcp_stream`, `duplex`, `file`) report drained from their send-completion path; the filters
-     (`tls`, `telnet`) flush into the stream below, TLS sending `close_notify` first. TCP sends its
-     FIN after the last queued byte.
-   - `uart_close` closes now and discards what is pending, on every backend; its drain spin goes.
-     On Linux, `closing_wait` none at open (or the close on the UART's I/O thread) keeps the kernel
-     from re-deciding the flush with a block. Reproduce the hang first by holding a CP210x's output
-     off, and show the change closes it.
-   - Then HTTP/1.0 is close-delimited: no `Content-Length` and no chunking, the body as-is, and the
-     connection closed after each response unless the client asked for keep-alive. The `505`s and
-     the `/api/cli/execute` guard go, and a peer's FIN no longer drops what is queued.
-   - An HTTP/1.1 request with `Connection: close` is answered and the connection kept: on the Pi and
-     on Windows (2026-10-13, master 2700da61 too) the client waits for a close that never comes.
-     Close after the response once the stream flushes on destroy.
-
-2. **Saturated crash dump counters still overwrite one file**: the sequence fix stops new units
-   saturating, but a unit whose `crash.seq` already reads 4294967295 keeps saving every dump as
-   `crash-4294967295.core`. The bench S3 (F993) is one, holding 33 dumps under mangled names. Decode
-   them against the firmware each was taken under, then remove `crash.seq` on each saturated unit so
-   numbering restarts; check the fleet for others.
-
 ## URGENT: undo at the next compiler update
 
 These work around compiler bugs. Undo each as soon as the minimum DMD **and** LDC carry the fix;
@@ -1653,10 +1607,33 @@ this is what remains.
   filter inside the chunked filter, chosen by `Accept-Encoding`, needs an incremental compressor;
   `urt.zip` is whole-buffer only.
 
+- **Streams flush on a graceful stop; only a failed one drops**: every stream but serial frees its
+  queue in `offline()`, so a graceful `destroy()` loses what was queued. On a graceful stop a stream
+  hands everything queued to its transport at once, in priority order, and tears its own queue down;
+  `shutdown()` returns `continue_` until the transport reports empty or a deadline of a few seconds
+  passes; a failed line drops at once. Streams with no transport below (console, file, memory, BLE,
+  the sync console) drain through `transmit` the same way.
+  - TCP sends its FIN after the last queued byte; the filters (`tls`, `telnet`) flush into the
+    stream below, TLS sending `close_notify` first.
+  - Then HTTP/1.0 is close-delimited: no `Content-Length` and no chunking, the body as-is, and the
+    connection closed after each response unless the client asked for keep-alive. The `505`s and
+    the `/api/cli/execute` guard go, and a peer's FIN no longer drops what is queued.
+  - An HTTP/1.1 request with `Connection: close` is answered but the connection is kept, so the
+    client waits for a close that never comes. Close after the response.
+
 - **The online signal tolerates a subscriber ending its source**: `set_online` returns quietly when
   a subscriber restarts or destroys the object, where the offline side asserts. `HTTPOneShot`
   destroys its client from the client's own `online` signal when the request fails to submit. Move
   it to the next pass, then assert on the online side too.
+
+- **The ZBDongle-E errors on its first data frame after most resets**: the first DATA frame after
+  RSTACK goes unacknowledged three times and the NCP answers ERROR 81; ASH resets and usually
+  connects, costing about ten seconds of Zigbee at every start. Capture the serial bytes around it
+  and find whether the host sends the first frame too soon after RSTACK or with stale ack numbers.
+
+- **Keep the ELF of every firmware deployed with core dumps**: a dump decodes only against the exact
+  image it was taken under, and a rebuild never matches since IDF stamps the build time in. Archive
+  `openwatt.elf` by its SHA prefix whenever a `COREDUMP=1` image is flashed or sent by OTA.
 
 - **A Windows TCP listener created early in startup never listens**: with
   `/protocol/http/server add` as the first line of a config, `tcp_listen` fails on every retry for
