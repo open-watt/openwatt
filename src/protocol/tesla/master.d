@@ -663,7 +663,7 @@ private:
     void iface_state_change(ActiveObject, StateSignal signal)
     {
         if (signal == StateSignal.offline)
-            restart();
+            restart_deferred();
     }
 
     void incoming_packet(ref const Packet p, BaseInterface iface, PacketDirection dir, void* user_data)

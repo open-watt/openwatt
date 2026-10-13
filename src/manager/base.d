@@ -1058,6 +1058,7 @@ protected:
         if (old == State.running)
         {
             set_offline();
+            assert(_state == new_state, "a subscriber restarted or destroyed the object inside its offline signal - bookkeeping bug");
 
             if (_flags & ObjectFlags.temporary)
             {
