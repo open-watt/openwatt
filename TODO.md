@@ -1653,6 +1653,11 @@ this is what remains.
   filter inside the chunked filter, chosen by `Accept-Encoding`, needs an incremental compressor;
   `urt.zip` is whole-buffer only.
 
+- **The online signal tolerates a subscriber ending its source**: `set_online` returns quietly when
+  a subscriber restarts or destroys the object, where the offline side asserts. `HTTPOneShot`
+  destroys its client from the client's own `online` signal when the request fails to submit. Move
+  it to the next pass, then assert on the online side too.
+
 - **A Windows TCP listener created early in startup never listens**: with
   `/protocol/http/server add` as the first line of a config, `tcp_listen` fails on every retry for
   any port, while a telnet server added after it listens; ordering the telnet server first makes
