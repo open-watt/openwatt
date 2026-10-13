@@ -1904,13 +1904,13 @@ unittest
         // an exotic packet is checked again once its ow envelope (5 bytes plus an 8-byte i2c header) is built
         Packet exotic;
         exotic.init!I2CFrame(payload[0 .. 1487]);
-        assert(a.forward(exotic) == 0);
-        ulong drops = a.tx_dropped;
+        assert(a2.forward(exotic) == 0);
+        ulong drops = a2.tx_dropped;
         exotic.init!I2CFrame(payload[]);
-        assert(a.forward(exotic) < 0 && a.tx_dropped == drops + 1);
+        assert(a2.forward(exotic) < 0 && a2.tx_dropped == drops + 1);
 
         // a vlan admits against its own mtu, which its parent cannot know
-        VLANInterface tagged = Collection!VLANInterface().create("mtu-test-vlan", ObjectFlags.none, NamedArgument("interface", a), NamedArgument("vlan", 20));
+        VLANInterface tagged = Collection!VLANInterface().create("mtu-test-vlan", ObjectFlags.none, NamedArgument("interface", a2), NamedArgument("vlan", 20));
         assert(tagged && tagged.running);
         assert(tagged.l2mtu == 1510 && tagged.max_l2mtu == 1510 && tagged.actual_mtu == 1496);
         assert(tagged.mtu(100) is null);
