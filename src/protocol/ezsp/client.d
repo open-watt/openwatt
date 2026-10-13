@@ -596,7 +596,7 @@ private:
     void ash_state_change(ActiveObject, StateSignal signal)
     {
         if (signal == StateSignal.offline)
-            restart();
+            restart_deferred();
         else if (signal == StateSignal.destroyed)
         {
             _ash.unsubscribe(&incoming_packet);
