@@ -187,8 +187,9 @@ protected:
             req.headers ~= HTTPParam(StringLit!"Sec-WebSocket-Version", StringLit!"13");
 
             Array!char msg = format_message_head(req, _conn.host[], false, 0);
-            if (msg.empty || _stream.write(msg[]) != msg.length)
+            if (msg.empty || append_tx_copy(_tx_queue, msg[]) != msg.length)
                 return CompletionStatus.error;
+            arm_tx();
 
             _handshake_parser = alloc!HTTPParser(&handshake_response);
         }
@@ -915,7 +916,7 @@ private:
             response ~= "\r\n" ~
 //                        "Sec-WebSocket-Protocol: chat, superchat\r\n" ~
                         "\r\n";
-            ws._stream.write(response[]);
+            ws._stream.send_bytes(response[]);
 
             version (DebugWebSocket)
                 log.trace("handshake complete, created '", ws.name, "'", ws._protocol.length ? " protocol=" : "", ws._protocol[]);

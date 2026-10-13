@@ -1592,6 +1592,18 @@ this is what remains.
   While there, move the listener off its per-tick non-blocking recv onto the reactor via
   `fdwatch`.
 
+- **One SLIP codec for TWC and PPP**: TWC escapes and unescapes RFC 1055 SLIP by hand in
+  `protocol/tesla/iface.d`, and PPP's SLIP mode decodes the same scheme but is unfinished. When PPP
+  needs it, share one codec (escaped length, escape, unescape) between them.
+
+- **A rebooted sync authority waits for its members to notice**: after the Pi restarts, a member's
+  UDP session stays `Running`, sending on a session the Pi no longer has; the Pi's UDP server drops
+  any datagram from an unknown session that is not a fresh `hello`, without a reply. A member only
+  declares its session dead when a control frame exhausts its retransmits, which an idle session
+  never sends, so on 2026-10-12 the shed and bench nodes took 9 minutes to rejoin and their devices
+  (`twc_6820`, `water_heater`) were absent meanwhile. Answer a stale session's datagram with a
+  frame from the new session, so the member sees a new remote stream and restarts at once.
+
 - **Fix the HTTP binding request-state wedge**: reproduce with request tracing, then replace
   FIFO response correlation with request handles. A rejected or timed-out submission must
   clear `in_flight`; late responses must not complete a different request.
@@ -1608,12 +1620,24 @@ this is what remains.
   filter inside the chunked filter, chosen by `Accept-Encoding`, needs an incremental compressor;
   `urt.zip` is whole-buffer only.
 
-- **Streams have no close-after-sent**: destroying a stream drops what its queue still holds, so
-  an HTTP server cannot delimit a body by closing, and refuses HTTP/1.0 a body of unknown length
-  (`505`, which fileserver listings and `/api/schema` get). A client that half-closes after its
-  request (netcat, some HTTP/1.0 tools) has its response cut short too: on Windows a 52 KB listing
-  with a `Content-Length` arrived truncated after the client's FIN (master d865a630). A stream
-  needs a close that lands once its queue drains, and a peer's FIN must not drop what is queued.
+- **Streams drop their send queue when destroyed; make them flush by default**: `destroy()`, the
+  only way a stream ends, discards what its queue still holds. So an HTTP server cannot delimit a
+  body by closing, and answers HTTP/1.0 `505` for a body of unknown length (fileserver listings,
+  `/api/schema`, `/api/get`, `/api/list`, `/api/cli/execute`, which refuses before running the
+  command). The server also never closes after an HTTP/1.0 response, so a strict HTTP/1.0 client
+  waiting for the close hangs. And a client that half-closes after its request (netcat) has its
+  response cut short: on Windows a 52 KB listing with a `Content-Length` arrived truncated after
+  the client's FIN (master d865a630).
+  - The base `Stream.shutdown()` returns `continue_` while its send queue holds data, so every
+    graceful `destroy()` flushes. A failing `transmit` drops the queue as now, so broken links
+    still tear down at once, and a deadline of a few seconds drops it for a stalled reader so
+    neither it nor app shutdown hangs.
+  - Streams with their own queue (`tcp_stream`, `serial`, `duplex`, `file`) report drained from
+    their send-completion path; the filters (`tls`, `telnet`) flush into the stream below, TLS
+    sending `close_notify` first. TCP sends its FIN after the last queued byte.
+  - Then HTTP/1.0 is close-delimited: no `Content-Length` and no chunking, the body as-is, and the
+    connection closed after each response unless the client asked for keep-alive. The `505`s and
+    the `/api/cli/execute` guard go, and a peer's FIN no longer drops what is queued.
 
 - **A Windows TCP listener created early in startup never listens**: with
   `/protocol/http/server add` as the first line of a config, `tcp_listen` fails on every retry for

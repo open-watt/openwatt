@@ -5,6 +5,9 @@ import urt.string;
 nothrow @nogc:
 
 
+// a peer with this much queued behind it is not keeping up, and its connection is dropped
+enum size_t max_tx_backlog = 64 * 1024;
+
 enum ProtocolLevel : ubyte
 {
     _3_1   = 3,

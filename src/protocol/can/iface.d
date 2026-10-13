@@ -4,6 +4,7 @@ import urt.driver.can;
 import urt.endian;
 import urt.log;
 import urt.mem;
+import urt.mem.pagepool : Page;
 import urt.meta.nullable;
 import urt.string;
 import urt.time;
@@ -427,43 +428,20 @@ protected:
             return 0;
         }
 
-        // frame it up and send via stream...
-        ubyte[LargestProtocolFrame] buffer = void;
-        size_t length = 0;
-
-        switch (protocol)
-        {
-            case CANInterfaceProtocol.ebyte:
-                ubyte dataLen = cast(ubyte)packet.length;
-                buffer[0] = (can.extended << 7) | (can.remote_transmission_request << 6) | dataLen;
-                buffer[1 .. 5] = can.id.nativeToBigEndian;
-                buffer[5 .. 5 + packet.length] = cast(ubyte[])packet.data[];
-                buffer[5 + packet.length .. EbyteFrameSize] = 0;
-                length = EbyteFrameSize;
-                break;
-
-            default:
-                assert(false);
-        }
-
-        ptrdiff_t written = stream.write(buffer[0 .. length]);
+        debug assert(protocol == CANInterfaceProtocol.ebyte);
+        Page* page = frame_page(EbyteFrameSize);
+        if (!page)
+            return -1;
+        ubyte[] buffer = cast(ubyte[])page.data;
+        buffer[0] = (can.extended << 7) | (can.remote_transmission_request << 6) | cast(ubyte)packet.length;
+        buffer[1 .. 5] = can.id.nativeToBigEndian;
+        buffer[5 .. 5 + packet.length] = cast(ubyte[])packet.data[];
+        buffer[5 + packet.length .. $] = 0;
 
         version (DebugCANInterface)
-        {
-            if (written <= 0)
-                writeDebug("CAN packet send failed on interface '", name, "'");
-            else
-                writeDebug("CAN packet sent on interface '", name, "': id=", can.id, " (", packet.length, ")[ ", packet.data, " - ", packet.data.bin_to_ascii(), " ]");
-        }
+            writeDebug("CAN packet sent on interface '", name, "': id=", can.id, " (", packet.length, ")[ ", packet.data, " - ", packet.data.bin_to_ascii(), " ]");
 
-        if (written <= 0)
-        {
-            add_tx_drop();
-            return -1;
-        }
-
-        add_tx_frame(length);
-        return 0;
+        return send_frame(stream, page);
     }
 
     override ushort pcap_type() const

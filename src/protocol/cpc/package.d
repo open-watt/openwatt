@@ -47,6 +47,7 @@ import urt.endian;
 import urt.lifetime;
 import urt.log;
 import urt.mem;
+import urt.mem.pagepool : Page;
 import urt.mem.temp;
 import urt.result;
 import urt.string;
@@ -827,31 +828,17 @@ private:
         if (_trace_frames)
             log.debugf("--> ep {0} ctrl [{1,02x}] {2}B: {3}", endpoint, control, payload.length, cast(void[])payload);
 
-        ubyte[cpc_header_size] header = void;
-        build_frame_header(header, endpoint, payload.length ? cast(ushort)(payload.length + 2) : 0, control);
-
-        ptrdiff_t written;
-        size_t expect;
+        Page* page = frame_page(cpc_header_size + (payload.length ? payload.length + 2 : 0));
+        if (!page)
+            return false;
+        ubyte[] frame = cast(ubyte[])page.data;
+        build_frame_header(*cast(ubyte[cpc_header_size]*)frame.ptr, endpoint, payload.length ? cast(ushort)(payload.length + 2) : 0, control);
         if (payload.length)
         {
-            ubyte[2] fcs = payload.cpc_crc().nativeToLittleEndian;
-            expect = header.length + payload.length + fcs.length;
-            written = _stream.write(header[], payload, fcs[]);
+            frame[cpc_header_size .. $ - 2] = payload[];
+            frame[$ - 2 .. $][0 .. 2] = payload.cpc_crc().nativeToLittleEndian;
         }
-        else
-        {
-            expect = header.length;
-            written = _stream.write(header[]);
-        }
-        if (written != expect)
-        {
-            // no cancel byte exists in CPC; a torn partial is resolved by the receiver's HCS resync,
-            // and I-frame loss by the retransmit timer
-            add_tx_drop();
-            return false;
-        }
-        add_tx_frame(expect);
-        return true;
+        return send_frame(_stream, page) == 0;
     }
 
     void on_bytes(Stream, const(void)[] data, MonoTime rx_time)

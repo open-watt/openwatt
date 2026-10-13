@@ -6,6 +6,7 @@ import urt.inet : AddressFamily, InetAddress, InetScopeProvider, register_inet_s
 import urt.lifetime;
 import urt.map;
 import urt.mem;
+import urt.mem.pagepool : Page, page_alloc;
 import urt.mem.ring;
 import urt.meta.enuminfo : bitfield;
 import urt.meta.nullable;
@@ -30,6 +31,7 @@ import router.iface.ethernet;
 import router.iface.group;
 import router.iface.udp;
 import router.iface.vlan;
+import router.stream : free_tx_chain, Stream;
 
 public import router.iface.packet;
 public import router.status;
@@ -884,6 +886,28 @@ protected:
     {
         ++_status.tx_dropped;
         mark_set!(typeof(this), [ "tx-dropped" ])();
+    }
+
+    final Page* frame_page(size_t length)
+    {
+        Page* page = page_alloc(length);
+        if (!page)
+            add_tx_drop();
+        return page;
+    }
+
+    final int send_frame(Stream stream, Page* frame)
+    {
+        size_t length = frame.length;
+        if (!stream)
+            free_tx_chain(frame);
+        else if (stream.send(frame))
+        {
+            add_tx_frame(length);
+            return 0;
+        }
+        add_tx_drop();
+        return -1;
     }
 
     final void add_rx_drop()

@@ -197,6 +197,9 @@ nothrow @nogc:
         return running && queued < tx_queue_limit ? tx_queue_limit - queued : 0;
     }
 
+    override size_t tx_backlog() const
+        => uart_tx_queued(_uart);
+
     override void queue_tx_page(Page* page)
     {
         for (Page* p = page; p; p = p.next)

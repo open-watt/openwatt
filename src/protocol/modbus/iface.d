@@ -8,6 +8,7 @@ import urt.inet;
 import urt.log;
 import urt.map;
 import urt.mem;
+import urt.mem.pagepool : Page;
 import urt.meta.nullable;
 import urt.result;
 import urt.string;
@@ -711,27 +712,29 @@ private:
 
     int frame_and_send(ubyte address, const(ubyte)[] pdu, ushort tx_id = 0)
     {
-        ushort length = 0;
-        ubyte[520] buffer = void;
+        assert(protocol != ModbusProtocol.unknown, "Modbus protocol not specified");
+        static immutable size_t[3] framing = [ 1 + 2, 7, 3 + 4 ];
+        size_t length = framing[protocol] + (protocol == ModbusProtocol.ascii ? 2 : 1) * pdu.length;
+        Page* page = frame_page(length);
+        if (!page)
+            return -1;
+        ubyte[] buffer = cast(ubyte[])page.data;
 
         final switch (protocol)
         {
             case ModbusProtocol.unknown:
-                assert(false, "Modbus protocol not specified");
+                assert(false);
             case ModbusProtocol.rtu:
-                length = cast(ushort)(1 + pdu.length);
                 buffer[0] = address;
-                buffer[1 .. length] = pdu[];
-                buffer[length .. length + 2][0 .. 2] = buffer[0 .. length].modbus_crc().nativeToLittleEndian;
-                length += 2;
+                buffer[1 .. $ - 2] = pdu[];
+                buffer[$ - 2 .. $][0 .. 2] = buffer[0 .. $ - 2].modbus_crc().nativeToLittleEndian;
                 break;
             case ModbusProtocol.tcp:
                 buffer[0..2] = tx_id.nativeToBigEndian;
                 buffer[2..4] = 0; // protocol identifier
                 buffer[4..6] = nativeToBigEndian(cast(ushort)(1 + pdu.length));
                 buffer[6] = address;
-                buffer[7 .. 7 + pdu.length] = pdu[];
-                length = cast(ushort)(7 + pdu.length);
+                buffer[7 .. $] = pdu[];
                 break;
             case ModbusProtocol.ascii:
                 ubyte lrc = address;
@@ -741,22 +744,12 @@ private:
 
                 buffer[0] = ':';
                 format_int(address, cast(char[])buffer[1..3], 16, 2, '0');
-                length = cast(ushort)(3 + toHexString(pdu[], cast(char[])buffer[3..$]).length);
-                format_int(lrc, cast(char[])buffer[length .. length + 2], 16, 2, '0');
-                (cast(char[])buffer)[length + 2 .. length + 4] = "\r\n";
-                length += 4;
+                toHexString(pdu[], cast(char[])buffer[3 .. $ - 4]);
+                format_int(lrc, cast(char[])buffer[$ - 4 .. $ - 2], 16, 2, '0');
+                (cast(char[])buffer)[$ - 2 .. $] = "\r\n";
         }
 
-        ptrdiff_t written = active_stream().write(buffer[0 .. length]);
-        if (written != length)
-        {
-            log.debug_("tx-drop: write failed (wrote ", written, " of ", length, ")");
-            add_tx_drop();
-            return -1;
-        }
-
-        add_tx_frame(length);
-        return 0;
+        return send_frame(active_stream(), page);
     }
 
     void send_queued_messages()

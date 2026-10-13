@@ -254,6 +254,9 @@ nothrow @nogc:
     override size_t tx_request() const
         => _conn ? _conn.tx_request : 0;
 
+    override size_t tx_backlog() const
+        => tx_queued() + (_conn ? _conn.tx_queued : 0);
+
 
 protected:
 

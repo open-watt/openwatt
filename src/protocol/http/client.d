@@ -154,13 +154,14 @@ protected:
         if (!_stream.running)
             return CompletionStatus.continue_;
         _stream.rx_handler(&stream_rx);
+        _stream.subscribe(&stream_state);
+        _subscribed = true;
         return CompletionStatus.complete;
     }
 
     override CompletionStatus shutdown()
     {
-        if (Stream s = _stream)
-            s.release_rx_handler(&stream_rx);
+        detach_stream();
         foreach (request; requests)
             free(request);
         requests.clear();
@@ -205,6 +206,7 @@ private:
     Duration _timeout = 5.seconds;
     bool _tls;
     bool _dispatching;
+    bool _subscribed;
 
     HTTPVersion server_version = HTTPVersion.V1_1;
 
@@ -213,9 +215,26 @@ private:
 
     void drop_stream()
     {
-        if (Stream s = _stream)
-            s.release_rx_handler(&stream_rx);
+        detach_stream();
         _stream = null;
+    }
+
+    void detach_stream()
+    {
+        if (!_subscribed)
+            return;
+        if (Stream s = _stream)
+        {
+            s.release_rx_handler(&stream_rx);
+            s.unsubscribe(&stream_state);
+        }
+        _subscribed = false;
+    }
+
+    void stream_state(ActiveObject, StateSignal signal)
+    {
+        if (signal == StateSignal.offline)
+            restart_deferred();
     }
 
     void stream_rx(Stream stream, const(void)[] data, MonoTime)
@@ -240,12 +259,9 @@ private:
         Array!char head = format_message_head(request, _conn.host[], body_included(request), request.content.length);
         if (head.empty)
             return;
-        ptrdiff_t r = stream.write(head[], request.content[]);
-        if (!running)
-            return;
-        if (r != head.length + request.content.length)
+        if (!stream.send_bytes(head[], request.content[]))
         {
-            writeWarning("HTTP client: write failed (", r, " of ", head.length + request.content.length, " bytes)");
+            writeWarning("HTTP client: send failed for a ", head.length + request.content.length, "-byte request");
             restart();
             return;
         }
@@ -403,6 +419,7 @@ unittest
         Collection!HTTPClient().update_all();
         wire.fail_write = true;
         assert(client.request(HTTPMethod.GET, "/failed", null) is null);
+        Collection!HTTPClient().update_all();
         assert(!client.running && client.requests.empty);
         client.destroy();
         wire.destroy();

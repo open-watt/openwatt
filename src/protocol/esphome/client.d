@@ -6,6 +6,7 @@ import urt.inet;
 import urt.lifetime;
 import urt.log;
 import urt.mem;
+import urt.mem.pagepool : Page, page_alloc, page_free;
 import urt.result;
 import urt.string;
 import urt.time;
@@ -131,20 +132,21 @@ nothrow @nogc:
     {
         assert(is(typeof(Msg.id)), "Msg must have an `id` option member");
 
-        ubyte[] encode;
-        Array!ubyte overflow;
-        ubyte[256] buffer = void;
-
         size_t len = buffer_len(msg);
-        if (len > buffer.sizeof)
-            encode = overflow.extend(len);
-        else
-            encode = buffer[0 .. len];
-
-        size_t enc_len = proto_serialise(encode, msg);
-        if (enc_len != len)
+        size_t head = 1 + varint_len(len) + varint_len(Msg.id);
+        Page* page = page_alloc(head + len);
+        if (!page)
             return -1;
-        return send_frame(Msg.id, encode[0 .. len]);
+        ubyte[] frame = cast(ubyte[])page.data;
+        frame[0] = 0;
+        size_t id_at = 1 + put_varint(frame[1 .. $], len);
+        put_varint(frame[id_at .. $], Msg.id);
+        if (proto_serialise(frame[head .. $], msg) != len)
+        {
+            page_free(page);
+            return -1;
+        }
+        return _stream.send(page) ? frame.length : -1;
     }
 
     void terminate()
@@ -277,20 +279,6 @@ private:
             return true;
         }
         return false;
-    }
-
-    ptrdiff_t send_frame(uint msg_type, const(ubyte)[] payload)
-    {
-        ubyte[11] header = void;
-        header[0] = 0;
-        ptrdiff_t written = write_var_int(cast(uint)payload.length, header[1 .. $]);
-        assert(written > 0);
-        ptrdiff_t written2 = write_var_int(msg_type, header[1 + written .. $]);
-        assert(written2 > 0);
-        ptrdiff_t sent = _stream.write(header[0 .. 1 + written + written2], payload[]);
-        if (sent != 1 + written + written2 + payload.length)
-            return -1;
-        return sent;
     }
 
     void stream_rx(Stream, const(void)[] data, MonoTime)
@@ -469,20 +457,3 @@ ptrdiff_t take_var_int(const(ubyte)[] data, out uint value)
     return -1;
 }
 
-ptrdiff_t write_var_int(uint value, ubyte[] data)
-{
-    size_t i = 0;
-    while (true)
-    {
-        if (i >= data.length)
-            return -1; // not enough space
-        ubyte b = value & 0x7F;
-        value >>= 7;
-        if (value != 0)
-            b |= 0x80;
-        data[i++] = b;
-        if (value == 0)
-            break;
-    }
-    return i;
-}

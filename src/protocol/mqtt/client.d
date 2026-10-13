@@ -248,8 +248,7 @@ nothrow @nogc:
         ubyte[] sink = _out_buf[];
         if (!encode_publish(sink, pkt, _protocol_level))
             return;
-        _stream.write(_out_buf[]);
-        _last_send = getTime();
+        send_packet(_out_buf[]);
     }
 
 
@@ -603,10 +602,7 @@ private:
         ubyte[] sink = _out_buf[];
         if (!encode_connect(sink, pkt))
             return false;
-        if (_stream.write(_out_buf[]) <= 0)
-            return false;
-        _last_send = getTime();
-        return true;
+        return send_packet(_out_buf[]);
     }
 
     bool send_subscribe(const(char)[] filter)
@@ -628,10 +624,7 @@ private:
         ubyte[] sink = _out_buf[];
         if (!encode_subscribe(sink, pkt, _protocol_level))
             return false;
-        if (_stream.write(_out_buf[]) <= 0)
-            return false;
-        _last_send = getTime();
-        return true;
+        return send_packet(_out_buf[]);
     }
 
     bool send_unsubscribe(const(char)[] filter)
@@ -651,10 +644,7 @@ private:
         ubyte[] sink = _out_buf[];
         if (!encode_unsubscribe(sink, pkt, _protocol_level))
             return false;
-        if (_stream.write(_out_buf[]) <= 0)
-            return false;
-        _last_send = getTime();
-        return true;
+        return send_packet(_out_buf[]);
     }
 
     bool send_pingreq()
@@ -663,10 +653,7 @@ private:
         ubyte[] sink = buf[];
         if (!encode_pingreq(sink))
             return false;
-        if (_stream.write(buf[]) <= 0)
-            return false;
-        _last_send = getTime();
-        return true;
+        return send_packet(buf[]);
     }
 
     bool send_disconnect_packet()
@@ -678,7 +665,21 @@ private:
         ubyte[] sink = _out_buf[];
         if (!encode_disconnect(sink, pkt, _protocol_level))
             return false;
-        return _stream.write(_out_buf[]) > 0;
+        return send_packet(_out_buf[]);
+    }
+
+    bool send_packet(const(ubyte)[] packet)
+    {
+        if (_stream.tx_backlog > max_tx_backlog)
+        {
+            log.warning("broker is not taking what is sent; dropping the connection");
+            restart_deferred();
+            return false;
+        }
+        if (!_stream.send_bytes(packet))
+            return false;
+        _last_send = getTime();
+        return true;
     }
 
     bool send_ack(PacketType t, ref AckPacket pkt)
@@ -688,10 +689,7 @@ private:
         ubyte[] sink = _out_buf[];
         if (!encode_ack(sink, t, pkt, _protocol_level))
             return false;
-        if (_stream.write(_out_buf[]) <= 0)
-            return false;
-        _last_send = getTime();
-        return true;
+        return send_packet(_out_buf[]);
     }
 
     ushort _next_packet_id = 1;

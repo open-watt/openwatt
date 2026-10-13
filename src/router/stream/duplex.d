@@ -77,6 +77,9 @@ nothrow @nogc:
     override size_t tx_request() const
         => _tx ? _tx.tx_request : 0;
 
+    override size_t tx_backlog() const
+        => _tx ? _tx.tx_backlog : 0;
+
 
     override ptrdiff_t write(const(void[])[] data...)
     {

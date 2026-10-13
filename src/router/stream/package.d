@@ -115,6 +115,16 @@ Page* take_tx_page(ref Page* chain, ref const TxRequest req, ref TxStatus status
     return page;
 }
 
+void free_tx_chain(Page* chain)
+{
+    while (chain)
+    {
+        Page* next = chain.next;
+        page_free(chain);
+        chain = next;
+    }
+}
+
 void append_tx_chain(ref Page* chain, Page* pages)
 {
     if (!chain)
@@ -444,6 +454,36 @@ nothrow @nogc:
 
     abstract ptrdiff_t write(const(void[])[] data...);
 
+    // takes the frame whether or not it is sent; the caller never frees it
+    bool send(Page* frame)
+    {
+        if (!running)
+        {
+            free_tx_chain(frame);
+            return false;
+        }
+        queue_tx_page(frame);
+        return true;
+    }
+
+    final bool send_bytes(const(void[])[] parts...)
+    {
+        size_t remaining;
+        foreach (part; parts)
+            remaining += part.length;
+        Page* frame;
+        foreach (part; parts)
+        {
+            if (append_tx_copy(frame, part, remaining) != part.length)
+            {
+                free_tx_chain(frame);
+                return false;
+            }
+            remaining -= part.length;
+        }
+        return !frame || send(frame);
+    }
+
     // a stream that takes pages itself overrides this with queue_tx_page; the rest queue them here for transmit()
     size_t tx_request() const
     {
@@ -459,6 +499,10 @@ nothrow @nogc:
             bytes += page.length;
         return bytes;
     }
+
+    // what waits behind this stream to reach the wire, a transport's own queue included
+    size_t tx_backlog() const
+        => tx_queued();
 
     TerminalChannel* terminal_channel()
     {
@@ -558,17 +602,15 @@ protected:
     void queue_tx_page(Page* page)
     {
         if (!running)
-        {
-            while (page)
-            {
-                Page* next = page.next;
-                page_free(page);
-                page = next;
-            }
-            return;
-        }
+            return free_tx_chain(page);
         append_tx_chain(_tx_queue, page);
         drain_tx();
+    }
+
+    final void hold_tx(Page* frame)
+    {
+        append_tx_chain(_tx_queue, frame);
+        tx_handler_changed();
     }
 
     // what the line takes of data now; a failed line returns -1
@@ -618,19 +660,30 @@ protected:
     }
 
     // the line has room again
+    // the page on the line is the drain's while transmit runs, so a stream torn down beneath it frees only its queue
     final void drain_tx()
     {
         while (_tx_queue)
         {
-            size_t length = _tx_queue.length;
-            ptrdiff_t n = transmit(_tx_queue.data);
-            if (n < 0)
-                return restart();
-            if (n == 0)
+            Page* page = _tx_queue;
+            _tx_queue = page.next;
+            ptrdiff_t n = transmit(page.data);
+            if (n < 0 || !running)
+            {
+                page_free(page);
+                if (running)
+                    restart();
+                return;
+            }
+            if (n < page.length)
+            {
+                page.offset += cast(ushort)n;
+                page.length -= cast(ushort)n;
+                page.next = _tx_queue;
+                _tx_queue = page;
                 break;
-            consume_tx(n);
-            if (n < length)
-                break;
+            }
+            page_free(page);
         }
         if (_tx_queue && tx_retry_interval != Duration.zero && !_tx_retrying)
         {
@@ -709,17 +762,6 @@ private:
     bool _tx_retrying;
     bool _tx_continuing;
     bool _rx_polling;
-
-    void consume_tx(size_t n)
-    {
-        Page* head = _tx_queue;
-        head.offset += cast(ushort)n;
-        head.length -= cast(ushort)n;
-        if (head.length)
-            return;
-        _tx_queue = head.next;
-        page_free(head);
-    }
 
     void tx_retry(MonoTime)
     {

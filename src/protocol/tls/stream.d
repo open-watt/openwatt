@@ -396,6 +396,17 @@ nothrow @nogc:
         return total;
     }
 
+    final override bool send(Page* frame)
+    {
+        if (!running)
+        {
+            free_tx_chain(frame);
+            return false;
+        }
+        hold_tx(frame);
+        return true;
+    }
+
     final override size_t tx_request() const
     {
         if (_handshake_state != HandshakeState.completed)
@@ -403,6 +414,12 @@ nothrow @nogc:
         if (auto stream = _stream.get)
             return stream.tx_request;
         return 0;
+    }
+
+    final override size_t tx_backlog() const
+    {
+        auto stream = _stream.get;
+        return tx_queued() + (stream ? stream.tx_backlog : 0);
     }
 
 protected:
@@ -1017,9 +1034,9 @@ private:
                 // If there's an output token, send it.
                 if (out_buf.cbBuffer != 0 && out_buf.pvBuffer !is null)
                 {
-                    ptrdiff_t bytes_sent = _stream.write(out_buf.pvBuffer[0 .. out_buf.cbBuffer]);
+                    bool sent = _stream.send_bytes(out_buf.pvBuffer[0 .. out_buf.cbBuffer]);
                     FreeContextBuffer(out_buf.pvBuffer);
-                    if (bytes_sent != out_buf.cbBuffer)
+                    if (!sent)
                     {
                         log.error("failed to send handshake token");
                         _handshake_state = HandshakeState.failed;
@@ -1287,12 +1304,9 @@ version (MbedTLS)
             self._tx_captured += len;
             return cast(int)len;
         }
-        ptrdiff_t n = self._stream.write(buf[0 .. len]);
-        if (n > 0)
-            return cast(int)n;
-        if (n == 0)
-            return MBEDTLS_ERR_SSL_WANT_WRITE;
-        return -1;
+        if (self._stream.send_bytes(buf[0 .. len]))
+            return cast(int)len;
+        return self._stream.running ? MBEDTLS_ERR_SSL_WANT_WRITE : -1;
     }
 
 }

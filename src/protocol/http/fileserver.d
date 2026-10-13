@@ -667,7 +667,7 @@ private:
         _uploads ~= u;
 
         if (request.http_version >= HTTPVersion.V1_1 && request.header("Expect")[] == "100-continue")
-            stream.write("HTTP/1.1 100 Continue\r\n\r\n");
+            stream.send_bytes("HTTP/1.1 100 Continue\r\n\r\n");
 
         return &u.on_chunk;
     }

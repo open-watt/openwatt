@@ -710,7 +710,6 @@ nothrow @nogc:
         }
         unsubscribe();
         _line.clear();
-        _write_pos = 0;
         return CompletionStatus.complete;
     }
 
@@ -731,19 +730,9 @@ nothrow @nogc:
                 format_message(msg);
             }
 
-            ptrdiff_t written = s.write(_line[_write_pos .. $]);
-            if (written < 0)
-            {
-                restart();
-                return;
-            }
-            if (written == 0)
-                return;
-            _write_pos += cast(uint)written;
-            if (_write_pos < _line.length)
+            if (s.tx_request == 0 || !s.send_bytes(_line[]))
                 return;
             _line.clear();
-            _write_pos = 0;
             log_module.acknowledge(_consumer);
         }
     }
@@ -753,7 +742,6 @@ private:
     LogConsumerHandle _consumer;
     String _tag;
     Array!(char, 0) _line;
-    uint _write_pos;
     LogFormat _format;
     LogLineEnding _line_ending;
     Severity _max_severity = Severity.info;
