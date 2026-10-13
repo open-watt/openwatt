@@ -45,11 +45,12 @@ or loses its forensic record.
    - An HTTP/1.1 request with `Connection: close` is answered and the connection kept: on the Pi and
      on Windows (2026-10-13, master 2700da61 too) the client waits for a close that never comes.
      Close after the response once the stream flushes on destroy.
-2. **ESP32 crash dumps lose their numbering**: `crash.d` saves an 11-byte `char[11] sequence = void`
-   with only 10 digits written, so a stack byte that happens to be a digit is parsed into the next
-   number (61 -> 619 -> 6209 ...) until it saturates at 4294967295 and every dump overwrites
-   `crash-4294967295.core`; `load_file`'s buffer is never freed. Save the 10 digits, free the
-   buffer, and reset `crash.seq` on the saturated units (F993 holds 33 such dumps, still to decode).
+
+2. **Saturated crash dump counters still overwrite one file**: the sequence fix stops new units
+   saturating, but a unit whose `crash.seq` already reads 4294967295 keeps saving every dump as
+   `crash-4294967295.core`. The bench S3 (F993) is one, holding 33 dumps under mangled names. Decode
+   them against the firmware each was taken under, then remove `crash.seq` on each saturated unit so
+   numbering restarts; check the fleet for others.
 
 ## URGENT: undo at the next compiler update
 
