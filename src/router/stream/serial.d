@@ -176,10 +176,20 @@ nothrow @nogc:
         return CompletionStatus.complete;
     }
 
+    // a graceful stop lets the line drain first, until the deadline; a failed one closes at once
     override CompletionStatus shutdown()
     {
         if (_uart.is_open)
         {
+            if (!(_state & _fail) && !uart_tx_done(_uart))
+            {
+                if (_drain_deadline == MonoTime())
+                    _drain_deadline = getTime() + drain_limit;
+                if (getTime() < _drain_deadline)
+                    return CompletionStatus.continue_;
+                log.warning("closing before the line drained; what it still held is dropped");
+            }
+            _drain_deadline = MonoTime();
             immutable uint slot = uart_slot(_uart.port);
             uart_close(_uart);
             if (slot < num_uarts && _streams[slot] is this)
@@ -233,7 +243,10 @@ private:
         tx = 2,
     }
 
+    enum Duration drain_limit = 3.seconds;
+
     Uart _uart;
+    MonoTime _drain_deadline;
     shared uint _events;    // UartEvent bits raised by the callbacks, taken by the sweep
     String _device;
 
