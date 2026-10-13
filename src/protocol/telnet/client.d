@@ -116,12 +116,12 @@ nothrow @nogc:
             if (data[i] == escape_key)
             {
                 if (i > 0)
-                    _telnet.write(cast(const(void)[])data[0 .. i]);
+                    _telnet.send_bytes(cast(const(void)[])data[0 .. i]);
                 _escape_pressed = true;
                 return;
             }
         }
-        _telnet.write(cast(const(void)[])data);
+        _telnet.send_bytes(cast(const(void)[])data);
     }
 
     override CommandCompletionState update()

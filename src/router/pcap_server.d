@@ -9,6 +9,7 @@ import urt.inet;
 import urt.lifetime;
 import urt.log;
 import urt.mem;
+import urt.mem.pagepool : Page, page_alloc;
 import urt.string;
 import urt.time;
 
@@ -146,6 +147,7 @@ private:
 
         Array!ubyte tail;
         enum size_t max_request = 16 * 1024;
+        enum size_t max_capture_backlog = 64 * 1024;
 
         this(PCAPServer server, Stream stream)
         {
@@ -513,22 +515,25 @@ private:
             if (!out_stream || !out_stream.running)
                 return;
 
-            ubyte[2048] buffer = void;
-            uint len = RpcapPktHdr.sizeof;
+            if (out_stream.tx_backlog > max_capture_backlog)
+                return;
+
+            enum size_t head = RpcapHeader.sizeof + RpcapPktHdr.sizeof;
+            Page* page = page_alloc(max_tx_page);
+            if (!page)
+                return;
+            ubyte[] buffer = cast(ubyte[])page.data;
+            size_t len = head;
 
             iface.pcap_write(p, dir, (const void[] data) {
                 size_t n = data.length;
                 if (len + n > buffer.length)
-                    n = buffer.length - len;  // truncate if too large
-                if (n > 0)
-                {
-                    buffer[len .. len + n] = cast(ubyte[])data[0 .. n];
-                    len += n;
-                }
+                    n = buffer.length - len;
+                buffer[len .. len + n] = cast(ubyte[])data[0 .. n];
+                len += n;
             });
 
-            uint pkt_len = cast(uint)(len - RpcapPktHdr.sizeof);
-
+            uint pkt_len = cast(uint)(len - head);
             ulong timestamp = unixTimeNs(cast(SysTime)p.creation_time);
             RpcapPktHdr pkt_hdr = {
                 timestamp_sec: cast(uint)(timestamp / 1_000_000_000),
@@ -537,16 +542,16 @@ private:
                 len: pkt_len,
                 npkt: packet_ordinal++,
             };
-            buffer[0 .. RpcapPktHdr.sizeof] = pkt_hdr.nativeToBigEndian;
-
             RpcapHeader hdr = {
                 ver: RPCAP_VERSION,
                 type: RPCAP_MSG_PACKET,
                 value: 0,
-                plen: len,
+                plen: cast(uint)(len - RpcapHeader.sizeof),
             };
-            out_stream.write(hdr.nativeToBigEndian);
-            out_stream.write(buffer[0 .. len]);
+            buffer[0 .. RpcapHeader.sizeof] = hdr.nativeToBigEndian;
+            buffer[RpcapHeader.sizeof .. head] = pkt_hdr.nativeToBigEndian;
+            page.length = cast(ushort)len;
+            out_stream.send(page);
         }
 
         void send_reply(ubyte msg_type, const void[] payload)
@@ -555,23 +560,17 @@ private:
         }
 
         void send_reply_with_value(ubyte msg_type, ushort value, const void[] payload)
-        {
-            write_header(RPCAP_VERSION, msg_type | RPCAP_MSG_IS_REPLY, value, payload.length);
-            if (payload.length > 0)
-                stream.write(payload);
-        }
+            => send_message(msg_type | RPCAP_MSG_IS_REPLY, value, payload);
 
         void send_error(const(char)[] message)
         {
-            write_header(RPCAP_VERSION, RPCAP_MSG_ERROR, 0, message.length);
-            stream.write(cast(const void[])message);
-
+            send_message(RPCAP_MSG_ERROR, 0, message);
             server.log.warning("error: ", message);
         }
 
-        void write_header(ubyte ver, ubyte type, ushort value, size_t plen)
+        void send_message(ubyte type, ushort value, const void[] payload)
         {
-            stream.write(RpcapHeader(ver: ver, type: type, value: value, plen: cast(uint)plen).nativeToBigEndian);
+            stream.send_bytes(RpcapHeader(ver: RPCAP_VERSION, type: type, value: value, plen: cast(uint)payload.length).nativeToBigEndian, payload);
         }
 
         void stream_destroyed(ActiveObject object, StateSignal signal)

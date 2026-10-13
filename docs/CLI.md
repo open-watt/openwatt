@@ -149,7 +149,8 @@ Node-wide state and lifecycle. The sub-scopes `/system/config`, `/system/fs` and
 `/system/hostname` prints the node's hostname; `/system/set-hostname <name>` sets it, and
 also stamps the log HOSTNAME field.
 
-`/system/sysinfo` prints hostname, node id, OS, CPU, build, memory pools, main stack use,
+`/system/sysinfo` prints hostname, node id, OS, CPU, build, memory pools, the page pool's live and
+peak pages per category (and page allocations that failed), main stack use,
 uptime, wall time and whether the saved configuration is dirty, plus the reset reason where the
 platform has one. The build is the source revision the image came from
 (`git describe --always --dirty`, or `unknown` where the build had none). Given property names

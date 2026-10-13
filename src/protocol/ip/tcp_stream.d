@@ -221,41 +221,17 @@ nothrow @nogc:
             _conn.enable_keepalive(enable, keep_idle, keep_interval, keep_count);
     }
 
-    override ptrdiff_t write(const(void[])[] data...)
-    {
-        if (!running || _conn is null)
-            return 0;
-
-        size_t total = 0;
-        foreach (b; data)
-            total += b.length;
-
-        ptrdiff_t n = _conn.send(data);
-        if (n > 0)
-        {
-            add_tx_bytes(n);
-            if (_logging)
-            {
-                import urt.util : min;
-                ptrdiff_t remain = n;
-                for (size_t i = 0; remain > 0; ++i)
-                {
-                    size_t len = min(data[i].length, remain);
-                    write_to_log(false, data[i][0 .. len]);
-                    remain -= len;
-                }
-            }
-        }
-        if (n < cast(ptrdiff_t)total)
-            log.warning("stream '", name[], "': short write -- ", n, " of ", total, " bytes sent, ", total - n, " dropped");
-        return n;
-    }
-
     override size_t tx_request() const
         => _conn ? _conn.tx_request : 0;
 
+    override size_t tx_backlog() const
+        => tx_queued() + (_conn ? _conn.tx_queued : 0);
+
 
 protected:
+
+    override ptrdiff_t transmit(const(void)[] data)
+        => _conn ? _conn.send(data) : 0;
 
     // the connection reads only while this stream has a consumer
     override void rx_handler_changed()
@@ -291,9 +267,7 @@ private:
         Page* page = request_tx_page(req, status);
         if (!page)
             return null;
-        add_tx_bytes(page.length);
-        if (_logging)
-            write_to_log(false, page.data);
+        sent(page.data);
         return page;
     }
 

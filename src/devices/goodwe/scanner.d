@@ -14,7 +14,7 @@ GOODWE scanning works like this:
     UDPStream udp = new UDPStream(48899, options: StreamOptions.allow_broadcast);
     udp.connect();
 
-    udp.write("WIFIKIT-214028-READ");
+    udp.send_bytes("WIFIKIT-214028-READ");
     ubyte[1024] buffer = void;
     udp.read(buffer);
     udp.read(buffer);

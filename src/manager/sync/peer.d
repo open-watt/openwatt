@@ -2199,7 +2199,7 @@ unittest
         link.frames.clear();
         link.release_tx_handler(link.tx_handler);
         link.room = 0;
-        assert(stream.write(text[]) == text.length && link.frames.length == 0);
+        assert(stream.send_bytes(text[]) && link.frames.length == 0);
         assert(link.tx_handler is &peer.produce_tx, "a full transport arms the peer");
         link.room = 4;
         assert(peer.produce_console() && link.frames.length == 4);
@@ -2214,7 +2214,7 @@ unittest
             assert(peer.transmit_frame(ping[]) == 0);
         size_t held = link.frames.length;
         link.release_tx_handler(link.tx_handler);
-        assert(stream.write(text[]) == text.length && link.frames.length == held && link.tx_handler is null);
+        assert(stream.send_bytes(text[]) && link.frames.length == held && link.tx_handler is null);
         assert(!peer.produce_console() && stream.tx_queued() == text.length, "a starved window waits for the ack");
         peer.release_control(peer._tx_seq);
         assert(link.tx_handler is &peer.produce_tx);
@@ -2227,12 +2227,12 @@ unittest
             euros[2 + 3 * i .. 5 + 3 * i] = "€";
         peer.release_control(peer._tx_seq);
         link.frames.clear();
-        assert(stream.write(euros[0 .. 150]) == 150 && link.frames.length == 1);
+        assert(stream.send_bytes(euros[0 .. 150]) && link.frames.length == 1);
         link.room = 1;
-        assert(stream.write(euros[150 .. 152]) == 2 && link.frames.length == 1 && stream.tx_queued() == 2);
+        assert(stream.send_bytes(euros[150 .. 152]) && link.frames.length == 1 && stream.tx_queued() == 2);
         link.room = size_t.max;
         assert(!peer.produce_console() && stream.tx_queued() == 0 && link.frames.length == 2);
-        assert(stream.write(euros[152 .. $]) == euros.length - 152 && stream.tx_queued() == 0);
+        assert(stream.send_bytes(euros[152 .. $]) && stream.tx_queued() == 0);
         Array!char relayed;
         foreach (ref f; link.frames[])
         {

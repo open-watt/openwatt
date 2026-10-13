@@ -382,18 +382,15 @@ nothrow @nogc:
         return CompletionStatus.complete;
     }
 
-    final override ptrdiff_t write(const(void[])[] data...)
+    final override bool send(Page* frame)
     {
-        if (_handshake_state != HandshakeState.completed)
+        if (!running)
         {
-            version (DebugTLS)
-                log.trace("write rejected, handshake state=", _handshake_state);
-            return -1;
+            free_tx_chain(frame);
+            return false;
         }
-
-        size_t total = hold_copy(data);
-        tx_handler_changed();
-        return total;
+        hold_tx(frame);
+        return true;
     }
 
     final override size_t tx_request() const
@@ -403,6 +400,12 @@ nothrow @nogc:
         if (auto stream = _stream.get)
             return stream.tx_request;
         return 0;
+    }
+
+    final override size_t tx_backlog() const
+    {
+        auto stream = _stream.get;
+        return tx_queued() + (stream ? stream.tx_backlog : 0);
     }
 
 protected:
@@ -473,9 +476,7 @@ private:
         if (!input)
             return null;
 
-        add_tx_bytes(input.length);
-        if (_logging)
-            write_to_log(false, input.data);
+        sent(input.data);
         Page* output = encrypt_page(input);
         if (!output)
         {
@@ -1017,9 +1018,9 @@ private:
                 // If there's an output token, send it.
                 if (out_buf.cbBuffer != 0 && out_buf.pvBuffer !is null)
                 {
-                    ptrdiff_t bytes_sent = _stream.write(out_buf.pvBuffer[0 .. out_buf.cbBuffer]);
+                    bool sent = _stream.send_bytes(out_buf.pvBuffer[0 .. out_buf.cbBuffer]);
                     FreeContextBuffer(out_buf.pvBuffer);
-                    if (bytes_sent != out_buf.cbBuffer)
+                    if (!sent)
                     {
                         log.error("failed to send handshake token");
                         _handshake_state = HandshakeState.failed;
@@ -1287,12 +1288,9 @@ version (MbedTLS)
             self._tx_captured += len;
             return cast(int)len;
         }
-        ptrdiff_t n = self._stream.write(buf[0 .. len]);
-        if (n > 0)
-            return cast(int)n;
-        if (n == 0)
-            return MBEDTLS_ERR_SSL_WANT_WRITE;
-        return -1;
+        if (self._stream.send_bytes(buf[0 .. len]))
+            return cast(int)len;
+        return self._stream.running ? MBEDTLS_ERR_SSL_WANT_WRITE : -1;
     }
 
 }
@@ -1330,9 +1328,6 @@ unittest
         {
             super(collection_type_info!Transport, id, flags);
         }
-
-        override ptrdiff_t write(const(void[])[] data...)
-            => 0;
     }
 
     bool owns_pool = page_pool_init();
@@ -1345,7 +1340,7 @@ unittest
     tls.fail_session();
     assert(tls._handshake_state == TLSStream.HandshakeState.failed);
     ubyte[1] more;
-    assert(tls.write(more[]) == -1);
+    assert(!tls.send_bytes(more[]));
 
     // once established, ciphertext that arrives with no consumer pauses the transport, so no more is read
     {

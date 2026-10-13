@@ -5,6 +5,7 @@ import urt.conv;
 import urt.endian;
 import urt.lifetime;
 import urt.log;
+import urt.mem.pagepool : Page;
 import urt.string;
 import urt.string.ascii;
 import urt.time;
@@ -499,7 +500,13 @@ private:
             return false;
         version (DebugOBDInterface)
             log.debug_("elm tx: ", cmd);
-        if (s.write(cmd, "\r") != cmd.length + 1)
+        Page* page = frame_page(cmd.length + 1);
+        if (page)
+        {
+            (cast(char[])page.data)[0 .. cmd.length] = cmd[];
+            (cast(char[])page.data)[$ - 1] = '\r';
+        }
+        if (!page || send_frame(s, page) < 0)
         {
             log.warning("adapter write failed");
             elm_fail();

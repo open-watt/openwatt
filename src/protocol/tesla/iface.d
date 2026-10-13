@@ -3,6 +3,7 @@ module protocol.tesla.iface;
 import urt.log;
 import urt.map;
 import urt.mem;
+import urt.mem.pagepool : Page;
 import urt.meta.nullable;
 import urt.string;
 import urt.string.format;
@@ -170,49 +171,44 @@ protected:
         }
 
         const(ubyte)[] msg = cast(ubyte[])packet.data;
-
-        ubyte[1 + 2 * max_message + 3] t = void;
-        size_t offset = 1;
         ubyte checksum = 0;
+        foreach (b; msg.length ? msg[1 .. $] : msg)
+            checksum += b;
 
-        t[0] = 0xC0;
-        for (size_t i = 0; i < msg.length; i++)
+        // the checksum is escaped with the message, as a TWC expects
+        size_t length = 1 + msg.length + 1 + 2 + (checksum == 0xC0 || checksum == 0xDB);
+        foreach (b; msg)
+            length += b == 0xC0 || b == 0xDB;
+        Page* page = frame_page(length);
+        if (!page)
+            return -1;
+        ubyte[] t = cast(ubyte[])page.data;
+        size_t offset = 1;
+        void put(ubyte b)
         {
-            if (i > 0)
-                checksum += msg.ptr[i];
-            if (msg.ptr[i] == 0xC0)
+            if (b == 0xC0 || b == 0xDB)
             {
                 t[offset++] = 0xDB;
-                t[offset++] = 0xDC;
-            }
-            else if (msg.ptr[i] == 0xDB)
-            {
-                t[offset++] = 0xDB;
-                t[offset++] = 0xDD;
+                t[offset++] = b == 0xC0 ? 0xDC : 0xDD;
             }
             else
-                t[offset++] = msg.ptr[i];
+                t[offset++] = b;
         }
-        t[offset++] = checksum;
+        t[0] = 0xC0;
+        foreach (b; msg)
+            put(b);
+        put(checksum);
         t[offset++] = 0xC0;
-
         // It works without this byte, but I always receive it from a real device!
         t[offset++] = 0xFD;
-
-        size_t written = _stream.write(t[0..offset]);
-        if (written != offset)
-        {
-            debug writeDebug("Failed to write to stream '", _stream.name, "'");
-            add_tx_drop();
+        if (send_frame(_stream, page) < 0)
             return -1;
-        }
 
         version (DebugTeslaInterface) {
             import urt.io;
             writef("{4} - {0}: TWC packet sent {1,04x}-->{2,04x} [{3}]\n", name, packet.hdr!TWCFrame.src, packet.hdr!TWCFrame.dst, packet.data, packet.creation_time);
         }
 
-        add_tx_frame(packet.data.length); // TODO: but should we record the ACTUAL protocol packet?
         return 0;
     }
 

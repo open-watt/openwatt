@@ -136,14 +136,15 @@ nothrow @nogc:
 
     // Stream API
 
-    // written bytes wait in the queue and are escaped as the line pulls them, like a producer's
-    override ptrdiff_t write(const(void[])[] data...)
+    override bool send(Page* frame)
     {
         if (!_inner)
-            return -1;
-        size_t total = hold_copy(data);
-        tx_handler_changed();
-        return total;
+        {
+            free_tx_chain(frame);
+            return false;
+        }
+        hold_tx(frame);
+        return true;
     }
 
     override ulong tx_link_speed() const
@@ -153,6 +154,9 @@ nothrow @nogc:
 
     override size_t tx_request() const
         => _inner ? _inner.tx_request : 0;
+
+    override size_t tx_backlog() const
+        => tx_queued() + (_inner ? _inner.tx_backlog : 0);
 
 
 protected:
@@ -311,7 +315,7 @@ private:
                             break;
 
                         case NVT.AYT:
-                            _inner.write("\a");
+                            _inner.send_bytes("\a");
                             break;
 
                         case NVT.EC:
@@ -404,9 +408,7 @@ private:
         if (!page)
             return null;
 
-        add_tx_bytes(page.length);
-        if (_logging)
-            write_to_log(false, page.data);
+        sent(page.data);
         escape(page);
         return page;
     }
@@ -534,7 +536,7 @@ private:
                     if (_role == TelnetRole.server && opt == TelnetOptions.TERMINAL_TYPE)
                     {
                         ubyte[6] t = [NVT.IAC, NVT.SB, TelnetOptions.TERMINAL_TYPE, 0x01, NVT.IAC, NVT.SE];
-                        _inner.write(t);
+                        _inner.send_bytes(t);
                     }
                 }
 
@@ -595,7 +597,7 @@ private:
         if (response)
         {
             ubyte[3] t = [NVT.IAC, response, cast(ubyte)opt];
-            _inner.write(t);
+            _inner.send_bytes(t);
 
             debug version (TelnetDebug)
             {
@@ -612,7 +614,7 @@ private:
         _server_state |= 1UL << opt;
 
         ubyte[3] t = [NVT.IAC, NVT.WILL, cast(ubyte)opt];
-        _inner.write(t[]);
+        _inner.send_bytes(t[]);
 
         version (TelnetDebug)
             debug log.trace("Telnet: --> WILL ", opt);
@@ -623,7 +625,7 @@ private:
         if ((_server_state & (1UL << opt)) || force)
         {
             ubyte[3] t = [NVT.IAC, NVT.WONT, cast(ubyte)opt];
-            _inner.write(t[]);
+            _inner.send_bytes(t[]);
         }
         _server_state &= ~(1UL << opt);
 
@@ -638,7 +640,7 @@ private:
         _client_state_req |= 1UL << opt;
 
         ubyte[3] t = [NVT.IAC, NVT.DO, cast(ubyte)opt];
-        _inner.write(t[]);
+        _inner.send_bytes(t[]);
 
         version (TelnetDebug)
             debug log.trace("Telnet: --> DO ", opt);
@@ -649,7 +651,7 @@ private:
         if ((_client_state_req & (1UL << opt)) || force)
         {
             ubyte[3] t = [NVT.IAC, NVT.DONT, cast(ubyte)opt];
-            _inner.write(t[]);
+            _inner.send_bytes(t[]);
         }
         _client_state_req &= ~(1UL << opt);
 
@@ -674,7 +676,7 @@ private:
                 t[n++] = 0xff;
         }
         t[n++] = NVT.IAC; t[n++] = NVT.SE;
-        _inner.write(t[0 .. n]);
+        _inner.send_bytes(t[0 .. n]);
 
         version (TelnetDebug)
             debug log.trace("Telnet: --> NAWS ", _terminal.width, 'x', _terminal.height);
@@ -686,7 +688,7 @@ private:
 
         ubyte[4] hdr = [NVT.IAC, NVT.SB, TelnetOptions.TERMINAL_TYPE, 0x00];
         ubyte[2] trl = [NVT.IAC, NVT.SE];
-        _inner.write(hdr[], cast(const(ubyte)[])tt, trl[]);
+        _inner.send_bytes(hdr[], cast(const(ubyte)[])tt, trl[]);
 
         version (TelnetDebug)
             debug log.trace("Telnet: --> TERMINAL-TYPE IS ", tt);
@@ -804,8 +806,6 @@ unittest
             {
                 super(collection_type_info!Transport, id, flags);
             }
-            override ptrdiff_t write(const(void[])[] data...)
-                => 0;
             void feed(const(char)[] text)
             {
                 incoming(text, MonoTime());

@@ -82,23 +82,12 @@ nothrow @nogc:
         super(collection_type_info!USBSerialStream, id, flags);
     }
 
-    override ptrdiff_t write(const(void[])[] data...)
+    override ptrdiff_t transmit(const(void)[] data)
     {
-        ptrdiff_t total;
-        foreach (d; data)
-        {
-            version (USBSerialJTAG)
-                ptrdiff_t bytes = usb_serial_jtag_write_bytes(d.ptr, d.length, 0);
-            else
-                ptrdiff_t bytes = esp_usb_console_write_buf(cast(const(char)*)d.ptr, d.length);
-            if (bytes < 0)
-                return -1;
-            add_tx_bytes(bytes);
-            total += bytes;
-            if (bytes < d.length)
-                break;
-        }
-        return total;
+        version (USBSerialJTAG)
+            return usb_serial_jtag_write_bytes(data.ptr, data.length, 0);
+        else
+            return esp_usb_console_write_buf(cast(const(char)*)data.ptr, data.length);
     }
 
     override CompletionStatus startup()

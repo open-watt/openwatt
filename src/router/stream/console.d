@@ -86,21 +86,8 @@ nothrow @nogc:
     override TerminalChannel* terminal_channel()
         => _input == ConsoleInput.stdin ? &_terminal : null;
 
-    override ptrdiff_t write(const(void[])[] data...)
-    {
-        ptrdiff_t total = 0;
-        foreach (d; data)
-        {
-            auto n = write_console(cast(const(char)[])d);
-            if (n < 0)
-                return -1;
-            add_tx_bytes(n);
-            total += n;
-            if (n < d.length)
-                return total;
-        }
-        return total;
-    }
+    override ptrdiff_t transmit(const(void)[] data)
+        => write_console(cast(const(char)[])data);
 
     override CompletionStatus startup()
     {

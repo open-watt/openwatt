@@ -408,45 +408,39 @@ nothrow @nogc:
         return term ? term.terminal_type : null;
     }
 
-    final ptrdiff_t write_raw(const(void)[] data)
-    {
-        if (!_stream)
-            return -1;
-        return _stream.write(data);
-    }
+    final bool write_raw(const(void)[] data)
+        => _stream && _stream.send_bytes(data);
 
     void write_output(const(char)[] text, bool newline)
     {
         if (_stream)
         {
-            if (text.length > 0)
+            Page* frame;
+            if (_features & ClientFeatures.crlf)
             {
-                if (_features & ClientFeatures.crlf)
+                // convert bare \n (not preceded by \r) to \r\n for NVT clients
+                size_t written = 0, search = 0;
+                while (search < text.length)
                 {
-                    // convert bare \n (not preceded by \r) to \r\n for NVT clients
-                    size_t written = 0, search = 0;
-                    while (search < text.length)
+                    size_t pos = text[search .. $].findFirst('\n');
+                    if (pos == text.length - search)
+                        break;
+                    pos += search;
+                    if (pos == 0 || text[pos - 1] != '\r')
                     {
-                        size_t pos = text[search .. $].findFirst('\n');
-                        if (pos == text.length - search)
-                            break;
-                        pos += search;
-                        if (pos == 0 || text[pos - 1] != '\r')
-                        {
-                            _stream.write(text[written .. pos]);
-                            _stream.write("\r\n");
-                            written = pos + 1;
-                        }
-                        search = pos + 1;
+                        append_tx_copy(frame, text[written .. pos]);
+                        append_tx_copy(frame, "\r\n");
+                        written = pos + 1;
                     }
-                    if (written < text.length)
-                        _stream.write(text[written .. $]);
+                    search = pos + 1;
                 }
-                else
-                    _stream.write(text);
+                text = text[written .. $];
             }
+            append_tx_copy(frame, text);
             if (newline)
-                _stream.write((_features & ClientFeatures.crlf) ? "\r\n" : "\n");
+                append_tx_copy(frame, (_features & ClientFeatures.crlf) ? "\r\n" : "\n");
+            if (frame)
+                _stream.send(frame);
         }
         else
         {
@@ -1603,15 +1597,10 @@ nothrow @nogc:
         super(collection_type_info!SessionTestStream, id, flags);
     }
 
-    override ptrdiff_t write(const(void[])[] data...)
+    override ptrdiff_t transmit(const(void)[] data)
     {
-        size_t written;
-        foreach (d; data)
-        {
-            _output ~= cast(const(ubyte)[])d;
-            written += d.length;
-        }
-        return written;
+        _output ~= cast(const(ubyte)[])data;
+        return data.length;
     }
 
     override size_t tx_request() const

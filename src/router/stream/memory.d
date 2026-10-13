@@ -127,68 +127,28 @@ nothrow @nogc:
     final const(ubyte)[] captured() const pure
         => _dynamic[];
 
-    override ptrdiff_t write(const(void[])[] data...)
+protected:
+    // a full buffer drops what does not fit; a full FIFO waits for its reader
+    override ptrdiff_t transmit(const(void)[] data)
     {
-        size_t total;
         final switch (_tx_mode)
         {
             case MemoryMode.none:
-                return 0;
-
+                return data.length;
             case MemoryMode.dynamic:
-                foreach (d; data)
-                {
-                    _dynamic ~= cast(ubyte[])d;
-                    total += d.length;
-                }
-                break;
-
+                _dynamic ~= cast(const(ubyte)[])data;
+                return data.length;
             case MemoryMode.buffer:
                 ubyte[] buf = cast(ubyte[])_tx;
-                foreach (d; data)
-                {
-                    size_t remain = buf.length - _tx_cursor;
-                    if (remain == 0)
-                        break;
-                    size_t take = d.length < remain ? d.length : remain;
-                    buf[_tx_cursor .. _tx_cursor + take] = cast(const(ubyte)[])d[0 .. take];
-                    _tx_cursor += take;
-                    total += take;
-                    if (take < d.length)
-                        break;
-                }
-                break;
-
+                size_t take = data.length < buf.length - _tx_cursor ? data.length : buf.length - _tx_cursor;
+                buf[_tx_cursor .. _tx_cursor + take] = cast(const(ubyte)[])data[0 .. take];
+                _tx_cursor += take;
+                return data.length;
             case MemoryMode.fifo:
-                foreach (d; data)
-                {
-                    size_t w = fifo_write(_tx, cast(const(ubyte)[])d);
-                    total += w;
-                    if (w < d.length)
-                        break;
-                }
-                break;
+                return fifo_write(_tx, cast(const(ubyte)[])data);
         }
-        if (total)
-        {
-            add_tx_bytes(total);
-            if (_logging)
-            {
-                size_t remain = total;
-                foreach (d; data)
-                {
-                    if (remain == 0)
-                        break;
-                    size_t chunk = d.length < remain ? d.length : remain;
-                    write_to_log(false, d[0 .. chunk]);
-                    remain -= chunk;
-                }
-            }
-        }
-        return total;
     }
 
-protected:
     // the writer of a shared FIFO raises nothing, so the RX side is polled
     override Duration rx_poll_interval() const
         => _rx_mode == MemoryMode.fifo || (_rx_mode == MemoryMode.buffer && _rx_cursor < _rx.length) ? msecs(10) : Duration.zero;

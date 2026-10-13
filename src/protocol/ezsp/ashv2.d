@@ -6,6 +6,7 @@ import urt.endian;
 import urt.lifetime;
 import urt.log;
 import urt.mem;
+import urt.mem.pagepool : Page;
 import urt.result;
 import urt.string;
 import urt.time;
@@ -152,11 +153,8 @@ protected:
             else
                 log.debug_("connecting on '", _stream.name, "'...");
 
-            immutable ubyte[5] RST = [ ASH_CANCEL_BYTE, 0xC0, 0x38, 0xBC, ASH_FLAG_BYTE ];
-            if (_stream.write(RST) != 5)
-                add_tx_drop();
-            else
-                add_tx_frame(5);
+            static immutable ubyte[5] RST = [ ASH_CANCEL_BYTE, 0xC0, 0x38, 0xBC, ASH_FLAG_BYTE ];
+            ash_emit(RST[]);
 
             _last_event = now;
 
@@ -210,8 +208,6 @@ protected:
         _rst_attempts = 0;
         _rx_since_rst = 0;
         _rx_sample_len = 0;
-        _pending_cancel = false;
-        _tx_stall_since = MonoTime();
         _reject_condition = false;
 
         if (_subscribed)
@@ -241,13 +237,6 @@ protected:
                 return;
             }
             resend_in_flight(now);
-        }
-
-        if (_tx_stall_since != MonoTime() && now - _tx_stall_since >= T_RSTACK_MAX.msecs)
-        {
-            log.error("serial output remained saturated; restarting stream '", _stream.name, "'");
-            _stream.restart();
-            return;
         }
 
         send_queued_messages();
@@ -338,7 +327,6 @@ private:
 
     ObjectRef!Stream _stream;
     MonoTime _last_event;
-    MonoTime _tx_stall_since;
     uint _rst_attempts;     // RST frames sent without an RSTACK; surfaced in status_message
     uint _rx_since_rst;     // bytes received since the last RST while still unconnected
     ubyte _rx_sample_len;
@@ -364,8 +352,6 @@ private:
     Message* _tx_queue;    // frames waiting to be sent
     Message* _free_list;
     ushort _tx_queue_len;
-    bool _pending_cancel;   // a prior frame was truncated by CTS backpressure; prepend a CANCEL to
-                            // the next frame so the NCP discards the leaked partial before parsing it
     bool _reject_condition;
 
     size_t _rx_offset;
@@ -758,52 +744,41 @@ private:
         ushort crc = frame[0 .. 1 + msg.length].ezsp_crc();
         frame[1 + msg.length .. 3 + msg.length][0..2] = crc.nativeToBigEndian;
 
-        ubyte[ASH_MAX_ENCODED_LENGTH] stuffed = void;
-        size_t len = stuff_bytes(frame[0 .. 1 + msg.length + 2], stuffed[]);
-        stuffed[len++] = 0x7E;
+        const(ubyte)[] raw = frame[0 .. 1 + msg.length + 2];
+        size_t length = raw.length + 1;
+        foreach (b; raw)
+            length += needs_escape(b);
+        Page* page = frame_page(length);
+        if (!page)
+            return false;
+        ubyte[] stuffed = cast(ubyte[])page.data;
+        stuffed[stuff_bytes(raw, stuffed)] = ASH_FLAG_BYTE;
 
         version (DebugASHMessageFlow)
             log.tracef("--> [x{0, 02x}]: {1}", control, cast(void[])msg);
 
-        return ash_emit(stuffed[0 .. len]);
+        return send_frame(_stream, page) == 0;
     }
 
-    // Write one complete ASH frame, recovering transparently from flow-control truncation. A short
-    // write means CTS backpressure filled the kernel TX buffer mid-frame, leaking a headless partial
-    // to the NCP; we flag it and prepend a CANCEL (0x1A) to the next frame so the NCP discards that
-    // partial before parsing. The flag only clears once a frame is written in full (CANCEL included),
-    // so a truncated CANCEL just re-arms for the following frame.
     bool ash_emit(const(ubyte)[] frame)
     {
-        ubyte[ASH_MAX_ENCODED_LENGTH + 1] buf = void;
-        size_t n = 0;
-        if (_pending_cancel)
-            buf[n++] = ASH_CANCEL_BYTE;
-        buf[n .. n + frame.length] = frame[];
-        n += frame.length;
-
-        if (_stream.write(buf[0 .. n]) != n)
-        {
-            _pending_cancel = true;
-            if (_tx_stall_since == MonoTime())
-                _tx_stall_since = getTime();
-            add_tx_drop();
+        Page* page = frame_page(frame.length);
+        if (!page)
             return false;
-        }
-
-        _pending_cancel = false;
-        _tx_stall_since = MonoTime();
-        add_tx_frame(frame.length);
-        return true;
+        (cast(ubyte[])page.data)[] = frame[];
+        return send_frame(_stream, page) == 0;
     }
+
+    static bool needs_escape(ubyte b) pure
+        => b == ASH_FLAG_BYTE || b == ASH_ESCAPE_BYTE || b == ASH_XON_BYTE || b == ASH_XOFF_BYTE ||
+           b == ASH_SUBSTITUTE_BYTE || b == ASH_CANCEL_BYTE;
 
     static size_t stuff_bytes(const(ubyte)[] input, ubyte[] output) pure
     {
         size_t len;
         foreach (b; input)
         {
-            if (b == ASH_FLAG_BYTE || b == ASH_ESCAPE_BYTE || b == ASH_XON_BYTE ||
-                b == ASH_XOFF_BYTE || b == ASH_SUBSTITUTE_BYTE || b == ASH_CANCEL_BYTE)
+            if (needs_escape(b))
             {
                 output[len++] = ASH_ESCAPE_BYTE;
                 output[len++] = b ^ 0x20;

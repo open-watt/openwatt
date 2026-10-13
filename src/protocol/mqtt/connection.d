@@ -128,7 +128,7 @@ nothrow @nogc:
         ubyte[] sink = out_buf[];
         if (!encode_publish(sink, pkt, protocol_level))
             return;
-        stream.write(out_buf[]);
+        send_packet(out_buf[]);
     }
 
     Session* attached_session() => session;
@@ -158,6 +158,17 @@ private:
         stream.release_rx_handler(&stream_rx);
         stream.destroy();
         stream = null;
+    }
+
+    bool send_packet(const(ubyte)[] packet)
+    {
+        if (!stream)
+            return false;
+        if (stream.tx_backlog <= max_tx_backlog)
+            return stream.send_bytes(packet);
+        writeWarning("MQTT client on ", stream_name(), " is not taking what is sent; dropping it");
+        terminate();
+        return false;
     }
 
     // a failure terminates the connection; the broker reaps it on its next update
@@ -403,7 +414,7 @@ private:
         ubyte[] sink = out_buf[];
         if (!encode_connack(sink, pkt, protocol_level))
             return false;
-        return stream.write(out_buf[]) > 0;
+        return send_packet(out_buf[]);
     }
 
     bool send_connack_reject(ProtocolLevel level, ubyte reason, bool session_present)
@@ -506,7 +517,7 @@ private:
         ubyte[] sink = out_buf[];
         if (!encode_ack(sink, t, pkt, protocol_level))
             return false;
-        return stream.write(out_buf[]) > 0;
+        return send_packet(out_buf[]);
     }
 
     bool handle_subscribe(const(ubyte)[] body, ubyte flags)
@@ -558,7 +569,7 @@ private:
         ubyte[] sink = out_buf[];
         if (!encode_suback(sink, ack, protocol_level))
             return false;
-        return stream.write(out_buf[]) > 0;
+        return send_packet(out_buf[]);
     }
 
     bool handle_unsubscribe(const(ubyte)[] body, ubyte flags)
@@ -591,7 +602,7 @@ private:
         ubyte[] sink = out_buf[];
         if (!encode_unsuback(sink, ack, protocol_level))
             return false;
-        return stream.write(out_buf[]) > 0;
+        return send_packet(out_buf[]);
     }
 
     bool handle_pingreq(const(ubyte)[] body, ubyte flags)
@@ -602,7 +613,7 @@ private:
         ubyte[] sink = buf[];
         if (!encode_pingresp(sink))
             return false;
-        return stream.write(buf[]) > 0;
+        return send_packet(buf[]);
     }
 
     bool handle_disconnect(const(ubyte)[] body, ubyte flags)
@@ -626,6 +637,44 @@ private:
         ubyte[] sink = out_buf[];
         if (!encode_disconnect(sink, pkt, protocol_level))
             return false;
-        return stream.write(out_buf[]) > 0;
+        return send_packet(out_buf[]);
     }
+}
+
+
+unittest
+{
+    import manager.collection;
+
+    static class Backlogged : Stream
+    {
+    nothrow @nogc:
+        ~this() {}
+        enum type_name = "mqtt-test-backlogged";
+        this(CID id, ObjectFlags flags = ObjectFlags.none)
+        {
+            super(collection_type_info!Backlogged, id, flags);
+        }
+        override size_t tx_backlog() const
+            => backlog;
+        override ptrdiff_t transmit(const(void)[] data)
+            => data.length;
+        size_t backlog;
+    }
+
+    Backlogged stream = Collection!Backlogged().create("mqtt-test-backlogged");
+    foreach (_; 0 .. 4)
+        Collection!Stream().update_all();
+    assert(stream.running);
+
+    // a peer counts what its transport holds, though the stream's own queue is empty
+    Connection c = Connection(null, stream);
+    ubyte[2] ping = [0xD0, 0];
+    stream.backlog = max_tx_backlog;
+    assert(c.send_packet(ping[]) && c.stream is stream);
+    stream.backlog = max_tx_backlog + 1;
+    assert(!c.send_packet(ping[]) && c.stream is null && c.state == ConnectionState.closing);
+    assert(!c.send_packet(ping[]), "a packet after the drop, as SUBACK follows a retained replay, finds the connection closed");
+    foreach (_; 0 .. 4)
+        Collection!Stream().update_all();
 }
