@@ -1195,6 +1195,12 @@ have in common, as elements appear.
 | `add` | `/element/link/add <a> <b>` | Links two elements, or two components, by path. A path that resolves to nothing yet is kept and decided when it appears. |
 | `print` | `/element/link/print` | A table of links: `a`, `b` and `status`, which is `linked`, `pending` while an end is missing, `undecided` while neither path resolves, or `component: <n> linked, <m> pending` for a component link. |
 
+### `/element/set`
+
+`/element/set element=<path> value=<value>` writes a value to an existing element.
+A rejected value leaves the element unchanged and prints `Cannot set <path>: <reason>`.
+For boolean elements, use `value=true` or `value=false`; numeric `0` and `1` are rejected.
+
 ### `/protocol/ble/device`
 
 | Command | Syntax | Description |
@@ -1479,7 +1485,7 @@ and `GATEWAY=1`; on desktop hosts the kernel owns the router role.
 | `pool` | `pool6` name | | Pool to draw the /64 from; its own prefix must be shorter than /64. |
 | `prefix` | `prefix/64` | | Static alternative to `pool`. |
 | `interval` | `4s` to `1800s` | `600s` | Maximum unsolicited advertisement interval; each gap is random between a third of this and this (fixed at this below 9s), the first three capped at 16s. |
-| `router-lifetime` | `0s`, or `interval` to `9000s` | `30m` | Default-router lifetime; `0s` advertises prefix only. |
+| `router-lifetime` | `0s`, or `interval` to `9000s` | `30min` | Default-router lifetime; `0s` advertises prefix only. |
 | `valid-lifetime` | duration | `30d` | Prefix valid lifetime; capped to the remaining lifetime of a delegated pool prefix. |
 | `preferred-lifetime` | duration <= `valid-lifetime` | `7d` | Prefix preferred lifetime; capped the same way. |
 | `managed` | `yes`/`no` | `no` | M flag: clients should use DHCPv6 for addresses. |
@@ -1487,8 +1493,7 @@ and `GATEWAY=1`; on desktop hosts the kernel owns the router role.
 | `dns` | IPv6 addresses | empty | RDNSS servers advertised. |
 
 Solicited advertisements are delayed by up to 500ms and never sent within 3s of
-the previous one. Durations with a bare `m` suffix parse as metres (the SI unit
-system owns unquoted suffixes); write minutes quoted (`"30m"`) or in another unit.
+the previous one. Use `min` for minutes (`30min`); a bare `m` suffix denotes metres.
 
 ```
 # advertise a /64 out of the site delegation, with DNS
@@ -1686,11 +1691,11 @@ exist yet parks the rule in `Starting` (`element not found: <path>`) and arms wh
 
 ```text
 /automation/add name=door-light on="@door.open" do={ /element/set element=hall.light value=$value }
-/automation/add name=poll schedule=5m do={ /device/print }
+/automation/add name=poll schedule=5min do={ /device/print }
 /automation/add name=weekday on="at:18:00?days=mon,wed,fri" do={ /notify "evening" }
-/automation/add name=once on="every:30m?repeat=false" do={ /notify "runs once, in 30 min" }
+/automation/add name=once on="every:30min?repeat=false" do={ /notify "runs once, in 30 min" }
 /automation/add name=peak on="@site.power" if="@site.power > 2000W" edge=rising do={ /notify "crossed 2kW" }
-/automation/add name=ajar on="@door.open" if="@door.open" for=5m do={ /notify "door left open 5 min" }
+/automation/add name=ajar on="@door.open" if="@door.open" for=5min do={ /notify "door left open 5 min" }
 /automation/add name=shut on="@door.open" if="@door.open" edge=falling for=1h do={ /notify "long closed" }
 /automation/add name=multi on="@door.open","every:1h" do={ /device/print }
 /automation/add name=motion on="@pir.motion" debounce=500ms do={ /element/set element=porch.light value=$value }
@@ -1823,7 +1828,7 @@ serve hand-wired datagram sync and always own their sockets.
 | `interface` | interface list | empty | Bind AF_ETHERNET and every configured IP endpoint on these interfaces. |
 | `port` | `1` to `65535` | `4826` | Port used by named interfaces and bind entries that omit one. |
 | `encoder` | `json`, `binary` | `binary` | Encoding for spawned peers. |
-| `timeout` | duration | `5m` | Idle time after which a silent peer is swept. |
+| `timeout` | duration | `5min` | Idle time after which a silent peer is swept. |
 
 At least one of `bind` or `interface` is required for an explicit server. The
 server is Running while at least one local endpoint is open; other configured

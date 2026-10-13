@@ -8,7 +8,7 @@ There are three ways to interact with the console:
 
 **Interactive mode** — Local console at startup:
 ```bash
-./bin/x86_64_debug/openwatt --interactive
+./bin/x86_64_linux_debug/openwatt --interactive
 ```
 
 **Telnet** — Remote console session:
@@ -141,7 +141,7 @@ Properties are typed. The console automatically converts string arguments to the
 | Boolean | `true`/`false`, `yes`/`no` | `master=true` |
 | Integer | Decimal or hex | `address=2`, `id=0x6914` |
 | String | Unquoted or quoted | `name=inv`, `name="my inverter"` |
-| Duration | Number + unit | `interval=5m`, `timeout=500ms`, `schedule=1h` |
+| Duration | Number + unit | `interval=5min`, `timeout=500ms`, `schedule=1h` |
 | Enum | Enum member name | `protocol=rtu`, `type=single_phase` |
 | Object reference | Object name | `stream=tcp1`, `interface=modbus1` |
 | Array | Comma-separated | `certificates=acme,selfsigned` |

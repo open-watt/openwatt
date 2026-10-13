@@ -42,7 +42,7 @@ make PLATFORM=bl808                    # BL808: M0 (the network node) with D0 ap
 
 # Testing
 make CONFIG=unittest                    # Build with unit tests enabled
-./bin/x86_64_unittest/openwatt_test    # Run unit tests (adjust platform as needed)
+./bin/x86_64_linux_unittest/openwatt_test   # Run unit tests (adjust platform as needed)
 ```
 
 **Build variables:**
@@ -140,7 +140,7 @@ Collections are the backbone of runtime object management. Key features:
 
 **Property type support:** The property system automatically converts CLI arguments to typed properties via `convertVariant()` functions in [src/manager/console/argument.d](src/manager/console/argument.d). Supported types include:
 - Primitives: `bool`, integers, floats, strings
-- Time types: `Duration` (with unit parsing: "5m", "30s"), `SysTime` (ISO-8601 date-times: 2026-08-10T12:00:00)
+- Time types: `Duration` (with unit parsing: "5min", "30s"), `SysTime` (ISO-8601 date-times: 2026-08-10T12:00:00)
 - Complex types: enums, arrays, Collection references (BaseObject, Device, Component, Stream, Interface)
 - Custom types can be added by implementing `convertVariant()` function
 
@@ -371,7 +371,7 @@ Core runtime providing:
 
 ##### Automation System
 
-An automation runs a `do={...}` action when a signal fires. It is a `Collection` object under `/automation`. Triggers are `on=<uri>,<uri>` signal URIs of the form `[provider:|@]body[?k=v&k=v]` -- e.g. `on="@door.open"` (element change; `@` is the element sentinel), `on="every:5m"`, `on="at:18:00?days=mon,fri"`, `on="when:2027-01-01T00:00:00"`, `on="mqtt:/topic?qos=1"`. URIs containing `?` `=` `@` must be quoted at the CLI (the parser reserves them). An optional `if=<expr>` (a quoted boolean expression) gates the action; a falsey result skips it. The time shorthands `schedule=`/`at=`/`when=` are thin write-only sugar that translate to `every:`/`at:`/`when:` URIs (finer detail like `?days=`/`?repeat=false` lives in the URI, not as sugar). Signals come from `ISignalProvider`s registered on the `Application` (general capability, [src/manager/signal.d](src/manager/signal.d)); the built-ins are the Application itself (the `element:` provider), cron ([src/manager/cron.d](src/manager/cron.d), the `every:`/`at:`/`when:` time provider -- the former `/system/cron` collection is gone) and the object-signal module (`object:<name>?state=online|offline|destroyed`). `edge=`/`for=` qualify the condition; `debounce=`/`throttle=`/`rate=`+`burst=` shape the trigger stream. Example: `/automation/add name=poll schedule=5m do={ /device/print }`. See [src/apps/automation/automation.d](src/apps/automation/automation.d). Design: [docs/AUTOMATION.md](docs/AUTOMATION.md); command reference: the `/automation` section of [docs/CLI.md](docs/CLI.md). Not yet built (see [TODO.md](TODO.md), Automation): execution policy, typed `$trigger.*` context, more providers, the `on=` completer.
+An automation runs a `do={...}` action when a signal fires. It is a `Collection` object under `/automation`. Triggers are `on=<uri>,<uri>` signal URIs of the form `[provider:|@]body[?k=v&k=v]` -- e.g. `on="@door.open"` (element change; `@` is the element sentinel), `on="every:5min"`, `on="at:18:00?days=mon,fri"`, `on="when:2027-01-01T00:00:00"`, `on="mqtt:/topic?qos=1"`. URIs containing `?` `=` `@` must be quoted at the CLI (the parser reserves them). An optional `if=<expr>` (a quoted boolean expression) gates the action; a falsey result skips it. The time shorthands `schedule=`/`at=`/`when=` are thin write-only sugar that translate to `every:`/`at:`/`when:` URIs (finer detail like `?days=`/`?repeat=false` lives in the URI, not as sugar). Signals come from `ISignalProvider`s registered on the `Application` (general capability, [src/manager/signal.d](src/manager/signal.d)); the built-ins are the Application itself (the `element:` provider), cron ([src/manager/cron.d](src/manager/cron.d), the `every:`/`at:`/`when:` time provider -- the former `/system/cron` collection is gone) and the object-signal module (`object:<name>?state=online|offline|destroyed`). `edge=`/`for=` qualify the condition; `debounce=`/`throttle=`/`rate=`+`burst=` shape the trigger stream. Example: `/automation/add name=poll schedule=5min do={ /device/print }`. See [src/apps/automation/automation.d](src/apps/automation/automation.d). Design: [docs/AUTOMATION.md](docs/AUTOMATION.md); command reference: the `/automation` section of [docs/CLI.md](docs/CLI.md). Not yet built (see [TODO.md](TODO.md), Automation): execution policy, typed `$trigger.*` context, more providers, the `on=` completer.
 
 #### Router Layer (src/router/)
 
@@ -701,7 +701,7 @@ OpenWatt has two types of tests:
 
 **1. Unit Tests (D `unittest` blocks)** - For testing individual functions and data structures
 ```bash
-rm -rf obj bin && make CONFIG=unittest && ./bin/x86_64_unittest/openwatt_test 2>&1 | grep "passed"
+rm -rf obj bin && make CONFIG=unittest && ./bin/x86_64_linux_unittest/openwatt_test 2>&1 | grep "passed"
 ```
 
 **2. Runtime Tests (Python test harness in `test/`)** - For testing the full application
@@ -725,8 +725,11 @@ The test harness provides **3 core capabilities**:
 3. **Persistent REPL** - Interactive investigation (recommended for Claude)
    ```bash
    # Start background REPL with named pipe (cross-platform)
-   # Binary: bin/x86_64_debug/openwatt (Linux) or openwatt.exe (Windows)
-   BINARY="bin/x86_64_debug/openwatt$([ "$(uname -s | grep -i mingw)" ] && echo .exe)"
+   # Binary: bin/x86_64_linux_debug/openwatt (Linux) or bin/x86_64_windows_debug/openwatt.exe
+   BINARY="bin/x86_64_linux_debug/openwatt"
+   case "$(uname -s)" in
+       MINGW*|MSYS*|CYGWIN*) BINARY="bin/x86_64_windows_debug/openwatt.exe" ;;
+   esac
    mkfifo /tmp/ow_stdin
    tail -f /tmp/ow_stdin | $BINARY --interactive > /tmp/ow_stdout.txt 2> /tmp/ow_stderr.txt &
 

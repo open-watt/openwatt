@@ -112,10 +112,13 @@ class OpenWattConsole:
         self.close()
 
 
+DEFAULT_BINARY = f"bin/x86_64_{'windows' if platform.system() == 'Windows' else 'linux'}_debug/openwatt"
+
+
 class OpenWattProcess:
     """Manages OpenWatt process lifecycle with --interactive mode"""
 
-    def __init__(self, binary_path='bin/x86_64_debug/openwatt', startup_delay=3.0, use_debugger=False):
+    def __init__(self, binary_path=DEFAULT_BINARY, startup_delay=3.0, use_debugger=False):
         # Make path absolute if relative
         if not Path(binary_path).is_absolute():
             # Assume relative to project root (parent of test/)
@@ -131,8 +134,7 @@ class OpenWattProcess:
             if exe_path.exists():
                 self.binary_path = exe_path
 
-        # Store project root for setting working directory
-        self.project_root = self.binary_path.parent.parent.parent  # bin/x86_64_debug/openwatt -> root
+        self.project_root = self.binary_path.parent.parent.parent
 
         self.startup_delay = startup_delay
         self.use_debugger = use_debugger

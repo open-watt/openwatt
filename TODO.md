@@ -54,7 +54,7 @@ left in place they are dead weight whose reason is invisible in the code.
   session interfaces. Use the shared bridge-port collection and dynamic endpoint
   cleanup rather than a separate membership path.
 - Fix the Windows empty-directory `get_temp_filename` contract in uRT; the native
-  console unit test fails creating its script file (command.d:590), including
+  console and uRT file unit tests fail creating their script files, including
   outside the sandbox. WSL unit tests pass.
 - Complete bridge VLAN membership tables beyond per-port PVID configuration;
   non-PVID ingress with filtering and non-PVID egress currently drop.
@@ -147,7 +147,6 @@ holding action, not an answer. Options, cheapest first:
   fault-injection tests do not establish the storage driver's power-loss guarantees.
 - Bound cleanup of crash-left `.tmp` and rejected `.bad` revision files without losing
   useful recovery evidence; successful-save retention currently prunes completed files.
-- Complete the config-dirty mutation coverage (`set-hostname` currently bypasses it).
 - **Retained reset/clock validation after uRT #322/#327**: the pin includes the
   merged watchdog-clock and reset-barrier fixes plus RTC restore. Verify Beken
   reset with its watchdog initially disabled, RP2350 mark/reset and wall-time
@@ -348,6 +347,10 @@ and the panel left outstanding.
   pool nor the event queues, intrinsics and signal providers its constructor registers.
 - **`Duration` properties print as raw nanoseconds** (`get` shows `3e+10ns` for `30s`): the value
   reaches the console as a quantity rather than through `Duration`'s own formatting.
+- **Duration compact-format footprint**: verify with the supported target compiler and linked
+  helpers. The assembly review is complete; isolated LDC 1.43 / LLVM 22 `-Oz` probes of both
+  functions and their numeric tables are 528 bytes below the original on ARM968E-S, 116 bytes
+  above on RV32IMAFC and 184 above on Cortex-M4. These are not firmware totals.
 
 ## Driver contracts (2026-10-04)
 
@@ -723,8 +726,6 @@ one primitive (most belong in urt) and its copies deleted:
 
 ## 802.15.4 radio (WpanInterface)
 
-- Create `wpan1` in the C5 and C6 system profiles, as on S31; both currently require
-  manually adding the built-in radio.
 - **Receive is validated on hardware; transmit is not.** On an ESP32-C5 DevKitC-1,
   `/interface/wpan/add name=wpan1 channel=15 promiscuous=yes` comes up Running with
   link-status up and counts real traffic off the air: 54 packets and 1,568 bytes in the first
@@ -879,10 +880,12 @@ decisions are in [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md). The
   netconsole, and neither does anything `/system/reboot` or the boot guard's revert logs last.
   Drain the sinks before resetting.
 
-- **`/element/set` swallows rejected values**: `element_set` calls `Element.value(Variant)`, which
-  drops the error `update_typed_series` returns, so `value=1` on a bool element does nothing and
-  says nothing (`value=true` works). Report the error, and decide whether 0 and 1 should convert
-  to bool.
+- **Give the CLI reference a consistent order**: `docs/CLI.md` is loosely grouped by
+  subsystem, but command paths within groups are unsorted and later additions sit outside
+  their groups. Keep related commands together and sort paths within each group.
+
+- **Decide whether `/element/set value=1` converts to bool**: the element rejects it today and
+  the console now says so (`value=true` works).
 
 - **The console prints quantities badly**: `/device/print` shows an integer 1310 nm as
   `1.31e+3nm` and a float supply of 3.2616 V as `3.2616000175476074V`. The stored values are
@@ -908,12 +911,6 @@ decisions are in [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md). The
   heap offsets into a heap that is null. `tail_record` likewise hands back the previous format's
   record. Either the readers ignore a tail whose format is not the element's, or the setter
   retires the tail.
-
-- **One more `realloc` result stored unchecked**: `router/iface/mac.d:407`
-  (`mem = realloc(mem, ...)`) assigns straight into the owning field, so an allocation failure
-  installs null over a live pointer. It wants the shape the series bucket lifecycle now has: grow
-  into a temporary, keep the old block when the grow fails, and let the caller refuse the
-  operation.
 
 - **`bucket_capacity`/`text_bucket_capacity` do not scale with the target**: `text_heap_limit`
   now does (8k under `Tiny`, 64k otherwise), but the record-count caps declared beside it are
@@ -1191,8 +1188,6 @@ this is what remains.
   verified on the BL808 only.
 - **`/element/set` cannot reach a device keyed by a peer id**, such as the energy app's device,
   which `create_energy_device` keys by the local node id.
-- **`/device/print` renders negative ages as `-209.-6s`** when a remote timestamp is ahead of the
-  local clock.
 
 - **A cleared template can survive a reconnect on a wholly unclassified path**: an introduction
   omits `tmpl` when nothing on the path carries a template, and an absent chain is silence, so a
@@ -1477,15 +1472,15 @@ this is what remains.
   2026-09-20; `IPV6=0 GATEWAY=0` builds clean, so it is this tier specifically. Gate the import
   and its call sites on `has_ip`.
 
-- **`EUILit` is unusable under LDC.** Building an EUI-64 from a string literal at compile time
-  makes LDC 1.42 emit `ICE: overlapping initializers for struct literal`, from `EUI`'s union of a
-  `ulong` and a `ubyte[8]`. DMD accepts it, and every ESP build uses LDC, so the template cannot
-  be used in anything that targets hardware; use the `EUI64(0x01, ...)` constructor instead.
-  Nothing had ever instantiated it, which is also why its own length check was wrong until now.
-  The C-style `EUI64 x = { b: [...] }` initialiser is not an escape: D refuses brace initialisers
-  on a struct that declares a constructor, and `EUI` declares one.
-
 - Fix `urt.conv.parse_uint` overflow: reject values outside `ulong` range using the existing zero-consumption error contract. Revision filenames use checked `parse_int_fast`.
+
+- **Finish the remaining fixes from PR #833 after a second review**: the trivial subset
+  is split out. The subscriber tombstones lose a resubscribe when all eight slots are occupied;
+  the energy patch clears the utility anomaly flag but leaves rogue provenance and residuals;
+  the ESPHome patch still trusts truncated protobuf fields and continues the outer RX loop
+  after requesting a deferred restart. Resolve those before landing. Separately review the
+  Telnet overflow state, Ethernet duplex, resolved endpoint reporting, Linux switch-tier gates,
+  Windows UDP/uRT changes, and the remaining CLI documentation.
 
 - **Unsubscribe during packet dispatch walks a stale slice**: `BaseInterface.fire_subscribers`
   and `send` iterate `_subscribers[0 .. _num_subscribers]` captured before the loop, and
@@ -1509,8 +1504,6 @@ this is what remains.
   stream reads console events. Use a terminal or supported session transport.
   Drain stderr during execution and terminate before waiting for EOF; the
   current shutdown reads stderr before stopping the process and can hang.
-  `test/test_runner.py` also looks for `bin/x86_64_debug/openwatt` while the makefile emits
-  `bin/x86_64_linux_debug/`, so it finds no Linux build at all.
 
 - **`assert(classref)` still segfaults LDC debug builds**: under `--fno-rtti`, `assert(o)` on a
   class reference runs the invariant, and urt's `_d_invariant_impl` walks `typeid(o)`, which is
