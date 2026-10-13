@@ -313,15 +313,10 @@ unittest
         this(CID id, ObjectFlags flags = ObjectFlags.none) { super(collection_type_info!TestStream, id, flags); }
         void activate() { set_state(State.running); }
         void push(const(char)[] text) { incoming(text, getTime()); }
-        override ptrdiff_t write(const(void[])[] data...)
+        override ptrdiff_t transmit(const(void)[] data)
         {
             ++writes;
-            if (fail_write)
-                return -1;
-            size_t count;
-            foreach (part; data)
-                count += part.length;
-            return count;
+            return fail_write ? -1 : data.length;
         }
     }
 

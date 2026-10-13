@@ -1597,15 +1597,10 @@ nothrow @nogc:
         super(collection_type_info!SessionTestStream, id, flags);
     }
 
-    override ptrdiff_t write(const(void[])[] data...)
+    override ptrdiff_t transmit(const(void)[] data)
     {
-        size_t written;
-        foreach (d; data)
-        {
-            _output ~= cast(const(ubyte)[])d;
-            written += d.length;
-        }
-        return written;
+        _output ~= cast(const(ubyte)[])data;
+        return data.length;
     }
 
     override size_t tx_request() const

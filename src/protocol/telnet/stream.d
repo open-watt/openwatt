@@ -136,16 +136,6 @@ nothrow @nogc:
 
     // Stream API
 
-    // written bytes wait in the queue and are escaped as the line pulls them, like a producer's
-    override ptrdiff_t write(const(void[])[] data...)
-    {
-        if (!_inner)
-            return -1;
-        size_t total = hold_copy(data);
-        tx_handler_changed();
-        return total;
-    }
-
     override bool send(Page* frame)
     {
         if (!_inner)
@@ -418,9 +408,7 @@ private:
         if (!page)
             return null;
 
-        add_tx_bytes(page.length);
-        if (_logging)
-            write_to_log(false, page.data);
+        sent(page.data);
         escape(page);
         return page;
     }
@@ -818,8 +806,6 @@ unittest
             {
                 super(collection_type_info!Transport, id, flags);
             }
-            override ptrdiff_t write(const(void[])[] data...)
-                => 0;
             void feed(const(char)[] text)
             {
                 incoming(text, MonoTime());

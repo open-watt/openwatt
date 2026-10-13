@@ -81,28 +81,17 @@ nothrow @nogc:
         => _tx ? _tx.tx_backlog : 0;
 
 
-    override ptrdiff_t write(const(void[])[] data...)
+    override bool send(Page* frame)
     {
-        if (!_tx || !_tx.running)
-            return 0;
-        ptrdiff_t n = _tx.write(data);
-        if (n > 0)
+        Stream tx = _tx;
+        if (!tx || !tx.running)
         {
-            add_tx_bytes(n);
-            if (_logging)
-            {
-                size_t remain = n;
-                foreach (d; data)
-                {
-                    if (remain == 0)
-                        break;
-                    size_t chunk = d.length < remain ? d.length : remain;
-                    write_to_log(false, d[0 .. chunk]);
-                    remain -= chunk;
-                }
-            }
+            free_tx_chain(frame);
+            return false;
         }
-        return n;
+        for (Page* p = frame; p; p = p.next)
+            sent(p.data);
+        return tx.send(frame);
     }
 
 protected:
@@ -171,9 +160,7 @@ private:
         Page* page = request_tx_page(req, status);
         if (!page)
             return null;
-        add_tx_bytes(page.length);
-        if (_logging)
-            write_to_log(false, page.data);
+        sent(page.data);
         return page;
     }
 

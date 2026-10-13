@@ -657,13 +657,8 @@ unittest
         }
         override size_t tx_backlog() const
             => backlog;
-        override ptrdiff_t write(const(void[])[] data...)
-        {
-            size_t n;
-            foreach (d; data)
-                n += d.length;
-            return n;
-        }
+        override ptrdiff_t transmit(const(void)[] data)
+            => data.length;
         size_t backlog;
     }
 

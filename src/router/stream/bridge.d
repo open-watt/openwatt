@@ -3,6 +3,7 @@ module router.stream.bridge;
 import urt.array;
 import urt.log;
 import urt.mem;
+import urt.mem.pagepool : Page;
 import urt.string;
 import urt.string.format;
 import urt.time;
@@ -75,26 +76,28 @@ nothrow @nogc:
         return fastest;
     }
 
-    // a member that takes less than all of it drops the rest; a fan-out holds no backlog per member
-    override ptrdiff_t write(const(void[])[] data...)
+protected:
+    // a member with no room drops the frame whole; a fan-out holds no backlog per member
+    override void queue_tx_page(Page* frame)
     {
+        for (Page* p = frame; p; p = p.next)
+            sent(p.data);
         foreach (ref stream; m_streams[])
         {
-            if (stream && stream.running)
-                stream.write(data);
+            Stream member = stream;
+            if (!member || !member.tx_request)
+                continue;
+            Page* copy;
+            Page* p = frame;
+            while (p && append_tx_copy(copy, p.data) == p.length)
+                p = p.next;
+            if (p)
+                free_tx_chain(copy);
+            else
+                member.send(copy);
         }
-        size_t total = 0;
-        foreach (ref d; data)
-        {
-            total += d.length;
-            if (_logging)
-                write_to_log(false, d[]);
-        }
-        add_tx_bytes(total);
-        return total;
+        free_tx_chain(frame);
     }
-
-protected:
 
     // a member that goes away restarts the bridge, and its replacement is hooked once it runs
     override CompletionStatus startup()
@@ -149,8 +152,9 @@ private:
     {
         foreach (ref stream; m_streams[])
         {
-            if (stream && stream.get !is source && stream.running)
-                stream.write(data);
+            Stream member = stream;
+            if (member && member !is source && member.tx_request)
+                member.send_bytes(data);
         }
         incoming(data, rx_time);
     }
@@ -180,17 +184,21 @@ unittest
         {
             super(collection_type_info!Member, id, flags);
         }
-        override ptrdiff_t write(const(void[])[] data...)
+        override size_t tx_request() const
+            => full ? 0 : super.tx_request();
+        override ptrdiff_t transmit(const(void)[] data)
         {
-            if (full)
+            if (fail)
+                return -1;
+            if (stall)
                 return 0;
-            size_t n;
-            foreach (d; data)
-            {
-                output ~= cast(const(char)[])d;
-                n += d.length;
-            }
-            return n;
+            output ~= cast(const(char)[])data;
+            return data.length;
+        }
+        void open()
+        {
+            stall = false;
+            drain_tx();
         }
         void feed(const(char)[] text)
         {
@@ -198,6 +206,11 @@ unittest
         }
         Array!char output;
         bool full;
+        bool fail;
+        bool stall;
+    protected:
+        override Duration tx_retry_interval() const
+            => Duration.zero;
     }
 
     static void settle()
@@ -226,8 +239,15 @@ unittest
 
     // a member that refuses does not hold up the others
     b.full = true;
-    assert(bridge.write("w") == 1 && a.output[] == "w" && b.output[] == "x");
+    assert(bridge.send_bytes("w") && a.output[] == "w" && b.output[] == "x" && b.tx_queued == 0);
     b.full = false;
+
+    // a member whose line fails restarts the bridge while it relays
+    b.fail = true;
+    assert(bridge.send_bytes("v") && a.output[] == "wv" && !b.running && !bridge.running);
+    b.fail = false;
+    settle();
+    assert(bridge.running && b.running);
 
     // a member destroyed and created again under its name is hooked once the replacement runs
     a.destroy();
@@ -240,4 +260,15 @@ unittest
     assert(b.output[] == "xy");
     b.feed("z");
     assert(again.output[] == "z");
+
+    // a frame goes to a member whole or not at all
+    char[5000] big = void;
+    foreach (i, ref c; big)
+        c = cast(char)('a' + i % 26);
+    b.output.clear();
+    b.stall = true;
+    assert(bridge.send_bytes(big[]) && b.tx_queued == big.length && again.output[1 .. $] == big[]);
+    assert(bridge.send_bytes(big[]) && b.tx_queued == big.length, "a member past its watermark drops the frame whole");
+    b.open();
+    assert(b.output[] == big[]);
 }

@@ -112,9 +112,6 @@ nothrow @nogc:
         _notify_close = false;
     }
 
-    override ptrdiff_t write(const(void[])[] data...)
-        => queue_copy(data);
-
     // the peer's control plane has room again
     final void room_returned()
     {
@@ -185,7 +182,6 @@ protected:
                 taken = end;
             }
         }
-        add_tx_bytes(taken);
         return taken;
     }
 
@@ -216,7 +212,6 @@ private:
     {
         if (peer.tx_full())
             peer.arm_tx();
-        add_tx_bytes(taken);
         return taken;
     }
 }

@@ -382,20 +382,6 @@ nothrow @nogc:
         return CompletionStatus.complete;
     }
 
-    final override ptrdiff_t write(const(void[])[] data...)
-    {
-        if (_handshake_state != HandshakeState.completed)
-        {
-            version (DebugTLS)
-                log.trace("write rejected, handshake state=", _handshake_state);
-            return -1;
-        }
-
-        size_t total = hold_copy(data);
-        tx_handler_changed();
-        return total;
-    }
-
     final override bool send(Page* frame)
     {
         if (!running)
@@ -490,9 +476,7 @@ private:
         if (!input)
             return null;
 
-        add_tx_bytes(input.length);
-        if (_logging)
-            write_to_log(false, input.data);
+        sent(input.data);
         Page* output = encrypt_page(input);
         if (!output)
         {
@@ -1344,9 +1328,6 @@ unittest
         {
             super(collection_type_info!Transport, id, flags);
         }
-
-        override ptrdiff_t write(const(void[])[] data...)
-            => 0;
     }
 
     bool owns_pool = page_pool_init();
@@ -1359,7 +1340,7 @@ unittest
     tls.fail_session();
     assert(tls._handshake_state == TLSStream.HandshakeState.failed);
     ubyte[1] more;
-    assert(tls.write(more[]) == -1);
+    assert(!tls.send_bytes(more[]));
 
     // once established, ciphertext that arrives with no consumer pauses the transport, so no more is read
     {

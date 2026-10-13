@@ -214,23 +214,6 @@ nothrow @nogc:
         }
     }
 
-    // A write past the watermark is refused; one under it goes whole, so a frame is never split.
-    override ptrdiff_t write(const(void[])[] data...)
-    {
-        if (!running || uart_tx_queued(_uart) >= tx_queue_limit)
-            return 0;
-        size_t total;
-        foreach (d; data)
-        {
-            immutable size_t taken = uart_write(_uart, d);
-            sent(d[0 .. taken]);
-            total += taken;
-            if (taken < d.length)
-                break;
-        }
-        return total;
-    }
-
     // Drives a modem line by hand, for devices with reset wired to RTS or DTR; a line flow control owns is refused.
     final bool set_rts(bool asserted)
         => uart_set_line(_uart, UartLine.rts, asserted);
@@ -287,13 +270,6 @@ private:
             }
         }
         return cfg;
-    }
-
-    void sent(const(void)[] data)
-    {
-        if (_logging || has_tap)
-            write_to_log(false, data);
-        add_tx_bytes(data.length);
     }
 
     // Each frame goes up whole, dated by when its last byte arrived; a frame still arriving goes up as it stands, dated

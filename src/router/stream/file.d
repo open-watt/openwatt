@@ -128,40 +128,15 @@ nothrow @nogc:
     override size_t tx_request() const
         => _tx.is_open ? super.tx_request() : 0;
 
-    override ptrdiff_t write(const(void[])[] data...)
+protected:
+    override ptrdiff_t transmit(const(void)[] data)
     {
         if (!_tx.is_open)
-            return 0;
-        size_t total;
-        foreach (d; data)
-        {
-            size_t n;
-            Result r = _tx.write(d, n);
-            total += n;
-            if (!r || n < d.length)
-                break;
-        }
-        if (total)
-        {
-            add_tx_bytes(total);
-            if (_logging)
-            {
-                size_t remain = total;
-                foreach (d; data)
-                {
-                    if (remain == 0)
-                        break;
-                    size_t chunk = d.length < remain ? d.length : remain;
-                    write_to_log(false, d[0 .. chunk]);
-                    remain -= chunk;
-                }
-            }
-        }
-        return total;
+            return -1;
+        size_t n;
+        return _tx.write(data, n) ? n : -1;
     }
 
-
-protected:
     override bool validate() const pure
         => _tx_path.length != 0 || _rx_path.length != 0;
 

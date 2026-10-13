@@ -74,6 +74,7 @@ row alone. Sizes stay in bytes; round in the note if that reads better.
 | 2026-10-09 | ow/filter-in-place | ldc 1.43.0 | 5,790,344 | 533,784 | | Telnet and TLS frame in the request's reserved room; their pending chains go |
 | 2026-10-11 | ow/http-respond | ldc 1.43.0 | 5,782,096 | 533,848 | | console output and HTTP responses are producers the stream pulls |
 | 2026-10-12 | ow/api-producers | ldc 1.43.0 | 5,802,272 | 534,536 | | API responses and sync command output stream from producers |
+| 2026-10-13 | ow/stream-frames | ldc 1.43.0 | 5,805,592 | 534,664 | | every writer sends whole frames as pages; `Stream.write()` retired |
 
 ### Waveshare ESP32-S3-RS485-CAN, `make esp-idf-build BOARD=waveshare-esp32-s3-rs485-can CONFIG=release`
 

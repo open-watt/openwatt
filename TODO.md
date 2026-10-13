@@ -6,6 +6,65 @@
   2.114). Host CI builds DMD with `dmd-master` and excludes LDC x86, since LDC is still on the 2.113
   frontend. Restore the release DMD and the LDC x86 jobs once both releases carry the fix.
 
+## Up next, in this order
+
+Decided 2026-10-13, ahead of S11 and the rest of the list. Each is a confirmed fault: items 2 to 4 took down
+fleet nodes, and item 1 is shown by computing every ACK and NAK frame.
+
+1. **ASH sends ACK and NAK frames without byte-stuffing**: `ash_ack` builds control, CRC and flag on
+   the stack and `ash_emit` sends them raw (`src/protocol/ezsp/ashv2.d`), though ASH stuffs every
+   frame. Two of the 32 controls carry a reserved CRC byte: ACK ack=3 ready (0x8B) sends `C1 13`, a
+   raw XOFF to a dongle on software flow control, and NAK ack=0 (0xA0) sends `54 1A`, a Substitute
+   that discards the frame. Route ACK and NAK through `ash_send`'s stuffing (RST stays raw, it is a
+   fixed Cancel sequence) and test all 32 controls. Likely the trigger of item 2 on the Pi: an
+   XOFF'd NCP goes silent, ASH retransmits, the NCP answers ERROR and ASH restarts the serial line.
+2. **A stream's close is asynchronous: flush in latent stopping, drop on error, never block**:
+   - Proven by the core dump: on 2026-10-13 at 09:21 UTC the Pi's main thread sat in `close()` in
+     `uart_hw_close`, called from `SerialStream.shutdown()` through `set_state_impl` from
+     `ASHInterface.process_frame` (an ERROR frame restarting the serial line), until `driver.watchdog`
+     aborted the process; the supervisor then lost a minute relaunching. Evidence, kept off the Pi:
+     `D:/tmp/evidence/2026-10-13-pi-serial-close-hang/` (core, the slot 184 binary it matches,
+     backtrace and log). The supervisor log shows eight more watchdog kills under slot 173 on
+     2026-10-10 and 11, one 16 s after launch like this one; their cores are gone, so the same cause
+     there is likely, not shown.
+   - Not yet shown: why `close()` blocked. `uart_hw_close` discards pending output (`tcflush`)
+     before closing but never sets `closing_wait`, so the reading is that Linux waits up to 30 s for
+     bytes the CP210x already holds while the dongle, on software flow control, is not taking them.
+     The repro below must confirm it.
+   - Both waits on that path go whatever the answer: urt's `uart_close` spins up to 250 ms in
+     `drain()` on every backend, and the kernel `close()` waited past the 5 s watchdog. Meanwhile
+     `destroy()` discards whatever a base queue holds. One model for every stream:
+   - `shutdown()` stops taking frames and returns `continue_` while output remains, so a graceful
+     `destroy()` flushes through the state machine; a failed line drops at once, and a deadline of
+     a few seconds drops for a peer that stopped reading, so neither the stream nor app shutdown
+     hangs. A reset requested for a peer in error (ASH's ERROR) drops rather than flushes.
+   - The base queue drains through `transmit`; streams with their own queue (`serial`,
+     `tcp_stream`, `duplex`, `file`) report drained from their send-completion path; the filters
+     (`tls`, `telnet`) flush into the stream below, TLS sending `close_notify` first. TCP sends its
+     FIN after the last queued byte.
+   - `uart_close` closes now and discards what is pending, on every backend; its drain spin goes.
+     On Linux, `closing_wait` none at open (or the close on the UART's I/O thread) keeps the kernel
+     from re-deciding the flush with a block. Reproduce the hang first by holding a CP210x's output
+     off, and show the change closes it.
+   - Then HTTP/1.0 is close-delimited: no `Content-Length` and no chunking, the body as-is, and the
+     connection closed after each response unless the client asked for keep-alive. The `505`s and
+     the `/api/cli/execute` guard go, and a peer's FIN no longer drops what is queued.
+   - An HTTP/1.1 request with `Connection: close` is answered and the connection kept: on the Pi and
+     on Windows (2026-10-13, master 2700da61 too) the client waits for a close that never comes.
+     Close after the response once the stream flushes on destroy.
+3. **Peering destroys a claimed peer twice**: `claim_peer_state`'s `offline` branch unsubscribes but
+   keeps `a.peer`, so a destroy it did not start (`/sync/peer/remove`) never nulls the pointer and
+   `teardown_attempt` destroys the peer again: the bench S3 aborted on `destroy() called twice` at
+   16:45 on 2026-10-13. Keep the subscription for exactly as long as `a.peer` is held: `offline`
+   only marks the attempt dead, `destroyed` nulls the peer, and `teardown_attempt` unsubscribes and
+   destroys a peer it still holds. Rewrite the unit test that asserts the old behaviour to replay a
+   real `destroy()` (`offline`, then `destroyed`, then teardown).
+4. **ESP32 crash dumps lose their numbering**: `crash.d` saves an 11-byte `char[11] sequence = void`
+   with only 10 digits written, so a stack byte that happens to be a digit is parsed into the next
+   number (61 -> 619 -> 6209 ...) until it saturates at 4294967295 and every dump overwrites
+   `crash-4294967295.core`; `load_file`'s buffer is never freed. Save the 10 digits, free the
+   buffer, and reset `crash.seq` on the saturated units (F993 holds 33 such dumps, still to decode).
+
 ## URGENT: undo at the next compiler update
 
 These work around compiler bugs. Undo each as soon as the minimum DMD **and** LDC carry the fix;
@@ -316,12 +375,6 @@ and the panel left outstanding.
   a 500-character line, `/log/print`) arrived with holes on both cores. The stream now queues what
   the line has not taken and a UART write never waits; retest on both cores, and find what held
   TX for 50 ms if the stall remains.
-- **Console output past a serial stream's TX bound is lost until S4**: `Session` writes with
-  `write()` and ignores a short write, and `SerialStream.write()` refuses once 2 KB waits in the
-  driver, which drains asynchronously. Replies that outrun the line lose everything past the bound:
-  40 queued `/system/sysinfo` over a pty with a slow reader gave 29 replies. Master hid it on Linux
-  behind the kernel's tty buffer and spun up to 50 ms per ring-full on embedded parts. Pull-driven
-  print (S4, #817/#803) retires it.
 - **Type-ahead is echoed again after every command**: the session redraws all pending input with
   each prompt, so n queued commands echo n(n+1)/2 times (40 queued: 755 copies, 13 KB). Echo
   pending input once.
@@ -1592,6 +1645,13 @@ this is what remains.
   While there, move the listener off its per-tick non-blocking recv onto the reactor via
   `fdwatch`.
 
+- **A sender restarts inside its own call when its line fails**: TLS, Telnet and the MQTT client
+  answer their stream's `offline` with `restart()`, whose `shutdown()` runs synchronously. A frame
+  they send can fail the line inside that `send()`, so TLS would free its mbedTLS contexts under
+  `tls_bio_send`, inside mbedTLS, and the MQTT client would clear its parse buffer and `_stream` in
+  the middle of `parse_received()`. Latent while TCP and TLS are the lines, since neither fails
+  inside `send()`; answer `offline` with `restart_deferred()`, as the HTTP client does, before
+  another line carries them.
 - **One SLIP codec for TWC and PPP**: TWC escapes and unescapes RFC 1055 SLIP by hand in
   `protocol/tesla/iface.d`, and PPP's SLIP mode decodes the same scheme but is unfinished. When PPP
   needs it, share one codec (escaped length, escape, unescape) between them.
@@ -1608,36 +1668,10 @@ this is what remains.
   FIFO response correlation with request handles. A rejected or timed-out submission must
   clear `in_flight`; late responses must not complete a different request.
 
-- **Bound the TCP push backlog once its writers can take a partial write**: `TCPConnection.send()`
-  queues pages without limit because MQTT packet emission (`src/protocol/mqtt/connection.d`),
-  the WebDAV `PROPFIND` multistatus and console session output push a whole message and ignore
-  the return; a cap would truncate their protocol streams. Give each a body producer for
-  `respond()` (the fileserver's `Listing` and the API's `UnitProducer` are the pattern), or have
-  it check `tx_backlog` before committing a message, then enforce a backlog bound in `send()`.
-
 - **Compress HTTP responses**: the server sends no `Content-Encoding`, so fileserver downloads,
   listings and the `/api` JSON dumps go uncompressed (a 132 KB `.conf` gzips ~4.9x). A deflate
   filter inside the chunked filter, chosen by `Accept-Encoding`, needs an incremental compressor;
   `urt.zip` is whole-buffer only.
-
-- **Streams drop their send queue when destroyed; make them flush by default**: `destroy()`, the
-  only way a stream ends, discards what its queue still holds. So an HTTP server cannot delimit a
-  body by closing, and answers HTTP/1.0 `505` for a body of unknown length (fileserver listings,
-  `/api/schema`, `/api/get`, `/api/list`, `/api/cli/execute`, which refuses before running the
-  command). The server also never closes after an HTTP/1.0 response, so a strict HTTP/1.0 client
-  waiting for the close hangs. And a client that half-closes after its request (netcat) has its
-  response cut short: on Windows a 52 KB listing with a `Content-Length` arrived truncated after
-  the client's FIN (master d865a630).
-  - The base `Stream.shutdown()` returns `continue_` while its send queue holds data, so every
-    graceful `destroy()` flushes. A failing `transmit` drops the queue as now, so broken links
-    still tear down at once, and a deadline of a few seconds drops it for a stalled reader so
-    neither it nor app shutdown hangs.
-  - Streams with their own queue (`tcp_stream`, `serial`, `duplex`, `file`) report drained from
-    their send-completion path; the filters (`tls`, `telnet`) flush into the stream below, TLS
-    sending `close_notify` first. TCP sends its FIN after the last queued byte.
-  - Then HTTP/1.0 is close-delimited: no `Content-Length` and no chunking, the body as-is, and the
-    connection closed after each response unless the client asked for keep-alive. The `505`s and
-    the `/api/cli/execute` guard go, and a peer's FIN no longer drops what is queued.
 
 - **A Windows TCP listener created early in startup never listens**: with
   `/protocol/http/server add` as the first line of a config, `tcp_listen` fails on every retry for
@@ -1728,10 +1762,7 @@ this is what remains.
   an honest "not in ISR" contract for the ADC.
 
 - **Stream TX queue follow-ups** (2026-10-06, #815):
-  - A stream whose `transmit()` is the default `write()` still lets a direct `write()` reach the
-    line ahead of pages already queued. Retire `write()` as a line path: subclasses implement
-    `transmit()`, and `write()` becomes `queue_copy()` everywhere, as `SerialStream` does now.
-  - `SerialStream.write()` never blocks until the line has taken the bytes, so Modbus RTU's
+  - A frame sent to a `SerialStream` returns before the line has taken it, so Modbus RTU's
     transport timeout starts while its frame is still on the wire. The timeout's margin of two
     frame times absorbs one queued frame; timing from the line's completion would not need it.
   - No test drives a pump's continuation: `pump_tx` yielding into `continue_tx`, `invite_tx`

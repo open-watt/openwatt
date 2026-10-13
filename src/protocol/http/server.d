@@ -1057,8 +1057,6 @@ unittest
         {
             super(collection_type_info!Line, id, flags);
         }
-        override ptrdiff_t write(const(void[])[] data...)
-            => 0;
         override size_t tx_request() const
             => room;
         override void queue_tx_page(Page* page)

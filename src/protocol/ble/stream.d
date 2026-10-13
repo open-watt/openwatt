@@ -1,6 +1,5 @@
 module protocol.ble.stream;
 
-import urt.array;
 import urt.lifetime;
 import urt.result;
 import urt.string;
@@ -123,28 +122,34 @@ nothrow @nogc:
         return super.status_message();
     }
 
-    override ptrdiff_t write(const(void[])[] data...)
-    {
-        size_t accepted = 0;
-        foreach (d; data)
-        {
-            size_t space = max_tx_backlog - _tx_buffer.length;
-            size_t n = min(d.length, space);
-            if (n == 0)
-                break;
-            _tx_buffer ~= cast(const(ubyte)[])d[0 .. n];
-            accepted += n;
-            if (n < d.length)
-                break;
-        }
-        service_tx();
-        return accepted;
-    }
-
 protected:
 
     override bool validate() const
         => _client.get !is null && !_service_str.empty && !_write_str.empty;
+
+    override ptrdiff_t transmit(const(void)[] data)
+    {
+        BLEClient c = _client.get;
+        if (!c || !c.running || _write_handle == 0)
+            return 0;
+        size_t taken, chunk_max = c.att_mtu - 3;
+        while (taken < data.length && !_await_ack)
+        {
+            size_t n = min(data.length - taken, chunk_max);
+            _await_ack = _use_request;
+            if (!c.write(_write_handle, cast(const(ubyte)[])data[taken .. taken + n], _use_request, _use_request ? &on_write_ack : null))
+            {
+                _await_ack = false;
+                break;
+            }
+            taken += n;
+        }
+        return taken;
+    }
+
+    // an acked write drains the next; only a refused write is retried on a timer
+    override Duration tx_retry_interval() const
+        => _await_ack ? Duration.zero : super.tx_retry_interval();
 
     override CompletionStatus startup()
     {
@@ -192,7 +197,6 @@ protected:
     override CompletionStatus shutdown()
     {
         release_client();
-        _tx_buffer.clear();
         _await_ack = false;
         _write_handle = 0;
         _notify_handle = 0;
@@ -212,15 +216,11 @@ private:
     GUID _write_char;
     GUID _notify_char;
 
-    Array!ubyte _tx_buffer;
     ushort _write_handle;
     ushort _notify_handle;
     bool _subscribed;
     bool _await_ack;
     bool _use_request;
-    bool _servicing;
-
-    enum max_tx_backlog = 64 * 1024;
 
     void release_client()
     {
@@ -247,34 +247,7 @@ private:
     {
         _await_ack = false;
         if (error == ATTError.none)
-            service_tx();
+            drain_tx();
         // a failed link fails the client; its offline signal restarts this stream
-    }
-
-    void service_tx()
-    {
-        if (_servicing)
-            return;
-        _servicing = true;
-        scope (exit) _servicing = false;
-
-        BLEClient c = _client.get;
-        if (!c || !c.running || _write_handle == 0)
-            return;
-
-        size_t chunk_max = c.att_mtu - 3;
-        while (_tx_buffer.length && !_await_ack)
-        {
-            size_t n = min(_tx_buffer.length, chunk_max);
-            _await_ack = _use_request;
-            if (!c.write(_write_handle, _tx_buffer[0 .. n], _use_request, _use_request ? &on_write_ack : null))
-            {
-                _await_ack = false;
-                break;
-            }
-            add_tx_bytes(n);
-            write_to_log(false, _tx_buffer[0 .. n]);
-            _tx_buffer.remove(0, n);
-        }
     }
 }
