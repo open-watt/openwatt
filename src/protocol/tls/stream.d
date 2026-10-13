@@ -548,7 +548,7 @@ private:
             _subscribed = false;
             _stream = null;
         }
-        restart();
+        restart_deferred();
     }
 
     // once established, ciphertext is read only while there is a consumer for the plaintext

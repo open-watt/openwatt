@@ -1631,13 +1631,6 @@ this is what remains.
   While there, move the listener off its per-tick non-blocking recv onto the reactor via
   `fdwatch`.
 
-- **A sender restarts inside its own call when its line fails**: TLS, Telnet and the MQTT client
-  answer their stream's `offline` with `restart()`, whose `shutdown()` runs synchronously. A frame
-  they send can fail the line inside that `send()`, so TLS would free its mbedTLS contexts under
-  `tls_bio_send`, inside mbedTLS, and the MQTT client would clear its parse buffer and `_stream` in
-  the middle of `parse_received()`. Latent while TCP and TLS are the lines, since neither fails
-  inside `send()`; answer `offline` with `restart_deferred()`, as the HTTP client does, before
-  another line carries them.
 - **One SLIP codec for TWC and PPP**: TWC escapes and unescapes RFC 1055 SLIP by hand in
   `protocol/tesla/iface.d`, and PPP's SLIP mode decodes the same scheme but is unfinished. When PPP
   needs it, share one codec (escaped length, escape, unescape) between them.
