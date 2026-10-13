@@ -154,7 +154,11 @@ protected:
                 log.debug_("connecting on '", _stream.name, "'...");
 
             static immutable ubyte[5] RST = [ ASH_CANCEL_BYTE, 0xC0, 0x38, 0xBC, ASH_FLAG_BYTE ];
-            ash_emit(RST[]);
+            if (Page* page = frame_page(RST.length))
+            {
+                (cast(ubyte[])page.data)[] = RST[];
+                send_frame(_stream, page);
+            }
 
             _last_event = now;
 
@@ -724,9 +728,9 @@ private:
         version (DebugASHMessageFlow)
             log.tracef("--> {0} [x{1, 02x}]", nak ? "NAK" : "ACK", control);
 
-        ubyte[4] ack_msg = [ control, 0, 0, ASH_FLAG_BYTE ];
-        ack_msg[1..3] = ack_msg[0..1].ezsp_crc().nativeToBigEndian;
-        return ash_emit(ack_msg[]);
+        ubyte[3] raw = [ control, 0, 0 ];
+        raw[1 .. 3] = raw[0 .. 1].ezsp_crc().nativeToBigEndian;
+        return ash_frame(raw[]);
     }
 
     bool ash_nak(ubyte ack, bool ready)
@@ -744,7 +748,15 @@ private:
         ushort crc = frame[0 .. 1 + msg.length].ezsp_crc();
         frame[1 + msg.length .. 3 + msg.length][0..2] = crc.nativeToBigEndian;
 
-        const(ubyte)[] raw = frame[0 .. 1 + msg.length + 2];
+        version (DebugASHMessageFlow)
+            log.tracef("--> [x{0, 02x}]: {1}", control, cast(void[])msg);
+
+        return ash_frame(frame[0 .. 1 + msg.length + 2]);
+    }
+
+    // every frame but RST is stuffed, the CRC included
+    bool ash_frame(const(ubyte)[] raw)
+    {
         size_t length = raw.length + 1;
         foreach (b; raw)
             length += needs_escape(b);
@@ -753,19 +765,6 @@ private:
             return false;
         ubyte[] stuffed = cast(ubyte[])page.data;
         stuffed[stuff_bytes(raw, stuffed)] = ASH_FLAG_BYTE;
-
-        version (DebugASHMessageFlow)
-            log.tracef("--> [x{0, 02x}]: {1}", control, cast(void[])msg);
-
-        return send_frame(_stream, page) == 0;
-    }
-
-    bool ash_emit(const(ubyte)[] frame)
-    {
-        Page* page = frame_page(frame.length);
-        if (!page)
-            return false;
-        (cast(ubyte[])page.data)[] = frame[];
         return send_frame(_stream, page) == 0;
     }
 
@@ -846,4 +845,56 @@ unittest
     assert(ASHInterface.data_action(3, 3, false) == ASHInterface.DataAction.accept);
     assert(ASHInterface.data_action(2, 3, true) == ASHInterface.DataAction.acknowledge_duplicate);
     assert(ASHInterface.data_action(4, 3, false) == ASHInterface.DataAction.reject);
+
+    // ACK 0x8B's CRC carries XOFF and NAK 0xA0's a Cancel; every ACK and NAK reaches the line stuffed
+    static class Line : Stream
+    {
+    nothrow @nogc:
+        ~this() {}
+        enum type_name = "ash-test-line";
+        this(CID id, ObjectFlags flags = ObjectFlags.none)
+        {
+            super(collection_type_info!Line, id, flags);
+        }
+        override ptrdiff_t transmit(const(void)[] data)
+        {
+            output ~= cast(const(ubyte)[])data;
+            return data.length;
+        }
+        Array!ubyte output;
+    }
+
+    Line line = Collection!Line().create("ash-test-line");
+    ASHInterface ash = Collection!ASHInterface().create("ash-test");
+    scope (exit)
+    {
+        ash.destroy();
+        line.destroy();
+        foreach (_; 0 .. 4)
+            Collection!Stream().update_all();
+    }
+    foreach (_; 0 .. 4)
+        Collection!Stream().update_all();
+    assert(line.running);
+    ash._stream = line;
+
+    foreach (ubyte ack; 0 .. 8)
+    {
+        foreach (ready; [false, true])
+        {
+            foreach (nak; [false, true])
+            {
+                line.output.clear();
+                assert(ash.ash_ack(ack, ready, nak));
+                ubyte[8] wire = 0;
+                assert(line.output.length <= wire.length && line.output[$ - 1] == ASHInterface.ASH_FLAG_BYTE);
+                wire[0 .. line.output.length] = line.output[];
+                foreach (b; wire[0 .. line.output.length - 1])
+                    assert(b == ASHInterface.ASH_ESCAPE_BYTE || !ASHInterface.needs_escape(b));
+                size_t length = ASHInterface.unstuff_bytes(wire[], 0, line.output.length - 1);
+                assert(length == 3 && wire[0] == (0x80 | (nak ? 0x20 : 0) | (ready << 3) | ack));
+                assert(wire[1 .. 3] == wire[0 .. 1].ezsp_crc().nativeToBigEndian);
+            }
+        }
+    }
 }

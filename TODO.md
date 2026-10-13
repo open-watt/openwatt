@@ -8,17 +8,10 @@
 
 ## Up next, in this order
 
-Decided 2026-10-13, ahead of S11 and the rest of the list. Each is a confirmed fault: items 2 to 4 took down
-fleet nodes, and item 1 is shown by computing every ACK and NAK frame.
+Decided 2026-10-13, ahead of S11 and the rest of the list. Each is a confirmed fault that took down a fleet node
+or loses its forensic record.
 
-1. **ASH sends ACK and NAK frames without byte-stuffing**: `ash_ack` builds control, CRC and flag on
-   the stack and `ash_emit` sends them raw (`src/protocol/ezsp/ashv2.d`), though ASH stuffs every
-   frame. Two of the 32 controls carry a reserved CRC byte: ACK ack=3 ready (0x8B) sends `C1 13`, a
-   raw XOFF to a dongle on software flow control, and NAK ack=0 (0xA0) sends `54 1A`, a Substitute
-   that discards the frame. Route ACK and NAK through `ash_send`'s stuffing (RST stays raw, it is a
-   fixed Cancel sequence) and test all 32 controls. Likely the trigger of item 2 on the Pi: an
-   XOFF'd NCP goes silent, ASH retransmits, the NCP answers ERROR and ASH restarts the serial line.
-2. **A stream's close is asynchronous: flush in latent stopping, drop on error, never block**:
+1. **A stream's close is asynchronous: flush in latent stopping, drop on error, never block**:
    - Proven by the core dump: on 2026-10-13 at 09:21 UTC the Pi's main thread sat in `close()` in
      `uart_hw_close`, called from `SerialStream.shutdown()` through `set_state_impl` from
      `ASHInterface.process_frame` (an ERROR frame restarting the serial line), until `driver.watchdog`
@@ -52,14 +45,14 @@ fleet nodes, and item 1 is shown by computing every ACK and NAK frame.
    - An HTTP/1.1 request with `Connection: close` is answered and the connection kept: on the Pi and
      on Windows (2026-10-13, master 2700da61 too) the client waits for a close that never comes.
      Close after the response once the stream flushes on destroy.
-3. **Peering destroys a claimed peer twice**: `claim_peer_state`'s `offline` branch unsubscribes but
+2. **Peering destroys a claimed peer twice**: `claim_peer_state`'s `offline` branch unsubscribes but
    keeps `a.peer`, so a destroy it did not start (`/sync/peer/remove`) never nulls the pointer and
    `teardown_attempt` destroys the peer again: the bench S3 aborted on `destroy() called twice` at
    16:45 on 2026-10-13. Keep the subscription for exactly as long as `a.peer` is held: `offline`
    only marks the attempt dead, `destroyed` nulls the peer, and `teardown_attempt` unsubscribes and
    destroys a peer it still holds. Rewrite the unit test that asserts the old behaviour to replay a
    real `destroy()` (`offline`, then `destroyed`, then teardown).
-4. **ESP32 crash dumps lose their numbering**: `crash.d` saves an 11-byte `char[11] sequence = void`
+3. **ESP32 crash dumps lose their numbering**: `crash.d` saves an 11-byte `char[11] sequence = void`
    with only 10 digits written, so a stack byte that happens to be a digit is parsed into the next
    number (61 -> 619 -> 6209 ...) until it saturates at 4294967295 and every dump overwrites
    `crash-4294967295.core`; `load_file`'s buffer is never freed. Save the 10 digits, free the
