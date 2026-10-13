@@ -927,6 +927,9 @@ nothrow @nogc:
     }
 
     final override void destroy()
+        => destroy_impl(true);
+
+    private void destroy_impl(bool dispatch)
     {
         assert(!(_state & _destroyed), "destroy() called twice - bookkeeping bug");
 
@@ -949,7 +952,7 @@ nothrow @nogc:
 
         if (!was_valid)
             super.destroy();    // no shutdown to run; detach and queue now
-        else
+        else if (dispatch)
             do_update();        // start the teardown now; an async shutdown() continues on the state machine
     }
 
@@ -1058,8 +1061,8 @@ protected:
 
             if (_flags & ObjectFlags.temporary)
             {
-                // destroy() drives the machine itself; dispatching below would double-run it
-                destroy();
+                // destroy drives the machine itself; dispatching below would double-run it
+                destroy_impl(dispatch);
                 return;
             }
         }
@@ -2199,6 +2202,16 @@ unittest
     assert(t.running);
     t.restart();
     assert(t.shutdowns == 1 && t._state == ActiveObject.State.destroyed);
+
+    // a deferred restart of a running temporary leaves its shutdown to the next pass, as for any object
+    LifecycleTestObject td = alloc!LifecycleTestObject(table.allocate("lifecycle-td", 0), ObjectFlags.temporary);
+    table.bind(td.id, td);
+    td.do_update();
+    assert(td.running);
+    td.restart_deferred();
+    assert(td.shutdowns == 0 && td._state == ActiveObject.State.destroying);
+    td.do_update();
+    assert(td.shutdowns == 1 && td._state == ActiveObject.State.destroyed);
 
     // a temporary that ends itself in online() is destroyed there, and never announced online
     LifecycleTestObject early = alloc!LifecycleTestObject(table.allocate("lifecycle-early", 0), ObjectFlags.temporary);

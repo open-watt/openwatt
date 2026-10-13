@@ -416,7 +416,7 @@ private:
     void stream_state_change(ActiveObject obj, StateSignal signal)
     {
         if (signal == StateSignal.offline || signal == StateSignal.destroyed)
-            restart();
+            restart_deferred();
     }
 
     void stream_rx(Stream, const(void)[] data, MonoTime rx_time)

@@ -459,7 +459,7 @@ private:
             _subscribed = false;
             _inner = null;
         }
-        restart();
+        restart_deferred();
     }
 
     void handle_subnegotiation(const(ubyte)[] sub)

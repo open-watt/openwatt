@@ -744,21 +744,18 @@ private:
             ref a = kvp.value;
             if (a.peer is obj && a.claimed)
             {
-                // the decision is terminal: deregister now so no further signals arrive,
-                // and leave the teardown to update()
-                a.peer.unsubscribe(&claim_peer_state);
                 a.dead = true;
                 return;
             }
         }
     }
 
+    // the attempt stays subscribed while it holds the peer, so a destroy it did not start nulls the peer
     void teardown_attempt(ref ClaimAttempt a)
     {
-        if (a.peer && !a.dead)
-            a.peer.unsubscribe(&claim_peer_state);
         if (a.peer)
         {
+            a.peer.unsubscribe(&claim_peer_state);
             a.peer.destroy();
             a.peer = null;
         }
@@ -912,27 +909,41 @@ unittest
         assert(m._issued.length == 1);
     }
 
+    // a claimed peer destroyed from outside (/sync/peer/remove) signals offline, then destroyed; teardown destroys nothing
     {
         SyncPeeringModule m = alloc!SyncPeeringModule(null);
         scope(exit) free(m);
-        SyncPeer p = alloc!SyncPeer(CID(1));
-        scope(exit) free(p);
-
+        SyncPeer p = Collection!SyncPeer().create("peering-test-removed");
         SyncPeeringModule.ClaimAttempt* a = m._attempts.insert(0xA, SyncPeeringModule.ClaimAttempt());
         a.peer = p;
         a.claimed = true;
         p.subscribe(&m.claim_peer_state);
 
-        m.claim_peer_state(p, StateSignal.offline);
-        assert(a.dead && a.peer is p);
-        p.subscribe(&m.claim_peer_state);
-        p.unsubscribe(&m.claim_peer_state);
-
-        a.dead = false;
-        m.claim_peer_state(p, StateSignal.destroyed);
+        p.set_remote_state(StateSignal.online);
+        p.set_remote_state(StateSignal.destroyed);
         assert(a.dead && a.peer is null);
-
-        m.claim_peer_state(p, StateSignal.destroyed);
-        assert(m._attempts.length == 1);
+        m.teardown_attempt(*a);
+        assert(a.peer is null && !a.dead);
+        m._attempts.remove(0xA);
     }
+
+    // a claimed peer that goes offline on its own is held, and teardown unsubscribes and destroys it once
+    {
+        SyncPeeringModule m = alloc!SyncPeeringModule(null);
+        scope(exit) free(m);
+        SyncPeer p = Collection!SyncPeer().create("peering-test-offline");
+        SyncPeeringModule.ClaimAttempt* a = m._attempts.insert(0xA, SyncPeeringModule.ClaimAttempt());
+        a.peer = p;
+        a.claimed = true;
+        p.subscribe(&m.claim_peer_state);
+
+        p.set_remote_state(StateSignal.online);
+        p.set_remote_state(StateSignal.offline);
+        assert(a.dead && a.peer is p);
+        m.teardown_attempt(*a);
+        assert(a.peer is null && !a.dead);
+        m._attempts.remove(0xA);
+    }
+    foreach (_; 0 .. 4)
+        Collection!SyncPeer().update_all();
 }

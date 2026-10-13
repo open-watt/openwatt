@@ -74,6 +74,8 @@ row alone. Sizes stay in bytes; round in the note if that reads better.
 | 2026-10-09 | ow/filter-in-place | ldc 1.43.0 | 5,790,344 | 533,784 | | Telnet and TLS frame in the request's reserved room; their pending chains go |
 | 2026-10-11 | ow/http-respond | ldc 1.43.0 | 5,782,096 | 533,848 | | console output and HTTP responses are producers the stream pulls |
 | 2026-10-12 | ow/api-producers | ldc 1.43.0 | 5,802,272 | 534,536 | | API responses and sync command output stream from producers |
+| 2026-10-13 | ow/ash-ack-stuffing | ldc 1.43.0 | 5,809,728 | 534,656 | | ASH ACK stuffing alone, as deployed to the Pi (slot 185) |
+| 2026-10-13 | ow/ash-ack-stuffing | ldc 1.43.0 | 5,805,496 | 534,656 | | ASH ACK stuffing, peering, deferred restarts, crash dump numbering |
 | 2026-10-13 | ow/stream-frames | ldc 1.43.0 | 5,805,592 | 534,664 | | every writer sends whole frames as pages; `Stream.write()` retired |
 
 ### Waveshare ESP32-S3-RS485-CAN, `make esp-idf-build BOARD=waveshare-esp32-s3-rs485-can CONFIG=release`
@@ -93,6 +95,7 @@ Limit is the 4 MB `ota_0` partition. `ram` is internal DRAM only; PSRAM is heap.
 | 2026-10-10 | ow/http-respond | ldc 1.42.0 | 2,976,000 | 138,507 | 4,194,304 | console output and HTTP responses are producers the stream pulls |
 | 2026-10-11 | ow/http-respond | ldc 1.42.0 | 2,985,296 | 141,871 | 4,194,304 | `COREDUMP=1`, as deployed to the bench S3 |
 | 2026-10-12 | ow/api-producers | ldc 1.42.0 | 2,985,552 | 141,839 | 4,194,304 | `COREDUMP=1`; API responses and sync command output stream from producers |
+| 2026-10-13 | ow/ash-ack-stuffing | ldc 1.42.0 | 2,986,928 | 141,887 | 4,194,304 | `COREDUMP=1`; ASH ACK stuffing, peering, deferred restarts, crash dump numbering: +96 over master 8e7db0c4 (2,986,832) |
 
 ### ESP32-C5 DevKitC-1, `make esp-idf-build PLATFORM=esp32-c5 CONFIG=release`
 
