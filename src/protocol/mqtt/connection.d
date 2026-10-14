@@ -4,6 +4,7 @@ import urt.array;
 import urt.lifetime;
 import urt.log;
 import urt.mem;
+import urt.mem.page : Page;
 import urt.string;
 import urt.time;
 
@@ -54,7 +55,6 @@ nothrow @nogc:
     {
         release_stream();
         parse_buf.clear();
-        out_buf.clear();
     }
 
     // Returns false when the broker should reap this connection.
@@ -102,33 +102,32 @@ nothrow @nogc:
         release_stream();
     }
 
-    void send_publish_to_subscriber(
-        const(char)[] topic,
-        const(ubyte)[] payload,
-        const(ubyte)[] orig_properties,
-        ubyte qos,
-        bool retain)
+    // a subscriber whose queue is full misses QoS 0 publishes until it catches up
+    void send_publish_to_subscriber(const(char)[] topic, const(ubyte)[] payload, const(ubyte)[] orig_properties, ubyte qos)
     {
-        if (!stream || !stream.running)
+        if (!stream || !stream.running || state != ConnectionState.active)
             return;
-        if (state != ConnectionState.active)
+        PublishPacket pkt = publish_packet(topic, payload, orig_properties, qos, false);
+        if (send_packet(publish_size(pkt, protocol_level), (ref ubyte[] s) => encode_publish(s, pkt, protocol_level), true) || dropping)
             return;
+        dropping = true;
+        writeWarning("MQTT client on ", stream_name(), " is not keeping up; dropping publishes until it does");
+    }
 
-        PublishPacket pkt;
-        pkt.topic = topic;
-        pkt.payload = payload;
-        pkt.qos = qos;
-        pkt.retain = retain;
-        // QoS > 0 would need a packet-id; broker caps sub.qos for now.
-        if (protocol_level >= ProtocolLevel._5)
-            pkt.properties = orig_properties;
+    // the SUBACK queued after this arms the pull, so the retained messages follow it, one at a time
+    void replay_retained(String filter, ubyte qos)
+    {
+        cancel_replay(filter[]);
+        replays ~= Replay(filter, String(), qos);
+    }
 
-        size_t sz = publish_size(pkt, protocol_level);
-        out_buf.resize(sz);
-        ubyte[] sink = out_buf[];
-        if (!encode_publish(sink, pkt, protocol_level))
-            return;
-        send_packet(out_buf[]);
+    void cancel_replay(const(char)[] filter)
+    {
+        foreach (i, ref r; replays)
+        {
+            if (r.filter[] == filter)
+                return replays.remove(i);
+        }
     }
 
     Session* attached_session() => session;
@@ -144,31 +143,99 @@ private:
     ConnectionState state;
     ProtocolLevel protocol_level;
     ushort keep_alive_secs;
+    bool dropping;
     MonoTime last_contact;
     MonoTime connect_deadline;
-    bool subscribed_stream;
 
     Array!ubyte parse_buf;
-    Array!ubyte out_buf;
+    PacketQueue tx;
+    Array!Replay replays;
+
+    struct Replay
+    {
+        String filter;
+        String after;
+        ubyte qos;
+    }
 
     void release_stream()
     {
+        tx.clear();
+        replays.clear();
         if (!stream)
             return;
         stream.release_rx_handler(&stream_rx);
+        stream.release_tx_handler(&produce);
         stream.destroy();
         stream = null;
     }
 
-    bool send_packet(const(ubyte)[] packet)
+    // a packet the queue cannot take ends the connection, unless it is a publish the subscriber can miss
+    bool send_packet(size_t size, scope PacketEncoder encode, bool droppable = false)
     {
         if (!stream)
             return false;
-        if (stream.tx_backlog <= max_tx_backlog)
-            return stream.send_bytes(packet);
+        if (tx.push(size, encode))
+        {
+            stream.tx_handler(&produce);
+            return true;
+        }
+        if (droppable)
+            return false;
         writeWarning("MQTT client on ", stream_name(), " is not taking what is sent; dropping it");
         terminate();
         return false;
+    }
+
+    PublishPacket publish_packet(const(char)[] topic, const(ubyte)[] payload, const(ubyte)[] orig_properties, ubyte qos, bool retain)
+    {
+        PublishPacket pkt;
+        pkt.topic = topic;
+        pkt.payload = payload;
+        pkt.qos = qos;
+        pkt.retain = retain;
+        // QoS > 0 would need a packet-id; broker caps sub.qos for now.
+        if (protocol_level >= ProtocolLevel._5)
+            pkt.properties = orig_properties;
+        return pkt;
+    }
+
+    Page* produce(ref const TxRequest req, out TxStatus status)
+    {
+        if (tx.empty)
+        {
+            dropping = false;
+            if (!replay_next())
+            {
+                status = TxStatus.starved;
+                return null;
+            }
+        }
+        Page* page = tx.take(req, status);
+        if (status == TxStatus.idle && !replays.empty)
+            status = TxStatus.more;
+        return page;
+    }
+
+    // false when the next retained message found no page; the cursor stays on it for the next pull
+    bool replay_next()
+    {
+        while (!replays.empty)
+        {
+            Replay* r = &replays[0];
+            RetainedMessage* m = broker.next_retained(r.filter[], r.after[]);
+            if (!m)
+            {
+                replays.remove(0);
+                continue;
+            }
+            PublishPacket pkt = publish_packet(m.topic[], m.payload[], m.properties[], r.qos, true);
+            if (!tx.push(publish_size(pkt, protocol_level), (ref ubyte[] s) => encode_publish(s, pkt, protocol_level)))
+                return false;
+            r.after = m.topic;
+            return true;
+        }
+        return true;
     }
 
     // a failure terminates the connection; the broker reaps it on its next update
@@ -211,6 +278,7 @@ private:
         if (signal == StateSignal.offline)
         {
             stream.unsubscribe(&stream_state_change);
+            stream.release_tx_handler(&produce);
             stream = null;
         }
     }
@@ -408,14 +476,7 @@ private:
     }
 
     bool send_connack(ref ConnAckPacket pkt)
-    {
-        size_t sz = connack_size(pkt, protocol_level);
-        out_buf.resize(sz);
-        ubyte[] sink = out_buf[];
-        if (!encode_connack(sink, pkt, protocol_level))
-            return false;
-        return send_packet(out_buf[]);
-    }
+        => send_packet(connack_size(pkt, protocol_level), (ref ubyte[] s) => encode_connack(s, pkt, protocol_level));
 
     bool send_connack_reject(ProtocolLevel level, ubyte reason, bool session_present)
     {
@@ -511,14 +572,7 @@ private:
     }
 
     bool send_ack(PacketType t, ref AckPacket pkt)
-    {
-        size_t sz = ack_size(pkt, protocol_level);
-        out_buf.resize(sz);
-        ubyte[] sink = out_buf[];
-        if (!encode_ack(sink, t, pkt, protocol_level))
-            return false;
-        return send_packet(out_buf[]);
-    }
+        => send_packet(ack_size(pkt, protocol_level), (ref ubyte[] s) => encode_ack(s, t, pkt, protocol_level));
 
     bool handle_subscribe(const(ubyte)[] body, ubyte flags)
     {
@@ -564,12 +618,7 @@ private:
         SubAckPacket ack;
         ack.packet_id = pkt.packet_id;
         ack.reason_codes = codes_buf[0 .. code_count];
-        size_t sz = suback_size(ack, protocol_level);
-        out_buf.resize(sz);
-        ubyte[] sink = out_buf[];
-        if (!encode_suback(sink, ack, protocol_level))
-            return false;
-        return send_packet(out_buf[]);
+        return send_packet(suback_size(ack, protocol_level), (ref ubyte[] s) => encode_suback(s, ack, protocol_level));
     }
 
     bool handle_unsubscribe(const(ubyte)[] body, ubyte flags)
@@ -588,6 +637,7 @@ private:
             if (!take_string(p, filter))
                 return false;
             bool removed = broker.unsubscribe_session(session, filter);
+            cancel_replay(filter);
             if (code_count == codes_buf.length)
                 return false;
             codes_buf[code_count++] = removed ? ReasonCode.Success : ReasonCode.NoSubscriptionExisted;
@@ -597,23 +647,14 @@ private:
         ack.packet_id = pkt.packet_id;
         if (protocol_level >= ProtocolLevel._5)
             ack.reason_codes = codes_buf[0 .. code_count];
-        size_t sz = unsuback_size(ack, protocol_level);
-        out_buf.resize(sz);
-        ubyte[] sink = out_buf[];
-        if (!encode_unsuback(sink, ack, protocol_level))
-            return false;
-        return send_packet(out_buf[]);
+        return send_packet(unsuback_size(ack, protocol_level), (ref ubyte[] s) => encode_unsuback(s, ack, protocol_level));
     }
 
     bool handle_pingreq(const(ubyte)[] body, ubyte flags)
     {
         if (!decode_pingreq(body, flags))
             return false;
-        ubyte[2] buf;
-        ubyte[] sink = buf[];
-        if (!encode_pingresp(sink))
-            return false;
-        return send_packet(buf[]);
+        return send_packet(2, (ref ubyte[] s) => encode_pingresp(s));
     }
 
     bool handle_disconnect(const(ubyte)[] body, ubyte flags)
@@ -631,50 +672,99 @@ private:
     }
 
     bool send_disconnect(ref DisconnectPacket pkt)
-    {
-        size_t sz = disconnect_size(pkt, protocol_level);
-        out_buf.resize(sz);
-        ubyte[] sink = out_buf[];
-        if (!encode_disconnect(sink, pkt, protocol_level))
-            return false;
-        return send_packet(out_buf[]);
-    }
+        => send_packet(disconnect_size(pkt, protocol_level), (ref ubyte[] s) => encode_disconnect(s, pkt, protocol_level));
 }
 
 
 unittest
 {
     import manager.collection;
+    import urt.mem.pagepool : page_pool_deinit, page_pool_init;
 
-    static class Backlogged : Stream
+    static class Line : Stream
     {
     nothrow @nogc:
         ~this() {}
-        enum type_name = "mqtt-test-backlogged";
+        enum type_name = "mqtt-test-line";
         this(CID id, ObjectFlags flags = ObjectFlags.none)
         {
-            super(collection_type_info!Backlogged, id, flags);
+            super(collection_type_info!Line, id, flags);
         }
-        override size_t tx_backlog() const
-            => backlog;
         override ptrdiff_t transmit(const(void)[] data)
-            => data.length;
-        size_t backlog;
+        {
+            size_t n = data.length < room ? data.length : room;
+            output ~= (cast(const(ubyte)[])data)[0 .. n];
+            room -= n;
+            return n;
+        }
+        Array!ubyte output;
+        size_t room = size_t.max;
+    protected:
+        override Duration tx_retry_interval() const
+            => Duration.zero;
     }
 
-    Backlogged stream = Collection!Backlogged().create("mqtt-test-backlogged");
+    static FixedHeader next_packet(ref const(ubyte)[] wire, out const(ubyte)[] body)
+    {
+        FixedHeader h;
+        assert(decode_header(wire, h) && wire.length >= h.body_length);
+        body = wire[0 .. h.body_length];
+        wire = wire[h.body_length .. $];
+        return h;
+    }
+
+    bool owns_pool = page_pool_init();
+    scope (exit) if (owns_pool) page_pool_deinit();
+    MQTTBroker broker = alloc!MQTTBroker(CID(1));
+    scope (exit) free(broker);
+    static immutable ubyte[] payload = [7];
+    foreach (topic; ["a/b", "b", "a"])
+        broker.publish(null, topic, payload, null, true, MonoTime());
+
+    Line line = Collection!Line().create("mqtt-test-line");
     foreach (_; 0 .. 4)
         Collection!Stream().update_all();
-    assert(stream.running);
+    assert(line.running);
 
-    // a peer counts what its transport holds, though the stream's own queue is empty
-    Connection c = Connection(null, stream);
-    ubyte[2] ping = [0xD0, 0];
-    stream.backlog = max_tx_backlog;
-    assert(c.send_packet(ping[]) && c.stream is stream);
-    stream.backlog = max_tx_backlog + 1;
-    assert(!c.send_packet(ping[]) && c.stream is null && c.state == ConnectionState.closing);
-    assert(!c.send_packet(ping[]), "a packet after the drop, as SUBACK follows a retained replay, finds the connection closed");
+    Connection c = Connection(broker, line);
+    c.state = ConnectionState.active;
+    c.protocol_level = ProtocolLevel._3_1_1;
+    static immutable ubyte[2] suback = [0x90, 0];
+    bool send_raw(const(ubyte)[] bytes, bool droppable = false)
+        => c.send_packet(bytes.length, (ref ubyte[] sink) { sink[0 .. bytes.length] = bytes[]; return true; }, droppable);
+    c.replay_retained("#".make_string(), 0);
+    assert(send_raw(suback[]));
+    const(ubyte)[] wire = line.output[];
+    const(ubyte)[] body;
+    assert(next_packet(wire, body).type == PacketType.SubAck, "the SUBACK goes out ahead of the retained messages");
+    foreach (topic; ["a", "a/b", "b"])
+    {
+        FixedHeader h = next_packet(wire, body);
+        PublishPacket pkt;
+        assert(h.type == PacketType.Publish && decode_publish(body, h.flags, c.protocol_level, pkt));
+        assert(pkt.topic == topic && pkt.retain, "the retained messages follow in the trie's order");
+    }
+    assert(wire.length == 0 && c.replays.empty);
+
+    c.replay_retained("a/#".make_string(), 0);
+    c.replay_retained("a/#".make_string(), 0);
+    assert(c.replays.length == 1, "subscribing again restarts the filter's replay rather than running it twice");
+    c.cancel_replay("a/#");
+    assert(c.replays.empty, "an unsubscribed filter replays nothing more");
+
+    line.room = 0;
+    ubyte[1000] big;
+    big[0] = 0x30;
+    big[1] = 0xE6;
+    big[2] = 0x07;
+    size_t taken;
+    while (send_raw(big[], true))
+        ++taken;
+    assert(taken > max_tx_queue / big.length && c.stream is line, "a full queue drops a publish and keeps the subscriber");
+    while (send_raw(suback[]))
+    {
+    }
+    assert(c.stream is null && c.state == ConnectionState.closing, "a full queue ends the connection rather than lose anything else");
     foreach (_; 0 .. 4)
         Collection!Stream().update_all();
 }

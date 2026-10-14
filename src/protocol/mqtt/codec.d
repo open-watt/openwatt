@@ -1,12 +1,91 @@
 module protocol.mqtt.codec;
 
+import urt.array;
+import urt.mem.page : Page;
+import urt.mem.pagepool : page_alloc, page_free;
 import urt.string;
+
+import router.stream : append_tx_chain, append_tx_copy, free_tx_chain, take_tx_page, TxRequest, TxStatus;
 
 nothrow @nogc:
 
 
-// a peer with this much queued behind it is not keeping up, and its connection is dropped
-enum size_t max_tx_backlog = 64 * 1024;
+// what a connection holds for its stream to pull; an empty queue takes any one packet, however large
+enum size_t max_tx_queue = 64 * 1024;
+
+alias PacketEncoder = bool delegate(ref ubyte[] sink) nothrow @nogc;
+
+// whole packets in order for the stream to pull; a packet past the bound, or without a page, is refused whole
+struct PacketQueue
+{
+nothrow @nogc:
+    @disable this(this);
+
+    ~this()
+    {
+        clear();
+    }
+
+    bool empty() const pure
+        => _chain is null;
+
+    // encoded into a page of its own, or through scratch into a chain when no page holds it whole
+    bool push(size_t size, scope PacketEncoder encode)
+    {
+        if (_chain && _bytes + size > max_tx_queue)
+            return false;
+        Page* frame = page_alloc(size);
+        if (frame)
+        {
+            ubyte[] sink = cast(ubyte[])frame.data;
+            if (!encode(sink))
+            {
+                page_free(frame);
+                return false;
+            }
+        }
+        else
+        {
+            __gshared Array!ubyte scratch;
+            scratch.resize(size);
+            ubyte[] sink = scratch[];
+            if (!encode(sink) || append_tx_copy(frame, scratch[], size) != size)
+            {
+                free_tx_chain(frame);
+                return false;
+            }
+        }
+        append_tx_chain(_chain, frame);
+        _bytes += size;
+        return true;
+    }
+
+    Page* take(ref const TxRequest req, out TxStatus status)
+    {
+        if (!_chain)
+        {
+            status = TxStatus.idle;
+            return null;
+        }
+        Page* page = take_tx_page(_chain, req, status);
+        if (!page)
+            return null;
+        _bytes -= page.length;
+        status = _chain ? TxStatus.more : TxStatus.idle;
+        return page;
+    }
+
+    void clear()
+    {
+        free_tx_chain(_chain);
+        _chain = null;
+        _bytes = 0;
+    }
+
+private:
+    Page* _chain;
+    size_t _bytes;
+}
 
 enum ProtocolLevel : ubyte
 {

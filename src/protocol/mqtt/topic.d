@@ -1,5 +1,6 @@
 module protocol.mqtt.topic;
 
+import urt.algorithm : compare;
 import urt.array;
 import urt.lifetime;
 import urt.map;
@@ -192,7 +193,21 @@ nothrow @nogc:
 
     void match_retained(const(char)[] filter, scope void delegate(ref const RetainedMessage) nothrow @nogc cb)
     {
-        match_retained_impl(&_root, filter, true, cb);
+        walk_retained(&_root, filter, null, Cursor.past, true, (ref RetainedMessage m) {
+            cb(m);
+            return false;
+        });
+    }
+
+    // the first match the walk reaches past topic `after`, which need not still be retained; an empty `after` starts it
+    RetainedMessage* next_retained(const(char)[] filter, const(char)[] after)
+    {
+        RetainedMessage* found;
+        walk_retained(&_root, filter, after, after.length ? Cursor.below : Cursor.past, true, (ref RetainedMessage m) {
+            found = &m;
+            return true;
+        });
+        return found;
     }
 
 private:
@@ -391,56 +406,71 @@ private:
         clear_retained_impl(next, topic);
     }
 
-    static void match_retained_impl(Node* node, const(char)[] filter, bool first_level, scope void delegate(ref const RetainedMessage) nothrow @nogc cb)
+    // where a resuming walk's cursor sits against a node: before the whole subtree, on the node, or below it in `after`
+    enum Cursor : ubyte
+    {
+        past,
+        at,
+        below,
+    }
+
+    static Cursor child_cursor(ptrdiff_t c, char cursor_sep)
+        => c > 0 ? Cursor.past : cursor_sep ? Cursor.below : Cursor.at;
+
+    alias RetainedVisitor = bool delegate(ref RetainedMessage) nothrow @nogc;
+
+    // true once visit stops the walk
+    static bool walk_retained(Node* node, const(char)[] filter, const(char)[] after, Cursor where, bool first_level, scope RetainedVisitor visit)
     {
         char sep;
         const(char)[] level = filter.split!'/'(sep);
-
         if (level == "#")
-        {
-            enumerate_retained(node, first_level, cb);
-            return;
-        }
+            return walk_subtree(node, after, where, first_level, visit);
 
+        char cursor_sep;
+        const(char)[] cursor = where == Cursor.below ? after.split!'/'(cursor_sep) : null;
         if (level == "+")
         {
             foreach (kvp; node.literal_children)
             {
                 if (first_level && kvp.key[].length > 0 && kvp.key[][0] == '$')
                     continue;
-                if (sep == 0)
-                {
-                    if (kvp.value.retained)
-                        cb(*kvp.value.retained);
-                }
-                else
-                    match_retained_impl(kvp.value, filter, false, cb);
+                if (walk_child(kvp.value, kvp.key[], cursor, cursor_sep, sep, filter, after, where, visit))
+                    return true;
             }
-            return;
+            return false;
         }
 
         Node** existing = level in node.literal_children;
-        if (!existing)
-            return;
-        if (sep == 0)
-        {
-            if ((*existing).retained)
-                cb(*(*existing).retained);
-        }
-        else
-            match_retained_impl(*existing, filter, false, cb);
+        return existing && walk_child(*existing, level, cursor, cursor_sep, sep, filter, after, where, visit);
     }
 
-    static void enumerate_retained(Node* node, bool first_level, scope void delegate(ref const RetainedMessage) nothrow @nogc cb)
+    static bool walk_child(Node* child, const(char)[] key, const(char)[] cursor, char cursor_sep, char sep, const(char)[] filter, const(char)[] after, Cursor where, scope RetainedVisitor visit)
     {
-        if (node.retained)
-            cb(*node.retained);
+        ptrdiff_t c = where == Cursor.below ? compare(key, cursor) : 1;
+        if (c < 0)
+            return false;
+        Cursor at = child_cursor(c, cursor_sep);
+        if (sep != 0)
+            return walk_retained(child, filter, after, at, false, visit);
+        return at == Cursor.past && child.retained && visit(*child.retained);
+    }
+
+    static bool walk_subtree(Node* node, const(char)[] after, Cursor where, bool first_level, scope RetainedVisitor visit)
+    {
+        if (where == Cursor.past && node.retained && visit(*node.retained))
+            return true;
+        char cursor_sep;
+        const(char)[] cursor = where == Cursor.below ? after.split!'/'(cursor_sep) : null;
         foreach (kvp; node.literal_children)
         {
             if (first_level && kvp.key[].length > 0 && kvp.key[][0] == '$')
                 continue;
-            enumerate_retained(kvp.value, false, cb);
+            ptrdiff_t c = where == Cursor.below ? compare(kvp.key[], cursor) : 1;
+            if (c >= 0 && walk_subtree(kvp.value, after, child_cursor(c, cursor_sep), false, visit))
+                return true;
         }
+        return false;
     }
 
     static void clear_node_contents(Node* node)
@@ -731,6 +761,38 @@ unittest
         trie.match_retained("a", (ref const RetainedMessage rm) {
             assert(rm.payload[] == expected[]);
         });
+    }
+
+    {
+        TopicTrie trie;
+        static immutable ubyte[] p = [1];
+        foreach (topic; ["b", "a/c", "a", "$sys/x", "a/b", "a/", "a//x", "a/b/z", "c/b"])
+            trie.store_retained(topic, p, null, 0);
+
+        void walk(const(char)[] filter, const(char)[][] expected...)
+        {
+            String after;
+            foreach (topic; expected)
+            {
+                RetainedMessage* m = trie.next_retained(filter, after[]);
+                assert(m && m.topic[] == topic, "the walk resumes past the last topic it handed out, in order");
+                after = m.topic;
+            }
+            assert(!trie.next_retained(filter, after[]));
+        }
+        walk("#", "a", "a/", "a//x", "a/b", "a/b/z", "a/c", "b", "c/b");
+        walk("a/#", "a", "a/", "a//x", "a/b", "a/b/z", "a/c");
+        walk("+", "a", "b");
+        walk("+/b", "a/b", "c/b");
+        walk("a/+", "a/", "a/b", "a/c");
+        walk("a/+/x", "a//x");
+        walk("$sys/#", "$sys/x");
+        walk("a/b", "a/b");
+
+        static immutable ubyte[] none;
+        trie.store_retained("a/b", none, null, 0);
+        RetainedMessage* m = trie.next_retained("#", "a/b");
+        assert(m && m.topic[] == "a/b/z", "a cursor resumes past a topic that is no longer retained");
     }
 
     {
