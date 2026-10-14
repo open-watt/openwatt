@@ -345,7 +345,7 @@ private:
     PageWaiter _tx_waiter;
     enum size_t max_tx_frame = 64 * 1024 + 14;                  // maximum sync payload plus WebSocket header
     enum size_t max_tx_pending = 128 * 1024;
-    enum size_t tx_low_water = 16 * 1024;                       // reserve room for one maximum frame
+    enum size_t tx_low_water = max_tx_page;                     // the producer runs one page ahead of TCP
     static assert(tx_low_water + max_tx_frame <= max_tx_pending, "the last frame admitted must fit");
 
     void stream_rx(Stream stream, const(void)[] data, MonoTime rx_time)
@@ -606,68 +606,39 @@ private:
         arm_tx();
     }
 
-    // copies a frame into pages behind what is queued, masking the body with a client's key
-    // a frame the pages cannot hold is refused whole, and the producer is invited back when pages are freed
+    // a frame packs behind the one before it, masked with a client's key; one the pages cannot hold is refused whole,
+    // and the producer is invited back when pages are freed
     bool queue_frame(const(ubyte)[] header, const(ubyte)[] body, const(ubyte)[] mask)
     {
         uint generation = page_free_generation();
-        Page* frame;
-        size_t total = header.length + body.length;
-        for (size_t at = 0; at < total; )
+        TxWriter writer = TxWriter(_tx_queue, header.length + body.length);
+        if (!writer)
         {
-            size_t n = total - at < max_tx_page ? total - at : max_tx_page;
-            Page* page = page_alloc(n);
-            if (!page)
-            {
-                free_chain(frame);
-                add_tx_drop();
-                _tx_waiter.wake = &pull_tx;
-                page_wait(&_tx_waiter, generation);
-                return false;
-            }
-            ubyte[] dst = cast(ubyte[])page.data;
-            size_t h;
-            if (at < header.length)
-            {
-                h = header.length - at < n ? header.length - at : n;
-                dst[0 .. h] = header[at .. at + h];
-            }
-            size_t from = at + h - header.length;
-            dst[h .. n] = body[from .. from + n - h];
-            if (mask.length)
-            {
-                foreach (i; h .. n)
-                    dst[i] ^= mask[(from + i - h) & 3];
-            }
-            append_tx_chain(frame, page);
-            at += n;
+            add_tx_drop();
+            _tx_waiter.wake = &pull_tx;
+            page_wait(&_tx_waiter, generation);
+            return false;
         }
-        append_tx_chain(_tx_queue, frame);
+        writer.put(header);
+        if (!mask.length)
+            writer.put(body);
+        for (size_t done; mask.length && done < body.length; )
+        {
+            ubyte[] span = writer.next(body.length - done);
+            foreach (i, ref b; span)
+                b = body[done + i] ^ mask[(done + i) & 3];
+            done += span.length;
+        }
         return true;
     }
 
     size_t tx_queued() const
-    {
-        size_t bytes;
-        for (const(Page)* page = _tx_queue; page; page = (cast(Page*)page).next)
-            bytes += page.length;
-        return bytes;
-    }
+        => chain_bytes(_tx_queue);
 
     void free_tx_queue()
     {
-        free_chain(_tx_queue);
+        free_tx_chain(_tx_queue);
         _tx_queue = null;
-    }
-
-    static void free_chain(Page* page)
-    {
-        while (page)
-        {
-            Page* next = page.next;
-            page_free(page);
-            page = next;
-        }
     }
 
     // every callback and timer that references this object or the stream is released here
@@ -1013,7 +984,7 @@ unittest
         ubyte[2] header = [0x82, 0x7E];
         ubyte[4] mask = [0x11, 0x22, 0x33, 0x44];
         assert(ws.queue_frame(header[], body[], mask[]) && ws.tx_queued == header.length + body.length);
-        assert(ws._tx_queue.length == max_tx_page && ws._tx_queue.next.next.next is null);
+        assert(ws._tx_queue.length >= max_tx_page && ws._tx_queue.next.next.next is null);
         size_t at;
         for (Page* page = ws._tx_queue; page; page = page.next)
         {
@@ -1027,5 +998,21 @@ unittest
         assert(at == header.length + body.length);
         ws.free_tx_queue();
         assert(ws.tx_queued == 0);
+    }
+
+    // small frames pack behind each other: a page opens only when the one before it is full
+    {
+        ubyte[2] header = [0x82, 72];
+        ubyte[72] body = 7;
+        foreach (_; 0 .. 20)
+            assert(ws.queue_frame(header[], body[], null));
+        assert(ws.tx_queued == 20 * 74);
+        for (Page* page = ws._tx_queue; page.next; page = page.next)
+            assert(!page.tailroom, "frames straddle pages rather than leave room behind");
+        assert(ws.tx_ready, "less than a page queued invites more");
+        foreach (_; 0 .. 2)
+            assert(ws.queue_frame(header[], body[], null));
+        assert(!ws.tx_ready, "a page queued holds the producer until TCP takes it");
+        ws.free_tx_queue();
     }
 }
