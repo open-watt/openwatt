@@ -136,17 +136,6 @@ nothrow @nogc:
 
     // Stream API
 
-    override bool send(Page* frame)
-    {
-        if (!_inner)
-        {
-            free_tx_chain(frame);
-            return false;
-        }
-        hold_tx(frame);
-        return true;
-    }
-
     override ulong tx_link_speed() const
         => _inner ? _inner.tx_link_speed : 0;
     override ulong rx_link_speed() const
@@ -235,6 +224,11 @@ protected:
             return;
         g_app.cancel(&resume_rx);
         g_app.schedule(getTime(), &resume_rx);
+    }
+
+    override void queue_tx_page(Page* frame)
+    {
+        hold_tx(frame);
     }
 
     override void tx_handler_changed()

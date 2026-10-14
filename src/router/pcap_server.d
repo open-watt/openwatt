@@ -519,11 +519,13 @@ private:
                 return;
 
             enum size_t head = RpcapHeader.sizeof + RpcapPktHdr.sizeof;
-            Page* page = page_alloc(max_tx_page);
+            size_t len = head;
+            iface.pcap_write(p, dir, (const void[] data) { len += data.length; });
+            Page* page = page_alloc(len < max_tx_page ? len : max_tx_page);
             if (!page)
                 return;
             ubyte[] buffer = cast(ubyte[])page.data;
-            size_t len = head;
+            len = head;
 
             iface.pcap_write(p, dir, (const void[] data) {
                 size_t n = data.length;

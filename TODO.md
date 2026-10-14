@@ -1635,6 +1635,11 @@ this is what remains.
   image it was taken under, and a rebuild never matches since IDF stamps the build time in. Archive
   `openwatt.elf` by its SHA prefix whenever a `COREDUMP=1` image is flashed or sent by OTA.
 
+- **An API with no `uri` never answers a path it does not route**: `/apps/api` without `uri=`
+  hooks the server's global handler, and then `POST /api/cli/execute` or `GET /api/` gets no
+  response at all; the client times out. Answer 404 for what the API does not handle, as the
+  server does for an unhandled path.
+
 - **A Windows TCP listener created early in startup never listens**: with
   `/protocol/http/server add` as the first line of a config, `tcp_listen` fails on every retry for
   any port, while a telnet server added after it listens; ordering the telnet server first makes

@@ -225,13 +225,22 @@ nothrow @nogc:
         => _conn ? _conn.tx_request : 0;
 
     override size_t tx_backlog() const
-        => tx_queued() + (_conn ? _conn.tx_queued : 0);
+        => _conn ? _conn.tx_queued : 0;
 
 
 protected:
 
-    override ptrdiff_t transmit(const(void)[] data)
-        => _conn ? _conn.send(data) : 0;
+    override void queue_tx_page(Page* frame)
+    {
+        while (frame)
+        {
+            Page* next = frame.next;
+            sent(frame.data);
+            if (!_conn || !_conn.send_page(frame))
+                return free_tx_chain(frame);
+            frame = next;
+        }
+    }
 
     // the connection reads only while this stream has a consumer
     override void rx_handler_changed()
