@@ -8,7 +8,7 @@ static if (num_wpan > 0)
 import urt.atomic;
 import urt.log;
 import urt.mem.page : Page;
-import urt.mem.pagepool : page_release;
+import urt.mem.pagepool : page_free;
 import urt.time;
 
 import manager;
@@ -251,7 +251,7 @@ private:
 
     void on_rx(Page* page, ref const WpanRxInfo info)
     {
-        scope(exit) page_release(page);
+        scope(exit) page_free(page);
 
         const(ubyte)[] frame = cast(const(ubyte)[])page.data;
         Packet pkt;
@@ -285,7 +285,7 @@ private:
         if (radio !is null && radio.running)
             radio.on_rx(frame, info);
         else
-            page_release(frame);
+            page_free(frame);
     }
 
     static void tx_dispatch(Wpan wpan, WpanTxError error, const(ubyte)[], ref const WpanRxInfo)

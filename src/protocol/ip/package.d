@@ -633,50 +633,28 @@ nothrow @nogc:
         if (_phase != Phase.open || !page || page.length == 0)
             return false;
 
-        static if (use_iocp)
+        bool empty = _tx_head is null;
+        page.next = null;
+        if (_tx_tail)
+            _tx_tail.next = page;
+        else
+            _tx_head = page;
+        _tx_tail = page;
+        _tx_bytes += page.length;
+        version (UseInternalIPStack)
         {
-            if (_send.page)
-            {
-                page.next = null;
-                if (_tx_tail)
-                    _tx_tail.next = page;
-                else
-                    _tx_head = page;
-                _tx_tail = page;
-                _tx_bytes += page.length;
-                return true;
-            }
-
-            _send.io.on_complete = &send_complete;
-            _send.page = page;
-            if (!post_send())
-            {
-                _send.page = null;
+            if (empty)
+                queue_service();
+        }
+        else static if (use_iocp)
+        {
+            if (!_send_count && !post_send())
                 fail(IPEvent.error);
-                return false;
-            }
-            _tx_bytes += page.length;
         }
         else
         {
-            bool empty = _tx_head is null;
-            page.next = null;
-            if (_tx_tail)
-                _tx_tail.next = page;
-            else
-                _tx_head = page;
-            _tx_tail = page;
-            _tx_bytes += page.length;
-            version (UseInternalIPStack)
-            {
-                if (empty)
-                    queue_service();
-            }
-            else
-            {
-                if (empty)
-                    want_write(true);
-            }
+            if (empty)
+                want_write(true);
         }
         return true;
     }
@@ -817,6 +795,7 @@ private:
 
     enum Phase : ubyte { connecting, open, dead }
     enum size_t max_tx_refill = 16 * 1024;
+    enum ubyte max_gather = 16;     // queued pages one send hands the OS
 
     Phase _phase;
     bool _closing;
@@ -832,6 +811,7 @@ private:
     TCPEventHandler _on_event;
     Page* _tx_head;
     Page* _tx_tail;
+    ushort _tx_sent;    // into _tx_head, which may be shared and is never written
     size_t _tx_bytes;
     SendHandler _outgoing;
     PageWaiter _tx_waiter;
@@ -888,17 +868,17 @@ private:
         while (bytes != 0)
         {
             Page* page = _tx_head;
-            size_t remaining = page.length;
+            size_t remaining = page.length - _tx_sent;
             size_t consumed = bytes < remaining ? bytes : remaining;
-            page.offset += cast(ushort)consumed;
-            page.length -= cast(ushort)consumed;
+            _tx_sent += cast(ushort)consumed;
             _tx_bytes -= consumed;
             bytes -= consumed;
-            if (page.length == 0)
+            if (_tx_sent == page.length)
             {
                 _tx_head = page.next;
                 if (!_tx_head)
                     _tx_tail = null;
+                _tx_sent = 0;
                 page_free(page);
             }
         }
@@ -906,14 +886,30 @@ private:
 
     void clear_tx()
     {
-        while (_tx_head)
+        Page* keep;
+        static if (use_iocp)
         {
-            Page* page = _tx_head;
-            _tx_head = page.next;
-            _tx_bytes -= page.length;
-            page_free(page);
+            foreach (_; 0 .. _send_count)
+                keep = keep ? keep.next : _tx_head;
         }
-        _tx_tail = null;
+        Page* page = keep ? keep.next : _tx_head;
+        size_t sent = keep ? 0 : _tx_sent;
+        if (keep)
+            keep.next = null;
+        else
+        {
+            _tx_head = null;
+            _tx_sent = 0;
+        }
+        _tx_tail = keep;
+        while (page)
+        {
+            Page* next = page.next;
+            _tx_bytes -= page.length - sent;
+            sent = 0;
+            page_free(page);
+            page = next;
+        }
     }
 
     void service_tx()
@@ -978,7 +974,7 @@ private:
         }
         else static if (use_iocp)
         {
-            if (yield && !_send.page && _phase == Phase.open)
+            if (yield && !_send_count && _phase == Phase.open)
                 continue_tx();
         }
         else
@@ -1073,7 +1069,7 @@ private:
                 return;
             while (_tx_head)
             {
-                const(ubyte)[] data = cast(const(ubyte)[])_tx_head.data;
+                const(ubyte)[] data = cast(const(ubyte)[])_tx_head.data[_tx_sent .. $];
                 size_t n = tcp_send_data(*_stack_ptr, _pcb, data);
                 if (n == 0)
                     break;     // send buffer full; drained on a later pump
@@ -1083,16 +1079,12 @@ private:
     }
     else version (Windows)
     {
-        struct SendOp
-        {
-            IoOp io;
-            Page* page;
-        }
         struct RecvOp { IoOp io; uint held; bool delivering; ubyte[16 * 1024] buf; }   // held: completed bytes awaiting a handler
 
         IOCP_SOCKET _handle = INVALID_SOCKET;
         int  _outstanding;   // overlapped ops in flight; freed by the pump sweep once they drain
-        SendOp _send;        // in flight while page is set
+        IoOp _send_op;
+        ubyte _send_count;   // pages at the head of the queue the OS reads until the send completes
         IoOp _connect_op;
         RecvOp _recv;
 
@@ -1161,17 +1153,21 @@ private:
 
         bool post_send()
         {
-            _send.io.ov = OVERLAPPED.init;
-            size_t remaining = _send.page.length;
-            uint length = remaining < uint.max ? cast(uint)remaining : uint.max;
-            WSABUF wb = WSABUF(length, cast(ubyte*)_send.page.data.ptr);
+            WSABUF[max_gather] bufs = void;
+            ubyte n;
+            size_t skip = _tx_sent;
+            for (Page* page = _tx_head; page && n < bufs.length; page = page.next, skip = 0)
+                bufs[n++] = WSABUF(cast(uint)(page.length - skip), cast(ubyte*)page.data.ptr + skip);
+            _send_op.ov = OVERLAPPED.init;
+            _send_op.on_complete = &send_complete;
             uint sent;
             ++_outstanding;
-            if (WSASend(_handle, &wb, 1, &sent, 0, &_send.io.ov, null) != 0 && ws_lasterror() != WSA_IO_PENDING)
+            if (WSASend(_handle, bufs.ptr, n, &sent, 0, &_send_op.ov, null) != 0 && ws_lasterror() != WSA_IO_PENDING)
             {
                 --_outstanding;
                 return false;
             }
+            _send_count = n;
             return true;
         }
 
@@ -1217,62 +1213,15 @@ private:
         void send_complete(IoOp*, bool ok, uint bytes, uint)
         {
             --_outstanding;
-            Page* page = _send.page;
-            size_t remaining = page.length;
-            debug assert(bytes <= remaining);
-            if (!ok || bytes == 0 || bytes > remaining)
-            {
-                _tx_bytes -= remaining;
-                page_free(page);
-                _send.page = null;
-                if (!_closing)
-                    fail(IPEvent.error);
-                return;
-            }
-
-            page.offset += cast(ushort)bytes;
-            page.length -= cast(ushort)bytes;
-            _tx_bytes -= bytes;
-            bool active = !_closing && _phase == Phase.open;
-            if (page.length != 0 && active && post_send())
-            {
-                service_tx();
-                return;
-            }
-
-            remaining = page.length;
-            _tx_bytes -= remaining;
-            page_free(page);
-            _send.page = null;
-            if (remaining != 0)
-            {
-                if (active)
-                    fail(IPEvent.error);
-                return;
-            }
-
-            if (active && _tx_head)
-            {
-                _send.page = _tx_head;
-                _tx_head = _send.page.next;
-                if (!_tx_head)
-                    _tx_tail = null;
-                _send.page.next = null;
-                if (post_send())
-                {
-                    service_tx();
-                    return;
-                }
-
-                _tx_bytes -= _send.page.length;
-                page_free(_send.page);
-                _send.page = null;
-                fail(IPEvent.error);
-                return;
-            }
-
-            if (active)
-                service_tx();
+            _send_count = 0;
+            if (_closing || _phase != Phase.open)
+                return clear_tx();
+            if (!ok || bytes == 0)
+                return fail(IPEvent.error);
+            consume_tx(bytes);
+            if (_tx_head && !post_send())
+                return fail(IPEvent.error);
+            service_tx();
         }
     }
     else
@@ -1375,9 +1324,12 @@ private:
         {
             while (_tx_head)
             {
-                const(void)[] data = _tx_head.data;
+                const(void)[][max_gather] parts = void;
+                size_t n, skip = _tx_sent;
+                for (Page* page = _tx_head; page && n < parts.length; page = page.next, skip = 0)
+                    parts[n++] = page.data[skip .. $];
                 size_t sent;
-                Result r = _socket.send(MsgFlags.none, &sent, data);
+                Result r = _socket.send(MsgFlags.none, &sent, parts[0 .. n]);
                 if (r.failed && r.socket_result != SocketResult.would_block)
                 {
                     detach_watch();
