@@ -730,7 +730,7 @@ nothrow @nogc:
                 format_message(msg);
             }
 
-            if (s.tx_request == 0 || !s.send_bytes(_line[]))
+            if (!s.send_bytes(_line[]))
                 return;
             _line.clear();
             log_module.acknowledge(_consumer);

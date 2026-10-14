@@ -574,16 +574,11 @@ nothrow @nogc:
             enum size_t ceiling = TcpSendBufSize;
         else
             enum size_t ceiling = max_tx_refill;
-        size_t queued = tx_queued();
-        return queued < ceiling / 2 ? ceiling - queued : 0;
-    }
-
-    size_t tx_queued() const pure
-    {
         version (UseInternalIPStack)
-            return _tx_bytes + (_pcb ? _pcb.send_buf.length : 0);
+            size_t queued = _tx_bytes + (_pcb ? _pcb.send_buf.length : 0);
         else
-            return _tx_bytes;
+            size_t queued = _tx_bytes;
+        return queued < ceiling / 2 ? ceiling - queued : 0;
     }
 
     // without a handler the connection stops reading, and what is unread holds the peer's window
@@ -927,7 +922,8 @@ private:
         {
             while (_outgoing && !yield)
             {
-                TxRequest req = TxRequest(tx_request(), deadline);
+                size_t room = tx_request();
+                TxRequest req = TxRequest(room < max_tx_page ? room : max_tx_page, deadline);
                 if (req.bytes < min_tx_request)
                     break;
                 uint generation = page_free_generation();

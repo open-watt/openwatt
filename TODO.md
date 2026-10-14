@@ -1616,6 +1616,28 @@ this is what remains.
   `StackPage`; ingress into pages, producers allocate at the source, `Packet` as a view,
   `forward`/`transmit` consume, mutators edit in place. Steps E1 to E5 there; #692 is superseded.
 
+- **A log follower on a full heap livelocks the main loop**: `LogFollowState.poll()` drains every
+  pending message in one pass through `Session.write_output`, a push. When the page the write needs
+  cannot be had and the pool cannot grow, `log_alloc_oom` logs an error, which is one more message
+  for the same pass, so the loop never empties and the task watchdog resets the board. Reproduced
+  on the bench Waveshare S3 (COM18) within seconds of every boot on #845 and #846 alike: its
+  `system.conf` streams `/log/print --stream` at `severity=trace` to the USB console, and the BLE
+  scanner alone logs several lines a second. Why that board's DMA heap is too full for one more
+  slab is not yet known; the OOM line (size, flags, free, largest) never reached the console. The
+  fix is the session on the pull path (S13 in STREAMING.md): `write_output` holds text the stream
+  pulls, held text is capped with the relay's lost-lines marker, and the follower consumes log
+  messages only into room, leaving the rest in the log ring.
+
+- **A local session loses written output silently at the watermark**: `Session.write_output` pushes
+  through `send()` and ignores a refusal, so a command that writes (rather than feeds a producer) to
+  a saturated link drops text with no trace. The remote console relay marks lost lines; the local
+  session needs the same marker on its next successful write, or its writes routed through the held
+  text the pull drains.
+
+- **A pcap record is cut at `max_tx_page`**: the capture server copies a frame into one page of at
+  most 1600 bytes, so a jumbo frame reaches the client truncated with `caplen` claiming the whole.
+  A record spanning a page chain fixes it; the rpcap header already carries the length.
+
 - **Streams flush on a graceful stop; only a failed one drops**: every stream but serial frees its
   queue in `offline()`, so a graceful `destroy()` loses what was queued. On a graceful stop a stream
   hands everything queued to its transport at once, in priority order, and tears its own queue down;

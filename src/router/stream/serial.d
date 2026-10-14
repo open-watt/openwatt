@@ -84,6 +84,8 @@ nothrow @nogc:
         return StringResult.success;
     }
 
+    enum uint tx_depth_ms = 100;    // line time the queue holds ahead of the wire
+
     final uint baud_rate() const
         => prop_read!(SerialStream, "baud-rate");
     final void baud_rate(uint value)
@@ -200,15 +202,20 @@ nothrow @nogc:
         return CompletionStatus.complete;
     }
 
-    // the driver takes each page and frees it once sent, up to the queue's watermark in flight
+    // the driver takes each page and frees it once sent, up to tx_depth_ms of line time in flight
     override size_t tx_request() const
     {
         immutable size_t queued = uart_tx_queued(_uart);
-        return running && queued < tx_queue_limit ? tx_queue_limit - queued : 0;
+        immutable size_t watermark = tx_watermark();
+        return running && queued < watermark ? watermark - queued : 0;
     }
 
-    override size_t tx_backlog() const
-        => uart_tx_queued(_uart);
+    // 8N1 carries a byte per ten baud; the floor keeps a slow line pulling
+    final size_t tx_watermark() const
+    {
+        immutable size_t depth = baud_rate / 10 * tx_depth_ms / 1000;
+        return depth > min_tx_request ? depth : min_tx_request;
+    }
 
     override void queue_tx_page(Page* page)
     {
