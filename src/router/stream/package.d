@@ -90,6 +90,7 @@ Page* alloc_tx_page(ref const TxRequest req, size_t bytes, ref TxStatus status)
 Page* take_tx_page(ref Page* chain, ref const TxRequest req, ref TxStatus status)
 {
     Page* head = chain;
+    debug assert(page_unique(head), "a shared page is written by the one who takes it");
     bool whole = head.length <= req.bytes;
     if (whole && head.headroom >= req.headroom && head.tailroom >= req.tailroom)
     {
@@ -495,7 +496,7 @@ nothrow @nogc:
         size_t bytes;
         for (const(Page)* page = _tx_queue; page; page = (cast(Page*)page).next)
             bytes += page.length;
-        return bytes;
+        return bytes - _tx_sent;
     }
 
     // what waits behind this stream to reach the wire, a transport's own queue included
@@ -627,6 +628,19 @@ protected:
             status = TxStatus.idle;
             return null;
         }
+        if (!page_unique(_tx_queue))
+        {
+            Page* own = page_alloc(_tx_queue.length);
+            if (!own)
+            {
+                status = TxStatus.starved;
+                return null;
+            }
+            own.data[] = _tx_queue.data;
+            own.next = _tx_queue.next;
+            page_free(_tx_queue);
+            _tx_queue = own;
+        }
         return take_tx_page(_tx_queue, req, status);
     }
 
@@ -638,24 +652,26 @@ protected:
         {
             Page* page = _tx_queue;
             _tx_queue = page.next;
-            ptrdiff_t n = transmit(page.data);
+            const(void)[] data = page.data[_tx_sent .. $];
+            ptrdiff_t n = transmit(data);
             if (n > 0)
-                sent(page.data[0 .. n]);
+                sent(data[0 .. n]);
             if (n < 0 || !running)
             {
+                _tx_sent = 0;
                 page_free(page);
                 if (running)
                     restart();
                 return;
             }
-            if (n < page.length)
+            if (n < data.length)
             {
-                page.offset += cast(ushort)n;
-                page.length -= cast(ushort)n;
+                _tx_sent += cast(ushort)n;
                 page.next = _tx_queue;
                 _tx_queue = page;
                 break;
             }
+            _tx_sent = 0;
             page_free(page);
         }
         if (_tx_queue && tx_retry_interval != Duration.zero && !_tx_retrying)
@@ -736,7 +752,8 @@ protected:
 private:
     SendHandler _outgoing;
     PageWaiter _tx_waiter;
-    Page* _tx_queue;    // for the line, oldest first; the head's offset advances as the line takes it
+    Page* _tx_queue;    // for the line, oldest first
+    ushort _tx_sent;    // into _tx_queue's head, which may be shared and is never written
     bool _pumping_tx;
     bool _tx_retrying;
     bool _tx_continuing;
@@ -762,6 +779,7 @@ private:
             page_free(_tx_queue);
             _tx_queue = next;
         }
+        _tx_sent = 0;
     }
 
     // one continuation per sink, on the next loop pass, after that pass's I/O and events, so busy sinks share the thread
@@ -1178,6 +1196,28 @@ unittest
         line.broken = true;
         line.open(10);
         assert(!line.running && line.tx_queued() == 0, "a failed line restarts and drops what it held");
+    }
+
+    // a queue dropped part way through a page leaves no position behind for the next frame
+    {
+        ShortStream line = alloc!ShortStream(CID(4));
+        scope(exit)
+        {
+            line.halt();
+            free(line);
+        }
+        ubyte[100] bytes;
+        foreach (i, ref b; bytes)
+            b = cast(ubyte)i;
+        assert(line.send_bytes(bytes[]));
+        line.open(10);
+        assert(line.tx_queued() == 90);
+        line.offline();
+        assert(line.tx_queued() == 0);
+        line.output.clear();
+        assert(line.send_bytes(bytes[]));
+        line.open(1000);
+        assert(line.output[] == bytes[], "the next frame goes out whole");
     }
 
     // a producer past its deadline yields and stays armed, and makes progress on the next turn

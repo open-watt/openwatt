@@ -832,6 +832,7 @@ private:
     TCPEventHandler _on_event;
     Page* _tx_head;
     Page* _tx_tail;
+    ushort _tx_sent;    // into _tx_head, which may be shared and is never written
     size_t _tx_bytes;
     SendHandler _outgoing;
     PageWaiter _tx_waiter;
@@ -888,17 +889,17 @@ private:
         while (bytes != 0)
         {
             Page* page = _tx_head;
-            size_t remaining = page.length;
+            size_t remaining = page.length - _tx_sent;
             size_t consumed = bytes < remaining ? bytes : remaining;
-            page.offset += cast(ushort)consumed;
-            page.length -= cast(ushort)consumed;
+            _tx_sent += cast(ushort)consumed;
             _tx_bytes -= consumed;
             bytes -= consumed;
-            if (page.length == 0)
+            if (_tx_sent == page.length)
             {
                 _tx_head = page.next;
                 if (!_tx_head)
                     _tx_tail = null;
+                _tx_sent = 0;
                 page_free(page);
             }
         }
@@ -910,7 +911,8 @@ private:
         {
             Page* page = _tx_head;
             _tx_head = page.next;
-            _tx_bytes -= page.length;
+            _tx_bytes -= page.length - _tx_sent;
+            _tx_sent = 0;
             page_free(page);
         }
         _tx_tail = null;
@@ -1073,7 +1075,7 @@ private:
                 return;
             while (_tx_head)
             {
-                const(ubyte)[] data = cast(const(ubyte)[])_tx_head.data;
+                const(ubyte)[] data = cast(const(ubyte)[])_tx_head.data[_tx_sent .. $];
                 size_t n = tcp_send_data(*_stack_ptr, _pcb, data);
                 if (n == 0)
                     break;     // send buffer full; drained on a later pump
@@ -1087,6 +1089,7 @@ private:
         {
             IoOp io;
             Page* page;
+            ushort sent;    // into page, which may be shared and is never written
         }
         struct RecvOp { IoOp io; uint held; bool delivering; ubyte[16 * 1024] buf; }   // held: completed bytes awaiting a handler
 
@@ -1162,9 +1165,9 @@ private:
         bool post_send()
         {
             _send.io.ov = OVERLAPPED.init;
-            size_t remaining = _send.page.length;
+            size_t remaining = _send.page.length - _send.sent;
             uint length = remaining < uint.max ? cast(uint)remaining : uint.max;
-            WSABUF wb = WSABUF(length, cast(ubyte*)_send.page.data.ptr);
+            WSABUF wb = WSABUF(length, cast(ubyte*)_send.page.data.ptr + _send.sent);
             uint sent;
             ++_outstanding;
             if (WSASend(_handle, &wb, 1, &sent, 0, &_send.io.ov, null) != 0 && ws_lasterror() != WSA_IO_PENDING)
@@ -1218,32 +1221,33 @@ private:
         {
             --_outstanding;
             Page* page = _send.page;
-            size_t remaining = page.length;
+            size_t remaining = page.length - _send.sent;
             debug assert(bytes <= remaining);
             if (!ok || bytes == 0 || bytes > remaining)
             {
                 _tx_bytes -= remaining;
                 page_free(page);
                 _send.page = null;
+                _send.sent = 0;
                 if (!_closing)
                     fail(IPEvent.error);
                 return;
             }
 
-            page.offset += cast(ushort)bytes;
-            page.length -= cast(ushort)bytes;
+            _send.sent += cast(ushort)bytes;
             _tx_bytes -= bytes;
             bool active = !_closing && _phase == Phase.open;
-            if (page.length != 0 && active && post_send())
+            if (_send.sent != page.length && active && post_send())
             {
                 service_tx();
                 return;
             }
 
-            remaining = page.length;
+            remaining = page.length - _send.sent;
             _tx_bytes -= remaining;
             page_free(page);
             _send.page = null;
+            _send.sent = 0;
             if (remaining != 0)
             {
                 if (active)
@@ -1375,7 +1379,7 @@ private:
         {
             while (_tx_head)
             {
-                const(void)[] data = _tx_head.data;
+                const(void)[] data = _tx_head.data[_tx_sent .. $];
                 size_t sent;
                 Result r = _socket.send(MsgFlags.none, &sent, data);
                 if (r.failed && r.socket_result != SocketResult.would_block)

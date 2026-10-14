@@ -1607,6 +1607,15 @@ this is what remains.
   filter inside the chunked filter, chosen by `Accept-Encoding`, needs an incremental compressor;
   `urt.zip` is whole-buffer only.
 
+- **Packet ownership is the page's refcount**: every producer hands in a stack `Packet` over a
+  borrowed buffer, so each framing on egress copies (Ethernet's 1522-byte `medium_tx` copy, CPC's
+  and ASH's `Message.buffer`, Modbus's frame page) and the two holders clone; the IP stack writes
+  TTL and checksum through a const cast into whatever buffer the frame arrived in, and seven sites
+  copy a page-backed `Packet` by value, which breaks its back-offset. Design in STREAMING.md
+  section E on #805: refcount 0 borrowed, 1 unique, >1 shared; `page_mutable`, `page_hold`,
+  `StackPage`; ingress into pages, producers allocate at the source, `Packet` as a view,
+  `forward`/`transmit` consume, mutators edit in place. Steps E1 to E5 there; #692 is superseded.
+
 - **Streams flush on a graceful stop; only a failed one drops**: every stream but serial frees its
   queue in `offline()`, so a graceful `destroy()` loses what was queued. On a graceful stop a stream
   hands everything queued to its transport at once, in priority order, and tears its own queue down;
