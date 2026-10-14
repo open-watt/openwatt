@@ -145,7 +145,7 @@ nothrow @nogc:
     override size_t tx_request() const
     {
         size_t room = _inner ? _inner.tx_request : 0;
-        size_t held = tx_queued();
+        size_t held = tx_held();
         return room > held ? room - held : 0;
     }
 
@@ -875,12 +875,18 @@ unittest
         assert(filter.tx_request == 100);
         filter.queue_tx_page(page_alloc(200));
         assert(filter.tx_queued == 200 && filter.tx_request == 0, "held pages fill the room");
+        immutable size_t one = filter.tx_held;
+        line.room = 0;
+        Page* sparse = page_alloc(max_tx_page);
+        sparse.length = 70;
+        filter.queue_tx_page(sparse);
+        line.room = 4000;
+        assert(filter.tx_queued == 270 && filter.tx_request == 4000 - one - sparse.capacity, "a held page counts as the memory it occupies");
         line.room = 1000;
-        assert(filter.tx_request == 800);
         TxStatus status;
-        Page* page = filter.provide_tx_page(TxRequest(1000, MonoTime()), status);
-        assert(page && filter.tx_queued == 0 && filter.tx_request == 1000);
-        page_free(page);
+        while (Page* page = filter.provide_tx_page(TxRequest(1000, MonoTime()), status))
+            page_free(page);
+        assert(filter.tx_queued == 0 && filter.tx_request == 1000);
         line.release_tx_handler(&filter.provide_tx_page);
     }
 }

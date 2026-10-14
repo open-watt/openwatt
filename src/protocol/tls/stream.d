@@ -389,7 +389,7 @@ nothrow @nogc:
             return 0;
         auto stream = _stream.get;
         size_t room = stream ? stream.tx_request : 0;
-        size_t held = tx_queued();
+        size_t held = tx_held();
         return room > held ? room - held : 0;
     }
 

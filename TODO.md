@@ -1622,6 +1622,25 @@ this is what remains.
   6 to 7 minutes. Per-module bitcode lowered by `llc` in parallel under ninja, and only for modules
   that changed, would cut a rebuild to the longest module. RISC-V targets compile directly in LDC.
 
+- **A sync peer restarts in a loop when its hello cannot get a page**: on the bench S3 under web UI
+  load the JSON encoder dropped `hello` for want of a page, the peer logged "control frame refused;
+  restarting session", restarted at once and sent `hello` again, five times in one second, each
+  failure logging. A refused control frame should wait for the pool (`starved` and the page waiter),
+  not restart the session.
+- **The sync log subscription delivers about one line in twelve seconds**: a JSON client sending
+  `{"kind":"log_sub","severity":"trace"}` to the bench S3 (2026-10-15, #847 image) received one log
+  frame in twelve seconds while the device logs several lines a second; the web UI's log view shows
+  nothing. `flush_logs` runs per tick and stops at the first refused record; find what refuses it
+  (the log data queue's backlog, the transport's readiness) before changing either.
+- **`JsonEscape` leaves its pages mostly empty**: it reserves tailroom for six-fold expansion, so
+  each page it fills from the session carries about 270 bytes of a 1,600-byte page. #847 bounds the
+  memory this costs; escaping into the page and spilling into the next on overflow would make the
+  pages dense.
+- **The prod Pi held 2,027 heap pages at once**: `/system/sysinfo` reported 53,100 and 51,951
+  category overflows and `heap: peak 2027` (2026-10-15, master), so for long stretches some writer
+  held more than 96 pages, about 3 MB at the peak, without dropping any. No writer on master is
+  bounded; which one it was needs the page tracer on the Pi.
+
 - **The page pool competes for the S3's internal SRAM while 8 MB of PSRAM sits idle**: at boot the
   bench 4547 has 851 bytes free in the DMA-capable internal heap (`heap.alloc: OOM! size=1621
   flags=4 free=851 largest=336 default-free=8,195,923`), WiFi, BLE and IDF having taken the rest,

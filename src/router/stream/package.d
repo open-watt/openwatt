@@ -574,16 +574,19 @@ nothrow @nogc:
     bool tx_line_idle() const
         => _tx_queue is null;
 
-    // a stream that takes pages itself overrides this with queue_tx_page; the rest queue them here for transmit()
+    // room is memory, so a mostly empty page costs what it occupies; a stream that takes pages itself overrides this
     size_t tx_request() const
     {
-        size_t queued = tx_line_queued();
-        return running && queued < tx_queue_limit ? tx_queue_limit - queued : 0;
+        size_t held = chain_held(_tx_queue);
+        return running && held < tx_queue_limit ? tx_queue_limit - held : 0;
     }
 
     // what waits here for the line: the fill page and the base queue
     final size_t tx_queued() const
         => chain_bytes(_fill) + tx_line_queued();
+
+    final size_t tx_held() const
+        => chain_held(_fill) + chain_held(_tx_queue);
 
     // what the base queue holds for the line
     final size_t tx_line_queued() const
@@ -869,7 +872,7 @@ private:
 
     // the line has room beyond what the fill page already holds for it
     final bool tx_admits() const
-        => running && tx_request() > chain_bytes(_fill);
+        => running && tx_request() > chain_held(_fill);
 
     final void release_tx_queue()
     {
@@ -1342,6 +1345,29 @@ unittest
         line.open(bytes.length);
         assert(line.tx_queued() == 0 && line.send_bytes(bytes[0 .. 1]), "a drained line admits again");
         line.open(1);
+        assert(line.tx_queued() == 0);
+    }
+
+    // mostly empty pages count against the watermark as the memory they hold, not the bytes they carry
+    {
+        ShortStream line = alloc!ShortStream(CID(7));
+        scope(exit)
+        {
+            line.halt();
+            free(line);
+        }
+        line.room = 0;
+        size_t sent;
+        foreach (_; 0 .. 8)
+        {
+            Page* sparse = page_alloc(max_tx_page);
+            sparse.length = 70;
+            if (!line.send(sparse))
+                break;
+            ++sent;
+        }
+        assert(sent < 3 && line.tx_queued() < 3 * 70, "two sparse pages fill a 2 KB watermark");
+        line.open(10_000);
         assert(line.tx_queued() == 0);
     }
 
