@@ -238,7 +238,7 @@ protected:
         Stream stream = _inner.get;
         if (!stream || !stream.running)
             return;
-        if (tx_handler || tx_queued)
+        if (tx_source || tx_queued)
             stream.tx_handler(&provide_tx_page);
         else
             stream.release_tx_handler(&provide_tx_page);
@@ -393,11 +393,9 @@ private:
         size_t grant = req.bytes;
         TxRequest inner = TxRequest(grant / 2, req.deadline, req.headroom, req.tailroom + grant - grant / 2);
         Page* page;
-        if (tx_queued)
+        if (tx_line_queued)
         {
-            page = take_queued_tx(inner, status);
-            if (page)
-                status = tx_queued || tx_handler ? TxStatus.more : TxStatus.idle;
+            page = take_queued_tx(inner, status, tx_source ? TxStatus.more : TxStatus.idle);
         }
         else
             page = request_tx_page(inner, status);

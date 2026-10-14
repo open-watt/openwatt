@@ -137,7 +137,7 @@ protected:
         Stream stream = _tx.get;
         if (!stream || !stream.running)
             return;
-        if (tx_handler)
+        if (tx_source)
             stream.tx_handler(&provide_tx_page);
         else
             stream.release_tx_handler(&provide_tx_page);

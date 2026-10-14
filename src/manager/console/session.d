@@ -409,40 +409,20 @@ nothrow @nogc:
     }
 
     final bool write_raw(const(void)[] data)
-        => _stream && _stream.send_bytes(data);
+        => _stream && commit(cast(const(char)[])data, false, true);
 
-    void write_output(const(char)[] text, bool newline)
+    // a write the caller keeps and retries until the stream has taken what is held, so a refusal is not a loss
+    final bool offer_output(const(char)[] text, bool newline)
     {
-        if (_stream)
-        {
-            Page* frame;
-            if (_features & ClientFeatures.crlf)
-            {
-                // convert bare \n (not preceded by \r) to \r\n for NVT clients
-                size_t written = 0, search = 0;
-                while (search < text.length)
-                {
-                    size_t pos = text[search .. $].findFirst('\n');
-                    if (pos == text.length - search)
-                        break;
-                    pos += search;
-                    if (pos == 0 || text[pos - 1] != '\r')
-                    {
-                        append_tx_copy(frame, text[written .. pos]);
-                        append_tx_copy(frame, "\r\n");
-                        written = pos + 1;
-                    }
-                    search = pos + 1;
-                }
-                text = text[written .. $];
-            }
-            append_tx_copy(frame, text);
-            if (newline)
-                append_tx_copy(frame, (_features & ClientFeatures.crlf) ? "\r\n" : "\n");
-            if (frame)
-                _stream.send(frame);
-        }
-        else
+        if (chain_bytes(_text) >= max_tx_page || !enqueue(text, newline, false))
+            return false;
+        arm_output();
+        return true;
+    }
+
+    bool write_output(const(char)[] text, bool newline)
+    {
+        if (!_stream)
         {
             import urt.log : writeInfo;
             while (text.length > 0)
@@ -453,13 +433,15 @@ nothrow @nogc:
                 if (line.length > 0)
                     writeInfo("session: ", line);
             }
+            return true;
         }
+        return commit(text, newline);
     }
 
     pragma(inline, true) void write(Args...)(ref Args args)
         if (Args.length == 1 && is(Args[0] : const(char)[]))
     {
-        return write_output(args[0], false);
+        write_output(args[0], false);
     }
 
     void write(Args...)(auto ref Args args)
@@ -474,7 +456,7 @@ nothrow @nogc:
     pragma(inline, true) void write_line(Args...)(auto ref Args args)
         if (Args.length == 1 && is(Args[0] : const(char)[]))
     {
-        return write_output(args[0], true);
+        write_output(args[0], true);
     }
 
     void write_line(Args...)(auto ref Args args)
@@ -505,7 +487,7 @@ nothrow @nogc:
         pull_output();
     }
 
-    // abandons the output the stream has not yet pulled
+    // abandons the output the stream has not yet pulled; text written meanwhile still goes
     final void release_output(SendHandler producer)
     {
         if (_producer && _producer !is producer)
@@ -514,12 +496,17 @@ nothrow @nogc:
         page_unwait(&_output_waiter);
         cancel_output_continuation();
         if (Stream s = _stream)
-            s.release_tx_handler(&provide_output_page);
+        {
+            if (_text && _stream_subscribed)
+                s.tx_handler(&provide_output_page);
+            else
+                s.release_tx_handler(&provide_output_page);
+        }
     }
 
     // output is still being made, or waits for the stream or the line
     final bool output_busy() const
-        => _producer !is null || _output_continuing || (_stream && _stream.tx_queued() != 0);
+        => _text !is null || _producer !is null || _output_continuing || (_stream && _stream.tx_queued() != 0);
 
     final bool show_prompt(bool show)
     {
@@ -996,6 +983,88 @@ private:
     SendHandler _producer;
     CrlfFilter _crlf;
     PageWaiter _output_waiter;
+    Page* _text;            // written output the stream has not yet pulled, packed
+    uint _lost_lines;       // writes dropped since the last one that went; the next says so
+
+    enum size_t held_limit = 8 * 1024;
+
+    // a write is held whole or not at all; one that is not is counted and the next one that goes says so
+    final bool commit(const(char)[] text, bool newline, bool raw = false)
+    {
+        if (!enqueue(text, newline, raw))
+        {
+            ++_lost_lines;
+            return false;
+        }
+        arm_output();
+        return true;
+    }
+
+    // the write as the client sees it, behind the marker for what was lost before it, or the chain as it was
+    final bool enqueue(const(char)[] text, bool newline, bool raw)
+    {
+        immutable bool crlf = (_features & ClientFeatures.crlf) != 0;
+        const(char)[] mark;
+        if (_lost_lines)
+        {
+            import urt.string.format : tconcat;
+            mark = tconcat("[session: ", _lost_lines, " lines lost]\r\n");
+        }
+        size_t bytes = mark.length + text.length + (newline ? 1 + crlf : 0);
+        if (crlf && !raw)
+            bytes += bare_newlines(text);
+        if (chain_bytes(_text) + bytes > held_limit)
+            return false;
+        TxWriter writer = TxWriter(_text, bytes);
+        if (!writer)
+            return false;
+        writer.put(mark);
+        if (crlf && !raw)
+            put_lines(writer, text);
+        else
+            writer.put(text);
+        if (newline)
+            writer.put(crlf ? "\r\n" : "\n");
+        _lost_lines = 0;
+        return true;
+    }
+
+    static size_t bare_newlines(const(char)[] text)
+    {
+        size_t count;
+        foreach (i, c; text)
+            if (c == '\n' && (i == 0 || text[i - 1] != '\r'))
+                ++count;
+        return count;
+    }
+
+    // bare \n becomes \r\n for NVT clients
+    static void put_lines(ref TxWriter writer, const(char)[] text)
+    {
+        size_t written;
+        foreach (i, c; text)
+        {
+            if (c == '\n' && (i == 0 || text[i - 1] != '\r'))
+            {
+                writer.put(text[written .. i]);
+                writer.put("\r\n");
+                written = i + 1;
+            }
+        }
+        writer.put(text[written .. $]);
+    }
+
+    // output reaches the stream only while this session is subscribed to it
+    final void arm_output()
+    {
+        if (Stream s = _stream)
+        {
+            if (_stream_subscribed)
+                s.tx_handler(&provide_output_page);
+        }
+        else
+            pull_output();
+    }
 
     Array!(MutableString!0) _history;
     uint _history_cursor = 0;
@@ -1023,6 +1092,9 @@ private:
             _stream_subscribed = false;
             // nothing pulls what is made, so the output is abandoned
             _producer = null;
+            free_tx_chain(_text);
+            _text = null;
+            _lost_lines = 0;
         }
     }
 
@@ -1035,8 +1107,11 @@ private:
             receive_input(text);
     }
 
+    // held text first, then the producer; starved while held text waits for a page
     Page* provide_output_page(ref const TxRequest req, out TxStatus status)
     {
+        if (_text)
+            return take_tx_page(_text, req, status);
         if (!_producer)
         {
             status = TxStatus.idle;
@@ -1411,27 +1486,9 @@ nothrow @nogc:
     // called on the loop pass after output becomes waiting
     void delegate() nothrow @nogc ready;
 
-    // idle while nothing waits, though the command may make more; starved while held text waits for a page
+    // idle while nothing waits, though the command may make more
     Page* produce(ref const TxRequest req, out TxStatus status)
     {
-        if (_text)
-        {
-            Page* page = take_tx_page(_text, req, status);
-            if (page)
-                status = TxStatus.more;
-            return page;
-        }
-        if (_held.length)
-        {
-            size_t take = _held.length < req.bytes ? _held.length : req.bytes;
-            Page* page = alloc_tx_page(req, take, status);
-            if (!page)
-                return null;
-            (cast(char[])page.data)[] = _held[0 .. take];
-            _held.remove(0, take);
-            status = TxStatus.more;
-            return page;
-        }
         Page* page = provide_output_page(req, status);
         if (status == TxStatus.end || status == TxStatus.abort)
             status = page ? TxStatus.more : TxStatus.idle;
@@ -1439,7 +1496,7 @@ nothrow @nogc:
     }
 
     bool idle() const
-        => !_text && !_held.length && !output_busy;
+        => !output_busy;
 
     void release()
     {
@@ -1447,22 +1504,12 @@ nothrow @nogc:
             g_app.cancel(&wake);
         _waking = false;
         ready = null;
-        while (_text)
-        {
-            Page* next = _text.next;
-            page_free(_text);
-            _text = next;
-        }
-        _held.clear();
+        free_tx_chain(_text);
+        _text = null;
     }
 
-    override void write_output(const(char)[] text, bool newline)
-    {
-        hold(text);
-        if (newline)
-            hold("\n");
-        announce();
-    }
+    override bool write_output(const(char)[] text, bool newline)
+        => commit(text, newline);
 
 protected:
     override void pull_output()
@@ -1471,16 +1518,7 @@ protected:
     }
 
 private:
-    Page* _text;
-    Array!char _held;   // text no page could take, in order behind _text
     bool _waking;
-
-    void hold(const(char)[] text)
-    {
-        if (!_held.length)
-            text = text[append_tx_copy(_text, text) .. $];
-        _held ~= text;
-    }
 
     void announce()
     {
@@ -1524,12 +1562,13 @@ nothrow @nogc:
         _output = null;
     }
 
-    override void write_output(const(char)[] text, bool newline)
+    override bool write_output(const(char)[] text, bool newline)
     {
         if (newline)
             _output.append(text, '\n');
         else
             _output ~= text;
+        return true;
     }
 
 private:
@@ -1619,6 +1658,10 @@ private:
 unittest
 {
     import urt.mem;
+    import urt.mem.pagepool : page_pool_init, page_pool_deinit;
+
+    bool owns_pool = page_pool_init();
+    scope(exit) if (owns_pool) page_pool_deinit();
 
     Console* console = alloc!Console(null, StringLit!"test.session");
 
@@ -1672,6 +1715,52 @@ unittest
         stream.limit = size_t.max;
     }
 
+    // writes past the held cap are lost, and the first one that goes again says how many
+    {
+        size_t before = stream.output.length;
+        stream.limit = before;
+        char[100] fill = 'z';
+        foreach (i; 0 .. 100)
+            session.write_line(fill[]);
+        assert(chain_bytes(session._text) <= Session.held_limit && session._lost_lines > 0, "the cap holds");
+        stream.limit = size_t.max;
+        session.write_line("end");
+        assert(chain_bytes(session._text) == 0 && session._lost_lines == 0);
+        import urt.string : contains;
+        const(char)[] text = cast(const(char)[])stream.output[before .. $];
+        assert(text.contains("[session: ") && text.contains(" lines lost]") && text[$ - 5 .. $] == "end\r\n", "the marker precedes the next write");
+    }
+
+    // the cap is on what the client receives: bare newlines count twice for a CRLF client
+    {
+        size_t before = stream.output.length;
+        stream.limit = before;
+        char[4096] bare = '\n';
+        assert(session.write_output(bare[], false) && chain_bytes(session._text) == 8192, "4096 bare newlines are 8192 bytes held");
+        assert(!session.write_output("x", false) && chain_bytes(session._text) == 8192 && session._lost_lines == 1, "a write that does not fit leaves the chain as it was");
+        stream.limit = size_t.max;
+        stream.tx_handler(&session.provide_output_page);
+        assert(chain_bytes(session._text) == 0, "the line pulls the held text when it has room");
+        session.write_line("end");
+        import urt.string : contains;
+        const(char)[] text = cast(const(char)[])stream.output[before .. $];
+        assert(session._lost_lines == 0 && text.contains("[session: 1 lines lost]") && text[$ - 5 .. $] == "end\r\n");
+    }
+
+    // an offered record waits while a page is held for the stream, and is not counted as lost
+    {
+        stream.limit = stream.output.length;
+        char[400] record = 'r';
+        size_t offered;
+        while (session.offer_output(record[], true))
+            ++offered;
+        assert(offered == 4 && chain_bytes(session._text) >= max_tx_page && session._lost_lines == 0, "the follower runs one page ahead");
+        stream.limit = size_t.max;
+        stream.tx_handler(&session.provide_output_page);
+        assert(chain_bytes(session._text) == 0 && session.offer_output(record[], true));
+        stream.tx_handler(&session.provide_output_page);
+    }
+
     // a print the stream takes whole completes on its first update; one it cannot take waits for the line
     {
         import manager.console.table : print_table, Table;
@@ -1700,13 +1789,15 @@ unittest
         stream.limit = size_t.max;
     }
 
-    // text no page could take is held, and what is written after it queues behind it
+    // written text waits packed in one chain and is produced in order, in the pieces the requests allow
     {
         CID producer_id = sessions.allocate_id("producer-session-test");
         ProducerSession producer = alloc!ProducerSession(producer_id, ObjectFlags.dynamic, *console);
-        producer._held ~= "first\n";
+        producer.write_output("first", true);
         producer.write_output("second", true);
-        assert(!producer._text && !producer.idle);
+        assert(producer._text && !producer._text.next && !producer.idle, "writes pack into one page");
+        producer.shutdown();
+        assert(producer._text, "held output outlives the session's shutdown until it is produced");
         TxStatus status;
         Array!char got;
         while (Page* page = producer.produce(TxRequest(4), status))
@@ -1754,8 +1845,24 @@ unittest
         stream.limit = size_t.max;
     }
 
-    session.destroy();
-    sessions.update_all();
+    // a session torn down with text held, its stream stalled and a print running leaves no handler on the stream
+    {
+        stream.limit = stream.output.length;
+        session.write_line("held");
+        import manager.console.table : print_table, Table;
+        Table table;
+        table.add_column("name");
+        table.add_row();
+        table.cell("row");
+        CommandState print = print_table(session, table);
+        assert(session.output_busy && stream.tx_handler !is null);
+        session.destroy();
+        foreach (_; 0 .. 4)
+            sessions.update_all();
+        assert(stream.tx_handler is null, "a destroyed session leaves no handler on its stream");
+        free(print);
+        stream.limit = size_t.max;
+    }
 
     StringSession temporary = console.createSession!StringSession();
     Variant result;

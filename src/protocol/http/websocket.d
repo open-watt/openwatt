@@ -187,8 +187,12 @@ protected:
             req.headers ~= HTTPParam(StringLit!"Sec-WebSocket-Version", StringLit!"13");
 
             Array!char msg = format_message_head(req, _conn.host[], false, 0);
-            if (msg.empty || append_tx_copy(_tx_queue, msg[]) != msg.length)
+            if (msg.empty)
                 return CompletionStatus.error;
+            TxWriter writer = TxWriter(_tx_queue, msg.length);
+            if (!writer)
+                return CompletionStatus.error;
+            writer.put(msg[]);
             arm_tx();
 
             _handshake_parser = alloc!HTTPParser(&handshake_response);

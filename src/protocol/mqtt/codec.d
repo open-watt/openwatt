@@ -5,7 +5,7 @@ import urt.mem.page : Page;
 import urt.mem.pagepool : page_alloc, page_free;
 import urt.string;
 
-import router.stream : append_tx_chain, append_tx_copy, free_tx_chain, take_tx_page, TxRequest, TxStatus;
+import router.stream : append_tx_chain, free_tx_chain, take_tx_page, TxRequest, TxStatus, TxWriter;
 
 nothrow @nogc:
 
@@ -49,11 +49,12 @@ nothrow @nogc:
             __gshared Array!ubyte scratch;
             scratch.resize(size);
             ubyte[] sink = scratch[];
-            if (!encode(sink) || append_tx_copy(frame, scratch[], size) != size)
-            {
-                free_tx_chain(frame);
+            if (!encode(sink))
                 return false;
-            }
+            TxWriter writer = TxWriter(frame, size);
+            if (!writer)
+                return false;
+            writer.put(scratch[]);
         }
         append_tx_chain(_chain, frame);
         _bytes += size;
@@ -67,11 +68,9 @@ nothrow @nogc:
             status = TxStatus.idle;
             return null;
         }
-        Page* page = take_tx_page(_chain, req, status);
-        if (!page)
-            return null;
-        _bytes -= page.length;
-        status = _chain ? TxStatus.more : TxStatus.idle;
+        Page* page = take_tx_page(_chain, req, status, TxStatus.idle);
+        if (page)
+            _bytes -= page.length;
         return page;
     }
 

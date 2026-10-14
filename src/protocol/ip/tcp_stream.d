@@ -250,7 +250,7 @@ protected:
     {
         if (!_conn)
             return;
-        if (tx_handler)
+        if (tx_source)
             _conn.tx_handler(&provide_tx_page);
         else
             _conn.release_tx_handler(&provide_tx_page);

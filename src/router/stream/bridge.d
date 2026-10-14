@@ -88,13 +88,12 @@ protected:
             if (!member || !member.tx_request)
                 continue;
             Page* copy;
-            Page* p = frame;
-            while (p && append_tx_copy(copy, p.data) == p.length)
-                p = p.next;
-            if (p)
-                free_tx_chain(copy);
-            else
-                member.send(copy);
+            TxWriter writer = TxWriter(copy, chain_bytes(frame));
+            if (!writer)
+                continue;
+            for (Page* p = frame; p; p = p.next)
+                writer.put(p.data);
+            member.send(copy);
         }
         free_tx_chain(frame);
     }

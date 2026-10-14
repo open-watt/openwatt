@@ -1616,24 +1616,24 @@ this is what remains.
   `StackPage`; ingress into pages, producers allocate at the source, `Packet` as a view,
   `forward`/`transmit` consume, mutators edit in place. Steps E1 to E5 there; #692 is superseded.
 
-- **A log follower on a full heap livelocks the main loop**: `LogFollowState.poll()` drains every
-  pending message in one pass through `Session.write_output`, a push. When the page the write needs
-  cannot be had and the pool cannot grow, `log_alloc_oom` logs an error, which is one more message
-  for the same pass, so the loop never empties and the task watchdog resets the board. Reproduced
-  on the bench Waveshare S3 (COM18) within seconds of every boot on #845 and #846 alike: its
-  `system.conf` streams `/log/print --stream` at `severity=trace` to the USB console, and the BLE
-  scanner alone logs several lines a second. Why that board's DMA heap is too full for one more
-  slab is not yet known; the OOM line (size, flags, free, largest) never reached the console. The
-  fix is the session on the pull path (S13 in STREAMING.md): `write_output` holds text the stream
-  pulls, held text is capped with the relay's lost-lines marker, and the follower consumes log
-  messages only into room, leaving the rest in the log ring.
+- **Xtensa images rebuild the whole D program serially**: LDC emits one bitcode file for every D
+  module (about 4 minutes at release optimisation) and esp-clang's `llc` lowers that one object on one
+  core (2 minutes 13 seconds measured 2026-10-14), while ESP-IDF rebuilt nothing. Any D change costs
+  6 to 7 minutes. Per-module bitcode lowered by `llc` in parallel under ninja, and only for modules
+  that changed, would cut a rebuild to the longest module. RISC-V targets compile directly in LDC.
 
-- **A local session loses written output silently at the watermark**: `Session.write_output` pushes
-  through `send()` and ignores a refusal, so a command that writes (rather than feeds a producer) to
-  a saturated link drops text with no trace. The remote console relay marks lost lines; the local
-  session needs the same marker on its next successful write, or its writes routed through the held
-  text the pull drains.
-
+- **The page pool competes for the S3's internal SRAM while 8 MB of PSRAM sits idle**: at boot the
+  bench 4547 has 851 bytes free in the DMA-capable internal heap (`heap.alloc: OOM! size=1621
+  flags=4 free=851 largest=336 default-free=8,195,923`), WiFi, BLE and IDF having taken the rest,
+  so the page pool cannot grow (`pagepool.d` asks `MemFlags.dma` for every slab and for the heap
+  fallback) and the console follower's 1600-byte pages fail 753 times while it replays the boot
+  log, each failure one more `[Error]` line. After init about 19 KB comes back and nothing fails
+  again. Measured 2026-10-14 with a per-site allocation table: the only failing site is
+  `append_tx_copy` from `Session.hold`; `WebSocket.queue_frame` makes ~107 small pages a second
+  for the UI's sync channel and is the churn and likely the CPU. Pages need DMA memory only where
+  a DMA engine reads them; on a target with PSRAM the pool's slabs, or at least its growth past the
+  preallocated floor, belong in the default heap. Decide per target in `page_pool_init`'s
+  categories, then re-measure the boot window.
 - **A pcap record is cut at `max_tx_page`**: the capture server copies a frame into one page of at
   most 1600 bytes, so a jumbo frame reaches the client truncated with `caplen` claiming the whole.
   A record spanning a page chain fixes it; the rpcap header already carries the length.
@@ -1790,14 +1790,12 @@ this is what remains.
   time added nothing. Opening the port over a CP210x seems to restart the session by itself on
   alternate opens. Find what a restart keeps.
 
-- **Bound what a `ProducerSession` holds**: text a command writes (rather than feeds as a producer)
-  is held without limit until its reader takes it, in pages and then on the heap, so a command
-  that writes heavily to a slow HTTP client or a blocked sync peer, or a `-w` view, can take every
-  pool page and grow the heap. A write cannot wait, so the bound needs the writers to move onto
-  producers (the remaining `Table.render` prints, looping scripts) or a cap that ends the command
-  with an error. `JsonEscape` also asks for more tailroom than a full session page has, so each
-  such page is copied once on its way out.
-
+- **Held session output is capped at 8 KB and marked when lost**: a command that writes heavily to a
+  slow client now loses lines past `Session.held_limit` and the client sees `[session: N lines
+  lost]`. A write cannot wait, so the writers that still write heavily (looping scripts, the
+  remaining `Table.render` prints) belong on producers, which the pull paces without loss.
+  `JsonEscape` also asks for more tailroom than a full session page has, so each such page is
+  copied once on its way out.
 - **Live views on a session without a terminal**: `/api/cli/execute` and sync commands run on a
   `ProducerSession`, so a watching command (`-w`) streams until the client disconnects. Audit
   `DeviceTreeView` and the other live views for terminal-channel assumptions on such sessions.
