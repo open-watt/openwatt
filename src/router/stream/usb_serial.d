@@ -48,6 +48,7 @@ version (USBSerialJTAG)
         int usb_serial_jtag_driver_install(USBSerialJTAGConfig* config);
         int usb_serial_jtag_driver_uninstall();
         bool usb_serial_jtag_is_driver_installed();
+        bool usb_serial_jtag_is_connected();
         int usb_serial_jtag_read_bytes(void* buffer, uint length, uint ticks_to_wait);
         int usb_serial_jtag_write_bytes(const(void)* data, size_t length, uint ticks_to_wait);
     }
@@ -85,7 +86,12 @@ nothrow @nogc:
     override ptrdiff_t transmit(const(void)[] data)
     {
         version (USBSerialJTAG)
+        {
+            // with no host reading, output goes nowhere rather than hold its pages until one returns
+            if (!usb_serial_jtag_is_connected())
+                return data.length;
             return usb_serial_jtag_write_bytes(data.ptr, data.length, 0);
+        }
         else
             return esp_usb_console_write_buf(cast(const(char)*)data.ptr, data.length);
     }
