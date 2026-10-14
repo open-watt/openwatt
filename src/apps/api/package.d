@@ -930,7 +930,7 @@ nothrow @nogc:
 
     Page* produce(ref const TxRequest req, out TxStatus status)
     {
-        size_t grant = req.bytes < max_tx_page ? req.bytes : max_tx_page;
+        size_t grant = req.bytes;
         Page* page = inner(TxRequest(grant / 6, req.deadline, req.headroom, req.tailroom + grant - grant / 6), status);
         if (!page)
             return null;

@@ -938,7 +938,7 @@ nothrow @nogc:
 
     Page* produce(ref const TxRequest req, out TxStatus status)
     {
-        size_t grant = (req.bytes < max_tx_page ? req.bytes : max_tx_page) - size_line - trailer;
+        size_t grant = req.bytes - size_line - trailer;
         Page* page = inner(TxRequest(grant, req.deadline, req.headroom + size_line, req.tailroom + trailer), status);
         if (page)
         {

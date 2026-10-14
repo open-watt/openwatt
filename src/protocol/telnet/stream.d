@@ -141,11 +141,13 @@ nothrow @nogc:
     override ulong rx_link_speed() const
         => _inner ? _inner.rx_link_speed : 0;
 
+    // the transport's room, less what is already held here on its way there
     override size_t tx_request() const
-        => _inner ? _inner.tx_request : 0;
-
-    override size_t tx_backlog() const
-        => tx_queued() + (_inner ? _inner.tx_backlog : 0);
+    {
+        size_t room = _inner ? _inner.tx_request : 0;
+        size_t held = tx_queued();
+        return room > held ? room - held : 0;
+    }
 
 
 protected:
@@ -388,7 +390,7 @@ private:
     // every byte may be an IAC, which doubles: half the grant carries payload and the other half is room to escape it
     Page* provide_tx_page(ref const TxRequest req, out TxStatus status)
     {
-        size_t grant = req.bytes < max_tx_page ? req.bytes : max_tx_page;
+        size_t grant = req.bytes;
         TxRequest inner = TxRequest(grant / 2, req.deadline, req.headroom, req.tailroom + grant - grant / 2);
         Page* page;
         if (tx_queued)
@@ -844,5 +846,43 @@ unittest
         transport.feed("later");
         assert(transport.rx_handler is null && filter._tail[] == cast(const(ubyte)[])"later");
         filter._subscribed = false;
+    }
+
+    // a page held on its way to the transport counts against the transport's room
+    {
+        static class Line : Stream
+        {
+        nothrow @nogc:
+            ~this() {}
+            enum type_name = "telnet-test-line";
+            this(CID id, ObjectFlags flags = ObjectFlags.none)
+            {
+                super(collection_type_info!Line, id, flags);
+            }
+            override size_t tx_request() const
+                => room;
+            size_t room;
+        }
+
+        Line line = Collection!Line().create("telnet-test-line");
+        scope (exit)
+        {
+            line.destroy();
+            Collection!Stream().update_all();
+        }
+        TelnetStream filter = alloc!TelnetStream(CID(3));
+        scope (exit) free(filter);
+        filter._inner = line;
+        line.room = 100;
+        assert(filter.tx_request == 100);
+        filter.queue_tx_page(page_alloc(200));
+        assert(filter.tx_queued == 200 && filter.tx_request == 0, "held pages fill the room");
+        line.room = 1000;
+        assert(filter.tx_request == 800);
+        TxStatus status;
+        Page* page = filter.provide_tx_page(TxRequest(1000, MonoTime()), status);
+        assert(page && filter.tx_queued == 0 && filter.tx_request == 1000);
+        page_free(page);
+        line.release_tx_handler(&filter.provide_tx_page);
     }
 }

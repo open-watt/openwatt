@@ -188,7 +188,9 @@ nothrow @nogc:
                 status = _after;
                 return null;
             }
-            Page* page = page_alloc(chunk, default_alignment, req.headroom, req.tailroom);
+            size_t room = req.headroom + req.tailroom;
+            size_t bytes = chunk + room <= max_tx_page ? chunk : max_tx_page - room;
+            Page* page = page_alloc(bytes, default_alignment, req.headroom, req.tailroom);
             if (!page)
             {
                 status = TxStatus.starved;
@@ -456,7 +458,7 @@ nothrow @nogc:
     // takes the frame whether or not it is sent; the caller never frees it
     final bool send(Page* frame)
     {
-        if (!running)
+        if (!tx_admits())
         {
             free_tx_chain(frame);
             return false;
@@ -467,6 +469,8 @@ nothrow @nogc:
 
     final bool send_bytes(const(void[])[] parts...)
     {
+        if (!tx_admits())
+            return false;
         size_t remaining;
         foreach (part; parts)
             remaining += part.length;
@@ -498,10 +502,6 @@ nothrow @nogc:
             bytes += page.length;
         return bytes - _tx_sent;
     }
-
-    // what waits behind this stream to reach the wire, a transport's own queue included
-    size_t tx_backlog() const
-        => tx_queued();
 
     TerminalChannel* terminal_channel()
     {
@@ -566,7 +566,8 @@ protected:
         MonoTime deadline = getTime() + tx_slice;
         while (_outgoing)
         {
-            TxRequest req = TxRequest(tx_request(), deadline);
+            size_t room = tx_request();
+            TxRequest req = TxRequest(room < max_tx_page ? room : max_tx_page, deadline);
             if (req.bytes < min_tx_request)
                 break;
             uint generation = page_free_generation();
@@ -765,6 +766,9 @@ private:
         if (running)
             drain_tx();
     }
+
+    final bool tx_admits() const
+        => running && tx_request() != 0;
 
     final void release_tx_queue()
     {
@@ -1218,6 +1222,24 @@ unittest
         assert(line.send_bytes(bytes[]));
         line.open(1000);
         assert(line.output[] == bytes[], "the next frame goes out whole");
+    }
+
+    // a queue at its watermark refuses a frame and admits again once the line has drained
+    {
+        ShortStream line = alloc!ShortStream(CID(5));
+        scope(exit)
+        {
+            line.halt();
+            free(line);
+        }
+        ubyte[Stream.tx_queue_limit] bytes;
+        line.room = 0;
+        assert(line.send_bytes(bytes[]) && line.tx_queued() == bytes.length);
+        assert(!line.send_bytes(bytes[0 .. 1]) && line.tx_queued() == bytes.length, "a full queue refuses");
+        line.open(bytes.length);
+        assert(line.tx_queued() == 0 && line.send_bytes(bytes[0 .. 1]), "a drained line admits again");
+        line.open(1);
+        assert(line.tx_queued() == 0);
     }
 
     // a producer past its deadline yields and stays armed, and makes progress on the next turn

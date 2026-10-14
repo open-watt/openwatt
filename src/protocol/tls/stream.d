@@ -382,19 +382,15 @@ nothrow @nogc:
         return CompletionStatus.complete;
     }
 
+    // the transport's room, less what is already held here on its way there
     final override size_t tx_request() const
     {
         if (_handshake_state != HandshakeState.completed)
             return 0;
-        if (auto stream = _stream.get)
-            return stream.tx_request;
-        return 0;
-    }
-
-    final override size_t tx_backlog() const
-    {
         auto stream = _stream.get;
-        return tx_queued() + (stream ? stream.tx_backlog : 0);
+        size_t room = stream ? stream.tx_request : 0;
+        size_t held = tx_queued();
+        return room > held ? room - held : 0;
     }
 
 protected:
@@ -453,7 +449,7 @@ private:
             return null;
         }
         debug assert(header + trailer < min_tx_request, "a grant carries a record's framing and some payload");
-        size_t payload = (req.bytes < max_tx_page ? req.bytes : max_tx_page) - header - trailer;
+        size_t payload = req.bytes - header - trailer;
         if (payload > max_payload)
             payload = max_payload;
         TxRequest inner = TxRequest(payload, req.deadline, req.headroom + header, req.tailroom + trailer);

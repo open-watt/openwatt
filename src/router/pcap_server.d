@@ -142,12 +142,12 @@ private:
 
         BaseInterface opened_iface;
         uint packet_ordinal;
+        uint dropped;
         bool authenticated;
         bool capturing;
 
         Array!ubyte tail;
         enum size_t max_request = 16 * 1024;
-        enum size_t max_capture_backlog = 64 * 1024;
 
         this(PCAPServer server, Stream stream)
         {
@@ -438,6 +438,7 @@ private:
             opened_iface.subscribe(&packet_handler, PacketFilter(type: PacketType.unknown, direction: cast(PacketDirection)(PacketDirection.incoming | PacketDirection.outgoing)), &this);
             capturing = true;
             packet_ordinal = 1;
+            dropped = 0;
 
             // portdata in reply: 0 = use same connection, non-zero = port client should connect to
             RpcapStartCapReply reply = {
@@ -487,7 +488,7 @@ private:
             RpcapStats stats = {
                 ifrecv: opened_iface ? cast(uint)opened_iface.status.rx_packets : 0,
                 ifdrop: opened_iface ? cast(uint)opened_iface.status.rx_dropped : 0,
-                krnldrop: 0,
+                krnldrop: dropped,
                 svrcapt: packet_ordinal,
             };
             send_reply(RPCAP_MSG_STATS_REQ, stats.nativeToBigEndian);
@@ -513,9 +514,6 @@ private:
 
             Stream out_stream = data_stream ? data_stream : stream;
             if (!out_stream || !out_stream.running)
-                return;
-
-            if (out_stream.tx_backlog > max_capture_backlog)
                 return;
 
             enum size_t head = RpcapHeader.sizeof + RpcapPktHdr.sizeof;
@@ -553,7 +551,8 @@ private:
             buffer[0 .. RpcapHeader.sizeof] = hdr.nativeToBigEndian;
             buffer[RpcapHeader.sizeof .. head] = pkt_hdr.nativeToBigEndian;
             page.length = cast(ushort)len;
-            out_stream.send(page);
+            if (!out_stream.send(page))
+                ++dropped;
         }
 
         void send_reply(ubyte msg_type, const void[] payload)
@@ -570,9 +569,14 @@ private:
             server.log.warning("error: ", message);
         }
 
+        // a control message the connection cannot take ends the session; the client would otherwise wait on it
         void send_message(ubyte type, ushort value, const void[] payload)
         {
-            stream.send_bytes(RpcapHeader(ver: RPCAP_VERSION, type: type, value: value, plen: cast(uint)payload.length).nativeToBigEndian, payload);
+            if (!stream.send_bytes(RpcapHeader(ver: RPCAP_VERSION, type: type, value: value, plen: cast(uint)payload.length).nativeToBigEndian, payload))
+            {
+                server.log.warning("control connection full; closing session");
+                close();
+            }
         }
 
         void stream_destroyed(ActiveObject object, StateSignal signal)
