@@ -81,20 +81,17 @@ nothrow @nogc:
         => _tx ? _tx.tx_backlog : 0;
 
 
-    override bool send(Page* frame)
+protected:
+
+    override void queue_tx_page(Page* frame)
     {
         Stream tx = _tx;
         if (!tx || !tx.running)
-        {
-            free_tx_chain(frame);
-            return false;
-        }
+            return free_tx_chain(frame);
         for (Page* p = frame; p; p = p.next)
             sent(p.data);
-        return tx.send(frame);
+        tx.send(frame);
     }
-
-protected:
 
     override bool validate() const pure
         => _tx !is null || _rx !is null;

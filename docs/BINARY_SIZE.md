@@ -78,6 +78,7 @@ row alone. Sizes stay in bytes; round in the note if that reads better.
 | 2026-10-13 | ow/ash-ack-stuffing | ldc 1.43.0 | 5,805,496 | 534,656 | | ASH ACK stuffing, peering, deferred restarts, crash dump numbering |
 | 2026-10-13 | ow/serial-close | ldc 1.43.0 | 5,820,648 | 534,856 | | serial close never blocks; owners tear dying children down on the next pass; as deployed to the Pi (slot 190) |
 | 2026-10-13 | ow/stream-frames | ldc 1.43.0 | 5,805,592 | 534,664 | | every writer sends whole frames as pages; `Stream.write()` retired |
+| 2026-10-14 | b610e54d | ldc 1.43.0 | 5,815,504 | 534,896 | | master with MQTT on the pull path; deployed to the Pi (slot 191) |
 
 ### Waveshare ESP32-S3-RS485-CAN, `make esp-idf-build BOARD=waveshare-esp32-s3-rs485-can CONFIG=release`
 

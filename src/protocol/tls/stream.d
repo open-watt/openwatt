@@ -382,17 +382,6 @@ nothrow @nogc:
         return CompletionStatus.complete;
     }
 
-    final override bool send(Page* frame)
-    {
-        if (!running)
-        {
-            free_tx_chain(frame);
-            return false;
-        }
-        hold_tx(frame);
-        return true;
-    }
-
     final override size_t tx_request() const
     {
         if (_handshake_state != HandshakeState.completed)
@@ -417,6 +406,11 @@ protected:
             return;
         g_app.cancel(&resume_rx);
         g_app.schedule(getTime(), &resume_rx);
+    }
+
+    final override void queue_tx_page(Page* frame)
+    {
+        hold_tx(frame);
     }
 
     final override void tx_handler_changed()

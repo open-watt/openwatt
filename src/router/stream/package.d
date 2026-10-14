@@ -453,7 +453,7 @@ nothrow @nogc:
         => _taps.length != 0;
 
     // takes the frame whether or not it is sent; the caller never frees it
-    bool send(Page* frame)
+    final bool send(Page* frame)
     {
         if (!running)
         {
