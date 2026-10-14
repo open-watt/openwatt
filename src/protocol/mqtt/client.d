@@ -5,6 +5,7 @@ import urt.inet : InetAddress;
 import urt.lifetime;
 import urt.log;
 import urt.mem;
+import urt.mem.page : Page;
 import urt.string;
 import urt.string.format : tconcat;
 import urt.time;
@@ -243,12 +244,7 @@ nothrow @nogc:
         pkt.payload = payload;
         pkt.retain = retain;
 
-        size_t sz = publish_size(pkt, _protocol_level);
-        _out_buf.resize(sz);
-        ubyte[] sink = _out_buf[];
-        if (!encode_publish(sink, pkt, _protocol_level))
-            return;
-        send_packet(_out_buf[]);
+        send_packet(publish_size(pkt, _protocol_level), (ref ubyte[] s) => encode_publish(s, pkt, _protocol_level), true);
     }
 
 
@@ -307,7 +303,6 @@ protected:
 
         release_stream();
         _parse_buf.clear();
-        _out_buf.clear();
         _state = ClientState.disconnected;
         return CompletionStatus.complete;
     }
@@ -379,7 +374,7 @@ private:
     MonoTime _connect_deadline;
 
     Array!ubyte _parse_buf;
-    Array!ubyte _out_buf;
+    PacketQueue _tx;
 
     Array!ClientSubscription _subscriptions;
 
@@ -400,9 +395,11 @@ private:
 
     void release_stream()
     {
+        _tx.clear();
         if (_subscribed && _stream)
         {
             _stream.release_rx_handler(&stream_rx);
+            _stream.release_tx_handler(&produce);
             _stream.unsubscribe(&stream_state_change);
             _subscribed = false;
         }
@@ -597,12 +594,7 @@ private:
             pkt.password = _password[];
         }
 
-        size_t sz = connect_size(pkt);
-        _out_buf.resize(sz);
-        ubyte[] sink = _out_buf[];
-        if (!encode_connect(sink, pkt))
-            return false;
-        return send_packet(_out_buf[]);
+        return send_packet(connect_size(pkt), (ref ubyte[] s) => encode_connect(s, pkt));
     }
 
     bool send_subscribe(const(char)[] filter)
@@ -619,12 +611,7 @@ private:
         pkt.packet_id = next_packet_id();
         pkt.subscriptions = payload_buf[0 .. plen];
 
-        size_t sz = subscribe_size(pkt, _protocol_level);
-        _out_buf.resize(sz);
-        ubyte[] sink = _out_buf[];
-        if (!encode_subscribe(sink, pkt, _protocol_level))
-            return false;
-        return send_packet(_out_buf[]);
+        return send_packet(subscribe_size(pkt, _protocol_level), (ref ubyte[] s) => encode_subscribe(s, pkt, _protocol_level));
     }
 
     bool send_unsubscribe(const(char)[] filter)
@@ -639,58 +626,40 @@ private:
         pkt.packet_id = next_packet_id();
         pkt.topic_filters = payload_buf[0 .. plen];
 
-        size_t sz = unsubscribe_size(pkt, _protocol_level);
-        _out_buf.resize(sz);
-        ubyte[] sink = _out_buf[];
-        if (!encode_unsubscribe(sink, pkt, _protocol_level))
-            return false;
-        return send_packet(_out_buf[]);
+        return send_packet(unsubscribe_size(pkt, _protocol_level), (ref ubyte[] s) => encode_unsubscribe(s, pkt, _protocol_level));
     }
 
     bool send_pingreq()
-    {
-        ubyte[2] buf;
-        ubyte[] sink = buf[];
-        if (!encode_pingreq(sink))
-            return false;
-        return send_packet(buf[]);
-    }
+        => send_packet(2, (ref ubyte[] s) => encode_pingreq(s));
 
     bool send_disconnect_packet()
     {
         DisconnectPacket pkt;
         pkt.reason_code = ReasonCode.Success;
-        size_t sz = disconnect_size(pkt, _protocol_level);
-        _out_buf.resize(sz);
-        ubyte[] sink = _out_buf[];
-        if (!encode_disconnect(sink, pkt, _protocol_level))
-            return false;
-        return send_packet(_out_buf[]);
+        return send_packet(disconnect_size(pkt, _protocol_level), (ref ubyte[] s) => encode_disconnect(s, pkt, _protocol_level));
     }
 
-    bool send_packet(const(ubyte)[] packet)
+    // a publish the queue cannot take is lost; anything else restarts the connection
+    bool send_packet(size_t size, scope PacketEncoder encode, bool droppable = false)
     {
-        if (_stream.tx_backlog > max_tx_backlog)
+        if (!_tx.push(size, encode))
         {
+            if (droppable)
+                return false;
             log.warning("broker is not taking what is sent; dropping the connection");
             restart_deferred();
             return false;
         }
-        if (!_stream.send_bytes(packet))
-            return false;
+        _stream.tx_handler(&produce);
         _last_send = getTime();
         return true;
     }
 
+    Page* produce(ref const TxRequest req, out TxStatus status)
+        => _tx.take(req, status);
+
     bool send_ack(PacketType t, ref AckPacket pkt)
-    {
-        size_t sz = ack_size(pkt, _protocol_level);
-        _out_buf.resize(sz);
-        ubyte[] sink = _out_buf[];
-        if (!encode_ack(sink, t, pkt, _protocol_level))
-            return false;
-        return send_packet(_out_buf[]);
-    }
+        => send_packet(ack_size(pkt, _protocol_level), (ref ubyte[] s) => encode_ack(s, t, pkt, _protocol_level));
 
     ushort _next_packet_id = 1;
     ushort next_packet_id()

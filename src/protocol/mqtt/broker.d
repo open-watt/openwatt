@@ -439,14 +439,12 @@ nothrow @nogc:
         // retain_handling: 0=always, 1=only-if-new-subscription, 2=never (MQTT v5 §3.8.3.1).
         bool send_retained = (retain_handling == 0) || (retain_handling == 1 && was_new);
         if (send_retained && s.connection !is null)
-        {
-            Connection* conn = cast(Connection*)s.connection;
-            _trie.match_retained(filter, (ref const RetainedMessage rm) nothrow @nogc {
-                conn.send_publish_to_subscriber(rm.topic[], rm.payload[], rm.properties[], granted, true);
-            });
-        }
+            (cast(Connection*)s.connection).replay_retained(filter_str, granted);
         return granted;
     }
+
+    package RetainedMessage* next_retained(const(char)[] filter, const(char)[] after)
+        => _trie.next_retained(filter, after);
 
     package bool unsubscribe_session(Session* s, const(char)[] filter)
     {
@@ -793,7 +791,7 @@ private:
             if (!s || s.connection is null)
                 return; // detached -- drop (TODO: queue for QoS > 0)
             Connection* conn = cast(Connection*)s.connection;
-            conn.send_publish_to_subscriber(topic, payload, properties, sub.qos, false);
+            conn.send_publish_to_subscriber(topic, payload, properties, sub.qos);
         });
     }
 
