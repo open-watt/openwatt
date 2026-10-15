@@ -888,6 +888,13 @@ Independent. B.1 records the definitions #810 implements.
 - **Y2a** lands fragmentation first, since without it one oversized value is still lost; until
   **Y2b** sizes the producers, large blocks fragment rather than fit. It is not a wire break: a
   `fragment` is a message, sent only toward a version-2 remote (B.5).
+- **Y4** as written needs `forward` to take a page-backed `Packet` by ownership, which the packet
+  path does not yet do: every transport copies the packet it is handed. Over WebSocket, which is
+  reliable and ordered, the sublayer never arms, each encoder's `_buf` is one persistent buffer,
+  and the only copy is `_buf` into the WebSocket's packed tail page (plus the bundle copy since Y3).
+  Removing that copy means encoding straight into the transport's tail page, the `ws_frame`
+  producer of A.3 item 5, not a page per frame. The sublayer copies (`_rel_buf`, `SentFrame.bytes`)
+  are C1's to delete. Y4 is open for a decision on which of these it is.
 - **Y5** waits for the UX_TODO action that moves clients to `model_sub from/to`.
 
 ### Track D: streaming parsers
