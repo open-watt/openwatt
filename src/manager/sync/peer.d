@@ -35,6 +35,7 @@ import router.iface;
 import router.iface.endpoint : UDPEndpoint, UDPReceiveInfo, udp_open;
 import router.iface.packet;
 import router.iface.udp : UDPFrame;
+import router.stream : max_tx_page;
 
 nothrow @nogc:
 
@@ -45,7 +46,7 @@ alias log = Log!"sync";
 alias SyncHandle = ulong;
 
 // verb families served; negotiated by hello, build-time on each end
-enum SyncCaps : ubyte
+enum SyncCaps : ushort
 {
     objects = 1 << 0,   // legacy object mirror
     model   = 1 << 1,   // data-model space (add/val/sub)
@@ -55,9 +56,10 @@ enum SyncCaps : ubyte
     time    = 1 << 5,
     console_session = 1 << 6,
     templates = 1 << 7, // understands `add {class:"component"}` shape refreshes
+    bundle    = 1 << 8, // JSON only: a frame may carry an array of messages
 }
 
-enum ubyte local_sync_caps = SyncCaps.objects | SyncCaps.model | SyncCaps.history | SyncCaps.console | SyncCaps.logs | SyncCaps.time | SyncCaps.console_session | SyncCaps.templates;
+enum ushort local_sync_caps = SyncCaps.objects | SyncCaps.model | SyncCaps.history | SyncCaps.console | SyncCaps.logs | SyncCaps.time | SyncCaps.console_session | SyncCaps.templates | SyncCaps.bundle;
 
 // reliability sublayer classification; values are the wire kind byte
 enum TxQueue : ubyte
@@ -246,6 +248,8 @@ nothrow @nogc:
             _send_failed = true;
             return -1;
         }
+        if (queue != TxQueue.val && flush_bundle() < 0)
+            return refused(queue == TxQueue.control);
         // refusals come before a frame is sequenced, so neither the session nor a burst fails with them
         if (frame.length > send_limit)
         {
@@ -550,6 +554,7 @@ protected:
 
     override CompletionStatus shutdown()
     {
+        _bundle.clear();
         // the module's drain reaps the cancelled commands once they finish
         foreach (cmd; _commands)
         {
@@ -776,7 +781,35 @@ package:
         if (!pump_fragments())
             return tx_full();
         bool console_waiting = produce_console();
-        return get_module!SyncModule.produce(this) || console_waiting;
+        bool more = get_module!SyncModule.produce(this);
+        flush_bundle();
+        return more || console_waiting;
+    }
+
+    // Values toward a peer that reads bundles share a frame of up to a page, which goes before any other frame. One
+    // the transport refuses is kept, closed, and values offered behind it are refused, so their producers keep them.
+    final int bundle(const(char)[] message)
+    {
+        size_t limit = send_limit < max_tx_page ? send_limit : max_tx_page;
+        if (_bundle.length && (_bundle[$ - 1] == ']' || _bundle.length + message.length + 2 > limit) && flush_bundle() < 0)
+            return -1;
+        if (message.length + 2 > limit)
+            return transmit_frame(cast(const(ubyte)[])message, true, TxQueue.val);
+        _bundle ~= _bundle.length ? ',' : '[';
+        _bundle ~= message;
+        return 0;
+    }
+
+    final int flush_bundle()
+    {
+        if (!_bundle.length)
+            return 0;
+        if (_bundle[$ - 1] != ']')
+            _bundle ~= ']';
+        int r = transmit_frame(cast(const(ubyte)[])_bundle[], true, TxQueue.val);
+        if (r == 0)
+            _bundle.clear();
+        return r;
     }
 
     // remote consoles and commands drain while the plane has room, and hold the producer while the transport is full
@@ -854,7 +887,8 @@ package:
 
     enum uint min_segment = 32;   // below hello's size, so a peer that can handshake clears it
 
-    ubyte            _remote_caps;       // hello negotiation; 0 = no hello received
+    ushort           _remote_caps;       // hello negotiation; 0 = no hello received
+    Array!char       _bundle;            // JSON values collected for one frame
     uint             _remote_version;    // 0 until hello
     uint             _remote_max_message; // 0 until hello
     uint             _remote_segment;    // 0 until hello, and from a peer that predates it
@@ -1167,20 +1201,22 @@ private:
         _log_active = false;
     }
 
-    // control has no gap semantics: a refusal invalidates the session
     int send_unwrapped(const(ubyte)[] frame, bool is_text, bool control)
     {
         int r = raw_tx(frame, is_text);
-        if (r < 0)
+        return r < 0 ? refused(control) : r;
+    }
+
+    // control has no gap semantics: a refusal invalidates the session
+    int refused(bool control)
+    {
+        _send_failed = true;
+        if (control && _state == State.running)
         {
-            _send_failed = true;
-            if (control && _state == State.running)
-            {
-                log.warning("peer '", name[], "' control frame refused; restarting session");
-                restart();
-            }
+            log.warning("peer '", name[], "' control frame refused; restarting session");
+            restart();
         }
-        return r;
+        return -1;
     }
 
     int send_sequenced(const(ubyte)[] frame)
@@ -1944,6 +1980,8 @@ unittest
         override void tx_handler_changed() {}
         override int transmit(ref Packet packet, MessageCallback, const(QueuePolicy)*)
         {
+            if (refuse)
+                return -1;
             Array!ubyte f;
             f ~= cast(const(ubyte)[])packet.data;
             frames ~= f.move;
@@ -1951,6 +1989,7 @@ unittest
         }
         Array!(Array!ubyte) frames;
         size_t room = size_t.max;
+        bool refuse;
     }
 
     static class Live : SyncPeer
@@ -1989,6 +2028,40 @@ unittest
     ubyte[1000] message;
     foreach (i, ref b; message)
         b = cast(ubyte)(i * 7);
+
+    // values collect into one frame, which closes before the segment and before any other frame
+    {
+        char[40] msg = 'v';
+        msg[0] = '{';
+        msg[$ - 1] = '}';
+        link.frames.clear();
+        foreach (_; 0 .. 3)
+            assert(peer.bundle(msg[]) == 0);
+        assert(link.frames.length == 0 && peer._bundle.length == 3 * 41);
+        peer.flush_bundle();
+        assert(link.frames.length == 1 && link.frames[0].length == 3 * 41 + 1);
+        assert(link.frames[0][0] == '[' && link.frames[0][$ - 1] == ']');
+        link.frames.clear();
+        foreach (_; 0 .. 10)
+            assert(peer.bundle(msg[]) == 0);
+        peer.flush_bundle();
+        assert(link.frames.length == 3, "ten 40-byte values over a 200-byte segment take three frames");
+        foreach (ref f; link.frames[])
+            assert(f.length <= 200 && f[0] == '[' && f[$ - 1] == ']');
+        link.frames.clear();
+
+        // a refused frame is kept and goes first; a value offered behind it is refused, and nothing overtakes it
+        foreach (_; 0 .. 2)
+            assert(peer.bundle(msg[]) == 0);
+        link.refuse = true;
+        assert(peer.flush_bundle() < 0 && peer._bundle.length == 2 * 41 + 1);
+        assert(peer.bundle(msg[]) < 0 && peer.transmit_frame(cast(const(ubyte)[])"{}", true, TxQueue.log) < 0);
+        link.refuse = false;
+        assert(peer.bundle(msg[]) == 0 && link.frames.length == 1 && link.frames[0].length == 2 * 41 + 1);
+        assert(peer.flush_bundle() == 0 && link.frames.length == 2);
+        link.frames.clear();
+        peer._send_failed = false;
+    }
 
     // toward a version-1 remote nothing is fragmented: an oversized message is refused as before
     peer._remote_version = 1;

@@ -1335,6 +1335,11 @@ this is what remains.
 
 ## Infrastructure
 
+- **`protocol.ip`'s TCP drain test is flaky** (2026-10-16): "one invitation drains what fits in its
+  turn" (`src/protocol/ip/package.d`) asserts that a 32 KB producer is drained in one invitation over a
+  real socket pair, which holds only while the kernel buffer takes it all at once. It failed once in a
+  Linux DMD run under WSL load and passed on three reruns of the same binary.
+
 - **Receive still polled after the stream migration** (2026-10-06): streams push, but a few
   consumers still learn of progress from a tick. TLS advances its handshake from `startup()`,
   which the state machine re-drives each frame, rather than from the bytes' arrival; the DNS

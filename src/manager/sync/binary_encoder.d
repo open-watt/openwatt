@@ -396,7 +396,7 @@ nothrow @nogc:
         begin_frame(Verb.hello);
         _buf.put_varint(model_protocol_version);
         _buf.put_str(null);
-        _buf ~= local_sync_caps;
+        _buf ~= cast(ubyte)local_sync_caps;   // bundling is JSON's; the binary hello carries the first eight caps
         _buf.put_varint(peer.local_max_message);
 
         // identity tail; pre-identity decoders stop at max_message and ignore it, and older ones stop at the nonce

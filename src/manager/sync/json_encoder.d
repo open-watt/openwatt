@@ -406,7 +406,7 @@ nothrow @nogc:
             _buf.append(",\"role\":\"", role_name(role), '\"');
         _buf ~= ",\"caps\":[";
         bool first = true;
-        foreach (bit; 0 .. 8)
+        foreach (bit; 0 .. 16)
         {
             if (!(local_sync_caps & (1 << bit)))
                 continue;
@@ -667,7 +667,17 @@ nothrow @nogc:
 
     override bool decode_and_dispatch(SyncPeer peer, const(ubyte)[] frame)
     {
-        Variant json = parse_json(cast(char[])cast(const(char)[])frame);
+        Variant parsed = parse_json(cast(char[])cast(const(char)[])frame);
+        if (!parsed.isArray)
+            return dispatch_message(peer, parsed);
+        for (size_t i = 0; i < parsed.length(); ++i)
+            if (!dispatch_message(peer, parsed[i]))
+                return false;
+        return true;
+    }
+
+    bool dispatch_message(SyncPeer peer, ref Variant json)
+    {
         if (!json.isObject)
         {
             log.warning("frame is not a JSON object");
@@ -999,7 +1009,7 @@ nothrow @nogc:
 
             case "hello":
             {
-                ubyte caps;
+                ushort caps;
                 Variant* cv = json.getMember("caps");
                 if (cv && !cv.isArray)
                     bad("caps");
@@ -1394,7 +1404,7 @@ private:
     int send_frame(SyncPeer peer, TxQueue queue = TxQueue.control)
     {
         _buf ~= '}';
-        int r = peer.transmit_frame(cast(const(ubyte)[])_buf[], true, queue);
+        int r = queue == TxQueue.val && (peer._remote_caps & SyncCaps.bundle) ? peer.bundle(_buf[]) : peer.transmit_frame(cast(const(ubyte)[])_buf[], true, queue);
         if (r < 0)
         {
             // event-driven encodes (state/cmd/result/error/sub/...) have no retry path!!
