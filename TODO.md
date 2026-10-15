@@ -1656,6 +1656,14 @@ this is what remains.
 - **A pcap record is cut at `max_tx_page`**: the capture server copies a frame into one page of at
   most 1600 bytes, so a jumbo frame reaches the client truncated with `caplen` claiming the whole.
   A record spanning a page chain fixes it; the rpcap header already carries the length.
+- **ESP32-S3 WiFi driver panics in `ieee80211_hostap_attach` on a mode switch**: the bench Waveshare
+  S3 (4547) took a LoadProhibited at `ieee80211_hostap_attach+269` on the WiFi task, under
+  `wifi_softap_start` / `wifi_set_mode_process`, while the main thread sat in
+  `BuiltinWiFi.update_drv_mode()` calling `esp_wifi_set_mode` (core dump of 2026-10-14, decoded with
+  `espcoredump` against the S13 image; no OpenWatt frame on the WiFi task). The board had 615 crash
+  dumps on its filesystem, so this has recurred for a long time on bring-up defaults, which start the
+  provisioning AP. Suspect the AP is started before the driver has finished the previous mode change,
+  or started twice; check the ordering in `wifi_hw_set_mode` and whether IDF v6.1 changed it.
 
 - **Streams flush on a graceful stop; only a failed one drops**: every stream but serial frees its
   queue in `offline()`, so a graceful `destroy()` loses what was queued. On a graceful stop a stream

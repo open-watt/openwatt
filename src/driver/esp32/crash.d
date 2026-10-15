@@ -12,17 +12,19 @@ nothrow @nogc:
 
 alias log = Log!"crash";
 
+enum uint kept_dumps = 2;
+
 void export_pending_crash_dump()
 {
+    uint number = next_dump_number();
+    prune_dumps(number - 1);
+
     size_t size;
     if (!urt_crash_dump_size(&size) || size == 0)
         return;
 
-    uint number = next_dump_number();
     char[21] path = void;
-    path[0 .. 6] = "crash-";
-    write_number(path[6 .. 16], number);
-    path[16 .. $] = ".core";
+    dump_path(path, number);
 
     File file;
     if (!file.open(path[], FileOpenMode.WriteTruncate, FileOpenFlags.Sequential))
@@ -68,9 +70,62 @@ void export_pending_crash_dump()
         return;
     }
     log.warning("saved crash dump ", path[], " (", size, " bytes)");
+    prune_dumps(number);
 }
 
 private:
+
+void dump_path(ref char[21] path, uint number)
+{
+    path[0 .. 6] = "crash-";
+    write_number(path[6 .. 16], number);
+    path[16 .. $] = ".core";
+}
+
+// the newest kept_dumps stay and every older one goes, whatever numbers are already missing
+void prune_dumps(uint newest)
+{
+    if (newest <= kept_dumps)
+        return;
+    uint[16] stale = void;
+    size_t count;
+    do
+    {
+        count = 0;
+        Directory dir;
+        if (!dir.open(null))
+            return;
+        DirEntry entry;
+        while (count < stale.length && dir.read(entry))
+        {
+            uint number;
+            if (dump_number(entry.name, number) && number <= newest - kept_dumps)
+                stale[count++] = number;
+        }
+        dir.close();
+        char[21] path = void;
+        foreach (number; stale[0 .. count])
+        {
+            dump_path(path, number);
+            if (delete_file(path[]).failed)
+                return;
+        }
+    }
+    while (count == stale.length);
+}
+
+bool dump_number(const(char)[] name, out uint number)
+{
+    if (name.length != 21 || name[0 .. 6] != "crash-" || name[16 .. $] != ".core")
+        return false;
+    foreach (char c; name[6 .. 16])
+    {
+        if (!c.is_numeric)
+            return false;
+        number = number * 10 + cast(uint)(c - '0');
+    }
+    return true;
+}
 
 bool write_all(ref File file, const(ubyte)[] data)
 {
