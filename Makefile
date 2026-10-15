@@ -121,6 +121,13 @@ ifeq ($(ALLOC_TRACKING),1)
     DFLAGS := $(DFLAGS) $(VERSION_FLAG)AllocTracking
 endif
 
+# Live page holders by call path (urt.mem.pagetrace, /system/pages). On by default where memory is
+# plentiful; a micro pays for the tables in RAM and flash, so it opts in.
+MEMSTATS ?= $(if $(filter freertos baremetal,$(OS)),0,1)
+ifeq ($(MEMSTATS),1)
+    DFLAGS := $(DFLAGS) $(VERSION_FLAG)MemStats
+endif
+
 ifeq ($(COMPILER),ldc)
   ifneq ($(CONFIG),unittest)
     # Make counts literal parentheses inside $(shell), even when quoted.

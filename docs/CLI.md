@@ -150,13 +150,21 @@ Node-wide state and lifecycle. The sub-scopes `/system/config`, `/system/fs` and
 also stamps the log HOSTNAME field.
 
 `/system/sysinfo` prints hostname, node id, OS, CPU, build, memory pools, the page pool's live and
-peak pages per category (and page allocations that failed), main stack use,
+peak pages per category, how often each category was full (the request then went to the heap)
+and how often the heap failed it too, main stack use,
 uptime, wall time and whether the saved configuration is dirty, plus the reset reason where the
 platform has one. The build is the source revision the image came from
 (`git describe --always --dirty`, or `unknown` where the build had none). Given property names
 instead, it prints only those values, one per line: `build`, `hostname`, `node-id`, `os`,
 `processor`, `total`, `used`, `peak`, `largest`, `ext-total`, `ext-used`, `ext-peak`,
 `ext-largest`, `stack-peak`, `stack-size`, `uptime`, `time`, `config-dirty`, `reset-reason`.
+
+`/system/pages` lists who holds the page pool's pages: one line per call path that has allocated
+a page, with the pages it holds now, the most it has held, their capacity in bytes, its
+allocations and its failures, the most pages held first. Each path is the caller of `page_alloc`
+and three frames above it, by name where the target can resolve symbols and by address
+otherwise. It exists in builds with `MEMSTATS=1`, the default except on FreeRTOS and bare-metal
+targets.
 
 `Stack:` is the deepest main stack use since boot over the stack's capacity. Bare-metal
 targets paint the stack at reset and find the deepest overwritten word; ESP32 reports the
