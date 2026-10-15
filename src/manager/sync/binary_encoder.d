@@ -527,7 +527,7 @@ nothrow @nogc:
         send_frame(peer);
     }
 
-    override void encode_val(SyncPeer peer, SyncHandle h, Element* e)
+    override bool encode_val(SyncPeer peer, SyncHandle h, Element* e)
     {
         import urt.time : unix_time_ns;
 
@@ -538,7 +538,7 @@ nothrow @nogc:
         _buf.put_varint(unix_time_ns(e.last_update) / 1_000_000);
         Variant v = e.value;
         _buf.put_variant(v);
-        send_frame(peer, TxQueue.val);
+        return send_frame(peer, TxQueue.val) >= 0;
     }
 
     override uint encode_val_block(SyncPeer peer, SyncHandle h, ref const RecordBlock blk)
@@ -835,12 +835,15 @@ nothrow @nogc:
             }
 
             case Verb.log:
-            {
-                const(char)[] line = r.str();
-                if (!r.fail)
-                    sync.inbound_log(peer, line);
+                // log and val records run on until the frame ends
+                do
+                {
+                    const(char)[] line = r.str();
+                    if (!r.fail)
+                        sync.inbound_log(peer, line);
+                }
+                while (r.remaining && !r.fail);
                 break;
-            }
 
             case Verb.time_req:
             {
@@ -1030,23 +1033,25 @@ nothrow @nogc:
             }
 
             case Verb.val:
-            {
-                SyncHandle h = r.varint();
-                r.varint();   // lost - informational, mirror ignores it (same as JSON)
-                size_t count = cast(size_t)r.varint();
-                if (r.fail || count > r.remaining)
-                    break;
-                foreach (i; 0 .. count)
+                do
                 {
-                    ulong t_ms = r.varint();
-                    Variant v = r.variant();
-                    if (r.fail)
+                    SyncHandle h = r.varint();
+                    r.varint();   // lost - informational, mirror ignores it (same as JSON)
+                    size_t count = cast(size_t)r.varint();
+                    if (r.fail || count > r.remaining)
                         break;
-                    if (!sync.inbound_val(peer, h, v, t_ms))
-                        return false;
+                    foreach (i; 0 .. count)
+                    {
+                        ulong t_ms = r.varint();
+                        Variant v = r.variant();
+                        if (r.fail)
+                            break;
+                        if (!sync.inbound_val(peer, h, v, t_ms))
+                            return false;
+                    }
                 }
+                while (r.remaining && !r.fail);
                 break;
-            }
 
             case Verb.model_set:
             {
@@ -1205,7 +1210,7 @@ private:
 
     int send_frame(SyncPeer peer, TxQueue queue = TxQueue.control)
     {
-        int r = peer.transmit_frame(_buf[], false, queue);
+        int r = queue == TxQueue.control ? peer.transmit_frame(_buf[], false, queue) : peer.bundle(_buf[], queue);
         if (r < 0)
         {
             // event-driven encodes (state/cmd/result/error/sub/...) have no retry path!!

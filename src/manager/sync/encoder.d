@@ -276,7 +276,7 @@ nothrow @nogc:
     // `templates` is the root-first '/'-joined component template of every node the path crosses
     abstract void encode_add(SyncPeer peer, SyncHandle h, const(char)[] path, const(char)[] node_class, const(char)[] templates, uint ft, Element* e, ulong peer_id, bool include_value = true);
 
-    abstract void encode_val(SyncPeer peer, SyncHandle h, Element* e);
+    abstract bool encode_val(SyncPeer peer, SyncHandle h, Element* e);
     // the leading records the send limit holds, at least one; returns the count consumed, 0 when refused for now (an unsendable record goes as lost)
     abstract uint encode_val_block(SyncPeer peer, SyncHandle h, ref const RecordBlock blk);
 

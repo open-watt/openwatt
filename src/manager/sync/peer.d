@@ -35,6 +35,7 @@ import router.iface;
 import router.iface.endpoint : UDPEndpoint, UDPReceiveInfo, udp_open;
 import router.iface.packet;
 import router.iface.udp : UDPFrame;
+import router.stream : max_tx_page;
 
 nothrow @nogc:
 
@@ -246,6 +247,8 @@ nothrow @nogc:
             _send_failed = true;
             return -1;
         }
+        if (queue == TxQueue.control && flush_bundle() < 0)
+            return refused(true);
         // refusals come before a frame is sequenced, so neither the session nor a burst fails with them
         if (frame.length > send_limit)
         {
@@ -550,6 +553,8 @@ protected:
 
     override CompletionStatus shutdown()
     {
+        _bundle.clear();
+        _peer_flags &= ~PeerFlags.bundle_closed;
         // the module's drain reaps the cancelled commands once they finish
         foreach (cmd; _commands)
         {
@@ -763,20 +768,63 @@ package:
 
     // a pending fragmented message holds the control plane until its last fragment is submitted
     final bool tx_blocked()
-        => _frag_tx.length != 0 || !control_room();
+        => _frag_tx.length != 0 || bundle_kept() || !control_room();
 
     // Transport readiness re-invites; control-window starvation waits for an ACK.
     final bool tx_full()
-        => !control_starved() && !uses_udp_endpoint && !_transport.tx_ready;
+        => bundle_kept() || (!control_starved() && !uses_udp_endpoint && !_transport.tx_ready);
+
+    // a bundle the transport refused waits, closed, for the room that re-invites the producer
+    final bool bundle_kept() const pure
+        => (_peer_flags & PeerFlags.bundle_closed) != 0;
 
     final bool produce_tx(BaseInterface)
     {
         _peer_flags |= PeerFlags.tx_producing;
         scope (exit) _peer_flags &= ~PeerFlags.tx_producing;
-        if (!pump_fragments())
+        if (!pump_fragments() || flush_bundle() < 0)
             return tx_full();
         bool console_waiting = produce_console();
-        return get_module!SyncModule.produce(this) || console_waiting;
+        bool more = get_module!SyncModule.produce(this);
+        flush_bundle();
+        return more || console_waiting;
+    }
+
+    // Value and log messages of one queue share a frame of up to a page, which goes before any other frame. One the
+    // transport refuses is kept, closed, and messages offered behind it are refused, so their producers keep them.
+    final int bundle(const(ubyte)[] message, TxQueue queue)
+    {
+        immutable bool json = _encoder == SyncEncoderKind.json;
+        // room for a JSON separator and close
+        size_t limit = (send_limit < max_tx_page ? send_limit : max_tx_page) - 2;
+        if (_bundle.length && ((_peer_flags & PeerFlags.bundle_closed) || queue != _bundle_queue || _bundle.length + message.length > limit) && flush_bundle() < 0)
+            return -1;
+        if (message.length > limit)
+            return transmit_frame(message, json, queue);
+        if (json)
+            _bundle ~= cast(ubyte)(_bundle.length ? ',' : '[');
+        else if (_bundle.length)
+            message = message[1 .. $];   // a binary val or log runs its records on behind the first one's verb
+        _bundle ~= message;
+        _bundle_queue = queue;
+        return 0;
+    }
+
+    final int flush_bundle()
+    {
+        if (!_bundle.length)
+            return 0;
+        immutable bool json = _encoder == SyncEncoderKind.json;
+        if (json && !(_peer_flags & PeerFlags.bundle_closed))
+            _bundle ~= cast(ubyte)']';
+        _peer_flags |= PeerFlags.bundle_closed;
+        int r = transmit_frame(_bundle[], json, _bundle_queue);
+        if (r == 0)
+        {
+            _bundle.clear();
+            _peer_flags &= ~PeerFlags.bundle_closed;
+        }
+        return r;
     }
 
     // remote consoles and commands drain while the plane has room, and hold the producer while the transport is full
@@ -855,6 +903,8 @@ package:
     enum uint min_segment = 32;   // below hello's size, so a peer that can handshake clears it
 
     ubyte            _remote_caps;       // hello negotiation; 0 = no hello received
+    Array!ubyte      _bundle;            // messages of one queue collected for one frame
+    TxQueue          _bundle_queue;
     uint             _remote_version;    // 0 until hello
     uint             _remote_max_message; // 0 until hello
     uint             _remote_segment;    // 0 until hello, and from a peer that predates it
@@ -968,6 +1018,7 @@ private:
         tx_producing               = 1 << 6,
         claims                     = 1 << 7,
         in_session                 = 1 << 8,
+        bundle_closed              = 1 << 9,
     }
 
     struct SentFrame
@@ -1167,20 +1218,25 @@ private:
         _log_active = false;
     }
 
-    // control has no gap semantics: a refusal invalidates the session
     int send_unwrapped(const(ubyte)[] frame, bool is_text, bool control)
     {
         int r = raw_tx(frame, is_text);
-        if (r < 0)
+        return r < 0 ? refused(control) : r;
+    }
+
+    // control has no gap semantics, so a refusal invalidates the session; a refused value or log is backpressure,
+    // held in the bundle or by its producer
+    int refused(bool control)
+    {
+        if (!control)
+            return -1;
+        _send_failed = true;
+        if (_state == State.running)
         {
-            _send_failed = true;
-            if (control && _state == State.running)
-            {
-                log.warning("peer '", name[], "' control frame refused; restarting session");
-                restart();
-            }
+            log.warning("peer '", name[], "' control frame refused; restarting session");
+            restart();
         }
-        return r;
+        return -1;
     }
 
     int send_sequenced(const(ubyte)[] frame)
@@ -1735,21 +1791,41 @@ unittest
             => pending < cap;
         override int transmit(ref Packet packet, MessageCallback, const(QueuePolicy)*)
         {
+            if (refuse)
+                return -1;
             pending += packet.length;
             if (pending > peak)
                 peak = pending;
             if (packet.length > largest)
                 largest = packet.length;
             ++frames;
-            const(ubyte)[] f = cast(const(ubyte)[])packet.data;
-            if (f.length && f[0] == Verb.val)
+            count(cast(const(ubyte)[])packet.data);
+            return 0;
+        }
+        void count(const(ubyte)[] f)
+        {
+            if (!f.length || f[0] != Verb.val)
+                return;
+            for (f = f[1 .. $]; f.length; )
             {
-                f = f[1 .. $];
                 take_varint(f);
                 lost += take_varint(f);
-                delivered += take_varint(f);
+                ulong n = take_varint(f);
+                delivered += n;
+                foreach (_; 0 .. n)
+                {
+                    take_varint(f);
+                    // value tags on the wire: 3 and 4 a varint, 5 an f64, 6 a string; the test writes no others
+                    ubyte tag = f[0];
+                    f = f[1 .. $];
+                    if (tag == 3 || tag == 4)
+                        take_varint(f);
+                    else if (tag == 5)
+                        f = f[8 .. $];
+                    else if (tag == 6)
+                        f = f[cast(size_t)take_varint(f) .. $];
+                }
             }
-            return 0;
         }
         static ulong take_varint(ref const(ubyte)[] f)
         {
@@ -1767,6 +1843,7 @@ unittest
         size_t pending, peak, frames, largest;
         ulong delivered, lost;
         size_t cap = 4096;
+        bool refuse;
     }
 
     Narrow link = Collection!Narrow().create("sync-test-narrow");
@@ -1802,9 +1879,22 @@ unittest
     scope(exit) free(enc);
     uint gen = peer.begin_burst();
     ulong resume = ulong.max;
+    SyncHandle handle = peer.handle_of(power.ensure_eid());
+    bool backfill(ulong from_ms, ulong to_ms)
+    {
+        bool done = SyncModule.send_backfill(peer, enc, power, from_ms, to_ms, gen, resume);
+        peer.flush_bundle();
+        return done;
+    }
+    bool live_events()
+    {
+        bool done = SyncModule.send_live_events(peer, enc, power, handle, gen);
+        peer.flush_bundle();
+        return done;
+    }
     uint passes;
     ulong last = 0;
-    while (!SyncModule.send_backfill(peer, enc, power, 1, 0, gen, resume))
+    while (!backfill(1, 0))
     {
         assert(peer.send_ok(gen) && resume != ulong.max && resume > last);
         last = resume;
@@ -1819,26 +1909,25 @@ unittest
     ulong* live = power.ensure_eid().raw in peer._live_nodes;
     link.frames = 0;
     link.pending = link.cap;
-    assert(!SyncModule.send_backfill(peer, enc, power, 1, 0, gen, resume) && link.frames == 0);
+    assert(!backfill(1, 0) && link.frames == 0);
     assert(*live == (resume | SyncPeer.live_parked));
 
     // Live events wait behind a parked backfill.
     float[1] late = [float(records)];
     SysTime[1] late_time = [from_unix_time_ns((records + 1) * 1_000_000_000L)];
     power.write_samples(late[], late_time[]);
-    SyncHandle handle = peer.handle_of(power.ensure_eid());
-    SyncModule.send_live_events(peer, enc, power, handle, gen);
+    live_events();
     assert(link.frames == 0 && *live == (resume | SyncPeer.live_parked));
 
-    while (!SyncModule.send_backfill(peer, enc, power, 1, 0, gen, resume))
+    while (!backfill(1, 0))
     {
-        SyncModule.send_live_events(peer, enc, power, handle, gen);
+        live_events();
         link.pending = 0;
     }
     assert(link.frames == (records + 1 + 255) / 256 && *live == records + 1);
 
     // The live flush must not duplicate the completed backfill.
-    SyncModule.send_live_events(peer, enc, power, handle, gen);
+    live_events();
     assert(link.frames == (records + 1 + 255) / 256);
 
     // Over a narrow link each block holds what one segment carries, and the walk still delivers every record.
@@ -1849,14 +1938,14 @@ unittest
     link.delivered = 0;
     link.cap = size_t.max;
     resume = ulong.max;
-    assert(SyncModule.send_backfill(peer, enc, power, 1, 0, gen, resume) && *live == records + 1);
+    assert(backfill(1, 0) && *live == records + 1);
     assert(link.largest <= 200 && link.frames > 4 * ((records + 1 + 255) / 256));
     assert(link.delivered == records + 1 && link.lost == 0);
 
     // A range ending mid-block stops at its last record, however the blocks were cut.
     resume = ulong.max;
     link.delivered = 0;
-    assert(SyncModule.send_backfill(peer, enc, power, 1, 1000 * 1000, gen, resume) && *live == 1000);
+    assert(backfill(1, 1000 * 1000) && *live == 1000);
     assert(link.delivered == 1000);
 
     // A record larger than any message the peer takes goes as an empty block declaring it lost, and the walk
@@ -1865,13 +1954,25 @@ unittest
     link.frames = 0;
     link.delivered = 0;
     resume = ulong.max;
-    assert(SyncModule.send_backfill(peer, enc, power, 1, 1000 * 1000, gen, resume) && *live == 1000);
+    assert(backfill(1, 1000 * 1000) && *live == 1000);
     assert(link.frames == 1000 && link.delivered == 0 && link.lost == 1000);
-    assert(SyncModule.send_live_events(peer, enc, power, handle, gen) && *live == records + 1);
+    assert(live_events() && *live == records + 1);
     assert(link.lost == records + 1 && peer.send_ok(gen));
     assert(link.mtu(200) is null);
     link.cap = 4096;
     assert(link.mtu(ushort.max) is null);
+
+    // a refused block parks the walk where it stood and leaves the session standing; the producer stays armed, and
+    // the transport's room callback sends what was kept before the walk resumes
+    link.refuse = true;
+    link.delivered = 0;
+    link.pending = 0;
+    resume = ulong.max;
+    assert(!backfill(1, 0) && resume != ulong.max && peer.send_ok(gen));
+    link.refuse = false;
+    while (!backfill(1, 0))
+        link.pending = 0;
+    assert(link.delivered == records + 1 && resume == ulong.max && peer.send_ok(gen));
 
     // A frame over what both ends carry in one packet is refused before it is sequenced; the session stands.
     assert(peer.local_segment == ushort.max && peer.send_limit == ushort.max);
@@ -1944,6 +2045,8 @@ unittest
         override void tx_handler_changed() {}
         override int transmit(ref Packet packet, MessageCallback, const(QueuePolicy)*)
         {
+            if (refuse)
+                return -1;
             Array!ubyte f;
             f ~= cast(const(ubyte)[])packet.data;
             frames ~= f.move;
@@ -1951,6 +2054,7 @@ unittest
         }
         Array!(Array!ubyte) frames;
         size_t room = size_t.max;
+        bool refuse;
     }
 
     static class Live : SyncPeer
@@ -1989,6 +2093,55 @@ unittest
     ubyte[1000] message;
     foreach (i, ref b; message)
         b = cast(ubyte)(i * 7);
+
+    // values collect into one frame, which closes before the segment and before any other frame
+    {
+        peer._encoder = SyncEncoderKind.json;
+        scope (exit) peer._encoder = SyncEncoderKind.binary;
+        ubyte[40] msg = 'v';
+        msg[0] = '{';
+        msg[$ - 1] = '}';
+        link.frames.clear();
+        foreach (_; 0 .. 3)
+            assert(peer.bundle(msg[], TxQueue.val) == 0);
+        assert(link.frames.length == 0 && peer._bundle.length == 3 * 41);
+        peer.flush_bundle();
+        assert(link.frames.length == 1 && link.frames[0].length == 3 * 41 + 1);
+        assert(link.frames[0][0] == '[' && link.frames[0][$ - 1] == ']');
+        link.frames.clear();
+        foreach (_; 0 .. 10)
+            assert(peer.bundle(msg[], TxQueue.val) == 0);
+        peer.flush_bundle();
+        assert(link.frames.length == 3, "ten 40-byte values over a 200-byte segment take three frames");
+        foreach (ref f; link.frames[])
+            assert(f.length <= 200 && f[0] == '[' && f[$ - 1] == ']');
+        link.frames.clear();
+
+        // a refused frame is kept and goes first; a value offered behind it is refused, and nothing overtakes it
+        foreach (_; 0 .. 2)
+            assert(peer.bundle(msg[], TxQueue.val) == 0);
+        link.refuse = true;
+        uint burst = peer.begin_burst();
+        assert(peer.flush_bundle() < 0 && peer._bundle.length == 2 * 41 + 1);
+        assert(peer.bundle(msg[], TxQueue.val) < 0 && peer.bundle(msg[], TxQueue.log) < 0);
+        assert(peer.send_ok(burst) && peer.tx_blocked() && peer.tx_full(), "backpressure holds the producer armed; the session stands");
+        assert(peer.produce_tx(link) && peer.bundle_kept(), "the room callback retries the kept bundle first, and stays armed while it is refused");
+        link.refuse = false;
+        assert(peer.bundle(msg[], TxQueue.val) == 0 && link.frames.length == 1 && link.frames[0].length == 2 * 41 + 1);
+        assert(peer.flush_bundle() == 0 && link.frames.length == 2 && !peer.tx_blocked());
+        link.frames.clear();
+
+        // binary records run on behind the first one's verb, and a message for the other queue closes the frame
+        peer._encoder = SyncEncoderKind.binary;
+        msg[0] = Verb.val;
+        foreach (_; 0 .. 2)
+            assert(peer.bundle(msg[], TxQueue.val) == 0);
+        msg[0] = Verb.log;
+        assert(peer.bundle(msg[], TxQueue.log) == 0 && link.frames.length == 1 && link.frames[0].length == 2 * 40 - 1);
+        assert(link.frames[0][0] == Verb.val && link.frames[0][1 .. 40] == msg[1 .. $] && link.frames[0][40 .. $] == msg[1 .. $]);
+        assert(peer.flush_bundle() == 0 && link.frames.length == 2 && link.frames[1][] == msg[]);
+        link.frames.clear();
+    }
 
     // toward a version-1 remote nothing is fragmented: an oversized message is refused as before
     peer._remote_version = 1;
