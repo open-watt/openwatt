@@ -494,6 +494,9 @@ nothrow @nogc:
             console.register_command!(fs_rm, "rm")("/system/fs", this);
         }
 
+        version (MemStats)
+            console.register_command!(pages_cmd, "pages")("/system", this);
+
         version (AllocTracking)
         {
             console.register_command!(alloc_stats_cmd, "stats")("/system/alloc", this);

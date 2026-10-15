@@ -1335,6 +1335,11 @@ this is what remains.
 
 ## Infrastructure
 
+- **The demangler stops inside nested function names** (2026-10-15): `/system/pages` and crash
+  traces print an LDC nested function as `urt.mem.pagetrace.__unittest_L258_C1$FNbNiZ9held_here
+  FNbNiZPSQCkQCj4page4Page`: `demangle_symbol` does not decode the enclosing function's attributes
+  and type, nor back-references, so it emits the rest raw. The readable prefix names the path.
+
 - **Receive still polled after the stream migration** (2026-10-06): streams push, but a few
   consumers still learn of progress from a tick. TLS advances its handshake from `startup()`,
   which the state machine re-drives each frame, rather than from the bytes' arrival; the DNS

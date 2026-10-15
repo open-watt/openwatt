@@ -198,8 +198,9 @@ void sysinfo(Session session, const(Variant)[] args)
             {
                 ubyte category = i < page_pool_num_categories() ? cast(ubyte)i : page_category_heap;
                 PagePoolStats s = page_pool_stats(category);
+                // a category that runs out passes the request on to the heap; only the heap's misses are lost
                 session.write_line(i ? "          " : "Pages:    ", category == page_category_heap ? "heap" : tconcat(page_payload_size(category), "B"),
-                                   ": ", s.pages_in_use, " (peak ", s.high_water, ", failed ", s.fail_count, ')');
+                                   ": ", s.pages_in_use, " (peak ", s.high_water, category == page_category_heap ? ", failed " : ", full ", s.fail_count, ')');
             }
         }
         if (info.stack_size > 0)
@@ -437,6 +438,15 @@ version (HasFilesystem)
         }
         session.write_line("format: erasing filesystem...");
         return alloc!FormatCommandState(session);
+    }
+}
+
+version (MemStats)
+{
+    void pages_cmd(Session session)
+    {
+        import urt.mem.pagetrace : page_trace_report;
+        page_trace_report((const(char)[] line) { session.write_line(line); });
     }
 }
 
