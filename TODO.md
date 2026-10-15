@@ -1622,11 +1622,6 @@ this is what remains.
   6 to 7 minutes. Per-module bitcode lowered by `llc` in parallel under ninja, and only for modules
   that changed, would cut a rebuild to the longest module. RISC-V targets compile directly in LDC.
 
-- **A sync peer restarts in a loop when its hello cannot get a page**: on the bench S3 under web UI
-  load the JSON encoder dropped `hello` for want of a page, the peer logged "control frame refused;
-  restarting session", restarted at once and sent `hello` again, five times in one second, each
-  failure logging. A refused control frame should wait for the pool (`starved` and the page waiter),
-  not restart the session.
 - **`JsonEscape` leaves its pages mostly empty**: it reserves tailroom for six-fold expansion, so
   each page it fills from the session carries about 270 bytes of a 1,600-byte page. #847 bounds the
   memory this costs; escaping into the page and spilling into the next on overflow would make the

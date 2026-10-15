@@ -511,10 +511,11 @@ protected:
             return CompletionStatus.error;   // gapped intake; establish from a fresh exchange
         }
 
+        _send_failed = false;
         uint gen = begin_burst();
         int hello = encoder_for(_encoder).encode_hello(this);
         if (!send_ok(gen))
-            return CompletionStatus.continue_;   // the refusal restarted us; a session without hello must not run
+            return CompletionStatus.error;
         if (hello < 0)
         {
             log.error("cannot fit hello in a ", send_limit, "-byte segment");
@@ -525,19 +526,20 @@ protected:
         encoder_for(_encoder).encode_identity(this);
 
         // frames that arrived before the session existed join it now, in arrival order
-        while (!_pre_start.empty)
+        while (!_pre_start.empty && send_ok(gen))
         {
             Array!ubyte held = _pre_start[0].move;
             _pre_start.remove(0);
             _pre_start_bytes -= held.length;
             deliver_frame(held[]);
             if (_state != State.starting)
-                return CompletionStatus.continue_;   // a refusal tore this fresh session down
+                return CompletionStatus.continue_;   // a dispatched frame tore this fresh session down
         }
 
-        if (_want_logs)
+        if (_want_logs && send_ok(gen))
             encoder_for(_encoder).encode_log_sub(this, _want_log_severity, false, _want_log_tag[]);
-        return CompletionStatus.complete;
+        // a refusal while starting fails startup, which the state machine retries after its backoff
+        return send_ok(gen) ? CompletionStatus.complete : CompletionStatus.error;
     }
 
     override void online()
@@ -830,8 +832,8 @@ package:
     // burst protocol: begin_burst, send, check send_ok after every send; refusal or teardown ends it
     final uint begin_burst()
     {
-        // a condemned session stays failed until its replacement session starts
-        if (_state == State.running || _state == State.starting)
+        // a failure stays until its session restarts; startup clears it once, so every send it makes counts
+        if (_state == State.running)
             _send_failed = false;
         return _session_gen;
     }
@@ -1172,7 +1174,7 @@ private:
         if (r < 0)
         {
             _send_failed = true;
-            if (control && (_state == State.running || _state == State.starting))
+            if (control && _state == State.running)
             {
                 log.warning("peer '", name[], "' control frame refused; restarting session");
                 restart();
