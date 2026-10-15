@@ -210,6 +210,9 @@ nothrow @nogc:
         return running && queued < watermark ? watermark - queued : 0;
     }
 
+    override bool tx_line_idle() const
+        => uart_tx_queued(_uart) == 0;
+
     // 8N1 carries a byte per ten baud; the floor keeps a slow line pulling
     final size_t tx_watermark() const
     {
@@ -221,14 +224,8 @@ nothrow @nogc:
     {
         for (Page* p = page; p; p = p.next)
             sent(p.data);
-        if (running && uart_send(_uart, page))
-            return;
-        while (page)
-        {
-            Page* next = page.next;
-            page_free(page);
-            page = next;
-        }
+        if (!running || !uart_send(_uart, page))
+            free_tx_chain(page);
     }
 
     // Drives a modem line by hand, for devices with reset wired to RTS or DTR; a line flow control owns is refused.

@@ -575,9 +575,9 @@ nothrow @nogc:
         else
             enum size_t ceiling = max_tx_refill;
         version (UseInternalIPStack)
-            size_t queued = _tx_bytes + (_pcb ? _pcb.send_buf.length : 0);
+            size_t queued = _tx_held + (_pcb ? _pcb.send_buf.length : 0);
         else
-            size_t queued = _tx_bytes;
+            size_t queued = _tx_held;
         return queued < ceiling / 2 ? ceiling - queued : 0;
     }
 
@@ -636,6 +636,7 @@ nothrow @nogc:
             _tx_head = page;
         _tx_tail = page;
         _tx_bytes += page.length;
+        _tx_held += page.capacity;
         version (UseInternalIPStack)
         {
             if (empty)
@@ -808,6 +809,7 @@ private:
     Page* _tx_tail;
     ushort _tx_sent;    // into _tx_head, which may be shared and is never written
     size_t _tx_bytes;
+    size_t _tx_held;    // the memory those pages occupy, which the watermark bounds
     SendHandler _outgoing;
     PageWaiter _tx_waiter;
     bool _servicing_tx;
@@ -874,6 +876,7 @@ private:
                 if (!_tx_head)
                     _tx_tail = null;
                 _tx_sent = 0;
+                _tx_held -= page.capacity;
                 page_free(page);
             }
         }
@@ -901,6 +904,7 @@ private:
         {
             Page* next = page.next;
             _tx_bytes -= page.length - sent;
+            _tx_held -= page.capacity;
             sent = 0;
             page_free(page);
             page = next;

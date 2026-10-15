@@ -832,9 +832,7 @@ private:
             Page* page;
             if (_out)
             {
-                page = take_tx_page(_out, req, status);
-                if (page)
-                    status = _out || _body ? TxStatus.more : TxStatus.end;
+                page = take_tx_page(_out, req, status, _body ? TxStatus.more : TxStatus.end);
             }
             else if (_body)
                 page = _body(req, status);

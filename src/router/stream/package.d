@@ -86,8 +86,9 @@ Page* alloc_tx_page(ref const TxRequest req, size_t bytes, ref TxStatus status)
     return page;
 }
 
-// hands out at most req.bytes from the front of chain; a head that is longer, or lacks the room, is copied out
-Page* take_tx_page(ref Page* chain, ref const TxRequest req, ref TxStatus status)
+// hands out at most req.bytes from the front of chain, copying out a head that is longer or lacks the room; the status
+// is more while the chain holds more, and after once it is empty
+Page* take_tx_page(ref Page* chain, ref const TxRequest req, out TxStatus status, TxStatus after = TxStatus.more)
 {
     Page* head = chain;
     debug assert(page_unique(head), "a shared page is written by the one who takes it");
@@ -96,6 +97,8 @@ Page* take_tx_page(ref Page* chain, ref const TxRequest req, ref TxStatus status
     {
         chain = head.next;
         head.next = null;
+        if (!chain)
+            status = after;
         return head;
     }
     size_t n = whole ? head.length : req.bytes;
@@ -107,6 +110,8 @@ Page* take_tx_page(ref Page* chain, ref const TxRequest req, ref TxStatus status
     {
         chain = head.next;
         page_free(head);
+        if (!chain)
+            status = after;
     }
     else
     {
@@ -128,45 +133,119 @@ void free_tx_chain(Page* chain)
 
 void append_tx_chain(ref Page* chain, Page* pages)
 {
-    if (!chain)
-    {
+    if (Page* tail = chain_tail(chain))
+        tail.next = pages;
+    else
         chain = pages;
-        return;
-    }
-    Page* tail = chain;
-    while (tail.next)
-        tail = tail.next;
-    tail.next = pages;
 }
 
-// copies behind the chain's last page, filling it before a whole page is taken, up to limit or until no page is free
-size_t append_tx_copy(ref Page* chain, const(void)[] data, size_t limit = size_t.max)
+Page* chain_tail(Page* chain)
 {
-    Page* tail = chain;
-    while (tail && tail.next)
-        tail = tail.next;
-    const(ubyte)[] bytes = cast(const(ubyte)[])data;
-    size_t total;
-    while (bytes.length && total < limit)
+    while (chain && chain.next)
+        chain = chain.next;
+    return chain;
+}
+
+// the payload a chain carries
+size_t chain_bytes(const(Page)* chain)
+{
+    size_t bytes;
+    for (; chain; chain = (cast(Page*)chain).next)
+        bytes += chain.length;
+    return bytes;
+}
+
+// the memory a chain occupies
+size_t chain_held(const(Page)* chain)
+{
+    size_t bytes;
+    for (; chain; chain = (cast(Page*)chain).next)
+        bytes += chain.capacity;
+    return bytes;
+}
+
+// Room reserved behind a chain, then filled in spans that end at page edges. Only the reservation can fail, and a failed
+// one leaves the chain as it was. Thread context, on a chain the caller owns, filled before control returns to the loop.
+struct TxWriter
+{
+nothrow @nogc:
+    @disable this(this);
+
+    this(ref Page* chain, size_t bytes)
     {
-        if (!tail || !tail.tailroom || !page_unique(tail))
+        _last = chain_tail(chain);
+        if (_last && page_unique(_last))
+            _at = _last;
+        size_t room = _at ? _at.tailroom : 0;
+        for (Page* last; room < bytes; )
         {
-            Page* page = page_alloc(max_tx_page < limit - total ? max_tx_page : limit - total);
+            size_t need = bytes - room;
+            Page* page = page_alloc(need < max_tx_page ? need : max_tx_page);
             if (!page)
-                break;
+            {
+                free_tx_chain(_spare);
+                _spare = null;
+                return;
+            }
             page.length = 0;
-            append_tx_chain(chain, page);
-            tail = page;
+            if (last)
+                last.next = page;
+            else
+                _spare = page;
+            last = page;
+            room += page.tailroom;
         }
-        size_t n = bytes.length < tail.tailroom ? bytes.length : tail.tailroom;
-        if (n > limit - total)
-            n = limit - total;
-        (cast(ubyte*)tail)[tail.offset + tail.length .. tail.offset + tail.length + n] = bytes[0 .. n];
-        tail.length += cast(ushort)n;
-        bytes = bytes[n .. $];
-        total += n;
+        _chain = &chain;
+        debug _left = bytes;
     }
-    return total;
+
+    ~this()
+    {
+        debug assert(_left == 0, "a writer fills what it reserved");
+        free_tx_chain(_spare);
+    }
+
+    bool opCast(T : bool)() const
+        => _chain !is null;
+
+    // up to n bytes of the reserved room, short only at a page edge
+    ubyte[] next(size_t n)
+    {
+        debug assert(n <= _left);
+        if (!_at || !_at.tailroom)
+        {
+            Page* page = _spare;
+            _spare = page.next;
+            page.next = null;
+            if (_last)
+                _last.next = page;
+            else
+                *_chain = page;
+            _last = _at = page;
+        }
+        size_t take = n < _at.tailroom ? n : _at.tailroom;
+        ubyte[] span = (cast(ubyte*)_at)[_at.offset + _at.length .. _at.offset + _at.length + take];
+        _at.length += cast(ushort)take;
+        debug _left -= take;
+        return span;
+    }
+
+    void put(const(void)[] data)
+    {
+        while (data.length)
+        {
+            ubyte[] span = next(data.length);
+            span[] = cast(const(ubyte)[])data[0 .. span.length];
+            data = data[span.length .. $];
+        }
+    }
+
+private:
+    Page** _chain;
+    Page* _last;
+    Page* _at;
+    Page* _spare;
+    debug size_t _left;
 }
 
 // fills the buffer it is given and returns the bytes written, stopping at a yield point past the deadline
@@ -208,10 +287,7 @@ nothrow @nogc:
             page.length = cast(ushort)n;
             _pending = page;
         }
-        Page* page = take_tx_page(_pending, req, status);
-        if (page)
-            status = _pending ? TxStatus.more : _after;
-        return page;
+        return take_tx_page(_pending, req, status, _after);
     }
 
     // what was made and not taken is dropped
@@ -458,6 +534,12 @@ nothrow @nogc:
     // takes the frame whether or not it is sent; the caller never frees it
     final bool send(Page* frame)
     {
+        if (_fill)
+        {
+            Page* fill = _fill;
+            _fill = null;
+            queue_tx_page(fill);
+        }
         if (!tx_admits())
         {
             free_tx_chain(frame);
@@ -467,41 +549,48 @@ nothrow @nogc:
         return true;
     }
 
+    // what a sink pulls from: written bytes waiting in the fill page, or the producer
+    final bool tx_source() const
+        => _fill !is null || _outgoing !is null;
+
+    // bytes pack into the fill page until the line pulls it; a frame is a page of its own
     final bool send_bytes(const(void[])[] parts...)
     {
         if (!tx_admits())
             return false;
-        size_t remaining;
+        size_t bytes;
         foreach (part; parts)
-            remaining += part.length;
-        Page* frame;
+            bytes += part.length;
+        TxWriter writer = TxWriter(_fill, bytes);
+        if (!writer)
+            return false;
         foreach (part; parts)
-        {
-            if (append_tx_copy(frame, part, remaining) != part.length)
-            {
-                free_tx_chain(frame);
-                return false;
-            }
-            remaining -= part.length;
-        }
-        return !frame || send(frame);
+            writer.put(part);
+        tx_handler_changed();
+        return true;
     }
 
-    // a stream that takes pages itself overrides this with queue_tx_page; the rest queue them here for transmit()
+    // the fill page goes to the line once it has taken everything before it; until then writes pack
+    bool tx_line_idle() const
+        => _tx_queue is null;
+
+    // room is memory, so a mostly empty page costs what it occupies; a stream that takes pages itself overrides this
     size_t tx_request() const
     {
-        size_t queued = tx_queued();
-        return running && queued < tx_queue_limit ? tx_queue_limit - queued : 0;
+        size_t held = chain_held(_tx_queue);
+        return running && held < tx_queue_limit ? tx_queue_limit - held : 0;
     }
 
-    // what the base queue holds for the line
+    // what waits here for the line: the fill page and the base queue
     final size_t tx_queued() const
-    {
-        size_t bytes;
-        for (const(Page)* page = _tx_queue; page; page = (cast(Page*)page).next)
-            bytes += page.length;
-        return bytes - _tx_sent;
-    }
+        => chain_bytes(_fill) + tx_line_queued();
+
+    final size_t tx_held() const
+        => chain_held(_fill) + chain_held(_tx_queue);
+
+    // what the base queue holds for the line
+    final size_t tx_line_queued() const
+        => chain_bytes(_tx_queue) - _tx_sent;
 
     TerminalChannel* terminal_channel()
     {
@@ -551,12 +640,16 @@ protected:
     // a pull already running, or a continuation queued, takes the room itself
     final void invite_tx()
     {
-        if (_outgoing && !_pumping_tx && !_tx_continuing)
+        if (tx_source && !_pumping_tx && !_tx_continuing)
             pump_tx();
     }
 
     final Page* request_tx_page(ref const TxRequest req, out TxStatus status)
-        => pull_tx_page(_outgoing, req, status);
+    {
+        if (!_fill)
+            return pull_tx_page(_outgoing, req, status);
+        return take_tx_page(_fill, req, status, _outgoing ? TxStatus.more : TxStatus.idle);
+    }
 
     final void pump_tx()
     {
@@ -564,9 +657,18 @@ protected:
         scope (exit) _pumping_tx = false;
 
         MonoTime deadline = getTime() + tx_slice;
-        while (_outgoing)
+        while (tx_source)
         {
             size_t room = tx_request();
+            if (_fill)
+            {
+                if (!room || !tx_line_idle)
+                    break;
+                Page* fill = _fill;
+                _fill = null;
+                queue_tx_page(fill);
+                continue;
+            }
             TxRequest req = TxRequest(room < max_tx_page ? room : max_tx_page, deadline);
             if (req.bytes < min_tx_request)
                 break;
@@ -590,7 +692,7 @@ protected:
             }
             if (status == TxStatus.yield || getTime() >= deadline)
             {
-                if (_outgoing && tx_request() >= min_tx_request)
+                if (tx_source && tx_request() >= min_tx_request)
                     continue_tx();
                 break;
             }
@@ -622,7 +724,7 @@ protected:
         => msecs(2);
 
     // a filter stream serves what was written to it through its own pull, rather than pushing it to a line
-    final Page* take_queued_tx(ref const TxRequest req, out TxStatus status)
+    final Page* take_queued_tx(ref const TxRequest req, out TxStatus status, TxStatus after)
     {
         if (!_tx_queue)
         {
@@ -642,7 +744,7 @@ protected:
             page_free(_tx_queue);
             _tx_queue = own;
         }
-        return take_tx_page(_tx_queue, req, status);
+        return take_tx_page(_tx_queue, req, status, after);
     }
 
     // the line has room again
@@ -753,6 +855,7 @@ protected:
 private:
     SendHandler _outgoing;
     PageWaiter _tx_waiter;
+    Page* _fill;        // bytes written and not yet pulled, packed
     Page* _tx_queue;    // for the line, oldest first
     ushort _tx_sent;    // into _tx_queue's head, which may be shared and is never written
     bool _pumping_tx;
@@ -767,8 +870,9 @@ private:
             drain_tx();
     }
 
+    // the line has room beyond what the fill page already holds for it
     final bool tx_admits() const
-        => running && tx_request() != 0;
+        => running && tx_request() > chain_held(_fill);
 
     final void release_tx_queue()
     {
@@ -784,6 +888,8 @@ private:
             _tx_queue = next;
         }
         _tx_sent = 0;
+        free_tx_chain(_fill);
+        _fill = null;
     }
 
     // one continuation per sink, on the next loop pass, after that pass's I/O and events, so busy sinks share the thread
@@ -1240,6 +1346,44 @@ unittest
         assert(line.tx_queued() == 0 && line.send_bytes(bytes[0 .. 1]), "a drained line admits again");
         line.open(1);
         assert(line.tx_queued() == 0);
+    }
+
+    // mostly empty pages count against the watermark as the memory they hold, not the bytes they carry
+    {
+        ShortStream line = alloc!ShortStream(CID(7));
+        scope(exit)
+        {
+            line.halt();
+            free(line);
+        }
+        line.room = 0;
+        size_t sent;
+        foreach (_; 0 .. 8)
+        {
+            Page* sparse = page_alloc(max_tx_page);
+            sparse.length = 70;
+            if (!line.send(sparse))
+                break;
+            ++sent;
+        }
+        assert(sent < 3 && line.tx_queued() < 3 * 70, "two sparse pages fill a 2 KB watermark");
+        line.open(10_000);
+        assert(line.tx_queued() == 0);
+    }
+
+    // bytes written while the line is busy pack into one fill page the line pulls when it has room
+    {
+        ShortStream line = alloc!ShortStream(CID(6));
+        scope(exit)
+        {
+            line.halt();
+            free(line);
+        }
+        line.room = 0;
+        assert(line.send_bytes("abc") && line.tx_line_queued() == 3 && !line._fill, "an idle line takes the write at once");
+        assert(line.send_bytes("def") && line.send_bytes("ghi") && line._fill.next is null && line._fill.length == 6, "writes behind a busy line share a page");
+        line.open(100);
+        assert(line.output[] == cast(const(ubyte)[])"abcdefghi" && !line._fill);
     }
 
     // a producer past its deadline yields and stays armed, and makes progress on the next turn

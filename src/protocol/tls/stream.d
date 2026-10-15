@@ -389,7 +389,7 @@ nothrow @nogc:
             return 0;
         auto stream = _stream.get;
         size_t room = stream ? stream.tx_request : 0;
-        size_t held = tx_queued();
+        size_t held = tx_held();
         return room > held ? room - held : 0;
     }
 
@@ -414,7 +414,7 @@ protected:
         Stream stream = _stream.get;
         if (!stream)
             return;
-        if ((tx_handler || tx_queued) && running && _handshake_state == HandshakeState.completed)
+        if ((tx_source || tx_queued) && running && _handshake_state == HandshakeState.completed)
             stream.tx_handler(&provide_tx_page);
         else
             stream.release_tx_handler(&provide_tx_page);
@@ -455,11 +455,9 @@ private:
         TxRequest inner = TxRequest(payload, req.deadline, req.headroom + header, req.tailroom + trailer);
 
         Page* input;
-        if (tx_queued)
+        if (tx_line_queued)
         {
-            input = take_queued_tx(inner, status);
-            if (input)
-                status = tx_queued || tx_handler ? TxStatus.more : TxStatus.idle;
+            input = take_queued_tx(inner, status, tx_source ? TxStatus.more : TxStatus.idle);
         }
         else
             input = request_tx_page(inner, status);

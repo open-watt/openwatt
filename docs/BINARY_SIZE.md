@@ -99,6 +99,7 @@ Limit is the 4 MB `ota_0` partition. `ram` is internal DRAM only; PSRAM is heap.
 | 2026-10-12 | ow/api-producers | ldc 1.42.0 | 2,985,552 | 141,839 | 4,194,304 | `COREDUMP=1`; API responses and sync command output stream from producers |
 | 2026-10-13 | ow/ash-ack-stuffing | ldc 1.42.0 | 2,986,928 | 141,887 | 4,194,304 | `COREDUMP=1`; ASH ACK stuffing, peering, deferred restarts, crash dump numbering: +96 over master 8e7db0c4 (2,986,832) |
 | 2026-10-14 | #846 | ldc 1.42.0 | 2,989,952 | 141,887 | 4,194,304 | `COREDUMP=1`; S11a, S11b and S12 together: `send()` refused at the watermark, serial watermark from baud, TCP gather, sinks never write a shared page |
+| 2026-10-16 | #847 | ldc 1.42.0 | 2,991,152 | 141,871 | 4,194,304 | `COREDUMP=1`; S13 on #846: session output held and pulled, fill page in the stream base, follower offers whole records, TxWriter: +1,200 over #846 |
 
 ### ESP32-C5 DevKitC-1, `make esp-idf-build PLATFORM=esp32-c5 CONFIG=release`
 

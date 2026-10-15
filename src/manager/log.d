@@ -1148,8 +1148,8 @@ protected:
         LogMessage msg;
         while (_log_module.next_message(_consumer, msg))
         {
-            if (matches(msg))
-                push(msg);
+            if (matches(msg) && !push(msg))
+                break;
             _log_module.acknowledge(_consumer);
         }
     }
@@ -1180,13 +1180,11 @@ private:
         return msg.message.contains_i(_match[]) || msg.tag.contains_i(_match[]) || msg.object_name.contains_i(_match[]) || severity_names[msg.severity].contains_i(_match[]);
     }
 
-    void push(scope ref const LogMessage msg)
+    // false leaves the message for the next pass: the session has no room for it
+    bool push(scope ref const LogMessage msg)
     {
         if (_stream_ready)
-        {
-            write_stream_message(msg);
-            return;
-        }
+            return write_stream_message(msg);
 
         uint slot;
         if (_count == _limit)
@@ -1205,6 +1203,7 @@ private:
         _messages[slot].assign(msg);
         if (!_stream)
             request_redraw();
+        return true;
     }
 
     bool get_message(uint index, out LogMessage msg)
@@ -1215,11 +1214,8 @@ private:
         return true;
     }
 
-    void write_stream_message(scope ref const LogMessage msg)
-    {
-        session.write_output(format_log_for_session(msg, session.features), false);
-        session.write_output("\r\n", false);
-    }
+    bool write_stream_message(scope ref const LogMessage msg)
+        => session.offer_output(format_log_for_session(msg, session.features), true);
 
     void close_consumer()
     {
