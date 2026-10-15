@@ -455,14 +455,21 @@ nothrow @nogc:
             return;
 
         SyncEncoder enc = encoder_for(_encoder);
+        LogModule logs = get_module!LogModule;
+        if (uint lost = logs.lost(_log_consumer))
+        {
+            if (!enc.encode_log(this, tconcat("[sync: ", lost, " log lines lost]")))
+                return;
+            logs.clear_lost(_log_consumer);
+        }
         LogMessage msg;
         void* source;
-        while (get_module!LogModule.next_message(_log_consumer, msg, source))
+        while (logs.next_message(_log_consumer, msg, source))
         {
             if (source !is cast(void*)this &&
                 !enc.encode_log(this, format_syslog(msg)))
                 break;
-            get_module!LogModule.acknowledge(_log_consumer);
+            logs.acknowledge(_log_consumer);
         }
     }
 

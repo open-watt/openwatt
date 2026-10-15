@@ -1627,11 +1627,6 @@ this is what remains.
   restarting session", restarted at once and sent `hello` again, five times in one second, each
   failure logging. A refused control frame should wait for the pool (`starved` and the page waiter),
   not restart the session.
-- **The sync log subscription delivers about one line in twelve seconds**: a JSON client sending
-  `{"kind":"log_sub","severity":"trace"}` to the bench S3 (2026-10-15, #847 image) received one log
-  frame in twelve seconds while the device logs several lines a second; the web UI's log view shows
-  nothing. `flush_logs` runs per tick and stops at the first refused record; find what refuses it
-  (the log data queue's backlog, the transport's readiness) before changing either.
 - **`JsonEscape` leaves its pages mostly empty**: it reserves tailroom for six-fold expansion, so
   each page it fills from the session carries about 270 bytes of a 1,600-byte page. #847 bounds the
   memory this costs; escaping into the page and spilling into the next on overflow would make the
