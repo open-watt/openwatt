@@ -120,6 +120,7 @@ private struct LogConsumerSlot
     LogFilter filter;
     StoredLogMessage* cursor;
     StoredLogMessage* current;
+    uint lost;          // messages evicted before this consumer read them, until it reports them
     bool active;
 }
 
@@ -292,6 +293,15 @@ nothrow @nogc:
         recalc_ingress_filter();
     }
 
+    uint lost(LogConsumerHandle handle) const
+        => handle.valid && _consumers[handle.index].active ? _consumers[handle.index].lost : 0;
+
+    void clear_lost(LogConsumerHandle handle)
+    {
+        if (handle.valid)
+            _consumers[handle.index].lost = 0;
+    }
+
     void acknowledge(LogConsumerHandle handle)
     {
         if (!handle.valid || !_consumers[handle.index].active)
@@ -399,10 +409,7 @@ private:
             pending |= uint(1) << i;
         }
         if (pending && _delivery_count == delivery_queue_size)
-        {
-            pending = 0;
-            ++_delivery_dropped;
-        }
+            evict_oldest_delivery();
 
         bool historical = _history_limit && matches_history(msg);
         if (!pending && !historical)
@@ -443,6 +450,32 @@ private:
             ++_history_count;
             trim_history();
         }
+    }
+
+    // A full queue drops the oldest delivery, which only consumers behind it still hold, so a consumer
+    // that stops reading loses its own backlog rather than stopping delivery to the rest.
+    void evict_oldest_delivery()
+    {
+        StoredLogMessage* record = _records_head;
+        while (record && !record.pending)
+            record = record.next;
+        if (!record)
+            return;
+        foreach (i, ref consumer; _consumers)
+        {
+            if (!(record.pending & (uint(1) << i)))
+                continue;
+            ++consumer.lost;
+            if (consumer.current is record)
+                consumer.current = null;
+            if (consumer.cursor is record)
+                consumer.cursor = record.next;
+        }
+        record.pending = 0;
+        record.source = null;
+        --_delivery_count;
+        ++_delivery_dropped;
+        release(record);
     }
 
     void release(StoredLogMessage* record)
@@ -1145,6 +1178,12 @@ nothrow @nogc:
 protected:
     override void poll()
     {
+        if (uint lost = _log_module.lost(_consumer))
+        {
+            if (_stream_ready && !session.offer_output(tconcat("[log: ", lost, " lines lost]"), true))
+                return;
+            _log_module.clear_lost(_consumer);
+        }
         LogMessage msg;
         while (_log_module.next_message(_consumer, msg))
         {
@@ -1362,13 +1401,20 @@ unittest
     module_.resize_history(0);
     queued.severity = Severity.info;
     first = module_.register_consumer(all);
+    LogConsumerHandle reader = module_.register_consumer(all);
+    LogMessage m;
+    uint read;
     foreach (i; 0 .. LogModule.delivery_queue_size + 1)
     {
         queued.timestamp = SysTime(i);
         module_.enqueue(queued);
+        for (; module_.next_message(reader, m); ++read)
+            module_.acknowledge(reader);
     }
     assert(module_._delivery_count == LogModule.delivery_queue_size);
     assert(module_._delivery_dropped == 1);
+    assert(module_.lost(first) == 1 && module_.lost(reader) == 0 && read == LogModule.delivery_queue_size + 1, "the stalled consumer loses its oldest, counted; the reader loses nothing");
+    module_.unregister_consumer(reader);
     module_.unregister_consumer(first);
     assert(module_._delivery_count == 0);
     assert(module_._records_head is null);
