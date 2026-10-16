@@ -3,6 +3,15 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-10-15: bundled value frames
+
+- A node advertises `bundle` in its hello `caps`. A client that also advertises `bundle` receives
+  value messages (`val`) as one WebSocket frame holding a JSON array of messages instead of one
+  frame each; handle each element in order as if it had arrived alone. Other frames are unchanged
+  and are never reordered against the bundles. A client may send arrays too. On a busy node this
+  cuts the frames per second severalfold; a client that does not advertise `bundle` sees no
+  change.
+
 ## 2026-10-12: page pool on the `system` device
 
 - `system.mem.pages.<category>` reports the page pool, one component per page size (`p336`,

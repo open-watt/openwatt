@@ -257,6 +257,7 @@ nothrow @nogc:
             });
             each_running_peer((SyncPeer p) { flush_pending_vals(p); });
         }
+        each_running_peer((SyncPeer p) { p.flush_bundle(); });
 
         poll_time_authorities();
 
@@ -1316,7 +1317,7 @@ nothrow @nogc:
         log.info("peer '", from.name[], "' is host '", host, "'", cluster.length ? " in cluster '" : "", cluster, cluster.length ? "'" : "");
     }
 
-    void inbound_hello(SyncPeer from, uint ver, ubyte caps, uint max_message, ulong node_id = 0, PeerRole role = PeerRole.none, const(ubyte)[] nonce = null, uint segment = 0)
+    void inbound_hello(SyncPeer from, uint ver, ushort caps, uint max_message, ulong node_id = 0, PeerRole role = PeerRole.none, const(ubyte)[] nonce = null, uint segment = 0)
     {
         import urt.conv : format_uint;
 

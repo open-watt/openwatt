@@ -55,7 +55,12 @@ bytes, so it fits every link but raw CAN; a peer that cannot fit it fails to sta
 without a handshake. The hostname and cluster follow in `identity`, the next frame; on the binary
 wire hello keeps their old slots empty so older decoders read on.
 Capability names the verb families this build serves: `objects` (the object mirror), `model` (the
-data-model plane), `history`, `console`, `logs`, `time`, `console_session` and `templates`.
+data-model plane), `history`, `console`, `logs`, `time`, `console_session` and `templates`. On the
+JSON encoder `bundle` says the sender reads a frame that is a JSON array of messages, handled in
+order; a node sends value messages toward a peer that advertised it as such arrays, filled up to
+a page or the segment, whichever is smaller, and closed before any other frame, so a value never
+overtakes the frame that introduced or unbound its handle. An array the transport refuses is kept
+and sent first once there is room. The binary hello carries the first eight capabilities only.
 `max_frame` is the largest message the sender takes and `segment` the largest frame it takes in one
 packet: its transport's `actual-mtu` less the carrier (a UDP endpoint uses the datagram that fits a
 1500-byte link without IP fragmentation) and less the sublayer header where the sublayer is armed.
@@ -257,6 +262,7 @@ timestamp the subordinate collects until the next push. The authority is either 
 | `templates` | `add {class:"component"}` |
 | `logs` | `log_sub`, `log` |
 | `time` | `time_req`, `time_resp`, `time_push` |
+| `bundle` (JSON) | a frame holding an array of messages |
 
 ## The reliability sublayer
 

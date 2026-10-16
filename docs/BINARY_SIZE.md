@@ -101,6 +101,7 @@ Limit is the 4 MB `ota_0` partition. `ram` is internal DRAM only; PSRAM is heap.
 | 2026-10-14 | #846 | ldc 1.42.0 | 2,989,952 | 141,887 | 4,194,304 | `COREDUMP=1`; S11a, S11b and S12 together: `send()` refused at the watermark, serial watermark from baud, TCP gather, sinks never write a shared page |
 | 2026-10-16 | #847 | ldc 1.42.0 | 2,991,152 | 141,871 | 4,194,304 | `COREDUMP=1`; S13 on #846: session output held and pulled, fill page in the stream base, follower offers whole records, TxWriter: +1,200 over #846 |
 | 2026-10-16 | #848 | ldc 1.42.0 | 2,991,872 | 141,871 | 4,194,304 | `COREDUMP=1`; crash dumps capped at two, pruned by walking the directory: +720 over master bde9e2c6 (#847, 2,991,152) |
+| 2026-10-16 | #851 | ldc 1.42.0 | 2,991,888 | 141,871 | 4,194,304 | `COREDUMP=1`; JSON value bundling, a refused bundle kept and sent first: +16 over master caddcc97 (#848, 2,991,872) |
 
 ### ESP32-C5 DevKitC-1, `make esp-idf-build PLATFORM=esp32-c5 CONFIG=release`
 
