@@ -450,6 +450,7 @@ const(void)[] heap_view(const(void)* heap, uint offset) pure
     return (cast(const(void)*)(p + 1))[0 .. *p & 0x7FFF];
 }
 
+// a view into a bucket: valid until the next read through its cursor or the next write to its element
 struct RecordBlock
 {
 nothrow @nogc:
@@ -700,7 +701,8 @@ nothrow @nogc:
         return lo < buckets.length ? buckets[lo] : null;
     }
 
-    // A cursor's borrow moves to the bucket it reads, so a view stays valid until the next read.
+    // A cursor's borrow moves to the bucket it reads, so a view stays valid until the next read
+    // or the next write to the element.
     // Cursor-less reads (queries) reconstitute without a borrow; their loose raws drop at the
     // next cursor close (byte budgets own the rest).
     // `format` only labels an empty result; a found bucket speaks for itself. When from_index
