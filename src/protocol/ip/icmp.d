@@ -7,7 +7,6 @@ import urt.endian;
 import urt.hash;
 import urt.inet;
 import urt.log;
-import urt.mem.temp : talloc;
 import urt.time;
 
 import router.iface.packet;
@@ -83,10 +82,15 @@ ushort icmp_echo_send(ref IPStack stack, IPAddr destination, BaseInterface iface
         sequence = _next_echo_sequence++;
     while (sequence == 0 || echo_sequence_pending(sequence));
 
-    align(uint.sizeof) ubyte[60] buffer;
+    Packet* packet = alloc_datagram(60);
+    if (!packet)
+        return 0;
+    scope (exit) packet_free(packet);
+    ubyte[] buffer = cast(ubyte[])packet.payload;
+    buffer[] = 0;
     auto ip = cast(IPv4Header*)buffer.ptr;
     ip.ver_ihl = 0x45;
-    ip.total_length = nativeToBigEndian(ushort(buffer.length));
+    ip.total_length = nativeToBigEndian(cast(ushort)buffer.length);
     ip.ident = nativeToBigEndian(next_ip_id());
     ip.ttl = 64;
     ip.protocol = IPProtocol.icmp;
@@ -101,12 +105,10 @@ ushort icmp_echo_send(ref IPStack stack, IPAddr destination, BaseInterface iface
         message[i] = cast(ubyte)(i - 8);
     message[2 .. 4] = nativeToBigEndian(internet_checksum(message));
     _pending_echoes ~= PendingEcho(source, destination, getTime(), handler, error_handler, sequence, iface ? iface.id : CID());
-    Packet packet;
-    packet.init!RawFrame(buffer[]);
     if (iface && route.kind != RouteResult.Kind.local)
-        stack.output_v4_routed(&packet, iface, route.next_hop);
+        stack.output_v4_routed(packet, iface, route.next_hop);
     else
-        stack.output_v4(&packet);
+        stack.output_v4(packet);
     return sequence;
 }
 
@@ -191,7 +193,11 @@ void icmp_send_error(ref IPStack stack, ubyte type, ubyte code, const(Packet)* o
     if (total > max_size)
         return;
 
-    ubyte[max_size] buf = void;
+    Packet* pkt = alloc_datagram(total);
+    if (!pkt)
+        return;
+    scope (exit) packet_free(pkt);
+    ubyte[] buf = cast(ubyte[])pkt.payload;
 
     auto rip = cast(IPv4Header*)buf.ptr;
     rip.ver_ihl  = 0x45;
@@ -220,9 +226,7 @@ void icmp_send_error(ref IPStack stack, ubyte type, ubyte code, const(Packet)* o
     ushort cc = internet_checksum(buf[IPv4Header.sizeof .. total]);
     icmp[2..4] = cc.nativeToBigEndian;
 
-    Packet pkt;
-    pkt.init!RawFrame(buf[0 .. total]);
-    stack.output_v4(&pkt);
+    stack.output_v4(pkt);
 }
 
 
@@ -437,7 +441,11 @@ void handle_echo_request(ref IPStack stack, const(Packet)* pkt, size_t ip_hdr_le
     if (datagram.length > max_size)
         return;
 
-    ubyte[] buf = cast(ubyte[])talloc(datagram.length);
+    Packet* reply = alloc_datagram(datagram.length);
+    if (!reply)
+        return;
+    scope (exit) packet_free(reply);
+    ubyte[] buf = cast(ubyte[])reply.payload;
     buf[] = datagram[];
 
     auto rip = cast(IPv4Header*)buf.ptr;
@@ -459,9 +467,7 @@ void handle_echo_request(ref IPStack stack, const(Packet)* pkt, size_t ip_hdr_le
     ushort cc = internet_checksum(buf[ip_hdr_len .. datagram.length]);
     icmp[2..4] = cc.nativeToBigEndian;
 
-    Packet reply;
-    reply.init!RawFrame(buf[0 .. datagram.length]);
-    stack.output_v4(&reply);
+    stack.output_v4(reply);
 }
 
 bool is_multicast_v4(IPAddr ip) pure

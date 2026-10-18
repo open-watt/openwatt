@@ -180,12 +180,12 @@ bool send_message(ref IPStack stack, IgmpType type, IPAddr local, IPAddr group, 
     if (!iface || !iface.running)
         return false;
 
-    MessageBuffer buffer = void;
-    write_message(buffer, type, local, group, destination, next_ip_id());
-
-    Packet packet;
-    packet.init!RawFrame(buffer.bytes);
-    stack.output_v4_routed(&packet, iface, destination);
+    Packet* packet = alloc_datagram(MessageBuffer.sizeof);
+    if (!packet)
+        return false;
+    write_message(*cast(MessageBuffer*)packet.payload.ptr, type, local, group, destination, next_ip_id());
+    stack.output_v4_routed(packet, iface, destination);
+    packet_free(packet);
     return true;
 }
 
