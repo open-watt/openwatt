@@ -698,7 +698,7 @@ Each step leaves the tree no worse than before it and deletes what it replaces.
 
 | PR | concerns | needs | deletes |
 | --- | --- | --- | --- |
-| E1 (urt) | refcount contract: `page_free` at 0, foreign tag and `page_foreign`, `StackPage!N`, `page_mutable`, `page_hold`; tests for each refcount state | urt #390 | the `page_share` call sites outside the pool |
+| E1 (urt #393) | refcount contract: `page_free` at 0, foreign tag and `page_foreign`, `StackPage!N`, `page_mutable`, `page_hold`; tests for each refcount state | urt #390 | the `page_share` call sites outside the pool |
 | E2 | ingress into pages: UART and WPAN rx pages take room; Ethernet drivers receive into pages; stream parsers assemble into a page | E1, #845 | `_rx_buffer`, `_rx[62]`, `_tail`, `Buffers.rx`, the ELM line buffer |
 | E3 | producers allocate at the source; interfaces state their framing room | E1 | the `ubyte[1500]`/`[1518]`/`[512]` sender buffers, Modbus `send_packet`'s stack PDU, the EZSP command buffer |
 | E4 | `Packet` owned by its page, borrowed through a `StackPage!0` pair; `Packet*` everywhere; holders hold | E1 | `init!T(buffer)`, `clone`/`free_clone`/`backing_page`, `mutable_flag`/`page_flag`, the by-value copy fault, #692 (closed as superseded) |
