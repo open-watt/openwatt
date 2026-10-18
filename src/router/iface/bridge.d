@@ -649,20 +649,14 @@ private:
 
     ulong source_address(const(Packet)* packet)
     {
-        if (_vlan_filtering || packet.vlan_tag == VlanTag.none)
-            return get_network_src_address(packet);
-        Packet untagged = *packet;
-        untagged.vlan &= 0xF000;
-        return get_network_src_address(&untagged);
+        ulong address = get_network_src_address(packet);
+        return _vlan_filtering || packet.vlan_tag == VlanTag.none ? address : address & ~network_address_vid_mask;
     }
 
     ulong destination_address(const(Packet)* packet)
     {
-        if (_vlan_filtering || packet.vlan_tag == VlanTag.none)
-            return get_network_dst_address(packet);
-        Packet untagged = *packet;
-        untagged.vlan &= 0xF000;
-        return get_network_dst_address(&untagged);
+        ulong address = get_network_dst_address(packet);
+        return _vlan_filtering || packet.vlan_tag == VlanTag.none ? address : address & ~network_address_vid_mask;
     }
 
     // an exotic address is ours if it lives behind a software-domain port (a local
@@ -764,14 +758,15 @@ private:
             if (eth_member != is_eth)
                 continue;
 
-            Packet outgoing = *packet;
+            StackPacket outgoing;
+            outgoing.init_view(packet);
             if (_vlan_filtering)
             {
-                if (!prepare_egress(&outgoing, member))
+                if (!prepare_egress(&outgoing.packet, member))
                     continue;
             }
 
-            if (member.iface.forward(&outgoing) < 0)
+            if (member.iface.forward(&outgoing.packet) < 0)
                 add_tx_drop();
         }
 
@@ -929,11 +924,12 @@ private:
             if (!member.iface.running || member.offloaded || eth_member != is_eth)
                 continue;
 
-            Packet outgoing = *packet;
-            if (_vlan_filtering && !prepare_egress(&outgoing, member))
+            StackPacket outgoing;
+            outgoing.init_view(packet);
+            if (_vlan_filtering && !prepare_egress(&outgoing.packet, member))
                 continue;
 
-            int tag = member.iface.forward(&outgoing, &tracking.on_port_callback);
+            int tag = member.iface.forward(&outgoing.packet, &tracking.on_port_callback);
             if (tag > 0)
             {
                 tracking.port_tags.pushBack(PortTag(ObjectRef!BaseInterface(member.iface), tag));

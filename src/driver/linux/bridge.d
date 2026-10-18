@@ -386,7 +386,7 @@ private:
             // but without touching the package-private _offset: hand the L3 payload to
             // init!Ethernet and set the header fields from the wire).
             ref mac_hdr = *cast(const Ethernet*)data.ptr;
-            Packet packet;
+            StackPacket packet;
             ref eth = packet.init!Ethernet(data[14 .. $], ts);
             eth.dst = mac_hdr.dst;
             eth.src = mac_hdr.src;
@@ -398,7 +398,7 @@ private:
                 packet.vlan = vlan_tci;
             }
 
-            o.bridge.cpu_port_incoming(&packet);
+            o.bridge.cpu_port_incoming(&packet.packet);
         }
     }
 

@@ -254,7 +254,7 @@ private:
         scope(exit) page_free(page);
 
         const(ubyte)[] frame = cast(const(ubyte)[])page.data;
-        Packet pkt;
+        StackPacket pkt;
         auto hdr = &pkt.init!WpanFrame(frame);
         if (hdr.parse(frame) == 0)
         {
@@ -263,7 +263,7 @@ private:
         }
         hdr.rssi = info.rssi;
         hdr.lqi = info.lqi;
-        incoming_packet(&pkt);
+        incoming_packet(&pkt.packet);
     }
 
     // may run in the radio ISR

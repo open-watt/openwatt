@@ -519,12 +519,12 @@ nothrow @nogc:
     private:
         bool emit(EthernetStation station, MACAddress dst, const(ubyte)[] frame)
         {
-            Packet packet;
+            StackPacket packet;
             ref ether = packet.init!Ethernet(frame);
             ether.dst = dst;
             ether.src = station.mac;
             ether.ether_type = EtherType.ow;
-            return station.forward(&packet) >= 0;
+            return station.forward(&packet.packet) >= 0;
         }
 
         ObjectRef!EthernetStation _iface;

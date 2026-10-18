@@ -169,9 +169,9 @@ private:
         }
         while (const(void)[] frame = xram_receive(_channel))
         {
-            Packet p;
+            StackPacket p;
             p.init!RawFrame(frame, when);
-            incoming_packet(&p);
+            incoming_packet(&p.packet);
             xram_release(_channel);
         }
         if (tx_ready)

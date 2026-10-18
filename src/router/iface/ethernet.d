@@ -75,12 +75,12 @@ nothrow @nogc:
 
     final int send(MACAddress dest, const(void)[] message, EtherType type, MessageCallback callback = null)
     {
-        Packet p;
+        StackPacket p;
         ref eth = p.init!Ethernet(message);
         eth.src = mac;
         eth.dst = dest;
         eth.ether_type = type;
-        return forward(&p, callback);
+        return forward(&p.packet, callback);
     }
 
     // 802.1ag loopback at our maintenance level; the pending entry expires quietly after 10s unless cancelled
@@ -306,14 +306,14 @@ protected:
         if (len <= 0 || len > actual_mtu)
             return false;
 
-        Packet wrapped;
+        StackPacket wrapped;
         ref eth = wrapped.init!Ethernet(buffer[0 .. len], packet.creation_time);
         eth.src = mac;
         eth.dst = resolve(get_network_dst_address(packet));
         eth.ether_type = EtherType.ow;
         wrapped.vlan = packet.vlan;
         wrapped.vlan_tag = packet.vlan_tag;
-        medium_tx(&wrapped);
+        medium_tx(&wrapped.packet);
         return true;
     }
 
@@ -419,14 +419,14 @@ protected:
         MACAddress remote = station_of(outgoing ? get_network_dst_address(packet) : get_network_src_address(packet));
 
         ubyte[18] hdr = void;
-        Packet wrapped;
+        StackPacket wrapped;
         ref eth = wrapped.init!Ethernet(null, packet.creation_time);
         eth.dst = outgoing ? remote : mac;
         eth.src = outgoing ? mac : remote;
         eth.ether_type = EtherType.ow;
         wrapped.vlan = packet.vlan;
         wrapped.vlan_tag = packet.vlan_tag;
-        size_t header_len = encode_ethernet_header(&wrapped, hdr[]);
+        size_t header_len = encode_ethernet_header(&wrapped.packet, hdr[]);
         if (header_len == 0)
             return;
         sink(hdr[0 .. header_len]);
@@ -607,20 +607,21 @@ private:
 
     void station_send_control(OWControl msg, MACAddress dst, scope const(ubyte)[] content)
     {
-        ubyte[512] buffer = void;
-        if (content.length + 5 > buffer.length)
+        Packet* wrapped = alloc_packet!Ethernet(5 + content.length);
+        if (!wrapped)
             return;
+        ubyte[] buffer = cast(ubyte[])wrapped.payload;
         storeBigEndian(cast(ushort*)buffer.ptr, ushort(msg));
         storeBigEndian(cast(ushort*)(buffer.ptr + 2), cast(ushort)content.length);
         buffer[4] = 0; // control messages carry no packet header
-        buffer[5 .. 5 + content.length] = content[];
+        buffer[5 .. $] = content[];
 
-        Packet wrapped;
-        ref eth = wrapped.init!Ethernet(buffer[0 .. 5 + content.length]);
+        ref eth = wrapped.hdr!Ethernet;
         eth.src = mac;
         eth.dst = dst;
         eth.ether_type = EtherType.ow;
-        medium_tx(&wrapped);
+        medium_tx(wrapped);
+        packet_free(wrapped);
     }
 
     void station_control(OWControl msg, const(ubyte)[] content, MACAddress src, bool unicast)
@@ -836,7 +837,7 @@ protected:
             return;
         }
 
-        Packet packet;
+        StackPacket packet;
         ref eth = packet.init!Ethernet(data, ts);
         eth.dst = MACAddress(data[0 .. 6]);
         eth.src = MACAddress(data[6 .. 12]);
@@ -867,7 +868,7 @@ protected:
 
         // the packet accounts only payload bytes; account the link-layer overhead here
         _status.rx_bytes += data.length - packet.length + (vlan_tpid != 0 ? 4 : 0);
-        incoming_packet(&packet);
+        incoming_packet(&packet.packet);
     }
 
     // The medium is the wire: frame the packet and push it via wire_send.

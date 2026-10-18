@@ -98,7 +98,7 @@ void icmp6_send_error(ref IPStack stack, ubyte type, ubyte code, const(Packet)* 
     if (!response)
         return;
     scope(exit)
-        response.free_clone();
+        packet_free(response);
     ubyte[] buffer = cast(ubyte[])response.payload;
 
     auto ip = cast(IPv6Header*)buffer.ptr;
@@ -304,7 +304,7 @@ void handle_echo_request(ref IPStack stack, const(Packet)* packet, size_t offset
     if (!reply)
         return;
     scope(exit)
-        reply.free_clone();
+        packet_free(reply);
     ubyte[] buffer = cast(ubyte[])reply.payload;
 
     auto reply_ip = cast(IPv6Header*)buffer.ptr;

@@ -172,6 +172,8 @@ void register_packet_codec(Hdr)()
 const(PacketCodec)* get_ow_codec(PacketType type)
     => g_packet_codecs[type].encode ? &g_packet_codecs[type] : null;
 
+enum ulong network_address_vid_mask = ulong(0xFFF) << 48;
+
 ulong get_network_src_address(const(Packet)* p) pure
     => packet_codec(p.type).extract_src(p);
 
@@ -185,6 +187,8 @@ bool is_network_multicast_address(ulong address) pure
 struct Packet
 {
 nothrow @nogc:
+    @disable this(this);
+
     ref T init(T)(const(void)[] payload, MonoTime create_time = getTime())
     {
         static assert(T.sizeof <= embed.length);
@@ -300,30 +304,6 @@ nothrow @nogc:
 
     uint length() const
         => (_flags & page_flag) ? page.length : _length - _offset;
-
-    Packet* clone() const
-    {
-        const(void)[] source = data;
-        Page* p = page_alloc(source.length, size_t.sizeof, packet_prefix_size + packet_headroom);
-        if (!p)
-            return null;
-        Packet* r = attach_packet(p);
-        if (!r)
-        {
-            page_free(p);
-            return null;
-        }
-        *r = this;
-        r._flags |= mutable_flag | page_flag;
-        r.page.data[] = source;
-        return r;
-    }
-
-    void free_clone()
-    {
-        assert(_flags & page_flag);
-        page_free(page);
-    }
 
     PCP pcp() const pure
         => cast(PCP)(vlan >> 13);
@@ -457,10 +437,87 @@ private:
 
     ushort packet_page_offset() const
         => (cast(const(ushort)*)&this)[-1];
+
+    void take_metadata(const(Packet)* from)
+    {
+        creation_time = from.creation_time;
+        embed = from.embed;
+        type = from.type;
+        vlan = from.vlan;
+        _flags = (_flags & (mutable_flag | page_flag)) | (from._flags & ~(mutable_flag | page_flag));
+    }
 }
+
+// a packet over bytes that live elsewhere, lent for the call
+struct StackPacket
+{
+nothrow @nogc:
+    @disable this(this);
+
+    ref T init(T)(const(void)[] bytes, MonoTime create_time = getTime())
+    {
+        lend();
+        return packet.init!T(bytes, create_time);
+    }
+
+    // the source's bytes under metadata of its own
+    void init_view(const(Packet)* source)
+    {
+        lend();
+        packet = Packet();
+        packet.take_metadata(source);
+        const(void)[] bytes = source.data;
+        packet._length = cast(ushort)bytes.length;
+        packet._ptr = bytes.ptr;
+    }
+
+    alias packet this;
+
+private:
+    StackPage!0 _page;
+public:
+    Packet packet;
+
+private:
+    void lend()
+    {
+        _page.page();
+        (cast(ushort*)&packet)[-1] = Page.sizeof;
+    }
+}
+static assert(StackPacket.packet.offsetof == Page.sizeof);
 
 // _offset is a ubyte, so 255 is the ceiling.
 enum ubyte packet_headroom = 128;
+
+// a packet the caller may keep: a pool page is shared, a lent packet is copied
+Packet* packet_retain(Packet* packet)
+{
+    if (packet._flags & Packet.page_flag)
+    {
+        page_share(packet.page);
+        return packet;
+    }
+    const(void)[] source = packet.data;
+    Page* p = page_alloc(source.length, size_t.sizeof, packet_prefix_size + packet_headroom);
+    if (!p)
+        return null;
+    Packet* r = attach_packet(p);
+    if (!r)
+    {
+        page_free(p);
+        return null;
+    }
+    r.take_metadata(packet);
+    r.page.data[] = source;
+    return r;
+}
+
+void packet_free(Packet* packet)
+{
+    if (packet._flags & Packet.page_flag)
+        page_free(packet.page);
+}
 
 Packet* alloc_packet(T)(size_t payload, ubyte headroom = packet_headroom)
 {
@@ -506,8 +563,7 @@ Packet* attach_packet(Page* page)
 
     Packet* packet = cast(Packet*)(cast(void*)page + offset);
     (cast(ushort*)packet)[-1] = cast(ushort)offset;
-    Packet blank;
-    *packet = blank;
+    *packet = Packet();
     packet._flags = Packet.mutable_flag | Packet.page_flag;
     return packet;
 }
@@ -669,7 +725,7 @@ unittest
     assert(owned.page.offset == data_offset - 4 && owned.data.length == 8);
     assert(owned.consume_prefix(4));
     assert(owned.page.offset == data_offset && owned.data.length == 4);
-    owned.free_clone();
+    packet_free(owned);
 
     Page* raw = page_alloc(16);
     assert(raw);
@@ -678,7 +734,25 @@ unittest
     assert(attached && attached.packet_page_offset > raw.offset + raw.length);
     assert(raw.capacity == attached.packet_page_offset - ushort.sizeof);
     assert(raw.capacity < old_capacity && attached.data.length == 16);
-    attached.free_clone();
+    packet_free(attached);
+
+    ubyte[4] lent_bytes = [1, 2, 3, 4];
+    StackPacket lent;
+    lent.init!Ethernet(lent_bytes[]).ether_type = EtherType.ow;
+    lent.vlan = 5;
+    assert(page_foreign(lent.page) && lent.data.ptr is lent_bytes.ptr);
+    StackPacket view;
+    view.init_view(&lent.packet);
+    view.vlan = 7;
+    assert(view.data.ptr is lent_bytes.ptr && view.hdr!Ethernet.ether_type == EtherType.ow && lent.vlan == 5);
+    Packet* kept = packet_retain(&view.packet);
+    assert(kept && kept.data.ptr !is lent_bytes.ptr && cast(const(ubyte)[])kept.data == lent_bytes[] && kept.vlan == 7);
+    assert(packet_retain(kept) is kept && !page_unique(kept.page), "a pool packet is shared, not copied");
+    packet_free(kept);
+    assert(page_unique(kept.page));
+    packet_free(kept);
+    packet_free(&lent.packet);
+    assert(cast(const(ubyte)[])lent.data == lent_bytes[], "freeing a lent packet leaves its bytes alone");
 
     ubyte[8] payload = [0x00, 0x03, 0x08, 0x00, 1, 2, 3, 4];
     Packet packet;

@@ -109,7 +109,7 @@ nothrow @nogc:
             return -1;
 
         QueuedFrame* frame = _pool.alloc();
-        frame.packet = packet.clone();
+        frame.packet = packet_retain(packet);
         if (!frame.packet)
         {
             _pool.free(frame);
@@ -122,7 +122,7 @@ nothrow @nogc:
         int tag = _tags.alloc();
         if (tag < 0)
         {
-            frame.packet.free_clone();
+            packet_free(frame.packet);
             _pool.free(frame);
             return -1;
         }
@@ -387,7 +387,7 @@ private:
     {
         MessageCallback callback = frame.callback;
         ubyte tag = frame.tag;
-        frame.packet.free_clone();
+        packet_free(frame.packet);
         _pool.free(frame);
         if (callback)
             callback(tag, state);
