@@ -51,19 +51,6 @@ void register_element_lifecycle_handler(ElementLifecycleHandler handler)
     _on_element_lifecycle ~= handler;
 }
 
-// Live model feeds: while any listener is registered, every element write enlists in
-// the per-tick dirty sweep; otherwise only cursor-bearing elements do.
-void add_feed_listener()
-{
-    ++g_feed_listeners;
-}
-
-void remove_feed_listener()
-{
-    debug assert(g_feed_listeners, "unbalanced remove_feed_listener");
-    --g_feed_listeners;
-}
-
 void sweep_dirty(scope void delegate(ref Element) nothrow @nogc visit)
 {
     // writes during a visit re-enlist into a fresh list for the next sweep
@@ -710,6 +697,22 @@ public:
         _subs = n;
     }
 
+    // a write enlists in the dirty sweep while any sync peer has the element armed
+    package(manager) uint sync_peers() const pure
+        => _sync_peers;
+
+    package(manager) void sync_arm()
+    {
+        assert(_sync_peers < ubyte.max, "too many sync peers on one element");
+        ++_sync_peers;
+    }
+
+    package(manager) void sync_disarm()
+    {
+        debug assert(_sync_peers, "unbalanced sync_disarm");
+        --_sync_peers;
+    }
+
     void unsubscribe(Subscriber callback)
     {
         Subscription** p = &_subs;
@@ -951,6 +954,7 @@ private:
 
     // DMD drops bitfield compound assignments, so pack these into Element's alignment hole.
     ubyte _status;
+    ubyte _sync_peers;
     ushort _format;
 
     Scalar _latest;
@@ -1533,7 +1537,7 @@ private:
 
     void mark_dirty()
     {
-        if (!(_history && _history.cursors.length) && !g_feed_listeners)
+        if (!(_history && _history.cursors.length) && !_sync_peers)
             return;
         if (!(_status & Flags.dirty_listed))
         {
@@ -1594,7 +1598,6 @@ private:
 
 __gshared Array!ElementLifecycleHandler _on_element_lifecycle;
 __gshared Array!(Element*) g_historical_elements;
-__gshared uint g_feed_listeners;
 __gshared uint g_commit_depth;
 __gshared Array!SampleUpdate g_pending_updates;
 
@@ -2208,10 +2211,12 @@ unittest
     void count_swept(ref Element) nothrow @nogc { ++swept; }
     sweep_dirty(&count_swept);      // drain anything earlier tests enlisted
     swept = 0;
-    add_feed_listener();
+    text_feed.sync_arm();
+    wide_feed.sync_arm();
     text_feed.write_sample("online", from_unix_time_ns(1_000_000));
     wide_feed.write_record(key1[], from_unix_time_ns(1_000_000));
-    remove_feed_listener();
+    text_feed.sync_disarm();
+    wide_feed.sync_disarm();
     sweep_dirty(&count_swept);
     assert(swept == 2);
     assert(!text_feed.has_history && !wide_feed.has_history);
@@ -2344,11 +2349,11 @@ unittest
         void count_dirty(ref Element) nothrow @nogc { ++dirty_visits; }
         sweep_dirty(&count_dirty);
         dirty_visits = 0;
-        add_feed_listener();
+        fs.sync_arm();
         g_fail_bucket_alloc = true;
         fs.write_sample(2.0, from_unix_time_ns(2_000));
         g_fail_bucket_alloc = false;
-        remove_feed_listener();
+        fs.sync_disarm();
         sweep_dirty(&count_dirty);
         assert(dirty_visits == 1);
         assert(fs.record_count == 1 && fs.latest_record.f64_ == 2.0);
@@ -2523,9 +2528,9 @@ unittest
     }
 
     // teardown mid-commit: the dying element's pending updates and dirty listing must vanish
-    add_feed_listener();
     Element dying;
     dying.format = register_format(f64_held);
+    dying.sync_arm();
     begin_commit();
     dying.write_sample(1.0, from_unix_time_ns(1_000_000));
     assert(g_pending_updates.length == 1);
@@ -2534,7 +2539,6 @@ unittest
     assert(g_pending_updates.empty);
     assert(!g_dirty_elements[].contains(&dying));
     end_commit();
-    remove_feed_listener();
 
     // TODO: regular-series test returns once regular write_records() and rate-aware tick() are built
 }

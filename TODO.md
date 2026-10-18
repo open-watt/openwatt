@@ -1104,6 +1104,12 @@ decisions are in [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md). The
   - `open_series_cursor` aborts with `assert(false, "out of cursors")` on the 17th concurrent
     cursor; return an invalid cursor instead of aborting in release.
 
+- **Sync arm counts across element recreation**: a peer's `_live_nodes` keys by EID while the
+  element counts its arming peers (`Element.sync_arm`). If an element is destroyed and another
+  takes its EID, the peer's entry stays, the new element's count starts at zero, and a later
+  disarm underflows it. Elements are never destroyed today; when they are, the destroyed event
+  must drop the node from every peer's `_live_nodes` before the EID can be reused.
+
 - **Element.value() drops unconvertible values silently**: `value()` discards
   `update_typed_series`'s failure, so a value that cannot unbox to the element's format (wrong
   dimension, overflow, non-string to a text element) vanishes with no log and no caller feedback.

@@ -684,6 +684,36 @@ package:
         uint cursor;
     }
 
+    final void arm(Element* e, EID node, ulong position)
+    {
+        if (node.raw in _live_nodes)
+            return;
+        _live_nodes.insert(node.raw, position);
+        e.sync_arm();
+    }
+
+    // e is null once the element is gone
+    final void disarm(Element* e, EID node)
+    {
+        if ((node.raw in _live_nodes) is null)
+            return;
+        _live_nodes.remove(node.raw);
+        if (e)
+            e.sync_disarm();
+    }
+
+    final void disarm_all()
+    {
+        foreach (raw; _live_nodes.keys)
+        {
+            EID node;
+            node.raw = raw;
+            if (Element* e = resolve_element(node))
+                e.sync_disarm();
+        }
+        _live_nodes.clear();
+    }
+
     final void attach_model_element(Device device, Element* element, Access access)
     {
         PeerBinding binding = model_binding(device);
@@ -694,7 +724,7 @@ package:
         }
         binding.attach(element, access);
         EID eid = element.ensure_eid();
-        _live_nodes.remove(eid.raw);
+        disarm(element, eid);
         foreach (i, pending; _pending_vals[])
             if (pending == eid)
             {
@@ -1749,10 +1779,11 @@ unittest
     Element* element = builder.element(component, "value");
 
     EID eid = element.ensure_eid();
-    p._live_nodes.insert(eid.raw, 0);
+    p.arm(element, eid, 0);
     p._pending_vals ~= eid;
+    assert(element.sync_peers == 1);
     p.attach_model_element(device, element, Access.read);
-    assert(!p._live_nodes.exists(eid.raw) && p._pending_vals.empty);
+    assert(!p._live_nodes.exists(eid.raw) && p._pending_vals.empty && element.sync_peers == 0);
     p.attach_model_element(device, element, Access.write);
     PeerBinding binding = p.model_binding(device);
     assert(device.bindings.length == 1 && device.bindings[0] is p);
@@ -1903,7 +1934,7 @@ unittest
     assert(link.frames == (records + 255) / 256 && link.delivered == records && link.lost == 0);
 
     // The initial live cursor must not count as delivered history.
-    peer._live_nodes.insert(power.ensure_eid().raw, power.record_count);
+    peer.arm(power, power.ensure_eid(), power.record_count);
     ulong* live = power.ensure_eid().raw in peer._live_nodes;
     link.frames = 0;
     link.pending = link.cap;

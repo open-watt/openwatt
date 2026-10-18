@@ -57,8 +57,8 @@ import manager.base;
 import manager.collection;
 import manager.component : Component;
 import manager.device : Device, DeviceBuilder, DeviceLifecycleEvent, register_device_lifecycle_handler;
-import manager.element : Access, add_feed_listener, Cursor, Element, ElementLifecycleEvent,
-                         register_element_lifecycle_handler, remove_feed_listener, SampleUpdate, Subscriber, sweep_dirty;
+import manager.element : Access, Cursor, Element, ElementLifecycleEvent, register_element_lifecycle_handler,
+                         SampleUpdate, Subscriber, sweep_dirty;
 import manager.id : EID;
 import manager.path : Address, match_path, pattern_matches, walk_elements, walk_elements_until;
 import manager.series : Constraint, DataFormat, format_info, FormatId, RecordBlock, register_format, Scalar,
@@ -590,10 +590,8 @@ nothrow @nogc:
         p._enums_sent.clear();
         p._ft_recv.clear();
         p.detach_model_bindings();
-        foreach (ref pat; p._model_subs[])
-            remove_feed_listener();
         p._model_subs.clear();
-        p._live_nodes.clear();
+        p.disarm_all();
         p._pending_vals.clear();
         p._pending_subs.clear();
         p._pending_live.clear();
@@ -1373,6 +1371,21 @@ nothrow @nogc:
         get_module!SyncPeeringModule.handle_claim(from, seq, cluster, priority, auth, key);
     }
 
+    // each live session holds a position per armed node; bound how many a node serves
+    version (Tiny) enum max_live_peers = 4; else enum max_live_peers = 32;
+    static assert(max_live_peers <= 127, "an element counts its armed peers in seven bits");
+
+    uint live_peers()
+    {
+        uint n = 0;
+        foreach (p; peers[])
+        {
+            if (!p._model_subs.empty)
+                ++n;
+        }
+        return n;
+    }
+
     void inbound_model_sub(SyncPeer from, uint seq, const(char[])[] patterns, bool once, ulong from_ms = 0, ulong to_ms = 0)
     {
         SyncEncoder enc = encoder_for(from._encoder);
@@ -1426,12 +1439,14 @@ nothrow @nogc:
             enc.encode_err(from, seq, "busy", "too many model subs in flight");
             return;
         }
+        if (!to_arm.empty && from._model_subs.empty && live_peers() >= max_live_peers)
+        {
+            enc.encode_err(from, seq, "busy", "too many live subscribers");
+            return;
+        }
 
         foreach (pat; to_arm[])
-        {
             from._model_subs ~= pat.make_string();
-            add_feed_listener();
-        }
 
         if (staged.empty)
         {
@@ -1454,7 +1469,6 @@ nothrow @nogc:
                 if (p[] == pat)
                 {
                     from._model_subs.remove(i);
-                    remove_feed_listener();
                     removed = true;
                     break;
                 }
@@ -1462,6 +1476,22 @@ nothrow @nogc:
         }
         if (removed)
         {
+            // a queued walk of a withdrawn pattern still introduces and replies, but must not arm
+            foreach (ref req; from._pending_subs[])
+            {
+                if (!req.arm)
+                    continue;
+                bool held = false;
+                foreach (ref p; from._model_subs[])
+                {
+                    if (Address.parse(p[]).subject == req.pattern[])
+                    {
+                        held = true;
+                        break;
+                    }
+                }
+                req.arm = held;
+            }
             from._rescan_cursor = 0;
             rebuild_live_nodes(from);
         }
@@ -2600,8 +2630,7 @@ nothrow @nogc:
         EID node = e.ensure_eid();
         if (!node)
             return;
-        if ((node.raw in to._live_nodes) is null)
-            to._live_nodes.insert(node.raw, e.record_count);
+        to.arm(e, node, e.record_count);
     }
 
     // Recomputes the armed set from the surviving patterns, so a node stays armed while any
@@ -2626,8 +2655,7 @@ nothrow @nogc:
                     if (!node)
                         return;
                     matched.insert(node.raw, true);
-                    if ((node.raw in from._live_nodes) is null)
-                        from._live_nodes.insert(node.raw, e.record_count);
+                    from.arm(e, node, e.record_count);
                 });
             }
         }
@@ -2639,7 +2667,11 @@ nothrow @nogc:
                 doomed ~= k;
         }
         foreach (k; doomed[])
-            from._live_nodes.remove(k);
+        {
+            EID node;
+            node.raw = k;
+            from.disarm(resolve_element(node), node);
+        }
     }
 
     // Creation notification: a node appearing later that matches an armed pattern
