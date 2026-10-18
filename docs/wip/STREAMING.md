@@ -708,10 +708,14 @@ no longer forces.
 
 ### E.8 Open decisions
 
-- Merging the allocation header into `Page` (refcount, tag, `next` as members) would make the
-  layout honest and `StackPage` trivial, at the cost of `Page` growing from 6 bytes to 8 on Tiny
-  and 16 or 24 on the full pool, and of both pools sharing one header shape. A separate urt
-  cleanup, not a prerequisite.
+- Merging the allocation header into `Page` (link, refcount, allocation as members): deferred to
+  a urt cleanup before E4. It costs no memory. Ordered widest first, the merged struct is 22
+  bytes on 64-bit (14 on 32-bit) and its tail padding is exactly the slot of the packet's 16-bit
+  back-offset, so a `Packet` still starts at the first 8-aligned byte, now `Page.sizeof`. A live
+  `Page` is then never assigned by value, which would clobber the back-offset, and the copy is
+  disabled. The back-offset stays: a retrofitted buffer with no room at its front keeps its
+  `Packet` at the end. Both pools need one header shape; Tiny packs refcount, category and size
+  in one tag word today.
 - Settled 2026-10-18: neither a consuming `ref Packet` nor a by-value move. Calls borrow
   `Packet*`, and a keeper holds (E.4).
 - Tiny's refcount is 8 bits; 255 holders of one page is a ceiling no path approaches.
