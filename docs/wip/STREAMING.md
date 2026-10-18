@@ -573,12 +573,19 @@ The primitives, all in urt:
   contract forces it.
 - `page_retain(page)` is the one way to keep: it shares a page at refcount >= 1 and copies one at
   0. Queues and caches hold through it and never call `page_share` directly.
-- `StackPage!N` lays out the allocation header, the `Page` and `N` bytes of storage as one
-  struct, at refcount 0. A producer whose bytes genuinely are its own
-  short-lived buffer declares that buffer as a `StackPage` and hands it in; the first consumer
-  that needs to keep or edit it copies, which is the copy it would have made anyway.
-  `StackPage!0` is a header with no storage: the page that owns a `Packet` whose bytes live
-  elsewhere (E.2), such as an RX ring, a DMA buffer or a caller's local.
+- `StackPage!N` is a `Page` and `N` bytes of storage as one struct, at refcount 0; `StackPage!0`
+  is a header with no storage, the page that owns a `Packet` whose bytes live elsewhere (E.2).
+
+Every packet has a page, and its bytes come from one of three places:
+
+| the bytes | storage |
+| --- | --- |
+| fresh, and may be kept or framed: anything handed to `forward`, `transmit`, a queue or an incoming path | a pool page with the path's headroom |
+| fresh and small, lent to a subtree known not to keep them: a decoder, a console command, a probe that reads its reply within the call, a test | `StackPage!N` |
+| already living elsewhere: an RX ring, a DMA, vendor or socket buffer, another packet's bytes | `StackPage!0` pointing at them |
+
+A misjudged `StackPage!N` costs the copy a keeper makes at refcount 0, never a fault. Egress never
+uses one: it has no headroom, so framing it always copies.
 
 ### E.2 Packet points at its bytes; its page owns them
 
@@ -623,11 +630,13 @@ hands it over. Three kinds of source:
    is unavoidable; it becomes the only copy. The parser appends into a page allocated with the
    framing room its egress may need, and dispatches that page. The per-interface `_rx_buffer`,
    `_rx[62]`, `_tail` and `Buffers.rx` go.
-3. **Protocol senders write into a page or a `StackPage`.** `icmp_send_error`'s `ubyte[1500]`,
+3. **Protocol senders write into a page.** `icmp_send_error`'s `ubyte[1500]`,
    `udp_output`'s and `send_segment_raw`'s `ubyte[1500]`, `station_egress`'s `ubyte[1518]`,
    Modbus `send_packet`'s stack PDU, the EZSP client's command buffer: each becomes
-   `alloc_packet` with headroom for the frame the path adds, or a `StackPage` when the bytes are
-   consumed by the call (a console command, a probe). The sender writes its header into headroom
+   `alloc_packet` with headroom for the frame the path adds. A flood over every station
+   (`tcp.d:1388`, `endpoint.d:523`) builds one page and lends it to each; today it rebuilds a
+   packet per station over one local buffer, and TCP rewrites the checksum in that buffer between
+   stations, which is safe only while every keeper copies. The sender writes its header into headroom
    with `alloc_prefix`, which now means "give me room in my own page".
 
 Each interface states the headroom and tailroom its egress framing needs (Ethernet 14 or 18,
@@ -697,22 +706,27 @@ Each step leaves the tree no worse than before it and deletes what it replaces.
 | --- | --- | --- | --- |
 | E1 (urt #393, merged) | refcount contract: `page_free` at 0, `page_foreign`, `StackPage!N`, `page_mutable`, `page_retain`; tests for each refcount state | urt #390 | the `page_share` call sites outside the pool |
 | E2 | ingress into pages: UART and WPAN rx pages take room; Ethernet drivers receive into pages; stream parsers assemble into a page | E1, #845 | `_rx_buffer`, `_rx[62]`, `_tail`, `Buffers.rx`, the ELM line buffer |
-| E3 | producers allocate at the source; interfaces state their framing room | E1 | the `ubyte[1500]`/`[1518]`/`[512]` sender buffers, Modbus `send_packet`'s stack PDU, the EZSP command buffer |
-| E4a (#856) | `Packet` is not copyable; a site that wants different metadata takes a view | | the by-value copy fault: `Packet x = packet` in the bridge's address lookups (2) and floods (2), the BLE, Modbus and Zigbee transmit paths (3) |
-| E4p | packets passed by pointer: every `ref Packet` and `ref const Packet` parameter, handler and delegate becomes `Packet*`, or `const(Packet)*` at look-only leaves | E4a | `ref Packet` (about 200 sites, 60 files) |
-| E4b | every packet lives beside a page: `StackPacket` (a `StackPage!0` header and the `Packet`) replaces a stack `Packet` over a buffer; `packet_retain` and `packet_free` | E4a, urt #394 | `init!T(buffer)` (115 sites, 41 files), `clone`/`free_clone`, `mutable_flag`/`page_flag`, #692 (closed as superseded) |
-| E4c | holders hold: the priority queue, the neighbour cache and BLE's `_emu_responses` share at refcount 1 or more; WPAN shares until DMA completion; Modbus keeps its validation bytes, not the request | E4b | the copy on every enqueue, `wpan.d`'s free of a frame the radio may still read |
+| E4p | packets passed by pointer: every `ref Packet` and `ref const Packet` parameter, handler and delegate becomes `Packet*`, or `const(Packet)*` at look-only leaves | | `ref Packet` (about 200 sites, 60 files) |
+| E4b1 | the storage kinds: `StackPacket`, `packet_retain`, `packet_free`; `Packet` not copyable (folds #856); the bridge floods take a `StackPage!0` view over the source; router/iface core (9 sites) and non-BLE drivers (6) | E4p, urt #394 | the by-value copy fault (7 sites), `ethernet.d`'s and `endpoint.d`'s sender buffers, `clone`/`free_clone` |
+| E4b2 | IP stack: 10 senders on pool pages; `frame_and_send` borrows the inner packet | E4b1 | `ubyte[1500]` in `icmp`, `tcp`, `udp`; `MessageBuffer` in IGMP and MLD; the TCP flood's per-station rebuild |
+| E4b3 | BLE: 8 fresh frames on pool pages, 3 vendor and socket borrows | E4b1 | the `ubyte[513]`/`[250]` notification and read buffers |
+| E4b4 | fieldbus and application protocols: CAN, OBD, CPC, Spinel, EZSP, Zigbee, Modbus, TWC, WebSocket, sync (11 fresh, 12 borrowed) | E4b1 | Modbus `send_packet`'s stack PDU, OBD's frame locals, the EZSP command buffer |
+| E4b5 | the remaining tests; no page-less packet is left | E4b2 to E4b4 | `init!T(buffer)`, `mutable_flag`/`page_flag`, #692 (closed as superseded) |
+| E3 | interfaces state their framing room; producers ask their egress for it | E4b5 | the default headroom on paths that know their framing |
+| E4c | holders hold: the priority queue, the neighbour cache and BLE's `_emu_responses` share at refcount 1 or more; WPAN shares until DMA completion; Modbus keeps its validation bytes, not the request | E4b5, the view decision (E.8) | the copy on every enqueue, `wpan.d`'s free of a frame the radio may still read |
 | E5 | mutators edit in place: IP, VLAN, Modbus, ASH, Ethernet, CPC, TWC, WebSocket | E4 | `frame_and_send`'s copy, ASH's and CPC's `Message.buffer`, Ethernet's `medium_tx` copy, the const-cast writes in `stack.d`, the unchecked fixed-buffer copies |
 
-E4 no longer waits for E2 and E3: a `StackPage!0` pair lends a ring or a local without a copy,
-so a borrowed ingress stays as cheap as it is today. E2 and E3 then remove copies the packet path
-no longer forces.
+E4 no longer waits for E2: a `StackPage!0` lends a ring or a local without a copy, so a borrowed
+ingress stays as cheap as it is today, and E2 then removes copies the packet path no longer
+forces. E4b decides each of the 115 `init!T(buffer)` sites once by the table in E.1 (35 fresh
+and kept, 24 borrowed, 1 small and lent, 55 tests, surveyed 2026-10-19), so no site is converted
+to a stack borrow and then again to a pool page. Each E4b part leaves both kinds working; the
+flags go only in E4b5, when nothing page-less is left.
 
-E4a is small and fixes a fault on its own. E4b is the mechanical bulk and changes no copy count:
-`clone` copies every time today, and `packet_retain` keeps doing so until E4c switches the holders
-to sharing. E4c is where the receive fork's copy disappears, and it waits on the shared-header
-decision in E.8. A `StackPacket` is a `Page` larger than today's stack `Packet` (24 bytes on
-64-bit, 16 on 32-bit), on every producer's stack.
+E4b changes no copy count on keep: `clone` copies every time today, and `packet_retain` keeps
+doing so until E4c switches the holders to sharing. E4c is where the receive fork's copy
+disappears, and it waits on the view decision in E.8: until a kept view holds its parent, a
+member that queues a flooded frame copies a page it could share.
 
 ### E.8 Open decisions
 
