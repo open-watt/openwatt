@@ -923,8 +923,6 @@ package:
     bool _master_subscribed;
     bool _master_running;
 
-    Packet[] _send_queue;
-
     final void queue_update_service_times(uint wait_us, uint service_us)
     {
         update_service_times(wait_us, service_us);

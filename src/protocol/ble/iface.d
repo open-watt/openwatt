@@ -302,8 +302,7 @@ protected:
             return -1;
         }
 
-        Packet p = packet;
-        int tag = _queue.enqueue(p, &on_frame_complete);
+        int tag = _queue.enqueue(&packet, &on_frame_complete);
         if (tag < 0)
         {
             add_tx_drop();

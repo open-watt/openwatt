@@ -172,6 +172,8 @@ void register_packet_codec(Hdr)()
 const(PacketCodec)* get_ow_codec(PacketType type)
     => g_packet_codecs[type].encode ? &g_packet_codecs[type] : null;
 
+enum ulong network_address_vid_mask = ulong(0xFFF) << 48;
+
 ulong get_network_src_address(ref const Packet p) pure
     => packet_codec(p.type).extract_src(p);
 
@@ -185,6 +187,8 @@ bool is_network_multicast_address(ulong address) pure
 struct Packet
 {
 nothrow @nogc:
+    @disable this(this);
+
     ref T init(T)(const(void)[] payload, MonoTime create_time = getTime())
     {
         static assert(T.sizeof <= embed.length);
@@ -217,6 +221,17 @@ nothrow @nogc:
         if (_flags & page_flag)
             return page.data;
         return _ptr[_offset .. _length];
+    }
+
+    // the same bytes, borrowed, under metadata the caller may change
+    Packet view() const
+    {
+        const(void)[] bytes = data;
+        Packet r;
+        r.take_metadata(&this);
+        r._length = cast(ushort)bytes.length;
+        r._ptr = bytes.ptr;
+        return r;
     }
 
     // null unless the packet owns its payload
@@ -313,8 +328,7 @@ nothrow @nogc:
             page_free(p);
             return null;
         }
-        *r = this;
-        r._flags |= mutable_flag | page_flag;
+        r.take_metadata(&this);
         r.page.data[] = source;
         return r;
     }
@@ -457,6 +471,15 @@ private:
 
     ushort packet_page_offset() const
         => (cast(const(ushort)*)&this)[-1];
+
+    void take_metadata(const(Packet)* from)
+    {
+        creation_time = from.creation_time;
+        embed = from.embed;
+        type = from.type;
+        vlan = from.vlan;
+        _flags = (_flags & (mutable_flag | page_flag)) | (from._flags & ~(mutable_flag | page_flag));
+    }
 }
 
 // _offset is a ubyte, so 255 is the ceiling.
@@ -506,8 +529,7 @@ Packet* attach_packet(Page* page)
 
     Packet* packet = cast(Packet*)(cast(void*)page + offset);
     (cast(ushort*)packet)[-1] = cast(ushort)offset;
-    Packet blank;
-    *packet = blank;
+    *packet = Packet();
     packet._flags = Packet.mutable_flag | Packet.page_flag;
     return packet;
 }

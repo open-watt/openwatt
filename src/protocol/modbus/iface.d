@@ -447,7 +447,7 @@ protected:
         send_queued_messages();
     }
 
-    override int transmit(ref const Packet packet, MessageCallback callback = null, const(QueuePolicy)* queue_policy = null) nothrow @nogc
+    override int transmit(ref Packet packet, MessageCallback callback = null, const(QueuePolicy)* queue_policy = null) nothrow @nogc
     {
         if (packet.type != PacketType.modbus)
         {
@@ -480,8 +480,7 @@ protected:
                 local_address = map.local_address;
             }
 
-            Packet p = packet;
-            int tag = _queue.enqueue(p, &on_frame_complete);
+            int tag = _queue.enqueue(&packet, &on_frame_complete);
             if (tag < 0)
             {
                 log.debug_("tx-drop: queue full");

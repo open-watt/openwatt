@@ -56,7 +56,7 @@ nothrow @nogc:
             add_tx_drop();
             return -1;
         }
-        int tag = _queue.enqueue(packet, callback, policy);
+        int tag = _queue.enqueue(&packet, callback, policy);
         if (tag < 0)
         {
             add_tx_drop();

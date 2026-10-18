@@ -649,20 +649,14 @@ private:
 
     ulong source_address(ref const Packet packet)
     {
-        if (_vlan_filtering || packet.vlan_tag == VlanTag.none)
-            return get_network_src_address(packet);
-        Packet untagged = packet;
-        untagged.vlan &= 0xF000;
-        return get_network_src_address(untagged);
+        ulong address = get_network_src_address(packet);
+        return _vlan_filtering || packet.vlan_tag == VlanTag.none ? address : address & ~network_address_vid_mask;
     }
 
     ulong destination_address(ref const Packet packet)
     {
-        if (_vlan_filtering || packet.vlan_tag == VlanTag.none)
-            return get_network_dst_address(packet);
-        Packet untagged = packet;
-        untagged.vlan &= 0xF000;
-        return get_network_dst_address(untagged);
+        ulong address = get_network_dst_address(packet);
+        return _vlan_filtering || packet.vlan_tag == VlanTag.none ? address : address & ~network_address_vid_mask;
     }
 
     // an exotic address is ours if it lives behind a software-domain port (a local
@@ -764,7 +758,7 @@ private:
             if (eth_member != is_eth)
                 continue;
 
-            Packet outgoing = packet;
+            Packet outgoing = packet.view();
             if (_vlan_filtering)
             {
                 if (!prepare_egress(outgoing, member))
@@ -929,7 +923,7 @@ private:
             if (!member.iface.running || member.offloaded || eth_member != is_eth)
                 continue;
 
-            Packet outgoing = packet;
+            Packet outgoing = packet.view();
             if (_vlan_filtering && !prepare_egress(outgoing, member))
                 continue;
 
