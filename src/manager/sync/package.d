@@ -257,6 +257,7 @@ nothrow @nogc:
             });
             each_running_peer((SyncPeer p) { flush_pending_vals(p); });
         }
+        each_running_peer((SyncPeer p) { p.flush_bundle(); });
 
         poll_time_authorities();
 
@@ -341,17 +342,20 @@ nothrow @nogc:
         SyncEncoder enc = encoder_for(p._encoder);
         uint gen = p.begin_burst();
         size_t kept;
-        foreach (node; p._pending_vals[])
+        foreach (i, node; p._pending_vals[])
         {
+            // behind a refused bundle the rest stay pending
+            if (p.bundle_kept())
+            {
+                foreach (rest; p._pending_vals[i .. $])
+                    p._pending_vals[][kept++] = rest;
+                break;
+            }
             Element* e = resolve_element(node);
             SyncHandle h = p.handle_of(node);
             if (!e || h == SyncPeer.invalid_handle)
                 continue;
-            bool done = true;
-            if (e.data_format.kind == SeriesKind.point)
-                done = send_live_events(p, enc, e, h, gen);
-            else
-                enc.encode_val(p, h, e);
+            bool done = e.data_format.kind == SeriesKind.point ? send_live_events(p, enc, e, h, gen) : enc.encode_val(p, h, e);
             if (!p.send_ok(gen))
                 return;   // the session went down under the burst; its pending set went with it
             if (!done)
@@ -382,13 +386,13 @@ nothrow @nogc:
             if (!blk.count)
                 break;
             uint sent = enc.encode_val_block(p, h, blk);
-            if (!p.send_ok(gen))
-                break;
             if (!sent)
             {
                 done = false;
                 break;
             }
+            if (!p.send_ok(gen))
+                break;
             committed = blk.first_index + sent;
             c.seek(committed);
         }
@@ -2386,11 +2390,7 @@ nothrow @nogc:
             return false;
         SyncHandle h = to.handle_of(node);
         if (h != SyncPeer.invalid_handle)
-        {
-            if (include_value)
-                enc.encode_val(to, h, e);
-            return true;
-        }
+            return !include_value || enc.encode_val(to, h, e);
         if (fmt.desc == DataFormat.Desc.enum_)
         {
             const(char)[] ename = enum_info_name(fmt.enum_info);
@@ -2475,10 +2475,10 @@ nothrow @nogc:
             uint read = blk.count;
             blk.count = in_range;
             blk.count = enc.encode_val_block(to, h, blk);
-            if (!to.send_ok(gen))
-                return true;
             if (!blk.count)
                 return park();
+            if (!to.send_ok(gen))
+                return true;
             commit_backfill(to, e, blk);
             idx = blk.first_index + blk.count;
             if (blk.count < in_range)
@@ -2505,8 +2505,8 @@ nothrow @nogc:
         if (backfill && e.data_format.kind != SeriesKind.point && p.send_ok(gen))
         {
             SyncHandle h = p.handle_of(e.ensure_eid());
-            if (h != SyncPeer.invalid_handle)
-                enc.encode_val(p, h, e);
+            if (h != SyncPeer.invalid_handle && !enc.encode_val(p, h, e))
+                mark_pending_val(p, e);
         }
         if (arm && e.data_format.kind == SeriesKind.point && p.send_ok(gen))
             mark_pending_val(p, e);

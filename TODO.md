@@ -1168,6 +1168,15 @@ role from a concrete deployment need before implementing or advertising it.
 
 ## Sync and peering
 
+- **Sync produces on demand** (2026-10-18): sources tell sync that data waits (dirty state, new log
+  lines, new samples, pending replies), sync arms its transport, and the transport pulls pages that
+  the peer fills from cursors and dirty marks in priority order until every source is flushed.
+  Nothing is pushed into sync, so no producer handles refusal, and the event-driven encodes that a
+  refusal loses today (bind, unbind, state, results) become dirty state. Pages are sized to the
+  transport's segment, carry its header in headroom and are closed at hand-off (E4, E5 and Y4 on
+  #805). Momentary state needs pinning cursors, copy on write, so a value goes out as it was. This
+  replaces #851's bundle buffer, its kept-bundle refusal path and its flush points.
+
 The built surface is documented in [docs/SYNC.md](docs/SYNC.md) and [docs/PEERING.md](docs/PEERING.md);
 this is what remains.
 
@@ -1334,6 +1343,11 @@ this is what remains.
   control plane, and make the mirror re-evaluate its peer binding.
 
 ## Infrastructure
+
+- **`protocol.ip`'s TCP drain test is flaky** (2026-10-16): "one invitation drains what fits in its
+  turn" (`src/protocol/ip/package.d`) asserts that a 32 KB producer is drained in one invitation over a
+  real socket pair, which holds only while the kernel buffer takes it all at once. It failed once in a
+  Linux DMD run under WSL load and passed on three reruns of the same binary.
 
 - **Receive still polled after the stream migration** (2026-10-06): streams push, but a few
   consumers still learn of progress from a tick. TLS advances its handshake from `startup()`,

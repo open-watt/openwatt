@@ -56,6 +56,12 @@ without a handshake. The hostname and cluster follow in `identity`, the next fra
 wire hello keeps their old slots empty so older decoders read on.
 Capability names the verb families this build serves: `objects` (the object mirror), `model` (the
 data-model plane), `history`, `console`, `logs`, `time`, `console_session` and `templates`.
+Value and log messages travel bundled, several to a frame, handled in order: on the JSON encoder a
+JSON array of messages, on the binary encoder one `val` or `log` verb whose records follow one
+another until the frame ends. A bundle holds one queue's messages, fills up to a page or the
+segment, whichever is smaller, and closes before any other frame, so a value never overtakes the
+frame that introduced or unbound its handle. A bundle the transport refuses is kept and sent first
+once there is room.
 `max_frame` is the largest message the sender takes and `segment` the largest frame it takes in one
 packet: its transport's `actual-mtu` less the carrier (a UDP endpoint uses the datagram that fits a
 1500-byte link without IP fragmentation) and less the sublayer header where the sublayer is armed.

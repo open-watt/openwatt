@@ -3,6 +3,14 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-10-15: bundled value frames
+
+- A JSON frame may be one message or a JSON array of messages. A node sends value and log
+  messages (`val`, `log`) as arrays, always, with no capability to opt out; handle each element in order as if it
+  had arrived alone. Other frames are unchanged and are never reordered against the arrays. A
+  client may send arrays too. Done in openwatt-web and openwatt-droid on their `sync-bundles`
+  branches; a client without it drops every bundled value, so ship it before the firmware.
+
 ## 2026-10-12: page pool on the `system` device
 
 - `system.mem.pages.<category>` reports the page pool, one component per page size (`p336`,

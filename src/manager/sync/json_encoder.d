@@ -586,7 +586,7 @@ nothrow @nogc:
         send_frame(peer);
     }
 
-    override void encode_val(SyncPeer peer, SyncHandle h, Element* e)
+    override bool encode_val(SyncPeer peer, SyncHandle h, Element* e)
     {
         import urt.time : unix_time_ns;
 
@@ -596,7 +596,7 @@ nothrow @nogc:
         Variant v = e.value;
         write_variant(v);
         _buf ~= "]]";
-        send_frame(peer, TxQueue.val);
+        return send_frame(peer, TxQueue.val) >= 0;
     }
 
     override uint encode_val_block(SyncPeer peer, SyncHandle h, ref const RecordBlock blk)
@@ -667,7 +667,17 @@ nothrow @nogc:
 
     override bool decode_and_dispatch(SyncPeer peer, const(ubyte)[] frame)
     {
-        Variant json = parse_json(cast(char[])cast(const(char)[])frame);
+        Variant parsed = parse_json(cast(char[])cast(const(char)[])frame);
+        if (!parsed.isArray)
+            return dispatch_message(peer, parsed);
+        for (size_t i = 0; i < parsed.length(); ++i)
+            if (!dispatch_message(peer, parsed[i]))
+                return false;
+        return true;
+    }
+
+    bool dispatch_message(SyncPeer peer, ref Variant json)
+    {
         if (!json.isObject)
         {
             log.warning("frame is not a JSON object");
@@ -1394,7 +1404,8 @@ private:
     int send_frame(SyncPeer peer, TxQueue queue = TxQueue.control)
     {
         _buf ~= '}';
-        int r = peer.transmit_frame(cast(const(ubyte)[])_buf[], true, queue);
+        const(ubyte)[] frame = cast(const(ubyte)[])_buf[];
+        int r = queue == TxQueue.control ? peer.transmit_frame(frame, true, queue) : peer.bundle(frame, queue);
         if (r < 0)
         {
             // event-driven encodes (state/cmd/result/error/sub/...) have no retry path!!
