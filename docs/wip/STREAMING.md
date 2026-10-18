@@ -571,7 +571,7 @@ The primitives, all in urt:
   untouched and the operation fails as any allocation failure does. Every mutation of bytes or
   geometry goes through it, so the decision to copy is made in one place and only when the
   contract forces it.
-- `page_hold(page)` is the one way to keep: it shares a page at refcount >= 1 and copies one at
+- `page_retain(page)` is the one way to keep: it shares a page at refcount >= 1 and copies one at
   0. Queues and caches hold through it and never call `page_share` directly.
 - `StackPage!N` lays out the allocation header, the `Page` and `N` bytes of storage as one
   struct, at refcount 0. A producer whose bytes genuinely are its own
@@ -590,7 +590,7 @@ memory someone else owns for the call: an RX ring, a DMA buffer, a stack local. 
 payload in the same allocation; a packet does not.
 
 So the clone moves as far downstream as it can. A consumer that finishes within the call uses the
-bytes where they lie. One that keeps the frame holds it (`page_hold`: shared at refcount 1 or
+bytes where they lie. One that keeps the frame holds it (`page_retain`: shared at refcount 1 or
 more, copied at 0), and one that edits it asks for a writable packet, which at refcount 0
 allocates a pool page and can write its transform straight into it: escape while copying, frame
 while copying, not copy and then transform. Every interface handles the same `Packet*` whether it
@@ -600,7 +600,7 @@ A packet is never copied by value: today's back-offset from a packet to its page
 moves, and seven sites copy a page-backed packet (`bridge.d` floods, the BLE, Zigbee and Modbus
 queue entries). With `Packet*` everywhere the copy has no use, and the struct disables it.
 `mutable_flag` and `page_flag` go, since the page's refcount answers both; `clone`, `free_clone`
-and `backing_page` go into `page_hold` and the writable-packet helper.
+and `backing_page` go into `page_retain` and the writable-packet helper.
 
 The owner's packet and the page's cursors agree at hand-off: a producer sets the page's `offset`
 and `length` to the frame it built, and a consumer that frames in place moves them. A packet
@@ -639,7 +639,7 @@ MBAP 7, RTU 1 and 2, ASH 1 and 3 plus escape expansion, CPC 7, SLIP 2 plus expan
 ### E.4 Hand-off through `forward` and `transmit`
 
 `forward(Packet*)`, `transmit(Packet*, ...)` and every frame handler borrow the packet for the
-call; whatever keeps it past the call holds it through `page_hold`, and the caller releases its
+call; whatever keeps it past the call holds it through `page_retain`, and the caller releases its
 own reference afterwards. A fan-out (a bridge flooding several members, a frame delivered to a
 subscriber and forwarded) is then no special case: each callee holds what it keeps. A frame that
 reaches a queue costs a share at refcount 1 or more, or the one copy at 0, which is the receive
@@ -696,7 +696,7 @@ Each step leaves the tree no worse than before it and deletes what it replaces.
 
 | PR | concerns | needs | deletes |
 | --- | --- | --- | --- |
-| E1 (urt #393) | refcount contract: `page_free` at 0, `page_foreign`, `StackPage!N`, `page_mutable`, `page_hold`; tests for each refcount state | urt #390 | the `page_share` call sites outside the pool |
+| E1 (urt #393) | refcount contract: `page_free` at 0, `page_foreign`, `StackPage!N`, `page_mutable`, `page_retain`; tests for each refcount state | urt #390 | the `page_share` call sites outside the pool |
 | E2 | ingress into pages: UART and WPAN rx pages take room; Ethernet drivers receive into pages; stream parsers assemble into a page | E1, #845 | `_rx_buffer`, `_rx[62]`, `_tail`, `Buffers.rx`, the ELM line buffer |
 | E3 | producers allocate at the source; interfaces state their framing room | E1 | the `ubyte[1500]`/`[1518]`/`[512]` sender buffers, Modbus `send_packet`'s stack PDU, the EZSP command buffer |
 | E4 | `Packet` owned by its page, borrowed through a `StackPage!0` pair; `Packet*` everywhere; holders hold | E1 | `init!T(buffer)`, `clone`/`free_clone`/`backing_page`, `mutable_flag`/`page_flag`, the by-value copy fault, #692 (closed as superseded) |
