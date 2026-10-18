@@ -668,7 +668,9 @@ Every site that changes a packet's bytes or geometry calls `page_mutable` and ed
 gets back:
 
 - the IP stack's TTL and hop-limit decrement and checksum patch (`stack.d:525-540, 579, 600`
-  write through a const cast today, into whatever buffer the frame arrived in);
+  write through a const cast today, into whatever buffer the frame arrived in). Once E2 receives
+  into pool pages, a forwarded frame is a reference, and nothing else holds it unless a
+  subscriber kept it during dispatch, so the edit is in place; before E2 it copies;
 - VLAN tag push and pop (`promote_vlan_tag`, `consume_vlan_tag`, the bridge's pvid stamping);
 - Modbus framing: the address or MBAP header into headroom, the RTU CRC into tailroom, for a
   request from the queue and for a response from the slave side alike; `frame_and_send` and
@@ -714,7 +716,7 @@ Each step leaves the tree no worse than before it and deletes what it replaces.
 | E4b5 | the remaining tests; no page-less packet is left | E4b2 to E4b4 | `init!T(buffer)`, `mutable_flag`/`page_flag`, #692 (closed as superseded) |
 | E3 | interfaces state their framing room; producers ask their egress for it | E4b5 | the default headroom on paths that know their framing |
 | E4c | holders hold: the priority queue, the neighbour cache and BLE's `_emu_responses` share at refcount 1 or more; WPAN shares until DMA completion; Modbus keeps its validation bytes, not the request | E4b5, the view decision (E.8) | the copy on every enqueue, `wpan.d`'s free of a frame the radio may still read |
-| E5 | mutators edit in place: IP, VLAN, Modbus, ASH, Ethernet, CPC, TWC, WebSocket | E4 | `frame_and_send`'s copy, ASH's and CPC's `Message.buffer`, Ethernet's `medium_tx` copy, the const-cast writes in `stack.d`, the unchecked fixed-buffer copies |
+| E5 | mutators edit in place: IP, VLAN, Modbus, ASH, Ethernet, CPC, TWC, WebSocket | E4c, E2 | `frame_and_send`'s copy, ASH's and CPC's `Message.buffer`, Ethernet's `medium_tx` copy, the const-cast writes in `stack.d`, the unchecked fixed-buffer copies |
 
 E4 no longer waits for E2: a `StackPage!0` lends a ring or a local without a copy, so a borrowed
 ingress stays as cheap as it is today, and E2 then removes copies the packet path no longer
