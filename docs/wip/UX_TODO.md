@@ -3,6 +3,12 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-10-18: page category names
+
+- A page category's name is now the data its pages carry, net of the page's own fields, so the
+  desktop's `system.mem.pages.p336` and `p1616` become `p328` and `p1608`. History under the old
+  names ends; nothing else about the components changes.
+
 ## 2026-10-15: bundled value frames
 
 - A JSON frame may be one message or a JSON array of messages. A node sends value and log
@@ -13,8 +19,8 @@ through them and remove sections as they are absorbed.
 
 ## 2026-10-12: page pool on the `system` device
 
-- `system.mem.pages.<category>` reports the page pool, one component per page size (`p336`,
-  `p1616` on desktop; the sizes are build configuration) plus `heap` for pages too large for any
+- `system.mem.pages.<category>` reports the page pool, one component per page size (`p328`,
+  `p1608` on desktop; the sizes are build configuration) plus `heap` for pages too large for any
   category. Each has `live` (pages in use), `peak` (all-time high-water) and `fails` (allocations
   that found no page), plain integer counts updated each second; a category's name is its page
   size in bytes. Show them with the memory pools as node health; `peak` against the

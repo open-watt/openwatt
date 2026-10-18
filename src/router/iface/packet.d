@@ -639,9 +639,8 @@ static assert(Wifi80211.sizeof == 24);
 
 private:
 
-enum ushort packet_page_start = 8;
-enum ushort packet_prefix_size = ushort.sizeof + Packet.sizeof;
-static assert(packet_page_start == Page.sizeof + ushort.sizeof);
+enum ushort packet_page_start = Page.sizeof;
+enum ushort packet_prefix_size = Packet.sizeof;
 static assert(packet_page_start % Packet.alignof == 0);
 
 immutable ushort[6] vlan_tpids = [0, EtherType.vlan, EtherType.qinq, EtherType._9100, EtherType._9200, EtherType._9300];
