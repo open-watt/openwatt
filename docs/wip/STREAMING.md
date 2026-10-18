@@ -645,9 +645,8 @@ subscriber and forwarded) is then no special case: each callee holds what it kee
 reaches a queue costs a share at refcount 1 or more, or the one copy at 0, which is the receive
 fork of the copy budget.
 
-A queue takes the packet rather than holding it: `enqueue` consumes the caller's reference
-(copying only a page at 0), keeps the view by value in `QueuedFrame.packet`, and dispatch hands
-that reference down through `transmit`. The in-flight entry keeps the tag and timing, not the
+A queue retains what it is given (sharing a page at 1 or more, copying only a page at 0), and
+dispatch lends that reference down through `transmit`. The in-flight entry keeps the tag and timing, not the
 bytes; `retire` frees only a frame that never left. The same for `NeighbourEntry.pending` and
 BLE's `_emu_responses`. Only a path that needs the bytes after the push shares before it: the
 WPAN driver until DMA completion (`wpan.d` today frees an aborted frame the radio may still be
@@ -700,7 +699,7 @@ Each step leaves the tree no worse than before it and deletes what it replaces.
 | E2 | ingress into pages: UART and WPAN rx pages take room; Ethernet drivers receive into pages; stream parsers assemble into a page | E1, #845 | `_rx_buffer`, `_rx[62]`, `_tail`, `Buffers.rx`, the ELM line buffer |
 | E3 | producers allocate at the source; interfaces state their framing room | E1 | the `ubyte[1500]`/`[1518]`/`[512]` sender buffers, Modbus `send_packet`'s stack PDU, the EZSP command buffer |
 | E4a (#856) | `Packet` is not copyable; a site that wants different metadata takes a view | | the by-value copy fault: `Packet x = packet` in the bridge's address lookups (2) and floods (2), the BLE, Modbus and Zigbee transmit paths (3) |
-| E4p | packets passed by pointer: every `ref Packet` and `ref const Packet` parameter, handler and delegate becomes `Packet*` or `const(Packet)*` | E4a | `ref Packet` (about 200 sites, 60 files) |
+| E4p | packets passed by pointer: every `ref Packet` and `ref const Packet` parameter, handler and delegate becomes `Packet*`, or `const(Packet)*` at look-only leaves | E4a | `ref Packet` (about 200 sites, 60 files) |
 | E4b | every packet lives beside a page: `StackPacket` (a `StackPage!0` header and the `Packet`) replaces a stack `Packet` over a buffer; `packet_retain` and `packet_free` | E4a, urt #394 | `init!T(buffer)` (115 sites, 41 files), `clone`/`free_clone`, `mutable_flag`/`page_flag`, #692 (closed as superseded) |
 | E4c | holders hold: the priority queue, the neighbour cache and BLE's `_emu_responses` share at refcount 1 or more; WPAN shares until DMA completion; Modbus keeps its validation bytes, not the request | E4b | the copy on every enqueue, `wpan.d`'s free of a frame the radio may still read |
 | E5 | mutators edit in place: IP, VLAN, Modbus, ASH, Ethernet, CPC, TWC, WebSocket | E4 | `frame_and_send`'s copy, ASH's and CPC's `Message.buffer`, Ethernet's `medium_tx` copy, the const-cast writes in `stack.d`, the unchecked fixed-buffer copies |
@@ -727,8 +726,11 @@ decision in E.8. A `StackPacket` is a `Page` larger than today's stack `Packet` 
   the parent's reference and `Packet` does not grow. Until this lands, a kept view copies, which is
   what `clone` does today. To settle before E4c.
 - Settled 2026-10-18: neither a consuming `ref Packet` nor a by-value move. Calls borrow, and a
-  keeper holds (E.4). Settled 2026-10-19: a packet is passed as `Packet*` or `const(Packet)*`,
-  never `ref Packet`; new signatures take pointers now, and E4p converts the rest.
+  keeper holds (E.4). Settled 2026-10-19: a packet is passed as `Packet*`, never `ref Packet`;
+  new signatures take pointers now, and E4p converts the rest. `const(Packet)*` is a borrow for
+  the life of the call tree: nothing below it can retain, so a keeper under it must copy. It is
+  only for leaves whose whole subtree looks and never keeps (codecs, filters, address lookups);
+  `forward`, `transmit`, queues and subscriber handlers take `Packet*`.
 - Tiny's refcount is 8 bits; 255 holders of one page is a ceiling no path approaches.
 
 ## Execution sequence
