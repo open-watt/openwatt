@@ -1061,6 +1061,13 @@ decisions are in [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md). The
   the classes are separated by recorder but every recorder retains alike. This is the last thing
   between the current state and leaving recording on indefinitely.
 
+- **Make the series container append-only**: an end that changes after its block is on disk is
+  rewritten into that block's header, held by the container until the write succeeds
+  (`SeriesContainer.update_end`/`flush_end`). Recording the gap on the successor's header instead,
+  which is written after the end is known, keeps the file append-only (kinder to littlefs and
+  spiffs) and deletes the rewrite, the held state and its retry. A trailing gap with no successor
+  is then the last adopted bucket ending at its last known time on reopen.
+
 - **Series files in another format are truncated**: `SeriesContainer.open_` discards any `.ows`
   file that is not the current version and logs it at error level. That is the policy while the
   format is still moving; once it settles, an older file must migrate (with a commit boundary,
@@ -1135,8 +1142,9 @@ decisions are in [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md). The
 - **Sync arm counts across element recreation**: a peer's `_live_nodes` keys by EID while the
   element counts its arming peers (`Element.sync_arm`). If an element is destroyed and another
   takes its EID, the peer's entry stays, the new element's count starts at zero, and a later
-  disarm underflows it. Elements are never destroyed today; when they are, the destroyed event
-  must drop the node from every peer's `_live_nodes` before the EID can be reused.
+  disarm underflows it; the module's shared pin (`SyncModule.sync_pins`) is keyed the same way. Elements
+  are never destroyed today; when they are, the destroyed event must drop the node from every peer's
+  `_live_nodes` and close its pin before the EID can be reused.
 
 - **Element.value() drops unconvertible values silently**: `value()` discards
   `update_typed_series`'s failure, so a value that cannot unbox to the element's format (wrong
@@ -1213,6 +1221,15 @@ role from a concrete deployment need before implementing or advertising it.
   kept-bundle refusal path and its flush points.
 - **Lossless, untorn sync streams**: the plan and its phases are in
   [docs/wip/SYNC_STREAMS.md](docs/wip/SYNC_STREAMS.md).
+- **Unsubscribing re-walks every remaining pattern**: `rebuild_live_nodes` walks the device tree once
+  per pattern the peer still holds and builds a map of everything matched, to find what one removed
+  pattern released. UIs hold many small overlapping patterns (one per widget), so with ~200
+  patterns over ~7,000 elements an unsubscribe visits ~1.4M elements. Count per node how many of
+  the peer's patterns match it (`LiveNode.refs`): a subscribe walk increments, an unsubscribe walks
+  only the removed pattern's matches and decrements, and a node created later or re-armed by the
+  overflow rescan sets its count from the peer's patterns rather than adding to it. An
+  unsubscribe that arrives while the same pattern's resumable subscribe walk is still pending must
+  cancel the walk and decrement only what it reached. A future `move` recounts the moved node.
 
 The built surface is documented in [docs/SYNC.md](docs/SYNC.md) and [docs/PEERING.md](docs/PEERING.md);
 this is what remains.
