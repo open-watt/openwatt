@@ -562,11 +562,9 @@ A page's refcount says what its holder may do, and nothing else carries ownershi
 The primitives, all in urt:
 
 - `page_free` drops one reference and frees at the last; at refcount 0 it returns without
-  touching anything, so a consumer always frees what it was handed. A free pool page also sits
-  at 0, so a borrowed page carries a reserved tag (`allocation` in the full pool, a reserved
-  category in Tiny) and `page_foreign(page)` reports it; in debug builds `page_free` asserts
-  that a page at 0 is foreign, which keeps "page_free on a free page" caught. `page_share`
-  asserts refcount >= 1.
+  touching anything, so a consumer always frees what it was handed. `page_foreign(page)` is
+  refcount 0 and nothing else. A page parked in the pool also sits at 0, so a stray second free
+  is a no-op rather than a second push onto the free list. `page_share` asserts refcount >= 1.
 - `page_mutable(page, headroom, tailroom)` is the one way to edit: it returns `page` when the
   refcount is 1 and the room is there, otherwise a fresh page with the room, the data copied,
   and one reference on the old page dropped. Null means the pool is empty; the caller's page is
@@ -576,7 +574,7 @@ The primitives, all in urt:
 - `page_hold(page)` is the one way to keep: it shares a page at refcount >= 1 and copies one at
   0. Queues and caches hold through it and never call `page_share` directly.
 - `StackPage!N` lays out the allocation header, the `Page` and `N` bytes of storage as one
-  struct, at refcount 0 with the foreign tag. A producer whose bytes genuinely are its own
+  struct, at refcount 0. A producer whose bytes genuinely are its own
   short-lived buffer declares that buffer as a `StackPage` and hands it in; the first consumer
   that needs to keep or edit it copies, which is the copy it would have made anyway.
   `StackPage!0` is a header with no storage: the page that owns a `Packet` whose bytes live
@@ -698,7 +696,7 @@ Each step leaves the tree no worse than before it and deletes what it replaces.
 
 | PR | concerns | needs | deletes |
 | --- | --- | --- | --- |
-| E1 (urt #393) | refcount contract: `page_free` at 0, foreign tag and `page_foreign`, `StackPage!N`, `page_mutable`, `page_hold`; tests for each refcount state | urt #390 | the `page_share` call sites outside the pool |
+| E1 (urt #393) | refcount contract: `page_free` at 0, `page_foreign`, `StackPage!N`, `page_mutable`, `page_hold`; tests for each refcount state | urt #390 | the `page_share` call sites outside the pool |
 | E2 | ingress into pages: UART and WPAN rx pages take room; Ethernet drivers receive into pages; stream parsers assemble into a page | E1, #845 | `_rx_buffer`, `_rx[62]`, `_tail`, `Buffers.rx`, the ELM line buffer |
 | E3 | producers allocate at the source; interfaces state their framing room | E1 | the `ubyte[1500]`/`[1518]`/`[512]` sender buffers, Modbus `send_packet`'s stack PDU, the EZSP command buffer |
 | E4 | `Packet` owned by its page, borrowed through a `StackPage!0` pair; `Packet*` everywhere; holders hold | E1 | `init!T(buffer)`, `clone`/`free_clone`/`backing_page`, `mutable_flag`/`page_flag`, the by-value copy fault, #692 (closed as superseded) |
