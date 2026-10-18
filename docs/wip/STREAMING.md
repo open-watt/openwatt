@@ -583,7 +583,7 @@ The primitives, all in urt:
 ### E.2 Packet points at its bytes; its page owns them
 
 `Packet` keeps a pointer to its bytes and lives beside the `Page` that owns them, and every API
-passes it as `Packet*`. Ownership is the page's refcount (E.1), never a flag on the packet. A
+borrows it. Ownership is the page's refcount (E.1), never a flag on the packet. A
 pool page holds its packet's bytes in its own payload. A borrowed packet sits in a stack pair,
 a `StackPage!0` header at refcount 0 followed by the `Packet`, and its pointer goes straight into
 memory someone else owns for the call: an RX ring, a DMA buffer, a stack local. A page needs its
@@ -598,7 +598,7 @@ will keep the frame or not and whether the source was borrowed or not.
 
 A packet is never copied by value: today's back-offset from a packet to its page breaks when it
 moves, and seven sites copy a page-backed packet (`bridge.d` floods, the BLE, Zigbee and Modbus
-queue entries). With `Packet*` everywhere the copy has no use, and the struct disables it.
+queue entries). Borrowed everywhere, the copy has no use, and the struct disables it.
 `mutable_flag` and `page_flag` go, since the page's refcount answers both; `clone`, `free_clone`
 and `backing_page` go into `page_retain` and the writable-packet helper.
 
@@ -699,25 +699,38 @@ Each step leaves the tree no worse than before it and deletes what it replaces.
 | E1 (urt #393, merged) | refcount contract: `page_free` at 0, `page_foreign`, `StackPage!N`, `page_mutable`, `page_retain`; tests for each refcount state | urt #390 | the `page_share` call sites outside the pool |
 | E2 | ingress into pages: UART and WPAN rx pages take room; Ethernet drivers receive into pages; stream parsers assemble into a page | E1, #845 | `_rx_buffer`, `_rx[62]`, `_tail`, `Buffers.rx`, the ELM line buffer |
 | E3 | producers allocate at the source; interfaces state their framing room | E1 | the `ubyte[1500]`/`[1518]`/`[512]` sender buffers, Modbus `send_packet`'s stack PDU, the EZSP command buffer |
-| E4 | `Packet` owned by its page, borrowed through a `StackPage!0` pair; `Packet*` everywhere; holders hold | E1 | `init!T(buffer)`, `clone`/`free_clone`/`backing_page`, `mutable_flag`/`page_flag`, the by-value copy fault, #692 (closed as superseded) |
+| E4a | `Packet` is not copyable; a site that wants different metadata takes a view | | the by-value copy fault: `Packet x = packet` in the bridge's address lookups (2) and floods (2), the BLE, Modbus and Zigbee transmit paths (3) |
+| E4b | every packet lives beside a page: `StackPacket` (a `StackPage!0` header and the `Packet`) replaces a stack `Packet` over a buffer; `packet_retain` and `packet_free` | E4a, urt #394 | `init!T(buffer)` (115 sites, 41 files), `clone`/`free_clone`, `mutable_flag`/`page_flag`, #692 (closed as superseded) |
+| E4c | holders hold: the priority queue, the neighbour cache and BLE's `_emu_responses` share at refcount 1 or more; WPAN shares until DMA completion; Modbus keeps its validation bytes, not the request | E4b | the copy on every enqueue, `wpan.d`'s free of a frame the radio may still read |
 | E5 | mutators edit in place: IP, VLAN, Modbus, ASH, Ethernet, CPC, TWC, WebSocket | E4 | `frame_and_send`'s copy, ASH's and CPC's `Message.buffer`, Ethernet's `medium_tx` copy, the const-cast writes in `stack.d`, the unchecked fixed-buffer copies |
 
 E4 no longer waits for E2 and E3: a `StackPage!0` pair lends a ring or a local without a copy,
 so a borrowed ingress stays as cheap as it is today. E2 and E3 then remove copies the packet path
 no longer forces.
 
+E4a is small and fixes a fault on its own. E4b is the mechanical bulk and changes no copy count:
+`clone` copies every time today, and `packet_retain` keeps doing so until E4c switches the holders
+to sharing. E4c is where the receive fork's copy disappears, and it waits on the shared-header
+decision in E.8. A `StackPacket` is a `Page` larger than today's stack `Packet` (24 bytes on
+64-bit, 16 on 32-bit), on every producer's stack.
+
 ### E.8 Open decisions
 
-- Merging the allocation header into `Page` (link, refcount, allocation as members): deferred to
-  a urt cleanup before E4. It costs no memory. Ordered widest first, the merged struct is 22
-  bytes on 64-bit (14 on 32-bit) and its tail padding is exactly the slot of the packet's 16-bit
-  back-offset, so a `Packet` still starts at the first 8-aligned byte, now `Page.sizeof`. A live
-  `Page` is then never assigned by value, which would clobber the back-offset, and the copy is
-  disabled. The back-offset stays: a retrofitted buffer with no room at its front keeps its
-  `Packet` at the end. Both pools need one header shape; Tiny packs refcount, category and size
-  in one tag word today.
-- Settled 2026-10-18: neither a consuming `ref Packet` nor a by-value move. Calls borrow
-  `Packet*`, and a keeper holds (E.4).
+- A shared page shares its one `Packet`. Once E4c shares rather than copies, a holder that edits
+  metadata on a packet it does not own alone (the bridge untagging `vlan` per member,
+  `consume_prefix` decapsulating, a flood stamping the pvid) changes the packet under every other
+  holder. The rule is that a packet at refcount above 1 has read-only metadata, and an editor
+  takes a view: a second `Packet` over the same bytes. A view used within the call is a
+  `StackPacket`. A view that is kept needs to hold the parent page. Recommended: a header-only
+  pool page whose `link` carries the parent under a second flag bit, so freeing the view drops
+  the parent's reference and `Packet` does not grow. Until this lands, a kept view copies, which is
+  what `clone` does today. To settle before E4c.
+- `Packet*` in signatures. `ref Packet` is already a borrowed pointer that cannot be null, and
+  once E4a disables the copy nothing can copy through it either; a keeper takes `&packet` into
+  `packet_retain`. Converting about 200 `ref` parameters to `Packet*` buys no behaviour, so it is
+  not staged. Recommended: drop it, and reopen only if a site needs a nullable borrow.
+- Settled 2026-10-18: neither a consuming `ref Packet` nor a by-value move. Calls borrow, and a
+  keeper holds (E.4).
 - Tiny's refcount is 8 bits; 255 holders of one page is a ceiling no path approaches.
 
 ## Execution sequence
