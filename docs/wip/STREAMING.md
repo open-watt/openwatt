@@ -699,7 +699,8 @@ Each step leaves the tree no worse than before it and deletes what it replaces.
 | E1 (urt #393, merged) | refcount contract: `page_free` at 0, `page_foreign`, `StackPage!N`, `page_mutable`, `page_retain`; tests for each refcount state | urt #390 | the `page_share` call sites outside the pool |
 | E2 | ingress into pages: UART and WPAN rx pages take room; Ethernet drivers receive into pages; stream parsers assemble into a page | E1, #845 | `_rx_buffer`, `_rx[62]`, `_tail`, `Buffers.rx`, the ELM line buffer |
 | E3 | producers allocate at the source; interfaces state their framing room | E1 | the `ubyte[1500]`/`[1518]`/`[512]` sender buffers, Modbus `send_packet`'s stack PDU, the EZSP command buffer |
-| E4a | `Packet` is not copyable; a site that wants different metadata takes a view | | the by-value copy fault: `Packet x = packet` in the bridge's address lookups (2) and floods (2), the BLE, Modbus and Zigbee transmit paths (3) |
+| E4a (#856) | `Packet` is not copyable; a site that wants different metadata takes a view | | the by-value copy fault: `Packet x = packet` in the bridge's address lookups (2) and floods (2), the BLE, Modbus and Zigbee transmit paths (3) |
+| E4p | packets passed by pointer: every `ref Packet` and `ref const Packet` parameter, handler and delegate becomes `Packet*` or `const(Packet)*` | E4a | `ref Packet` (about 200 sites, 60 files) |
 | E4b | every packet lives beside a page: `StackPacket` (a `StackPage!0` header and the `Packet`) replaces a stack `Packet` over a buffer; `packet_retain` and `packet_free` | E4a, urt #394 | `init!T(buffer)` (115 sites, 41 files), `clone`/`free_clone`, `mutable_flag`/`page_flag`, #692 (closed as superseded) |
 | E4c | holders hold: the priority queue, the neighbour cache and BLE's `_emu_responses` share at refcount 1 or more; WPAN shares until DMA completion; Modbus keeps its validation bytes, not the request | E4b | the copy on every enqueue, `wpan.d`'s free of a frame the radio may still read |
 | E5 | mutators edit in place: IP, VLAN, Modbus, ASH, Ethernet, CPC, TWC, WebSocket | E4 | `frame_and_send`'s copy, ASH's and CPC's `Message.buffer`, Ethernet's `medium_tx` copy, the const-cast writes in `stack.d`, the unchecked fixed-buffer copies |
@@ -725,12 +726,9 @@ decision in E.8. A `StackPacket` is a `Page` larger than today's stack `Packet` 
   pool page whose `link` carries the parent under a second flag bit, so freeing the view drops
   the parent's reference and `Packet` does not grow. Until this lands, a kept view copies, which is
   what `clone` does today. To settle before E4c.
-- `Packet*` in signatures. `ref Packet` is already a borrowed pointer that cannot be null, and
-  once E4a disables the copy nothing can copy through it either; a keeper takes `&packet` into
-  `packet_retain`. Converting about 200 `ref` parameters to `Packet*` buys no behaviour, so it is
-  not staged. Recommended: drop it, and reopen only if a site needs a nullable borrow.
 - Settled 2026-10-18: neither a consuming `ref Packet` nor a by-value move. Calls borrow, and a
-  keeper holds (E.4).
+  keeper holds (E.4). Settled 2026-10-19: a packet is passed as `Packet*` or `const(Packet)*`,
+  never `ref Packet`; new signatures take pointers now, and E4p converts the rest.
 - Tiny's refcount is 8 bits; 255 holders of one page is a ceiling no path approaches.
 
 ## Execution sequence
