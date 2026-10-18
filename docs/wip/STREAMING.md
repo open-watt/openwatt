@@ -577,28 +577,37 @@ The primitives, all in urt:
   0. Queues and caches hold through it and never call `page_share` directly.
 - `StackPage!N` lays out the allocation header, the `Page` and `N` bytes of storage as one
   struct, at refcount 0 with the foreign tag. A producer whose bytes genuinely are its own
-  short-lived buffer declares that buffer as a `StackPage` and hands a view of it in; the first
-  consumer that needs to keep or edit it copies, which is the copy it would have made anyway.
-  The header must sit directly in front of the data (`next` and the refcount are the word before
-  the `Page`), so a `StackPage` cannot wrap a buffer whose preceding bytes belong to someone
-  else; such a source allocates a pool page instead.
+  short-lived buffer declares that buffer as a `StackPage` and hands it in; the first consumer
+  that needs to keep or edit it copies, which is the copy it would have made anyway.
+  `StackPage!0` is a header with no storage: the page that owns a `Packet` whose bytes live
+  elsewhere (E.2), such as an RX ring, a DMA buffer or a caller's local.
 
-### E.2 Packet is a view
+### E.2 Packet points at its bytes; its page owns them
 
-`Packet` becomes `{ Page* page; ushort offset, length; header embed; flags }`: a view onto a
-page, copyable by value, with no ownership of its own. Today's `Packet` lives inside the page
-and finds it by a back-offset from its own address, so a by-value copy points at garbage; seven
-sites copy a page-backed packet (`bridge.d` floods, the BLE, Zigbee and Modbus queue entries)
-and the view removes the fault by construction. The borrowed mode (`_ptr`, the second branch of
-`alloc_prefix`, `consume_prefix` and the `data` setter, `mutable_flag`, `page_flag`,
-`free_clone`, `backing_page`) goes: a borrowed buffer is a page at refcount 0, and whether a
-packet may be edited is the page's refcount, not a flag on the view. `init!T(buffer)` goes with
-it; the producer either owns a page or declares a `StackPage`.
+`Packet` keeps a pointer to its bytes and lives beside the `Page` that owns them, and every API
+passes it as `Packet*`. Ownership is the page's refcount (E.1), never a flag on the packet. A
+pool page holds its packet's bytes in its own payload. A borrowed packet sits in a stack pair,
+a `StackPage!0` header at refcount 0 followed by the `Packet`, and its pointer goes straight into
+memory someone else owns for the call: an RX ring, a DMA buffer, a stack local. A page needs its
+payload in the same allocation; a packet does not.
 
-The owner's view and the page's cursors agree at hand-off: a producer sets the page's `offset`
-and `length` to the frame it built, and a consumer that frames in place moves them. A view over
-a shared page keeps its own cursors (a decapsulated inner frame, a subscriber reading a slice)
-and never writes the page's.
+So the clone moves as far downstream as it can. A consumer that finishes within the call uses the
+bytes where they lie. One that keeps the frame holds it (`page_hold`: shared at refcount 1 or
+more, copied at 0), and one that edits it asks for a writable packet, which at refcount 0
+allocates a pool page and can write its transform straight into it: escape while copying, frame
+while copying, not copy and then transform. Every interface handles the same `Packet*` whether it
+will keep the frame or not and whether the source was borrowed or not.
+
+A packet is never copied by value: today's back-offset from a packet to its page breaks when it
+moves, and seven sites copy a page-backed packet (`bridge.d` floods, the BLE, Zigbee and Modbus
+queue entries). With `Packet*` everywhere the copy has no use, and the struct disables it.
+`mutable_flag` and `page_flag` go, since the page's refcount answers both; `clone`, `free_clone`
+and `backing_page` go into `page_hold` and the writable-packet helper.
+
+The owner's packet and the page's cursors agree at hand-off: a producer sets the page's `offset`
+and `length` to the frame it built, and a consumer that frames in place moves them. A packet
+viewing a slice of a shared page (a decapsulated inner frame, a subscriber reading a slice) keeps
+its own pointer and length and never writes the page's.
 
 ### E.3 Producers allocate at the source
 
@@ -631,12 +640,12 @@ MBAP 7, RTU 1 and 2, ASH 1 and 3 plus escape expansion, CPC 7, SLIP 2 plus expan
 
 ### E.4 Hand-off through `forward` and `transmit`
 
-`forward(ref Packet)` and `transmit(ref Packet, ...)` consume: the callee takes the caller's
-reference and the caller's view is emptied on return, so a use after hand-off faults rather than
-races. A consumer that fans out (a bridge flooding several members, a frame delivered to a
-subscriber and forwarded) shares before each extra call through `page_hold`; the last call gets
-the original reference. Frame handlers (subscribers) borrow `ref const Packet` during dispatch
-and `page_hold` what they keep, which is the receive fork of the copy budget.
+`forward(Packet*)`, `transmit(Packet*, ...)` and every frame handler borrow the packet for the
+call; whatever keeps it past the call holds it through `page_hold`, and the caller releases its
+own reference afterwards. A fan-out (a bridge flooding several members, a frame delivered to a
+subscriber and forwarded) is then no special case: each callee holds what it keeps. A frame that
+reaches a queue costs a share at refcount 1 or more, or the one copy at 0, which is the receive
+fork of the copy budget.
 
 A queue takes the packet rather than holding it: `enqueue` consumes the caller's reference
 (copying only a page at 0), keeps the view by value in `QueuedFrame.packet`, and dispatch hands
@@ -692,12 +701,12 @@ Each step leaves the tree no worse than before it and deletes what it replaces.
 | E1 (urt) | refcount contract: `page_free` at 0, foreign tag and `page_foreign`, `StackPage!N`, `page_mutable`, `page_hold`; tests for each refcount state | urt #390 | the `page_share` call sites outside the pool |
 | E2 | ingress into pages: UART and WPAN rx pages take room; Ethernet drivers receive into pages; stream parsers assemble into a page | E1, #845 | `_rx_buffer`, `_rx[62]`, `_tail`, `Buffers.rx`, the ELM line buffer |
 | E3 | producers allocate at the source; interfaces state their framing room | E1 | the `ubyte[1500]`/`[1518]`/`[512]` sender buffers, Modbus `send_packet`'s stack PDU, the EZSP command buffer |
-| E4 | `Packet` is a view; holders hold; `forward`/`transmit` consume; fan-out shares | E2, E3 | the borrowed mode, `init!T(buffer)`, `clone`/`free_clone`/`backing_page`, `mutable_flag`/`page_flag`, the by-value copy fault, #692 (closed as superseded) |
+| E4 | `Packet` owned by its page, borrowed through a `StackPage!0` pair; `Packet*` everywhere; holders hold | E1 | `init!T(buffer)`, `clone`/`free_clone`/`backing_page`, `mutable_flag`/`page_flag`, the by-value copy fault, #692 (closed as superseded) |
 | E5 | mutators edit in place: IP, VLAN, Modbus, ASH, Ethernet, CPC, TWC, WebSocket | E4 | `frame_and_send`'s copy, ASH's and CPC's `Message.buffer`, Ethernet's `medium_tx` copy, the const-cast writes in `stack.d`, the unchecked fixed-buffer copies |
 
-E4 follows E2 and E3 rather than leading them because a view cannot describe a buffer with no
-header in front of it: flipping `Packet` first would make every borrowed ingress copy into a
-`StackPage`, which is worse than the tree before it on the hot receive paths.
+E4 no longer waits for E2 and E3: a `StackPage!0` pair lends a ring or a local without a copy,
+so a borrowed ingress stays as cheap as it is today. E2 and E3 then remove copies the packet path
+no longer forces.
 
 ### E.8 Open decisions
 
@@ -705,9 +714,8 @@ header in front of it: flipping `Packet` first would make every borrowed ingress
   layout honest and `StackPage` trivial, at the cost of `Page` growing from 6 bytes to 8 on Tiny
   and 16 or 24 on the full pool, and of both pools sharing one header shape. A separate urt
   cleanup, not a prerequisite.
-- Whether `transmit` consumes `ref Packet` (and empties the caller's view) or takes `Packet` by
-  value as a move; the first fails loudly on misuse, the second reads as ownership in the
-  signature.
+- Settled 2026-10-18: neither a consuming `ref Packet` nor a by-value move. Calls borrow
+  `Packet*`, and a keeper holds (E.4).
 - Tiny's refcount is 8 bits; 255 holders of one page is a ceiling no path approaches.
 
 ## Execution sequence
