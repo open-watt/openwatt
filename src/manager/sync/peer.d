@@ -688,7 +688,7 @@ package:
     {
         if (node.raw in _live_nodes)
             return;
-        _live_nodes.insert(node.raw, position);
+        _live_nodes.insert(node.raw, LiveNode(position));
         e.sync_arm();
     }
 
@@ -712,6 +712,13 @@ package:
                 e.sync_disarm();
         }
         _live_nodes.clear();
+    }
+
+    struct LiveNode
+    {
+        ulong position;
+        bool pending;   // listed in _pending_vals
+        bool told_gap;  // the peer has the value as unknown since the gap before position
     }
 
     final void attach_model_element(Device device, Element* element, Access access)
@@ -961,7 +968,7 @@ package:
     Map!(uint, FormatId) _ft_recv;       // peer's session ft -> local format
 
     Array!String     _model_subs;        // armed live model patterns
-    Map!(ulong, ulong) _live_nodes;      // EID.raw of armed nodes -> next unsent record index (point series)
+    Map!(ulong, LiveNode) _live_nodes;   // EID.raw of armed nodes -> next unsent record index
     enum ulong live_parked = 1UL << 63;  // backfill owns the live cursor while parked
     Array!EID        _pending_vals;      // dirty matched nodes awaiting this tick's flush
 
@@ -1918,7 +1925,7 @@ unittest
     }
     bool live_events()
     {
-        bool done = SyncModule.send_live_events(peer, enc, power, handle, gen);
+        bool done = SyncModule.send_live(peer, enc, power, handle, gen);
         peer.flush_bundle();
         return done;
     }
@@ -1936,29 +1943,128 @@ unittest
 
     // The initial live cursor must not count as delivered history.
     peer.arm(power, power.ensure_eid(), power.record_count);
-    ulong* live = power.ensure_eid().raw in peer._live_nodes;
+    SyncPeer.LiveNode* live = power.ensure_eid().raw in peer._live_nodes;
     link.frames = 0;
     link.pending = link.cap;
     assert(!backfill(1, 0) && link.frames == 0);
-    assert(*live == (resume | SyncPeer.live_parked));
+    assert(live.position == (resume | SyncPeer.live_parked));
 
     // Live events wait behind a parked backfill.
     float[1] late = [float(records)];
     SysTime[1] late_time = [from_unix_time_ns((records + 1) * 1_000_000_000L)];
     power.write_samples(late[], late_time[]);
     live_events();
-    assert(link.frames == 0 && *live == (resume | SyncPeer.live_parked));
+    assert(link.frames == 0 && live.position == (resume | SyncPeer.live_parked));
 
     while (!backfill(1, 0))
     {
         live_events();
         link.pending = 0;
     }
-    assert(link.frames == (records + 1 + 255) / 256 && *live == records + 1);
+    assert(link.frames == (records + 1 + 255) / 256 && live.position == records + 1);
 
     // The live flush must not duplicate the completed backfill.
     live_events();
     assert(link.frames == (records + 1 + 255) / 256);
+
+    // A held element streams every change: armed without a store it sends its register first, and its first
+    // change creates a sync store holding the register as record 0, so the stream continues from record 1.
+    Element* level;
+    {
+        DeviceBuilder builder = devices.create("tank");
+        level = builder.element(builder.component("meter"), "level", register_value_format!float());
+        builder.commit();
+    }
+    EID level_node = level.ensure_eid();
+    level.write_sample(1.0f, from_unix_time_ns(1_000_000_000L));
+    peer.introduce(level_node);
+    SyncHandle level_handle = peer.handle_of(level_node);
+    peer.arm(level, level_node, SyncModule.live_start(level));
+    SyncPeer.LiveNode* level_live = level_node.raw in peer._live_nodes;
+    assert(!level.has_history && level_live.position == 0);
+    SyncModule.mark_pending_val(peer, level_node);
+    SyncModule.mark_pending_val(peer, level_node);
+    assert(level_live.pending && peer._pending_vals.length == 1 && peer._pending_vals[0] == level_node);
+    peer._pending_vals.clear();
+    level_live.pending = false;
+    link.pending = 0;
+    link.delivered = 0;
+    assert(SyncModule.send_register(peer, enc, level, level_handle));
+    peer.flush_bundle();
+    assert(link.delivered == 1 && level_live.position == 1);
+    level.write_sample(2.0f, from_unix_time_ns(2_000_000_000L));
+    level.write_sample(3.0f, from_unix_time_ns(3_000_000_000L));
+    assert(level.has_history && level.record_count == 3);
+    assert(SyncModule.send_live(peer, enc, level, level_handle, gen));
+    peer.flush_bundle();
+    assert(link.delivered == 3 && level_live.position == 3);
+
+    // an invalidation reaches the peer once, as a null at its time, and the next value follows it
+    level.invalidate(from_unix_time_ns(4_000_000_000L));
+    assert(SyncModule.send_live(peer, enc, level, level_handle, gen));
+    peer.flush_bundle();
+    assert(link.delivered == 4 && level_live.told_gap && level_live.position == 3);
+    assert(SyncModule.send_live(peer, enc, level, level_handle, gen));
+    peer.flush_bundle();
+    assert(link.delivered == 4);
+    level.write_sample(6.0f, from_unix_time_ns(5_000_000_000L));
+    assert(SyncModule.send_live(peer, enc, level, level_handle, gen));
+    peer.flush_bundle();
+    assert(link.delivered == 5 && !level_live.told_gap && level_live.position == 4);
+    peer.disarm(level, level_node);
+    assert(level.sync_peers == 0);
+
+    Element* make_meter(const(char)[] device)
+    {
+        DeviceBuilder builder = devices.create(device);
+        Element* m = builder.element(builder.component("meter"), "flow", register_value_format!float());
+        builder.commit();
+        return m;
+    }
+
+    // armed with no store: after its register was sent, an invalidation gives the element a store holding
+    // that value as record 0, ended there, so the null follows it and the next value is record 1
+    Element* flow = make_meter("pipe");
+    EID flow_node = flow.ensure_eid();
+    flow.write_sample(1.0f, from_unix_time_ns(1_000_000_000L));
+    peer.introduce(flow_node);
+    SyncHandle flow_handle = peer.handle_of(flow_node);
+    peer.arm(flow, flow_node, SyncModule.live_start(flow));
+    SyncPeer.LiveNode* flow_live = flow_node.raw in peer._live_nodes;
+    link.delivered = 0;
+    assert(SyncModule.send_register(peer, enc, flow, flow_handle));
+    peer.flush_bundle();
+    assert(link.delivered == 1 && flow_live.position == 1);
+    flow.invalidate(from_unix_time_ns(2_000_000_000L));
+    assert(flow.has_history && flow.record_count == 1);
+    assert(SyncModule.send_live(peer, enc, flow, flow_handle, gen));
+    peer.flush_bundle();
+    assert(link.delivered == 2 && flow_live.told_gap);
+    flow.write_sample(2.0f, from_unix_time_ns(3_000_000_000L));
+    assert(SyncModule.send_live(peer, enc, flow, flow_handle, gen));
+    peer.flush_bundle();
+    assert(link.delivered == 3 && flow_live.position == 2 && !flow_live.told_gap);
+    peer.disarm(flow, flow_node);
+
+    // already unknown when armed: the peer is told so without the position moving, and the first value is record 0
+    Element* idle = make_meter("valve");
+    EID idle_node = idle.ensure_eid();
+    idle.write_sample(1.0f, from_unix_time_ns(1_000_000_000L));
+    idle.invalidate(from_unix_time_ns(2_000_000_000L));
+    peer.introduce(idle_node);
+    SyncHandle idle_handle = peer.handle_of(idle_node);
+    peer.arm(idle, idle_node, SyncModule.live_start(idle));
+    SyncPeer.LiveNode* idle_live = idle_node.raw in peer._live_nodes;
+    link.delivered = 0;
+    assert(SyncModule.send_register(peer, enc, idle, idle_handle));
+    peer.flush_bundle();
+    assert(link.delivered == 1 && idle_live.position == 0 && idle_live.told_gap);
+    idle.write_sample(3.0f, from_unix_time_ns(3_000_000_000L));
+    assert(idle.record_count == 1);
+    assert(SyncModule.send_live(peer, enc, idle, idle_handle, gen));
+    peer.flush_bundle();
+    assert(link.delivered == 2 && idle_live.position == 1 && !idle_live.told_gap);
+    peer.disarm(idle, idle_node);
 
     // Over a narrow link each block holds what one segment carries, and the walk still delivers every record.
     assert(link.mtu(200) is null && peer.send_limit == 200);
@@ -1968,14 +2074,14 @@ unittest
     link.delivered = 0;
     link.cap = size_t.max;
     resume = ulong.max;
-    assert(backfill(1, 0) && *live == records + 1);
+    assert(backfill(1, 0) && live.position == records + 1);
     assert(link.largest <= 200 && link.frames > 4 * ((records + 1 + 255) / 256));
     assert(link.delivered == records + 1 && link.lost == 0);
 
     // A range ending mid-block stops at its last record, however the blocks were cut.
     resume = ulong.max;
     link.delivered = 0;
-    assert(backfill(1, 1000 * 1000) && *live == 1000);
+    assert(backfill(1, 1000 * 1000) && live.position == 1000);
     assert(link.delivered == 1000);
 
     // A record larger than any message the peer takes goes as an empty block declaring it lost, and the walk
@@ -1984,9 +2090,9 @@ unittest
     link.frames = 0;
     link.delivered = 0;
     resume = ulong.max;
-    assert(backfill(1, 1000 * 1000) && *live == 1000);
+    assert(backfill(1, 1000 * 1000) && live.position == 1000);
     assert(link.frames == 1000 && link.delivered == 0 && link.lost == 1000);
-    assert(live_events() && *live == records + 1);
+    assert(live_events() && live.position == records + 1);
     assert(link.lost == records + 1 && peer.send_ok(gen));
     assert(link.mtu(200) is null);
     link.cap = 4096;

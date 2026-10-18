@@ -16,7 +16,8 @@ command named here.
    if you hold a reference, you were already sent its definition.
 3. **An introduction answers every question it provokes.** Path, schema reference, ownership and
    current value travel together, because each omission would stimulate the follow-up request
-   principle 2 forbids.
+   principle 2 forbids. A live subscription's current value travels in the feed that follows the
+   introduction, unrequested.
 4. **Every verb family is optional and negotiated.** Capability is a build-time property, so it is
    declared in `hello`, and an unsupported verb is answered `err {code:"unsupported"}`, never
    dropped.
@@ -163,7 +164,9 @@ with zero segments.
   bound a history window, and without `once` the patterns stay armed as a live feed. Reply order
   is `type` for unseen schema, `add` per match not yet bound, `val` payloads, then `res {seq}`
   closes the initial burst; under a `from` window the `add` binds without a value, chronological
-  backfill follows, and the latest value closes the burst. A live pattern is the creation
+  backfill follows, and the latest value closes the burst. A live pattern binds without a value:
+  each armed node's feed starts at its latest record, so its current value is the feed's first
+  sample and every change after it follows, none coalesced. A live pattern is the creation
   notification: a node created later that matches receives its `add` when it appears. Overlapping
   patterns arm a node once; a node carries one handle and one feed, and re-arming never rewinds its
   cursor. A node serves a bounded number of sessions with live patterns (32, 4 on small targets);
@@ -173,7 +176,8 @@ with zero segments.
   no wire representation, the same verdict `ows.container_serialisable` gives, are skipped from
   the surface with a log.
 - **`add {h, path, class, ft, peer?, v?, t?, tmpl?}`** binds a handle to a path, announces
-  existence, cites schema and carries the current value and timestamp, all in one frame. `class`
+  existence, cites schema and, unless the node is armed, carries the current value and timestamp,
+  all in one frame. `class`
   is `device` or `element`; `peer` is the hexadecimal owner of a peer-local device and is omitted
   for the global namespace.
 - **`tmpl`** is the authority's shape for the path: the component template of every node it
@@ -200,7 +204,9 @@ with zero segments.
   narrow subscription is refreshed exactly where it looks. A peer without the capability picks the
   shape up from `tmpl` on its next introduction.
 - **`val {h, s:[[t,v],...], lost?}`** is the feed, deliberately dumb: it is nearly all the bytes on
-  a mature link and every field multiplies by sample count. `lost` reports overrun rather than
+  a mature link and every field multiplies by sample count. It is lossless: an armed node sends
+  every record in order, a held value's changes as much as an event's, and a gap in its history
+  arrives once, as a null at the moment the value stopped being known. `lost` reports overrun rather than
   hiding it, the difference between a mirror that is wrong and one that knows where. There is no
   staleness field: staleness is the absence of frames, and `t` plus a disciplined clock lets the
   receiver compute age itself. A null `v` says the value stopped being known at `t`: the mirror
@@ -294,8 +300,9 @@ Bounded retention means eviction is possible, and eviction breaks the catch-up p
 declared, not silent: the queue's epoch bumps once per repair cycle, acks are epoch-qualified, and
 the receiver re-bases its watermark under a newer epoch's refold. A bump is durable, announced by
 an empty frame until acked, so however long a partition lasts the epoch stays within one of the
-receiver. Once the cycle closes the gap is repaired above the sublayer: a `val` bump re-pushes the
-latest value of every armed live node, and a `log` bump emits a lost-lines marker.
+receiver. Once the cycle closes the gap is repaired above the sublayer: a `val` bump rewinds every
+armed held node to its latest record, so the mirror converges and only history stays lost, and a
+`log` bump emits a lost-lines marker.
 
 Session ids echo rather than "new id wins": a frame is honoured only when its `dst` matches the
 receiver's live session, so stragglers from a dead session can neither deliver nor ack. Adopting a
@@ -338,8 +345,8 @@ never sees the link. A link adapter provides:
 Settled design that is not built, tracked in [TODO.md](../TODO.md) under *Sync and peering*:
 
 - **The rest of the read surface.** `meta`/`depth` structure browsing so `sub {patterns:["*:"],
-  once, meta, depth:0}` is namespace enumeration; `rate`, `deadband` and `mode` (`latest` coalesces
-  per flush, `all` is forced for events), with tightest-wins when patterns overlap.
+  once, meta, depth:0}` is namespace enumeration; `rate` and `deadband`, with tightest-wins when
+  patterns overlap. A coalescing `mode` waits for evidence that the lossless feed costs too much.
 - **`move` and `gone`.** Rename or reparent with the handle surviving, because EIDs are
   rename-stable; a device `move` implies a subtree prefix rewrite in O(1). `gone` is terminal, and
   handles are never reused, so there is no ABA hazard.
