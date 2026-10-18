@@ -578,7 +578,6 @@ nothrow @nogc:
         p._adopted.clear();
         p._warned_name_count = 0;
         p._remote_caps = 0;
-        p._remote_version = 0;
         p._remote_max_message = 0;
         p._remote_segment = 0;
         p._remote_node_id = 0;
@@ -1320,7 +1319,7 @@ nothrow @nogc:
         log.info("peer '", from.name[], "' is host '", host, "'", cluster.length ? " in cluster '" : "", cluster, cluster.length ? "'" : "");
     }
 
-    void inbound_hello(SyncPeer from, uint ver, ubyte caps, uint max_message, ulong node_id = 0, PeerRole role = PeerRole.none, const(ubyte)[] nonce = null, uint segment = 0)
+    void inbound_hello(SyncPeer from, ubyte caps, uint max_message, ulong node_id = 0, PeerRole role = PeerRole.none, const(ubyte)[] nonce = null, uint segment = 0)
     {
         import urt.conv : format_uint;
 
@@ -1331,7 +1330,6 @@ nothrow @nogc:
             return;
         }
         from._remote_caps = caps;
-        from._remote_version = ver;
         from._remote_max_message = max_message;
         from._remote_segment = segment;
         from._remote_node_id = node_id;
@@ -1345,7 +1343,7 @@ nothrow @nogc:
         char[16] nid = void;
         if (node_id)
             format_uint(node_id, nid[], 16, 16, '0');
-        log.info("hello from '", from.name[], "' ver=", ver, " caps=", caps, node_id ? " node=" : "", node_id ? nid[] : "");
+        log.info("hello from '", from.name[], "' caps=", caps, node_id ? " node=" : "", node_id ? nid[] : "");
 
         // a node's newest session supersedes any older one it re-dialled away from
         if (node_id)

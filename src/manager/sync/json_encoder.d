@@ -1046,10 +1046,8 @@ nothrow @nogc:
                     if (hex_decode(nonce_str, nonce_buf[]) == 16)
                         nonce = nonce_buf[];
                 }
-                uint ver = optional_uint(json, "ver");
-
                 if (!bad_frame)
-                    sync.inbound_hello(peer, ver, caps, max_message, nid, role, nonce, segment);
+                    sync.inbound_hello(peer, caps, max_message, nid, role, nonce, segment);
                 break;
             }
 
@@ -1281,8 +1279,6 @@ nothrow @nogc:
             case "log":
             {
                 Variant* msg_v = json.getMember("msg");
-                if (!msg_v)
-                    msg_v = json.getMember("payload"); // tolerate older browser clients
                 if (!msg_v || !msg_v.isString)
                 {
                     log.warning("log missing string 'msg'");

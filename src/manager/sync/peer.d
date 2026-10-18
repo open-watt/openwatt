@@ -238,7 +238,7 @@ nothrow @nogc:
 
     // the largest frame transmit_frame takes this session; past send_limit it travels as fragments
     final uint max_message(bool is_text)
-        => is_text || _remote_version < fragments_since ? send_limit : _remote_max_message;
+        => is_text || !_remote_max_message ? send_limit : _remote_max_message;
 
     final int transmit_frame(const(ubyte)[] frame, bool is_text = false, TxQueue queue = TxQueue.control)
     {
@@ -905,9 +905,8 @@ package:
     ubyte            _remote_caps;       // hello negotiation; 0 = no hello received
     Array!ubyte      _bundle;            // messages of one queue collected for one frame
     TxQueue          _bundle_queue;
-    uint             _remote_version;    // 0 until hello
     uint             _remote_max_message; // 0 until hello
-    uint             _remote_segment;    // 0 until hello, and from a peer that predates it
+    uint             _remote_segment;    // 0 until hello
     ulong            _remote_node_id;    // hello identity; 0 = peer announced none
     PeerRole         _remote_role;
     String           _remote_cluster;
@@ -989,7 +988,6 @@ private:
     enum reorder_cap = 16;
     enum reorder_span = 32;
     enum backlog_max_frames = 32;
-    enum uint fragments_since = 2;
     enum uint reassembly_budget = is_tiny ? 8 * 1024 : ushort.max;
     enum ubyte fragment_first = 1 << 0;
     enum ubyte fragment_more = 1 << 1;
@@ -2143,13 +2141,8 @@ unittest
         link.frames.clear();
     }
 
-    // toward a version-1 remote nothing is fragmented: an oversized message is refused as before
-    peer._remote_version = 1;
+    // a message over the segment goes as flagged fragments that reassemble to it
     peer._remote_max_message = 65535;
-    assert(peer.transmit_frame(message[]) < 0 && link.frames.length == 0);
-
-    // a version-2 remote takes the message as flagged fragments that reassemble to it
-    peer._remote_version = 2;
     assert(peer.transmit_frame(message[]) == 0 && !peer.tx_blocked());
     assert(link.frames.length == (message.length + 197) / 198);
     Array!ubyte joined;
