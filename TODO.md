@@ -1174,15 +1174,20 @@ role from a concrete deployment need before implementing or advertising it.
   Nothing is pushed into sync, so no producer handles refusal, and the event-driven encodes that a
   refusal loses today (bind, unbind, state, results) become dirty state. Pages are sized to the
   transport's segment, carry its header in headroom and are closed at hand-off (E4, E5 and Y4 on
-  #805). Momentary state needs pinning cursors, copy on write, so a value goes out as it was. This
-  replaces #851's bundle buffer, its kept-bundle refusal path and its flush points.
+  #805). Values go out from pinned series records, so what a page carries is what the source held
+  ([docs/wip/SYNC_STREAMS.md](docs/wip/SYNC_STREAMS.md)). This replaces #851's bundle buffer, its
+  kept-bundle refusal path and its flush points.
+- **Lossless, untorn sync streams**: the plan and its phases are in
+  [docs/wip/SYNC_STREAMS.md](docs/wip/SYNC_STREAMS.md).
 
 The built surface is documented in [docs/SYNC.md](docs/SYNC.md) and [docs/PEERING.md](docs/PEERING.md);
 this is what remains.
 
 - **Devices mirrored from a `claim=` sibling need a naming rule.** The claimant files them under
   the sibling's peer id, so one named like a local device is ambiguous to anything addressing by
-  name, and how the network sees a claimed sibling's devices is undecided.
+  name, and how the network sees a claimed sibling's devices is undecided. openwatt-web's
+  `ModelMirror` keys nodes by subject alone and ignores `add.peer`, so every node's `system`
+  device folds into one on a hub, and the `model_set` path form cannot name the owner.
 - **A `claim=` sibling warns on every boot that it was claimed with no cluster.** The pair has no
   fleet of its own; decide whether the sibling inherits the claimant's cluster or the warning
   skips sibling claims.

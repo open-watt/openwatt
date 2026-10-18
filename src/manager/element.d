@@ -958,6 +958,7 @@ private:
     Subscription* _subs;
     SeriesStore* _history;
 
+    enum min_bucket_bytes = 32;
     enum bucket_capacity = 256; // TODO: scale with rate (target a time span, not a record count)
     enum text_bucket_capacity = 64;     // text series are low-rate; keep resident buckets small
     // u16 record offsets cap the bucket heap at 64k; a small target cannot serve that much contiguous
@@ -1165,7 +1166,7 @@ private:
         Bucket* tail = h.buckets.length ? h.buckets[$-1] : null;
 
         bool format_changed = tail && tail.format != format;
-        bool roll = !tail || tail.count + 1 > tail.capacity || follows_gap || format_changed || (tail.count && tick - tail.first_tick > uint.max);
+        bool roll = !tail || follows_gap || format_changed || (tail.count && tick - tail.first_tick > uint.max);
         uint entry = uint.max;
         if (!roll)
         {
@@ -1173,8 +1174,12 @@ private:
             if (entry == uint.max && tail.heap_used + heap_entry_bytes(v.length) > text_heap_limit)
                 roll = true;
         }
+        if (!roll && tail.count == tail.capacity)
+            roll = tail.sealed || tail.count >= text_bucket_capacity || !grow_bucket(tail, tail.count + 1, text_bucket_capacity);
+        if (roll)
+            entry = uint.max;
 
-        Bucket* b = roll ? alloc_bucket(text_bucket_capacity) : tail;
+        Bucket* b = roll ? alloc_bucket(start_capacity(1, tail && tail.count >= text_bucket_capacity, text_bucket_capacity)) : tail;
         if (!b)
             return false;
         if (entry == uint.max)
@@ -1326,9 +1331,14 @@ private:
         // a slow stream spanning >~71 min at 1 MHz, or a base discontinuity that would underflow it
         bool overflow = tail && tail.offsets && tail.count && max_tick - tail.first_tick > uint.max;
         bool format_changed = tail && tail.format != format;
-        if (tail && !(tail.count + n > tail.capacity || follows_gap || overflow || format_changed))
-            return tail;
-        Bucket* b = alloc_bucket(n > bucket_capacity ? n : bucket_capacity);
+        if (tail && !(follows_gap || overflow || format_changed))
+        {
+            if (tail.count + n <= tail.capacity)
+                return tail;
+            if (!tail.sealed && tail.count + n <= bucket_capacity && grow_bucket(tail, tail.count + n, bucket_capacity))
+                return tail;
+        }
+        Bucket* b = alloc_bucket(start_capacity(n, tail && tail.count >= bucket_capacity, bucket_capacity));
         if (b && !publish_bucket(b, tail, follows_gap, format_changed))
         {
             _history.free_bucket(b);
@@ -1480,6 +1490,45 @@ private:
             free((cast(void*)b.offsets)[0 .. capacity * uint.sizeof]);
         free((cast(void*)b)[0 .. Bucket.sizeof]);
         return null;
+    }
+
+    uint start_capacity(uint n, bool follows_full, uint limit) const
+    {
+        uint cap = follows_full ? limit : min_bucket_bytes / data_format.stride;
+        if (cap < n)
+            cap = n;
+        return cap ? cap : 1;
+    }
+
+    bool grow_bucket(Bucket* b, uint need, uint limit)
+    {
+        uint cap = b.capacity * 2;
+        if (cap < need)
+            cap = need;
+        if (cap > limit)
+            cap = limit;
+        uint stride = data_format.stride;
+        void* samples = alloc(cap * stride, MemFlags.slow).ptr;
+        if (!samples)
+            return false;
+        uint* offsets = null;
+        if (b.offsets)
+        {
+            offsets = cast(uint*)alloc(cap * uint.sizeof, MemFlags.slow).ptr;
+            if (!offsets)
+            {
+                free(samples[0 .. cap * stride]);
+                return false;
+            }
+            offsets[0 .. b.count] = b.offsets[0 .. b.count];
+            free((cast(void*)b.offsets)[0 .. b.capacity * uint.sizeof]);
+        }
+        (cast(ubyte*)samples)[0 .. b.count * stride] = (cast(const(ubyte)*)b.samples)[0 .. b.count * stride];
+        free(b.samples[0 .. b.capacity * stride]);
+        b.samples = samples;
+        b.offsets = offsets;
+        b.capacity = cap;
+        return true;
     }
 
     void mark_dirty()
@@ -1818,6 +1867,23 @@ unittest
     assert(n.record_count == 0 && n.bucket_count == 0);
     assert(n.latest_record.f64_ == 9.0);
     assert(n.last_update == from_unix_time_ns(500_000));
+
+    // buckets start at min_bucket_bytes and double in place; a full bucket's successor starts full
+    Element g;
+    g.format = register_format(f64_held);
+    g.ensure_history();
+    g.write_sample(0.0, from_unix_time_ns(1_000));
+    assert(g._history.buckets[0].capacity == Element.min_bucket_bytes / double.sizeof);
+    foreach (i; 1 .. Element.bucket_capacity + 1)
+        g.write_sample(cast(double)i, from_unix_time_ns(1_000 * (i + 1)));
+    assert(g.bucket_count == 2 && g._history.buckets[0].count == Element.bucket_capacity);
+    assert(g._history.buckets[1].capacity == Element.bucket_capacity);
+    Cursor gc = g.open_series_cursor(0);
+    RecordBlock gb = gc.next(Element.bucket_capacity);
+    assert(gb.count == Element.bucket_capacity && gb.get!double(5) == 5.0);
+    assert(gb.time(5) == from_unix_time_ns(6_000));
+    g.close_series_cursor(gc);
+    g.teardown();
 
     // held series: equal observations advance last_update but record nothing
     Element e;
