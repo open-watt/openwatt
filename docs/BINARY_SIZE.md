@@ -104,6 +104,7 @@ Limit is the 4 MB `ota_0` partition. `ram` is internal DRAM only; PSRAM is heap.
 | 2026-10-16 | #848 | ldc 1.42.0 | 2,991,872 | 141,871 | 4,194,304 | `COREDUMP=1`; crash dumps capped at two, pruned by walking the directory: +720 over master bde9e2c6 (#847, 2,991,152) |
 | 2026-10-18 | #851 | ldc 1.42.0 | 2,992,848 | 141,871 | 4,194,304 | `COREDUMP=1`; value and log bundling, binary records repeated within `val` and `log`; on master d1be2617 (#850, whose size was not recorded); deployed to 4547 and F993 |
 | 2026-10-18 | #852 | ldc 1.42.0 | 2,993,408 | 141,887 | 4,194,304 | `COREDUMP=1`; buckets start at 32 bytes and grow in place: +400 over master 64b117f9 (2,993,008); PSRAM at 300 s uptime on 4547 358 KB against master's 362 KB |
+| 2026-10-19 | #855 | ldc 1.42.0 | 2,993,296 | 141,887 | 4,194,304 | `COREDUMP=1`; elements count their armed sync peers, the global feed listener gone: -112 over #852 (2,993,408) |
 
 ### ESP32-C5 DevKitC-1, `make esp-idf-build PLATFORM=esp32-c5 CONFIG=release`
 

@@ -1,6 +1,6 @@
 # Lossless, untorn sync streams
 
-Status: plan, phase A in progress. Delete this file when phase C lands; reconcile what remains
+Status: phase A landed (#852), B1a in progress. Delete this file when phase C lands; reconcile what remains
 into [TODO.md](../../TODO.md).
 
 ## Problem
@@ -44,6 +44,9 @@ sync. It has no floors and no container; its ceiling is the per-platform sync la
   wholly below the sync pin is dropped (borrowed ones on their last `release_ref`). Removing it
   while unsubscribed releases the store.
 - Reads never promote: opening a cursor must not create or claim a store.
+- Any store created on an element that holds a value starts with that value as record 0, for every
+  format (text and wide already do; scalars join in B1b), so "one record before the latest" exists
+  for every element.
 
 Because the open bucket can now move, a `RecordBlock` is valid only until the next write to its
 element (the open text heap already reallocates under the same rule). A producer that resumes
@@ -105,8 +108,8 @@ Each phase is one PR.
 
 | Phase | Work | Deletes |
 |---|---|---|
-| A | Buckets start at 32 bytes and double in place up to `bucket_capacity`; a new bucket starts at the size its predecessor reached. All stores benefit. | the fixed first allocation |
-| B1 | Held elements stream through cursors like point series; subscribing arms a position and marks the element touched. `_sync`, sync stores, the shared pin, promotion and demotion, eviction below every pin when there are no floors. Counters for stores, churn, grown buckets and bytes on the `system` device; `lost` on `/sync/peer`. | `_pending_vals` coalescing, `encode_val`, `take_val_repush`, the value in `add`, `send_backfill` as a separate path |
+| B1a | `Element._sync_peers` counts the peers that have the element armed, kept by `SyncPeer.arm`/`disarm`; a write enlists in the dirty sweep only when its element is armed. | `add_feed_listener`, `remove_feed_listener`, `g_feed_listeners` |
+| B1b | Held elements stream through cursors like point series; subscribing arms a position and marks the element touched. `_sync_peers` becomes `_sync` with the store bit, sync stores, the shared pin, promotion and demotion, eviction below every pin when there are no floors. Counters for stores, churn, grown buckets and bytes on the `system` device; `lost` on `/sync/peer`. | `_pending_vals` coalescing, `encode_val`, `take_val_repush`, the value in `add`, `send_backfill` as a separate path |
 | B2 | Increments: wire fields, receiver held delivery, ack-driven pin, retransmit from the store. Protocol version bump. | the val `DataQueue` backlog, refold and epochs |
 | B3 | Sync store release and freelist, if B1's counters justify it. | |
 | C | Logs as a text series, `LogSink` on a cursor, merged reads. | `log.d` retention and consumers, log sub verbs, `DataQueue` |

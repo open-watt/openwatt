@@ -166,7 +166,8 @@ with zero segments.
   backfill follows, and the latest value closes the burst. A live pattern is the creation
   notification: a node created later that matches receives its `add` when it appears. Overlapping
   patterns arm a node once; a node carries one handle and one feed, and re-arming never rewinds its
-  cursor.
+  cursor. A node serves a bounded number of sessions with live patterns (32, 4 on small targets);
+  the next one to arm its first pattern is answered `err {code:"busy"}` and nothing is armed.
 - **`type`** has two forms, push-only and deduped per session: a format under an `ft` (type,
   count, series kind, unit, rate) and a named dictionary (enum or bitfield members). Formats with
   no wire representation, the same verdict `ows.container_serialisable` gives, are skipped from
