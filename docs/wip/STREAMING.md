@@ -740,10 +740,10 @@ and can run in parallel with each other.
 | S8 (#827, merged) | WebSocket is a plain sink | S2 | `_tx_pending`, unbounded RX reassembly |
 | S9 (#843, merged) | MQTT on the pull path | S2 | retained-replay burst, inline publish fan-out, MQTT's 64 KB backlog drop |
 | S10 (#839, merged) | `write()` removed; every writer sends whole frames | S5 to S8 | `Stream.write()`, `queue_copy`, `hold_copy`, short-write handling in every writer |
-| S11a (#844) | `send()` final; TCP takes sent pages; pcap sizes its pages | S10 | the `send()` overrides, `TCPConnection.send()` and TCP's queue in front of the connection |
-| S11b (#845, urt #390) | a sink never writes to a shared page; TCP gathers queued pages | S11a | `page_release`, sinks moving a page's offset, Windows TCP's page-in-flight handling |
-| S12 (#846) | `send()` refused at the watermark; serial's watermark is line time | S9, S11a | unbounded `send()`, pcap's backlog drop, `tx_backlog()` and its overrides, the producer-side request clamps |
-| S13 (#847) | session output held and pulled; bytes pack behind a busy line; the log follower offers whole records | S12 | the session's push through `send_bytes()`, `ProducerSession`'s heap-held overflow, a page per `write_output` call |
+| S11a (#844, merged) | `send()` final; TCP takes sent pages; pcap sizes its pages | S10 | the `send()` overrides, `TCPConnection.send()` and TCP's queue in front of the connection |
+| S11b (#845, urt #390, merged) | a sink never writes to a shared page; TCP gathers queued pages | S11a | `page_release`, sinks moving a page's offset, Windows TCP's page-in-flight handling |
+| S12 (#846, merged) | `send()` refused at the watermark; serial's watermark is line time | S9, S11a | unbounded `send()`, pcap's backlog drop, `tx_backlog()` and its overrides, the producer-side request clamps |
+| S13 (#847, merged) | session output held and pulled; bytes pack behind a busy line; the log follower offers whole records | S12 | the session's push through `send_bytes()`, `ProducerSession`'s heap-held overflow, a page per `write_output` call |
 
 - **S1** (#807, urt #372) is the broadest. `TxRequest` (bytes only), `TxStatus` (without
   `yield`) and the new `SendHandler`; `pull_tx_page`, shared by `Stream` and `TCPConnection`;
@@ -876,7 +876,7 @@ Independent. B.1 records the definitions #810 implements.
 | Y1 (#811, merged) | hello negotiates `segment` and `max_message`; frames over them refused, not looped | M1 | `max_frame_size`, the restart loop |
 | Y2a (#812, merged) | fragmentation as a message, negotiated by protocol version 2 | Y1 | frames lost over the segment |
 | Y2b (#813, merged) | messages fit the segment: byte budgets and refold packing | Y2a | fixed record counts, the whole-backlog refold |
-| Y3 | bundling | Y2b | |
+| Y3 (#851, merged) | value and log bundling: a JSON array, or `val` and `log` records repeated to the frame end; a refused bundle is kept and blocks the producers | Y2b | one frame per value and per log line |
 | Y4 | sync encodes into pages | Y2b, S1 | encoder `_buf` growth, `_rel_buf`, `SentFrame.bytes` copies, the `_frag_tx` copy and `_frag_rx` buffer |
 | Y5 | `history` retired | Y2b, UX migration | single-frame `history`, `max_history_points` |
 | C0 | reliability and congestion specification (document only) | Y2b | |
