@@ -160,7 +160,7 @@ protected:
     override const(char)[] apply_mac(ref MACAddress value)
         => "vlan address is inherited from its parent";
 
-    final override void medium_tx(ref Packet packet)
+    final override void medium_tx(Packet* packet)
     {
         debug assert(packet.vid == 0 && packet.vlan_tag == VlanTag.none, "packet already has a vlan tag");
         packet.vlan = (packet.vlan & 0xF000) | (_vlan & 0xFFF);
@@ -175,7 +175,7 @@ protected:
     // override forward() instead of transmit() for the ethernet path, to pass the
     // callback through to the parent without double firing; exotic packets route
     // through the inherited station egress.
-    final override int forward(ref Packet packet, MessageCallback callback = null, const(QueuePolicy)* queue_policy = null)
+    final override int forward(Packet* packet, MessageCallback callback = null, const(QueuePolicy)* queue_policy = null)
     {
         if (packet.type != PacketType.ethernet)
             return super.forward(packet, callback, queue_policy);
@@ -199,7 +199,7 @@ protected:
     }
 
 package:
-    final void vlan_incoming(ref Packet packet)
+    final void vlan_incoming(Packet* packet)
     {
         assert(packet.vid == _vlan, "received packet for wrong vlan!");
         assert(packet.vlan_tag == VlanTag.none || packet.vlan_tag == _tag, "received packet with wrong vlan tag!");

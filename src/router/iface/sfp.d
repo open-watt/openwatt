@@ -390,7 +390,7 @@ private:
         frame.type = I2CFrameType.request;
         frame.flags = I2CFrameFlags.none;
         _request = 0;
-        immutable handle = bus.forward(request, &message_complete);
+        immutable handle = bus.forward(&request, &message_complete);
         if (handle <= 0)
             return request_failed();
         _request = cast(ubyte)handle;
@@ -418,7 +418,7 @@ private:
             g_app.schedule(getTime() + diag_interval, &diagnostics_timer);
     }
 
-    void packet_handler(ref const Packet packet, BaseInterface, PacketDirection, void*)
+    void packet_handler(Packet* packet, BaseInterface, PacketDirection, void*)
     {
         ref frame = packet.hdr!I2CFrame;
         if (_pending == Read.none || frame.type != I2CFrameType.response || frame.sequence_number != _sequence)

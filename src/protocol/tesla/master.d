@@ -657,7 +657,7 @@ private:
         ref TWCFrame twc = p.init!TWCFrame(message[]);
         twc.src = _id_on_bus;
         twc.dst = dst;
-        return _iface.forward(p);
+        return _iface.forward(&p);
     }
 
     void iface_state_change(ActiveObject, StateSignal signal)
@@ -666,7 +666,7 @@ private:
             restart_deferred();
     }
 
-    void incoming_packet(ref const Packet p, BaseInterface iface, PacketDirection dir, void* user_data)
+    void incoming_packet(Packet* p, BaseInterface iface, PacketDirection dir, void* user_data)
     {
         ref const twc = p.hdr!TWCFrame;
 
@@ -901,7 +901,7 @@ unittest
         }
 
         override CompletionStatus startup() => CompletionStatus.complete;
-        override int transmit(ref Packet packet, MessageCallback callback = null, const(QueuePolicy)* queue_policy = null) => 0;
+        override int transmit(Packet* packet, MessageCallback callback = null, const(QueuePolicy)* queue_policy = null) => 0;
         override void on_subscribers_changed(bool any) { subscribed = any; }
         void start() { set_state(State.running); }
     }
@@ -981,7 +981,7 @@ unittest
     ref TWCFrame frame = packet.init!TWCFrame(message[]);
     frame.src = 124;
     frame.dst = 42;
-    master.incoming_packet(packet, iface, PacketDirection.incoming, null);
+    master.incoming_packet(&packet, iface, PacketDirection.incoming, null);
     discovered = master.find_charger(124);
     assert(discovered && discovered.current == 1500 && discovered.charge_current_target == 2000);
     assert(discovered.reserved_current == 2000);

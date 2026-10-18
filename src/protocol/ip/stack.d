@@ -91,7 +91,7 @@ nothrow @nogc:
         }
     }
 
-    void output_v4(ref Packet pkt)
+    void output_v4(Packet* pkt)
     {
         if (firewall_v4.run(HookPoint.output, pkt) == Verdict.drop)
             return;
@@ -99,7 +99,7 @@ nothrow @nogc:
         dispatch(pkt, r, firewall_v4);
     }
 
-    void output_v4_routed(ref Packet pkt, BaseInterface egress, IPAddr next_hop)
+    void output_v4_routed(Packet* pkt, BaseInterface egress, IPAddr next_hop)
     {
         if (firewall_v4.run(HookPoint.output, pkt) == Verdict.drop)
             return;
@@ -110,7 +110,7 @@ nothrow @nogc:
     static if (has_ipv6)
     {
 
-    void output_v6(ref Packet pkt, BaseInterface iface_hint = null)
+    void output_v6(Packet* pkt, BaseInterface iface_hint = null)
     {
         if (firewall_v6.run(HookPoint.output, pkt) == Verdict.drop)
             return;
@@ -118,7 +118,7 @@ nothrow @nogc:
         dispatch_v6(pkt, r, null);
     }
 
-    void output_v6_routed(ref Packet pkt, BaseInterface egress, IPv6Addr next_hop)
+    void output_v6_routed(Packet* pkt, BaseInterface egress, IPv6Addr next_hop)
     {
         if (firewall_v6.run(HookPoint.output, pkt) == Verdict.drop)
             return;
@@ -348,7 +348,7 @@ nothrow @nogc:
     // Frame handler registered for PacketType.ethernet by the IP module at init.
     // Ethernet-shaped frames (real Ethernet, VLAN sub-interfaces, Ethernet-bridge,
     // and protocols normalised to Ethernet framing) all funnel here.
-    void on_packet(ref Packet pkt, BaseInterface iface)
+    void on_packet(Packet* pkt, BaseInterface iface)
     {
         version (DebugRawIngress)
             log.trace("ingress if=", iface.name, " type=", pkt.type, " (", pkt.length, ") [ ", pkt.data[0 .. 24 < pkt.length ? 24 : pkt.length], 24 < pkt.length ? " ... ]" : " ]");
@@ -373,7 +373,7 @@ nothrow @nogc:
 
 private:
 
-    void ethernet_ingress(ref Packet pkt, EthernetStation iface)
+    void ethernet_ingress(Packet* pkt, EthernetStation iface)
     {
         const Ethernet eth = pkt.hdr!Ethernet();
         if (eth.dst != iface.mac && !eth.dst.is_multicast())
@@ -402,7 +402,7 @@ private:
         }
     }
 
-    void ingress_v4(ref Packet pkt, BaseInterface iface)
+    void ingress_v4(Packet* pkt, BaseInterface iface)
     {
         if (pkt.data.length < IPv4Header.sizeof)
             return;
@@ -448,7 +448,7 @@ private:
     }
 
     static if (has_ipv6)
-    void ingress_v6(ref Packet pkt, BaseInterface iface)
+    void ingress_v6(Packet* pkt, BaseInterface iface)
     {
         if (pkt.data.length < IPv6Header.sizeof)
             return;
@@ -499,7 +499,7 @@ private:
         dispatch_v6(pkt, r, iface);
     }
 
-    void dispatch(ref Packet pkt, ref RouteResult r, ref FirewallChains fw, bool transit = false)
+    void dispatch(Packet* pkt, ref RouteResult r, ref FirewallChains fw, bool transit = false)
     {
         final switch (r.kind)
         {
@@ -551,7 +551,7 @@ private:
     static if (has_ipv6)
     {
 
-    void dispatch_v6(ref Packet pkt, ref RouteResult6 r, BaseInterface in_iface)
+    void dispatch_v6(Packet* pkt, ref RouteResult6 r, BaseInterface in_iface)
     {
         final switch (r.kind)
         {
@@ -604,7 +604,7 @@ private:
         }
     }
 
-    void egress_v6(ref Packet pkt, BaseInterface out_iface, IPv6Addr next_hop)
+    void egress_v6(Packet* pkt, BaseInterface out_iface, IPv6Addr next_hop)
     {
         if (firewall_v6.run(HookPoint.postrouting, pkt) == Verdict.drop)
             return;
@@ -633,7 +633,7 @@ private:
         frame_and_send(pkt, out_iface, link_addr);
     }
 
-    void deliver_local_v6(ref Packet pkt, BaseInterface iface)
+    void deliver_local_v6(Packet* pkt, BaseInterface iface)
     {
         size_t l4_offset, nh_offset;
         IPProtocol proto;
@@ -742,7 +742,7 @@ private:
         return false;
     }
 
-    RouteResult route_lookup_v4(ref const Packet pkt)
+    RouteResult route_lookup_v4(const(Packet)* pkt)
     {
         if (pkt.length < IPv4Header.sizeof)
             return RouteResult(RouteResult.Kind.none);
@@ -751,7 +751,7 @@ private:
     }
 
     static if (has_ipv6)
-    RouteResult6 route_lookup_v6(ref const Packet pkt, BaseInterface iface_hint = null)
+    RouteResult6 route_lookup_v6(const(Packet)* pkt, BaseInterface iface_hint = null)
     {
         if (pkt.length < IPv6Header.sizeof)
             return RouteResult6(RouteResult6.Kind.none);
@@ -759,7 +759,7 @@ private:
         return route_lookup_v6_dst(h.dst_addr, iface_hint);
     }
 
-    void egress(ref Packet pkt, BaseInterface out_iface, IPAddr next_hop, ref FirewallChains fw)
+    void egress(Packet* pkt, BaseInterface out_iface, IPAddr next_hop, ref FirewallChains fw)
     {
         if (fw.run(HookPoint.postrouting, pkt) == Verdict.drop)
             return;
@@ -803,7 +803,7 @@ private:
 
     // TODO: when sixlowpan / ppp / raw_ip are added, dispatch by iface type
     //       (or by a virtual on BaseInterface) to choose the framing.
-    void frame_and_send(ref Packet pkt, BaseInterface out_iface, const(ubyte)[] link_addr)
+    void frame_and_send(Packet* pkt, BaseInterface out_iface, const(ubyte)[] link_addr)
     {
         EthernetStation station = dyn_cast!EthernetStation(out_iface);
         if (!station || link_addr.length != 6 || pkt.data.length < 1)
@@ -817,10 +817,10 @@ private:
         eth.dst = dst;
         eth.ether_type = ver == 6 ? EtherType.ip6 : EtherType.ip4;
         framed.checksum_pending = pkt.checksum_pending;
-        station.forward(framed);
+        station.forward(&framed);
     }
 
-    void deliver_local(ref Packet pkt, BaseInterface iface = null)
+    void deliver_local(Packet* pkt, BaseInterface iface = null)
     {
         if (pkt.data.length < IPv4Header.sizeof)
             return;
@@ -859,7 +859,7 @@ private:
             send_arp_request(target, station);
     }
 
-    void v4_drain(ref Packet pkt, BaseInterface iface, const(ubyte)[] link_addr)
+    void v4_drain(Packet* pkt, BaseInterface iface, const(ubyte)[] link_addr)
     {
         frame_and_send(pkt, iface, link_addr);
     }
@@ -872,7 +872,7 @@ private:
                 send_neighbour_solicit(this, target, station);
         }
 
-        void v6_drain(ref Packet pkt, BaseInterface iface, const(ubyte)[] link_addr)
+        void v6_drain(Packet* pkt, BaseInterface iface, const(ubyte)[] link_addr)
         {
             frame_and_send(pkt, iface, link_addr);
         }
@@ -966,7 +966,7 @@ unittest
                 _state = State.running;
                 set_l2mtu(1280 + 14);
             }
-            override void medium_tx(ref Packet packet)
+            override void medium_tx(Packet* packet)
             {
                 ++transmissions;
                 captured = cast(const(ubyte)[])packet.data;
@@ -1009,7 +1009,7 @@ unittest
             storeBigEndian(cast(ushort*)ip.payload_length.ptr, cast(ushort)(length - 40));
             packet.init!Ethernet(data[0 .. length]);
             uint before = egress.transmissions;
-            stack.dispatch_v6(packet, route, ingress);
+            stack.dispatch_v6(&packet, route, ingress);
             if (length <= 1280)
             {
                 assert(egress.transmissions == before + 1 && ip.hop_limit == 63);
@@ -1031,7 +1031,7 @@ unittest
             }
         }
         assert(ingress.transmissions == 2 && egress.transmissions == 2);
-        stack.dispatch_v6(packet, route, null);
+        stack.dispatch_v6(&packet, route, null);
         assert(ingress.transmissions == 2 && egress.transmissions == 2);
 
         ip.dst_addr = local;
@@ -1045,7 +1045,7 @@ unittest
             ushort pseudo = pseudo_header_checksum_v6(ip.src, ip.dst, cast(uint)length, IPProtocol.icmp6);
             storeBigEndian(cast(ushort*)(data.ptr + 42), internet_checksum(data[40 .. 40 + length], pseudo));
             packet.init!Ethernet(data[0 .. 40 + length]);
-            icmp6_input(stack, packet, 40, ingress);
+            icmp6_input(stack, &packet, 40, ingress);
             assert(ingress.transmissions == (length == 8 ? 3 : 2));
         }
         assert(ingress.captured[40] == Icmp6Type.echo_reply);

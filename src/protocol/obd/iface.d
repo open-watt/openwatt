@@ -37,7 +37,7 @@ struct OBDFrame
     uint dst_id;    // destination arbitration id; 0 = the local tester
     bool extended;
 
-    static ulong extract_src(ref const Packet p) pure nothrow @nogc
+    static ulong extract_src(const(Packet)* p) pure nothrow @nogc
     {
         ulong addr = p.hdr!OBDFrame().src_id;
         addr |= ulong(p.vlan & 0xFFF) << 48;
@@ -45,7 +45,7 @@ struct OBDFrame
         return addr;
     }
 
-    static ulong extract_dst(ref const Packet p) pure nothrow @nogc
+    static ulong extract_dst(const(Packet)* p) pure nothrow @nogc
     {
         ulong addr = p.hdr!OBDFrame().dst_id;
         addr |= ulong(p.vlan & 0xFFF) << 48;
@@ -60,7 +60,7 @@ struct OBDFrame
     }
 
     // OW encapsulation wire codec: [src:4 BE][dst:4 BE][flags:1] (bit0 = extended)
-    static ptrdiff_t encode_ow_header(ref const Packet p, ubyte[] buffer) nothrow @nogc
+    static ptrdiff_t encode_ow_header(const(Packet)* p, ubyte[] buffer) nothrow @nogc
     {
         if (buffer.length < 9)
             return -1;
@@ -71,7 +71,7 @@ struct OBDFrame
         return 9;
     }
 
-    static ptrdiff_t decode_ow_header(ref Packet p, const(ubyte)[] header) nothrow @nogc
+    static ptrdiff_t decode_ow_header(Packet* p, const(ubyte)[] header) nothrow @nogc
     {
         if (header.length < 9)
             return -1;
@@ -292,7 +292,7 @@ protected:
     }
 
 
-    override int transmit(ref const Packet packet, MessageCallback callback, const(QueuePolicy)*)
+    override int transmit(Packet* packet, MessageCallback callback, const(QueuePolicy)*)
     {
         if (packet.type != PacketType.obd)
         {
@@ -348,7 +348,7 @@ protected:
                 ref CANFrame can = p.init!CANFrame(frame[], packet.creation_time);
                 can.id = dst;
                 can.extended = f.extended || dst > 0x7FF;
-                if (_can.forward(p) < 0)
+                if (_can.forward(&p) < 0)
                 {
                     add_tx_drop();
                     return -1;
@@ -442,12 +442,12 @@ private:
         f.src_id = src_id;
         f.dst_id = 0;
         f.extended = extended;
-        incoming_packet(p);
+        incoming_packet(&p);
     }
 
     // --- CAN backend ---
 
-    void can_packet_handler(ref const Packet p, BaseInterface, PacketDirection, void*)
+    void can_packet_handler(Packet* p, BaseInterface, PacketDirection, void*)
     {
         if (p.type != PacketType.can)
             return;
@@ -478,7 +478,7 @@ private:
                 ref CANFrame tx = fc.init!CANFrame(frame[]);
                 tx.id = fc_id;
                 tx.extended = can.extended;
-                _can.forward(fc);
+                _can.forward(&fc);
                 return;
 
             case IsoTpResult.none:
@@ -774,7 +774,7 @@ unittest
 
         void on_vehicle(ref const SampleUpdate) { ++notifications; }
 
-        void on_packet(ref const Packet, BaseInterface, PacketDirection, void*)
+        void on_packet(Packet*, BaseInterface, PacketDirection, void*)
         {
             saw_packet = true;
             at_delivery = vehicle;
@@ -876,7 +876,7 @@ unittest
     Packet cp;
     ref CANFrame can = cp.init!CANFrame(orphan[]);
     can.id = 0x7E8;
-    o.can_packet_handler(cp, null, PacketDirection.incoming, null);
+    o.can_packet_handler(&cp, null, PacketDirection.incoming, null);
     assert(o.vehicle == VehicleState.awake);
 
     // a frame that is not a diagnostic response proves nothing
@@ -884,7 +884,7 @@ unittest
     assert(o.vehicle == VehicleState.asleep);
     ref CANFrame other = cp.init!CANFrame(orphan[]);
     other.id = 0x123;
-    o.can_packet_handler(cp, null, PacketDirection.incoming, null);
+    o.can_packet_handler(&cp, null, PacketDirection.incoming, null);
     assert(o.vehicle == VehicleState.asleep);
 
     // an accepted dispatch reaches g_app through elm_send's timeout arming, and

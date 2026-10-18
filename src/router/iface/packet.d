@@ -133,7 +133,7 @@ nothrow @nogc:
 }
 
 
-alias AddressExtract = ulong function(ref const Packet) pure nothrow @nogc;
+alias AddressExtract = ulong function(const(Packet)*) pure nothrow @nogc;
 alias IsMulticastAddress = bool function(ulong address) pure nothrow @nogc;
 
 // OW ethertype encapsulation: exotic packet types are carried over ethernet as
@@ -142,8 +142,8 @@ alias IsMulticastAddress = bool function(ulong address) pure nothrow @nogc;
 // encode returns bytes written; decode sets packet type + embed header and returns
 // header bytes consumed; <= 0 = failure for both. decode may consume less than the
 // wire hdr_len (older node, newer peer); the payload is located by hdr_len regardless.
-alias OWHeaderEncode = ptrdiff_t function(ref const Packet, ubyte[] buffer) nothrow @nogc;
-alias OWHeaderDecode = ptrdiff_t function(ref Packet, const(ubyte)[] header) nothrow @nogc;
+alias OWHeaderEncode = ptrdiff_t function(const(Packet)*, ubyte[] buffer) nothrow @nogc;
+alias OWHeaderDecode = ptrdiff_t function(Packet*, const(ubyte)[] header) nothrow @nogc;
 
 struct PacketCodec
 {
@@ -172,10 +172,10 @@ void register_packet_codec(Hdr)()
 const(PacketCodec)* get_ow_codec(PacketType type)
     => g_packet_codecs[type].encode ? &g_packet_codecs[type] : null;
 
-ulong get_network_src_address(ref const Packet p) pure
+ulong get_network_src_address(const(Packet)* p) pure
     => packet_codec(p.type).extract_src(p);
 
-ulong get_network_dst_address(ref const Packet p) pure
+ulong get_network_dst_address(const(Packet)* p) pure
     => packet_codec(p.type).extract_dst(p);
 
 bool is_network_multicast_address(ulong address) pure
@@ -536,7 +536,7 @@ struct Ethernet
     ushort ether_type;
     HwTimestamp hw_time;    // valid only where Packet.has_hw_timestamp
 
-    static ulong extract_src(ref const Packet p) pure nothrow @nogc
+    static ulong extract_src(const(Packet)* p) pure nothrow @nogc
     {
         ulong addr = p.hdr!Ethernet().src.ul;
         addr |= ulong(p.vlan & 0xFFF) << 48;
@@ -544,7 +544,7 @@ struct Ethernet
         return addr;
     }
 
-    static ulong extract_dst(ref const Packet p) pure nothrow @nogc
+    static ulong extract_dst(const(Packet)* p) pure nothrow @nogc
     {
         ulong addr = p.hdr!Ethernet().dst.ul;
         addr |= ulong(p.vlan & 0xFFF) << 48;
@@ -580,7 +580,7 @@ struct Wifi80211
     // uint ht_ctrl;         // HT Control field for +HTC frames
 
     // 802.11 monitor frames address by RA/TA; multicast follows the ethernet bit semantics
-    static ulong extract_src(ref const Packet p) pure nothrow @nogc
+    static ulong extract_src(const(Packet)* p) pure nothrow @nogc
     {
         ulong addr = p.hdr!Wifi80211().addr2.ul;
         addr |= ulong(p.vlan & 0xFFF) << 48;
@@ -588,7 +588,7 @@ struct Wifi80211
         return addr;
     }
 
-    static ulong extract_dst(ref const Packet p) pure nothrow @nogc
+    static ulong extract_dst(const(Packet)* p) pure nothrow @nogc
     {
         ulong addr = p.hdr!Wifi80211().addr1.ul;
         addr |= ulong(p.vlan & 0xFFF) << 48;
@@ -601,7 +601,7 @@ struct Wifi80211
 
     // OW encapsulation wire codec: [fc:2 LE][seq_ctrl:2 LE][addr1:6][addr2:6][addr3:6][rssi:1][channel:1]
     // FC and seq_ctrl keep 802.11's little-endian convention
-    static ptrdiff_t encode_ow_header(ref const Packet p, ubyte[] buffer) nothrow @nogc
+    static ptrdiff_t encode_ow_header(const(Packet)* p, ubyte[] buffer) nothrow @nogc
     {
         import urt.endian : nativeToLittleEndian;
         if (buffer.length < 24)
@@ -617,7 +617,7 @@ struct Wifi80211
         return 24;
     }
 
-    static ptrdiff_t decode_ow_header(ref Packet p, const(ubyte)[] header) nothrow @nogc
+    static ptrdiff_t decode_ow_header(Packet* p, const(ubyte)[] header) nothrow @nogc
     {
         import urt.endian : littleEndianToNative;
         if (header.length < 24)

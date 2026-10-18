@@ -64,7 +64,7 @@ struct ModbusFrame
     ubyte dst_address;
     ubyte function_code;
 
-    static ulong extract_src(ref const Packet p) pure nothrow @nogc
+    static ulong extract_src(const(Packet)* p) pure nothrow @nogc
     {
         ulong addr = p.hdr!ModbusFrame().src_address;
         addr |= ulong(p.vlan & 0xFFF) << 48;
@@ -72,7 +72,7 @@ struct ModbusFrame
         return addr;
     }
 
-    static ulong extract_dst(ref const Packet p) pure nothrow @nogc
+    static ulong extract_dst(const(Packet)* p) pure nothrow @nogc
     {
         ulong addr = p.hdr!ModbusFrame().dst_address;
         addr |= ulong(p.vlan & 0xFFF) << 48;
@@ -84,7 +84,7 @@ struct ModbusFrame
         => (addr & 0x7F) == 0;
 
     // OW encapsulation wire codec: [seq:2 BE][type:1][src:1][dst:1][fnc:1]
-    static ptrdiff_t encode_ow_header(ref const Packet p, ubyte[] buffer) nothrow @nogc
+    static ptrdiff_t encode_ow_header(const(Packet)* p, ubyte[] buffer) nothrow @nogc
     {
         import urt.endian : nativeToBigEndian;
         if (buffer.length < 6)
@@ -98,7 +98,7 @@ struct ModbusFrame
         return 6;
     }
 
-    static ptrdiff_t decode_ow_header(ref Packet p, const(ubyte)[] header) nothrow @nogc
+    static ptrdiff_t decode_ow_header(Packet* p, const(ubyte)[] header) nothrow @nogc
     {
         import urt.endian : bigEndianToNative;
         if (header.length < 6)
@@ -447,7 +447,7 @@ protected:
         send_queued_messages();
     }
 
-    override int transmit(ref const Packet packet, MessageCallback callback = null, const(QueuePolicy)* queue_policy = null) nothrow @nogc
+    override int transmit(Packet* packet, MessageCallback callback = null, const(QueuePolicy)* queue_policy = null) nothrow @nogc
     {
         if (packet.type != PacketType.modbus)
         {
@@ -480,8 +480,7 @@ protected:
                 local_address = map.local_address;
             }
 
-            Packet p = packet;
-            int tag = _queue.enqueue(p, &on_frame_complete);
+            int tag = _queue.enqueue(packet, &on_frame_complete);
             if (tag < 0)
             {
                 log.debug_("tx-drop: queue full");
@@ -523,7 +522,7 @@ protected:
     override ushort pcap_type() const
         => 147; // DLT_USER
 
-    override void pcap_write(ref const Packet packet, PacketDirection dir, scope void delegate(const void[] packetData) nothrow @nogc sink) const
+    override void pcap_write(const(Packet)* packet, PacketDirection dir, scope void delegate(const void[] packetData) nothrow @nogc sink) const
     {
         ref const ModbusFrame hdr = packet.hdr!ModbusFrame();
         ubyte address = hdr.type == ModbusFrameType.request ? hdr.dst_address : hdr.src_address;
@@ -1024,7 +1023,7 @@ private:
                     hdr.src_address = address;
                     hdr.dst_address = pm.request_from_address;
                     hdr.sequence_number = pm.sequence_number;
-                    incoming_packet(p);
+                    incoming_packet(&p);
                     _queue.complete(matched_tag, MessageState.complete);
                 }
 
@@ -1043,7 +1042,7 @@ private:
                     hdr.src_address = address;
                     hdr.dst_address = pm.request_from_address;
                     hdr.sequence_number = pm.sequence_number;
-                    incoming_packet(p);
+                    incoming_packet(&p);
                     _queue.complete(tag, MessageState.complete);
                 }
                 else
@@ -1079,7 +1078,7 @@ private:
             }
             hdr.sequence_number = seq;
 
-            incoming_packet(p);
+            incoming_packet(&p);
 
             _expect_message_type = type == ModbusFrameType.request ? ModbusFrameType.response : ModbusFrameType.request;
         }

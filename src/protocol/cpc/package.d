@@ -210,7 +210,7 @@ protected:
 
     // Egress entry for endpoint traffic: a CPCEndpoint forwards a CPCFrame here (framework calls this via
     // forward()). We enqueue it on the target endpoint's channel and let the scheduler emit it.
-    override int transmit(ref Packet packet, MessageCallback callback, const(QueuePolicy)* queue_policy)
+    override int transmit(Packet* packet, MessageCallback callback, const(QueuePolicy)* queue_policy)
     {
         if (packet.type != PacketType.cpc)
             return -1;
@@ -437,7 +437,7 @@ protected:
 
     // ingress: trunk accounting + observability, then ARQ and demux. A CPCFrame terminates here (ep0
     // system traffic) or is decapsulated to the child endpoint; it is never dispatched as a vlan/eth frame.
-    override void ingress(ref Packet packet)
+    override void ingress(Packet* packet)
     {
         // count the full wire frame (header + payload + FCS), matching what emit_frame counts on tx, so
         // the trunk's rx/tx byte stats stay comparable; the packet carries only the borrowed payload
@@ -929,7 +929,7 @@ private:
         CPCFrame* f = &p.init!CPCFrame(payload, rx_time);
         f.endpoint = endpoint;
         f.control = control;
-        incoming_packet(p);
+        incoming_packet(&p);
     }
 
     ubyte channel_ack_for(ubyte endpoint) pure
@@ -1310,7 +1310,7 @@ protected:
 
     // wrap the raw frame into a CPCFrame (borrowing the payload) and forward it to the trunk; the trunk
     // copies it into this endpoint's channel on transmit(), so the borrow only needs to last that call.
-    override int transmit(ref Packet packet, MessageCallback callback, const(QueuePolicy)* queue_policy)
+    override int transmit(Packet* packet, MessageCallback callback, const(QueuePolicy)* queue_policy)
     {
         if (packet.type != PacketType.raw)
             return -1;
@@ -1328,7 +1328,7 @@ protected:
         cpc_packet.pcp = packet.pcp;
         cpc_packet.dei = packet.dei;
 
-        if (trunk.forward(cpc_packet, callback, queue_policy) < 0)
+        if (trunk.forward(&cpc_packet, callback, queue_policy) < 0)
         {
             add_tx_drop();
             return -1;
@@ -1438,7 +1438,7 @@ package:
     {
         Packet p;
         p.init!RawFrame(payload, rx_time);
-        incoming_packet(p);
+        incoming_packet(&p);
     }
 
     void on_connect_reply(EndpointState state)

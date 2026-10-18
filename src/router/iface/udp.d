@@ -340,7 +340,7 @@ protected:
         return CompletionStatus.complete;
     }
 
-    override int transmit(ref Packet packet, MessageCallback callback = null, const(QueuePolicy)* queue_policy = null)
+    override int transmit(Packet* packet, MessageCallback callback = null, const(QueuePolicy)* queue_policy = null)
     {
         InetAddress dst = _remote;
         if (packet.type == PacketType.udp)
@@ -425,7 +425,7 @@ private:
     {
         Packet packet;
         packet.init!UDPFrame(data, info.rx_time).address = info.source;
-        incoming_packet(packet);
+        incoming_packet(&packet);
     }
 }
 

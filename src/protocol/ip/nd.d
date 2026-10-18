@@ -94,7 +94,7 @@ void send_neighbour_solicit(ref IPStack stack, IPv6Addr target, EthernetStation 
     iface.send(ipv6_multicast_mac(destination), buffer[0 .. IPv6Header.sizeof + message_length], EtherType.ip6);
 }
 
-void on_neighbour_solicit(ref IPStack stack, ref const IPv6Header ip, const(ubyte)[] message, BaseInterface iface, ref const Packet packet)
+void on_neighbour_solicit(ref IPStack stack, ref const IPv6Header ip, const(ubyte)[] message, BaseInterface iface, const(Packet)* packet)
 {
     EthernetStation station = dyn_cast!EthernetStation(iface);
     if (!station || packet.type != PacketType.ethernet || message.length < 24 || ip.hop_limit != 255 || message[1] != 0)

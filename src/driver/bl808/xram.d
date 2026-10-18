@@ -76,7 +76,7 @@ nothrow @nogc:
         => link_up && xram_writable(_channel);
 
     // The ring is the queue: a frame it cannot take is dropped.
-    override int transmit(ref Packet packet, MessageCallback, const(QueuePolicy)*)
+    override int transmit(Packet* packet, MessageCallback, const(QueuePolicy)*)
     {
         if (packet.type != PacketType.raw)
             return -1;
@@ -171,7 +171,7 @@ private:
         {
             Packet p;
             p.init!RawFrame(frame, when);
-            incoming_packet(p);
+            incoming_packet(&p);
             xram_release(_channel);
         }
         if (tx_ready)

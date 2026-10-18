@@ -305,7 +305,7 @@ protected:
         super.update();
     }
 
-    final override int transmit(ref const Packet packet, MessageCallback callback = null,
+    final override int transmit(Packet* packet, MessageCallback callback = null,
         const(QueuePolicy)* queue_policy = null) nothrow @nogc
     {
         // can only handle zigbee packets
@@ -330,8 +330,7 @@ protected:
                 return -1;
         }
 
-        Packet p = packet;
-        int tag = _queue.enqueue(p, &on_frame_complete, queue_policy);
+        int tag = _queue.enqueue(packet, &on_frame_complete, queue_policy);
         if (tag < 0)
         {
             add_tx_drop();
@@ -353,7 +352,7 @@ protected:
     override ushort pcap_type() const
         => 283; // DLT_IEEE802_15_4_TAP
 
-    override void pcap_write(ref const Packet packet, PacketDirection dir, scope void delegate(scope const void[] packetData) nothrow @nogc sink) const
+    override void pcap_write(const(Packet)* packet, PacketDirection dir, scope void delegate(scope const void[] packetData) nothrow @nogc sink) const
     {
         ref aps = packet.hdr!APSFrame;
         const(ubyte)[] data = cast(ubyte[])packet.data;
@@ -783,7 +782,7 @@ private:
         version (DebugZigbeeLatency)
             writeDebugf("ZBLAT rx    t={0} src={1,04x} ep={2,02x} cl={3,04x}", zblat_us(), hdr.src, hdr.src_endpoint, hdr.cluster_id);
 
-        incoming_packet(p);
+        incoming_packet(&p);
     }
 
     void lookup_eui_response(void* user_data, EmberStatus status, EmberEUI64 eui64)

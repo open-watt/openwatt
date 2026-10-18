@@ -88,7 +88,7 @@ enum MessageState
 }
 
 alias MessageCallback = void delegate(int msg_handle, MessageState state) nothrow @nogc;
-alias IncomingPacketHandler = void delegate(ref Packet p, BaseInterface i) nothrow @nogc;
+alias IncomingPacketHandler = void delegate(Packet* p, BaseInterface i) nothrow @nogc;
 // Submit through forward() while tx_ready; return true to wait for room, false to disarm until tx_handler() re-arms.
 alias TxHandler = bool delegate(BaseInterface sink) nothrow @nogc;
 
@@ -152,7 +152,7 @@ nothrow @nogc:
     ushort ether_type_2;
     ushort vlan;
 
-    bool match(ref const Packet p)
+    bool match(const(Packet)* p)
     {
         if (type != PacketType.unknown)
         {
@@ -184,7 +184,7 @@ nothrow @nogc:
 
 struct InterfaceSubscriber
 {
-    alias PacketHandler = void delegate(ref const Packet p, BaseInterface i, PacketDirection dir, void* u) nothrow @nogc;
+    alias PacketHandler = void delegate(Packet* p, BaseInterface i, PacketDirection dir, void* u) nothrow @nogc;
 
     PacketFilter filter;
     PacketHandler recv_packet;
@@ -534,7 +534,7 @@ nothrow @nogc:
     bool tx_ready() const
         => true;
 
-    int forward(ref Packet packet, MessageCallback callback = null, const(QueuePolicy)* queue_policy = null)
+    int forward(Packet* packet, MessageCallback callback = null, const(QueuePolicy)* queue_policy = null)
     {
         if (!admit(packet, callback))
             return -1;
@@ -569,7 +569,7 @@ nothrow @nogc:
     ushort pcap_type() const
         => 0;
 
-    void pcap_write(ref const Packet packet, PacketDirection dir, scope void delegate(scope const void[] packet_data) nothrow @nogc sink) const
+    void pcap_write(const(Packet)* packet, PacketDirection dir, scope void delegate(scope const void[] packet_data) nothrow @nogc sink) const
     {
     }
 
@@ -601,7 +601,7 @@ protected:
     // an mtu the user has not configured follows the link: l2mtu less its header, or default_mtu where nothing
     // limits the link
     // every forward() passes this before outgoing subscribers see the packet
-    final bool admit(ref const Packet packet, MessageCallback callback)
+    final bool admit(const(Packet)* packet, MessageCallback callback)
     {
         if (running && packet.length <= actual_mtu)
             return true;
@@ -674,7 +674,7 @@ protected:
         signal_link(up);
     }
 
-    abstract int transmit(ref Packet packet, MessageCallback callback = null, const(QueuePolicy)* queue_policy = null);
+    abstract int transmit(Packet* packet, MessageCallback callback = null, const(QueuePolicy)* queue_policy = null);
 
     final bool invite_tx()
     {
@@ -694,7 +694,7 @@ protected:
         invite_tx();
     }
 
-    final void incoming_packet(ref Packet packet)
+    final void incoming_packet(Packet* packet)
     {
         if (_flags & ObjectFlags.slave)
         {
@@ -719,12 +719,12 @@ protected:
 
     // Ingress stage between reception and local delivery: switching and station
     // transforms live here. Default: everything terminates locally.
-    void ingress(ref Packet packet)
+    void ingress(Packet* packet)
     {
         dispatch(packet);
     }
 
-    final void dispatch(ref Packet packet)
+    final void dispatch(Packet* packet)
     {
         debug assert(!(_flags & ObjectFlags.slave), "dispatch() on a slaved interface; ingress must enter via incoming_packet()");
 
@@ -788,12 +788,12 @@ protected:
             handler(packet, this);
     }
 
-    void slave_incoming(ref Packet packet, byte slave_id)
+    void slave_incoming(Packet* packet, byte slave_id)
     {
         assert(false, "Override this method to implement a _master interface");
     }
 
-    final void fire_subscribers(ref Packet packet)
+    final void fire_subscribers(Packet* packet)
     {
         if (!_num_subscribers)
             return;
@@ -1591,7 +1591,7 @@ nothrow @nogc:
 +/
 
 private:
-    void on_ethernet_frame(ref Packet packet, BaseInterface iface)
+    void on_ethernet_frame(Packet* packet, BaseInterface iface)
     {
         if (packet.eth.ether_type == EtherType.ow)
             ether_transport_input(packet, iface);
@@ -1617,7 +1617,7 @@ unittest
             super(collection_type_info!Link, id, flags);
             _state = State.running;
         }
-        override void medium_tx(ref Packet packet) {}
+        override void medium_tx(Packet* packet) {}
     }
 
     Link a = Collection!Link().create("scope-test-a");
@@ -1700,7 +1700,7 @@ unittest
         {
             this(collection_type_info!Sink, id, flags);
         }
-        override int transmit(ref Packet packet, MessageCallback, const(QueuePolicy)*)
+        override int transmit(Packet* packet, MessageCallback, const(QueuePolicy)*)
         {
             pending += packet.length;
             return 0;
@@ -1745,7 +1745,7 @@ unittest
                 ubyte[64] buf;
                 Packet p;
                 p.init!RawFrame(buf[0 .. frame]);
-                sink.forward(p);
+                sink.forward(&p);
                 remaining -= frame;
             }
             return remaining != 0;
@@ -1810,7 +1810,7 @@ unittest
         }
         override bool carrier() const
             => has_carrier;
-        override int transmit(ref Packet, MessageCallback, const(QueuePolicy)*)
+        override int transmit(Packet*, MessageCallback, const(QueuePolicy)*)
             => -1;
         bool has_carrier = true;
     }
@@ -1906,7 +1906,7 @@ unittest
             super(collection_type_info!Sized, id, flags);
             _state = State.running;
         }
-        override int transmit(ref Packet, MessageCallback, const(QueuePolicy)*)
+        override int transmit(Packet*, MessageCallback, const(QueuePolicy)*)
         {
             ++sent;
             return 0;
@@ -1928,10 +1928,10 @@ unittest
         // an exotic packet is checked again once its ow envelope (5 bytes plus an 8-byte i2c header) is built
         Packet exotic;
         exotic.init!I2CFrame(payload[0 .. 1487]);
-        assert(a2.forward(exotic) == 0);
+        assert(a2.forward(&exotic) == 0);
         ulong drops = a2.tx_dropped;
         exotic.init!I2CFrame(payload[]);
-        assert(a2.forward(exotic) < 0 && a2.tx_dropped == drops + 1);
+        assert(a2.forward(&exotic) < 0 && a2.tx_dropped == drops + 1);
 
         // a vlan admits against its own mtu, which its parent cannot know
         VLANInterface tagged = Collection!VLANInterface().create("mtu-test-vlan", ObjectFlags.none, NamedArgument("interface", a2), NamedArgument("vlan", 20));
@@ -1941,9 +1941,9 @@ unittest
         Packet framed;
         framed.init!Ethernet(payload[0 .. 200]);
         BaseInterface through = tagged;
-        assert(through.forward(framed) < 0 && tagged.tx_dropped == 1);
+        assert(through.forward(&framed) < 0 && tagged.tx_dropped == 1);
         framed.init!Ethernet(payload[0 .. 100]);
-        assert(through.forward(framed) >= 0);
+        assert(through.forward(&framed) >= 0);
         tagged.destroy();
     }
 
@@ -1953,7 +1953,7 @@ unittest
     ubyte[2000] bytes;
     Packet big;
     big.init!RawFrame(bytes[]);
-    assert(link.forward(big) < 0 && link.sent == 0 && link.tx_dropped == 1);
+    assert(link.forward(&big) < 0 && link.sent == 0 && link.tx_dropped == 1);
 
     link.set_l2mtu(100);
     assert(link.mtu == 100 && link.actual_mtu == 100);
@@ -1968,8 +1968,8 @@ unittest
     Packet fits, over;
     fits.init!RawFrame(bytes[0 .. 50]);
     over.init!RawFrame(bytes[0 .. 51]);
-    assert(link.forward(fits) == 0 && link.sent == 1);
-    assert(link.forward(over) < 0 && link.sent == 1 && link.tx_dropped == 2);
+    assert(link.forward(&fits) == 0 && link.sent == 1);
+    assert(link.forward(&over) < 0 && link.sent == 1 && link.tx_dropped == 2);
 
     link.destroy();
     Collection!BaseInterface().update_all();

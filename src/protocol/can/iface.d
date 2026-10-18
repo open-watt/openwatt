@@ -52,7 +52,7 @@ struct CANFrame
     bool remote_transmission_request;
     bool extended;
 
-    static ulong extract_src(ref const Packet p) pure nothrow @nogc
+    static ulong extract_src(const(Packet)* p) pure nothrow @nogc
     {
         ulong addr = p.hdr!CANFrame().id;
         addr |= ulong(p.vlan & 0xFFF) << 48;
@@ -60,7 +60,7 @@ struct CANFrame
         return addr;
     }
 
-    static ulong extract_dst(ref const Packet p) pure nothrow @nogc
+    static ulong extract_dst(const(Packet)* p) pure nothrow @nogc
     {
         ulong addr = ulong(p.vlan & 0xFFF) << 48;
         addr |= ulong(PacketType.can) << 60;
@@ -71,7 +71,7 @@ struct CANFrame
         => true; // CAN is always broadcast
 
     // OW encapsulation wire codec: [id:4 BE][flags:1] (bit0 = extended, bit1 = rtr)
-    static ptrdiff_t encode_ow_header(ref const Packet p, ubyte[] buffer) nothrow @nogc
+    static ptrdiff_t encode_ow_header(const(Packet)* p, ubyte[] buffer) nothrow @nogc
     {
         import urt.endian : nativeToBigEndian;
         if (buffer.length < 5)
@@ -82,7 +82,7 @@ struct CANFrame
         return 5;
     }
 
-    static ptrdiff_t decode_ow_header(ref Packet p, const(ubyte)[] header) nothrow @nogc
+    static ptrdiff_t decode_ow_header(Packet* p, const(ubyte)[] header) nothrow @nogc
     {
         import urt.endian : bigEndianToNative;
         if (header.length < 5)
@@ -379,7 +379,7 @@ protected:
         super.update();
     }
 
-    override int transmit(ref const Packet packet, MessageCallback, const(QueuePolicy)*)
+    override int transmit(Packet* packet, MessageCallback, const(QueuePolicy)*)
     {
         // can only handle can packets
         if (packet.type != PacketType.can)
@@ -447,7 +447,7 @@ protected:
     override ushort pcap_type() const
         => 227; // CAN_SOCKETCAN
 
-    override void pcap_write(ref const Packet packet, PacketDirection dir, scope void delegate(const void[] packetData) nothrow @nogc sink) const
+    override void pcap_write(const(Packet)* packet, PacketDirection dir, scope void delegate(const void[] packetData) nothrow @nogc sink) const
     {
         // write socket_can struct...
         struct socket_can
@@ -577,7 +577,7 @@ private:
                 version (DebugCANInterface)
                     writeDebug("CAN packet received from interface '", name, "': id=", can.id, " (", packet.length , ")[ ", packet.data, " - ", packet.data.bin_to_ascii(), " ]");
 
-                incoming_packet(packet);
+                incoming_packet(&packet);
             }
 
             // shuffle remaining unparsed bytes to the front for the next chunk
@@ -719,7 +719,7 @@ private:
                 can.id = frame.can_id & (extended ? CAN_EFF_MASK : CAN_SFF_MASK);
                 can.extended = extended;
                 can.remote_transmission_request = (frame.can_id & CAN_RTR_FLAG) != 0;
-                incoming_packet(packet);
+                incoming_packet(&packet);
             }
         }
     }
@@ -756,7 +756,7 @@ private:
             can.id = hw.id;
             can.extended = hw.extended;
             can.remote_transmission_request = hw.rtr;
-            incoming_packet(packet);
+            incoming_packet(&packet);
         }
 
         uint dropped = can_take_rx_drops(_can);

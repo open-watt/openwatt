@@ -81,7 +81,7 @@ void send_arp_request(IPAddr target, EthernetStation iface)
 
 
 // Parse incoming ARP frame, learn from observed traffic, and reply to who-has-our-IP.
-void on_arp(ref const Packet pkt, EthernetStation iface, ref NeighbourCache!IPAddr cache)
+void on_arp(const(Packet)* pkt, EthernetStation iface, ref NeighbourCache!IPAddr cache)
 {
     const data = pkt.data;
     if (data.length < ArpV4Packet.sizeof)

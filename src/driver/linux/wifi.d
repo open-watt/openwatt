@@ -887,7 +887,7 @@ private:
             wifi.seq_ctrl = load_le16(data[h + 22 .. h + 24]);
         }
 
-        dispatch(packet);
+        dispatch(&packet);
     }
 
     static ushort load_le16(const(ubyte)[] v) pure

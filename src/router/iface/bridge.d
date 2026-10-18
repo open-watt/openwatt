@@ -25,7 +25,7 @@ nothrow @nogc:
 // can drive a kernel bridge without router.iface importing any driver.* module.
 // The CPU-port sink injects a frame into the kernel-switched ethernet segment;
 // it returns <0 on failure (mirrors BaseInterface.forward's convention).
-alias CpuPortSink = int delegate(ref Packet packet) nothrow @nogc;
+alias CpuPortSink = int delegate(Packet* packet) nothrow @nogc;
 alias PortsChangedHook = void delegate(BridgeInterface bridge) nothrow @nogc;
 alias CpuPromiscHook = void delegate(BridgeInterface bridge) nothrow @nogc;
 
@@ -180,7 +180,7 @@ nothrow @nogc:
     // Ingress from the kernel-switched ethernet segment (the offload module drains
     // the CPU-port socket and feeds frames here). This is a switching ingress like
     // any member port, with src = _cpu_port.
-    final void cpu_port_incoming(ref Packet packet)
+    final void cpu_port_incoming(Packet* packet)
     {
         if (!running || !_cpu.active)
             return;
@@ -216,7 +216,7 @@ nothrow @nogc:
             g_bridge_cpu_promisc_changed(this);
     }
 
-    protected override int transmit(ref Packet packet, MessageCallback callback, const(QueuePolicy)*)
+    protected override int transmit(Packet* packet, MessageCallback callback, const(QueuePolicy)*)
     {
         // this is a packet entering the bridge from the bridge interface...
 
@@ -351,13 +351,13 @@ protected:
 
     // The medium is the switched ethernet domain: wrapped frames from the station
     // enter switching at the attachment.
-    final override void medium_tx(ref Packet packet)
+    final override void medium_tx(Packet* packet)
     {
         send(packet, _attach_port);
     }
 
     // Decapped exotic traffic enters the exotic switching domain at the attachment.
-    final override void station_deliver_exotic(ref Packet inner)
+    final override void station_deliver_exotic(Packet* inner)
     {
         ulong src_address = source_address(inner);
         if (!src_address.is_multicast_address)
@@ -389,7 +389,7 @@ protected:
         }
     }
 
-    final override void slave_incoming(ref Packet packet, byte slave_id)
+    final override void slave_incoming(Packet* packet, byte slave_id)
     {
         debug assert(running, "Shouldn't receive packets while not running...?");
 
@@ -615,7 +615,7 @@ private:
     TagTracking* _tracking_active;
     TagAllocator _bridge_tags;
 
-    bool classify_vlan(Port)(ref Packet packet, auto ref const Port port)
+    bool classify_vlan(Port)(Packet* packet, auto ref const Port port)
     {
         if (packet.has_inline_vlan_tag && !packet.promote_vlan_tag())
             return false;
@@ -636,7 +636,7 @@ private:
         return true;
     }
 
-    bool prepare_egress(Port)(ref Packet packet, auto ref const Port port)
+    bool prepare_egress(Port)(Packet* packet, auto ref const Port port)
     {
         if (packet.vid != port.pvid)
             return false;
@@ -647,22 +647,22 @@ private:
         return true;
     }
 
-    ulong source_address(ref const Packet packet)
+    ulong source_address(const(Packet)* packet)
     {
         if (_vlan_filtering || packet.vlan_tag == VlanTag.none)
             return get_network_src_address(packet);
-        Packet untagged = packet;
+        Packet untagged = *packet;
         untagged.vlan &= 0xF000;
-        return get_network_src_address(untagged);
+        return get_network_src_address(&untagged);
     }
 
-    ulong destination_address(ref const Packet packet)
+    ulong destination_address(const(Packet)* packet)
     {
         if (_vlan_filtering || packet.vlan_tag == VlanTag.none)
             return get_network_dst_address(packet);
-        Packet untagged = packet;
+        Packet untagged = *packet;
         untagged.vlan &= 0xF000;
-        return get_network_dst_address(untagged);
+        return get_network_dst_address(&untagged);
     }
 
     // an exotic address is ours if it lives behind a software-domain port (a local
@@ -676,7 +676,7 @@ private:
         return port < _members.length && _members[port].iface && !(_members[port].iface.caps & InterfaceCaps.ethernet);
     }
 
-    void local_dispatch(ref Packet packet)
+    void local_dispatch(Packet* packet)
     {
         if (!_vlan_filtering)
         {
@@ -704,7 +704,7 @@ private:
         // not a member of this vlan, drop
     }
 
-    void send(ref Packet packet, ubyte src_port) nothrow @nogc
+    void send(Packet* packet, ubyte src_port) nothrow @nogc
     {
         if (!running)
             return;
@@ -764,14 +764,14 @@ private:
             if (eth_member != is_eth)
                 continue;
 
-            Packet outgoing = packet;
+            Packet outgoing = *packet;
             if (_vlan_filtering)
             {
-                if (!prepare_egress(outgoing, member))
+                if (!prepare_egress(&outgoing, member))
                     continue;
             }
 
-            if (member.iface.forward(outgoing) < 0)
+            if (member.iface.forward(&outgoing) < 0)
                 add_tx_drop();
         }
 
@@ -850,7 +850,7 @@ private:
         _tracking_active = entry;
     }
 
-    int send_tracked(ref Packet packet, MessageCallback callback)
+    int send_tracked(Packet* packet, MessageCallback callback)
     {
         if (!running)
             return -1;
@@ -929,11 +929,11 @@ private:
             if (!member.iface.running || member.offloaded || eth_member != is_eth)
                 continue;
 
-            Packet outgoing = packet;
-            if (_vlan_filtering && !prepare_egress(outgoing, member))
+            Packet outgoing = *packet;
+            if (_vlan_filtering && !prepare_egress(&outgoing, member))
                 continue;
 
-            int tag = member.iface.forward(outgoing, &tracking.on_port_callback);
+            int tag = member.iface.forward(&outgoing, &tracking.on_port_callback);
             if (tag > 0)
             {
                 tracking.port_tags.pushBack(PortTag(ObjectRef!BaseInterface(member.iface), tag));
@@ -1292,12 +1292,12 @@ unittest
             set_state(State.starting);
         }
 
-        void receive(ref Packet packet)
+        void receive(Packet* packet)
         {
             incoming_packet(packet);
         }
 
-        override int transmit(ref Packet, MessageCallback callback, const(QueuePolicy)*)
+        override int transmit(Packet*, MessageCallback callback, const(QueuePolicy)*)
         {
             ++sends;
             pending = callback;
@@ -1391,23 +1391,23 @@ unittest
     Packet packet;
     ref frame = packet.init!Ethernet(null);
     frame.dst = MACAddress(0xff, 0xff, 0xff, 0xff, 0xff, 0xff);
-    member.receive(packet);
+    member.receive(&packet);
     assert(member.rx_packets == 1 && member.rx_dropped == 1);
     auto master = Collection!BridgeInterface().create("bridge-test-master");
     assert(master.running && member.running && master.member_count == 1);
-    member.receive(packet);
+    member.receive(&packet);
     assert(member.rx_packets == 2 && member.rx_dropped == 1);
     master.disabled = true;
     assert(member.running && (member.flags & ObjectFlags.slave));
-    member.receive(packet);
+    member.receive(&packet);
     assert(member.rx_packets == 3 && member.rx_dropped == 2);
     master.destroy();
     assert(Collection!BridgePort().get(port.name[]) is port);
-    member.receive(packet);
+    member.receive(&packet);
     assert(member.rx_packets == 4 && member.rx_dropped == 3);
     master = Collection!BridgeInterface().create("bridge-test-master");
     assert(master.running && member.running && master.member_count == 1);
-    member.receive(packet);
+    member.receive(&packet);
     assert(member.rx_packets == 5 && member.rx_dropped == 3);
     assert(member.link_downs == link_downs);
 
@@ -1415,7 +1415,7 @@ unittest
     {
         BridgeInterface master;
         uint calls;
-        void received(ref const Packet, BaseInterface, PacketDirection, void*) nothrow @nogc
+        void received(Packet*, BaseInterface, PacketDirection, void*) nothrow @nogc
         {
             ++calls;
             master.disabled = true;
@@ -1425,10 +1425,10 @@ unittest
     packet_observer.master = master;
     PacketFilter filter;
     member.subscribe(&packet_observer.received, filter);
-    member.receive(packet);
+    member.receive(&packet);
     assert(packet_observer.calls == 1 && member.running && !master.running);
     assert(member.rx_packets == 6 && member.rx_dropped == 4);
-    member.receive(packet);
+    member.receive(&packet);
     assert(packet_observer.calls == 1 && member.rx_packets == 7 && member.rx_dropped == 5);
     member.unsubscribe(&packet_observer.received);
     master.disabled = false;
@@ -1457,13 +1457,13 @@ unittest
     Completion completion;
     packet.vlan_tag = VlanTag._8100;
     packet.vlan = 42;
-    assert(!master.classify_vlan(packet, port));
-    assert(!master.prepare_egress(packet, port));
+    assert(!master.classify_vlan(&packet, port));
+    assert(!master.prepare_egress(&packet, port));
     assert(port.pvid(42) is null);
-    assert(master.classify_vlan(packet, port));
-    assert(master.prepare_egress(packet, port));
+    assert(master.classify_vlan(&packet, port));
+    assert(master.prepare_egress(&packet, port));
     packet.vlan = 0;
-    int tag = master.transmit(packet, &completion.completed, null);
+    int tag = master.transmit(&packet, &completion.completed, null);
     assert(tag > 0 && member.pending);
     port.destroy();
     assert(!member.pending && completion.calls == 1 && completion.state == MessageState.aborted);
@@ -1489,15 +1489,15 @@ unittest
     packet.eth.src = MACAddress(2, 0, 0, 0, 0, 9);
     packet.eth.dst = master.mac;
     master._cpu.active = true;
-    master.cpu_port_incoming(packet);
-    ulong learned = master.source_address(packet);
+    master.cpu_port_incoming(&packet);
+    ulong learned = master.source_address(&packet);
     assert(master._address_table.get(learned) == master._cpu_port);
     master.detach_cpu_port();
     assert(master._address_table.get(learned) == -1);
     packet.eth.dst = packet.eth.src;
     packet.eth.src = master.mac;
     uint before = member.sends;
-    assert(master.transmit(packet, null, null) == 0);
+    assert(master.transmit(&packet, null, null) == 0);
     assert(member.sends == before + 1);
     port.destroy();
     master.destroy();
@@ -1541,7 +1541,7 @@ unittest
         reentrant.master = master;
         reentrant.destroy_master = mode % 4 == 1;
         packet.eth.dst = MACAddress(0xff, 0xff, 0xff, 0xff, 0xff, 0xff);
-        tag = master.transmit(packet, &reentrant.completed, null);
+        tag = master.transmit(&packet, &reentrant.completed, null);
         assert(tag > 0);
         if (mode % 4 < 2)
         {

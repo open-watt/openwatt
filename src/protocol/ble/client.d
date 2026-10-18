@@ -252,7 +252,7 @@ protected:
         f.kind = BLEFrameKind.advert;
         f.code = BLEAdvPDU.connect_ind;
 
-        _connect_handle = _iface.forward(p, &on_connect_complete);
+        _connect_handle = _iface.forward(&p, &on_connect_complete);
 
         if (_connect_handle < 0)
         {
@@ -284,7 +284,7 @@ protected:
             f.dst = _peer;
             f.kind = BLEFrameKind.control;
             f.code = BLEControl.disconnect;
-            _iface.forward(p);
+            _iface.forward(&p);
             _connected = false;
         }
 
@@ -317,7 +317,7 @@ protected:
         f.dst = _peer;
         f.kind = BLEFrameKind.att;
         f.code = pdu[0];
-        return _iface.forward(p) >= 0;
+        return _iface.forward(&p) >= 0;
     }
 
 private:
@@ -365,7 +365,7 @@ private:
             log.info("read_rsp: [ ", cast(void[])value, " ]");
     }
 
-    final package void incoming_frame(ref const Packet p, BaseInterface iface)
+    final package void incoming_frame(Packet* p, BaseInterface iface)
     {
         ref f = p.hdr!BLEFrame;
 

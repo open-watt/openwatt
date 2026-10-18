@@ -99,7 +99,7 @@ nothrow @nogc:
         return null;
     }
 
-    int enqueue(ref Packet packet, MessageCallback callback = null, const(QueuePolicy)* policy = null)
+    int enqueue(Packet* packet, MessageCallback callback = null, const(QueuePolicy)* policy = null)
     {
         PCP pcp = packet.pcp;
         bool dei = packet.dei;
@@ -414,15 +414,15 @@ unittest
     PriorityPacketQueue queue;
     queue.init(3, 1, PCP.vo);
 
-    assert(queue.enqueue(low) >= 0);
-    assert(queue.enqueue(low) >= 0);
+    assert(queue.enqueue(&low) >= 0);
+    assert(queue.enqueue(&low) >= 0);
     assert(queue.dequeue() !is null);
     assert(queue.dequeue() !is null);
 
-    assert(queue.enqueue(low) >= 0);
+    assert(queue.enqueue(&low) >= 0);
     assert(queue.dequeue() is null);
 
-    assert(queue.enqueue(urgent) >= 0);
+    assert(queue.enqueue(&urgent) >= 0);
     assert(queue.dequeue() !is null);
 
     queue.set_capacity(5, 1, PCP.vo);
@@ -439,7 +439,7 @@ unittest
     deadline.priority_escalation_after = 100;
     deadline.deadline_after = 200;
 
-    int deadline_tag = queue.enqueue(deadline_packet, null, &deadline);
+    int deadline_tag = queue.enqueue(&deadline_packet, null, &deadline);
     assert(deadline_tag > 0);
     MonoTime due;
     assert(queue.next_due(due) && due == base + 100.msecs);
@@ -455,7 +455,7 @@ unittest
 
     deadline.priority_escalation_after = 300;
     deadline.deadline_after = 400;
-    deadline_tag = queue.enqueue(deadline_packet, null, &deadline);
+    deadline_tag = queue.enqueue(&deadline_packet, null, &deadline);
     assert(queue.is_queued(cast(ubyte)deadline_tag));
     queue.timeout_stale(base + 400.msecs);
     assert(!queue.is_queued(cast(ubyte)deadline_tag));
@@ -469,7 +469,7 @@ unittest
     int next_background_tag;
     foreach (i; 0 .. 32)
     {
-        int tag = queue.enqueue(background);
+        int tag = queue.enqueue(&background);
         assert(tag > 0);
         next_background_tag = newest_background_tag;
         newest_background_tag = tag;
@@ -478,13 +478,13 @@ unittest
     Packet routine;
     routine.init!RawFrame(data[]);
     routine.pcp = PCP.be;
-    assert(queue.enqueue(routine) > 0);
+    assert(queue.enqueue(&routine) > 0);
     assert(!queue.is_queued(cast(ubyte)newest_background_tag));
 
     Packet important;
     important.init!RawFrame(data[]);
     important.pcp = PCP.vo;
-    assert(queue.enqueue(important) > 0);
+    assert(queue.enqueue(&important) > 0);
     assert(!queue.is_queued(cast(ubyte)next_background_tag));
 
     queue.abort_all();
@@ -505,7 +505,7 @@ unittest
             assert(!queue.is_queued(cast(ubyte)tag) && queue.find_in_flight(cast(ubyte)tag) is null);
             if (calls == 1)
             {
-                replacement_tag = queue.enqueue(*replacement);
+                replacement_tag = queue.enqueue(replacement);
                 queue.timeout_stale(now);
             }
         }
@@ -514,28 +514,28 @@ unittest
     r.queue = &queue;
     r.replacement = &routine;
     r.now = base + 1000.msecs;
-    assert(queue.enqueue(deadline_packet, &r.terminal, &deadline) > 0);
+    assert(queue.enqueue(&deadline_packet, &r.terminal, &deadline) > 0);
     queue.timeout_stale(r.now);
     assert(r.calls == 1 && queue.is_queued(cast(ubyte)r.replacement_tag));
 
     r.calls = 0;
-    assert(queue.enqueue(deadline_packet, &r.terminal, &deadline) > 0);
+    assert(queue.enqueue(&deadline_packet, &r.terminal, &deadline) > 0);
     queue.abort_all();
     assert(r.calls == 1 && !queue.has_pending);
 
     // the same from an in-flight frame's abort
     r.calls = 0;
-    assert(queue.enqueue(important, &r.terminal) > 0);
+    assert(queue.enqueue(&important, &r.terminal) > 0);
     assert(queue.dequeue() !is null);
     queue.abort_all();
     assert(r.calls == 1 && !queue.has_pending && queue.in_flight_count == 0);
 
     // an evicted frame's callback refills its slot: the outer enqueue is refused, not admitted over the bound
     r.calls = 0;
-    assert(queue.enqueue(background, &r.terminal) > 0);
+    assert(queue.enqueue(&background, &r.terminal) > 0);
     foreach (i; 1 .. 32)
-        assert(queue.enqueue(routine) > 0);
-    assert(queue.enqueue(important) < 0);
+        assert(queue.enqueue(&routine) > 0);
+    assert(queue.enqueue(&important) < 0);
     size_t depth;
     foreach (pcp; 0 .. 8)
         depth += queue.queue_depth(cast(PCP)pcp);
@@ -560,7 +560,7 @@ unittest
             assert(queue.find_in_flight(cast(ubyte)tag) is null);
             assert(!queue.abort(cast(ubyte)tag));
             queue.complete(cast(ubyte)tag);
-            replacement = queue.enqueue(*packet);
+            replacement = queue.enqueue(packet);
             assert(replacement > 0 && replacement != tag);
         }
     }
@@ -577,7 +577,7 @@ unittest
         completion.packet = &packet;
         packet.pcp = PCP.bk;
         packet.dei = true;
-        int first = queue.enqueue(packet, &completion.done);
+        int first = queue.enqueue(&packet, &completion.done);
         assert(first == 1);
         packet.pcp = PCP.be;
         packet.dei = false;
@@ -587,7 +587,7 @@ unittest
         // Wrap the allocator while the first frame still owns tag 1.
         foreach (i; 0 .. (mode == 5 ? 223 : 254))
         {
-            int tag = queue.enqueue(packet);
+            int tag = queue.enqueue(&packet);
             assert(tag > 0);
             assert(queue.abort(cast(ubyte)tag));
         }
@@ -613,8 +613,8 @@ unittest
                 break;
             case 5:
                 foreach (i; 1 .. 32)
-                    assert(queue.enqueue(packet) > 0);
-                assert(queue.enqueue(packet) < 0);
+                    assert(queue.enqueue(&packet) > 0);
+                assert(queue.enqueue(&packet) < 0);
                 break;
             case 6:
                 queue.abort_all();

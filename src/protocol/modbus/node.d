@@ -302,7 +302,7 @@ private:
             restart();
     }
 
-    void incoming_packet(ref const Packet p, BaseInterface iface, PacketDirection dir, void* user_data) nothrow @nogc
+    void incoming_packet(Packet* p, BaseInterface iface, PacketDirection dir, void* user_data) nothrow @nogc
     {
         auto pdu = cast(const(ubyte)[])p.data;
         if (pdu.length < 1)
@@ -412,6 +412,6 @@ private:
         p.dei = dei;
 
         MessageCallback cb = type == ModbusFrameType.request ? &send_status : null;
-        return _iface.forward(p, cb);
+        return _iface.forward(&p, cb);
     }
 }

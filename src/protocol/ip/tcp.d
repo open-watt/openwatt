@@ -570,7 +570,7 @@ private void tcp_app_deliver(TcpPcb* pcb, const(ubyte)[] bytes, MonoTime rx_time
 // -------------------------------------------------------------------------
 // Ingress
 
-void tcp_input(ref IPStack stack, ref Packet pkt)
+void tcp_input(ref IPStack stack, Packet* pkt)
 {
     if (pkt.data.length < IPv4Header.sizeof + TcpHeader.sizeof)
         return;
@@ -1361,9 +1361,9 @@ void send_segment_raw(ref IPStack stack, ref const InetAddress src, ref const In
             pkt.init!RawFrame(buf[0 .. total]);
             pkt.checksum_pending = true;
             if (egress)
-                stack.output_v4_routed(pkt, egress, next_hop);
+                stack.output_v4_routed(&pkt, egress, next_hop);
             else
-                stack.output_v4(pkt);
+                stack.output_v4(&pkt);
             break;
         }
 
@@ -1389,7 +1389,7 @@ void send_segment_raw(ref IPStack stack, ref const InetAddress src, ref const In
                 h.dst = dst_mac;
                 h.src = use_src;
                 h.ether_type = EtherType.ow;
-                s.forward(pkt);
+                s.forward(&pkt);
             }
 
             EthernetStation station = dyn_cast!EthernetStation(egress);

@@ -81,7 +81,7 @@ private:
         // kernel-switched segment. Exotic packets are OW-encapsulated at the
         // bridge's station before they reach this sink, so only ethernet frames
         // arrive here. Anything else is a routing bug upstream.
-        int inject(ref Packet packet)
+        int inject(Packet* packet)
         {
             debug assert(packet.type == PacketType.ethernet);
             if (packet.type != PacketType.ethernet)
@@ -398,7 +398,7 @@ private:
                 packet.vlan = vlan_tci;
             }
 
-            o.bridge.cpu_port_incoming(packet);
+            o.bridge.cpu_port_incoming(&packet);
         }
     }
 

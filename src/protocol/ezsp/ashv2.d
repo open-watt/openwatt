@@ -246,7 +246,7 @@ protected:
         send_queued_messages();
     }
 
-    override int transmit(ref Packet packet, MessageCallback, const(QueuePolicy)*)
+    override int transmit(Packet* packet, MessageCallback, const(QueuePolicy)*)
     {
         if (packet.type != PacketType.raw)
             return -1;
@@ -611,7 +611,7 @@ private:
         {
             Packet p;
             p.init!RawFrame(data, timestamp);
-            incoming_packet(p);
+            incoming_packet(&p);
         }
     }
 

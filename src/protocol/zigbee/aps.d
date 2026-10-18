@@ -73,7 +73,7 @@ struct APSFrame
     ubyte last_hop_lqi;
     byte last_hop_rssi;
 
-    static ulong extract_src(ref const Packet p) pure nothrow @nogc
+    static ulong extract_src(const(Packet)* p) pure nothrow @nogc
     {
         ref aps = p.hdr!APSFrame();
         ulong addr = (aps.pan_id << 16) | aps.src;
@@ -82,7 +82,7 @@ struct APSFrame
         return addr;
     }
 
-    static ulong extract_dst(ref const Packet p) pure nothrow @nogc
+    static ulong extract_dst(const(Packet)* p) pure nothrow @nogc
     {
         ref aps = p.hdr!APSFrame();
         ulong addr = (aps.pan_id << 16) | aps.dst;

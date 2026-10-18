@@ -252,7 +252,7 @@ protected:
         return CompletionStatus.complete;
     }
 
-    override int transmit(ref Packet packet, MessageCallback, const(QueuePolicy)*)
+    override int transmit(Packet* packet, MessageCallback, const(QueuePolicy)*)
     {
         if (packet.type != PacketType.raw)
         {
@@ -523,7 +523,7 @@ private:
                     hdr.is_text = _pending_message_type == WSMessageType.text;
                     _status.rx_bytes += _rx_overhead; // incoming_packet() counts the payload; we add framing
                     _rx_overhead = 0;
-                    incoming_packet(p);
+                    incoming_packet(&p);
 
                     frame_start += msg_len;
                     _pending_message_type = WSMessageType.unknown;
@@ -548,7 +548,7 @@ private:
                 hdr.is_text = _pending_message_type == WSMessageType.text;
                 _status.rx_bytes += _rx_overhead;
                 _rx_overhead = 0;
-                incoming_packet(p);
+                incoming_packet(&p);
 
                 _pending_message_type = WSMessageType.unknown;
                 _decoded_bytes = 0;

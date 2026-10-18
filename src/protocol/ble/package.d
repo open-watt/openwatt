@@ -126,7 +126,7 @@ nothrow @nogc:
         ring(_service_doorbell);
     }
 
-    void on_ble_frame(ref Packet p, BaseInterface iface)
+    void on_ble_frame(Packet* p, BaseInterface iface)
     {
         ref f = p.hdr!BLEFrame;
 

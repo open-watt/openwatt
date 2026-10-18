@@ -2459,7 +2459,7 @@ nothrow @nogc:
                     super(collection_type_info!Link, id, flags);
                     _state = State.running;
                 }
-                override int transmit(ref Packet packet, MessageCallback callback, const(QueuePolicy)* policy) { return 0; }
+                override int transmit(Packet* packet, MessageCallback callback, const(QueuePolicy)* policy) { return 0; }
             }
 
             Link link = Collection!Link().create("ping-lifetime-test");

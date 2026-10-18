@@ -45,7 +45,7 @@ struct FirewallChains
 {
 nothrow @nogc:
 
-    Verdict run(HookPoint where, ref Packet pkt)
+    Verdict run(HookPoint where, Packet* pkt)
     {
         // TODO: walk chains[where].rules, return on first terminal verdict
         return Verdict.accept;

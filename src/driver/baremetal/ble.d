@@ -686,7 +686,7 @@ private:
         {
             Packet* p = _emu_responses[0];
             _emu_responses.remove(0);
-            on_incoming(*p);
+            on_incoming(p);
             p.free_clone();
         }
     }
@@ -763,7 +763,7 @@ private:
         f.code = report.adv_type == BLEAdvType.connectable ? BLEAdvPDU.adv_ind : BLEAdvPDU.adv_nonconn_ind;
         f.rssi = report.rssi;
 
-        on_incoming(p);
+        on_incoming(&p);
     }
 
     void on_conn_event(BLEConn conn, bool connected, BLEError error)
@@ -813,7 +813,7 @@ private:
                 f.dst = session.client;
                 f.kind = BLEFrameKind.control;
                 f.code = BLEControl.disconnected;
-                on_incoming(p);
+                on_incoming(&p);
 
                 session.active = false;
             }
@@ -903,7 +903,7 @@ private:
             f.dst = client;
             f.kind = BLEFrameKind.att;
             f.code = ATTOpcode.read_rsp;
-            on_incoming(p);
+            on_incoming(&p);
         }
 
         if (tag >= 0)
@@ -934,7 +934,7 @@ private:
             f.dst = client;
             f.kind = BLEFrameKind.att;
             f.code = ATTOpcode.write_rsp;
-            on_incoming(p);
+            on_incoming(&p);
         }
 
         if (tag >= 0)
@@ -964,7 +964,7 @@ private:
         f.kind = BLEFrameKind.att;
         f.code = ATTOpcode.notification;
 
-        on_incoming(p);
+        on_incoming(&p);
     }
 }
 

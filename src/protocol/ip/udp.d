@@ -322,7 +322,7 @@ static if (has_ipv6)
 
 // Demux a locally-delivered v4 UDP datagram to a matching PCB.
 // pkt.data is the entire IP datagram.
-void udp_input(ref IPStack stack, ref Packet pkt, BaseInterface iface, bool group_destination)
+void udp_input(ref IPStack stack, Packet* pkt, BaseInterface iface, bool group_destination)
 {
     if (pkt.data.length < IPv4Header.sizeof + UdpHeader.sizeof)
         return;
@@ -405,7 +405,7 @@ void udp_input(ref IPStack stack, ref Packet pkt, BaseInterface iface, bool grou
 static if (has_ipv6)
 {
     // Demux a locally-delivered v6 UDP datagram; l4_offset is past any extension headers.
-    void udp_input6(ref IPStack stack, ref Packet pkt, size_t l4_offset, BaseInterface iface)
+    void udp_input6(ref IPStack stack, Packet* pkt, size_t l4_offset, BaseInterface iface)
     {
         const(ubyte)[] datagram = cast(const(ubyte)[])pkt.data;
         ushort src_port, dst_port;
@@ -501,16 +501,16 @@ bool udp_output(ref IPStack stack, IPAddr src_addr, ushort src_port, IPAddr dst_
         {
             if (!iface)
                 return false;
-            stack.output_v4_routed(pkt, iface, dst_addr);
+            stack.output_v4_routed(&pkt, iface, dst_addr);
             return true;
         }
         if (iface && is_broadcast_for_interface(iface, dst_addr))
         {
-            stack.output_v4_routed(pkt, iface, dst_addr);
+            stack.output_v4_routed(&pkt, iface, dst_addr);
             return true;
         }
     }
-    stack.output_v4(pkt);
+    stack.output_v4(&pkt);
     return true;
 }
 
@@ -544,9 +544,9 @@ static if (has_ipv6)
         pkt.init!RawFrame(buf[0 .. total]);
         pkt.checksum_pending = true;
         if (scoped)
-            stack.output_v6_routed(pkt, iface, dst_addr);
+            stack.output_v6_routed(&pkt, iface, dst_addr);
         else
-            stack.output_v6(pkt);
+            stack.output_v6(&pkt);
         return true;
     }
 
@@ -749,7 +749,7 @@ unittest
                 super(collection_type_info!Link, id, flags);
                 _state = State.running;
             }
-            override int transmit(ref Packet packet, MessageCallback callback, const(QueuePolicy)* policy) { return 0; }
+            override int transmit(Packet* packet, MessageCallback callback, const(QueuePolicy)* policy) { return 0; }
         }
 
         Link link_a = Collection!Link().create("udp6-test-a");
@@ -795,30 +795,30 @@ unittest
         Packet pkt;
         total = write_udp6(buffer[], src, 4000, local, 5540, payload[]);
         pkt.init!RawFrame(buffer[0 .. total]);
-        udp_input6(stack, pkt, IPv6Header.sizeof, link_a);
+        udp_input6(stack, &pkt, IPv6Header.sizeof, link_a);
         assert(on_a.recv_queue.length == 1 && on_b.recv_queue.length == 0);
         assert(on_a.recv_queue[0].src == InetAddress(src, 4000, 0, zone_a) && on_a.recv_queue[0].data == payload[]);
         pkt.init!RawFrame(buffer[0 .. total]);
-        udp_input6(stack, pkt, IPv6Header.sizeof, link_b);
+        udp_input6(stack, &pkt, IPv6Header.sizeof, link_b);
         assert(on_a.recv_queue.length == 1 && on_b.recv_queue.length == 1);
         assert(on_b.recv_queue[0].src == InetAddress(src, 4000, 0, zone_b));
 
         // a connected wildcard receiver admits its peer only on the connected zone
         total = write_udp6(buffer[], src, 4000, local, probe.local_port, payload[]);
         pkt.init!RawFrame(buffer[0 .. total]);
-        udp_input6(stack, pkt, IPv6Header.sizeof, link_b);
+        udp_input6(stack, &pkt, IPv6Header.sizeof, link_b);
         assert(probe.recv_queue.length == 0);
         pkt.init!RawFrame(buffer[0 .. total]);
-        udp_input6(stack, pkt, IPv6Header.sizeof, link_a);
+        udp_input6(stack, &pkt, IPv6Header.sizeof, link_a);
         assert(probe.recv_queue.length == 1);
 
         // no receiver on the port, and a multicast group nobody joined
         total = write_udp6(buffer[], src, 4000, local, 5541, payload[]);
         pkt.init!RawFrame(buffer[0 .. total]);
-        udp_input6(stack, pkt, IPv6Header.sizeof, link_a);
+        udp_input6(stack, &pkt, IPv6Header.sizeof, link_a);
         total = write_udp6(buffer[], src, 4000, dst, 5540, payload[]);
         pkt.init!RawFrame(buffer[0 .. total]);
-        udp_input6(stack, pkt, IPv6Header.sizeof, link_a);
+        udp_input6(stack, &pkt, IPv6Header.sizeof, link_a);
         assert(on_a.recv_queue.length == 1 && on_b.recv_queue.length == 1);
 
         // a saturated receiver drops silently and stays bound
@@ -826,7 +826,7 @@ unittest
         foreach (_; 0 .. UdpPcb.max_queued + 1)
         {
             pkt.init!RawFrame(buffer[0 .. total]);
-            udp_input6(stack, pkt, IPv6Header.sizeof, link_a);
+            udp_input6(stack, &pkt, IPv6Header.sizeof, link_a);
         }
         assert(on_a.recv_queue.length == UdpPcb.max_queued);
 

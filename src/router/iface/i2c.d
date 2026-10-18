@@ -43,7 +43,7 @@ nothrow @nogc:
     I2CFrameType type;
     I2CFrameFlags flags;
 
-    static ulong extract_src(ref const Packet packet) pure
+    static ulong extract_src(const(Packet)* packet) pure
     {
         ref const frame = packet.hdr!I2CFrame;
         ulong address = frame.type == I2CFrameType.response ? universal_address(frame) : 0;
@@ -52,7 +52,7 @@ nothrow @nogc:
         return address;
     }
 
-    static ulong extract_dst(ref const Packet packet) pure
+    static ulong extract_dst(const(Packet)* packet) pure
     {
         ref const frame = packet.hdr!I2CFrame;
         ulong address = frame.type == I2CFrameType.request ? universal_address(frame) : 0;
@@ -64,7 +64,7 @@ nothrow @nogc:
     static bool is_multicast(ulong address) pure
         => (address & 0x3FF) == 0;
 
-    static ptrdiff_t encode_ow_header(ref const Packet packet, ubyte[] buffer)
+    static ptrdiff_t encode_ow_header(const(Packet)* packet, ubyte[] buffer)
     {
         if (buffer.length < 8)
             return -1;
@@ -77,7 +77,7 @@ nothrow @nogc:
         return 8;
     }
 
-    static ptrdiff_t decode_ow_header(ref Packet packet, const(ubyte)[] header)
+    static ptrdiff_t decode_ow_header(Packet* packet, const(ubyte)[] header)
     {
         if (header.length < 8)
             return -1;
@@ -274,7 +274,7 @@ protected:
         super.update();
     }
 
-    override int transmit(ref Packet packet, MessageCallback callback, const(QueuePolicy)* policy)
+    override int transmit(Packet* packet, MessageCallback callback, const(QueuePolicy)* policy)
     {
         if (packet.type != PacketType.i2c)
         {
@@ -411,7 +411,7 @@ private:
                 frame.read_length = 0;
                 frame.type = I2CFrameType.response;
                 frame.flags = request.flags;
-                incoming_packet(response);
+                incoming_packet(&response);
             }
         }
         else
@@ -455,14 +455,14 @@ unittest
     frame.flags = I2CFrameFlags.ten_bit_address;
 
     ubyte[8] header;
-    assert(I2CFrame.encode_ow_header(packet, header[]) == 8);
-    assert(I2CFrame.encode_ow_header(packet, header[0 .. 7]) == -1);
+    assert(I2CFrame.encode_ow_header(&packet, header[]) == 8);
+    assert(I2CFrame.encode_ow_header(&packet, header[0 .. 7]) == -1);
 
     Packet decoded;
-    assert(I2CFrame.decode_ow_header(decoded, header[0 .. 7]) == -1);
-    assert(I2CFrame.decode_ow_header(decoded, header[]) == 8);
+    assert(I2CFrame.decode_ow_header(&decoded, header[0 .. 7]) == -1);
+    assert(I2CFrame.decode_ow_header(&decoded, header[]) == 8);
     ref result = decoded.hdr!I2CFrame;
     assert(result.sequence_number == 0x1234 && result.address == 0x351 && result.read_length == 7 &&
            result.type == I2CFrameType.request && result.flags == I2CFrameFlags.ten_bit_address);
-    assert(I2CFrame.extract_dst(packet) == I2CFrame.extract_dst(decoded));
+    assert(I2CFrame.extract_dst(&packet) == I2CFrame.extract_dst(&decoded));
 }

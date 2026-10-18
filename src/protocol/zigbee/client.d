@@ -176,7 +176,7 @@ nothrow @nogc:
             queue_policy_ptr = &queue_policy;
         }
 
-        return _interface.forward(p, progress_callback, queue_policy_ptr);
+        return _interface.forward(&p, progress_callback, queue_policy_ptr);
     }
 
     final ZigbeeResult send_message_async(ushort dst, ubyte dst_endpoint, ubyte src_endpoint, ushort profile_id, ushort cluster_id, const(void)[] message, PCP pcp = PCP.be, bool group = false)
@@ -664,7 +664,7 @@ protected:
         }
     }
 
-    final void incoming_packet(ref const Packet p, BaseInterface iface, PacketDirection dir, void*)
+    final void incoming_packet(Packet* p, BaseInterface iface, PacketDirection dir, void*)
     {
         // TODO: we should enhance the PACKET FILTER to do this work!
         ref aps = p.hdr!APSFrame;
@@ -781,7 +781,7 @@ protected:
         }
     }
 
-    ZDOReply handle_zdo_frame(ref const APSFrame aps, ref const Packet p)
+    ZDOReply handle_zdo_frame(ref const APSFrame aps, const(Packet)* p)
     {
         bool response_required = (aps.flags & APSFlags.zdo_response_required) != 0;
 
@@ -1303,7 +1303,7 @@ private:
 
     ZigbeeMessageHandler _message_handler;
 
-    void incoming_packet(ref const Packet p, ZigbeeNode iface, PacketDirection dir)
+    void incoming_packet(Packet* p, ZigbeeNode iface, PacketDirection dir)
     {
         // TODO: this seems inefficient!
         if (_message_handler)

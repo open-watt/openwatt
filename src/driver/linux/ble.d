@@ -331,7 +331,7 @@ package:
             f.code = BLEAdvPDU.adv_ind;
         f.rssi = ev.rssi;
 
-        on_incoming(p);
+        on_incoming(&p);
     }
 
 private:
@@ -515,7 +515,7 @@ private:
                     f.dst = session.client;
                     f.kind = BLEFrameKind.att;
                     f.code = buf[0];
-                    on_incoming(p);
+                    on_incoming(&p);
                     continue;
                 }
 
@@ -535,7 +535,7 @@ private:
                 f.dst = session.client;
                 f.kind = BLEFrameKind.control;
                 f.code = BLEControl.disconnected;
-                on_incoming(p);
+                on_incoming(&p);
 
                 session.active = false;
                 break;

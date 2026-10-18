@@ -1099,7 +1099,7 @@ private:
             ref hdr = p.init!RawFrame(bytes);
             hdr.is_text = is_text;
         }
-        return _transport.forward(p);
+        return _transport.forward(&p);
     }
 
     // a dispatched frame may restart the session and clear the hold, so each frame is taken
@@ -1531,7 +1531,7 @@ private:
         }
     }
 
-    void on_transport_packet(ref const Packet p, BaseInterface, PacketDirection, void*) nothrow @nogc
+    void on_transport_packet(Packet* p, BaseInterface, PacketDirection, void*) nothrow @nogc
     {
         if (p.type != PacketType.raw && p.type != PacketType.udp)
             return;
@@ -1787,7 +1787,7 @@ unittest
         }
         override bool tx_ready() const
             => pending < cap;
-        override int transmit(ref Packet packet, MessageCallback, const(QueuePolicy)*)
+        override int transmit(Packet* packet, MessageCallback, const(QueuePolicy)*)
         {
             if (refuse)
                 return -1;
@@ -2041,7 +2041,7 @@ unittest
             => frames.length < room;
         // a bounded link: the producer is invited when the test drains it, never inline
         override void tx_handler_changed() {}
-        override int transmit(ref Packet packet, MessageCallback, const(QueuePolicy)*)
+        override int transmit(Packet* packet, MessageCallback, const(QueuePolicy)*)
         {
             if (refuse)
                 return -1;
