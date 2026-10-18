@@ -8,8 +8,8 @@ through them and remove sections as they are absorbed.
 - A JSON frame may be one message or a JSON array of messages. A node sends value and log
   messages (`val`, `log`) as arrays, always, with no capability to opt out; handle each element in order as if it
   had arrived alone. Other frames are unchanged and are never reordered against the arrays. A
-  client may send arrays too. Done in openwatt-web and openwatt-droid on their `sync-bundles`
-  branches; a client without it drops every bundled value, so ship it before the firmware.
+  client may send arrays too. Done in openwatt-web e9de7b1 and openwatt-droid fd14532; a client
+  without it drops every bundled value.
 
 ## 2026-10-12: page pool on the `system` device
 

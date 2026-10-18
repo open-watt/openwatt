@@ -52,8 +52,7 @@ tick where JSON favours a frame per element.
 `hello` is the first frame in each direction: protocol version, capability bits, `max_frame`,
 node-id, role and a fresh 16-byte nonce for peering, then `segment`. It has a fixed size of about 40
 bytes, so it fits every link but raw CAN; a peer that cannot fit it fails to start rather than run
-without a handshake. The hostname and cluster follow in `identity`, the next frame; on the binary
-wire hello keeps their old slots empty so older decoders read on.
+without a handshake. The hostname and cluster follow in `identity`, the next frame.
 Capability names the verb families this build serves: `objects` (the object mirror), `model` (the
 data-model plane), `history`, `console`, `logs`, `time`, `console_session` and `templates`.
 Value and log messages travel bundled, several to a frame, handled in order: on the JSON encoder a
@@ -67,19 +66,18 @@ packet: its transport's `actual-mtu` less the carrier (a UDP endpoint uses the d
 1500-byte link without IP fragmentation) and less the sublayer header where the sublayer is armed.
 `max_frame` is the receiver's reassembly budget, 64 KiB (8 KiB on tiny targets) and never less than
 its `segment`. Each side sends no frame larger than the smaller of its own segment and the remote's
-`segment`; `segment` rides at the end of the tail, so a peer that predates it ignores it. A hello
+`segment`. A hello
 advertising either limit below 32 bytes, less than hello itself, restarts the session, and so does
 a send limit that falls below it while a fragmented message is pending.
 
 A binary message that does not fit is sent as `fragment` frames: a flags byte (`first` on the first,
 `more` on all but the last) and the next slice of the encoded message. Reassembly relies on the
 control plane being ordered and free of duplicates, so a fragment carries no id or offset; the
-receiver appends until the last and dispatches the whole message. A sender fragments only toward a
-remote whose hello reports protocol version 2 or later, checks the whole message against the
-remote's `max_frame` before the first fragment, and keeps one fragmented message pending at a time,
+receiver appends until the last and dispatches the whole message. A sender checks the whole message
+against the remote's `max_frame` before the first fragment, and keeps one fragmented message pending at a time,
 submitting fragments as the control window or the transport has room. While it is pending, other
 control messages are refused and logged, so two messages never interleave; data frames still flow.
-A message over the budget, toward an older peer, or in JSON is refused and logged, and the session
+A message over the budget, or in JSON, is refused and logged, and the session
 stands. A malformed fragment, a reassembly over the budget or a fragment nested in a fragment resets
 the session; hello is never fragmented.
 
@@ -186,8 +184,7 @@ with zero segments.
   device. A chain that is absent says nothing and changes nothing. Terminating each segment is
   what keeps those apart, since a chain is then never the empty string. An introduction omits the
   chain when nothing on the path carries a template, which costs a large unclassified device
-  nothing; a sender that cannot state a chain whole omits it rather than truncate it; and a
-  receiver that predates the field ignores it.
+  nothing; and a sender that cannot state a chain whole omits it rather than truncate it.
 - **`add {path, class:"component", peer?, tmpl}`** refreshes shape. It binds no node and consumes
   no handle; `path` names a component (the bare device path names the device itself) and `tmpl`,
   always present here, covers every node down to it. Existing handles carry values, never shape,

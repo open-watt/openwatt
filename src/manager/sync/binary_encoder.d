@@ -385,8 +385,7 @@ nothrow @nogc:
 
     // Outbound: model plane
 
-    // fixed size, so it fits the smallest segment; the names follow in identity, and their empty slots keep older
-    // decoders reading
+    // fixed size, so it fits the smallest segment; the names follow in identity
     override int encode_hello(SyncPeer peer)
     {
         import manager : get_module;
@@ -395,14 +394,10 @@ nothrow @nogc:
 
         begin_frame(Verb.hello);
         _buf.put_varint(model_protocol_version);
-        _buf.put_str(null);
         _buf ~= local_sync_caps;
         _buf.put_varint(peer.local_max_message);
-
-        // identity tail; pre-identity decoders stop at max_message and ignore it, and older ones stop at the nonce
         _buf.put_varint(node_id());
         _buf ~= peer.claim ? PeerRole.authority : get_module!SyncDiscoveryModule.local_role;
-        _buf.put_str(null);
         _buf.put_str(cast(const(char)[])peer.local_nonce());
         _buf.put_varint(peer.local_segment);
         return send_frame(peer);
@@ -513,7 +508,6 @@ nothrow @nogc:
         {
             _buf.put_varint(ft);
             _buf.put_str(e.access != Access.read ? enum_key_name!Access(e.access) : null);
-            _buf.put_str(null); // Version 1 reserved this slot for sampling mode.
 
             Variant v;
             ulong t_ms = 0;
@@ -877,29 +871,15 @@ nothrow @nogc:
             {
                 import manager.sync.discovery : PeerRole;
 
-                uint ver = cast(uint)r.varint();
-                r.str();    // the hostname's slot; it arrives in identity
+                r.varint();     // the protocol version
                 ubyte caps = r.u8();
                 uint max_message = cast(uint)r.varint();
-
-                ulong nid = 0;
-                PeerRole role;
-                const(ubyte)[] nonce;
-                uint segment = 0;
-                if (!r.fail && r.more)
-                {
-                    nid = r.varint();
-                    ubyte rb = r.u8();
-                    if (rb <= PeerRole.max)
-                        role = cast(PeerRole)rb;
-                    r.str();    // the cluster's slot; it arrives in identity
-                    if (!r.fail && r.more)
-                        nonce = cast(const(ubyte)[])r.str();
-                    if (!r.fail && r.more)
-                        segment = cast(uint)r.varint();
-                }
+                ulong nid = r.varint();
+                ubyte rb = r.u8();
+                const(ubyte)[] nonce = cast(const(ubyte)[])r.str();
+                uint segment = cast(uint)r.varint();
                 if (!r.fail)
-                    sync.inbound_hello(peer, ver, caps, max_message, nid, role, nonce, segment);
+                    sync.inbound_hello(peer, caps, max_message, nid, rb <= PeerRole.max ? cast(PeerRole)rb : PeerRole.none, nonce, segment);
                 break;
             }
 
@@ -926,7 +906,7 @@ nothrow @nogc:
                 const(char)[] cluster = r.str();
                 uint priority = cast(uint)r.varint();
                 const(char)[] auth = r.str();
-                const(char)[] key = r.more ? r.str() : null;
+                const(char)[] key = r.str();
                 if (!r.fail)
                     sync.inbound_claim(peer, seq, cluster, priority, auth, key);
                 break;
@@ -1015,15 +995,11 @@ nothrow @nogc:
                 {
                     ft = cast(uint)r.varint();
                     access = r.str();
-                    r.str();
                     v = r.variant();
                     t_ms = r.varint();
                 }
-                const(char)[] templates;
-                if (r.more())
-                    peer_id = r.varint();
-                if (r.more())
-                    templates = r.str();
+                peer_id = r.varint();
+                const(char)[] templates = r.str();
                 if (!r.fail)
                 {
                     Variant* value = has_element ? &v : null;
@@ -1575,29 +1551,4 @@ unittest
     Reader t = Reader(buf[0 .. 3]);
     t.variant();
     assert(t.fail);
-
-    Reader old_add = Reader(null);
-    ulong peer_id = old_add.more ? old_add.varint() : 0;
-    assert(peer_id == 0 && !old_add.fail);
-
-    buf.clear();
-    buf.put_varint(0x0123_4567_89AB_CDEF);
-    Reader scoped_add = Reader(buf[]);
-    peer_id = scoped_add.more ? scoped_add.varint() : 0;
-    assert(peer_id == 0x0123_4567_89AB_CDEF && !scoped_add.fail);
-
-    buf.clear();
-    buf.put_varint(0);
-    buf.put_str("/Port/EnergyMeter/");
-    Reader templated_add = Reader(buf[]);
-    peer_id = templated_add.more ? templated_add.varint() : 0;
-    const(char)[] templates = templated_add.more ? templated_add.str() : null;
-    assert(peer_id == 0 && templates == "/Port/EnergyMeter/" && !templated_add.fail && !templated_add.more);
-
-    buf.clear();
-    buf.put_varint(9);
-    Reader untemplated_add = Reader(buf[]);
-    peer_id = untemplated_add.more ? untemplated_add.varint() : 0;
-    templates = untemplated_add.more ? untemplated_add.str() : null;
-    assert(peer_id == 9 && templates is null && !untemplated_add.fail);
 }
