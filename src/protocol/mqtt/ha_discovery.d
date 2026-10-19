@@ -279,7 +279,8 @@ private:
         entity.availability.clear();
     }
 
-    void remove_entities(const(char)[] config_topic)
+    // a deleted entity's value is no longer known; a reconfigured one keeps its element
+    void remove_entities(const(char)[] config_topic, bool deleted)
     {
         Device device;
         for (size_t i = 0; i < _entities.length; )
@@ -290,8 +291,8 @@ private:
                 continue;
             }
             release_entity(_entities[i]);
-            if (_entities[i].state)
-                _entities[i].state.mark_gap();
+            if (deleted && _entities[i].state)
+                _entities[i].state.invalidate();
             device = _entities[i].device;
             _entities.removeSwapLast(i);
         }
@@ -301,8 +302,9 @@ private:
 
     void handle_config(ref const HADiscoveryTopic topic, const(char)[] config_topic, const(ubyte)[] payload)
     {
-        remove_entities(config_topic);
-        if (payload.empty || !g_app)
+        bool deleted = payload.empty || !g_app;
+        remove_entities(config_topic, deleted);
+        if (deleted)
             return;
 
         Variant root = parse_json(cast(const(char)[])payload);
@@ -1297,7 +1299,9 @@ unittest
     const(VoidEnumInfo)* updated_mode_info = mode.data_format.enum_info;
     assert(updated_mode_info && updated_mode_info.count == 4);
     assert(updated_mode_info.value_for("Eco").asLong == eco_value);
-    assert(mode.value.is_enum && mode.value.get_enum_info() is updated_mode_info);
+    assert(!mode.has_value);    // a new format discards the value; the next state restores it
+    discovery.handle_publish("meter/mode", cast(const(ubyte)[])"Eco", getTime());
+    assert(mode.value.is_enum && mode.value.get_enum_info() is updated_mode_info && mode.value.asLong == eco_value);
 
     static immutable string bundled_config =
         `{"dev":{"ids":["meter-01"],"name":"Main Meter"},"o":{"name":"meter-fw"},"cmps":{` ~

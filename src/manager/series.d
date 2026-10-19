@@ -29,6 +29,7 @@ import urt.string : String;
 import urt.time;
 import urt.traits : is_boolean, is_some_float, is_some_int, Unqual;
 import urt.typereg : find_type_details, TypeDetails;
+import urt.util : log2;
 import urt.variant;
 
 import manager.base : BaseObject;
@@ -515,6 +516,7 @@ nothrow @nogc:
 enum ubyte ows_codec_raw = 0;
 enum ubyte ows_codec_zlib = 1;
 enum ubyte first_registered_codec = 2;
+enum ubyte codec_untried = 0xFF;    // RAM only: never packed or flushed; ows_codec_raw once packing declined
 
 struct SeriesCodec
 {
@@ -547,13 +549,16 @@ struct Bucket
 {
     ulong first_index;
     ulong first_tick;
+    ulong end_tick;    // the last record's tick while open; once retired, when its final value stopped holding
     ulong file_offset; // container file offset of the encoded image; 0 = never flushed
-    uint last_offset;
     uint count;
     uint capacity;     // open builder only; == count once sealed
+    uint heap_used;
+    uint packed_bytes; // size of the encoded image, in RAM and/or on disk
     FormatId format = FormatId.invalid; // stamped at creation; a format change rolls the bucket
-    bool follows_gap;  // <- we should steal a bit for this!
-    bool sealed;       // tail retired: the raw side is one immutable image
+    ushort refs;       // readers borrowing the raw side; the open tail is implicitly protected
+    ubyte codec = codec_untried;   // of the encoded image; ows_codec_raw = the raw image itself
+    private ubyte _bits;
 
     // The residency entry: samples/offsets/heap are the raw side, packed the encoded side,
     // file_offset the same encoded image on disk. An open bucket is a builder whose planes
@@ -565,22 +570,52 @@ struct Bucket
     void* samples;
     uint* offsets;     // null when regular
     void* heap;        // dynamic-record series: 2-aligned len-prefixed values, dedup'd per bucket
-    uint heap_used;
-    uint heap_capacity;
     void* packed;
-    uint packed_bytes;  // size of the encoded image, in RAM and/or on disk
-    ushort refs;        // readers borrowing the raw side; the open tail is implicitly protected
-    ubyte codec;        // codec of the encoded image; ows_codec_raw = the raw image itself
-    bool pack_declined; // codecs tried and beaten by raw, or the file holds it raw; don't retry
+
+    enum Bits : ubyte
+    {
+        ended    = 1 << 0,  // the final value stopped holding at end_tick; what follows begins after a gap
+        sealed   = 1 << 1,  // tail retired: the raw side is one immutable image
+        heap_log = 0xF0,    // open builder's heap capacity, 64 << n, while it has a heap
+    }
 
 pure nothrow @nogc:
-    ulong last_tick() const => first_tick + last_offset;
+    bool ended() const => (_bits & Bits.ended) != 0;
+    void ended(bool v) { set_bit(Bits.ended, v); }
+    bool sealed() const => (_bits & Bits.sealed) != 0;
+    void sealed(bool v) { set_bit(Bits.sealed, v); }
+
+    uint heap_capacity() const
+        => heap ? 64u << (_bits >> 4) : 0;
+    void heap_capacity(uint cap)
+    {
+        debug assert(!cap || (cap >= 64 && cap <= 0x1_0000 && !(cap & (cap - 1))), "a heap grows from 64 by doubling, to 64K");
+        _bits = cast(ubyte)((_bits & ~Bits.heap_log) | (cap ? (log2(cap) - 6) << 4 : 0));
+    }
+
+    ulong last_tick() const => end_tick;
     SysTime first_time() const => from_unix_time_ns(first_tick * 1000);
     SysTime last_time() const => from_unix_time_ns(last_tick * 1000);
     SysTime get_time(size_t i) const => from_unix_time_ns((first_tick + (offsets ? offsets[i] : i)) * 1000);
 
     bool resident() const => samples !is null || packed !is null;
 
+    // the final value stopped holding at tick; a regular series' value holds until its next record was due
+    void end_at(ulong tick)
+    {
+        if (format_info(format).regular)
+            tick = first_tick + count;
+        if (tick > end_tick)
+            end_tick = tick;
+    }
+
+private:
+    void set_bit(Bits bit, bool v)
+    {
+        _bits = cast(ubyte)(v ? _bits | bit : _bits & ~bit);
+    }
+
+public:
     // sealed raw image size; the offsets plane's presence follows the format, not the
     // (possibly dropped) pointer
     uint image_bytes() const
@@ -589,6 +624,7 @@ pure nothrow @nogc:
         return (f.regular ? 0 : count * cast(uint)uint.sizeof) + count * f.stride + heap_used;
     }
 }
+version (D_LP64) static assert(Bucket.sizeof == 88);
 
 struct CursorSlot
 {
@@ -653,6 +689,33 @@ nothrow @nogc:
         }
         cursors ~= CursorSlot(position, null, id, pin);
         return id;
+    }
+
+    // the one way a bucket's end changes: continuing into the next record, or ended at a gap; a
+    // flushed bucket's block on disk follows
+    void end_bucket(Bucket* b, ulong tick, bool gap)
+    {
+        b.end_at(tick);
+        if (gap)
+            b.ended = true;
+        if (b.file_offset && container)
+            container.update_end(*b);
+    }
+
+    // the final value stopped holding at tick: the tail ends there and seals, and the next write
+    // rolls after the gap; an empty tail is recycled so the last bucket with records ends
+    void end_tail(ulong tick)
+    {
+        if (buckets.length && !buckets[$-1].count)
+        {
+            free_bucket(buckets[$-1]);
+            buckets.popBack();
+        }
+        if (!buckets.length)
+            return;
+        Bucket* b = buckets[$-1];
+        end_bucket(b, tick, true);
+        seal(b);    // a failed seal leaves it open, and ended still rolls the next write
     }
 
     void release_cursor(ubyte id)
@@ -793,7 +856,6 @@ nothrow @nogc:
         b.samples = p + offs_bytes;
         b.heap = b.heap_used ? p + offs_bytes + rec_bytes : null;
         b.capacity = b.count;
-        b.heap_capacity = b.heap_used;
         // pack now if nothing borrows the raw side; otherwise the last release_ref packs
         try_pack(b);
         return true;
@@ -805,7 +867,7 @@ nothrow @nogc:
     // the canonical encoded copy and codec/packed_bytes describe it.
     void try_pack(Bucket* b)
     {
-        if (b.packed || b.pack_declined || b.file_offset || !b.sealed || !b.count || !g_num_codecs)
+        if (b.codec != codec_untried || b.file_offset || !b.sealed || !b.count || !g_num_codecs)
             return;
         const(DataFormat)* fmt = format_info(b.format);
         RecordBlock blk = block_view(b);
@@ -839,7 +901,7 @@ nothrow @nogc:
             break;
         }
         if (!b.packed)
-            b.pack_declined = true;
+            b.codec = ows_codec_raw;
     }
 
     // repopulate the raw side from the packed image, or from the container for a bucket
@@ -927,7 +989,6 @@ nothrow @nogc:
         b.offsets = null;
         b.heap = null;
         b.capacity = 0;
-        b.heap_capacity = 0;
     }
 
     void free_bucket(Bucket* b)
@@ -970,7 +1031,7 @@ nothrow @nogc:
             if (!b.packed)
             {
                 b.packed_bytes = 0;
-                b.codec = 0;
+                b.codec = ows_codec_raw;
             }
             ++i;
         }
@@ -997,7 +1058,6 @@ private:
         b.samples = cast(ubyte*)base + offs_bytes;
         b.heap = b.heap_used ? cast(ubyte*)base + offs_bytes + rec_bytes : null;
         b.capacity = b.count;
-        b.heap_capacity = b.heap_used;
     }
 }
 
@@ -1218,6 +1278,7 @@ private:
 package immutable ubyte[ValueType.max + 1] g_type_stride = [ 1, 1, 1, 2, 2, 4, 4, 8, 8, 4, 8, 1, 0 ];
 
 package __gshared SeriesCodec[8] g_codecs;
+static assert(first_registered_codec + g_codecs.length <= codec_untried);
 package __gshared ubyte g_num_codecs;
 
 __gshared Array!(DataFormat*) g_formats;

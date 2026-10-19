@@ -1049,6 +1049,17 @@ decisions are in [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md). The
   the classes are separated by recorder but every recorder retains alike. This is the last thing
   between the current state and leaving recording on indefinitely.
 
+- **Series files in another format are truncated**: `SeriesContainer.open_` discards any `.ows`
+  file that is not the current version and logs it at error level. That is the policy while the
+  format is still moving; once it settles, an older file must migrate (with a commit boundary,
+  such as writing a converted copy before switching) or be refused, never silently lost.
+
+- **Minimise `Bucket`'s layout**: it is held per bucket of every stored element. `capacity` only
+  means anything while a bucket is open (a sealed one has `capacity == count`), `_bits` has a spare
+  bit and the struct four bytes of tail padding, and the residency pointers (`samples`, `offsets`,
+  `heap`, `packed`) are not all needed in every state. Measure the population first; only the
+  64-bit end in #862 forced a change so far.
+
 - **Make the container complete**: `ows` v0 cannot flush user types or enum identity (both need
   name binding in the block header) or domain-clocked series (need anchor blocks for the clock), so
   those series stop at RAM. Adoption under live cursors is unresolved (`src/manager/ows.d` header):

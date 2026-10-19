@@ -82,6 +82,7 @@ nothrow @nogc:
                 return; // disk trouble; sealed buckets stay resident, retry next flush
             flush_pos = 0;  // adopted buckets carry their offsets; the loop walks past them
         }
+        container.flush_end();  // a held end with no successor to carry it retries here
 
         ulong now = unixTimeNs(getSysTime()) / 1000;
         while (flush_pos < h.buckets.length)

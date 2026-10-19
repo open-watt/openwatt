@@ -360,7 +360,7 @@ nothrow @nogc:
         static if (has_gpio_sampler)
         {
             if (_watched)
-                _element.mark_gap();
+                _element.invalidate();
             detach_watch();
             _sampler.close();
         }
@@ -899,10 +899,10 @@ private:
             _stream_first_tick = first_tick;
             _have_stream = true;
 
-            // a restart resumes into the retained series; force a fresh bucket so the new stream's low
-            // relative ticks can't underflow the old bucket's offset base (cross-segment wall: TODO)
+            // a restart resumes into the retained series after a gap: the old bucket ends, so the new
+            // stream's low relative ticks can't underflow its offset base (cross-segment wall: TODO)
             if (_element.record_count > 0)
-                _element.mark_gap();
+                _element.invalidate();
 
             ulong tick_c;
             SysTime wall_c;

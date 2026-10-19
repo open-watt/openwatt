@@ -27,7 +27,7 @@ module manager.ows;
 
 import urt.array;
 import urt.file;
-import urt.log : writeWarning;
+import urt.log : writeError, writeWarning;
 import urt.mem.alloc;
 import urt.si.unit : ScaledUnit;
 
@@ -43,7 +43,7 @@ bool container_serialisable(ref const DataFormat f)
 struct FileHeader
 {
     char[4] magic = "OWSG";
-    ubyte version_ = 1;
+    ubyte version_ = 2;
     ubyte pad;
     ushort header_bytes = FileHeader.sizeof;  // offset of the first block; the header may grow
     ubyte[8] reserved;
@@ -60,7 +60,7 @@ nothrow @nogc:
     ulong first_index;
     ulong last_index;    // inclusive
     ulong first_tick;    // usecs; also the time base of the offsets plane
-    ulong last_tick;     // inclusive
+    ulong last_tick;     // when the final value stopped holding: the gap's start if ended, else at most the next block's start
     uint payload_bytes;
     ushort header_bytes; // offset from block start to the payload; covers any format header and extensions
     ubyte flags;         // Flags
@@ -71,7 +71,7 @@ nothrow @nogc:
     enum Flags : ubyte
     {
         irregular   = 1 << 0,  // offsets plane precedes the records
-        follows_gap = 1 << 1,
+        ended       = 1 << 1,  // a gap follows this block, from last_tick
     }
 
     uint count() const pure
@@ -115,10 +115,21 @@ nothrow @nogc:
 
         FileHeader fh;
         size_t bytes;
-        if (read_at(_file, (cast(void*)&fh)[0 .. FileHeader.sizeof], 0, bytes) != Result.success
-            || bytes < FileHeader.sizeof)
+        bool fresh = read_at(_file, (cast(void*)&fh)[0 .. FileHeader.sizeof], 0, bytes) != Result.success
+                  || bytes < FileHeader.sizeof;
+        if (!fresh && (fh.magic != FileHeader.init.magic || fh.version_ != FileHeader.init.version_))
         {
-            // new file
+            writeError("series container: TRUNCATED ", path, ": its history is DISCARDED (format version ",
+                       fh.version_, ", magic '", fh.magic[], "'; this build reads version ", FileHeader.init.version_, ")");
+            if (set_size(_file, 0) != Result.success)
+            {
+                close_();
+                return false;
+            }
+            fresh = true;
+        }
+        if (fresh)
+        {
             fh = FileHeader.init;
             if (write_at(_file, (cast(const(void)*)&fh)[0 .. FileHeader.sizeof], 0, bytes) != Result.success)
             {
@@ -128,11 +139,6 @@ nothrow @nogc:
             _end = FileHeader.sizeof;
             store.container = &this;
             return true;
-        }
-        if (fh.magic != "OWSG" || fh.version_ != 1)
-        {
-            close_();
-            return false;
         }
 
         Array!(Bucket*) adopted;
@@ -173,13 +179,12 @@ nothrow @nogc:
                 b.first_index = next_index;
                 b.count = hdr.count;
                 b.first_tick = hdr.first_tick;
-                b.last_offset = cast(uint)(hdr.last_tick - hdr.first_tick);
+                b.end_tick = hdr.last_tick;
                 b.heap_used = hdr.heap_bytes;
                 b.codec = hdr.codec;
                 b.packed_bytes = hdr.payload_bytes;
-                b.pack_declined = hdr.codec == ows_codec_raw;
                 b.sealed = true;
-                b.follows_gap = (hdr.flags & BlockHeader.Flags.follows_gap) != 0;
+                b.ended = (hdr.flags & BlockHeader.Flags.ended) != 0;
                 b.file_offset = offset + hdr.header_bytes;
                 adopted ~= b;
                 next_index += hdr.count;
@@ -207,11 +212,43 @@ nothrow @nogc:
         return true;
     }
 
+    // the newest block's end changed after it was written; the container holds the change until
+    // its header records it, retried by flush_end, the next append and close
+    void update_end(ref const Bucket b)
+    {
+        _end_tick = b.end_tick;
+        _end_gap = b.ended;
+        _end_pending = true;
+        if (!flush_end())
+            writeWarning("series container: a block's end could not be written yet; retrying");
+    }
+
+    // false while the newest block's changed end has not reached its header
+    bool flush_end()
+    {
+        if (!_end_pending)
+            return true;
+        BlockHeader h;
+        if (!read_header(_tail, h))
+            return false;
+        h.last_tick = _end_tick;
+        h.flags = cast(ubyte)((h.flags & ~BlockHeader.Flags.ended) | (_end_gap ? BlockHeader.Flags.ended : 0));
+        if (!write_header(_tail, h))
+            return false;
+        _end_pending = false;
+        return true;
+    }
+
     void close_()
     {
         if (_open)
+        {
+            if (!flush_end())
+                writeWarning("series container: a block's end was never written; the gap is lost on disk");
             urt.file.close(_file);
+        }
         _open = false;
+        _end_pending = false;
         _tail = 0;
         _end = 0;
         _fmt_anchor = 0;
@@ -222,6 +259,8 @@ nothrow @nogc:
     bool append(Bucket* b)
     {
         debug assert(b.sealed && b.count && !b.file_offset && b.resident);
+        if (!flush_end())
+            return false;
         const(DataFormat)* f = format_info(b.format);
         debug assert(container_serialisable(*f));
 
@@ -262,11 +301,11 @@ nothrow @nogc:
         h.last_tick = b.last_tick;
         h.payload_bytes = cast(uint)payload.length;
         h.flags = cast(ubyte)((f.regular ? 0 : BlockHeader.Flags.irregular)
-                            | (b.follows_gap ? BlockHeader.Flags.follows_gap : 0));
+                            | (b.ended ? BlockHeader.Flags.ended : 0));
         h.codec = codec;
         h.heap_bytes = b.heap_used;
 
-        ubyte[BlockHeader.sizeof + BlockFormatHeader.sizeof] hbuf = void;
+        align(8) ubyte[BlockHeader.sizeof + BlockFormatHeader.sizeof] hbuf = void;
         *cast(BlockHeader*)hbuf.ptr = h;
         if (anchor)
             *cast(BlockFormatHeader*)(hbuf.ptr + BlockHeader.sizeof) = bf;
@@ -294,8 +333,7 @@ nothrow @nogc:
         if (!b.packed)
         {
             b.packed_bytes = cast(uint)payload.length;
-            b.codec = ows_codec_raw;
-            b.pack_declined = true; // the file is the canonical encoded copy; never re-pack
+            b.codec = ows_codec_raw;    // the file is the canonical encoded copy; never re-pack
         }
         return true;
     }
@@ -310,11 +348,33 @@ nothrow @nogc:
 
 private:
     File _file;
+    bool read_header(ulong offset, out BlockHeader h)
+    {
+        size_t bytes;
+        return read_at(_file, (cast(void*)&h)[0 .. BlockHeader.sizeof], offset, bytes) == Result.success
+            && bytes == BlockHeader.sizeof;
+    }
+
+    bool write_header(ulong offset, ref const BlockHeader h)
+    {
+        version (unittest)
+        {
+            if (g_fail_header_write)
+                return false;
+        }
+        size_t bytes;
+        return write_at(_file, (cast(const(void)*)&h)[0 .. BlockHeader.sizeof], offset, bytes) == Result.success
+            && bytes == BlockHeader.sizeof;
+    }
+
     BlockFormatHeader _afmt;
     ulong _fmt_anchor;
     ulong _tail;
     ulong _end;
+    ulong _end_tick;    // the newest block's changed end, while _end_pending
     bool _open;
+    bool _end_gap;
+    bool _end_pending;
 
     static FormatId register_block_format(ref const BlockFormatHeader bf)
     {
@@ -361,7 +421,7 @@ unittest
         {
             e.write_sample(i * 1.5, from_unix_time_ns((i + 1) * 1_000_000UL));
             if (i == 1)
-                e.mark_gap(); // second bucket
+                e.invalidate(e.last_update); // second bucket
         }
         assert(h.buckets.length == 2);
         h.seal(h.buckets[$-1]);
@@ -399,7 +459,7 @@ unittest
         assert(c.open_(path, *h));
         assert(h.buckets.length == 2 && h.head == 4);
         assert(!h.buckets[0].resident && h.buckets[0].sealed);
-        assert(h.buckets[1].follows_gap);
+        assert(h.buckets[0].ended);
 
         e.write_sample(9.0, from_unix_time_ns(5_000_000));
         assert(e.record_count == 5);
@@ -542,4 +602,113 @@ unittest
         e.teardown();
     }
     delete_file(fpath);
+}
+
+version (unittest)
+    private __gshared bool g_fail_header_write;
+
+static if (has_file_io)
+unittest
+{
+    import urt.time : from_unix_time_ns;
+    import manager.element;
+
+    static immutable DataFormat f64_held = DataFormat(ValueType.f64, SeriesKind.held);
+    enum ulong hour_ns = 3_600_000_000_000UL;
+    enum path = "ows_ends_unittest.tmp";
+    delete_file(path);
+
+    // a gap that begins after its block reached disk is written back to the block, two hours past
+    // the block's start, beyond any 32-bit offset
+    {
+        Element e;
+        e.format = register_format(f64_held);
+        SeriesStore* h = e.ensure_history();
+        SeriesContainer c;
+        assert(c.open_(path, *h));
+        e.write_sample(1.0, from_unix_time_ns(1_000_000));
+        h.seal(h.buckets[0]);
+        assert(c.append(h.buckets[0]));
+        e.invalidate(from_unix_time_ns(2 * hour_ns));
+        e.write_sample(2.0, from_unix_time_ns(3 * hour_ns));
+        h.seal(h.buckets[$-1]);
+        assert(c.append(h.buckets[$-1]));
+        c.close_();
+        h.container = null;
+        e.teardown();
+    }
+
+    bool adopted_gap()
+    {
+        Element e;
+        e.format = register_format(f64_held);
+        SeriesStore* h = e.ensure_history();
+        SeriesContainer c;
+        assert(c.open_(path, *h));
+        bool ok = h.buckets.length >= 2 && h.buckets[0].ended && !h.buckets[1].ended
+            && h.buckets[0].last_time == from_unix_time_ns(2 * hour_ns);
+        c.close_();
+        h.container = null;
+        e.teardown();
+        return ok;
+    }
+    assert(adopted_gap());
+
+    // a header write that fails is held and retried by the next append, so the gap still lands
+    {
+        Element e;
+        e.format = register_format(f64_held);
+        SeriesStore* h = e.ensure_history();
+        SeriesContainer c;
+        assert(c.open_(path, *h));
+        e.write_sample(4.0, from_unix_time_ns(4 * hour_ns));
+        h.seal(h.buckets[$-1]);
+        assert(c.append(h.buckets[$-1]));
+        g_fail_header_write = true;
+        e.invalidate(from_unix_time_ns(5 * hour_ns));
+        e.write_sample(5.0, from_unix_time_ns(6 * hour_ns));
+        h.seal(h.buckets[$-1]);
+        assert(!c.append(h.buckets[$-1]));    // the held end goes first, and still cannot
+        g_fail_header_write = false;
+        assert(c.append(h.buckets[$-1]));
+        c.close_();
+        h.container = null;
+        e.teardown();
+    }
+    {
+        Element e;
+        e.format = register_format(f64_held);
+        SeriesStore* h = e.ensure_history();
+        SeriesContainer c;
+        assert(c.open_(path, *h));
+        assert(h.buckets.length == 4 && h.buckets[2].ended && !h.buckets[3].ended);
+        assert(h.buckets[2].last_time == from_unix_time_ns(5 * hour_ns));
+        c.close_();
+        h.container = null;
+        e.teardown();
+    }
+
+    // a file in any other format is discarded on contact and recording starts afresh
+    {
+        File f;
+        size_t bytes;
+        assert(open(f, path, FileOpenMode.ReadWrite) == Result.success);
+        FileHeader fh;
+        fh.version_ = 1;
+        assert(write_at(f, (cast(const(void)*)&fh)[0 .. FileHeader.sizeof], 0, bytes) == Result.success);
+        close(f);
+    }
+    {
+        Element e;
+        e.format = register_format(f64_held);
+        SeriesStore* h = e.ensure_history();
+        SeriesContainer c;
+        assert(c.open_(path, *h));
+        assert(h.buckets.length == 0 && h.head == 0);
+        c.close_();
+        h.container = null;
+        e.teardown();
+    }
+
+    delete_file(path);
 }
