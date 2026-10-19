@@ -585,7 +585,9 @@ Every packet has a page, and its bytes come from one of three places:
 | already living elsewhere: an RX ring, a DMA, vendor or socket buffer, another packet's bytes | `StackPage!0` pointing at them |
 
 A misjudged `StackPage!N` costs the copy a keeper makes at refcount 0, never a fault. Egress never
-uses one: it has no headroom, so framing it always copies.
+uses one: it has no headroom, so framing it always copies. A header-only frame (a BLE connect or
+disconnect) is a `StackPage!0` even when it may be kept: it has no bytes to share, and a keeper's
+copy is the same single allocation a pool page would be.
 
 ### E.2 Packet points at its bytes; its page owns them
 
@@ -711,7 +713,7 @@ Each step leaves the tree no worse than before it and deletes what it replaces.
 | E4p (#858) | packets passed by pointer: every `ref Packet` and `ref const Packet` parameter, handler and delegate becomes `Packet*`, or `const(Packet)*` at look-only leaves | | `ref Packet` (about 200 sites, 60 files) |
 | E4b1 (#859) | the storage kinds: `StackPacket`, `packet_retain`, `packet_free`; `Packet` not copyable (folds #856); the bridge floods take a `StackPage!0` view over the source; router/iface core (9 sites) and non-BLE drivers (6) | E4p, urt #394 | the by-value copy fault (7 sites), `ethernet.d`'s and `endpoint.d`'s sender buffers, `clone`/`free_clone` |
 | E4b2 (#860) | IP stack: 10 senders on pool pages; `frame_and_send` borrows the inner packet | E4b1 | `ubyte[1500]` in `icmp`, `tcp`, `udp`; `MessageBuffer` in IGMP and MLD; the TCP flood's per-station rebuild |
-| E4b3 | BLE: 8 fresh frames on pool pages, 3 vendor and socket borrows | E4b1 | the `ubyte[513]`/`[250]` notification and read buffers |
+| E4b3 (#861) | BLE: 8 fresh frames on pool pages, 3 vendor and socket borrows | E4b1 | the `ubyte[513]`/`[250]` notification and read buffers |
 | E4b4 | fieldbus and application protocols: CAN, OBD, CPC, Spinel, EZSP, Zigbee, Modbus, TWC, WebSocket, sync (11 fresh, 12 borrowed) | E4b1 | Modbus `send_packet`'s stack PDU, OBD's frame locals, the EZSP command buffer |
 | E4b5 | the remaining tests; no page-less packet is left | E4b2 to E4b4 | `init!T(buffer)`, `mutable_flag`/`page_flag`, #692 (closed as superseded) |
 | E3 | interfaces state their framing room; producers ask their egress for it | E4b5 | the default headroom on paths that know their framing |
