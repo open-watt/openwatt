@@ -718,6 +718,7 @@ Each step leaves the tree no worse than before it and deletes what it replaces.
 | E4b5 | the remaining tests; no page-less packet is left | E4b2 to E4b4 | `init!T(buffer)`, `mutable_flag`/`page_flag`, #692 (closed as superseded) |
 | E3 | interfaces state their framing room; producers ask their egress for it | E4b5 | the default headroom on paths that know their framing |
 | E4c | the remaining holders: BLE's `_emu_responses` shares; WPAN shares until DMA completion; Modbus keeps its validation bytes, not the request; TCP's Ethernet flood without a fixed source MAC takes a page per station, since its checksum differs per station | E4b5, the view decision (E.8) | `wpan.d`'s free of a frame the radio may still read |
+| E4v (deferred, last) | a kept view holds its parent: `init_view` records the source page in its header's `link`, and `packet_retain` of such a view allocates a header-only page referencing the parent instead of copying the bytes | E4b5 | the per-member copy when a flooded frame is queued; low value, since flooding is rare and the bridge usually knows the port |
 | E5 | mutators edit in place: IP, VLAN, Modbus, ASH, Ethernet, CPC, TWC, WebSocket | E4c, E2 | `frame_and_send`'s copy, ASH's and CPC's `Message.buffer`, Ethernet's `medium_tx` copy, the const-cast writes in `stack.d`, the unchecked fixed-buffer copies |
 
 E4 no longer waits for E2: a `StackPage!0` lends a ring or a local without a copy, so a borrowed
