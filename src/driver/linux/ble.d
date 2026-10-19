@@ -309,7 +309,7 @@ package:
         if (ev.addr_type == 0) // BR/EDR
             return;
 
-        Packet p;
+        StackPacket p;
         ref f = p.init!BLEFrame(eir);
         f.src = MACAddress(ev.addr[5], ev.addr[4], ev.addr[3],
                            ev.addr[2], ev.addr[1], ev.addr[0]);
@@ -331,7 +331,7 @@ package:
             f.code = BLEAdvPDU.adv_ind;
         f.rssi = ev.rssi;
 
-        on_incoming(&p);
+        on_incoming(&p.packet);
     }
 
 private:
@@ -509,13 +509,13 @@ private:
                 ptrdiff_t n = recv(session_fd(session), buf.ptr, buf.length, 0);
                 if (n > 0)
                 {
-                    Packet p;
+                    StackPacket p;
                     ref f = p.init!BLEFrame(buf[0 .. cast(size_t)n]);
                     f.src = session.peer;
                     f.dst = session.client;
                     f.kind = BLEFrameKind.att;
                     f.code = buf[0];
-                    on_incoming(&p);
+                    on_incoming(&p.packet);
                     continue;
                 }
 
@@ -529,13 +529,13 @@ private:
                 // orderly close or socket error: connection is gone
                 log.info("disconnected from ", session.peer);
 
-                Packet p;
+                StackPacket p;
                 ref f = p.init!BLEFrame(null);
                 f.src = _bd_addr;
                 f.dst = session.client;
                 f.kind = BLEFrameKind.control;
                 f.code = BLEControl.disconnected;
-                on_incoming(&p);
+                on_incoming(&p.packet);
 
                 session.active = false;
                 break;
