@@ -46,7 +46,7 @@ struct NeighbourCache(IP)
 nothrow @nogc:
 
     alias SendRequestDg = void delegate(IP target, BaseInterface iface) nothrow @nogc;
-    alias DrainDg       = void delegate(ref Packet pkt, BaseInterface iface, const(ubyte)[] link_addr) nothrow @nogc;
+    alias DrainDg       = void delegate(Packet* pkt, BaseInterface iface, const(ubyte)[] link_addr) nothrow @nogc;
 
     enum uint  retry_interval_ms       = 1000;
     enum ubyte max_retries             = 3;
@@ -174,7 +174,7 @@ nothrow @nogc:
     // Lookup; returns link_addr if reachable, null otherwise.
     // On miss, creates an incomplete entry, queues `pending`, kicks off resolution.
     // On in-flight, replaces the queued packet (single-slot).
-    const(ubyte)[] resolve(IP ip, BaseInterface iface, ref Packet pending)
+    const(ubyte)[] resolve(IP ip, BaseInterface iface, Packet* pending)
     {
         if (auto e = find(ip, iface))
         {
@@ -282,7 +282,7 @@ nothrow @nogc:
         => _entries[];
 
 private:
-    void queue_pending(ref NeighbourEntry!IP e, ref Packet pkt)
+    void queue_pending(ref NeighbourEntry!IP e, Packet* pkt)
     {
         if (e.pending_count == pending_queue_depth)
         {
@@ -321,7 +321,7 @@ private:
         }
         foreach (i; 0 .. e.pending_count)
         {
-            drain(*e.pending[i], e.iface, e.link_addr[0 .. e.link_addr_len]);
+            drain(e.pending[i], e.iface, e.link_addr[0 .. e.link_addr_len]);
             e.pending[i].free_clone();
         }
         e.pending_count = 0;

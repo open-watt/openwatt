@@ -104,9 +104,9 @@ ushort icmp_echo_send(ref IPStack stack, IPAddr destination, BaseInterface iface
     Packet packet;
     packet.init!RawFrame(buffer[]);
     if (iface && route.kind != RouteResult.Kind.local)
-        stack.output_v4_routed(packet, iface, route.next_hop);
+        stack.output_v4_routed(&packet, iface, route.next_hop);
     else
-        stack.output_v4(packet);
+        stack.output_v4(&packet);
     return sequence;
 }
 
@@ -127,7 +127,7 @@ void icmp_echo_cancel(ushort sequence)
 //
 // Suppresses errors for: multicast/broadcast original dst, ICMP-error replies
 // (loop avoidance), non-zero fragment offsets.
-void icmp_send_error(ref IPStack stack, ubyte type, ubyte code, ref const Packet original, uint code_data = 0)
+void icmp_send_error(ref IPStack stack, ubyte type, ubyte code, const(Packet)* original, uint code_data = 0)
 {
     if (original.data.length < IPv4Header.sizeof)
         return;
@@ -222,13 +222,13 @@ void icmp_send_error(ref IPStack stack, ubyte type, ubyte code, ref const Packet
 
     Packet pkt;
     pkt.init!RawFrame(buf[0 .. total]);
-    stack.output_v4(pkt);
+    stack.output_v4(&pkt);
 }
 
 
 // Process a locally-delivered ICMP datagram.
 // pkt.data is the entire IP datagram (IPv4 header + ICMP message).
-void icmp_input(ref IPStack stack, ref Packet pkt, BaseInterface iface = null)
+void icmp_input(ref IPStack stack, Packet* pkt, BaseInterface iface = null)
 {
     if (pkt.data.length < IPv4Header.sizeof + IcmpHeader.sizeof)
         return;
@@ -425,7 +425,7 @@ enum ushort echo_identifier = 0x4f57;
 __gshared ushort _next_echo_sequence = 1;
 __gshared Array!PendingEcho _pending_echoes;
 
-void handle_echo_request(ref IPStack stack, ref const Packet pkt, size_t ip_hdr_len)
+void handle_echo_request(ref IPStack stack, const(Packet)* pkt, size_t ip_hdr_len)
 {
     enum max_size = 1500;
     const ip = cast(const IPv4Header*)pkt.data.ptr;
@@ -461,7 +461,7 @@ void handle_echo_request(ref IPStack stack, ref const Packet pkt, size_t ip_hdr_
 
     Packet reply;
     reply.init!RawFrame(buf[0 .. datagram.length]);
-    stack.output_v4(reply);
+    stack.output_v4(&reply);
 }
 
 bool is_multicast_v4(IPAddr ip) pure
@@ -517,7 +517,7 @@ unittest
             super(collection_type_info!Link, id, flags);
             _state = State.running;
         }
-        override void medium_tx(ref Packet packet) { captured = cast(const(ubyte)[])packet.data; }
+        override void medium_tx(Packet* packet) { captured = cast(const(ubyte)[])packet.data; }
     }
     Link link = Collection!Link().create("icmp-echo-test-link");
     IPAddress address = Collection!IPAddress().create("icmp-echo-test-address");
@@ -562,7 +562,7 @@ unittest
         reply[22 .. 24] = nativeToBigEndian(internet_checksum(reply[20 .. $]));
         Packet packet;
         packet.init!RawFrame(reply[]);
-        icmp_input(stack, packet, link);
+        icmp_input(stack, &packet, link);
     }
     ip.src = IPAddr(192, 0, 2, 3).b;
     input();
@@ -594,14 +594,14 @@ unittest
     error[22 .. 24] = nativeToBigEndian(internet_checksum(error[20 .. $]));
     Packet packet;
     packet.init!RawFrame(error[]);
-    icmp_input(stack, packet, null);
+    icmp_input(stack, &packet, null);
     assert(results.errors == 0);
     error[22] ^= 1;
-    icmp_input(stack, packet, link);
+    icmp_input(stack, &packet, link);
     assert(results.errors == 0);
     error[22] ^= 1;
-    icmp_input(stack, packet, link);
-    icmp_input(stack, packet, link);
+    icmp_input(stack, &packet, link);
+    icmp_input(stack, &packet, link);
     assert(results.errors == 1);
 
     sequence = icmp_echo_send(stack, remote, link, &results.reply);

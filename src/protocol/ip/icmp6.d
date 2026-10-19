@@ -64,7 +64,7 @@ static assert(Icmp6Header.sizeof == 4);
 alias Echo6Handler = void delegate(IPv6Addr from, Duration rtt) nothrow @nogc;
 alias Echo6ErrorHandler = void delegate(IPv6Addr from, ubyte type, ubyte code, uint data) nothrow @nogc;
 
-void icmp6_send_error(ref IPStack stack, ubyte type, ubyte code, ref const Packet original, BaseInterface ingress, uint code_data = 0)
+void icmp6_send_error(ref IPStack stack, ubyte type, ubyte code, const(Packet)* original, BaseInterface ingress, uint code_data = 0)
 {
     if (!icmp6_error_allowed(stack, type, code, original))
         return;
@@ -122,9 +122,9 @@ void icmp6_send_error(ref IPStack stack, ubyte type, ubyte code, ref const Packe
     storeBigEndian(cast(ushort*)(message + 2), checksum);
 
     if (original_source.is_link_local && ingress)
-        stack.output_v6_routed(*response, ingress, original_source);
+        stack.output_v6_routed(response, ingress, original_source);
     else
-        stack.output_v6(*response);
+        stack.output_v6(response);
 }
 
 ushort icmp6_echo_send(ref IPStack stack, IPv6Addr destination, BaseInterface iface_hint, Echo6Handler handler, Echo6ErrorHandler error_handler = null)
@@ -173,9 +173,9 @@ ushort icmp6_echo_send(ref IPStack stack, IPv6Addr destination, BaseInterface if
     Packet packet;
     packet.init!RawFrame(buffer[]);
     if (iface_hint && route.kind != RouteResult6.Kind.local)
-        stack.output_v6_routed(packet, iface_hint, route.next_hop);
+        stack.output_v6_routed(&packet, iface_hint, route.next_hop);
     else
-        stack.output_v6(packet, iface_hint);
+        stack.output_v6(&packet, iface_hint);
     return sequence;
 }
 
@@ -191,7 +191,7 @@ void icmp6_echo_cancel(ushort sequence)
     }
 }
 
-void icmp6_input(ref IPStack stack, ref Packet packet, size_t offset, BaseInterface iface)
+void icmp6_input(ref IPStack stack, Packet* packet, size_t offset, BaseInterface iface)
 {
     if (offset < IPv6Header.sizeof || offset > packet.data.length || packet.data.length - offset < Icmp6Header.sizeof)
         return;
@@ -258,7 +258,7 @@ bool echo_sequence_pending(ushort sequence)
     return false;
 }
 
-bool icmp6_error_allowed(ref IPStack stack, ubyte type, ubyte code, ref const Packet original)
+bool icmp6_error_allowed(ref IPStack stack, ubyte type, ubyte code, const(Packet)* original)
 {
     if (original.data.length < IPv6Header.sizeof)
         return false;
@@ -289,7 +289,7 @@ bool icmp6_error_allowed(ref IPStack stack, ubyte type, ubyte code, ref const Pa
 bool multicast_error_allowed(ubyte type, ubyte code) pure
     => type == Icmp6Type.packet_too_big || (type == Icmp6Type.parameter_problem && code == 2);
 
-void handle_echo_request(ref IPStack stack, ref const Packet packet, size_t offset, size_t datagram_end, BaseInterface iface)
+void handle_echo_request(ref IPStack stack, const(Packet)* packet, size_t offset, size_t datagram_end, BaseInterface iface)
 {
     const ip = cast(const IPv6Header*)packet.data.ptr;
     IPv6Addr source = ip.dst_addr;
@@ -328,9 +328,9 @@ void handle_echo_request(ref IPStack stack, ref const Packet packet, size_t offs
         write_log(Severity.debug_, "icmp6", null, "tx echo reply dst=", reply_ip.dst_addr, " (", total, " bytes)");
 
     if (reply_ip.dst_addr.is_link_local && iface)
-        stack.output_v6(*reply, iface);
+        stack.output_v6(reply, iface);
     else
-        stack.output_v6(*reply);
+        stack.output_v6(reply);
 }
 
 void handle_echo_reply(ref const IPv6Header ip, const(ubyte)[] message, BaseInterface iface)
@@ -462,27 +462,27 @@ unittest
     data[40] = Icmp6Type.echo_request;
     Packet packet;
     packet.init!Ethernet(data[]);
-    assert(icmp6_error_allowed(stack, Icmp6Type.dest_unreachable, 0, packet));
+    assert(icmp6_error_allowed(stack, Icmp6Type.dest_unreachable, 0, &packet));
     packet.hdr!Ethernet.dst.b[0] = 0x33;
-    assert(!icmp6_error_allowed(stack, Icmp6Type.dest_unreachable, 0, packet));
-    assert(icmp6_error_allowed(stack, Icmp6Type.packet_too_big, 0, packet));
-    assert(icmp6_error_allowed(stack, Icmp6Type.parameter_problem, 2, packet));
+    assert(!icmp6_error_allowed(stack, Icmp6Type.dest_unreachable, 0, &packet));
+    assert(icmp6_error_allowed(stack, Icmp6Type.packet_too_big, 0, &packet));
+    assert(icmp6_error_allowed(stack, Icmp6Type.parameter_problem, 2, &packet));
     packet.hdr!Ethernet.dst.b[] = 0xff;
-    assert(!icmp6_error_allowed(stack, Icmp6Type.time_exceeded, 0, packet));
+    assert(!icmp6_error_allowed(stack, Icmp6Type.time_exceeded, 0, &packet));
     packet.hdr!Ethernet.dst.b[] = 0;
     foreach (ubyte type; [Icmp6Type.dest_unreachable, Icmp6Type.redirect])
     {
         data[40] = type;
-        assert(!icmp6_error_allowed(stack, Icmp6Type.packet_too_big, 0, packet));
+        assert(!icmp6_error_allowed(stack, Icmp6Type.packet_too_big, 0, &packet));
     }
     data[40] = Icmp6Type.echo_request;
     ip.dst_addr = IPv6Addr(0xff02, 0, 0, 0, 0, 0, 0, 1);
-    assert(!icmp6_error_allowed(stack, Icmp6Type.time_exceeded, 0, packet));
-    assert(icmp6_error_allowed(stack, Icmp6Type.packet_too_big, 0, packet));
+    assert(!icmp6_error_allowed(stack, Icmp6Type.time_exceeded, 0, &packet));
+    assert(icmp6_error_allowed(stack, Icmp6Type.packet_too_big, 0, &packet));
     ip.src_addr = IPv6Addr.any;
-    assert(!icmp6_error_allowed(stack, Icmp6Type.packet_too_big, 0, packet));
+    assert(!icmp6_error_allowed(stack, Icmp6Type.packet_too_big, 0, &packet));
     ip.src_addr = ip.dst_addr;
-    assert(!icmp6_error_allowed(stack, Icmp6Type.packet_too_big, 0, packet));
+    assert(!icmp6_error_allowed(stack, Icmp6Type.packet_too_big, 0, &packet));
 }
 
 unittest
@@ -497,7 +497,7 @@ unittest
 
         ~this() {}
         this(CID id, ObjectFlags flags = ObjectFlags.none) { super(collection_type_info!Link, id, flags); }
-        override int transmit(ref Packet packet, MessageCallback callback, const(QueuePolicy)* policy) { return 0; }
+        override int transmit(Packet* packet, MessageCallback callback, const(QueuePolicy)* policy) { return 0; }
     }
 
     Link first = alloc!Link(CID(1));
@@ -592,7 +592,7 @@ unittest
             data[42] ^= 1;
         Packet packet;
         packet.init!RawFrame(data[0 .. length]);
-        icmp6_input(stack, packet, 40, null);
+        icmp6_input(stack, &packet, 40, null);
     }
     scope(exit) icmp6_echo_cancel(42);
     pending(destination);

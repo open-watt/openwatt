@@ -302,7 +302,7 @@ protected:
         apply_channel(ch);
     }
 
-    override int transmit(ref const Packet packet, MessageCallback callback, const(QueuePolicy)*)
+    override int transmit(Packet* packet, MessageCallback callback, const(QueuePolicy)*)
     {
         if (packet.type != PacketType.wifi_80211 || !_wifi.is_open)
         {
@@ -522,7 +522,7 @@ private:
         }
         hdr.rssi = rssi;
         hdr.channel = channel;
-        radio.incoming_packet(pkt);
+        radio.incoming_packet(&pkt);
     }
 
     void dispatch_rx(WifiVif vif, const(ubyte)[] data)

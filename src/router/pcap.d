@@ -178,12 +178,12 @@ private:
         Array!ubyte packet_buffer;
     }
 
-    void packet_handler(ref const Packet p, BaseInterface i, PacketDirection dir, void*)
+    void packet_handler(Packet* p, BaseInterface i, PacketDirection dir, void*)
     {
         write_packet(p, i, dir);
     }
 
-    void write_packet(ref const Packet p, BaseInterface i, PacketDirection dir)
+    void write_packet(Packet* p, BaseInterface i, PacketDirection dir)
     {
         import router.iface.ethernet : EthernetStation;
 

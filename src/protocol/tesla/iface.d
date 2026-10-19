@@ -39,7 +39,7 @@ struct TWCFrame
     ushort src;
     ushort dst;
 
-    static ulong extract_src(ref const Packet p) pure nothrow @nogc
+    static ulong extract_src(const(Packet)* p) pure nothrow @nogc
     {
         ulong addr = p.hdr!TWCFrame().src;
         addr |= ulong(p.vlan & 0xFFF) << 48;
@@ -47,7 +47,7 @@ struct TWCFrame
         return addr;
     }
 
-    static ulong extract_dst(ref const Packet p) pure nothrow @nogc
+    static ulong extract_dst(const(Packet)* p) pure nothrow @nogc
     {
         ulong addr = p.hdr!TWCFrame().dst;
         addr |= ulong(p.vlan & 0xFFF) << 48;
@@ -59,7 +59,7 @@ struct TWCFrame
         => (address & 0xFFFF) == broadcast;
 
     // OW encapsulation wire codec: [src:2 BE][dst:2 BE]
-    static ptrdiff_t encode_ow_header(ref const Packet p, ubyte[] buffer) nothrow @nogc
+    static ptrdiff_t encode_ow_header(const(Packet)* p, ubyte[] buffer) nothrow @nogc
     {
         import urt.endian : nativeToBigEndian;
         if (buffer.length < 4)
@@ -70,7 +70,7 @@ struct TWCFrame
         return 4;
     }
 
-    static ptrdiff_t decode_ow_header(ref Packet p, const(ubyte)[] header) nothrow @nogc
+    static ptrdiff_t decode_ow_header(Packet* p, const(ubyte)[] header) nothrow @nogc
     {
         import urt.endian : bigEndianToNative;
         if (header.length < 4)
@@ -162,7 +162,7 @@ protected:
             return restart();
     }
 
-    override int transmit(ref const Packet packet, MessageCallback, const(QueuePolicy)*) nothrow @nogc
+    override int transmit(Packet* packet, MessageCallback, const(QueuePolicy)*) nothrow @nogc
     {
         if (packet.type != PacketType.tesla_twc)
         {
@@ -269,7 +269,7 @@ private:
         twc.src = message.sender;
         twc.dst = message.receiver ? message.receiver : TWCFrame.broadcast;
 
-        incoming_packet(p);
+        incoming_packet(&p);
     }
 }
 

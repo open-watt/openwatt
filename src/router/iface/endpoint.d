@@ -41,7 +41,7 @@ bool write_ow_transport_header(ubyte[] buffer, ubyte protocol, size_t segment_le
     return true;
 }
 
-bool parse_ow_transport(ref const Packet packet, out ubyte protocol, out const(ubyte)[] segment)
+bool parse_ow_transport(const(Packet)* packet, out ubyte protocol, out const(ubyte)[] segment)
 {
     if (packet.type != PacketType.ethernet || packet.eth.ether_type != EtherType.ow)
         return false;
@@ -93,7 +93,7 @@ void set_ether_tcp_input(EtherTcpInput handler)
     g_ether_tcp_input = handler;
 }
 
-void ether_transport_input(ref Packet packet, BaseInterface iface)
+void ether_transport_input(Packet* packet, BaseInterface iface)
 {
     EthernetStation station = dyn_cast!EthernetStation(iface);
     if (!station)
@@ -340,7 +340,7 @@ nothrow @nogc:
 
 private:
 
-    void deliver_ether(ref const Packet packet, const(ubyte)[] segment, EthernetStation station)
+    void deliver_ether(const(Packet)* packet, const(ubyte)[] segment, EthernetStation station)
     {
         if (_family != AddressFamily.ether || _closing)
             return;
@@ -486,7 +486,7 @@ nothrow @nogc:
             }
         }
 
-        void deliver(UDPEndpoint* owner, ref const Packet packet, const(ubyte)[] segment, EthernetStation station)
+        void deliver(UDPEndpoint* owner, const(Packet)* packet, const(ubyte)[] segment, EthernetStation station)
         {
             if (!_wildcard)
             {
@@ -524,7 +524,7 @@ nothrow @nogc:
             ether.dst = dst;
             ether.src = station.mac;
             ether.ether_type = EtherType.ow;
-            return station.forward(packet) >= 0;
+            return station.forward(&packet) >= 0;
         }
 
         ObjectRef!EthernetStation _iface;
@@ -700,7 +700,7 @@ unittest
             ingress_matches = info.ingress is expected_ingress;
         }
 
-        void input(ref Packet packet, BaseInterface iface) nothrow @nogc
+        void input(Packet* packet, BaseInterface iface) nothrow @nogc
         {
             ether_transport_input(packet, iface);
         }
@@ -729,7 +729,7 @@ nothrow @nogc:
             _state = State.destroyed;
         }
 
-        void receive(ref Packet packet)
+        void receive(Packet* packet)
         {
             incoming_packet(packet);
         }
@@ -751,14 +751,14 @@ nothrow @nogc:
 
     ubyte protocol;
     const(ubyte)[] segment;
-    assert(parse_ow_transport(packet, protocol, segment));
+    assert(parse_ow_transport(&packet, protocol, segment));
     assert(protocol == TransportProto.udp);
     assert(segment == ow[ow_transport_header_size .. $]);
     assert(loadBigEndian(cast(const(ushort)*)ow.ptr) == ow_transport_discriminator(TransportProto.udp));
 
     UDPEndpoint ip_endpoint;
     ip_endpoint._family = AddressFamily.ipv4;
-    ip_endpoint.deliver_ether(packet, segment, null);
+    ip_endpoint.deliver_ether(&packet, segment, null);
 
     MACAddress local_a = MACAddress(0x02, 0, 0, 0, 0, 1);
     MACAddress local_b = MACAddress(0x02, 0, 0, 0, 0, 2);
@@ -789,7 +789,7 @@ nothrow @nogc:
 
     assert(register_frame_handler(PacketType.ethernet, &sink.input));
     eth.dst = station.mac;
-    station.receive(packet);
+    station.receive(&packet);
     unregister_frame_handler(PacketType.ethernet);
     assert(sink.received == 1 && sink.payload == [1, 2, 3, 4]);
     assert(sink.source == eth.src && sink.source_port == 49_152);

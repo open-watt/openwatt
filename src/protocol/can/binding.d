@@ -190,7 +190,7 @@ private:
         }
     }
 
-    void packet_handler(ref const Packet p, BaseInterface i, PacketDirection dir, void* u)
+    void packet_handler(Packet* p, BaseInterface i, PacketDirection dir, void* u)
     {
         if (p.type != PacketType.can)
             return;

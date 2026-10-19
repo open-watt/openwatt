@@ -103,7 +103,7 @@ struct BLEFrame
     BLEControl control() const pure nothrow @nogc
         => cast(BLEControl)code;
 
-    static ulong extract_src(ref const Packet p) pure nothrow @nogc
+    static ulong extract_src(const(Packet)* p) pure nothrow @nogc
     {
         ulong addr = p.hdr!BLEFrame().src.ul;
         addr |= ulong(p.vlan & 0xFFF) << 48;
@@ -111,7 +111,7 @@ struct BLEFrame
         return addr;
     }
 
-    static ulong extract_dst(ref const Packet p) pure nothrow @nogc
+    static ulong extract_dst(const(Packet)* p) pure nothrow @nogc
     {
         ulong addr = p.hdr!BLEFrame().dst.ul;
         addr |= ulong(p.vlan & 0xFFF) << 48;
@@ -123,7 +123,7 @@ struct BLEFrame
         => (address & 0xFFFF_FFFF_FFFF) == 0xFFFF_FFFF_FFFF;
 
     // OW encapsulation wire codec: [src:6][dst:6][kind:1][code:1][rssi:1]
-    static ptrdiff_t encode_ow_header(ref const Packet p, ubyte[] buffer) nothrow @nogc
+    static ptrdiff_t encode_ow_header(const(Packet)* p, ubyte[] buffer) nothrow @nogc
     {
         if (buffer.length < 15)
             return -1;
@@ -136,7 +136,7 @@ struct BLEFrame
         return 15;
     }
 
-    static ptrdiff_t decode_ow_header(ref Packet p, const(ubyte)[] header) nothrow @nogc
+    static ptrdiff_t decode_ow_header(Packet* p, const(ubyte)[] header) nothrow @nogc
     {
         if (header.length < 15)
             return -1;
@@ -294,7 +294,7 @@ protected:
         send_queued_messages();
     }
 
-    final override int transmit(ref Packet packet, MessageCallback callback = null, const(QueuePolicy)* queue_policy = null)
+    final override int transmit(Packet* packet, MessageCallback callback = null, const(QueuePolicy)* queue_policy = null)
     {
         if (packet.type != PacketType.ble)
         {
@@ -302,8 +302,7 @@ protected:
             return -1;
         }
 
-        Packet p = packet;
-        int tag = _queue.enqueue(p, &on_frame_complete);
+        int tag = _queue.enqueue(packet, &on_frame_complete);
         if (tag < 0)
         {
             add_tx_drop();
@@ -391,7 +390,7 @@ protected:
     }
 
     // incoming packet handler - NAT rewriting and dispatch
-    final void on_incoming(ref Packet p)
+    final void on_incoming(Packet* p)
     {
         ref f = p.hdr!BLEFrame;
 

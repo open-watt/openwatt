@@ -72,7 +72,7 @@ void igmp_update(ref IPStack stack, MonoTime now)
     }
 }
 
-void igmp_input(ref Packet packet, BaseInterface iface)
+void igmp_input(Packet* packet, BaseInterface iface)
 {
     if (packet.data.length < IPv4Header.sizeof + IgmpHeader.sizeof)
         return;
@@ -185,7 +185,7 @@ bool send_message(ref IPStack stack, IgmpType type, IPAddr local, IPAddr group, 
 
     Packet packet;
     packet.init!RawFrame(buffer.bytes);
-    stack.output_v4_routed(packet, iface, destination);
+    stack.output_v4_routed(&packet, iface, destination);
     return true;
 }
 

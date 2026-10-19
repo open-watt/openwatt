@@ -21,7 +21,7 @@ import router.iface.checksum;
 nothrow @nogc:
 
 
-size_t encode_ethernet_header(ref const Packet packet, ubyte[] buffer)
+size_t encode_ethernet_header(const(Packet)* packet, ubyte[] buffer)
 {
     VlanTag tag = packet.vlan_tag;
     if (tag == VlanTag.none && packet.vid != 0 && !packet.has_inline_vlan_tag)
@@ -43,7 +43,7 @@ size_t encode_ethernet_header(ref const Packet packet, ubyte[] buffer)
     return required;
 }
 
-size_t encode_ethernet_frame(ref const Packet packet, ubyte[] buffer)
+size_t encode_ethernet_frame(const(Packet)* packet, ubyte[] buffer)
 {
     size_t header_len = encode_ethernet_header(packet, buffer);
     if (header_len == 0 || packet.data.length > buffer.length - header_len)
@@ -52,7 +52,7 @@ size_t encode_ethernet_frame(ref const Packet packet, ubyte[] buffer)
     return header_len + packet.data.length;
 }
 
-void complete_frame_checksum(ref const Packet packet, ubyte[] frame)
+void complete_frame_checksum(const(Packet)* packet, ubyte[] frame)
 {
     if (packet.checksum_pending)
         complete_checksum(frame[$ - packet.data.length .. $], cast(EtherType)packet.eth.ether_type);
@@ -80,7 +80,7 @@ nothrow @nogc:
         eth.src = mac;
         eth.dst = dest;
         eth.ether_type = type;
-        return forward(p, callback);
+        return forward(&p, callback);
     }
 
     // 802.1ag loopback at our maintenance level; the pending entry expires quietly after 10s unless cancelled
@@ -158,14 +158,14 @@ protected:
     }
 
     // Egress seam toward the segment; takes a fully-formed ethernet packet.
-    abstract void medium_tx(ref Packet packet);
+    abstract void medium_tx(Packet* packet);
 
-    void station_deliver_exotic(ref Packet inner)
+    void station_deliver_exotic(Packet* inner)
     {
         dispatch(inner);
     }
 
-    override int transmit(ref Packet packet, MessageCallback, const(QueuePolicy)*)
+    override int transmit(Packet* packet, MessageCallback, const(QueuePolicy)*)
     {
         switch (packet.type)
         {
@@ -185,7 +185,7 @@ protected:
         }
     }
 
-    final override void ingress(ref Packet packet)
+    final override void ingress(Packet* packet)
     {
         if (!packet.consume_priority_tags())
         {
@@ -287,7 +287,7 @@ protected:
     }
 
     // Encapsulate an exotic packet and transmit it across the segment.
-    final bool station_egress(ref const Packet packet)
+    final bool station_egress(Packet* packet)
     {
         const(PacketCodec)* codec = get_ow_codec(packet.type);
         if (!codec)
@@ -313,12 +313,12 @@ protected:
         eth.ether_type = EtherType.ow;
         wrapped.vlan = packet.vlan;
         wrapped.vlan_tag = packet.vlan_tag;
-        medium_tx(wrapped);
+        medium_tx(&wrapped);
         return true;
     }
 
     // Decapsulate an OW frame addressed to this station (caller pre-filtered outer src/dst).
-    final bool station_ingress(ref Packet packet)
+    final bool station_ingress(Packet* packet)
     {
         const(ubyte)[] content = cast(const(ubyte)[])packet.data;
         if (content.length < 5)
@@ -361,20 +361,20 @@ protected:
         inner.vlan = packet.vlan;
         inner.vlan_tag = packet.vlan_tag;
         inner.data = content[5 + hdr_len .. 5 + hdr_len + data_len];
-        if (codec.decode(inner, content[5 .. 5 + hdr_len]) <= 0)
+        if (codec.decode(&inner, content[5 .. 5 + hdr_len]) <= 0)
             return false;
         // learn the station carrying the inner src so replies can unicast
-        learn(get_network_src_address(inner), packet.eth.src);
+        learn(get_network_src_address(&inner), packet.eth.src);
 
         // the inner packet accounts where it terminates; the encap overhead counts here
         _status.rx_bytes += packet.length - inner.length;
-        station_deliver_exotic(inner);
+        station_deliver_exotic(&inner);
         return true;
     }
 
     // [type:u16][data_len:u16][hdr_len:u8][header][payload]; <= 0 on failure.
     // data_len is explicit because short frames gain padding on the wire (60-byte minimum).
-    static ptrdiff_t build_ow_payload(ref const Packet packet, ref const PacketCodec codec, ubyte[] buffer)
+    static ptrdiff_t build_ow_payload(const(Packet)* packet, ref const PacketCodec codec, ubyte[] buffer)
     {
         if (buffer.length < 5)
             return -1;
@@ -397,7 +397,7 @@ protected:
     final override ushort pcap_type() const
         => 1; // LINKTYPE_ETHERNET
 
-    final override void pcap_write(ref const Packet packet, PacketDirection dir, scope void delegate(scope const void[] packet_data) nothrow @nogc sink) const
+    final override void pcap_write(const(Packet)* packet, PacketDirection dir, scope void delegate(scope const void[] packet_data) nothrow @nogc sink) const
     {
         if (packet.type == PacketType.ethernet)
         {
@@ -426,7 +426,7 @@ protected:
         eth.ether_type = EtherType.ow;
         wrapped.vlan = packet.vlan;
         wrapped.vlan_tag = packet.vlan_tag;
-        size_t header_len = encode_ethernet_header(wrapped, hdr[]);
+        size_t header_len = encode_ethernet_header(&wrapped, hdr[]);
         if (header_len == 0)
             return;
         sink(hdr[0 .. header_len]);
@@ -502,7 +502,7 @@ private:
 
     // 802.1ag LBM (opcode 3) is answered with an LBR (opcode 2) echoing the PDU, with a Sender ID TLV prepended
     // LBMs at other levels belong to someone else's maintenance domain; answering them would corrupt it
-    void cfm_ingress(ref const Packet packet)
+    void cfm_ingress(const(Packet)* packet)
     {
         const(ubyte)[] pdu = cast(const(ubyte)[])packet.data;
         if (pdu.length < 8)
@@ -620,7 +620,7 @@ private:
         eth.src = mac;
         eth.dst = dst;
         eth.ether_type = EtherType.ow;
-        medium_tx(wrapped);
+        medium_tx(&wrapped);
     }
 
     void station_control(OWControl msg, const(ubyte)[] content, MACAddress src, bool unicast)
@@ -867,11 +867,11 @@ protected:
 
         // the packet accounts only payload bytes; account the link-layer overhead here
         _status.rx_bytes += data.length - packet.length + (vlan_tpid != 0 ? 4 : 0);
-        incoming_packet(packet);
+        incoming_packet(&packet);
     }
 
     // The medium is the wire: frame the packet and push it via wire_send.
-    final override void medium_tx(ref Packet packet)
+    final override void medium_tx(Packet* packet)
     {
         debug assert(packet.type == PacketType.ethernet, "medium_tx expects an ethernet packet");
 
@@ -943,17 +943,17 @@ unittest
     tagged.vlan = 0xA003;
     tagged.vlan_tag = VlanTag._88a8;
     ubyte[18] header = void;
-    assert(encode_ethernet_header(tagged, header[]) == 18);
+    assert(encode_ethernet_header(&tagged, header[]) == 18);
     assert(header[12 .. 18] == [0x88, 0xA8, 0xA0, 0x03, 0x08, 0x00]);
 
     tagged.vlan = 0;
     tagged.vlan_tag = VlanTag._8100;
-    assert(encode_ethernet_header(tagged, header[]) == 18);
+    assert(encode_ethernet_header(&tagged, header[]) == 18);
     assert(header[12 .. 18] == [0x81, 0x00, 0, 0, 0x08, 0x00]);
 
     tagged.vlan = 3;
     tagged.vlan_tag = VlanTag.none;
-    assert(encode_ethernet_header(tagged, header[]) == 18);
+    assert(encode_ethernet_header(&tagged, header[]) == 18);
     assert(header[12 .. 18] == [0x81, 0x00, 0, 3, 0x08, 0x00]);
 }
 
@@ -975,7 +975,7 @@ unittest
             super(collection_type_info!Link, id, flags);
             _state = State.running;
         }
-        override void medium_tx(ref Packet packet) {}
+        override void medium_tx(Packet* packet) {}
     }
     Link first = Collection!Link().create("mac-ping-test-first");
     Link second = Collection!Link().create("mac-ping-test-second");
@@ -1003,12 +1003,12 @@ unittest
     ref eth = packet.init!Ethernet(data[]);
     eth.ether_type = EtherType.cfm;
     eth.src = MACAddress(2, 0, 0, 0, 0, 4);
-    first.cfm_ingress(packet);
+    first.cfm_ingress(&packet);
     eth.src = remote;
-    second.cfm_ingress(packet);
+    second.cfm_ingress(&packet);
     assert(results.replies == 0);
-    first.cfm_ingress(packet);
-    first.cfm_ingress(packet);
+    first.cfm_ingress(&packet);
+    first.cfm_ingress(&packet);
     assert(results.replies == 1);
 
     Console* console = alloc!Console(null, StringLit!"test.mac-ping");
@@ -1068,22 +1068,22 @@ unittest
     udp.init!Ethernet(datagram[]).ether_type = EtherType.ip4;
     udp.checksum_pending = true;
 
-    wire.medium_tx(udp);
+    wire.medium_tx(&udp);
     assert(!wire.mac_asked);
     assert(internet_checksum(wire.sent[34 .. 44], internet_checksum(pseudo[])) == 0);
     assert(datagram[26] == 0 && datagram[27] == 0);
 
     wire.offload = true;
-    wire.medium_tx(udp);
+    wire.medium_tx(&udp);
     assert(wire.mac_asked && wire.sent[40] == 0 && wire.sent[41] == 0);
 
     udp.vlan = 5;
-    wire.medium_tx(udp);
+    wire.medium_tx(&udp);
     assert(!wire.mac_asked && wire.sent[12] == 0x81);
     assert(internet_checksum(wire.sent[38 .. 48], internet_checksum(pseudo[])) == 0);
 
     udp.vlan = 0;
     udp.checksum_pending = false;
-    wire.medium_tx(udp);
+    wire.medium_tx(&udp);
     assert(!wire.mac_asked && wire.sent[40] == 0 && wire.sent[41] == 0);
 }

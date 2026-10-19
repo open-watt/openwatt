@@ -330,7 +330,7 @@ private:
     Array!VinEntry _vins;
     bool _subscribed;
 
-    void incoming_packet(ref const Packet p, BaseInterface, PacketDirection, void*)
+    void incoming_packet(Packet* p, BaseInterface, PacketDirection, void*)
     {
         if (p.type != PacketType.ble)
             return;

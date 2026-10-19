@@ -213,10 +213,10 @@ private:
             return false;
         Packet p;
         p.init!RawFrame(msg);
-        return i.forward(p) >= 0;
+        return i.forward(&p) >= 0;
     }
 
-    void incoming_packet(ref const Packet p, BaseInterface, PacketDirection, void*)
+    void incoming_packet(Packet* p, BaseInterface, PacketDirection, void*)
     {
         const(ubyte)[] buf = cast(const(ubyte)[])p.data();
         // Silabs multi-PAN CPC 15.4 framing packs one or more spinel frames per CPC transfer, each prefixed

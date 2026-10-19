@@ -282,7 +282,7 @@ private:
         _message_done = false;
         _response_received = false;
         _request_failed = false;
-        int handle = interface_.forward(request, &message_complete);
+        int handle = interface_.forward(&request, &message_complete);
         if (handle <= 0)
         {
             reset_operation();
@@ -316,7 +316,7 @@ private:
         }
     }
 
-    void packet_handler(ref const Packet packet, BaseInterface, PacketDirection direction, void*)
+    void packet_handler(Packet* packet, BaseInterface, PacketDirection direction, void*)
     {
         if (direction != PacketDirection.incoming || packet.type != PacketType.i2c || _operation != Operation.read)
             return;

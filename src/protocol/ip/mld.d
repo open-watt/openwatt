@@ -118,7 +118,7 @@ void mld_update(ref IPStack stack, MonoTime now)
     }
 }
 
-void mld_input(ref Packet packet, size_t offset, BaseInterface iface)
+void mld_input(Packet* packet, size_t offset, BaseInterface iface)
 {
     if (!iface || packet.data.length < offset + MldHeader.sizeof)
         return;
@@ -274,7 +274,7 @@ bool send_message(ref IPStack stack, Icmp6Type type, ref Membership membership, 
 
     Packet packet;
     packet.init!RawFrame(buffer.bytes[]);
-    stack.output_v6_routed(packet, iface, destination);
+    stack.output_v6_routed(&packet, iface, destination);
     return true;
 }
 

@@ -107,7 +107,7 @@ protected:
             restart();
     }
 
-    override int transmit(ref const Packet packet, MessageCallback, const(QueuePolicy)*)
+    override int transmit(Packet* packet, MessageCallback, const(QueuePolicy)*)
     {
         assert(false, "TODO: frame and transmit");
     }
@@ -275,7 +275,7 @@ nothrow @nogc:
 
 protected:
 
-    override int transmit(ref const Packet packet, MessageCallback, const(QueuePolicy)*)
+    override int transmit(Packet* packet, MessageCallback, const(QueuePolicy)*)
     {
         assert(false, "TODO: frame and transmit");
     }
@@ -284,7 +284,7 @@ private:
     ObjectRef!BaseInterface _interface;
     TunnelProtocol _protocol;
 
-    void incoming_packet(ref const Packet packet, BaseInterface srcInterface, PacketDirection dir, void* user_data)
+    void incoming_packet(Packet* packet, BaseInterface srcInterface, PacketDirection dir, void* user_data)
     {
         assert(false, "TODO: Listen for PPPoE Discovery and Session packets");
     }

@@ -839,6 +839,6 @@ private:
     }
 
 protected:
-    final override ZDOReply handle_zdo_frame(ref const APSFrame aps, ref const Packet p)
+    final override ZDOReply handle_zdo_frame(ref const APSFrame aps, const(Packet)* p)
         => super.handle_zdo_frame(aps, p);
 }

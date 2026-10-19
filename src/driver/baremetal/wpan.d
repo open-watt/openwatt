@@ -49,7 +49,7 @@ nothrow @nogc:
         mark_set!(typeof(this), "cca")();
     }
 
-    override int transmit(ref Packet packet, MessageCallback callback, const(QueuePolicy)* policy)
+    override int transmit(Packet* packet, MessageCallback callback, const(QueuePolicy)* policy)
     {
         if (packet.type != PacketType.wpan || !_wpan.is_open || packet.length == 0)
         {
@@ -263,7 +263,7 @@ private:
         }
         hdr.rssi = info.rssi;
         hdr.lqi = info.lqi;
-        incoming_packet(pkt);
+        incoming_packet(&pkt);
     }
 
     // may run in the radio ISR

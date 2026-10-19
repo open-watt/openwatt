@@ -150,7 +150,7 @@ protected:
     }
 
 
-    override ZDOReply handle_zdo_frame(ref const APSFrame aps, ref const Packet p)
+    override ZDOReply handle_zdo_frame(ref const APSFrame aps, const(Packet)* p)
     {
         bool response_required = (aps.flags & APSFlags.zdo_response_required) != 0;
 
