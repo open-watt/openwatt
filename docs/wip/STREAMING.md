@@ -711,13 +711,13 @@ Each step leaves the tree no worse than before it and deletes what it replaces.
 | E1 (urt #393, merged) | refcount contract: `page_free` at 0, `page_foreign`, `StackPage!N`, `page_mutable`, `page_retain`; tests for each refcount state | urt #390 | the `page_share` call sites outside the pool |
 | E2 | ingress into pages: UART and WPAN rx pages take room; Ethernet drivers receive into pages; stream parsers assemble into a page | E1, #845 | `_rx_buffer`, `_rx[62]`, `_tail`, `Buffers.rx`, the ELM line buffer |
 | E4p (#858) | packets passed by pointer: every `ref Packet` and `ref const Packet` parameter, handler and delegate becomes `Packet*`, or `const(Packet)*` at look-only leaves | | `ref Packet` (about 200 sites, 60 files) |
-| E4b1 (#859) | the storage kinds: `StackPacket`, `packet_retain`, `packet_free`; `Packet` not copyable (folds #856); the bridge floods take a `StackPage!0` view over the source; router/iface core (9 sites) and non-BLE drivers (6) | E4p, urt #394 | the by-value copy fault (7 sites), `ethernet.d`'s and `endpoint.d`'s sender buffers, `clone`/`free_clone` |
+| E4b1 (#859) | the storage kinds: `StackPacket`, `packet_retain` (shares a pool packet, copies a lent one), `packet_free`; the priority queue and neighbour cache share; `Packet` not copyable (folds #856); the bridge floods take a `StackPage!0` view over the source; router/iface core (9 sites) and non-BLE drivers (6) | E4p, urt #394 | the by-value copy fault (7 sites), `ethernet.d`'s and `endpoint.d`'s sender buffers, `clone`/`free_clone` |
 | E4b2 (#860) | IP stack: 10 senders on pool pages; `frame_and_send` borrows the inner packet | E4b1 | `ubyte[1500]` in `icmp`, `tcp`, `udp`; `MessageBuffer` in IGMP and MLD; the TCP flood's per-station rebuild |
 | E4b3 (#861) | BLE: 8 fresh frames on pool pages, 3 vendor and socket borrows | E4b1 | the `ubyte[513]`/`[250]` notification and read buffers |
 | E4b4 | fieldbus and application protocols: CAN, OBD, CPC, Spinel, EZSP, Zigbee, Modbus, TWC, WebSocket, sync (11 fresh, 12 borrowed) | E4b1 | Modbus `send_packet`'s stack PDU, OBD's frame locals, the EZSP command buffer |
 | E4b5 | the remaining tests; no page-less packet is left | E4b2 to E4b4 | `init!T(buffer)`, `mutable_flag`/`page_flag`, #692 (closed as superseded) |
 | E3 | interfaces state their framing room; producers ask their egress for it | E4b5 | the default headroom on paths that know their framing |
-| E4c | holders hold: the priority queue, the neighbour cache and BLE's `_emu_responses` share at refcount 1 or more; WPAN shares until DMA completion; Modbus keeps its validation bytes, not the request; TCP's Ethernet flood without a fixed source MAC takes a page per station, since its checksum differs per station | E4b5, the view decision (E.8) | the copy on every enqueue, `wpan.d`'s free of a frame the radio may still read |
+| E4c | the remaining holders: BLE's `_emu_responses` shares; WPAN shares until DMA completion; Modbus keeps its validation bytes, not the request; TCP's Ethernet flood without a fixed source MAC takes a page per station, since its checksum differs per station | E4b5, the view decision (E.8) | `wpan.d`'s free of a frame the radio may still read |
 | E5 | mutators edit in place: IP, VLAN, Modbus, ASH, Ethernet, CPC, TWC, WebSocket | E4c, E2 | `frame_and_send`'s copy, ASH's and CPC's `Message.buffer`, Ethernet's `medium_tx` copy, the const-cast writes in `stack.d`, the unchecked fixed-buffer copies |
 
 E4 no longer waits for E2: a `StackPage!0` lends a ring or a local without a copy, so a borrowed
@@ -727,10 +727,9 @@ and kept, 24 borrowed, 1 small and lent, 55 tests, surveyed 2026-10-19), so no s
 to a stack borrow and then again to a pool page. Each E4b part leaves both kinds working; the
 flags go only in E4b5, when nothing page-less is left.
 
-E4b changes no copy count on keep: `clone` copies every time today, and `packet_retain` keeps
-doing so until E4c switches the holders to sharing. E4c is where the receive fork's copy
-disappears, and it waits on the view decision in E.8: until a kept view holds its parent, a
-member that queues a flooded frame copies a page it could share.
+From E4b1 a pool packet is shared when kept; a lent one (a borrow or a view) is still copied.
+Until a kept view holds its parent (E.8), a member that queues a flooded frame copies a page it
+could share.
 
 ### E.8 Open decisions
 
