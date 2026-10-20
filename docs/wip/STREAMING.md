@@ -656,7 +656,11 @@ on `packet_retain(p)`, which shares a pool page and copies a lent one. `forward`
 `enqueue` and the egress chain take `Packet*`, so a sender's `forward(p)` is its last word on `p`.
 A transform is `Packet* transform(Packet* p)`: it takes ownership, edits in place when it is the
 sole holder with room or into a new page otherwise, and returns ownership, so the caller writes
-`p = transform(p)`. A null return means the transform freed `p`, so failure cannot leak;
+`p = transform(p)`. A null return means the transform freed `p`, so failure cannot leak, and so a transform fails only
+where dropping the packet is right for its caller. A public function that edits a packet its caller
+keeps either succeeds or fails leaving the packet unmodified, and its name says what it edits
+(`decode_ow_header`); "edit in place, the caller keeps it" with no such guarantee is for private
+helpers only (the bridge's `classify_vlan`, `prepare_egress`);
 `packet_mutable` follows the same rule (urt's `page_mutable` leaves the page untouched on failure
 today, to align or keep as the lower primitive).
 
