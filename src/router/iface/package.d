@@ -1768,9 +1768,9 @@ unittest
             while (remaining && sink.tx_ready)
             {
                 ubyte[64] buf;
-                Packet p;
+                StackPacket p;
                 p.init!RawFrame(buf[0 .. frame]);
-                sink.forward(&p);
+                sink.forward(&p.packet);
                 remaining -= frame;
             }
             return remaining != 0;
@@ -1951,24 +1951,24 @@ unittest
         ubyte[1488] payload;
 
         // an exotic packet is checked again once its ow envelope (5 bytes plus an 8-byte i2c header) is built
-        Packet exotic;
+        StackPacket exotic;
         exotic.init!I2CFrame(payload[0 .. 1487]);
-        assert(a2.forward(&exotic) == 0);
+        assert(a2.forward(&exotic.packet) == 0);
         ulong drops = a2.tx_dropped;
         exotic.init!I2CFrame(payload[]);
-        assert(a2.forward(&exotic) < 0 && a2.tx_dropped == drops + 1);
+        assert(a2.forward(&exotic.packet) < 0 && a2.tx_dropped == drops + 1);
 
         // a vlan admits against its own mtu, which its parent cannot know
         VLANInterface tagged = Collection!VLANInterface().create("mtu-test-vlan", ObjectFlags.none, NamedArgument("interface", a2), NamedArgument("vlan", 20));
         assert(tagged && tagged.running);
         assert(tagged.l2mtu == 1510 && tagged.max_l2mtu == 1510 && tagged.actual_mtu == 1496);
         assert(tagged.mtu(100) is null);
-        Packet framed;
+        StackPacket framed;
         framed.init!Ethernet(payload[0 .. 200]);
         BaseInterface through = tagged;
-        assert(through.forward(&framed) < 0 && tagged.tx_dropped == 1);
+        assert(through.forward(&framed.packet) < 0 && tagged.tx_dropped == 1);
         framed.init!Ethernet(payload[0 .. 100]);
-        assert(through.forward(&framed) >= 0);
+        assert(through.forward(&framed.packet) >= 0);
         tagged.destroy();
     }
 
@@ -1976,9 +1976,9 @@ unittest
     assert(link.l2mtu == ushort.max && link.max_l2mtu == ushort.max && link.mtu == 1500 && link.actual_mtu == 1500);
 
     ubyte[2000] bytes;
-    Packet big;
+    StackPacket big;
     big.init!RawFrame(bytes[]);
-    assert(link.forward(&big) < 0 && link.sent == 0 && link.tx_dropped == 1);
+    assert(link.forward(&big.packet) < 0 && link.sent == 0 && link.tx_dropped == 1);
 
     link.set_l2mtu(100);
     assert(link.mtu == 100 && link.actual_mtu == 100);
@@ -1990,11 +1990,11 @@ unittest
     link.set_l2mtu(50);
     assert(link.mtu == 60 && link.actual_mtu == 50);
 
-    Packet fits, over;
+    StackPacket fits, over;
     fits.init!RawFrame(bytes[0 .. 50]);
     over.init!RawFrame(bytes[0 .. 51]);
-    assert(link.forward(&fits) == 0 && link.sent == 1);
-    assert(link.forward(&over) < 0 && link.sent == 1 && link.tx_dropped == 2);
+    assert(link.forward(&fits.packet) == 0 && link.sent == 1);
+    assert(link.forward(&over.packet) < 0 && link.sent == 1 && link.tx_dropped == 2);
 
     // an edit after a subscriber kept the frame, or before ingress when the caller kept it, leaves that copy alone
     static struct Keeper

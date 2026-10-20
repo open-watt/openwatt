@@ -189,26 +189,6 @@ struct Packet
 nothrow @nogc:
     @disable this(this);
 
-    ref T init(T)(const(void)[] payload, MonoTime create_time = getTime())
-    {
-        static assert(T.sizeof <= embed.length);
-        assert(payload.length <= ushort.max, "Payload too large");
-        creation_time = create_time;
-        type = T.Type;
-        vlan = 0;
-        _flags = 0;
-        _offset = 0;
-        _length = cast(ushort)payload.length;
-        _ptr = payload.ptr;
-        return *cast(T*)embed.ptr;
-    }
-    ref T init(T)(void[] payload, MonoTime create_time = getTime())
-    {
-        ref T r = init!T(cast(const)payload, create_time);
-        _flags |= mutable_flag;
-        return r;
-    }
-
     ref inout(T) hdr(T)() inout
     {
         static assert(T.sizeof <= embed.length);
@@ -217,93 +197,49 @@ nothrow @nogc:
     }
 
     const(void)[] data() const @property
-    {
-        if (_flags & page_flag)
-            return page.data;
-        return _ptr[_offset .. _length];
-    }
+        => _ptr[0 .. _length];
 
-    // null unless the packet owns its payload
+    // null unless the packet alone holds the page its bytes live in
     void[] payload() @property
-    {
-        if (!(_flags & mutable_flag))
-            return null;
-        if (_flags & page_flag)
-            return page.data;
-        return (cast(void*)_ptr)[_offset .. _length];
-    }
+        => page_unique(page) ? (cast(void*)_ptr)[0 .. _length] : null;
 
     void truncate(size_t length)
     {
-        if (_flags & page_flag)
-        {
-            assert(length <= page.length, "Cannot grow a packet by truncating it");
-            page.length = cast(ushort)length;
-            return;
-        }
-        assert(_offset + length <= _length, "Cannot grow a packet by truncating it");
-        _length = cast(ushort)(_offset + length);
+        assert(length <= _length, "Cannot grow a packet by truncating it");
+        _length = cast(ushort)length;
     }
 
     void[] alloc_prefix(size_t bytes)
     {
-        if (!(_flags & mutable_flag))
+        if (!page_unique(page))
             return null;
-        if (_flags & page_flag)
-        {
-            Page* p = page;
-            size_t packet_offset = packet_page_offset;
-            size_t floor = Page.sizeof;
-            if (packet_offset < p.offset)
-                floor = packet_offset + Packet.sizeof;
-            if (bytes > p.offset || p.offset - bytes < floor)
-                return null;
-            p.offset -= cast(ushort)bytes;
-            p.length += cast(ushort)bytes;
-            return p.data[0 .. bytes];
-        }
-        if (_offset < bytes)
+        size_t start = cast(size_t)(_ptr - cast(const(void)*)page);
+        size_t floor = packet_page_offset < start ? packet_page_offset + Packet.sizeof : Page.sizeof;
+        if (bytes > start || start - bytes < floor)
             return null;
-        _offset -= cast(ubyte)bytes;
-        return (cast(void*)_ptr)[_offset .. _offset + bytes];
+        _ptr -= bytes;
+        _length += cast(ushort)bytes;
+        return (cast(void*)_ptr)[0 .. bytes];
     }
 
     bool consume_prefix(size_t bytes)
     {
-        if (_flags & page_flag)
-        {
-            Page* p = page;
-            if (bytes > p.length)
-                return false;
-            p.offset += cast(ushort)bytes;
-            p.length -= cast(ushort)bytes;
-            return true;
-        }
-        if (_offset + bytes > _length)
+        if (bytes > _length)
             return false;
-        _offset += cast(ubyte)bytes;
+        _ptr += bytes;
+        _length -= cast(ushort)bytes;
         return true;
     }
 
     void data(const(void[]) payload) @property
     {
         assert(payload.length <= ushort.max, "Payload too large");
-        if (_flags & page_flag)
-        {
-            Page* p = page;
-            size_t offset = cast(size_t)payload.ptr - cast(size_t)p;
-            assert(offset <= p.capacity && payload.length <= p.capacity - offset);
-            p.offset = cast(ushort)offset;
-            p.length = cast(ushort)payload.length;
-            return;
-        }
         _ptr = payload.ptr;
-        _offset = 0;
         _length = cast(ushort)payload.length;
     }
 
     uint length() const
-        => (_flags & page_flag) ? page.length : _length - _offset;
+        => _length;
 
     PCP pcp() const pure
         => cast(PCP)(vlan >> 13);
@@ -417,14 +353,11 @@ nothrow @nogc:
 
 package:
     ubyte _flags;
-    ubyte _offset;
     ushort _length;
     const(void)* _ptr;
 
 private:
     enum ubyte vlan_tag_mask = 7;
-    enum ubyte mutable_flag = 1 << 3;
-    enum ubyte page_flag = 1 << 4;
     enum ubyte hw_timestamp_flag = 1 << 5;
     enum ubyte checksum_pending_flag = 1 << 6;
     enum ubyte checksum_verified_flag = 1 << 7;
@@ -432,11 +365,25 @@ private:
     Page* page() const
     {
         ushort offset = packet_page_offset;
+        debug assert(offset >= Page.sizeof, "a StackPacket is initialised before use");
         return cast(Page*)(cast(void*)&this - offset);
     }
 
     ushort packet_page_offset() const
         => (cast(const(ushort)*)&this)[-1];
+
+    ref T init(T)(const(void)[] payload, MonoTime create_time = getTime())
+    {
+        static assert(T.sizeof <= embed.length);
+        assert(payload.length <= ushort.max, "Payload too large");
+        creation_time = create_time;
+        type = T.Type;
+        vlan = 0;
+        _flags = 0;
+        _length = cast(ushort)payload.length;
+        _ptr = payload.ptr;
+        return *cast(T*)embed.ptr;
+    }
 
     void take_metadata(const(Packet)* from)
     {
@@ -444,7 +391,7 @@ private:
         embed = from.embed;
         type = from.type;
         vlan = from.vlan;
-        _flags = (_flags & (mutable_flag | page_flag)) | (from._flags & ~(mutable_flag | page_flag));
+        _flags = from._flags;
     }
 }
 
@@ -487,24 +434,21 @@ private:
 }
 static assert(StackPacket.packet.offsetof == Page.sizeof);
 
-// _offset is a ubyte, so 255 is the ceiling.
 enum ubyte packet_headroom = 128;
 
 // a reference of the caller's own to a packet it borrowed: a pool page is shared, a lent packet is copied
 Packet* packet_retain(const(Packet)* packet)
 {
-    if (packet._flags & Packet.page_flag)
-    {
-        page_share(cast(Page*)packet.page);
-        return cast(Packet*)packet;
-    }
-    return packet_copy(packet);
+    if (page_foreign(packet.page))
+        return packet_copy(packet);
+    page_share(cast(Page*)packet.page);
+    return cast(Packet*)packet;
 }
 
 // a packet the caller may edit: itself unless its page is shared, else a copy; null, having freed it, if the copy fails
 Packet* packet_mutable(Packet* packet)
 {
-    if (!(packet._flags & Packet.page_flag) || page_unique(packet.page))
+    if (page_foreign(packet.page) || page_unique(packet.page))
         return packet;
     Packet* copy = packet_copy(packet);
     packet_free(packet);
@@ -513,7 +457,7 @@ Packet* packet_mutable(Packet* packet)
 
 // makes a reference the caller owns storable: a pool packet as it is, a lent one copied
 Packet* packet_keep(Packet* packet)
-    => packet._flags & Packet.page_flag ? packet : packet_copy(packet);
+    => page_foreign(packet.page) ? packet_copy(packet) : packet;
 
 Packet* packet_copy(const(Packet)* packet)
 {
@@ -528,13 +472,13 @@ Packet* packet_copy(const(Packet)* packet)
         return null;
     }
     r.take_metadata(packet);
-    r.page.data[] = source;
+    r.payload[] = source;
     return r;
 }
 
 void packet_free(Packet* packet)
 {
-    if (packet && (packet._flags & Packet.page_flag))
+    if (packet)
         page_free(packet.page);
 }
 
@@ -583,7 +527,7 @@ Packet* attach_packet(Page* page)
     Packet* packet = cast(Packet*)(cast(void*)page + offset);
     (cast(ushort*)packet)[-1] = cast(ushort)offset;
     *packet = Packet();
-    packet._flags = Packet.mutable_flag | Packet.page_flag;
+    packet.data = page.data;
     return packet;
 }
 
@@ -738,12 +682,14 @@ unittest
     Packet* owned = alloc_packet!RawFrame(4);
     assert(owned && owned.packet_page_offset == packet_page_start);
     assert(owned.page.offset == packet_page_start + Packet.sizeof + packet_headroom);
-    assert(owned.data.length == 4);
-    ushort data_offset = owned.page.offset;
+    assert(owned.data.ptr is owned.page.data.ptr && owned.data.length == 4);
+    const(void)* start = owned.data.ptr;
     assert(owned.alloc_prefix(4).length == 4);
-    assert(owned.page.offset == data_offset - 4 && owned.data.length == 8);
+    assert(owned.data.ptr is start - 4 && owned.data.length == 8);
     assert(owned.consume_prefix(4));
-    assert(owned.page.offset == data_offset && owned.data.length == 4);
+    assert(owned.data.ptr is start && owned.data.length == 4);
+    assert(packet_retain(owned) is owned && owned.alloc_prefix(4) is null && owned.payload is null, "a shared packet is not written in place");
+    packet_free(owned);
     packet_free(owned);
 
     Page* raw = page_alloc(16);
@@ -774,7 +720,7 @@ unittest
     assert(cast(const(ubyte)[])lent.data == lent_bytes[], "freeing a lent packet leaves its bytes alone");
 
     ubyte[8] payload = [0x00, 0x03, 0x08, 0x00, 1, 2, 3, 4];
-    Packet packet;
+    StackPacket packet;
     ref eth = packet.init!Ethernet(payload[]);
     eth.ether_type = vlan_tpid(VlanTag._8100);
     packet.pcp = PCP.vo;

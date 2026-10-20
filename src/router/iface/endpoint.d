@@ -744,7 +744,7 @@ nothrow @nogc:
     static immutable ubyte[12] wire_segment = [ 0xC0, 0x00, 0x01, 0xF4, 0x00, 0x0C, 0x00, 0x00, 1, 2, 3, 4 ];
     ow[ow_transport_header_size .. $] = wire_segment[];
 
-    Packet packet;
+    StackPacket packet;
     ref eth = packet.init!Ethernet(ow);
     eth.dst = MACAddress(0x02, 0x13, 0x37, 0xAA, 0xBB, 0x64);
     eth.src = MACAddress(0x02, 0x13, 0x37, 0xCC, 0xDD, 0x65);
@@ -752,14 +752,14 @@ nothrow @nogc:
 
     ubyte protocol;
     const(ubyte)[] segment;
-    assert(parse_ow_transport(&packet, protocol, segment));
+    assert(parse_ow_transport(&packet.packet, protocol, segment));
     assert(protocol == TransportProto.udp);
     assert(segment == ow[ow_transport_header_size .. $]);
     assert(loadBigEndian(cast(const(ushort)*)ow.ptr) == ow_transport_discriminator(TransportProto.udp));
 
     UDPEndpoint ip_endpoint;
     ip_endpoint._family = AddressFamily.ipv4;
-    ip_endpoint.deliver_ether(&packet, segment, null);
+    ip_endpoint.deliver_ether(&packet.packet, segment, null);
 
     MACAddress local_a = MACAddress(0x02, 0, 0, 0, 0, 1);
     MACAddress local_b = MACAddress(0x02, 0, 0, 0, 0, 2);
@@ -790,7 +790,7 @@ nothrow @nogc:
 
     assert(register_frame_handler(PacketType.ethernet, &sink.input));
     eth.dst = station.mac;
-    station.receive(&packet);
+    station.receive(&packet.packet);
     unregister_frame_handler(PacketType.ethernet);
     assert(sink.received == 1 && sink.payload == [1, 2, 3, 4]);
     assert(sink.source == eth.src && sink.source_port == 49_152);

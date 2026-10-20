@@ -977,11 +977,11 @@ unittest
     message[6] = TWCState.Charging;
     message[7..9] = ushort(2000).nativeToBigEndian;
     message[9..11] = ushort(1500).nativeToBigEndian;
-    Packet packet;
+    StackPacket packet;
     ref TWCFrame frame = packet.init!TWCFrame(message[]);
     frame.src = 124;
     frame.dst = 42;
-    master.incoming_packet(&packet, iface, PacketDirection.incoming, null);
+    master.incoming_packet(&packet.packet, iface, PacketDirection.incoming, null);
     discovered = master.find_charger(124);
     assert(discovered && discovered.current == 1500 && discovered.charge_current_target == 2000);
     assert(discovered.reserved_current == 2000);

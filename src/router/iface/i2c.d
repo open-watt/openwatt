@@ -440,7 +440,7 @@ nothrow @nogc:
 unittest
 {
     ubyte[4] payload = [ 1, 2, 3, 4 ];
-    Packet packet;
+    StackPacket packet;
     ref I2CFrame frame = packet.init!I2CFrame(payload[]);
     frame.sequence_number = 0x1234;
     frame.address = 0x351;
@@ -449,14 +449,14 @@ unittest
     frame.flags = I2CFrameFlags.ten_bit_address;
 
     ubyte[8] header;
-    assert(I2CFrame.encode_ow_header(&packet, header[]) == 8);
-    assert(I2CFrame.encode_ow_header(&packet, header[0 .. 7]) == -1);
+    assert(I2CFrame.encode_ow_header(&packet.packet, header[]) == 8);
+    assert(I2CFrame.encode_ow_header(&packet.packet, header[0 .. 7]) == -1);
 
-    Packet decoded;
-    assert(I2CFrame.decode_ow_header(&decoded, header[0 .. 7]) == -1);
-    assert(I2CFrame.decode_ow_header(&decoded, header[]) == 8);
+    StackPacket decoded;
+    assert(I2CFrame.decode_ow_header(&decoded.packet, header[0 .. 7]) == -1);
+    assert(I2CFrame.decode_ow_header(&decoded.packet, header[]) == 8);
     ref result = decoded.hdr!I2CFrame;
     assert(result.sequence_number == 0x1234 && result.address == 0x351 && result.read_length == 7 &&
            result.type == I2CFrameType.request && result.flags == I2CFrameFlags.ten_bit_address);
-    assert(I2CFrame.extract_dst(&packet) == I2CFrame.extract_dst(&decoded));
+    assert(I2CFrame.extract_dst(&packet.packet) == I2CFrame.extract_dst(&decoded.packet));
 }

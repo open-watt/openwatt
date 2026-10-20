@@ -779,33 +779,33 @@ unittest
         assert(!udp_bind(&probe, InetAddress(local, 5543, 0, foreign_scope | 1)) && probe.local_scope6 == 0);
 
         // ingress zone selects the receiver and stamps the addresses it hands up
-        Packet pkt;
+        StackPacket pkt;
         total = write_udp6(buffer[], src, 4000, local, 5540, payload[]);
         pkt.init!RawFrame(buffer[0 .. total]);
-        udp_input6(stack, &pkt, IPv6Header.sizeof, link_a);
+        udp_input6(stack, &pkt.packet, IPv6Header.sizeof, link_a);
         assert(on_a.recv_queue.length == 1 && on_b.recv_queue.length == 0);
         assert(on_a.recv_queue[0].src == InetAddress(src, 4000, 0, zone_a) && on_a.recv_queue[0].data == payload[]);
         pkt.init!RawFrame(buffer[0 .. total]);
-        udp_input6(stack, &pkt, IPv6Header.sizeof, link_b);
+        udp_input6(stack, &pkt.packet, IPv6Header.sizeof, link_b);
         assert(on_a.recv_queue.length == 1 && on_b.recv_queue.length == 1);
         assert(on_b.recv_queue[0].src == InetAddress(src, 4000, 0, zone_b));
 
         // a connected wildcard receiver admits its peer only on the connected zone
         total = write_udp6(buffer[], src, 4000, local, probe.local_port, payload[]);
         pkt.init!RawFrame(buffer[0 .. total]);
-        udp_input6(stack, &pkt, IPv6Header.sizeof, link_b);
+        udp_input6(stack, &pkt.packet, IPv6Header.sizeof, link_b);
         assert(probe.recv_queue.length == 0);
         pkt.init!RawFrame(buffer[0 .. total]);
-        udp_input6(stack, &pkt, IPv6Header.sizeof, link_a);
+        udp_input6(stack, &pkt.packet, IPv6Header.sizeof, link_a);
         assert(probe.recv_queue.length == 1);
 
         // no receiver on the port, and a multicast group nobody joined
         total = write_udp6(buffer[], src, 4000, local, 5541, payload[]);
         pkt.init!RawFrame(buffer[0 .. total]);
-        udp_input6(stack, &pkt, IPv6Header.sizeof, link_a);
+        udp_input6(stack, &pkt.packet, IPv6Header.sizeof, link_a);
         total = write_udp6(buffer[], src, 4000, dst, 5540, payload[]);
         pkt.init!RawFrame(buffer[0 .. total]);
-        udp_input6(stack, &pkt, IPv6Header.sizeof, link_a);
+        udp_input6(stack, &pkt.packet, IPv6Header.sizeof, link_a);
         assert(on_a.recv_queue.length == 1 && on_b.recv_queue.length == 1);
 
         // a saturated receiver drops silently and stays bound
@@ -813,7 +813,7 @@ unittest
         foreach (_; 0 .. UdpPcb.max_queued + 1)
         {
             pkt.init!RawFrame(buffer[0 .. total]);
-            udp_input6(stack, &pkt, IPv6Header.sizeof, link_a);
+            udp_input6(stack, &pkt.packet, IPv6Header.sizeof, link_a);
         }
         assert(on_a.recv_queue.length == UdpPcb.max_queued);
 
