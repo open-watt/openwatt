@@ -584,7 +584,9 @@ Every packet has a page, and its bytes come from one of three places:
 | fresh and small, lent to a subtree known not to keep them: a decoder, a console command, a probe that reads its reply within the call, a test | `StackPage!N` |
 | already living elsewhere: an RX ring, a DMA, vendor or socket buffer, another packet's bytes | `StackPage!0` pointing at them |
 
-A misjudged `StackPage!N` costs the copy a keeper makes at refcount 0, never a fault. Egress never
+A pool page saves a copy only where the sender writes the bytes in place and something downstream keeps
+them; elsewhere a keeper's copy costs what building into a page would, so lending is never worse. A
+misjudged `StackPage!N` costs the copy a keeper makes at refcount 0, never a fault. Egress never
 uses one: it has no headroom, so framing it always copies. A header-only frame (a BLE connect or
 disconnect) is a `StackPage!0` even when it may be kept: it has no bytes to share, and a keeper's
 copy is the same single allocation a pool page would be.
@@ -729,8 +731,8 @@ Each step leaves the tree no worse than before it and deletes what it replaces.
 | E4b1 (#859) | the storage kinds: `StackPacket`, `packet_retain` (shares a pool packet, copies a lent one), `packet_free`; the priority queue and neighbour cache share; `Packet` not copyable (folds #856); the bridge floods take a `StackPage!0` view over the source; router/iface core (9 sites) and non-BLE drivers (6) | E4p, urt #394 | the by-value copy fault (7 sites), `ethernet.d`'s and `endpoint.d`'s sender buffers, `clone`/`free_clone` |
 | E4b2 (#860, merged) | IP stack: 10 senders on pool pages; `frame_and_send` borrows the inner packet | E4b1 | `ubyte[1500]` in `icmp`, `tcp`, `udp`; `MessageBuffer` in IGMP and MLD; the TCP flood's per-station rebuild |
 | E4b3 (#861, merged) | BLE: 8 fresh frames on pool pages, 3 vendor and socket borrows | E4b1 | the `ubyte[513]`/`[250]` notification and read buffers |
-| E4m (#864) | `Packet*` transfers, `const(Packet)*` lends: `forward`, `transmit`, `enqueue` and the egress chain own what they take and free it on every path; ingress dispatch lends `const`; `packet_retain` takes `const(Packet)*` | E4b3 | the senders' `packet_free` after `forward`, the queue's retain on enqueue |
-| E4b4 | fieldbus and application protocols: CAN, OBD, CPC, Spinel, EZSP, Zigbee, Modbus, TWC, WebSocket, sync (11 fresh, 12 borrowed) | E4b1 | Modbus `send_packet`'s stack PDU, OBD's frame locals, the EZSP command buffer |
+| E4m (#864, merged) | `Packet*` transfers, `const(Packet)*` lends: `forward`, `transmit`, `enqueue` and the egress chain own what they take and free it on every path; ingress dispatch lends `const`; `packet_retain` takes `const(Packet)*` | E4b3 | the senders' `packet_free` after `forward`, the queue's retain on enqueue |
+| E4b4 (#865) | fieldbus and application protocols: Modbus `send_packet` builds in a pool page; the rest lend, including Ethernet's decapsulated inner packet | E4b1 | Modbus `send_packet`'s stack PDU; the last production stack `Packet` |
 | E4b5 | the remaining tests; no page-less packet is left | E4b2 to E4b4 | `init!T(buffer)`, `mutable_flag`/`page_flag`, #692 (closed as superseded) |
 | E3 | interfaces state their framing room; producers ask their egress for it | E4b5 | the default headroom on paths that know their framing |
 | E4c | the remaining holders: BLE's `_emu_responses` shares; WPAN shares until DMA completion; Modbus keeps its validation bytes, not the request; TCP's Ethernet flood without a fixed source MAC takes a page per station, since its checksum differs per station | E4b5, the view decision (E.8) | `wpan.d`'s free of a frame the radio may still read |
