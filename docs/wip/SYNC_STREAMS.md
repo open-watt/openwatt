@@ -1,6 +1,6 @@
 # Lossless, untorn sync streams
 
-Status: phase A landed (#852), B1a in progress. Delete this file when phase C lands; reconcile what remains
+Status: phase A (#852), B1a (#855) and the series corrections B1b needed (#862) landed; B1b (#857) in review. Delete this file when phase C lands; reconcile what remains
 into [TODO.md](../../TODO.md).
 
 ## Problem
@@ -38,11 +38,10 @@ sync. It has no floors and no container; its ceiling is the per-platform sync la
 - It is released when every peer has reached head: the tail returns to the register for text and
   wide formats, peer positions rebase to 0, and the store returns to a freelist. The freelist keeps
   a store's bucket only when it is exactly the 32-byte minimum and was never packed.
-- Configuring retention or attaching a container *promotes* it: the open bucket is reallocated to
-  the configured size and the sync-store bit clears. Nothing else changes.
-- Removing the policy while subscribed *demotes* it: the sync-store bit sets, and every sealed bucket
-  wholly below the sync pin is dropped (borrowed ones on their last `release_ref`). Removing it
-  while unsubscribed releases the store.
+- Configuring retention or attaching a container takes it over: the configured policy replaces the
+  sync ceiling and the open bucket keeps growing to the configured size. Nothing else changes.
+- Releasing a sync store, and demoting a configured store back to one when its policy is removed,
+  need to know which stores exist only for sync; that marker arrives with B3, which uses it.
 - Reads never promote: opening a cursor must not create or claim a store.
 - Any store created on an element that holds a value starts with that value as record 0, for every
   format (text and wide already do; scalars join in B1b), so "one record before the latest" exists
@@ -54,13 +53,11 @@ across pulls keeps its cursor position and reads again; it never holds a block.
 
 ### Who is subscribed
 
-`Element._sync`, in the padding byte after `_status`, holds the number of peers that have the node
-armed, shifted left one, and in bit 0 whether the store exists only for sync (set implies a store).
-Arming adds 2 and disarming subtracts 2 wherever a node enters or leaves a peer's `_live_nodes`
-(`track_live`, `rebuild_live_nodes`, peer detach, per-node removal), so disarm never scans other
-peers; an element allows 127 peers. The write path tests `!_history && _sync >= 2`. Bit 0 clears
-in `retention()` and at container attach (`ows.d` and `record.d` reach the store through
-`ensure_history()`, so they call back into the element there).
+`Element._sync_peers`, in the padding byte after `_status`, counts the peers that have the node
+armed. It changes by one wherever a node enters or leaves a peer's `_live_nodes` (`track_live`,
+`rebuild_live_nodes`, peer detach, per-node removal), so disarm never scans other peers, and the
+number of sessions holding live patterns is capped at admission. The write path tests
+`!_history && _sync_peers`.
 
 Sync holds one pinned cursor per stored element, shared by every peer, at the lowest peer
 position. It opens when a sync store is created (or when a subscribed element's configured store
@@ -109,10 +106,22 @@ Each phase is one PR.
 | Phase | Work | Deletes |
 |---|---|---|
 | B1a | `Element._sync_peers` counts the peers that have the element armed, kept by `SyncPeer.arm`/`disarm`; a write enlists in the dirty sweep only when its element is armed. | `add_feed_listener`, `remove_feed_listener`, `g_feed_listeners` |
-| B1b | Held elements stream through cursors like point series; subscribing arms a position and marks the element touched. `_sync_peers` becomes `_sync` with the store bit, sync stores, the shared pin, promotion and demotion, eviction below every pin when there are no floors. Counters for stores, churn, grown buckets and bytes on the `system` device; `lost` on `/sync/peer`. | `_pending_vals` coalescing, `encode_val`, `take_val_repush`, the value in `add`, `send_backfill` as a separate path |
+| B1b | Held elements stream through cursors like point series; subscribing arms one record before the latest and marks the element touched, and `add` carries no value for an armed node. sync stores on first change with the sync ceiling; every new store over a held value starts with it as record 0; the shared pin; gaps sent as a null at their start; eviction below every pin when there are no floors. `encode_val` stays for a store-less element's register, and the val-queue repair rewinds held positions to their latest record (B2 deletes it). | `_pending_vals` coalescing, the value in armed `add`s, the re-push of every armed node |
+| B1c | Counters for sync stores (live, peak, created, freed, grown, bytes) on the `system` device once #849 lands; `lost` on `/sync/peer`. | |
 | B2 | Increments: wire fields, receiver held delivery, ack-driven pin, retransmit from the store. Protocol version bump. | the val `DataQueue` backlog, refold and epochs |
-| B3 | Sync store release and freelist, if B1's counters justify it. | |
+| B3 | Sync store release, the freelist and demotion, if B1c's counters justify the first two. | |
 | C | Logs as a text series, `LogSink` on a cursor, merged reads. | `log.d` retention and consumers, log sub verbs, `DataQueue` |
+
+## Candidates waiting on measurement
+
+- Sparse positions: when a flush keeps up, every armed element's position equals its head, so a
+  peer's entry need only exist while the element has unsent records; caught-up peers do not
+  constrain the pin. The per-peer map then holds the backlog, not every armed element (the energy
+  device alone is ~5,400 entries per peer on the Pi). Wait for B1c's counters and the map size
+  with an energy visualisation open.
+- Component arms: a pattern naming a whole component arms the component, and an element is armed
+  if it or an ancestor is. Saves the subscribe walk and per-node counts, at the cost of a second
+  arming path and an ancestor walk on writes; only if measurements show the walk or the counts.
 
 ## Open
 

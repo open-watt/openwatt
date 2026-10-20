@@ -19,6 +19,7 @@ module manager.sync.encoder;
 import urt.log;
 import urt.meta.enuminfo : VoidEnumInfo;
 import urt.string;
+import urt.time : SysTime;
 import urt.variant;
 
 import manager.base;
@@ -276,7 +277,14 @@ nothrow @nogc:
     // `templates` is the root-first '/'-joined component template of every node the path crosses
     abstract void encode_add(SyncPeer peer, SyncHandle h, const(char)[] path, const(char)[] node_class, const(char)[] templates, uint ft, Element* e, ulong peer_id, bool include_value = true);
 
-    abstract bool encode_val(SyncPeer peer, SyncHandle h, Element* e);
+    // one sample; a null value says the value stopped being known at t
+    abstract bool encode_val(SyncPeer peer, SyncHandle h, ref Variant v, SysTime t);
+
+    final bool encode_val(SyncPeer peer, SyncHandle h, Element* e)
+    {
+        Variant v = e.value;
+        return encode_val(peer, h, v, e.last_update);
+    }
     // the leading records the send limit holds, at least one; returns the count consumed, 0 when refused for now (an unsendable record goes as lost)
     abstract uint encode_val_block(SyncPeer peer, SyncHandle h, ref const RecordBlock blk);
 

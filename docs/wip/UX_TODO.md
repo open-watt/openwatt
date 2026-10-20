@@ -3,6 +3,15 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-10-19: live feeds are lossless
+
+- A live (`model_sub` without `once`) `add` no longer carries `v`/`t`; the node's current value is
+  the first sample of its first `val`, which follows the introduction without a request. Until it
+  arrives the node has no value: show it as pending, not as zero or unset.
+- Held elements now send every change, not the latest per flush, so one `val` can carry several
+  samples for a held element. Apply the last as the current value and hand all of them to anything
+  that plots. openwatt-web's `ModelMirror` already does both; openwatt-droid is unchecked.
+
 ## 2026-10-18: page category names
 
 - A page category's name is now the data its pages carry, net of the page's own fields, so the
