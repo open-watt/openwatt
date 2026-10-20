@@ -927,11 +927,11 @@ private:
     // build a CPCFrame packet (payload borrowed from the rx buffer) and push it through the packet path
     void deliver_frame(ubyte endpoint, ubyte control, const(ubyte)[] payload, MonoTime rx_time)
     {
-        Packet p;
+        StackPacket p;
         CPCFrame* f = &p.init!CPCFrame(payload, rx_time);
         f.endpoint = endpoint;
         f.control = control;
-        incoming_packet(&p);
+        incoming_packet(&p.packet);
     }
 
     ubyte channel_ack_for(ubyte endpoint) pure
@@ -1324,14 +1324,14 @@ protected:
             return -1;
         }
 
-        Packet cpc_packet;
+        StackPacket cpc_packet;
         CPCFrame* f = &cpc_packet.init!CPCFrame(packet.data, packet.creation_time);
         f.endpoint = ubyte(_endpoint);
         f.control = 0; // the trunk stamps the control byte at emit
         cpc_packet.pcp = packet.pcp;
         cpc_packet.dei = packet.dei;
 
-        if (trunk.forward(&cpc_packet, callback, queue_policy) < 0)
+        if (trunk.forward(&cpc_packet.packet, callback, queue_policy) < 0)
         {
             add_tx_drop();
             return -1;
@@ -1439,9 +1439,9 @@ package:
     // packet path as a RawFrame so our subscribers see it and our rx counters advance.
     void deliver_payload(const(ubyte)[] payload, MonoTime rx_time)
     {
-        Packet p;
+        StackPacket p;
         p.init!RawFrame(payload, rx_time);
-        incoming_packet(&p);
+        incoming_packet(&p.packet);
     }
 
     void on_connect_reply(EndpointState state)

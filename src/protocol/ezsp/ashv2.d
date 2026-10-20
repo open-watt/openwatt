@@ -610,9 +610,9 @@ private:
 
         if (data.length > 0)
         {
-            Packet p;
+            StackPacket p;
             p.init!RawFrame(data, timestamp);
-            incoming_packet(&p);
+            incoming_packet(&p.packet);
         }
     }
 

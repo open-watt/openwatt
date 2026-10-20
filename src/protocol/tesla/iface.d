@@ -265,12 +265,12 @@ private:
         if (!r)
             return;
 
-        Packet p;
+        StackPacket p;
         ref TWCFrame twc = p.init!TWCFrame(msg, recv_time);
         twc.src = message.sender;
         twc.dst = message.receiver ? message.receiver : TWCFrame.broadcast;
 
-        incoming_packet(&p);
+        incoming_packet(&p.packet);
     }
 }
 

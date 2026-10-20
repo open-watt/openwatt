@@ -343,13 +343,13 @@ protected:
                 return handle;
 
             case Backend.can:
-                Packet p;
+                StackPacket p;
                 ubyte[8] frame = void;
                 isotp_single(payload, frame);
                 ref CANFrame can = p.init!CANFrame(frame[], packet.creation_time);
                 can.id = dst;
                 can.extended = f.extended || dst > 0x7FF;
-                if (_can.forward(&p) < 0)
+                if (_can.forward(&p.packet) < 0)
                 {
                     add_tx_drop();
                     return -1;
@@ -438,12 +438,12 @@ private:
 
         note_awake();
 
-        Packet p;
+        StackPacket p;
         ref OBDFrame f = p.init!OBDFrame(message, rx_time);
         f.src_id = src_id;
         f.dst_id = 0;
         f.extended = extended;
-        incoming_packet(&p);
+        incoming_packet(&p.packet);
     }
 
     // --- CAN backend ---
@@ -473,13 +473,13 @@ private:
                 return;
 
             case IsoTpResult.need_fc:
-                Packet fc;
+                StackPacket fc;
                 ubyte[8] frame = void;
                 isotp_flow_control(frame);
                 ref CANFrame tx = fc.init!CANFrame(frame[]);
                 tx.id = fc_id;
                 tx.extended = can.extended;
-                _can.forward(&fc);
+                _can.forward(&fc.packet);
                 return;
 
             case IsoTpResult.none:

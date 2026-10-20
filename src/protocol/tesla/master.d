@@ -653,11 +653,11 @@ private:
     int send_twc_message(ushort dst, const(void)[] message)
     {
         _last_tx = getTime();
-        Packet p;
+        StackPacket p;
         ref TWCFrame twc = p.init!TWCFrame(message[]);
         twc.src = _id_on_bus;
         twc.dst = dst;
-        return _iface.forward(&p);
+        return _iface.forward(&p.packet);
     }
 
     void iface_state_change(ActiveObject, StateSignal signal)

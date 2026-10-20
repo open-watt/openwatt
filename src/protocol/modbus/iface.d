@@ -978,7 +978,7 @@ private:
         }
 
         // message = [function_code, pdu_data...]; payload is the full PDU
-        Packet p;
+        StackPacket p;
         ref ModbusFrame hdr = p.init!ModbusFrame(message, recvTime);
         hdr.type = type;
         hdr.function_code = cast(ubyte)frame_info.function_code;
@@ -1024,7 +1024,7 @@ private:
                     hdr.src_address = address;
                     hdr.dst_address = pm.request_from_address;
                     hdr.sequence_number = pm.sequence_number;
-                    incoming_packet(&p);
+                    incoming_packet(&p.packet);
                     _queue.complete(matched_tag, MessageState.complete);
                 }
 
@@ -1043,7 +1043,7 @@ private:
                     hdr.src_address = address;
                     hdr.dst_address = pm.request_from_address;
                     hdr.sequence_number = pm.sequence_number;
-                    incoming_packet(&p);
+                    incoming_packet(&p.packet);
                     _queue.complete(tag, MessageState.complete);
                 }
                 else
@@ -1079,7 +1079,7 @@ private:
             }
             hdr.sequence_number = seq;
 
-            incoming_packet(&p);
+            incoming_packet(&p.packet);
 
             _expect_message_type = type == ModbusFrameType.request ? ModbusFrameType.response : ModbusFrameType.request;
         }

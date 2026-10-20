@@ -307,12 +307,12 @@ protected:
         OBDInterface i = _iface.get;
         if (!i)
             return -1;
-        Packet p;
+        StackPacket p;
         ref OBDFrame f = p.init!OBDFrame(request);
         f.src_id = 0;
         f.dst_id = ecu;
         f.extended = extended;
-        return i.forward(&p, &on_dispatch);
+        return i.forward(&p.packet, &on_dispatch);
     }
 
     void abort_dispatch(int handle)

@@ -1121,7 +1121,7 @@ private:
         if (uses_udp_endpoint)
             return _udp_endpoint.sendto(bytes, _remote) == bytes.length ? 0 : -1;
 
-        Packet p;
+        StackPacket p;
         if (_peer_flags & PeerFlags.remote_bound)
             p.init!UDPFrame(bytes).address = _remote_addr;
         else
@@ -1129,7 +1129,7 @@ private:
             ref hdr = p.init!RawFrame(bytes);
             hdr.is_text = is_text;
         }
-        return _transport.forward(&p);
+        return _transport.forward(&p.packet);
     }
 
     // a dispatched frame may restart the session and clear the hold, so each frame is taken

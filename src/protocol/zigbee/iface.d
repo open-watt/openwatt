@@ -663,7 +663,7 @@ private:
         if (_coordinator.node_id == 0xFFFE)
             return; // not joined to a network...
 
-        Packet p;
+        StackPacket p;
         ref hdr = p.init!APSFrame(message);
         switch (type)
         {
@@ -783,7 +783,7 @@ private:
         version (DebugZigbeeLatency)
             writeDebugf("ZBLAT rx    t={0} src={1,04x} ep={2,02x} cl={3,04x}", zblat_us(), hdr.src, hdr.src_endpoint, hdr.cluster_id);
 
-        incoming_packet(&p);
+        incoming_packet(&p.packet);
     }
 
     void lookup_eui_response(void* user_data, EmberStatus status, EmberEUI64 eui64)
