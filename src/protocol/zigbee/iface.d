@@ -52,7 +52,6 @@ EUI64 zigbee_multicast_addr(ushort group)
 
 
 enum uint queue_timeout = 10_000; // milliseconds - safety net only; message_sent_handler is the real completion path
-enum uint ezsp_grace_period = 4000; // milliseconds - how long to wait for EZSP client to recover before restarting
 
 // IEEE 802.15.4 O-QPSK in the 2.4GHz band; the only PHY zigbee runs on here
 enum ieee802154_phy_bitrate = 250_000;
@@ -264,7 +263,6 @@ protected:
 
         _last_ping = MonoTime();
         _counter_pending = false;
-        _ezsp_offline_since = MonoTime();
 
         if (_ezsp_client)
             _network_status = EmberStatus.NETWORK_DOWN;
@@ -275,14 +273,6 @@ protected:
     override void update()
     {
         MonoTime now = getTime();
-
-        // delayed restart: give EZSP client a grace period to recover
-        if (_ezsp_offline_since != MonoTime())
-        {
-            if (now - _ezsp_offline_since > ezsp_grace_period.msecs)
-                restart();
-            return; // don't send while client is offline
-        }
 
         _queue.timeout_stale(now);
 
@@ -448,16 +438,12 @@ private:
     ubyte _max_in_flight = 3;
 
     MonoTime _last_ping;
-    MonoTime _ezsp_offline_since;
 
     PriorityPacketQueue _queue;
     Map!(ubyte, PendingMessage) _pending;
 
     void send_queued_messages()
     {
-        if (_ezsp_offline_since != MonoTime())
-            return;
-
         for (QueuedFrame* frame = _queue.dequeue(); frame !is null; frame = _queue.dequeue())
         {
             const(ubyte)[] data = cast(const(ubyte)[])frame.packet.data();
@@ -626,14 +612,8 @@ private:
 
     void ezsp_state_change(ActiveObject, StateSignal signal) nothrow
     {
-        if (signal == StateSignal.offline)
-        {
-            _ezsp_offline_since = getTime();
-            _queue.abort_all_in_flight(MessageState.failed);
-        }
-        else if (signal == StateSignal.online)
-            _ezsp_offline_since = MonoTime();
-        else if (signal == StateSignal.destroyed)
+        // an ASH reconnect resets the NCP, so the network never survives the client going down
+        if (signal == StateSignal.offline || signal == StateSignal.destroyed)
             restart();
     }
 
