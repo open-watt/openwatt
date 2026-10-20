@@ -82,8 +82,12 @@ is irregular, and a byte heap for dynamic records, where a record is a `u16` off
 length-prefixed value, 2-aligned and deduplicated within the bucket. The record plane stays
 fixed-stride and the image is context-free, so a bucket in RAM and a block on disk are byte
 identical. A gap forces a bucket boundary, so within a bucket the timeline is continuous and a
-regular series stores zero bytes of time. The bucket directory carries first and last time and
-first index, so time-seek and index-seek are both binary searches over one array.
+regular series stores zero bytes of time. The bucket directory carries first time, end time and
+first index, so time-seek and index-seek are both binary searches over one array. A bucket's end
+is when its final value stopped holding: the next bucket's first record when one follows without
+a gap, or the moment the value became unknown when the bucket ended at a gap (an invalidation
+seals it there; a regular series' value holds until its next record was due). A gap is therefore
+the space between an ended bucket and the next one, and an ended tail is an open gap.
 
 `RecordBlock` is storage and delivery in one shape: the block an observer receives, the block a
 cursor returns and the bucket's memory layout are the same `{format, data, times|null, t0,
