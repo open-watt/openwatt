@@ -2467,8 +2467,7 @@ nothrow @nogc:
             {
                 if (link)
                 {
-                    Collection!Link().remove(link);
-                    free(link);
+                    link.destroy();
                 }
             }
             Console* console = alloc!Console(null, StringLit!"test.ping");
@@ -2480,8 +2479,7 @@ nothrow @nogc:
             assert(command.subscribed && command.sent == 1);
             link.disabled(true);
             assert(!command.subscribed);
-            Collection!Link().remove(link);
-            free(link);
+            link.destroy();
             link = null;
             assert(command.update() == CommandCompletionState.cancelled);
             command.last_send -= 2.seconds;

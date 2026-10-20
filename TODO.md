@@ -521,13 +521,11 @@ one primitive (most belong in urt) and its copies deleted:
   (`UDPBindEndpoint` carries the station separately). urt's WinSock `IPV6_RECVPKTINFO` /
   `IPV6_PKTINFO` constants are the Linux values (49/50), not Windows' 19; the IOCP path defines
   its own, but `urt.socket.recvfrom` with packet-info is wrong on Windows.
-- **[P2, test] The internal IP stack's tests are never run, and their teardown fails**: the host builds
-  use the kernel stack and the embedded builds only cross-compile, so `version (UseInternalIPStack)` code
-  is only compiled, never tested. `make CONFIG=unittest USE_INTERNAL_IP_STACK=1` on Linux stops at the
-  first of `protocol.ip.icmp` or `protocol.ip.udp` to run, with "ActiveObject was started but not
-  destroyed": both tests' `Link` sets `_state = State.running` in its constructor and is freed without
-  being destroyed, so the check fires in teardown after the test body passes, and the modules after it
-  never run. Tear the links down properly, then add a host CI job with the internal stack.
+- **[P2, test] The internal IP stack's tests are never run in CI**: the host builds use the kernel stack
+  and the embedded builds only cross-compile, so `version (UseInternalIPStack)` code is only compiled.
+  `make CONFIG=unittest USE_INTERNAL_IP_STACK=1` on Linux now runs every IP module, then stops in
+  `urt.socket`, whose test asserts "receive context not supported on callback backend": it assumes the
+  kernel socket backend. Skip or adapt that test under the internal stack, then add a host CI job.
 - **[P3, build] The lwIP socket backend is unbuilt and unsupported**: ESP builds default to
   the internal stack and do not link lwIP; `USE_INTERNAL_IP_STACK=0` on ESP32 fails to compile
   (`IoReady` is Linux-only in manager/reactor.d, `Array!DNSQuestion` fails to emplace under the

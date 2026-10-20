@@ -986,10 +986,8 @@ unittest
         {
             Collection!IPv6Address().remove(address);
             free(address);
-            Collection!Link().remove(ingress);
-            Collection!Link().remove(egress);
-            free(ingress);
-            free(egress);
+            ingress.destroy();
+            egress.destroy();
         }
         IPv6Addr local = IPv6Addr(0x2001, 0xdb8, 1, 0, 0, 0, 0, 1);
         IPv6Addr source = IPv6Addr(0x2001, 0xdb8, 1, 0, 0, 0, 0, 2);
