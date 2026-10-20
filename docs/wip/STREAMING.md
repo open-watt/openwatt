@@ -649,16 +649,22 @@ MBAP 7, RTU 1 and 2, ASH 1 and 3 plus escape expansion, CPC 7, SLIP 2 plus expan
 
 ### E.4 Hand-off through `forward` and `transmit`
 
-`forward(Packet*)`, `transmit(Packet*, ...)` and every frame handler borrow the packet for the
-call; whatever keeps it past the call holds it through `page_retain`, and the caller releases its
-own reference afterwards. A fan-out (a bridge flooding several members, a frame delivered to a
-subscriber and forwarded) is then no special case: each callee holds what it keeps. A frame that
-reaches a queue costs a share at refcount 1 or more, or the one copy at 0, which is the receive
-fork of the copy budget.
+`Packet*` transfers a reference; `const(Packet)*` lends one. A callee given `Packet*` owns that
+reference: it edits (in place at refcount 1, through `page_mutable`), keeps, hands on or frees it,
+on every return path, failures included. A caller that keeps using a packet after passing it hands
+on `packet_retain(p)`, which shares a pool page and copies a lent one. `forward`, `transmit`,
+`enqueue` and the egress chain take `Packet*`, so a sender's `forward(p)` is its last word on `p`.
 
-A queue retains what it is given (sharing a page at 1 or more, copying only a page at 0), and
-dispatch lends that reference down through `transmit`. The in-flight entry keeps the tag and timing, not the
-bytes; `retire` frees only a frame that never left. The same for `NeighbourEntry.pending` and
+A callee given `const(Packet)*` looks for the call and keeps by `packet_retain`; the refcount
+counts holders and is not the packet's value, so retaining through `const` is legitimate. Fan-out
+lends: ingress dispatch hands each subscriber and frame handler `const(Packet)*`, and one that
+wants to edit or forward takes its own reference first, so an edit while others still hold the
+frame copies, which is what makes in-place editing safe. Moving a lent packet (refcount 0) is
+legal: freeing it does nothing, and keeping it copies.
+
+A queue takes the reference it is given, and dispatch hands it down through `transmit`. The
+in-flight entry keeps the tag and timing, not the bytes; `retire` frees only a frame that never
+left. The same for `NeighbourEntry.pending` and
 BLE's `_emu_responses`. Only a path that needs the bytes after the push shares before it: the
 WPAN driver until DMA completion (`wpan.d` today frees an aborted frame the radio may still be
 reading), ASH until the ack. Modbus keeps the five bytes response validation reads (function
@@ -714,6 +720,7 @@ Each step leaves the tree no worse than before it and deletes what it replaces.
 | E4b1 (#859) | the storage kinds: `StackPacket`, `packet_retain` (shares a pool packet, copies a lent one), `packet_free`; the priority queue and neighbour cache share; `Packet` not copyable (folds #856); the bridge floods take a `StackPage!0` view over the source; router/iface core (9 sites) and non-BLE drivers (6) | E4p, urt #394 | the by-value copy fault (7 sites), `ethernet.d`'s and `endpoint.d`'s sender buffers, `clone`/`free_clone` |
 | E4b2 (#860) | IP stack: 10 senders on pool pages; `frame_and_send` borrows the inner packet | E4b1 | `ubyte[1500]` in `icmp`, `tcp`, `udp`; `MessageBuffer` in IGMP and MLD; the TCP flood's per-station rebuild |
 | E4b3 (#861) | BLE: 8 fresh frames on pool pages, 3 vendor and socket borrows | E4b1 | the `ubyte[513]`/`[250]` notification and read buffers |
+| E4m | `Packet*` transfers, `const(Packet)*` lends: `forward`, `transmit`, `enqueue` and the egress chain own what they take and free it on every path; ingress dispatch lends `const`; `packet_retain` takes `const(Packet)*` | E4b3 | the senders' `packet_free` after `forward`, the queue's retain on enqueue |
 | E4b4 | fieldbus and application protocols: CAN, OBD, CPC, Spinel, EZSP, Zigbee, Modbus, TWC, WebSocket, sync (11 fresh, 12 borrowed) | E4b1 | Modbus `send_packet`'s stack PDU, OBD's frame locals, the EZSP command buffer |
 | E4b5 | the remaining tests; no page-less packet is left | E4b2 to E4b4 | `init!T(buffer)`, `mutable_flag`/`page_flag`, #692 (closed as superseded) |
 | E3 | interfaces state their framing room; producers ask their egress for it | E4b5 | the default headroom on paths that know their framing |
@@ -743,12 +750,11 @@ could share.
   pool page whose `link` carries the parent under a second flag bit, so freeing the view drops
   the parent's reference and `Packet` does not grow. Until this lands, a kept view copies, which is
   what `clone` does today. To settle before E4c.
-- Settled 2026-10-18: neither a consuming `ref Packet` nor a by-value move. Calls borrow, and a
-  keeper holds (E.4). Settled 2026-10-19: a packet is passed as `Packet*`, never `ref Packet`;
-  new signatures take pointers now, and E4p converts the rest. `const(Packet)*` is a borrow for
-  the life of the call tree: nothing below it can retain, so a keeper under it must copy. It is
-  only for leaves whose whole subtree looks and never keeps (codecs, filters, address lookups);
-  `forward`, `transmit`, queues and subscriber handlers take `Packet*`.
+- Settled 2026-10-20: `Packet*` transfers ownership and `const(Packet)*` borrows (E.4), replacing
+  the 2026-10-18 "calls borrow" rule. A mutable borrow let a callee edit a packet its caller
+  still used, so in-place editing was safe only for the last user, which is ownership by another
+  name; and `page_mutable` already consumes a reference. A packet is passed by pointer, never
+  `ref Packet` (E4p).
 - Tiny's refcount is 8 bits; 255 holders of one page is a ceiling no path approaches.
 
 ## Execution sequence
