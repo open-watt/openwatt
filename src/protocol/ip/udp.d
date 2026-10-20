@@ -758,10 +758,8 @@ unittest
         Link link_b = Collection!Link().create("udp6-test-b");
         scope(exit)
         {
-            Collection!Link().remove(link_a);
-            free(link_a);
-            Collection!Link().remove(link_b);
-            free(link_b);
+            link_a.destroy();
+            link_b.destroy();
         }
         uint zone_a = link_a.scope_id, zone_b = link_b.scope_id;
 

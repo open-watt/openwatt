@@ -531,8 +531,7 @@ unittest
     {
         Collection!IPAddress().remove(address);
         free(address);
-        Collection!Link().remove(link);
-        free(link);
+        link.destroy();
     }
     IPAddr local = IPAddr(192, 0, 2, 1), remote = IPAddr(192, 0, 2, 2);
     address.address = IPNetworkAddress(local, 24);
