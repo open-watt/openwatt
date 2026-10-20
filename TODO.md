@@ -1341,12 +1341,14 @@ this is what remains.
   `model_sub` burst, one quiet skip per unknown type per session, and write routing to the authority;
   until that lands a console `set` on a proxy diverges it silently.
 
-- **Finish the model plane**: `model_sub` takes patterns, `once` and a `from`/`to` window, nothing
-  else. Still to build: `meta`/`depth` structure browsing, `rate`/`deadband`/`mode` (tightest wins
+- **Finish the model plane**: `model_sub` takes patterns, `once`, a `from`/`to` window and
+  `points`, nothing else. Still to build: `meta`/`depth` structure browsing, `rate`/`deadband`/`mode` (tightest wins
   when patterns overlap), `move` and `gone`, `call` with the signature form of `type` (lands with
   the first callable node; `cancel` reserved), constraint min/max/step on the format block together
   with element-write enforcement, echo suppression for `set` writers via `SampleUpdate.who`,
-  pinned-cursor paced backfill (backfill serves synchronously inside the burst today), and an
+  a pin for a read parked between frames (eviction while it waits arrives as `lost`), bundling a read's
+  `add`s with its `val`s (a first read sends each `add` as its own control frame, which closes the
+  bundle; binary needs a mixed-verb frame), and an
   element lifecycle hook that carries the element. Formats failing `ows.container_serialisable` are
   skipped with a log rather than answered `err`, because per-node errors inside a glob burst are
   unresolved. Confirm `device` is registered as a namespace in `g_app.types`.

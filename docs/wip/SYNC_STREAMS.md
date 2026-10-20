@@ -1,6 +1,6 @@
 # Lossless, untorn sync streams
 
-Status: phase A (#852), B1a (#855) and the series corrections B1b needed (#862) landed; B1b (#857) in review. Delete this file when phase C lands; reconcile what remains
+Status: phase A (#852), B1a (#855) and the series corrections B1b needed (#862) landed; B1b (#857) and B2a in review. Delete this file when phase C lands; reconcile what remains
 into [TODO.md](../../TODO.md).
 
 ## Problem
@@ -108,7 +108,8 @@ Each phase is one PR.
 | B1a | `Element._sync_peers` counts the peers that have the element armed, kept by `SyncPeer.arm`/`disarm`; a write enlists in the dirty sweep only when its element is armed. | `add_feed_listener`, `remove_feed_listener`, `g_feed_listeners` |
 | B1b | Held elements stream through cursors like point series; subscribing arms one record before the latest and marks the element touched, and `add` carries no value for an armed node. sync stores on first change with the sync ceiling; every new store over a held value starts with it as record 0; the shared pin; gaps sent as a null at their start; eviction below every pin when there are no floors. `encode_val` stays for a store-less element's register, and the val-queue repair rewinds held positions to their latest record (B2 deletes it). | `_pending_vals` coalescing, the value in armed `add`s, the re-push of every armed node |
 | B1c | Counters for sync stores (live, peak, created, freed, grown, bytes) on the `system` device once #849 lands; `lost` on `/sync/peer`. | |
-| B2 | Increments: wire fields, receiver held delivery, ack-driven pin, retransmit from the store. Protocol version bump. | the val `DataQueue` backlog, refold and epochs |
+| B2a | One value path: a `once` sub answers each match with `val`s carrying the request's `seq`, bundled on the control plane, from one sample-frame encoder per encoding; a point read is the latest record, `from`/`to` a range from the record holding at `from`, `points` its span means. An armed sub's `from` seeds its position. `index_for_time` is exact. Protocol version 3. | `history_req`/`history` and the `history` capability, the value in `add`, `send_backfill` and the parked live cursor, the unarmed value retry, `SampleAggregator` |
+| B2b | Increments: wire fields, receiver held delivery, ack-driven pin, retransmit from the store. | the val `DataQueue` backlog, refold and epochs, the repush rewind |
 | B3 | Sync store release, the freelist and demotion, if B1c's counters justify the first two. | |
 | C | Logs as a text series, `LogSink` on a cursor, merged reads. | `log.d` retention and consumers, log sub verbs, `DataQueue` |
 

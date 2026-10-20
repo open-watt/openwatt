@@ -50,15 +50,14 @@ enum SyncCaps : ubyte
 {
     objects = 1 << 0,   // legacy object mirror
     model   = 1 << 1,   // data-model space (add/val/sub)
-    history = 1 << 2,
-    console = 1 << 3,
-    logs    = 1 << 4,
-    time    = 1 << 5,
-    console_session = 1 << 6,
-    templates = 1 << 7, // understands `add {class:"component"}` shape refreshes
+    console = 1 << 2,
+    logs    = 1 << 3,
+    time    = 1 << 4,
+    console_session = 1 << 5,
+    templates = 1 << 6, // understands `add {class:"component"}` shape refreshes
 }
 
-enum ubyte local_sync_caps = SyncCaps.objects | SyncCaps.model | SyncCaps.history | SyncCaps.console | SyncCaps.logs | SyncCaps.time | SyncCaps.console_session | SyncCaps.templates;
+enum ubyte local_sync_caps = SyncCaps.objects | SyncCaps.model | SyncCaps.console | SyncCaps.logs | SyncCaps.time | SyncCaps.console_session | SyncCaps.templates;
 
 // reliability sublayer classification; values are the wire kind byte
 enum TxQueue : ubyte
@@ -242,13 +241,19 @@ nothrow @nogc:
 
     final int transmit_frame(const(ubyte)[] frame, bool is_text = false, TxQueue queue = TxQueue.control)
     {
+        if (queue == TxQueue.control && transport_ready && flush_bundle() < 0)
+            return refused(true);
+        return transmit_unbundled(frame, is_text, queue);
+    }
+
+    // a bundle goes out through here, as it cannot wait behind itself
+    final int transmit_unbundled(const(ubyte)[] frame, bool is_text, TxQueue queue)
+    {
         if (!transport_ready)
         {
             _send_failed = true;
             return -1;
         }
-        if (queue == TxQueue.control && flush_bundle() < 0)
-            return refused(true);
         // refusals come before a frame is sequenced, so neither the session nor a burst fails with them
         if (frame.length > send_limit)
         {
@@ -667,14 +672,15 @@ package:
     struct PendingSub
     {
         String pattern;
-        uint   res_seq;
         ulong  from_ms;
         ulong  to_ms;
-        bool   arm;
+        ulong  range_cursor = ulong.max;   // the element's next record or span; max until its add is sent
+        uint   seq;
+        uint   points;                     // spans a one-shot range reduces to; 0 sends every record
         uint   device_cursor;
         uint   element_cursor;
+        bool   arm;
         bool   device_sent;
-        ulong  backfill_cursor = ulong.max;   // next unsent backfill record
     }
 
     // a device whose classification changed after this session may have been introduced to it
@@ -837,7 +843,7 @@ package:
         if (_bundle.length && ((_peer_flags & PeerFlags.bundle_closed) || queue != _bundle_queue || _bundle.length + message.length > limit) && flush_bundle() < 0)
             return -1;
         if (message.length > limit)
-            return transmit_frame(message, json, queue);
+            return transmit_unbundled(message, json, queue);
         if (json)
             _bundle ~= cast(ubyte)(_bundle.length ? ',' : '[');
         else if (_bundle.length)
@@ -855,7 +861,7 @@ package:
         if (json && !(_peer_flags & PeerFlags.bundle_closed))
             _bundle ~= cast(ubyte)']';
         _peer_flags |= PeerFlags.bundle_closed;
-        int r = transmit_frame(_bundle[], json, _bundle_queue);
+        int r = transmit_unbundled(_bundle[], json, _bundle_queue);
         if (r == 0)
         {
             _bundle.clear();
@@ -969,7 +975,6 @@ package:
 
     Array!String     _model_subs;        // armed live model patterns
     Map!(ulong, LiveNode) _live_nodes;   // EID.raw of armed nodes -> next unsent record index
-    enum ulong live_parked = 1UL << 63;  // backfill owns the live cursor while parked
     Array!EID        _pending_vals;      // dirty matched nodes awaiting this tick's flush
 
     Array!PendingSub _pending_subs;
@@ -1846,6 +1851,7 @@ unittest
             for (f = f[1 .. $]; f.length; )
             {
                 take_varint(f);
+                take_varint(f);
                 lost += take_varint(f);
                 ulong n = take_varint(f);
                 delivered += n;
@@ -1910,16 +1916,17 @@ unittest
     }
     peer.introduce(power.ensure_eid());
 
-    // Backfill spans multiple transport windows.
+    // A range spans multiple transport windows, each pass resuming where the last stopped.
     import manager.sync.binary_encoder : BinaryEncoder;
     SyncEncoder enc = alloc!BinaryEncoder(null);
     scope(exit) free(enc);
     uint gen = peer.begin_burst();
-    ulong resume = ulong.max;
     SyncHandle handle = peer.handle_of(power.ensure_eid());
-    bool backfill(ulong from_ms, ulong to_ms)
+    ulong position;
+    bool range(SysTime to = SysTime(ulong.max))
     {
-        bool done = SyncModule.send_backfill(peer, enc, power, from_ms, to_ms, gen, resume);
+        bool told_gap;
+        bool done = SyncModule.send_records(peer, enc, power, handle, position, told_gap, to, 1, gen);
         peer.flush_bundle();
         return done;
     }
@@ -1931,41 +1938,29 @@ unittest
     }
     uint passes;
     ulong last = 0;
-    while (!backfill(1, 0))
+    while (!range())
     {
-        assert(peer.send_ok(gen) && resume != ulong.max && resume > last);
-        last = resume;
+        assert(peer.send_ok(gen) && position > last);
+        last = position;
         link.pending = 0;
         ++passes;
     }
-    assert(passes > 1 && resume == ulong.max && peer.send_ok(gen));
+    assert(passes > 1 && position == records && peer.send_ok(gen));
     assert(link.frames == (records + 255) / 256 && link.delivered == records && link.lost == 0);
 
-    // The initial live cursor must not count as delivered history.
-    peer.arm(power, power.ensure_eid(), power.record_count);
+    // A feed armed from a time streams from the record holding then, through every later write, once.
+    peer.arm(power, power.ensure_eid(), power.index_for_time(from_unix_time_ns(1000 * 1_000_000_000L)));
     SyncPeer.LiveNode* live = power.ensure_eid().raw in peer._live_nodes;
-    link.frames = 0;
-    link.pending = link.cap;
-    assert(!backfill(1, 0) && link.frames == 0);
-    assert(live.position == (resume | SyncPeer.live_parked));
-
-    // Live events wait behind a parked backfill.
+    assert(live.position == 999);
     float[1] late = [float(records)];
     SysTime[1] late_time = [from_unix_time_ns((records + 1) * 1_000_000_000L)];
     power.write_samples(late[], late_time[]);
-    live_events();
-    assert(link.frames == 0 && live.position == (resume | SyncPeer.live_parked));
-
-    while (!backfill(1, 0))
-    {
-        live_events();
+    link.delivered = 0;
+    while (!live_events())
         link.pending = 0;
-    }
-    assert(link.frames == (records + 1 + 255) / 256 && live.position == records + 1);
-
-    // The live flush must not duplicate the completed backfill.
+    assert(link.delivered == records + 1 - 999 && live.position == records + 1);
     live_events();
-    assert(link.frames == (records + 1 + 255) / 256);
+    assert(link.delivered == records + 1 - 999);
 
     // A held element streams every change: armed without a store it sends its register first, and its first
     // change creates a sync store holding the register as record 0, so the stream continues from record 1.
@@ -2066,6 +2061,18 @@ unittest
     assert(link.delivered == 2 && idle_live.position == 1 && !idle_live.told_gap);
     peer.disarm(idle, idle_node);
 
+    // reads of introduced elements share a frame, each element's samples a group under the read's seq
+    link.frames = 0;
+    Element*[3] read = [level, flow, idle];
+    foreach (e; read)
+    {
+        ulong at = 0;
+        bool told_gap;
+        assert(SyncModule.send_records(peer, enc, e, peer.handle_of(e.ensure_eid()), at, told_gap, SysTime(ulong.max), 7, gen));
+    }
+    peer.flush_bundle();
+    assert(link.frames == 1);
+
     // Over a narrow link each block holds what one segment carries, and the walk still delivers every record.
     assert(link.mtu(200) is null && peer.send_limit == 200);
     link.frames = 0;
@@ -2073,15 +2080,15 @@ unittest
     link.largest = 0;
     link.delivered = 0;
     link.cap = size_t.max;
-    resume = ulong.max;
-    assert(backfill(1, 0) && live.position == records + 1);
+    position = 0;
+    assert(range() && position == records + 1);
     assert(link.largest <= 200 && link.frames > 4 * ((records + 1 + 255) / 256));
     assert(link.delivered == records + 1 && link.lost == 0);
 
     // A range ending mid-block stops at its last record, however the blocks were cut.
-    resume = ulong.max;
+    position = 0;
     link.delivered = 0;
-    assert(backfill(1, 1000 * 1000) && live.position == 1000);
+    assert(range(from_unix_time_ns(1000 * 1_000_000_000L)) && position == 1000);
     assert(link.delivered == 1000);
 
     // A record larger than any message the peer takes goes as an empty block declaring it lost, and the walk
@@ -2089,9 +2096,10 @@ unittest
     assert(link.mtu(7) is null && peer.max_message(false) == 7);
     link.frames = 0;
     link.delivered = 0;
-    resume = ulong.max;
-    assert(backfill(1, 1000 * 1000) && live.position == 1000);
+    position = 0;
+    assert(range(from_unix_time_ns(1000 * 1_000_000_000L)) && position == 1000);
     assert(link.frames == 1000 && link.delivered == 0 && link.lost == 1000);
+    live.position = 1000;
     assert(live_events() && live.position == records + 1);
     assert(link.lost == records + 1 && peer.send_ok(gen));
     assert(link.mtu(200) is null);
@@ -2103,12 +2111,12 @@ unittest
     link.refuse = true;
     link.delivered = 0;
     link.pending = 0;
-    resume = ulong.max;
-    assert(!backfill(1, 0) && resume != ulong.max && peer.send_ok(gen));
+    live.position = 0;
+    assert(!live_events() && live.position < records + 1 && peer.send_ok(gen));
     link.refuse = false;
-    while (!backfill(1, 0))
+    while (!live_events())
         link.pending = 0;
-    assert(link.delivered == records + 1 && resume == ulong.max && peer.send_ok(gen));
+    assert(link.delivered == records + 1 && live.position == records + 1 && peer.send_ok(gen));
 
     // A frame over what both ends carry in one packet is refused before it is sequenced; the session stands.
     assert(peer.local_segment == ushort.max && peer.send_limit == ushort.max);

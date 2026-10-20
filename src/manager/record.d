@@ -36,7 +36,7 @@ nothrow @nogc:
 
 alias log = Log!"record";
 
-// The query boundary: history is typed, but graphs and the sync history verb consume
+// The query boundary: history is typed, but graphs and reduced sync ranges consume
 // numbers, so queries normalise to (unix ns, double) and quantities to base SI scale.
 struct Sample
 {
@@ -124,57 +124,6 @@ nothrow @nogc:
         reset_container();
     }
 }
-
-// Streaming time-bucket aggregator: emits one mean-value sample per bucket,
-// stamped with the bucket's last real timestamp. bucket_width == 0 passes
-// samples through unmodified.
-struct SampleAggregator
-{
-nothrow @nogc:
-
-    Array!Sample* sink;
-    ulong from;
-    ulong bucket_width;
-
-    void put(ref const Sample s)
-    {
-        if (!bucket_width)
-        {
-            *sink ~= s;
-            return;
-        }
-        ulong b = (s.time - from) / bucket_width;
-        if (b != _bucket)
-        {
-            emit();
-            _bucket = b;
-        }
-        _sum += s.value;
-        _last_time = s.time;
-        ++_n;
-    }
-
-    void finish()
-    {
-        emit();
-    }
-
-private:
-    ulong _bucket = ulong.max;
-    double _sum = 0;
-    ulong _last_time;
-    uint _n;
-
-    void emit()
-    {
-        if (!_n)
-            return;
-        *sink ~= Sample(_last_time, _sum / _n);
-        _sum = 0;
-        _n = 0;
-    }
-}
-
 
 // Sample-and-hold interval downsampler for graphs. Each emitted point is the
 // time-weighted mean value over one visible time bucket, which avoids the
@@ -280,12 +229,68 @@ private:
 }
 
 
-// Serves whatever coverage exists. The series spans its full recorded history - buckets
-// evicted to disk reconstitute through the store - so the walk is one pass, cursor-paced.
-// Partial coverage is answered as partial.
-void query_local(ref RecordStream rs, ulong from, ulong to, uint max_points, QueryMode mode, ref Array!Sample result)
+// the mean of each span [from + k * width, from + (k + 1) * width) up to to holding numeric records, from span k on, stamped with its last record's time
+uint mean_spans(Element* e, ulong from, ulong to, ulong width, ulong k, Sample[] means)
 {
-    Element* e = rs.element;
+    ulong start = from + k * width;
+    ulong idx = e.index_for_time(from_unix_time_ns(start));
+    if (idx == ulong.max)
+        return 0;
+    Cursor c = e.open_series_cursor(idx);
+    scope (exit) e.close_series_cursor(c);   // drops the raws the walk reconstituted
+    uint n, count;
+    ulong span, last;
+    double sum = 0;
+    walk: for (RecordBlock blk = c.next(256); blk.count; blk = c.next(256))
+    {
+        foreach (i; 0 .. blk.count)
+        {
+            ulong t = unixTimeNs(blk.time(i));
+            if (t < start)
+                continue;
+            if (t > to)
+                break walk;
+            double v;
+            Variant val = blk.box(i);
+            if (!sample_to_double(val, v))
+                continue;
+            if (count && (t - from) / width != span)
+            {
+                means[n++] = Sample(last, sum / count);
+                if (n == means.length)
+                    return n;
+                sum = 0;
+                count = 0;
+            }
+            span = (t - from) / width;
+            sum += v;
+            last = t;
+            ++count;
+        }
+    }
+    if (count)
+        means[n++] = Sample(last, sum / count);
+    return n;
+}
+
+// Serves whatever coverage exists; partial coverage is answered as partial.
+void query_local(Element* e, ulong from, ulong to, uint max_points, QueryMode mode, ref Array!Sample result)
+{
+    ulong bucket_width = max_points ? (to - from) / max_points + 1 : 0;
+    if (mode == QueryMode.raw)
+    {
+        Sample[64] means = void;
+        ulong width = bucket_width ? bucket_width : 1;
+        for (ulong k = 0; ; )
+        {
+            uint n = mean_spans(e, from, to, width, k, means[]);
+            result ~= means[0 .. n];
+            if (n < means.length)
+                return;
+            k = (means[n - 1].time - from) / width + 1;
+        }
+    }
+
     Array!Sample local;
     ulong idx = e.index_for_time(from_unix_time_ns(from));
     if (idx != ulong.max)
@@ -315,70 +320,49 @@ void query_local(ref RecordStream rs, ulong from, ulong to, uint max_points, Que
         }
         e.close_series_cursor(c);   // drops the raws the walk reconstituted
     }
-    ulong bucket_width = max_points ? (to - from) / max_points + 1 : 0;
 
-    if (mode == QueryMode.graph)
+    Sample held;
+    bool has_held = false;
+    foreach (ref const Sample s; local[])
     {
-        Sample held;
-        bool has_held = false;
+        if (s.time >= from)
+            break;
+        held = s;
+        has_held = true;
+    }
+    ulong hold_limit = bucket_width ? bucket_width : to - from;
+    has_held = has_held && from - held.time <= hold_limit;
+
+    if (!bucket_width)
+    {
+        if (has_held)
+            result ~= Sample(from, held.value);
         foreach (ref const Sample s; local[])
         {
-            if (s.time >= from)
+            if (s.time < from)
+                continue;
+            if (s.time > to)
                 break;
-            held = s;
-            has_held = true;
-        }
-        ulong hold_limit = bucket_width ? bucket_width : to - from;
-        has_held = has_held && from - held.time <= hold_limit;
-
-        if (!bucket_width)
-        {
-            if (has_held)
-                result ~= Sample(from, held.value);
-            foreach (ref const Sample s; local[])
-            {
-                if (s.time < from)
-                    continue;
-                if (s.time > to)
-                    break;
-                result ~= s;
-            }
-        }
-        else
-        {
-            GraphIntervalSampler g;
-            g.sink = &result;
-            g.from = from;
-            g.to = to;
-            g.bucket_width = bucket_width;
-            if (has_held)
-                g.seed(held);
-            foreach (ref const Sample s; local[])
-            {
-                if (s.time < from)
-                    continue;
-                if (s.time > to)
-                    break;
-                g.put(s);
-            }
-            g.finish();
+            result ~= s;
         }
         return;
     }
-
-    SampleAggregator agg;
-    agg.sink = &result;
-    agg.from = from;
-    agg.bucket_width = bucket_width;
+    GraphIntervalSampler g;
+    g.sink = &result;
+    g.from = from;
+    g.to = to;
+    g.bucket_width = bucket_width;
+    if (has_held)
+        g.seed(held);
     foreach (ref const Sample s; local[])
     {
         if (s.time < from)
             continue;
         if (s.time > to)
             break;
-        agg.put(s);
+        g.put(s);
     }
-    agg.finish();
+    g.finish();
 }
 
 
@@ -394,36 +378,33 @@ unittest
     foreach (i; 0 .. 6)
         en.write_sample(i * 10.0, from_unix_time_ns((i + 1) * 1_000_000UL));
 
-    RecordStream rn;
-    rn.element = &en;
     Array!Sample result;
-    result.clear();
-    rn.query_local(4_000_000, 5_000_000, 0, QueryMode.raw, result);
+    query_local(&en, 4_000_000, 5_000_000, 0, QueryMode.raw, result);
     assert(result.length == 2 && result[0].time == 4_000_000 && result[0].value == 30);
     result.clear();
-    rn.query_local(0, 6_000_000, 0, QueryMode.raw, result);
+    query_local(&en, 0, 6_000_000, 0, QueryMode.raw, result);
     assert(result.length == 6 && result[0].time == 1_000_000); // partial coverage answers partial
     result.clear();
-    rn.query_local(4_000_000, 6_000_000, 0, QueryMode.graph, result);
-    assert(result[0].time == 4_000_000 && result[0].value == 20);
+    query_local(&en, 3_500_000, 6_000_000, 0, QueryMode.graph, result);
+    assert(result[0].time == 3_500_000 && result[0].value == 20);
     en.teardown();
 
-    // bucketed downsample: mean value, stamped with the bucket's last time
-    Array!Sample bucketed;
-    SampleAggregator agg;
-    agg.sink = &bucketed;
-    agg.from = 0;
-    agg.bucket_width = 10;
-    agg.put(Sample(1, 1));
-    agg.put(Sample(5, 3));
-    agg.put(Sample(12, 10));
-    agg.finish();
-    assert(bucketed.length == 2);
-    assert(bucketed[0].time == 5 && bucketed[0].value == 2);
-    assert(bucketed[1].time == 12 && bucketed[1].value == 10);
+    // reduced: the mean of each span, stamped with its last record time, resumed span by span
+    Element spans;
+    spans.format = register_format(qfmt);
+    spans.ensure_history();
+    spans.write_sample(1.0, from_unix_time_ns(1_000_000));
+    spans.write_sample(3.0, from_unix_time_ns(5_000_000));
+    spans.write_sample(10.0, from_unix_time_ns(12_000_000));
+    spans.write_sample(20.0, from_unix_time_ns(31_000_000));
+    Sample[1] one;
+    assert(mean_spans(&spans, 0, 30_000_000, 10_000_000, 0, one[]) == 1 && one[0].time == 5_000_000 && one[0].value == 2);
+    assert(mean_spans(&spans, 0, 30_000_000, 10_000_000, 1, one[]) == 1 && one[0].time == 12_000_000 && one[0].value == 10);
+    assert(mean_spans(&spans, 0, 30_000_000, 10_000_000, 2, one[]) == 0);
+    spans.teardown();
 
     // sample-and-hold: time-weighted mean per bucket, seeded at the left edge
-    bucketed.clear();
+    Array!Sample bucketed;
     GraphIntervalSampler graph_agg;
     graph_agg.sink = &bucketed;
     graph_agg.from = 0;
@@ -726,7 +707,7 @@ nothrow @nogc:
             RecordStream* rs = streams[i];
             labels[][i] = rs.path;
             data[][i].clear();
-            query_local(*rs, t0, t1, max_points, mode, data[][i]);
+            query_local(rs.element, t0, t1, max_points, mode, data[][i]);
         }
     }
 

@@ -797,8 +797,8 @@ public:
         return _history.read(format, from_index, max_records);
     }
 
-    // first retained index of the bucket holding the value at wall time t; ulong.max = nothing retained
-    ulong index_for_time(SysTime t) const
+    // a held series' record holding at t (its first if t precedes them all), an event series' first at or after t; ulong.max = nothing retained
+    ulong index_for_time(SysTime t)
     {
         if (!_history || !_history.buckets.length)
             return ulong.max;
@@ -811,7 +811,21 @@ public:
             else
                 hi = mid;
         }
-        return _history.buckets[lo ? lo - 1 : 0].first_index;
+        ulong first = _history.buckets[lo ? lo - 1 : 0].first_index;
+        bool held = data_format.kind != SeriesKind.point;
+        ulong at = first;
+        Cursor c = open_series_cursor(first);
+        for (RecordBlock blk = c.next(256); blk.count; blk = c.next(256))
+        {
+            uint i;
+            while (i < blk.count && (held ? blk.time(i) <= t : blk.time(i) < t))
+                ++i;
+            at = blk.first_index + i;
+            if (i < blk.count)
+                break;
+        }
+        close_series_cursor(c);
+        return held && at > first ? at - 1 : at;
     }
 
     Cursor open_series_cursor(ulong from_index = ulong.max, bool pin = false)
@@ -1971,7 +1985,7 @@ unittest
     assert(e.last_update == from_unix_time_ns(5_000_000));
     assert(e._history.buckets[0].ended && e._history.buckets[0].sealed);
     assert(e._history.buckets[0].last_time == from_unix_time_ns(5_000_000));
-    assert(e.index_for_time(from_unix_time_ns(4_000_000)) == 0);
+    assert(e.index_for_time(from_unix_time_ns(4_000_000)) == 1);
     e.write_sample(3.0, from_unix_time_ns(10_000_000));
     assert(e.bucket_count == 2 && e.latest_record.f64_ == 3.0);
     assert(e.index_for_time(from_unix_time_ns(10_000_000)) == 2);
