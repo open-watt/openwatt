@@ -350,19 +350,18 @@ protected:
             return false;
         }
 
-        Packet inner;
-        inner.creation_time = packet.creation_time;
+        StackPacket inner;
+        inner.init!RawFrame(content[5 + hdr_len .. 5 + hdr_len + data_len], packet.creation_time);
         inner.vlan = packet.vlan;
         inner.vlan_tag = packet.vlan_tag;
-        inner.data = content[5 + hdr_len .. 5 + hdr_len + data_len];
-        if (codec.decode(&inner, content[5 .. 5 + hdr_len]) <= 0)
+        if (codec.decode(&inner.packet, content[5 .. 5 + hdr_len]) <= 0)
             return false;
         // learn the station carrying the inner src so replies can unicast
-        learn(get_network_src_address(&inner), packet.eth.src);
+        learn(get_network_src_address(&inner.packet), packet.eth.src);
 
         // the inner packet accounts where it terminates; the encap overhead counts here
         _status.rx_bytes += packet.length - inner.length;
-        station_deliver_exotic(&inner);
+        station_deliver_exotic(&inner.packet);
         return true;
     }
 

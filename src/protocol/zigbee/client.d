@@ -150,7 +150,7 @@ nothrow @nogc:
         if (message.length > 256)
             return -1;
 
-        Packet p;
+        StackPacket p;
         ref aps = p.init!APSFrame(message);
 
         aps.type = APSFrameType.data;
@@ -176,7 +176,7 @@ nothrow @nogc:
             queue_policy_ptr = &queue_policy;
         }
 
-        return _interface.forward(&p, progress_callback, queue_policy_ptr);
+        return _interface.forward(&p.packet, progress_callback, queue_policy_ptr);
     }
 
     final ZigbeeResult send_message_async(ushort dst, ubyte dst_endpoint, ubyte src_endpoint, ushort profile_id, ushort cluster_id, const(void)[] message, PCP pcp = PCP.be, bool group = false)

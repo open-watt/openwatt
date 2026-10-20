@@ -590,9 +590,9 @@ private:
 
     int ash_send(const(ubyte)[] data)
     {
-        Packet p;
+        StackPacket p;
         p.init!RawFrame(data);
-        return _ash.forward(&p);
+        return _ash.forward(&p.packet);
     }
 
     void ash_state_change(ActiveObject, StateSignal signal)

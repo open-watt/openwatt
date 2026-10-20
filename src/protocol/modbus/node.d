@@ -397,12 +397,14 @@ private:
 
     int send_packet(ubyte dst_address, ushort sequence_number, ref const ModbusPDU message, ModbusFrameType type, PCP pcp = PCP.be, bool dei = false) nothrow @nogc
     {
-        ubyte[1 + ModbusMessageDataMaxLength] buffer = void;
+        Packet* p = alloc_packet!ModbusFrame(1 + message.data.length);
+        if (!p)
+            return -1;
+        ubyte[] buffer = cast(ubyte[])p.payload;
         buffer[0] = message.function_code;
-        buffer[1 .. 1 + message.data.length] = message.data[];
+        buffer[1 .. $] = message.data[];
 
-        Packet p;
-        ref ModbusFrame hdr = p.init!ModbusFrame(buffer[0 .. 1 + message.data.length]);
+        ref ModbusFrame hdr = p.hdr!ModbusFrame();
         hdr.sequence_number = sequence_number;
         hdr.type = type;
         hdr.function_code = message.function_code;
@@ -412,6 +414,6 @@ private:
         p.dei = dei;
 
         MessageCallback cb = type == ModbusFrameType.request ? &send_status : null;
-        return _iface.forward(&p, cb);
+        return _iface.forward(p, cb);
     }
 }

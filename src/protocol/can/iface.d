@@ -516,7 +516,7 @@ private:
             input = input[take .. $];
             length += take;
 
-            Packet packet;
+            StackPacket packet;
 
             size_t offset = 0;
             parse_loop: while (offset < length)
@@ -578,7 +578,7 @@ private:
                 version (DebugCANInterface)
                     writeDebug("CAN packet received from interface '", name, "': id=", can.id, " (", packet.length , ")[ ", packet.data, " - ", packet.data.bin_to_ascii(), " ]");
 
-                incoming_packet(&packet);
+                incoming_packet(&packet.packet);
             }
 
             // shuffle remaining unparsed bytes to the front for the next chunk
@@ -713,14 +713,14 @@ private:
                 if (frame.can_id & CAN_ERR_FLAG)    // bus diagnostics, not traffic
                     continue;
 
-                Packet packet;
+                StackPacket packet;
                 bool extended = (frame.can_id & CAN_EFF_FLAG) != 0;
                 ubyte len = frame.len > 8 ? 8 : frame.len;
                 ref CANFrame can = packet.init!CANFrame(frame.data[0 .. len], ts);
                 can.id = frame.can_id & (extended ? CAN_EFF_MASK : CAN_SFF_MASK);
                 can.extended = extended;
                 can.remote_transmission_request = (frame.can_id & CAN_RTR_FLAG) != 0;
-                incoming_packet(&packet);
+                incoming_packet(&packet.packet);
             }
         }
     }
@@ -752,12 +752,12 @@ private:
 
         while (can_receive(_can, hw))
         {
-            Packet packet;
+            StackPacket packet;
             ref CANFrame can = packet.init!CANFrame(hw.data[0 .. hw.dlc], now);
             can.id = hw.id;
             can.extended = hw.extended;
             can.remote_transmission_request = hw.rtr;
-            incoming_packet(&packet);
+            incoming_packet(&packet.packet);
         }
 
         uint dropped = can_take_rx_drops(_can);

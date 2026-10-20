@@ -211,9 +211,9 @@ private:
         BaseInterface i = _iface.get;
         if (!i)
             return false;
-        Packet p;
+        StackPacket p;
         p.init!RawFrame(msg);
-        return i.forward(&p) >= 0;
+        return i.forward(&p.packet) >= 0;
     }
 
     void incoming_packet(const(Packet)* p, BaseInterface, PacketDirection, void*)
