@@ -1140,6 +1140,11 @@ nothrow @nogc:
 
         g_app.console.register_collection!InterfaceGroup();
         g_app.console.register_collection!UDPInterface();
+        static if (has_reliable)
+        {
+            import router.iface.reliable : ReliableInterface;
+            g_app.console.register_collection!ReliableInterface();
+        }
         g_app.console.register_collection!VLANInterface();
     }
 

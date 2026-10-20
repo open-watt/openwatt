@@ -947,6 +947,35 @@ lower to send smaller datagrams.
 | `remote-host` | host, address or MAC | none | Default datagram destination. An IPv6 multicast or link-local peer names its link with a zone (`ff02::1%eth0`). |
 | `remote-port` | `1` to `65535` | with remote-host | Default destination port. |
 
+### `/interface/reliable`
+
+A reliable interface delivers raw packets over any datagram parent (`/interface/udp`,
+a radio link, a framed serial trunk) with acknowledgement and retransmission: a
+16-frame selective-repeat window tuned for links of hundreds of kbit/s and frames of
+hundreds of bytes. Both ends configure one instance over their side of the link;
+the session opens itself and reopens when either end restarts.
+
+Consumers submit packets up to `max-message` and receive them whole. The layer packs
+small packets into one parent frame and splits large ones across several, so the
+parent's MTU is invisible above it; over a 1500-byte parent a message is one
+datagram. A packet's PCP selects its lane: packets are delivered in order within a
+lane, lanes do not block each other under loss, and a small high-priority packet
+rides at the head of the next frame while a long low-priority one streams. The
+interface advertises `reliable` and `ordered` in `caps`, and a transmit callback
+completes when the peer has acknowledged every frame of the packet.
+
+| Property | Values | Default | Description |
+| --- | --- | --- | --- |
+| `interface` | interface name | none | Datagram parent carrying the frames. The instance waits for it to run and restarts when it goes offline. |
+| `window` | `1` to `16` | `16` | Frames in flight before the sender waits for an acknowledgement. Lower it on a slow or congested uplink. |
+| `max-message` | `64` to `2040` | `1500` | Largest packet accepted, rounded down to a multiple of 8; the session uses the smaller of the two ends' values, which `actual-mtu` reports. |
+| `rto-min` | duration | `20ms` | Floor of the retransmit timeout; raise it on a polled bus whose round trip is bounded by the poll cycle. |
+| `retries` | `1` to `255` | `8` | Retransmissions of one frame before the peer is declared unresponsive and the session restarts. |
+| `established` | read-only | | Session open with the peer. |
+| `rtt` | read-only | | Smoothed round-trip time. |
+| `rto` | read-only | | Current retransmit timeout. |
+| `retransmits` | read-only | | Frames sent more than once. |
+
 ### `/interface/wifi`
 
 This collection represents physical radios; WLAN and AP interfaces bind to them.
