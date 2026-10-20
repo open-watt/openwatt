@@ -35,15 +35,6 @@ RAM-only by construction. Only code holding a `RecordStream` can see disk.
 
 ### Consequences we are living with
 
-- **`send_backfill` does not honour its range.** It takes `from_ms` but resolves it through
-  `index_for_time`, which clamps to `buckets[0].first_index`. A peer asking for 24h of a 1h-retained
-  element silently receives 1h, with no truncation marker on the wire. The forward edge is exact
-  (`track_live` records `record_count`, backfill runs to head, one synchronous burst, gap-free);
-  only the backward edge is undefined. This is documented as deliberate at
-  [sync/package.d:1668](../src/manager/sync/package.d#L1668) - deep recall was routed to
-  `history_req` "until cursor-paced draining lands".
-- **`history_req` is therefore load-bearing, not legacy.** It is the only path that reads disk.
-  It cannot be deleted before a tier-spanning reader exists.
 - **Format changes silently reinterpret retained history.** `Bucket` carries no `FormatId`;
   `SeriesStore.read` takes it from the caller, which passes `element.format` - i.e. whatever it
   is *now*. `writable_bucket` rolls on capacity, gap and tick overflow, never on format.
@@ -81,7 +72,7 @@ same refcount, same `drop_raw` on the 0-edge, same sharing of one decoded image 
   bounds per-tick work in a way `query_local`'s 845-block walk never did.
 - **`query_local`'s two-tier merge deletes entirely** - the container walk, the `ram_start`
   splice, the ordering logic. It becomes "seek by time, read blocks".
-- **`send_backfill` stops lying** without being touched, because `index_for_time` and
+- **`from` ranges stop lying** without being touched, because `index_for_time` and
   `read_records` reach disk.
 - **Retention changes axis, correctly.** Evicting a flushed bucket drops its bytes and keeps its
   descriptor; `first_index` does not advance. Retention becomes a memory budget, not a statement
@@ -209,15 +200,11 @@ Sequenced, because order matters:
 
 1. Bucket-local format (above) - independent, do now.
 2. Unified residency + paced cursor reads.
-3. `send_backfill` serves deep recall through it, and reports its served range so truncation is
-   never silent.
-4. `history_req` and `encode_history` die. `Sample`, `QueryMode`, `SampleAggregator` and
-   `GraphIntervalSampler` **demote** rather than disappear - `/record/graph` renders to a fixed
-   terminal width and legitimately needs doubles and bucketing, so they become private types of
-   the console chart renderer instead of a query/protocol boundary.
-
-Note step 4 is client-visible: it needs a `docs/UX_TODO.md` entry and coordinated web/droid
-updates.
+3. A `from` range serves deep recall through it, and reports its served range so truncation is
+   never silent. The first half landed with sync reads; the report has not.
+4. Landed: `history_req` and `encode_history` are gone, and `SampleAggregator` with them. `Sample`,
+   `QueryMode` and `GraphIntervalSampler` remain for `/record/graph`, and `Sample` for a reduced
+   sync range's span means.
 
 ## 6. Deliberately out of scope
 

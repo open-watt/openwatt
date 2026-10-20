@@ -797,8 +797,8 @@ public:
         return _history.read(format, from_index, max_records);
     }
 
-    // first retained index of the bucket holding the value at wall time t; ulong.max = nothing retained
-    ulong index_for_time(SysTime t) const
+    // a held series' record holding at t (its first if t precedes them all), an event series' first at or after t; ulong.max = nothing retained
+    ulong index_for_time(SysTime t)
     {
         if (!_history || !_history.buckets.length)
             return ulong.max;
@@ -811,7 +811,21 @@ public:
             else
                 hi = mid;
         }
-        return _history.buckets[lo ? lo - 1 : 0].first_index;
+        ulong first = _history.buckets[lo ? lo - 1 : 0].first_index;
+        bool held = data_format.kind != SeriesKind.point;
+        ulong at = first;
+        Cursor c = open_series_cursor(first);
+        for (RecordBlock blk = c.next(256); blk.count; blk = c.next(256))
+        {
+            uint i;
+            while (i < blk.count && (held ? blk.time(i) <= t : blk.time(i) < t))
+                ++i;
+            at = blk.first_index + i;
+            if (i < blk.count)
+                break;
+        }
+        close_series_cursor(c);
+        return held && at > first ? at - 1 : at;
     }
 
     Cursor open_series_cursor(ulong from_index = ulong.max, bool pin = false)
@@ -1579,6 +1593,31 @@ bool sample_to_double(ref const Variant v, out double value)
     return value == value; // reject NaN
 }
 
+// a value of sample_to_double's scale back in f's own unit, as a quantity element's sample carries it
+Variant sample_from_double(ref const DataFormat f, double value)
+{
+    if (f.desc != DataFormat.Desc.quantity)
+        return Variant(value);
+    return Variant(Quantity!double(value, ScaledUnit(f.unit.unit)).adjust_scale(f.unit));
+}
+
+unittest
+{
+    import urt.si.unit : Ampere, Celsius;
+
+    static immutable DataFormat milliamps = DataFormat(ValueType.f64, SeriesKind.held, ScaledUnit(Ampere, -3));
+    static immutable DataFormat celsius = DataFormat(ValueType.f64, SeriesKind.held, Celsius);
+    double si;
+    Variant current = Variant(Quantity!double(1000, ScaledUnit(Ampere, -3)));
+    assert(sample_to_double(current, si) && si == 1);
+    Variant back = sample_from_double(milliamps, si);
+    assert(back.isQuantity && back.asQuantity!double().unit == ScaledUnit(Ampere, -3) && back.asQuantity!double().value == 1000);
+    Variant warm = Variant(Quantity!double(20, Celsius));
+    assert(sample_to_double(warm, si) && si > 293 && si < 294);
+    double c = sample_from_double(celsius, si).asQuantity!double().value;
+    assert(c > 19.999999 && c < 20.000001);
+}
+
 Element* alloc_element()
 {
     Element* element = alloc!Element();
@@ -1971,7 +2010,7 @@ unittest
     assert(e.last_update == from_unix_time_ns(5_000_000));
     assert(e._history.buckets[0].ended && e._history.buckets[0].sealed);
     assert(e._history.buckets[0].last_time == from_unix_time_ns(5_000_000));
-    assert(e.index_for_time(from_unix_time_ns(4_000_000)) == 0);
+    assert(e.index_for_time(from_unix_time_ns(4_000_000)) == 1);
     e.write_sample(3.0, from_unix_time_ns(10_000_000));
     assert(e.bucket_count == 2 && e.latest_record.f64_ == 3.0);
     assert(e.index_for_time(from_unix_time_ns(10_000_000)) == 2);

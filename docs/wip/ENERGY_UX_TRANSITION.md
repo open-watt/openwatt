@@ -194,14 +194,13 @@ the reconciled store value); read it there, not from `circuit.terminal`.
 
 **Graphing is available now.** The presentation set records to disk (island
 accounts including the today counters, every `boundary.*` power/energy/soc,
-appliance loss), and the sync websocket already answers history requests:
-send a `history_req` frame with `path` (the full element path, e.g.
-`energy.islands.grid.account.grid.power`), `from`/`to` in epoch
-milliseconds, and `max_points` (default 500, hard cap 2000); you get back a
-`history` frame with `samples` as `[time_ms, value]` pairs. An unrecorded
-path answers with an error frame, which is the signal that the element is
-live-only by design -- ask for it to be added to the recorder rather than
-polling it into your own store.
+appliance loss), and the sync websocket answers history reads: send a
+`model_sub` with `once:true`, the element's pattern (e.g.
+`device:energy.islands.grid.account.grid.power`), `from`/`to` in epoch
+milliseconds and `points` (the number of spans to reduce to); `val` messages
+carrying your `seq` return `s` as `[time_ms, value]` pairs until `res`. An
+unrecorded element answers only as far back as it holds in memory -- ask for
+it to be added to the recorder rather than polling it into your own store.
 
 Recording is opt-in per element class, so what you can graph is exactly the
 supported presentation surface. Debug trees (`circuit.bus.*`,
@@ -233,6 +232,6 @@ supported presentation surface. Debug trees (`circuit.bus.*`,
    `appliance.*` / `islands.<id>.account.*` only; treat section 5's
    namespaces as already gone.
 7. Adopt `appliance.<name>.loss_power` and `topology.link.<id>.mismatch`
-   (available now), and build charts against the sync `history_req` frame
+   (available now), and build charts against the sync history read
    (section 5); reserve UI space for the three-severity fault reporting
    (section 4).

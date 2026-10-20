@@ -22,8 +22,7 @@ import manager.base;
 import manager.collection;
 import manager.console.session : ClientFeatures;
 import manager.element : Element;
-import manager.record : Sample;
-import manager.series : Constraint, DataFormat, RecordBlock, Scalar, SeriesKind, ValueType;
+import manager.series : Constraint, DataFormat, Scalar, SeriesKind, ValueType;
 import manager.sync;
 import manager.sync.encoder;
 import manager.sync.peer;
@@ -285,40 +284,6 @@ nothrow @nogc:
         send_frame(peer);
     }
 
-    override void encode_history_req(SyncPeer peer, const(char)[] path, ulong from_ms, ulong to_ms, uint max_points, uint seq)
-    {
-        begin_frame("history_req");
-        _buf.append(",\"path\":");
-        write_str(path);
-        _buf.append(",\"from\":", from_ms);
-        if (to_ms)
-            _buf.append(",\"to\":", to_ms);
-        if (max_points)
-            _buf.append(",\"max\":", max_points);
-        _buf.append(",\"seq\":", seq);
-        send_frame(peer);
-    }
-
-    override void encode_history(SyncPeer peer, uint seq, const(char)[] path, const(Sample)[] samples)
-    {
-        begin_frame("history");
-        _buf.append(",\"seq\":", seq);
-        _buf.append(",\"path\":");
-        write_str(path);
-        _buf.append(",\"samples\":[");
-        foreach (i, ref s; samples)
-        {
-            if (i)
-                _buf ~= ',';
-            _buf.append('[', s.time / 1_000_000, ',');
-            const v = Variant(s.value);
-            write_variant(v);
-            _buf ~= ']';
-        }
-        _buf ~= ']';
-        send_frame(peer);
-    }
-
     // Outbound: log streaming
 
     override void encode_log_sub(SyncPeer peer, Severity max_severity, bool off, const(char)[] tag)
@@ -547,7 +512,7 @@ nothrow @nogc:
         send_frame(peer);
     }
 
-    override void encode_add(SyncPeer peer, SyncHandle h, const(char)[] path, const(char)[] node_class, const(char)[] templates, uint ft, Element* e, ulong peer_id, bool include_value = true)
+    override void encode_add(SyncPeer peer, SyncHandle h, const(char)[] path, const(char)[] node_class, const(char)[] templates, uint ft, Element* e, ulong peer_id)
     {
         import manager.element : Access;
 
@@ -568,16 +533,6 @@ nothrow @nogc:
             _buf.append(",\"ft\":", ft);
             if (e.access != Access.read)
                 _buf.append(",\"access\":\"", enum_key_from_value!Access(e.access), '\"');
-            Variant v;
-            ulong t_ms = 0;
-            if (include_value)
-                intro_value(e, v, t_ms);
-            if (t_ms)
-            {
-                _buf ~= ",\"v\":";
-                write_variant(v);
-                _buf.append(",\"t\":", t_ms);
-            }
         }
         if (templates.length)
         {
@@ -587,36 +542,21 @@ nothrow @nogc:
         send_frame(peer);
     }
 
-    override bool encode_val(SyncPeer peer, SyncHandle h, ref Variant v, SysTime t)
+    override uint encode_samples(SyncPeer peer, SyncHandle h, ulong lost, uint available, scope SampleAt sample, uint seq)
     {
-        import urt.time : unix_time_ns;
-
-        begin_frame("val");
-        _buf.append(",\"h\":", h);
-        _buf.append(",\"s\":[[", unix_time_ns(t) / 1_000_000, ',');
-        write_variant(v);
-        _buf ~= "]]";
-        return send_frame(peer, TxQueue.val) >= 0;
-    }
-
-    override uint encode_val_block(SyncPeer peer, SyncHandle h, ref const RecordBlock blk)
-    {
-        import urt.time : unix_time_ns;
-
-        begin_frame("val");
-        _buf.append(",\"h\":", h);
-        if (blk.lost)
-            _buf.append(",\"lost\":", blk.lost);
+        open_samples(h, lost, seq);
         _buf ~= ",\"s\":[";
         size_t limit = peer.send_limit;
         uint count;
-        while (count < blk.count)
+        while (count < available)
         {
             size_t mark = _buf.length;
+            ulong t_ms;
+            Variant v;
+            sample(count, t_ms, v);
             if (count)
                 _buf ~= ',';
-            _buf.append('[', unix_time_ns(blk.time(count)) / 1_000_000, ',');
-            Variant v = blk.box(count);
+            _buf.append('[', t_ms, ',');
             write_variant(v);
             _buf ~= ']';
             // the frame closes with "]}"
@@ -631,10 +571,10 @@ nothrow @nogc:
         if (count == 1 && _buf.length + 1 > peer.max_message(true))
         {
             warn_unsendable(peer, h);
-            begin_frame("val");
-            _buf.append(",\"h\":", h, ",\"lost\":", blk.lost + 1, ",\"s\":[]");
+            open_samples(h, lost + 1, seq);
+            _buf ~= ",\"s\":[]";
         }
-        return send_frame(peer, TxQueue.val) < 0 ? 0 : count;
+        return send_frame(peer, seq ? TxQueue.control : TxQueue.val, true) < 0 ? 0 : count;
     }
 
     override void encode_res(SyncPeer peer, uint seq)
@@ -997,8 +937,9 @@ nothrow @nogc:
                     bool once = optional_bool(json, "once");
                     ulong from = optional_ulong(json, "from");
                     ulong to = optional_ulong(json, "to");
+                    uint points = optional_uint(json, "points");
                     if (!bad_frame)
-                        sync.inbound_model_sub(peer, seq, patterns[], once, from, to);
+                        sync.inbound_model_sub(peer, seq, patterns[], once, from, to, points);
                     break;
                 }
                 const(char)[] pattern = require_str(json, "pattern");
@@ -1129,7 +1070,6 @@ nothrow @nogc:
                 uint ft = optional_uint(json, "ft", uint.max);
                 const(char)[] access = optional_str(json, "access");
                 const(char)[] templates = optional_str(json, "tmpl");
-                ulong t = optional_ulong(json, "t");
                 ulong peer_id;
                 if (const(char)[] owner = optional_str(json, "peer"))
                 {
@@ -1137,7 +1077,7 @@ nothrow @nogc:
                         bad("peer");
                 }
                 if (!bad_frame)
-                    sync.inbound_model_add(peer, h, path, cls, templates, ft, access, json.getMember("v"), t, peer_id);
+                    sync.inbound_model_add(peer, h, path, cls, templates, ft, access, peer_id);
                 break;
             }
 
@@ -1223,24 +1163,6 @@ nothrow @nogc:
                     sync.inbound_enum_req(peer, type, seq);
                 break;
             }
-
-            case "history_req":
-            {
-                const(char)[] path = require_str(json, "path");
-                uint seq = require_uint(json, "seq");
-                ulong from = optional_ulong(json, "from");
-                ulong to = optional_ulong(json, "to");
-                uint max = optional_uint(json, "max");
-                if (!bad_frame)
-                    sync.inbound_history_req(peer, path, from, to, max, seq);
-                break;
-            }
-
-            case "history":
-                // node-to-node history recall isn't wired up yet - no outbound
-                // requester exists to correlate this response with.
-                log.info("inbound history frame from '", peer.name[], "' - ignored");
-                break;
 
             case "enum":
             {
@@ -1397,11 +1319,21 @@ private:
         _buf.append("{\"kind\":\"", kind, "\"");
     }
 
-    int send_frame(SyncPeer peer, TxQueue queue = TxQueue.control)
+    void open_samples(SyncHandle h, ulong lost, uint seq)
+    {
+        begin_frame("val");
+        if (seq)
+            _buf.append(",\"seq\":", seq);
+        _buf.append(",\"h\":", h);
+        if (lost)
+            _buf.append(",\"lost\":", lost);
+    }
+
+    int send_frame(SyncPeer peer, TxQueue queue = TxQueue.control, bool bundled = false)
     {
         _buf ~= '}';
         const(ubyte)[] frame = cast(const(ubyte)[])_buf[];
-        int r = queue == TxQueue.control ? peer.transmit_frame(frame, true, queue) : peer.bundle(frame, queue);
+        int r = queue == TxQueue.control && !bundled ? peer.transmit_frame(frame, true, queue) : peer.bundle(frame, queue);
         if (r < 0)
         {
             // event-driven encodes (state/cmd/result/error/sub/...) have no retry path!!
