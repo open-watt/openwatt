@@ -25,7 +25,7 @@ nothrow @nogc:
 // can drive a kernel bridge without router.iface importing any driver.* module.
 // The CPU-port sink injects a frame into the kernel-switched ethernet segment;
 // it returns <0 on failure (mirrors BaseInterface.forward's convention).
-alias CpuPortSink = int delegate(Packet* packet) nothrow @nogc;
+alias CpuPortSink = int delegate(const(Packet)* packet) nothrow @nogc;
 alias PortsChangedHook = void delegate(BridgeInterface bridge) nothrow @nogc;
 alias CpuPromiscHook = void delegate(BridgeInterface bridge) nothrow @nogc;
 
@@ -183,7 +183,10 @@ nothrow @nogc:
     final void cpu_port_incoming(Packet* packet)
     {
         if (!running || !_cpu.active)
-            return;
+            return packet_free(packet);
+        packet = packet_mutable(packet);
+        if (!packet)
+            return add_rx_drop();
 
         // Promisc surfaces frames the kernel already switched among its own ports
         // (a sniffer is attached): feed subscribers, nothing else to do.
@@ -194,7 +197,7 @@ nothrow @nogc:
             if (dp >= 0 && (dp == _cpu_port || (dp < _members.length && _members[dp].offloaded)))
             {
                 fire_subscribers(packet);
-                return;
+                return packet_free(packet);
             }
         }
 
@@ -223,10 +226,7 @@ nothrow @nogc:
         if (_vlan_filtering)
         {
             if (!classify_vlan(packet, _bridge_port))
-            {
-                add_tx_drop();
-                return -1;
-            }
+                return drop_tx(packet);
         }
 
         ulong src = source_address(packet);
@@ -236,10 +236,9 @@ nothrow @nogc:
         if (callback)
             return send_tracked(packet, callback);
 
+        size_t length = packet.data.length;
         send(packet, _local_port);
-
-        add_tx_frame(packet.data.length);
-
+        add_tx_frame(length);
         return 0;
     }
 
@@ -418,8 +417,6 @@ protected:
         if (!src_address.is_multicast_address)
             _address_table.insert(src_address, src_port);
 
-        send(packet, src_port);
-
         debug
         {
             if (packet.type == PacketType.ethernet)
@@ -435,10 +432,10 @@ protected:
                     log.trace("broadcast: ", packet.eth.src, " -> * [", packet.data, "]");
             }
         }
-        return;
+        return send(packet, src_port);
 
     drop_packet:
-        add_rx_drop();
+        drop(packet);
     }
 
 private:
@@ -695,13 +692,13 @@ private:
                 return;
             }
         }
-        // not a member of this vlan, drop
+        packet_free(packet);    // not a member of this vlan
     }
 
     void send(Packet* packet, ubyte src_port) nothrow @nogc
     {
         if (!running)
-            return;
+            return packet_free(packet);
 
         bool is_eth = packet.type == PacketType.ethernet;
 
@@ -712,10 +709,10 @@ private:
             if (dst_port >= 0)
             {
                 if (dst_port == src_port)
-                    return;
+                    return packet_free(packet);
 
                 if (dst_port == _local_port)
-                    local_dispatch(packet);
+                    return local_dispatch(packet);
                 else if (dst_port == _attach_port)
                 {
                     // exotic packet crossing to the ethernet domain
@@ -736,16 +733,13 @@ private:
                 }
                 else if (_members[dst_port].iface.running)
                 {
-                    if (_vlan_filtering)
-                    {
-                        if (!prepare_egress(packet, _members[dst_port]))
-                            return;
-                    }
-
+                    if (_vlan_filtering && !prepare_egress(packet, _members[dst_port]))
+                        return packet_free(packet);
                     if (_members[dst_port].iface.forward(packet) < 0)
                         add_tx_drop();
+                    return;
                 }
-                return;
+                return packet_free(packet);
             }
         }
 
@@ -777,7 +771,7 @@ private:
             if (_cpu.active && src_port != _cpu_port)
                 _cpu.send(packet);
             if (src_port != _local_port && src_port != _attach_port)
-                local_dispatch(packet);
+                return local_dispatch(packet);
         }
         else
         {
@@ -785,8 +779,9 @@ private:
             if (src_port != _attach_port)
                 station_egress(packet);
             if (src_port != _local_port)
-                local_dispatch(packet);
+                return local_dispatch(packet);
         }
+        packet_free(packet);
     }
 
     TagTracking* alloc_tracking()
@@ -847,10 +842,12 @@ private:
 
     int send_tracked(Packet* packet, MessageCallback callback)
     {
+        scope (exit) packet_free(packet);
         if (!running)
             return -1;
 
         bool is_eth = packet.type == PacketType.ethernet;
+        size_t length = packet.data.length;
 
         TagTracking* tracking = alloc_tracking();
         bool any_succeeded = false;
@@ -865,6 +862,7 @@ private:
                 {
                     recycle_tracking(tracking);
                     local_dispatch(packet);
+                    packet = null;
                     return 0;
                 }
 
@@ -874,7 +872,7 @@ private:
                     recycle_tracking(tracking);
                     if (is_eth || !station_egress(packet))
                         return -1;
-                    add_tx_frame(packet.data.length);
+                    add_tx_frame(length);
                     return 0;
                 }
 
@@ -885,7 +883,7 @@ private:
                     recycle_tracking(tracking);
                     if (_cpu.active)
                         _cpu.send(packet);
-                    add_tx_frame(packet.data.length);
+                    add_tx_frame(length);
                     return 0;
                 }
 
@@ -903,12 +901,13 @@ private:
                 }
 
                 int tag = _members[dst_port].iface.forward(packet, &tracking.on_port_callback);
+                packet = null;
                 if (tag <= 0)
                 {
                     recycle_tracking(tracking);
 
                     if (tag == 0)
-                        add_tx_frame(packet.data.length);
+                        add_tx_frame(length);
                     return tag;
                 }
                 tracking.port_tags.pushBack(PortTag(ObjectRef!BaseInterface(_members[dst_port].iface), tag));
@@ -961,7 +960,7 @@ private:
             recycle_tracking(tracking);
 
             if (any_succeeded)
-                add_tx_frame(packet.data.length);
+                add_tx_frame(length);
             return any_succeeded ? 0 : -1;
         }
 
@@ -981,7 +980,7 @@ private:
         tracking.upstream_cb = callback;
         link_active(tracking);
 
-        add_tx_frame(packet.data.length);
+        add_tx_frame(length);
         return btag;
     }
 }
@@ -1293,8 +1292,9 @@ unittest
             incoming_packet(packet);
         }
 
-        override int transmit(Packet*, MessageCallback callback, const(QueuePolicy)*)
+        override int transmit(Packet* packet, MessageCallback callback, const(QueuePolicy)*)
         {
+            packet_free(packet);
             ++sends;
             pending = callback;
             return callback ? 17 : 0;
@@ -1411,7 +1411,7 @@ unittest
     {
         BridgeInterface master;
         uint calls;
-        void received(Packet*, BaseInterface, PacketDirection, void*) nothrow @nogc
+        void received(const(Packet)*, BaseInterface, PacketDirection, void*) nothrow @nogc
         {
             ++calls;
             master.disabled = true;

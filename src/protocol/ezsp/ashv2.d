@@ -248,6 +248,7 @@ protected:
 
     override int transmit(Packet* packet, MessageCallback, const(QueuePolicy)*)
     {
+        scope (exit) packet_free(packet);
         if (packet.type != PacketType.raw)
             return -1;
         const(ubyte)[] message = cast(ubyte[])packet.data();

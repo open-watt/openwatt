@@ -490,14 +490,33 @@ static assert(StackPacket.packet.offsetof == Page.sizeof);
 // _offset is a ubyte, so 255 is the ceiling.
 enum ubyte packet_headroom = 128;
 
-// a packet the caller may keep: a pool page is shared, a lent packet is copied
-Packet* packet_retain(Packet* packet)
+// a reference of the caller's own to a packet it borrowed: a pool page is shared, a lent packet is copied
+Packet* packet_retain(const(Packet)* packet)
 {
     if (packet._flags & Packet.page_flag)
     {
-        page_share(packet.page);
-        return packet;
+        page_share(cast(Page*)packet.page);
+        return cast(Packet*)packet;
     }
+    return packet_copy(packet);
+}
+
+// a packet the caller may edit: itself unless its page is shared, else a copy; null, having freed it, if the copy fails
+Packet* packet_mutable(Packet* packet)
+{
+    if (!(packet._flags & Packet.page_flag) || page_unique(packet.page))
+        return packet;
+    Packet* copy = packet_copy(packet);
+    packet_free(packet);
+    return copy;
+}
+
+// makes a reference the caller owns storable: a pool packet as it is, a lent one copied
+Packet* packet_keep(Packet* packet)
+    => packet._flags & Packet.page_flag ? packet : packet_copy(packet);
+
+Packet* packet_copy(const(Packet)* packet)
+{
     const(void)[] source = packet.data;
     Page* p = page_alloc(source.length, size_t.sizeof, packet_prefix_size + packet_headroom);
     if (!p)
@@ -515,7 +534,7 @@ Packet* packet_retain(Packet* packet)
 
 void packet_free(Packet* packet)
 {
-    if (packet._flags & Packet.page_flag)
+    if (packet && (packet._flags & Packet.page_flag))
         page_free(packet.page);
 }
 

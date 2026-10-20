@@ -406,7 +406,7 @@ private:
         b.transmit(s, link_local_for(s.mac), dhcp6_multicast, ether_multicast_dhcp6, dhcp6_client_port, dhcp6_server_port);
     }
 
-    void incoming_packet(Packet* pkt, BaseInterface, PacketDirection dir, void* user_data)
+    void incoming_packet(const(Packet)* pkt, BaseInterface, PacketDirection dir, void* user_data)
     {
         if (pkt.type != PacketType.ethernet || pkt.eth.ether_type != EtherType.ip6)
             return;

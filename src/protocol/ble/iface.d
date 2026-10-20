@@ -297,20 +297,16 @@ protected:
     final override int transmit(Packet* packet, MessageCallback callback = null, const(QueuePolicy)* queue_policy = null)
     {
         if (packet.type != PacketType.ble)
-        {
-            add_tx_drop();
-            return -1;
-        }
+            return drop_tx(packet);
 
+        PendingMessage pending = PendingMessage(callback, packet.hdr!BLEFrame, cast(ushort)packet.data.length, getTime());
         int tag = _queue.enqueue(packet, &on_frame_complete);
         if (tag < 0)
         {
             add_tx_drop();
             return -1;
         }
-
-        _pending[cast(ubyte)tag] = PendingMessage(callback, packet.hdr!BLEFrame,
-            cast(ushort)packet.data.length, getTime());
+        _pending[cast(ubyte)tag] = pending;
 
         send_queued_messages();
         return tag;

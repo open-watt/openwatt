@@ -97,8 +97,6 @@ void icmp6_send_error(ref IPStack stack, ubyte type, ubyte code, const(Packet)* 
     Packet* response = alloc_packet!RawFrame(total);
     if (!response)
         return;
-    scope(exit)
-        packet_free(response);
     ubyte[] buffer = cast(ubyte[])response.payload;
 
     auto ip = cast(IPv6Header*)buffer.ptr;
@@ -146,7 +144,6 @@ ushort icmp6_echo_send(ref IPStack stack, IPv6Addr destination, BaseInterface if
     Packet* packet = alloc_datagram(IPv6Header.sizeof + message_length);
     if (!packet)
         return 0;
-    scope (exit) packet_free(packet);
     ubyte[] buffer = cast(ubyte[])packet.payload;
 
     auto ip = cast(IPv6Header*)buffer.ptr;
@@ -193,7 +190,7 @@ void icmp6_echo_cancel(ushort sequence)
     }
 }
 
-void icmp6_input(ref IPStack stack, Packet* packet, size_t offset, BaseInterface iface)
+void icmp6_input(ref IPStack stack, const(Packet)* packet, size_t offset, BaseInterface iface)
 {
     if (offset < IPv6Header.sizeof || offset > packet.data.length || packet.data.length - offset < Icmp6Header.sizeof)
         return;
@@ -305,8 +302,6 @@ void handle_echo_request(ref IPStack stack, const(Packet)* packet, size_t offset
     Packet* reply = alloc_packet!RawFrame(total);
     if (!reply)
         return;
-    scope(exit)
-        packet_free(reply);
     ubyte[] buffer = cast(ubyte[])reply.payload;
 
     auto reply_ip = cast(IPv6Header*)buffer.ptr;
@@ -499,7 +494,7 @@ unittest
 
         ~this() {}
         this(CID id, ObjectFlags flags = ObjectFlags.none) { super(collection_type_info!Link, id, flags); }
-        override int transmit(Packet* packet, MessageCallback callback, const(QueuePolicy)* policy) { return 0; }
+        override int transmit(Packet* packet, MessageCallback callback, const(QueuePolicy)* policy) { packet_free(packet); return 0; }
     }
 
     Link first = alloc!Link(CID(1));

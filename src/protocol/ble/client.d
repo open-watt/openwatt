@@ -365,7 +365,7 @@ private:
             log.info("read_rsp: [ ", cast(void[])value, " ]");
     }
 
-    final package void incoming_frame(Packet* p, BaseInterface iface)
+    final package void incoming_frame(const(Packet)* p, BaseInterface iface)
     {
         ref f = p.hdr!BLEFrame;
 

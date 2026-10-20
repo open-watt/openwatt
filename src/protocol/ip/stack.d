@@ -100,7 +100,7 @@ nothrow @nogc:
     void output_v4(Packet* pkt)
     {
         if (firewall_v4.run(HookPoint.output, pkt) == Verdict.drop)
-            return;
+            return packet_free(pkt);
         RouteResult r = route_lookup_v4(pkt);
         dispatch(pkt, r, firewall_v4);
     }
@@ -108,7 +108,7 @@ nothrow @nogc:
     void output_v4_routed(Packet* pkt, BaseInterface egress, IPAddr next_hop)
     {
         if (firewall_v4.run(HookPoint.output, pkt) == Verdict.drop)
-            return;
+            return packet_free(pkt);
         RouteResult r = RouteResult(RouteResult.Kind.forward, egress, next_hop);
         dispatch(pkt, r, firewall_v4);
     }
@@ -119,7 +119,7 @@ nothrow @nogc:
     void output_v6(Packet* pkt, BaseInterface iface_hint = null)
     {
         if (firewall_v6.run(HookPoint.output, pkt) == Verdict.drop)
-            return;
+            return packet_free(pkt);
         RouteResult6 r = route_lookup_v6(pkt, iface_hint);
         dispatch_v6(pkt, r, null);
     }
@@ -127,7 +127,7 @@ nothrow @nogc:
     void output_v6_routed(Packet* pkt, BaseInterface egress, IPv6Addr next_hop)
     {
         if (firewall_v6.run(HookPoint.output, pkt) == Verdict.drop)
-            return;
+            return packet_free(pkt);
         RouteResult6 r = RouteResult6(RouteResult6.Kind.forward, egress, next_hop);
         dispatch_v6(pkt, r, null);
     }
@@ -364,11 +364,12 @@ nothrow @nogc:
             EthernetStation station = dyn_cast!EthernetStation(iface);
             debug assert(station !is null);
             if (station)
-                ethernet_ingress(pkt, station);
+                return ethernet_ingress(pkt, station);
         }
         // TODO: sixlowpan handler -> register for PacketType._6lowpan
         // TODO: ppp handler -> register for an appropriate PacketType
         // TODO: raw_ip tunnel handler -> register for PacketType.raw (peek IP version byte)
+        packet_free(pkt);
     }
 
     ref inout(NeighbourCache!IPAddr) neighbour_v4_cache() inout pure return
@@ -383,7 +384,7 @@ private:
     {
         const Ethernet eth = pkt.hdr!Ethernet();
         if (eth.dst != iface.mac && !eth.dst.is_multicast())
-            return; // promiscuous capture; not addressed to us
+            return packet_free(pkt); // promiscuous capture; not addressed to us
         version (DebugIPIngress)
             log.trace("ingress if=", iface.name, ' ', pkt.hdr!Ethernet().src, " --> ", pkt.hdr!Ethernet().dst, " (", pkt.length, ") [ ", pkt.data[0 .. 24 < pkt.length ? 24 : pkt.length], 24 < pkt.length ? " ... ]" : " ]");
         switch (eth.ether_type)
@@ -392,41 +393,39 @@ private:
                 on_arp(pkt, iface, neighbour_v4);
                 break;
             case EtherType.ip4:
-                ingress_v4(pkt, iface);
-                break;
+                return ingress_v4(pkt, iface);
             static if (has_ipv6)
             {
             case EtherType.ip6:
-                ingress_v6(pkt, iface);
-                break;
+                return ingress_v6(pkt, iface);
             }
             case EtherType.ow:
-                ether_transport_input(pkt, iface);
-                break;
+                return ether_transport_input(pkt, iface);
             default:
                 break;  // not an L3 frame we care about; another subscriber may handle it
         }
+        packet_free(pkt);
     }
 
     void ingress_v4(Packet* pkt, BaseInterface iface)
     {
         if (pkt.data.length < IPv4Header.sizeof)
-            return;
+            return packet_free(pkt);
 
         const ip = cast(const IPv4Header*)pkt.data.ptr;
         if (ip.version_ != 4)
-            return;
+            return packet_free(pkt);
         if (ip.ihl < 5)
-            return;
+            return packet_free(pkt);
         size_t hdr_len = ip.ihl * 4;
         if (pkt.data.length < hdr_len)
-            return;
+            return packet_free(pkt);
         ushort total = ip.total_length.bigEndianToNative!ushort;
         if (total < hdr_len || total > pkt.data.length)
-            return;
+            return packet_free(pkt);
         pkt.truncate(total);
         if (internet_checksum(pkt.data.ptr[0 .. hdr_len]) != 0)
-            return;
+            return packet_free(pkt);
 
         // Learn (src_ip, l2_src_mac) from any unicast IPv4 frame.
         if (pkt.type == PacketType.ethernet)
@@ -442,7 +441,7 @@ private:
         // TODO: conntrack lookup for stateful firewall
 
         if (firewall_v4.run(HookPoint.prerouting, pkt) == Verdict.drop)
-            return;
+            return packet_free(pkt);
 
         bool group_destination = is_multicast_or_broadcast_v4(IPAddr(ip.dst), iface);
         RouteResult r;
@@ -457,34 +456,34 @@ private:
     void ingress_v6(Packet* pkt, BaseInterface iface)
     {
         if (pkt.data.length < IPv6Header.sizeof)
-            return;
+            return packet_free(pkt);
 
         const ip = cast(const IPv6Header*)pkt.data.ptr;
         if (ip.version_ != 6)
-            return;
+            return packet_free(pkt);
         size_t total = IPv6Header.sizeof + loadBigEndian(cast(const(ushort)*)ip.payload_length.ptr);
         if (total > pkt.data.length)
-            return;
+            return packet_free(pkt);
         pkt.truncate(total);
 
         // TODO: reassembly via fragment extension header
         // TODO: conntrack lookup for stateful firewall
 
         if (firewall_v6.run(HookPoint.prerouting, pkt) == Verdict.drop)
-            return;
+            return packet_free(pkt);
 
         IPv6Addr dst = ip.dst_addr;
         IPv6Addr src = ip.src_addr;
 
         if (src.is_multicast)
-            return;
+            return packet_free(pkt);
 
         if (dst.is_multicast)
         {
             if (!mld_accepts(dst, iface))
-                return;
+                return packet_free(pkt);
             if (firewall_v6.run(HookPoint.input, pkt) == Verdict.drop)
-                return;
+                return packet_free(pkt);
             deliver_local_v6(pkt, iface);
             return;
         }
@@ -492,14 +491,14 @@ private:
         if (is_our_ip_v6(dst, iface))
         {
             if (firewall_v6.run(HookPoint.input, pkt) == Verdict.drop)
-                return;
+                return packet_free(pkt);
             deliver_local_v6(pkt, iface);
             return;
         }
 
         // Link-local scope never crosses the link, in either address.
         if (dst.is_link_local || src.is_link_local)
-            return;
+            return packet_free(pkt);
 
         RouteResult6 r = route_lookup_v6_dst(dst);
         dispatch_v6(pkt, r, iface);
@@ -513,26 +512,26 @@ private:
                 version (DebugIP)
                     log.trace("no route for packet");
                 icmp_send_error(this, IcmpType.dest_unreachable, IcmpDestUnreachableCode.net, pkt);
-                return;
+                return packet_free(pkt);
             case RouteResult.Kind.blackhole:
-                return;
+                return packet_free(pkt);
             case RouteResult.Kind.local:
                 if (fw.run(HookPoint.input, pkt) == Verdict.drop)
-                    return;
+                    return packet_free(pkt);
                 deliver_local(pkt, r.out_iface);
                 return;
             case RouteResult.Kind.forward:
             {
                 static if (!has_gateway)
                     if (transit)
-                        return;
+                        return packet_free(pkt);
                 if (pkt.data.length < IPv4Header.sizeof)
-                    return;
+                    return packet_free(pkt);
                 auto ip = cast(IPv4Header*)pkt.data.ptr;
                 if (transit && ip.ttl <= 1)
                 {
                     icmp_send_error(this, IcmpType.time_exceeded, 0, pkt);
-                    return;
+                    return packet_free(pkt);
                 }
                 if (transit)
                 {
@@ -547,7 +546,7 @@ private:
                 }
                 // TODO: if pkt.length > out_iface.actual_mtu, fragment (v4) or send PTB (v6)
                 if (fw.run(HookPoint.forward, pkt) == Verdict.drop)
-                    return;
+                    return packet_free(pkt);
                 egress(pkt, r.out_iface, r.next_hop, fw);
                 return;
             }
@@ -567,40 +566,40 @@ private:
                 static if (has_gateway)
                     if (in_iface)
                         icmp6_send_error(this, Icmp6Type.dest_unreachable, Icmp6DestUnreachableCode.no_route, pkt, in_iface);
-                return;
+                return packet_free(pkt);
             case RouteResult6.Kind.blackhole:
-                return;
+                return packet_free(pkt);
             case RouteResult6.Kind.local:
                 if (firewall_v6.run(HookPoint.input, pkt) == Verdict.drop)
-                    return;
+                    return packet_free(pkt);
                 deliver_local_v6(pkt, in_iface ? in_iface : r.out_iface);
                 return;
             case RouteResult6.Kind.forward:
             {
                 static if (!has_gateway)
                     if (in_iface)
-                        return;
+                        return packet_free(pkt);
                 if (pkt.data.length < IPv6Header.sizeof)
-                    return;
+                    return packet_free(pkt);
                 auto ip = cast(IPv6Header*)pkt.data.ptr;
                 if (in_iface)
                 {
                     if (ip.hop_limit <= 1)
                     {
                         icmp6_send_error(this, Icmp6Type.time_exceeded, 0, pkt, in_iface);
-                        return;
+                        return packet_free(pkt);
                     }
                 }
                 if (firewall_v6.run(HookPoint.forward, pkt) == Verdict.drop)
-                    return;
+                    return packet_free(pkt);
                 if (!r.out_iface)
-                    return;
+                    return packet_free(pkt);
                 uint mtu = r.out_iface.actual_mtu;
                 if (mtu && pkt.data.length > mtu)
                 {
                     if (in_iface)
                         icmp6_send_error(this, Icmp6Type.packet_too_big, 0, pkt, in_iface, mtu);
-                    return;
+                    return packet_free(pkt);
                 }
                 if (in_iface)
                     --ip.hop_limit;
@@ -613,10 +612,10 @@ private:
     void egress_v6(Packet* pkt, BaseInterface out_iface, IPv6Addr next_hop)
     {
         if (firewall_v6.run(HookPoint.postrouting, pkt) == Verdict.drop)
-            return;
+            return packet_free(pkt);
 
         if (!out_iface)
-            return;
+            return packet_free(pkt);
 
         version (DebugIPEgress)
             log.trace("egress6 if=", out_iface.name, " next_hop=", next_hop, " (", pkt.length, ")");
@@ -628,12 +627,12 @@ private:
             return;
         }
 
-        const(ubyte)[] link_addr = neighbour_v6.resolve(next_hop, out_iface, pkt);
+        const(ubyte)[] link_addr = neighbour_v6.resolve(next_hop, out_iface);
         if (link_addr is null)
         {
             version (DebugIPEgress)
                 log.trace("egress6 defer: no neighbour for ", next_hop, " (queued, awaiting resolution)");
-            return;
+            return neighbour_v6.pend(next_hop, out_iface, pkt);
         }
 
         frame_and_send(pkt, out_iface, link_addr);
@@ -641,6 +640,7 @@ private:
 
     void deliver_local_v6(Packet* pkt, BaseInterface iface)
     {
+        scope (exit) packet_free(pkt);
         size_t l4_offset, nh_offset;
         IPProtocol proto;
         if (!walk_ext_headers_v6(pkt.data, l4_offset, nh_offset, proto))
@@ -768,10 +768,10 @@ private:
     void egress(Packet* pkt, BaseInterface out_iface, IPAddr next_hop, ref FirewallChains fw)
     {
         if (fw.run(HookPoint.postrouting, pkt) == Verdict.drop)
-            return;
+            return packet_free(pkt);
 
         if (!out_iface)
-            return;
+            return packet_free(pkt);
 
         version (DebugIPEgress)
             log.trace("egress if=", out_iface.name, " next_hop=", next_hop, " (", pkt.length, ") [ ", pkt.data[0 .. 24 < pkt.length ? 24 : pkt.length], 24 < pkt.length ? " ... ]" : " ]");
@@ -796,12 +796,12 @@ private:
             return;
         }
 
-        const(ubyte)[] link_addr = neighbour_v4.resolve(next_hop, out_iface, pkt);
+        const(ubyte)[] link_addr = neighbour_v4.resolve(next_hop, out_iface);
         if (link_addr is null)
         {
             version (DebugIPEgress)
                 log.trace("egress defer: no neighbour for ", next_hop, " (queued, awaiting resolution)");
-            return;
+            return neighbour_v4.pend(next_hop, out_iface, pkt);
         }
 
         frame_and_send(pkt, out_iface, link_addr);
@@ -811,6 +811,7 @@ private:
     //       (or by a virtual on BaseInterface) to choose the framing.
     void frame_and_send(Packet* pkt, BaseInterface out_iface, const(ubyte)[] link_addr)
     {
+        scope (exit) packet_free(pkt);
         EthernetStation station = dyn_cast!EthernetStation(out_iface);
         if (!station || link_addr.length != 6 || pkt.data.length < 1)
             return;
@@ -828,6 +829,7 @@ private:
 
     void deliver_local(Packet* pkt, BaseInterface iface = null)
     {
+        scope (exit) packet_free(pkt);
         if (pkt.data.length < IPv4Header.sizeof)
             return;
         const ip = cast(const IPv4Header*)pkt.data.ptr;
@@ -976,6 +978,7 @@ unittest
             {
                 ++transmissions;
                 captured = cast(const(ubyte)[])packet.data;
+                packet_free(packet);
             }
         }
 

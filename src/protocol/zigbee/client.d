@@ -664,7 +664,7 @@ protected:
         }
     }
 
-    final void incoming_packet(Packet* p, BaseInterface iface, PacketDirection dir, void*)
+    final void incoming_packet(const(Packet)* p, BaseInterface iface, PacketDirection dir, void*)
     {
         // TODO: we should enhance the PACKET FILTER to do this work!
         ref aps = p.hdr!APSFrame;
@@ -1303,7 +1303,7 @@ private:
 
     ZigbeeMessageHandler _message_handler;
 
-    void incoming_packet(Packet* p, ZigbeeNode iface, PacketDirection dir)
+    void incoming_packet(const(Packet)* p, ZigbeeNode iface, PacketDirection dir)
     {
         // TODO: this seems inefficient!
         if (_message_handler)

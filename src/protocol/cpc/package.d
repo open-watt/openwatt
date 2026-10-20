@@ -212,6 +212,7 @@ protected:
     // forward()). We enqueue it on the target endpoint's channel and let the scheduler emit it.
     override int transmit(Packet* packet, MessageCallback callback, const(QueuePolicy)* queue_policy)
     {
+        scope (exit) packet_free(packet);
         if (packet.type != PacketType.cpc)
             return -1;
         CPCFrame f = packet.hdr!CPCFrame;
@@ -439,6 +440,7 @@ protected:
     // system traffic) or is decapsulated to the child endpoint; it is never dispatched as a vlan/eth frame.
     override void ingress(Packet* packet)
     {
+        scope (exit) packet_free(packet);
         // count the full wire frame (header + payload + FCS), matching what emit_frame counts on tx, so
         // the trunk's rx/tx byte stats stay comparable; the packet carries only the borrowed payload
         add_rx_frame(cpc_header_size + (packet.length ? packet.length + 2 : 0));
@@ -1312,6 +1314,7 @@ protected:
     // copies it into this endpoint's channel on transmit(), so the borrow only needs to last that call.
     override int transmit(Packet* packet, MessageCallback callback, const(QueuePolicy)* queue_policy)
     {
+        scope (exit) packet_free(packet);
         if (packet.type != PacketType.raw)
             return -1;
         CPCInterface trunk = _cpc.get;

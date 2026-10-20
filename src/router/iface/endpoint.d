@@ -95,6 +95,7 @@ void set_ether_tcp_input(EtherTcpInput handler)
 
 void ether_transport_input(Packet* packet, BaseInterface iface)
 {
+    scope (exit) packet_free(packet);
     EthernetStation station = dyn_cast!EthernetStation(iface);
     if (!station)
         return;

@@ -342,6 +342,7 @@ protected:
 
     override int transmit(Packet* packet, MessageCallback callback = null, const(QueuePolicy)* queue_policy = null)
     {
+        scope (exit) packet_free(packet);
         InetAddress dst = _remote;
         if (packet.type == PacketType.udp)
         {

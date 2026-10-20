@@ -687,7 +687,6 @@ private:
             Packet* p = _emu_responses[0];
             _emu_responses.remove(0);
             on_incoming(p);
-            packet_free(p);
         }
     }
 
@@ -903,7 +902,6 @@ private:
                 f.kind = BLEFrameKind.att;
                 f.code = ATTOpcode.read_rsp;
                 on_incoming(p);
-                packet_free(p);
             }
         }
 
@@ -936,7 +934,6 @@ private:
                 f.kind = BLEFrameKind.att;
                 f.code = ATTOpcode.write_rsp;
                 on_incoming(p);
-                packet_free(p);
             }
         }
 
@@ -970,7 +967,6 @@ private:
         f.code = ATTOpcode.notification;
 
         on_incoming(p);
-        packet_free(p);
     }
 }
 

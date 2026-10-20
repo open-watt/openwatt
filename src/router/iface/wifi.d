@@ -395,6 +395,7 @@ protected:
 
     override int transmit(Packet* packet, MessageCallback, const(QueuePolicy)*)
     {
+        scope (exit) packet_free(packet);
         add_tx_drop();
         return -1;
     }

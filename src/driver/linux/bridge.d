@@ -81,7 +81,7 @@ private:
         // kernel-switched segment. Exotic packets are OW-encapsulated at the
         // bridge's station before they reach this sink, so only ethernet frames
         // arrive here. Anything else is a routing bug upstream.
-        int inject(Packet* packet)
+        int inject(const(Packet)* packet)
         {
             debug assert(packet.type == PacketType.ethernet);
             if (packet.type != PacketType.ethernet)

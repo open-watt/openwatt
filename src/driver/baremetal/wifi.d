@@ -304,6 +304,7 @@ protected:
 
     override int transmit(Packet* packet, MessageCallback callback, const(QueuePolicy)*)
     {
+        scope (exit) packet_free(packet);
         if (packet.type != PacketType.wifi_80211 || !_wifi.is_open)
         {
             add_tx_drop();

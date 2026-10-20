@@ -106,15 +106,16 @@ nothrow @nogc:
 
         // the evicted frame's callback may resubmit into the slot it vacated
         if (_queued_count >= _max_queue_depth && (dei || !drop_lowest_dei() || _queued_count >= _max_queue_depth))
-            return -1;
-
-        QueuedFrame* frame = _pool.alloc();
-        frame.packet = packet_retain(packet);
-        if (!frame.packet)
         {
-            _pool.free(frame);
+            packet_free(packet);
             return -1;
         }
+
+        Packet* kept = packet_keep(packet);
+        if (!kept)
+            return -1;
+        QueuedFrame* frame = _pool.alloc();
+        frame.packet = kept;
         frame.callback = callback;
         frame.enqueue_time = getTime();
         frame.deadline_after = policy ? policy.deadline_after : 0;

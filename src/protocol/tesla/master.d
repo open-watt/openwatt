@@ -666,7 +666,7 @@ private:
             restart_deferred();
     }
 
-    void incoming_packet(Packet* p, BaseInterface iface, PacketDirection dir, void* user_data)
+    void incoming_packet(const(Packet)* p, BaseInterface iface, PacketDirection dir, void* user_data)
     {
         ref const twc = p.hdr!TWCFrame;
 
@@ -901,7 +901,7 @@ unittest
         }
 
         override CompletionStatus startup() => CompletionStatus.complete;
-        override int transmit(Packet* packet, MessageCallback callback = null, const(QueuePolicy)* queue_policy = null) => 0;
+        override int transmit(Packet* packet, MessageCallback callback = null, const(QueuePolicy)* queue_policy = null) { packet_free(packet); return 0; }
         override void on_subscribers_changed(bool any) { subscribed = any; }
         void start() { set_state(State.running); }
     }

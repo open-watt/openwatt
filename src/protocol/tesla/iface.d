@@ -164,6 +164,7 @@ protected:
 
     override int transmit(Packet* packet, MessageCallback, const(QueuePolicy)*) nothrow @nogc
     {
+        scope (exit) packet_free(packet);
         if (packet.type != PacketType.tesla_twc)
         {
             add_tx_drop();

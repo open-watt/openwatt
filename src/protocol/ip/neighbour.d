@@ -171,46 +171,37 @@ nothrow @nogc:
         return null;
     }
 
-    // Lookup; returns link_addr if reachable, null otherwise.
-    // On miss, creates an incomplete entry, queues `pending`, kicks off resolution.
-    // On in-flight, replaces the queued packet (single-slot).
-    const(ubyte)[] resolve(IP ip, BaseInterface iface, Packet* pending)
+    // the link address of a reachable neighbour, or null
+    const(ubyte)[] resolve(IP ip, BaseInterface iface)
     {
         if (auto e = find(ip, iface))
+            if (e.state == NeighbourState.reachable || e.state == NeighbourState.stale)
+                return e.link_addr[0 .. e.link_addr_len];
+        return null;
+    }
+
+    // holds `pkt` until `ip` resolves, starting resolution unless it is under way
+    void pend(IP ip, BaseInterface iface, Packet* pkt)
+    {
+        NeighbourEntry!IP* e = find(ip, iface);
+        if (e && e.state == NeighbourState.incomplete)
+            return queue_pending(*e, pkt);
+        debug assert(!e || e.state == NeighbourState.failed, "pend() on a neighbour that resolves");
+
+        if (!e)
         {
-            final switch (e.state) with (NeighbourState)
-            {
-                case reachable:
-                case stale:
-                    return e.link_addr[0 .. e.link_addr_len];
-                case failed:
-                    // peer may have come back -- restart resolution
-                    e.state        = NeighbourState.incomplete;
-                    e.last_request = getTime();
-                    e.retry_count  = 1;
-                    queue_pending(*e, pending);
-                    if (send_request)
-                        send_request(ip, iface);
-                    return null;
-                case incomplete:
-                    queue_pending(*e, pending);
-                    return null;
-            }
+            NeighbourEntry!IP n;
+            n.ip    = ip;
+            n.iface = iface;
+            _entries ~= n;
+            e = &_entries[$ - 1];
         }
-
-        NeighbourEntry!IP n;
-        n.ip            = ip;
-        n.iface         = iface;
-        n.state         = NeighbourState.incomplete;
-        n.last_request  = getTime();
-        n.retry_count   = 1;
-        queue_pending(n, pending);
-        _entries ~= n;
-
+        e.state        = NeighbourState.incomplete;
+        e.last_request = getTime();
+        e.retry_count  = 1;
+        queue_pending(*e, pkt);
         if (send_request)
             send_request(ip, iface);
-
-        return null;
     }
 
     void tick(MonoTime now)
@@ -298,7 +289,7 @@ private:
                             ": dropping queued packet for ", e.ip,
                             " on ", e.iface.name, " (state=", e.state, ")");
         }
-        Packet* queued = packet_retain(pkt);
+        Packet* queued = packet_keep(pkt);
         if (!queued)
             return;
         e.pending[e.pending_count] = queued;
@@ -320,10 +311,7 @@ private:
             return;
         }
         foreach (i; 0 .. e.pending_count)
-        {
             drain(e.pending[i], e.iface, e.link_addr[0 .. e.link_addr_len]);
-            packet_free(e.pending[i]);
-        }
         e.pending_count = 0;
     }
 

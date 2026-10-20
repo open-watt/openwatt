@@ -178,29 +178,29 @@ protected:
 
             default:
                 // exotic frames are OW-encapsulated for transit across the segment
-                if (station_egress(packet))
-                    return 0;
-                add_tx_drop();
-                return -1;
+                if (!station_egress(packet))
+                    return drop_tx(packet);
+                packet_free(packet);
+                return 0;
         }
     }
 
     final override void ingress(Packet* packet)
     {
         if (!packet.consume_priority_tags())
-        {
-            add_rx_drop();
-            return;
-        }
+            return drop(packet);
         if (packet.type == PacketType.ethernet && packet.vlan_tag == VlanTag.none && packet.eth.ether_type == EtherType.ow)
         {
             if (packet.eth.src == mac)
-                return; // capture echo of our own transmission
+                return packet_free(packet); // capture echo of our own transmission
             if (packet.eth.dst != mac && !packet.eth.dst.is_multicast)
-                return; // unicast for another station
+                return packet_free(packet); // unicast for another station
+            const(ubyte)[] content = cast(const(ubyte)[])packet.data;
+            if (content.length >= 5 && is_ow_transport(loadBigEndian(cast(const(ushort)*)content.ptr)))
+                return dispatch(packet);
             if (!station_ingress(packet))
                 add_rx_drop();
-            return;
+            return packet_free(packet);
         }
         if (packet.type == PacketType.ethernet && packet.vlan_tag == VlanTag.none && packet.eth.ether_type == EtherType.cfm && packet.eth.src != mac)
         {
@@ -287,7 +287,7 @@ protected:
     }
 
     // Encapsulate an exotic packet and transmit it across the segment.
-    final bool station_egress(Packet* packet)
+    final bool station_egress(const(Packet)* packet)
     {
         const(PacketCodec)* codec = get_ow_codec(packet.type);
         if (!codec)
@@ -318,7 +318,7 @@ protected:
     }
 
     // Decapsulate an OW frame addressed to this station (caller pre-filtered outer src/dst).
-    final bool station_ingress(Packet* packet)
+    final bool station_ingress(const(Packet)* packet)
     {
         const(ubyte)[] content = cast(const(ubyte)[])packet.data;
         if (content.length < 5)
@@ -334,12 +334,6 @@ protected:
                 return false;
             add_rx_frame(packet.length);
             station_control(cast(OWControl)wire_type, content[5 .. 5 + data_len], packet.eth.src, !packet.eth.dst.is_multicast);
-            return true;
-        }
-
-        if (is_ow_transport(wire_type))
-        {
-            dispatch(packet);
             return true;
         }
 
@@ -621,7 +615,6 @@ private:
         eth.dst = dst;
         eth.ether_type = EtherType.ow;
         medium_tx(wrapped);
-        packet_free(wrapped);
     }
 
     void station_control(OWControl msg, const(ubyte)[] content, MACAddress src, bool unicast)
@@ -875,6 +868,7 @@ protected:
     final override void medium_tx(Packet* packet)
     {
         debug assert(packet.type == PacketType.ethernet, "medium_tx expects an ethernet packet");
+        scope (exit) packet_free(packet);
 
         ubyte[1522] buffer = void;
 
@@ -976,7 +970,7 @@ unittest
             super(collection_type_info!Link, id, flags);
             _state = State.running;
         }
-        override void medium_tx(Packet* packet) {}
+        override void medium_tx(Packet* packet) { packet_free(packet); }
     }
     Link first = Collection!Link().create("mac-ping-test-first");
     Link second = Collection!Link().create("mac-ping-test-second");

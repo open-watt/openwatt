@@ -85,7 +85,6 @@ ushort icmp_echo_send(ref IPStack stack, IPAddr destination, BaseInterface iface
     Packet* packet = alloc_datagram(60);
     if (!packet)
         return 0;
-    scope (exit) packet_free(packet);
     ubyte[] buffer = cast(ubyte[])packet.payload;
     buffer[] = 0;
     auto ip = cast(IPv4Header*)buffer.ptr;
@@ -196,7 +195,6 @@ void icmp_send_error(ref IPStack stack, ubyte type, ubyte code, const(Packet)* o
     Packet* pkt = alloc_datagram(total);
     if (!pkt)
         return;
-    scope (exit) packet_free(pkt);
     ubyte[] buf = cast(ubyte[])pkt.payload;
 
     auto rip = cast(IPv4Header*)buf.ptr;
@@ -232,7 +230,7 @@ void icmp_send_error(ref IPStack stack, ubyte type, ubyte code, const(Packet)* o
 
 // Process a locally-delivered ICMP datagram.
 // pkt.data is the entire IP datagram (IPv4 header + ICMP message).
-void icmp_input(ref IPStack stack, Packet* pkt, BaseInterface iface = null)
+void icmp_input(ref IPStack stack, const(Packet)* pkt, BaseInterface iface = null)
 {
     if (pkt.data.length < IPv4Header.sizeof + IcmpHeader.sizeof)
         return;
@@ -444,7 +442,6 @@ void handle_echo_request(ref IPStack stack, const(Packet)* pkt, size_t ip_hdr_le
     Packet* reply = alloc_datagram(datagram.length);
     if (!reply)
         return;
-    scope (exit) packet_free(reply);
     ubyte[] buf = cast(ubyte[])reply.payload;
     buf[] = datagram[];
 
@@ -523,7 +520,11 @@ unittest
             super(collection_type_info!Link, id, flags);
             _state = State.running;
         }
-        override void medium_tx(Packet* packet) { captured = cast(const(ubyte)[])packet.data; }
+        override void medium_tx(Packet* packet)
+        {
+            captured = cast(const(ubyte)[])packet.data;
+            packet_free(packet);
+        }
     }
     Link link = Collection!Link().create("icmp-echo-test-link");
     IPAddress address = Collection!IPAddress().create("icmp-echo-test-address");
