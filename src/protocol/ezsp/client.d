@@ -606,7 +606,7 @@ private:
         }
     }
 
-    void incoming_packet(Packet* p, BaseInterface iface, PacketDirection dir, void* ud)
+    void incoming_packet(const(Packet)* p, BaseInterface iface, PacketDirection dir, void* ud)
     {
         const(ubyte)[] msg = cast(const(ubyte)[])p.data();
 //        writeWarningf("ASHv2: [!!!] empty frame received! [x{0,02x}]", control);

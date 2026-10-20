@@ -322,7 +322,7 @@ static if (has_ipv6)
 
 // Demux a locally-delivered v4 UDP datagram to a matching PCB.
 // pkt.data is the entire IP datagram.
-void udp_input(ref IPStack stack, Packet* pkt, BaseInterface iface, bool group_destination)
+void udp_input(ref IPStack stack, const(Packet)* pkt, BaseInterface iface, bool group_destination)
 {
     if (pkt.data.length < IPv4Header.sizeof + UdpHeader.sizeof)
         return;
@@ -405,7 +405,7 @@ void udp_input(ref IPStack stack, Packet* pkt, BaseInterface iface, bool group_d
 static if (has_ipv6)
 {
     // Demux a locally-delivered v6 UDP datagram; l4_offset is past any extension headers.
-    void udp_input6(ref IPStack stack, Packet* pkt, size_t l4_offset, BaseInterface iface)
+    void udp_input6(ref IPStack stack, const(Packet)* pkt, size_t l4_offset, BaseInterface iface)
     {
         const(ubyte)[] datagram = cast(const(ubyte)[])pkt.data;
         ushort src_port, dst_port;
@@ -463,11 +463,13 @@ bool udp_output(ref IPStack stack, IPAddr src_addr, ushort src_port, IPAddr dst_
         if (selected != IPAddr.any)
             src_addr = selected;
     }
+    BaseInterface iface = src_addr != IPAddr.any ? interface_for_address(src_addr) : null;
+    if (dst_addr.is_multicast && src_addr != IPAddr.any && !iface)
+        return false;
 
     Packet* pkt = alloc_datagram(total);
     if (!pkt)
         return false;
-    scope (exit) packet_free(pkt);
     ubyte[] buf = cast(ubyte[])pkt.payload;
 
     auto ip = cast(IPv4Header*)buf.ptr;
@@ -496,23 +498,10 @@ bool udp_output(ref IPStack stack, IPAddr src_addr, ushort src_port, IPAddr dst_
         buf[IPv4Header.sizeof + UdpHeader.sizeof .. total] = payload[];
 
     pkt.checksum_pending = true;
-    if (src_addr != IPAddr.any)
-    {
-        BaseInterface iface = interface_for_address(src_addr);
-        if (dst_addr.is_multicast)
-        {
-            if (!iface)
-                return false;
-            stack.output_v4_routed(pkt, iface, dst_addr);
-            return true;
-        }
-        if (iface && is_broadcast_for_interface(iface, dst_addr))
-        {
-            stack.output_v4_routed(pkt, iface, dst_addr);
-            return true;
-        }
-    }
-    stack.output_v4(pkt);
+    if (iface && (dst_addr.is_multicast || is_broadcast_for_interface(iface, dst_addr)))
+        stack.output_v4_routed(pkt, iface, dst_addr);
+    else
+        stack.output_v4(pkt);
     return true;
 }
 
@@ -540,9 +529,7 @@ static if (has_ipv6)
         Packet* pkt = alloc_datagram(IPv6Header.sizeof + UdpHeader.sizeof + payload.length);
         if (!pkt)
             return false;
-        scope (exit) packet_free(pkt);
-        if (write_udp6(cast(ubyte[])pkt.payload, src_addr, src_port, dst_addr, dst_port, payload, 64, false) == 0)
-            return false;
+        write_udp6(cast(ubyte[])pkt.payload, src_addr, src_port, dst_addr, dst_port, payload, 64, false);
 
         pkt.checksum_pending = true;
         if (scoped)
@@ -751,7 +738,7 @@ unittest
                 super(collection_type_info!Link, id, flags);
                 _state = State.running;
             }
-            override int transmit(Packet* packet, MessageCallback callback, const(QueuePolicy)* policy) { return 0; }
+            override int transmit(Packet* packet, MessageCallback callback, const(QueuePolicy)* policy) { packet_free(packet); return 0; }
         }
 
         Link link_a = Collection!Link().create("udp6-test-a");

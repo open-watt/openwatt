@@ -277,19 +277,13 @@ protected:
     override int transmit(Packet* packet, MessageCallback callback, const(QueuePolicy)* policy)
     {
         if (packet.type != PacketType.i2c)
-        {
-            add_tx_drop();
-            return -1;
-        }
+            return drop_tx(packet);
 
         ref frame = packet.hdr!I2CFrame;
         bool ten_bit = (frame.flags & I2CFrameFlags.ten_bit_address) != 0;
         if (frame.type != I2CFrameType.request || (packet.data.length == 0 && frame.read_length == 0) ||
             frame.read_length > l2mtu || (!ten_bit && frame.address > 0x7F) || (ten_bit && frame.address > 0x3FF))
-        {
-            add_tx_drop();
-            return -1;
-        }
+            return drop_tx(packet);
 
         int tag = _queue.enqueue(packet, callback, policy);
         if (tag < 0)

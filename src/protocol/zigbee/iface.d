@@ -323,13 +323,14 @@ protected:
                 }
 
                 writeWarning("Zigbee: raw NWK transmit is not implemented");
+                packet_free(packet);
                 return -1;
 
             default:
-                add_tx_drop();
-                return -1;
+                return drop_tx(packet);
         }
 
+        PendingMessage pending = PendingMessage(callback, packet.hdr!APSFrame, cast(ushort)packet.data.length, getTime());
         int tag = _queue.enqueue(packet, &on_frame_complete, queue_policy);
         if (tag < 0)
         {
@@ -337,11 +338,11 @@ protected:
             return -1;
         }
 
-        _pending[cast(ubyte)tag] = PendingMessage(callback, packet.hdr!APSFrame, cast(ushort)packet.data.length, getTime());
+        _pending[cast(ubyte)tag] = pending;
 
         version (DebugZigbeeLatency)
         {
-            ref const aps = packet.hdr!APSFrame;
+            ref const aps = pending.aps;
             writeDebugf("ZBLAT txreq t={0} dst={1,04x} ep={2,02x} cl={3,04x} tag={4} ezspq={5}", zblat_us(), aps.dst, aps.dst_endpoint, aps.cluster_id, tag, _ezsp_client ? _ezsp_client.queued_count() : 0);
         }
 

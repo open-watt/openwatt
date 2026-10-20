@@ -715,7 +715,7 @@ private:
         }
     }
 
-    void packet_handler(Packet* p, BaseInterface, PacketDirection, void*)
+    void packet_handler(const(Packet)* p, BaseInterface, PacketDirection, void*)
     {
         if (p.type != PacketType.obd)
             return;

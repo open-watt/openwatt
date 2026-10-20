@@ -52,10 +52,7 @@ nothrow @nogc:
     override int transmit(Packet* packet, MessageCallback callback, const(QueuePolicy)* policy)
     {
         if (packet.type != PacketType.wpan || !_wpan.is_open || packet.length == 0)
-        {
-            add_tx_drop();
-            return -1;
-        }
+            return drop_tx(packet);
         int tag = _queue.enqueue(packet, callback, policy);
         if (tag < 0)
         {

@@ -570,7 +570,7 @@ private void tcp_app_deliver(TcpPcb* pcb, const(ubyte)[] bytes, MonoTime rx_time
 // -------------------------------------------------------------------------
 // Ingress
 
-void tcp_input(ref IPStack stack, Packet* pkt)
+void tcp_input(ref IPStack stack, const(Packet)* pkt)
 {
     if (pkt.data.length < IPv4Header.sizeof + TcpHeader.sizeof)
         return;
@@ -1314,7 +1314,6 @@ void send_segment_raw(ref IPStack stack, ref const InetAddress src, ref const In
     Packet* pkt = alloc_datagram(total);
     if (!pkt)
         return;
-    scope (exit) packet_free(pkt);
     ubyte[] buf = cast(ubyte[])pkt.payload;
 
     auto t = cast(TcpHeader*)(buf.ptr + reserve);
@@ -1375,7 +1374,7 @@ void send_segment_raw(ref IPStack stack, ref const InetAddress src, ref const In
             MACAddress dst_mac = MACAddress(dst._a.ether.addr);
             ubyte[] ow = buf[reserve - ow_transport_header_size .. total];
             if (!write_ow_transport_header(ow, TransportProto.tcp, tcp_total))
-                return;
+                return packet_free(pkt);
 
             // the checksum covers the pseudo-header, so it is computed per emission
             void emit(EthernetStation s)
@@ -1409,11 +1408,13 @@ void send_segment_raw(ref IPStack stack, ref const InetAddress src, ref const In
                         emit(s);
                 });
             }
+            packet_free(pkt);
             break;
         }
 
         default:
             // TODO: ipv6 header build + output_v6 lands here
+            packet_free(pkt);
             break;
     }
 }

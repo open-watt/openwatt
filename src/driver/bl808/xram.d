@@ -78,6 +78,7 @@ nothrow @nogc:
     // The ring is the queue: a frame it cannot take is dropped.
     override int transmit(Packet* packet, MessageCallback, const(QueuePolicy)*)
     {
+        scope (exit) packet_free(packet);
         if (packet.type != PacketType.raw)
             return -1;
         auto payload = cast(const(ubyte)[])packet.data();

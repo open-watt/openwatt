@@ -239,7 +239,7 @@ private:
             restart();
     }
 
-    void incoming_packet(Packet* pkt, BaseInterface, PacketDirection dir, void* user_data)
+    void incoming_packet(const(Packet)* pkt, BaseInterface, PacketDirection dir, void* user_data)
     {
         if (!running)
             return;

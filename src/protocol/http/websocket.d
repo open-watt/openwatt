@@ -254,6 +254,7 @@ protected:
 
     override int transmit(Packet* packet, MessageCallback, const(QueuePolicy)*)
     {
+        scope (exit) packet_free(packet);
         if (packet.type != PacketType.raw)
         {
             add_tx_drop();

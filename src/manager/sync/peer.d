@@ -1561,7 +1561,7 @@ private:
         }
     }
 
-    void on_transport_packet(Packet* p, BaseInterface, PacketDirection, void*) nothrow @nogc
+    void on_transport_packet(const(Packet)* p, BaseInterface, PacketDirection, void*) nothrow @nogc
     {
         if (p.type != PacketType.raw && p.type != PacketType.udp)
             return;
@@ -1820,6 +1820,7 @@ unittest
             => pending < cap;
         override int transmit(Packet* packet, MessageCallback, const(QueuePolicy)*)
         {
+            scope (exit) packet_free(packet);
             if (refuse)
                 return -1;
             pending += packet.length;
@@ -2074,6 +2075,7 @@ unittest
         override void tx_handler_changed() {}
         override int transmit(Packet* packet, MessageCallback, const(QueuePolicy)*)
         {
+            scope (exit) packet_free(packet);
             if (refuse)
                 return -1;
             Array!ubyte f;

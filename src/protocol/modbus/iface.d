@@ -452,8 +452,7 @@ protected:
         if (packet.type != PacketType.modbus)
         {
             log.debug_("tx-drop: not a modbus packet");
-            add_tx_drop();
-            return -1;
+            return drop_tx(packet);
         }
 
         auto mod_mb = get_module!ModbusProtocolModule();
@@ -464,6 +463,7 @@ protected:
             if (hdr.type != ModbusFrameType.request)
             {
 //                add_tx_drop(); // should we count this as a drop?
+                packet_free(packet);
                 return -1;
             }
 
@@ -474,12 +474,12 @@ protected:
                 if (!map || map.iface !is this)
                 {
                     log.debug_("tx-drop: unknown server address ", hdr.dst_address);
-                    add_tx_drop();
-                    return -1;
+                    return drop_tx(packet);
                 }
                 local_address = map.local_address;
             }
 
+            PendingModbus pending = PendingModbus(hdr.src_address, hdr.sequence_number, local_address, callback);
             int tag = _queue.enqueue(packet, &on_frame_complete);
             if (tag < 0)
             {
@@ -488,7 +488,7 @@ protected:
                 return -1;
             }
 
-            _pending[cast(ubyte)tag] = PendingModbus(hdr.src_address, hdr.sequence_number, local_address, callback);
+            _pending[cast(ubyte)tag] = pending;
 
             send_queued_messages();
             return tag;
@@ -498,14 +498,14 @@ protected:
             if (hdr.type != ModbusFrameType.response)
             {
 //                add_tx_drop(); // should we count this as a drop?
+                packet_free(packet);
                 return -1;
             }
 
             if (hdr.dst_address != _master_address)
             {
                 log.debug_("tx-drop: response dst != master address");
-                add_tx_drop();
-                return -1;
+                return drop_tx(packet);
             }
 
             ServerMap* map = mod_mb.find_server_by_universal_address(hdr.src_address);
@@ -514,8 +514,9 @@ protected:
                 wire_address = map.iface is this ? map.local_address : map.universal_address;
             else
                 wire_address = hdr.src_address; // hosted-local node: universal == bus, no NAT
-            const(ubyte)[] pdu = cast(ubyte[])packet.data;
-            return frame_and_send(wire_address, pdu, hdr.sequence_number);
+            int result = frame_and_send(wire_address, cast(const(ubyte)[])packet.data, hdr.sequence_number);
+            packet_free(packet);
+            return result;
         }
     }
 

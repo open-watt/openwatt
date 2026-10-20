@@ -294,6 +294,7 @@ protected:
 
     override int transmit(Packet* packet, MessageCallback callback, const(QueuePolicy)*)
     {
+        scope (exit) packet_free(packet);
         if (packet.type != PacketType.obd)
         {
             add_tx_drop();
@@ -447,7 +448,7 @@ private:
 
     // --- CAN backend ---
 
-    void can_packet_handler(Packet* p, BaseInterface, PacketDirection, void*)
+    void can_packet_handler(const(Packet)* p, BaseInterface, PacketDirection, void*)
     {
         if (p.type != PacketType.can)
             return;
@@ -774,7 +775,7 @@ unittest
 
         void on_vehicle(ref const SampleUpdate) { ++notifications; }
 
-        void on_packet(Packet*, BaseInterface, PacketDirection, void*)
+        void on_packet(const(Packet)*, BaseInterface, PacketDirection, void*)
         {
             saw_packet = true;
             at_delivery = vehicle;

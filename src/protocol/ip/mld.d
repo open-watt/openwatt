@@ -118,7 +118,7 @@ void mld_update(ref IPStack stack, MonoTime now)
     }
 }
 
-void mld_input(Packet* packet, size_t offset, BaseInterface iface)
+void mld_input(const(Packet)* packet, size_t offset, BaseInterface iface)
 {
     if (!iface || packet.data.length < offset + MldHeader.sizeof)
         return;
@@ -274,7 +274,6 @@ bool send_message(ref IPStack stack, Icmp6Type type, ref Membership membership, 
     write_message(*cast(MessageBuffer*)packet.payload.ptr, type, source, membership.group, destination);
     membership.report_source = source;
     stack.output_v6_routed(packet, iface, destination);
-    packet_free(packet);
     return true;
 }
 

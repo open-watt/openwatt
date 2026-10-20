@@ -184,7 +184,7 @@ nothrow @nogc:
 
 struct InterfaceSubscriber
 {
-    alias PacketHandler = void delegate(Packet* p, BaseInterface i, PacketDirection dir, void* u) nothrow @nogc;
+    alias PacketHandler = void delegate(const(Packet)* p, BaseInterface i, PacketDirection dir, void* u) nothrow @nogc;
 
     PacketFilter filter;
     PacketHandler recv_packet;
@@ -536,7 +536,8 @@ nothrow @nogc:
 
     int forward(Packet* packet, MessageCallback callback = null, const(QueuePolicy)* queue_policy = null)
     {
-        if (!admit(packet, callback))
+        packet = admit(packet, callback);
+        if (!packet)
             return -1;
 
         foreach (ref subscriber; _subscribers[0.._num_subscribers])
@@ -545,7 +546,11 @@ nothrow @nogc:
                 subscriber.recv_packet(packet, this, PacketDirection.outgoing, subscriber.user_data);
         }
 
-        int result = transmit(packet, callback, queue_policy);
+        int result = -1;
+        if (Packet* writable = packet_mutable(packet))
+            result = transmit(writable, callback, queue_policy);
+        else
+            add_tx_drop();
         if (result <= 0 && callback)
             callback(result, result == 0 ? MessageState.complete : MessageState.failed);
         return result;
@@ -600,16 +605,21 @@ protected:
 
     // an mtu the user has not configured follows the link: l2mtu less its header, or default_mtu where nothing
     // limits the link
-    // every forward() passes this before outgoing subscribers see the packet
-    final bool admit(const(Packet)* packet, MessageCallback callback)
+    // every forward() passes this first: a packet the link can send and the caller may edit, or null having dropped it
+    final Packet* admit(Packet* packet, MessageCallback callback)
     {
         if (running && packet.length <= actual_mtu)
-            return true;
+        {
+            if (Packet* writable = packet_mutable(packet))
+                return writable;
+        }
+        else
+            packet_free(packet);
         if (running)
             add_tx_drop();
         if (callback)
             callback(-1, MessageState.failed);
-        return false;
+        return null;
     }
 
     final void set_l2mtu(ushort value)
@@ -696,19 +706,21 @@ protected:
 
     final void incoming_packet(Packet* packet)
     {
+        packet = packet_mutable(packet);
+        if (!packet)
+            return add_rx_drop();
         if (_flags & ObjectFlags.slave)
         {
             add_rx_frame(packet.length);
             if (!_master_running)
-            {
-                add_rx_drop();
-                return;
-            }
+                return drop(packet);
             BaseInterface master = _master;
             byte port = _slave_id;
             fire_subscribers(packet);
-            if (_master_running && _master is master && _slave_id == port)
-                master.slave_incoming(packet, port);
+            if (!_master_running || _master !is master || _slave_id != port)
+                return drop(packet);
+            if (Packet* writable = packet_mutable(packet))
+                master.slave_incoming(writable, port);
             else
                 add_rx_drop();
             return;
@@ -731,12 +743,12 @@ protected:
         add_rx_frame(packet.length);
 
         if (packet.has_inline_vlan_tag && !packet.promote_vlan_tag())
-        {
-            add_rx_drop();
-            return;
-        }
+            return drop(packet);
 
         fire_subscribers(packet);
+        packet = packet_mutable(packet);
+        if (!packet)
+            return add_rx_drop();
 
         while (packet.vlan_tag != VlanTag.none)
         {
@@ -747,10 +759,7 @@ protected:
                 if (!packet.has_inline_vlan_tag)
                     break;
                 if (!packet.promote_vlan_tag())
-                {
-                    add_rx_drop();
-                    return;
-                }
+                    return drop(packet);
                 continue;
             }
 
@@ -777,15 +786,21 @@ protected:
                 return;
 
             no_vlan:
-                add_rx_drop();
-                return;
+                return drop(packet);
             }
-            add_rx_drop();
-            return;
+            return drop(packet);
         }
 
         if (auto handler = _frame_handlers[packet.type])
             handler(packet, this);
+        else
+            packet_free(packet);
+    }
+
+    final void drop(Packet* packet)
+    {
+        add_rx_drop();
+        packet_free(packet);
     }
 
     void slave_incoming(Packet* packet, byte slave_id)
@@ -793,7 +808,7 @@ protected:
         assert(false, "Override this method to implement a _master interface");
     }
 
-    final void fire_subscribers(Packet* packet)
+    final void fire_subscribers(const(Packet)* packet)
     {
         if (!_num_subscribers)
             return;
@@ -886,6 +901,13 @@ protected:
     {
         ++_status.tx_dropped;
         mark_set!(typeof(this), [ "tx-dropped" ])();
+    }
+
+    final int drop_tx(Packet* packet)
+    {
+        add_tx_drop();
+        packet_free(packet);
+        return -1;
     }
 
     final Page* frame_page(size_t length)
@@ -1595,6 +1617,8 @@ private:
     {
         if (packet.eth.ether_type == EtherType.ow)
             ether_transport_input(packet, iface);
+        else
+            packet_free(packet);
     }
 }
 
@@ -1617,7 +1641,7 @@ unittest
             super(collection_type_info!Link, id, flags);
             _state = State.running;
         }
-        override void medium_tx(Packet* packet) {}
+        override void medium_tx(Packet* packet) { packet_free(packet); }
     }
 
     Link a = Collection!Link().create("scope-test-a");
@@ -1703,6 +1727,7 @@ unittest
         override int transmit(Packet* packet, MessageCallback, const(QueuePolicy)*)
         {
             pending += packet.length;
+            packet_free(packet);
             return 0;
         }
         size_t pending;
@@ -1810,8 +1835,7 @@ unittest
         }
         override bool carrier() const
             => has_carrier;
-        override int transmit(Packet*, MessageCallback, const(QueuePolicy)*)
-            => -1;
+        override int transmit(Packet* packet, MessageCallback, const(QueuePolicy)*) { packet_free(packet); return -1; }
         bool has_carrier = true;
     }
 
@@ -1906,9 +1930,10 @@ unittest
             super(collection_type_info!Sized, id, flags);
             _state = State.running;
         }
-        override int transmit(Packet*, MessageCallback, const(QueuePolicy)*)
+        override int transmit(Packet* packet, MessageCallback, const(QueuePolicy)*)
         {
             ++sent;
+            packet_free(packet);
             return 0;
         }
 
@@ -1971,6 +1996,33 @@ unittest
     assert(link.forward(&fits) == 0 && link.sent == 1);
     assert(link.forward(&over) < 0 && link.sent == 1 && link.tx_dropped == 2);
 
+    // an edit after a subscriber kept the frame, or before ingress when the caller kept it, leaves that copy alone
+    static struct Keeper
+    {
+        Packet* kept;
+        void keep(const(Packet)* p, BaseInterface, PacketDirection, void*) nothrow @nogc { kept = packet_retain(p); }
+    }
+    Sink port = Collection!Sink().create("shared-edit-test");
+    Keeper keeper;
+    PacketFilter filter;
+    port.subscribe(&keeper.keep, filter);
+    Packet* frame = alloc_packet!Ethernet(4);
+    frame.vlan_tag = VlanTag._8100;
+    frame.pcp = PCP.vo;
+    port.incoming_packet(frame);
+    assert(keeper.kept && keeper.kept.vlan_tag == VlanTag._8100 && keeper.kept.pcp == PCP.vo);
+    packet_free(keeper.kept);
+    static immutable ubyte[8] tagged = [0x00, 0x05, 0x08, 0x00, 1, 2, 3, 4];
+    frame = alloc_packet!Ethernet(tagged[]);
+    frame.hdr!Ethernet.ether_type = EtherType.vlan;
+    Packet* kept = packet_retain(frame);
+    port.incoming_packet(frame);
+    assert(kept.hdr!Ethernet.ether_type == EtherType.vlan && kept.data.length == 8);
+    packet_free(kept);
+    packet_free(keeper.kept);
+    port.unsubscribe(&keeper.keep);
+
+    port.destroy();
     link.destroy();
     Collection!BaseInterface().update_all();
 }

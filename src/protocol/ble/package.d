@@ -128,6 +128,7 @@ nothrow @nogc:
 
     void on_ble_frame(Packet* p, BaseInterface iface)
     {
+        scope (exit) packet_free(p);
         ref f = p.hdr!BLEFrame;
 
         if (f.kind == BLEFrameKind.advert)

@@ -163,13 +163,17 @@ protected:
     final override void medium_tx(Packet* packet)
     {
         debug assert(packet.vid == 0 && packet.vlan_tag == VlanTag.none, "packet already has a vlan tag");
+        packet = packet_mutable(packet);
+        if (!packet)
+            return add_tx_drop();
         packet.vlan = (packet.vlan & 0xF000) | (_vlan & 0xFFF);
         packet.vlan_tag = _tag;
 
+        size_t length = packet.data.length;
         if (_interface.forward(packet) < 0)
             add_tx_drop();
         else
-            add_tx_frame(packet.data.length);
+            add_tx_frame(length);
     }
 
     // override forward() instead of transmit() for the ethernet path, to pass the
@@ -179,7 +183,8 @@ protected:
     {
         if (packet.type != PacketType.ethernet)
             return super.forward(packet, callback, queue_policy);
-        if (!admit(packet, callback))
+        packet = admit(packet, callback);
+        if (!packet)
             return -1;
 
         debug assert(packet.vid == 0 && packet.vlan_tag == VlanTag.none, "packet already has a vlan tag");
@@ -192,9 +197,10 @@ protected:
                 sub.recv_packet(packet, this, PacketDirection.outgoing, sub.user_data);
         }
 
+        size_t length = packet.data.length;
         int result = _interface.forward(packet, callback, queue_policy);
         if (result >= 0)
-            add_tx_frame(packet.data.length);
+            add_tx_frame(length);
         return result;
     }
 

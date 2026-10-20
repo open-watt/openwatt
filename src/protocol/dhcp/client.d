@@ -443,7 +443,7 @@ private:
 
     // ---- packet parse ----
 
-    void incoming_packet(Packet* pkt, BaseInterface, PacketDirection dir, void* user_data)
+    void incoming_packet(const(Packet)* pkt, BaseInterface, PacketDirection dir, void* user_data)
     {
         if (!(_state == State.starting || _state == State.running))
             return;

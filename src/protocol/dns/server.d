@@ -662,7 +662,7 @@ private:
         // TODO: handle requests with `Content-Type: application/dns-message` as a DNS request...
     }
 
-    void incoming_packet(Packet* p, BaseInterface iface, PacketDirection dir, void* user_data) nothrow @nogc
+    void incoming_packet(const(Packet)* p, BaseInterface iface, PacketDirection dir, void* user_data) nothrow @nogc
     {
         if (!running)
             return;

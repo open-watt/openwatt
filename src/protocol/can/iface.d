@@ -381,6 +381,7 @@ protected:
 
     override int transmit(Packet* packet, MessageCallback, const(QueuePolicy)*)
     {
+        scope (exit) packet_free(packet);
         // can only handle can packets
         if (packet.type != PacketType.can)
         {

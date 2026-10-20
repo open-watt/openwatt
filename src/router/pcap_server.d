@@ -505,7 +505,7 @@ private:
             server.log.info("data connection established");
         }
 
-        void packet_handler(Packet* p, BaseInterface iface, PacketDirection dir, void* user_data)
+        void packet_handler(const(Packet)* p, BaseInterface iface, PacketDirection dir, void* user_data)
         {
             if (!capturing)
                 return;
