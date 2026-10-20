@@ -85,9 +85,6 @@ static if (has_http)
 nothrow @nogc:
 
 
-// History responses must fit in one raw packet (64KB); JSON samples are ~25 bytes each.
-enum uint max_history_points = 2000;
-
 // Time-sync cadence for a remote pulling from its authority.
 enum Duration time_poll_interval    = seconds(17 * 60);
 enum Duration time_retry_interval   = seconds(30);
@@ -225,7 +222,7 @@ nothrow @nogc:
                     if (!e)
                         continue;
                     SyncPeer.LiveNode* live = raw in p._live_nodes;
-                    if (e.data_format.kind != SeriesKind.point && !(live.position & SyncPeer.live_parked) && live.position > live_start(e))
+                    if (e.data_format.kind != SeriesKind.point && live.position > live_start(e))
                     {
                         live.position = live_start(e);
                         live.told_gap = false;
@@ -345,9 +342,7 @@ nothrow @nogc:
             bool done = true;
             if (e && h != SyncPeer.invalid_handle)
             {
-                // an unarmed node is pending only to retry the current value that closes a one-shot backfill
-                done = (node.raw in p._live_nodes) is null ? enc.encode_val(p, h, e)
-                     : e.has_history ? send_live(p, enc, e, h, gen) : send_register(p, enc, e, h);
+                done = e.has_history ? send_live(p, enc, e, h, gen) : send_register(p, enc, e, h);
                 if (!p.send_ok(gen))
                     return;   // the session went down under the burst; its pending set went with it
                 update_pin(e, node);
@@ -365,57 +360,84 @@ nothrow @nogc:
     {
         EID node = e.ensure_eid();
         SyncPeer.LiveNode* next = node.raw in p._live_nodes;
-        // Backfill owns the cursor while parked and re-marks the node on completion.
-        if (!next || (next.position & SyncPeer.live_parked))
+        if (!next)
             return true;
-        ulong committed = next.position;
+        ulong position = next.position;
         bool told_gap = next.told_gap;
-        auto c = e.open_series_cursor(committed);
-        bool done = true;
-        for (;;)
-        {
-            if (p.tx_blocked() || !p.val_room())
-            {
-                done = false;
-                break;
-            }
-            RecordBlock blk = c.next(256);
-            // a gap sits at a bucket boundary, and blocks never span one; at head it is an ended tail
-            SysTime gap;
-            if (!told_gap && e.gap_before(blk.count ? blk.first_index : committed, gap))
-            {
-                Variant unknown;
-                if (!enc.encode_val(p, h, unknown, gap))
-                {
-                    done = false;
-                    break;
-                }
-                if (!p.send_ok(gen))
-                    break;
-                told_gap = true;
-            }
-            if (!blk.count)
-                break;
-            uint sent = enc.encode_val_block(p, h, blk);
-            if (!sent)
-            {
-                done = false;
-                break;
-            }
-            if (!p.send_ok(gen))
-                break;
-            told_gap = false;
-            committed = blk.first_index + sent;
-            c.seek(committed);
-        }
+        bool done = send_records(p, enc, e, h, position, told_gap, SysTime(ulong.max), 0, gen);
         // Sending can detach the session and invalidate the map entry.
         if (SyncPeer.LiveNode* live = node.raw in p._live_nodes)
         {
-            live.position = committed;
+            live.position = position;
             live.told_gap = told_gap;
         }
-        e.close_series_cursor(c);
         return done;
+    }
+
+    // vals, tagged with seq when they answer a read; false while there is no room, with position where the walk resumes
+    static bool send_records(SyncPeer p, SyncEncoder enc, Element* e, SyncHandle h, ref ulong position, ref bool told_gap, SysTime to, uint seq, uint gen)
+    {
+        auto c = e.open_series_cursor(position);
+        scope (exit) e.close_series_cursor(c);
+        for (;;)
+        {
+            if (p.tx_blocked() || (!seq && !p.val_room()))
+                return false;
+            RecordBlock blk = c.next(256);
+            // a gap sits at a bucket boundary, and blocks never span one; at head it is an ended tail
+            SysTime gap;
+            if (!told_gap && e.gap_before(blk.count ? blk.first_index : position, gap) && gap <= to)
+            {
+                Variant unknown;
+                if (!enc.encode_val(p, h, unknown, gap, seq))
+                    return false;
+                if (!p.send_ok(gen))
+                    return true;
+                told_gap = true;
+            }
+            while (blk.count && blk.time(blk.count - 1) > to)
+                --blk.count;
+            if (!blk.count)
+                return true;
+            uint sent = enc.encode_val_block(p, h, blk, seq);
+            if (!sent)
+                return false;
+            if (!p.send_ok(gen))
+                return true;
+            told_gap = false;
+            position = blk.first_index + sent;
+            c.seek(position);
+        }
+    }
+
+    // the mean of each of a reduced range's spans that holds numeric records, from span sub.range_cursor on
+    static bool send_points(SyncPeer p, SyncEncoder enc, Element* e, SyncHandle h, ref SyncPeer.PendingSub sub, uint gen)
+    {
+        import manager.record : mean_spans, Sample;
+
+        ulong from = sub.from_ms * 1_000_000;
+        ulong to = sub.to_ms * 1_000_000;
+        ulong width = (to - from) / sub.points + 1;
+        Sample[32] means = void;
+        void sample(uint i, out ulong t_ms, out Variant v)
+        {
+            t_ms = means[i].time / 1_000_000;
+            v = Variant(means[i].value);
+        }
+        for (;;)
+        {
+            if (p.tx_blocked())
+                return false;
+            uint n = mean_spans(e, from, to, width, sub.range_cursor, means[]);
+            if (!n)
+                return true;
+            uint sent = enc.encode_samples(p, h, 0, n, &sample, sub.seq);
+            if (!sent)
+                return false;
+            if (!p.send_ok(gen))
+                return true;
+            sub.range_cursor = (means[sent - 1].time - from) / width + 1;
+        }
     }
 
     // a store-less held element's only record is its register: position 0 until sent, then 1,
@@ -452,9 +474,8 @@ nothrow @nogc:
         {
             if (SyncPeer.LiveNode* live = node.raw in p._live_nodes)
             {
-                ulong pos = live.position & ~SyncPeer.live_parked;
-                if (pos < low)
-                    low = pos;
+                if (live.position < low)
+                    low = live.position;
             }
         }
         ubyte* id = node.raw in sync_pins;
@@ -543,8 +564,7 @@ nothrow @nogc:
                 {
                     char[256] buf = void;
                     ptrdiff_t len = e.full_path(buf);
-                    ulong no_history = ulong.max;
-                    if (len > 0 && len <= buf.length && !introduce_element(p, enc, e, buf[0 .. len], gen, true, 0, 0, no_history))
+                    if (len > 0 && len <= buf.length && !introduce_element(p, enc, e, buf[0 .. len], gen))
                         return p.tx_full();
                 }
                 if (!p.send_ok(gen))
@@ -599,8 +619,12 @@ nothrow @nogc:
                         if (p.tx_blocked())
                             return false;
                         if (sub.arm)
-                            track_live(p, e);
-                        if (!introduce_element(p, enc, e, path, gen, sub.arm, sub.from_ms, sub.to_ms, sub.backfill_cursor))
+                        {
+                            track_live(p, e, sub.from_ms);
+                            if (!introduce_element(p, enc, e, path, gen))
+                                return false;
+                        }
+                        else if (!send_range(p, enc, e, path, gen, sub))
                             return false;
                         ++sub.element_cursor;
                         return p.send_ok(gen);
@@ -622,11 +646,12 @@ nothrow @nogc:
                 if (starved)
                     return p.tx_full();
 
-                if (sub.res_seq)
+                // a request's last pattern closes it
+                if (p._pending_subs.length == 1 || p._pending_subs[1].seq != sub.seq)
                 {
                     if (p.tx_blocked())
                         return p.tx_full();
-                    enc.encode_res(p, sub.res_seq);
+                    enc.encode_res(p, sub.seq);
                     if (!p.send_ok(gen))
                         return false;
                 }
@@ -1472,9 +1497,18 @@ nothrow @nogc:
         return n;
     }
 
-    void inbound_model_sub(SyncPeer from, uint seq, const(char[])[] patterns, bool once, ulong from_ms = 0, ulong to_ms = 0)
+    void inbound_model_sub(SyncPeer from, uint seq, const(char[])[] patterns, bool once, ulong from_ms = 0, ulong to_ms = 0, uint points = 0)
     {
+        import urt.time : getSysTime, unix_time_ns;
+
         SyncEncoder enc = encoder_for(from._encoder);
+        if (from_ms && !to_ms)
+            to_ms = unix_time_ns(getSysTime()) / 1_000_000;
+        if (to_ms < from_ms)
+        {
+            enc.encode_err(from, seq, "bad_value", "range ends before it starts");
+            return;
+        }
 
         Array!(const(char)[]) to_arm;
         Array!(SyncPeer.PendingSub) staged;
@@ -1516,6 +1550,8 @@ nothrow @nogc:
             req.pattern = a.subject.make_string();
             req.from_ms = from_ms;
             req.to_ms = to_ms;
+            req.seq = seq;
+            req.points = from_ms ? points : 0;
             req.arm = !once;
             staged ~= req.move;
         }
@@ -1539,7 +1575,6 @@ nothrow @nogc:
             enc.encode_res(from, seq);
             return;
         }
-        staged[staged.length - 1].res_seq = seq;
         foreach (ref req; staged[])
             from._pending_subs ~= req.move;
         from.arm_tx();
@@ -1721,7 +1756,7 @@ nothrow @nogc:
         register_enum_info(name, make_enum_info(name, keys[], values[]));
     }
 
-    void inbound_model_add(SyncPeer from, SyncHandle handle, const(char)[] path, const(char)[] node_class, const(char)[] templates, uint ft, const(char)[] access, Variant* v, ulong t_ms, ulong peer_id)
+    void inbound_model_add(SyncPeer from, SyncHandle handle, const(char)[] path, const(char)[] node_class, const(char)[] templates, uint ft, const(char)[] access, ulong peer_id)
     {
         // Shape only: it names no node, so it never consumes a handle.
         if (node_class[] == "component")
@@ -1735,10 +1770,10 @@ nothrow @nogc:
             return;
         }
         // Failed materialisation must still advance the announced handle high-water.
-        from.adopt(handle, materialise_add(from, path, node_class, templates, ft, access, v, t_ms, peer_id));
+        from.adopt(handle, materialise_add(from, path, node_class, templates, ft, access, peer_id));
     }
 
-    EID materialise_add(SyncPeer from, const(char)[] path, const(char)[] node_class, const(char)[] templates, uint ft, const(char)[] access, Variant* v, ulong t_ms, ulong peer_id)
+    EID materialise_add(SyncPeer from, const(char)[] path, const(char)[] node_class, const(char)[] templates, uint ft, const(char)[] access, ulong peer_id)
     {
         Address a = Address.parse(path);
         if (!a.valid || a.ns[] != "device")
@@ -1813,8 +1848,6 @@ nothrow @nogc:
             if (const(Access)* acc = enum_from_key!Access(access))
                 remote_access = *acc;
         }
-        if (v)
-            merge_remote_value(e, *v, t_ms, &on_mirror_write);
         EID eid = e.ensure_eid();
         from.attach_model_element(dev, e, remote_access);
         update_pin(e, eid);
@@ -1952,31 +1985,6 @@ nothrow @nogc:
         if (get_module!SyncPeeringModule.claim_response(from, seq, false, code, text))
             return;
         log.warning("err from '", from.name[], "' seq=", seq, " code=", code, ": ", text);
-    }
-
-    void inbound_history_req(SyncPeer from, const(char)[] path, ulong from_ms, ulong to_ms, uint max_points, uint seq)
-    {
-        import urt.time : getSysTime, unixTimeNs;
-        import manager.record;
-
-        RecordStream* rs = get_module!RecordModule.find_stream(path);
-        if (!rs)
-        {
-            encoder_for(from._encoder).encode_error(from, seq, "no record stream");
-            return;
-        }
-
-        ulong now_ms = unixTimeNs(getSysTime()) / 1_000_000;
-        if (to_ms == 0 || to_ms > now_ms)
-            to_ms = now_ms;
-        if (max_points == 0)
-            max_points = 500;
-        else if (max_points > max_history_points)
-            max_points = max_history_points;
-
-        Array!Sample local;
-        query_local(*rs, from_ms * 1_000_000, to_ms * 1_000_000, max_points, QueryMode.raw, local);
-        encoder_for(from._encoder).encode_history(from, seq, path, local[]);
     }
 
     void inbound_enum_req(SyncPeer from, const(char)[] type_name, uint seq)
@@ -2482,7 +2490,7 @@ nothrow @nogc:
     }
 
     // False requests a retry; the peer remembers which schema frames were sent.
-    bool send_element(SyncPeer to, SyncEncoder enc, Element* e, const(char)[] path, uint gen, bool include_value = true)
+    bool send_element(SyncPeer to, SyncEncoder enc, Element* e, const(char)[] path, uint gen)
     {
         import urt.mem.temp : tconcat;
         import manager.sample : enum_info_name;
@@ -2505,7 +2513,7 @@ nothrow @nogc:
             return false;
         SyncHandle h = to.handle_of(node);
         if (h != SyncPeer.invalid_handle)
-            return !include_value || enc.encode_val(to, h, e);
+            return true;
         if (fmt.desc == DataFormat.Desc.enum_)
         {
             const(char)[] ename = enum_info_name(fmt.enum_info);
@@ -2536,114 +2544,63 @@ nothrow @nogc:
         h = to.introduce(node);
         char[max_template_chain] templates = void;
         const(char)[] chain = omit_unclassified_chain(path_templates(e.parent, templates[]));
-        enc.encode_add(to, h, tconcat("device:", path), "element", chain, ft, e, device.peer_id, include_value);
+        enc.encode_add(to, h, tconcat("device:", path), "element", chain, ft, e, device.peer_id);
         return true;
     }
 
-    // On false, resume holds the next unsent record.
-    static bool send_backfill(SyncPeer to, SyncEncoder enc, Element* e, ulong from_ms, ulong to_ms, uint gen, ref ulong resume)
+    bool introduce_element(SyncPeer p, SyncEncoder enc, Element* e, const(char)[] path, uint gen)
     {
-        import urt.time : from_unix_time_ns;
-
-        if (!e.has_history)
-            return true;
-        EID node = e.ensure_eid();
-        SyncHandle h = to.handle_of(node);
-        if (h == SyncPeer.invalid_handle)
-            return true;
-        ulong idx = e.index_for_time(from_unix_time_ns(from_ms * 1_000_000));
-        if (resume != ulong.max)
-        {
-            idx = resume;
-            if (SyncPeer.LiveNode* live = node.raw in to._live_nodes)
-                live.position = idx;
-        }
-        resume = ulong.max;
-        if (idx == ulong.max)
-            return true;
-        Cursor cursor = e.open_series_cursor(idx);
-        scope (exit) e.close_series_cursor(cursor);
-        SysTime to_t = to_ms ? from_unix_time_ns(to_ms * 1_000_000) : SysTime();
-        bool park()
-        {
-            resume = idx;
-            if (SyncPeer.LiveNode* live = node.raw in to._live_nodes)
-                live.position = idx | SyncPeer.live_parked;
+        if (!send_element(p, enc, e, path, gen))
             return false;
-        }
-
-        for (;;)
-        {
-            if (to.tx_blocked() || !to.val_room())
-                return park();
-            RecordBlock blk = cursor.next(256);
-            if (!blk.count)
-                break;
-            uint in_range = blk.count;
-            if (to_ms)
-            {
-                while (in_range && blk.time(in_range - 1) > to_t)
-                    --in_range;
-                if (!in_range)
-                    break;
-            }
-            uint read = blk.count;
-            blk.count = in_range;
-            blk.count = enc.encode_val_block(to, h, blk);
-            if (!blk.count)
-                return park();
-            if (!to.send_ok(gen))
-                return true;
-            commit_backfill(to, e, blk);
-            idx = blk.first_index + blk.count;
-            if (blk.count < in_range)
-                cursor.seek(idx);
-            else if (in_range < read)
-                break;
-        }
-        return true;
-    }
-
-    static void commit_backfill(SyncPeer to, Element* e, ref const RecordBlock blk)
-    {
-        if (SyncPeer.LiveNode* live = e.ensure_eid().raw in to._live_nodes)
-            live.position = blk.first_index + blk.count;
-    }
-
-    bool introduce_element(SyncPeer p, SyncEncoder enc, Element* e, const(char)[] path, uint gen, bool arm, ulong from_ms, ulong to_ms, ref ulong resume)
-    {
-        bool backfill = from_ms && e.has_history;
-        if (resume == ulong.max && !send_element(p, enc, e, path, gen, !arm && !backfill))
-            return false;
-        if (backfill && p.send_ok(gen) && !send_backfill(p, enc, e, from_ms, to_ms, gen, resume))
-            return false;
-        if (!arm && backfill && e.data_format.kind != SeriesKind.point && p.send_ok(gen))
-        {
-            SyncHandle h = p.handle_of(e.ensure_eid());
-            if (h != SyncPeer.invalid_handle && !enc.encode_val(p, h, e))
-                mark_pending_val(p, e.ensure_eid());
-        }
-        if (arm && p.send_ok(gen))
+        if (p.send_ok(gen))
             mark_pending_val(p, e.ensure_eid());
         return true;
     }
 
-    static void mark_pending_val(SyncPeer p, EID node)
+    // a one-shot sub's reply for e: its add, then its records over the range, or without one its latest
+    bool send_range(SyncPeer p, SyncEncoder enc, Element* e, const(char)[] path, uint gen, ref SyncPeer.PendingSub sub)
     {
-        if (!node)
-            return;
-        if (SyncPeer.LiveNode* live = node.raw in p._live_nodes)
+        import urt.time : from_unix_time_ns;
+
+        if (sub.range_cursor == ulong.max)
         {
-            if (live.pending)
-                return;
-            live.pending = true;
+            if (!send_element(p, enc, e, path, gen))
+                return false;
+            if (sub.points)
+                sub.range_cursor = 0;
+            else if (sub.from_ms && e.has_history)
+                sub.range_cursor = e.index_for_time(from_unix_time_ns(sub.from_ms * 1_000_000));
+            else
+                sub.range_cursor = live_start(e);
         }
+        SyncHandle h = p.handle_of(e.ensure_eid());
+        if (h == SyncPeer.invalid_handle || !p.send_ok(gen))
+        {
+            sub.range_cursor = ulong.max;
+            return true;
+        }
+        SysTime to = sub.to_ms ? from_unix_time_ns(sub.to_ms * 1_000_000) : SysTime(ulong.max);
+        bool done;
+        if (!e.has_history)
+            done = e.data_format.kind == SeriesKind.point || e.last_update == SysTime() || e.last_update > to || enc.encode_val(p, h, e, sub.seq);
+        else if (sub.points)
+            done = send_points(p, enc, e, h, sub, gen);
         else
         {
-            foreach (n; p._pending_vals[])
-                if (n == node)
-                    return;
+            bool told_gap;
+            done = send_records(p, enc, e, h, sub.range_cursor, told_gap, to, sub.seq, gen);
         }
+        if (done)
+            sub.range_cursor = ulong.max;
+        return done;
+    }
+
+    static void mark_pending_val(SyncPeer p, EID node)
+    {
+        SyncPeer.LiveNode* live = node.raw in p._live_nodes;
+        if (!live || live.pending)
+            return;
+        live.pending = true;
         p._pending_vals ~= node;
     }
 
@@ -2717,15 +2674,15 @@ nothrow @nogc:
         return false;
     }
 
-    // arms a node for the live feed; several patterns may match one node, within one sub or
-    // across successive ones, and re-arming must not rewind the cursor or records arriving
-    // between the two arms would never be sent
-    void track_live(SyncPeer to, Element* e)
+    // several patterns may match one node, within one sub or across successive ones; an armed node keeps its position
+    void track_live(SyncPeer to, Element* e, ulong from_ms = 0)
     {
+        import urt.time : from_unix_time_ns;
+
         EID node = e.ensure_eid();
         if (!node)
             return;
-        to.arm(e, node, live_start(e));
+        to.arm(e, node, from_ms && e.has_history ? e.index_for_time(from_unix_time_ns(from_ms * 1_000_000)) : live_start(e));
         update_pin(e, node);
     }
 
@@ -3281,18 +3238,10 @@ unittest
     SyncModule.merge_remote_value(&mirror, fresh, 3000, null);
     assert(mirror.value.isQuantity);
 
-    // an invalidation while disconnected reaches the mirror through the reintroduction
     source.value(Quantity!double(3.2, ScaledUnit(Volt)), from_unix_time_ns(4_000_000_000));
     Variant live = source.value;
     SyncModule.merge_remote_value(&mirror, live, stamp(source), null);
     assert(mirror.value.isQuantity);
-    source.invalidate(from_unix_time_ns(5_000_000_000));
-    Variant intro;
-    ulong intro_t;
-    intro_value(&source, intro, intro_t);
-    assert(intro.isNull && intro_t == 5000);
-    SyncModule.merge_remote_value(&mirror, intro, intro_t, null);
-    assert(mirror.value.isNull);
 
     // a mirror with no value keeps an invalidation's time, and an older replay does not land behind it
     Element unset;

@@ -55,10 +55,11 @@ node-id, role and a fresh 16-byte nonce for peering, then `segment`. It has a fi
 bytes, so it fits every link but raw CAN; a peer that cannot fit it fails to start rather than run
 without a handshake. The hostname and cluster follow in `identity`, the next frame.
 Capability names the verb families this build serves: `objects` (the object mirror), `model` (the
-data-model plane), `history`, `console`, `logs`, `time`, `console_session` and `templates`.
+data-model plane), `console`, `logs`, `time`, `console_session` and `templates`.
 Value and log messages travel bundled, several to a frame, handled in order: on the JSON encoder a
 JSON array of messages, on the binary encoder one `val` or `log` verb whose records follow one
-another until the frame ends. A bundle holds one queue's messages, fills up to a page or the
+another until the frame ends. A read's `val`s bundle on the control plane like a feed's on its
+own queue. A bundle holds one queue's messages, fills up to a page or the
 segment, whichever is smaller, and closes before any other frame, so a value never overtakes the
 frame that introduced or unbound its handle. A bundle the transport refuses is kept and sent first
 once there is room.
@@ -159,25 +160,29 @@ with zero segments.
 
 ### Verbs
 
-- **`model_sub {seq, patterns[], once?, from?, to?}`** is the read surface. It is list-valued and
-  every read is a subscription: `once` closes it after the initial burst (a get), `from`/`to`
-  bound a history window, and without `once` the patterns stay armed as a live feed. Reply order
-  is `type` for unseen schema, `add` per match not yet bound, `val` payloads, then `res {seq}`
-  closes the initial burst; under a `from` window the `add` binds without a value, chronological
-  backfill follows, and the latest value closes the burst. A live pattern binds without a value:
-  each armed node's feed starts at its latest record, so its current value is the feed's first
-  sample and every change after it follows, none coalesced. A live pattern is the creation
-  notification: a node created later that matches receives its `add` when it appears. Overlapping
-  patterns arm a node once; a node carries one handle and one feed, and re-arming never rewinds its
-  cursor. A node serves a bounded number of sessions with live patterns (32, 4 on small targets);
-  the next one to arm its first pattern is answered `err {code:"busy"}` and nothing is armed.
+- **`model_sub {seq, patterns[], once?, from?, to?, points?}`** is the read surface. It is
+  list-valued and every read is a subscription. Reply order is `type` for unseen schema and `add`
+  per match not yet bound, each followed by the match's values, then `res {seq}` closes the
+  request. Without `once` the patterns stay armed as a live feed: each armed node's feed starts at
+  its latest record, or under `from` at the record holding then, and every record after it follows
+  on `val`, none coalesced. A live pattern is the creation notification: a node created later that
+  matches receives its `add` when it appears. Overlapping patterns arm a node once; a node carries
+  one handle and one feed, and an armed node keeps its position, so a `from` reaching a node already
+  armed sends nothing earlier. A node serves a bounded number of sessions with live patterns (32, 4
+  on small targets); the next one to arm its first pattern is answered `err {code:"busy"}` and
+  nothing is armed.
+- **`once`** makes the sub a read, answered per match by `val`s carrying the request's `seq`, on
+  the control plane, so concurrent reads correlate. Without `from` the read is the latest record, a
+  point read; with it, every record from the one holding at `from` through `to` (by default the
+  request's arrival), a gap arriving as a null at its start. `points` reduces the window to the
+  mean of each of that many equal spans that holds numeric records, stamped with the span's last
+  record time.
 - **`type`** has two forms, push-only and deduped per session: a format under an `ft` (type,
   count, series kind, unit, rate) and a named dictionary (enum or bitfield members). Formats with
   no wire representation, the same verdict `ows.container_serialisable` gives, are skipped from
   the surface with a log.
-- **`add {h, path, class, ft, peer?, v?, t?, tmpl?}`** binds a handle to a path, announces
-  existence, cites schema and, unless the node is armed, carries the current value and timestamp,
-  all in one frame. `class`
+- **`add {h, path, class, ft, peer?, tmpl?}`** binds a handle to a path, announces existence and
+  cites schema in one frame. It carries no value: values travel on `val` alone. `class`
   is `device` or `element`; `peer` is the hexadecimal owner of a peer-local device and is omitted
   for the global namespace.
 - **`tmpl`** is the authority's shape for the path: the component template of every node it
@@ -203,35 +208,26 @@ with zero segments.
   to nothing under a component is owed nothing for it, so a fresh mirror refreshes nothing and a
   narrow subscription is refreshed exactly where it looks. A peer without the capability picks the
   shape up from `tmpl` on its next introduction.
-- **`val {h, s:[[t,v],...], lost?}`** is the feed, deliberately dumb: it is nearly all the bytes on
+- **`val {seq?, h, s:[[t,v],...], lost?}`** is the feed (with `seq`, a read's answer), deliberately dumb: it is nearly all the bytes on
   a mature link and every field multiplies by sample count. It is lossless: an armed node sends
   every record in order, a held value's changes as much as an event's, and a gap in its history
   arrives once, as a null at the moment the value stopped being known. `lost` reports overrun rather than
   hiding it, the difference between a mirror that is wrong and one that knows where. There is no
   staleness field: staleness is the absence of frames, and `t` plus a disciplined clock lets the
   receiver compute age itself. A null `v` says the value stopped being known at `t`: the mirror
-  invalidates rather than stores, and judges it newer-wins like any sample. An `add` introduces an
-  invalidated element the same way, with a null value and its `t`; a null with no `t` reports
-  nothing. `val_block` carries a
-  record block for history and backfill.
+  invalidates rather than stores, and judges it newer-wins like any sample.
 - **`model_set {seq, h|path, value}` or `{seq, h|path, reset:true}`** writes an element. The path
   form serves one-shot writers with no binding. `reset` carries no value, because null is a
   legitimate value here, and the receiver never infers the post-reset value: `res {seq, value}`
   carries the authority's applied value, and every other consequence flows back through the feed.
 
 Feeds emit at the end of a commit scope, never per write, so a subscriber always sees a fully
-applied frame. Peers ride the per-tick dirty sweep with a pending set drained each tick; pinned
-element cursors are reserved for `from` subscriptions that need gap-free replay, since an element
-holds at most sixteen pinned cursors.
+applied frame. Peers ride the per-tick dirty sweep with a pending set drained each tick; sync holds
+one pinned cursor per stored element, shared by every peer, at the lowest position a peer has yet
+to send.
 
 A `model_set` arriving at a mirror is forwarded to the peer that advertised write access, and the
 ack reflects that peer's applied value, not the mirror's optimistic one.
-
-**`history_req {seq, path, from, to, max_points}`** is the one-shot history query, answered by
-`history {seq, path, samples:[[t,v],...]}`. It predates the model plane and is the one verb that
-still addresses an element by bare dotted path rather than by handle or pattern; `max_points` is
-capped at 2000 so a reply fits one packet. A `model_sub` with a `from`/`to` window is the same query
-through the handle-bound surface.
 
 ## Console, logs and time
 
@@ -260,8 +256,7 @@ timestamp the subordinate collects until the next push. The authority is either 
 | --- | --- |
 | session | `hello`, `identity`, `res`, `err`, `claim`, `fragment` |
 | `objects` | `add_name`, `bind`, `unbind`, `create`, `destroy`, `state`, `set`, `reset`, `enum_req`, `enum`, `sub`, `unsub` |
-| `model` | `model_sub`, `type`, `add`, `val`, `val_block`, `model_set` |
-| `history` | `history_req`, `history` |
+| `model` | `model_sub`, `type`, `add`, `val`, `model_set` |
 | `console` | `cmd`, `result`, `error`, `suggest`, `suggestions` |
 | `console_session` | `console` |
 | `templates` | `add {class:"component"}` |
@@ -288,7 +283,7 @@ Armed, every frame carries `[src_session:4][dst_session:4][kind:1]`. Two planes 
   segments, whichever is larger); every data frame refolds the oldest unacked records one segment
   holds, and the receiver's per-queue watermark dedups replays while keeping application in order.
   A newly queued record goes out at once when it fits behind the backlog's head, and otherwise
-  when an ack frees the segment. Bulk producers (backfill, event series) wait for room for one more
+  when an ack frees the segment. Bulk producers (a feed catching up) wait for room for one more
   segment rather than evict. A record the receiver cannot apply yet, a `val` racing its
   `add` through the control plane, is left unacked so the refold resupplies it until the `add`
   lands; because handles are announced ascending over the in-order control plane, a `val` citing
@@ -374,8 +369,8 @@ Settled design that is not built, tracked in [TODO.md](../TODO.md) under *Sync a
   frame and returns whether it wants another invitation, and a bounded transport such as the
   websocket re-invites as its queue drains. Admission is the transport's answer about its own
   queue, framing included, so the producer keeps no byte account that could drift from it. The
-  unit of suspension is one frame: a history backfill parks between `val_block`s and resumes at
-  the record it stopped on, and template refreshes ride the same feed. Where the reliability
+  unit of suspension is one frame: a feed or a read parks between frames and resumes at the
+  record it stopped on, and template refreshes ride the same feed. Where the reliability
   sublayer is armed the retransmit window is the brake and an ack re-arms the walk.
 - **The designed transports** in the table above, and `stream=` on `/sync/peer` materialising the
   CPC stack over a byte stream. RS485 is settled: the envelope is a valid Modbus RTU frame with a

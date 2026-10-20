@@ -19,7 +19,7 @@ module manager.sync.encoder;
 import urt.log;
 import urt.meta.enuminfo : VoidEnumInfo;
 import urt.string;
-import urt.time : SysTime;
+import urt.time : SysTime, unix_time_ns;
 import urt.variant;
 
 import manager.base;
@@ -27,7 +27,6 @@ import manager.collection : CID;
 import manager.console.session : ClientFeatures;
 import manager.element : Element;
 import manager.expression : NamedArgument;
-import manager.record : Sample;
 import manager.series : DataFormat, RecordBlock, SeriesKind, ValueType;
 import manager.sync.peer;
 
@@ -44,7 +43,7 @@ enum SyncEncoderKind : ubyte
     json,
 }
 
-enum uint model_protocol_version = 2;   // 2: fragment
+enum uint model_protocol_version = 3;   // 3: reads answer with seq-tagged vals
 
 enum SyncConsoleEvent : ubyte
 {
@@ -63,6 +62,8 @@ struct SyncConsoleTerminal
     ClientFeatures features;
     const(char)[] type;
 }
+
+alias SampleAt = void delegate(uint i, out ulong t_ms, out Variant v) nothrow @nogc;
 
 // Set at SyncModule.init() once singleton encoders exist.
 __gshared SyncEncoder[SyncEncoderKind.max + 1] g_encoders;
@@ -232,12 +233,6 @@ nothrow @nogc:
     abstract void encode_enum_req(SyncPeer peer, const(char)[] type_name, uint seq);
     abstract void encode_enum(SyncPeer peer, const(char)[] type_name, ref const Variant members, uint seq);
 
-    // Element history recall (record streams). Times are unix milliseconds
-    // on the wire; samples are (time, value) pairs.
-
-    abstract void encode_history_req(SyncPeer peer, const(char)[] path, ulong from_ms, ulong to_ms, uint max_points, uint seq);
-    abstract void encode_history(SyncPeer peer, uint seq, const(char)[] path, const(Sample)[] samples);
-
     abstract void encode_log_sub(SyncPeer peer, Severity max_severity, bool off, const(char)[] tag);
     abstract bool encode_log(SyncPeer peer, const(char)[] line);
 
@@ -275,18 +270,37 @@ nothrow @nogc:
     abstract void encode_type_enum(SyncPeer peer, const(char)[] name, const(VoidEnumInfo)* info);
 
     // `templates` is the root-first '/'-joined component template of every node the path crosses
-    abstract void encode_add(SyncPeer peer, SyncHandle h, const(char)[] path, const(char)[] node_class, const(char)[] templates, uint ft, Element* e, ulong peer_id, bool include_value = true);
+    abstract void encode_add(SyncPeer peer, SyncHandle h, const(char)[] path, const(char)[] node_class, const(char)[] templates, uint ft, Element* e, ulong peer_id);
 
-    // one sample; a null value says the value stopped being known at t
-    abstract bool encode_val(SyncPeer peer, SyncHandle h, ref Variant v, SysTime t);
+    // an element's leading samples the send limit holds, tagged with the read's seq when they answer one; 0 when refused for now (an unsendable sample goes as lost)
+    abstract uint encode_samples(SyncPeer peer, SyncHandle h, ulong lost, uint available, scope SampleAt sample, uint seq = 0);
 
-    final bool encode_val(SyncPeer peer, SyncHandle h, Element* e)
+    final uint encode_val_block(SyncPeer peer, SyncHandle h, ref const RecordBlock blk, uint seq = 0)
+    {
+        void sample(uint i, out ulong t_ms, out Variant v)
+        {
+            t_ms = unix_time_ns(blk.time(i)) / 1_000_000;
+            v = blk.box(i);
+        }
+        return encode_samples(peer, h, blk.lost, blk.count, &sample, seq);
+    }
+
+    // a null value says the value stopped being known at t
+    final bool encode_val(SyncPeer peer, SyncHandle h, ref Variant v, SysTime t, uint seq = 0)
+    {
+        void sample(uint, out ulong t_ms, out Variant value)
+        {
+            t_ms = unix_time_ns(t) / 1_000_000;
+            value = v;
+        }
+        return encode_samples(peer, h, 0, 1, &sample, seq) != 0;
+    }
+
+    final bool encode_val(SyncPeer peer, SyncHandle h, Element* e, uint seq = 0)
     {
         Variant v = e.value;
-        return encode_val(peer, h, v, e.last_update);
+        return encode_val(peer, h, v, e.last_update, seq);
     }
-    // the leading records the send limit holds, at least one; returns the count consumed, 0 when refused for now (an unsendable record goes as lost)
-    abstract uint encode_val_block(SyncPeer peer, SyncHandle h, ref const RecordBlock blk);
 
     abstract void encode_res(SyncPeer peer, uint seq);
     abstract void encode_res(SyncPeer peer, uint seq, ref const Variant value);
@@ -327,20 +341,6 @@ protected:
             log.warning("a value of handle ", h, " exceeds the largest message peer '", peer.name[], "' takes; sent as lost");
     }
 }
-
-// An introduction carries the element's value and its time; an invalidated element carries null and the moment of invalidation.
-void intro_value(Element* e, ref Variant value, ref ulong t_ms)
-{
-    import urt.time : SysTime, unix_time_ns;
-
-    // events retain no value; occurrences replay via backfill
-    if (e.data_format.kind == SeriesKind.point)
-        return;
-    value = e.value;
-    if (e.last_update != SysTime())
-        t_ms = unix_time_ns(e.last_update) / 1_000_000;
-}
-
 
 unittest
 {

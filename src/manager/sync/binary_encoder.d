@@ -21,8 +21,7 @@ import manager.base;
 import manager.collection;
 import manager.console.session : ClientFeatures;
 import manager.element : Element;
-import manager.record : Sample;
-import manager.series : Constraint, DataFormat, RecordBlock, Scalar, SeriesKind, ValueType;
+import manager.series : Constraint, DataFormat, Scalar, SeriesKind, ValueType;
 import manager.sync;
 import manager.sync.encoder;
 import manager.sync.peer;
@@ -53,8 +52,6 @@ enum Verb : ubyte
     unsub,
     enum_req,
     enum_,
-    history_req,
-    history,
     log_sub,
     log,
     time_req,
@@ -315,31 +312,6 @@ nothrow @nogc:
         send_frame(peer);
     }
 
-    override void encode_history_req(SyncPeer peer, const(char)[] path, ulong from_ms, ulong to_ms, uint max_points, uint seq)
-    {
-        begin_frame(Verb.history_req);
-        _buf.put_str(path);
-        _buf.put_varint(from_ms);
-        _buf.put_varint(to_ms);
-        _buf.put_varint(max_points);
-        _buf.put_varint(seq);
-        send_frame(peer);
-    }
-
-    override void encode_history(SyncPeer peer, uint seq, const(char)[] path, const(Sample)[] samples)
-    {
-        begin_frame(Verb.history);
-        _buf.put_varint(seq);
-        _buf.put_str(path);
-        _buf.put_varint(samples.length);
-        foreach (ref s; samples)
-        {
-            _buf.put_varint(s.time / 1_000_000);
-            _buf.put_f64(s.value);
-        }
-        send_frame(peer);
-    }
-
     // Outbound: log streaming
 
     override void encode_log_sub(SyncPeer peer, Severity max_severity, bool off, const(char)[] tag)
@@ -434,6 +406,7 @@ nothrow @nogc:
         _buf ~= ubyte(once);
         _buf.put_varint(0);   // from_ms
         _buf.put_varint(0);   // to_ms
+        _buf.put_varint(0);   // points
         _buf.put_varint(patterns.length);
         foreach (p; patterns)
             _buf.put_str(p);
@@ -496,7 +469,7 @@ nothrow @nogc:
         send_frame(peer);
     }
 
-    override void encode_add(SyncPeer peer, SyncHandle h, const(char)[] path, const(char)[] node_class, const(char)[] templates, uint ft, Element* e, ulong peer_id, bool include_value = true)
+    override void encode_add(SyncPeer peer, SyncHandle h, const(char)[] path, const(char)[] node_class, const(char)[] templates, uint ft, Element* e, ulong peer_id)
     {
         import manager.element : Access;
 
@@ -509,47 +482,25 @@ nothrow @nogc:
         {
             _buf.put_varint(ft);
             _buf.put_str(e.access != Access.read ? enum_key_name!Access(e.access) : null);
-
-            Variant v;
-            ulong t_ms = 0;
-            if (include_value)
-                intro_value(e, v, t_ms);
-            _buf.put_variant(v);
-            _buf.put_varint(t_ms);
         }
         _buf.put_varint(peer_id);
         _buf.put_str(templates);
         send_frame(peer);
     }
 
-    override bool encode_val(SyncPeer peer, SyncHandle h, ref Variant v, SysTime t)
+    override uint encode_samples(SyncPeer peer, SyncHandle h, ulong lost, uint available, scope SampleAt sample, uint seq)
     {
-        import urt.time : unix_time_ns;
-
-        begin_frame(Verb.val);
-        _buf.put_varint(h);
-        _buf.put_varint(0);   // lost
-        _buf.put_varint(1);
-        _buf.put_varint(unix_time_ns(t) / 1_000_000);
-        _buf.put_variant(v);
-        return send_frame(peer, TxQueue.val) >= 0;
-    }
-
-    override uint encode_val_block(SyncPeer peer, SyncHandle h, ref const RecordBlock blk)
-    {
-        import urt.time : unix_time_ns;
-
-        begin_frame(Verb.val);
-        _buf.put_varint(h);
-        _buf.put_varint(blk.lost);
+        open_samples(h, lost, seq);
         size_t count_at = _buf.length;
         size_t limit = peer.send_limit;
         uint count;
-        while (count < blk.count)
+        while (count < available)
         {
             size_t mark = _buf.length;
-            _buf.put_varint(unix_time_ns(blk.time(count)) / 1_000_000);
-            Variant v = blk.box(count);
+            ulong t_ms;
+            Variant v;
+            sample(count, t_ms, v);
+            _buf.put_varint(t_ms);
             _buf.put_variant(v);
             // five bytes hold the count, which goes in front once known
             if (count && _buf.length + 5 > limit)
@@ -570,9 +521,7 @@ nothrow @nogc:
         if (count == 1 && _buf.length + n > peer.max_message(false))
         {
             warn_unsendable(peer, h);
-            begin_frame(Verb.val);
-            _buf.put_varint(h);
-            _buf.put_varint(blk.lost + 1);
+            open_samples(h, lost + 1, seq);
             _buf ~= ubyte(0);
         }
         else
@@ -580,7 +529,7 @@ nothrow @nogc:
             foreach_reverse (b; prefix[0 .. n])
                 _buf.insert(count_at, b);
         }
-        return send_frame(peer, TxQueue.val) < 0 ? 0 : count;
+        return send_frame(peer, seq ? TxQueue.control : TxQueue.val, true) < 0 ? 0 : count;
     }
 
     override void encode_res(SyncPeer peer, uint seq)
@@ -794,24 +743,6 @@ nothrow @nogc:
                 break;
             }
 
-            case Verb.history_req:
-            {
-                const(char)[] path = r.str();
-                ulong from_ms = r.varint();
-                ulong to_ms = r.varint();
-                uint max_points = cast(uint)r.varint();
-                uint seq = cast(uint)r.varint();
-                if (!r.fail)
-                    sync.inbound_history_req(peer, path, from_ms, to_ms, max_points, seq);
-                break;
-            }
-
-            case Verb.history:
-                // node-to-node history recall isn't wired up yet - no outbound
-                // requester exists to correlate this response with.
-                log.info("inbound history frame from '", peer.name[], "' - ignored");
-                break;
-
             case Verb.log_sub:
             {
                 ubyte sev = r.u8();
@@ -918,6 +849,7 @@ nothrow @nogc:
                 bool once = r.u8() != 0;
                 ulong from_ms = r.varint();
                 ulong to_ms = r.varint();
+                uint points = cast(uint)r.varint();
                 size_t count = cast(size_t)r.varint();
                 if (r.fail || count > r.remaining)
                     break;
@@ -925,7 +857,7 @@ nothrow @nogc:
                 foreach (i; 0 .. count)
                     patterns ~= r.str();
                 if (!r.fail)
-                    sync.inbound_model_sub(peer, seq, patterns[], once, from_ms, to_ms);
+                    sync.inbound_model_sub(peer, seq, patterns[], once, from_ms, to_ms, points);
                 break;
             }
 
@@ -988,29 +920,22 @@ nothrow @nogc:
                 bool has_element = r.u8() != 0;
                 uint ft = uint.max;
                 const(char)[] access;
-                Variant v;
-                ulong t_ms = 0;
-                ulong peer_id;
                 if (has_element)
                 {
                     ft = cast(uint)r.varint();
                     access = r.str();
-                    v = r.variant();
-                    t_ms = r.varint();
                 }
-                peer_id = r.varint();
+                ulong peer_id = r.varint();
                 const(char)[] templates = r.str();
                 if (!r.fail)
-                {
-                    Variant* value = has_element ? &v : null;
-                    sync.inbound_model_add(peer, h, path, node_class, templates, ft, access, value, t_ms, peer_id);
-                }
+                    sync.inbound_model_add(peer, h, path, node_class, templates, ft, access, peer_id);
                 break;
             }
 
             case Verb.val:
                 do
                 {
+                    r.varint();   // seq: the read a group answers; its samples merge like any others
                     SyncHandle h = r.varint();
                     r.varint();   // lost - informational, mirror ignores it (same as JSON)
                     size_t count = cast(size_t)r.varint();
@@ -1184,9 +1109,17 @@ private:
         _buf ~= verb;
     }
 
-    int send_frame(SyncPeer peer, TxQueue queue = TxQueue.control)
+    void open_samples(SyncHandle h, ulong lost, uint seq)
     {
-        int r = queue == TxQueue.control ? peer.transmit_frame(_buf[], false, queue) : peer.bundle(_buf[], queue);
+        begin_frame(Verb.val);
+        _buf.put_varint(seq);
+        _buf.put_varint(h);
+        _buf.put_varint(lost);
+    }
+
+    int send_frame(SyncPeer peer, TxQueue queue = TxQueue.control, bool bundled = false)
+    {
+        int r = queue == TxQueue.control && !bundled ? peer.transmit_frame(_buf[], false, queue) : peer.bundle(_buf[], queue);
         if (r < 0)
         {
             // event-driven encodes (state/cmd/result/error/sub/...) have no retry path!!
