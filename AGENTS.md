@@ -55,6 +55,7 @@ make CONFIG=unittest                    # Build with unit tests enabled
 - `HEADLESS`: `0` (default) or `1`. Orthogonal to FEATURES; strips human-facing CLI affordances.
 - `IPV6`: `1` (default) or `0`. `IPV6=0` drops the IPv6 side of the in-tree IP stack and its address, route, and pool collections.
 - `GATEWAY`: `1` (default) or `0`. `GATEWAY=0` disables transit forwarding and DHCP server/lease objects while retaining clients and diagnostics; TINY targets default to `0`.
+- `RDP`: `1` (default) or `0`. `RDP=0` drops `/interface/rdp`, the reliable datagram layer; TINY targets default to `0` until a consumer needs it there.
 - `SFP`: `0` or `1`. Builds the SFP cage and `/interface/sfp`. Defaults to `1` on Windows, Linux and unittest builds, `0` on embedded targets, where a board with a cage sets it in its `board.mk`.
 - `TINY`: `0`/`1`, set by [third_party/urt/platforms.mk](third_party/urt/platforms.mk) for <~350KB-RAM / <2MB-flash targets. Forces `-Oz` under LDC, strips verbose strings, drops heavy helpers.
 

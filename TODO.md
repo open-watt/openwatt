@@ -1210,6 +1210,38 @@ role from a concrete deployment need before implementing or advertising it.
 
 ## Sync and peering
 
+- **Move sync onto `/interface/rdp`** (layer landed 2026-10-20, `src/router/iface/rdp.d`):
+  the reliability sublayer in `src/manager/sync/peer.d` (control retransmission, reorder hold, the
+  val/log refold queues and epochs, session-id echo) duplicates the interface and goes. Sync requires
+  `reliable | ordered` from its transport and never arms its own. Control, console, log and bulk
+  walks ride ordered lanes by PCP; val rides its own lane, uncoalesced, dropping and re-marking dirty
+  on would-block. Then remove the peer-owned UDP endpoint path (`remote=` on `/sync/peer`,
+  `udp_server.d`'s per-source spawn, `peering.d`'s endpoint adoption): the transport is always an
+  interface, and dynamic peers come from per-peer sub-interfaces spawned on a multi-drop UDP trunk
+  (the TODO atop `router/iface/udp.d`), a mechanism shared with 802.15.4 and the RS485 trunk. The
+  last patch is frontend-visible (CLI.md, UX_TODO.md). Target: LOC-neutral beyond the spawn
+  scaffolding. Design record: the memory note `rdp_interface_design`.
+
+- **`/interface/rdp` allocation-failure coverage**: startup refuses a null table allocation, but no
+  test injects one; add it once the fixture can fail an allocation on demand.
+
+- **Reject RDP stragglers on WAN UDP** (#869 review): a frame delivered after a full window of newer,
+  acknowledged frames is indistinguishable from fresh data under the 5-bit sequence and 8-bit lane
+  counters; it takes the slot of the real frame with that number and the real one is then dropped as a
+  duplicate. The module states the parent contract (no frame later than one window), which serial,
+  radio and LAN UDP satisfy. For UDP across the internet, authenticate an implicit extended sequence
+  with the planned HMAC trailer, DTLS-style, so the receiver can reject a frame from an earlier
+  generation. The reviewer's delayed-duplicate probe in `.review869-rereview-artifacts/` is the test.
+
+- **`/interface/rdp` follow-ups**, each with its header space reserved: a pause flag for flow
+  control (bit 5 of byte 1), needed by a stream tunnel into a slower sink, not by sync; an HMAC
+  trailer as a session property, which also closes the 5-bit straggler window on UDP; delay-based
+  window shrink when a slow WAN uplink shows bufferbloat (fixed window today, `window=` is the
+  knob); a `max-message` the parent cannot carry in one frame on a large-MTU parent is still
+  fragmented rather than refused. BLE connections are already reliable and ordered and must stay
+  bare. Supersedes the CPC generalisation in `docs/TAPS_AND_TUNNELS.draft.md`: CPC and ASH remain
+  Silabs device drivers.
+
 - **Sync produces on demand** (2026-10-18): sources tell sync that data waits (dirty state, new log
   lines, new samples, pending replies), sync arms its transport, and the transport pulls pages that
   the peer fills from cursors and dirty marks in priority order until every source is flushed.
@@ -1363,13 +1395,13 @@ this is what remains.
   cores.
 
 - **Build the remaining transports**: the sibling class for BL808 M0/D0 (raw EIDs as handles; the
-  cores peer today over `/interface/xram`), a `CPCEndpoint` transport for UART/SPI
-  point links (I2C deferred until a data-ready GPIO exists), the RS485 multi-drop envelope (valid
+  cores peer today over `/interface/xram`), `/interface/rdp` over a framed UART/SPI
+  point link (I2C deferred until a data-ready GPIO exists), the RS485 multi-drop envelope (valid
   Modbus RTU frames with a user-space function code, token is the poll, one scheduler shared with
   the Modbus master, per-slave baud as addressing metadata from day one), and one-way multicast
   feeds (publisher-owned handle namespace, gap detection by datagram seq, unicast backfill, never
-  acks on the group). `stream=` on `/sync/peer` materialising the CPC stack, and `remote=` URI
-  schemes beyond UDP, arrive with those. RS485 slave-to-slave goes through the master first;
+  acks on the group). The RS485 trunk is the poll master and hosts `/interface/rdp` per
+  slave. RS485 slave-to-slave goes through the master first;
   multicast groups are configured before derived.
 
 - **Take the fleet to micros and to the box**: `conf/fleet.id` and `conf/node.id` need an NVS
@@ -1401,6 +1433,15 @@ this is what remains.
   control plane, and make the mirror re-evaluate its peer binding.
 
 ## Infrastructure
+
+- **Element-backed properties cost more image than synthesised ones** (measured 2026-10-31 on the
+  Waveshare S3 release while sizing `/interface/rdp`): converting six scalar `Prop!`s to `Elem!`
+  took 829 bytes out of the module but added 2,109 to the image. `ElemFormat` is instantiated per
+  declaration (about 140 bytes each, six declarations), and each value type new to the image pulls
+  `Element.try_write!T` and `from_variant!T` (250 to 320 bytes each; `ushort`, `ulong` and the
+  `Milliseconds` quantity were new). `Elem!` only wins where its types are already instantiated.
+  Make `ElemFormat` a per-type formatter over a data table of default, min and max, and look at why
+  `from_variant!ulong` is 320 bytes, before recommending `Elem!` for size.
 
 - **`protocol.ip`'s TCP drain test is flaky** (2026-10-16): "one invitation drains what fits in its
   turn" (`src/protocol/ip/package.d`) asserts that a 32 KB producer is drained in one invitation over a

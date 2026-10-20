@@ -109,6 +109,7 @@ Limit is the 4 MB `ota_0` partition. `ram` is internal DRAM only; PSRAM is heap.
 | 2026-10-19 | #862 | ldc 1.42.0 | 2,995,376 | 141,887 | 4,194,304 | `COREDUMP=1`; a bucket ends when its final value stopped holding (64-bit end, held header rewrite for a flushed end, other formats truncated), `mark_gap` gone; on master d4ecb1a3, whose size was not recorded |
 | 2026-10-20 | #857 | ldc 1.42.0 | 2,997,808 | 141,887 | 4,194,304 | `COREDUMP=1`; held elements stream every record and their gaps, sync stores, the shared pin, pending marks on the node: +2,432 over #862 (2,995,376) |
 | 2026-10-30 | #865 | ldc 1.42.0 | 2,997,824 | 141,887 | 4,194,304 | `COREDUMP=1`; reads answer with seq-tagged `val`s through one sample-frame encoder, bundled, `history_req` and the value in `add` gone, `index_for_time` exact: -2,144 over master b0b2f318 (2,999,968, #857 merged); deployed to 4547 |
+| 2026-10-31 | #869 | ldc 1.42.0 | 3,012,480 | 142,047 | 4,194,304 | `COREDUMP=1`; `/interface/rdp` after the second review: +14,400 over master 6b8d0672a (2,998,080), all the module (13.7 KB symbols; lanes independent under loss, ordered abort marker); `RDP=0` on TINY targets |
 
 ### ESP32-C5 DevKitC-1, `make esp-idf-build PLATFORM=esp32-c5 CONFIG=release`
 

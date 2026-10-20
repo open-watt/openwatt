@@ -51,6 +51,11 @@
 #                   DHCP clients and diagnostics stay. Defaults to 1, except
 #                   TINY targets which default to 0.
 #
+#   RDP             RDP=1 builds /interface/rdp, the reliable
+#                   message layer over datagram parents. Defaults to 1,
+#                   except TINY targets which default to 0 until a consumer
+#                   (sync over 802.15.4 or RS485) needs it there.
+#
 #   SFP             SFP=1 builds the SFP cage, its module decoder and
 #                   /interface/sfp. Few boards have a cage, so it defaults
 #                   to 0 on embedded targets: a board with one sets SFP ?= 1
@@ -77,20 +82,22 @@ HTTP_FILESERVER ?= 1
 IPV6 ?= 1
 ifeq ($(TINY),1)
   GATEWAY ?= 0
+  RDP ?= 0
 endif
 GATEWAY ?= 1
 ifneq ($(filter windows linux,$(OS))$(filter unittest,$(CONFIG)),)
   SFP ?= 1
 endif
 SFP ?= 0
+RDP ?= 1
 
 # -- Validate ------------------------------------------------------------
 
 ifeq ($(filter $(FEATURES),switch switch-ip switch-http switch-https full),)
     $(error Unknown FEATURES='$(FEATURES)'; valid: switch | switch-ip | switch-http | switch-https | full)
 endif
-ifneq ($(filter-out 0 1,$(MODBUS) $(HTTP_CLIENT) $(HTTP_FILESERVER) $(IPV6) $(GATEWAY) $(SFP)),)
-    $(error MODBUS, HTTP_CLIENT, HTTP_FILESERVER, IPV6, GATEWAY and SFP must be 0 or 1)
+ifneq ($(filter-out 0 1,$(MODBUS) $(HTTP_CLIENT) $(HTTP_FILESERVER) $(IPV6) $(GATEWAY) $(RDP) $(SFP)),)
+    $(error MODBUS, HTTP_CLIENT, HTTP_FILESERVER, IPV6, GATEWAY, RDP and SFP must be 0 or 1)
 endif
 
 # -- Source-tree subset per preset ---------------------------------------
@@ -124,6 +131,11 @@ ifeq ($(IPV6),0)
 endif
 ifeq ($(GATEWAY),0)
     FEATURE_DFLAGS += $(VERSION_FLAG)NoGateway
+endif
+ifeq ($(RDP),1)
+    FEATURE_DFLAGS += $(VERSION_FLAG)HasRDP
+else
+    FEATURE_EXCLUDES += router/iface/rdp.d
 endif
 ifeq ($(SFP),1)
     FEATURE_DFLAGS += $(VERSION_FLAG)HasSFP
