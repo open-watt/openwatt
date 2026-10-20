@@ -457,29 +457,29 @@ unittest
     ip.dst_addr = IPv6Addr(0x2001, 0xdb8, 0, 0, 0, 0, 0, 2);
     ip.next_header = IPProtocol.icmp6;
     data[40] = Icmp6Type.echo_request;
-    Packet packet;
+    StackPacket packet;
     packet.init!Ethernet(data[]);
-    assert(icmp6_error_allowed(stack, Icmp6Type.dest_unreachable, 0, &packet));
+    assert(icmp6_error_allowed(stack, Icmp6Type.dest_unreachable, 0, &packet.packet));
     packet.hdr!Ethernet.dst.b[0] = 0x33;
-    assert(!icmp6_error_allowed(stack, Icmp6Type.dest_unreachable, 0, &packet));
-    assert(icmp6_error_allowed(stack, Icmp6Type.packet_too_big, 0, &packet));
-    assert(icmp6_error_allowed(stack, Icmp6Type.parameter_problem, 2, &packet));
+    assert(!icmp6_error_allowed(stack, Icmp6Type.dest_unreachable, 0, &packet.packet));
+    assert(icmp6_error_allowed(stack, Icmp6Type.packet_too_big, 0, &packet.packet));
+    assert(icmp6_error_allowed(stack, Icmp6Type.parameter_problem, 2, &packet.packet));
     packet.hdr!Ethernet.dst.b[] = 0xff;
-    assert(!icmp6_error_allowed(stack, Icmp6Type.time_exceeded, 0, &packet));
+    assert(!icmp6_error_allowed(stack, Icmp6Type.time_exceeded, 0, &packet.packet));
     packet.hdr!Ethernet.dst.b[] = 0;
     foreach (ubyte type; [Icmp6Type.dest_unreachable, Icmp6Type.redirect])
     {
         data[40] = type;
-        assert(!icmp6_error_allowed(stack, Icmp6Type.packet_too_big, 0, &packet));
+        assert(!icmp6_error_allowed(stack, Icmp6Type.packet_too_big, 0, &packet.packet));
     }
     data[40] = Icmp6Type.echo_request;
     ip.dst_addr = IPv6Addr(0xff02, 0, 0, 0, 0, 0, 0, 1);
-    assert(!icmp6_error_allowed(stack, Icmp6Type.time_exceeded, 0, &packet));
-    assert(icmp6_error_allowed(stack, Icmp6Type.packet_too_big, 0, &packet));
+    assert(!icmp6_error_allowed(stack, Icmp6Type.time_exceeded, 0, &packet.packet));
+    assert(icmp6_error_allowed(stack, Icmp6Type.packet_too_big, 0, &packet.packet));
     ip.src_addr = IPv6Addr.any;
-    assert(!icmp6_error_allowed(stack, Icmp6Type.packet_too_big, 0, &packet));
+    assert(!icmp6_error_allowed(stack, Icmp6Type.packet_too_big, 0, &packet.packet));
     ip.src_addr = ip.dst_addr;
-    assert(!icmp6_error_allowed(stack, Icmp6Type.packet_too_big, 0, &packet));
+    assert(!icmp6_error_allowed(stack, Icmp6Type.packet_too_big, 0, &packet.packet));
 }
 
 unittest
@@ -587,9 +587,9 @@ unittest
         storeBigEndian(cast(ushort*)(data.ptr + 42), internet_checksum(data[40 .. length], pseudo));
         if (corrupt)
             data[42] ^= 1;
-        Packet packet;
+        StackPacket packet;
         packet.init!RawFrame(data[0 .. length]);
-        icmp6_input(stack, &packet, 40, null);
+        icmp6_input(stack, &packet.packet, 40, null);
     }
     scope(exit) icmp6_echo_cancel(42);
     pending(destination);

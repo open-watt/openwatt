@@ -402,10 +402,10 @@ unittest
     static immutable ubyte[11] inter_pan = [0x01, 0x98, 0x07, 0x34, 0x12, 0x02, 0x00, 0x78, 0x56, 0x01, 0x00];
     assert(h.parse(inter_pan[]) == 11);
     assert(h.dst_pan == 0x1234 && h.src_pan == 0x5678);
-    Packet ip;
+    StackPacket ip;
     ip.init!WpanFrame(inter_pan[]) = h;
-    assert((WpanFrame.extract_src(&ip) & 0xFFFF_FFFF_FFFF) == 0x5678_0001);
-    assert((WpanFrame.extract_dst(&ip) & 0xFFFF_FFFF_FFFF) == 0x1234_0002);
+    assert((WpanFrame.extract_src(&ip.packet) & 0xFFFF_FFFF_FFFF) == 0x5678_0001);
+    assert((WpanFrame.extract_dst(&ip.packet) & 0xFFFF_FFFF_FFFF) == 0x1234_0002);
 
     // source only
     static immutable ubyte[7] src_only = [0x01, 0x90, 0x07, 0x78, 0x56, 0x01, 0x00];
@@ -421,16 +421,16 @@ unittest
     assert(h.dst == EUI64(0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08));
     assert(h.src == EUI64(0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18));
 
-    Packet p;
+    StackPacket p;
     p.init!WpanFrame(ext_frame[]) = h;
     ubyte[32] wire = void;
-    assert(WpanFrame.encode_ow_header(&p, wire[]) == WpanFrame.ow_header_size);
-    Packet q;
-    assert(WpanFrame.decode_ow_header(&q, wire[0 .. WpanFrame.ow_header_size]) == WpanFrame.ow_header_size);
+    assert(WpanFrame.encode_ow_header(&p.packet, wire[]) == WpanFrame.ow_header_size);
+    StackPacket q;
+    assert(WpanFrame.decode_ow_header(&q.packet, wire[0 .. WpanFrame.ow_header_size]) == WpanFrame.ow_header_size);
     assert(q.hdr!WpanFrame.dst == h.dst && q.hdr!WpanFrame.frame_control == h.frame_control);
     assert(q.hdr!WpanFrame.src_pan == 0x5678);
-    assert(WpanFrame.extract_dst(&q) == WpanFrame.extract_dst(&p));
-    assert(WpanFrame.extract_src(&q) == WpanFrame.extract_src(&p));
+    assert(WpanFrame.extract_dst(&q.packet) == WpanFrame.extract_dst(&p.packet));
+    assert(WpanFrame.extract_src(&q.packet) == WpanFrame.extract_src(&p.packet));
 
     // 802.15.4-2015, table 7-2
     static immutable ubyte[5] v2_dst_compressed = [0x41, 0x28, 0x01, 0x34, 0x12];
@@ -471,5 +471,5 @@ unittest
     assert(h.parse(multipurpose[]) == 0);
     wire[0] = 0x01;
     wire[1] = 0x14;
-    assert(WpanFrame.decode_ow_header(&q, wire[0 .. WpanFrame.ow_header_size]) == -1);
+    assert(WpanFrame.decode_ow_header(&q.packet, wire[0 .. WpanFrame.ow_header_size]) == -1);
 }

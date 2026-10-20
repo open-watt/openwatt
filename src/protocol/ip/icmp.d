@@ -566,9 +566,9 @@ unittest
     {
         reply[22 .. 24] = 0;
         reply[22 .. 24] = nativeToBigEndian(internet_checksum(reply[20 .. $]));
-        Packet packet;
+        StackPacket packet;
         packet.init!RawFrame(reply[]);
-        icmp_input(stack, &packet, link);
+        icmp_input(stack, &packet.packet, link);
     }
     ip.src = IPAddr(192, 0, 2, 3).b;
     input();
@@ -598,16 +598,16 @@ unittest
     error[20] = IcmpType.time_exceeded;
     error[28 .. $] = link.captured[0 .. 28];
     error[22 .. 24] = nativeToBigEndian(internet_checksum(error[20 .. $]));
-    Packet packet;
+    StackPacket packet;
     packet.init!RawFrame(error[]);
-    icmp_input(stack, &packet, null);
+    icmp_input(stack, &packet.packet, null);
     assert(results.errors == 0);
     error[22] ^= 1;
-    icmp_input(stack, &packet, link);
+    icmp_input(stack, &packet.packet, link);
     assert(results.errors == 0);
     error[22] ^= 1;
-    icmp_input(stack, &packet, link);
-    icmp_input(stack, &packet, link);
+    icmp_input(stack, &packet.packet, link);
+    icmp_input(stack, &packet.packet, link);
     assert(results.errors == 1);
 
     sequence = icmp_echo_send(stack, remote, link, &results.reply);

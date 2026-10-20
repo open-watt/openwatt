@@ -1008,7 +1008,7 @@ unittest
         ip.src_addr = source;
         ip.dst_addr = destination;
         ip.next_header = IPProtocol.udp;
-        Packet packet;
+        StackPacket packet;
         RouteResult6 route = RouteResult6(RouteResult6.Kind.forward, egress, destination);
         foreach (length; [1279, 1280, 1281, 1500])
         {
@@ -1016,7 +1016,7 @@ unittest
             storeBigEndian(cast(ushort*)ip.payload_length.ptr, cast(ushort)(length - 40));
             packet.init!Ethernet(data[0 .. length]);
             uint before = egress.transmissions;
-            stack.dispatch_v6(&packet, route, ingress);
+            stack.dispatch_v6(&packet.packet, route, ingress);
             if (length <= 1280)
             {
                 assert(egress.transmissions == before + 1 && ip.hop_limit == 63);
@@ -1038,7 +1038,7 @@ unittest
             }
         }
         assert(ingress.transmissions == 2 && egress.transmissions == 2);
-        stack.dispatch_v6(&packet, route, null);
+        stack.dispatch_v6(&packet.packet, route, null);
         assert(ingress.transmissions == 2 && egress.transmissions == 2);
 
         ip.dst_addr = local;
@@ -1052,7 +1052,7 @@ unittest
             ushort pseudo = pseudo_header_checksum_v6(ip.src, ip.dst, cast(uint)length, IPProtocol.icmp6);
             storeBigEndian(cast(ushort*)(data.ptr + 42), internet_checksum(data[40 .. 40 + length], pseudo));
             packet.init!Ethernet(data[0 .. 40 + length]);
-            icmp6_input(stack, &packet, 40, ingress);
+            icmp6_input(stack, &packet.packet, 40, ingress);
             assert(ingress.transmissions == (length == 8 ? 3 : 2));
         }
         assert(ingress.captured[40] == Icmp6Type.echo_reply);

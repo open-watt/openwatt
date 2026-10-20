@@ -981,7 +981,7 @@ unittest
 
     // response payloads are truncated (1 data byte for a 2-byte element) so element
     // decode is skipped and the null Element* is never dereferenced
-    Packet p;
+    StackPacket p;
     static immutable ubyte[3] rsp = [0x41, 0x0C, 0xAA];        // requested pid
     static immutable ubyte[3] other_pid = [0x41, 0x0D, 0xAA];  // right mode + source, wrong pid
     static immutable ubyte[3] wrong_mode = [0x49, 0x02, 0x01];
@@ -989,26 +989,26 @@ unittest
     // a reply carrying only un-requested pids must not touch the request
     ref OBDFrame f = p.init!OBDFrame(other_pid[]);
     f.src_id = 0x7E8;
-    b.packet_handler(&p, null, PacketDirection.incoming, null);
+    b.packet_handler(&p.packet, null, PacketDirection.incoming, null);
     assert(b._outstanding && b.submits == 1 && b.windows_armed == 1);
 
     // functional query: the first matching reply holds the window open rather than completing
     ref OBDFrame g = p.init!OBDFrame(rsp[]);
     g.src_id = 0x7E8;
-    b.packet_handler(&p, null, PacketDirection.incoming, null);
+    b.packet_handler(&p.packet, null, PacketDirection.incoming, null);
     assert(b._outstanding && b.submits == 1);
     assert(b.windows_armed == 2);   // re-armed to the collection window
 
     // a sibling ECU reply also lands inside the window
     g.src_id = 0x7E9;
-    b.packet_handler(&p, null, PacketDirection.incoming, null);
+    b.packet_handler(&p.packet, null, PacketDirection.incoming, null);
     assert(b._outstanding && b.submits == 1);
     assert(b.windows_armed == 3);
 
     // a wrong-mode response never completes the request
     ref OBDFrame h = p.init!OBDFrame(wrong_mode[]);
     h.src_id = 0x7E8;
-    b.packet_handler(&p, null, PacketDirection.incoming, null);
+    b.packet_handler(&p.packet, null, PacketDirection.incoming, null);
     assert(b._outstanding && b.submits == 1);
     assert(b.windows_armed == 3);
 
@@ -1027,16 +1027,16 @@ unittest
     assert(b.submits == 2 && b.last_ecu == 0x7E0);
     ref OBDFrame q = p.init!OBDFrame(rsp[]);
     q.src_id = 0x7E9;   // wrong ECU: ignored
-    b.packet_handler(&p, null, PacketDirection.incoming, null);
+    b.packet_handler(&p.packet, null, PacketDirection.incoming, null);
     assert(b._outstanding);
     ref OBDFrame r = p.init!OBDFrame(other_pid[]);
     r.src_id = 0x7E8;   // right ECU, but a 41 0D reply must not complete an 01 0C request
-    b.packet_handler(&p, null, PacketDirection.incoming, null);
+    b.packet_handler(&p.packet, null, PacketDirection.incoming, null);
     assert(b._outstanding);
     ref OBDFrame s = p.init!OBDFrame(rsp[]);
     s.src_id = 0x7E8;   // 0x7E0's responder answering the requested pid
     polls_before = b.polls_armed;
-    b.packet_handler(&p, null, PacketDirection.incoming, null);
+    b.packet_handler(&p.packet, null, PacketDirection.incoming, null);
     assert(!b._outstanding);
     assert(b.submits == 2 && b.polls_armed == polls_before + 1);
 
@@ -1044,7 +1044,7 @@ unittest
     b._vehicle = VehicleState.asleep;
     ref OBDFrame t = p.init!OBDFrame(rsp[]);
     t.src_id = 0x7E8;
-    b.packet_handler(&p, null, PacketDirection.incoming, null);
+    b.packet_handler(&p.packet, null, PacketDirection.incoming, null);
     assert(b._vehicle == VehicleState.asleep);
 
     // waking arrives as an interface state change, and must not transmit until
@@ -1057,14 +1057,14 @@ unittest
     u.src_id = 0x7E8;
     b._vehicle = VehicleState.awake;    // the interface wakes before it delivers
     b._wake_discovery_pending = true;
-    b.packet_handler(&p, null, PacketDirection.incoming, null);
+    b.packet_handler(&p.packet, null, PacketDirection.incoming, null);
     assert(b._wake_discovery_pending);
     assert(b._outstanding && b.submits == 3);
     assert(!b._discovering);            // discovery deferred to the window close
 
     // a sibling ECU's probe reply also lands in the open window
     u.src_id = 0x7E9;
-    b.packet_handler(&p, null, PacketDirection.incoming, null);
+    b.packet_handler(&p.packet, null, PacketDirection.incoming, null);
     assert(b._outstanding && b.submits == 3);
 
     // the window closing starts discovery with a fresh page-0 request
@@ -1074,7 +1074,7 @@ unittest
 
     // page-0 reply + window close finishes discovery; mask 0x00000001 excludes pid 0x0C
     u.src_id = 0x7E8;
-    b.packet_handler(&p, null, PacketDirection.incoming, null);
+    b.packet_handler(&p.packet, null, PacketDirection.incoming, null);
     b.window_fired(MonoTime.init);
     assert(!b._discovering);
     assert(b.elements[0].flags & 2);
@@ -1086,7 +1086,7 @@ unittest
     static immutable ubyte[6] mask_sup = [0x41, 0x00, 0x00, 0x10, 0x00, 0x00];
     ref OBDFrame v = p.init!OBDFrame(mask_sup[]);
     v.src_id = 0x7E8;
-    b.packet_handler(&p, null, PacketDirection.incoming, null);
+    b.packet_handler(&p.packet, null, PacketDirection.incoming, null);
     b.window_fired(MonoTime.init);
     assert(!b._discovering && (b.elements[0].flags & 2) == 0);
 
@@ -1096,7 +1096,7 @@ unittest
     assert(b.submits == 6);
     ref OBDFrame w = p.init!OBDFrame(mask_rsp[]);
     w.src_id = 0x7E8;
-    b.packet_handler(&p, null, PacketDirection.incoming, null);
+    b.packet_handler(&p.packet, null, PacketDirection.incoming, null);
     b.window_fired(MonoTime.init);
     assert(!b._discovering);
     assert(b.elements[0].flags & 2);
@@ -1109,7 +1109,7 @@ unittest
     static immutable ubyte[3] nrc = [0x7F, 0x01, 0x12];
     ref OBDFrame x = p.init!OBDFrame(nrc[]);
     x.src_id = 0x7E8;
-    b.packet_handler(&p, null, PacketDirection.incoming, null);
+    b.packet_handler(&p.packet, null, PacketDirection.incoming, null);
 
     // response-pending (NRC 78) extends the wait instead of completing
     b.elements[0].lastUpdate = MonoTime.init;
@@ -1119,11 +1119,11 @@ unittest
     static immutable ubyte[3] pending = [0x7F, 0x01, 0x78];
     ref OBDFrame y = p.init!OBDFrame(pending[]);
     y.src_id = 0x7E8;
-    b.packet_handler(&p, null, PacketDirection.incoming, null);
+    b.packet_handler(&p.packet, null, PacketDirection.incoming, null);
     assert(b._outstanding && b.windows_armed == windows_before + 1);
     ref OBDFrame z = p.init!OBDFrame(nrc[]);
     z.src_id = 0x7E8;
-    b.packet_handler(&p, null, PacketDirection.incoming, null);
+    b.packet_handler(&p.packet, null, PacketDirection.incoming, null);
     assert(!b._outstanding);
 
     // a negative echoing a different service does not correlate
@@ -1133,7 +1133,7 @@ unittest
     static immutable ubyte[3] nrc_other = [0x7F, 0x22, 0x31];
     ref OBDFrame zz = p.init!OBDFrame(nrc_other[]);
     zz.src_id = 0x7E8;
-    b.packet_handler(&p, null, PacketDirection.incoming, null);
+    b.packet_handler(&p.packet, null, PacketDirection.incoming, null);
     b.window_fired(MonoTime.init);
 
     // a queued request does not start response timing until the transport dispatches it
@@ -1152,7 +1152,7 @@ unittest
     // a dispatched request completes without aborting anything
     ref OBDFrame nr = p.init!OBDFrame(rsp[]);
     nr.src_id = 0x7E8;
-    b.packet_handler(&p, null, PacketDirection.incoming, null);
+    b.packet_handler(&p.packet, null, PacketDirection.incoming, null);
     assert(!b._outstanding && b.aborts == 0);
 
     // completing (here: timing out) an undispatched request aborts the queued transport entry
