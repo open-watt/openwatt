@@ -268,11 +268,13 @@ nothrow @nogc:
 
         final void set_callback_handler(Callback)(Callback response_handler, void* user_data = null)
         {
-            static if (is(Callback == typeof(null)))
+            if (response_handler is null)
             {
-                _command_handlers.replace(EZSP_Command.Command, CommandHandler());
+                ushort command = EZSP_Command.Command;
+                _command_handlers.remove(command);
+                return;
             }
-            else
+            static if (!is(Callback == typeof(null)))
             {
                 alias Args = Parameters!Callback;
                 static assert (is(Args == ResponseParams) || is(Args == AliasSeq!(void*, ResponseParams)), "Callback must be a function with arguments matching " ~ EZSP_Command.stringof ~ ".Response, and optionally a `void* user_data` argument in the first position.");

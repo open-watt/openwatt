@@ -771,6 +771,9 @@ one primitive (most belong in urt) and its copies deleted:
 - **Expose scheduling validation metrics**: queue wait by PCP, deadline promotions and
   expiries, queue rejection and DEI eviction counts, reserved-slot dispatches,
   user-command submission-to-completion latency, and reactive receive-to-dispatch latency.
+- **`ZigbeeInterface._ezsp_client` is a raw pointer**: destroying the EZSP client leaves the
+  interface restarting against freed memory (`startup()` reads `_ezsp_client.running`). Make it
+  an `ObjectRef!EZSPClient` per the dependency rules.
 
 ## Automation
 
@@ -924,6 +927,15 @@ decisions are in [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md). The
   free function with no owning object at all. Decide who owns a VIN-keyed appliance (the
   observer that saw the VIN, or durable like the Device it wraps) and sweep the remaining
   `ObjectFlags.dynamic` sites for the same question.
+
+- **A user disable of a creator-managed dynamic object is silently undone**: disabling the ASH
+  interface the EZSP client spawned takes it offline, the client restarts, destroys it and
+  creates a fresh enabled one. Check the other owner-spawned children for the same shape: the
+  HTTP, DNS and MQTT listeners, the ESPHome stream, DHCP and SLAAC addresses. Enumerated hardware (Linux ethernet, CAN, wifi, BLE)
+  is dynamic too but is not recreated by a restart, so a disable there holds until the next
+  hotplug. Decide whether `disabled` on an owned child is refused, forwarded to the owner, or
+  kept by the owner across recreation, and give the two kinds of dynamic object distinct flags
+  if the answer differs between them.
 
 - **Modbus `report` registers: accept unsolicited responses and never poll them**: some devices
   push a value on their own schedule instead of answering reads. The bench PT100 transmitter does
