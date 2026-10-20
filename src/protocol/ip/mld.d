@@ -268,13 +268,13 @@ bool send_message(ref IPStack stack, Icmp6Type type, ref Membership membership, 
         return false;
 
     IPv6Addr source = link_local_source(iface);
-    MessageBuffer buffer = void;
-    write_message(buffer, type, source, membership.group, destination);
+    Packet* packet = alloc_datagram(MessageBuffer.sizeof);
+    if (!packet)
+        return false;
+    write_message(*cast(MessageBuffer*)packet.payload.ptr, type, source, membership.group, destination);
     membership.report_source = source;
-
-    Packet packet;
-    packet.init!RawFrame(buffer.bytes[]);
-    stack.output_v6_routed(&packet, iface, destination);
+    stack.output_v6_routed(packet, iface, destination);
+    packet_free(packet);
     return true;
 }
 

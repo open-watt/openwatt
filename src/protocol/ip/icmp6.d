@@ -143,7 +143,11 @@ ushort icmp6_echo_send(ref IPStack stack, IPv6Addr destination, BaseInterface if
 
     enum size_t payload_length = 32;
     enum size_t message_length = 8 + payload_length;
-    align(size_t.sizeof) ubyte[IPv6Header.sizeof + message_length] buffer = void;
+    Packet* packet = alloc_datagram(IPv6Header.sizeof + message_length);
+    if (!packet)
+        return 0;
+    scope (exit) packet_free(packet);
+    ubyte[] buffer = cast(ubyte[])packet.payload;
 
     auto ip = cast(IPv6Header*)buffer.ptr;
     ip.ver_tc_flow[] = 0;
@@ -170,12 +174,10 @@ ushort icmp6_echo_send(ref IPStack stack, IPv6Addr destination, BaseInterface if
     CID scope_iface = iface_hint ? iface_hint.id : CID();
     _pending_echoes ~= PendingEcho(destination, getTime(), handler, sequence, scope_iface, Array!IPv6Addr.init, source, error_handler);
 
-    Packet packet;
-    packet.init!RawFrame(buffer[]);
     if (iface_hint && route.kind != RouteResult6.Kind.local)
-        stack.output_v6_routed(&packet, iface_hint, route.next_hop);
+        stack.output_v6_routed(packet, iface_hint, route.next_hop);
     else
-        stack.output_v6(&packet, iface_hint);
+        stack.output_v6(packet, iface_hint);
     return sequence;
 }
 

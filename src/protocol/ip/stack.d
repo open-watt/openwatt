@@ -55,6 +55,12 @@ uint route_generation()
 ushort next_ip_id()
     => ++_ip_id;
 
+// an Ethernet header with two VLAN tags
+enum ubyte ip_headroom = 22;
+
+Packet* alloc_datagram(size_t length)
+    => alloc_packet!RawFrame(length, ip_headroom);
+
 
 struct RouteResultT(Addr)
 {
@@ -811,13 +817,13 @@ private:
         MACAddress dst;
         dst.b[] = link_addr[0 .. 6];
         ubyte ver = (cast(const(ubyte)*)pkt.data.ptr)[0] >> 4;
-        Packet framed;
+        StackPacket framed;
         ref eth = framed.init!Ethernet(pkt.data, pkt.creation_time);
         eth.src = station.mac;
         eth.dst = dst;
         eth.ether_type = ver == 6 ? EtherType.ip6 : EtherType.ip4;
         framed.checksum_pending = pkt.checksum_pending;
-        station.forward(&framed);
+        station.forward(&framed.packet);
     }
 
     void deliver_local(Packet* pkt, BaseInterface iface = null)

@@ -464,7 +464,11 @@ bool udp_output(ref IPStack stack, IPAddr src_addr, ushort src_port, IPAddr dst_
             src_addr = selected;
     }
 
-    align(size_t.sizeof) ubyte[max_size] buf = void;
+    Packet* pkt = alloc_datagram(total);
+    if (!pkt)
+        return false;
+    scope (exit) packet_free(pkt);
+    ubyte[] buf = cast(ubyte[])pkt.payload;
 
     auto ip = cast(IPv4Header*)buf.ptr;
     ip.ver_ihl  = 0x45;
@@ -491,8 +495,6 @@ bool udp_output(ref IPStack stack, IPAddr src_addr, ushort src_port, IPAddr dst_
     if (payload.length > 0)
         buf[IPv4Header.sizeof + UdpHeader.sizeof .. total] = payload[];
 
-    Packet pkt;
-    pkt.init!RawFrame(buf[0 .. total]);
     pkt.checksum_pending = true;
     if (src_addr != IPAddr.any)
     {
@@ -501,16 +503,16 @@ bool udp_output(ref IPStack stack, IPAddr src_addr, ushort src_port, IPAddr dst_
         {
             if (!iface)
                 return false;
-            stack.output_v4_routed(&pkt, iface, dst_addr);
+            stack.output_v4_routed(pkt, iface, dst_addr);
             return true;
         }
         if (iface && is_broadcast_for_interface(iface, dst_addr))
         {
-            stack.output_v4_routed(&pkt, iface, dst_addr);
+            stack.output_v4_routed(pkt, iface, dst_addr);
             return true;
         }
     }
-    stack.output_v4(&pkt);
+    stack.output_v4(pkt);
     return true;
 }
 
@@ -535,18 +537,18 @@ static if (has_ipv6)
         if (scoped && !iface)
             return false;
 
-        align(size_t.sizeof) ubyte[max_size] buf = void;
-        size_t total = write_udp6(buf[], src_addr, src_port, dst_addr, dst_port, payload, 64, false);
-        if (total == 0)
+        Packet* pkt = alloc_datagram(IPv6Header.sizeof + UdpHeader.sizeof + payload.length);
+        if (!pkt)
+            return false;
+        scope (exit) packet_free(pkt);
+        if (write_udp6(cast(ubyte[])pkt.payload, src_addr, src_port, dst_addr, dst_port, payload, 64, false) == 0)
             return false;
 
-        Packet pkt;
-        pkt.init!RawFrame(buf[0 .. total]);
         pkt.checksum_pending = true;
         if (scoped)
-            stack.output_v6_routed(&pkt, iface, dst_addr);
+            stack.output_v6_routed(pkt, iface, dst_addr);
         else
-            stack.output_v6(&pkt);
+            stack.output_v6(pkt);
         return true;
     }
 

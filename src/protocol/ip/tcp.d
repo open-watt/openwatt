@@ -1299,7 +1299,7 @@ void send_segment_raw(ref IPStack stack, ref const InetAddress src, ref const In
                       uint seq, uint ack_val, ubyte flags, ushort window, const(ubyte)[] data,
                       ushort advertise_mss = 0, BaseInterface egress = null, IPAddr next_hop = IPAddr.any)
 {
-    enum size_t max_packet = 1500;      // scratch buffer; segment must already be sized to MSS
+    enum size_t max_packet = 1500;      // segment must already be sized to MSS
     enum size_t reserve = IPv4Header.sizeof;    // network-header space; enough for any family we emit
                                                 // TODO: ipv6 needs a 40-byte reserve when it lands here
 
@@ -1311,7 +1311,11 @@ void send_segment_raw(ref IPStack stack, ref const InetAddress src, ref const In
     if (total > max_packet)
         return;
 
-    align(size_t.sizeof) ubyte[max_packet] buf = void;
+    Packet* pkt = alloc_datagram(total);
+    if (!pkt)
+        return;
+    scope (exit) packet_free(pkt);
+    ubyte[] buf = cast(ubyte[])pkt.payload;
 
     auto t = cast(TcpHeader*)(buf.ptr + reserve);
     t.src_port = nativeToBigEndian(src.port);
@@ -1357,13 +1361,11 @@ void send_segment_raw(ref IPStack stack, ref const InetAddress src, ref const In
             ushort ihc = internet_checksum(buf[0 .. IPv4Header.sizeof]);
             ip.checksum = nativeToBigEndian(ihc);
 
-            Packet pkt;
-            pkt.init!RawFrame(buf[0 .. total]);
             pkt.checksum_pending = true;
             if (egress)
-                stack.output_v4_routed(&pkt, egress, next_hop);
+                stack.output_v4_routed(pkt, egress, next_hop);
             else
-                stack.output_v4(&pkt);
+                stack.output_v4(pkt);
             break;
         }
 
@@ -1384,12 +1386,12 @@ void send_segment_raw(ref IPStack stack, ref const InetAddress src, ref const In
                 ushort cc = internet_checksum(buf[reserve .. total], pseudo);
                 t.checksum = nativeToBigEndian(cc);
 
-                Packet pkt;
-                ref h = pkt.init!Ethernet(ow);
+                StackPacket framed;
+                ref h = framed.init!Ethernet(ow);
                 h.dst = dst_mac;
                 h.src = use_src;
                 h.ether_type = EtherType.ow;
-                s.forward(&pkt);
+                s.forward(&framed.packet);
             }
 
             EthernetStation station = dyn_cast!EthernetStation(egress);
