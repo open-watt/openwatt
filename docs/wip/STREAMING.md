@@ -654,6 +654,11 @@ reference: it edits (in place at refcount 1, through `page_mutable`), keeps, han
 on every return path, failures included. A caller that keeps using a packet after passing it hands
 on `packet_retain(p)`, which shares a pool page and copies a lent one. `forward`, `transmit`,
 `enqueue` and the egress chain take `Packet*`, so a sender's `forward(p)` is its last word on `p`.
+A transform is `Packet* transform(Packet* p)`: it takes ownership, edits in place when it is the
+sole holder with room or into a new page otherwise, and returns ownership, so the caller writes
+`p = transform(p)`. A null return means the transform freed `p`, so failure cannot leak;
+`packet_mutable` follows the same rule (urt's `page_mutable` leaves the page untouched on failure
+today, to align or keep as the lower primitive).
 
 A callee given `const(Packet)*` looks for the call and keeps by `packet_retain`; the refcount
 counts holders and is not the packet's value, so retaining through `const` is legitimate. Fan-out
