@@ -245,14 +245,14 @@ protected:
         }
 
         // send connect_ind to the interface
-        Packet p;
+        StackPacket p;
         ref f = p.init!BLEFrame(null);
         f.src = local_mac;
         f.dst = _peer;
         f.kind = BLEFrameKind.advert;
         f.code = BLEAdvPDU.connect_ind;
 
-        _connect_handle = _iface.forward(&p, &on_connect_complete);
+        _connect_handle = _iface.forward(&p.packet, &on_connect_complete);
 
         if (_connect_handle < 0)
         {
@@ -278,13 +278,13 @@ protected:
         if (_connected)
         {
             // send disconnect to the interface
-            Packet p;
+            StackPacket p;
             ref f = p.init!BLEFrame(null);
             f.src = local_mac;
             f.dst = _peer;
             f.kind = BLEFrameKind.control;
             f.code = BLEControl.disconnect;
-            _iface.forward(&p);
+            _iface.forward(&p.packet);
             _connected = false;
         }
 
@@ -311,13 +311,13 @@ protected:
     {
         if (!_iface)
             return false;
-        Packet p;
+        StackPacket p;
         ref f = p.init!BLEFrame(pdu);
         f.src = local_mac;
         f.dst = _peer;
         f.kind = BLEFrameKind.att;
         f.code = pdu[0];
-        return _iface.forward(&p) >= 0;
+        return _iface.forward(&p.packet) >= 0;
     }
 
 private:

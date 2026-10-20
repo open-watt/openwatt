@@ -755,7 +755,7 @@ private:
             _addr_types[addr] = report.addr_type;
         }
 
-        Packet p;
+        StackPacket p;
         ref f = p.init!BLEFrame(report.data);
         f.src = addr;
         f.dst = MACAddress.broadcast;
@@ -763,7 +763,7 @@ private:
         f.code = report.adv_type == BLEAdvType.connectable ? BLEAdvPDU.adv_ind : BLEAdvPDU.adv_nonconn_ind;
         f.rssi = report.rssi;
 
-        on_incoming(&p);
+        on_incoming(&p.packet);
     }
 
     void on_conn_event(BLEConn conn, bool connected, BLEError error)
@@ -807,13 +807,13 @@ private:
                     complete_pending_connect(MessageState.failed);
 
                 // notify subscribers via disconnect frame
-                Packet p;
+                StackPacket p;
                 ref f = p.init!BLEFrame(null);
                 f.src = _bd_addr;
                 f.dst = session.client;
                 f.kind = BLEFrameKind.control;
                 f.code = BLEControl.disconnected;
-                on_incoming(&p);
+                on_incoming(&p.packet);
 
                 session.active = false;
             }
@@ -890,20 +890,21 @@ private:
         if (error == BLEError.none)
         {
             // read_rsp PDU is [opcode][value...] (correlation is by outstanding request)
-            ubyte[513] buf = void;
-            size_t n = data.length;
-            if (n > buf.length - 1)
-                n = buf.length - 1;
-            buf[0] = ATTOpcode.read_rsp;
-            buf[1 .. 1 + n] = data[0 .. n];
-
-            Packet p;
-            ref f = p.init!BLEFrame(buf[0 .. 1 + n]);
-            f.src = peer;
-            f.dst = client;
-            f.kind = BLEFrameKind.att;
-            f.code = ATTOpcode.read_rsp;
-            on_incoming(&p);
+            enum size_t max_value = 512;
+            size_t n = data.length < max_value ? data.length : max_value;
+            if (Packet* p = alloc_packet!BLEFrame(1 + n))
+            {
+                ubyte[] buf = cast(ubyte[])p.payload;
+                buf[0] = ATTOpcode.read_rsp;
+                buf[1 .. $] = data[0 .. n];
+                ref f = p.hdr!BLEFrame;
+                f.src = peer;
+                f.dst = client;
+                f.kind = BLEFrameKind.att;
+                f.code = ATTOpcode.read_rsp;
+                on_incoming(p);
+                packet_free(p);
+            }
         }
 
         if (tag >= 0)
@@ -926,15 +927,17 @@ private:
 
         if (error == BLEError.none)
         {
-            ubyte[1] buf = [ ATTOpcode.write_rsp ];
-
-            Packet p;
-            ref f = p.init!BLEFrame(buf[]);
-            f.src = peer;
-            f.dst = client;
-            f.kind = BLEFrameKind.att;
-            f.code = ATTOpcode.write_rsp;
-            on_incoming(&p);
+            if (Packet* p = alloc_packet!BLEFrame(1))
+            {
+                (cast(ubyte[])p.payload)[0] = ATTOpcode.write_rsp;
+                ref f = p.hdr!BLEFrame;
+                f.src = peer;
+                f.dst = client;
+                f.kind = BLEFrameKind.att;
+                f.code = ATTOpcode.write_rsp;
+                on_incoming(p);
+                packet_free(p);
+            }
         }
 
         if (tag >= 0)
@@ -950,21 +953,24 @@ private:
             return;
 
         // notification PDU is [opcode][handle(2)][value...]
-        ubyte[250] buf = void;
-        if (3 + data.length > buf.length)
+        enum size_t max_notification = 250;
+        if (3 + data.length > max_notification)
             return;
+        Packet* p = alloc_packet!BLEFrame(3 + data.length);
+        if (!p)
+            return;
+        ubyte[] buf = cast(ubyte[])p.payload;
         buf[0] = ATTOpcode.notification;
         buf[1 .. 3] = handle.nativeToLittleEndian;
-        buf[3 .. 3 + data.length] = data[];
-
-        Packet p;
-        ref f = p.init!BLEFrame(buf[0 .. 3 + data.length]);
+        buf[3 .. $] = data[];
+        ref f = p.hdr!BLEFrame;
         f.src = session.peer;
         f.dst = session.client;
         f.kind = BLEFrameKind.att;
         f.code = ATTOpcode.notification;
 
-        on_incoming(&p);
+        on_incoming(p);
+        packet_free(p);
     }
 }
 
