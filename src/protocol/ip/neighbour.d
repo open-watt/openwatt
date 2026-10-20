@@ -287,7 +287,7 @@ private:
         if (e.pending_count == pending_queue_depth)
         {
             // evict oldest to make room for newest
-            e.pending[0].free_clone();
+            packet_free(e.pending[0]);
             foreach (i; 1 .. pending_queue_depth)
                 e.pending[i - 1] = e.pending[i];
             --e.pending_count;
@@ -298,7 +298,7 @@ private:
                             ": dropping queued packet for ", e.ip,
                             " on ", e.iface.name, " (state=", e.state, ")");
         }
-        Packet* queued = pkt.clone();
+        Packet* queued = packet_retain(pkt);
         if (!queued)
             return;
         e.pending[e.pending_count] = queued;
@@ -308,7 +308,7 @@ private:
     void free_pending(ref NeighbourEntry!IP e)
     {
         foreach (i; 0 .. e.pending_count)
-            e.pending[i].free_clone();
+            packet_free(e.pending[i]);
         e.pending_count = 0;
     }
 
@@ -322,7 +322,7 @@ private:
         foreach (i; 0 .. e.pending_count)
         {
             drain(e.pending[i], e.iface, e.link_addr[0 .. e.link_addr_len]);
-            e.pending[i].free_clone();
+            packet_free(e.pending[i]);
         }
         e.pending_count = 0;
     }

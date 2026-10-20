@@ -867,7 +867,7 @@ private:
             return;
         }
 
-        Packet packet;
+        StackPacket packet;
         ref wifi = packet.init!Wifi80211(data, ts);
         wifi.rssi = parse_radiotap_rssi(data[0 .. radiotap_len]);
         wifi.channel = parse_radiotap_channel(data[0 .. radiotap_len]);
@@ -887,7 +887,7 @@ private:
             wifi.seq_ctrl = load_le16(data[h + 22 .. h + 24]);
         }
 
-        dispatch(&packet);
+        dispatch(&packet.packet);
     }
 
     static ushort load_le16(const(ubyte)[] v) pure

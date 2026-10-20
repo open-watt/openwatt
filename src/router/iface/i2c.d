@@ -404,14 +404,14 @@ private:
 
             if (request.read_length)
             {
-                Packet response;
+                StackPacket response;
                 ref frame = response.init!I2CFrame(_read_buffer[0 .. request.read_length]);
                 frame.sequence_number = request.sequence_number;
                 frame.address = request.address;
                 frame.read_length = 0;
                 frame.type = I2CFrameType.response;
                 frame.flags = request.flags;
-                incoming_packet(&response);
+                incoming_packet(&response.packet);
             }
         }
         else

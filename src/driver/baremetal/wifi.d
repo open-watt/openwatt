@@ -505,7 +505,7 @@ private:
             return;
         }
 
-        Packet pkt;
+        StackPacket pkt;
         auto hdr = &pkt.init!Wifi80211(frame);
         // 802.11 is little-endian on the wire (unlike most network protocols).
         hdr.frame_control = littleEndianToNative!ushort(frame[0 .. 2][0 .. 2]);
@@ -522,7 +522,7 @@ private:
         }
         hdr.rssi = rssi;
         hdr.channel = channel;
-        radio.incoming_packet(&pkt);
+        radio.incoming_packet(&pkt.packet);
     }
 
     void dispatch_rx(WifiVif vif, const(ubyte)[] data)

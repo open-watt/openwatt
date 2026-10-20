@@ -270,7 +270,7 @@ private:
         if (!interface_ || !interface_.running || _operation != Operation.none)
             return false;
 
-        Packet request;
+        StackPacket request;
         ref frame = request.init!I2CFrame(data);
         frame.sequence_number = ++_sequence;
         frame.address = _address;
@@ -282,7 +282,7 @@ private:
         _message_done = false;
         _response_received = false;
         _request_failed = false;
-        int handle = interface_.forward(&request, &message_complete);
+        int handle = interface_.forward(&request.packet, &message_complete);
         if (handle <= 0)
         {
             reset_operation();

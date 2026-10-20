@@ -423,9 +423,9 @@ private:
 
     void on_recv(UDPEndpoint*, const(void)[] data, ref UDPReceiveInfo info)
     {
-        Packet packet;
+        StackPacket packet;
         packet.init!UDPFrame(data, info.rx_time).address = info.source;
-        incoming_packet(&packet);
+        incoming_packet(&packet.packet);
     }
 }
 

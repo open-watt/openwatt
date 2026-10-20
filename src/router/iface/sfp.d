@@ -381,16 +381,19 @@ private:
             _pending = Read.none;
             return;
         }
-        ubyte[1] offset = [cast(ubyte)(_read_offset + _read_at % _read_span)];
-        Packet request;
-        ref frame = request.init!I2CFrame(offset[]);
+        Packet* request = alloc_packet!I2CFrame(1);
+        if (!request)
+            return request_failed();
+        (cast(ubyte[])request.payload)[0] = cast(ubyte)(_read_offset + _read_at % _read_span);
+        ref frame = request.hdr!I2CFrame;
         frame.sequence_number = ++_sequence;
         frame.address = _read_address;
         frame.read_length = _byte_io ? 1 : _read_length;
         frame.type = I2CFrameType.request;
         frame.flags = I2CFrameFlags.none;
         _request = 0;
-        immutable handle = bus.forward(&request, &message_complete);
+        immutable handle = bus.forward(request, &message_complete);
+        packet_free(request);
         if (handle <= 0)
             return request_failed();
         _request = cast(ubyte)handle;

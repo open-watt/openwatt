@@ -140,7 +140,7 @@ protected:
         _addr_types.clear();
 
         foreach (p; _emu_responses[])
-            p.free_clone();
+            packet_free(p);
         _emu_responses.clear();
 
         return super.shutdown();
@@ -687,7 +687,7 @@ private:
             Packet* p = _emu_responses[0];
             _emu_responses.remove(0);
             on_incoming(p);
-            p.free_clone();
+            packet_free(p);
         }
     }
 
