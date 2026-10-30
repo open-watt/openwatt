@@ -3,6 +3,27 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-10-20: reads answer with seq-tagged `val`s (sync protocol version 3)
+
+- `history_req` and `history` are gone, and `hello` no longer lists a `history` capability. A
+  history read is a `model_sub` with `once:true`, the element's pattern (`device:<path>`),
+  `from`/`to` in epoch milliseconds (`to` defaults to the request's arrival) and optionally
+  `points`, the number of equal spans to reduce the window to: each span that holds numeric records
+  answers its mean, stamped with its last record's time. Without `points` every record arrives.
+  Any element with a series store answers, recorded or not; one without a store answers its
+  current value. There is no "not recorded" error any more.
+- A `once` sub's values arrive as `val {seq, h, s:[[t,v],...], lost?}` messages carrying the
+  request's `seq`, never on `add`; a live feed's `val`s carry no `seq`. A match may take several
+  messages, and messages for several matches share a bundle; collect them by `seq` until
+  `res {seq}`. A `once` sub without `from` is a point read: the latest record per match. A null
+  `v` is a gap: the value stopped being known at `t`. Apply the samples of a read you do not collect
+  to a mirror as you would any `val`'s.
+- `add` never carries `v`/`t`, armed or not. A node's value arrives on its first `val`.
+- openwatt-web: `SyncClient.history()` sends the `once` sub and collects the `val`s carrying its
+  `seq`; `ModelMirror` applies the rest; the history popup drops its `mirror.fetch` fallback and
+  its fold of the `add` value. openwatt-droid: `SyncClient.history()`, `ModelMirror` and
+  `ElementHistorySheet` the same.
+
 ## 2026-10-19: live feeds are lossless
 
 - A live (`model_sub` without `once`) `add` no longer carries `v`/`t`; the node's current value is

@@ -1,6 +1,6 @@
 # Lossless, untorn sync streams
 
-Status: phase A (#852), B1a (#855) and the series corrections B1b needed (#862) landed; B1b (#857) in review. Delete this file when phase C lands; reconcile what remains
+Status: phase A (#852), B1a (#855) and the series corrections B1b needed (#862) landed; B1b (#857) and B2a in review. Delete this file when phase C lands; reconcile what remains
 into [TODO.md](../../TODO.md).
 
 ## Problem
@@ -73,20 +73,28 @@ Subscribing is arming at a position and marking the element touched; the first i
 the current state. A held element arms one record before its latest (a store-less one at its
 register, which becomes the store's first record if one is created before the increment), an event
 series at head, and a subscription with backfill at `index_for_time(from)`. `add` carries schema
-only. Values travel in exactly two ways: increments to subscribers, and replies to history range
-requests from readers outside a subscription, where a point read is a range with `from == to` and
-a held range starts with the record before `from`.
+only. Values travel in exactly two ways, both as `val`: increments to subscribers, and replies to
+reads, where a point read is the latest record and a held window starts with the record holding at
+`from`. A `val` group's `seq` names the read or the increment it belongs to.
 
-- Frames carry the increment id, a frame index and a final flag. The receiver acks frames; the
-  sender rebuilds missing frames from the store. A retry keeps the increment's original end; only
-  a completed increment advances to a new one. A timeout restarts from the same base.
-- The shared pin advances when an increment completes, never when a frame is merely accepted for
-  sending. The store is the retransmit buffer, which retires the val `DataQueue` backlog, refold
-  and epochs.
-- The receiver writes records into its elements as they arrive and holds notification. When the
-  increment completes it delivers one batch `SampleUpdate` per touched element, carrying the
-  increment's records, inside `open_commit()`. `previous` is the record before the slice. A
-  receiver that needs the slice for delivery creates a sync store the same way.
+- An increment is a fixed slice: records (position, head at T_k] for every touched element,
+  however many frames it spans. Its `val`s carry the increment id in `seq`, and `res {seq}`
+  closes it. One increment is in flight per peer; the next opens from where it ended.
+- Sync rides `/interface/reliable` (#869), so every transport is reliable and ordered and a lost
+  frame is the layer's to repair. The shared pin advances when the layer reports the increment's
+  closing `res` delivered, never when a frame is merely accepted for sending. Moving sync onto the
+  layer retires the reliability sublayer whole: the `DataQueue` backlog, refold, epochs and the
+  repush rewind.
+- The receiver stages an increment's records in each element's store past a published head, which
+  every reader (cursors, walks, `index_for_time`, the register, the dirty sweep) treats as the end.
+  Staged writes neither notify nor enlist in the dirty sweep, so a relay never forwards a partial
+  increment and a reader never sees one torn across elements. The closing `res` publishes: the head
+  advances over the staged records, the elements enlist, and one batch `SampleUpdate` per touched
+  element, carrying the increment's records, is delivered inside `open_commit()`. `previous` is the
+  record before the slice. A mirror element without a store gets a sync store to stage into.
+- A session that dies mid-increment truncates the staged records; the new session's first
+  increment carries the current state.
+- Clients without stores (web, droid) buffer an increment's samples and apply them on its `res`.
 
 Increments do not depend on on-demand production (TODO.md, "Sync produces on demand"); they work
 with today's push encoder, and on-demand production later changes only what drives it.
@@ -108,7 +116,8 @@ Each phase is one PR.
 | B1a | `Element._sync_peers` counts the peers that have the element armed, kept by `SyncPeer.arm`/`disarm`; a write enlists in the dirty sweep only when its element is armed. | `add_feed_listener`, `remove_feed_listener`, `g_feed_listeners` |
 | B1b | Held elements stream through cursors like point series; subscribing arms one record before the latest and marks the element touched, and `add` carries no value for an armed node. sync stores on first change with the sync ceiling; every new store over a held value starts with it as record 0; the shared pin; gaps sent as a null at their start; eviction below every pin when there are no floors. `encode_val` stays for a store-less element's register, and the val-queue repair rewinds held positions to their latest record (B2 deletes it). | `_pending_vals` coalescing, the value in armed `add`s, the re-push of every armed node |
 | B1c | Counters for sync stores (live, peak, created, freed, grown, bytes) on the `system` device once #849 lands; `lost` on `/sync/peer`. | |
-| B2 | Increments: wire fields, receiver held delivery, ack-driven pin, retransmit from the store. Protocol version bump. | the val `DataQueue` backlog, refold and epochs |
+| B2a | One value path: a `once` sub answers each match with `val`s carrying the request's `seq`, bundled on the control plane, from one sample-frame encoder per encoding; a point read is the latest record, `from`/`to` a range from the record holding at `from`, `points` its span means. An armed sub's `from` seeds its position. `index_for_time` is exact. Protocol version 3. | `history_req`/`history` and the `history` capability, the value in `add`, `send_backfill` and the parked live cursor, the unarmed value retry, `SampleAggregator` |
+| B2b | Increments, after sync moves onto `/interface/reliable`: the increment id in `seq` closed by `res`, the store's published head and staging, held delivery on receivers and clients, the pin advancing on delivery. | the repush rewind (the move itself retires the `DataQueue` backlog, refold and epochs) |
 | B3 | Sync store release, the freelist and demotion, if B1c's counters justify the first two. | |
 | C | Logs as a text series, `LogSink` on a cursor, merged reads. | `log.d` retention and consumers, log sub verbs, `DataQueue` |
 
@@ -125,12 +134,12 @@ Each phase is one PR.
 
 ## Open
 
-- Receiver restart of an increment: truncate the store back to the delivery pin (a new
-  `SeriesStore` operation) or skip duplicates. Truncation is preferred.
-- A local write to an element whose notification is held: before or after the held increment.
+- A local write to a mirrored element while an increment is staged appends after the staged
+  records and publishes with them, until a mirror forwards local writes to its authority instead
+  (the TODO at `merge_remote_value`).
 - Whether `res` for `model_set` keeps carrying the applied value, or only the outcome and the
   record's position, leaving the value to the feed.
-- The sync lag ceiling per platform, and the size of an increment on a lossy link.
+- The sync lag ceiling per platform.
 - Attaching a container adopts disk history beneath the RAM buckets and shifts indices; positions
   held by value (peer positions) need the store-held rebase offset from TODO.md, "Make the
   container complete". B1 makes this likely rather than a boot-time race.
