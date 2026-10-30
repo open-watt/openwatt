@@ -149,6 +149,7 @@ final class SyncModule : Module
 nothrow @nogc:
 
     Array!SyncPeer             peers;
+    Map!(ulong, ubyte)         sync_pins;   // EID.raw -> the shared pin's cursor id
     Map!(CID, SyncPeer)        authority;         // only remote auth; absence = local
     Map!(uint, PendingForward) pending_forwards;
     Map!(uint, PendingSyncConsole) pending_sync_consoles;
@@ -198,7 +199,7 @@ nothrow @nogc:
         each_running_peer((SyncPeer p) { tick_peer(p); });
 
         // Live model feeds: drain the per-tick dirty sweep into per-peer pending
-        // sets, then flush coalesced latest values.
+        // sets, then send each pending node's records from its position.
         bool feeds = false;
         foreach (p; peers[])
         {
@@ -210,8 +211,8 @@ nothrow @nogc:
         }
         if (feeds)
         {
-            // a val-queue eviction broke the catch-up promise; re-push the latest
-            // value of every armed node (idempotent) so only history stays lost
+            // a val-queue eviction lost records whose positions had already advanced; rewind every
+            // held node to its latest record so the mirror converges and only history stays lost
             foreach (p; peers[])
             {
                 if (!p.take_val_repush())
@@ -220,17 +221,16 @@ nothrow @nogc:
                 {
                     EID node;
                     node.raw = raw;
-                    bool queued = false;
-                    foreach (pe; p._pending_vals[])
+                    Element* e = resolve_element(node);
+                    if (!e)
+                        continue;
+                    SyncPeer.LiveNode* live = raw in p._live_nodes;
+                    if (e.data_format.kind != SeriesKind.point && !(live.position & SyncPeer.live_parked) && live.position > live_start(e))
                     {
-                        if (pe == node)
-                        {
-                            queued = true;
-                            break;
-                        }
+                        live.position = live_start(e);
+                        live.told_gap = false;
                     }
-                    if (!queued)
-                        p._pending_vals ~= node;
+                    mark_pending_val(p, node);
                 }
             }
 
@@ -240,19 +240,8 @@ nothrow @nogc:
                     return;
                 foreach (p; peers[])
                 {
-                    if (p._model_subs.empty || (node.raw in p._live_nodes) is null)
-                        continue;
-                    bool queued = false;
-                    foreach (pe; p._pending_vals[])
-                    {
-                        if (pe == node)
-                        {
-                            queued = true;
-                            break;
-                        }
-                    }
-                    if (!queued)
-                        p._pending_vals ~= node;
+                    if (!p._model_subs.empty && (node.raw in p._live_nodes) !is null)
+                        mark_pending_val(p, node);
                 }
             });
             each_running_peer((SyncPeer p) { flush_pending_vals(p); });
@@ -353,26 +342,34 @@ nothrow @nogc:
             }
             Element* e = resolve_element(node);
             SyncHandle h = p.handle_of(node);
-            if (!e || h == SyncPeer.invalid_handle)
-                continue;
-            bool done = e.data_format.kind == SeriesKind.point ? send_live_events(p, enc, e, h, gen) : enc.encode_val(p, h, e);
-            if (!p.send_ok(gen))
-                return;   // the session went down under the burst; its pending set went with it
+            bool done = true;
+            if (e && h != SyncPeer.invalid_handle)
+            {
+                // an unarmed node is pending only to retry the current value that closes a one-shot backfill
+                done = (node.raw in p._live_nodes) is null ? enc.encode_val(p, h, e)
+                     : e.has_history ? send_live(p, enc, e, h, gen) : send_register(p, enc, e, h);
+                if (!p.send_ok(gen))
+                    return;   // the session went down under the burst; its pending set went with it
+                update_pin(e, node);
+            }
             if (!done)
                 p._pending_vals[][kept++] = node;
+            else if (SyncPeer.LiveNode* live = node.raw in p._live_nodes)
+                live.pending = false;
         }
         p._pending_vals.resize(kept);
     }
 
     // false while the val backlog has no room for the rest; the node stays pending for the next tick
-    static bool send_live_events(SyncPeer p, SyncEncoder enc, Element* e, SyncHandle h, uint gen)
+    static bool send_live(SyncPeer p, SyncEncoder enc, Element* e, SyncHandle h, uint gen)
     {
         EID node = e.ensure_eid();
-        ulong* next = node.raw in p._live_nodes;
+        SyncPeer.LiveNode* next = node.raw in p._live_nodes;
         // Backfill owns the cursor while parked and re-marks the node on completion.
-        if (!next || (*next & SyncPeer.live_parked) || !e.has_history)
+        if (!next || (next.position & SyncPeer.live_parked))
             return true;
-        ulong committed = *next;
+        ulong committed = next.position;
+        bool told_gap = next.told_gap;
         auto c = e.open_series_cursor(committed);
         bool done = true;
         for (;;)
@@ -383,6 +380,20 @@ nothrow @nogc:
                 break;
             }
             RecordBlock blk = c.next(256);
+            // a gap sits at a bucket boundary, and blocks never span one; at head it is an ended tail
+            SysTime gap;
+            if (!told_gap && e.gap_before(blk.count ? blk.first_index : committed, gap))
+            {
+                Variant unknown;
+                if (!enc.encode_val(p, h, unknown, gap))
+                {
+                    done = false;
+                    break;
+                }
+                if (!p.send_ok(gen))
+                    break;
+                told_gap = true;
+            }
             if (!blk.count)
                 break;
             uint sent = enc.encode_val_block(p, h, blk);
@@ -393,14 +404,79 @@ nothrow @nogc:
             }
             if (!p.send_ok(gen))
                 break;
+            told_gap = false;
             committed = blk.first_index + sent;
             c.seek(committed);
         }
         // Sending can detach the session and invalidate the map entry.
-        if (ulong* live = node.raw in p._live_nodes)
-            *live = committed;
+        if (SyncPeer.LiveNode* live = node.raw in p._live_nodes)
+        {
+            live.position = committed;
+            live.told_gap = told_gap;
+        }
         e.close_series_cursor(c);
         return done;
+    }
+
+    // a store-less held element's only record is its register: position 0 until sent, then 1,
+    // which is where the register lands when a store is created. An unset register is no record:
+    // the peer is told the value is unknown and the position stays.
+    static bool send_register(SyncPeer p, SyncEncoder enc, Element* e, SyncHandle h)
+    {
+        EID node = e.ensure_eid();
+        SyncPeer.LiveNode* next = node.raw in p._live_nodes;
+        if (!next || next.position || next.told_gap || e.data_format.kind == SeriesKind.point || e.last_update == SysTime())
+            return true;
+        bool valued = e.has_value;
+        if (!enc.encode_val(p, h, e))
+            return false;
+        if (SyncPeer.LiveNode* live = node.raw in p._live_nodes)
+        {
+            if (valued)
+                live.position = 1;
+            else
+                live.told_gap = true;
+        }
+        return true;
+    }
+
+    // a held element's stream starts at its latest record, an event series' at the next event
+    static ulong live_start(Element* e)
+        => e.data_format.kind == SeriesKind.point || !e.record_count ? e.record_count : e.record_count - 1;
+
+    // one pinned cursor per stored element, at the lowest position a peer has yet to send
+    void update_pin(Element* e, EID node)
+    {
+        ulong low = ulong.max;
+        foreach (p; peers[])
+        {
+            if (SyncPeer.LiveNode* live = node.raw in p._live_nodes)
+            {
+                ulong pos = live.position & ~SyncPeer.live_parked;
+                if (pos < low)
+                    low = pos;
+            }
+        }
+        ubyte* id = node.raw in sync_pins;
+        if (low == ulong.max)
+        {
+            if (id)
+            {
+                Cursor c = Cursor(e, 0, *id);
+                e.close_series_cursor(c);
+                sync_pins.remove(node.raw);
+            }
+            return;
+        }
+        if (!e.has_history)
+            return;
+        if (!id)
+        {
+            sync_pins.insert(node.raw, e.open_series_cursor(low, true).id);
+            return;
+        }
+        Cursor c = Cursor(e, low, *id);
+        c.seek(low);
     }
 
     bool produce(SyncPeer p)
@@ -591,7 +667,17 @@ nothrow @nogc:
         p._ft_recv.clear();
         p.detach_model_bindings();
         p._model_subs.clear();
+        Array!ulong armed;
+        foreach (raw; p._live_nodes.keys)
+            armed ~= raw;
         p.disarm_all();
+        foreach (raw; armed[])
+        {
+            EID node;
+            node.raw = raw;
+            if (Element* e = resolve_element(node))
+                update_pin(e, node);
+        }
         p._pending_vals.clear();
         p._pending_subs.clear();
         p._pending_live.clear();
@@ -1731,6 +1817,7 @@ nothrow @nogc:
             merge_remote_value(e, *v, t_ms, &on_mirror_write);
         EID eid = e.ensure_eid();
         from.attach_model_element(dev, e, remote_access);
+        update_pin(e, eid);
 
         if (remote_access & Access.write)
             e.subscribe(&on_mirror_write);
@@ -2468,8 +2555,8 @@ nothrow @nogc:
         if (resume != ulong.max)
         {
             idx = resume;
-            if (ulong* live = node.raw in to._live_nodes)
-                *live = idx;
+            if (SyncPeer.LiveNode* live = node.raw in to._live_nodes)
+                live.position = idx;
         }
         resume = ulong.max;
         if (idx == ulong.max)
@@ -2480,8 +2567,8 @@ nothrow @nogc:
         bool park()
         {
             resume = idx;
-            if (ulong* live = node.raw in to._live_nodes)
-                *live = idx | SyncPeer.live_parked;
+            if (SyncPeer.LiveNode* live = node.raw in to._live_nodes)
+                live.position = idx | SyncPeer.live_parked;
             return false;
         }
 
@@ -2519,36 +2606,44 @@ nothrow @nogc:
 
     static void commit_backfill(SyncPeer to, Element* e, ref const RecordBlock blk)
     {
-        if (ulong* live = e.ensure_eid().raw in to._live_nodes)
-            *live = blk.first_index + blk.count;
+        if (SyncPeer.LiveNode* live = e.ensure_eid().raw in to._live_nodes)
+            live.position = blk.first_index + blk.count;
     }
 
     bool introduce_element(SyncPeer p, SyncEncoder enc, Element* e, const(char)[] path, uint gen, bool arm, ulong from_ms, ulong to_ms, ref ulong resume)
     {
         bool backfill = from_ms && e.has_history;
-        if (resume == ulong.max && !send_element(p, enc, e, path, gen, !backfill))
+        if (resume == ulong.max && !send_element(p, enc, e, path, gen, !arm && !backfill))
             return false;
         if (backfill && p.send_ok(gen) && !send_backfill(p, enc, e, from_ms, to_ms, gen, resume))
             return false;
-        if (backfill && e.data_format.kind != SeriesKind.point && p.send_ok(gen))
+        if (!arm && backfill && e.data_format.kind != SeriesKind.point && p.send_ok(gen))
         {
             SyncHandle h = p.handle_of(e.ensure_eid());
             if (h != SyncPeer.invalid_handle && !enc.encode_val(p, h, e))
-                mark_pending_val(p, e);
+                mark_pending_val(p, e.ensure_eid());
         }
-        if (arm && e.data_format.kind == SeriesKind.point && p.send_ok(gen))
-            mark_pending_val(p, e);
+        if (arm && p.send_ok(gen))
+            mark_pending_val(p, e.ensure_eid());
         return true;
     }
 
-    void mark_pending_val(SyncPeer p, Element* e)
+    static void mark_pending_val(SyncPeer p, EID node)
     {
-        EID node = e.ensure_eid();
         if (!node)
             return;
-        foreach (n; p._pending_vals[])
-            if (n == node)
+        if (SyncPeer.LiveNode* live = node.raw in p._live_nodes)
+        {
+            if (live.pending)
                 return;
+            live.pending = true;
+        }
+        else
+        {
+            foreach (n; p._pending_vals[])
+                if (n == node)
+                    return;
+        }
         p._pending_vals ~= node;
     }
 
@@ -2630,7 +2725,8 @@ nothrow @nogc:
         EID node = e.ensure_eid();
         if (!node)
             return;
-        to.arm(e, node, e.record_count);
+        to.arm(e, node, live_start(e));
+        update_pin(e, node);
     }
 
     // Recomputes the armed set from the surviving patterns, so a node stays armed while any
@@ -2655,7 +2751,7 @@ nothrow @nogc:
                     if (!node)
                         return;
                     matched.insert(node.raw, true);
-                    from.arm(e, node, e.record_count);
+                    from.arm(e, node, live_start(e));
                 });
             }
         }
@@ -2670,7 +2766,10 @@ nothrow @nogc:
         {
             EID node;
             node.raw = k;
-            from.disarm(resolve_element(node), node);
+            Element* e = resolve_element(node);
+            from.disarm(e, node);
+            if (e)
+                update_pin(e, node);
         }
     }
 

@@ -15,6 +15,7 @@ import urt.log;
 import urt.mem;
 import urt.meta.enuminfo : enum_key_from_value, enum_from_key, VoidEnumInfo;
 import urt.string;
+import urt.time : SysTime;
 import urt.variant;
 
 import manager.base;
@@ -586,14 +587,13 @@ nothrow @nogc:
         send_frame(peer);
     }
 
-    override bool encode_val(SyncPeer peer, SyncHandle h, Element* e)
+    override bool encode_val(SyncPeer peer, SyncHandle h, ref Variant v, SysTime t)
     {
         import urt.time : unix_time_ns;
 
         begin_frame("val");
         _buf.append(",\"h\":", h);
-        _buf.append(",\"s\":[[", unix_time_ns(e.last_update) / 1_000_000, ',');
-        Variant v = e.value;
+        _buf.append(",\"s\":[[", unix_time_ns(t) / 1_000_000, ',');
         write_variant(v);
         _buf ~= "]]";
         return send_frame(peer, TxQueue.val) >= 0;

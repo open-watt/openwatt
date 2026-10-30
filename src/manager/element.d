@@ -422,6 +422,8 @@ nothrow @nogc:
     {
         if (!has_value && _last_update != SysTime())
             return;     // already unknown, since _last_update
+        if (has_value && !_history && _sync_peers)
+            create_sync_store();    // before _last_update moves: it seeds record 0 with the value's own time
         if (t > last_update)
             last_update = t;
         _last_update = last_update;
@@ -693,7 +695,8 @@ public:
         _subs = n;
     }
 
-    // a write enlists in the dirty sweep while any sync peer has the element armed
+    // a write enlists in the dirty sweep while any sync peer has the element armed, and its
+    // first real change creates a store for them if the element has none
     package(manager) uint sync_peers() const pure
         => _sync_peers;
 
@@ -708,6 +711,20 @@ public:
         debug assert(_sync_peers, "unbalanced sync_disarm");
         --_sync_peers;
     }
+
+    // whether the value stopped holding before record index (at head: whether the tail ended), and when
+    package(manager) bool gap_before(ulong index, out SysTime start)
+    {
+        if (!_history || !index)
+            return false;
+        Bucket* b = _history.find_by_index(index - 1);
+        if (!b || !b.ended || index != b.first_index + b.count)
+            return false;
+        const(DataFormat)* f = format_info(b.format);
+        start = f.clock ? f.clock.to_wall(b.end_tick) : b.last_time;
+        return true;
+    }
+
 
     void unsubscribe(Subscriber callback)
     {
@@ -732,17 +749,23 @@ public:
             _history = alloc!SeriesStore();
             g_historical_elements ~= &this;
 
-            // a held register value becomes record 0; the store owns it once it lands and the
-            // register releases, so only one of the two ever holds the value
+            // a held register value becomes record 0; a text or wide register releases once the
+            // store holds it, while a scalar register stays the read path. An event is not state,
+            // so an event register is released, never recorded.
             if (format.valid && has_value)
             {
-                if (data_format.is_text)
+                SysTime[1] held_time = _last_update;
+                if (data_format.kind != SeriesKind.held)
+                    release_register();
+                else if (data_format.is_text)
                     append_text(text_register()[], unix_time_ns(_last_update) / 1000);
-                else if (data_format.is_wide && wide_register())
+                else if (data_format.is_wide)
                 {
-                    SysTime[1] held_time = _last_update;
-                    append(wide_register()[0 .. data_format.stride], held_time[]);
+                    if (wide_register())
+                        append(wide_register()[0 .. data_format.stride], held_time[]);
                 }
+                else
+                    append(_latest.raw[0 .. data_format.stride], held_time[]);
             }
         }
         return _history;
@@ -953,6 +976,7 @@ private:
     SeriesStore* _history;
 
     enum min_bucket_bytes = 32;
+    version (Tiny) enum sync_store_max_records = 128; else enum sync_store_max_records = 1024;
     enum bucket_capacity = 256; // TODO: scale with rate (target a time span, not a record count)
     enum text_bucket_capacity = 64;     // text series are low-rate; keep resident buckets small
     // u16 record offsets cap the bucket heap at 64k; a small target cannot serve that much contiguous
@@ -1048,6 +1072,8 @@ private:
 
     bool apply(ref SampleUpdate update)
     {
+        if (!_history && _sync_peers)
+            create_sync_store();
         if (data_format.is_scalar)
         {
             _latest.u = 0;
@@ -1091,6 +1117,8 @@ private:
             previous = record_value();
         SysTime previous_timestamp = last_update;
 
+        if (!_history && _sync_peers)
+            create_sync_store();
         if (_history)
         {
             if (!append_text(v, unix_time_ns(t) / 1000))
@@ -1404,9 +1432,10 @@ private:
                        || (max_age_ticks && newest - front.last_tick > max_age_ticks);
             if (!forced)
             {
-                if (!h.min_records && !h.min_age)
+                // with no floor a bucket goes once every pin is past the record after it, keeping a pin's unsent gap
+                if (!h.min_records && !h.min_age && (floor == ulong.max || front.first_index + front.count >= floor))
                     break;
-                if (!flushed && front.first_index + front.count > floor)
+                if (!flushed && front.first_index + front.count >= floor)
                     break;
                 if (h.min_records && h.head - front.first_index - front.count < h.min_records)
                     break;
@@ -1479,6 +1508,11 @@ private:
             free((cast(void*)b.offsets)[0 .. capacity * uint.sizeof]);
         free((cast(void*)b)[0 .. Bucket.sizeof]);
         return null;
+    }
+
+    void create_sync_store()
+    {
+        ensure_history().max_records = sync_store_max_records;
     }
 
     uint start_capacity(uint n, bool follows_full, uint limit) const
@@ -2064,7 +2098,7 @@ unittest
     foreach (_; 0 .. 4)
         pinc.next(1);
     p.write_sample(6.0, from_unix_time_ns(7_000_000));
-    assert(p._history.first_index == 4);
+    assert(p._history.first_index == 3);    // the bucket before the pin keeps the gap it ended in
     p.close_series_cursor(pinc);
     p.teardown();
 
@@ -2114,7 +2148,7 @@ unittest
     assert(mp._history.first_index == 0);
     mp.close_series_cursor(lag);
     mp.write_sample(5.0, from_unix_time_ns(6_000_000));
-    assert(mp._history.first_index == 3);
+    assert(mp._history.first_index == 2);
     mp.close_series_cursor(lead);
     mp.teardown();
 
@@ -2240,7 +2274,7 @@ unittest
     assert(lit.text_value == "Fronius" && lit.text_value.ptr is brand.ptr);
     lit.teardown();
 
-    // a register write still enlists in the dirty sweep: no store must not mean no live feed
+    // an armed element's first change creates a sync store and enlists in the dirty sweep
     Element text_feed;
     Element wide_feed;
     text_feed.format = register_format(text_fmt);
@@ -2257,9 +2291,43 @@ unittest
     wide_feed.sync_disarm();
     sweep_dirty(&count_swept);
     assert(swept == 2);
-    assert(!text_feed.has_history && !wide_feed.has_history);
+    assert(text_feed.has_history && text_feed.record_count == 1);
+    assert(wide_feed.has_history && wide_feed.record_count == 1);
+    assert(text_feed._history.max_records == Element.sync_store_max_records);
     text_feed.teardown();
     wide_feed.teardown();
+
+    // a store created over a held value starts with that value as record 0, a scalar's too
+    Element held_scalar;
+    held_scalar.format = register_format(f64_held);
+    held_scalar.write_sample(5.0, from_unix_time_ns(1_000_000));
+    assert(!held_scalar.has_history);
+    held_scalar.sync_arm();
+    held_scalar.write_sample(6.0, from_unix_time_ns(2_000_000));
+    assert(held_scalar.record_count == 2 && held_scalar.latest_record.f64_ == 6.0);
+    RecordBlock hb = held_scalar.read_records(0, 4);
+    assert(hb.count == 2 && hb.get!double(0) == 5.0 && hb.time(0) == from_unix_time_ns(1_000_000));
+    held_scalar.sync_disarm();
+    held_scalar.teardown();
+
+    // an invalidation that creates the store keeps the value at its own time and starts the gap at its own
+    Element lapsed;
+    lapsed.format = register_format(f64_held);
+    lapsed.write_sample(5.0, from_unix_time_ns(1_000_000));
+    lapsed.sync_arm();
+    lapsed.invalidate(from_unix_time_ns(3_000_000));
+    RecordBlock db = lapsed.read_records(0, 4);
+    SysTime gap_start;
+    assert(db.count == 1 && db.time(0) == from_unix_time_ns(1_000_000));
+    assert(lapsed.gap_before(1, gap_start) && gap_start == from_unix_time_ns(3_000_000));
+
+    // a pin's unsent gap outlives eviction: the ended bucket before it stays while the next value lands
+    Cursor sent = lapsed.open_series_cursor(1, true);
+    lapsed.write_sample(7.0, from_unix_time_ns(4_000_000));
+    assert(lapsed.gap_before(1, gap_start) && gap_start == from_unix_time_ns(3_000_000));
+    lapsed.close_series_cursor(sent);
+    lapsed.sync_disarm();
+    lapsed.teardown();
 
     // heap exhaustion seals the bucket and rolls to a fresh one
     Element th;
