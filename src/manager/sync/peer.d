@@ -84,6 +84,7 @@ nothrow @nogc:
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!SyncPeer, id, flags);
+        _tx_waiter = TxWaiter(&produce_tx);
     }
 
     // subscriptions outlive the session, so destruction from any state releases them
@@ -578,8 +579,8 @@ protected:
             detach_transport();
             close_udp_endpoint();
         }
-        else if (BaseInterface transport = _transport)
-            transport.release_tx_handler(&produce_tx);
+        else
+            _tx_waiter.cancel();
 
         // Peer-derived tap state dies with the stream; the desire to receive
         // (_want_*) persists so a reconnect re-subscribes.
@@ -917,7 +918,7 @@ package:
         if (uses_udp_endpoint)
             produce_tx(null);
         else
-            _transport.tx_handler(&produce_tx);
+            _transport.wait_tx(_tx_waiter);
     }
 
     // burst protocol: begin_burst, send, check send_ok after every send; refusal or teardown ends it
@@ -1099,6 +1100,7 @@ private:
         ObjectRef!BaseInterface _transport;
         UDPEndpoint* _udp_endpoint;
     }
+    TxWaiter                _tx_waiter;
     InetAddress             _remote_addr;
     InetAddress             _remote;
     ubyte[16]               _local_nonce;
@@ -1347,12 +1349,11 @@ private:
 
     void detach_transport()
     {
+        _tx_waiter.cancel();
         // the endpoint shares the transport's storage
         if (uses_udp_endpoint)
             return;
         BaseInterface transport = _transport;
-        if (transport)
-            transport.release_tx_handler(&produce_tx);
         if (!(_peer_flags & PeerFlags.transport_subscribed))
             return;
         if (transport)
@@ -1828,8 +1829,8 @@ unittest
             _state = State.running;
             set_link(true);
         }
-        override bool tx_ready() const
-            => pending < cap;
+        override ubyte tx_floor() const
+            => pending < cap ? 0 : tx_full;
         override int transmit(Packet* packet, MessageCallback, const(QueuePolicy)*)
         {
             scope (exit) packet_free(packet);
@@ -2204,10 +2205,8 @@ unittest
         {
             _caps = on ? cast(InterfaceCaps)(InterfaceCaps.reliable | InterfaceCaps.ordered) : InterfaceCaps.none;
         }
-        override bool tx_ready() const
-            => frames.length < room;
-        // a bounded link: the producer is invited when the test drains it, never inline
-        override void tx_handler_changed() {}
+        override ubyte tx_floor() const
+            => frames.length < room ? 0 : tx_full;
         override int transmit(Packet* packet, MessageCallback, const(QueuePolicy)*)
         {
             scope (exit) packet_free(packet);
@@ -2241,6 +2240,8 @@ unittest
             return CompletionStatus.complete;
         }
         uint resets;
+        // producing needs the sync module; a held turn is what the tests observe
+        bool hold(BaseInterface) => true;
     }
 
     Capture link = Collection!Capture().create("sync-test-capture");
@@ -2253,6 +2254,7 @@ unittest
         Collection!Capture().table.free_pending();
     }
     peer._transport = link;
+    peer._tx_waiter.handler = &peer.hold;
     link.reliable(true);
     assert(link.mtu(200) is null && peer.send_limit == 200);
 
@@ -2375,6 +2377,7 @@ unittest
     scope (exit) g_encoders[peer._encoder] = previous;
 
     remote._transport = link_b;
+    remote._tx_waiter.handler = &remote.hold;
     link.reliable(false);
     link_b.reliable(false);
     peer._remote_segment = 0;
@@ -2445,10 +2448,10 @@ unittest
         assert(remote._frag_rx[] == large[0 .. remote._frag_rx.length]);
         link_b.frames.clear();
         remote.update();
-        link.release_tx_handler(link.tx_handler);
+        peer._tx_waiter.cancel();
         foreach (ref f; link_b.frames[])
             peer.deliver_frame(f[]);
-        assert(peer._resend.empty && link.tx_handler !is null);
+        assert(peer._resend.empty && peer._tx_waiter.waiting);
         peer.pump_fragments();
         ++rounds;
     }
@@ -2467,9 +2470,9 @@ unittest
     link.frames.clear();
     link_b.frames.clear();
     remote.update();
-    link.release_tx_handler(link.tx_handler);
+    peer._tx_waiter.cancel();
     peer.deliver_frame(link_b.frames[0][]);
-    assert(link.frames.length == 1 && peer._queues[0].backlog.length == 1 && link.tx_handler !is null);
+    assert(link.frames.length == 1 && peer._queues[0].backlog.length == 1 && peer._tx_waiter.waiting);
 
     // a bulk producer stops short of evicting: the backlog keeps room for one more segment or reports none
     assert(peer.val_room());
@@ -2520,10 +2523,10 @@ unittest
 
         // a full transport invites the peer back, and the peer keeps its turn until the console drains
         link.frames.clear();
-        link.release_tx_handler(link.tx_handler);
+        peer._tx_waiter.cancel();
         link.room = 0;
         assert(stream.send_bytes(text[]) && link.frames.length == 0);
-        assert(link.tx_handler is &peer.produce_tx, "a full transport arms the peer");
+        assert(peer._tx_waiter.waiting, "a full transport arms the peer");
         link.room = 4;
         assert(peer.produce_console() && link.frames.length == 4);
         link.room = size_t.max;
@@ -2536,11 +2539,11 @@ unittest
         while (!peer.tx_blocked())
             assert(peer.transmit_frame(ping[]) == 0);
         size_t held = link.frames.length;
-        link.release_tx_handler(link.tx_handler);
-        assert(stream.send_bytes(text[]) && link.frames.length == held && link.tx_handler is null);
+        peer._tx_waiter.cancel();
+        assert(stream.send_bytes(text[]) && link.frames.length == held && !peer._tx_waiter.waiting);
         assert(!peer.produce_console() && stream.tx_queued() == text.length, "a starved window waits for the ack");
         peer.release_control(peer._tx_seq);
-        assert(link.tx_handler is &peer.produce_tx);
+        assert(peer._tx_waiter.waiting);
         assert(!peer.produce_console() && stream.tx_queued() == 0);
 
         // a code point cut between pages goes out whole, though the line is full when it completes

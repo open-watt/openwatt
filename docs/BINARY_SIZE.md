@@ -109,6 +109,7 @@ Limit is the 4 MB `ota_0` partition. `ram` is internal DRAM only; PSRAM is heap.
 | 2026-10-19 | #862 | ldc 1.42.0 | 2,995,376 | 141,887 | 4,194,304 | `COREDUMP=1`; a bucket ends when its final value stopped holding (64-bit end, held header rewrite for a flushed end, other formats truncated), `mark_gap` gone; on master d4ecb1a3, whose size was not recorded |
 | 2026-10-20 | #857 | ldc 1.42.0 | 2,997,808 | 141,887 | 4,194,304 | `COREDUMP=1`; held elements stream every record and their gaps, sync stores, the shared pin, pending marks on the node: +2,432 over #862 (2,995,376) |
 | 2026-10-30 | #865 | ldc 1.42.0 | 2,997,824 | 141,887 | 4,194,304 | `COREDUMP=1`; reads answer with seq-tagged `val`s through one sample-frame encoder, bundled, `history_req` and the value in `add` gone, `index_for_time` exact: -2,144 over master b0b2f318 (2,999,968, #857 merged); deployed to 4547 |
+| 2026-11-01 | ow/tx-floor | ldc 1.42.0 | 2,998,416 | 141,887 | 4,194,304 | `COREDUMP=1`; interfaces admit by class (`tx_floor`) and invite waiting producers in turn, UDP sends carry a PCP and DSCP: +336 over master 6b8d0672a (2,998,080) |
 
 ### ESP32-C5 DevKitC-1, `make esp-idf-build PLATFORM=esp32-c5 CONFIG=release`
 
@@ -215,6 +216,7 @@ a netbooted image is bounded by RAM instead.
 | 2026-10-08 | #825 | ldc 1.43.0 | 2,646,184 | 186,238 | 4,190,208 | doorbells: -592 flash, +128 ram for the handler table; D0 1,012,294 flash, 88,104 ram |
 | 2026-10-08 | ow/console-prints | ldc 1.43.0 | 2,647,864 | 186,266 | 4,190,208 | M0 packing D0 (1,009,089 flash, 88,144 ram); console tables and `/system/fs/read` print through the stream's pull |
 | 2026-10-10 | ow/http-respond | ldc 1.43.0 | 2,639,768 | 186,258 | 4,190,208 | M0 packing D0 (1,008,331 flash, 88,144 ram); console output and HTTP responses are producers the stream pulls |
+| 2026-11-01 | ow/tx-floor | ldc 1.43.0 | 2,652,664 | 186,266 | 4,190,208 | M0 packing D0 (1,013,088 flash, 88,168 ram); interfaces admit by class and invite waiting producers in turn |
 
 ### BL618, `make PLATFORM=bl618 CONFIG=release`
 

@@ -365,9 +365,9 @@ Settled design that is not built, tracked in [TODO.md](../TODO.md) under *Sync a
 - **Backpressure as a channel property.** Producers ask for room and suspend; control rides PCP >=
   ca with DEI=0.
   The bulk control walks (registry introduction, model introduction, live re-arm) run as the
-  transport's `tx_handler`: the interface invites the peer, the walk asks `tx_ready` before every
-  frame and returns whether it wants another invitation, and a bounded transport such as the
-  websocket re-invites as its queue drains. Admission is the transport's answer about its own
+  peer's transmit waiter on the transport: the interface invites the peer, the walk asks `tx_ready`
+  before every frame and returns whether it wants another invitation, and a bounded transport such
+  as the websocket re-invites as its queue drains. Admission is the transport's answer about its own
   queue, framing included, so the producer keeps no byte account that could drift from it. The
   unit of suspension is one frame: a feed or a read parks between frames and resumes at the
   record it stopped on, and template refreshes ride the same feed. Where the reliability

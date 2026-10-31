@@ -141,6 +141,7 @@ nothrow @nogc:
             _pending.remove(t);
         }
         _queue.abort(t);
+        invite_tx();
     }
 
     final override MessageState msg_state(int msg_handle) const
@@ -151,6 +152,9 @@ nothrow @nogc:
             return MessageState.queued;
         return MessageState.complete;
     }
+
+    final override ubyte tx_floor() const
+        => _queue.floor();
 
 //package: // TODO: should this be hidden in some way?
     void attach_coordiantor(ZigbeeCoordinator coordinator)
@@ -459,6 +463,7 @@ private:
                 _queue.complete(frame.tag, MessageState.failed);
             }
         }
+        invite_tx();
     }
 
     ZigbeeResult send_message(ubyte tag, ref const APSFrame hdr, const(ubyte)[] data, ubyte priority = 1)

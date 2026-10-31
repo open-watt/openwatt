@@ -72,8 +72,8 @@ nothrow @nogc:
     }
 
     // Leaves room in the ring for a frame that cannot wait for it.
-    override bool tx_ready() const
-        => link_up && xram_writable(_channel);
+    override ubyte tx_floor() const
+        => link_up && xram_writable(_channel) ? 0 : tx_full;
 
     // The ring is the queue: a frame it cannot take is dropped.
     override int transmit(Packet* packet, MessageCallback, const(QueuePolicy)*)
@@ -175,8 +175,7 @@ private:
             incoming_packet(&p.packet);
             xram_release(_channel);
         }
-        if (tx_ready)
-            invite_tx();
+        invite_tx();
     }
 }
 

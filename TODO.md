@@ -1311,7 +1311,7 @@ this is what remains.
   per frame against a 50ms budget, also pre-existing, with occasional 500-600ms spikes.
 
 - **Make backpressure a channel property**: the bulk walks (registry and model introduction,
-  live re-arm, history backfill, template refresh) now run as the transport's `tx_handler` and ask
+  live re-arm, history backfill, template refresh) now run as the peer's transmit waiter and ask
   `tx_ready` before every frame, so a model larger than the websocket's 128 KB bound mirrors
   instead of restarting the session, and a paced queue holds 16 KB plus one frame.
   Every other emitter still pushes: the `val` and `log` queues (`flush_pending_vals` drains an
@@ -1401,6 +1401,25 @@ this is what remains.
   control plane, and make the mirror re-evaluate its peer binding.
 
 ## Infrastructure
+
+- **Egress admission follow-ups** (2026-11-01): interfaces admit by `tx_floor()` and invite
+  classless waiters a frame per turn; what that left open:
+  - Ethernet and Wi-Fi never refuse: their `tx_floor()` is 0, so nothing waits and PCP only orders
+    traffic where a queue exists. A small transmit backlog limit per driver (BQL-style) is what
+    makes priority real there.
+  - Polled buses (Modbus, RS485) need a per-destination grant with a frame/byte budget, so a
+    response slot for node A invites only A's waiters. Wanted once an address family carries
+    per-destination traffic on them.
+  - `PriorityPacketQueue.admit_limit` (4 frames per class step) is a first guess; tune it against a
+    real slow link.
+  - Rounds are frame-fair, not byte-fair; add a byte budget if mixed frame sizes starve someone.
+  - Kernel socket backends drop `sendto`'s PCP: set `IP_TOS`/`IPV6_TCLASS` and `SO_PRIORITY` when it
+    changes (Windows needs qWAVE).
+  - TCP carries no class: give a connection a PCP and mark its segments from `pcp_dscp`.
+  - Ingress: map DSCP to PCP when forwarding and on local delivery, with a per-interface switch that
+    resets untrusted marks to best effort at the internet edge.
+  - `BLEInterface.send_queued_messages` dequeues before checking `submit_capacity()`, so a frame it
+    cannot submit sits in flight, unsent, until the transport timeout.
 
 - **`protocol.ip`'s TCP drain test is flaky** (2026-10-16): "one invitation drains what fits in its
   turn" (`src/protocol/ip/package.d`) asserts that a 32 KB producer is drained in one invitation over a

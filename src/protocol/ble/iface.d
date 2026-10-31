@@ -205,6 +205,7 @@ nothrow @nogc:
             _pending.remove(t);
         }
         _queue.abort(t);
+        invite_tx();
     }
 
     final override MessageState msg_state(int msg_handle) const
@@ -215,6 +216,9 @@ nothrow @nogc:
             return MessageState.queued;
         return MessageState.complete;
     }
+
+    final override ubyte tx_floor() const
+        => _queue.floor();
 
     final BLESession* find_session_by_peer(MACAddress peer)
     {
@@ -472,7 +476,7 @@ protected:
         for (QueuedFrame* frame = _queue.dequeue(); frame !is null; frame = _queue.dequeue())
         {
             if (!submit_capacity())
-                return;
+                break;
 
             version (DebugBLEInterface)
                 log_frame(frame.packet.hdr!BLEFrame, cast(const(ubyte)[])frame.packet.data, PacketDirection.outgoing);
@@ -488,6 +492,7 @@ protected:
             else
                 _queue.complete(frame.tag, MessageState.failed);
         }
+        invite_tx();
     }
 
     final void on_frame_complete(int tag, MessageState state)

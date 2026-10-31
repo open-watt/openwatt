@@ -5,7 +5,7 @@ import urt.mem;
 import urt.mem.freelist;
 import urt.time;
 
-import router.iface : BaseInterface, MessageCallback, MessageState, TagAllocator;
+import router.iface : BaseInterface, MessageCallback, MessageState, TagAllocator, tx_full;
 import router.iface.packet;
 
 nothrow @nogc:
@@ -68,6 +68,15 @@ nothrow @nogc:
 
     bool has_pending() const pure
         => _queued_count > 0;
+
+    // bulk only fills the shallow end, so an urgent frame finds little ahead of it
+    ubyte floor() const pure
+    {
+        foreach (ubyte rank, limit; admit_limit)
+            if (_queued_count < limit)
+                return rank;
+        return tx_full;
+    }
 
     bool has_capacity(PCP pcp = PCP.nc) const pure
     {
@@ -266,6 +275,7 @@ nothrow @nogc:
 private:
 
     enum _max_queue_depth = 32;
+    static immutable ubyte[8] admit_limit = [4, 8, 12, 16, 20, 24, 28, _max_queue_depth];
 
     // buckets indexed by rank (0=lowest priority, 7=highest), NOT by PCP value
     Array!(QueuedFrame*)[8] _buckets;
@@ -468,10 +478,12 @@ unittest
 
     int newest_background_tag;
     int next_background_tag;
+    assert(queue.floor() == 0);
     foreach (i; 0 .. 32)
     {
         int tag = queue.enqueue(&background);
         assert(tag > 0);
+        assert(queue.floor() == (i + 1 < 32 ? (i + 1) / 4 : tx_full), "each class admits four frames above the class below");
         next_background_tag = newest_background_tag;
         newest_background_tag = tag;
     }

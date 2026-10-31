@@ -260,6 +260,9 @@ nothrow @nogc:
         => ver_ihl & 0x0F;
 }
 
+// The DSCP of each PCP, by PCP value; the IPv4 TOS and IPv6 traffic class carry it shifted left 2.
+immutable ubyte[8] pcp_dscp = [0, 8, 18, 24, 34, 46, 48, 56];
+
 struct IPv6Header
 {
 nothrow @nogc:
@@ -1848,10 +1851,10 @@ nothrow @nogc:
         }
     }
 
-    ptrdiff_t sendto(scope const(void)[] data, InetAddress dst)
+    ptrdiff_t sendto(scope const(void)[] data, InetAddress dst, PCP pcp)
     {
         version (UseInternalIPStack)
-            return udp_send(*_stack_ptr, _pcb, dst, cast(const(ubyte)[])data) ? data.length : 0;
+            return udp_send(*_stack_ptr, _pcb, dst, cast(const(ubyte)[])data, pcp) ? data.length : 0;
         else version (Windows)
         {
             if (_handle == INVALID_SOCKET || data.length == 0)

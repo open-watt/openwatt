@@ -312,13 +312,8 @@ protected:
         return 0;
     }
 
-    override void tx_handler_changed()
-    {
-        pull_tx();
-    }
-
-    override bool tx_ready() const
-        => !_tx_waiter.queued && tx_queued < tx_low_water;
+    override ubyte tx_floor() const
+        => !_tx_waiter.queued && tx_queued < tx_low_water ? 0 : tx_full;
 
 private:
     ObjectRef!Stream _stream;
@@ -331,7 +326,6 @@ private:
     bool _subscribed;
     bool _close_sent;
     bool _tx_closing;
-    bool _tx_pulling;
     bool _upgraded;
 
     HTTPParser* _handshake_parser; // non-null while client handshake is in flight
@@ -693,14 +687,9 @@ private:
 
     void pull_tx()
     {
-        if (_tx_pulling || _tx_closing)
+        if (_tx_closing)
             return;
-        if (tx_ready)
-        {
-            _tx_pulling = true;
-            invite_tx();
-            _tx_pulling = false;
-        }
+        invite_tx();
         arm_tx();
     }
 

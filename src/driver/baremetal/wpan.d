@@ -69,6 +69,7 @@ nothrow @nogc:
     {
         debug assert(msg_handle > 0 && msg_handle <= 0xFF, "invalid msg_handle");
         _queue.abort(cast(ubyte)msg_handle, reason);
+        invite_tx();
     }
 
     final override MessageState msg_state(int msg_handle) const
@@ -79,6 +80,9 @@ nothrow @nogc:
             return MessageState.queued;
         return MessageState.complete;
     }
+
+    final override ubyte tx_floor() const
+        => _queue.floor();
 
 protected:
 
@@ -192,15 +196,16 @@ private:
         {
             QueuedFrame* frame = _queue.dequeue();
             if (frame is null)
-                return;
+                break;
             if (wpan_tx(_wpan, cast(const(ubyte)[])frame.packet.data, _cca).succeeded)
             {
                 _in_flight = frame.tag;
-                return;
+                break;
             }
             add_tx_drop();
             _queue.complete(frame.tag, MessageState.failed);
         }
+        invite_tx();
     }
 
     void on_tx_done(WpanTxError error)
