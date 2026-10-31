@@ -318,6 +318,7 @@ nothrow @nogc:
             _pending.remove(t);
         }
         _queue.abort(t);
+        invite_tx();
     }
 
     final override MessageState msg_state(int msg_handle) const
@@ -328,6 +329,9 @@ nothrow @nogc:
             return MessageState.queued;
         return MessageState.complete;
     }
+
+    final override ubyte tx_floor() const
+        => _queue.floor();
 
 protected:
 
@@ -780,6 +784,7 @@ private:
             if (pm.callback)
                 pm.callback(tag, MessageState.in_flight);
         }
+        invite_tx();
     }
 
     void on_frame_complete(int tag, MessageState state)

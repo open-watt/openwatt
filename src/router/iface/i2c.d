@@ -194,6 +194,7 @@ nothrow @nogc:
         if (tag != _active_tag)
         {
             _queue.abort(tag, reason);
+            invite_tx();
             return;
         }
         // The bus still owns the frame's buffers; it retires silently when the transfer ends.
@@ -216,6 +217,9 @@ nothrow @nogc:
             return MessageState.in_flight;
         return MessageState.complete;
     }
+
+    override ubyte tx_floor() const
+        => _queue.floor();
 
 protected:
 
@@ -370,6 +374,7 @@ private:
             _queue.complete(_active_tag, MessageState.failed);
             _active_tag = 0;
         }
+        invite_tx();
         return accepted;
     }
 

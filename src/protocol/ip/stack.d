@@ -824,6 +824,8 @@ private:
         eth.dst = dst;
         eth.ether_type = ver == 6 ? EtherType.ip6 : EtherType.ip4;
         framed.checksum_pending = pkt.checksum_pending;
+        framed.pcp = pkt.pcp;
+        framed.dei = pkt.dei;
         station.forward(&framed.packet);
     }
 

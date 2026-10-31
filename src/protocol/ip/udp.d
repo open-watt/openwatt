@@ -16,7 +16,7 @@ import router.iface;
 import router.iface.endpoint : UdpHeader;
 import router.iface.packet;
 
-import protocol.ip : IPv4Header, IPProtocol;
+import protocol.ip : IPv4Header, IPProtocol, pcp_dscp;
 import protocol.ip.address;
 import protocol.ip.icmp;
 import protocol.ip.igmp : igmp_join, igmp_leave;
@@ -265,7 +265,7 @@ void udp_leave_all(ref IPStack stack, UdpPcb* pcb)
 
 // An explicit destination zone must agree with a pinned outbound interface; without one, the pinned interface,
 // then the bound address's zone, pins the link.
-bool udp_send(ref IPStack stack, UdpPcb* pcb, ref const InetAddress dst, const(ubyte)[] payload)
+bool udp_send(ref IPStack stack, UdpPcb* pcb, ref const InetAddress dst, const(ubyte)[] payload, PCP pcp = PCP.be)
 {
     if (dst.family != pcb.family)
         return false;
@@ -283,12 +283,12 @@ bool udp_send(ref IPStack stack, UdpPcb* pcb, ref const InetAddress dst, const(u
                     return false;
                 iface = zone;
             }
-            return udp_output6(stack, pcb.local_addr6, pcb.local_port, dst._a.ipv6.addr, dst.port, iface, payload);
+            return udp_output6(stack, pcb.local_addr6, pcb.local_port, dst._a.ipv6.addr, dst.port, iface, payload, pcp);
         }
     }
     IPAddr remote = dst._a.ipv4.addr;
     IPAddr local = remote.is_multicast && pcb.outbound_interface ? pcb.outbound_interface : pcb.local_addr;
-    return udp_output(stack, local, pcb.local_port, remote, dst.port, payload);
+    return udp_output(stack, local, pcb.local_port, remote, dst.port, payload, pcp);
 }
 
 static if (has_ipv6)
@@ -451,7 +451,7 @@ static if (has_ipv6)
 // Build and emit a UDP datagram with IP header.
 // Caller supplies destination, source (typically 0.0.0.0 -> stack picks egress IP),
 // and the payload bytes. Returns true on success; false if no route, no source, etc.
-bool udp_output(ref IPStack stack, IPAddr src_addr, ushort src_port, IPAddr dst_addr, ushort dst_port, const(ubyte)[] payload)
+bool udp_output(ref IPStack stack, IPAddr src_addr, ushort src_port, IPAddr dst_addr, ushort dst_port, const(ubyte)[] payload, PCP pcp = PCP.be)
 {
     enum size_t max_size = 1500;
     size_t total = IPv4Header.sizeof + UdpHeader.sizeof + payload.length;
@@ -474,7 +474,7 @@ bool udp_output(ref IPStack stack, IPAddr src_addr, ushort src_port, IPAddr dst_
 
     auto ip = cast(IPv4Header*)buf.ptr;
     ip.ver_ihl  = 0x45;
-    ip.tos      = 0;
+    ip.tos      = cast(ubyte)(pcp_dscp[pcp] << 2);
     storeBigEndian(cast(ushort*)&ip.total_length, cast(ushort)total);
     ushort ip_id = next_ip_id();
     storeBigEndian(cast(ushort*)&ip.ident, ip_id);
@@ -497,6 +497,7 @@ bool udp_output(ref IPStack stack, IPAddr src_addr, ushort src_port, IPAddr dst_
     if (payload.length > 0)
         buf[IPv4Header.sizeof + UdpHeader.sizeof .. total] = payload[];
 
+    pkt.pcp = pcp;
     pkt.checksum_pending = true;
     if (iface && (dst_addr.is_multicast || is_broadcast_for_interface(iface, dst_addr)))
         stack.output_v4_routed(pkt, iface, dst_addr);
@@ -509,7 +510,7 @@ static if (has_ipv6)
 {
     // `iface` pins the link for link-local and multicast destinations; it is derived from
     // `src_addr` when null, and global destinations are routed normally.
-    bool udp_output6(ref IPStack stack, IPv6Addr src_addr, ushort src_port, IPv6Addr dst_addr, ushort dst_port, BaseInterface iface, const(ubyte)[] payload)
+    bool udp_output6(ref IPStack stack, IPv6Addr src_addr, ushort src_port, IPv6Addr dst_addr, ushort dst_port, BaseInterface iface, const(ubyte)[] payload, PCP pcp = PCP.be)
     {
         enum size_t max_size = 1500;
         if (IPv6Header.sizeof + UdpHeader.sizeof + payload.length > max_size || dst_addr == IPv6Addr.any)
@@ -529,8 +530,9 @@ static if (has_ipv6)
         Packet* pkt = alloc_datagram(IPv6Header.sizeof + UdpHeader.sizeof + payload.length);
         if (!pkt)
             return false;
-        write_udp6(cast(ubyte[])pkt.payload, src_addr, src_port, dst_addr, dst_port, payload, 64, false);
+        write_udp6(cast(ubyte[])pkt.payload, src_addr, src_port, dst_addr, dst_port, payload, 64, false, cast(ubyte)(pcp_dscp[pcp] << 2));
 
+        pkt.pcp = pcp;
         pkt.checksum_pending = true;
         if (scoped)
             stack.output_v6_routed(pkt, iface, dst_addr);
@@ -539,7 +541,7 @@ static if (has_ipv6)
         return true;
     }
 
-    size_t write_udp6(ubyte[] buffer, IPv6Addr src_addr, ushort src_port, IPv6Addr dst_addr, ushort dst_port, const(ubyte)[] payload, ubyte hop_limit = 64, bool checksum = true)
+    size_t write_udp6(ubyte[] buffer, IPv6Addr src_addr, ushort src_port, IPv6Addr dst_addr, ushort dst_port, const(ubyte)[] payload, ubyte hop_limit = 64, bool checksum = true, ubyte traffic_class = 0)
     {
         size_t udp_len = UdpHeader.sizeof + payload.length;
         size_t total = IPv6Header.sizeof + udp_len;
@@ -548,7 +550,8 @@ static if (has_ipv6)
 
         auto ip = cast(IPv6Header*)buffer.ptr;
         ip.ver_tc_flow[] = 0;
-        ip.ver_tc_flow[0] = 0x60;
+        ip.ver_tc_flow[0] = cast(ubyte)(0x60 | traffic_class >> 4);
+        ip.ver_tc_flow[1] = cast(ubyte)(traffic_class << 4);
         storeBigEndian(cast(ushort*)ip.payload_length.ptr, cast(ushort)udp_len);
         ip.next_header = IPProtocol.udp;
         ip.hop_limit = hop_limit;
@@ -722,6 +725,9 @@ unittest
         assert(parse_udp6(buffer[0 .. total], IPv6Header.sizeof, src_port, dst_port, body_, true));
 
         assert(write_udp6(buffer[0 .. 8], src, 1, dst, 2, payload[]) == 0);
+
+        assert(write_udp6(buffer[], src, 5353, dst, 5353, payload[], 64, true, cast(ubyte)(pcp_dscp[PCP.vo] << 2)) == total);
+        assert(buffer[0] == 0x6B && buffer[1] == 0x80, "voice carries EF in the traffic class");
 
         import manager.base : CID, ObjectFlags;
         import manager.collection : Collection, collection_type_info;
