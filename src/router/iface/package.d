@@ -1140,11 +1140,6 @@ nothrow @nogc:
 
         g_app.console.register_collection!InterfaceGroup();
         g_app.console.register_collection!UDPInterface();
-        static if (has_rdp)
-        {
-            import router.iface.rdp : RDPInterface;
-            g_app.console.register_collection!RDPInterface();
-        }
         g_app.console.register_collection!VLANInterface();
     }
 

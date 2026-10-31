@@ -51,8 +51,8 @@
 #                   DHCP clients and diagnostics stay. Defaults to 1, except
 #                   TINY targets which default to 0.
 #
-#   RDP             RDP=1 builds /interface/rdp, the reliable
-#                   message layer over datagram parents. Defaults to 1,
+#   RDP             RDP=1 builds reliable UDP: rdp_open sessions and
+#                   /interface/udp reliable=. Defaults to 1,
 #                   except TINY targets which default to 0 until a consumer
 #                   (sync over 802.15.4 or RS485) needs it there.
 #

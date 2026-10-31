@@ -946,43 +946,21 @@ lower to send smaller datagrams.
 | `local-port` | `0` to `65535` | `0` | Local port; zero requests an ephemeral port. |
 | `remote-host` | host, address or MAC | none | Default datagram destination. An IPv6 multicast or link-local peer names its link with a zone (`ff02::1%eth0`). |
 | `remote-port` | `1` to `65535` | with remote-host | Default destination port. |
+| `reliable` | `yes`/`no` | `no` | Carry packets over RDP sessions instead of bare datagrams (see below). Needs a unicast `remote-host`, or none. |
 
-### `/interface/rdp`
-
-An RDP interface delivers raw packets reliably over a datagram parent (`/interface/udp`,
-a radio link, a framed serial trunk) with acknowledgement and retransmission: a
-16-frame selective-repeat window tuned for links of hundreds of kbit/s and frames of
-hundreds of bytes. Both ends configure one instance over their side of the link;
-the session opens itself and reopens when either end restarts.
-
-The parent must never deliver a frame later than one window of newer, acknowledged
-frames, because the short sequence number cannot tell such a straggler from fresh
-data. RDP does not enforce this; a supported parent is one whose link provides the
-bound, such as a point-to-point serial link that holds no frame in transit. UDP
-across the internet, where datagrams can be duplicated or held for long periods, is
-not supported.
-
-Consumers submit packets up to `max-message` and receive them whole. The layer packs
-small packets into one parent frame and splits large ones across several, so the
-parent's MTU is invisible above it; over a 1500-byte parent a message is one
-datagram. A packet's PCP selects its lane: packets are delivered in order within a
-lane, and a lost frame holds up only the lanes it carried, except that a new message
-large enough to be split waits until the hole is repaired, since the receiver
-assembles one split message at a time. A frame is cut highest
-lane first, so a small high-priority packet rides at the head of the next frame
-while a long one streams, and a long message yields only to lanes above its own.
-A transmit handle may be aborted mid-message: the remainder is never sent and the
-peer discards what it had assembled. The interface advertises `reliable` and `ordered` in `caps`, `link-status` is up while
-the session is open, and a transmit callback completes when the peer has
-acknowledged every frame of the packet.
-
-| Property | Values | Default | Description |
-| --- | --- | --- | --- |
-| `interface` | interface name | none | Datagram parent carrying the frames. The instance waits for it to run and restarts when it goes offline. |
-| `window` | `1` to `16` | `16` | Frames in flight before the sender waits for an acknowledgement. Lower it on a slow or congested uplink. |
-| `max-message` | `64` to `2040` | `1500` | Largest packet accepted, rounded down to a multiple of 8; the session uses the smaller of the two ends' values, which `actual-mtu` reports. |
-| `rtt` | read-only | | Smoothed round-trip time. |
-| `retransmits` | read-only | | Frames sent more than once. |
+With `reliable=yes` each peer is an RDP session: packets are acknowledged and
+retransmitted, delivered whole and in order, and may be up to 1496 bytes whatever
+the path's datagram size, being packed into datagrams and split across several
+where they do not fit. A unicast `remote-host` holds one session to that peer
+open, with `link-status` up while it is established; without a remote, sessions
+open to any peer that sends one, up to 16, and close when they fail. A packet's
+PCP selects its lane: packets are delivered in order within a lane, a lost
+datagram holds up only the lanes it carried (except that a packet large enough to
+be split waits until the loss is repaired), and a small high-priority packet
+rides ahead of a long one in progress. A transmit handle may be aborted
+mid-packet; the peer discards what it had assembled. The interface advertises
+`reliable` and `ordered` in `caps`, and a transmit callback completes when the
+peer has acknowledged the whole packet. Both ends must set `reliable=yes`.
 
 ### `/interface/wifi`
 

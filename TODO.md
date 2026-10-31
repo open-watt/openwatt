@@ -1210,37 +1210,78 @@ role from a concrete deployment need before implementing or advertising it.
 
 ## Sync and peering
 
-- **Move sync onto `/interface/rdp`** (layer landed 2026-10-20, `src/router/iface/rdp.d`):
-  the reliability sublayer in `src/manager/sync/peer.d` (control retransmission, reorder hold, the
-  val/log refold queues and epochs, session-id echo) duplicates the interface and goes. Sync requires
-  `reliable | ordered` from its transport and never arms its own. Control, console, log and bulk
-  walks ride ordered lanes by PCP; val rides its own lane, uncoalesced, dropping and re-marking dirty
-  on would-block. Then remove the peer-owned UDP endpoint path (`remote=` on `/sync/peer`,
-  `udp_server.d`'s per-source spawn, `peering.d`'s endpoint adoption): the transport is always an
-  interface, and dynamic peers come from per-peer sub-interfaces spawned on a multi-drop UDP trunk
-  (the TODO atop `router/iface/udp.d`), a mechanism shared with 802.15.4 and the RS485 trunk. The
-  last patch is frontend-visible (CLI.md, UX_TODO.md). Target: LOC-neutral beyond the spawn
-  scaffolding. Design record: the memory note `rdp_interface_design`.
+- **Move sync onto RDP sessions** (`rdp_open`, `src/router/iface/rdp.d`): a peer is an address and
+  the session to it is the transport. Goes: the reliability sublayer in `src/manager/sync/peer.d`
+  (control retransmission, reorder hold, the val/log refold queues and epochs, session-id echo,
+  fragmentation), the three `TxQueue`s (control, val and log become lanes by PCP; val uncoalesced,
+  dropping and re-marking dirty on would-block), the dual transport (`_transport` interface path
+  beside `_udp_endpoint`, `sublayer_armed`, `uses_udp_endpoint`), and `udp_server.d`'s per-source
+  spawn (the endpoint's session table demuxes peers). Session events replace the transport state
+  subscription; `writable` replaces the backlog limit. `peering.d` sends to addresses instead of
+  adopting endpoints. Open decision: dropping the interface path means sync reaches only media with an
+  address family, so sync over RS485 and 802.15.4 waits for those families. Frontend-visible where
+  `/sync/peer` properties change (CLI.md, UX_TODO.md). Target: net negative against the sublayer.
+  Design record: the memory note `rdp_interface_design`.
 
-- **`/interface/rdp` allocation-failure coverage**: startup refuses a null table allocation, but no
-  test injects one; add it once the fixture can fail an allocation on demand.
+- **RDP allocation-failure coverage**: session, frame and held-frame allocations fail soft (a send is
+  refused, a frame waits, an early frame is dropped for retransmission), but no test injects a
+  failure; add it once the fixture can fail an allocation on demand.
 
-- **Reject RDP stragglers on WAN UDP** (#869 review): a frame delivered after a full window of newer,
-  acknowledged frames is indistinguishable from fresh data under the 5-bit sequence and 8-bit lane
-  counters; it takes the slot of the real frame with that number and the real one is then dropped as a
-  duplicate. The module states the parent contract (no frame later than one window), which serial,
-  radio and LAN UDP satisfy. For UDP across the internet, authenticate an implicit extended sequence
-  with the planned HMAC trailer, DTLS-style, so the receiver can reject a frame from an earlier
-  generation. The reviewer's delayed-duplicate probe in `.review869-rereview-artifacts/` is the test.
+- **RDP reset frames are not bound to a session**: data and acks check against both nonces and the
+  sequence generations, so a frame held past a sequence cycle or left from an earlier session is
+  dropped, but a reset carries nothing to check. A reset held from an earlier session closes the
+  current one: its messages fail and a held session reopens, nothing is corrupted. Bind it when
+  sessions are authenticated.
 
-- **`/interface/rdp` follow-ups**, each with its header space reserved: a pause flag for flow
-  control (bit 5 of byte 1), needed by a stream tunnel into a slower sink, not by sync; an HMAC
-  trailer as a session property, which also closes the 5-bit straggler window on UDP; delay-based
-  window shrink when a slow WAN uplink shows bufferbloat (fixed window today, `window=` is the
-  knob); a `max-message` the parent cannot carry in one frame on a large-MTU parent is still
-  fragmented rather than refused. BLE connections are already reliable and ordered and must stay
-  bare. Supersedes the CPC generalisation in `docs/TAPS_AND_TUNNELS.draft.md`: CPC and ASH remain
-  Silabs device drivers.
+- **RDP follow-ups**, each with its header space reserved: a pause flag for flow control (bit 5 of
+  byte 1), needed by a stream tunnel into a slower sink, not by sync; a congestion window (AIMD on the
+  existing loss and RTT signals, delay-based shrink for bufferbloat), mandatory before RDP crosses
+  the internet; frames are cut as soon as the window allows and carry no PCP to the link, because
+  `UDPEndpoint` has neither a readiness signal nor a priority on `sendto`, so on a slow or polled
+  link (the RS485 trunk) frames queue in the egress instead of waiting to be cut, and a small urgent
+  message preempts only at the window boundary; frame size assumes a 1500-byte link per family
+  until the endpoint reports a path MTU (PLPMTUD, RFC 8899, belongs there too). BLE connections are
+  already reliable and ordered and must stay bare. Supersedes the CPC generalisation in
+  `docs/TAPS_AND_TUNNELS.draft.md`: CPC and ASH remain Silabs device drivers.
+
+- **Authenticated RDP sessions, then the internet profile**: a Noise handshake (XX, or IK for a
+  known peer) negotiated by the open's flags byte, node identity a Curve25519 key signed by a fleet
+  key so fleet members are accepted without per-connection credentials, and a keyed tag per burst
+  in the check slot covering the extended sequence. Services read the verified node ID from the
+  session; TLS is never layered over RSP between fleet members (a stream reports itself secured).
+  Then for internet paths: rekey on a timer and byte count, a stateless cookie before any session
+  state or DH work, an amplification limit for unvalidated addresses, sessions keyed by session ID
+  so a NAT rebinding roams, and congestion control. Gated by a feature flag; TINY leaves on a trusted
+  bus keep unauthenticated sessions.
+
+- **RSP: stream sockets on families without TCP**: a thin `Stream` over one ordered lane of an RDP
+  session (write cuts messages at the session limit or on idle, completions bound the transmit
+  buffer, a final message closes). A TCP socket to a family without real TCP aliases it, keeping
+  listen/accept, half-close, reset reporting and sensible option behaviour, chosen at the endpoint
+  dispatch the way `udp_open` branches by family. Then delete ether-TCP (`set_ether_tcp_input` and
+  the ether branches in `protocol/ip/tcp.d` and `package.d`) for RSP over ether, so TCP is an
+  IP-only component and switch tiers get streams without the TCP engine; that supersedes #553's
+  ether-TCP motivation (keep its dual-bind idea: servers answer at `[station-mac]:port` over RSP).
+  Trigger: the first stream consumer on a family without TCP. Watch for bulk RSP on a shared
+  segment before congestion control exists.
+
+- **TINY leaf profile without TCP or TLS**: a fleet leaf managed through a gateway needs neither;
+  browsers reach the gateway, the console is sync's, outside brokers terminate at the gateway. Saves
+  far more than RDP costs there. Prerequisites: sync-native enrolment for a blank leaf (the fleet
+  key work), and OTA over RDP including the bootguard firmware trial (which also closes the open
+  OTA port). Leaves on the gateway's L2 segment can then drop `protocol/ip` too, as BK7231N does.
+
+- **L2 datagram fragmentation for plain UDP on small-frame families**, when a consumer needs
+  unreliable datagrams larger than a frame (tag and offset, whole datagram lost on any loss). RDP
+  keeps its own fragmentation above loss repair and cuts to the raw frame size underneath.
+
+- **Fleet mesh as an address family** (deferred): node IDs as routable addresses
+  (`[abcdef1234]:port`), routed over peering links with next hops resolved through the existing
+  families, so any service is reachable across the fleet and sync's forwarding and relay become
+  routing. Trigger: a second fleet service beyond model replication, or routed multi-hop over mixed
+  media in a real deployment. Costs a routing protocol, per-hop headers (elided for link-local
+  delivery), path MTU across hops, and a firewall on the family, since every port becomes reachable
+  to every member. Order: authenticated sessions first, with node IDs derived from keys.
 
 - **Sync produces on demand** (2026-10-18): sources tell sync that data waits (dirty state, new log
   lines, new samples, pending replies), sync arms its transport, and the transport pulls pages that
@@ -1395,13 +1436,13 @@ this is what remains.
   cores.
 
 - **Build the remaining transports**: the sibling class for BL808 M0/D0 (raw EIDs as handles; the
-  cores peer today over `/interface/xram`), `/interface/rdp` over a framed UART/SPI
+  cores peer today over `/interface/xram`), RDP sessions over a framed UART/SPI
   point link (I2C deferred until a data-ready GPIO exists), the RS485 multi-drop envelope (valid
   Modbus RTU frames with a user-space function code, token is the poll, one scheduler shared with
   the Modbus master, per-slave baud as addressing metadata from day one), and one-way multicast
   feeds (publisher-owned handle namespace, gap detection by datagram seq, unicast backfill, never
-  acks on the group). The RS485 trunk is the poll master and hosts `/interface/rdp` per
-  slave. RS485 slave-to-slave goes through the master first;
+  acks on the group). The RS485 trunk is the poll master and hosts an RDP session per
+  slave address. RS485 slave-to-slave goes through the master first;
   multicast groups are configured before derived.
 
 - **Take the fleet to micros and to the box**: `conf/fleet.id` and `conf/node.id` need an NVS
@@ -1435,7 +1476,7 @@ this is what remains.
 ## Infrastructure
 
 - **Element-backed properties cost more image than synthesised ones** (measured 2026-10-31 on the
-  Waveshare S3 release while sizing `/interface/rdp`): converting six scalar `Prop!`s to `Elem!`
+  Waveshare S3 release while sizing RDP): converting six scalar `Prop!`s to `Elem!`
   took 829 bytes out of the module but added 2,109 to the image. `ElemFormat` is instantiated per
   declaration (about 140 bytes each, six declarations), and each value type new to the image pulls
   `Element.try_write!T` and `from_variant!T` (250 to 320 bytes each; `ushort`, `ulong` and the
