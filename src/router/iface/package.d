@@ -89,8 +89,36 @@ enum MessageState
 
 alias MessageCallback = void delegate(int msg_handle, MessageState state) nothrow @nogc;
 alias IncomingPacketHandler = void delegate(Packet* p, BaseInterface i) nothrow @nogc;
-// Submit through forward() while tx_ready; return true to wait for room, false to disarm until tx_handler() re-arms.
+// Submit a frame through forward() if tx_ready admits its class; a turn admits one. Return true to be invited again.
 alias TxHandler = bool delegate(BaseInterface sink) nothrow @nogc;
+
+// Embedded in its producer, which must not move while it waits.
+struct TxWaiter
+{
+nothrow @nogc:
+    this(TxHandler handler) pure
+    {
+        this.handler = handler;
+    }
+
+    bool waiting() const pure
+        => _sink !is null;
+
+    void cancel()
+    {
+        if (_sink)
+            _sink.unlink(this);
+    }
+
+    TxHandler handler;
+
+private:
+    TxWaiter* _next;
+    BaseInterface _sink;
+}
+
+// tx_floor() when no class is admitted
+enum ubyte tx_full = 8;
 
 
 __gshared IncomingPacketHandler[PacketType.count] _frame_handlers;
@@ -516,23 +544,101 @@ nothrow @nogc:
     {
     }
 
-    final void tx_handler(TxHandler handler)
-    {
-        _tx_handler = handler;
-        tx_handler_changed();
-    }
-    final TxHandler tx_handler() const pure
-        => _tx_handler;
+    // Room for one maximum-sized frame of the class, including transport framing.
+    final bool tx_ready(PCP pcp = PCP.be) const
+        => !_tx_spent && pcp_priority_map[pcp] >= tx_floor();
 
-    final void release_tx_handler(TxHandler handler)
+    // Lowest priority rank admitted now, or tx_full.
+    ubyte tx_floor() const
+        => 0;
+
+    // A stopped interface takes no waiters: offline() is what unlinks them before it is freed.
+    final void wait_tx(ref TxWaiter waiter)
     {
-        if (_tx_handler is handler)
-            _tx_handler = null;
+        if (!running)
+            return;
+        if (waiter._sink !is this)
+        {
+            waiter.cancel();
+            waiter._sink = this;
+        }
+        if (!linked(&waiter))
+            append(&waiter);
+        if (_tx_inviting)
+            _tx_demand = true;
+        else
+            invite_tx();
     }
 
-    // Room for one maximum-sized frame, including transport framing.
-    bool tx_ready() const
-        => true;
+    // A pass repeats on progress, a frame admitted or the floor fallen; demand left over resumes on the next loop pass.
+    final void invite_tx()
+    {
+        if (_tx_inviting)
+            return;
+        _tx_inviting = true;
+        defer_tx(false);
+        bool again;
+        do
+        {
+            _tx_admitted = false;
+            _tx_demand = false;
+            ubyte floor = tx_floor();
+            size_t turns = 0;
+            for (TxWaiter* w = _tx_head; w; w = w._next)
+                ++turns;
+            // a waiter the floor refused keeps its place ahead of those that sent, so the next slot is its
+            TxWaiter* sent_first = null;
+            for (; turns && _tx_head && running && tx_floor() < tx_full; --turns)
+            {
+                TxWaiter* w = _tx_head;
+                _tx_head = w._next;
+                if (!_tx_head)
+                    _tx_tail = null;
+                w._next = null;
+                _tx_bounced = false;
+                bool more = w.handler(this);
+                bool sent = _tx_spent;
+                _tx_spent = false;
+                if (w._sink !is this)
+                    continue;
+                if (linked(w))
+                {
+                    if (sent && !sent_first)
+                        sent_first = w;
+                    else if (!sent && sent_first)
+                    {
+                        remove(w);
+                        insert_before(w, sent_first);
+                    }
+                    continue;
+                }
+                if (!more || !running || _tx_bounced)
+                {
+                    w._sink = null;
+                    continue;
+                }
+                if (sent || !sent_first)
+                {
+                    append(w);
+                    if (sent && !sent_first)
+                        sent_first = w;
+                }
+                else
+                    insert_before(w, sent_first);
+            }
+            again = _tx_admitted || tx_floor() < floor;
+        }
+        while (again && _tx_head && running && tx_floor() < tx_full);
+        _tx_inviting = false;
+        if (_tx_demand && _tx_head && running && tx_floor() < tx_full)
+            defer_tx(true);
+    }
+
+    final void invite_tx_later()
+    {
+        if (_tx_head && running)
+            defer_tx(true);
+    }
 
     int forward(Packet* packet, MessageCallback callback = null, const(QueuePolicy)* queue_policy = null)
     {
@@ -551,6 +657,11 @@ nothrow @nogc:
             result = transmit(writable, callback, queue_policy);
         else
             add_tx_drop();
+        if (result >= 0)
+        {
+            _tx_admitted = true;
+            _tx_spent = _tx_inviting;
+        }
         if (result <= 0 && callback)
             callback(result, result == 0 ? MessageState.complete : MessageState.failed);
         return result;
@@ -659,7 +770,15 @@ protected:
         mark_set!(typeof(this), [ "tx-rate", "rx-rate", "avg-queue-time", "avg-service-time", "max-service-time" ])();
 
         set_link_speed(0);
-        _tx_handler = null;
+        defer_tx(false);
+        _tx_bounced = true;
+        while (TxWaiter* w = _tx_head)
+        {
+            _tx_head = w._next;
+            w._next = null;
+            w._sink = null;
+        }
+        _tx_tail = null;
     }
 
     // An interface whose carrier is apart from its lifetime reports it here and drives set_link() while running.
@@ -686,22 +805,19 @@ protected:
 
     abstract int transmit(Packet* packet, MessageCallback callback = null, const(QueuePolicy)* queue_policy = null);
 
-    final bool invite_tx()
+    final void defer_tx(bool on)
     {
-        TxHandler h = _tx_handler;
-        if (!h)
-            return false;
-        if (h(this))
-            return true;
-        if (_tx_handler is h)
-            _tx_handler = null;
-        return false;
-    }
-
-    // Unbounded interfaces drain the producer synchronously.
-    void tx_handler_changed()
-    {
-        invite_tx();
+        if (on == _tx_deferred)
+            return;
+        _tx_deferred = on;
+        // a unittest has no loop: it resumes by hand
+        version (unittest)
+            if (!g_app)
+                return;
+        if (on)
+            g_app.schedule(getTime(), &resume_tx);
+        else
+            g_app.cancel(&resume_tx);
     }
 
     final void incoming_packet(Packet* packet)
@@ -956,7 +1072,14 @@ package:
 protected: // TODO: should probably be private?
     InterfaceSubscriber[8] _subscribers;
     ubyte _num_subscribers;
-    TxHandler _tx_handler;
+    bool _tx_admitted;
+    bool _tx_inviting;
+    bool _tx_spent;
+    bool _tx_bounced;
+    bool _tx_demand;
+    bool _tx_deferred;
+    TxWaiter* _tx_head;
+    TxWaiter* _tx_tail;
     int _kernel_ifindex;    // OS netdev ifindex when a platform backend backs this interface (0 = none)
     version (Windows)
         int _kernel_ifindex6;
@@ -970,6 +1093,51 @@ private:
     EID _led_indicate;
     EID _led_pulse;
     MonoTime _led_pulsed;
+
+    void resume_tx(MonoTime)
+    {
+        _tx_deferred = false;
+        invite_tx();
+    }
+
+    bool linked(const(TxWaiter)* w) const pure
+        => w._next !is null || _tx_tail is w;
+
+    void append(TxWaiter* w)
+    {
+        (_tx_tail ? _tx_tail._next : _tx_head) = w;
+        _tx_tail = w;
+    }
+
+    void insert_before(TxWaiter* w, TxWaiter* at)
+    {
+        TxWaiter* prev = null;
+        TxWaiter* n = _tx_head;
+        for (; n && n !is at; n = n._next)
+            prev = n;
+        if (!n)
+            return append(w);
+        w._next = at;
+        (prev ? prev._next : _tx_head) = w;
+    }
+
+    void unlink(ref TxWaiter waiter)
+    {
+        waiter._sink = null;
+        if (linked(&waiter))
+            remove(&waiter);
+    }
+
+    void remove(TxWaiter* waiter)
+    {
+        TxWaiter* prev = null;
+        for (TxWaiter* w = _tx_head; w !is waiter; w = w._next)
+            prev = w;
+        (prev ? prev._next : _tx_head) = waiter._next;
+        if (_tx_tail is waiter)
+            _tx_tail = prev;
+        waiter._next = null;
+    }
 
     // by EID, so a light that goes away is found absent rather than dangling
     void bind_led()
@@ -1743,20 +1911,36 @@ unittest
         {
             super(collection_type_info!Bounded, id, flags);
         }
-        override bool tx_ready() const
-            => pending < cap;
-        override void tx_handler_changed()
+        override int transmit(Packet* packet, MessageCallback callback, const(QueuePolicy)* policy)
         {
-            if (tx_ready && invite_tx())
-                ++invites;
+            ++frames;
+            ++by_len[packet.length];
+            return super.transmit(packet, callback, policy);
         }
-        void drain(size_t bytes)
+        override ubyte tx_floor() const
         {
-            pending -= bytes;
-            tx_handler_changed();
+            foreach (ubyte rank, limit; limits)
+                if (frames < limit)
+                    return rank;
+            return tx_full;
         }
-        size_t cap = 300;
-        size_t invites;
+        void drain(size_t n)
+        {
+            frames -= n;
+            invite_tx();
+        }
+        void stop()
+        {
+            _state = State.disabled;
+            offline();
+        }
+        void start()
+        {
+            _state = State.running;
+        }
+        static immutable ubyte[8] limits = [4, 6, 8, 8, 10, 12, 14, 16];
+        size_t frames;
+        size_t[64] by_len;
     }
 
     static struct Producer
@@ -1765,19 +1949,37 @@ unittest
         bool produce(BaseInterface sink)
         {
             ++calls;
-            while (remaining && sink.tx_ready)
+            PCP pcp = urgent ? PCP.vo : PCP.bk;
+            size_t* left = urgent ? &urgent : &remaining;
+            if (*left && sink.tx_ready(pcp))
             {
                 ubyte[64] buf;
                 Packet p;
-                p.init!RawFrame(buf[0 .. frame]);
+                p.init!RawFrame(buf[0 .. urgent ? frame + 1 : frame]);
+                p.pcp = pcp;
                 sink.forward(&p);
-                remaining -= frame;
+                --*left;
             }
-            return remaining != 0;
+            if (cancel)
+                cancel.waiter.cancel();
+            if (rearm)
+            {
+                rearm = false;
+                sink.wait_tx(waiter);
+                return false;
+            }
+            if (rearm_always)
+                sink.wait_tx(waiter);
+            return remaining + urgent != 0;
         }
         size_t remaining;
-        size_t frame = 40;
+        size_t frame = 10;
+        size_t urgent;
         size_t calls;
+        Producer* cancel;
+        bool rearm;
+        bool rearm_always;
+        TxWaiter waiter;
     }
 
     Sink open = Collection!Sink().create("tx-handler-test-open");
@@ -1789,31 +1991,238 @@ unittest
         Collection!BaseInterface().update_all();
     }
 
-    Producer whole = Producer(400);
-    open.tx_handler(&whole.produce);
-    assert(whole.calls == 1 && whole.remaining == 0 && open.pending == 400 && open.tx_handler is null);
+    Producer whole = Producer(10);
+    whole.waiter = TxWaiter(&whole.produce);
+    open.wait_tx(whole.waiter);
+    assert(whole.calls == 10 && whole.remaining == 0 && open.pending == 100 && !whole.waiter.waiting);
 
-    Producer paced = Producer(1000);
-    bounded.tx_handler(&paced.produce);
-    assert(paced.calls == 1 && bounded.pending == 320 && paced.remaining == 680 && bounded.tx_handler !is null);
-    bounded.drain(320);
-    assert(paced.calls == 2 && bounded.pending == 320 && paced.remaining == 360);
-    bounded.drain(320);
-    assert(paced.calls == 3 && bounded.pending == 320 && paced.remaining == 40 && bounded.tx_handler !is null);
-    bounded.drain(320);
-    assert(paced.calls == 4 && bounded.pending == 40 && paced.remaining == 0 && bounded.tx_handler is null);
-    assert(bounded.invites == 3);
+    // a producer re-arming inside its own turn stays queued whatever it returns
+    Producer again = Producer(1);
+    again.rearm = true;
+    again.waiter = TxWaiter(&again.produce);
+    open.wait_tx(again.waiter);
+    assert(again.calls == 2 && again.remaining == 0 && !again.waiter.waiting);
 
-    // Releasing another producer must not detach the current handler.
-    Producer idle;
-    bounded.tx_handler(&idle.produce);
-    assert(idle.calls == 1 && bounded.tx_handler is null);
-    Producer held = Producer(1000);
-    bounded.tx_handler(&held.produce);
-    bounded.release_tx_handler(&idle.produce);
-    assert(bounded.tx_handler !is null);
-    bounded.release_tx_handler(&held.produce);
-    assert(bounded.tx_handler is null);
+    // two bulk producers on one bounded link share it frame for frame
+    Producer pa = Producer(10, 10);
+    Producer pb = Producer(10, 20);
+    pa.waiter = TxWaiter(&pa.produce);
+    pb.waiter = TxWaiter(&pb.produce);
+    bounded.wait_tx(pa.waiter);
+    assert(bounded.frames == 4 && pa.remaining == 6 && pa.waiter.waiting);
+    bounded.wait_tx(pb.waiter);
+    assert(pb.calls == 1 && pb.remaining == 10, "a floor above bulk admits none of it");
+    bounded.drain(4);
+    assert(bounded.frames == 4 && bounded.by_len[10] == 6 && bounded.by_len[20] == 2);
+
+    // one slot at a time alternates between them: the one refused keeps its place ahead, re-armed in its turn or not
+    size_t a_before = bounded.by_len[10], b_before = bounded.by_len[20];
+    foreach (_; 0 .. 2)
+        bounded.drain(1);
+    pb.rearm_always = true;
+    foreach (_; 0 .. 2)
+        bounded.drain(1);
+    pb.rearm_always = false;
+    assert(bounded.by_len[10] - a_before == 2 && bounded.by_len[20] - b_before == 2);
+
+    // urgent work clears a floor that refuses bulk, without waiting for it to drain
+    pb.urgent = 2;
+    bounded.wait_tx(pb.waiter);
+    assert(pb.urgent == 0 && bounded.by_len[21] == 2 && bounded.frames == 6);
+    assert(pa.remaining == 2 && pb.remaining == 6);
+
+    // a waiter cancelled by another during a round gets no further turn
+    pa.cancel = &pb;
+    size_t b_calls = pb.calls;
+    bounded.drain(6);
+    assert(!pb.waiter.waiting && pb.calls == b_calls && pa.remaining == 0 && !pa.waiter.waiting);
+
+    // a turn admits one frame however hard its producer pushes
+    static struct Burst
+    {
+    nothrow @nogc:
+        bool produce(BaseInterface sink)
+        {
+            ++calls;
+            while (left && sink.tx_ready(PCP.bk))
+            {
+                ubyte[12] buf;
+                Packet p;
+                p.init!RawFrame(buf[]);
+                p.pcp = PCP.bk;
+                sink.forward(&p);
+                --left;
+            }
+            if (rearm)
+                sink.wait_tx(waiter);
+            if (poke)
+            {
+                if (feed)
+                    poke.left = 1;
+                sink.wait_tx(poke.waiter);
+            }
+            if (spawn)
+                sink.wait_tx(spawn.waiter);
+            if (churn)
+            {
+                waiter.cancel();
+                sink.wait_tx(waiter);
+            }
+            if (stop || bounce)
+                (cast(Bounded)sink).stop();
+            if (bounce)
+                (cast(Bounded)sink).start();
+            return left != 0 || hold || (poke && !feed) || churn;
+        }
+        size_t left;
+        size_t calls;
+        Burst* poke;
+        Burst* spawn;
+        bool rearm;
+        bool feed;
+        bool hold;
+        bool churn;
+        bool stop;
+        bool bounce;
+        TxWaiter waiter;
+    }
+    bounded.frames = bounded.limits[0];
+    Burst burst = Burst(10);
+    burst.waiter = TxWaiter(&burst.produce);
+    Producer single = Producer(10, 13);
+    single.waiter = TxWaiter(&single.produce);
+    bounded.wait_tx(burst.waiter);
+    bounded.wait_tx(single.waiter);
+    bounded.drain(4);
+    assert(bounded.by_len[12] == 2 && bounded.by_len[13] == 2);
+    burst.waiter.cancel();
+    single.waiter.cancel();
+
+    // re-arming without sending defers to the next loop pass rather than spinning
+    Burst idle;
+    idle.rearm = true;
+    idle.waiter = TxWaiter(&idle.produce);
+    bounded.wait_tx(idle.waiter);
+    assert(idle.calls == 1 && idle.waiter.waiting && bounded._tx_deferred);
+    bounded.resume_tx(MonoTime());
+    assert(idle.calls == 2 && bounded._tx_deferred, "each loop pass runs one round, never a synchronous spin");
+    idle.waiter.cancel();
+
+    // nor does poking a waiter already queued, or cancelling and re-arming in a turn
+    Burst first, second;
+    first.waiter = TxWaiter(&first.produce);
+    second.waiter = TxWaiter(&second.produce);
+    first.poke = &second;
+    second.poke = &first;
+    bounded.wait_tx(first.waiter);
+    bounded.wait_tx(second.waiter);
+    assert(first.calls <= 4 && second.calls <= 4 && first.waiter.waiting && second.waiter.waiting);
+    first.waiter.cancel();
+    second.waiter.cancel();
+    Burst churn;
+    churn.churn = true;
+    churn.waiter = TxWaiter(&churn.produce);
+    bounded.wait_tx(churn.waiter);
+    assert(churn.calls == 1 && churn.waiter.waiting && bounded._tx_deferred);
+    churn.waiter.cancel();
+    bounded.resume_tx(MonoTime());
+    assert(churn.calls == 1 && !bounded._tx_deferred);
+
+    // work handed to a queued waiter inside another's turn is sent in the same round
+    bounded.drain(bounded.frames);
+    Burst parked, feeder;
+    parked.hold = true;
+    parked.waiter = TxWaiter(&parked.produce);
+    bounded.wait_tx(parked.waiter);
+    assert(parked.calls == 1 && parked.waiter.waiting);
+    feeder.poke = &parked;
+    feeder.feed = true;
+    feeder.waiter = TxWaiter(&feeder.produce);
+    bounded.wait_tx(feeder.waiter);
+    assert(!feeder.waiter.waiting);
+    while (bounded._tx_deferred)
+        bounded.resume_tx(MonoTime());
+    assert(parked.left == 0 && bounded.frames == 1);
+
+    // however long the chain of hand-offs, the work it reaches is sent
+    Burst relay, giver;
+    giver.poke = &parked;
+    giver.feed = true;
+    giver.waiter = TxWaiter(&giver.produce);
+    relay.spawn = &giver;
+    relay.waiter = TxWaiter(&relay.produce);
+    bounded.wait_tx(relay.waiter);
+    while (bounded._tx_deferred)
+        bounded.resume_tx(MonoTime());
+    assert(parked.left == 0 && bounded.frames == 2 && !relay.waiter.waiting && !giver.waiter.waiting);
+    parked.waiter.cancel();
+    bounded.frames = bounded.limits[0];
+
+    // a turn that bounces its interface leaves no stale wait behind
+    Burst bouncing = Burst(5);
+    bouncing.bounce = true;
+    bouncing.waiter = TxWaiter(&bouncing.produce);
+    bounded.wait_tx(bouncing.waiter);
+    assert(bouncing.calls == 1 && !bouncing.waiter.waiting && bounded.running);
+
+    // a turn that stops its interface leaves the waiter unlinked
+    Burst stopping = Burst(1);
+    stopping.stop = true;
+    stopping.waiter = TxWaiter(&stopping.produce);
+    bounded.drain(1);
+    bounded.wait_tx(stopping.waiter);
+    assert(stopping.calls == 1 && !stopping.waiter.waiting && !bounded.running);
+    bounded.start();
+    stopping.stop = false;
+    bounded.wait_tx(stopping.waiter);
+    assert(!stopping.waiter.waiting, "nothing left to send");
+
+    // offline unlinks every waiter
+    pa.cancel = null;
+    Producer held = Producer(100);
+    held.waiter = TxWaiter(&held.produce);
+    bounded.wait_tx(held.waiter);
+    assert(held.waiter.waiting && bounded.frames == bounded.limits[0]);
+    bounded.offline();
+    assert(!held.waiter.waiting);
+
+    // a queue that frees a slot, by dispatch, abort or teardown, invites its waiters
+    import router.iface.priority_queue : PriorityPacketQueue, QueuedFrame;
+    import urt.mem.pagepool : page_pool_init, page_pool_deinit;
+    bool owns_pool = page_pool_init();
+    scope(exit) if (owns_pool) page_pool_deinit();
+
+    static final class Queued : Sink
+    {
+        enum type_name = "tx-handler-test-queued";
+    nothrow @nogc:
+
+        ~this() {}
+        this(CID id, ObjectFlags flags = ObjectFlags.none)
+        {
+            super(collection_type_info!Queued, id, flags);
+            queue.init(1, 0, PCP.vo, this);
+        }
+        override int transmit(Packet* packet, MessageCallback callback, const(QueuePolicy)* policy)
+            => queue.enqueue(packet, callback, policy);
+        override ubyte tx_floor() const
+            => queue.floor();
+        PriorityPacketQueue queue;
+    }
+    Queued queued = Collection!Queued().create("tx-handler-test-queued");
+    scope(exit) queued.destroy();
+    Producer bulk = Producer(8);
+    bulk.waiter = TxWaiter(&bulk.produce);
+    queued.wait_tx(bulk.waiter);
+    assert(bulk.remaining == 4 && queued.queue.has_pending() && bulk.waiter.waiting);
+    QueuedFrame* selected = queued.queue.dequeue();
+    assert(selected && bulk.remaining == 4 && queued._tx_deferred, "dispatch defers the invite past its caller");
+    queued.resume_tx(MonoTime());
+    assert(bulk.remaining == 3);
+    assert(queued.queue.abort(2) && bulk.remaining == 2);
+    queued.queue.abort_all();
+    assert(bulk.remaining == 0 && !bulk.waiter.waiting);
+    queued.queue.abort_all();
 
     static final class Port : BaseInterface
     {

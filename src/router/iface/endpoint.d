@@ -313,18 +313,41 @@ nothrow @nogc:
             return false;
     }
 
-    ptrdiff_t send(scope const(void)[] data)
+    ptrdiff_t send(scope const(void)[] data, PCP pcp = PCP.be)
     {
         if (_closing || !_connected)
             return 0;
-        return sendto_backend(data, _remote);
+        return sendto_backend(data, _remote, pcp);
     }
 
-    ptrdiff_t sendto(scope const(void)[] data, InetAddress dst)
+    ptrdiff_t sendto(scope const(void)[] data, InetAddress dst, PCP pcp = PCP.be)
     {
         if (_closing || dst.family != _family || (_connected && dst != _remote))
             return 0;
-        return sendto_backend(data, dst);
+        return sendto_backend(data, dst, pcp);
+    }
+
+    // A destination with no egress interface to ask (a flood, or a kernel socket) is always ready.
+    bool tx_ready(InetAddress dst, PCP pcp = PCP.be)
+    {
+        BaseInterface egress = egress_iface(dst);
+        return !egress || egress.tx_ready(pcp);
+    }
+
+    void wait_tx(InetAddress dst, ref TxWaiter waiter)
+    {
+        if (BaseInterface egress = egress_iface(dst))
+            egress.wait_tx(waiter);
+    }
+
+    size_t frame_room(InetAddress dst)
+    {
+        BaseInterface egress = egress_iface(dst);
+        size_t mtu = egress ? egress.actual_mtu : default_frame;
+        if (mtu > default_frame)
+            mtu = default_frame;
+        size_t overhead = UdpHeader.sizeof + (_family == AddressFamily.ether ? ow_transport_header_size : _family == AddressFamily.ipv6 ? 40 : 20);
+        return mtu > overhead ? mtu - overhead : 0;
     }
 
     // Deferred to the module sweep; safe to call from the receive handler.
@@ -390,8 +413,11 @@ nothrow @nogc:
             return InetAddress(address.b, _local_port);
         }
 
-        BaseInterface egress_iface(InetAddress)
-            => _iface.get;
+        BaseInterface egress_iface(InetAddress dst)
+        {
+            const(InetAddress.Ether)* address = dst.as_ether;
+            return address ? unicast_egress(MACAddress(address.addr)) : null;
+        }
 
         bool join(MACAddress group)
         {
@@ -415,7 +441,7 @@ nothrow @nogc:
         bool enable_broadcast()
             => true;
 
-        ptrdiff_t sendto(scope const(void)[] data, InetAddress dst)
+        ptrdiff_t sendto(scope const(void)[] data, InetAddress dst, PCP pcp)
         {
             const(InetAddress.Ether)* address = dst.as_ether;
             if (!address)
@@ -439,33 +465,18 @@ nothrow @nogc:
             storeBigEndian(&udp.checksum, ushort(0));
             ow[ow_transport_header_size + UdpHeader.sizeof .. $] = (cast(const(ubyte)[])data)[];
 
-            if (!_wildcard)
+            if (EthernetStation station = unicast_egress(mac))
             {
-                EthernetStation station = _iface.get;
-                if (station)
-                {
-                    if (!station.running || (station.flags & ObjectFlags.slave))
-                        return 0;
-                    return emit(station, mac, ow) ? data.length : 0;
-                }
-                if (EthernetStation learned = ether_neighbour_lookup(mac))
-                    if (learned.mac == _local)
-                        return emit(learned, mac, ow) ? data.length : 0;
-                bool sent;
-                foreach_ether_station((EthernetStation candidate)
-                {
-                    if (candidate.running && candidate.mac == _local && emit(candidate, mac, ow))
-                        sent = true;
-                });
-                return sent ? data.length : 0;
+                if (!station.running || (station.flags & ObjectFlags.slave))
+                    return 0;
+                return emit(station, mac, ow, pcp) ? data.length : 0;
             }
-
-            if (EthernetStation station = ether_neighbour_lookup(mac))
-                return emit(station, mac, ow) ? data.length : 0;
+            if (!_wildcard)
+                return 0;
             bool sent;
             foreach_ether_station((EthernetStation station)
             {
-                if (station.running && emit(station, mac, ow))
+                if (station.running && emit(station, mac, ow, pcp))
                     sent = true;
             });
             return sent ? data.length : 0;
@@ -518,13 +529,25 @@ nothrow @nogc:
         }
 
     private:
-        bool emit(EthernetStation station, MACAddress dst, const(ubyte)[] frame)
+        // null floods every station: a wildcard endpoint that has not heard the destination
+        EthernetStation unicast_egress(MACAddress dst)
+        {
+            if (EthernetStation station = _iface.get)
+                return station;
+            EthernetStation learned = ether_neighbour_lookup(dst);
+            if (learned && (_wildcard || learned.mac == _local))
+                return learned;
+            return _wildcard ? null : find_ether_station(_local);
+        }
+
+        bool emit(EthernetStation station, MACAddress dst, const(ubyte)[] frame, PCP pcp)
         {
             StackPacket packet;
             ref ether = packet.init!Ethernet(frame);
             ether.dst = dst;
             ether.src = station.mac;
             ether.ether_type = EtherType.ow;
+            packet.pcp = pcp;
             return station.forward(&packet.packet) >= 0;
         }
 
@@ -553,12 +576,14 @@ nothrow @nogc:
             _ip.release();
     }
 
-    ptrdiff_t sendto_backend(scope const(void)[] data, InetAddress dst)
+    enum size_t default_frame = 1500;
+
+    ptrdiff_t sendto_backend(scope const(void)[] data, InetAddress dst, PCP pcp)
     {
         if (_family == AddressFamily.ether)
-            return _ether.sendto(data, dst);
+            return _ether.sendto(data, dst, pcp);
         static if (has_ip)
-            return _ip.sendto(data, dst);
+            return _ip.sendto(data, dst, pcp);
         else
             return 0;
     }
@@ -811,6 +836,47 @@ nothrow @nogc:
     Collection!TestEtherStation().remove(station);
     free(master);
     free(station);
+
+    // a datagram's class rides its frame, and the egress answers readiness and room for it
+    static struct TxProbe
+    {
+        PCP pcp;
+        size_t sent;
+        void tx(const(Packet)* p, BaseInterface, PacketDirection, void*) nothrow @nogc
+        {
+            pcp = p.pcp;
+            ++sent;
+        }
+    }
+    TxProbe probe;
+    TestEtherStation egress = Collection!TestEtherStation().create("ether-test-egress");
+    egress.start_test();
+    PacketFilter outgoing = PacketFilter(PacketType.ethernet, PacketDirection.outgoing);
+    egress.subscribe(&probe.tx, outgoing);
+    InetAddress egress_local = InetAddress(egress.mac.b, 600);
+    InetAddress peer = InetAddress(local_b.b, 700);
+    UDPEndpoint* sender = udp_open(&egress_local, null, &sink.recv, egress);
+    assert(sender);
+    assert(sender.frame_room(peer) == 1500 - ow_transport_header_size - UdpHeader.sizeof);
+    assert(sender.tx_ready(peer, PCP.bk));
+    ubyte[4] datagram = [5, 6, 7, 8];
+    assert(sender.sendto(datagram[], peer, PCP.vo) == datagram.length);
+    assert(probe.sent == 1 && probe.pcp == PCP.vo);
+
+    // an endpoint opened by local address finds the station it sends from
+    assert(egress.mtu(512) is null);
+    InetAddress by_mac = InetAddress(egress.mac.b, 601);
+    UDPEndpoint* unbound = udp_open(&by_mac, null, &sink.recv);
+    assert(unbound && unbound.egress_iface(peer) is egress);
+    assert(unbound.frame_room(peer) == 512 - ow_transport_header_size - UdpHeader.sizeof);
+    assert(unbound.sendto(datagram[], peer, PCP.ca) == datagram.length && probe.sent == 2 && probe.pcp == PCP.ca);
+    unbound.close();
+
+    egress.unsubscribe(&probe.tx);
+    sender.close();
+    egress.stop_test();
+    Collection!TestEtherStation().remove(egress);
+    free(egress);
 
     ephemeral.close();
     wildcard.close();
