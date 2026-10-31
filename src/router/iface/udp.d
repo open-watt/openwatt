@@ -33,12 +33,15 @@ import urt.time;
 import manager;
 import manager.base;
 import manager.collection;
-import manager.features : has_ipv6;
+import manager.features : has_ipv6, has_rdp;
 import manager.plugin;
 
 import router.iface;
 import router.iface.endpoint;
 import router.iface.ethernet;
+
+static if (has_rdp)
+    import router.iface.rdp;
 
 nothrow @nogc:
 
@@ -103,11 +106,11 @@ enum ushort udp_carrier_ether = 14;
 
 final class UDPInterface : BaseInterface
 {
-    alias Properties = AliasSeq!(Prop!("interface", iface),
-                                 Prop!("local-host", local_host),
-                                 Prop!("local-port", local_port),
-                                 Prop!("remote-host", remote_host),
-                                 Prop!("remote-port", remote_port));
+    alias CommonProperties = AliasSeq!(Prop!("interface", iface),
+                                       Prop!("local-host", local_host),
+                                       Prop!("local-port", local_port),
+                                       Prop!("remote-host", remote_host),
+                                       Prop!("remote-port", remote_port));
 nothrow @nogc:
 
     ~this() {}
@@ -183,6 +186,37 @@ nothrow @nogc:
         restart();
     }
 
+    static if (has_rdp)
+    {
+        final bool reliable() const pure
+            => _reliable;
+        final void reliable(bool value)
+        {
+            if (value == _reliable)
+                return;
+            _reliable = value;
+            mark_set!(typeof(this), "reliable")();
+            restart();
+        }
+
+        override bool tx_ready() const
+            => !_rdp || _rdp.tx_ready(_remote);
+
+        override void abort(int msg_handle, MessageState reason = MessageState.aborted)
+        {
+            if (_rdp)
+                _rdp.abort(msg_handle, reason);
+        }
+
+        override MessageState msg_state(int msg_handle) const
+            => _rdp ? _rdp.msg_state(msg_handle) : MessageState.complete;
+
+        alias ReliableProperties = AliasSeq!(Prop!("reliable", reliable));
+    }
+    else
+        alias ReliableProperties = AliasSeq!();
+    alias Properties = AliasSeq!(CommonProperties, ReliableProperties);
+
     final void configure_broadcast(bool value)
     {
         if (_broadcast == value)
@@ -251,6 +285,27 @@ protected:
         }
 
         const(InetAddress)* peer = have_remote && !multidrop ? &_remote : null;
+        static if (has_rdp)
+        {
+            if (_reliable)
+            {
+                if (multidrop)
+                {
+                    log.error("reliable needs a unicast remote-host, or none");
+                    return CompletionStatus.error;
+                }
+                _rdp = rdp_open(have_local ? &local : null, peer, &on_message, &on_rdp_event, bind_station);
+                if (!_rdp)
+                {
+                    log.error("failed to open RDP endpoint");
+                    return CompletionStatus.error;
+                }
+                _caps = cast(InterfaceCaps)(InterfaceCaps.reliable | InterfaceCaps.ordered);
+                set_l2mtu(rdp_max_message);
+                watch_station(bind_station);
+                return CompletionStatus.complete;
+            }
+        }
         _ep = udp_open(have_local ? &local : null, peer, &on_recv, bind_station);
         if (!_ep)
         {
@@ -304,13 +359,14 @@ protected:
         }
 
         set_l2mtu(family == AddressFamily.ipv6 ? default_payload_v6 : family == AddressFamily.ether ? default_payload_ether : default_payload_v4);
-
-        if (_bound)
-        {
-            bind_station.subscribe(&iface_state_change);
-            _subscribed = true;
-        }
+        watch_station(bind_station);
         return CompletionStatus.complete;
+    }
+
+    static if (has_rdp)
+    {
+        override bool carrier() const
+            => !_rdp || _remote.family == AddressFamily.unspecified || _rdp.established(_remote);
     }
 
     override void online()
@@ -336,13 +392,21 @@ protected:
             _ep.close();
             _ep = null;
         }
+        static if (has_rdp)
+        {
+            if (_rdp)
+            {
+                _rdp.close();
+                _rdp = null;
+                _caps = InterfaceCaps.none;
+            }
+        }
         _remote = InetAddress();
         return CompletionStatus.complete;
     }
 
     override int transmit(Packet* packet, MessageCallback callback = null, const(QueuePolicy)* queue_policy = null)
     {
-        scope (exit) packet_free(packet);
         InetAddress dst = _remote;
         if (packet.type == PacketType.udp)
         {
@@ -351,24 +415,29 @@ protected:
                 dst = frame.address;
         }
         else if (packet.type != PacketType.raw)
-        {
-            add_tx_drop();
-            return -1;
-        }
+            dst = InetAddress();
 
-        if (dst.family <= AddressFamily.unspecified)
+        size_t length = packet.data.length;
+        int result = -1;
+        if (dst.family > AddressFamily.unspecified)
         {
-            add_tx_drop();
-            return -1;
+            static if (has_rdp)
+            {
+                if (_rdp)
+                {
+                    result = _rdp.send(packet, dst, callback);
+                    packet = null;
+                }
+            }
+            if (packet && _ep && _ep.sendto(packet.data, dst) == length)
+                result = 0;
         }
-
-        if (!_ep || _ep.sendto(packet.data, dst) != packet.data.length)
-        {
+        packet_free(packet);
+        if (result < 0)
             add_tx_drop();
-            return -1;
-        }
-        add_tx_frame(packet.data.length);
-        return 0;
+        else
+            add_tx_frame(length);
+        return result;
     }
 
 private:
@@ -385,8 +454,20 @@ private:
     ushort _local_port;
     ushort _remote_port;
     bool _broadcast;
+    static if (has_rdp)
+        bool _reliable;
     InetAddress _remote;
     UDPEndpoint* _ep;
+    static if (has_rdp)
+        RDPEndpoint* _rdp;
+
+    void watch_station(EthernetStation station)
+    {
+        if (!_bound)
+            return;
+        station.subscribe(&iface_state_change);
+        _subscribed = true;
+    }
 
     void iface_state_change(ActiveObject, StateSignal signal)
     {
@@ -427,6 +508,25 @@ private:
         StackPacket packet;
         packet.init!UDPFrame(data, info.rx_time).address = info.source;
         incoming_packet(&packet.packet);
+    }
+
+    static if (has_rdp)
+    {
+        void on_message(RDPEndpoint*, const(void)[] message, PCP lane, ref UDPReceiveInfo info)
+        {
+            StackPacket packet;
+            packet.init!UDPFrame(message, info.rx_time).address = info.source;
+            packet.pcp = lane;
+            incoming_packet(&packet.packet);
+        }
+
+        void on_rdp_event(RDPEndpoint*, ref const InetAddress peer, RDPEvent event)
+        {
+            if (event == RDPEvent.writable)
+                invite_tx();
+            else if (running && peer == _remote)
+                set_link(event == RDPEvent.established);
+        }
     }
 }
 
