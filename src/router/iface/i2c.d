@@ -217,6 +217,9 @@ nothrow @nogc:
         return MessageState.complete;
     }
 
+    override ubyte tx_floor() const
+        => _queue.floor();
+
 protected:
 
     override bool validate() const
