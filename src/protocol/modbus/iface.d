@@ -482,7 +482,7 @@ protected:
                 local_address = map.local_address;
             }
 
-            PendingModbus pending = PendingModbus(hdr.src_address, hdr.sequence_number, local_address, callback);
+            PendingModbus pending = { request_from_address: hdr.src_address, sequence_number: hdr.sequence_number, local_server_address: local_address, callback: callback };
             int tag = _queue.enqueue(packet, &on_frame_complete);
             if (tag < 0)
             {
@@ -546,6 +546,8 @@ private:
         ubyte request_from_address;
         ushort sequence_number;
         ubyte local_server_address;
+        ubyte function_code;        // 0 until the request is sent, and for a request too short to check against
+        ushort count;
         MessageCallback callback;
     }
 
@@ -772,13 +774,19 @@ private:
             }
 
             const(ubyte)[] pdu = cast(ubyte[])frame.packet.data;
-
             if (frame_and_send(pm.local_server_address, pdu, tag) < 0)
             {
                 log.debug_("dispatch: frame_and_send failed for addr ", pm.local_server_address);
                 _queue.complete(tag, MessageState.failed);
                 continue;
             }
+            if (pdu.length >= 5)
+            {
+                pm.function_code = pdu[0];
+                pm.count = pdu[3 .. 5].bigEndianToNative!ushort;
+            }
+            packet_free(frame.packet);
+            frame.packet = null;
 
             if (pm.callback)
                 pm.callback(tag, MessageState.in_flight);
@@ -799,19 +807,12 @@ private:
         }
     }
 
-    bool validate_response_length(ubyte tag, const(void)[] response_message) const
+    static bool validate_response_length(ref const PendingModbus pm, const(void)[] response_message)
     {
-        auto frame = _queue.find_in_flight(tag);
-        if (!frame || frame.packet is null)
-            return true; // can't validate without the request
-
-        const(ubyte)[] request_pdu = cast(const(ubyte)[])frame.packet.data;
         const(ubyte)[] response_pdu = cast(const(ubyte)[])response_message;
-
-        if (request_pdu.length < 5 || response_pdu.length < 2)
+        if (!pm.function_code || response_pdu.length < 2)
             return true; // too short to validate
 
-        ubyte req_fc = request_pdu[0];
         ubyte rsp_fc = response_pdu[0];
 
         // error responses (function code | 0x80) are always valid
@@ -819,14 +820,14 @@ private:
             return true;
 
         // function code must match
-        if (rsp_fc != req_fc)
+        if (rsp_fc != pm.function_code)
             return false;
 
         // for read register/coil responses, validate byte count
-        ushort count = request_pdu[3 .. 5].bigEndianToNative!ushort;
+        ushort count = pm.count;
         ubyte response_bytes = response_pdu[1];
 
-        switch (req_fc)
+        switch (pm.function_code)
         {
             case FunctionCode.read_holding_registers:
             case FunctionCode.read_input_registers:
@@ -995,8 +996,7 @@ private:
                 PendingModbus* pm = null;
                 foreach (kvp; _pending[])
                 {
-                    auto frame = _queue.find_in_flight(kvp.key);
-                    if (frame && frame.packet)
+                    if (_queue.find_in_flight(kvp.key))
                     {
                         matched_tag = kvp.key;
                         pm = &kvp.value();
@@ -1017,7 +1017,7 @@ private:
                     add_rx_drop();
                     _queue.complete(matched_tag, MessageState.failed);
                 }
-                else if (!validate_response_length(matched_tag, message))
+                else if (!validate_response_length(*pm, message))
                 {
                     log.debug_("rx-drop: response length mismatch (late response after timeout?)");
                     add_rx_drop();
