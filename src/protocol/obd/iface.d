@@ -874,10 +874,10 @@ unittest
     // a recognised response id proves the vehicle at recognition: this frame joins
     // no reassembly session and is discarded, yet it still wakes it
     static immutable ubyte[8] orphan = [0x21, 0x57, 0x37, 0x34, 0x30, 0x39, 0x33, 0x4D];
-    Packet cp;
+    StackPacket cp;
     ref CANFrame can = cp.init!CANFrame(orphan[]);
     can.id = 0x7E8;
-    o.can_packet_handler(&cp, null, PacketDirection.incoming, null);
+    o.can_packet_handler(&cp.packet, null, PacketDirection.incoming, null);
     assert(o.vehicle == VehicleState.awake);
 
     // a frame that is not a diagnostic response proves nothing
@@ -885,7 +885,7 @@ unittest
     assert(o.vehicle == VehicleState.asleep);
     ref CANFrame other = cp.init!CANFrame(orphan[]);
     other.id = 0x123;
-    o.can_packet_handler(&cp, null, PacketDirection.incoming, null);
+    o.can_packet_handler(&cp.packet, null, PacketDirection.incoming, null);
     assert(o.vehicle == VehicleState.asleep);
 
     // an accepted dispatch reaches g_app through elm_send's timeout arming, and

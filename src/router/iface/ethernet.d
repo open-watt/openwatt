@@ -834,7 +834,7 @@ protected:
         eth.dst = MACAddress(data[0 .. 6]);
         eth.src = MACAddress(data[6 .. 12]);
         eth.ether_type = data[12 .. 14].bigEndianToNative!ushort;
-        packet._offset = 14;
+        packet.consume_prefix(14);
         if (hw_time)
             packet.set_hw_timestamp(*hw_time);
         if (checksum_verified)
@@ -929,7 +929,7 @@ unittest
     assert(report[4] == hostname.length);
     assert(cast(const(char)[])report[5 .. offset] == hostname[]);
 
-    Packet tagged;
+    StackPacket tagged;
     ref eth = tagged.init!Ethernet(null);
     eth.dst = MACAddress.broadcast;
     eth.src = MACAddress(0, 1, 2, 3, 4, 5);
@@ -937,17 +937,17 @@ unittest
     tagged.vlan = 0xA003;
     tagged.vlan_tag = VlanTag._88a8;
     ubyte[18] header = void;
-    assert(encode_ethernet_header(&tagged, header[]) == 18);
+    assert(encode_ethernet_header(&tagged.packet, header[]) == 18);
     assert(header[12 .. 18] == [0x88, 0xA8, 0xA0, 0x03, 0x08, 0x00]);
 
     tagged.vlan = 0;
     tagged.vlan_tag = VlanTag._8100;
-    assert(encode_ethernet_header(&tagged, header[]) == 18);
+    assert(encode_ethernet_header(&tagged.packet, header[]) == 18);
     assert(header[12 .. 18] == [0x81, 0x00, 0, 0, 0x08, 0x00]);
 
     tagged.vlan = 3;
     tagged.vlan_tag = VlanTag.none;
-    assert(encode_ethernet_header(&tagged, header[]) == 18);
+    assert(encode_ethernet_header(&tagged.packet, header[]) == 18);
     assert(header[12 .. 18] == [0x81, 0x00, 0, 3, 0x08, 0x00]);
 }
 
@@ -993,16 +993,16 @@ unittest
     data[1] = cfm_opcode_lbr;
     data[3] = 4;
     data[4 .. 8] = txid.nativeToBigEndian;
-    Packet packet;
+    StackPacket packet;
     ref eth = packet.init!Ethernet(data[]);
     eth.ether_type = EtherType.cfm;
     eth.src = MACAddress(2, 0, 0, 0, 0, 4);
-    first.cfm_ingress(&packet);
+    first.cfm_ingress(&packet.packet);
     eth.src = remote;
-    second.cfm_ingress(&packet);
+    second.cfm_ingress(&packet.packet);
     assert(results.replies == 0);
-    first.cfm_ingress(&packet);
-    first.cfm_ingress(&packet);
+    first.cfm_ingress(&packet.packet);
+    first.cfm_ingress(&packet.packet);
     assert(results.replies == 1);
 
     Console* console = alloc!Console(null, StringLit!"test.mac-ping");
@@ -1058,26 +1058,26 @@ unittest
     ubyte[30] datagram = [0x45, 0, 0, 30, 0, 0, 0, 0, 64, 17, 0, 0, 10, 0, 0, 1, 10, 0, 0, 2,
                           0, 1, 0, 2, 0, 10, 0, 0, 'h', 'i'];
     ubyte[12] pseudo = [10, 0, 0, 1, 10, 0, 0, 2, 0, 17, 0, 10];
-    Packet udp;
+    StackPacket udp;
     udp.init!Ethernet(datagram[]).ether_type = EtherType.ip4;
     udp.checksum_pending = true;
 
-    wire.medium_tx(&udp);
+    wire.medium_tx(&udp.packet);
     assert(!wire.mac_asked);
     assert(internet_checksum(wire.sent[34 .. 44], internet_checksum(pseudo[])) == 0);
     assert(datagram[26] == 0 && datagram[27] == 0);
 
     wire.offload = true;
-    wire.medium_tx(&udp);
+    wire.medium_tx(&udp.packet);
     assert(wire.mac_asked && wire.sent[40] == 0 && wire.sent[41] == 0);
 
     udp.vlan = 5;
-    wire.medium_tx(&udp);
+    wire.medium_tx(&udp.packet);
     assert(!wire.mac_asked && wire.sent[12] == 0x81);
     assert(internet_checksum(wire.sent[38 .. 48], internet_checksum(pseudo[])) == 0);
 
     udp.vlan = 0;
     udp.checksum_pending = false;
-    wire.medium_tx(&udp);
+    wire.medium_tx(&udp.packet);
     assert(!wire.mac_asked && wire.sent[40] == 0 && wire.sent[41] == 0);
 }
