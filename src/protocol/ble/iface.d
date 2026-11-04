@@ -216,6 +216,9 @@ nothrow @nogc:
         return MessageState.complete;
     }
 
+    final override ubyte tx_floor() const
+        => _queue.floor();
+
     final BLESession* find_session_by_peer(MACAddress peer)
     {
         foreach (s; _sessions[])
