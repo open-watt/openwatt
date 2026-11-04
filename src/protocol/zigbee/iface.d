@@ -736,7 +736,7 @@ private:
                 _sender_eui = EUI64();
             }
             else
-                _ezsp_client.send_command!EZSP_LookupEui64ByNodeId(&lookup_eui_response, sender, cast(void*)size_t(sender));
+                _ezsp_client.send_command!EZSP_LookupEui64ByNodeId(&lookup_eui_response, sender, cast(void*)(size_t(_coordinator.pan_id) << 16 | sender));
         }
         else
         {
@@ -772,6 +772,9 @@ private:
     void lookup_eui_response(void* user_data, EmberStatus status, EmberEUI64 eui64)
     {
         ushort sender = cast(ushort)(cast(size_t)user_data);
+        // the network may have gone down, or come up as another, while the lookup was out
+        if (_coordinator.node_id == 0xFFFE || cast(ushort)(cast(size_t)user_data >> 16) != _coordinator.pan_id)
+            return;
         ZigbeeProtocolModule mod_zb = get_module!ZigbeeProtocolModule;
 
         if (status == EmberStatus.SUCCESS)

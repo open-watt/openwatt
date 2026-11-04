@@ -226,6 +226,7 @@ nothrow @nogc:
 
         _previous_extended_pan_id = _network_params.extended_pan_id;
         _network_params = NetworkParams();
+        set_node_id(0xFFFE);
         _already_complained = false;
         _ready = false;
 
