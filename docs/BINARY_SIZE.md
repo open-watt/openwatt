@@ -81,6 +81,7 @@ row alone. Sizes stay in bytes; round in the note if that reads better.
 | 2026-10-14 | b610e54d | ldc 1.43.0 | 5,815,504 | 534,896 | | master with MQTT on the pull path; deployed to the Pi (slot 191) |
 | 2026-10-18 | #851 | ldc 1.43.0 | 5,785,624 | 535,000 | | value and log bundling on master d1be2617; deployed to the Pi (slot 192) |
 | 2026-10-20 | #865 | ldc 1.43.0 | 5,806,984 | 534,976 | | held streams (#857) and seq-tagged reads (#865) on master 371d7dc2; deployed to the Pi (slot 193) |
+| 2026-11-04 | #869 | ldc 1.43.0 | 5,851,368 | 534,920 | | RDP sessions on #870; deployed to the Pi (slot 212), sync peered with F993 over `/interface/udp reliable=yes` |
 
 ### Waveshare ESP32-S3-RS485-CAN, `make esp-idf-build BOARD=waveshare-esp32-s3-rs485-can CONFIG=release`
 
@@ -110,6 +111,7 @@ Limit is the 4 MB `ota_0` partition. `ram` is internal DRAM only; PSRAM is heap.
 | 2026-10-20 | #857 | ldc 1.42.0 | 2,997,808 | 141,887 | 4,194,304 | `COREDUMP=1`; held elements stream every record and their gaps, sync stores, the shared pin, pending marks on the node: +2,432 over #862 (2,995,376) |
 | 2026-10-30 | #865 | ldc 1.42.0 | 2,997,824 | 141,887 | 4,194,304 | `COREDUMP=1`; reads answer with seq-tagged `val`s through one sample-frame encoder, bundled, `history_req` and the value in `add` gone, `index_for_time` exact: -2,144 over master b0b2f318 (2,999,968, #857 merged); deployed to 4547 |
 | 2026-11-04 | ow/tx-floor | ldc 1.42.0 | 2,998,688 | 141,887 | 4,194,304 | `COREDUMP=1`; interfaces admit by class (`tx_floor`) and invite waiting producers in turn, the packet queue invites as frames leave it, UDP sends carry a PCP and DSCP: +608 over master 6b8d0672a (2,998,080); OTA to F993 |
+| 2026-11-04 | #869 | ldc 1.42.0 | 3,015,152 | 141,887 | 4,194,304 | `COREDUMP=1`; reliable UDP (`rdp_open` sessions, `/interface/udp reliable=`) on #870: per-lane assembly, egress waiters and frame room, window headroom, admission by class, idle eviction: +16,464 over #870 (2,998,688), +17,072 over master 6b8d0672a; OTA to F993, sync peered with the Pi over it; RDP=0 on TINY targets |
 
 ### ESP32-C5 DevKitC-1, `make esp-idf-build PLATFORM=esp32-c5 CONFIG=release`
 
