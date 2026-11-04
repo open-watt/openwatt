@@ -946,6 +946,22 @@ lower to send smaller datagrams.
 | `local-port` | `0` to `65535` | `0` | Local port; zero requests an ephemeral port. |
 | `remote-host` | host, address or MAC | none | Default datagram destination. An IPv6 multicast or link-local peer names its link with a zone (`ff02::1%eth0`). |
 | `remote-port` | `1` to `65535` | with remote-host | Default destination port. |
+| `reliable` | `yes`/`no` | `no` | Carry packets over RDP sessions instead of bare datagrams (see below). Needs a unicast `remote-host`, or none. |
+
+With `reliable=yes` each peer is an RDP session: packets are acknowledged and
+retransmitted, delivered whole and in order, and may be up to 1200 bytes whatever
+the path's datagram size: a packet that size is one datagram on any IPv6-capable
+path, tunnels included, while small packets share datagrams and links with small
+frames carry a packet across several. A unicast `remote-host` holds one session to that peer
+open, with `link-status` up while it is established; without a remote, sessions
+open to any peer that sends one, up to 16, and close when they fail; at the limit
+the longest-idle session closes to admit a new peer. A packet's
+PCP selects its lane: packets are delivered in order within a lane, a lost
+datagram holds up only the lanes it carried, and a higher-priority packet rides
+ahead of a long one in progress, interrupting it if it is long itself. A transmit handle may be aborted
+mid-packet; the peer discards what it had assembled. The interface advertises
+`reliable` and `ordered` in `caps`, and a transmit callback completes when the
+peer has acknowledged the whole packet. Both ends must set `reliable=yes`.
 
 ### `/interface/wifi`
 

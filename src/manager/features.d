@@ -26,6 +26,7 @@ version (NoGateway) enum has_gateway = false; else enum has_gateway = true;
 version (HasAPI)   enum has_api    = true; else version (NoAll) enum has_api = false; else enum has_api = true;
 version (HasOTA)   enum has_ota    = true; else version (NoAll) enum has_ota = false; else enum has_ota = true;
 version (HasSFP)   enum has_sfp    = true; else enum has_sfp = false;
+version (HasRDP)   enum has_rdp    = true; else enum has_rdp = false;
 
 version (MbedTLS)       enum has_aes_gcm = true;
 else version (Windows) enum has_aes_gcm = true;
