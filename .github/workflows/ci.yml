@@ -46,7 +46,8 @@ jobs:
       - name: Setup D Compiler
         uses: dlang-community/setup-dlang@v2
         with:
-          compiler: ${{ matrix.compiler == 'dmd' && 'dmd-master' || matrix.compiler }}
+          # TODO: back to dmd-master once its nightly stops segfaulting on the unittest build (regressed 2026-11-01..03)
+          compiler: ${{ matrix.compiler == 'dmd' && 'dmd-2.114.0-beta.1' || matrix.compiler }}
 
       # Linux needs mbedtls for TLS/crypto support
       - name: Install mbedtls (Linux)

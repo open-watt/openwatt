@@ -1402,6 +1402,12 @@ this is what remains.
 
 ## Infrastructure
 
+- **Unpin DMD in CI** (2026-11-05): the `dmd-master` nightly published between 2026-11-01 and
+  2026-11-03 segfaults compiling the unittest build (all four DMD jobs; LDC and the cross builds
+  pass), so `ci.yml` pins DMD to 2.114.0-beta.1 (the 2.114.0 release has no binaries on downloads.dlang.org yet). Reduce the crash against a local nightly, report it
+  upstream, and go back to `dmd-master` (the virtual-destructor work needs dmd#23946, which is only
+  in master until 2.115) once a nightly builds again.
+
 - **`protocol.ip`'s TCP drain test is flaky** (2026-10-16): "one invitation drains what fits in its
   turn" (`src/protocol/ip/package.d`) asserts that a 32 KB producer is drained in one invitation over a
   real socket pair, which holds only while the kernel buffer takes it all at once. It failed once in a
