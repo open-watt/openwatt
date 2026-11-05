@@ -1215,6 +1215,10 @@ have in common, as elements appear.
 ### `/element/set`
 
 `/element/set element=<path> value=<value>` writes a value to an existing element.
+
+For text elements, `value=""` clears the text to an empty, present value. The
+runtime's boxed empty string is null; a null text write has the same meaning.
+It does not invalidate the element. Non-text incompatible values remain rejected.
 A rejected value leaves the element unchanged and prints `Cannot set <path>: <reason>`.
 For boolean elements, use `value=true` or `value=false`; numeric `0` and `1` are rejected.
 
@@ -2018,3 +2022,314 @@ the node is adoptable again immediately.
 /sync/peering reset                                # factory reset: leave the fleet
 ```
 
+
+
+## GoodWe mixed-protocol integration
+
+`/protocol/goodwe/client` manages the UDP client for AA55 vendor commands,
+AA55 register operations, Modbus RTU and 5A5A module messages. The wire decoder
+also accepts AA55-prefixed RTU replies and concatenated reply frames. Client
+startup reads identity directly without the optional registration handshake.
+
+```text
+/protocol/goodwe/client/add name=cabin remote=192.0.2.5:8899
+/binding/goodwe/add name=cabin-data client=cabin device=cabin profile=gwxx48es model=GW5048D-ES
+/protocol/goodwe/server/add name=cabin-proxy device=cabin profile=gwxx48es model=GW5048D-ES bind-address=192.0.2.10 advertise-address=192.0.2.10 serial-number=00000ESU00000001
+```
+
+The server shares Device values with the data binding. Its `requests`, `respond`,
+`answer`, `relay`, `raw-reply`, `reply` and `clear-replies` commands support protocol
+capture and experiments. Physical configuration writes require client transaction
+support. Unhandled proxy writes receive a failure response.
+
+Client `request` accepts `wire=aa55|module|modbus` with the protocol-specific
+`control`, `fn`, `address`, `count`, `value`, `unit` and `data` arguments.
+Bespoke requests require `manual=true`; use `received` to inspect the reply.
+Client `send` transmits a bespoke datagram while `manual=true`. `received` returns
+the last experimental response. `trace=true` records datagrams, unmatched frames
+and malformed remainders. Captures can contain WLAN credentials.
+
+```text
+/protocol/goodwe/client/set cabin manual=true
+/protocol/goodwe/client/request client=cabin wire=module fn=1
+/protocol/goodwe/client/request client=cabin wire=modbus fn=3 address=0x056E count=2
+/protocol/goodwe/client/set cabin manual=false
+```
+
+`/binding/goodwe-control` maps an explicit continuous control to either the mixed
+client or a native Modbus node. `component` defaults to `inverter.control` and
+selects the Device's PowerControl component. `scheme=legacy` uses legacy ES
+modes2/3. `scheme=battery_power` uses native modes11/12/8. Positive requested W
+charges the battery and negative requested W discharges it. Exact AC conversion
+and independent hybrid generation curtailment remain under investigation.
+
+The binding exposes `kind`, `enable`, `setpoint`, `mode`, `applied`,
+`measured_power`, `available`, `result` and `watchdog`. `applied` is register
+readback. `watchdog.feed` is the common renewal counter. Its controller lease
+expires after30 seconds and requests automatic mode. Controller expiry cannot
+execute after an OpenWatt crash. A native device watchdog is not assumed.
+
+Energy policies accept `control=<relative component path>` to select one of
+several control surfaces on a Device. Each selected control has its own watchdog.
+
+### Migration
+
+Update `/protocol/goodwe/aa55` to `/protocol/goodwe/client` and
+`/protocol/goodwe/aa55-server` to `/protocol/goodwe/server` in saved console
+scripts. The binding remains `/binding/goodwe`. The client and server runtime
+type names are `goodwe-client` and `goodwe-server`. Remove the experimental
+`fallback-register` argument. Register47505 is exposed as a firmware-specific
+raw readback and is not automatically changed by the control binding.
+
+### Profile sections
+
+- `aa55` selects a bulk vendor response function and byte offset.
+- `goodwe-register` selects an AA55-wrapped register read.
+- `goodwe-rtu` selects a native RTU register read over the mixed client.
+- `goodwe-module` selects a 5A5A module function and byte offset.
+
+Module strings can use `str` for the complete payload. A `field` child selects
+`csv,<index>` or `length-prefixed,<index>`, with zero-based field indexes. Failed
+or truncated field decoding invalidates the value. Scalar writer children use
+`write: aa55|modbus,<address>[,<count>,<byte-offset>]`. Transactions preserve
+unrelated bytes and check ACK and fresh readback. `range` and `invalid` children
+express bounds and unsupported raw sentinels.
+
+GoodWe module fields accept `request-byte: N` for parameterized reads. Selector
+bytes are included in correlation, so functions 04/05 can address different
+servers through the same queue. `field: status,0` decodes the module's one-byte
+numeric status or its alternate text response into a text element.
+
+A scalar writer with `commit: schedule` stages edits until its mapped component's
+writable `apply` counter changes. Apply snapshots every field, reads the current
+six-register block, validates times, weekday mask, enable flag, signed percent
+power and cutoff SOC, and sends one FC16 transaction. Reserved bytes are zero as
+in SolarGo. Discharge slots require zero cutoff SOC. Charging slots require
+10–100 percent. Readback verifies the whole block. The four ES slots expose this
+contract under `config.basic.tou.time1` through `time4` for legacy ES; native
+TOU editors extend through `time7` with a four-group bank limit.
+
+Modbus profile register declarations also accept a `range: lower, upper` child.
+Both bounds use the element's units. Out-of-range external writes fail before
+submission. This uses the same constraint compiler as GoodWe scalar fields.
+
+Modbus profile register declarations also accept a `range: lower, upper` child.
+Both bounds use the element's units. Out-of-range external writes fail before
+submission. This uses the same constraint compiler as GoodWe scalar fields.
+
+The GoodWe client accepts `identity=aa55|modbus`. The default uses the legacy
+vendor identity request. `identity=modbus` starts with FC03 at35000 for33 words
+and decodes the native model, serial and firmware fields. No registration or EMS
+mode change is sent. Bespoke Modbus requests accept FC03 and FC04 reads.
+
+The GoodWe binding also accepts native Modbus profiles, including
+`profile=goodwe_ems`. Holding/input register declarations are adapted to FC03/04;
+RW holding declarations use the same fresh-read, bounded write and verified
+readback path as mixed-protocol fields. This allows one GoodWe client to carry
+native register and module requests together. Generic Modbus bindings remain
+available for serial EMS connections.
+
+`commit: schedule-spn` selects the SPN schedule record. The apply contract matches
+`commit: schedule`, but enable flags are6/249, power uses signed tenths of a
+percent, and bytes10–11 hold a nonzero12-bit month mask. Weekdays must also be
+nonzero. The native profile's TOU editors require the GoodWe binding because
+these transaction declarations extend ordinary Modbus scalar declarations.
+
+`commit: prohibited-period` stages a six-byte generator period. Its fields are
+0/255 enable, weekday mask, start hour/minute and end hour/minute. Apply sends one
+three-register FC16 request and verifies the complete record. Start must precede
+end. This is distinct from either twelve-byte battery schedule format.
+
+Native-profile reads are grouped by function and adjacent address, with at most
+125 registers and a16-register gap. Writes retain their original register/byte
+positions and transaction boundaries. Explicit GoodWe bulk declarations preserve
+their declared blocks. Native holding and input-register spaces remain separate.
+
+GoodWe action counters use `action: N` with a single-register Modbus `write`.
+Changing the counter submits that fixed value once, without a preliminary read
+or a state readback. The counter records a request; `acknowledged` reports only
+the protocol ACK. Failed commands do not roll the counter back. No command runs
+at startup or when the binding restarts. Increment again for a new request.
+
+Legacy vendor commands use `command: control, function, response-function, hex`
+instead of a register `write`. The payload is literal hex, may be empty and has
+at most255 bytes. The response must match the declared control/function and
+contain the vendor ACK06. For example overload clear is command3/5E, payload0F,
+response3/DE. Native and vendor action counters are omitted from server register
+readback because they represent requests rather than physical register state.
+The ES First Cold Start actions use3/26 with response3/A6: payload04 enables and
+01 cancels. These are requests under `config.advanced.cold_start`, not reported
+physical state; enabling requires backup supply to be available.
+ES `config.meter_ct_detection.start_request` and `.stop_request` write AA55
+register059C/count1 values1 and0. They never run at startup. The test can affect
+power limiting and requires battery discharge/communications. Inspect the separate
+status/result readbacks; an acknowledged request is not a completed test.
+
+`commit: sequence` stages scalar fields under their parent component's `apply`
+counter. Apply processes them in profile element-map order, verifying each write
+before starting the next. A failure cancels the remaining writes in that sequence;
+completed writes are not rolled back. An apply submitted while a configuration
+write is already pending reports busy. This is an ordered transaction, not an
+atomic multi-register write. Native immediate charging uses stop SOC, power%, then
+enable; its separate `stop` action writes47545=0 directly. Smart Charge start time
+stages hour and minute and preserves the complete tagged six-register record.
+
+The native profile includes action counters for deleting TOU groups and generator
+prohibited periods. TOU deletion writes5500 at base+2; prohibited-period deletion
+writes5500 at its base. These are explicit requests and report ACK only.
+
+The shared descriptor form `enc16:goodwe-response-time` exposes the native
+nonlinear coefficient as bounded0–60s values. The original coefficient remains
+available for diagnostics. Native LVRT/HVRT enable fields use separate booleans
+at45499 bits0/1 with fresh read/modify/write to preserve neighboring bits.
+
+GoodWe servers accept an optional `upstream=<GoodWeClient>`. With it unset, reads
+come from the bound Device. With it set, validated AA55 vendor, native RTU
+FC03/04/06/16 and module-family1/2 requests are queued through that client's shared
+transport and replies return to the originating peer. This forwards app writes
+as well as reads. Discovery/registration and explicit response rules remain local;
+identity responses retain the proxy serial override. Bare RTU replies carry the
+GoodWe AA55 response prefix. Module family is retained in request/reply correlation.
+Family2 password ACK behavior is emulator-tested; physical firmware acceptance
+remains unverified. Other wire protocols are not implied.
+
+The upstream queue holds at most16 requests, deduplicates identical pending
+requests from the same peer and bounds waiting for client capacity to10s. RTU
+queue overflow returns gateway-path exception10; target timeout returns11;
+upstream Modbus exceptions are preserved. Vendor/module failures do not fabricate
+success ACKs. Removing/replacing the upstream or server cancels its pending
+callbacks; recreating a client with the same name/type rebinds the dependency.
+Forwarded ACKs do not optimistically change Device values; its producer binding
+continues to sample them independently.
+
+GoodWe RTU schedule fields can declare `record-type: N` (0–6), where the record's
+byte4 is N when disabled and255−N when enabled. Inactive/mismatched typed fields
+are unavailable. Scalar writes read and preserve the declared record extent
+(six words for TOU/Smart Charge, five for the peak editor), reject another occupied record type, and require the result's tag to
+match. Free/deleted slots can become a TOU record only through a complete staged
+apply. A tagged delete action first reads the record and only writes5500 when
+its type matches. Generator prohibited periods have a separate format.
+
+The native Smart Charge months, peak fraction and paired start time now use
+this protection; a peak-shaving record is never decoded or overwritten as Smart
+Charge. The profile exposes the shared record state separately. An opaque
+96-byte schedule-bank snapshot preserves all eight records for Device-backed
+proxy reads, including currently inactive/unknown layouts. Unknown Element values
+are never encoded as synthetic zeros over those snapshots.
+
+Bespoke `wire=module` requests accept `control=1|2` for the command family
+(default1). Family2/function1 is the captured WLAN password-change route; it is
+not the family1/function1 firmware read. The capture tool retains its historical
+`version`/`recognized_version` field names for this family byte.
+
+The native GoodWe profile's `config.battery_function.limit_protection.reserve_pair`
+stages on-grid and off-grid minimum SOC. Increment `apply` to read45356–45358,
+preserve the middle off-grid voltage word, send one three-word FC16, and verify
+the full readback. Values use minimum SOC, not DoD. This requires the GoodWe
+binding's compound transactions; ordinary individual reserve controls remain.
+
+`commit: peak-period` stages the ten-byte native peak record: start/end HH:MM,
+flags3/252, weekday127, purchase ceiling in10W units (0–500kW), reserve SOC0–100%.
+Apply writes five words at47589 and verifies those five;47594 is untouched. The
+profile places it under `config.basic.peak_shaving` and requires record type3.
+It configures the period; application-mode activation is a separate transaction.
+
+`commit: reactive-mode` stages four single-word native settings in element-map
+order: cosφ(P) enable, Q(U) enable, fixed PF, signed reactive fraction. The
+native profile maps them to45433,45456,45482,45483 under
+`config.advanced.safety.reactive_selection`. Both flags must be0/1; only one
+reactive mode may be active. Fixed PF uses `enc16:goodwe-native-power-factor`
+(negative leading−0.99–−0.80, positive lagging0.80–1.00,0.01 steps); fixed Q is
+signed−60–60%. Incrementing `apply` validates the combination, verifies neutral
+settings first, then activates the selected mode. Failure aborts remaining steps
+without rollback. The existing raw native cos-curve field is read-only.
+
+All staged commits snapshot their desired values when `apply` is incremented.
+Editing a field while that transaction runs leaves the current command unchanged
+and stages the new value for the next apply.
+
+`record-bank: <base>,<word-count>,<type-limit>` adds a fresh bank preflight to a
+six-word typed record writer. The bank consists of whole six-word records; the
+edited record must fall on a bank record boundary. Creation in an unused/deleted
+slot fails when the bank already contains the configured number of that type.
+Existing records remain editable. The native TOU editors cover physical slots1–7
+and use `record-bank: 47547,42,4`: the app allocates at most four TOU entries in
+those seven records. The eighth record is used by the Smart/peak editors; the
+load screen scans all eight. No automatic free-slot selection is implied.
+
+
+GoodWe `commit: native-work-mode` is a native47000 single-word staged selector.
+The profile's `config.basic.working_mode.requested_mode` accepts `self_use` and
+`peak_shaving`. Increment `apply` to execute the source-traced mode-specific
+four-step sequence, with ACK/readback at every step. This changes47511–47512,
+47591,47612 and47000;47505 is untouched. Failure aborts without rollback; success
+is register verification, not proof of autonomous watchdog release.
+
+`record-type: load` recognizes both standard1/254 and intelligent2/253 schedule
+tags. `commit: load-period` applies a six-word record, validating time, flags,
+weekday,0–100kW rated power and0–1440 minute minimum run time. Standard records
+require zero power/time. Intelligent records first disable and verify47509 before
+the record write. `record-bank: 47547,48,4` enforces a combined four-load limit
+across both types. The native profile exposes physical `time1`–`time8` under
+`config.port_connection.load`; each has an apply and a guarded delete counter.
+The separate load-mode selector is not changed by period apply.
+
+
+`commit: battery-low745` stages the native single-battery selection form. Its
+fourteen U16 fields follow the order documented in GOODWE_SPN_CONFIGURATION.md;
+the native profile scopes this form to the observed GW6000ES20 path. Apply
+validates the complete form, then executes and verifies the seven wire writes,
+aborting without rollback on failure. `current_coefficient_raw` is ×100; reserve
+fields are minimum SOC, not DoD. `tools/goodwe_battery_catalogue.py <catalogue.json>
+--index 116 --device inverter --apply 1` emits console commands only. Supply an
+applicable low745 catalogue explicitly and a counter different from the current
+apply value; omit `--index` to list entries.
+
+GoodWe module text fields can declare `commit: module-network` or
+`commit: module-password` without a register `write` descriptor. They must be
+unsized strings on the module wire. Network forms contain eight fields in
+mode/address/netmask/gateway/DNS/SSID/encryption/router-password order; password
+forms contain one field. These formats snapshot and validate text, send the
+source-traced 5A5A configuration/reload sequence, and report ACK rather than
+verified reconnection. Native forms live under `config.communication.wlan_lan`.
+Write-only inputs are not sampled and clear after completion when no newer draft
+is staged. Packet tracing can still contain wire credentials, as on the app.
+
+
+`commit: legacy-work-mode` applies the observed DSP22+/ARM14+ ESU mode workflow.
+Its declaration reads AA55 function09 at byte66 with a two-byte mode and needs
+no scalar `write` child. The ES profile exposes
+`config.basic.working_mode.activation.requested_mode` (General/Off-grid/Backup/TOU)
+and an apply counter. The transaction uses the mode-specific register/vendor
+setup, checks positive ACKs including non-OR80 reply codes, and verifies the
+final01/09 mode readback. Older firmware paths, physical effects and watchdog
+release are separate. Mode editing does not itself change the energy manager's
+PowerControl.kind or lease ownership.
+
+Native `config.modbus.address` is bounded1–247. Baud rate uses the four-byte
+`enc32:goodwe-modbus-baud` codec: reads retain the raw U32, and writes accept only
+9600,19200,38400,57600,115200, using FC16/count2. This is the745 menu's option set;
+the205 app branch lacks115200 and needs its own applicability treatment.
+
+
+`commit: native-apn` stages one write-only text name. The ordinary UDP form uses
+FC16 at47041/count25: U16 byte length, up to48 name bytes, zero padding to50 bytes.
+An empty name clears the block. Apply verifies the complete50-byte readback;
+the name input then clears. Both profiles expose `config.communication.apn`.
+This does not implement the different150-byte cloud/BLE form or establish the
+presence of a cellular module. Carrier/region lists are app catalogue data.
+
+Device-backed GoodWe servers serve read fields and read-only wire snapshots;
+staged transaction fields and write-only inputs are excluded. The legacy profile
+preserves64-byte identity,140-byte runtime,86-byte settings and four12-byte TOU
+images. Native snapshots also retain coupled battery and reactive-setting blocks.
+This prevents an unapplied form edit from overriding actual proxy readback.
+
+Native history uses `commit: native-alarm-page` on the write-only two-byte
+RTU47016 field (`write: 47016, 1`). Under `status.alarms`, read page_count,
+set page.requested_index, then increment page.apply. The binding validates the
+count at55316, selects the cursor, reads55252/count65 and verifies the cursor
+before publishing page.index and record1..8. Empty history invalidates the cache;
+rejected/out-of-range/interfered fetches retain the previous verified page.
+This cursor write selects history only. Fault-label catalogue resolution and
+concurrent external cursor readers are separate concerns.

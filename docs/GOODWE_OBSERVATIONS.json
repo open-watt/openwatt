@@ -1,0 +1,622 @@
+{
+  "date_local": "2026-10-28",
+  "timezone": "Australia/Brisbane",
+  "source": "Pi AA55 CLI, cabin_solar real inverter, UDP 8899; normal sampler paused during explicit read probes",
+  "observations": [
+    {
+      "request": "aa55b07f011d00024c",
+      "response": "aa557fb0019d100001000000000000000000000000000002dd",
+      "timestamp_utc": "2026-10-27T16:20:42.866595+00:00",
+      "request_decoded": {
+        "protocol": "aa55",
+        "valid": true,
+        "source": 176,
+        "destination": 127,
+        "control": 1,
+        "function": 29,
+        "payload": "",
+        "kind": "request"
+      },
+      "response_decoded": {
+        "protocol": "aa55",
+        "valid": true,
+        "source": 127,
+        "destination": 176,
+        "control": 1,
+        "function": 157,
+        "payload": "00010000000000000000000000000000",
+        "kind": "response"
+      },
+      "status": "validated response",
+      "app_meaning": "unconfirmed"
+    },
+    {
+      "request": "aa55b07f011a03059c0202ef",
+      "response": "aa550db0019a0400000000025b",
+      "timestamp_utc": "2026-10-27T16:20:46.071388+00:00",
+      "request_decoded": {
+        "protocol": "aa55",
+        "valid": true,
+        "source": 176,
+        "destination": 127,
+        "control": 1,
+        "function": 26,
+        "payload": "059c02",
+        "kind": "request"
+      },
+      "response_decoded": {
+        "protocol": "aa55",
+        "valid": true,
+        "source": 13,
+        "destination": 176,
+        "control": 1,
+        "function": 154,
+        "payload": "00000000",
+        "kind": "response"
+      },
+      "status": "validated response",
+      "app_meaning": "unconfirmed"
+    },
+    {
+      "request": "f703750600016a91",
+      "response": "aa55f703020001b191",
+      "timestamp_utc": "2026-10-27T16:20:49.304245+00:00",
+      "request_decoded": {
+        "protocol": "modbus-rtu",
+        "valid": true,
+        "unit": 247,
+        "function": 3,
+        "kind": "read-request",
+        "register": 29958,
+        "count": 1
+      },
+      "response_decoded": {
+        "protocol": "goodwe-modbus-rtu",
+        "valid": true,
+        "kind": "response",
+        "unit": 247,
+        "function": 3,
+        "byte_count": 2,
+        "payload": "0001"
+      },
+      "status": "validated response",
+      "app_meaning": "BMS Information correlated with 1 -> 42 marker displaying 42 in batch 01. Later direct real-inverter visit showed --.-- initially, then 00 after waiting; proxy baseline shows 01. Complete source/validity/formatting rules remain unresolved."
+    },
+    {
+      "request": "f703d6d80043a8de",
+      "response": "aa55f70386004000006a96a6b2000000c00401ff2b020004496a96a8f3000000000401ff27020103c96a979445000000810201ff0c0202036d6a97944e000001000300ff0c020302f76a9794bb000000000200ff0c020403636a97953f000001000300ff0b020502ea6a97e1a5000001000300ff06020603986a97f9aa000001000300ff06020703b6002a3b15",
+      "timestamp_utc": "2026-10-27T16:20:52.521924+00:00",
+      "request_decoded": {
+        "protocol": "modbus-rtu",
+        "valid": true,
+        "unit": 247,
+        "function": 3,
+        "kind": "read-request",
+        "register": 55000,
+        "count": 67
+      },
+      "response_decoded": {
+        "protocol": "goodwe-modbus-rtu",
+        "valid": true,
+        "kind": "response",
+        "unit": 247,
+        "function": 3,
+        "byte_count": 134,
+        "payload": "004000006a96a6b2000000c00401ff2b020004496a96a8f3000000000401ff27020103c96a979445000000810201ff0c0202036d6a97944e000001000300ff0c020302f76a9794bb000000000200ff0c020403636a97953f000001000300ff0b020502ea6a97e1a5000001000300ff06020603986a97f9aa000001000300ff06020703b6002a"
+      },
+      "status": "validated response",
+      "app_meaning": "Alarm screen history data; screenshot confirms records 512, 515, 517",
+      "alarm_analysis": {
+        "evidence": "User-provided SolarGo Alarm screenshot, received 2026-10-28; phone clock 3:20; proxy serial 00000ESU99000008",
+        "header_hex": "0040",
+        "record_start": 2,
+        "record_stride": 16,
+        "record_count_in_response": 8,
+        "trailing_hex": "03b6002a",
+        "type_labels": {
+          "3": "BMS Alarm",
+          "4": "BMS Warning"
+        },
+        "status_labels": {
+          "0": "Waiting",
+          "1": "On-grid"
+        },
+        "uncertainties": [
+          "header meaning",
+          "record prefix meaning",
+          "byte 12 meaning",
+          "trailing bytes meaning",
+          "full code width",
+          "temperature signedness or high-byte meaning",
+          "other type/status enumeration values",
+          "pagination",
+          "cleared-record filtering"
+        ],
+        "records": [
+          {
+            "index": 0,
+            "payload_offset": 2,
+            "raw": "00006a96a6b2000000c00401ff2b0200",
+            "unknown_prefix": "0000",
+            "timestamp_u32be": 1788257970,
+            "datetime_as_utc": "2026-09-01 10:19:30",
+            "code_u32be": 192,
+            "type_byte": 4,
+            "status_byte": 1,
+            "unknown_byte_12": 255,
+            "temperature_byte": 43,
+            "id_u16be": 512,
+            "screenshot": {
+              "datetime": "2026-09-01 10:19:30",
+              "id": 512,
+              "code": 192,
+              "type": "BMS Warning",
+              "status": "On-grid",
+              "temperature": 43,
+              "label": "Battery under SOC,Battery under total voltage"
+            }
+          },
+          {
+            "index": 1,
+            "payload_offset": 18,
+            "raw": "04496a96a8f3000000000401ff270201",
+            "unknown_prefix": "0449",
+            "timestamp_u32be": 1788258547,
+            "datetime_as_utc": "2026-09-01 10:29:07",
+            "code_u32be": 0,
+            "type_byte": 4,
+            "status_byte": 1,
+            "unknown_byte_12": 255,
+            "temperature_byte": 39,
+            "id_u16be": 513
+          },
+          {
+            "index": 2,
+            "payload_offset": 34,
+            "raw": "03c96a979445000000810201ff0c0202",
+            "unknown_prefix": "03c9",
+            "timestamp_u32be": 1788318789,
+            "datetime_as_utc": "2026-09-02 03:13:09",
+            "code_u32be": 129,
+            "type_byte": 2,
+            "status_byte": 1,
+            "unknown_byte_12": 255,
+            "temperature_byte": 12,
+            "id_u16be": 514
+          },
+          {
+            "index": 3,
+            "payload_offset": 50,
+            "raw": "036d6a97944e000001000300ff0c0203",
+            "unknown_prefix": "036d",
+            "timestamp_u32be": 1788318798,
+            "datetime_as_utc": "2026-09-02 03:13:18",
+            "code_u32be": 256,
+            "type_byte": 3,
+            "status_byte": 0,
+            "unknown_byte_12": 255,
+            "temperature_byte": 12,
+            "id_u16be": 515,
+            "screenshot": {
+              "datetime": "2026-09-02 03:13:18",
+              "id": 515,
+              "code": 256,
+              "type": "BMS Alarm",
+              "status": "Waiting",
+              "temperature": 12,
+              "label": "Battery communication failure"
+            }
+          },
+          {
+            "index": 4,
+            "payload_offset": 66,
+            "raw": "02f76a9794bb000000000200ff0c0204",
+            "unknown_prefix": "02f7",
+            "timestamp_u32be": 1788318907,
+            "datetime_as_utc": "2026-09-02 03:15:07",
+            "code_u32be": 0,
+            "type_byte": 2,
+            "status_byte": 0,
+            "unknown_byte_12": 255,
+            "temperature_byte": 12,
+            "id_u16be": 516
+          },
+          {
+            "index": 5,
+            "payload_offset": 82,
+            "raw": "03636a97953f000001000300ff0b0205",
+            "unknown_prefix": "0363",
+            "timestamp_u32be": 1788319039,
+            "datetime_as_utc": "2026-09-02 03:17:19",
+            "code_u32be": 256,
+            "type_byte": 3,
+            "status_byte": 0,
+            "unknown_byte_12": 255,
+            "temperature_byte": 11,
+            "id_u16be": 517,
+            "screenshot": {
+              "datetime": "2026-09-02 03:17:19",
+              "id": 517,
+              "code": 256,
+              "type": "BMS Alarm",
+              "status": "Waiting",
+              "temperature": 11,
+              "label": "Battery communication failure"
+            }
+          },
+          {
+            "index": 6,
+            "payload_offset": 98,
+            "raw": "02ea6a97e1a5000001000300ff060206",
+            "unknown_prefix": "02ea",
+            "timestamp_u32be": 1788338597,
+            "datetime_as_utc": "2026-09-02 08:43:17",
+            "code_u32be": 256,
+            "type_byte": 3,
+            "status_byte": 0,
+            "unknown_byte_12": 255,
+            "temperature_byte": 6,
+            "id_u16be": 518
+          },
+          {
+            "index": 7,
+            "payload_offset": 114,
+            "raw": "03986a97f9aa000001000300ff060207",
+            "unknown_prefix": "0398",
+            "timestamp_u32be": 1788344746,
+            "datetime_as_utc": "2026-09-02 10:25:46",
+            "code_u32be": 256,
+            "type_byte": 3,
+            "status_byte": 0,
+            "unknown_byte_12": 255,
+            "temperature_byte": 6,
+            "id_u16be": 519
+          }
+        ]
+      }
+    },
+    {
+      "request": "fa03232900014bcd",
+      "response": null,
+      "timestamp_utc": "2026-10-27T16:20:55.980185+00:00",
+      "request_decoded": {
+        "protocol": "modbus-rtu",
+        "valid": true,
+        "unit": 250,
+        "function": 3,
+        "kind": "read-request",
+        "register": 9001,
+        "count": 1
+      },
+      "response_decoded": null,
+      "status": "no response captured in one 1.6-second wait",
+      "app_meaning": "unconfirmed"
+    },
+    {
+      "request": "f70390c400103c6d",
+      "response": null,
+      "timestamp_utc": "2026-10-27T16:20:59.344417+00:00",
+      "request_decoded": {
+        "protocol": "modbus-rtu",
+        "valid": true,
+        "unit": 247,
+        "function": 3,
+        "kind": "read-request",
+        "register": 37060,
+        "count": 16
+      },
+      "response_decoded": null,
+      "status": "no response captured in one 1.6-second wait",
+      "app_meaning": "unconfirmed"
+    },
+    {
+      "request": "f703078000019000",
+      "response": null,
+      "timestamp_utc": "2026-10-27T16:21:02.897575+00:00",
+      "request_decoded": {
+        "protocol": "modbus-rtu",
+        "valid": true,
+        "unit": 247,
+        "function": 3,
+        "kind": "read-request",
+        "register": 1920,
+        "count": 1
+      },
+      "response_decoded": null,
+      "status": "no response captured in one 1.6-second wait",
+      "app_meaning": "unconfirmed"
+    }
+  ],
+  "screenshot_interval_requests": [
+    {
+      "request": "5a5a01020000f4d0",
+      "first_seen_utc": "2026-10-27T17:09:15.827118831Z",
+      "occurrences_0308_to_0312": 2,
+      "decoded": {
+        "protocol": "goodwe-5a5a",
+        "valid": true,
+        "body": "01020000"
+      },
+      "response": "not implemented on emulator; no real probe for this request in this analysis",
+      "screen_association": "time-correlated candidate; not isolated"
+    },
+    {
+      "request": "5a5a01030000a510",
+      "first_seen_utc": "2026-10-27T17:09:15.857125045Z",
+      "occurrences_0308_to_0312": 1,
+      "decoded": {
+        "protocol": "goodwe-5a5a",
+        "valid": true,
+        "body": "01030000"
+      },
+      "response": "not implemented on emulator; no real probe for this request in this analysis",
+      "screen_association": "time-correlated candidate; not isolated"
+    },
+    {
+      "request": "5a5a010e000034d3",
+      "first_seen_utc": "2026-10-27T17:09:30.212598441Z",
+      "occurrences_0308_to_0312": 6,
+      "decoded": {
+        "protocol": "goodwe-5a5a",
+        "valid": true,
+        "body": "010e0000"
+      },
+      "response": "not implemented on emulator; no real probe for this request in this analysis",
+      "screen_association": "time-correlated candidate; not isolated"
+    },
+    {
+      "request": "fa030bc30053e264",
+      "first_seen_utc": "2026-10-27T17:09:41.086077665Z",
+      "occurrences_0308_to_0312": 1,
+      "decoded": {
+        "protocol": "modbus-rtu",
+        "valid": true,
+        "unit": 250,
+        "function": 3,
+        "kind": "read-request",
+        "register": 3011,
+        "count": 83
+      },
+      "response": null,
+      "screen_association": "time-correlated candidate; not isolated",
+      "probe_status": "no response captured in one 1.6-second wait",
+      "probe_evidence": "GOODWE_READ_PROBE_03.json"
+    },
+    {
+      "request": "f703b169000a267b",
+      "first_seen_utc": "2026-10-27T17:10:29.086297167Z",
+      "occurrences_0308_to_0312": 3,
+      "decoded": {
+        "protocol": "modbus-rtu",
+        "valid": true,
+        "unit": 247,
+        "function": 3,
+        "kind": "read-request",
+        "register": 45417,
+        "count": 10
+      },
+      "response": "aa55f7031409ec07a81397128e003c09ec07a81397128e003d6342",
+      "screen_association": "time-correlated candidate; not isolated",
+      "probe_status": "validated full read response",
+      "probe_evidence": "GOODWE_READ_PROBE_03.json"
+    },
+    {
+      "request": "f703b16d000ce7b8",
+      "first_seen_utc": "2026-10-27T17:10:29.086886436Z",
+      "occurrences_0308_to_0312": 3,
+      "decoded": {
+        "protocol": "modbus-rtu",
+        "valid": true,
+        "unit": 247,
+        "function": 3,
+        "kind": "read-request",
+        "register": 45421,
+        "count": 12
+      },
+      "response": "aa55f70318003c09ec07a81397128e003dffff017701770001000100011d5a",
+      "screen_association": "time-correlated candidate; not isolated",
+      "probe_status": "validated full read response",
+      "probe_evidence": "GOODWE_READ_PROBE_03.json"
+    },
+    {
+      "request": "f703b2530021462d",
+      "first_seen_utc": "2026-10-27T17:10:29.088592056Z",
+      "occurrences_0308_to_0312": 3,
+      "decoded": {
+        "protocol": "modbus-rtu",
+        "valid": true,
+        "unit": 247,
+        "function": 3,
+        "kind": "read-request",
+        "register": 45651,
+        "count": 33
+      },
+      "response": "aa55f70342ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff28b9",
+      "screen_association": "time-correlated candidate; not isolated",
+      "probe_status": "validated full read response",
+      "probe_evidence": "GOODWE_READ_PROBE_03.json"
+    },
+    {
+      "request": "f703b158001137bf",
+      "first_seen_utc": "2026-10-27T17:10:29.089048722Z",
+      "occurrences_0308_to_0312": 5,
+      "decoded": {
+        "protocol": "modbus-rtu",
+        "valid": true,
+        "unit": 247,
+        "function": 3,
+        "kind": "read-request",
+        "register": 45400,
+        "count": 17
+      },
+      "response": "aa55f703220a5a004b0708020d0abe000702bc004b0a1414500007125c004b14500007125c004b8ac8",
+      "screen_association": "time-correlated candidate; not isolated",
+      "probe_status": "validated full read response",
+      "probe_evidence": "GOODWE_READ_PROBE_03.json"
+    },
+    {
+      "request": "f703b1830043c679",
+      "first_seen_utc": "2026-10-27T17:10:29.110854855Z",
+      "occurrences_0308_to_0312": 2,
+      "decoded": {
+        "protocol": "modbus-rtu",
+        "valid": true,
+        "unit": 247,
+        "function": 3,
+        "kind": "read-request",
+        "register": 45443,
+        "count": 67
+      },
+      "response": "aa55f70386000113a1136f145012c0003c13971379016801f301f403e800a7000100c80032081601b808980000096000000a14fda800060000ffffffffffff00010168081600c8086603e809e203e80a2800c8005a000003e8ffffffffffff00000000a7d20000ffffffffffff00000000000000000003070802bc01f401f407080a280abe020800080abec033",
+      "screen_association": "time-correlated candidate; not isolated",
+      "probe_status": "validated full read response",
+      "probe_evidence": "GOODWE_READ_PROBE_03.json"
+    },
+    {
+      "request": "f703b253000147f5",
+      "first_seen_utc": "2026-10-27T17:10:36.830728493Z",
+      "occurrences_0308_to_0312": 1,
+      "decoded": {
+        "protocol": "modbus-rtu",
+        "valid": true,
+        "unit": 247,
+        "function": 3,
+        "kind": "read-request",
+        "register": 45651,
+        "count": 1
+      },
+      "response": "aa55f70302ffff71e1",
+      "screen_association": "time-correlated candidate; not isolated",
+      "probe_status": "validated full read response",
+      "probe_evidence": "GOODWE_READ_PROBE_03.json"
+    },
+    {
+      "request": "f703b7bc000176cc",
+      "first_seen_utc": "2026-10-27T17:10:49.832001149Z",
+      "occurrences_0308_to_0312": 1,
+      "decoded": {
+        "protocol": "modbus-rtu",
+        "valid": true,
+        "unit": 247,
+        "function": 3,
+        "kind": "read-request",
+        "register": 47036,
+        "count": 1
+      },
+      "response": "aa55f7030200007051",
+      "screen_association": "time-correlated candidate; not isolated",
+      "probe_status": "validated full read response",
+      "probe_evidence": "GOODWE_READ_PROBE_03.json"
+    },
+    {
+      "request": "f703b1ac00017781",
+      "first_seen_utc": "2026-10-27T17:10:49.864141783Z",
+      "occurrences_0308_to_0312": 3,
+      "decoded": {
+        "protocol": "modbus-rtu",
+        "valid": true,
+        "unit": 247,
+        "function": 3,
+        "kind": "read-request",
+        "register": 45484,
+        "count": 1
+      },
+      "response": "aa55f7030203e870ef",
+      "screen_association": "time-correlated candidate; not isolated",
+      "probe_status": "validated full read response",
+      "probe_evidence": "GOODWE_READ_PROBE_03.json"
+    },
+    {
+      "request": "f703b9b900022424",
+      "first_seen_utc": "2026-10-27T17:11:03.508615111Z",
+      "occurrences_0308_to_0312": 12,
+      "decoded": {
+        "protocol": "modbus-rtu",
+        "valid": true,
+        "unit": 247,
+        "function": 3,
+        "kind": "read-request",
+        "register": 47545,
+        "count": 2
+      },
+      "response": "aa55f70304000000646dd7",
+      "screen_association": "time-correlated candidate; not isolated",
+      "probe_status": "validated full read response",
+      "probe_evidence": "GOODWE_READ_PROBE_03.json"
+    },
+    {
+      "request": "aa55b07f011a0305a10102f3",
+      "first_seen_utc": "2026-10-27T17:11:03.509297921Z",
+      "occurrences_0308_to_0312": 2,
+      "decoded": {
+        "protocol": "aa55",
+        "valid": true,
+        "source": 176,
+        "destination": 127,
+        "control": 1,
+        "function": 26,
+        "payload": "05a101",
+        "kind": "request"
+      },
+      "response": "aa550db0019a020014026d",
+      "screen_association": "time-correlated candidate; not isolated",
+      "probe_status": "validated full read response",
+      "probe_evidence": "GOODWE_READ_PROBE_03.json"
+    },
+    {
+      "request": "f703b1690010a7b0",
+      "first_seen_utc": "2026-10-27T17:11:21.853871171Z",
+      "occurrences_0308_to_0312": 3,
+      "decoded": {
+        "protocol": "modbus-rtu",
+        "valid": true,
+        "unit": 247,
+        "function": 3,
+        "kind": "read-request",
+        "register": 45417,
+        "count": 16
+      },
+      "response": "aa55f7032009ec07a81397128e003c09ec07a81397128e003dffff017701770001000100013609",
+      "screen_association": "time-correlated candidate; not isolated",
+      "probe_status": "validated full read response",
+      "probe_evidence": "GOODWE_READ_PROBE_03.json"
+    },
+    {
+      "request": "f703b17900422788",
+      "first_seen_utc": "2026-10-27T17:11:32.139289164Z",
+      "occurrences_0308_to_0312": 3,
+      "decoded": {
+        "protocol": "modbus-rtu",
+        "valid": true,
+        "unit": 247,
+        "function": 3,
+        "kind": "read-request",
+        "register": 45433,
+        "count": 66
+      },
+      "response": "aa55f70384000000c8006401f4006403e8005a08fc08fc01f4000113a1136f145012c0003c13971379016801f301f403e800a7000100c80032081601b808980000096000000a14fda800060000ffffffffffff00010168081600c8086603e809e203e80a2800c8005a000003e8ffffffffffff00000000a7d20000ffffffffffff0000000000000000fb9f",
+      "screen_association": "time-correlated candidate; not isolated",
+      "probe_status": "validated full read response",
+      "probe_evidence": "GOODWE_READ_PROBE_03.json"
+    },
+    {
+      "request": "f703b1c80001365e",
+      "first_seen_utc": "2026-10-27T17:11:32.140192703Z",
+      "occurrences_0308_to_0312": 1,
+      "decoded": {
+        "protocol": "modbus-rtu",
+        "valid": true,
+        "unit": 247,
+        "function": 3,
+        "kind": "read-request",
+        "register": 45512,
+        "count": 1
+      },
+      "response": "aa55f7030200007051",
+      "screen_association": "time-correlated candidate; not isolated",
+      "probe_status": "validated full read response",
+      "probe_evidence": "GOODWE_READ_PROBE_03.json"
+    }
+  ],
+  "public_record_redaction": "Private LAN addresses, MACs and serial identifiers are pseudonymized. Encoded identity bytes may be substituted, so affected historical frames are not checksum-valid replay fixtures. Private captures and WLAN credentials are excluded."
+}

@@ -1,0 +1,42 @@
+{
+  "target": "cabin_solar 192.0.2.28",
+  "operation": "Bounded low-power legacy control trial: mode2/123W and mode3/137W with exact ACK/read-back; finally restores verified mode1/power0. Settings evidence only, not measured battery-power validation.",
+  "results": [
+    {
+      "request": "f703056e0002b18c",
+      "response": "aa55f70304000100003dfc",
+      "timestamp_utc": "2026-10-28T16:25:56.831573+00:00"
+    },
+    {
+      "request": "f710056e0002040002007bb733",
+      "response": "aa55f710056e0002344f",
+      "timestamp_utc": "2026-10-28T16:26:00.034692+00:00"
+    },
+    {
+      "request": "f703056e0002b18c",
+      "response": "aa55f703040002007b8ddf",
+      "timestamp_utc": "2026-10-28T16:26:03.287014+00:00"
+    },
+    {
+      "request": "f710056e000204000300896776",
+      "response": "aa55f710056e0002344f",
+      "timestamp_utc": "2026-10-28T16:26:06.533323+00:00"
+    },
+    {
+      "request": "f703056e0002b18c",
+      "response": "aa55f70304000300895d9a",
+      "timestamp_utc": "2026-10-28T16:26:09.732522+00:00"
+    },
+    {
+      "request": "f710056e000204000100000710",
+      "response": "aa55f710056e0002344f",
+      "timestamp_utc": "2026-10-28T16:26:12.967622+00:00"
+    },
+    {
+      "request": "f703056e0002b18c",
+      "response": "aa55f70304000100003dfc",
+      "timestamp_utc": "2026-10-28T16:26:16.350545+00:00"
+    }
+  ],
+  "public_record_redaction": "Private LAN addresses, MACs and serial identifiers are pseudonymized. Encoded identity bytes may be substituted, so affected historical frames are not checksum-valid replay fixtures. Private captures and WLAN credentials are excluded."
+}

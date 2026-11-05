@@ -67,6 +67,9 @@ nothrow @nogc:
     Element* unit_e;
 
     Element* setpoint_e;
+    Element* watchdog_feed_e;
+    Element* measured_power_e;
+    Element* available_e;
 
     Element* min_e;
     Element* max_e;
@@ -93,9 +96,9 @@ nothrow @nogc:
     ControlKind kind() const
     {
         if (kind_e)
-            if (const(ControlKind)* p = enum_from_key!ControlKind(kind_e.text_value()))
+            if (const(ControlKind)* p = enum_from_key!ControlKind(control_key(kind_e)))
                 return *p;
-        if (source && is_switch(source))
+        if (is_switch(source))
             return ControlKind.discrete;
         return ControlKind.unknown;
     }
@@ -103,9 +106,9 @@ nothrow @nogc:
     ControlDirection direction() const
     {
         if (direction_e)
-            if (const(ControlDirection)* p = enum_from_key!ControlDirection(direction_e.text_value()))
+            if (const(ControlDirection)* p = enum_from_key!ControlDirection(control_key(direction_e)))
                 return *p;
-        if (source && is_switch(source))
+        if (is_switch(source))
             return ControlDirection.consume;
         return ControlDirection.unknown;
     }
@@ -113,9 +116,9 @@ nothrow @nogc:
     ControlUnit unit() const
     {
         if (unit_e)
-            if (const(ControlUnit)* p = enum_from_key!ControlUnit(unit_e.text_value()))
+            if (const(ControlUnit)* p = enum_from_key!ControlUnit(control_key(unit_e)))
                 return *p;
-        if (source && is_switch(source))
+        if (is_switch(source))
             return ControlUnit.boolean;
         return ControlUnit.unknown;
     }
@@ -158,17 +161,43 @@ nothrow @nogc:
 
 
 // Maps policy targets to direct or graph-projected control surfaces.
+struct ControlSurfaceKey
+{
+    CID owner;
+    size_t source;
+
+    int opCmp(ref const ControlSurfaceKey rhs) const pure nothrow @nogc
+    {
+        if (owner != rhs.owner)
+            return owner < rhs.owner ? -1 : 1;
+        return source < rhs.source ? -1 : source > rhs.source ? 1 : 0;
+    }
+}
+
 final class ControlRegistry
 {
 nothrow @nogc:
 
     Map!(CID, Control) by_owner;
     Map!(CID, Control) by_target;
+    Map!(ControlSurfaceKey, Control) by_surface;
 
-    Control* lookup(Appliance a)
+    Control* lookup(Appliance a, const(char)[] path = null)
     {
         if (a is null)
             return null;
+        if (path.length)
+        {
+            Component source = a.device_ref ? a.device_ref.find_component(path) : null;
+            if (!source)
+                return null;
+            if (Control* c = a.id in by_owner)
+                if (c.source is source)
+                    return c;
+            if (Control* c = ControlSurfaceKey(a.id, cast(size_t)cast(void*)source) in by_surface)
+                return c;
+            return null;
+        }
         if (Control* c = a.id in by_owner)
             return c;
         if (Control* c = a.id in by_target)
@@ -183,6 +212,7 @@ nothrow @nogc:
 
         Array!CID survivors;
         Array!CID composite_survivors;
+        Array!ControlSurfaceKey surface_survivors;
 
         foreach (Appliance a; col.values)
         {
@@ -193,16 +223,26 @@ nothrow @nogc:
             Control synth;
             synthesize(a, source, synth);
 
-            if (Control* existing = a.id in by_owner)
-            {
-                synth.last_transition = existing.last_transition;
-                synth.last_on = existing.last_on;
-                synth.current_setpoint = existing.current_setpoint;
-            }
-
+            Control* existing = a.id in by_owner;
+            if (!existing || existing.source !is source)
+                existing = ControlSurfaceKey(a.id, cast(size_t)cast(void*)source) in by_surface;
+            preserve_state(synth, existing);
+            collect_surfaces(a, a.device_ref, source, surface_survivors);
             by_owner.replace(a.id, synth.move);
             survivors ~= a.id;
         }
+
+        Array!ControlSurfaceKey removed_surfaces;
+        foreach (key; by_surface.keys)
+        {
+            bool kept = false;
+            foreach (s; surface_survivors)
+                if (s == key) { kept = true; break; }
+            if (!kept)
+                removed_surfaces ~= key;
+        }
+        foreach (key; removed_surfaces)
+            by_surface.remove(key);
 
         synthesize_graph_controls(graph, composite_survivors);
 
@@ -251,6 +291,34 @@ nothrow @nogc:
     }
 
 private:
+    void preserve_state(ref Control target, const(Control)* source)
+    {
+        if (!source)
+            return;
+        target.last_transition = source.last_transition;
+        target.last_on = source.last_on;
+        target.current_setpoint = source.current_setpoint;
+    }
+
+    void collect_surfaces(Appliance owner, Component root, Component primary, ref Array!ControlSurfaceKey survivors)
+    {
+        if (!root)
+            return;
+        if (root !is primary && (root.template_[] == "PowerControl" || is_switch(root)))
+        {
+            Control synth;
+            synthesize(owner, root, synth);
+            Control* existing = owner.id in by_owner;
+            if (!existing || existing.source !is root)
+                existing = ControlSurfaceKey(owner.id, cast(size_t)cast(void*)root) in by_surface;
+            preserve_state(synth, existing);
+            by_surface.replace(ControlSurfaceKey(owner.id, cast(size_t)cast(void*)root), synth.move);
+            survivors ~= ControlSurfaceKey(owner.id, cast(size_t)cast(void*)root);
+        }
+        foreach (child; root.components)
+            collect_surfaces(owner, child, primary, survivors);
+    }
+
     void synthesize_graph_controls(ref TopologyGraph graph, ref Array!CID survivors)
     {
         foreach (link; graph.links[])
@@ -360,6 +428,9 @@ private:
         ctl.unit_e              = pc.find_element("unit");
 
         ctl.setpoint_e              = pc.find_element("setpoint");
+        ctl.watchdog_feed_e         = pc.find_element("watchdog.feed");
+        ctl.measured_power_e        = pc.find_element("measured_power");
+        ctl.available_e             = pc.find_element("available");
         ctl.enable_e              = pc.find_element("enable");
 
         ctl.min_e               = pc.find_element("min");
@@ -429,15 +500,26 @@ private:
 
 private:
 
-bool is_switch(const Component c)
-    => c.template_[] == "Switch" || c.template_[] == "Light";
-
 // Scalar comparisons use SI base units regardless of device storage scale.
 float read_float(const(Element)* e)
 {
     if (e is null || !e.value.isNumber)
         return float.nan;
     return cast(float)e.normalised_value();
+}
+
+const(char)[] control_key(const(Element)* e)
+{
+    if (!e)
+        return null;
+    import manager.series : DataFormat;
+    auto format = e.data_format;
+    if (format.desc == DataFormat.Desc.enum_)
+    {
+        auto value = e.value;
+        return value.isLong && value.is_enum ? format.enum_info.key_for_raw(value.asLong) : null;
+    }
+    return e.text_value();
 }
 
 VarQuantity read_quantity(const(Element)* e)
@@ -453,4 +535,9 @@ Duration read_duration(const(Element)* e)
         return Duration.zero;
     // Bare duration constants are already seconds; typed values normalise to them.
     return seconds(cast(long)e.normalised_value());
+}
+
+bool is_switch(const(Component) c)
+{
+    return c && (c.template_[] == "Switch" || c.template_[] == "Light");
 }

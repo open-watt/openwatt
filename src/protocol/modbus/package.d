@@ -51,6 +51,11 @@ unittest
     assert(!translate_legacy_byte_type("u16", buffer, length));
 }
 
+bool modbus_profile_section(uint kind) nothrow @nogc
+{
+    return kind == modbus_reg_section_kind || kind == modbus_mb_section_kind;
+}
+
 final class ModbusProtocolModule : Module, ProfileSections
 {
     mixin DeclareModule!"protocol.mb";
@@ -141,6 +146,18 @@ nothrow @nogc:
 
         if (!b.compile_value(type, following, modbus_context, mb.desc, mb.length))
             return false;
+        foreach (ref child; item.sub_items)
+            if (child.name[] == "range")
+            {
+                const(char)[] range = child.value;
+                const(char)[] low = range.split!','.unQuote;
+                const(char)[] high = range.split!','.unQuote;
+                if (range.length || !b.constrain_value(mb.desc, low, high))
+                {
+                    writeWarning("Invalid Modbus field range: ", b.element_id);
+                    return false;
+                }
+            }
         if (mb.reg_type >= RegisterType.input_register && (mb.length == 0 || (mb.length & 1)))
         {
             writeWarning("Modbus register values require a non-zero whole-word span: ", b.element_id);

@@ -1,0 +1,4256 @@
+{
+  "schema_version": 1,
+  "target": "GW5048D-ES / DSP23 ARM14 / SolarGo7.2.2",
+  "profile": "goodwe_profiles/gwxx48es.conf",
+  "safety": [
+    {
+      "name": "over_voltage_level_1_phase",
+      "path": "config.advanced.safety.protection.over_voltage_level_1_phase",
+      "address": 45400,
+      "read_bank": 45400,
+      "format": "u16:0.1V",
+      "decoding": "Voltage",
+      "access": "RW",
+      "observed_raw": 2650,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "over_voltage_level_1_time_phase",
+      "path": "config.advanced.safety.protection.over_voltage_level_1_time_phase_cycles",
+      "address": 45401,
+      "read_bank": 45400,
+      "format": "u16",
+      "decoding": "Grid cycles; divide by nominal country frequency, not live frequency; extended-time bank may override",
+      "access": "RW",
+      "observed_raw": 75,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "under_voltage_level_1_phase",
+      "path": "config.advanced.safety.protection.under_voltage_level_1_phase",
+      "address": 45402,
+      "read_bank": 45400,
+      "format": "u16:0.1V",
+      "decoding": "Voltage",
+      "access": "RW",
+      "observed_raw": 1800,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "under_voltage_level_1_time_phase",
+      "path": "config.advanced.safety.protection.under_voltage_level_1_time_phase_cycles",
+      "address": 45403,
+      "read_bank": 45400,
+      "format": "u16",
+      "decoding": "Grid cycles; divide by nominal country frequency, not live frequency; extended-time bank may override",
+      "access": "RW",
+      "observed_raw": 525,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "over_voltage_level_2_phase",
+      "path": "config.advanced.safety.protection.over_voltage_level_2_phase",
+      "address": 45404,
+      "read_bank": 45400,
+      "format": "u16:0.1V",
+      "decoding": "Voltage",
+      "access": "RW",
+      "observed_raw": 2750,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "over_voltage_level_2_time_phase",
+      "path": "config.advanced.safety.protection.over_voltage_level_2_time_phase_cycles",
+      "address": 45405,
+      "read_bank": 45400,
+      "format": "u16",
+      "decoding": "Grid cycles; divide by nominal country frequency, not live frequency; extended-time bank may override",
+      "access": "RW",
+      "observed_raw": 7,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "under_voltage_level_2_phase",
+      "path": "config.advanced.safety.protection.under_voltage_level_2_phase",
+      "address": 45406,
+      "read_bank": 45400,
+      "format": "u16:0.1V",
+      "decoding": "Voltage",
+      "access": "RW",
+      "observed_raw": 700,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "under_voltage_level_2_time_phase",
+      "path": "config.advanced.safety.protection.under_voltage_level_2_time_phase_cycles",
+      "address": 45407,
+      "read_bank": 45400,
+      "format": "u16",
+      "decoding": "Grid cycles; divide by nominal country frequency, not live frequency; extended-time bank may override",
+      "access": "RW",
+      "observed_raw": 75,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "over_voltage_phase_10min",
+      "path": "config.advanced.safety.protection.over_voltage_phase_10min",
+      "address": 45408,
+      "read_bank": 45400,
+      "format": "u16:0.1V",
+      "decoding": "Voltage",
+      "access": "RW",
+      "observed_raw": 2580,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "over_frequency_level_1",
+      "path": "config.advanced.safety.protection.over_frequency_level_1",
+      "address": 45409,
+      "read_bank": 45400,
+      "format": "u16:0.01Hz",
+      "decoding": "Frequency",
+      "access": "RW",
+      "observed_raw": 5200,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "over_frequency_level_1_time",
+      "path": "config.advanced.safety.protection.over_frequency_level_1_time_cycles",
+      "address": 45410,
+      "read_bank": 45400,
+      "format": "u16",
+      "decoding": "Grid cycles; divide by nominal country frequency, not live frequency; extended-time bank may override",
+      "access": "RW",
+      "observed_raw": 7,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "under_frequency_level_1",
+      "path": "config.advanced.safety.protection.under_frequency_level_1",
+      "address": 45411,
+      "read_bank": 45400,
+      "format": "u16:0.01Hz",
+      "decoding": "Frequency",
+      "access": "RW",
+      "observed_raw": 4700,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "under_frequency_level_1_time",
+      "path": "config.advanced.safety.protection.under_frequency_level_1_time_cycles",
+      "address": 45412,
+      "read_bank": 45400,
+      "format": "u16",
+      "decoding": "Grid cycles; divide by nominal country frequency, not live frequency; extended-time bank may override",
+      "access": "RW",
+      "observed_raw": 75,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "over_frequency_level_2",
+      "path": "config.advanced.safety.protection.over_frequency_level_2",
+      "address": 45413,
+      "read_bank": 45400,
+      "format": "u16:0.01Hz",
+      "decoding": "Frequency",
+      "access": "RW",
+      "observed_raw": 5200,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "over_frequency_level_2_time",
+      "path": "config.advanced.safety.protection.over_frequency_level_2_time_cycles",
+      "address": 45414,
+      "read_bank": 45400,
+      "format": "u16",
+      "decoding": "Grid cycles; divide by nominal country frequency, not live frequency; extended-time bank may override",
+      "access": "RW",
+      "observed_raw": 7,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "under_frequency_level_2",
+      "path": "config.advanced.safety.protection.under_frequency_level_2",
+      "address": 45415,
+      "read_bank": 45400,
+      "format": "u16:0.01Hz",
+      "decoding": "Frequency",
+      "access": "RW",
+      "observed_raw": 4700,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "under_frequency_level_2_time",
+      "path": "config.advanced.safety.protection.under_frequency_level_2_time_cycles",
+      "address": 45416,
+      "read_bank": 45400,
+      "format": "u16",
+      "decoding": "Grid cycles; divide by nominal country frequency, not live frequency; extended-time bank may override",
+      "access": "RW",
+      "observed_raw": 75,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "connect_voltage_upper_limit",
+      "path": "config.advanced.safety.connection.connect_voltage_upper_limit",
+      "address": 45417,
+      "read_bank": 45417,
+      "format": "u16:0.1V",
+      "decoding": "Voltage",
+      "access": "RW",
+      "observed_raw": 2540,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "connect_voltage_lower_limit",
+      "path": "config.advanced.safety.connection.connect_voltage_lower_limit",
+      "address": 45418,
+      "read_bank": 45417,
+      "format": "u16:0.1V",
+      "decoding": "Voltage",
+      "access": "RW",
+      "observed_raw": 1960,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "connect_frequency_upper_limit",
+      "path": "config.advanced.safety.connection.connect_frequency_upper_limit",
+      "address": 45419,
+      "read_bank": 45417,
+      "format": "u16:0.01Hz",
+      "decoding": "Frequency",
+      "access": "RW",
+      "observed_raw": 5015,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "connect_frequency_lower_limit",
+      "path": "config.advanced.safety.connection.connect_frequency_lower_limit",
+      "address": 45420,
+      "read_bank": 45417,
+      "format": "u16:0.01Hz",
+      "decoding": "Frequency",
+      "access": "RW",
+      "observed_raw": 4750,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "grid_connect_wait_time",
+      "path": "config.advanced.safety.connection.grid_connect_wait_time",
+      "address": 45421,
+      "read_bank": 45417,
+      "format": "u16:s",
+      "decoding": "Time",
+      "access": "RW",
+      "observed_raw": 60,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "connect_voltage_upper_fault",
+      "path": "config.advanced.safety.connection.connect_voltage_upper_fault",
+      "address": 45422,
+      "read_bank": 45417,
+      "format": "u16:0.1V",
+      "decoding": "Voltage",
+      "access": "RW",
+      "observed_raw": 2540,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "connect_voltage_lower_fault",
+      "path": "config.advanced.safety.connection.connect_voltage_lower_fault",
+      "address": 45423,
+      "read_bank": 45417,
+      "format": "u16:0.1V",
+      "decoding": "Voltage",
+      "access": "RW",
+      "observed_raw": 1960,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "connect_frequency_upper_fault",
+      "path": "config.advanced.safety.connection.connect_frequency_upper_fault",
+      "address": 45424,
+      "read_bank": 45417,
+      "format": "u16:0.01Hz",
+      "decoding": "Frequency",
+      "access": "RW",
+      "observed_raw": 5015,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "connect_frequency_lower_fault",
+      "path": "config.advanced.safety.connection.connect_frequency_lower_fault",
+      "address": 45425,
+      "read_bank": 45417,
+      "format": "u16:0.01Hz",
+      "decoding": "Frequency",
+      "access": "RW",
+      "observed_raw": 4750,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "grid_wait_time_lower_fault",
+      "path": "config.advanced.safety.connection.grid_wait_time_lower_fault",
+      "address": 45426,
+      "read_bank": 45417,
+      "format": "u16:s",
+      "decoding": "Time",
+      "access": "RW",
+      "observed_raw": 61,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "grid_frequency_wait_time_lower_fault",
+      "path": "config.advanced.safety.connection.grid_frequency_wait_time_lower_fault",
+      "address": 45427,
+      "read_bank": 45417,
+      "format": "u16:s",
+      "decoding": "Time",
+      "access": "RW",
+      "observed_raw": 65535,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "grid_connect_power_rate",
+      "path": "config.advanced.safety.connection.grid_connect_power_rate",
+      "address": 45428,
+      "read_bank": 45417,
+      "format": "u16:s",
+      "decoding": "Ramp duration in seconds",
+      "access": "RW",
+      "observed_raw": 375,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "decoder_source": "com/goodwe/hybrid/fragment/JointParamFragment.java:212-226",
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "grid_connect_power_rate_under_fault",
+      "path": "config.advanced.safety.connection.grid_connect_power_rate_under_fault",
+      "address": 45429,
+      "read_bank": 45417,
+      "format": "u16:s",
+      "decoding": "Ramp duration in seconds",
+      "access": "RW",
+      "observed_raw": 375,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "decoder_source": "com/goodwe/hybrid/fragment/JointParamFragment.java:212-226",
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "power_slope_enable",
+      "path": "config.advanced.safety.connection.power_slope_enable",
+      "address": 45432,
+      "read_bank": 45417,
+      "format": "u16",
+      "decoding": "Boolean code",
+      "access": "R",
+      "observed_raw": 1,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true
+    },
+    {
+      "name": "cos_curve",
+      "path": "config.advanced.safety.curves.cos_curve",
+      "address": 45433,
+      "read_bank": 45433,
+      "format": "u16",
+      "decoding": "Boolean code",
+      "access": "RW",
+      "observed_raw": 0,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "power_point_a",
+      "path": "config.advanced.safety.curves.power_point_a",
+      "address": 45434,
+      "read_bank": 45433,
+      "format": "s16:0.1%",
+      "decoding": "Signed I16 permille, exposed as 0.1% per count",
+      "access": "RW",
+      "observed_raw": 200,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false,
+      "decoder_source": "CurveSettingFragment.java:448-533 -> ArrayUtils.getUnsignedIntValue -> NumberUtils.bytes2Int2V2:349 (signed despite helper name)",
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "power_point_a_cos",
+      "path": "config.advanced.safety.curves.power_point_a_cos",
+      "address": 45435,
+      "read_bank": 45433,
+      "format": "s16:0.01",
+      "decoding": "Signed I16 / 100 ratio",
+      "access": "R",
+      "observed_raw": 100,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false,
+      "decoder_source": "CurveSettingFragment.java:448-533 -> ArrayUtils.getUnsignedIntValue -> NumberUtils.bytes2Int2V2:349 (signed despite helper name)",
+      "default_display": "Percent: native90 is ratio0.90, displayed90%; normalize units once."
+    },
+    {
+      "name": "power_point_b",
+      "path": "config.advanced.safety.curves.power_point_b",
+      "address": 45436,
+      "read_bank": 45433,
+      "format": "s16:0.1%",
+      "decoding": "Signed I16 permille, exposed as 0.1% per count",
+      "access": "RW",
+      "observed_raw": 500,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false,
+      "decoder_source": "CurveSettingFragment.java:448-533 -> ArrayUtils.getUnsignedIntValue -> NumberUtils.bytes2Int2V2:349 (signed despite helper name)",
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "power_point_b_cos",
+      "path": "config.advanced.safety.curves.power_point_b_cos",
+      "address": 45437,
+      "read_bank": 45433,
+      "format": "s16:0.01",
+      "decoding": "Signed I16 / 100 ratio",
+      "access": "R",
+      "observed_raw": 100,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false,
+      "decoder_source": "CurveSettingFragment.java:448-533 -> ArrayUtils.getUnsignedIntValue -> NumberUtils.bytes2Int2V2:349 (signed despite helper name)",
+      "default_display": "Percent: native90 is ratio0.90, displayed90%; normalize units once."
+    },
+    {
+      "name": "power_point_c",
+      "path": "config.advanced.safety.curves.power_point_c",
+      "address": 45438,
+      "read_bank": 45433,
+      "format": "s16:0.1%",
+      "decoding": "Signed I16 permille, exposed as 0.1% per count",
+      "access": "RW",
+      "observed_raw": 1000,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false,
+      "decoder_source": "CurveSettingFragment.java:448-533 -> ArrayUtils.getUnsignedIntValue -> NumberUtils.bytes2Int2V2:349 (signed despite helper name)",
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "power_point_c_cos",
+      "path": "config.advanced.safety.curves.power_point_c_cos",
+      "address": 45439,
+      "read_bank": 45433,
+      "format": "s16:0.01",
+      "decoding": "Signed I16 / 100 ratio",
+      "access": "R",
+      "observed_raw": 90,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false,
+      "decoder_source": "CurveSettingFragment.java:448-533 -> ArrayUtils.getUnsignedIntValue -> NumberUtils.bytes2Int2V2:349 (signed despite helper name)",
+      "default_display": "Percent: native90 is ratio0.90, displayed90%; normalize units once."
+    },
+    {
+      "name": "entry_curve_voltage",
+      "path": "config.advanced.safety.curves.entry_curve_voltage",
+      "address": 45440,
+      "read_bank": 45433,
+      "format": "u16:0.1V",
+      "decoding": "Voltage",
+      "access": "RW",
+      "observed_raw": 2300,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "exit_curve_voltage",
+      "path": "config.advanced.safety.curves.exit_curve_voltage",
+      "address": 45441,
+      "read_bank": 45433,
+      "format": "u16:0.1V",
+      "decoding": "Voltage",
+      "access": "RW",
+      "observed_raw": 2300,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "exit_curve_power",
+      "path": "config.advanced.safety.curves.exit_curve_power",
+      "address": 45442,
+      "read_bank": 45433,
+      "format": "s16:0.1%",
+      "decoding": "Signed I16 permille, exposed as 0.1% per count",
+      "access": "RW",
+      "observed_raw": 500,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false,
+      "decoder_source": "CurveSettingFragment.java:448-533 -> ArrayUtils.getUnsignedIntValue -> NumberUtils.bytes2Int2V2:349 (signed despite helper name)",
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "qu_curve",
+      "path": "config.advanced.safety.curves.qu_curve",
+      "address": 45456,
+      "read_bank": 45433,
+      "format": "u16",
+      "decoding": "Boolean code",
+      "access": "R",
+      "observed_raw": 1,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true
+    },
+    {
+      "name": "entry_curve_power",
+      "path": "config.advanced.safety.curves.entry_curve_power",
+      "address": 45457,
+      "read_bank": 45433,
+      "format": "s16:0.1%",
+      "decoding": "Signed I16 permille, exposed as 0.1% per count",
+      "access": "RW",
+      "observed_raw": 200,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false,
+      "decoder_source": "CurveSettingFragment.java:448-533 -> ArrayUtils.getUnsignedIntValue -> NumberUtils.bytes2Int2V2:349 (signed despite helper name)",
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "exit_curve_power_2",
+      "path": "config.advanced.safety.curves.exit_curve_power_2",
+      "address": 45458,
+      "read_bank": 45433,
+      "format": "s16:0.1%",
+      "decoding": "Signed I16 permille, exposed as 0.1% per count",
+      "access": "RW",
+      "observed_raw": 50,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false,
+      "decoder_source": "CurveSettingFragment.java:448-533 -> ArrayUtils.getUnsignedIntValue -> NumberUtils.bytes2Int2V2:349 (signed despite helper name)",
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "voltage_v1",
+      "path": "config.advanced.safety.curves.voltage_v1",
+      "address": 45459,
+      "read_bank": 45433,
+      "format": "u16:0.1V",
+      "decoding": "Voltage",
+      "access": "RW",
+      "observed_raw": 2070,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "reactive_v1",
+      "path": "config.advanced.safety.curves.reactive_v1",
+      "address": 45460,
+      "read_bank": 45433,
+      "format": "s16:0.1%",
+      "decoding": "Signed I16 permille, exposed as 0.1% per count",
+      "access": "RW",
+      "observed_raw": 440,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false,
+      "decoder_source": "CurveSettingFragment.java:448-533 -> ArrayUtils.getUnsignedIntValue -> NumberUtils.bytes2Int2V2:349 (signed despite helper name)",
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "voltage_v2",
+      "path": "config.advanced.safety.curves.voltage_v2",
+      "address": 45461,
+      "read_bank": 45433,
+      "format": "u16:0.1V",
+      "decoding": "Voltage",
+      "access": "RW",
+      "observed_raw": 2200,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "reactive_v2",
+      "path": "config.advanced.safety.curves.reactive_v2",
+      "address": 45462,
+      "read_bank": 45433,
+      "format": "s16:0.1%",
+      "decoding": "Signed I16 permille, exposed as 0.1% per count",
+      "access": "RW",
+      "observed_raw": 0,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false,
+      "decoder_source": "CurveSettingFragment.java:448-533 -> ArrayUtils.getUnsignedIntValue -> NumberUtils.bytes2Int2V2:349 (signed despite helper name)",
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "voltage_v3",
+      "path": "config.advanced.safety.curves.voltage_v3",
+      "address": 45463,
+      "read_bank": 45433,
+      "format": "u16:0.1V",
+      "decoding": "Voltage",
+      "access": "RW",
+      "observed_raw": 2400,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "reactive_v3",
+      "path": "config.advanced.safety.curves.reactive_v3",
+      "address": 45464,
+      "read_bank": 45433,
+      "format": "s16:0.1%",
+      "decoding": "Signed I16 permille, exposed as 0.1% per count",
+      "access": "RW",
+      "observed_raw": 0,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false,
+      "decoder_source": "CurveSettingFragment.java:448-533 -> ArrayUtils.getUnsignedIntValue -> NumberUtils.bytes2Int2V2:349 (signed despite helper name)",
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "voltage_v4",
+      "path": "config.advanced.safety.curves.voltage_v4",
+      "address": 45465,
+      "read_bank": 45433,
+      "format": "u16:0.1V",
+      "decoding": "Voltage",
+      "access": "RW",
+      "observed_raw": 2580,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "reactive_v4",
+      "path": "config.advanced.safety.curves.reactive_v4",
+      "address": 45466,
+      "read_bank": 45433,
+      "format": "s16:0.1%",
+      "decoding": "Signed I16 permille, exposed as 0.1% per count",
+      "access": "RW",
+      "observed_raw": 64936,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false,
+      "decoder_source": "CurveSettingFragment.java:448-533 -> ArrayUtils.getUnsignedIntValue -> NumberUtils.bytes2Int2V2:349 (signed despite helper name)",
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "reactive_qu",
+      "path": "config.advanced.safety.curves.reactive_qu_seconds",
+      "address": 45468,
+      "read_bank": 45433,
+      "format": "enc16:goodwe-response-time",
+      "decoding": "Seconds = 0.6 * (4096 / coefficient - 1). Zero and values above4096 are unavailable. Encoder follows app two-decimal rounding, float conversion and U16 truncation.",
+      "access": "RW",
+      "observed_raw": 0,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false,
+      "write_implementation": "bounded scalar write, fresh read/ACK/full readback; native emulator verified; physical changed-value validation pending"
+    },
+    {
+      "name": "cos_qu",
+      "path": "config.advanced.safety.curves.cos_qu_seconds",
+      "address": 45510,
+      "read_bank": 45510,
+      "format": "enc16:goodwe-response-time",
+      "decoding": "Seconds = 0.6 * (4096 / coefficient - 1). Zero and values above4096 are unavailable. Encoder follows app two-decimal rounding, float conversion and U16 truncation.",
+      "access": "RW",
+      "observed_raw": 0,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false,
+      "write_implementation": "bounded scalar write, fresh read/ACK/full readback; native emulator verified; physical changed-value validation pending"
+    },
+    {
+      "name": "pu_curve",
+      "path": "config.advanced.safety.curves.pu_curve",
+      "address": 45472,
+      "read_bank": 45433,
+      "format": "u16",
+      "decoding": "Boolean code",
+      "access": "R",
+      "observed_raw": 1,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true
+    },
+    {
+      "name": "voltage_v1_power",
+      "path": "config.advanced.safety.curves.voltage_v1_power",
+      "address": 45474,
+      "read_bank": 45433,
+      "format": "u16:0.1V",
+      "decoding": "Voltage",
+      "access": "RW",
+      "observed_raw": 2070,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "active_v1",
+      "path": "config.advanced.safety.curves.active_v1",
+      "address": 45475,
+      "read_bank": 45433,
+      "format": "s16:0.1%",
+      "decoding": "Signed I16 permille, exposed as 0.1% per count",
+      "access": "RW",
+      "observed_raw": 200,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false,
+      "decoder_source": "CurveSettingFragment.java:448-533 -> ArrayUtils.getUnsignedIntValue -> NumberUtils.bytes2Int2V2:349 (signed despite helper name)",
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "voltage_v2_power",
+      "path": "config.advanced.safety.curves.voltage_v2_power",
+      "address": 45476,
+      "read_bank": 45433,
+      "format": "u16:0.1V",
+      "decoding": "Voltage",
+      "access": "RW",
+      "observed_raw": 2150,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "active_v2",
+      "path": "config.advanced.safety.curves.active_v2",
+      "address": 45477,
+      "read_bank": 45433,
+      "format": "s16:0.1%",
+      "decoding": "Signed I16 permille, exposed as 0.1% per count",
+      "access": "RW",
+      "observed_raw": 1000,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false,
+      "decoder_source": "CurveSettingFragment.java:448-533 -> ArrayUtils.getUnsignedIntValue -> NumberUtils.bytes2Int2V2:349 (signed despite helper name)",
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "voltage_v3_power",
+      "path": "config.advanced.safety.curves.voltage_v3_power",
+      "address": 45478,
+      "read_bank": 45433,
+      "format": "u16:0.1V",
+      "decoding": "Voltage",
+      "access": "RW",
+      "observed_raw": 2530,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "active_v3",
+      "path": "config.advanced.safety.curves.active_v3",
+      "address": 45479,
+      "read_bank": 45433,
+      "format": "s16:0.1%",
+      "decoding": "Signed I16 permille, exposed as 0.1% per count",
+      "access": "RW",
+      "observed_raw": 1000,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false,
+      "decoder_source": "CurveSettingFragment.java:448-533 -> ArrayUtils.getUnsignedIntValue -> NumberUtils.bytes2Int2V2:349 (signed despite helper name)",
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "voltage_v4_power",
+      "path": "config.advanced.safety.curves.voltage_v4_power",
+      "address": 45480,
+      "read_bank": 45433,
+      "format": "u16:0.1V",
+      "decoding": "Voltage",
+      "access": "RW",
+      "observed_raw": 2600,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "active_v4",
+      "path": "config.advanced.safety.curves.active_v4",
+      "address": 45481,
+      "read_bank": 45433,
+      "format": "s16:0.1%",
+      "decoding": "Signed I16 permille, exposed as 0.1% per count",
+      "access": "RW",
+      "observed_raw": 200,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false,
+      "decoder_source": "CurveSettingFragment.java:448-533 -> ArrayUtils.getUnsignedIntValue -> NumberUtils.bytes2Int2V2:349 (signed despite helper name)",
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "active_pu",
+      "path": "config.advanced.safety.curves.active_pu_seconds",
+      "address": 45512,
+      "read_bank": 45512,
+      "format": "enc16:goodwe-response-time",
+      "decoding": "Seconds = 0.6 * (4096 / coefficient - 1). Zero and values above4096 are unavailable. Encoder follows app two-decimal rounding, float conversion and U16 truncation.",
+      "access": "RW",
+      "observed_raw": 0,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false,
+      "write_implementation": "bounded scalar write, fresh read/ACK/full readback; native emulator verified; physical changed-value validation pending"
+    },
+    {
+      "name": "response_time",
+      "path": "config.advanced.safety.curves.response_time_raw",
+      "address": 45728,
+      "read_bank": 45728,
+      "format": "u16",
+      "decoding": "Raw register; source units require decoder validation",
+      "access": "R",
+      "observed_raw": null,
+      "confidence": "APK only; target read rejected",
+      "sentinel_filtered": false
+    },
+    {
+      "name": "fp_curve",
+      "path": "config.advanced.safety.curves.fp_curve",
+      "address": 45443,
+      "read_bank": 45443,
+      "format": "u16",
+      "decoding": "Boolean code",
+      "access": "R",
+      "observed_raw": 1,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true
+    },
+    {
+      "name": "of_start_point",
+      "path": "config.advanced.safety.curves.of_start_point",
+      "address": 45444,
+      "read_bank": 45443,
+      "format": "u16:0.01Hz",
+      "decoding": "Frequency",
+      "access": "RW",
+      "observed_raw": 5025,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "uf_start_point",
+      "path": "config.advanced.safety.curves.uf_start_point",
+      "address": 45445,
+      "read_bank": 45443,
+      "format": "u16:0.01Hz",
+      "decoding": "Frequency",
+      "access": "RW",
+      "observed_raw": 4975,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "of_end_point",
+      "path": "config.advanced.safety.curves.of_end_point",
+      "address": 45446,
+      "read_bank": 45443,
+      "format": "u16:0.01Hz",
+      "decoding": "Frequency",
+      "access": "RW",
+      "observed_raw": 5200,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "uf_end_point",
+      "path": "config.advanced.safety.curves.uf_end_point",
+      "address": 45447,
+      "read_bank": 45443,
+      "format": "u16:0.01Hz",
+      "decoding": "Frequency",
+      "access": "RW",
+      "observed_raw": 4800,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "recovery_wait_time",
+      "path": "config.advanced.safety.curves.recovery_wait_time",
+      "address": 45448,
+      "read_bank": 45443,
+      "format": "u16:s",
+      "decoding": "Time",
+      "access": "RW",
+      "observed_raw": 60,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "recovery_high_frequency",
+      "path": "config.advanced.safety.curves.recovery_high_frequency",
+      "address": 45449,
+      "read_bank": 45443,
+      "format": "u16:0.01Hz",
+      "decoding": "Frequency",
+      "access": "RW",
+      "observed_raw": 5015,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "recovery_low_frequency",
+      "path": "config.advanced.safety.curves.recovery_low_frequency",
+      "address": 45450,
+      "read_bank": 45443,
+      "format": "u16:0.01Hz",
+      "decoding": "Frequency",
+      "access": "RW",
+      "observed_raw": 4985,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "recovery_slope",
+      "path": "config.advanced.safety.curves.recovery_slope",
+      "address": 45451,
+      "read_bank": 45443,
+      "format": "u16:s",
+      "decoding": "Time",
+      "access": "RW",
+      "observed_raw": 360,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "fp_setting",
+      "path": "config.advanced.safety.curves.fp_setting_raw",
+      "address": 45452,
+      "read_bank": 45443,
+      "format": "u16",
+      "decoding": "Raw register; source units require decoder validation",
+      "access": "R",
+      "observed_raw": 499,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false
+    },
+    {
+      "name": "of_power_slope",
+      "path": "config.advanced.safety.curves.of_power_slope",
+      "address": 45453,
+      "read_bank": 45443,
+      "format": "u16:0.1%",
+      "decoding": "Unsigned per mille; displayed as percent after scaling",
+      "access": "R",
+      "observed_raw": 500,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "decoder_source": "com/goodwe/hybrid/fragment/CurveSettingFragment.java:551-553; com/goodwe/utils/ArrayUtils.java:133-138"
+    },
+    {
+      "name": "uf_power_slope",
+      "path": "config.advanced.safety.curves.uf_power_slope",
+      "address": 45454,
+      "read_bank": 45443,
+      "format": "u16:0.1%",
+      "decoding": "Unsigned per mille; displayed as percent after scaling",
+      "access": "R",
+      "observed_raw": 1000,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "decoder_source": "com/goodwe/hybrid/fragment/CurveSettingFragment.java:551-553; com/goodwe/utils/ArrayUtils.java:133-138"
+    },
+    {
+      "name": "recovery_power_slope",
+      "path": "config.advanced.safety.curves.recovery_power_slope",
+      "address": 45455,
+      "read_bank": 45443,
+      "format": "u16:0.1%",
+      "decoding": "Unsigned per mille; displayed as percent after scaling",
+      "access": "R",
+      "observed_raw": 167,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "decoder_source": "com/goodwe/hybrid/fragment/CurveSettingFragment.java:551-553; com/goodwe/utils/ArrayUtils.java:133-138"
+    },
+    {
+      "name": "frequency_upper_curve",
+      "path": "config.advanced.safety.other.frequency_upper_curve",
+      "address": 45443,
+      "read_bank": 45443,
+      "format": "u16",
+      "decoding": "Boolean code",
+      "access": "RW",
+      "observed_raw": 1,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "over_voltage_level_3_phase",
+      "path": "config.advanced.safety.other.over_voltage_level_3_phase",
+      "address": 45495,
+      "read_bank": 45443,
+      "format": "u16:0.1V",
+      "decoding": "Voltage",
+      "access": "RW",
+      "observed_raw": 0,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "over_voltage_level_3_time_phase",
+      "path": "config.advanced.safety.other.over_voltage_level_3_time_phase_cycles",
+      "address": 45496,
+      "read_bank": 45443,
+      "format": "u16",
+      "decoding": "Grid cycles; divide by nominal country frequency, not live frequency; extended-time bank may override",
+      "access": "RW",
+      "observed_raw": 0,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "under_voltage_level_3_phase",
+      "path": "config.advanced.safety.other.under_voltage_level_3_phase",
+      "address": 45497,
+      "read_bank": 45443,
+      "format": "u16:0.1V",
+      "decoding": "Voltage",
+      "access": "RW",
+      "observed_raw": 0,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "under_voltage_level_3_time_phase",
+      "path": "config.advanced.safety.other.under_voltage_level_3_time_phase_cycles",
+      "address": 45498,
+      "read_bank": 45443,
+      "format": "u16",
+      "decoding": "Grid cycles; divide by nominal country frequency, not live frequency; extended-time bank may override",
+      "access": "RW",
+      "observed_raw": 0,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "uwItalyFreqMode",
+      "path": "config.advanced.safety.other.uwItalyFreqMode_raw",
+      "address": 45490,
+      "read_bank": 45443,
+      "format": "u16",
+      "decoding": "Raw register; source units require decoder validation",
+      "access": "RW",
+      "observed_raw": 42962,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "set_high_low_switch",
+      "path": "config.advanced.safety.other.set_high_low_switch_raw",
+      "address": 45499,
+      "read_bank": 45443,
+      "format": "u16",
+      "decoding": "Raw register; source units require decoder validation",
+      "access": "R",
+      "observed_raw": 3,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false
+    },
+    {
+      "name": "low_ride_through_start_point",
+      "path": "config.advanced.safety.other.low_ride_through_start_point",
+      "address": 45500,
+      "read_bank": 45443,
+      "format": "u16:0.1V",
+      "decoding": "Voltage",
+      "access": "RW",
+      "observed_raw": 1800,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "low_ride_through_end_point",
+      "path": "config.advanced.safety.other.low_ride_through_end_point",
+      "address": 45501,
+      "read_bank": 45443,
+      "format": "u16:0.1V",
+      "decoding": "Voltage",
+      "access": "RW",
+      "observed_raw": 700,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "low_start_point_protection_time",
+      "path": "config.advanced.safety.other.low_start_point_protection_time_cycles",
+      "address": 45502,
+      "read_bank": 45443,
+      "format": "u16",
+      "decoding": "Grid cycles; divide by nominal country frequency, not live frequency; extended-time bank may override",
+      "access": "RW",
+      "observed_raw": 500,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "low_end_point_protection_time",
+      "path": "config.advanced.safety.other.low_end_point_protection_time_cycles",
+      "address": 45503,
+      "read_bank": 45443,
+      "format": "u16",
+      "decoding": "Grid cycles; divide by nominal country frequency, not live frequency; extended-time bank may override",
+      "access": "RW",
+      "observed_raw": 500,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "low_ride_through_limit",
+      "path": "config.advanced.safety.other.low_ride_through_limit",
+      "address": 45504,
+      "read_bank": 45443,
+      "format": "u16:0.1V",
+      "decoding": "Voltage",
+      "access": "RW",
+      "observed_raw": 1800,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "high_ride_through_start_point",
+      "path": "config.advanced.safety.other.high_ride_through_start_point",
+      "address": 45505,
+      "read_bank": 45443,
+      "format": "u16:0.1V",
+      "decoding": "Voltage",
+      "access": "RW",
+      "observed_raw": 2600,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "high_ride_through_end_point",
+      "path": "config.advanced.safety.other.high_ride_through_end_point",
+      "address": 45506,
+      "read_bank": 45443,
+      "format": "u16:0.1V",
+      "decoding": "Voltage",
+      "access": "RW",
+      "observed_raw": 2750,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "high_start_point_protection_time",
+      "path": "config.advanced.safety.other.high_start_point_protection_time_cycles",
+      "address": 45507,
+      "read_bank": 45443,
+      "format": "u16",
+      "decoding": "Grid cycles; divide by nominal country frequency, not live frequency; extended-time bank may override",
+      "access": "RW",
+      "observed_raw": 520,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "high_end_point_protection_time",
+      "path": "config.advanced.safety.other.high_end_point_protection_time_cycles",
+      "address": 45508,
+      "read_bank": 45443,
+      "format": "u16",
+      "decoding": "Grid cycles; divide by nominal country frequency, not live frequency; extended-time bank may override",
+      "access": "RW",
+      "observed_raw": 8,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "high_ride_through_limit",
+      "path": "config.advanced.safety.other.high_ride_through_limit",
+      "address": 45509,
+      "read_bank": 45443,
+      "format": "u16:0.1V",
+      "decoding": "Voltage",
+      "access": "RW",
+      "observed_raw": 2750,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "pq_curve_switch",
+      "path": "config.advanced.safety.pq.pq_curve_switch",
+      "address": 45526,
+      "read_bank": 45526,
+      "format": "u16",
+      "decoding": "Boolean code",
+      "access": "RW",
+      "observed_raw": 65535,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": true,
+      "write_implementation": "bounded scalar FC06 with fresh read, ACK and readback on mixed transport; generic Modbus on native profile; hardware changed-value validation pending"
+    },
+    {
+      "name": "p1_gen_active_power",
+      "path": "config.advanced.safety.pq.p1_gen_active_power_raw",
+      "address": 45527,
+      "read_bank": 45526,
+      "format": "u16",
+      "decoding": "Raw register; source units require decoder validation",
+      "access": "R",
+      "observed_raw": 65535,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false
+    },
+    {
+      "name": "q1_gen_reactive_power",
+      "path": "config.advanced.safety.pq.q1_gen_reactive_power_raw",
+      "address": 45528,
+      "read_bank": 45526,
+      "format": "u16",
+      "decoding": "Raw register; source units require decoder validation",
+      "access": "R",
+      "observed_raw": 65535,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false
+    },
+    {
+      "name": "p2_gen_active_power",
+      "path": "config.advanced.safety.pq.p2_gen_active_power_raw",
+      "address": 45529,
+      "read_bank": 45526,
+      "format": "u16",
+      "decoding": "Raw register; source units require decoder validation",
+      "access": "R",
+      "observed_raw": 65535,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false
+    },
+    {
+      "name": "q2_gen_reactive_power",
+      "path": "config.advanced.safety.pq.q2_gen_reactive_power_raw",
+      "address": 45530,
+      "read_bank": 45526,
+      "format": "u16",
+      "decoding": "Raw register; source units require decoder validation",
+      "access": "R",
+      "observed_raw": 65535,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false
+    },
+    {
+      "name": "p3_gen_active_power",
+      "path": "config.advanced.safety.pq.p3_gen_active_power_raw",
+      "address": 45531,
+      "read_bank": 45526,
+      "format": "u16",
+      "decoding": "Raw register; source units require decoder validation",
+      "access": "R",
+      "observed_raw": 65535,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false
+    },
+    {
+      "name": "q3_gen_reactive_power",
+      "path": "config.advanced.safety.pq.q3_gen_reactive_power_raw",
+      "address": 45532,
+      "read_bank": 45526,
+      "format": "u16",
+      "decoding": "Raw register; source units require decoder validation",
+      "access": "R",
+      "observed_raw": 65535,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false
+    },
+    {
+      "name": "p1_load_active_power",
+      "path": "config.advanced.safety.pq.p1_load_active_power_raw",
+      "address": 45533,
+      "read_bank": 45526,
+      "format": "u16",
+      "decoding": "Raw register; source units require decoder validation",
+      "access": "R",
+      "observed_raw": 65535,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false
+    },
+    {
+      "name": "q1_load_reactive_power",
+      "path": "config.advanced.safety.pq.q1_load_reactive_power_raw",
+      "address": 45534,
+      "read_bank": 45526,
+      "format": "u16",
+      "decoding": "Raw register; source units require decoder validation",
+      "access": "R",
+      "observed_raw": 65535,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false
+    },
+    {
+      "name": "p2_load_active_power",
+      "path": "config.advanced.safety.pq.p2_load_active_power_raw",
+      "address": 45535,
+      "read_bank": 45526,
+      "format": "u16",
+      "decoding": "Raw register; source units require decoder validation",
+      "access": "R",
+      "observed_raw": 65535,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false
+    },
+    {
+      "name": "q2_load_reactive_power",
+      "path": "config.advanced.safety.pq.q2_load_reactive_power_raw",
+      "address": 45536,
+      "read_bank": 45526,
+      "format": "u16",
+      "decoding": "Raw register; source units require decoder validation",
+      "access": "R",
+      "observed_raw": 65535,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false
+    },
+    {
+      "name": "p3_load_active_power",
+      "path": "config.advanced.safety.pq.p3_load_active_power_raw",
+      "address": 45537,
+      "read_bank": 45526,
+      "format": "u16",
+      "decoding": "Raw register; source units require decoder validation",
+      "access": "R",
+      "observed_raw": 65535,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false
+    },
+    {
+      "name": "q3_load_reactive_power",
+      "path": "config.advanced.safety.pq.q3_load_reactive_power_raw",
+      "address": 45538,
+      "read_bank": 45526,
+      "format": "u16",
+      "decoding": "Raw register; source units require decoder validation",
+      "access": "R",
+      "observed_raw": 65535,
+      "confidence": "target read; APK mapping",
+      "sentinel_filtered": false
+    }
+  ],
+  "writable_scalar_fields": [
+    {
+      "field": "config.advanced.backup",
+      "address": 1366,
+      "range": "0..1",
+      "hardware_verification": "ACK plus unchanged readback"
+    },
+    {
+      "field": "config.advanced.shadow_scan",
+      "address": 1368,
+      "range": "0..1",
+      "hardware_verification": "ACK plus unchanged readback"
+    },
+    {
+      "field": "config.advanced.software_power_limit",
+      "address": 1369,
+      "range": "0..1",
+      "hardware_verification": "ACK plus unchanged readback"
+    },
+    {
+      "field": "config.advanced.battery_function.on_grid_min_soc",
+      "address": 1376,
+      "range": "20..100%",
+      "hardware_verification": "Changed21% then20%, native ACK06 and matching register readback, Pi slot204; GOODWE_PROFILE_VALIDATION_20261030.json"
+    },
+    {
+      "field": "config.advanced.battery_function.off_grid_min_soc",
+      "address": 1441,
+      "range": "20..100%",
+      "hardware_verification": "Changed21% then20%, native ACK06 and matching register readback, Pi slot204; GOODWE_PROFILE_VALIDATION_20261030.json"
+    },
+    {
+      "field": "config.advanced.dred",
+      "address": 47036,
+      "range": "0..1",
+      "hardware_verification": "Encoder traced to SolarGo7.2.2. Emulated ACK and fresh readback passed. Changed-value verification on real hardware remains pending."
+    },
+    {
+      "field": "config.advanced.hardware_power_limit",
+      "address": 29958,
+      "range": "0..1",
+      "hardware_verification": "Encoder traced to SolarGo7.2.2. Emulated ACK and fresh readback passed. Changed-value verification on real hardware remains pending."
+    },
+    {
+      "field": "config.advanced.output_active_power",
+      "address": 45484,
+      "range": "0..100%",
+      "hardware_verification": "Encoder traced to SolarGo7.2.2. Emulated ACK and fresh readback passed. Changed-value verification on real hardware remains pending."
+    },
+    {
+      "field": "config.advanced.battery_function.immediate_charging",
+      "address": 47545,
+      "range": "0..1",
+      "hardware_verification": "Encoder traced to SolarGo7.2.2. Emulated ACK and fresh readback passed. Changed-value verification on real hardware remains pending."
+    },
+    {
+      "field": "config.advanced.battery_function.charge_cutoff_soc",
+      "address": 47546,
+      "range": "0..100%",
+      "hardware_verification": "Encoder traced to SolarGo7.2.2. Emulated ACK and fresh readback passed. Changed-value verification on real hardware remains pending."
+    }
+  ],
+  "menus": [
+    {
+      "id": "item-001",
+      "menu": "Home",
+      "label": "Open screen",
+      "paths": [],
+      "status": "navigation",
+      "reason": "App navigation has no device configuration equivalent.",
+      "app_write": "Navigation only",
+      "source": "com/goodwe/hybrid/fragment/SettingFragment.java"
+    },
+    {
+      "id": "item-002",
+      "menu": "Parameters / Data",
+      "label": "Open screen",
+      "paths": [],
+      "status": "navigation",
+      "reason": "App navigation has no device configuration equivalent.",
+      "app_write": "Navigation only",
+      "source": "com/goodwe/hybrid/fragment/SettingFragment.java"
+    },
+    {
+      "id": "item-003",
+      "menu": "Parameters / Alarm",
+      "label": "Open screen",
+      "paths": [],
+      "status": "navigation",
+      "reason": "App navigation has no device configuration equivalent.",
+      "app_write": "Navigation only",
+      "source": "com/goodwe/hybrid/fragment/SettingFragment.java"
+    },
+    {
+      "id": "item-004",
+      "menu": "Settings / Communication Settings",
+      "label": "Open screen",
+      "paths": [],
+      "status": "navigation",
+      "reason": "App navigation has no device configuration equivalent.",
+      "app_write": "Navigation only",
+      "source": "com/goodwe/hybrid/fragment/SettingFragment.java"
+    },
+    {
+      "id": "item-005",
+      "menu": "Settings / Basic Settings",
+      "label": "Open screen",
+      "paths": [],
+      "status": "navigation",
+      "reason": "App navigation has no device configuration equivalent.",
+      "app_write": "Navigation only",
+      "source": "com/goodwe/hybrid/fragment/SettingFragment.java"
+    },
+    {
+      "id": "item-006",
+      "menu": "Settings / Advanced Settings",
+      "label": "Open screen",
+      "paths": [],
+      "status": "navigation",
+      "reason": "App navigation has no device configuration equivalent.",
+      "app_write": "Navigation only",
+      "source": "com/goodwe/hybrid/fragment/SettingFragment.java"
+    },
+    {
+      "id": "item-007",
+      "menu": "Settings / Meter Function",
+      "label": "Open screen",
+      "paths": [],
+      "status": "navigation",
+      "reason": "App navigation has no device configuration equivalent.",
+      "app_write": "Navigation only",
+      "source": "com/goodwe/hybrid/fragment/SettingFragment.java"
+    },
+    {
+      "id": "item-008",
+      "menu": "Settings / Device Information",
+      "label": "Open screen",
+      "paths": [],
+      "status": "navigation",
+      "reason": "App navigation has no device configuration equivalent.",
+      "app_write": "Navigation only",
+      "source": "com/goodwe/hybrid/fragment/SettingFragment.java"
+    },
+    {
+      "id": "item-009",
+      "menu": "Communication / Privacy & Security",
+      "label": "WLAN Module Password Change",
+      "paths": [
+        "config.communication.wlan_lan.password.new_password"
+      ],
+      "status": "implemented UDP staged workflow",
+      "reason": "Module-capable UDP form snapshots fields and submits the source-traced configuration/reload sequence. ACK is not reconnect/readback proof. Confirmation input is UI validation; older HTTP path remains separate.",
+      "app_write": "Version-dependent route to password editor",
+      "source": "com/goodwe/hybrid/activity/WIFIPrivacySecurityActivity.java:94"
+    },
+    {
+      "id": "item-010",
+      "menu": "Communication / Privacy & Security",
+      "label": "New password",
+      "paths": [
+        "config.communication.wlan_lan.password.new_password"
+      ],
+      "status": "implemented UDP staged workflow",
+      "reason": "Module-capable UDP form snapshots fields and submits the source-traced configuration/reload sequence. ACK is not reconnect/readback proof. Confirmation input is UI validation; older HTTP path remains separate.",
+      "app_write": "5A5A family2/01 with ASCII AT+WAKEY=WPA2PSK,AES,<password> CR LF; on ACK family1/0C reload",
+      "source": "com/goodwe/hybrid/activity/ModifyWifiPasswordActivity.java:448"
+    },
+    {
+      "id": "item-011",
+      "menu": "Communication / Privacy & Security",
+      "label": "Confirm new password",
+      "paths": [
+        "config.communication.wlan_lan.password.new_password"
+      ],
+      "status": "implemented UDP staged workflow",
+      "reason": "Module-capable UDP form snapshots fields and submits the source-traced configuration/reload sequence. ACK is not reconnect/readback proof. Confirmation input is UI validation; older HTTP path remains separate.",
+      "app_write": "5A5A family2/01 with ASCII AT+WAKEY=WPA2PSK,AES,<password> CR LF; on ACK family1/0C reload",
+      "source": "com/goodwe/hybrid/activity/ModifyWifiPasswordActivity.java:448"
+    },
+    {
+      "id": "item-012",
+      "menu": "Communication / WLAN/LAN",
+      "label": "Network Name",
+      "paths": [
+        "config.communication.wlan_lan.configure.ssid"
+      ],
+      "status": "implemented UDP staged workflow",
+      "reason": "Module-capable UDP form snapshots fields and submits the source-traced configuration/reload sequence. ACK is not reconnect/readback proof. Confirmation input is UI validation; older HTTP path remains separate.",
+      "app_write": "5A5A/0B: U16 length + DHCP or static,IP,mask,gateway,DNS; then 0A: U16 total length + U8-length SSID, encryption, password; then 0C reload",
+      "source": "com/goodwe/grid/solargo/settings/activity/InverterRouterSettingActivity.java:206"
+    },
+    {
+      "id": "item-013",
+      "menu": "Communication / WLAN/LAN",
+      "label": "Encryption",
+      "paths": [
+        "config.communication.wlan_lan.configure.encryption"
+      ],
+      "status": "implemented UDP staged workflow",
+      "reason": "Module-capable UDP form snapshots fields and submits the source-traced configuration/reload sequence. ACK is not reconnect/readback proof. Confirmation input is UI validation; older HTTP path remains separate.",
+      "app_write": "5A5A/0B: U16 length + DHCP or static,IP,mask,gateway,DNS; then 0A: U16 total length + U8-length SSID, encryption, password; then 0C reload",
+      "source": "com/goodwe/grid/solargo/settings/activity/InverterRouterSettingActivity.java:206"
+    },
+    {
+      "id": "item-014",
+      "menu": "Communication / WLAN/LAN",
+      "label": "Password",
+      "paths": [
+        "config.communication.wlan_lan.configure.router_password"
+      ],
+      "status": "implemented UDP staged workflow",
+      "reason": "Module-capable UDP form snapshots fields and submits the source-traced configuration/reload sequence. ACK is not reconnect/readback proof. Confirmation input is UI validation; older HTTP path remains separate.",
+      "app_write": "5A5A/0B: U16 length + DHCP or static,IP,mask,gateway,DNS; then 0A: U16 total length + U8-length SSID, encryption, password; then 0C reload",
+      "source": "com/goodwe/grid/solargo/settings/activity/InverterRouterSettingActivity.java:206"
+    },
+    {
+      "id": "item-015",
+      "menu": "Communication / WLAN/LAN",
+      "label": "DHCP",
+      "paths": [
+        "config.communication.wlan_lan.configure.mode"
+      ],
+      "status": "implemented UDP staged workflow",
+      "reason": "Module-capable UDP form snapshots fields and submits the source-traced configuration/reload sequence. ACK is not reconnect/readback proof. Confirmation input is UI validation; older HTTP path remains separate.",
+      "app_write": "5A5A/0B: U16 length + DHCP or static,IP,mask,gateway,DNS; then 0A: U16 total length + U8-length SSID, encryption, password; then 0C reload",
+      "source": "com/goodwe/grid/solargo/settings/activity/InverterRouterSettingActivity.java:206"
+    },
+    {
+      "id": "item-016",
+      "menu": "Communication / WLAN/LAN",
+      "label": "IP Address",
+      "paths": [
+        "config.communication.wlan_lan.configure.address"
+      ],
+      "status": "implemented UDP staged workflow",
+      "reason": "Module-capable UDP form snapshots fields and submits the source-traced configuration/reload sequence. ACK is not reconnect/readback proof. Confirmation input is UI validation; older HTTP path remains separate.",
+      "app_write": "5A5A/0B: U16 length + DHCP or static,IP,mask,gateway,DNS; then 0A: U16 total length + U8-length SSID, encryption, password; then 0C reload",
+      "source": "com/goodwe/grid/solargo/settings/activity/InverterRouterSettingActivity.java:206"
+    },
+    {
+      "id": "item-017",
+      "menu": "Communication / WLAN/LAN",
+      "label": "Subnet Mask",
+      "paths": [
+        "config.communication.wlan_lan.configure.netmask"
+      ],
+      "status": "implemented UDP staged workflow",
+      "reason": "Module-capable UDP form snapshots fields and submits the source-traced configuration/reload sequence. ACK is not reconnect/readback proof. Confirmation input is UI validation; older HTTP path remains separate.",
+      "app_write": "5A5A/0B: U16 length + DHCP or static,IP,mask,gateway,DNS; then 0A: U16 total length + U8-length SSID, encryption, password; then 0C reload",
+      "source": "com/goodwe/grid/solargo/settings/activity/InverterRouterSettingActivity.java:206"
+    },
+    {
+      "id": "item-018",
+      "menu": "Communication / WLAN/LAN",
+      "label": "Gateway Address",
+      "paths": [
+        "config.communication.wlan_lan.configure.gateway"
+      ],
+      "status": "implemented UDP staged workflow",
+      "reason": "Module-capable UDP form snapshots fields and submits the source-traced configuration/reload sequence. ACK is not reconnect/readback proof. Confirmation input is UI validation; older HTTP path remains separate.",
+      "app_write": "5A5A/0B: U16 length + DHCP or static,IP,mask,gateway,DNS; then 0A: U16 total length + U8-length SSID, encryption, password; then 0C reload",
+      "source": "com/goodwe/grid/solargo/settings/activity/InverterRouterSettingActivity.java:206"
+    },
+    {
+      "id": "item-019",
+      "menu": "Communication / WLAN/LAN",
+      "label": "DNS Server",
+      "paths": [
+        "config.communication.wlan_lan.configure.dns"
+      ],
+      "status": "implemented UDP staged workflow",
+      "reason": "Module-capable UDP form snapshots fields and submits the source-traced configuration/reload sequence. ACK is not reconnect/readback proof. Confirmation input is UI validation; older HTTP path remains separate.",
+      "app_write": "5A5A/0B: U16 length + DHCP or static,IP,mask,gateway,DNS; then 0A: U16 total length + U8-length SSID, encryption, password; then 0C reload",
+      "source": "com/goodwe/grid/solargo/settings/activity/InverterRouterSettingActivity.java:206"
+    },
+    {
+      "id": "item-020",
+      "menu": "Communication / WLAN/LAN",
+      "label": "Router hotspot list",
+      "paths": [],
+      "status": "workflow not implemented",
+      "reason": "Command source is recorded; encoder, transaction and target verification remain required.",
+      "app_write": "Selection fills editor; Set commits",
+      "source": "com/goodwe/grid/solargo/settings/activity/InverterRouterSettingActivity.java:349"
+    },
+    {
+      "id": "item-021",
+      "menu": "Communication / WLAN Detection",
+      "label": "Module version",
+      "paths": [
+        "status.communication_module.firmware"
+      ],
+      "status": "read-only decoded",
+      "reason": "5A5A/01 payload matches the observed firmware version. Module field and shared-Device server response are implemented.",
+      "app_write": "Read-only Diagnosis / Re-diagnose",
+      "source": "com/goodwe/hybrid/activity/WifiDiagnosisActivity.java:658"
+    },
+    {
+      "id": "item-022",
+      "menu": "Communication / WLAN Detection",
+      "label": "Router credentials / encryption",
+      "paths": [],
+      "status": "workflow not implemented",
+      "reason": "Command source is recorded; encoder, transaction and target verification remain required.",
+      "app_write": "Read-only Diagnosis / Re-diagnose",
+      "source": "com/goodwe/hybrid/activity/WifiDiagnosisActivity.java:658"
+    },
+    {
+      "id": "item-023",
+      "menu": "Communication / WLAN Detection",
+      "label": "Assigned network parameters",
+      "paths": [],
+      "status": "workflow not implemented",
+      "reason": "Command source is recorded; encoder, transaction and target verification remain required.",
+      "app_write": "Read-only Diagnosis / Re-diagnose",
+      "source": "com/goodwe/hybrid/activity/WifiDiagnosisActivity.java:658"
+    },
+    {
+      "id": "item-024",
+      "menu": "Communication / WLAN Detection",
+      "label": "Server 1 connection",
+      "paths": [
+        "status.communication_module.server1_status"
+      ],
+      "status": "read-only decoded",
+      "reason": "Parameterized 5A5A profile reads and shared-Device server replies implemented. Emulator verified.",
+      "app_write": "Read-only Diagnosis / Re-diagnose",
+      "source": "com/goodwe/hybrid/activity/WifiDiagnosisActivity.java:658"
+    },
+    {
+      "id": "item-025",
+      "menu": "Communication / WLAN Detection",
+      "label": "Server 2 connection",
+      "paths": [
+        "status.communication_module.server2_status"
+      ],
+      "status": "read-only decoded",
+      "reason": "Parameterized 5A5A profile reads and shared-Device server replies implemented. Emulator verified.",
+      "app_write": "Read-only Diagnosis / Re-diagnose",
+      "source": "com/goodwe/hybrid/activity/WifiDiagnosisActivity.java:658"
+    },
+    {
+      "id": "item-026",
+      "menu": "Communication / WLAN Detection",
+      "label": "Packet counters",
+      "paths": [
+        "status.communication_module.packets"
+      ],
+      "status": "read-only decoded",
+      "reason": "Parameterized 5A5A profile reads and shared-Device server replies implemented. Emulator verified.",
+      "app_write": "Read-only Diagnosis / Re-diagnose",
+      "source": "com/goodwe/hybrid/activity/WifiDiagnosisActivity.java:658"
+    },
+    {
+      "id": "item-027",
+      "menu": "Communication / 4G",
+      "label": "Area",
+      "paths": [
+        "config.communication.apn.name"
+      ],
+      "status": "app-side catalogue selection",
+      "reason": "Region/carrier select an APN catalogue entry; only the resulting APN name is transmitted. They are not separate inverter registers.",
+      "app_write": "F710 B7C1 count0019 bytecount32; selected APN data",
+      "source": "com/goodwe/hybrid/activity/ApnSettingHybridActivity.java"
+    },
+    {
+      "id": "item-028",
+      "menu": "Communication / 4G",
+      "label": "Operator",
+      "paths": [
+        "config.communication.apn.name"
+      ],
+      "status": "app-side catalogue selection",
+      "reason": "Region/carrier select an APN catalogue entry; only the resulting APN name is transmitted. They are not separate inverter registers.",
+      "app_write": "F710 B7C1 count0019 bytecount32; selected APN data",
+      "source": "com/goodwe/hybrid/activity/ApnSettingHybridActivity.java"
+    },
+    {
+      "id": "item-029",
+      "menu": "Communication / 4G",
+      "label": "APN Name",
+      "paths": [
+        "config.communication.apn.name"
+      ],
+      "status": "implemented ordinary UDP APN workflow",
+      "reason": "Staged write-only APN text or empty clear, FC16/47041,count25 with U16 length and zero padding. Separate cloud/BLE layout is not claimed.",
+      "app_write": "F710 B7C1 count0019 bytecount32; selected APN data",
+      "source": "com/goodwe/hybrid/activity/ApnSettingHybridActivity.java"
+    },
+    {
+      "id": "item-030",
+      "menu": "Basic / Grid Code",
+      "label": "Grid Code (Safety Code)",
+      "paths": [
+        "config.basic.grid_code.code"
+      ],
+      "status": "read-only decoded",
+      "reason": "Target readback with profile mapping; no writable metadata without a transaction implementation.",
+      "app_write": "SelectSetSafeCodeActivity; legacy 03/01 and region-dependent follow-up",
+      "source": "com/goodwe/hybrid/activity/SelectSetSafeCodeActivity.java"
+    },
+    {
+      "id": "item-031",
+      "menu": "Basic / Grid Code",
+      "label": "Export",
+      "paths": [],
+      "status": "workflow not implemented",
+      "reason": "Command source is recorded; encoder, transaction and target verification remain required.",
+      "app_write": "Local image export only",
+      "source": "com/goodwe/hybrid/activity/SelectSafetyHybirdActivity.java:1002"
+    },
+    {
+      "id": "item-032",
+      "menu": "Basic / Select Working Mode",
+      "label": "General Mode",
+      "paths": [
+        "config.basic.working_mode.activation.requested_mode"
+      ],
+      "status": "implemented staged mode workflow",
+      "reason": "Observed DSP23/ARM14 newer-Eco ESU branch: ordered setup, vendor ACKs and final01/09 mode readback. Older firmware and physical effects remain separate.",
+      "app_write": "ChooseWorkModeActivity workflow: schedule/offgrid setup then 03/59; do not reduce to one universal write",
+      "source": "com/goodwe/hybrid/activity/ChooseWorkModeActivity.java"
+    },
+    {
+      "id": "item-033",
+      "menu": "Basic / Select Working Mode",
+      "label": "Off-Grid Mode",
+      "paths": [
+        "config.basic.working_mode.activation.requested_mode"
+      ],
+      "status": "implemented staged mode workflow",
+      "reason": "Observed DSP23/ARM14 newer-Eco ESU branch: ordered setup, vendor ACKs and final01/09 mode readback. Older firmware and physical effects remain separate.",
+      "app_write": "ChooseWorkModeActivity workflow: schedule/offgrid setup then 03/59; do not reduce to one universal write",
+      "source": "com/goodwe/hybrid/activity/ChooseWorkModeActivity.java"
+    },
+    {
+      "id": "item-034",
+      "menu": "Basic / Select Working Mode",
+      "label": "Backup Mode",
+      "paths": [
+        "config.basic.working_mode.activation.requested_mode"
+      ],
+      "status": "implemented staged mode workflow",
+      "reason": "Observed DSP23/ARM14 newer-Eco ESU branch: ordered setup, vendor ACKs and final01/09 mode readback. Older firmware and physical effects remain separate.",
+      "app_write": "ChooseWorkModeActivity workflow: schedule/offgrid setup then 03/59; do not reduce to one universal write",
+      "source": "com/goodwe/hybrid/activity/ChooseWorkModeActivity.java"
+    },
+    {
+      "id": "item-035",
+      "menu": "Basic / Select Working Mode",
+      "label": "TOU Mode",
+      "paths": [
+        "config.basic.working_mode.activation.requested_mode"
+      ],
+      "status": "implemented staged mode workflow",
+      "reason": "Observed DSP23/ARM14 newer-Eco ESU branch: ordered setup, vendor ACKs and final01/09 mode readback. Older firmware and physical effects remain separate.",
+      "app_write": "ChooseWorkModeActivity workflow: schedule/offgrid setup then 03/59; do not reduce to one universal write",
+      "source": "com/goodwe/hybrid/activity/ChooseWorkModeActivity.java"
+    },
+    {
+      "id": "item-036",
+      "menu": "Basic / TOU / Time1",
+      "label": "Enabled",
+      "paths": [
+        "config.basic.tou.time1.enabled_raw"
+      ],
+      "status": "implemented atomic schedule writer",
+      "reason": "Staged fields and apply counter commit one validated twelve-byte FC16 slot with readback. Emulator tested. Physical write and working-mode selection remain pending.",
+      "app_write": "SetEcoModeData slot 47547; byte4=FF enabled; enable/disable workflow separate; bytes10..11 zero",
+      "source": "com/goodwe/hybrid/activity/AddEcoModeActivity.java:258"
+    },
+    {
+      "id": "item-037",
+      "menu": "Basic / TOU / Time1",
+      "label": "Start Time",
+      "paths": [
+        "config.basic.tou.time1.start_hour",
+        "config.basic.tou.time1.start_minute"
+      ],
+      "status": "implemented atomic schedule writer",
+      "reason": "Staged fields and apply counter commit one validated twelve-byte FC16 slot with readback. Emulator tested. Physical write and working-mode selection remain pending.",
+      "app_write": "SetEcoModeData slot 47547; bytes0,1 hour/minute; bytes10..11 zero",
+      "source": "com/goodwe/hybrid/activity/AddEcoModeActivity.java:258"
+    },
+    {
+      "id": "item-038",
+      "menu": "Basic / TOU / Time1",
+      "label": "End Time",
+      "paths": [
+        "config.basic.tou.time1.end_hour",
+        "config.basic.tou.time1.end_minute"
+      ],
+      "status": "implemented atomic schedule writer",
+      "reason": "Staged fields and apply counter commit one validated twelve-byte FC16 slot with readback. Emulator tested. Physical write and working-mode selection remain pending.",
+      "app_write": "SetEcoModeData slot 47547; bytes2,3 hour/minute; bytes10..11 zero",
+      "source": "com/goodwe/hybrid/activity/AddEcoModeActivity.java:258"
+    },
+    {
+      "id": "item-039",
+      "menu": "Basic / TOU / Time1",
+      "label": "Repeat",
+      "paths": [
+        "config.basic.tou.time1.weekdays"
+      ],
+      "status": "implemented atomic schedule writer",
+      "reason": "Staged fields and apply counter commit one validated twelve-byte FC16 slot with readback. Emulator tested. Physical write and working-mode selection remain pending.",
+      "app_write": "SetEcoModeData slot 47547; byte5 weekday mask; bytes10..11 zero",
+      "source": "com/goodwe/hybrid/activity/AddEcoModeActivity.java:258"
+    },
+    {
+      "id": "item-040",
+      "menu": "Basic / TOU / Time1",
+      "label": "Rated Power (%)",
+      "paths": [
+        "config.basic.tou.time1.power"
+      ],
+      "status": "implemented atomic schedule writer",
+      "reason": "Staged fields and apply counter commit one validated twelve-byte FC16 slot with readback. Emulator tested. Physical write and working-mode selection remain pending.",
+      "app_write": "SetEcoModeData slot 47547; bytes6..7 signed percent; negative charge; bytes10..11 zero",
+      "source": "com/goodwe/hybrid/activity/AddEcoModeActivity.java:258"
+    },
+    {
+      "id": "item-041",
+      "menu": "Basic / TOU / Time1",
+      "label": "Charge / Discharge",
+      "paths": [
+        "config.basic.tou.time1.power"
+      ],
+      "status": "implemented atomic schedule writer",
+      "reason": "Staged fields and apply counter commit one validated twelve-byte FC16 slot with readback. Emulator tested. Physical write and working-mode selection remain pending.",
+      "app_write": "SetEcoModeData slot 47547; sign of signed power; bytes10..11 zero",
+      "source": "com/goodwe/hybrid/activity/AddEcoModeActivity.java:258"
+    },
+    {
+      "id": "item-042",
+      "menu": "Basic / TOU / Time1",
+      "label": "Charge Cut-off SOC",
+      "paths": [
+        "config.basic.tou.time1.cutoff_soc"
+      ],
+      "status": "implemented atomic schedule writer",
+      "reason": "Staged fields and apply counter commit one validated twelve-byte FC16 slot with readback. Emulator tested. Physical write and working-mode selection remain pending.",
+      "app_write": "SetEcoModeData slot 47547; bytes8..9 U16 percent; discharge writes0; bytes10..11 zero",
+      "source": "com/goodwe/hybrid/activity/AddEcoModeActivity.java:258"
+    },
+    {
+      "id": "item-043",
+      "menu": "Basic / TOU / Time2",
+      "label": "Enabled",
+      "paths": [
+        "config.basic.tou.time2.enabled_raw"
+      ],
+      "status": "implemented atomic schedule writer",
+      "reason": "Staged fields and apply counter commit one validated twelve-byte FC16 slot with readback. Emulator tested. Physical write and working-mode selection remain pending.",
+      "app_write": "SetEcoModeData slot 47553; byte4=FF enabled; enable/disable workflow separate; bytes10..11 zero",
+      "source": "com/goodwe/hybrid/activity/AddEcoModeActivity.java:258"
+    },
+    {
+      "id": "item-044",
+      "menu": "Basic / TOU / Time2",
+      "label": "Start Time",
+      "paths": [
+        "config.basic.tou.time2.start_hour",
+        "config.basic.tou.time2.start_minute"
+      ],
+      "status": "implemented atomic schedule writer",
+      "reason": "Staged fields and apply counter commit one validated twelve-byte FC16 slot with readback. Emulator tested. Physical write and working-mode selection remain pending.",
+      "app_write": "SetEcoModeData slot 47553; bytes0,1 hour/minute; bytes10..11 zero",
+      "source": "com/goodwe/hybrid/activity/AddEcoModeActivity.java:258"
+    },
+    {
+      "id": "item-045",
+      "menu": "Basic / TOU / Time2",
+      "label": "End Time",
+      "paths": [
+        "config.basic.tou.time2.end_hour",
+        "config.basic.tou.time2.end_minute"
+      ],
+      "status": "implemented atomic schedule writer",
+      "reason": "Staged fields and apply counter commit one validated twelve-byte FC16 slot with readback. Emulator tested. Physical write and working-mode selection remain pending.",
+      "app_write": "SetEcoModeData slot 47553; bytes2,3 hour/minute; bytes10..11 zero",
+      "source": "com/goodwe/hybrid/activity/AddEcoModeActivity.java:258"
+    },
+    {
+      "id": "item-046",
+      "menu": "Basic / TOU / Time2",
+      "label": "Repeat",
+      "paths": [
+        "config.basic.tou.time2.weekdays"
+      ],
+      "status": "implemented atomic schedule writer",
+      "reason": "Staged fields and apply counter commit one validated twelve-byte FC16 slot with readback. Emulator tested. Physical write and working-mode selection remain pending.",
+      "app_write": "SetEcoModeData slot 47553; byte5 weekday mask; bytes10..11 zero",
+      "source": "com/goodwe/hybrid/activity/AddEcoModeActivity.java:258"
+    },
+    {
+      "id": "item-047",
+      "menu": "Basic / TOU / Time2",
+      "label": "Rated Power (%)",
+      "paths": [
+        "config.basic.tou.time2.power"
+      ],
+      "status": "implemented atomic schedule writer",
+      "reason": "Staged fields and apply counter commit one validated twelve-byte FC16 slot with readback. Emulator tested. Physical write and working-mode selection remain pending.",
+      "app_write": "SetEcoModeData slot 47553; bytes6..7 signed percent; negative charge; bytes10..11 zero",
+      "source": "com/goodwe/hybrid/activity/AddEcoModeActivity.java:258"
+    },
+    {
+      "id": "item-048",
+      "menu": "Basic / TOU / Time2",
+      "label": "Charge / Discharge",
+      "paths": [
+        "config.basic.tou.time2.power"
+      ],
+      "status": "implemented atomic schedule writer",
+      "reason": "Staged fields and apply counter commit one validated twelve-byte FC16 slot with readback. Emulator tested. Physical write and working-mode selection remain pending.",
+      "app_write": "SetEcoModeData slot 47553; sign of signed power; bytes10..11 zero",
+      "source": "com/goodwe/hybrid/activity/AddEcoModeActivity.java:258"
+    },
+    {
+      "id": "item-049",
+      "menu": "Basic / TOU / Time2",
+      "label": "Charge Cut-off SOC",
+      "paths": [
+        "config.basic.tou.time2.cutoff_soc"
+      ],
+      "status": "implemented atomic schedule writer",
+      "reason": "Staged fields and apply counter commit one validated twelve-byte FC16 slot with readback. Emulator tested. Physical write and working-mode selection remain pending.",
+      "app_write": "SetEcoModeData slot 47553; bytes8..9 U16 percent; discharge writes0; bytes10..11 zero",
+      "source": "com/goodwe/hybrid/activity/AddEcoModeActivity.java:258"
+    },
+    {
+      "id": "item-050",
+      "menu": "Basic / TOU / Time3",
+      "label": "Enabled",
+      "paths": [
+        "config.basic.tou.time3.enabled_raw"
+      ],
+      "status": "implemented atomic schedule writer",
+      "reason": "Staged fields and apply counter commit one validated twelve-byte FC16 slot with readback. Emulator tested. Physical write and working-mode selection remain pending.",
+      "app_write": "SetEcoModeData slot 47559; byte4=FF enabled; enable/disable workflow separate; bytes10..11 zero",
+      "source": "com/goodwe/hybrid/activity/AddEcoModeActivity.java:258"
+    },
+    {
+      "id": "item-051",
+      "menu": "Basic / TOU / Time3",
+      "label": "Start Time",
+      "paths": [
+        "config.basic.tou.time3.start_hour",
+        "config.basic.tou.time3.start_minute"
+      ],
+      "status": "implemented atomic schedule writer",
+      "reason": "Staged fields and apply counter commit one validated twelve-byte FC16 slot with readback. Emulator tested. Physical write and working-mode selection remain pending.",
+      "app_write": "SetEcoModeData slot 47559; bytes0,1 hour/minute; bytes10..11 zero",
+      "source": "com/goodwe/hybrid/activity/AddEcoModeActivity.java:258"
+    },
+    {
+      "id": "item-052",
+      "menu": "Basic / TOU / Time3",
+      "label": "End Time",
+      "paths": [
+        "config.basic.tou.time3.end_hour",
+        "config.basic.tou.time3.end_minute"
+      ],
+      "status": "implemented atomic schedule writer",
+      "reason": "Staged fields and apply counter commit one validated twelve-byte FC16 slot with readback. Emulator tested. Physical write and working-mode selection remain pending.",
+      "app_write": "SetEcoModeData slot 47559; bytes2,3 hour/minute; bytes10..11 zero",
+      "source": "com/goodwe/hybrid/activity/AddEcoModeActivity.java:258"
+    },
+    {
+      "id": "item-053",
+      "menu": "Basic / TOU / Time3",
+      "label": "Repeat",
+      "paths": [
+        "config.basic.tou.time3.weekdays"
+      ],
+      "status": "implemented atomic schedule writer",
+      "reason": "Staged fields and apply counter commit one validated twelve-byte FC16 slot with readback. Emulator tested. Physical write and working-mode selection remain pending.",
+      "app_write": "SetEcoModeData slot 47559; byte5 weekday mask; bytes10..11 zero",
+      "source": "com/goodwe/hybrid/activity/AddEcoModeActivity.java:258"
+    },
+    {
+      "id": "item-054",
+      "menu": "Basic / TOU / Time3",
+      "label": "Rated Power (%)",
+      "paths": [
+        "config.basic.tou.time3.power"
+      ],
+      "status": "implemented atomic schedule writer",
+      "reason": "Staged fields and apply counter commit one validated twelve-byte FC16 slot with readback. Emulator tested. Physical write and working-mode selection remain pending.",
+      "app_write": "SetEcoModeData slot 47559; bytes6..7 signed percent; negative charge; bytes10..11 zero",
+      "source": "com/goodwe/hybrid/activity/AddEcoModeActivity.java:258"
+    },
+    {
+      "id": "item-055",
+      "menu": "Basic / TOU / Time3",
+      "label": "Charge / Discharge",
+      "paths": [
+        "config.basic.tou.time3.power"
+      ],
+      "status": "implemented atomic schedule writer",
+      "reason": "Staged fields and apply counter commit one validated twelve-byte FC16 slot with readback. Emulator tested. Physical write and working-mode selection remain pending.",
+      "app_write": "SetEcoModeData slot 47559; sign of signed power; bytes10..11 zero",
+      "source": "com/goodwe/hybrid/activity/AddEcoModeActivity.java:258"
+    },
+    {
+      "id": "item-056",
+      "menu": "Basic / TOU / Time3",
+      "label": "Charge Cut-off SOC",
+      "paths": [
+        "config.basic.tou.time3.cutoff_soc"
+      ],
+      "status": "implemented atomic schedule writer",
+      "reason": "Staged fields and apply counter commit one validated twelve-byte FC16 slot with readback. Emulator tested. Physical write and working-mode selection remain pending.",
+      "app_write": "SetEcoModeData slot 47559; bytes8..9 U16 percent; discharge writes0; bytes10..11 zero",
+      "source": "com/goodwe/hybrid/activity/AddEcoModeActivity.java:258"
+    },
+    {
+      "id": "item-057",
+      "menu": "Basic / TOU / Time4",
+      "label": "Enabled",
+      "paths": [
+        "config.basic.tou.time4.enabled_raw"
+      ],
+      "status": "implemented atomic schedule writer",
+      "reason": "Staged fields and apply counter commit one validated twelve-byte FC16 slot with readback. Emulator tested. Physical write and working-mode selection remain pending.",
+      "app_write": "SetEcoModeData slot 47565; byte4=FF enabled; enable/disable workflow separate; bytes10..11 zero",
+      "source": "com/goodwe/hybrid/activity/AddEcoModeActivity.java:258"
+    },
+    {
+      "id": "item-058",
+      "menu": "Basic / TOU / Time4",
+      "label": "Start Time",
+      "paths": [
+        "config.basic.tou.time4.start_hour",
+        "config.basic.tou.time4.start_minute"
+      ],
+      "status": "implemented atomic schedule writer",
+      "reason": "Staged fields and apply counter commit one validated twelve-byte FC16 slot with readback. Emulator tested. Physical write and working-mode selection remain pending.",
+      "app_write": "SetEcoModeData slot 47565; bytes0,1 hour/minute; bytes10..11 zero",
+      "source": "com/goodwe/hybrid/activity/AddEcoModeActivity.java:258"
+    },
+    {
+      "id": "item-059",
+      "menu": "Basic / TOU / Time4",
+      "label": "End Time",
+      "paths": [
+        "config.basic.tou.time4.end_hour",
+        "config.basic.tou.time4.end_minute"
+      ],
+      "status": "implemented atomic schedule writer",
+      "reason": "Staged fields and apply counter commit one validated twelve-byte FC16 slot with readback. Emulator tested. Physical write and working-mode selection remain pending.",
+      "app_write": "SetEcoModeData slot 47565; bytes2,3 hour/minute; bytes10..11 zero",
+      "source": "com/goodwe/hybrid/activity/AddEcoModeActivity.java:258"
+    },
+    {
+      "id": "item-060",
+      "menu": "Basic / TOU / Time4",
+      "label": "Repeat",
+      "paths": [
+        "config.basic.tou.time4.weekdays"
+      ],
+      "status": "implemented atomic schedule writer",
+      "reason": "Staged fields and apply counter commit one validated twelve-byte FC16 slot with readback. Emulator tested. Physical write and working-mode selection remain pending.",
+      "app_write": "SetEcoModeData slot 47565; byte5 weekday mask; bytes10..11 zero",
+      "source": "com/goodwe/hybrid/activity/AddEcoModeActivity.java:258"
+    },
+    {
+      "id": "item-061",
+      "menu": "Basic / TOU / Time4",
+      "label": "Rated Power (%)",
+      "paths": [
+        "config.basic.tou.time4.power"
+      ],
+      "status": "implemented atomic schedule writer",
+      "reason": "Staged fields and apply counter commit one validated twelve-byte FC16 slot with readback. Emulator tested. Physical write and working-mode selection remain pending.",
+      "app_write": "SetEcoModeData slot 47565; bytes6..7 signed percent; negative charge; bytes10..11 zero",
+      "source": "com/goodwe/hybrid/activity/AddEcoModeActivity.java:258"
+    },
+    {
+      "id": "item-062",
+      "menu": "Basic / TOU / Time4",
+      "label": "Charge / Discharge",
+      "paths": [
+        "config.basic.tou.time4.power"
+      ],
+      "status": "implemented atomic schedule writer",
+      "reason": "Staged fields and apply counter commit one validated twelve-byte FC16 slot with readback. Emulator tested. Physical write and working-mode selection remain pending.",
+      "app_write": "SetEcoModeData slot 47565; sign of signed power; bytes10..11 zero",
+      "source": "com/goodwe/hybrid/activity/AddEcoModeActivity.java:258"
+    },
+    {
+      "id": "item-063",
+      "menu": "Basic / TOU / Time4",
+      "label": "Charge Cut-off SOC",
+      "paths": [
+        "config.basic.tou.time4.cutoff_soc"
+      ],
+      "status": "implemented atomic schedule writer",
+      "reason": "Staged fields and apply counter commit one validated twelve-byte FC16 slot with readback. Emulator tested. Physical write and working-mode selection remain pending.",
+      "app_write": "SetEcoModeData slot 47565; bytes8..9 U16 percent; discharge writes0; bytes10..11 zero",
+      "source": "com/goodwe/hybrid/activity/AddEcoModeActivity.java:258"
+    },
+    {
+      "id": "item-064",
+      "menu": "Basic / Battery Model",
+      "label": "Brand / model selection",
+      "paths": [
+        "config.basic.battery_model.protocol",
+        "config.basic.battery_model.index"
+      ],
+      "status": "read-only decoded",
+      "reason": "Target readback with profile mapping; no writable metadata without a transaction implementation.",
+      "app_write": "03/50 ->03/51 ->03/52 ->02/39(05A0,2) ->battery-index/protocol block; coefficient conditional",
+      "source": "com/goodwe/hybrid/activity/SelectBatteryOver07Activity.java:220"
+    },
+    {
+      "id": "item-065",
+      "menu": "Basic / Battery Model / SELF-DEFINE",
+      "label": "Battery Capacity",
+      "paths": [
+        "config.basic.battery_model.capacity"
+      ],
+      "status": "read-only decoded",
+      "reason": "Target readback with profile mapping; no writable metadata without a transaction implementation.",
+      "app_write": "03/50 capacity U16 Ah",
+      "source": "com/goodwe/hybrid/activity/BatterySelfDefineActivity.java:451"
+    },
+    {
+      "id": "item-066",
+      "menu": "Basic / Battery Model / SELF-DEFINE",
+      "label": "Charging Voltage",
+      "paths": [
+        "config.advanced.battery_function.charging_voltage"
+      ],
+      "status": "conditional read-only",
+      "reason": "Self-define branch is not selected; battery selection rewrites coupled parameters.",
+      "app_write": "03/51 U16 tenths V",
+      "source": "com/goodwe/hybrid/activity/BatterySelfDefineActivity.java:451"
+    },
+    {
+      "id": "item-067",
+      "menu": "Basic / Battery Model / SELF-DEFINE",
+      "label": "Charging Current",
+      "paths": [
+        "config.advanced.battery_function.charging_current"
+      ],
+      "status": "conditional read-only",
+      "reason": "Self-define branch is not selected; battery selection rewrites coupled parameters.",
+      "app_write": "03/51 U16 tenths A",
+      "source": "com/goodwe/hybrid/activity/BatterySelfDefineActivity.java:451"
+    },
+    {
+      "id": "item-068",
+      "menu": "Basic / Battery Model / SELF-DEFINE",
+      "label": "Discharge Current",
+      "paths": [
+        "config.advanced.battery_function.discharging_current"
+      ],
+      "status": "conditional read-only",
+      "reason": "Self-define branch is not selected; battery selection rewrites coupled parameters.",
+      "app_write": "03/52 U16 tenths A",
+      "source": "com/goodwe/hybrid/activity/BatterySelfDefineActivity.java:451"
+    },
+    {
+      "id": "item-069",
+      "menu": "Basic / Battery Model / SELF-DEFINE",
+      "label": "SOC Protection",
+      "paths": [
+        "config.advanced.battery_function.soc_protection_raw"
+      ],
+      "status": "conditional read-only",
+      "reason": "Self-define branch is not selected; battery selection rewrites coupled parameters.",
+      "app_write": "03/3B 00,value,00",
+      "source": "com/goodwe/hybrid/activity/BatterySelfDefineActivity.java:451"
+    },
+    {
+      "id": "item-070",
+      "menu": "Basic / Battery Model / SELF-DEFINE",
+      "label": "Depth Of Discharge (On-Grid)",
+      "paths": [
+        "config.advanced.battery_function.on_grid_min_soc"
+      ],
+      "status": "conditional read-only",
+      "reason": "Self-define branch is not selected; battery selection rewrites coupled parameters.",
+      "app_write": "03/52 byte4 =100-DoD",
+      "source": "com/goodwe/hybrid/activity/BatterySelfDefineActivity.java:451"
+    },
+    {
+      "id": "item-071",
+      "menu": "Basic / Battery Model / SELF-DEFINE",
+      "label": "Depth Of Discharge (Off-grid)",
+      "paths": [
+        "config.advanced.battery_function.off_grid_min_soc"
+      ],
+      "status": "conditional read-only",
+      "reason": "Self-define branch is not selected; battery selection rewrites coupled parameters.",
+      "app_write": "02/39 address05A1 or coupled05A0/2,100-DoD",
+      "source": "com/goodwe/hybrid/activity/BatterySelfDefineActivity.java:451"
+    },
+    {
+      "id": "item-072",
+      "menu": "Basic / Battery Model / SELF-DEFINE",
+      "label": "Floating Voltage",
+      "paths": [
+        "config.basic.battery_model.self_define.floating_voltage"
+      ],
+      "status": "conditional read-only",
+      "reason": "Lead-acid branch not selected; bulk codes exposed without asserting applicability or a current/time conversion.",
+      "app_write": "battery-index/protocol block first U16",
+      "source": "com/goodwe/hybrid/activity/BatterySelfDefineActivity.java:451"
+    },
+    {
+      "id": "item-073",
+      "menu": "Basic / Battery Model / SELF-DEFINE",
+      "label": "Floating Current",
+      "paths": [
+        "config.basic.battery_model.self_define.floating_current_raw"
+      ],
+      "status": "conditional read-only",
+      "reason": "Lead-acid branch not selected; bulk codes exposed without asserting applicability or a current/time conversion.",
+      "app_write": "same block next U16",
+      "source": "com/goodwe/hybrid/activity/BatterySelfDefineActivity.java:451"
+    },
+    {
+      "id": "item-074",
+      "menu": "Basic / Battery Model / SELF-DEFINE",
+      "label": "Floating Time",
+      "paths": [
+        "config.basic.battery_model.self_define.floating_time_raw"
+      ],
+      "status": "conditional read-only",
+      "reason": "Lead-acid branch not selected; bulk codes exposed without asserting applicability or a current/time conversion.",
+      "app_write": "same block next U16 minutes",
+      "source": "com/goodwe/hybrid/activity/BatterySelfDefineActivity.java:451"
+    },
+    {
+      "id": "item-075",
+      "menu": "Advanced",
+      "label": "DRED/Remote Shutdown/RCR",
+      "paths": [
+        "config.advanced.dred"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "SolarGo encoder implemented with bounds, ACK and readback. Verified against emulator; physical changed-value validation pending.",
+      "app_write": "F706 B7BC U16 1/0",
+      "source": "com/goodwe/hybrid/activity/AdvancedSettingNewActivity.java:2015"
+    },
+    {
+      "id": "item-076",
+      "menu": "Advanced",
+      "label": "Software Power Limit",
+      "paths": [
+        "config.advanced.software_power_limit"
+      ],
+      "status": "verified scalar writer",
+      "reason": "Target readback with profile mapping; no writable metadata without a transaction implementation.",
+      "app_write": "03/53",
+      "source": "com/goodwe/hybrid/activity/AdvancedSettingNewActivity.java:1832"
+    },
+    {
+      "id": "item-077",
+      "menu": "Advanced",
+      "label": "Power Limit Value",
+      "paths": [
+        "config.advanced.power_limit"
+      ],
+      "status": "read-only decoded",
+      "reason": "Target readback with profile mapping; no writable metadata without a transaction implementation.",
+      "app_write": "03/35 U16 watts",
+      "source": "com/goodwe/hybrid/activity/AdvancedSettingNewActivity.java:2673"
+    },
+    {
+      "id": "item-078",
+      "menu": "Advanced",
+      "label": "Hardware Power Limit",
+      "paths": [
+        "config.advanced.hardware_power_limit"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "SolarGo encoder implemented with bounds, ACK and readback. Verified against emulator; physical changed-value validation pending.",
+      "app_write": "F7067506 U16 1/0",
+      "source": "com/goodwe/hybrid/activity/AdvancedSettingNewActivity.java:2065"
+    },
+    {
+      "id": "item-079",
+      "menu": "Advanced",
+      "label": "Shadow Scan",
+      "paths": [
+        "config.advanced.shadow_scan"
+      ],
+      "status": "verified scalar writer",
+      "reason": "Target readback with profile mapping; no writable metadata without a transaction implementation.",
+      "app_write": "03/28 payload8080 enable /8000 disable",
+      "source": "com/goodwe/hybrid/activity/AdvancedSettingNewActivity.java:1802"
+    },
+    {
+      "id": "item-080",
+      "menu": "Advanced",
+      "label": "Backup",
+      "paths": [
+        "config.advanced.backup"
+      ],
+      "status": "verified scalar writer",
+      "reason": "Target readback with profile mapping; no writable metadata without a transaction implementation.",
+      "app_write": "03/27 payload0000 enable /0030 disable per app builder",
+      "source": "com/goodwe/hybrid/activity/AdvancedSettingNewActivity.java:1741"
+    },
+    {
+      "id": "item-081",
+      "menu": "Advanced",
+      "label": "Detection Mode",
+      "paths": [
+        "config.advanced.detection_mode"
+      ],
+      "status": "read-only decoded",
+      "reason": "Target readback with profile mapping; no writable metadata without a transaction implementation.",
+      "app_write": "03/5B via setDetectionMode",
+      "source": "com/goodwe/hybrid/activity/DetectionModeActivity.java:180"
+    },
+    {
+      "id": "item-082",
+      "menu": "Advanced",
+      "label": "First Cold Start (Off-grid)",
+      "paths": [
+        "config.advanced.cold_start.enable_request",
+        "config.advanced.cold_start.disable_request"
+      ],
+      "status": "implemented vendor actions",
+      "reason": "Explicit enable/cancel counters follow app selector encoding; ACK only. Backup supply must be available; physical cold-start/continuity unverified.",
+      "app_write": "AA55 control03/function26, enable payload04 or cancel01; response03/A6 ACK06",
+      "source": "com/goodwe/hybrid/activity/AdvancedSettingNewActivity.java:1771"
+    },
+    {
+      "id": "item-083",
+      "menu": "Advanced",
+      "label": "Battery Activated",
+      "paths": [
+        "config.advanced.battery_activated"
+      ],
+      "status": "read-only decoded",
+      "reason": "Target readback with profile mapping; no writable metadata without a transaction implementation.",
+      "app_write": "03/37 U16 value",
+      "source": "com/goodwe/hybrid/activity/AdvancedSettingNewActivity.java:1602"
+    },
+    {
+      "id": "item-084",
+      "menu": "Advanced",
+      "label": "Power Factor",
+      "paths": [
+        "config.advanced.power_factor"
+      ],
+      "status": "read-only decoded",
+      "reason": "Target readback with profile mapping; no writable metadata without a transaction implementation.",
+      "app_write": "03/1F U8: truncate(PF*100), add100 if negative",
+      "source": "com/goodwe/hybrid/activity/AdvancedSettingNewActivity.java:2694"
+    },
+    {
+      "id": "item-085",
+      "menu": "Advanced",
+      "label": "Clear Overload History",
+      "paths": [
+        "config.advanced.clear_overload"
+      ],
+      "status": "implemented action",
+      "reason": "03/5E payload0F,03/DE ACK06; counter-triggered and emulator verified; physical completion remains unverified",
+      "app_write": "03/5E",
+      "source": "com/goodwe/hybrid/activity/AdvancedSettingNewActivity.java:3176"
+    },
+    {
+      "id": "item-086",
+      "menu": "Advanced",
+      "label": "Output Active Power",
+      "paths": [
+        "config.advanced.output_active_power"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "SolarGo encoder implemented with bounds, ACK and readback. Verified against emulator; physical changed-value validation pending.",
+      "app_write": "F706B1AC U16 percent*10",
+      "source": "com/goodwe/hybrid/activity/AdvancedSettingNewActivity.java:2169"
+    },
+    {
+      "id": "item-087",
+      "menu": "Advanced / Battery Function",
+      "label": "Charging Voltage",
+      "paths": [
+        "config.advanced.battery_function.charging_voltage"
+      ],
+      "status": "read-only decoded",
+      "reason": "Target readback with profile mapping; no writable metadata without a transaction implementation.",
+      "app_write": "part of03/51",
+      "source": "com/goodwe/hybrid/activity/BatteryFunction105Activity.java"
+    },
+    {
+      "id": "item-088",
+      "menu": "Advanced / Battery Function",
+      "label": "Charging Current",
+      "paths": [
+        "config.advanced.battery_function.charging_current"
+      ],
+      "status": "read-only decoded",
+      "reason": "Target readback with profile mapping; no writable metadata without a transaction implementation.",
+      "app_write": "03/51 uses physical tenths A",
+      "source": "com/goodwe/hybrid/activity/BatteryFunction105Activity.java"
+    },
+    {
+      "id": "item-089",
+      "menu": "Advanced / Battery Function",
+      "label": "Discharge Current",
+      "paths": [
+        "config.advanced.battery_function.discharging_current"
+      ],
+      "status": "read-only decoded",
+      "reason": "Target readback with profile mapping; no writable metadata without a transaction implementation.",
+      "app_write": "03/52 uses physical tenths A",
+      "source": "com/goodwe/hybrid/activity/BatteryFunction105Activity.java"
+    },
+    {
+      "id": "item-090",
+      "menu": "Advanced / Battery Function",
+      "label": "SOC Protection",
+      "paths": [
+        "config.advanced.battery_function.soc_protection_raw"
+      ],
+      "status": "read-only decoded",
+      "reason": "Target readback with profile mapping; no writable metadata without a transaction implementation.",
+      "app_write": "03/3B payload00,value,00",
+      "source": "com/goodwe/hybrid/activity/BatteryFunction105Activity.java"
+    },
+    {
+      "id": "item-091",
+      "menu": "Advanced / Battery Function",
+      "label": "Depth Of Discharge (On-Grid)",
+      "paths": [
+        "config.advanced.battery_function.on_grid_min_soc"
+      ],
+      "status": "verified scalar writer",
+      "reason": "Real changed-value trial21% ->20%: ACK06 and readback verified on deployed Pi slot204; persistence not tested.",
+      "app_write": "03/52 also rewrites discharge voltage/current",
+      "source": "com/goodwe/hybrid/activity/BatteryFunction105Activity.java"
+    },
+    {
+      "id": "item-092",
+      "menu": "Advanced / Battery Function",
+      "label": "Depth Of Discharge (Off-grid)",
+      "paths": [
+        "config.advanced.battery_function.off_grid_min_soc"
+      ],
+      "status": "verified scalar writer",
+      "reason": "Real changed-value trial21% ->20%: ACK06 and readback verified on deployed Pi slot204; persistence not tested.",
+      "app_write": "AA55 02/39 05A1 count1 U16minSOC",
+      "source": "com/goodwe/hybrid/activity/BatteryFunction105Activity.java"
+    },
+    {
+      "id": "item-093",
+      "menu": "Advanced / Battery Function",
+      "label": "Immediate Charging",
+      "paths": [
+        "config.advanced.battery_function.immediate_charging"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "SolarGo encoder implemented with bounds, ACK and readback. Verified against emulator; physical changed-value validation pending.",
+      "app_write": "F706 B9B9 U16 1/0",
+      "source": "com/goodwe/hybrid/activity/BatteryFunction105Activity.java"
+    },
+    {
+      "id": "item-094",
+      "menu": "Advanced / Battery Function",
+      "label": "Charge Cut-off SOC",
+      "paths": [
+        "config.advanced.battery_function.charge_cutoff_soc"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "SolarGo encoder implemented with bounds, ACK and readback. Verified against emulator; physical changed-value validation pending.",
+      "app_write": "F706 B9BA U16 percent",
+      "source": "com/goodwe/hybrid/activity/BatteryFunction105Activity.java"
+    },
+    {
+      "id": "item-095",
+      "menu": "Meter Function / Meter/CT Detection",
+      "label": "Meter/CT Detection",
+      "paths": [
+        "config.meter_ct_detection.start_request",
+        "config.meter_ct_detection.stop_request"
+      ],
+      "status": "implemented vendor actions",
+      "reason": "Explicit start/stop counters send the app register059C values1/0 and require vendor ACK06. Status/result reads remain independent; no physical test or power-limit/continuity proof.",
+      "app_write": "AA55 control02/function39 payload059C010001 or059C010000; response02/B9 ACK06",
+      "source": "com/goodwe/hybrid/activity/CTCheckActivity.java"
+    },
+    {
+      "id": "item-096",
+      "menu": "Meter Function / Meter/CT Detection",
+      "label": "Test Status",
+      "paths": [
+        "config.meter_ct_detection.status_code"
+      ],
+      "status": "read-only decoded",
+      "reason": "AA55 register059C/count2 supplies independent U16 status/result words. Raw model-specific codes retained; no physical test started.",
+      "app_write": "none",
+      "source": "com/goodwe/hybrid/common/DataCollectUtil.java:5668/7667; CTCheckActivity.getCTCheckInfo"
+    },
+    {
+      "id": "item-097",
+      "menu": "Meter Function / Meter/CT Detection",
+      "label": "Test Results",
+      "paths": [
+        "config.meter_ct_detection.result_code"
+      ],
+      "status": "read-only decoded",
+      "reason": "AA55 register059C/count2 supplies independent U16 status/result words. Raw model-specific codes retained; no physical test started.",
+      "app_write": "none",
+      "source": "com/goodwe/hybrid/common/DataCollectUtil.java:5668/7667; CTCheckActivity.getCTCheckInfo"
+    },
+    {
+      "id": "item-098",
+      "menu": "Device Information",
+      "label": "DSP Information",
+      "paths": [
+        "info.firmware_version"
+      ],
+      "status": "read-only decoded",
+      "reason": "Target readback with profile mapping; no writable metadata without a transaction implementation.",
+      "app_write": "none",
+      "source": "com/goodwe/hybrid/activity/FirmwareInfoAndUpdateActivity.java:738"
+    },
+    {
+      "id": "item-099",
+      "menu": "Device Information",
+      "label": "ARM Information",
+      "paths": [
+        "info.software_version"
+      ],
+      "status": "read-only decoded",
+      "reason": "Target readback with profile mapping; no writable metadata without a transaction implementation.",
+      "app_write": "none",
+      "source": "com/goodwe/hybrid/activity/FirmwareInfoAndUpdateActivity.java:738"
+    },
+    {
+      "id": "item-100",
+      "menu": "Device Information",
+      "label": "BMS Information",
+      "paths": [
+        "info.battery.bms_version"
+      ],
+      "status": "read-only decoded",
+      "reason": "Target readback with profile mapping; no writable metadata without a transaction implementation.",
+      "app_write": "none",
+      "source": "com/goodwe/hybrid/activity/FirmwareInfoAndUpdateActivity.java:738"
+    },
+    {
+      "id": "item-101",
+      "menu": "Device Information / Update Record",
+      "label": "Firmware name / time / type / version / result",
+      "paths": [],
+      "status": "workflow not implemented",
+      "reason": "Command source is recorded; encoder, transaction and target verification remain required.",
+      "app_write": "none",
+      "source": "com/goodwe/hybrid/activity/HybridUpgradeRecordActivity.java"
+    },
+    {
+      "id": "item-102",
+      "menu": "Advanced / Safety / Protection",
+      "label": "over_voltage_level_1_phase",
+      "paths": [
+        "config.advanced.safety.protection.over_voltage_level_1_phase"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Voltage",
+      "app_write": "f706b158 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:10"
+    },
+    {
+      "id": "item-103",
+      "menu": "Advanced / Safety / Protection",
+      "label": "over_voltage_level_1_time_phase",
+      "paths": [
+        "config.advanced.safety.protection.over_voltage_level_1_time_phase_cycles"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Grid cycles; divide by nominal country frequency, not live frequency; extended-time bank may override",
+      "app_write": "f706b159 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:11"
+    },
+    {
+      "id": "item-104",
+      "menu": "Advanced / Safety / Protection",
+      "label": "under_voltage_level_1_phase",
+      "paths": [
+        "config.advanced.safety.protection.under_voltage_level_1_phase"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Voltage",
+      "app_write": "f706b15a + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:12"
+    },
+    {
+      "id": "item-105",
+      "menu": "Advanced / Safety / Protection",
+      "label": "under_voltage_level_1_time_phase",
+      "paths": [
+        "config.advanced.safety.protection.under_voltage_level_1_time_phase_cycles"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Grid cycles; divide by nominal country frequency, not live frequency; extended-time bank may override",
+      "app_write": "f706b15b + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:13"
+    },
+    {
+      "id": "item-106",
+      "menu": "Advanced / Safety / Protection",
+      "label": "over_voltage_level_2_phase",
+      "paths": [
+        "config.advanced.safety.protection.over_voltage_level_2_phase"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Voltage",
+      "app_write": "f706b15c + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:14"
+    },
+    {
+      "id": "item-107",
+      "menu": "Advanced / Safety / Protection",
+      "label": "over_voltage_level_2_time_phase",
+      "paths": [
+        "config.advanced.safety.protection.over_voltage_level_2_time_phase_cycles"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Grid cycles; divide by nominal country frequency, not live frequency; extended-time bank may override",
+      "app_write": "f706b15d + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:15"
+    },
+    {
+      "id": "item-108",
+      "menu": "Advanced / Safety / Protection",
+      "label": "under_voltage_level_2_phase",
+      "paths": [
+        "config.advanced.safety.protection.under_voltage_level_2_phase"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Voltage",
+      "app_write": "f706b15e + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:16"
+    },
+    {
+      "id": "item-109",
+      "menu": "Advanced / Safety / Protection",
+      "label": "under_voltage_level_2_time_phase",
+      "paths": [
+        "config.advanced.safety.protection.under_voltage_level_2_time_phase_cycles"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Grid cycles; divide by nominal country frequency, not live frequency; extended-time bank may override",
+      "app_write": "f706b15f + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:17"
+    },
+    {
+      "id": "item-110",
+      "menu": "Advanced / Safety / Protection",
+      "label": "over_voltage_phase_10min",
+      "paths": [
+        "config.advanced.safety.protection.over_voltage_phase_10min"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Voltage",
+      "app_write": "f706b160 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:18"
+    },
+    {
+      "id": "item-111",
+      "menu": "Advanced / Safety / Protection",
+      "label": "over_frequency_level_1",
+      "paths": [
+        "config.advanced.safety.protection.over_frequency_level_1"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Frequency",
+      "app_write": "f706b161 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:19"
+    },
+    {
+      "id": "item-112",
+      "menu": "Advanced / Safety / Protection",
+      "label": "over_frequency_level_1_time",
+      "paths": [
+        "config.advanced.safety.protection.over_frequency_level_1_time_cycles"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Grid cycles; divide by nominal country frequency, not live frequency; extended-time bank may override",
+      "app_write": "f706b162 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:20"
+    },
+    {
+      "id": "item-113",
+      "menu": "Advanced / Safety / Protection",
+      "label": "under_frequency_level_1",
+      "paths": [
+        "config.advanced.safety.protection.under_frequency_level_1"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Frequency",
+      "app_write": "f706b163 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:21"
+    },
+    {
+      "id": "item-114",
+      "menu": "Advanced / Safety / Protection",
+      "label": "under_frequency_level_1_time",
+      "paths": [
+        "config.advanced.safety.protection.under_frequency_level_1_time_cycles"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Grid cycles; divide by nominal country frequency, not live frequency; extended-time bank may override",
+      "app_write": "f706b164 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:22"
+    },
+    {
+      "id": "item-115",
+      "menu": "Advanced / Safety / Protection",
+      "label": "over_frequency_level_2",
+      "paths": [
+        "config.advanced.safety.protection.over_frequency_level_2"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Frequency",
+      "app_write": "f706b165 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:23"
+    },
+    {
+      "id": "item-116",
+      "menu": "Advanced / Safety / Protection",
+      "label": "over_frequency_level_2_time",
+      "paths": [
+        "config.advanced.safety.protection.over_frequency_level_2_time_cycles"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Grid cycles; divide by nominal country frequency, not live frequency; extended-time bank may override",
+      "app_write": "f706b166 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:24"
+    },
+    {
+      "id": "item-117",
+      "menu": "Advanced / Safety / Protection",
+      "label": "under_frequency_level_2",
+      "paths": [
+        "config.advanced.safety.protection.under_frequency_level_2"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Frequency",
+      "app_write": "f706b167 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:25"
+    },
+    {
+      "id": "item-118",
+      "menu": "Advanced / Safety / Protection",
+      "label": "under_frequency_level_2_time",
+      "paths": [
+        "config.advanced.safety.protection.under_frequency_level_2_time_cycles"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Grid cycles; divide by nominal country frequency, not live frequency; extended-time bank may override",
+      "app_write": "f706b168 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:26"
+    },
+    {
+      "id": "item-119",
+      "menu": "Advanced / Safety / Connection",
+      "label": "connect_voltage_upper_limit",
+      "paths": [
+        "config.advanced.safety.connection.connect_voltage_upper_limit"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Voltage",
+      "app_write": "f706b169 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:28"
+    },
+    {
+      "id": "item-120",
+      "menu": "Advanced / Safety / Connection",
+      "label": "connect_voltage_lower_limit",
+      "paths": [
+        "config.advanced.safety.connection.connect_voltage_lower_limit"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Voltage",
+      "app_write": "f706b16a + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:29"
+    },
+    {
+      "id": "item-121",
+      "menu": "Advanced / Safety / Connection",
+      "label": "connect_frequency_upper_limit",
+      "paths": [
+        "config.advanced.safety.connection.connect_frequency_upper_limit"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Frequency",
+      "app_write": "f706b16b + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:30"
+    },
+    {
+      "id": "item-122",
+      "menu": "Advanced / Safety / Connection",
+      "label": "connect_frequency_lower_limit",
+      "paths": [
+        "config.advanced.safety.connection.connect_frequency_lower_limit"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Frequency",
+      "app_write": "f706b16c + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:31"
+    },
+    {
+      "id": "item-123",
+      "menu": "Advanced / Safety / Connection",
+      "label": "grid_connect_wait_time",
+      "paths": [
+        "config.advanced.safety.connection.grid_connect_wait_time"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Time",
+      "app_write": "f706b16d + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:32"
+    },
+    {
+      "id": "item-124",
+      "menu": "Advanced / Safety / Connection",
+      "label": "connect_voltage_upper_fault",
+      "paths": [
+        "config.advanced.safety.connection.connect_voltage_upper_fault"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Voltage",
+      "app_write": "f706b16e + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:33"
+    },
+    {
+      "id": "item-125",
+      "menu": "Advanced / Safety / Connection",
+      "label": "connect_voltage_lower_fault",
+      "paths": [
+        "config.advanced.safety.connection.connect_voltage_lower_fault"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Voltage",
+      "app_write": "f706b16f + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:34"
+    },
+    {
+      "id": "item-126",
+      "menu": "Advanced / Safety / Connection",
+      "label": "connect_frequency_upper_fault",
+      "paths": [
+        "config.advanced.safety.connection.connect_frequency_upper_fault"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Frequency",
+      "app_write": "f706b170 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:35"
+    },
+    {
+      "id": "item-127",
+      "menu": "Advanced / Safety / Connection",
+      "label": "connect_frequency_lower_fault",
+      "paths": [
+        "config.advanced.safety.connection.connect_frequency_lower_fault"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Frequency",
+      "app_write": "f706b171 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:36"
+    },
+    {
+      "id": "item-128",
+      "menu": "Advanced / Safety / Connection",
+      "label": "grid_wait_time_lower_fault",
+      "paths": [
+        "config.advanced.safety.connection.grid_wait_time_lower_fault"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Time",
+      "app_write": "f706b172 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:37"
+    },
+    {
+      "id": "item-129",
+      "menu": "Advanced / Safety / Connection",
+      "label": "grid_frequency_wait_time_lower_fault",
+      "paths": [
+        "config.advanced.safety.connection.grid_frequency_wait_time_lower_fault"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "Target branch excluded: excluded from observed target surface: not exposed as an independent field in this target walkthrough. target read; APK mapping; Time",
+      "app_write": "f706b173 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:38"
+    },
+    {
+      "id": "item-130",
+      "menu": "Advanced / Safety / Connection",
+      "label": "grid_connect_power_rate",
+      "paths": [
+        "config.advanced.safety.connection.grid_connect_power_rate"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "Target read; decoder traced to SolarGo fragment and unsigned U16 helper",
+      "app_write": "f706b174 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:39"
+    },
+    {
+      "id": "item-131",
+      "menu": "Advanced / Safety / Connection",
+      "label": "grid_connect_power_rate_under_fault",
+      "paths": [
+        "config.advanced.safety.connection.grid_connect_power_rate_under_fault"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "Target read; decoder traced to SolarGo fragment and unsigned U16 helper",
+      "app_write": "f706b175 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:40"
+    },
+    {
+      "id": "item-132",
+      "menu": "Advanced / Safety / Connection",
+      "label": "power_slope_enable",
+      "paths": [
+        "config.advanced.safety.connection.power_slope_enable"
+      ],
+      "status": "read-only decoded",
+      "reason": "target read; APK mapping; Boolean code",
+      "app_write": "f706b178 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:41"
+    },
+    {
+      "id": "item-133",
+      "menu": "Advanced / Safety / Curves",
+      "label": "cos_curve",
+      "paths": [
+        "config.advanced.safety.curves.cos_curve"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Boolean code",
+      "app_write": "f706b179 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:43"
+    },
+    {
+      "id": "item-134",
+      "menu": "Advanced / Safety / Curves",
+      "label": "power_point_a",
+      "paths": [
+        "config.advanced.safety.curves.power_point_a"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "Signed I16 permille, exposed as 0.1% per count; CurveSettingFragment.java:448-533 -> ArrayUtils.getUnsignedIntValue -> NumberUtils.bytes2Int2V2:349 (signed despite helper name)",
+      "app_write": "f706b17a + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:44"
+    },
+    {
+      "id": "item-135",
+      "menu": "Advanced / Safety / Curves",
+      "label": "power_point_a_cos",
+      "paths": [
+        "config.advanced.safety.curves.power_point_a_cos"
+      ],
+      "status": "read-only decoded",
+      "reason": "Signed I16 / 100 ratio; CurveSettingFragment.java:448-533 -> ArrayUtils.getUnsignedIntValue -> NumberUtils.bytes2Int2V2:349 (signed despite helper name)",
+      "app_write": "f706b17b + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:45"
+    },
+    {
+      "id": "item-136",
+      "menu": "Advanced / Safety / Curves",
+      "label": "power_point_b",
+      "paths": [
+        "config.advanced.safety.curves.power_point_b"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "Signed I16 permille, exposed as 0.1% per count; CurveSettingFragment.java:448-533 -> ArrayUtils.getUnsignedIntValue -> NumberUtils.bytes2Int2V2:349 (signed despite helper name)",
+      "app_write": "f706b17c + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:46"
+    },
+    {
+      "id": "item-137",
+      "menu": "Advanced / Safety / Curves",
+      "label": "power_point_b_cos",
+      "paths": [
+        "config.advanced.safety.curves.power_point_b_cos"
+      ],
+      "status": "read-only decoded",
+      "reason": "Signed I16 / 100 ratio; CurveSettingFragment.java:448-533 -> ArrayUtils.getUnsignedIntValue -> NumberUtils.bytes2Int2V2:349 (signed despite helper name)",
+      "app_write": "f706b17d + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:47"
+    },
+    {
+      "id": "item-138",
+      "menu": "Advanced / Safety / Curves",
+      "label": "power_point_c",
+      "paths": [
+        "config.advanced.safety.curves.power_point_c"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "Signed I16 permille, exposed as 0.1% per count; CurveSettingFragment.java:448-533 -> ArrayUtils.getUnsignedIntValue -> NumberUtils.bytes2Int2V2:349 (signed despite helper name)",
+      "app_write": "f706b17e + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:48"
+    },
+    {
+      "id": "item-139",
+      "menu": "Advanced / Safety / Curves",
+      "label": "power_point_c_cos",
+      "paths": [
+        "config.advanced.safety.curves.power_point_c_cos"
+      ],
+      "status": "read-only decoded",
+      "reason": "Signed I16 / 100 ratio; CurveSettingFragment.java:448-533 -> ArrayUtils.getUnsignedIntValue -> NumberUtils.bytes2Int2V2:349 (signed despite helper name)",
+      "app_write": "f706b17f + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:49"
+    },
+    {
+      "id": "item-140",
+      "menu": "Advanced / Safety / Curves",
+      "label": "entry_curve_voltage",
+      "paths": [
+        "config.advanced.safety.curves.entry_curve_voltage"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Voltage",
+      "app_write": "f706b180 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:50"
+    },
+    {
+      "id": "item-141",
+      "menu": "Advanced / Safety / Curves",
+      "label": "exit_curve_voltage",
+      "paths": [
+        "config.advanced.safety.curves.exit_curve_voltage"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Voltage",
+      "app_write": "f706b181 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:51"
+    },
+    {
+      "id": "item-142",
+      "menu": "Advanced / Safety / Curves",
+      "label": "exit_curve_power",
+      "paths": [
+        "config.advanced.safety.curves.exit_curve_power"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "Signed I16 permille, exposed as 0.1% per count; CurveSettingFragment.java:448-533 -> ArrayUtils.getUnsignedIntValue -> NumberUtils.bytes2Int2V2:349 (signed despite helper name)",
+      "app_write": "f706b182 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:52"
+    },
+    {
+      "id": "item-143",
+      "menu": "Advanced / Safety / Curves",
+      "label": "qu_curve",
+      "paths": [
+        "config.advanced.safety.curves.qu_curve"
+      ],
+      "status": "read-only decoded",
+      "reason": "target read; APK mapping; Boolean code",
+      "app_write": "f706b190 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:53"
+    },
+    {
+      "id": "item-144",
+      "menu": "Advanced / Safety / Curves",
+      "label": "entry_curve_power",
+      "paths": [
+        "config.advanced.safety.curves.entry_curve_power"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "Signed I16 permille, exposed as 0.1% per count; CurveSettingFragment.java:448-533 -> ArrayUtils.getUnsignedIntValue -> NumberUtils.bytes2Int2V2:349 (signed despite helper name)",
+      "app_write": "f706b191 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:54"
+    },
+    {
+      "id": "item-145",
+      "menu": "Advanced / Safety / Curves",
+      "label": "exit_curve_power_2",
+      "paths": [
+        "config.advanced.safety.curves.exit_curve_power_2"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "Signed I16 permille, exposed as 0.1% per count; CurveSettingFragment.java:448-533 -> ArrayUtils.getUnsignedIntValue -> NumberUtils.bytes2Int2V2:349 (signed despite helper name)",
+      "app_write": "f706b192 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:55"
+    },
+    {
+      "id": "item-146",
+      "menu": "Advanced / Safety / Curves",
+      "label": "voltage_v1",
+      "paths": [
+        "config.advanced.safety.curves.voltage_v1"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Voltage",
+      "app_write": "f706b193 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:56"
+    },
+    {
+      "id": "item-147",
+      "menu": "Advanced / Safety / Curves",
+      "label": "reactive_v1",
+      "paths": [
+        "config.advanced.safety.curves.reactive_v1"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "Signed I16 permille, exposed as 0.1% per count; CurveSettingFragment.java:448-533 -> ArrayUtils.getUnsignedIntValue -> NumberUtils.bytes2Int2V2:349 (signed despite helper name)",
+      "app_write": "f706b194 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:57"
+    },
+    {
+      "id": "item-148",
+      "menu": "Advanced / Safety / Curves",
+      "label": "voltage_v2",
+      "paths": [
+        "config.advanced.safety.curves.voltage_v2"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Voltage",
+      "app_write": "f706b195 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:58"
+    },
+    {
+      "id": "item-149",
+      "menu": "Advanced / Safety / Curves",
+      "label": "reactive_v2",
+      "paths": [
+        "config.advanced.safety.curves.reactive_v2"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "Signed I16 permille, exposed as 0.1% per count; CurveSettingFragment.java:448-533 -> ArrayUtils.getUnsignedIntValue -> NumberUtils.bytes2Int2V2:349 (signed despite helper name)",
+      "app_write": "f706b196 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:59"
+    },
+    {
+      "id": "item-150",
+      "menu": "Advanced / Safety / Curves",
+      "label": "voltage_v3",
+      "paths": [
+        "config.advanced.safety.curves.voltage_v3"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Voltage",
+      "app_write": "f706b197 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:60"
+    },
+    {
+      "id": "item-151",
+      "menu": "Advanced / Safety / Curves",
+      "label": "reactive_v3",
+      "paths": [
+        "config.advanced.safety.curves.reactive_v3"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "Signed I16 permille, exposed as 0.1% per count; CurveSettingFragment.java:448-533 -> ArrayUtils.getUnsignedIntValue -> NumberUtils.bytes2Int2V2:349 (signed despite helper name)",
+      "app_write": "f706b198 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:61"
+    },
+    {
+      "id": "item-152",
+      "menu": "Advanced / Safety / Curves",
+      "label": "voltage_v4",
+      "paths": [
+        "config.advanced.safety.curves.voltage_v4"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Voltage",
+      "app_write": "f706b199 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:62"
+    },
+    {
+      "id": "item-153",
+      "menu": "Advanced / Safety / Curves",
+      "label": "reactive_v4",
+      "paths": [
+        "config.advanced.safety.curves.reactive_v4"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "Signed I16 permille, exposed as 0.1% per count; CurveSettingFragment.java:448-533 -> ArrayUtils.getUnsignedIntValue -> NumberUtils.bytes2Int2V2:349 (signed despite helper name)",
+      "app_write": "f706b19a + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:63"
+    },
+    {
+      "id": "item-154",
+      "menu": "Advanced / Safety / Curves",
+      "label": "reactive_qu",
+      "paths": [
+        "config.advanced.safety.curves.reactive_qu_raw",
+        "config.advanced.safety.curves.reactive_qu_seconds"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "Source-traced nonlinear seconds codec; emulator write/readback verified; physical changed-value validation pending",
+      "app_write": "f706b19c + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:64"
+    },
+    {
+      "id": "item-155",
+      "menu": "Advanced / Safety / Curves",
+      "label": "cos_qu",
+      "paths": [
+        "config.advanced.safety.curves.cos_qu_raw",
+        "config.advanced.safety.curves.cos_qu_seconds"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "Source-traced nonlinear seconds codec; emulator write/readback verified; physical changed-value validation pending",
+      "app_write": "f706b1c6 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:65"
+    },
+    {
+      "id": "item-156",
+      "menu": "Advanced / Safety / Curves",
+      "label": "pu_curve",
+      "paths": [
+        "config.advanced.safety.curves.pu_curve"
+      ],
+      "status": "read-only decoded",
+      "reason": "target read; APK mapping; Boolean code",
+      "app_write": "f706b1a0 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:66"
+    },
+    {
+      "id": "item-157",
+      "menu": "Advanced / Safety / Curves",
+      "label": "voltage_v1_power",
+      "paths": [
+        "config.advanced.safety.curves.voltage_v1_power"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Voltage",
+      "app_write": "f706b1a2 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:67"
+    },
+    {
+      "id": "item-158",
+      "menu": "Advanced / Safety / Curves",
+      "label": "active_v1",
+      "paths": [
+        "config.advanced.safety.curves.active_v1"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "Signed I16 permille, exposed as 0.1% per count; CurveSettingFragment.java:448-533 -> ArrayUtils.getUnsignedIntValue -> NumberUtils.bytes2Int2V2:349 (signed despite helper name)",
+      "app_write": "f706b1a3 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:68"
+    },
+    {
+      "id": "item-159",
+      "menu": "Advanced / Safety / Curves",
+      "label": "voltage_v2_power",
+      "paths": [
+        "config.advanced.safety.curves.voltage_v2_power"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Voltage",
+      "app_write": "f706b1a4 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:69"
+    },
+    {
+      "id": "item-160",
+      "menu": "Advanced / Safety / Curves",
+      "label": "active_v2",
+      "paths": [
+        "config.advanced.safety.curves.active_v2"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "Signed I16 permille, exposed as 0.1% per count; CurveSettingFragment.java:448-533 -> ArrayUtils.getUnsignedIntValue -> NumberUtils.bytes2Int2V2:349 (signed despite helper name)",
+      "app_write": "f706b1a5 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:70"
+    },
+    {
+      "id": "item-161",
+      "menu": "Advanced / Safety / Curves",
+      "label": "voltage_v3_power",
+      "paths": [
+        "config.advanced.safety.curves.voltage_v3_power"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Voltage",
+      "app_write": "f706b1a6 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:71"
+    },
+    {
+      "id": "item-162",
+      "menu": "Advanced / Safety / Curves",
+      "label": "active_v3",
+      "paths": [
+        "config.advanced.safety.curves.active_v3"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "Signed I16 permille, exposed as 0.1% per count; CurveSettingFragment.java:448-533 -> ArrayUtils.getUnsignedIntValue -> NumberUtils.bytes2Int2V2:349 (signed despite helper name)",
+      "app_write": "f706b1a7 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:72"
+    },
+    {
+      "id": "item-163",
+      "menu": "Advanced / Safety / Curves",
+      "label": "voltage_v4_power",
+      "paths": [
+        "config.advanced.safety.curves.voltage_v4_power"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Voltage",
+      "app_write": "f706b1a8 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:73"
+    },
+    {
+      "id": "item-164",
+      "menu": "Advanced / Safety / Curves",
+      "label": "active_v4",
+      "paths": [
+        "config.advanced.safety.curves.active_v4"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "Signed I16 permille, exposed as 0.1% per count; CurveSettingFragment.java:448-533 -> ArrayUtils.getUnsignedIntValue -> NumberUtils.bytes2Int2V2:349 (signed despite helper name)",
+      "app_write": "f706b1a9 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:74"
+    },
+    {
+      "id": "item-165",
+      "menu": "Advanced / Safety / Curves",
+      "label": "active_pu",
+      "paths": [
+        "config.advanced.safety.curves.active_pu_raw",
+        "config.advanced.safety.curves.active_pu_seconds"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "Source-traced nonlinear seconds codec; emulator write/readback verified; physical changed-value validation pending",
+      "app_write": "f706b1c8 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:75"
+    },
+    {
+      "id": "item-166",
+      "menu": "Advanced / Safety / Curves",
+      "label": "response_time",
+      "paths": [
+        "config.advanced.safety.curves.response_time_raw"
+      ],
+      "status": "read-only raw",
+      "reason": "Target branch excluded: excluded from observed target surface: different firmware/model response-time branch. APK only; target read rejected; Raw register; source units require decoder validation",
+      "app_write": "f706b2a0 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:76"
+    },
+    {
+      "id": "item-167",
+      "menu": "Advanced / Safety / Curves",
+      "label": "fp_curve",
+      "paths": [
+        "config.advanced.safety.curves.fp_curve"
+      ],
+      "status": "read-only decoded",
+      "reason": "target read; APK mapping; Boolean code",
+      "app_write": "f706b183 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:77"
+    },
+    {
+      "id": "item-168",
+      "menu": "Advanced / Safety / Curves",
+      "label": "of_start_point",
+      "paths": [
+        "config.advanced.safety.curves.of_start_point"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Frequency",
+      "app_write": "f706b184 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:78"
+    },
+    {
+      "id": "item-169",
+      "menu": "Advanced / Safety / Curves",
+      "label": "uf_start_point",
+      "paths": [
+        "config.advanced.safety.curves.uf_start_point"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Frequency",
+      "app_write": "f706b185 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:79"
+    },
+    {
+      "id": "item-170",
+      "menu": "Advanced / Safety / Curves",
+      "label": "of_end_point",
+      "paths": [
+        "config.advanced.safety.curves.of_end_point"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Frequency",
+      "app_write": "f706b186 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:80"
+    },
+    {
+      "id": "item-171",
+      "menu": "Advanced / Safety / Curves",
+      "label": "uf_end_point",
+      "paths": [
+        "config.advanced.safety.curves.uf_end_point"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Frequency",
+      "app_write": "f706b187 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:81"
+    },
+    {
+      "id": "item-172",
+      "menu": "Advanced / Safety / Curves",
+      "label": "recovery_wait_time",
+      "paths": [
+        "config.advanced.safety.curves.recovery_wait_time"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Time",
+      "app_write": "f706b188 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:82"
+    },
+    {
+      "id": "item-173",
+      "menu": "Advanced / Safety / Curves",
+      "label": "recovery_high_frequency",
+      "paths": [
+        "config.advanced.safety.curves.recovery_high_frequency"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Frequency",
+      "app_write": "f706b189 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:83"
+    },
+    {
+      "id": "item-174",
+      "menu": "Advanced / Safety / Curves",
+      "label": "recovery_low_frequency",
+      "paths": [
+        "config.advanced.safety.curves.recovery_low_frequency"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Frequency",
+      "app_write": "f706b18a + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:84"
+    },
+    {
+      "id": "item-175",
+      "menu": "Advanced / Safety / Curves",
+      "label": "recovery_slope",
+      "paths": [
+        "config.advanced.safety.curves.recovery_slope"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Time",
+      "app_write": "f706b18b + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:85"
+    },
+    {
+      "id": "item-176",
+      "menu": "Advanced / Safety / Curves",
+      "label": "fp_setting",
+      "paths": [
+        "config.advanced.safety.curves.fp_setting_raw"
+      ],
+      "status": "read-only raw",
+      "reason": "Target branch excluded: excluded from observed target surface: not exposed as an independent field in this target walkthrough. target read; APK mapping; Raw register; source units require decoder validation",
+      "app_write": "f706b18c + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:86"
+    },
+    {
+      "id": "item-177",
+      "menu": "Advanced / Safety / Curves",
+      "label": "of_power_slope",
+      "paths": [
+        "config.advanced.safety.curves.of_power_slope"
+      ],
+      "status": "read-only decoded",
+      "reason": "Target read; decoder traced to SolarGo fragment and unsigned U16 helper",
+      "app_write": "f706b18d + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:87"
+    },
+    {
+      "id": "item-178",
+      "menu": "Advanced / Safety / Curves",
+      "label": "uf_power_slope",
+      "paths": [
+        "config.advanced.safety.curves.uf_power_slope"
+      ],
+      "status": "read-only decoded",
+      "reason": "Target read; decoder traced to SolarGo fragment and unsigned U16 helper",
+      "app_write": "f706b18e + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:88"
+    },
+    {
+      "id": "item-179",
+      "menu": "Advanced / Safety / Curves",
+      "label": "recovery_power_slope",
+      "paths": [
+        "config.advanced.safety.curves.recovery_power_slope"
+      ],
+      "status": "read-only decoded",
+      "reason": "Target read; decoder traced to SolarGo fragment and unsigned U16 helper",
+      "app_write": "f706b18f + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:89"
+    },
+    {
+      "id": "item-180",
+      "menu": "Advanced / Safety / Protection",
+      "label": "over_voltage_level_3_phase",
+      "paths": [
+        "config.advanced.safety.other.over_voltage_level_3_phase"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Voltage",
+      "app_write": "f706b1b7 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:92"
+    },
+    {
+      "id": "item-181",
+      "menu": "Advanced / Safety / Protection",
+      "label": "over_voltage_level_3_time_phase",
+      "paths": [
+        "config.advanced.safety.other.over_voltage_level_3_time_phase_cycles"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Grid cycles; divide by nominal country frequency, not live frequency; extended-time bank may override",
+      "app_write": "f706b1b8 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:93"
+    },
+    {
+      "id": "item-182",
+      "menu": "Advanced / Safety / Protection",
+      "label": "under_voltage_level_3_phase",
+      "paths": [
+        "config.advanced.safety.other.under_voltage_level_3_phase"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Voltage",
+      "app_write": "f706b1b9 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:94"
+    },
+    {
+      "id": "item-183",
+      "menu": "Advanced / Safety / Protection",
+      "label": "under_voltage_level_3_time_phase",
+      "paths": [
+        "config.advanced.safety.other.under_voltage_level_3_time_phase_cycles"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Grid cycles; divide by nominal country frequency, not live frequency; extended-time bank may override",
+      "app_write": "f706b1ba + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:95"
+    },
+    {
+      "id": "item-184",
+      "menu": "Advanced / Safety / Curves",
+      "label": "uwItalyFreqMode",
+      "paths": [
+        "config.advanced.safety.other.uwItalyFreqMode_raw"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "Target branch excluded: excluded from observed target surface: Italy regional branch. target read; APK mapping; Raw register; source units require decoder validation",
+      "app_write": "f706b1b2 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:96"
+    },
+    {
+      "id": "item-185",
+      "menu": "Advanced / Safety / Other",
+      "label": "LVRT / HVRT Extended Functions (shared register)",
+      "paths": [],
+      "status": "workflow not implemented",
+      "reason": "Command source is recorded; encoder, transaction and target verification remain required.",
+      "app_write": "f706b1bb + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:97"
+    },
+    {
+      "id": "item-186",
+      "menu": "Advanced / Safety / Other",
+      "label": "low_ride_through_start_point",
+      "paths": [
+        "config.advanced.safety.other.low_ride_through_start_point"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Voltage",
+      "app_write": "f706b1bc + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:98"
+    },
+    {
+      "id": "item-187",
+      "menu": "Advanced / Safety / Other",
+      "label": "low_ride_through_end_point",
+      "paths": [
+        "config.advanced.safety.other.low_ride_through_end_point"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Voltage",
+      "app_write": "f706b1bd + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:99"
+    },
+    {
+      "id": "item-188",
+      "menu": "Advanced / Safety / Other",
+      "label": "low_start_point_protection_time",
+      "paths": [
+        "config.advanced.safety.other.low_start_point_protection_time_cycles"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Grid cycles; divide by nominal country frequency, not live frequency; extended-time bank may override",
+      "app_write": "f706b1be + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:100"
+    },
+    {
+      "id": "item-189",
+      "menu": "Advanced / Safety / Other",
+      "label": "low_end_point_protection_time",
+      "paths": [
+        "config.advanced.safety.other.low_end_point_protection_time_cycles"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Grid cycles; divide by nominal country frequency, not live frequency; extended-time bank may override",
+      "app_write": "f706b1bf + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:101"
+    },
+    {
+      "id": "item-190",
+      "menu": "Advanced / Safety / Other",
+      "label": "low_ride_through_limit",
+      "paths": [
+        "config.advanced.safety.other.low_ride_through_limit"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Voltage",
+      "app_write": "f706b1c0 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:102"
+    },
+    {
+      "id": "item-191",
+      "menu": "Advanced / Safety / Other",
+      "label": "high_ride_through_start_point",
+      "paths": [
+        "config.advanced.safety.other.high_ride_through_start_point"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Voltage",
+      "app_write": "f706b1c1 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:103"
+    },
+    {
+      "id": "item-192",
+      "menu": "Advanced / Safety / Other",
+      "label": "high_ride_through_end_point",
+      "paths": [
+        "config.advanced.safety.other.high_ride_through_end_point"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Voltage",
+      "app_write": "f706b1c2 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:104"
+    },
+    {
+      "id": "item-193",
+      "menu": "Advanced / Safety / Other",
+      "label": "high_start_point_protection_time",
+      "paths": [
+        "config.advanced.safety.other.high_start_point_protection_time_cycles"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Grid cycles; divide by nominal country frequency, not live frequency; extended-time bank may override",
+      "app_write": "f706b1c3 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:105"
+    },
+    {
+      "id": "item-194",
+      "menu": "Advanced / Safety / Other",
+      "label": "high_end_point_protection_time",
+      "paths": [
+        "config.advanced.safety.other.high_end_point_protection_time_cycles"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Grid cycles; divide by nominal country frequency, not live frequency; extended-time bank may override",
+      "app_write": "f706b1c4 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:106"
+    },
+    {
+      "id": "item-195",
+      "menu": "Advanced / Safety / Other",
+      "label": "high_ride_through_limit",
+      "paths": [
+        "config.advanced.safety.other.high_ride_through_limit"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "target read; APK mapping; Voltage",
+      "app_write": "f706b1c5 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:107"
+    },
+    {
+      "id": "item-196",
+      "menu": "Advanced / Safety / Curves",
+      "label": "pq_curve_switch",
+      "paths": [
+        "config.advanced.safety.pq.pq_curve_switch"
+      ],
+      "status": "implemented scalar writer",
+      "reason": "Target branch excluded: excluded from observed target surface: PQ curve branch. target read; APK mapping; Boolean code",
+      "app_write": "f706b1d6 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:109"
+    },
+    {
+      "id": "item-197",
+      "menu": "Advanced / Safety / Curves",
+      "label": "p1_gen_active_power",
+      "paths": [
+        "config.advanced.safety.pq.p1_gen_active_power_raw"
+      ],
+      "status": "read-only raw",
+      "reason": "Target branch excluded: excluded from observed target surface: PQ curve branch. target read; APK mapping; Raw register; source units require decoder validation",
+      "app_write": "f706b1d7 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:110"
+    },
+    {
+      "id": "item-198",
+      "menu": "Advanced / Safety / Curves",
+      "label": "q1_gen_reactive_power",
+      "paths": [
+        "config.advanced.safety.pq.q1_gen_reactive_power_raw"
+      ],
+      "status": "read-only raw",
+      "reason": "Target branch excluded: excluded from observed target surface: PQ curve branch. target read; APK mapping; Raw register; source units require decoder validation",
+      "app_write": "f706b1d8 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:111"
+    },
+    {
+      "id": "item-199",
+      "menu": "Advanced / Safety / Curves",
+      "label": "p2_gen_active_power",
+      "paths": [
+        "config.advanced.safety.pq.p2_gen_active_power_raw"
+      ],
+      "status": "read-only raw",
+      "reason": "Target branch excluded: excluded from observed target surface: PQ curve branch. target read; APK mapping; Raw register; source units require decoder validation",
+      "app_write": "f706b1d9 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:112"
+    },
+    {
+      "id": "item-200",
+      "menu": "Advanced / Safety / Curves",
+      "label": "q2_gen_reactive_power",
+      "paths": [
+        "config.advanced.safety.pq.q2_gen_reactive_power_raw"
+      ],
+      "status": "read-only raw",
+      "reason": "Target branch excluded: excluded from observed target surface: PQ curve branch. target read; APK mapping; Raw register; source units require decoder validation",
+      "app_write": "f706b1da + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:113"
+    },
+    {
+      "id": "item-201",
+      "menu": "Advanced / Safety / Curves",
+      "label": "p3_gen_active_power",
+      "paths": [
+        "config.advanced.safety.pq.p3_gen_active_power_raw"
+      ],
+      "status": "read-only raw",
+      "reason": "Target branch excluded: excluded from observed target surface: PQ curve branch. target read; APK mapping; Raw register; source units require decoder validation",
+      "app_write": "f706b1db + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:114"
+    },
+    {
+      "id": "item-202",
+      "menu": "Advanced / Safety / Curves",
+      "label": "q3_gen_reactive_power",
+      "paths": [
+        "config.advanced.safety.pq.q3_gen_reactive_power_raw"
+      ],
+      "status": "read-only raw",
+      "reason": "Target branch excluded: excluded from observed target surface: PQ curve branch. target read; APK mapping; Raw register; source units require decoder validation",
+      "app_write": "f706b1dc + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:115"
+    },
+    {
+      "id": "item-203",
+      "menu": "Advanced / Safety / Curves",
+      "label": "p1_load_active_power",
+      "paths": [
+        "config.advanced.safety.pq.p1_load_active_power_raw"
+      ],
+      "status": "read-only raw",
+      "reason": "Target branch excluded: excluded from observed target surface: PQ curve branch. target read; APK mapping; Raw register; source units require decoder validation",
+      "app_write": "f706b1dd + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:116"
+    },
+    {
+      "id": "item-204",
+      "menu": "Advanced / Safety / Curves",
+      "label": "q1_load_reactive_power",
+      "paths": [
+        "config.advanced.safety.pq.q1_load_reactive_power_raw"
+      ],
+      "status": "read-only raw",
+      "reason": "Target branch excluded: excluded from observed target surface: PQ curve branch. target read; APK mapping; Raw register; source units require decoder validation",
+      "app_write": "f706b1de + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:117"
+    },
+    {
+      "id": "item-205",
+      "menu": "Advanced / Safety / Curves",
+      "label": "p2_load_active_power",
+      "paths": [
+        "config.advanced.safety.pq.p2_load_active_power_raw"
+      ],
+      "status": "read-only raw",
+      "reason": "Target branch excluded: excluded from observed target surface: PQ curve branch. target read; APK mapping; Raw register; source units require decoder validation",
+      "app_write": "f706b1df + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:118"
+    },
+    {
+      "id": "item-206",
+      "menu": "Advanced / Safety / Curves",
+      "label": "q2_load_reactive_power",
+      "paths": [
+        "config.advanced.safety.pq.q2_load_reactive_power_raw"
+      ],
+      "status": "read-only raw",
+      "reason": "Target branch excluded: excluded from observed target surface: PQ curve branch. target read; APK mapping; Raw register; source units require decoder validation",
+      "app_write": "f706b1e0 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:119"
+    },
+    {
+      "id": "item-207",
+      "menu": "Advanced / Safety / Curves",
+      "label": "p3_load_active_power",
+      "paths": [
+        "config.advanced.safety.pq.p3_load_active_power_raw"
+      ],
+      "status": "read-only raw",
+      "reason": "Target branch excluded: excluded from observed target surface: PQ curve branch. target read; APK mapping; Raw register; source units require decoder validation",
+      "app_write": "f706b1e1 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:120"
+    },
+    {
+      "id": "item-208",
+      "menu": "Advanced / Safety / Curves",
+      "label": "q3_load_reactive_power",
+      "paths": [
+        "config.advanced.safety.pq.q3_load_reactive_power_raw"
+      ],
+      "status": "read-only raw",
+      "reason": "Target branch excluded: excluded from observed target surface: PQ curve branch. target read; APK mapping; Raw register; source units require decoder validation",
+      "app_write": "f706b1e2 + big-endian encoded value + CRC",
+      "source": "com/goodwe/hybrid/bean/CustomSaftyParamEnum.java:121"
+    }
+  ],
+  "counts": {
+    "navigation": 8,
+    "implemented UDP staged workflow": 11,
+    "workflow not implemented": 6,
+    "read-only decoded": 30,
+    "app-side catalogue selection": 2,
+    "implemented ordinary UDP APN workflow": 1,
+    "implemented staged mode workflow": 4,
+    "implemented atomic schedule writer": 28,
+    "conditional read-only": 9,
+    "implemented scalar writer": 87,
+    "verified scalar writer": 5,
+    "implemented vendor actions": 2,
+    "implemented action": 1,
+    "read-only raw": 14
+  },
+  "sbp_readbacks": [
+    {
+      "path": "config.advanced.software_power_limit",
+      "native_address": 42003,
+      "format": "u16",
+      "access": "R",
+      "evidence": "Manufacturer register table; target validity determined by read response"
+    },
+    {
+      "path": "config.advanced.power_limit",
+      "native_address": 42004,
+      "format": "s32:W",
+      "access": "R",
+      "evidence": "Manufacturer register table; target validity determined by read response"
+    },
+    {
+      "path": "config.advanced.shadow_scan",
+      "native_address": 45251,
+      "format": "u16",
+      "access": "R",
+      "evidence": "Manufacturer register table; target validity determined by read response"
+    },
+    {
+      "path": "config.advanced.backup",
+      "native_address": 45252,
+      "format": "u16",
+      "access": "R",
+      "evidence": "Manufacturer register table; target validity determined by read response"
+    },
+    {
+      "path": "config.advanced.detection_mode",
+      "native_address": 45254,
+      "format": "u16",
+      "access": "R",
+      "evidence": "Manufacturer register table; target validity determined by read response"
+    },
+    {
+      "path": "config.advanced.battery_function.charging_voltage",
+      "native_address": 45352,
+      "format": "u16:0.1V",
+      "access": "R",
+      "evidence": "Manufacturer register table; target validity determined by read response"
+    },
+    {
+      "path": "config.advanced.battery_function.charging_current",
+      "native_address": 45353,
+      "format": "u16:0.1A",
+      "access": "R",
+      "evidence": "Target readback on Pi slot204: reserves20%/20%, configured charge current100A; no writes tested"
+    },
+    {
+      "path": "config.advanced.battery_function.discharge_voltage",
+      "native_address": 45354,
+      "format": "u16:0.1V",
+      "access": "R",
+      "evidence": "Manufacturer register table; target validity determined by read response"
+    },
+    {
+      "path": "config.advanced.battery_function.discharging_current",
+      "native_address": 45355,
+      "format": "u16:0.1A",
+      "access": "R",
+      "evidence": "Target readback on Pi slot204: reserves20%/20%, configured charge current100A; no writes tested"
+    },
+    {
+      "path": "config.advanced.battery_function.on_grid_min_soc",
+      "native_address": 45356,
+      "format": "u16:%",
+      "access": "R",
+      "evidence": "Target readback on Pi slot204: reserves20%/20%, configured charge current100A; no writes tested"
+    },
+    {
+      "path": "config.advanced.battery_function.off_grid_discharge_voltage",
+      "native_address": 45357,
+      "format": "u16:0.1V",
+      "access": "R",
+      "evidence": "Manufacturer register table; target validity determined by read response"
+    },
+    {
+      "path": "config.advanced.battery_function.off_grid_min_soc",
+      "native_address": 45358,
+      "format": "u16:%",
+      "access": "R",
+      "evidence": "Target readback on Pi slot204: reserves20%/20%, configured charge current100A; no writes tested"
+    },
+    {
+      "path": "config.advanced.ems.manufacturer_ems_code_raw",
+      "native_address": 47505,
+      "format": "u16",
+      "access": "R",
+      "evidence": "Firmware-specific raw manufacturer/EMS code. Restoring 10 alone did not clear the 30-second stop. Native self-use recovered after FC06 45221=361 and passed a read-only soak and communication blackout. See GOODWE_NATIVE_RECOVERY_20261105.json."
+    },
+    {
+      "path": "config.basic.working_mode.mode",
+      "native_address": 47000,
+      "format": "enum16:ApplicationMode",
+      "access": "R",
+      "evidence": "Native house recovery readback5. Application mode is distinct from EMS mode47511 and physical WorkMode35187."
+    },
+    {
+      "path": "config.basic.battery_model.protocol_raw",
+      "native_address": 47514,
+      "format": "u16",
+      "access": "R",
+      "evidence": "Manufacturer-map raw readback. Target-specific battery catalogue write transaction remains unimplemented."
+    }
+  ],
+  "limitations": [
+    "No claim of complete write support. Navigation/conditional menus remain in GOODWE_SOLARGO_MENU_SURVEY.json.",
+    "Safety raw values are diagnostic, not validated physical settings. PQ bank is all FFFF on target.",
+    "No arbitrary changes to grid protection, battery chemistry, credentials or network configuration.",
+    "The new scalar writer is client-side. Native app proxy write-through and correlated deferred replies are not implemented."
+  ],
+  "deployment": {
+    "slot": 206,
+    "good": 206,
+    "fail": 0,
+    "sha256": "6742BAA8CA52A351FF1B1BD4D2CAFD3F27D9D191C483EF9A27F7AB559C6F1745",
+    "profile_sha256": "1e8211730fb2913397ee6ab839e73b4d85021b970ca9877dd374cc567c00e6a3",
+    "evidence_date": "2026-10-30",
+    "scope": "Historical deployment evidence for this profile implementation; not a claim about the current Pi runtime"
+  },
+  "completion_audit": {
+    "date": "2026-11-05",
+    "complete_protocol_knowledge": false,
+    "complete_configuration_profiles": false,
+    "legacy_es": {
+      "survey_entries": 208,
+      "safety_schema_fields": 108,
+      "scalar_write_declarations": 5,
+      "module_profile_declarations": 0,
+      "explicit_unimplemented_workflow_entries": 29,
+      "workflow_count_limit": "29 counts entries with the workflow-not-implemented status only. Mapped read-only working-mode, battery-selection, schedule and safety items also lack setters.",
+      "survey_scope": "GW5048D-ES, DSP23/ARM14, SolarGo 7.2.2. Other-model branches and all catalogue selections were not exhaustively exercised."
+    },
+    "house_spn": {
+      "serial": "00000SPN00000001",
+      "reported_model": "GW6000ES20",
+      "configured_appliance_label": "GW5000-SBP-20",
+      "full_menu_write_audit": false,
+      "native_recovery_verified": true,
+      "external_dispatch_failover_verified": false,
+      "runtime_evidence": "Pi slot213 was healthy during the recovery investigation but lacked goodwe-control. Source/profile declarations do not prove current runtime control capability."
+    },
+    "required_completion": [
+      "Audit house SPN firmware and menu applicability separately from legacy ES.",
+      "Implement multi-step working-mode, battery-selection and schedule transactions with coupling, validation, readback and persistence checks.",
+      "Bind 5A5A module identity, diagnostics and network data, and implement its length-prefixed credential/network commit transactions.",
+      "Implement actions and conditional fields from the app survey with model-specific preconditions and response handling.",
+      "Complete safety decoding, sentinel handling and target validity before exposing physical writable settings.",
+      "Resolve reserve reversion and physically characterize independent solar/battery control semantics and failover.",
+      "Implement correlated proxy write-through against the shared Device and verify deployed runtime capabilities."
+    ]
+  },
+  "pr_implementation": {
+    "date": "2026-11-07",
+    "legacy_scalar_writers": 10,
+    "hardware_verified_scalar_writers": 5,
+    "module_field_declarations": 11,
+    "module_functions": [
+      1,
+      3,
+      4,
+      5
+    ],
+    "module_formats": [
+      "whole-payload text",
+      "CSV fields",
+      "byte-length-prefixed fields"
+    ],
+    "common_watchdog": "PowerControl.watchdog with explicit feed counter and controller-scoped lease",
+    "native_watchdog_action": "unknown",
+    "client_collection": "/protocol/goodwe/client",
+    "server_collection": "/protocol/goodwe/server",
+    "binding_collection": "/binding/goodwe",
+    "model_alias_added": "GW6000ES20",
+    "deployed": false,
+    "limitations": "Historical completion_audit records the pre-PR baseline. Complete menu/write coverage on both inverters, compound commits, hardware failover and independent hybrid control remain outstanding.",
+    "atomic_schedule_slots": 4,
+    "safety_scalar_writers": 83,
+    "native_safety_fields": 108,
+    "native_identity": true,
+    "native_profile_adapter": true,
+    "native_batched_reads": true,
+    "native_fc04": true,
+    "atomic_schedule_formats": [
+      "legacy",
+      "spn",
+      "prohibited-period",
+      "peak-period"
+    ],
+    "generator_prohibited_periods": 2,
+    "native_menu_inventory": "GOODWE_SPN_MENU_SURVEY.json",
+    "native_request_inventory": "GOODWE_SPN_OBSERVED_REQUESTS.json",
+    "native_readonly_validation": "Real native identity and20% on/off-grid reserve readbacks observed through write-blocking relay. Timeouts remain recorded. No physical configuration writes in this pass.",
+    "native_actions": 23,
+    "legacy_actions": 9,
+    "native_module_fields": 11,
+    "action_result": "ACK only; no physical completion or persistence claim",
+    "codec_unit_module": "standalone DMD unittest runner passed",
+    "native_reported_identity_battery_mapping": true,
+    "native_bulk_proxy_banks": [
+      35000,
+      35100,
+      36000,
+      37000,
+      47547
+    ],
+    "native_ordered_immediate_charge": true,
+    "native_smart_charge_parameters": true,
+    "native_lvrt_hvrt_preserving_writers": true,
+    "native_source_reference": "GOODWE_SPN_CONFIGURATION.md",
+    "native_additional_uv_stage_fields": 14,
+    "native_signed_frequency_slopes": true,
+    "latest_config_runtime_seconds": 254.252,
+    "latest_proxy_runtime_seconds": 94.348,
+    "native_survey_screens": 102,
+    "correlated_proxy_write_through": true,
+    "proxy_wire_families": [
+      "AA55 vendor",
+      "native RTU FC03/04/06/16",
+      "5A5A module families1/2 (family2 ACK shape only emulated)"
+    ],
+    "proxy_queue_limit": 16,
+    "proxy_validation": "Peer isolation, identity override, upstream exception, client recreation and pending cancellation emulator tests; guarded physical reads only",
+    "native_tagged_schedule_guards": true,
+    "native_guarded_tou_deletion": true,
+    "module_family2": true,
+    "module_password_workflow": "Typed UDP form: family2/01 and family1/0C reload; ACKs only, physical credential/reconnect validation outstanding",
+    "native_paired_reserve_editor": true,
+    "battery_catalogue_commit_reference": "Typed low745 form and explicit-catalogue console generator; other model branches remain separate",
+    "native_peak_period_editor": true,
+    "native_peak_activation": true,
+    "fully_offline_app_workflows": true,
+    "native_physical_tou_slots": 7,
+    "native_tou_group_limit": 4,
+    "native_tou_allocation_bank": {
+      "address": 47547,
+      "words": 42
+    },
+    "native_reactive_selection": true,
+    "immutable_staged_apply_snapshot": true,
+    "native_reactive_hardware_validation": false,
+    "privacy_reminder_source_trace": "App policy/module eligibility and per-serial dismissal; not an inverter password-status register",
+    "native_self_use_activation": true,
+    "native_load_periods": 8,
+    "native_load_group_limit": 4,
+    "native_load_export_limiter_prelude": true,
+    "native_low745_selection": true,
+    "native_low745_scope": "Observed GW6000ES20 single-battery non-EOA branch; fourteen staged fields and seven ordered writes",
+    "module_network_workflow": "Typed UDP form: family1/0B network, family1/0A length-prefixed credentials, family1/0C reload; current client address unchanged",
+    "legacy_module_configuration_forms": true,
+    "legacy_mode_activation": true,
+    "legacy_mode_activation_scope": "GW5048D-ES DSP22+/ARM14+ newer-Eco branch",
+    "native_serial_baud_encoding": "U32 FC16/count2, discrete745 rates",
+    "native_serial_address_range": [
+      1,
+      247
+    ],
+    "module_config_fields_per_profile": 9,
+    "legacy_bulk_proxy_banks": [
+      "AA55 identity64",
+      "AA55 runtime140",
+      "AA55 settings86",
+      "four RTU TOU12"
+    ],
+    "proxy_excludes_staged_and_write_only": true,
+    "native_apn_workflow": "Ordinary UDP FC16/47041,count25; U16 byte length plus name/padding; cloud/BLE separate",
+    "empty_text_write_semantics": "Boxed empty-string/null clears a text element to an empty present value; validity remains explicit",
+    "legacy_mode_selector_encoding": "Off-grid sets relay selector3 ->0030 and store selector0 ->04; expected repliesA7/A6",
+    "legacy_cold_start_actions": true,
+    "legacy_ct_readback": true,
+    "legacy_ct_actions": true,
+    "profile_parser_rejection": "Field/root parser rejection aborts the full profile; runtime rejects a malformed schedule without creating its writable element",
+    "full_unit_suite": "Build passes; Windows run stops at pre-existing manager.console.command:626 temporary-file assertion before profile unit tests",
+    "native_distinct_app_requests": 150,
+    "native_alarm_paging": true,
+    "native_alarm_evidence": "APK mapping, loopback transaction tests and SolarGo fixture display; hardware unverified",
+    "native_alarm_fault_labels": "Raw main_code/subcode_mask/detail_word exposed; runtime catalogue resolver pending",
+    "unix_seconds_codec": true,
+    "expression_inequality_parser_fixed": true
+  },
+  "public_record_redaction": "Private LAN addresses, MACs and serial identifiers are pseudonymized. Encoded identity bytes may be substituted, so affected historical frames are not checksum-valid replay fixtures. Private captures and WLAN credentials are excluded."
+}

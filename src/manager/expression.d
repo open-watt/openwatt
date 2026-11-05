@@ -607,7 +607,12 @@ nothrow @nogc:
         ctx.types_only = true;
         scope(exit) ctx.types_only = saved;
         Variant value = evaluate(ctx);
-        return value.isNull ? FormatId.invalid : register_value_format(value);
+        if (value.isNull)
+            return FormatId.invalid;
+        if (value.isNumber && !value.is_enum)
+            return register_format(DataFormat(ValueType.f64, SeriesKind.held,
+                value.isQuantity ? value.asQuantity.unit : ScaledUnit()));
+        return register_value_format(value);
     }
 
 private:
@@ -1015,7 +1020,7 @@ private Expression* parse_equality_exp(ref Parser parser)
     {
         version (ExpressionDebug)
             writeDebug("EQ");
-        Type ty = parser.text.ptr[-1] == '=' ? Type.eq : Type.ne;
+        Type ty = parser.text.ptr[-2] == '!' ? Type.ne : Type.eq;
         parser.skip_whitespace();
         Expression* right = parse_relational_exp(parser);
         if (!right)
@@ -1035,7 +1040,7 @@ private Expression* parse_relational_exp(ref Parser parser)
     if (!left)
         return null;
     parser.skip_whitespace();
-    while (parser.match('<') || parser.match("<=") || parser.match('>') || parser.match(">="))
+    while (parser.match("<=") || parser.match('<') || parser.match(">=") || parser.match('>'))
     {
         version (ExpressionDebug)
             writeDebug("REL");
@@ -1523,6 +1528,26 @@ unittest
     assert(e.cmd_list_source() == "/print hello");
 
     EvalContext ctx;
+
+    foreach (comparison; ["0 <= 0", "0 >= 0", "1 <= 2", "2 >= 1", "1 == 1", "1 != 2", "\"a\" != \"b\""])
+    {
+        text = comparison;
+        e = parse_expression(text);
+        assert(e && text.empty && e.as_bool);
+        free_expression(e);
+    }
+    foreach (comparison; ["1 <= 0", "0 >= 1", "0 < 0", "0 > 0", "1 == 2", "1 != 1", "\"a\" != \"a\""])
+    {
+        text = comparison;
+        e = parse_expression(text);
+        assert(e && text.empty && !e.as_bool);
+        free_expression(e);
+    }
+    text = "0 * 0.01";
+    e = parse_expression(text);
+    import manager.series : format_info, ValueType;
+    assert(format_info(e.infer_format(ctx)).type == ValueType.f64);
+    free_expression(e);
 
     // unary operators: '!' is logical, '-' is numeric
     text = "!1";

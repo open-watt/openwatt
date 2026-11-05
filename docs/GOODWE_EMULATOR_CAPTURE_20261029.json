@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "app": "SolarGo 7.2.2 build1521",
+  "target": "GW5048D-ES / DSP23+23 ARM14 / module V1.1.3.14",
+  "date_local": "2026-10-29",
+  "capture_scope": "Android emulator WiFiPacketStream netsimd full WiFi capture plus Ethernet tcpdump; host relay exact UDP datagrams and UI action timeline. Bluetooth not exercised. Historical physical-phone sessions are separate captures; no claim of lossless capture across all past sessions.",
+  "private_artifacts": [
+    {
+      "path": ".tmp/solargo-screen-pass/wifi-final-20261029.pcap",
+      "size": 11457382,
+      "sha256": "a0d8b51cff3f44cedf43708ccc87ff377ef3ff44d1389b505189875beb5e156e"
+    },
+    {
+      "path": ".tmp/solargo-screen-pass/ethernet-final-20261029.pcap",
+      "size": 20583,
+      "sha256": "42d769fbde774e2f6e991cae8a3810721bbdbfbdbfbc83231bf46cab9f74e9ea"
+    },
+    {
+      "path": ".tmp/solargo-screen-pass/wire-final-20261029-private.jsonl",
+      "size": 174575,
+      "sha256": "e63cce35eec5bfc79a8b22b60b4ace022a8da09e2844bd20e2ed70ba39fe66c8"
+    },
+    {
+      "path": ".tmp/solargo-screen-pass/actions-final-20261029.jsonl",
+      "size": 5171,
+      "sha256": "7679c9d385cad638c66ead20caad202527637b98b246fcf316915f8b2e28f386"
+    },
+    {
+      "path": ".tmp/solargo-screen-pass/app-logcat-ems.txt",
+      "size": 47518,
+      "sha256": "1650247ec46ee741ddc64562445a861793d5be3adcf73dedf6b1d8f32956bd16"
+    }
+  ],
+  "relay_event_counts": {
+    "discovery-injected": 20,
+    "app": 267,
+    "upstream-tx": 256,
+    "upstream-rx": 241,
+    "app-tx": 241,
+    "withheld": 11
+  },
+  "app_requests": 267,
+  "distinct_requests": 33,
+  "first_app_time_ns": 1793201749133540400,
+  "last_app_time_ns": 1793203308358018800,
+  "wifi_udp8899_frames": 508,
+  "configuration_writes": "Withheld; alarm-page cursor B7A8 was explicitly forwarded and verified. Off-grid DoD79 request recorded but withheld. Emulator app force-stopped after capture; Pi normal sampler resumed.",
+  "warning": "Raw capture and module-02 replies contain WLAN credentials. Keep private; this manifest omits packet contents.",
+  "public_record_redaction": "Private LAN addresses, MACs and serial identifiers are pseudonymized. Encoded identity bytes may be substituted, so affected historical frames are not checksum-valid replay fixtures. Private captures and WLAN credentials are excluded."
+}

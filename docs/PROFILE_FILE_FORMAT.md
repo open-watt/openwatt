@@ -384,3 +384,55 @@ device-template:
 ## See Also
 
 - [Component Templates Reference](COMPONENT_TEMPLATES.md) - Standard template specifications
+
+### Named binary encodings
+
+`enc<BITS>:<name>` selects a registered binary codec whose wire width must match
+BITS. The codec supplies the stored value type and unit. Arrays, bit slicing and
+additional scaling are rejected for this form. For example,
+`enc16:goodwe-response-time` decodes a two-byte GoodWe coefficient into seconds
+and implements its inverse for writes. `u8[N]` represents a fixed byte vector in
+wire order; scalar endian modifiers do not reverse the array.
+
+
+### GoodWe mixed-protocol configuration
+
+GoodWe profiles may combine `aa55`, `goodwe-rtu`, `goodwe-module` and native
+Modbus declarations through the GoodWe binding. Scalar `write` descriptors use
+bounds and fresh read/modify/write. `commit` selects staged whole records or an
+ordered sequence: `schedule`, `schedule-spn`, `prohibited-period`, `peak-period`,
+`reactive-mode`, `native-work-mode`, `load-period`, `battery-low745`, `module-network`,
+`module-password`, `legacy-work-mode`, `native-apn`, or `sequence`. The ordinary
+UDP APN format is a50-byte block with a U16 length and zero padding. The legacy mode format
+implements the observed newer-Eco ESU branch with source-traced vendor payloads
+and final settings readback. The battery format validates fourteen staged
+words before its ordered writes. The two module formats take unsized text fields
+in the documented field order and synthesize their 5A5A commands/reload instead
+of register writes.
+`native-work-mode` performs the coupled native Self-use/Peak selection workflow.
+`record-type: load` and `load-period` recognize both standard/intelligent tags,
+share their bank limit, and enforce the intelligent export-limiter prelude. Reactive mode requires four single-word fields
+in cosφ(P), Q(U), PF, Q element-map order; validation and neutral-first sequencing
+are part of that format. Staged values are snapshotted on apply, so later edits
+cannot mutate an active transaction. `record-type` guards shared tagged schedule records; `record-bank` adds a
+fresh occupied-slot limit check before creation. These are
+GoodWe binding extensions, not a generic Modbus-binding transaction language.
+See the [GoodWe CLI/profile reference](CLI.md) for descriptor grammar and the
+[native configuration survey](GOODWE_SPN_CONFIGURATION.md) for model-specific
+layouts, boundaries and evidence limits.
+
+Protocol section parsers can reject fields and root sections. Either rejection
+now aborts loading the whole profile and reports the offending field/root. A
+partially parsed descriptor is never materialised as an element. Bindings report
+profile-load failure and may retry through their normal lifecycle.
+
+The built-in `unix-seconds` codec maps a four-byte unsigned big-endian Unix
+timestamp to `dt` (`dt32:unix-seconds`). Encoding rejects dates before the epoch,
+fractional seconds and values beyond U32. It is separate from the six-byte
+calendar codec `yymmddhhmmss`.
+
+GoodWe's `commit: native-alarm-page` requires a staged two-byte field at native
+RTU register47016, offset0, `write: 47016, 1`. It adds the standard apply/result
+controls and a read-only verified `index`. Page selection is a cursor transaction;
+it does not turn the selected page window into writable telemetry. See the
+native configuration survey for its count/window reads and cache semantics.

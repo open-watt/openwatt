@@ -7,7 +7,7 @@ module manager.sample.codec;
 // urt.typereg directly - so this table holds only encodings whose wire form is not a
 // type's canonical image.
 
-import urt.time : DateTime, get_date_time, get_sys_time, Month, SysTime;
+import urt.time : DateTime, get_date_time, get_sys_time, Month, SysTime, unix_time_ns, from_unix_time_ns;
 import urt.typereg;
 
 import manager.series;
@@ -53,6 +53,7 @@ void register_builtin_encodings()
     assert(dt, "SysTime not registered");
     Encoding e = Encoding("yymmddhhmmss", 6, DataFormat(ValueType.user, SeriesKind.held, dt), &yymmddhhmmss_decode, &yymmddhhmmss_encode);
     register_encoding(e);
+    register_encoding(Encoding("unix-seconds", 4, DataFormat(ValueType.user, SeriesKind.held, dt), &unix_seconds_decode, &unix_seconds_encode));
 }
 
 void clear_encoding_registry()
@@ -91,10 +92,53 @@ unittest
     assert(back == img);
 
     assert(find_encoding("no-such-encoding") is null);
+
+    const(Encoding)* unix = find_encoding("unix-seconds");
+    ubyte[4] epoch = [0, 0, 0, 0];
+    assert(unix && unix.decode(epoch, (cast(void*)&st)[0 .. SysTime.sizeof]));
+    assert(unix_time_ns(st) == 0);
+    epoch[] = 255;
+    assert(unix.decode(epoch, (cast(void*)&st)[0 .. SysTime.sizeof]));
+    assert(unix_time_ns(st) == uint.max * 1_000_000_000UL);
+    ubyte[4] encoded;
+    assert(unix.encode((cast(const(void)*)&st)[0 .. SysTime.sizeof], encoded) && encoded == epoch);
+    st = from_unix_time_ns(1_000_000_100UL);
+    assert(!unix.encode((cast(const(void)*)&st)[0 .. SysTime.sizeof], encoded));
+    st = from_unix_time_ns((ulong(uint.max) + 1) * 1_000_000_000UL);
+    assert(!unix.encode((cast(const(void)*)&st)[0 .. SysTime.sizeof], encoded));
 }
 
 
 private:
+
+bool unix_seconds_decode(const(void)[] image, void[] record)
+{
+    if (image.length != 4 || record.length < SysTime.sizeof)
+        return false;
+    const(ubyte)[] bytes = cast(const(ubyte)[])image;
+    uint seconds = uint(bytes[0]) << 24 | uint(bytes[1]) << 16 | uint(bytes[2]) << 8 | bytes[3];
+    SysTime value = from_unix_time_ns(seconds * 1_000_000_000UL);
+    record[0 .. SysTime.sizeof] = (cast(const(void)*)&value)[0 .. SysTime.sizeof];
+    return true;
+}
+
+bool unix_seconds_encode(const(void)[] record, void[] image)
+{
+    if (image.length != 4 || record.length < SysTime.sizeof)
+        return false;
+    SysTime value;
+    (cast(void*)&value)[0 .. SysTime.sizeof] = record[0 .. SysTime.sizeof];
+    if (value < from_unix_time_ns(0))
+        return false;
+    ulong ns = unix_time_ns(value);
+    if (ns % 1_000_000_000UL || ns / 1_000_000_000UL > uint.max)
+        return false;
+    uint seconds = cast(uint)(ns / 1_000_000_000UL);
+    ubyte[] bytes = cast(ubyte[])image;
+    foreach (i; 0 .. 4)
+        bytes[i] = cast(ubyte)(seconds >> (24 - i * 8));
+    return true;
+}
 
 __gshared Encoding[16] g_encodings = void;
 __gshared ushort g_num_encodings;

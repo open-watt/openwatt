@@ -1,0 +1,2433 @@
+{
+  "schema_version": 1,
+  "target": "GW5048D-ES DSP23 ARM14",
+  "date": "2026-10-30",
+  "app_reserve_writers": {
+    "source": "SolarGo7.2.2 DataCollectUtil.java:5538-5541,5598-5599; BatteryFunction105Activity.java:1081-1083",
+    "on_grid": "AA55 02/39 address0560 count1; minimum SOC",
+    "off_grid": "AA55 02/39 address05A1 count1; minimum SOC",
+    "paired_commit": "No paired on/off-grid write in these app editor paths; battery catalogue selection uses a distinct multi-command workflow"
+  },
+  "reserve_writer_audit": {
+    "reserve_writes": [
+      {
+        "line": 833,
+        "carrier": "aa55",
+        "address": 1376,
+        "payload": "0015"
+      },
+      {
+        "line": 874,
+        "carrier": "aa55",
+        "address": 1376,
+        "payload": "0014"
+      },
+      {
+        "line": 900,
+        "carrier": "aa55",
+        "address": 1441,
+        "payload": "0015"
+      },
+      {
+        "line": 982,
+        "carrier": "aa55",
+        "address": 1441,
+        "payload": "0014"
+      },
+      {
+        "line": 123367,
+        "carrier": "aa55",
+        "address": 1376,
+        "payload": "0014"
+      },
+      {
+        "line": 123377,
+        "carrier": "aa55",
+        "address": 1441,
+        "payload": "0014"
+      }
+    ],
+    "other_vendor_setter_counts": {}
+  },
+  "reserve_readback_changes": [
+    {
+      "line": 827,
+      "address": 1376,
+      "previous": null,
+      "value": 20,
+      "last_ems_write": {
+        "line": 802,
+        "mode": 1,
+        "power": 0
+      }
+    },
+    {
+      "line": 852,
+      "address": 1376,
+      "previous": 20,
+      "value": 21,
+      "last_ems_write": {
+        "line": 828,
+        "mode": 1,
+        "power": 0
+      }
+    },
+    {
+      "line": 880,
+      "address": 1376,
+      "previous": 21,
+      "value": 20,
+      "last_ems_write": {
+        "line": 865,
+        "mode": 1,
+        "power": 0
+      }
+    },
+    {
+      "line": 896,
+      "address": 1441,
+      "previous": null,
+      "value": 20,
+      "last_ems_write": {
+        "line": 881,
+        "mode": 1,
+        "power": 0
+      }
+    },
+    {
+      "line": 905,
+      "address": 1441,
+      "previous": 20,
+      "value": 21,
+      "last_ems_write": {
+        "line": 881,
+        "mode": 1,
+        "power": 0
+      }
+    },
+    {
+      "line": 991,
+      "address": 1441,
+      "previous": 21,
+      "value": 20,
+      "last_ems_write": {
+        "line": 972,
+        "mode": 1,
+        "power": 0
+      }
+    },
+    {
+      "line": 15224,
+      "address": 1376,
+      "previous": 20,
+      "value": 80,
+      "last_ems_write": {
+        "line": 15193,
+        "mode": 1,
+        "power": 0
+      }
+    },
+    {
+      "line": 15236,
+      "address": 1441,
+      "previous": 20,
+      "value": 0,
+      "last_ems_write": {
+        "line": 15193,
+        "mode": 1,
+        "power": 0
+      }
+    },
+    {
+      "line": 123372,
+      "address": 1376,
+      "previous": 80,
+      "value": 20,
+      "last_ems_write": {
+        "line": 123365,
+        "mode": 2,
+        "power": 2591
+      }
+    },
+    {
+      "line": 123382,
+      "address": 1441,
+      "previous": 0,
+      "value": 20,
+      "last_ems_write": {
+        "line": 123375,
+        "mode": 2,
+        "power": 2791
+      }
+    }
+  ],
+  "interpretation": [
+    "Retained trace covers our client only; cannot rule out other LAN/cloud writers.",
+    "First 80/0 readbacks follow a return-to-auto write; correlation is not causation.",
+    "A contiguous write covering0560..05A1 includes unrelated settings and control registers; not attempted."
+  ],
+  "queue_fix": {
+    "pi_slot": 205,
+    "good": 205,
+    "fail": 0,
+    "sha256": "19C2BA91A9D979869B692E4FA8672388D16C8A7D00148E5D63314822AE324F05",
+    "regression": "Delayed background register replies; live AA55 telemetry spacing <3s; complete configuration integration passed38.998s; server checks passed81.658s",
+    "limitation": "Strict priority kept telemetry age <=2s but delayed low-priority reserve reads; bounded fairness follow-up in progress."
+  },
+  "trials": [
+    {
+      "file": "goodwe-hybrid-daylight-20261030.jsonl",
+      "result": "Aborted on availability false; automatic-mode cleanup completed",
+      "events": [
+        {
+          "time": "2026-10-29T15:17:29.615007+00:00",
+          "event": "waiting_for_pv",
+          "min_pv_watts": 300,
+          "timeout_seconds": 28800
+        },
+        {
+          "time": "2026-10-29T15:24:10.863069+00:00",
+          "event": "waiting_for_pv",
+          "min_pv_watts": 300,
+          "timeout_seconds": 28800
+        },
+        {
+          "time": "2026-10-29T18:17:11.786821+00:00",
+          "event": "waiting_for_pv",
+          "min_pv_watts": 300,
+          "timeout_seconds": 28800
+        },
+        {
+          "time": "2026-10-29T18:36:14.062772+00:00",
+          "event": "waiting_for_pv",
+          "min_pv_watts": 300,
+          "timeout_seconds": 28800
+        },
+        {
+          "time": "2026-10-29T18:36:14.243576+00:00",
+          "event": "wait_error",
+          "error": "<urlopen error [Errno 111] Connection refused>"
+        },
+        {
+          "time": "2026-10-29T20:21:16.068241+00:00",
+          "event": "trial_started",
+          "interpretation": "Native ceilings, charge-positive; no PV-specific limit writes"
+        },
+        {
+          "time": "2026-10-29T20:21:55.182337+00:00",
+          "event": "cleanup_complete",
+          "errors": []
+        }
+      ],
+      "last_samples": [
+        {
+          "time": "2026-10-29T20:21:51.533038+00:00",
+          "event": "sample",
+          "phase": "1",
+          "data": {
+            "cabin_solar.solar.meter.power": {
+              "value": 318.16,
+              "unit": "W",
+              "age": 0
+            },
+            "cabin_solar.battery.meter.voltage": {
+              "value": 50.8,
+              "unit": "V",
+              "age": 6
+            },
+            "cabin_solar.battery.meter.current": {
+              "value": 0,
+              "unit": "A",
+              "age": 1799
+            },
+            "cabin_solar.battery.meter.power": {
+              "value": 0,
+              "unit": "W",
+              "age": 0
+            },
+            "cabin_solar.battery.store.soc": {
+              "value": 23,
+              "unit": "%",
+              "age": 6
+            },
+            "cabin_solar.battery.store.mode": {
+              "value": 1,
+              "age": 6
+            },
+            "cabin_solar.battery.store.max_charge_current": {
+              "value": 195,
+              "unit": "A",
+              "age": 6
+            },
+            "cabin_solar.battery.store.max_discharge_current": {
+              "value": 205,
+              "unit": "A",
+              "age": 6
+            },
+            "cabin_solar.grid.meter.power": {
+              "value": -73,
+              "unit": "W",
+              "age": 6
+            },
+            "cabin_solar.backup.meter.power": {
+              "value": 261,
+              "unit": "W",
+              "age": 6
+            },
+            "cabin_solar.inverter.load.power": {
+              "value": 188,
+              "unit": "W",
+              "age": 6
+            },
+            "cabin_solar.inverter.control.kind": {
+              "value": 1,
+              "age": 14
+            },
+            "cabin_solar.inverter.control.enable": {
+              "value": true,
+              "age": 3116
+            },
+            "cabin_solar.inverter.control.available": {
+              "value": false,
+              "age": 0
+            },
+            "cabin_solar.inverter.control.setpoint": {
+              "value": 1,
+              "unit": "W",
+              "age": 1
+            },
+            "cabin_solar.inverter.control.applied": {
+              "value": 1,
+              "unit": "W",
+              "age": 8
+            },
+            "cabin_solar.inverter.control.mode": {
+              "value": 2,
+              "age": 0
+            },
+            "cabin_solar.inverter.control.result": {
+              "value": "confirmed",
+              "age": 8
+            },
+            "cabin_meter.meter_1.power": {
+              "value": -101.911,
+              "unit": "W",
+              "age": 0
+            },
+            "goodwe_meter.meter1.power": {
+              "value": -158,
+              "unit": "W",
+              "age": 0
+            }
+          }
+        },
+        {
+          "time": "2026-10-29T20:21:53.358229+00:00",
+          "event": "sample",
+          "phase": "restoring-auto",
+          "data": {
+            "cabin_solar.solar.meter.power": {
+              "value": 330.33,
+              "unit": "W",
+              "age": 0
+            },
+            "cabin_solar.battery.meter.voltage": {
+              "value": 50.8,
+              "unit": "V",
+              "age": 0
+            },
+            "cabin_solar.battery.meter.current": {
+              "value": 0,
+              "unit": "A",
+              "age": 1801
+            },
+            "cabin_solar.battery.meter.power": {
+              "value": 0,
+              "unit": "W",
+              "age": 0
+            },
+            "cabin_solar.battery.store.soc": {
+              "value": 23,
+              "unit": "%",
+              "age": 0
+            },
+            "cabin_solar.battery.store.mode": {
+              "value": 1,
+              "age": 0
+            },
+            "cabin_solar.battery.store.max_charge_current": {
+              "value": 195,
+              "unit": "A",
+              "age": 0
+            },
+            "cabin_solar.battery.store.max_discharge_current": {
+              "value": 205,
+              "unit": "A",
+              "age": 0
+            },
+            "cabin_solar.grid.meter.power": {
+              "value": -53,
+              "unit": "W",
+              "age": 0
+            },
+            "cabin_solar.backup.meter.power": {
+              "value": 241,
+              "unit": "W",
+              "age": 0
+            },
+            "cabin_solar.inverter.load.power": {
+              "value": 188,
+              "unit": "W",
+              "age": 0
+            },
+            "cabin_solar.inverter.control.kind": {
+              "value": 0,
+              "age": 1
+            },
+            "cabin_solar.inverter.control.enable": {
+              "value": true,
+              "age": 3118
+            },
+            "cabin_solar.inverter.control.available": {
+              "value": true,
+              "age": 0
+            },
+            "cabin_solar.inverter.control.setpoint": {
+              "value": 1,
+              "unit": "W",
+              "age": 3
+            },
+            "cabin_solar.inverter.control.applied": {
+              "value": 1,
+              "unit": "W",
+              "age": 0
+            },
+            "cabin_solar.inverter.control.mode": {
+              "value": 2,
+              "age": 0
+            },
+            "cabin_solar.inverter.control.result": {
+              "value": "confirmed",
+              "age": 0
+            },
+            "cabin_meter.meter_1.power": {
+              "value": -101.474,
+              "unit": "W",
+              "age": 0
+            },
+            "goodwe_meter.meter1.power": {
+              "value": -142,
+              "unit": "W",
+              "age": 0
+            }
+          }
+        },
+        {
+          "time": "2026-10-29T20:21:54.480648+00:00",
+          "event": "sample",
+          "phase": "restoring-auto",
+          "data": {
+            "cabin_solar.solar.meter.power": {
+              "value": 330.33,
+              "unit": "W",
+              "age": 0
+            },
+            "cabin_solar.battery.meter.voltage": {
+              "value": 50.8,
+              "unit": "V",
+              "age": 1
+            },
+            "cabin_solar.battery.meter.current": {
+              "value": 0,
+              "unit": "A",
+              "age": 1802
+            },
+            "cabin_solar.battery.meter.power": {
+              "value": 0,
+              "unit": "W",
+              "age": 0
+            },
+            "cabin_solar.battery.store.soc": {
+              "value": 23,
+              "unit": "%",
+              "age": 1
+            },
+            "cabin_solar.battery.store.mode": {
+              "value": 1,
+              "age": 1
+            },
+            "cabin_solar.battery.store.max_charge_current": {
+              "value": 195,
+              "unit": "A",
+              "age": 1
+            },
+            "cabin_solar.battery.store.max_discharge_current": {
+              "value": 205,
+              "unit": "A",
+              "age": 1
+            },
+            "cabin_solar.grid.meter.power": {
+              "value": -53,
+              "unit": "W",
+              "age": 1
+            },
+            "cabin_solar.backup.meter.power": {
+              "value": 241,
+              "unit": "W",
+              "age": 1
+            },
+            "cabin_solar.inverter.load.power": {
+              "value": 188,
+              "unit": "W",
+              "age": 1
+            },
+            "cabin_solar.inverter.control.kind": {
+              "value": 0,
+              "age": 2
+            },
+            "cabin_solar.inverter.control.enable": {
+              "value": true,
+              "age": 3119
+            },
+            "cabin_solar.inverter.control.available": {
+              "value": true,
+              "age": 0
+            },
+            "cabin_solar.inverter.control.setpoint": {
+              "value": 1,
+              "unit": "W",
+              "age": 4
+            },
+            "cabin_solar.inverter.control.applied": {
+              "value": 1,
+              "unit": "W",
+              "age": 2
+            },
+            "cabin_solar.inverter.control.mode": {
+              "value": 1,
+              "age": 0
+            },
+            "cabin_solar.inverter.control.result": {
+              "value": "confirmed",
+              "age": 2
+            },
+            "cabin_meter.meter_1.power": {
+              "value": -101.659,
+              "unit": "W",
+              "age": 0
+            },
+            "goodwe_meter.meter1.power": {
+              "value": -141,
+              "unit": "W",
+              "age": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "file": "goodwe-hybrid-noon-20261030.jsonl",
+      "result": "Aborted on availability false; automatic-mode cleanup completed",
+      "events": [
+        {
+          "time": "2026-10-30T01:05:27.209986+00:00",
+          "event": "waiting_for_pv",
+          "min_pv_watts": 300,
+          "timeout_seconds": 600.0
+        },
+        {
+          "time": "2026-10-30T01:05:30.024167+00:00",
+          "event": "trial_started",
+          "interpretation": "Native ceilings, charge-positive; no PV-specific limit writes"
+        },
+        {
+          "time": "2026-10-30T01:05:41.256829+00:00",
+          "event": "cleanup_complete",
+          "errors": []
+        }
+      ],
+      "last_samples": [
+        {
+          "time": "2026-10-30T01:05:37.446744+00:00",
+          "event": "sample",
+          "phase": "0",
+          "data": {
+            "cabin_solar.solar.meter.power": {
+              "value": 2604.62,
+              "unit": "W",
+              "age": 0
+            },
+            "cabin_solar.battery.meter.voltage": {
+              "value": 53.6,
+              "unit": "V",
+              "age": 6
+            },
+            "cabin_solar.battery.meter.current": {
+              "value": -31.2,
+              "unit": "A",
+              "age": 6
+            },
+            "cabin_solar.battery.meter.power": {
+              "value": -1672.32,
+              "unit": "W",
+              "age": 0
+            },
+            "cabin_solar.battery.store.soc": {
+              "value": 61,
+              "unit": "%",
+              "age": 6
+            },
+            "cabin_solar.battery.store.mode": {
+              "value": 3,
+              "age": 6
+            },
+            "cabin_solar.battery.store.max_charge_current": {
+              "value": 195,
+              "unit": "A",
+              "age": 6
+            },
+            "cabin_solar.battery.store.max_discharge_current": {
+              "value": 205,
+              "unit": "A",
+              "age": 6
+            },
+            "cabin_solar.grid.meter.power": {
+              "value": 216,
+              "unit": "W",
+              "age": 6
+            },
+            "cabin_solar.backup.meter.power": {
+              "value": 397,
+              "unit": "W",
+              "age": 6
+            },
+            "cabin_solar.inverter.load.power": {
+              "value": 613,
+              "unit": "W",
+              "age": 6
+            },
+            "cabin_solar.inverter.control.kind": {
+              "value": 1,
+              "age": 6
+            },
+            "cabin_solar.inverter.control.enable": {
+              "value": true,
+              "age": 9
+            },
+            "cabin_solar.inverter.control.available": {
+              "value": false,
+              "age": 0
+            },
+            "cabin_solar.inverter.control.setpoint": {
+              "value": 0,
+              "unit": "W",
+              "age": 7
+            },
+            "cabin_solar.inverter.control.applied": {
+              "value": 1543,
+              "unit": "W",
+              "age": 7
+            },
+            "cabin_solar.inverter.control.mode": {
+              "value": 2,
+              "age": 4
+            },
+            "cabin_solar.inverter.control.result": {
+              "value": "confirmed",
+              "age": 7
+            },
+            "cabin_meter.meter_1.power": {
+              "value": -593.384,
+              "unit": "W",
+              "age": 0
+            },
+            "goodwe_meter.meter1.power": {
+              "value": 2095,
+              "unit": "W",
+              "age": 0
+            }
+          }
+        },
+        {
+          "time": "2026-10-30T01:05:39.380729+00:00",
+          "event": "sample",
+          "phase": "restoring-auto",
+          "data": {
+            "cabin_solar.solar.meter.power": {
+              "value": 2604.62,
+              "unit": "W",
+              "age": 0
+            },
+            "cabin_solar.battery.meter.voltage": {
+              "value": 53.6,
+              "unit": "V",
+              "age": 7
+            },
+            "cabin_solar.battery.meter.current": {
+              "value": -31.2,
+              "unit": "A",
+              "age": 7
+            },
+            "cabin_solar.battery.meter.power": {
+              "value": -1672.32,
+              "unit": "W",
+              "age": 0
+            },
+            "cabin_solar.battery.store.soc": {
+              "value": 61,
+              "unit": "%",
+              "age": 7
+            },
+            "cabin_solar.battery.store.mode": {
+              "value": 3,
+              "age": 7
+            },
+            "cabin_solar.battery.store.max_charge_current": {
+              "value": 195,
+              "unit": "A",
+              "age": 7
+            },
+            "cabin_solar.battery.store.max_discharge_current": {
+              "value": 205,
+              "unit": "A",
+              "age": 7
+            },
+            "cabin_solar.grid.meter.power": {
+              "value": 216,
+              "unit": "W",
+              "age": 7
+            },
+            "cabin_solar.backup.meter.power": {
+              "value": 397,
+              "unit": "W",
+              "age": 7
+            },
+            "cabin_solar.inverter.load.power": {
+              "value": 613,
+              "unit": "W",
+              "age": 8
+            },
+            "cabin_solar.inverter.control.kind": {
+              "value": 0,
+              "age": 1
+            },
+            "cabin_solar.inverter.control.enable": {
+              "value": true,
+              "age": 11
+            },
+            "cabin_solar.inverter.control.available": {
+              "value": false,
+              "age": 0
+            },
+            "cabin_solar.inverter.control.setpoint": {
+              "value": 0,
+              "unit": "W",
+              "age": 9
+            },
+            "cabin_solar.inverter.control.applied": {
+              "value": 1543,
+              "unit": "W",
+              "age": 9
+            },
+            "cabin_solar.inverter.control.mode": {
+              "value": 2,
+              "age": 6
+            },
+            "cabin_solar.inverter.control.result": {
+              "value": "confirmed",
+              "age": 9
+            },
+            "cabin_meter.meter_1.power": {
+              "value": -588.337,
+              "unit": "W",
+              "age": 0
+            },
+            "goodwe_meter.meter1.power": {
+              "value": 2120,
+              "unit": "W",
+              "age": 0
+            }
+          }
+        },
+        {
+          "time": "2026-10-30T01:05:40.546983+00:00",
+          "event": "sample",
+          "phase": "restoring-auto",
+          "data": {
+            "cabin_solar.solar.meter.power": {
+              "value": 2674.29,
+              "unit": "W",
+              "age": 0
+            },
+            "cabin_solar.battery.meter.voltage": {
+              "value": 53.5,
+              "unit": "V",
+              "age": 0
+            },
+            "cabin_solar.battery.meter.current": {
+              "value": -28.9,
+              "unit": "A",
+              "age": 0
+            },
+            "cabin_solar.battery.meter.power": {
+              "value": -1546.15,
+              "unit": "W",
+              "age": 0
+            },
+            "cabin_solar.battery.store.soc": {
+              "value": 61,
+              "unit": "%",
+              "age": 0
+            },
+            "cabin_solar.battery.store.mode": {
+              "value": 3,
+              "age": 0
+            },
+            "cabin_solar.battery.store.max_charge_current": {
+              "value": 195,
+              "unit": "A",
+              "age": 0
+            },
+            "cabin_solar.battery.store.max_discharge_current": {
+              "value": 205,
+              "unit": "A",
+              "age": 0
+            },
+            "cabin_solar.grid.meter.power": {
+              "value": 414,
+              "unit": "W",
+              "age": 0
+            },
+            "cabin_solar.backup.meter.power": {
+              "value": 402,
+              "unit": "W",
+              "age": 0
+            },
+            "cabin_solar.inverter.load.power": {
+              "value": 816,
+              "unit": "W",
+              "age": 0
+            },
+            "cabin_solar.inverter.control.kind": {
+              "value": 0,
+              "age": 3
+            },
+            "cabin_solar.inverter.control.enable": {
+              "value": true,
+              "age": 12
+            },
+            "cabin_solar.inverter.control.available": {
+              "value": true,
+              "age": 0
+            },
+            "cabin_solar.inverter.control.setpoint": {
+              "value": 0,
+              "unit": "W",
+              "age": 10
+            },
+            "cabin_solar.inverter.control.applied": {
+              "value": null,
+              "unit": "W",
+              "age": 0
+            },
+            "cabin_solar.inverter.control.mode": {
+              "value": 1,
+              "age": 0
+            },
+            "cabin_solar.inverter.control.result": {
+              "value": "automatic mode confirmed",
+              "age": 0
+            },
+            "cabin_meter.meter_1.power": {
+              "value": -841.719,
+              "unit": "W",
+              "age": 0
+            },
+            "goodwe_meter.meter1.power": {
+              "value": 3577,
+              "unit": "W",
+              "age": 0
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "completed_trial": {
+    "result": "All seven phases and automatic-mode cleanup completed; no cleanup errors",
+    "phase_summary": [
+      {
+        "command_w": 0,
+        "samples": 15,
+        "solar.meter.power": 2643.25,
+        "battery.meter.power": 0,
+        "grid.meter.power": 2181,
+        "backup.meter.power": 270,
+        "inverter.control.mode": 3,
+        "inverter.control.applied": 0,
+        "cabin_meter.meter_1.power": -2258.69,
+        "goodwe_meter.meter1.power": 2931,
+        "max_voltage_age": 1
+      },
+      {
+        "command_w": 1,
+        "samples": 15,
+        "solar.meter.power": 2643.25,
+        "battery.meter.power": 0,
+        "grid.meter.power": 2154,
+        "backup.meter.power": 279,
+        "inverter.control.mode": 2,
+        "inverter.control.applied": 1,
+        "cabin_meter.meter_1.power": -2234.33,
+        "goodwe_meter.meter1.power": 2856,
+        "max_voltage_age": 1
+      },
+      {
+        "command_w": 500,
+        "samples": 15,
+        "solar.meter.power": 2645.19,
+        "battery.meter.power": -484.12,
+        "grid.meter.power": 1518,
+        "backup.meter.power": 349,
+        "inverter.control.mode": 2,
+        "inverter.control.applied": 500,
+        "cabin_meter.meter_1.power": -1664.51,
+        "goodwe_meter.meter1.power": 2376,
+        "max_voltage_age": 2
+      },
+      {
+        "command_w": 1000,
+        "samples": 15,
+        "solar.meter.power": 2643.25,
+        "battery.meter.power": -980.72,
+        "grid.meter.power": 1123,
+        "backup.meter.power": 270,
+        "inverter.control.mode": 2,
+        "inverter.control.applied": 1000,
+        "cabin_meter.meter_1.power": -1243.43,
+        "goodwe_meter.meter1.power": 2011,
+        "max_voltage_age": 1
+      },
+      {
+        "command_w": 0,
+        "samples": 15,
+        "solar.meter.power": 2643.25,
+        "battery.meter.power": 0,
+        "grid.meter.power": 2172,
+        "backup.meter.power": 275,
+        "inverter.control.mode": 3,
+        "inverter.control.applied": 0,
+        "cabin_meter.meter_1.power": -2251.76,
+        "goodwe_meter.meter1.power": 2865,
+        "max_voltage_age": 1
+      },
+      {
+        "command_w": -500,
+        "samples": 15,
+        "solar.meter.power": 2642.28,
+        "battery.meter.power": 498.2,
+        "grid.meter.power": 2666,
+        "backup.meter.power": 260,
+        "inverter.control.mode": 3,
+        "inverter.control.applied": -500,
+        "cabin_meter.meter_1.power": -2735.67,
+        "goodwe_meter.meter1.power": 3362,
+        "max_voltage_age": 2
+      },
+      {
+        "command_w": 0,
+        "samples": 15,
+        "solar.meter.power": 2641.31,
+        "battery.meter.power": 0,
+        "grid.meter.power": 2178,
+        "backup.meter.power": 269,
+        "inverter.control.mode": 3,
+        "inverter.control.applied": 0,
+        "cabin_meter.meter_1.power": -2250.17,
+        "goodwe_meter.meter1.power": 2891,
+        "max_voltage_age": 1
+      }
+    ],
+    "events": [
+      {
+        "time": "2026-10-30T01:13:31.158796+00:00",
+        "event": "waiting_for_pv",
+        "min_pv_watts": 300,
+        "timeout_seconds": 600.0
+      },
+      {
+        "time": "2026-10-30T01:13:34.033323+00:00",
+        "event": "trial_started",
+        "interpretation": "Native ceilings, charge-positive; no PV-specific limit writes"
+      },
+      {
+        "time": "2026-10-30T01:16:01.278291+00:00",
+        "event": "trial_finished"
+      },
+      {
+        "time": "2026-10-30T01:16:05.061733+00:00",
+        "event": "cleanup_complete",
+        "errors": []
+      }
+    ],
+    "interpretation": [
+      "PV remained about2.64kW throughout.",
+      "Mode2 commanded500/1000W produced about484/981W DC battery charging; mode3 commanded500W produced about498W DC discharging.",
+      "Independent cabin feeder export decreased during charging and increased during discharge.",
+      "This supersedes the PV-first grid-charge-ceiling hypothesis at these tested powers; exact AC boundary, higher-power behavior and generation curtailment remain unproven.",
+      "House energy control remained active; main export meter changes are not attributed solely to the cabin."
+    ],
+    "last_samples": [
+      {
+        "time": "2026-10-30T01:16:01.278180+00:00",
+        "event": "sample",
+        "phase": "0",
+        "data": {
+          "cabin_solar.solar.meter.power": {
+            "value": 2641.31,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.battery.meter.voltage": {
+            "value": 53.1,
+            "unit": "V",
+            "age": 0
+          },
+          "cabin_solar.battery.meter.current": {
+            "value": 0,
+            "unit": "A",
+            "age": 15
+          },
+          "cabin_solar.battery.meter.power": {
+            "value": 0,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.battery.store.soc": {
+            "value": 64,
+            "unit": "%",
+            "age": 0
+          },
+          "cabin_solar.battery.store.mode": {
+            "value": 2,
+            "age": 0
+          },
+          "cabin_solar.battery.store.max_charge_current": {
+            "value": 195,
+            "unit": "A",
+            "age": 0
+          },
+          "cabin_solar.battery.store.max_discharge_current": {
+            "value": 205,
+            "unit": "A",
+            "age": 0
+          },
+          "cabin_solar.grid.meter.power": {
+            "value": 2106,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.backup.meter.power": {
+            "value": 342,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.inverter.load.power": {
+            "value": 2448,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.inverter.control.kind": {
+            "value": 1,
+            "age": 19
+          },
+          "cabin_solar.inverter.control.enable": {
+            "value": true,
+            "age": 149
+          },
+          "cabin_solar.inverter.control.available": {
+            "value": true,
+            "age": 0
+          },
+          "cabin_solar.inverter.control.setpoint": {
+            "value": 0,
+            "unit": "W",
+            "age": 6
+          },
+          "cabin_solar.inverter.control.applied": {
+            "value": 0,
+            "unit": "W",
+            "age": 2
+          },
+          "cabin_solar.inverter.control.mode": {
+            "value": 3,
+            "age": 0
+          },
+          "cabin_solar.inverter.control.result": {
+            "value": "confirmed",
+            "age": 2
+          },
+          "cabin_solar.status.operating_mode": {
+            "value": 2,
+            "age": 0
+          },
+          "cabin_solar.status.diagnostics": {
+            "value": 51904592,
+            "age": 0
+          },
+          "cabin_solar.config.advanced.battery_function.on_grid_min_soc": {
+            "value": 20,
+            "unit": "%",
+            "age": 56
+          },
+          "cabin_solar.config.advanced.battery_function.off_grid_min_soc": {
+            "value": 20,
+            "unit": "%",
+            "age": 28
+          },
+          "cabin_meter.meter_1.power": {
+            "value": -2190.91,
+            "unit": "W",
+            "age": 0
+          },
+          "goodwe_meter.meter1.power": {
+            "value": 2841,
+            "unit": "W",
+            "age": 0
+          }
+        }
+      },
+      {
+        "time": "2026-10-30T01:16:03.184415+00:00",
+        "event": "sample",
+        "phase": "restoring-auto",
+        "data": {
+          "cabin_solar.solar.meter.power": {
+            "value": 2641.31,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.battery.meter.voltage": {
+            "value": 53.1,
+            "unit": "V",
+            "age": 0
+          },
+          "cabin_solar.battery.meter.current": {
+            "value": 0,
+            "unit": "A",
+            "age": 17
+          },
+          "cabin_solar.battery.meter.power": {
+            "value": 0,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.battery.store.soc": {
+            "value": 64,
+            "unit": "%",
+            "age": 0
+          },
+          "cabin_solar.battery.store.mode": {
+            "value": 2,
+            "age": 0
+          },
+          "cabin_solar.battery.store.max_charge_current": {
+            "value": 195,
+            "unit": "A",
+            "age": 0
+          },
+          "cabin_solar.battery.store.max_discharge_current": {
+            "value": 205,
+            "unit": "A",
+            "age": 0
+          },
+          "cabin_solar.grid.meter.power": {
+            "value": 2080,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.backup.meter.power": {
+            "value": 368,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.inverter.load.power": {
+            "value": 2448,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.inverter.control.kind": {
+            "value": 0,
+            "age": 1
+          },
+          "cabin_solar.inverter.control.enable": {
+            "value": true,
+            "age": 151
+          },
+          "cabin_solar.inverter.control.available": {
+            "value": true,
+            "age": 0
+          },
+          "cabin_solar.inverter.control.setpoint": {
+            "value": 0,
+            "unit": "W",
+            "age": 8
+          },
+          "cabin_solar.inverter.control.applied": {
+            "value": 0,
+            "unit": "W",
+            "age": 1
+          },
+          "cabin_solar.inverter.control.mode": {
+            "value": 3,
+            "age": 1
+          },
+          "cabin_solar.inverter.control.result": {
+            "value": "confirmed",
+            "age": 1
+          },
+          "cabin_solar.status.operating_mode": {
+            "value": 2,
+            "age": 0
+          },
+          "cabin_solar.status.diagnostics": {
+            "value": 51904592,
+            "age": 0
+          },
+          "cabin_solar.config.advanced.battery_function.on_grid_min_soc": {
+            "value": 20,
+            "unit": "%",
+            "age": 57
+          },
+          "cabin_solar.config.advanced.battery_function.off_grid_min_soc": {
+            "value": 20,
+            "unit": "%",
+            "age": 30
+          },
+          "cabin_meter.meter_1.power": {
+            "value": -2197.89,
+            "unit": "W",
+            "age": 0
+          },
+          "goodwe_meter.meter1.power": {
+            "value": 2901,
+            "unit": "W",
+            "age": 0
+          }
+        }
+      },
+      {
+        "time": "2026-10-30T01:16:04.346537+00:00",
+        "event": "sample",
+        "phase": "restoring-auto",
+        "data": {
+          "cabin_solar.solar.meter.power": {
+            "value": 2641.31,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.battery.meter.voltage": {
+            "value": 53.1,
+            "unit": "V",
+            "age": 0
+          },
+          "cabin_solar.battery.meter.current": {
+            "value": 0,
+            "unit": "A",
+            "age": 18
+          },
+          "cabin_solar.battery.meter.power": {
+            "value": 0,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.battery.store.soc": {
+            "value": 64,
+            "unit": "%",
+            "age": 0
+          },
+          "cabin_solar.battery.store.mode": {
+            "value": 2,
+            "age": 0
+          },
+          "cabin_solar.battery.store.max_charge_current": {
+            "value": 195,
+            "unit": "A",
+            "age": 0
+          },
+          "cabin_solar.battery.store.max_discharge_current": {
+            "value": 205,
+            "unit": "A",
+            "age": 0
+          },
+          "cabin_solar.grid.meter.power": {
+            "value": 2104,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.backup.meter.power": {
+            "value": 344,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.inverter.load.power": {
+            "value": 2448,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.inverter.control.kind": {
+            "value": 0,
+            "age": 2
+          },
+          "cabin_solar.inverter.control.enable": {
+            "value": true,
+            "age": 152
+          },
+          "cabin_solar.inverter.control.available": {
+            "value": true,
+            "age": 0
+          },
+          "cabin_solar.inverter.control.setpoint": {
+            "value": 0,
+            "unit": "W",
+            "age": 9
+          },
+          "cabin_solar.inverter.control.applied": {
+            "value": null,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.inverter.control.mode": {
+            "value": 1,
+            "age": 0
+          },
+          "cabin_solar.inverter.control.result": {
+            "value": "automatic mode confirmed",
+            "age": 0
+          },
+          "cabin_solar.status.operating_mode": {
+            "value": 2,
+            "age": 0
+          },
+          "cabin_solar.status.diagnostics": {
+            "value": 51380288,
+            "age": 0
+          },
+          "cabin_solar.config.advanced.battery_function.on_grid_min_soc": {
+            "value": 20,
+            "unit": "%",
+            "age": 59
+          },
+          "cabin_solar.config.advanced.battery_function.off_grid_min_soc": {
+            "value": 20,
+            "unit": "%",
+            "age": 32
+          },
+          "cabin_meter.meter_1.power": {
+            "value": -2205.43,
+            "unit": "W",
+            "age": 0
+          },
+          "goodwe_meter.meter1.power": {
+            "value": 2870,
+            "unit": "W",
+            "age": 0
+          }
+        }
+      }
+    ]
+  },
+  "final_deployment": {
+    "slot": 206,
+    "good": 206,
+    "fail": 0,
+    "sha256": "6742BAA8CA52A351FF1B1BD4D2CAFD3F27D9D191C483EF9A27F7AB559C6F1745",
+    "profile_sha256": "1e8211730fb2913397ee6ab839e73b4d85021b970ca9877dd374cc567c00e6a3",
+    "scheduler": "At most three realtime requests before one queued background request; in-flight requests never preempted",
+    "reserve_poll_seconds": 10,
+    "reserve_watch": {
+      "pid": 843843,
+      "seconds": 28800,
+      "read_only": true,
+      "path": "/home/manu/ow/goodwe-reserve-watch-20261030.jsonl"
+    },
+    "mock_tests": {
+      "configuration": "passed52.558s with slow background replies and three live-read streams",
+      "server": "passed81.578s"
+    }
+  },
+  "final_trial": {
+    "phase_summary": [
+      {
+        "command_w": 0,
+        "samples": 15,
+        "solar.meter.power": 2547.22,
+        "battery.meter.power": 0,
+        "grid.meter.power": 2028,
+        "backup.meter.power": 273,
+        "inverter.control.mode": 3,
+        "inverter.control.applied": 0,
+        "cabin_feeder_power_w": -2154.6,
+        "max_battery_voltage_age_s": 1
+      },
+      {
+        "command_w": 1,
+        "samples": 15,
+        "solar.meter.power": 2481.01,
+        "battery.meter.power": 0,
+        "grid.meter.power": 1956,
+        "backup.meter.power": 272,
+        "inverter.control.mode": 2,
+        "inverter.control.applied": 1,
+        "cabin_feeder_power_w": -2095.56,
+        "max_battery_voltage_age_s": 2
+      },
+      {
+        "command_w": 500,
+        "samples": 15,
+        "solar.meter.power": 2489,
+        "battery.meter.power": -484.12,
+        "grid.meter.power": 1427,
+        "backup.meter.power": 284,
+        "inverter.control.mode": 2,
+        "inverter.control.applied": 500,
+        "cabin_feeder_power_w": -1581.12,
+        "max_battery_voltage_age_s": 1
+      },
+      {
+        "command_w": 1000,
+        "samples": 15,
+        "solar.meter.power": 2536.55,
+        "battery.meter.power": -991.38,
+        "grid.meter.power": 978,
+        "backup.meter.power": 275,
+        "inverter.control.mode": 2,
+        "inverter.control.applied": 1000,
+        "cabin_feeder_power_w": -1132.5,
+        "max_battery_voltage_age_s": 2
+      },
+      {
+        "command_w": 0,
+        "samples": 15,
+        "solar.meter.power": 2501.26,
+        "battery.meter.power": 0,
+        "grid.meter.power": 1904,
+        "backup.meter.power": 360,
+        "inverter.control.mode": 3,
+        "inverter.control.applied": 0,
+        "cabin_feeder_power_w": -2079.11,
+        "max_battery_voltage_age_s": 1
+      },
+      {
+        "command_w": -500,
+        "samples": 15,
+        "solar.meter.power": 2473.92,
+        "battery.meter.power": 493.83,
+        "grid.meter.power": 2324,
+        "backup.meter.power": 455,
+        "inverter.control.mode": 3,
+        "inverter.control.applied": -500,
+        "cabin_feeder_power_w": -2455.68,
+        "max_battery_voltage_age_s": 3
+      },
+      {
+        "command_w": 0,
+        "samples": 15,
+        "solar.meter.power": 2440.32,
+        "battery.meter.power": 0,
+        "grid.meter.power": 1767,
+        "backup.meter.power": 455,
+        "inverter.control.mode": 3,
+        "inverter.control.applied": 0,
+        "cabin_feeder_power_w": -1890.2,
+        "max_battery_voltage_age_s": 1
+      }
+    ],
+    "events": [
+      {
+        "time": "2026-10-30T01:25:32.065505+00:00",
+        "event": "waiting_for_pv",
+        "min_pv_watts": 300,
+        "timeout_seconds": 600.0
+      },
+      {
+        "time": "2026-10-30T01:25:35.087202+00:00",
+        "event": "trial_started",
+        "interpretation": "Native ceilings, charge-positive; no PV-specific limit writes"
+      },
+      {
+        "time": "2026-10-30T01:28:02.715382+00:00",
+        "event": "trial_finished"
+      },
+      {
+        "time": "2026-10-30T01:28:05.754685+00:00",
+        "event": "automatic_observation_started",
+        "seconds": 30.0
+      },
+      {
+        "time": "2026-10-30T01:28:38.862782+00:00",
+        "event": "cleanup_complete",
+        "errors": []
+      }
+    ],
+    "automatic_mode_samples": [
+      {
+        "time": "2026-10-30T01:28:04.605403+00:00",
+        "event": "sample",
+        "phase": "confirming-auto",
+        "data": {
+          "cabin_solar.solar.meter.power": {
+            "value": 2423.04,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.battery.meter.voltage": {
+            "value": 53.1,
+            "unit": "V",
+            "age": 0
+          },
+          "cabin_solar.battery.meter.current": {
+            "value": 0,
+            "unit": "A",
+            "age": 16
+          },
+          "cabin_solar.battery.meter.power": {
+            "value": 0,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.battery.store.soc": {
+            "value": 67,
+            "unit": "%",
+            "age": 0
+          },
+          "cabin_solar.battery.store.mode": {
+            "value": 2,
+            "age": 0
+          },
+          "cabin_solar.battery.store.max_charge_current": {
+            "value": 195,
+            "unit": "A",
+            "age": 0
+          },
+          "cabin_solar.battery.store.max_discharge_current": {
+            "value": 205,
+            "unit": "A",
+            "age": 0
+          },
+          "cabin_solar.grid.meter.power": {
+            "value": 1731,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.backup.meter.power": {
+            "value": 460,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.inverter.load.power": {
+            "value": 2191,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.inverter.control.kind": {
+            "value": 0,
+            "age": 1
+          },
+          "cabin_solar.inverter.control.enable": {
+            "value": true,
+            "age": 151
+          },
+          "cabin_solar.inverter.control.available": {
+            "value": true,
+            "age": 0
+          },
+          "cabin_solar.inverter.control.setpoint": {
+            "value": 0,
+            "unit": "W",
+            "age": 8
+          },
+          "cabin_solar.inverter.control.applied": {
+            "value": 0,
+            "unit": "W",
+            "age": 1
+          },
+          "cabin_solar.inverter.control.mode": {
+            "value": 3,
+            "age": 0
+          },
+          "cabin_solar.inverter.control.result": {
+            "value": "confirmed",
+            "age": 1
+          },
+          "cabin_solar.status.operating_mode": {
+            "value": 2,
+            "age": 0
+          },
+          "cabin_solar.status.diagnostics": {
+            "value": 51904592,
+            "age": 0
+          },
+          "cabin_solar.config.advanced.battery_function.on_grid_min_soc": {
+            "value": 20,
+            "unit": "%",
+            "age": 3
+          },
+          "cabin_solar.config.advanced.battery_function.off_grid_min_soc": {
+            "value": 20,
+            "unit": "%",
+            "age": 5
+          },
+          "cabin_meter.meter_1.power": {
+            "value": -1874.68,
+            "unit": "W",
+            "age": 0
+          },
+          "goodwe_meter.meter1.power": {
+            "value": 41,
+            "unit": "W",
+            "age": 0
+          }
+        }
+      },
+      {
+        "time": "2026-10-30T01:28:05.754537+00:00",
+        "event": "sample",
+        "phase": "confirming-auto",
+        "data": {
+          "cabin_solar.solar.meter.power": {
+            "value": 2437.44,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.battery.meter.voltage": {
+            "value": 53.1,
+            "unit": "V",
+            "age": 0
+          },
+          "cabin_solar.battery.meter.current": {
+            "value": 0,
+            "unit": "A",
+            "age": 17
+          },
+          "cabin_solar.battery.meter.power": {
+            "value": 0,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.battery.store.soc": {
+            "value": 67,
+            "unit": "%",
+            "age": 0
+          },
+          "cabin_solar.battery.store.mode": {
+            "value": 2,
+            "age": 0
+          },
+          "cabin_solar.battery.store.max_charge_current": {
+            "value": 195,
+            "unit": "A",
+            "age": 1
+          },
+          "cabin_solar.battery.store.max_discharge_current": {
+            "value": 205,
+            "unit": "A",
+            "age": 1
+          },
+          "cabin_solar.grid.meter.power": {
+            "value": 1742,
+            "unit": "W",
+            "age": 1
+          },
+          "cabin_solar.backup.meter.power": {
+            "value": 455,
+            "unit": "W",
+            "age": 1
+          },
+          "cabin_solar.inverter.load.power": {
+            "value": 2197,
+            "unit": "W",
+            "age": 1
+          },
+          "cabin_solar.inverter.control.kind": {
+            "value": 0,
+            "age": 2
+          },
+          "cabin_solar.inverter.control.enable": {
+            "value": true,
+            "age": 152
+          },
+          "cabin_solar.inverter.control.available": {
+            "value": true,
+            "age": 0
+          },
+          "cabin_solar.inverter.control.setpoint": {
+            "value": 0,
+            "unit": "W",
+            "age": 9
+          },
+          "cabin_solar.inverter.control.applied": {
+            "value": null,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.inverter.control.mode": {
+            "value": 1,
+            "age": 0
+          },
+          "cabin_solar.inverter.control.result": {
+            "value": "automatic mode confirmed",
+            "age": 0
+          },
+          "cabin_solar.status.operating_mode": {
+            "value": 2,
+            "age": 1
+          },
+          "cabin_solar.status.diagnostics": {
+            "value": 51380288,
+            "age": 1
+          },
+          "cabin_solar.config.advanced.battery_function.on_grid_min_soc": {
+            "value": 20,
+            "unit": "%",
+            "age": 4
+          },
+          "cabin_solar.config.advanced.battery_function.off_grid_min_soc": {
+            "value": 20,
+            "unit": "%",
+            "age": 6
+          },
+          "cabin_meter.meter_1.power": {
+            "value": -1883.36,
+            "unit": "W",
+            "age": 0
+          },
+          "goodwe_meter.meter1.power": {
+            "value": 75,
+            "unit": "W",
+            "age": 0
+          }
+        }
+      },
+      {
+        "time": "2026-10-30T01:28:10.925818+00:00",
+        "event": "sample",
+        "phase": "observing-auto",
+        "data": {
+          "cabin_solar.solar.meter.power": {
+            "value": 2447.7,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.battery.meter.voltage": {
+            "value": 53,
+            "unit": "V",
+            "age": 0
+          },
+          "cabin_solar.battery.meter.current": {
+            "value": 15.1,
+            "unit": "A",
+            "age": 0
+          },
+          "cabin_solar.battery.meter.power": {
+            "value": 800.3,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.battery.store.soc": {
+            "value": 67,
+            "unit": "%",
+            "age": 0
+          },
+          "cabin_solar.battery.store.mode": {
+            "value": 2,
+            "age": 0
+          },
+          "cabin_solar.battery.store.max_charge_current": {
+            "value": 195,
+            "unit": "A",
+            "age": 0
+          },
+          "cabin_solar.battery.store.max_discharge_current": {
+            "value": 205,
+            "unit": "A",
+            "age": 0
+          },
+          "cabin_solar.grid.meter.power": {
+            "value": 2608,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.backup.meter.power": {
+            "value": 445,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.inverter.load.power": {
+            "value": 3053,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.inverter.control.kind": {
+            "value": 0,
+            "age": 8
+          },
+          "cabin_solar.inverter.control.enable": {
+            "value": true,
+            "age": 157
+          },
+          "cabin_solar.inverter.control.available": {
+            "value": true,
+            "age": 0
+          },
+          "cabin_solar.inverter.control.setpoint": {
+            "value": 0,
+            "unit": "W",
+            "age": 14
+          },
+          "cabin_solar.inverter.control.applied": {
+            "value": null,
+            "unit": "W",
+            "age": 1
+          },
+          "cabin_solar.inverter.control.mode": {
+            "value": 1,
+            "age": 1
+          },
+          "cabin_solar.inverter.control.result": {
+            "value": "automatic mode confirmed",
+            "age": 1
+          },
+          "cabin_solar.status.operating_mode": {
+            "value": 2,
+            "age": 0
+          },
+          "cabin_solar.status.diagnostics": {
+            "value": 51380288,
+            "age": 0
+          },
+          "cabin_solar.config.advanced.battery_function.on_grid_min_soc": {
+            "value": 20,
+            "unit": "%",
+            "age": 0
+          },
+          "cabin_solar.config.advanced.battery_function.off_grid_min_soc": {
+            "value": 20,
+            "unit": "%",
+            "age": 2
+          },
+          "cabin_meter.meter_1.power": {
+            "value": -2762.56,
+            "unit": "W",
+            "age": 0
+          },
+          "goodwe_meter.meter1.power": {
+            "value": 1055,
+            "unit": "W",
+            "age": 0
+          }
+        }
+      },
+      {
+        "time": "2026-10-30T01:28:16.103104+00:00",
+        "event": "sample",
+        "phase": "observing-auto",
+        "data": {
+          "cabin_solar.solar.meter.power": {
+            "value": 2503.57,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.battery.meter.voltage": {
+            "value": 53,
+            "unit": "V",
+            "age": 0
+          },
+          "cabin_solar.battery.meter.current": {
+            "value": 17.7,
+            "unit": "A",
+            "age": 0
+          },
+          "cabin_solar.battery.meter.power": {
+            "value": 938.1,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.battery.store.soc": {
+            "value": 67,
+            "unit": "%",
+            "age": 0
+          },
+          "cabin_solar.battery.store.mode": {
+            "value": 2,
+            "age": 0
+          },
+          "cabin_solar.battery.store.max_charge_current": {
+            "value": 195,
+            "unit": "A",
+            "age": 0
+          },
+          "cabin_solar.battery.store.max_discharge_current": {
+            "value": 205,
+            "unit": "A",
+            "age": 0
+          },
+          "cabin_solar.grid.meter.power": {
+            "value": 2740,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.backup.meter.power": {
+            "value": 465,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.inverter.load.power": {
+            "value": 3205,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.inverter.control.kind": {
+            "value": 0,
+            "age": 13
+          },
+          "cabin_solar.inverter.control.enable": {
+            "value": true,
+            "age": 162
+          },
+          "cabin_solar.inverter.control.available": {
+            "value": true,
+            "age": 0
+          },
+          "cabin_solar.inverter.control.setpoint": {
+            "value": 0,
+            "unit": "W",
+            "age": 19
+          },
+          "cabin_solar.inverter.control.applied": {
+            "value": null,
+            "unit": "W",
+            "age": 1
+          },
+          "cabin_solar.inverter.control.mode": {
+            "value": 1,
+            "age": 0
+          },
+          "cabin_solar.inverter.control.result": {
+            "value": "automatic mode confirmed",
+            "age": 1
+          },
+          "cabin_solar.status.operating_mode": {
+            "value": 2,
+            "age": 0
+          },
+          "cabin_solar.status.diagnostics": {
+            "value": 51380288,
+            "age": 0
+          },
+          "cabin_solar.config.advanced.battery_function.on_grid_min_soc": {
+            "value": 20,
+            "unit": "%",
+            "age": 5
+          },
+          "cabin_solar.config.advanced.battery_function.off_grid_min_soc": {
+            "value": 20,
+            "unit": "%",
+            "age": 7
+          },
+          "cabin_meter.meter_1.power": {
+            "value": -2836.81,
+            "unit": "W",
+            "age": 0
+          },
+          "goodwe_meter.meter1.power": {
+            "value": 1220,
+            "unit": "W",
+            "age": 0
+          }
+        }
+      },
+      {
+        "time": "2026-10-30T01:28:21.275405+00:00",
+        "event": "sample",
+        "phase": "observing-auto",
+        "data": {
+          "cabin_solar.solar.meter.power": {
+            "value": 2517.15,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.battery.meter.voltage": {
+            "value": 52.9,
+            "unit": "V",
+            "age": 0
+          },
+          "cabin_solar.battery.meter.current": {
+            "value": 17.9,
+            "unit": "A",
+            "age": 0
+          },
+          "cabin_solar.battery.meter.power": {
+            "value": 946.91,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.battery.store.soc": {
+            "value": 67,
+            "unit": "%",
+            "age": 0
+          },
+          "cabin_solar.battery.store.mode": {
+            "value": 2,
+            "age": 0
+          },
+          "cabin_solar.battery.store.max_charge_current": {
+            "value": 195,
+            "unit": "A",
+            "age": 0
+          },
+          "cabin_solar.battery.store.max_discharge_current": {
+            "value": 205,
+            "unit": "A",
+            "age": 0
+          },
+          "cabin_solar.grid.meter.power": {
+            "value": 2766,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.backup.meter.power": {
+            "value": 465,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.inverter.load.power": {
+            "value": 3231,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.inverter.control.kind": {
+            "value": 0,
+            "age": 18
+          },
+          "cabin_solar.inverter.control.enable": {
+            "value": true,
+            "age": 168
+          },
+          "cabin_solar.inverter.control.available": {
+            "value": true,
+            "age": 0
+          },
+          "cabin_solar.inverter.control.setpoint": {
+            "value": 0,
+            "unit": "W",
+            "age": 25
+          },
+          "cabin_solar.inverter.control.applied": {
+            "value": null,
+            "unit": "W",
+            "age": 2
+          },
+          "cabin_solar.inverter.control.mode": {
+            "value": 1,
+            "age": 1
+          },
+          "cabin_solar.inverter.control.result": {
+            "value": "automatic mode confirmed",
+            "age": 2
+          },
+          "cabin_solar.status.operating_mode": {
+            "value": 2,
+            "age": 0
+          },
+          "cabin_solar.status.diagnostics": {
+            "value": 51380288,
+            "age": 0
+          },
+          "cabin_solar.config.advanced.battery_function.on_grid_min_soc": {
+            "value": 20,
+            "unit": "%",
+            "age": 10
+          },
+          "cabin_solar.config.advanced.battery_function.off_grid_min_soc": {
+            "value": 20,
+            "unit": "%",
+            "age": 12
+          },
+          "cabin_meter.meter_1.power": {
+            "value": -2855.11,
+            "unit": "W",
+            "age": 0
+          },
+          "goodwe_meter.meter1.power": {
+            "value": 1336,
+            "unit": "W",
+            "age": 0
+          }
+        }
+      },
+      {
+        "time": "2026-10-30T01:28:26.450446+00:00",
+        "event": "sample",
+        "phase": "observing-auto",
+        "data": {
+          "cabin_solar.solar.meter.power": {
+            "value": 2520.06,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.battery.meter.voltage": {
+            "value": 52.9,
+            "unit": "V",
+            "age": 0
+          },
+          "cabin_solar.battery.meter.current": {
+            "value": 17.6,
+            "unit": "A",
+            "age": 0
+          },
+          "cabin_solar.battery.meter.power": {
+            "value": 931.04,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.battery.store.soc": {
+            "value": 67,
+            "unit": "%",
+            "age": 0
+          },
+          "cabin_solar.battery.store.mode": {
+            "value": 2,
+            "age": 0
+          },
+          "cabin_solar.battery.store.max_charge_current": {
+            "value": 195,
+            "unit": "A",
+            "age": 0
+          },
+          "cabin_solar.battery.store.max_discharge_current": {
+            "value": 205,
+            "unit": "A",
+            "age": 0
+          },
+          "cabin_solar.grid.meter.power": {
+            "value": 2759,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.backup.meter.power": {
+            "value": 459,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.inverter.load.power": {
+            "value": 3218,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.inverter.control.kind": {
+            "value": 0,
+            "age": 23
+          },
+          "cabin_solar.inverter.control.enable": {
+            "value": true,
+            "age": 173
+          },
+          "cabin_solar.inverter.control.available": {
+            "value": true,
+            "age": 0
+          },
+          "cabin_solar.inverter.control.setpoint": {
+            "value": 0,
+            "unit": "W",
+            "age": 30
+          },
+          "cabin_solar.inverter.control.applied": {
+            "value": null,
+            "unit": "W",
+            "age": 2
+          },
+          "cabin_solar.inverter.control.mode": {
+            "value": 1,
+            "age": 1
+          },
+          "cabin_solar.inverter.control.result": {
+            "value": "automatic mode confirmed",
+            "age": 2
+          },
+          "cabin_solar.status.operating_mode": {
+            "value": 2,
+            "age": 0
+          },
+          "cabin_solar.status.diagnostics": {
+            "value": 51380288,
+            "age": 0
+          },
+          "cabin_solar.config.advanced.battery_function.on_grid_min_soc": {
+            "value": 20,
+            "unit": "%",
+            "age": 15
+          },
+          "cabin_solar.config.advanced.battery_function.off_grid_min_soc": {
+            "value": 20,
+            "unit": "%",
+            "age": 17
+          },
+          "cabin_meter.meter_1.power": {
+            "value": -2844.42,
+            "unit": "W",
+            "age": 0
+          },
+          "goodwe_meter.meter1.power": {
+            "value": 1378,
+            "unit": "W",
+            "age": 0
+          }
+        }
+      },
+      {
+        "time": "2026-10-30T01:28:31.608784+00:00",
+        "event": "sample",
+        "phase": "observing-auto",
+        "data": {
+          "cabin_solar.solar.meter.power": {
+            "value": 2517.15,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.battery.meter.voltage": {
+            "value": 52.9,
+            "unit": "V",
+            "age": 0
+          },
+          "cabin_solar.battery.meter.current": {
+            "value": 17.8,
+            "unit": "A",
+            "age": 0
+          },
+          "cabin_solar.battery.meter.power": {
+            "value": 941.62,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.battery.store.soc": {
+            "value": 67,
+            "unit": "%",
+            "age": 0
+          },
+          "cabin_solar.battery.store.mode": {
+            "value": 2,
+            "age": 0
+          },
+          "cabin_solar.battery.store.max_charge_current": {
+            "value": 195,
+            "unit": "A",
+            "age": 0
+          },
+          "cabin_solar.battery.store.max_discharge_current": {
+            "value": 205,
+            "unit": "A",
+            "age": 0
+          },
+          "cabin_solar.grid.meter.power": {
+            "value": 2763,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.backup.meter.power": {
+            "value": 460,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.inverter.load.power": {
+            "value": 3223,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.inverter.control.kind": {
+            "value": 0,
+            "age": 28
+          },
+          "cabin_solar.inverter.control.enable": {
+            "value": true,
+            "age": 178
+          },
+          "cabin_solar.inverter.control.available": {
+            "value": true,
+            "age": 0
+          },
+          "cabin_solar.inverter.control.setpoint": {
+            "value": 0,
+            "unit": "W",
+            "age": 35
+          },
+          "cabin_solar.inverter.control.applied": {
+            "value": null,
+            "unit": "W",
+            "age": 1
+          },
+          "cabin_solar.inverter.control.mode": {
+            "value": 1,
+            "age": 0
+          },
+          "cabin_solar.inverter.control.result": {
+            "value": "automatic mode confirmed",
+            "age": 1
+          },
+          "cabin_solar.status.operating_mode": {
+            "value": 2,
+            "age": 0
+          },
+          "cabin_solar.status.diagnostics": {
+            "value": 51380288,
+            "age": 0
+          },
+          "cabin_solar.config.advanced.battery_function.on_grid_min_soc": {
+            "value": 20,
+            "unit": "%",
+            "age": 20
+          },
+          "cabin_solar.config.advanced.battery_function.off_grid_min_soc": {
+            "value": 20,
+            "unit": "%",
+            "age": 22
+          },
+          "cabin_meter.meter_1.power": {
+            "value": -2841.56,
+            "unit": "W",
+            "age": 0
+          },
+          "goodwe_meter.meter1.power": {
+            "value": 1272,
+            "unit": "W",
+            "age": 0
+          }
+        }
+      },
+      {
+        "time": "2026-10-30T01:28:36.091855+00:00",
+        "event": "sample",
+        "phase": "observing-auto",
+        "data": {
+          "cabin_solar.solar.meter.power": {
+            "value": 2522,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.battery.meter.voltage": {
+            "value": 52.9,
+            "unit": "V",
+            "age": 0
+          },
+          "cabin_solar.battery.meter.current": {
+            "value": 18.1,
+            "unit": "A",
+            "age": 0
+          },
+          "cabin_solar.battery.meter.power": {
+            "value": 957.49,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.battery.store.soc": {
+            "value": 67,
+            "unit": "%",
+            "age": 0
+          },
+          "cabin_solar.battery.store.mode": {
+            "value": 2,
+            "age": 0
+          },
+          "cabin_solar.battery.store.max_charge_current": {
+            "value": 195,
+            "unit": "A",
+            "age": 0
+          },
+          "cabin_solar.battery.store.max_discharge_current": {
+            "value": 205,
+            "unit": "A",
+            "age": 0
+          },
+          "cabin_solar.grid.meter.power": {
+            "value": 2799,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.backup.meter.power": {
+            "value": 446,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.inverter.load.power": {
+            "value": 3245,
+            "unit": "W",
+            "age": 0
+          },
+          "cabin_solar.inverter.control.kind": {
+            "value": 0,
+            "age": 33
+          },
+          "cabin_solar.inverter.control.enable": {
+            "value": true,
+            "age": 182
+          },
+          "cabin_solar.inverter.control.available": {
+            "value": true,
+            "age": 0
+          },
+          "cabin_solar.inverter.control.setpoint": {
+            "value": 0,
+            "unit": "W",
+            "age": 39
+          },
+          "cabin_solar.inverter.control.applied": {
+            "value": null,
+            "unit": "W",
+            "age": 5
+          },
+          "cabin_solar.inverter.control.mode": {
+            "value": 1,
+            "age": 0
+          },
+          "cabin_solar.inverter.control.result": {
+            "value": "command failed",
+            "age": 2
+          },
+          "cabin_solar.status.operating_mode": {
+            "value": 2,
+            "age": 0
+          },
+          "cabin_solar.status.diagnostics": {
+            "value": 51380288,
+            "age": 0
+          },
+          "cabin_solar.config.advanced.battery_function.on_grid_min_soc": {
+            "value": 20,
+            "unit": "%",
+            "age": 25
+          },
+          "cabin_solar.config.advanced.battery_function.off_grid_min_soc": {
+            "value": 20,
+            "unit": "%",
+            "age": 27
+          },
+          "cabin_meter.meter_1.power": {
+            "value": -2867.19,
+            "unit": "W",
+            "age": 0
+          },
+          "goodwe_meter.meter1.power": {
+            "value": 1365,
+            "unit": "W",
+            "age": 0
+          }
+        }
+      }
+    ],
+    "limits": [
+      "No immediate reserve reset reproduced; delayed reset or another writer remains unresolved.",
+      "Reserve values include sampling ages; a cached read is not asserted to be a new hardware response."
+    ]
+  },
+  "public_record_redaction": "Private LAN addresses, MACs and serial identifiers are pseudonymized. Encoded identity bytes may be substituted, so affected historical frames are not checksum-valid replay fixtures. Private captures and WLAN credentials are excluded."
+}

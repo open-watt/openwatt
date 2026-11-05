@@ -807,6 +807,14 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
             }
             bool is_new_element = (e is null);
             if (is_new_element)
+                foreach (ref computation; device.computations)
+                    if (computation.target.parent is c && computation.target.id[] == el_id)
+                    {
+                        e = computation.target;
+                        is_new_element = false;
+                        break;
+                    }
+            if (is_new_element)
             {
                 e = alloc_element();
                 e.parent = c;

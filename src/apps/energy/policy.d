@@ -30,7 +30,7 @@ nothrow @nogc:
 
 enum PolicyField : ubyte
 {
-    target, tier, goal, goal_value, current_value, satisfied,
+    target, tier, goal, goal_value, current_value, satisfied, control,
 }
 
 
@@ -66,6 +66,7 @@ nothrow @nogc:
 final class Policy : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("target", target),
+                                 Prop!("control", control),
                                  Prop!("tier", tier),
                                  Prop!("goal", goal),
                                  Prop!("deadline", deadline));
@@ -110,6 +111,16 @@ nothrow @nogc:
         mark_set!(typeof(this), "target")();
         restart();
         return null;
+    }
+
+    const(char)[] control() const pure { return _control_path[]; }
+    void control(const(char)[] value)
+    {
+        if (_control_path[] == value)
+            return;
+        _control_path = value.make_string();
+        mark_set!(typeof(this), "control")();
+        restart();
     }
 
     PolicyTier tier() const pure { return _tier; }
@@ -179,6 +190,7 @@ protected:
 private:
     String _published_as;
     String _target_name;
+    String _control_path;
     ObjectRef!Appliance _target_appliance;
     PolicyTier _tier;
     String _goal_text;
@@ -288,7 +300,7 @@ void publish_policy(Device energy_device, Policy p, ControlRegistry registry)
     if (energy_device is null || p is null)
         return;
 
-    Control* ctl = registry !is null ? registry.lookup(p.target_appliance) : null;
+    Control* ctl = registry !is null ? registry.lookup(p.target_appliance, p.control) : null;
 
     p.publish_as(p.name[]);
     const(char)[] base = tconcat("policy.", p.name[], ".");
@@ -298,6 +310,7 @@ void publish_policy(Device energy_device, Policy p, ControlRegistry registry)
         => p.published[f].write(energy_device, tconcat(base, enum_key_from_value!PolicyField(f)), value, now);
 
     put(PolicyField.target, p.target);
+    put(PolicyField.control, p.control);
     put(PolicyField.tier, enum_key_from_value!PolicyTier(p.tier));
     put(PolicyField.goal, p.goal);
 

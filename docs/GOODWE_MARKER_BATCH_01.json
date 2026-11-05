@@ -1,0 +1,340 @@
+{
+  "batch": 1,
+  "date_local": "2026-10-28",
+  "created_utc": "2026-10-27T17:47:22.658584+00:00",
+  "state": "restored to live Device-backed encoding at about 2026-10-28 10:47 AEST; probe 03 read extensions retained",
+  "scope": "emulator exact read replies only; no real-inverter writes or Device mutation",
+  "restoration": "sudo python3 /tmp/apply_solargo_markers.py restore",
+  "persistent": false,
+  "rules": [
+    {
+      "request": "aa55c07f0106000245",
+      "original_response": "aa557fc001868c0000000000000000000000000002000000ef0000000000000100130013640000000108f4000001c113850108f4001200411385010100c500000000000032c300001cdc0000001d0000d222ffb501002002018000010000fd540348404000001a0a1c032f120000000000000000000000000000000000000000000000000000134900001058020000000000001290",
+      "marker_response": "aa557fc001868c00000000000000000000020000020000013d0017000b001101004300135e000000010929000002a6137b0108a8000d00411385010100c500000000000032c300001cdc0000001d0000d222ffb50100200201c800010000fd540348404000001a0a1c032f120000000000000000000000000000000000000000000000000000134900001058020000000000001147",
+      "changes": [
+        {
+          "name": "battery.voltage",
+          "payload_offset": 10,
+          "width": 2,
+          "before_hex": "0000",
+          "marker_raw": 512,
+          "display_candidate": "51.2 V",
+          "ui_result": {
+            "status": "marker confirmed",
+            "displayed": "51.2 V",
+            "evidence": "image 2"
+          }
+        },
+        {
+          "name": "battery.temperature",
+          "payload_offset": 16,
+          "width": 2,
+          "before_hex": "00ef",
+          "marker_raw": 317,
+          "display_candidate": "31.7 C",
+          "ui_result": {
+            "status": "marker confirmed",
+            "displayed": "31.7 C",
+            "evidence": "image 2"
+          }
+        },
+        {
+          "name": "battery.current",
+          "payload_offset": 18,
+          "width": 2,
+          "before_hex": "0000",
+          "marker_raw": 23,
+          "display_candidate": "2.3 A",
+          "ui_result": {
+            "status": "marker confirmed",
+            "displayed": "2.3 A",
+            "evidence": "image 2"
+          }
+        },
+        {
+          "name": "battery.charge_limit",
+          "payload_offset": 20,
+          "width": 2,
+          "before_hex": "0000",
+          "marker_raw": 11,
+          "display_candidate": "11 A",
+          "ui_result": {
+            "status": "marker confirmed",
+            "displayed": "11 A",
+            "evidence": "image 2"
+          }
+        },
+        {
+          "name": "battery.discharge_limit",
+          "payload_offset": 22,
+          "width": 2,
+          "before_hex": "0000",
+          "marker_raw": 17,
+          "display_candidate": "17 A",
+          "ui_result": {
+            "status": "marker confirmed",
+            "displayed": "17 A",
+            "evidence": "image 2"
+          }
+        },
+        {
+          "name": "battery.soc",
+          "payload_offset": 26,
+          "width": 1,
+          "before_hex": "13",
+          "marker_raw": 67,
+          "display_candidate": "67 %",
+          "ui_result": {
+            "status": "marker confirmed",
+            "displayed": "67 %",
+            "evidence": "images 2,3"
+          }
+        },
+        {
+          "name": "battery.soh",
+          "payload_offset": 29,
+          "width": 1,
+          "before_hex": "64",
+          "marker_raw": 94,
+          "display_candidate": "94 %",
+          "ui_result": {
+            "status": "marker confirmed",
+            "displayed": "94.0 %",
+            "evidence": "image 2"
+          }
+        },
+        {
+          "name": "grid.voltage",
+          "payload_offset": 34,
+          "width": 2,
+          "before_hex": "08f4",
+          "marker_raw": 2345,
+          "display_candidate": "234.5 V",
+          "ui_result": {
+            "status": "marker confirmed",
+            "displayed": "234.5 V",
+            "evidence": "image 1"
+          }
+        },
+        {
+          "name": "grid.import_power",
+          "payload_offset": 38,
+          "width": 2,
+          "before_hex": "01c1",
+          "marker_raw": 678,
+          "display_candidate": "678 W; app may round to 0.68 kW",
+          "ui_result": {
+            "status": "marker confirmed",
+            "displayed": "0.68 kW",
+            "evidence": "images 1,3"
+          }
+        },
+        {
+          "name": "grid.frequency",
+          "payload_offset": 40,
+          "width": 2,
+          "before_hex": "1385",
+          "marker_raw": 4987,
+          "display_candidate": "49.87 Hz; app may round",
+          "ui_result": {
+            "status": "marker confirmed",
+            "displayed": "49.9 Hz",
+            "evidence": "image 1"
+          }
+        },
+        {
+          "name": "backup.voltage",
+          "payload_offset": 43,
+          "width": 2,
+          "before_hex": "08f4",
+          "marker_raw": 2216,
+          "display_candidate": "221.6 V",
+          "ui_result": {
+            "status": "marker confirmed",
+            "displayed": "221.6 V",
+            "evidence": "image 1"
+          }
+        },
+        {
+          "name": "backup.current",
+          "payload_offset": 45,
+          "width": 2,
+          "before_hex": "0012",
+          "marker_raw": 13,
+          "display_candidate": "1.3 A",
+          "ui_result": {
+            "status": "not visible in submitted batch screenshots"
+          }
+        },
+        {
+          "name": "backup.power",
+          "payload_offset": 81,
+          "width": 2,
+          "before_hex": "0180",
+          "marker_raw": 456,
+          "display_candidate": "456 W; app may round to 0.46 kW",
+          "ui_result": {
+            "status": "marker confirmed",
+            "displayed": "0.46 kW",
+            "evidence": "image 1"
+          }
+        }
+      ]
+    },
+    {
+      "request": "aa55c07f0109000248",
+      "original_response": "aa557fc00189560000000000000000000000000001000100010001000a006402300085004001c20014000f000000000000005a021401f4001e007b1388000000000000023f00000007000000000000000101f401f401b800140000000c0b12",
+      "marker_response": "aa557fc00189560000000000000000000000000001000100010001000a007b021f0025002b01dc0019000f000000000000005d021401f4001e007b10e1000000000000023f00000007000000000000000101f401f401b800140000000c0b1b",
+      "changes": [
+        {
+          "name": "battery.capacity",
+          "payload_offset": 22,
+          "width": 2,
+          "before_hex": "0064",
+          "marker_raw": 123,
+          "display_candidate": "123 Ah",
+          "ui_result": {
+            "status": "not visible in submitted batch screenshots"
+          }
+        },
+        {
+          "name": "battery.charge_voltage",
+          "payload_offset": 24,
+          "width": 2,
+          "before_hex": "0230",
+          "marker_raw": 543,
+          "display_candidate": "54.3 V",
+          "ui_result": {
+            "status": "marker confirmed",
+            "displayed": "54.3 V",
+            "evidence": "image 4"
+          }
+        },
+        {
+          "name": "battery.charge_current_setting",
+          "payload_offset": 26,
+          "width": 2,
+          "before_hex": "0085",
+          "marker_raw": 37,
+          "display_candidate": "37 raw; observe 37 or 3.7 A",
+          "ui_result": {
+            "status": "transformed; scaling unresolved",
+            "displayed": "13.9 A",
+            "evidence": "image 4"
+          },
+          "later_resolution": {
+            "date_local": "2026-10-29",
+            "formula": "raw / 2.66 A",
+            "evidence": "GOODWE_CURRENT_SCALING.json",
+            "basis": "Installed app ESU branch plus marker/display match; original unresolved observation retained"
+          }
+        },
+        {
+          "name": "battery.discharge_current_setting",
+          "payload_offset": 28,
+          "width": 2,
+          "before_hex": "0040",
+          "marker_raw": 43,
+          "display_candidate": "43 raw; observe 43 or 4.3 A",
+          "ui_result": {
+            "status": "transformed; scaling unresolved",
+            "displayed": "33.6 A",
+            "evidence": "image 5"
+          },
+          "later_resolution": {
+            "date_local": "2026-10-29",
+            "formula": "raw / 1.28 A",
+            "evidence": "GOODWE_CURRENT_SCALING.json",
+            "basis": "Installed app ESU branch plus marker/display match; original unresolved observation retained"
+          }
+        },
+        {
+          "name": "battery.discharge_voltage",
+          "payload_offset": 30,
+          "width": 2,
+          "before_hex": "01c2",
+          "marker_raw": 476,
+          "display_candidate": "47.6 V",
+          "ui_result": {
+            "status": "not visible in submitted batch screenshots"
+          }
+        },
+        {
+          "name": "battery.remaining_soc",
+          "payload_offset": 32,
+          "width": 2,
+          "before_hex": "0014",
+          "marker_raw": 25,
+          "display_candidate": "25 raw -> candidate DoD 75 %",
+          "ui_result": {
+            "status": "marker confirmed",
+            "displayed": "75 % DoD",
+            "evidence": "images 4,5"
+          }
+        },
+        {
+          "name": "power_factor",
+          "payload_offset": 42,
+          "width": 2,
+          "before_hex": "005a",
+          "marker_raw": 93,
+          "display_candidate": "0.93",
+          "ui_result": {
+            "status": "not visible in submitted batch screenshots"
+          }
+        },
+        {
+          "name": "power_limit",
+          "payload_offset": 52,
+          "width": 2,
+          "before_hex": "1388",
+          "marker_raw": 4321,
+          "display_candidate": "4321 W",
+          "ui_result": {
+            "status": "not visible in submitted batch screenshots"
+          }
+        }
+      ]
+    },
+    {
+      "request": "f703750600016a91",
+      "original_response": "aa55f703020001b191",
+      "marker_response": "aa55f70302002af18e",
+      "changes": [
+        {
+          "name": "candidate_bms_information",
+          "register": 29958,
+          "before_hex": "0001",
+          "marker_raw": 42,
+          "display_candidate": "42 decimal or 2A hexadecimal, if this is the BMS Information source",
+          "ui_result": {
+            "status": "historical display observation; BMS source attribution superseded by APK trace",
+            "displayed": "42",
+            "evidence": "explicit user report"
+          }
+        }
+      ]
+    }
+  ],
+  "ui_evidence": {
+    "source": "5 user screenshots with phone clock 03:57–03:58, plus explicit BMS Information 42 report",
+    "date_local": "2026-10-28",
+    "directly_confirmed_markers": 15,
+    "transformed_current_fields": 2,
+    "not_yet_visible": 5,
+    "derived_observations": {
+      "battery_power_kw": 0.12,
+      "battery_power_calculation_w": 117.75999999999999,
+      "home_consumption_kw": 0.8,
+      "home_candidate_calculation_w": 795.76,
+      "hardware_power_limit": "OFF in Home; cause not isolated",
+      "battery_status": "Battery communication failure unchanged",
+      "battery_mode": "No Battery/Battery Disconnected unchanged"
+    }
+  },
+  "interpretation_correction_20261029": {
+    "source": "GOODWE_SOLARGO_MENU_SURVEY.md",
+    "finding": "7506 is Hardware Power Limit. FirmwareInfoAndUpdateActivity reads0780 for BMS version after90C4. The historical report of42 remains an observation but does not establish the register mapping; response correlation/caching was not isolated."
+  },
+  "public_record_redaction": "Private LAN addresses, MACs and serial identifiers are pseudonymized. Encoded identity bytes may be substituted, so affected historical frames are not checksum-valid replay fixtures. Private captures and WLAN credentials are excluded."
+}

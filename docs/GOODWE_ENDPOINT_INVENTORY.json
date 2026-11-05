@@ -1,0 +1,24 @@
+{
+  "timestamp_utc": "2026-10-28T14:15:29.557479+00:00",
+  "target": "192.0.2.28",
+  "results": [
+    {
+      "port": 80,
+      "transport": "tcp",
+      "probe": "HTTP GET /, no authentication",
+      "connect": "accepted",
+      "http_status": "HTTP/1.0 401 Unauthorized",
+      "server_header": "HTTPD",
+      "bytes_saved_privately": 352
+    },
+    {
+      "port": 502,
+      "transport": "tcp",
+      "probe": "connect only",
+      "connect": "ConnectionRefusedError",
+      "errno": 111
+    }
+  ],
+  "limits": "Open TCP port alone does not verify Modbus TCP; no Modbus writes or authenticated web actions were performed.",
+  "public_record_redaction": "Private LAN addresses, MACs and serial identifiers are pseudonymized. Encoded identity bytes may be substituted, so affected historical frames are not checksum-valid replay fixtures. Private captures and WLAN credentials are excluded."
+}

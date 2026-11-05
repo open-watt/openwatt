@@ -1,0 +1,223 @@
+{
+  "read_only": true,
+  "target": "192.0.2.28:8899",
+  "results": [
+    {
+      "timestamp_utc": "2026-10-28T02:19:59.717712+00:00",
+      "request": "aa55c07f0102000241",
+      "proxy_response": "aa557fc001824d3233323345475735303438442d45532331300000000000000000000000000030303030304553553939303030303038333630303431302d30343032352d3236093431302d30323033342d323201101b",
+      "real_response": "aa550dc001824d3233323345475735303438442d45532331300000000000000000000000000030303030304553553030303030303031333630303431302d30343032352d3236093431302d30323033342d3232010fd6",
+      "differences": [
+        {
+          "offset": 2,
+          "proxy": 127,
+          "real": 13
+        },
+        {
+          "offset": 46,
+          "proxy": 57,
+          "real": 50
+        },
+        {
+          "offset": 47,
+          "proxy": 57,
+          "real": 49
+        },
+        {
+          "offset": 48,
+          "proxy": 48,
+          "real": 67
+        },
+        {
+          "offset": 49,
+          "proxy": 48,
+          "real": 87
+        },
+        {
+          "offset": 51,
+          "proxy": 48,
+          "real": 49
+        },
+        {
+          "offset": 52,
+          "proxy": 48,
+          "real": 54
+        },
+        {
+          "offset": 53,
+          "proxy": 56,
+          "real": 51
+        },
+        {
+          "offset": 84,
+          "proxy": 16,
+          "real": 15
+        },
+        {
+          "offset": 85,
+          "proxy": 27,
+          "real": 214
+        }
+      ],
+      "same_length": true
+    },
+    {
+      "timestamp_utc": "2026-10-28T02:20:03.090759+00:00",
+      "request": "aa55c07f0106000245",
+      "proxy_response": "aa557fc001868c05af00000005a900000000000002000000ef00000000000001001300136400000001097d000001ff138701097d000e00d513870101010b00000000000032c300001cdc0000001d0000d222ffb501002002012a00010000fd540348404000001a0a1c0c0d1f00000000000000000000000000000000000000000000000000001349000010580200000000000012bd",
+      "real_response": "aa550dc001868c05ac00000005a700000000000002000000ef00000000000001001300136400000001098000000190138b010980000b00cd138b0101010b00000000000032c300001cdc000000750000d27affb50300200200c300010000fd650348404000001a0a1c0c133b0000000000000000000000000000000000000000000000000000134900001058020000000000001357",
+      "differences": [
+        {
+          "offset": 2,
+          "proxy": 127,
+          "real": 13
+        },
+        {
+          "offset": 8,
+          "proxy": 175,
+          "real": 172
+        },
+        {
+          "offset": 13,
+          "proxy": 169,
+          "real": 167
+        },
+        {
+          "offset": 42,
+          "proxy": 125,
+          "real": 128
+        },
+        {
+          "offset": 46,
+          "proxy": 255,
+          "real": 144
+        },
+        {
+          "offset": 48,
+          "proxy": 135,
+          "real": 139
+        },
+        {
+          "offset": 51,
+          "proxy": 125,
+          "real": 128
+        },
+        {
+          "offset": 53,
+          "proxy": 14,
+          "real": 11
+        },
+        {
+          "offset": 55,
+          "proxy": 213,
+          "real": 205
+        },
+        {
+          "offset": 57,
+          "proxy": 135,
+          "real": 139
+        },
+        {
+          "offset": 77,
+          "proxy": 29,
+          "real": 117
+        },
+        {
+          "offset": 81,
+          "proxy": 34,
+          "real": 122
+        },
+        {
+          "offset": 84,
+          "proxy": 1,
+          "real": 3
+        },
+        {
+          "offset": 88,
+          "proxy": 1,
+          "real": 0
+        },
+        {
+          "offset": 89,
+          "proxy": 42,
+          "real": 195
+        },
+        {
+          "offset": 95,
+          "proxy": 84,
+          "real": 101
+        },
+        {
+          "offset": 106,
+          "proxy": 13,
+          "real": 19
+        },
+        {
+          "offset": 107,
+          "proxy": 31,
+          "real": 59
+        },
+        {
+          "offset": 147,
+          "proxy": 18,
+          "real": 19
+        },
+        {
+          "offset": 148,
+          "proxy": 189,
+          "real": 87
+        }
+      ],
+      "same_length": true
+    },
+    {
+      "timestamp_utc": "2026-10-28T02:20:06.325674+00:00",
+      "request": "aa55c07f0109000248",
+      "proxy_response": "aa557fc00189560000000000000000000000000001000100010001000a006402300085004001c20014000f000000000000005a021401f4001e007b1388000000000000023f00000007000000000000000101f401f401b800140000000c0b12",
+      "real_response": "aa550dc00189560000000000000000000000000001000100010001000a006402300085004001c20014000f000000000000005a021401f4001e007b1388000000000000023f00000007000000000000000101f401f401b800140000000c0aa0",
+      "differences": [
+        {
+          "offset": 2,
+          "proxy": 127,
+          "real": 13
+        },
+        {
+          "offset": 93,
+          "proxy": 11,
+          "real": 10
+        },
+        {
+          "offset": 94,
+          "proxy": 18,
+          "real": 160
+        }
+      ],
+      "same_length": true
+    },
+    {
+      "timestamp_utc": "2026-10-28T02:20:09.577252+00:00",
+      "request": "aa55b07f011d00024c",
+      "proxy_response": "aa557fb0019d100001000000000000000000000000000002dd",
+      "real_response": "aa557fb0019d100001000000000000000000000000000002dd",
+      "differences": [],
+      "same_length": true
+    },
+    {
+      "timestamp_utc": "2026-10-28T02:20:12.996072+00:00",
+      "request": "aa55b07f011a03059c0202ef",
+      "proxy_response": "aa550db0019a0400000000025b",
+      "real_response": "aa550db0019a0400000000025b",
+      "differences": [],
+      "same_length": true
+    },
+    {
+      "timestamp_utc": "2026-10-28T02:20:16.412242+00:00",
+      "request": "f703750600016a91",
+      "proxy_response": "aa55f703020001b191",
+      "real_response": "aa55f703020001b191",
+      "differences": [],
+      "same_length": true
+    }
+  ],
+  "public_record_redaction": "Private LAN addresses, MACs and serial identifiers are pseudonymized. Encoded identity bytes may be substituted, so affected historical frames are not checksum-valid replay fixtures. Private captures and WLAN credentials are excluded."
+}

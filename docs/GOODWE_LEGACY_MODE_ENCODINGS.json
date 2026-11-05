@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "app": "SolarGo7.2.2/build1521",
+  "date_local": "2026-11-07",
+  "scope": "Source-traced observed ESU newer-Eco mode and cold-start encodings; no physical configuration writes",
+  "source_hashes": {
+    "activity/ChooseWorkModeActivity.java": "22a54971f2c9096f691a1e2f8e4b991b1c7d835e2d2fd9cce55da95dea4dab19",
+    "activity/AdvancedSettingNewActivity.java": "0f9a7a90be3f01a968d4bb7e0e021182d8e00d2475a70122edf3f30675819878",
+    "common/DataCollectUtil.java": "4f6d63f005e109b92021f32190fa0bfa49f10c382911f01bca6f01ab896618c2",
+    "common/Constant.java": "56ac2bc266e8bf0fc7930d600df80501767d8809a239af6a8c798c7418c43ac4"
+  },
+  "off_grid": {
+    "activity": "ChooseWorkModeActivity.initESEMOffgridModeDialog",
+    "selectors": {
+      "SelectRelayControl": 3,
+      "SelectStoreEnergyMode": 0
+    },
+    "relay": {
+      "builder_case": 51,
+      "control": 3,
+      "function": 39,
+      "payload_hex": "0030",
+      "response_function": 167
+    },
+    "store": {
+      "builder_case": 47,
+      "control": 3,
+      "function": 38,
+      "payload_hex": "04",
+      "response_function": 166
+    }
+  },
+  "cold_start": {
+    "activity": "AdvancedSettingNewActivity switch_off_grid_out",
+    "builder_case": 47,
+    "function": 38,
+    "response_function": 166,
+    "checked": {
+      "selector": 0,
+      "payload_hex": "04"
+    },
+    "unchecked": {
+      "selector": 3,
+      "payload_hex": "01"
+    }
+  },
+  "review": "Selectors must be interpreted through the command builder, not copied to the wire. Constants separately identify A7/A6 replies. An earlier implementation/mock pair used incorrect values and was corrected before deployment."
+}

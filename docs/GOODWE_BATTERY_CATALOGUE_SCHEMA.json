@@ -1,0 +1,113 @@
+{
+  "schema_version": 1,
+  "app": "SolarGo7.2.2/build1521",
+  "scope": "Bundled low745 catalogue fallback, not the currently downloaded/cached catalogue",
+  "asset": "assets/BatteryListNew.json",
+  "sha256": "870307d0da2a0c13c06f8080e1c2065c31c04c431261f1abb15a37929df0f384",
+  "version": {
+    "type": "Default",
+    "ver": 231
+  },
+  "manufacturer_groups": 20,
+  "entries": 207,
+  "fields": [
+    "armVersion",
+    "averageDays",
+    "averageVoltage",
+    "batSN",
+    "batteryType",
+    "capacity",
+    "chargeCurrent",
+    "chargeVoltage",
+    "currentCoefficient",
+    "dischargeCurrent",
+    "dischargeDepthGrid",
+    "dischargeDepthOffGrid",
+    "dischargeVoltage",
+    "dodOnGridUpper",
+    "floatCurrent",
+    "floatMinutes",
+    "floatVoltage",
+    "indexCode",
+    "manufacturerId",
+    "model",
+    "protocolCode",
+    "strongSocEnd",
+    "strongSocStart"
+  ],
+  "selection_source": "com/goodwe/hybrid/activity/Select745BatteryLowVoltageActivity.java",
+  "cache_precedence": [
+    "Internal BATTERY_LIST_HIGH_NAME_V7.txt",
+    "Bundled BatteryListNew.json"
+  ],
+  "commit_reference": "GOODWE_SPN_CONFIGURATION.md#native-low-voltage-battery-catalogue-commit",
+  "limits": [
+    "No physical battery selection test",
+    "Catalogue selection writes coupled electrical and SOC parameters, not just a model number",
+    "No authoritative downloaded catalogue captured",
+    "Do not substitute this fallback for firmware/model-specific cached selection data"
+  ],
+  "offline_ui_validation": {
+    "model": "PYLON US2000B*4+",
+    "physical_connection": "none; loopback-only fixture without upstream socket",
+    "success_dialog": true,
+    "sequence": [
+      {
+        "function": 6,
+        "address": 47743,
+        "words": [
+          1
+        ]
+      },
+      {
+        "function": 6,
+        "address": 47514,
+        "words": [
+          4
+        ]
+      },
+      {
+        "function": 6,
+        "address": 45350,
+        "words": [
+          200
+        ]
+      },
+      {
+        "function": 16,
+        "address": 45352,
+        "words": [
+          532,
+          1000,
+          450,
+          1000,
+          20,
+          450,
+          20
+        ]
+      },
+      {
+        "function": 16,
+        "address": 47531,
+        "words": [
+          140,
+          190
+        ]
+      },
+      {
+        "function": 6,
+        "address": 47504,
+        "words": [
+          116
+        ]
+      },
+      {
+        "function": 6,
+        "address": 47615,
+        "words": [
+          100
+        ]
+      }
+    ]
+  }
+}

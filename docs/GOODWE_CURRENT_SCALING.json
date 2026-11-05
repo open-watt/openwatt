@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "target_serial_family": "ESU; branch excludes BPU and uses separate BHN handling",
+  "source_apk": "777549fd41ac954134ff5e20927cfeb3b78dcab6d44b1188946658cd16de4b67",
+  "source_locations": [
+    {
+      "path": "com/goodwe/hybrid/common/DataCollectUtil.java",
+      "lines": [
+        1533,
+        1554
+      ]
+    },
+    {
+      "path": "com/goodwe/hybrid/activity/BatteryFunction105Activity.java",
+      "lines": [
+        320,
+        322
+      ]
+    }
+  ],
+  "fields": [
+    {
+      "response": "0189",
+      "offset": 26,
+      "type": "u16be",
+      "display_unit": "A",
+      "formula": "raw / (0.266 * 10)",
+      "marker_raw": 37,
+      "expected_display": 13.9,
+      "observed_display": 13.9
+    },
+    {
+      "response": "0189",
+      "offset": 28,
+      "type": "u16be",
+      "display_unit": "A",
+      "formula": "raw / (0.128 * 10)",
+      "marker_raw": 43,
+      "expected_display": 33.6,
+      "observed_display": 33.6
+    }
+  ],
+  "modbus_distinction": "055D/055E are physical tenths of an ampere. Reference Integer decoder for AA55 bulk is not a validated physical ampere value.",
+  "confidence": "Static branch plus two independent marker/UI matches; not a universal GoodWe scale.",
+  "public_record_redaction": "Private LAN addresses, MACs and serial identifiers are pseudonymized. Encoded identity bytes may be substituted, so affected historical frames are not checksum-valid replay fixtures. Private captures and WLAN credentials are excluded."
+}

@@ -1,0 +1,1443 @@
+{
+  "schema_version": 1,
+  "source": "https://github.com/marcelblijleven/goodwe/blob/66dfcdd9cd947bfd799f2bddb40b4e05ba9db6f6/goodwe/es.py",
+  "sha256": "e325aac49822f0062192db87a2672389e46345c8732276d9980d0c6f1f3f5b96",
+  "fields": [
+    {
+      "group": "__sensors",
+      "id": "vpv1",
+      "offset": 0,
+      "decoder": "Voltage",
+      "literal_arguments": [
+        "vpv1",
+        0,
+        "PV1 Voltage",
+        null
+      ],
+      "source_line": 30,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "ipv1",
+      "offset": 2,
+      "decoder": "Current",
+      "literal_arguments": [
+        "ipv1",
+        2,
+        "PV1 Current",
+        null
+      ],
+      "source_line": 31,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "ppv1",
+      "offset": null,
+      "decoder": "Calculated",
+      "literal_arguments": [
+        "ppv1",
+        null,
+        "PV1 Power",
+        "W",
+        null
+      ],
+      "source_line": 32,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "derived, no direct offset"
+    },
+    {
+      "group": "__sensors",
+      "id": "pv1_mode",
+      "offset": 4,
+      "decoder": "Byte",
+      "literal_arguments": [
+        "pv1_mode",
+        4,
+        "PV1 Mode code",
+        "",
+        null
+      ],
+      "source_line": 39,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "pv1_mode_label",
+      "offset": 4,
+      "decoder": "Enum",
+      "literal_arguments": [
+        "pv1_mode_label",
+        4,
+        null,
+        "PV1 Mode",
+        null
+      ],
+      "source_line": 40,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "vpv2",
+      "offset": 5,
+      "decoder": "Voltage",
+      "literal_arguments": [
+        "vpv2",
+        5,
+        "PV2 Voltage",
+        null
+      ],
+      "source_line": 41,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "ipv2",
+      "offset": 7,
+      "decoder": "Current",
+      "literal_arguments": [
+        "ipv2",
+        7,
+        "PV2 Current",
+        null
+      ],
+      "source_line": 42,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "ppv2",
+      "offset": null,
+      "decoder": "Calculated",
+      "literal_arguments": [
+        "ppv2",
+        null,
+        "PV2 Power",
+        "W",
+        null
+      ],
+      "source_line": 43,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "derived, no direct offset"
+    },
+    {
+      "group": "__sensors",
+      "id": "pv2_mode",
+      "offset": 9,
+      "decoder": "Byte",
+      "literal_arguments": [
+        "pv2_mode",
+        9,
+        "PV2 Mode code",
+        "",
+        null
+      ],
+      "source_line": 50,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "pv2_mode_label",
+      "offset": 9,
+      "decoder": "Enum",
+      "literal_arguments": [
+        "pv2_mode_label",
+        9,
+        null,
+        "PV2 Mode",
+        null
+      ],
+      "source_line": 51,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "ppv",
+      "offset": null,
+      "decoder": "Calculated",
+      "literal_arguments": [
+        "ppv",
+        null,
+        "PV Power",
+        "W",
+        null
+      ],
+      "source_line": 52,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "derived, no direct offset"
+    },
+    {
+      "group": "__sensors",
+      "id": "vbattery1",
+      "offset": 10,
+      "decoder": "Voltage",
+      "literal_arguments": [
+        "vbattery1",
+        10,
+        "Battery Voltage",
+        null
+      ],
+      "source_line": 60,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "battery_status",
+      "offset": 14,
+      "decoder": "Integer",
+      "literal_arguments": [
+        "battery_status",
+        14,
+        "Battery Status",
+        "",
+        null
+      ],
+      "source_line": 62,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "battery_temperature",
+      "offset": 16,
+      "decoder": "Temp",
+      "literal_arguments": [
+        "battery_temperature",
+        16,
+        "Battery Temperature",
+        null
+      ],
+      "source_line": 63,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "ibattery1",
+      "offset": null,
+      "decoder": "Calculated",
+      "literal_arguments": [
+        "ibattery1",
+        null,
+        "Battery Current",
+        "A",
+        null
+      ],
+      "source_line": 64,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "derived, no direct offset"
+    },
+    {
+      "group": "__sensors",
+      "id": "pbattery1",
+      "offset": null,
+      "decoder": "Calculated",
+      "literal_arguments": [
+        "pbattery1",
+        null,
+        "Battery Power",
+        "W",
+        null
+      ],
+      "source_line": 73,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "derived, no direct offset"
+    },
+    {
+      "group": "__sensors",
+      "id": "battery_charge_limit",
+      "offset": 20,
+      "decoder": "Integer",
+      "literal_arguments": [
+        "battery_charge_limit",
+        20,
+        "Battery Charge Limit",
+        "A",
+        null
+      ],
+      "source_line": 81,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "battery_discharge_limit",
+      "offset": 22,
+      "decoder": "Integer",
+      "literal_arguments": [
+        "battery_discharge_limit",
+        22,
+        "Battery Discharge Limit",
+        "A",
+        null
+      ],
+      "source_line": 82,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "battery_error",
+      "offset": 24,
+      "decoder": "Integer",
+      "literal_arguments": [
+        "battery_error",
+        24,
+        "Battery Error Code",
+        "",
+        null
+      ],
+      "source_line": 85,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "battery_soc",
+      "offset": 26,
+      "decoder": "Byte",
+      "literal_arguments": [
+        "battery_soc",
+        26,
+        "Battery State of Charge",
+        "%",
+        null
+      ],
+      "source_line": 86,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "battery_soh",
+      "offset": 29,
+      "decoder": "Byte",
+      "literal_arguments": [
+        "battery_soh",
+        29,
+        "Battery State of Health",
+        "%",
+        null
+      ],
+      "source_line": 91,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "battery_mode",
+      "offset": 30,
+      "decoder": "Byte",
+      "literal_arguments": [
+        "battery_mode",
+        30,
+        "Battery Mode code",
+        "",
+        null
+      ],
+      "source_line": 92,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "battery_mode_label",
+      "offset": 30,
+      "decoder": "Enum",
+      "literal_arguments": [
+        "battery_mode_label",
+        30,
+        null,
+        "Battery Mode",
+        null
+      ],
+      "source_line": 93,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "battery_warning",
+      "offset": 31,
+      "decoder": "Integer",
+      "literal_arguments": [
+        "battery_warning",
+        31,
+        "Battery Warning",
+        "",
+        null
+      ],
+      "source_line": 94,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "meter_status",
+      "offset": 33,
+      "decoder": "Byte",
+      "literal_arguments": [
+        "meter_status",
+        33,
+        "Meter Status code",
+        "",
+        null
+      ],
+      "source_line": 95,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "vgrid",
+      "offset": 34,
+      "decoder": "Voltage",
+      "literal_arguments": [
+        "vgrid",
+        34,
+        "On-grid Voltage",
+        null
+      ],
+      "source_line": 96,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "igrid",
+      "offset": 36,
+      "decoder": "Current",
+      "literal_arguments": [
+        "igrid",
+        36,
+        "On-grid Current",
+        null
+      ],
+      "source_line": 97,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "pgrid",
+      "offset": null,
+      "decoder": "Calculated",
+      "literal_arguments": [
+        "pgrid",
+        null,
+        "On-grid Export Power",
+        "W",
+        null
+      ],
+      "source_line": 98,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "derived, no direct offset"
+    },
+    {
+      "group": "__sensors",
+      "id": "fgrid",
+      "offset": 40,
+      "decoder": "Frequency",
+      "literal_arguments": [
+        "fgrid",
+        40,
+        "On-grid Frequency",
+        null
+      ],
+      "source_line": 106,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "grid_mode",
+      "offset": 42,
+      "decoder": "Byte",
+      "literal_arguments": [
+        "grid_mode",
+        42,
+        "Work Mode code",
+        "",
+        null
+      ],
+      "source_line": 107,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "grid_mode_label",
+      "offset": 42,
+      "decoder": "Enum",
+      "literal_arguments": [
+        "grid_mode_label",
+        42,
+        null,
+        "Work Mode",
+        null
+      ],
+      "source_line": 108,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "vload",
+      "offset": 43,
+      "decoder": "Voltage",
+      "literal_arguments": [
+        "vload",
+        43,
+        "Back-up Voltage",
+        null
+      ],
+      "source_line": 109,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "iload",
+      "offset": 45,
+      "decoder": "Current",
+      "literal_arguments": [
+        "iload",
+        45,
+        "Back-up Current",
+        null
+      ],
+      "source_line": 110,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "pload",
+      "offset": 47,
+      "decoder": "Power",
+      "literal_arguments": [
+        "pload",
+        47,
+        "On-grid Power",
+        null
+      ],
+      "source_line": 111,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "fload",
+      "offset": 49,
+      "decoder": "Frequency",
+      "literal_arguments": [
+        "fload",
+        49,
+        "Back-up Frequency",
+        null
+      ],
+      "source_line": 112,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "load_mode",
+      "offset": 51,
+      "decoder": "Byte",
+      "literal_arguments": [
+        "load_mode",
+        51,
+        "Load Mode code",
+        "",
+        null
+      ],
+      "source_line": 113,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "load_mode_label",
+      "offset": 51,
+      "decoder": "Enum",
+      "literal_arguments": [
+        "load_mode_label",
+        51,
+        null,
+        "Load Mode",
+        null
+      ],
+      "source_line": 114,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "work_mode",
+      "offset": 52,
+      "decoder": "Byte",
+      "literal_arguments": [
+        "work_mode",
+        52,
+        "Energy Mode code",
+        "",
+        null
+      ],
+      "source_line": 115,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "work_mode_label",
+      "offset": 52,
+      "decoder": "Enum",
+      "literal_arguments": [
+        "work_mode_label",
+        52,
+        null,
+        "Energy Mode",
+        null
+      ],
+      "source_line": 116,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "temperature",
+      "offset": 53,
+      "decoder": "Temp",
+      "literal_arguments": [
+        "temperature",
+        53,
+        "Inverter Temperature"
+      ],
+      "source_line": 117,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "error_codes",
+      "offset": 55,
+      "decoder": "Long",
+      "literal_arguments": [
+        "error_codes",
+        55,
+        "Error Codes"
+      ],
+      "source_line": 118,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "e_total",
+      "offset": 59,
+      "decoder": "Energy4",
+      "literal_arguments": [
+        "e_total",
+        59,
+        "Total PV Generation",
+        null
+      ],
+      "source_line": 119,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "h_total",
+      "offset": 63,
+      "decoder": "Long",
+      "literal_arguments": [
+        "h_total",
+        63,
+        "Hours Total",
+        "h",
+        null
+      ],
+      "source_line": 120,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "e_day",
+      "offset": 67,
+      "decoder": "Energy",
+      "literal_arguments": [
+        "e_day",
+        67,
+        "Today's PV Generation",
+        null
+      ],
+      "source_line": 121,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "e_load_day",
+      "offset": 69,
+      "decoder": "Energy",
+      "literal_arguments": [
+        "e_load_day",
+        69,
+        "Today's Load",
+        null
+      ],
+      "source_line": 122,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "e_load_total",
+      "offset": 71,
+      "decoder": "Energy4",
+      "literal_arguments": [
+        "e_load_total",
+        71,
+        "Total Load",
+        null
+      ],
+      "source_line": 123,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "total_power",
+      "offset": 75,
+      "decoder": "PowerS",
+      "literal_arguments": [
+        "total_power",
+        75,
+        "Total Power",
+        null
+      ],
+      "source_line": 124,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "effective_work_mode",
+      "offset": 77,
+      "decoder": "Byte",
+      "literal_arguments": [
+        "effective_work_mode",
+        77,
+        "Effective Work Mode code"
+      ],
+      "source_line": 125,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "effective_relay_control",
+      "offset": 78,
+      "decoder": "Integer",
+      "literal_arguments": [
+        "effective_relay_control",
+        78,
+        "Effective Relay Control",
+        "",
+        null
+      ],
+      "source_line": 126,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "grid_in_out",
+      "offset": 80,
+      "decoder": "Byte",
+      "literal_arguments": [
+        "grid_in_out",
+        80,
+        "On-grid Mode code",
+        "",
+        null
+      ],
+      "source_line": 127,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "grid_in_out_label",
+      "offset": 80,
+      "decoder": "Enum",
+      "literal_arguments": [
+        "grid_in_out_label",
+        80,
+        null,
+        "On-grid Mode",
+        null
+      ],
+      "source_line": 128,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "pback_up",
+      "offset": 81,
+      "decoder": "Power",
+      "literal_arguments": [
+        "pback_up",
+        81,
+        "Back-up Power",
+        null
+      ],
+      "source_line": 129,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "plant_power",
+      "offset": null,
+      "decoder": "Calculated",
+      "literal_arguments": [
+        "plant_power",
+        null,
+        "Plant Power",
+        "W",
+        null
+      ],
+      "source_line": 131,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "derived, no direct offset"
+    },
+    {
+      "group": "__sensors",
+      "id": "meter_power_factor",
+      "offset": 83,
+      "decoder": "Decimal",
+      "literal_arguments": [
+        "meter_power_factor",
+        83,
+        1000,
+        "Meter Power Factor",
+        "",
+        null
+      ],
+      "source_line": 138,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "diagnose_result",
+      "offset": 89,
+      "decoder": "Long",
+      "literal_arguments": [
+        "diagnose_result",
+        89,
+        "Diag Status Code"
+      ],
+      "source_line": 143,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "diagnose_result_label",
+      "offset": 89,
+      "decoder": "EnumBitmap4",
+      "literal_arguments": [
+        "diagnose_result_label",
+        89,
+        null,
+        "Diag Status"
+      ],
+      "source_line": 144,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/86"
+    },
+    {
+      "group": "__sensors",
+      "id": "house_consumption",
+      "offset": null,
+      "decoder": "Calculated",
+      "literal_arguments": [
+        "house_consumption",
+        null,
+        "House Consumption",
+        "W",
+        null
+      ],
+      "source_line": 157,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "derived, no direct offset"
+    },
+    {
+      "group": "__all_settings",
+      "id": "backup_supply",
+      "offset": 12,
+      "decoder": "Integer",
+      "literal_arguments": [
+        "backup_supply",
+        12,
+        "Backup Supply"
+      ],
+      "source_line": 176,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/89"
+    },
+    {
+      "group": "__all_settings",
+      "id": "off-grid_charge",
+      "offset": 14,
+      "decoder": "Integer",
+      "literal_arguments": [
+        "off-grid_charge",
+        14,
+        "Off-grid Charge"
+      ],
+      "source_line": 177,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/89"
+    },
+    {
+      "group": "__all_settings",
+      "id": "shadow_scan",
+      "offset": 16,
+      "decoder": "Integer",
+      "literal_arguments": [
+        "shadow_scan",
+        16,
+        "Shadow Scan",
+        "",
+        null
+      ],
+      "source_line": 178,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/89"
+    },
+    {
+      "group": "__all_settings",
+      "id": "grid_export",
+      "offset": 18,
+      "decoder": "Integer",
+      "literal_arguments": [
+        "grid_export",
+        18,
+        "Export Limit Enabled",
+        "",
+        null
+      ],
+      "source_line": 179,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/89"
+    },
+    {
+      "group": "__all_settings",
+      "id": "capacity",
+      "offset": 22,
+      "decoder": "Integer",
+      "literal_arguments": [
+        "capacity",
+        22,
+        "Capacity"
+      ],
+      "source_line": 180,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/89"
+    },
+    {
+      "group": "__all_settings",
+      "id": "charge_v",
+      "offset": 24,
+      "decoder": "Decimal",
+      "literal_arguments": [
+        "charge_v",
+        24,
+        10,
+        "Charge Voltage",
+        "V"
+      ],
+      "source_line": 181,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/89"
+    },
+    {
+      "group": "__all_settings",
+      "id": "charge_i",
+      "offset": 26,
+      "decoder": "Integer",
+      "literal_arguments": [
+        "charge_i",
+        26,
+        "Charge Current",
+        "A"
+      ],
+      "source_line": 182,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/89",
+      "target_override": "raw / 2.66 amperes for ESU branch",
+      "override_evidence": "GOODWE_CURRENT_SCALING.json"
+    },
+    {
+      "group": "__all_settings",
+      "id": "discharge_i",
+      "offset": 28,
+      "decoder": "Integer",
+      "literal_arguments": [
+        "discharge_i",
+        28,
+        "Discharge Current",
+        "A"
+      ],
+      "source_line": 188,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/89",
+      "target_override": "raw / 1.28 amperes for ESU branch",
+      "override_evidence": "GOODWE_CURRENT_SCALING.json"
+    },
+    {
+      "group": "__all_settings",
+      "id": "discharge_v",
+      "offset": 30,
+      "decoder": "Decimal",
+      "literal_arguments": [
+        "discharge_v",
+        30,
+        10,
+        "Discharge Voltage",
+        "V"
+      ],
+      "source_line": 194,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/89"
+    },
+    {
+      "group": "__all_settings",
+      "id": "dod",
+      "offset": null,
+      "decoder": "Calculated",
+      "literal_arguments": [
+        "dod",
+        null,
+        "Depth of Discharge",
+        "%"
+      ],
+      "source_line": 195,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "derived, no direct offset"
+    },
+    {
+      "group": "__all_settings",
+      "id": "battery_activated",
+      "offset": 34,
+      "decoder": "Integer",
+      "literal_arguments": [
+        "battery_activated",
+        34,
+        "Battery Activated"
+      ],
+      "source_line": 201,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/89"
+    },
+    {
+      "group": "__all_settings",
+      "id": "bp_off_grid_charge",
+      "offset": 36,
+      "decoder": "Integer",
+      "literal_arguments": [
+        "bp_off_grid_charge",
+        36,
+        "BP Off-grid Charge"
+      ],
+      "source_line": 202,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/89"
+    },
+    {
+      "group": "__all_settings",
+      "id": "bp_pv_discharge",
+      "offset": 38,
+      "decoder": "Integer",
+      "literal_arguments": [
+        "bp_pv_discharge",
+        38,
+        "BP PV Discharge"
+      ],
+      "source_line": 203,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/89"
+    },
+    {
+      "group": "__all_settings",
+      "id": "bp_bms_protocol",
+      "offset": 40,
+      "decoder": "Integer",
+      "literal_arguments": [
+        "bp_bms_protocol",
+        40,
+        "BP BMS Protocol"
+      ],
+      "source_line": 204,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/89"
+    },
+    {
+      "group": "__all_settings",
+      "id": "power_factor",
+      "offset": 42,
+      "decoder": "Integer",
+      "literal_arguments": [
+        "power_factor",
+        42,
+        "Power Factor"
+      ],
+      "source_line": 205,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/89"
+    },
+    {
+      "group": "__all_settings",
+      "id": "grid_export_limit",
+      "offset": 52,
+      "decoder": "Integer",
+      "literal_arguments": [
+        "grid_export_limit",
+        52,
+        "Grid Export Limit",
+        "W",
+        null
+      ],
+      "source_line": 206,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/89"
+    },
+    {
+      "group": "__all_settings",
+      "id": "battery_soc_protection",
+      "offset": 56,
+      "decoder": "Integer",
+      "literal_arguments": [
+        "battery_soc_protection",
+        56,
+        "Battery SoC Protection",
+        "",
+        null
+      ],
+      "source_line": 207,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/89"
+    },
+    {
+      "group": "__all_settings",
+      "id": "work_mode",
+      "offset": 66,
+      "decoder": "Integer",
+      "literal_arguments": [
+        "work_mode",
+        66,
+        "Work Mode"
+      ],
+      "source_line": 208,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/89"
+    },
+    {
+      "group": "__all_settings",
+      "id": "grid_quality_check",
+      "offset": 68,
+      "decoder": "Integer",
+      "literal_arguments": [
+        "grid_quality_check",
+        68,
+        "Grid Quality Check"
+      ],
+      "source_line": 209,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "payload byte offset in 01/89"
+    },
+    {
+      "group": "__all_settings",
+      "id": "eco_mode_1",
+      "offset": 1793,
+      "decoder": "EcoModeV1",
+      "literal_arguments": [
+        "eco_mode_1",
+        1793,
+        "Eco Mode Group 1"
+      ],
+      "source_line": 210,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "register address"
+    },
+    {
+      "group": "__all_settings",
+      "id": "eco_mode_1_switch",
+      "offset": 1796,
+      "decoder": "ByteH",
+      "literal_arguments": [
+        "eco_mode_1_switch",
+        1796,
+        "Eco Mode Group 1 Switch",
+        "",
+        null
+      ],
+      "source_line": 211,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "register address"
+    },
+    {
+      "group": "__all_settings",
+      "id": "eco_mode_2",
+      "offset": 1797,
+      "decoder": "EcoModeV1",
+      "literal_arguments": [
+        "eco_mode_2",
+        1797,
+        "Eco Mode Group 2"
+      ],
+      "source_line": 212,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "register address"
+    },
+    {
+      "group": "__all_settings",
+      "id": "eco_mode_2_switch",
+      "offset": 1800,
+      "decoder": "ByteH",
+      "literal_arguments": [
+        "eco_mode_2_switch",
+        1800,
+        "Eco Mode Group 2 Switch",
+        "",
+        null
+      ],
+      "source_line": 213,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "register address"
+    },
+    {
+      "group": "__all_settings",
+      "id": "eco_mode_3",
+      "offset": 1801,
+      "decoder": "EcoModeV1",
+      "literal_arguments": [
+        "eco_mode_3",
+        1801,
+        "Eco Mode Group 3"
+      ],
+      "source_line": 214,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "register address"
+    },
+    {
+      "group": "__all_settings",
+      "id": "eco_mode_3_switch",
+      "offset": 1804,
+      "decoder": "ByteH",
+      "literal_arguments": [
+        "eco_mode_3_switch",
+        1804,
+        "Eco Mode Group 3 Switch",
+        "",
+        null
+      ],
+      "source_line": 215,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "register address"
+    },
+    {
+      "group": "__all_settings",
+      "id": "eco_mode_4",
+      "offset": 1805,
+      "decoder": "EcoModeV1",
+      "literal_arguments": [
+        "eco_mode_4",
+        1805,
+        "Eco Mode Group 4"
+      ],
+      "source_line": 216,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "register address"
+    },
+    {
+      "group": "__all_settings",
+      "id": "eco_mode_4_switch",
+      "offset": 1808,
+      "decoder": "ByteH",
+      "literal_arguments": [
+        "eco_mode_4_switch",
+        1808,
+        "Eco Mode Group 4 Switch",
+        "",
+        null
+      ],
+      "source_line": 217,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "register address"
+    },
+    {
+      "group": "__settings_arm_fw_14",
+      "id": "eco_mode_1",
+      "offset": 47547,
+      "decoder": "EcoModeV2",
+      "literal_arguments": [
+        "eco_mode_1",
+        47547,
+        "Eco Mode Group 1"
+      ],
+      "source_line": 222,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "register address"
+    },
+    {
+      "group": "__settings_arm_fw_14",
+      "id": "eco_mode_1_switch",
+      "offset": 47549,
+      "decoder": "ByteH",
+      "literal_arguments": [
+        "eco_mode_1_switch",
+        47549,
+        "Eco Mode Group 1 Switch"
+      ],
+      "source_line": 223,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "register address"
+    },
+    {
+      "group": "__settings_arm_fw_14",
+      "id": "eco_mode_2",
+      "offset": 47553,
+      "decoder": "EcoModeV2",
+      "literal_arguments": [
+        "eco_mode_2",
+        47553,
+        "Eco Mode Group 2"
+      ],
+      "source_line": 224,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "register address"
+    },
+    {
+      "group": "__settings_arm_fw_14",
+      "id": "eco_mode_2_switch",
+      "offset": 47555,
+      "decoder": "ByteH",
+      "literal_arguments": [
+        "eco_mode_2_switch",
+        47555,
+        "Eco Mode Group 2 Switch"
+      ],
+      "source_line": 225,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "register address"
+    },
+    {
+      "group": "__settings_arm_fw_14",
+      "id": "eco_mode_3",
+      "offset": 47559,
+      "decoder": "EcoModeV2",
+      "literal_arguments": [
+        "eco_mode_3",
+        47559,
+        "Eco Mode Group 3"
+      ],
+      "source_line": 226,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "register address"
+    },
+    {
+      "group": "__settings_arm_fw_14",
+      "id": "eco_mode_3_switch",
+      "offset": 47561,
+      "decoder": "ByteH",
+      "literal_arguments": [
+        "eco_mode_3_switch",
+        47561,
+        "Eco Mode Group 3 Switch"
+      ],
+      "source_line": 227,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "register address"
+    },
+    {
+      "group": "__settings_arm_fw_14",
+      "id": "eco_mode_4",
+      "offset": 47565,
+      "decoder": "EcoModeV2",
+      "literal_arguments": [
+        "eco_mode_4",
+        47565,
+        "Eco Mode Group 4"
+      ],
+      "source_line": 228,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "register address"
+    },
+    {
+      "group": "__settings_arm_fw_14",
+      "id": "eco_mode_4_switch",
+      "offset": 47567,
+      "decoder": "ByteH",
+      "literal_arguments": [
+        "eco_mode_4_switch",
+        47567,
+        "Eco Mode Group 4 Switch"
+      ],
+      "source_line": 229,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "register address"
+    },
+    {
+      "group": "__settings_arm_fw_19",
+      "id": "fast_charging",
+      "offset": 47545,
+      "decoder": "Integer",
+      "literal_arguments": [
+        "fast_charging",
+        47545,
+        "Fast Charging Enabled",
+        "",
+        null
+      ],
+      "source_line": 234,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "register address"
+    },
+    {
+      "group": "__settings_arm_fw_19",
+      "id": "fast_charging_soc",
+      "offset": 47546,
+      "decoder": "Integer",
+      "literal_arguments": [
+        "fast_charging_soc",
+        47546,
+        "Fast Charging SoC",
+        "%",
+        null
+      ],
+      "source_line": 235,
+      "status": "pinned implementation reference; not all field semantics marker-verified",
+      "offset_space": "register address"
+    }
+  ],
+  "reference": "GOODWE_REFERENCE.md",
+  "public_record_redaction": "Private LAN addresses, MACs and serial identifiers are pseudonymized. Encoded identity bytes may be substituted, so affected historical frames are not checksum-valid replay fixtures. Private captures and WLAN credentials are excluded."
+}

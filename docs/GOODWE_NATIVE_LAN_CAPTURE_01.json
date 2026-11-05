@@ -1,0 +1,152 @@
+{
+  "interface": "OpenWatt ether1 via RPCAP 192.0.2.20:2002",
+  "filter": "none",
+  "phone_mac": "02:00:00:00:01:04",
+  "phone_ipv4": "192.0.2.2334",
+  "frames": 188821,
+  "phone_frames": 14214,
+  "flows": [
+    {
+      "source": "",
+      "source_port": null,
+      "destination": "",
+      "destination_port": null,
+      "ip_protocol": null,
+      "packets": 19
+    },
+    {
+      "source": "192.0.2.2334",
+      "source_port": 38711,
+      "destination": "255.255.255.255",
+      "destination_port": 48899,
+      "ip_protocol": 17,
+      "packets": 9
+    },
+    {
+      "source": "192.0.2.2334",
+      "source_port": 60353,
+      "destination": "192.0.2.2318",
+      "destination_port": 8899,
+      "ip_protocol": 17,
+      "packets": 3156
+    },
+    {
+      "source": "192.0.2.2334",
+      "source_port": null,
+      "destination": "192.0.2.2318",
+      "destination_port": null,
+      "ip_protocol": 1,
+      "packets": 3
+    },
+    {
+      "source": "192.0.2.2334",
+      "source_port": 60306,
+      "destination": "255.255.255.255",
+      "destination_port": 48899,
+      "ip_protocol": 17,
+      "packets": 10
+    },
+    {
+      "source": "192.0.2.2334",
+      "source_port": 39744,
+      "destination": "192.0.2.2318",
+      "destination_port": 8899,
+      "ip_protocol": 17,
+      "packets": 1393
+    },
+    {
+      "source": "192.0.2.2334",
+      "source_port": 45034,
+      "destination": "255.255.255.255",
+      "destination_port": 48899,
+      "ip_protocol": 17,
+      "packets": 10
+    },
+    {
+      "source": "192.0.2.2334",
+      "source_port": 40401,
+      "destination": "192.0.2.2318",
+      "destination_port": 8899,
+      "ip_protocol": 17,
+      "packets": 1182
+    },
+    {
+      "source": "192.0.2.2334",
+      "source_port": 34059,
+      "destination": "255.255.255.255",
+      "destination_port": 48899,
+      "ip_protocol": 17,
+      "packets": 9
+    },
+    {
+      "source": "192.0.2.2334",
+      "source_port": 34292,
+      "destination": "192.0.2.2318",
+      "destination_port": 8899,
+      "ip_protocol": 17,
+      "packets": 8422
+    },
+    {
+      "source": "192.0.2.2334",
+      "source_port": 56074,
+      "destination": "239.255.255.250",
+      "destination_port": 1900,
+      "ip_protocol": 17,
+      "packets": 1
+    }
+  ],
+  "files": [
+    {
+      "path": ".tmp/solargo-lan-rpcap-followup_00001_20261028234330.pcapng",
+      "bytes": 2494184,
+      "sha256": "49f8576efa1f9a49b30039d0ea5f242c43027e30a9300540f400c737a804fe3a"
+    },
+    {
+      "path": ".tmp/solargo-lan-rpcap-followup_00002_20261028234430.pcapng",
+      "bytes": 2745572,
+      "sha256": "bbbbcf8654cfa039460786025e1f72601d9f706d46da6829fa3e1b2f40ca37f3"
+    },
+    {
+      "path": ".tmp/solargo-lan-rpcap-followup_00003_20261028234531.pcapng",
+      "bytes": 2772964,
+      "sha256": "f09e22b7b5f40967289b172440052aef405dc133ea6b88b70645721d9813cb16"
+    },
+    {
+      "path": ".tmp/solargo-lan-rpcap-followup_00004_20261028234631.pcapng",
+      "bytes": 2622744,
+      "sha256": "b8b1bfc52e7746046153080d9a8b6ab4431bb77a6c3733af48e8d738e6facf71"
+    },
+    {
+      "path": ".tmp/solargo-lan-rpcap-followup_00005_20261028234731.pcapng",
+      "bytes": 2518748,
+      "sha256": "2f4611a2a33fa43fbab5523c405f5233902a105e495491dcb09783afde733017"
+    },
+    {
+      "path": ".tmp/solargo-lan-rpcap-followup_00006_20261028234831.pcapng",
+      "bytes": 2337928,
+      "sha256": "1a2224af4e6519fb99fc629f0ae4a827dc65f71d8ad265a12e87a466c200c422"
+    },
+    {
+      "path": ".tmp/solargo-lan-rpcap-followup_00007_20261028234931.pcapng",
+      "bytes": 2269080,
+      "sha256": "62fd86f86f8fc504f2d582c0b3efb5bb34e5919abc7b9f607d6d59e42988c36f"
+    },
+    {
+      "path": ".tmp/solargo-lan-rpcap-followup_00008_20261028235031.pcapng",
+      "bytes": 2480184,
+      "sha256": "dd618080ba1738aa955338a4e4c25db498622dc7a041403299d0bfa2206edb3a"
+    },
+    {
+      "path": ".tmp/solargo-lan-rpcap-followup_00009_20261028235131.pcapng",
+      "bytes": 2419448,
+      "sha256": "a1ddc5528104f84b742b9c68ed02a22f032769819bd23f29a329cc1d8e6f4228"
+    },
+    {
+      "path": ".tmp/solargo-lan-rpcap-followup_00010_20261028235231.pcapng",
+      "bytes": 2344372,
+      "sha256": "71970ffc358358b0bb55f16c4a461b27c3a0556210ebc340d1c9c634137fd963"
+    }
+  ],
+  "completeness": "Interface-visible traffic only. RPCAP drop stats are global interface counters. Approximate-window UDP/8899 cross-check found 14153 capture versus 14186 server-log packets; exact capture-boundary alignment remains to be checked, so zero loss is not established.",
+  "public_record_redaction": "Private LAN addresses, MACs and serial identifiers are pseudonymized. Encoded identity bytes may be substituted, so affected historical frames are not checksum-valid replay fixtures. Private captures and WLAN credentials are excluded."
+}

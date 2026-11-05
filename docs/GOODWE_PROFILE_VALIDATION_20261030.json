@@ -1,0 +1,408 @@
+{
+  "schema_version": 1,
+  "target": "GW5048D-ES DSP23/ARM14; SBP-20 EMS readback surface",
+  "app": "SolarGo7.2.2/build1521",
+  "pi": {
+    "slot": 204,
+    "good": 204,
+    "fail": 0,
+    "sha256": "73E370E4DDCBB4E3F1C9BE0BE29F8D2CE7E6FBCEE4DFCD8FBAEFAE5B7CB7FD30"
+  },
+  "method": "Normal deployed profile element writes through the verified RMW binding; raw client trace retained on Pi",
+  "reserve_exchanges": [
+    {
+      "address": 1376,
+      "requested": 21,
+      "request": "aa55c07f023905056001001502f9",
+      "ack": "aa550dc002b90106028e",
+      "verify_request": "aa55c07f011a0305600102c2",
+      "verify_response": "aa550dc0019a020015027e",
+      "readback": 21,
+      "acknowledged": true,
+      "verified": true
+    },
+    {
+      "address": 1376,
+      "requested": 20,
+      "request": "aa55c07f023905056001001402f8",
+      "ack": "aa550dc002b90106028e",
+      "verify_request": "aa55c07f011a0305600102c2",
+      "verify_response": "aa550dc0019a020014027d",
+      "readback": 20,
+      "acknowledged": true,
+      "verified": true
+    },
+    {
+      "address": 1441,
+      "requested": 21,
+      "request": "aa55c07f02390505a1010015033a",
+      "ack": "aa550dc002b90106028e",
+      "verify_request": "aa55c07f011a0305a1010303",
+      "verify_response": "aa550dc0019a020015027e",
+      "readback": 21,
+      "acknowledged": true,
+      "verified": true
+    },
+    {
+      "address": 1441,
+      "requested": 20,
+      "request": "aa55c07f02390505a10100140339",
+      "ack": "aa550dc002b90106028e",
+      "verify_request": "aa55c07f011a0305a1010303",
+      "verify_response": "aa550dc0019a020014027d",
+      "readback": 20,
+      "acknowledged": true,
+      "verified": true
+    }
+  ],
+  "events": [
+    {
+      "time": "2026-10-29T18:18:34.666226+00:00",
+      "event": "verified",
+      "path": "cabin_solar.config.advanced.battery_function.on_grid_min_soc",
+      "percent": 21
+    },
+    {
+      "time": "2026-10-29T18:18:37.694873+00:00",
+      "event": "verified",
+      "path": "cabin_solar.config.advanced.battery_function.on_grid_min_soc",
+      "percent": 20
+    },
+    {
+      "time": "2026-10-29T18:18:40.724735+00:00",
+      "event": "verified",
+      "path": "cabin_solar.config.advanced.battery_function.off_grid_min_soc",
+      "percent": 21
+    },
+    {
+      "time": "2026-10-29T18:18:49.970801+00:00",
+      "event": "verified",
+      "path": "cabin_solar.config.advanced.battery_function.off_grid_min_soc",
+      "percent": 20
+    },
+    {
+      "time": "2026-10-29T18:18:50.412839+00:00",
+      "event": "cleanup",
+      "errors": [],
+      "requested_min_soc": 20
+    }
+  ],
+  "initial": {
+    "cabin_solar.config.advanced.battery_function.on_grid_min_soc": {
+      "value": 20,
+      "unit": "%",
+      "age": 54
+    },
+    "cabin_solar.config.advanced.battery_function.off_grid_min_soc": {
+      "value": 20,
+      "unit": "%",
+      "age": 47
+    },
+    "cabin_solar.status.config_write.result": {
+      "value": "verified",
+      "age": 112
+    },
+    "cabin_solar.status.config_write.pending": {
+      "value": false,
+      "age": 112
+    },
+    "cabin_solar.status.config_write.address": {
+      "value": 1441,
+      "age": 113
+    },
+    "cabin_solar.inverter.control.kind": {
+      "value": 0,
+      "age": 174
+    },
+    "cabin_solar.inverter.control.enable": {
+      "value": true,
+      "age": 165
+    },
+    "cabin_solar.inverter.control.mode": {
+      "value": 1,
+      "age": 0
+    },
+    "cabin_solar.inverter.control.result": {
+      "value": "automatic mode confirmed",
+      "age": 1
+    },
+    "goodwe_ems.inverter.control.kind": {
+      "value": 0,
+      "age": 175
+    },
+    "goodwe_ems.inverter.control.enable": {
+      "value": true,
+      "age": 175
+    },
+    "goodwe_ems.inverter.control.mode": {
+      "value": 1,
+      "age": 0
+    },
+    "goodwe_ems.inverter.control.result": {
+      "value": "automatic mode confirmed",
+      "age": 0
+    },
+    "cabin_solar.config.advanced.power_factor": {
+      "value": 0.9,
+      "age": 171
+    },
+    "cabin_solar.config.advanced.battery_function.charging_current": {
+      "value": 50,
+      "unit": "A",
+      "age": 48
+    },
+    "cabin_solar.config.advanced.battery_function.discharging_current": {
+      "value": 50,
+      "unit": "A",
+      "age": 48
+    },
+    "cabin_solar.config.advanced.safety.protection.over_voltage_level_1_phase": {
+      "value": 265,
+      "unit": "V",
+      "age": 47
+    },
+    "cabin_solar.config.advanced.safety.connection.connect_voltage_upper_limit": {
+      "value": 254,
+      "unit": "V",
+      "age": 47
+    },
+    "goodwe_ems.config.advanced.battery_function.on_grid_min_soc": {
+      "value": 20,
+      "unit": "%",
+      "age": 54
+    },
+    "goodwe_ems.config.advanced.battery_function.off_grid_min_soc": {
+      "value": 20,
+      "unit": "%",
+      "age": 54
+    },
+    "goodwe_ems.config.advanced.battery_function.charging_current": {
+      "value": 100,
+      "unit": "A",
+      "age": 54
+    }
+  },
+  "final": {
+    "cabin_solar.config.advanced.battery_function.on_grid_min_soc": {
+      "value": 20,
+      "unit": "%",
+      "age": 11
+    },
+    "cabin_solar.config.advanced.battery_function.off_grid_min_soc": {
+      "value": 20,
+      "unit": "%",
+      "age": 0
+    },
+    "cabin_solar.status.config_write.result": {
+      "value": "verified",
+      "age": 0
+    },
+    "cabin_solar.status.config_write.pending": {
+      "value": false,
+      "age": 0
+    },
+    "cabin_solar.status.config_write.address": {
+      "value": 1441,
+      "age": 9
+    },
+    "cabin_solar.inverter.control.kind": {
+      "value": 0,
+      "age": 193
+    },
+    "cabin_solar.inverter.control.enable": {
+      "value": true,
+      "age": 184
+    },
+    "cabin_solar.inverter.control.mode": {
+      "value": 1,
+      "age": 0
+    },
+    "cabin_solar.inverter.control.result": {
+      "value": "automatic mode confirmed",
+      "age": 1
+    },
+    "goodwe_ems.inverter.control.kind": {
+      "value": 0,
+      "age": 194
+    },
+    "goodwe_ems.inverter.control.enable": {
+      "value": true,
+      "age": 194
+    },
+    "goodwe_ems.inverter.control.mode": {
+      "value": 1,
+      "age": 0
+    },
+    "goodwe_ems.inverter.control.result": {
+      "value": "automatic mode confirmed",
+      "age": 0
+    },
+    "cabin_solar.config.advanced.power_factor": {
+      "value": 0.9,
+      "age": 190
+    },
+    "cabin_solar.config.advanced.battery_function.charging_current": {
+      "value": 50,
+      "unit": "A",
+      "age": 7
+    },
+    "cabin_solar.config.advanced.battery_function.discharging_current": {
+      "value": 50,
+      "unit": "A",
+      "age": 7
+    },
+    "cabin_solar.config.advanced.safety.protection.over_voltage_level_1_phase": {
+      "value": 265,
+      "unit": "V",
+      "age": 5
+    },
+    "cabin_solar.config.advanced.safety.connection.connect_voltage_upper_limit": {
+      "value": 254,
+      "unit": "V",
+      "age": 5
+    },
+    "goodwe_ems.config.advanced.battery_function.on_grid_min_soc": {
+      "value": 20,
+      "unit": "%",
+      "age": 13
+    },
+    "goodwe_ems.config.advanced.battery_function.off_grid_min_soc": {
+      "value": 20,
+      "unit": "%",
+      "age": 13
+    },
+    "goodwe_ems.config.advanced.battery_function.charging_current": {
+      "value": 100,
+      "unit": "A",
+      "age": 13
+    }
+  },
+  "tests": {
+    "configuration_runtime": "26.595s before traced replay; full profile + dispatch attachment passed",
+    "proxy_control_runtime": "81.658s targeted regression passed; prior full lease run150.709s passed",
+    "unit_build": "compiled without DMD debug info after LNK1103",
+    "unit_suite": "blocked at existing Windows temp-filename assertion before manager.expression tests"
+  },
+  "limits": [
+    "21% and20% acceptance tested; not a claim that every reserve value or reboot persistence is verified.",
+    "No physical stop, safety, chemistry, credentials or network changes were made.",
+    "ES AC-equivalent split control is still pending real-PV characterization."
+  ],
+  "profile_revision": {
+    "sha256": "d79d70ee4a70527ac0c187cd26a564dac26f4aac4356fe692f9a56adcb025ba8",
+    "applied_at": "2026-10-30T04:36:00+10:00",
+    "runtime_checks": {
+      "connection.grid_connect_power_rate": {
+        "value": 375,
+        "unit": "s"
+      },
+      "curves.of_power_slope": {
+        "value": 50,
+        "unit": "%"
+      }
+    },
+    "integration_test": "test_goodwe_config.py passed, 28.904s; distinct duration and slope values plus existing configuration/control checks"
+  },
+  "final_profile_reload_samples": [
+    {
+      "time": "2026-10-29T18:36:00.344857+00:00",
+      "event": "sample",
+      "data": {
+        "cabin_solar.config.advanced.battery_function.on_grid_min_soc": {
+          "value": 20,
+          "unit": "%",
+          "age": 3
+        },
+        "cabin_solar.config.advanced.battery_function.off_grid_min_soc": {
+          "value": 20,
+          "unit": "%",
+          "age": 2
+        },
+        "cabin_solar.status.config_write.result": {
+          "value": "idle",
+          "age": 7
+        },
+        "cabin_solar.status.config_write.pending": {
+          "value": false,
+          "age": 7
+        },
+        "cabin_solar.status.config_write.address": {
+          "value": null,
+          "age": 1793298960
+        },
+        "cabin_solar.inverter.control.kind": {
+          "value": 0,
+          "age": 7
+        },
+        "cabin_solar.inverter.control.enable": {
+          "value": true,
+          "age": 7
+        },
+        "cabin_solar.inverter.control.mode": {
+          "value": 1,
+          "age": 4
+        },
+        "cabin_solar.inverter.control.result": {
+          "value": "awaiting confirmation",
+          "age": 7
+        },
+        "goodwe_ems.inverter.control.kind": {
+          "value": 0,
+          "age": 8
+        },
+        "goodwe_ems.inverter.control.enable": {
+          "value": true,
+          "age": 8
+        },
+        "goodwe_ems.inverter.control.mode": {
+          "value": 1,
+          "age": 0
+        },
+        "goodwe_ems.inverter.control.result": {
+          "value": "automatic mode confirmed",
+          "age": 0
+        },
+        "cabin_solar.config.advanced.power_factor": {
+          "value": 0.9,
+          "age": 3
+        },
+        "cabin_solar.config.advanced.battery_function.charging_current": {
+          "value": 50,
+          "unit": "A",
+          "age": 3
+        },
+        "cabin_solar.config.advanced.battery_function.discharging_current": {
+          "value": 50,
+          "unit": "A",
+          "age": 3
+        },
+        "cabin_solar.config.advanced.safety.protection.over_voltage_level_1_phase": {
+          "value": 265,
+          "unit": "V",
+          "age": 2
+        },
+        "cabin_solar.config.advanced.safety.connection.connect_voltage_upper_limit": {
+          "value": 254,
+          "unit": "V",
+          "age": 1
+        },
+        "goodwe_ems.config.advanced.battery_function.on_grid_min_soc": {
+          "value": 20,
+          "unit": "%",
+          "age": 7
+        },
+        "goodwe_ems.config.advanced.battery_function.off_grid_min_soc": {
+          "value": 20,
+          "unit": "%",
+          "age": 7
+        },
+        "goodwe_ems.config.advanced.battery_function.charging_current": {
+          "value": 100,
+          "unit": "A",
+          "age": 7
+        }
+      }
+    }
+  ],
+  "public_record_redaction": "Private LAN addresses, MACs and serial identifiers are pseudonymized. Encoded identity bytes may be substituted, so affected historical frames are not checksum-valid replay fixtures. Private captures and WLAN credentials are excluded."
+}

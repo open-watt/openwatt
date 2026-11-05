@@ -289,6 +289,16 @@ bool compile_spec(const(char)[] spec, ref const LayoutContext ctx, ScaledUnit un
             return true;
         }
 
+        case "enc":
+        {
+            const(Encoding)* enc = name.length ? find_encoding(name) : null;
+            if (!enc || count != 1 || sliced || pre_scale != 1 || unit != ScaledUnit() || enum_info || enc.wire_bytes * 8 != width)
+                return false;
+            desc = SampleDesc(WireLayout(WireKind.char_, 8, 0, image_flags(), wb), 1,
+                              register_format(enc.format), encoding_index_of(*enc));
+            return true;
+        }
+
         case "dt":
         {
             if (!width && !name.length)
@@ -432,6 +442,10 @@ unittest
     assert(compile_spec("dt48:yymmddhhmmss", modbus_context, ScaledUnit(), 1, null, null, d));
     assert(d.enc !is null && d.fmt.type == ValueType.user);
     assert(!compile_spec("dt32:yymmddhhmmss", modbus_context, ScaledUnit(), 1, null, null, d));
+    assert(compile_spec("enc48:yymmddhhmmss", modbus_context, ScaledUnit(), 1, null, null, d));
+    assert(d.enc !is null && d.fmt.type == ValueType.user);
+    assert(!compile_spec("enc16:missing", modbus_context, ScaledUnit(), 1, null, null, d));
+    assert(!compile_spec("enc48:yymmddhhmmss[2]", modbus_context, ScaledUnit(), 1, null, null, d));
     assert(compile_spec("dt", stream_le_context, ScaledUnit(), 1, null, null, d));
     assert(d.enc is null && d.fmt.type == ValueType.user && d.fmt.user_type.name == "dt");
 

@@ -1,0 +1,7225 @@
+{
+  "schema_version": 1,
+  "source_sha256": "481a55285390d6655c6aaf7ccd4c06285e02f010805abde6ada79bcecce77345",
+  "blackout_seconds": 720.177,
+  "es": {
+    "mode_before": 2,
+    "watts_before": 750,
+    "mode_after": 2,
+    "watts_after": 750,
+    "automatic_recovery_observed": false
+  },
+  "sbp": {
+    "fallback": 3,
+    "mode_after": 255,
+    "watts_after": 0,
+    "automatic_recovery_observed": false
+  },
+  "cleanup": "Trial process was interrupted during cleanup; manual cleanup subsequently verified both inverters mode 1, enable=false, normal polling and policies restored, SBP fallback=10. Neither returned to auto on its own.",
+  "limits": "At least 12 minutes without OpenWatt traffic, not proof of infinite hold time. Internal dongle/cloud communication was not disabled.",
+  "events": [
+    {
+      "time": "2026-10-29T13:21:50.243304+00:00",
+      "event": "command",
+      "command": "/apps/energy/policy/set house_battery_surplus disabled=true",
+      "reply": "/apps/energy/policy/set house_battery_surplus disabled=true\n\n[/]> \u001b[K\n"
+    },
+    {
+      "time": "2026-10-29T13:21:50.981401+00:00",
+      "event": "command",
+      "command": "/apps/energy/policy/set cabin_battery_surplus disabled=true",
+      "reply": "/apps/energy/policy/set cabin_battery_surplus disabled=true\n\n[/]> \u001b[K\n"
+    },
+    {
+      "time": "2026-10-29T13:21:51.736028+00:00",
+      "event": "command",
+      "command": "/binding/goodwe-control/set house_dispatch disabled=true",
+      "reply": "/binding/goodwe-control/set house_dispatch disabled=true\n\n[/]> \u001b[K\n"
+    },
+    {
+      "time": "2026-10-29T13:21:52.493616+00:00",
+      "event": "command",
+      "command": "/binding/goodwe-control/set cabin_dispatch disabled=true",
+      "reply": "/binding/goodwe-control/set cabin_dispatch disabled=true\n\n[/]> \u001b[K\n"
+    },
+    {
+      "time": "2026-10-29T13:21:56.233001+00:00",
+      "event": "command",
+      "command": "/binding/modbus/set goodwe_ems disabled=true",
+      "reply": "/binding/modbus/set goodwe_ems disabled=true\n\n[/]> \u001b[K\n"
+    },
+    {
+      "time": "2026-10-29T13:21:56.972338+00:00",
+      "event": "command",
+      "command": "/protocol/goodwe/aa55/set cabin_solar manual=true",
+      "reply": "/protocol/goodwe/aa55/set cabin_solar manual=true\n\n[/]> \u001b[K\n"
+    },
+    {
+      "time": "2026-10-29T13:22:00.754442+00:00",
+      "event": "command",
+      "command": "/protocol/modbus/node/request/write client=mb slave=goodwe_ems reg-type=holding register=47505 values=3",
+      "reply": "/protocol/modbus/node/request/write client=mb slave=goodwe_ems reg-type=holding register=47505 values=3\n\nResponse from goodwe_ems in 44ms: B9910003\n\n  47505: 0003 (3)\n\n[/]> \u001b[K\n"
+    },
+    {
+      "time": "2026-10-29T13:22:01.496587+00:00",
+      "event": "command",
+      "command": "/protocol/modbus/node/request/read client=mb slave=goodwe_ems reg-type=holding register=47505 count=1",
+      "reply": "/protocol/modbus/node/request/read client=mb slave=goodwe_ems reg-type=holding register=47505 count=1\n\nResponse from goodwe_ems in 13ms: 020003\n\n  47505: 0003 (3)\n\n[/]> \u001b[K\n"
+    },
+    {
+      "time": "2026-10-29T13:22:02.277334+00:00",
+      "event": "command",
+      "command": "/protocol/modbus/node/request/write client=mb slave=goodwe_ems reg-type=holding register=47512 values=500",
+      "reply": "/protocol/modbus/node/request/write client=mb slave=goodwe_ems reg-type=holding register=47512 values=500\n\nResponse from goodwe_ems in 13ms: B99801F4\n\n  47512: 01f4 (500)\n\n[/]> \u001b[K\n"
+    },
+    {
+      "time": "2026-10-29T13:22:03.019878+00:00",
+      "event": "command",
+      "command": "/protocol/modbus/node/request/write client=mb slave=goodwe_ems reg-type=holding register=47511 values=11",
+      "reply": "/protocol/modbus/node/request/write client=mb slave=goodwe_ems reg-type=holding register=47511 values=11\n\nResponse from goodwe_ems in 12ms: B997000B\n\n  47511: 000b (11)\n\n[/]> \u001b[K\n"
+    },
+    {
+      "time": "2026-10-29T13:22:03.757423+00:00",
+      "event": "command",
+      "command": "/protocol/modbus/node/request/read client=mb slave=goodwe_ems reg-type=holding register=47511 count=2",
+      "reply": "/protocol/modbus/node/request/read client=mb slave=goodwe_ems reg-type=holding register=47511 count=2\n\nResponse from goodwe_ems in 13ms: 04000B01F4\n\n  47511: 000b_01f4 (i: 721396, f: 1.01089e-39)\n\n[/]> \u001b[K\n"
+    },
+    {
+      "time": "2026-10-29T13:22:04.148449+00:00",
+      "event": "aa55",
+      "request": "aa55b07f033a030202ee0360",
+      "response": "aa550db003ba01060280"
+    },
+    {
+      "time": "2026-10-29T13:22:04.384087+00:00",
+      "event": "aa55",
+      "request": "aa55b07f011a03056e0202c1",
+      "response": "aa550db0019a04000202ee034d"
+    },
+    {
+      "time": "2026-10-29T13:22:04.384435+00:00",
+      "event": "quiet_start",
+      "duration_seconds": 720,
+      "sbp_fallback": 3,
+      "sbp_mode": 11,
+      "sbp_watts": 500,
+      "es_mode": 2,
+      "es_watts": 750
+    },
+    {
+      "time": "2026-10-29T13:22:04.550098+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 0.0,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1506,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 240.3,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 232.926,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 239.851,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.07,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -9.5,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 1
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:22:09.639354+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 5.174,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -2266,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.1,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 959.191,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.545,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.11,
+          "unit": "V",
+          "age": 1
+        },
+        "house_bms.connection.meter.current": {
+          "value": 10.6,
+          "unit": "A",
+          "age": 1
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:22:14.725375+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 10.263,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -2370,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 238.8,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1039.23,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.101,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.13,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": 10.6,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:22:19.859694+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 15.349,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -2328,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 238.8,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1041,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.18,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.14,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": 10.6,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 1
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 1
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:22:24.973684+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 20.483,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -2313,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 238.7,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1033.61,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 236.915,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.14,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": 10.7,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 1
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:22:30.091729+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 25.598,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -2382,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.2,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1072.02,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.319,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.15,
+          "unit": "V",
+          "age": 1
+        },
+        "house_bms.connection.meter.current": {
+          "value": 10.6,
+          "unit": "A",
+          "age": 1
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:22:35.211201+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 30.714,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1774,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.7,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1084.87,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.957,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.16,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": 6.8,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:22:40.378892+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 35.833,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1894,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.5,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1162.14,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.577,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.16,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": 0,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:22:45.471814+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 41.001,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1875,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.6,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1169.64,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.494,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.16,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": 0,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 1
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:22:50.559899+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 46.094,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -2012,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.3,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1227.53,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.263,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.16,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.1,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:22:55.642657+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 51.181,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1876,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.6,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1161.82,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.615,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.16,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": 0,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:23:00.815554+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 56.265,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1875,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.3,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1169.99,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.326,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.16,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": 0,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:23:05.947701+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 61.439,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1884,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.5,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1190.65,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.514,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.16,
+          "unit": "V",
+          "age": 1
+        },
+        "house_bms.connection.meter.current": {
+          "value": 0,
+          "unit": "A",
+          "age": 1
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:23:11.078264+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 66.571,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1898,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.5,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1191.36,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.385,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.16,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": 0,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:23:16.208227+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 71.701,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1897,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.8,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1193.77,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.852,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.16,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": 0,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 1
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 1
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:23:21.322647+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 76.83,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1910,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.8,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1200.38,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.629,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.16,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": 0,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 1
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:23:26.456536+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 81.945,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1818,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.9,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1073,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.223,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.16,
+          "unit": "V",
+          "age": 1
+        },
+        "house_bms.connection.meter.current": {
+          "value": 0,
+          "unit": "A",
+          "age": 1
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:23:31.597883+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 87.079,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1842,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.8,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1130.04,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.877,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.16,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": 0,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:23:36.737893+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 92.22,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1846,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.6,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1128.51,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.65,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.16,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": 0,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:23:41.877668+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 97.359,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1919,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 240.1,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1217.99,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.1,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.16,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": 0,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 1
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:23:46.994788+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 102.5,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1914,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.9,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1211.58,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.915,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.16,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": 0,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:23:52.129677+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 107.618,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1959,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.9,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1233.94,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.75,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.16,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": 0,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 1
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 1
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:23:57.223562+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 112.751,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1984,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.8,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1259.19,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.564,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.16,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": 0,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:24:02.337575+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 117.846,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1961,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.8,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1248.94,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.536,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.16,
+          "unit": "V",
+          "age": 1
+        },
+        "house_bms.connection.meter.current": {
+          "value": 0,
+          "unit": "A",
+          "age": 1
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:24:07.476638+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 122.961,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1822,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.9,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1036.57,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.4,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.16,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": 0,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:24:12.615690+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 128.098,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1815,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.5,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1121.06,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.523,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.16,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": 0,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 1
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 1
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:24:17.754261+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 133.238,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1852,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.6,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1160.31,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.733,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.17,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": 0,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 1
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:24:22.883736+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 138.377,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1737,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.7,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1041.47,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.005,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.17,
+          "unit": "V",
+          "age": 1
+        },
+        "house_bms.connection.meter.current": {
+          "value": 0,
+          "unit": "A",
+          "age": 1
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:24:28.011075+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 143.506,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1740,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.9,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1042.83,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.108,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.17,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": 0,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:24:33.103388+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 148.634,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1727,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.5,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1033.75,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.716,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.17,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": 0,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:24:38.246439+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 153.725,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1737,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.9,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1036.42,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.271,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.17,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": 0,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 1
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:24:43.316262+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 158.868,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1736,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.6,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1034.29,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.895,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.17,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": 0,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:24:48.429610+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 163.937,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1733,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.5,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1035.89,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.803,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.17,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": 0,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:24:53.517698+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 169.052,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1747,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 240.1,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1109.48,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.289,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.17,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.1,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:24:58.637364+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 174.14,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1792,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.5,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1089.38,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.756,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.17,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": 0,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 1
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:25:03.773618+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 179.259,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1779,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.6,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1084.64,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.801,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.18,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": 0,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:25:08.915954+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 184.396,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1795,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.6,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1083.53,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.865,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.18,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": 0,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 1
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 1
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:25:14.043742+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 189.539,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1826,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.4,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1100.43,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.554,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.18,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": 0,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:25:19.185962+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 194.666,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1744,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.3,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1033.73,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.577,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.18,
+          "unit": "V",
+          "age": 1
+        },
+        "house_bms.connection.meter.current": {
+          "value": 0,
+          "unit": "A",
+          "age": 1
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:25:24.324274+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 199.808,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1736,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.4,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1035.36,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.689,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.18,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.1,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:25:29.463364+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 204.947,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1746,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 240.2,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1041.71,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.417,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.18,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.1,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 1
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 1
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:25:34.602285+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 210.085,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1739,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.9,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1037.03,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.156,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.18,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.1,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 1
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:25:39.738444+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 215.224,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1745,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.8,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1034.19,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.101,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.18,
+          "unit": "V",
+          "age": 1
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.1,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:25:44.865339+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 220.36,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1735,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.7,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1034.34,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.042,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.18,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.1,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:25:49.983895+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 225.488,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1743,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.7,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1036.37,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.01,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.18,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.1,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:25:55.114572+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 230.606,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1749,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.9,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1036.26,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.179,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.18,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.1,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 1
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:26:00.314543+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 235.738,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1741,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.6,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1041.5,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.861,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.19,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.1,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:26:05.544120+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 240.936,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1795,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.9,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1042.9,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.057,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.19,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": 0,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:26:10.526376+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 245.965,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1773,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.4,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1070.02,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.594,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.19,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.1,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:26:15.652936+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 251.149,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1797,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.5,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1080.28,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.747,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.19,
+          "unit": "V",
+          "age": 1
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.1,
+          "unit": "A",
+          "age": 1
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:26:20.784497+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 256.274,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1817,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.6,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1096.06,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.78,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.19,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.1,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:26:25.922418+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 261.405,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1802,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.8,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1093.86,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.982,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.19,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.1,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:26:31.036774+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 266.545,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1755,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.6,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1054.29,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.67,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.19,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.1,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 1
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:26:36.162927+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 271.657,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1755,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.7,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1042.41,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.96,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.19,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.1,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:26:41.345895+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 276.784,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1749,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.8,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1035.43,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.024,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.19,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.1,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 1
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 1
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:26:46.471830+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 281.966,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1947,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.3,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1032.87,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.04,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.19,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:26:51.623285+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 287.094,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1820,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.7,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1109.21,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.808,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.19,
+          "unit": "V",
+          "age": 1
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.1,
+          "unit": "A",
+          "age": 1
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:26:56.738393+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 292.245,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1746,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 240.1,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1041.35,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.388,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.19,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.1,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:27:01.876213+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 297.368,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1877,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.8,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1150.09,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.926,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.19,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.1,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 1
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 1
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:27:07.030744+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 302.497,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1839,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 240,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1136.85,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.979,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.2,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.1,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 1
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:27:12.154467+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 307.653,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1904,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.7,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1161.52,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.631,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.2,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.1,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:27:17.269174+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 312.776,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1880,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.8,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1173.8,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.776,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.2,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.1,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:27:22.350775+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 317.89,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1917,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.8,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1232.78,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.679,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.2,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.1,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:27:27.478730+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 322.973,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1927,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 240.1,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1236.66,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.906,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.2,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.1,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 1
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:27:32.615443+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 328.099,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1965,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.7,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1250.42,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.563,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.2,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.1,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:27:37.746361+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 333.235,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1961,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.6,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1262.57,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.411,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.2,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.1,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 1
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 1
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:27:42.881769+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 338.372,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1919,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.5,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1191.01,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.44,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.2,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.1,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:27:47.958646+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 343.509,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1911,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.7,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1192.2,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.573,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.2,
+          "unit": "V",
+          "age": 1
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.1,
+          "unit": "A",
+          "age": 1
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:27:53.050265+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 348.585,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1889,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.5,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1191.33,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.521,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.2,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.1,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:27:58.135869+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 353.671,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1813,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.9,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1131.1,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.047,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.2,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.1,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 1
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 1
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:28:03.254171+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 358.757,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1832,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.7,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1118.05,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.918,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.2,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.1,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:28:08.380909+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 363.874,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1869,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 240.2,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1171.49,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.171,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.2,
+          "unit": "V",
+          "age": 1
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.1,
+          "unit": "A",
+          "age": 1
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:28:13.689941+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 369.005,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1864,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.8,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1167.17,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.857,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.21,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.1,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:28:18.626819+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 374.111,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1877,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.9,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1170.7,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.874,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.21,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.1,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 1
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 1
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:28:23.782922+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 379.255,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1915,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.7,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1186.04,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.634,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.21,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 1
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:28:28.919912+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 384.403,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1838,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.6,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1141.14,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.74,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.21,
+          "unit": "V",
+          "age": 1
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:28:34.034215+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 389.541,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1884,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.8,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1167.82,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.832,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.21,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:28:39.148075+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 394.656,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1933,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.9,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1190.45,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.997,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.21,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:28:44.277768+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 399.767,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1788,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.9,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1089.82,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.041,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.21,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 1
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:28:49.409011+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 404.898,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1820,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.9,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1090.91,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.255,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.21,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.1,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:28:54.513674+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 410.041,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1821,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 240,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1102.17,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.126,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.21,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.1,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 1
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 1
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:28:59.643121+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 415.133,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1739,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 240.1,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1032.02,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.437,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.21,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:29:04.779352+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 420.262,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1728,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 240.2,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1033.24,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.517,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.21,
+          "unit": "V",
+          "age": 1
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 1
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:29:09.906903+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 425.399,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1735,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 240.4,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1042.31,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.626,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.21,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:29:15.049384+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 430.527,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1752,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 240.2,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1040.78,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.554,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.21,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 1
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 1
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:29:20.181233+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 435.669,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1737,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 240.2,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1034.98,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.55,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.21,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 1
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:29:25.301634+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 440.802,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1749,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 240.1,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1033.65,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.504,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.21,
+          "unit": "V",
+          "age": 1
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 1
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:29:30.432463+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 445.922,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1749,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 240,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1034.57,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.315,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.21,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:29:35.593709+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 451.055,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1757,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 240.1,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1035.41,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.385,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.22,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:29:40.730719+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 456.214,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1745,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 240,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1042.28,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.297,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.22,
+          "unit": "V",
+          "age": 1
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 1
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:29:45.846049+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 461.351,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1787,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 240,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1088.88,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.295,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.22,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:29:50.958817+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 466.465,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1739,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 240,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1069.83,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.271,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.22,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 1
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 1
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:29:56.099078+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 471.579,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1743,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 240.7,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1087.26,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 239.043,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.22,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 1
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:30:01.244885+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 476.719,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1793,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 240.1,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1092.17,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.435,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.22,
+          "unit": "V",
+          "age": 1
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 1
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:30:06.367902+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 481.88,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1785,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 240.2,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1093.67,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.519,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.22,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.1,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:30:11.480198+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 486.988,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1708,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 240.1,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1041.52,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.188,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.22,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 1
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 1
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:30:16.615790+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 492.102,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1697,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.8,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1041.6,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.151,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.22,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 1
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:30:21.747532+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 497.236,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1678,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 240.1,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1038.48,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.506,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.22,
+          "unit": "V",
+          "age": 1
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:30:26.875274+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 502.367,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1687,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 240,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1033.55,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.328,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.22,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:30:32.010235+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 507.496,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1668,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 240,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1034.03,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.317,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.22,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:30:37.141128+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 512.63,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1639,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.8,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1003.01,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.367,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.22,
+          "unit": "V",
+          "age": 1
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 1
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:30:42.277672+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 517.762,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1668,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.9,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1010.3,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.269,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.22,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:30:47.390132+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 522.897,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1647,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 240.2,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1007.72,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.608,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.22,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 1
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 1
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:30:52.525399+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 528.01,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1651,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 240,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1004.38,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.457,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.22,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:30:57.655344+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 533.145,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1707,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 240.2,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1042.51,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.656,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.22,
+          "unit": "V",
+          "age": 1
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 1
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:31:02.796763+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 538.276,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1813,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.9,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1054.58,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.278,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.22,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:31:07.936685+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 543.417,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1815,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.6,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1046.82,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.989,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.22,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:31:13.066802+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 548.555,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1824,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 240,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1071.15,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.247,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.22,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 1
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:31:18.194585+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 553.685,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1847,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.8,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1069.7,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.201,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.23,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:31:23.318149+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 558.815,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1878,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.9,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1074.19,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.265,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.23,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 1
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 1
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:31:28.458765+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 563.937,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1854,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.9,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1117.27,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.11,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.23,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:31:33.594410+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 569.077,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1903,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 240.1,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1119.14,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.264,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.23,
+          "unit": "V",
+          "age": 1
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 1
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 1
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 1
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 1
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:31:38.730884+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 574.214,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1891,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.8,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1117.46,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.993,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.23,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:31:43.864390+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 579.348,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1898,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.8,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1157.33,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.857,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.23,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:31:49.002114+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 584.482,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1912,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.7,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1159.38,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.785,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.23,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 1
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:31:54.131427+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 589.621,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1902,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.6,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1160.96,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.824,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.23,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.3,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:31:59.264773+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 594.75,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1900,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.8,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1160.56,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.656,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.23,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:32:04.404035+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 599.883,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1909,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.6,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1159.88,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.613,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.23,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:32:09.538499+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 605.022,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1905,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.7,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1144.41,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.8,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.23,
+          "unit": "V",
+          "age": 1
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 1
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:32:14.655551+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 610.158,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1909,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.6,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1153.98,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.701,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.23,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:32:19.789315+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 615.274,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1970,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.8,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1180.93,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.792,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.23,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 1
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 1
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:32:24.930367+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 620.409,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1953,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.7,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1194.2,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.722,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.23,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 1
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:32:30.051823+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 625.549,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1884,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.7,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1141.16,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.85,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.23,
+          "unit": "V",
+          "age": 1
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 1
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:32:35.358116+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 630.671,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1898,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.8,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1156.25,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.901,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.23,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:32:40.290681+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 635.777,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1907,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.6,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1164.85,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.546,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.23,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 1
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 1
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:32:45.425112+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 640.908,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1915,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.8,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1168.3,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.757,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.23,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 1
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:32:50.533510+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 646.042,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1914,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.7,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1162.36,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.786,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.23,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:32:55.650858+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 651.157,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1810,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.7,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1074.91,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.944,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.23,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:33:00.787424+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 656.269,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1859,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.4,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1122.4,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.591,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.24,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:33:05.921377+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 661.405,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1756,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.5,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1001.28,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.957,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.24,
+          "unit": "V",
+          "age": 1
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 1
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 1
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 1
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 1
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:33:11.045178+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 666.539,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1754,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.7,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1010.48,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 238.091,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.24,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:33:16.192254+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 671.662,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1746,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.5,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1007.4,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.957,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.24,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 1
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 1
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:33:21.494452+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 676.812,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1786,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.4,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1046.21,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.712,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.24,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 1
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:33:26.417122+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 681.911,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1788,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.6,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1043.27,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.786,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.24,
+          "unit": "V",
+          "age": 1
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 1
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:33:31.555565+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 687.036,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1803,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.4,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1057,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.625,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.24,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:33:36.694934+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 692.174,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1806,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.5,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1062.15,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.776,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.24,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:33:41.831210+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 697.313,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1809,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.2,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1069.48,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.537,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.24,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 1
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:33:46.957756+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 702.448,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1773,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.4,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1006.73,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.837,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.24,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:33:52.085426+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 707.575,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1753,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.2,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1001.35,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.65,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.24,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 1
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 1
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:33:57.226374+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 712.709,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1744,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.4,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1000.79,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.783,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.24,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 0
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:34:02.363947+00:00",
+      "event": "independent_sample",
+      "elapsed_seconds": 717.843,
+      "data": {
+        "goodwe_meter.meter1.power": {
+          "value": -1735,
+          "unit": "W",
+          "age": 0
+        },
+        "goodwe_meter.meter1.voltage": {
+          "value": 239.5,
+          "unit": "V",
+          "age": 0
+        },
+        "cabin_meter.meter_1.power": {
+          "value": 1000.91,
+          "unit": "W",
+          "age": 0
+        },
+        "cabin_meter.meter_1.voltage": {
+          "value": 237.992,
+          "unit": "V",
+          "age": 0
+        },
+        "house_bms.connection.meter.voltage": {
+          "value": 52.24,
+          "unit": "V",
+          "age": 1
+        },
+        "house_bms.connection.meter.current": {
+          "value": -0.2,
+          "unit": "A",
+          "age": 1
+        },
+        "house_bms.connection.store.soc": {
+          "value": 34,
+          "unit": "%",
+          "age": 0
+        },
+        "house_bms.bms.protection": {
+          "value": 0,
+          "age": 0
+        },
+        "house_bms.bms.alarm": {
+          "value": 0,
+          "age": 0
+        }
+      }
+    },
+    {
+      "time": "2026-10-29T13:34:04.568063+00:00",
+      "event": "quiet_end",
+      "elapsed_seconds": 720.177282300021
+    },
+    {
+      "time": "2026-10-29T13:34:05.155632+00:00",
+      "event": "aa55",
+      "request": "aa55b07f011a03056e0202c1",
+      "response": "aa550db0019a04000202ee034d"
+    },
+    {
+      "time": "2026-10-29T13:34:05.156082+00:00",
+      "event": "es_mode_after_quiet",
+      "words": "000202ee"
+    },
+    {
+      "time": "2026-10-29T13:34:05.957553+00:00",
+      "event": "command",
+      "command": "/protocol/modbus/node/request/read client=mb slave=goodwe_ems reg-type=holding register=47511 count=2",
+      "reply": "/protocol/modbus/node/request/read client=mb slave=goodwe_ems reg-type=holding register=47511 count=2\n\nResponse from goodwe_ems in 13ms: 0400FF0000\n\n  47511: 00ff_0000 (i: 16711680, f: 2.34181e-38)\n\n[/]> \u001b[K\n"
+    },
+    {
+      "time": "2026-10-29T13:34:06.679465+00:00",
+      "event": "command",
+      "command": "/protocol/modbus/node/request/read client=mb slave=goodwe_ems reg-type=holding register=47505 count=1",
+      "reply": "/protocol/modbus/node/request/read client=mb slave=goodwe_ems reg-type=holding register=47505 count=1\n\nResponse from goodwe_ems in 13ms: 020003\n\n  47505: 0003 (3)\n\n[/]> \u001b[K\n"
+    },
+    {
+      "time": "2026-10-29T13:34:07.466595+00:00",
+      "event": "command",
+      "command": "/protocol/modbus/node/request/read client=mb slave=goodwe_ems reg-type=holding register=35187 count=1",
+      "reply": "/protocol/modbus/node/request/read client=mb slave=goodwe_ems reg-type=holding register=35187 count=1\n\nResponse from goodwe_ems in 13ms: 020000\n\n  35187: 0000 (0)\n\n[/]> \u001b[K\n"
+    },
+    {
+      "time": "2026-10-29T13:34:07.829964+00:00",
+      "event": "aa55",
+      "request": "aa55b07f033a03010000026f",
+      "response": "aa550db003ba01060280"
+    },
+    {
+      "time": "2026-10-29T13:34:08.581530+00:00",
+      "event": "command",
+      "command": "/protocol/modbus/node/request/write client=mb slave=goodwe_ems reg-type=holding register=47511 values=1",
+      "reply": "/protocol/modbus/node/request/write client=mb slave=goodwe_ems reg-type=holding register=47511 values=1\n\nResponse from goodwe_ems in 13ms: B9970001\n\n  47511: 0001 (1)\n\n[/]> \u001b[K\n"
+    },
+    {
+      "time": "2026-10-29T13:34:09.332997+00:00",
+      "event": "command",
+      "command": "/protocol/modbus/node/request/write client=mb slave=goodwe_ems reg-type=holding register=47512 values=0",
+      "reply": "/protocol/modbus/node/request/write client=mb slave=goodwe_ems reg-type=holding register=47512 values=0\n\nResponse from goodwe_ems in 13ms: B9980000\n\n  47512: 0000 (0)\n\n[/]> \u001b[K\n"
+    },
+    {
+      "time": "2026-10-29T13:34:10.134039+00:00",
+      "event": "command",
+      "command": "/protocol/modbus/node/request/write client=mb slave=goodwe_ems reg-type=holding register=47505 values=10",
+      "reply": "/protocol/modbus/node/request/write client=mb slave=goodwe_ems reg-type=holding register=47505 values=10\n\nResponse from goodwe_ems in 64ms: B991000A\n\n  47505: 000a (10)\n\n[/]> \u001b[K\n"
+    },
+    {
+      "time": "2026-10-29T13:34:10.906010+00:00",
+      "event": "command",
+      "command": "/binding/modbus/set goodwe_ems disabled=false",
+      "reply": "/binding/modbus/set goodwe_ems disabled=false\n\n[/]> \u001b[K\n"
+    }
+  ],
+  "public_record_redaction": "Private LAN addresses, MACs and serial identifiers are pseudonymized. Encoded identity bytes may be substituted, so affected historical frames are not checksum-valid replay fixtures. Private captures and WLAN credentials are excluded."
+}

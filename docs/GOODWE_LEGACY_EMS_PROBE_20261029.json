@@ -1,0 +1,55 @@
+{
+  "target": "cabin_solar real inverter 192.0.2.28:8899",
+  "read_only": true,
+  "results": [
+    {
+      "request": "f703056e0002b18c",
+      "response": "aa55f70304000100003dfc",
+      "wait_seconds": 1.6,
+      "timestamp_utc": "2026-10-28T16:21:51.691035+00:00"
+    },
+    {
+      "request": "f703056e0001f18d",
+      "response": "aa55f703020001b191",
+      "wait_seconds": 1.6,
+      "timestamp_utc": "2026-10-28T16:21:54.891713+00:00"
+    },
+    {
+      "request": "f703056f0001a04d",
+      "response": "aa55f7030200007051",
+      "wait_seconds": 1.6,
+      "timestamp_utc": "2026-10-28T16:21:58.115045+00:00"
+    },
+    {
+      "request": "aa55b07f011a03056e0202c1",
+      "response": "aa550db0019a0400010000025c",
+      "wait_seconds": 1.6,
+      "timestamp_utc": "2026-10-28T16:22:01.315269+00:00"
+    },
+    {
+      "request": "aa55b07f011a03056e0102c0",
+      "response": "aa550db0019a020001025a",
+      "wait_seconds": 1.6,
+      "timestamp_utc": "2026-10-28T16:22:04.552570+00:00"
+    },
+    {
+      "request": "aa55b07f011a03056f0102c1",
+      "response": "aa550db0019a0200000259",
+      "wait_seconds": 1.6,
+      "timestamp_utc": "2026-10-28T16:22:07.751907+00:00"
+    },
+    {
+      "request": "aa55b07f011a0305502502c6",
+      "response": "aa550db0019a4a0000000000000000000000000001000100010001000a0064023001f401f401c20014000f005a021401f4001e007b1388000000000000023f00000007000100000000000000000000000008f7",
+      "wait_seconds": 1.6,
+      "timestamp_utc": "2026-10-28T16:22:10.994895+00:00"
+    },
+    {
+      "request": "aa55b07f0109000238",
+      "response": "aa550db00189560000000000000000000000000001000100010001000a006402300085004001c20014000f000000000000005a021401f4001e007b1388000000000000023f00000007000000000000000101f401f401b800140000000c0a90",
+      "wait_seconds": 1.6,
+      "timestamp_utc": "2026-10-28T16:22:14.366055+00:00"
+    }
+  ],
+  "public_record_redaction": "Private LAN addresses, MACs and serial identifiers are pseudonymized. Encoded identity bytes may be substituted, so affected historical frames are not checksum-valid replay fixtures. Private captures and WLAN credentials are excluded."
+}

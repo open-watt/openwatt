@@ -333,7 +333,7 @@ nothrow @nogc:
             table.cell(p.name[]);
             table.cell(p.target);
 
-            Control* ctl = registry.lookup(p.target_appliance);
+            Control* ctl = registry.lookup(p.target_appliance, p.control);
             table.cell(ctl !is null && ctl.partner !is null ? ctl.partner.name[] : "-");
             table.cell(enum_key_from_value!PolicyTier(p.tier));
             table.cell(p.goal);

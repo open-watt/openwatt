@@ -804,3 +804,158 @@ Two behaviours worth knowing while planning views: energy counters do not bridge
 and energy moved while a meter was both silent and reset is lost to the daily account), and
 diffuse sink energy is deliberately not integrated, because sinks have no counters and
 integrating inferred power would fabricate data.
+
+
+## 2026-11-05 GoodWe integration and watchdog
+
+- Migrate the GoodWe client and server CLI collections to `/protocol/goodwe/client`
+  and `/protocol/goodwe/server`, with runtime types `goodwe-client` and
+  `goodwe-server`. The binding is `/binding/goodwe`.
+- Render the `Watchdog` child of each PowerControl independently. Its writable
+  `feed` counter renews ownership, `scope` distinguishes controller/device,
+  `timeout` and `remaining` are seconds, and `expiry_action` describes the
+  declared scope. `device_expiry_action=unknown` carries no hardware guarantee.
+- Support the two-state writable GoodWe strategy enum `autonomous|continuous`
+  and separate `enable` control. An autonomous release result can report a
+  request or register readback while physical recovery is still unverified.
+- Consume communication-module firmware/network readbacks and their aliases
+  under `config.communication.wlan_lan`. Preserve unavailable values.
+- Replace house `communication_loss_response` with `manufacturer_ems_code_raw`.
+  Show native application mode separately from EMS mode and physical grid state.
+- Energy policies can select a relative `control` path for multiple surfaces.
+
+- GoodWe TOU editors stage `start_hour`, `start_minute`, `end_hour`, `end_minute`,
+  `enabled_raw`, `weekdays`, signed-percent `power` and `cutoff_soc`, then increment
+  the slot's `apply` counter. Render Save against this counter. Individual field
+  changes do not commit a slot. Show `status.config_write.result` for validation
+  and readback failures.
+- GoodWe module status adds `server1_status`, `server2_status` and packet counters.
+  Server status is text because the native response supports numeric codes and
+  text. Preserve unknown native status text.
+
+- Native GoodWe TOU editors add `months` as a12-bit January–December mask and
+  use enable flags6/249. Stage all fields and increment `apply` to save.
+  Show `power` in percent; its wire scaling differs from the legacy ES record.
+
+- The native GoodWe profile follows the SPN app hierarchy. Move its former
+  `config.advanced.battery_function` fields into `config.battery_function.parameters`
+  and `config.battery_function.limit_protection`. Backup enable/detection/holding
+  appear under `config.basic.backup`. Load and generator controls live under
+  `config.port_connection`. These native paths do not change the ES app hierarchy.
+- Generator prohibited-time editors expose six staged fields and an `apply`
+  counter. Enable is0/255. Render two periods independently. `mode_raw` and the
+  battery-dependent SOC/voltage thresholds remain explicitly raw/read-only.
+
+- Render GoodWe action counters as buttons that increment a request value.
+  Native AFCI self-test/clear and backup cold-start/cancel/overload clear, plus
+  legacy overload clear, use this contract. Show ACK and physical status as
+  separate results. An `acknowledged` command does not establish completion.
+
+- GoodWe: render `config.advanced.safety.curves.{reactive_qu,cos_qu,active_pu}_seconds`
+  as bounded0–60s writable values; preserve raw coefficient diagnostics. Native
+  `safety.voltage_ride_through.uvN_{voltage,cycles}` adds seven model/country
+  stages;6/7 are Sri Lanka-only and are sampled on demand. The hidden
+  `status.protocol.native` byte snapshots are protocol diagnostics, not UI rows.
+
+- GoodWe: add native `config.basic.self_use` backup/grid charging and Smart Charge
+  fields; represent its start-time hour/minute as a staged pair with `apply`.
+  `config.battery_function.immediate_charge` stages stop SOC, power and enable;
+  expose its separate stop action. TOU and generator periods now also offer
+  delete request counters. An ordered sequence can partially complete before
+  failure; show the pending/result elements and do not imply rollback.
+- Native LVRT/HVRT enable booleans share45499 and preserve each other's bits.
+  Show country-specific UV-stage visibility and explicit cycles units accurately.
+
+- Native GoodWe frequency-response slopes now accept signed values: of/uf
+  −100–100%, recovery−100–200%. Preserve percent scaling; the legacy ES decoder
+  remains unsigned because its active app fragment uses a different read path.
+
+- GoodWe server has an optional `upstream` client reference. Label it as real
+  request/write forwarding; unset means Device-backed serving. Show failures
+  without treating a forwarded ACK as verified Device configuration. Existing
+  producer sampling still determines Device freshness.
+
+- GoodWe shared schedule records now expose a state enum; render typed fields as
+  unavailable when a slot contains another record kind. TOU delete is guarded by
+  that kind. Smart Charge month/peak/start-time writes preserve the complete
+  tagged record. Do not display unavailable fields as zero or provide a TOU form
+  for an occupied load/peak record without an explicit replacement workflow.
+
+- Native GoodWe reserve_pair has staged on/off-grid minimum SOC plus apply.
+  Show minimum SOC consistently (20% means80% DoD); apply writes both in one
+  transaction while preserving the intervening voltage. ACK/readback is not
+  persistence. Keep the existing individual reserve controls distinguishable.
+
+- Native GoodWe config.basic.peak_shaving is a staged period editor, with apply,
+  typed shared-record state, kW purchase ceiling and reserve SOC. It writes five
+  words and leaves the Smart Charge month word untouched. Keep period save
+  separate from working-mode activation; do not label it an activated mode.
+
+- GoodWe native TOU time1–time7 are physical slots, not seven allowed logical
+  groups. Filter by shared-record state, allow at most four TOU groups, and
+  handle the bank-preflight limit failure without treating empty slots as zero
+  configuration. Smart/peak use the eighth record; load allocation differs.
+
+- GoodWe native: render `config.advanced.safety.reactive_selection` as one staged
+  four-field form with an `apply` counter. PF has two valid ranges, negative
+  leading−0.99–−0.80 and positive lagging0.80–1.00 in0.01 steps. Q is signed
+  −60–60%; mutually exclusive curve/PF/Q selections fail before submission.
+  The old native `curves.cos_curve` is read-only. Preserve edits made while a
+  transaction is active as staged values for the next apply; the active command
+  uses its original snapshot. Report failures without implying rollback.
+
+- GoodWe native: render `config.basic.working_mode.requested_mode` as a staged
+  Self-use/Peak selector with `apply`. Activation clears external setpoint,
+  disables TOU and changes the shared peak tag; it is distinct from opening an
+  editor and is not verified watchdog release. Render the eight physical
+  `config.port_connection.load.timeN` forms with standard/intelligent tags,
+  guarded delete and a combined four-group limit. Intelligent apply disables
+  export limiting first. Show partial failure without implying rollback.
+
+- GoodWe reported GW6000ES20: add the fourteen-field staged
+  `config.basic.battery_model.selection` form for its single-battery low745 path.
+  Preserve catalogue protocol/index pairing, show reserves as minimum SOC, and
+  label `current_coefficient_raw` as coefficient×100. This form writes electrical
+  limits and both reserves; it is distinct from changing only a displayed model.
+- GoodWe native: render `config.communication.wlan_lan.configure` as a staged
+  network/router form and `.password` as a separate WLAN-password form. Mask
+  write-only inputs, retain newer drafts during active apply, and do not treat
+  ACK as successful reconnection. The client remote address remains separately
+  configured. Module-generation/HTTP applicability must be explicit.
+
+- Legacy GW5048D-ES: render `config.basic.working_mode.activation` as staged
+  General/Off-grid/Backup/TOU with apply, distinct from the read-only current mode.
+  Its firmware applicability and side effects differ from native Self-use/Peak.
+  Mode apply does not transfer energy-manager ownership or prove watchdog release.
+  Native serial configuration uses address1–247 and five discrete745 baud rates;
+  unsupported rates are rejected before a write.
+
+- Both GoodWe profiles: `config.communication.apn` is a staged write-only ordinary
+  UDP name plus apply. Empty name means clear; maximum48 bytes. Do not present
+  the cloud/BLE150-byte form as equivalent or infer fitted cellular hardware from
+  a visible menu. Hidden `status.protocol` wire images are observed state, while
+  staged configuration forms are requested values; the proxy excludes drafts.
+- Text element writes now accept the runtime's boxed empty-string/null value as
+  an empty, present string. Use this for clearing APN/text inputs; unknown/unset
+  state still comes from element validity, not from an empty string's box type.
+- ES `config.advanced.cold_start.enable_request` and `.disable_request` are action
+  counters with ACK-only outcomes. Render explicit enable/cancel actions and the
+  backup-supply prerequisite; do not display the counters as actual cold-start state.
+- ES `config.meter_ct_detection.status_code` and `.result_code` now expose the
+  two-word059C test readback. Keep codes available without treating them as test
+  completion or enabling a test; model-specific result decoding is separate.
+- ES meter/CT detection now adds `start_request` and `stop_request` counters.
+  Render explicit actions and the app's battery-discharge/power-limiting notice;
+  require separate confirmation in the UI before starting. ACK means command
+  accepted, while status/result words determine waiting, checking or completion.
+- Protocol parser rejection now fails the whole profile load. Surface the binding
+  load error and invalid field/root diagnostic; do not expect a partial Device
+  to appear after a rejected descriptor. This affects all profile-backed bindings.
+- Native GoodWe `status.alarms` now exposes page_count and a staged page fetch:
+  set page.requested_index, increment page.apply, then inspect result and verified
+  page.index. Render record1..8 newest first, retain their sample age after a
+  failed fetch, and hide invalidated rows after empty history. main_code,
+  subcode_mask and detail_word are catalogue inputs; no fault-label resolver is
+  supplied. Avoid parallel readers of the inverter's shared history cursor.
+- Expression `!=` now performs inequality; it previously parsed as equality.
+  Audit client-provided conditions that relied on the previous incorrect result.

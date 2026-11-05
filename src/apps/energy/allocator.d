@@ -5,12 +5,15 @@ import urt.lifetime;
 import urt.mem;
 import urt.mem.temp : tconcat;
 import urt.si.quantity : Amps, VarQuantity, Watts;
+import urt.si.unit : Watt, ScaledUnit;
 import urt.string;
 import urt.time;
+import urt.variant;
 
 import apps.energy.appliance;
 import apps.energy.control;
 import apps.energy.meter : MeterData, MeterField;
+import apps.energy.model : read_in_unit;
 import apps.energy.planner;
 import apps.energy.policy;
 import apps.energy.topology;
@@ -54,7 +57,7 @@ void run_allocator(Device energy_device, ControlRegistry registry, ref Planner p
     foreach (ref r; queue)
     {
         Policy p = r.p;
-        Control* ctl = registry.lookup(p.target_appliance);
+        Control* ctl = registry.lookup(p.target_appliance, p.control);
         if (ctl is null)
         {
             record_decision(energy_device, p, no_control_reason(p.target_appliance), float.nan, now);
@@ -63,6 +66,11 @@ void run_allocator(Device energy_device, ControlRegistry registry, ref Planner p
         if (ctl.setpoint_e is null && ctl.enable_e is null)
         {
             record_decision(energy_device, p, "no actuator element", float.nan, now, null, ctl);
+            continue;
+        }
+        if (ctl.available_e && (!ctl.available_e.value.isBool || !ctl.available_e.value.asBool))
+        {
+            record_decision(energy_device, p, "control unavailable", float.nan, now, null, ctl);
             continue;
         }
         if (control_already_driven(driven, ctl))
@@ -103,7 +111,7 @@ void run_allocator(Device energy_device, ControlRegistry registry, ref Planner p
                     record_decision(energy_device, p, block_off, float.nan, now, &ctx, ctl);
                     continue;
                 }
-                float off_cmd = release_control(*ctl, now, mt);
+                float off_cmd = release_control(*ctl, now, mt, true);
                 record_decision(energy_device, p, off_cmd == off_cmd && off_cmd > 0 ? "off (parked at min)"
                                                                   : "off",
                                 off_cmd, now, &ctx, ctl);
@@ -149,8 +157,13 @@ void run_allocator(Device energy_device, ControlRegistry registry, ref Planner p
                 float draw_watts = float.nan;
                 if (p.tier == PolicyTier.opportunistic)
                 {
-                    draw_watts = appliance_draw_watts(graph, p.target_appliance);
+                    draw_watts = ctl.measured_power_e ? read_in_unit(ctl.measured_power_e, ScaledUnit(Watt)) : appliance_draw_watts(graph, p.target_appliance);
                     float surplus = surplus_remaining(surplus_pools, ctx.path.source_bus);
+                    if (surplus != surplus)
+                    {
+                        record_decision(energy_device, p, "export meter unavailable", float.nan, now, &ctx, ctl);
+                        continue;
+                    }
                     if (surplus == surplus)
                     {
                         float budget_watts = (draw_watts == draw_watts ? draw_watts : 0) + surplus;
@@ -172,7 +185,7 @@ void run_allocator(Device energy_device, ControlRegistry registry, ref Planner p
                         else if (ctl.unit == ControlUnit.W)
                         {
                             float min_watts = ctl.min;
-                            if (budget_watts < (min_watts == min_watts ? min_watts : 0))
+                            if (budget_watts <= 0 || budget_watts < (min_watts == min_watts ? min_watts : 0))
                             {
                                 record_decision(energy_device, p, "no surplus", float.nan, now, &ctx, ctl);
                                 continue;
@@ -300,6 +313,14 @@ void run_allocator(Device energy_device, ControlRegistry registry, ref Planner p
             continue;
         release_control(ctl, now, mt_release);
     }
+    foreach (ref ctl; registry.by_surface.values)
+    {
+        if (ctl.current_setpoint != ctl.current_setpoint)
+            continue;
+        if (control_already_driven(driven, &ctl))
+            continue;
+        release_control(ctl, now, mt_release);
+    }
 }
 
 
@@ -349,15 +370,18 @@ float bus_export_watts(Bus* bus)
 {
     if (bus is null)
         return float.nan;
+    float total = 0;
+    bool metered;
     foreach (p; bus.ports[])
     {
-        if (p.role != PortRole.grid)
+        if (!external_boundary(p))
             continue;
         if (!p.meter_data.has(MeterField.power))
             return float.nan;
-        return -p.meter_data.active[0].value;
+        total -= p.meter_data.active[0].value;
+        metered = true;
     }
-    return float.nan;
+    return metered ? total : float.nan;
 }
 
 float appliance_draw_watts(ref TopologyGraph graph, Appliance target)
@@ -365,8 +389,8 @@ float appliance_draw_watts(ref TopologyGraph graph, Appliance target)
     if (target is null)
         return float.nan;
     foreach (p; graph.ports[])
-        if (p.owner is target && p.bus !is null && p.meter_data.has(MeterField.power))
-            return absf(p.meter_data.active[0].value);
+        if (p.owner is target && p.bus !is null && (p.role == PortRole.grid || p.role == PortRole.connection) && p.meter_data.has(MeterField.power))
+            return p.meter_data.active[0].value;
     return float.nan;
 }
 
@@ -437,8 +461,8 @@ const(char)[] setpoint_change_block_reason(ref const Control ctl, float desired,
     if (!current_nan && desired == desired && ctl.current_setpoint == desired)
         return null;
 
-    bool current_on = !current_nan && ctl.current_setpoint > 0;
-    bool desired_on = desired == desired && desired > 0;
+    bool current_on = !current_nan && ctl.current_setpoint != 0;
+    bool desired_on = desired == desired && desired != 0;
     Duration elapsed = now - ctl.last_transition;
 
     if (ctl.min_dwell != Duration.zero && elapsed < ctl.min_dwell)
@@ -571,16 +595,24 @@ VarQuantity unit_quantity(ref Control ctl, double value)
     return VarQuantity(value);
 }
 
-float drive_control(ref Control ctl, VarQuantity value, SysTime now, MonoTime mt)
+float drive_control(ref Control ctl, const VarQuantity value, SysTime now, MonoTime mt)
 {
-    bool was_on = ctl.current_setpoint > 0;
+    bool was_on = ctl.current_setpoint == ctl.current_setpoint && ctl.current_setpoint != 0;
+    if (ctl.kind_e && (ctl.kind_e.access & Access.write) && ctl.kind != ControlKind.continuous)
+    {
+        Variant requested = Variant("continuous");
+        if (ctl.kind_e.try_set(requested, now).length)
+            return float.nan;
+    }
     if (ctl.enable_e !is null)
         ctl.enable_e.value(true, now);
+    if (ctl.watchdog_feed_e !is null && (ctl.watchdog_feed_e.access & Access.write))
+        ctl.watchdog_feed_e.value(cast(uint)(ctl.watchdog_feed_e.value.asLong + 1), now);
     float commanded = 1;
     if (ctl.setpoint_e !is null && value.value == value.value)
     {
-        ctl.setpoint_e.value(value, now);
         commanded = cast(float)value.normalise().value;
+        ctl.setpoint_e.value(value, now);
     }
     if (!was_on)
         ctl.last_on = mt;
@@ -603,7 +635,7 @@ bool setpoint_already(ref const Control ctl, VarQuantity target)
     return (d < 0 ? -d : d) <= 1e-6;
 }
 
-float release_control(ref Control ctl, SysTime now, MonoTime mt)
+float release_control(ref Control ctl, SysTime now, MonoTime mt, bool disable = false)
 {
     if (ctl.setpoint_e is null && ctl.enable_e is null)
     {
@@ -615,6 +647,18 @@ float release_control(ref Control ctl, SysTime now, MonoTime mt)
 
     float left_at = 0;
     bool wrote;
+    if (!disable && ctl.kind_e && (ctl.kind_e.access & Access.write))
+    {
+        if (ctl.kind != ControlKind.autonomous)
+        {
+            Variant requested = Variant("autonomous");
+            if (ctl.kind_e.try_set(requested, now).length)
+                return float.nan;
+            ctl.last_transition = mt;
+        }
+        ctl.current_setpoint = float.nan;
+        return float.nan;
+    }
     if (ctl.enable_e !is null)
     {
         const(Element)* e = ctl.enable_e;
@@ -630,7 +674,7 @@ float release_control(ref Control ctl, SysTime now, MonoTime mt)
         bool has_min = mn.value == mn.value;
         VarQuantity target;
         bool have_target;
-        if (ctl.enable_e is null && ctl.can_disable)
+        if (ctl.can_disable && (ctl.enable_e is null || ctl.direction == ControlDirection.bidirectional))
         {
             target = unit_quantity(ctl, 0);
             have_target = true;

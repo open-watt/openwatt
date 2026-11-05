@@ -1,0 +1,115 @@
+{
+  "schema_version": 1,
+  "date_local": "2026-11-06",
+  "target": "SPN / GW6000ES20 / DSP04048-11-S03 / ARM02020-12-S01",
+  "app": "SolarGo7.2.2/build1521",
+  "physical_scope": "Guarded read-only native and module forwarding. An independent relay rejects every write. Private packet capture and identities excluded.",
+  "physical_reads": {
+    "read_requests": 150,
+    "timeouts": 1,
+    "modbus_exceptions": 0,
+    "write_attempts": 0,
+    "proxy_identity_override": true,
+    "module_firmware_forwarding": true
+  },
+  "emulator": {
+    "configuration_seconds": 254.252,
+    "proxy_seconds": 94.348,
+    "passed": true,
+    "cases": [
+      "FC03/04/06/16 forwarding",
+      "upstream exception propagation",
+      "vendor AA55 source/destination restoration",
+      "5A5A-v1 packet classification despite shared Modbus CRC",
+      "distinct app-peer correlation",
+      "proxy identity override",
+      "upstream client destruction/recreation",
+      "upstream removal returns to Device serving",
+      "sixteen-request overflow exception10",
+      "cancellation with pending requests",
+      "Tagged Smart Charge mismatch rejects write",
+      "Guarded TOU delete rejects load record",
+      "Full96-byte shared schedule proxy read preserves unavailable typed fields",
+      "Family2 forwarding rejects mismatched family1 reply",
+      "Staged paired minimum-SOC FC16 preserves intervening discharge-voltage word",
+      "Native peak five-word apply leaves Smart Charge month word untouched",
+      "Seven physical TOU editors: reject a fifth group, then create in freed physical slot5 while preserving other records",
+      "Native reactive transitions neutralize conflicting modes before activation",
+      "Reject conflicting curves, invalid PF ranges and unsupported precision before writes",
+      "Abort reactive activation on a rejected neutralization step",
+      "Edits during active staged apply remain pending for the next immutable snapshot",
+      "Native Self-use/Peak ordered activation; rejected write/readback mismatch aborts",
+      "ESU DSP23/ARM14 General/Off-grid/Backup/TOU ordering; Off-grid selectors encode0030/04 with repliesA7/A6",
+      "ES First Cold Start enable04/cancel01 commands requireA6 ACK",
+      "ES meter/CT status/result words read independently from059C/count2",
+      "Realtime-load fixture asserts repeated function1/3 traffic and rejects profile parser warnings",
+      "Eight standard/intelligent load editors, shared four-group bank limit and verified export-limiter prelude",
+      "Low745 fourteen-field catalogue selection, complete seven-write sequence and pre-write validation",
+      "Module network/router and WLAN-password staged payloads, abort before reload after failed ACK, write-only input cleanup",
+      "Native address range and discrete U32 FC16 baud encoding",
+      "Ordinary UDP APN fifty-byte apply and clear; oversized input rejects before writes",
+      "Text element boxed empty-string/null accepted without invalidating the element",
+      "Proxy excludes staged/write-only forms and preserves authoritative read-only wire snapshots",
+      "ES meter/CT start1 and stop0 fixed vendor commands require ACK; rejected start does not store",
+      "Malformed schedule metadata is rejected by the profile loader without creating a writable Device element",
+      "Native history count/cursor/window/verified cursor publication",
+      "Native history invalid index, cursor rejection, drift and empty invalidation",
+      "Unix seconds decoded to Device timestamps",
+      "Console numeric inequality semantics; string unit cases compile"
+    ]
+  },
+  "mode3_capability": {
+    "address": 36212,
+    "count": 1,
+    "response_hex": "aa55f7830220c3",
+    "result": "Unsupported register02. App retains default false and eight-slot layout."
+  },
+  "limits": [
+    "No physical configuration writes",
+    "No deployment",
+    "No firmware-transfer validation",
+    "No persistence or physical dispatch/failover proof",
+    "Family2 password ACK shape and change/reload sequence are simulated; no physical credential validation"
+  ],
+  "schedule_bank_observation": {
+    "address": 47547,
+    "count": 48,
+    "captured_app_reads": 4,
+    "captured_valid_96_byte_replies": 4,
+    "latest_guarded_smoke": "Timed out once; separate47589/count6 read succeeded. Do not infer universal register support or guaranteed delivery."
+  },
+  "latest_physical_registers": {
+    "ems_mode_and_setpoint_47511": [
+      1,
+      0
+    ],
+    "application_mode_47000": 5,
+    "manufacturer_raw_47505": 10,
+    "interpretation": "Readback only; no dispatch, watchdog-release or physical power-flow claim"
+  },
+  "physical_schedule_bank_reads": [
+    {
+      "address": 47547,
+      "count": 48,
+      "reply_length": 103
+    },
+    {
+      "address": 47547,
+      "count": 42,
+      "reply_length": 91
+    }
+  ],
+  "emulator_updated_date_local": "2026-11-07",
+  "full_unit_suite": "Windows unit build succeeds; runtime blocked at existing manager.console.command:626 get_temp_filename assertion; new profile unit cases compile but are not reached",
+  "native_alarm_app_validation": {
+    "date_local": "2026-11-07",
+    "scope": "SolarGo7.2.2 on loopback-only mutable fixture; no upstream socket",
+    "requests": [
+      "FC03/55316/count1",
+      "FC06/47016/value0",
+      "FC03/55252/count65"
+    ],
+    "display": "Eight distinct timestamps 01:01:01 through 01:08:08; newest first; main code37100 and distinct mask bits resolve to grid fault labels; six operating states match",
+    "physical_acceptance": false
+  }
+}

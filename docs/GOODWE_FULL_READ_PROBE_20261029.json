@@ -1,0 +1,753 @@
+{
+  "target": "cabin_solar real inverter 192.0.2.28:8899",
+  "read_only": true,
+  "results": [
+    {
+      "request": "aa55b07f011a030701100264",
+      "response": "aa557fb0019a200000173bfff6007f000000000000007f00000000000000000000000000000000062e",
+      "wait_seconds": 1.6,
+      "timestamp_utc": "2026-10-28T16:12:17.584340+00:00",
+      "request_decoded": {
+        "protocol": "aa55",
+        "valid": true,
+        "source": 176,
+        "destination": 127,
+        "control": 1,
+        "function": 26,
+        "payload": "070110",
+        "kind": "request"
+      },
+      "response_decoded": {
+        "protocol": "aa55",
+        "valid": true,
+        "source": 127,
+        "destination": 176,
+        "control": 1,
+        "function": 154,
+        "payload": "0000173bfff6007f000000000000007f00000000000000000000000000000000",
+        "kind": "response"
+      },
+      "interpretation": "valid frame with data; semantics require operation-specific decoding"
+    },
+    {
+      "request": "aa55b07f011a03059c0202ef",
+      "response": "aa550db0019a0400000000025b",
+      "wait_seconds": 1.6,
+      "timestamp_utc": "2026-10-28T16:12:20.791553+00:00",
+      "request_decoded": {
+        "protocol": "aa55",
+        "valid": true,
+        "source": 176,
+        "destination": 127,
+        "control": 1,
+        "function": 26,
+        "payload": "059c02",
+        "kind": "request"
+      },
+      "response_decoded": {
+        "protocol": "aa55",
+        "valid": true,
+        "source": 13,
+        "destination": 176,
+        "control": 1,
+        "function": 154,
+        "payload": "00000000",
+        "kind": "response"
+      },
+      "interpretation": "valid frame with data; semantics require operation-specific decoding"
+    },
+    {
+      "request": "aa55b07f011a0305a10102f3",
+      "response": "aa550db0019a020014026d",
+      "wait_seconds": 1.6,
+      "timestamp_utc": "2026-10-28T16:12:24.178022+00:00",
+      "request_decoded": {
+        "protocol": "aa55",
+        "valid": true,
+        "source": 176,
+        "destination": 127,
+        "control": 1,
+        "function": 26,
+        "payload": "05a101",
+        "kind": "request"
+      },
+      "response_decoded": {
+        "protocol": "aa55",
+        "valid": true,
+        "source": 13,
+        "destination": 176,
+        "control": 1,
+        "function": 154,
+        "payload": "0014",
+        "kind": "response"
+      },
+      "interpretation": "valid frame with data; semantics require operation-specific decoding"
+    },
+    {
+      "request": "aa55b07f0125000254",
+      "response": "aa557fb001a5040001000c02e5",
+      "wait_seconds": 1.6,
+      "timestamp_utc": "2026-10-28T16:12:27.548445+00:00",
+      "request_decoded": {
+        "protocol": "aa55",
+        "valid": true,
+        "source": 176,
+        "destination": 127,
+        "control": 1,
+        "function": 37,
+        "payload": "",
+        "kind": "request"
+      },
+      "response_decoded": {
+        "protocol": "aa55",
+        "valid": true,
+        "source": 127,
+        "destination": 176,
+        "control": 1,
+        "function": 165,
+        "payload": "0001000c",
+        "kind": "response"
+      },
+      "interpretation": "valid frame with data; semantics require operation-specific decoding"
+    },
+    {
+      "request": "aa55b07f011a03b7a70103ab",
+      "response": "aa550db0019a0115026d",
+      "wait_seconds": 1.6,
+      "timestamp_utc": "2026-10-28T16:12:30.878476+00:00",
+      "request_decoded": {
+        "protocol": "aa55",
+        "valid": true,
+        "source": 176,
+        "destination": 127,
+        "control": 1,
+        "function": 26,
+        "payload": "b7a701",
+        "kind": "request"
+      },
+      "response_decoded": {
+        "protocol": "aa55",
+        "valid": true,
+        "source": 13,
+        "destination": 176,
+        "control": 1,
+        "function": 154,
+        "payload": "15",
+        "kind": "response"
+      },
+      "interpretation": "one-byte AA55 payload 15; not the requested register record; meaning unverified"
+    },
+    {
+      "request": "aa55b07f011a0371001c02d9",
+      "response": "aa550db0019a3809591389004b000000000000000000000000000000000000000000000000000000000000000000000a55141e000000000000000400000000046d",
+      "wait_seconds": 1.6,
+      "timestamp_utc": "2026-10-28T16:12:34.126571+00:00",
+      "request_decoded": {
+        "protocol": "aa55",
+        "valid": true,
+        "source": 176,
+        "destination": 127,
+        "control": 1,
+        "function": 26,
+        "payload": "71001c",
+        "kind": "request"
+      },
+      "response_decoded": {
+        "protocol": "aa55",
+        "valid": true,
+        "source": 13,
+        "destination": 176,
+        "control": 1,
+        "function": 154,
+        "payload": "09591389004b000000000000000000000000000000000000000000000000000000000000000000000a55141e000000000000000400000000",
+        "kind": "response"
+      },
+      "interpretation": "valid frame with data; semantics require operation-specific decoding"
+    },
+    {
+      "request": "aa55b07f011d00024c",
+      "response": "aa557fb0019d100001000000000000000000000000000002dd",
+      "wait_seconds": 1.6,
+      "timestamp_utc": "2026-10-28T16:12:37.324977+00:00",
+      "request_decoded": {
+        "protocol": "aa55",
+        "valid": true,
+        "source": 176,
+        "destination": 127,
+        "control": 1,
+        "function": 29,
+        "payload": "",
+        "kind": "request"
+      },
+      "response_decoded": {
+        "protocol": "aa55",
+        "valid": true,
+        "source": 127,
+        "destination": 176,
+        "control": 1,
+        "function": 157,
+        "payload": "00010000000000000000000000000000",
+        "kind": "response"
+      },
+      "interpretation": "valid frame with data; semantics require operation-specific decoding"
+    },
+    {
+      "request": "aa55b07f011a0305aa0102fc",
+      "response": "aa550db0019a0115026d",
+      "wait_seconds": 1.6,
+      "timestamp_utc": "2026-10-28T16:12:40.686100+00:00",
+      "request_decoded": {
+        "protocol": "aa55",
+        "valid": true,
+        "source": 176,
+        "destination": 127,
+        "control": 1,
+        "function": 26,
+        "payload": "05aa01",
+        "kind": "request"
+      },
+      "response_decoded": {
+        "protocol": "aa55",
+        "valid": true,
+        "source": 13,
+        "destination": 176,
+        "control": 1,
+        "function": 154,
+        "payload": "15",
+        "kind": "response"
+      },
+      "interpretation": "one-byte AA55 payload 15; not the requested register record; meaning unverified"
+    },
+    {
+      "request": "aa55c07f0106000245",
+      "response": "aa550dc001868c0000000000000000000000000002000000ef00000000000001001300136400000001095a0000019a138a01095a000d00a4138a0101007500000000000032c300001cdc000000090000d2d6ffb50100200200f600010000fd3b0348404000001a0a1d020c2800000000000000000000000000000000000000000000000000001349000010580200000000000011cc",
+      "wait_seconds": 1.6,
+      "timestamp_utc": "2026-10-28T16:12:43.892257+00:00",
+      "request_decoded": {
+        "protocol": "aa55",
+        "valid": true,
+        "source": 192,
+        "destination": 127,
+        "control": 1,
+        "function": 6,
+        "payload": "",
+        "kind": "request"
+      },
+      "response_decoded": {
+        "protocol": "aa55",
+        "valid": true,
+        "source": 13,
+        "destination": 192,
+        "control": 1,
+        "function": 134,
+        "payload": "0000000000000000000000000002000000ef00000000000001001300136400000001095a0000019a138a01095a000d00a4138a0101007500000000000032c300001cdc000000090000d2d6ffb50100200200f600010000fd3b0348404000001a0a1d020c28000000000000000000000000000000000000000000000000000013490000105802000000000000",
+        "kind": "response"
+      },
+      "interpretation": "valid frame with data; semantics require operation-specific decoding"
+    },
+    {
+      "request": "aa55b07f011a03056d0102bf",
+      "response": "aa550db0019a0200070260",
+      "wait_seconds": 1.6,
+      "timestamp_utc": "2026-10-28T16:12:47.112075+00:00",
+      "request_decoded": {
+        "protocol": "aa55",
+        "valid": true,
+        "source": 176,
+        "destination": 127,
+        "control": 1,
+        "function": 26,
+        "payload": "056d01",
+        "kind": "request"
+      },
+      "response_decoded": {
+        "protocol": "aa55",
+        "valid": true,
+        "source": 13,
+        "destination": 176,
+        "control": 1,
+        "function": 154,
+        "payload": "0007",
+        "kind": "response"
+      },
+      "interpretation": "valid frame with data; semantics require operation-specific decoding"
+    },
+    {
+      "request": "aa55b07f011a0305910402e6",
+      "response": "aa550db0019a080000000000000000025f",
+      "wait_seconds": 1.6,
+      "timestamp_utc": "2026-10-28T16:12:50.311413+00:00",
+      "request_decoded": {
+        "protocol": "aa55",
+        "valid": true,
+        "source": 176,
+        "destination": 127,
+        "control": 1,
+        "function": 26,
+        "payload": "059104",
+        "kind": "request"
+      },
+      "response_decoded": {
+        "protocol": "aa55",
+        "valid": true,
+        "source": 13,
+        "destination": 176,
+        "control": 1,
+        "function": 154,
+        "payload": "0000000000000000",
+        "kind": "response"
+      },
+      "interpretation": "valid frame with data; semantics require operation-specific decoding"
+    },
+    {
+      "request": "aa55b07f011a03000101024e",
+      "response": "aa550db0019a02003c0295",
+      "wait_seconds": 1.6,
+      "timestamp_utc": "2026-10-28T16:12:53.548289+00:00",
+      "request_decoded": {
+        "protocol": "aa55",
+        "valid": true,
+        "source": 176,
+        "destination": 127,
+        "control": 1,
+        "function": 26,
+        "payload": "000101",
+        "kind": "request"
+      },
+      "response_decoded": {
+        "protocol": "aa55",
+        "valid": true,
+        "source": 13,
+        "destination": 176,
+        "control": 1,
+        "function": 154,
+        "payload": "003c",
+        "kind": "response"
+      },
+      "interpretation": "valid frame with data; semantics require operation-specific decoding"
+    },
+    {
+      "request": "aa55b07f011a03010001024e",
+      "response": "aa550db0019a02006402bd",
+      "wait_seconds": 1.6,
+      "timestamp_utc": "2026-10-28T16:12:56.771092+00:00",
+      "request_decoded": {
+        "protocol": "aa55",
+        "valid": true,
+        "source": 176,
+        "destination": 127,
+        "control": 1,
+        "function": 26,
+        "payload": "010001",
+        "kind": "request"
+      },
+      "response_decoded": {
+        "protocol": "aa55",
+        "valid": true,
+        "source": 13,
+        "destination": 176,
+        "control": 1,
+        "function": 154,
+        "payload": "0064",
+        "kind": "response"
+      },
+      "interpretation": "valid frame with data; semantics require operation-specific decoding"
+    },
+    {
+      "request": "aa55b07f011a0305791002da",
+      "response": "aa550db0019a200a5a0708004b020d0abe02bc0007004b1450125c0007004b1450125c0007004b0764",
+      "wait_seconds": 1.6,
+      "timestamp_utc": "2026-10-28T16:12:59.969741+00:00",
+      "request_decoded": {
+        "protocol": "aa55",
+        "valid": true,
+        "source": 176,
+        "destination": 127,
+        "control": 1,
+        "function": 26,
+        "payload": "057910",
+        "kind": "request"
+      },
+      "response_decoded": {
+        "protocol": "aa55",
+        "valid": true,
+        "source": 13,
+        "destination": 176,
+        "control": 1,
+        "function": 154,
+        "payload": "0a5a0708004b020d0abe02bc0007004b1450125c0007004b1450125c0007004b",
+        "kind": "response"
+      },
+      "interpretation": "valid frame with data; semantics require operation-specific decoding"
+    },
+    {
+      "request": "aa55b07f011a03715001030e",
+      "response": null,
+      "wait_seconds": 1.6,
+      "timestamp_utc": "2026-10-28T16:13:03.169774+00:00",
+      "request_decoded": {
+        "protocol": "aa55",
+        "valid": true,
+        "source": 176,
+        "destination": 127,
+        "control": 1,
+        "function": 26,
+        "payload": "715001",
+        "kind": "request"
+      },
+      "response_decoded": null,
+      "interpretation": "bounded timeout; not proof of unsupported operation"
+    },
+    {
+      "request": "aa55b07f011a037152020311",
+      "response": "aa550db0019a0115026d",
+      "wait_seconds": 1.6,
+      "timestamp_utc": "2026-10-28T16:13:06.366849+00:00",
+      "request_decoded": {
+        "protocol": "aa55",
+        "valid": true,
+        "source": 176,
+        "destination": 127,
+        "control": 1,
+        "function": 26,
+        "payload": "715202",
+        "kind": "request"
+      },
+      "response_decoded": {
+        "protocol": "aa55",
+        "valid": true,
+        "source": 13,
+        "destination": 176,
+        "control": 1,
+        "function": 154,
+        "payload": "15",
+        "kind": "response"
+      },
+      "interpretation": "one-byte AA55 payload 15; not the requested register record; meaning unverified"
+    },
+    {
+      "request": "aa55b07f011a0305680102ba",
+      "response": "aa550db0019a0200000259",
+      "wait_seconds": 1.6,
+      "timestamp_utc": "2026-10-28T16:13:09.616179+00:00",
+      "request_decoded": {
+        "protocol": "aa55",
+        "valid": true,
+        "source": 176,
+        "destination": 127,
+        "control": 1,
+        "function": 26,
+        "payload": "056801",
+        "kind": "request"
+      },
+      "response_decoded": {
+        "protocol": "aa55",
+        "valid": true,
+        "source": 13,
+        "destination": 176,
+        "control": 1,
+        "function": 154,
+        "payload": "0000",
+        "kind": "response"
+      },
+      "interpretation": "valid frame with data; semantics require operation-specific decoding"
+    },
+    {
+      "request": "aa55b07f011a037154010312",
+      "response": "aa550db0019a0115026d",
+      "wait_seconds": 1.6,
+      "timestamp_utc": "2026-10-28T16:13:12.815862+00:00",
+      "request_decoded": {
+        "protocol": "aa55",
+        "valid": true,
+        "source": 176,
+        "destination": 127,
+        "control": 1,
+        "function": 26,
+        "payload": "715401",
+        "kind": "request"
+      },
+      "response_decoded": {
+        "protocol": "aa55",
+        "valid": true,
+        "source": 13,
+        "destination": 176,
+        "control": 1,
+        "function": 154,
+        "payload": "15",
+        "kind": "response"
+      },
+      "interpretation": "one-byte AA55 payload 15; not the requested register record; meaning unverified"
+    },
+    {
+      "request": "f703a4100001b269",
+      "response": "aa55f7830220c3",
+      "wait_seconds": 1.6,
+      "timestamp_utc": "2026-10-28T16:13:16.032032+00:00",
+      "request_decoded": {
+        "protocol": "modbus-rtu",
+        "valid": true,
+        "unit": 247,
+        "function": 3,
+        "kind": "read-request",
+        "register": 42000,
+        "count": 1
+      },
+      "response_decoded": {
+        "protocol": "goodwe-modbus-rtu",
+        "valid": true,
+        "kind": "response",
+        "unit": 247,
+        "function": 131,
+        "exception": 2
+      },
+      "interpretation": "Modbus exception response"
+    },
+    {
+      "request": "f703a4110002a3a8",
+      "response": "aa55f7830220c3",
+      "wait_seconds": 1.6,
+      "timestamp_utc": "2026-10-28T16:13:19.394292+00:00",
+      "request_decoded": {
+        "protocol": "modbus-rtu",
+        "valid": true,
+        "unit": 247,
+        "function": 3,
+        "kind": "read-request",
+        "register": 42001,
+        "count": 2
+      },
+      "response_decoded": {
+        "protocol": "goodwe-modbus-rtu",
+        "valid": true,
+        "kind": "response",
+        "unit": 247,
+        "function": 131,
+        "exception": 2
+      },
+      "interpretation": "Modbus exception response"
+    },
+    {
+      "request": "f703b9970001042c",
+      "response": "aa55f78304a0c1",
+      "wait_seconds": 1.6,
+      "timestamp_utc": "2026-10-28T16:13:22.908914+00:00",
+      "request_decoded": {
+        "protocol": "modbus-rtu",
+        "valid": true,
+        "unit": 247,
+        "function": 3,
+        "kind": "read-request",
+        "register": 47511,
+        "count": 1
+      },
+      "response_decoded": {
+        "protocol": "goodwe-modbus-rtu",
+        "valid": true,
+        "kind": "response",
+        "unit": 247,
+        "function": 131,
+        "exception": 4
+      },
+      "interpretation": "Modbus exception response"
+    },
+    {
+      "request": "f703b9980001342f",
+      "response": "aa55f78304a0c1",
+      "wait_seconds": 1.6,
+      "timestamp_utc": "2026-10-28T16:13:26.303670+00:00",
+      "request_decoded": {
+        "protocol": "modbus-rtu",
+        "valid": true,
+        "unit": 247,
+        "function": 3,
+        "kind": "read-request",
+        "register": 47512,
+        "count": 1
+      },
+      "response_decoded": {
+        "protocol": "goodwe-modbus-rtu",
+        "valid": true,
+        "kind": "response",
+        "unit": 247,
+        "function": 131,
+        "exception": 4
+      },
+      "interpretation": "Modbus exception response"
+    },
+    {
+      "request": "f703b9bb00068427",
+      "response": "aa55f7030c0000173b007ffff600640000614a",
+      "wait_seconds": 1.6,
+      "timestamp_utc": "2026-10-28T16:13:29.505346+00:00",
+      "request_decoded": {
+        "protocol": "modbus-rtu",
+        "valid": true,
+        "unit": 247,
+        "function": 3,
+        "kind": "read-request",
+        "register": 47547,
+        "count": 6
+      },
+      "response_decoded": {
+        "protocol": "goodwe-modbus-rtu",
+        "valid": true,
+        "kind": "response",
+        "unit": 247,
+        "function": 3,
+        "byte_count": 12,
+        "payload": "0000173b007ffff600640000"
+      },
+      "interpretation": "valid frame with data; semantics require operation-specific decoding"
+    },
+    {
+      "request": "f703b9c10006a5fe",
+      "response": "aa55f7030c00000000007f0000006400002a2e",
+      "wait_seconds": 1.6,
+      "timestamp_utc": "2026-10-28T16:13:32.826212+00:00",
+      "request_decoded": {
+        "protocol": "modbus-rtu",
+        "valid": true,
+        "unit": 247,
+        "function": 3,
+        "kind": "read-request",
+        "register": 47553,
+        "count": 6
+      },
+      "response_decoded": {
+        "protocol": "goodwe-modbus-rtu",
+        "valid": true,
+        "kind": "response",
+        "unit": 247,
+        "function": 3,
+        "byte_count": 12,
+        "payload": "00000000007f000000640000"
+      },
+      "interpretation": "valid frame with data; semantics require operation-specific decoding"
+    },
+    {
+      "request": "f703b9c7000645ff",
+      "response": "aa55f7030c000000000000000000640000a4e9",
+      "wait_seconds": 1.6,
+      "timestamp_utc": "2026-10-28T16:13:36.025594+00:00",
+      "request_decoded": {
+        "protocol": "modbus-rtu",
+        "valid": true,
+        "unit": 247,
+        "function": 3,
+        "kind": "read-request",
+        "register": 47559,
+        "count": 6
+      },
+      "response_decoded": {
+        "protocol": "goodwe-modbus-rtu",
+        "valid": true,
+        "kind": "response",
+        "unit": 247,
+        "function": 3,
+        "byte_count": 12,
+        "payload": "000000000000000000640000"
+      },
+      "interpretation": "valid frame with data; semantics require operation-specific decoding"
+    },
+    {
+      "request": "f703b9cd000665fd",
+      "response": "aa55f7030c000000000000000000640000a4e9",
+      "wait_seconds": 1.6,
+      "timestamp_utc": "2026-10-28T16:13:39.246618+00:00",
+      "request_decoded": {
+        "protocol": "modbus-rtu",
+        "valid": true,
+        "unit": 247,
+        "function": 3,
+        "kind": "read-request",
+        "register": 47565,
+        "count": 6
+      },
+      "response_decoded": {
+        "protocol": "goodwe-modbus-rtu",
+        "valid": true,
+        "kind": "response",
+        "unit": 247,
+        "function": 3,
+        "byte_count": 12,
+        "payload": "000000000000000000640000"
+      },
+      "interpretation": "valid frame with data; semantics require operation-specific decoding"
+    },
+    {
+      "request": "f70307010004002b",
+      "response": null,
+      "wait_seconds": 1.6,
+      "timestamp_utc": "2026-10-28T16:13:42.466603+00:00",
+      "request_decoded": {
+        "protocol": "modbus-rtu",
+        "valid": true,
+        "unit": 247,
+        "function": 3,
+        "kind": "read-request",
+        "register": 1793,
+        "count": 4
+      },
+      "response_decoded": null,
+      "interpretation": "bounded timeout; not proof of unsupported operation"
+    },
+    {
+      "request": "f70307080001102a",
+      "response": null,
+      "wait_seconds": 1.6,
+      "timestamp_utc": "2026-10-28T16:13:45.708065+00:00",
+      "request_decoded": {
+        "protocol": "modbus-rtu",
+        "valid": true,
+        "unit": 247,
+        "function": 3,
+        "kind": "read-request",
+        "register": 1800,
+        "count": 1
+      },
+      "response_decoded": null,
+      "interpretation": "bounded timeout; not proof of unsupported operation"
+    },
+    {
+      "request": "f703078000019000",
+      "response": null,
+      "wait_seconds": 1.6,
+      "timestamp_utc": "2026-10-28T16:13:48.908096+00:00",
+      "request_decoded": {
+        "protocol": "modbus-rtu",
+        "valid": true,
+        "unit": 247,
+        "function": 3,
+        "kind": "read-request",
+        "register": 1920,
+        "count": 1
+      },
+      "response_decoded": null,
+      "interpretation": "bounded timeout; not proof of unsupported operation"
+    },
+    {
+      "request": "f7030229000140ec",
+      "response": null,
+      "wait_seconds": 1.6,
+      "timestamp_utc": "2026-10-28T16:13:52.139729+00:00",
+      "request_decoded": {
+        "protocol": "modbus-rtu",
+        "valid": true,
+        "unit": 247,
+        "function": 3,
+        "kind": "read-request",
+        "register": 553,
+        "count": 1
+      },
+      "response_decoded": null,
+      "interpretation": "bounded timeout; not proof of unsupported operation"
+    }
+  ],
+  "schema_version": 1,
+  "date_local": "2026-10-29",
+  "client": "cabin_solar",
+  "limits": "Latest manual-mode datagram after each isolated read. No protocol transaction ID; exact correlation is not guaranteed. Normal sampling restored in finally and verified manual=false. No configuration writes sent.",
+  "input_sha256": "11ef527bcd66b2abca2f0240f76066a377d0494bfd02277594d753bdf83fa47a",
+  "public_record_redaction": "Private LAN addresses, MACs and serial identifiers are pseudonymized. Encoded identity bytes may be substituted, so affected historical frames are not checksum-valid replay fixtures. Private captures and WLAN credentials are excluded."
+}

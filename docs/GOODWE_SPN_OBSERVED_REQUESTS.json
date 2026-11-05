@@ -1,0 +1,2138 @@
+{
+  "schema_version": 1,
+  "target": "SPN / GW6000ES20 / SolarGo 7.2.2 build1521",
+  "scope": "Distinct requests observed during the continuing house menu survey. Captured request bytes establish app encoding. They do not establish target acceptance of a write.",
+  "requests": [
+    {
+      "count": 4,
+      "first_utc": "2026-11-05T13:35:04.556696+00:00",
+      "wire": "other",
+      "length": 9,
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 4,
+      "first_utc": "2026-11-05T13:35:04.694798+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 28500,
+      "count_or_words": 1,
+      "request_hex": "f7036f540001cc58",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 11,
+      "first_utc": "2026-11-05T13:35:04.745874+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 37094,
+      "count_or_words": 1,
+      "request_hex": "f70390e600015c6b",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 12,
+      "first_utc": "2026-11-05T13:35:04.881193+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 28501,
+      "count_or_words": 1,
+      "request_hex": "f7036f5500019d98",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 6053,
+      "first_utc": "2026-11-05T13:35:05.018033+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 47464,
+      "count_or_words": 1,
+      "request_hex": "f703b9680001341c",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 5,
+      "first_utc": "2026-11-05T13:35:05.060445+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 28550,
+      "count_or_words": 1,
+      "request_hex": "f7036f8600016c61",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 4,
+      "first_utc": "2026-11-05T13:35:07.126781+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 28551,
+      "count_or_words": 1,
+      "request_hex": "f7036f8700013da1",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 4,
+      "first_utc": "2026-11-05T13:35:07.180343+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 37002,
+      "count_or_words": 1,
+      "request_hex": "f703908a00019c76",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 8,
+      "first_utc": "2026-11-05T13:35:07.227364+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 39000,
+      "count_or_words": 1,
+      "request_hex": "f703985800013e2f",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 12,
+      "first_utc": "2026-11-05T13:35:09.277525+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 43560,
+      "count_or_words": 1,
+      "request_hex": "f703aa280001314c",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 13,
+      "first_utc": "2026-11-05T13:35:11.378845+00:00",
+      "wire": "RTU",
+      "unit": 250,
+      "function": 3,
+      "address": 9000,
+      "count_or_words": 1,
+      "request_hex": "fa03232800011a0d",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 13,
+      "first_utc": "2026-11-05T13:35:13.384230+00:00",
+      "wire": "RTU",
+      "unit": 250,
+      "function": 3,
+      "address": 9001,
+      "count_or_words": 1,
+      "request_hex": "fa03232900014bcd",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 5,
+      "first_utc": "2026-11-05T13:35:15.387434+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 28009,
+      "count_or_words": 1,
+      "request_hex": "f7036d6900015c2c",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 3031,
+      "first_utc": "2026-11-05T13:35:15.432358+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 36212,
+      "count_or_words": 1,
+      "request_hex": "f7038d740001fbea",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 3030,
+      "first_utc": "2026-11-05T13:35:15.478876+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 35000,
+      "count_or_words": 33,
+      "request_hex": "f70388b800213ac1",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 4,
+      "first_utc": "2026-11-05T13:35:15.654235+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 36224,
+      "count_or_words": 2,
+      "request_hex": "f7038d800002fa19",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 3,
+      "first_utc": "2026-11-05T13:35:15.806223+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 16,
+      "address": 45200,
+      "count_or_words": 3,
+      "values": [
+        6667,
+        1303,
+        8748
+      ],
+      "request_hex": "f710b0900003061a0b0517222cf146",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 3035,
+      "first_utc": "2026-11-05T13:35:21.891975+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 47605,
+      "count_or_words": 1,
+      "request_hex": "f703b9f50001a5f2",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 3028,
+      "first_utc": "2026-11-05T13:35:21.939844+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 35002,
+      "count_or_words": 1,
+      "request_hex": "f70388ba00019ad9",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 3038,
+      "first_utc": "2026-11-05T13:35:21.982442+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 47504,
+      "count_or_words": 11,
+      "request_hex": "f703b990000b35ea",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 3029,
+      "first_utc": "2026-11-05T13:35:22.161836+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 35100,
+      "count_or_words": 125,
+      "request_hex": "f703891c007d7ae7",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 3025,
+      "first_utc": "2026-11-05T13:35:22.477224+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 36000,
+      "count_or_words": 27,
+      "request_hex": "f7038ca0001b3be5",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 3025,
+      "first_utc": "2026-11-05T13:35:22.574250+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 37000,
+      "count_or_words": 22,
+      "request_hex": "f703908800167db8",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 3026,
+      "first_utc": "2026-11-05T13:35:22.660168+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 37060,
+      "count_or_words": 16,
+      "request_hex": "f70390c400103c6d",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 3026,
+      "first_utc": "2026-11-05T13:35:24.662290+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 45248,
+      "count_or_words": 7,
+      "request_hex": "f703b0c000073662",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 3026,
+      "first_utc": "2026-11-05T13:35:24.720479+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 47599,
+      "count_or_words": 1,
+      "request_hex": "f703b9ef00018435",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 3025,
+      "first_utc": "2026-11-05T13:35:24.762629+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 36043,
+      "count_or_words": 6,
+      "request_hex": "f7038ccb00068a30",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 3028,
+      "first_utc": "2026-11-05T13:35:24.815355+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 45134,
+      "count_or_words": 16,
+      "request_hex": "f703b04e00101647",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 3031,
+      "first_utc": "2026-11-05T13:35:24.897650+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 47745,
+      "count_or_words": 18,
+      "request_hex": "f703ba810012a461",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 3025,
+      "first_utc": "2026-11-05T13:35:24.975089+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 36197,
+      "count_or_words": 1,
+      "request_hex": "f7038d650001abef",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 3026,
+      "first_utc": "2026-11-05T13:35:25.016664+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 47001,
+      "count_or_words": 2,
+      "request_hex": "f703b79900022706",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 3034,
+      "first_utc": "2026-11-05T13:35:25.060565+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 47000,
+      "count_or_words": 1,
+      "request_hex": "f703b798000136c7",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 3026,
+      "first_utc": "2026-11-05T13:35:25.102159+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 45350,
+      "count_or_words": 9,
+      "request_hex": "f703b126000957ad",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 3025,
+      "first_utc": "2026-11-05T13:35:25.160511+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 37151,
+      "count_or_words": 9,
+      "request_hex": "f703911f00098c60",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 3025,
+      "first_utc": "2026-11-05T13:35:25.221070+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 37058,
+      "count_or_words": 37,
+      "request_hex": "f70390c200251c7b",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 3024,
+      "first_utc": "2026-11-05T13:35:25.338144+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 37024,
+      "count_or_words": 1,
+      "request_hex": "f70390a00001bdbe",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 3025,
+      "first_utc": "2026-11-05T13:35:25.382658+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 33000,
+      "count_or_words": 4,
+      "request_hex": "f70380e80004f96b",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 3024,
+      "first_utc": "2026-11-05T13:35:25.434236+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 36067,
+      "count_or_words": 1,
+      "request_hex": "f7038ce300014bfa",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 3024,
+      "first_utc": "2026-11-05T13:35:25.518306+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 36208,
+      "count_or_words": 1,
+      "request_hex": "f7038d700001ba2b",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 3024,
+      "first_utc": "2026-11-05T13:35:25.626427+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 35365,
+      "count_or_words": 1,
+      "request_hex": "f7038a250001ab4f",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 3023,
+      "first_utc": "2026-11-05T13:35:25.667415+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 37000,
+      "count_or_words": 1,
+      "request_hex": "f703908800013db6",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 3017,
+      "first_utc": "2026-11-05T13:35:27.667235+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 36226,
+      "count_or_words": 1,
+      "request_hex": "f7038d8200011bd8",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 4,
+      "first_utc": "2026-11-05T13:36:21.163580+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 45293,
+      "count_or_words": 1,
+      "request_hex": "f703b0ed00012669",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 3,
+      "first_utc": "2026-11-05T13:36:23.209459+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 47604,
+      "count_or_words": 1,
+      "request_hex": "f703b9f40001f432",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 4,
+      "first_utc": "2026-11-05T13:36:23.251679+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 45359,
+      "count_or_words": 1,
+      "request_hex": "f703b12f00018669",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 3,
+      "first_utc": "2026-11-05T13:37:12.286054+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 35186,
+      "count_or_words": 1,
+      "request_hex": "f703897200011adb",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 3,
+      "first_utc": "2026-11-05T13:37:12.330234+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 35021,
+      "count_or_words": 12,
+      "request_hex": "f70388cd000ceb06",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 5,
+      "first_utc": "2026-11-05T13:37:12.569264+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 47010,
+      "count_or_words": 1,
+      "request_hex": "f703b7a2000116ca",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 3,
+      "first_utc": "2026-11-05T13:37:14.617058+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 45288,
+      "count_or_words": 1,
+      "request_hex": "f703b0e800013668",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 3,
+      "first_utc": "2026-11-05T13:37:14.662625+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 45264,
+      "count_or_words": 1,
+      "request_hex": "f703b0d00001b7a5",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 9,
+      "first_utc": "2026-11-05T13:37:20.740190+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 31001,
+      "count_or_words": 1,
+      "request_hex": "f703791900015807",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 1,
+      "first_utc": "2026-11-05T13:37:40.958549+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 47509,
+      "count_or_words": 2,
+      "request_hex": "f703b9950002e5ed",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 2,
+      "first_utc": "2026-11-05T13:37:41.122008+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 47456,
+      "count_or_words": 1,
+      "request_hex": "f703b9600001b5de",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 1,
+      "first_utc": "2026-11-05T13:39:14.331052+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 47874,
+      "count_or_words": 5,
+      "request_hex": "f703bb020005147b",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 1,
+      "first_utc": "2026-11-05T13:40:02.097770+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 45270,
+      "count_or_words": 1,
+      "request_hex": "f703b0d6000157a4",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 2,
+      "first_utc": "2026-11-05T13:40:02.143129+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 35226,
+      "count_or_words": 1,
+      "request_hex": "f703899a00019aef",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 2,
+      "first_utc": "2026-11-05T13:41:37.072838+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 45472,
+      "count_or_words": 10,
+      "request_hex": "f703b1a0000af645",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 5,
+      "first_utc": "2026-11-05T13:41:37.135607+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 45484,
+      "count_or_words": 1,
+      "request_hex": "f703b1ac00017781",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 2,
+      "first_utc": "2026-11-05T13:41:37.214532+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 45443,
+      "count_or_words": 13,
+      "request_hex": "f703b183000d464d",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 2,
+      "first_utc": "2026-11-05T13:41:37.536603+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 45512,
+      "count_or_words": 1,
+      "request_hex": "f703b1c80001365e",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 3,
+      "first_utc": "2026-11-05T13:43:51.040801+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 45433,
+      "count_or_words": 10,
+      "request_hex": "f703b179000a27be",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 3,
+      "first_utc": "2026-11-05T13:43:51.164909+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 45456,
+      "count_or_words": 13,
+      "request_hex": "f703b190000db788",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 3,
+      "first_utc": "2026-11-05T13:43:51.361389+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 45482,
+      "count_or_words": 2,
+      "request_hex": "f703b1aa0002d781",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 3,
+      "first_utc": "2026-11-05T13:43:51.539179+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 45510,
+      "count_or_words": 1,
+      "request_hex": "f703b1c60001579d",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 4,
+      "first_utc": "2026-11-05T13:44:27.072855+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 45400,
+      "count_or_words": 17,
+      "request_hex": "f703b158001137bf",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 1,
+      "first_utc": "2026-11-05T13:44:27.212149+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 45495,
+      "count_or_words": 4,
+      "request_hex": "f703b1b70004c785",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 4,
+      "first_utc": "2026-11-05T13:44:27.293692+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 45651,
+      "count_or_words": 33,
+      "request_hex": "f703b2530021462d",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 5,
+      "first_utc": "2026-11-05T13:45:31.643996+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 45417,
+      "count_or_words": 10,
+      "request_hex": "f703b169000a267b",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 4,
+      "first_utc": "2026-11-05T13:45:33.711886+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 45421,
+      "count_or_words": 12,
+      "request_hex": "f703b16d000ce7b8",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 2,
+      "first_utc": "2026-11-05T13:47:38.910445+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 45499,
+      "count_or_words": 1,
+      "request_hex": "f703b1bb0001c785",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 2,
+      "first_utc": "2026-11-05T13:47:38.961326+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 45505,
+      "count_or_words": 5,
+      "request_hex": "f703b1c10005e79f",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 2,
+      "first_utc": "2026-11-05T13:47:39.032659+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 45920,
+      "count_or_words": 14,
+      "request_hex": "f703b360000ef602",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 1,
+      "first_utc": "2026-11-05T13:51:01.198273+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 45353,
+      "count_or_words": 3,
+      "request_hex": "f703b1290003e7a9",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 3,
+      "first_utc": "2026-11-05T13:51:01.396397+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 47832,
+      "count_or_words": 2,
+      "request_hex": "f703bad8000275be",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 3,
+      "first_utc": "2026-11-05T13:51:03.401393+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 39093,
+      "count_or_words": 1,
+      "request_hex": "f70398b50001ae1a",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 1,
+      "first_utc": "2026-11-05T13:51:26.082896+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 47602,
+      "count_or_words": 1,
+      "request_hex": "f703b9f200011433",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 1,
+      "first_utc": "2026-11-05T13:51:26.132957+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 47500,
+      "count_or_words": 1,
+      "request_hex": "f703b98c0001742b",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 2,
+      "first_utc": "2026-11-05T13:51:26.177555+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 45287,
+      "count_or_words": 1,
+      "request_hex": "f703b0e70001066b",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 2,
+      "first_utc": "2026-11-05T13:51:28.225656+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 47760,
+      "count_or_words": 1,
+      "request_hex": "f703ba900001b5a9",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 1,
+      "first_utc": "2026-11-05T13:52:28.630815+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 47545,
+      "count_or_words": 2,
+      "request_hex": "f703b9b900022424",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 2,
+      "first_utc": "2026-11-05T13:52:28.744282+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 47603,
+      "count_or_words": 1,
+      "request_hex": "f703b9f3000145f3",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 3,
+      "first_utc": "2026-11-05T13:54:30.098884+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 35177,
+      "count_or_words": 1,
+      "request_hex": "f703896900016adc",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 6,
+      "first_utc": "2026-11-05T13:55:08.267705+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 45593,
+      "count_or_words": 7,
+      "request_hex": "f703b2190007e621",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 3,
+      "first_utc": "2026-11-05T13:55:30.606940+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 47595,
+      "count_or_words": 3,
+      "request_hex": "f703b9eb00034435",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 7,
+      "first_utc": "2026-11-05T13:55:31.083616+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 47547,
+      "count_or_words": 48,
+      "request_hex": "f703b9bb00300431",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 3,
+      "first_utc": "2026-11-05T14:00:37.430093+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 45443,
+      "count_or_words": 67,
+      "request_hex": "f703b1830043c679",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 6,
+      "first_utc": "2026-11-05T14:01:10.398966+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 47514,
+      "count_or_words": 1,
+      "request_hex": "f703b99a000195ef",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 4,
+      "first_utc": "2026-11-05T14:01:28.444560+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 47504,
+      "count_or_words": 1,
+      "request_hex": "f703b9900001b5ed",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 9,
+      "first_utc": "2026-11-05T14:02:52.017477+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 16,
+      "address": 47511,
+      "count_or_words": 2,
+      "values": [
+        1,
+        0
+      ],
+      "request_hex": "f710b99700020400010000a8f9",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 5,
+      "first_utc": "2026-11-05T14:04:52.413095+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 6,
+      "address": 47000,
+      "values": [
+        5
+      ],
+      "request_hex": "f706b7980005fb04",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 2,
+      "first_utc": "2026-11-05T14:06:04.914122+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 47605,
+      "count_or_words": 2,
+      "request_hex": "f703b9f50002e5f3",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 2,
+      "first_utc": "2026-11-05T14:06:05.040799+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 47591,
+      "count_or_words": 2,
+      "request_hex": "f703b9e7000245f6",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 2,
+      "first_utc": "2026-11-05T14:06:05.117439+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 47612,
+      "count_or_words": 2,
+      "request_hex": "f703b9fc000235f1",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 4,
+      "first_utc": "2026-11-05T14:06:34.243650+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 6,
+      "address": 47605,
+      "values": [
+        0
+      ],
+      "request_hex": "f706b9f50000a832",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 4,
+      "first_utc": "2026-11-05T14:09:01.716663+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 6,
+      "address": 47612,
+      "values": [
+        1
+      ],
+      "request_hex": "f706b9fc0001b9f0",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 2,
+      "first_utc": "2026-11-05T14:29:47.292874+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 6,
+      "address": 47591,
+      "values": [
+        64127
+      ],
+      "request_hex": "f706b9e7fa7f0b77",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 2,
+      "first_utc": "2026-11-05T14:29:47.299589+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 6,
+      "address": 47609,
+      "values": [
+        1
+      ],
+      "request_hex": "f706b9f90001a9f1",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 5,
+      "first_utc": "2026-11-05T14:29:47.385544+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 47589,
+      "count_or_words": 6,
+      "request_hex": "f703b9e50006e5f5",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 3,
+      "first_utc": "2026-11-05T14:40:55.293143+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 6,
+      "address": 47612,
+      "values": [
+        0
+      ],
+      "request_hex": "f706b9fc00007830",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 3,
+      "first_utc": "2026-11-05T14:40:55.316587+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 6,
+      "address": 47591,
+      "values": [
+        64639
+      ],
+      "request_hex": "f706b9e7fc7f08d7",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 3,
+      "first_utc": "2026-11-05T14:40:55.328967+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 6,
+      "address": 47000,
+      "values": [
+        4
+      ],
+      "request_hex": "f706b79800043ac4",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 3,
+      "first_utc": "2026-11-05T14:43:32.881534+00:00",
+      "wire": "5A5A",
+      "family": 1,
+      "function": 1,
+      "payload_length": 0,
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 3,
+      "first_utc": "2026-11-05T14:44:39.669800+00:00",
+      "wire": "5A5A",
+      "family": 1,
+      "function": 2,
+      "payload_length": 0,
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 2,
+      "first_utc": "2026-11-05T14:44:39.836690+00:00",
+      "wire": "5A5A",
+      "family": 1,
+      "function": 3,
+      "payload_length": 0,
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 1,
+      "first_utc": "2026-11-05T14:46:11.814876+00:00",
+      "wire": "5A5A",
+      "family": 1,
+      "function": 13,
+      "payload_length": 0,
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 1,
+      "first_utc": "2026-11-05T14:47:14.722804+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 47041,
+      "count_or_words": 75,
+      "request_hex": "f703b7c1004b6723",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 1,
+      "first_utc": "2026-11-05T14:48:04.594745+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 45127,
+      "count_or_words": 1,
+      "request_hex": "f703b04700010649",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 1,
+      "first_utc": "2026-11-05T14:48:04.782576+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 45132,
+      "count_or_words": 2,
+      "request_hex": "f703b04c0002378a",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 1,
+      "first_utc": "2026-11-05T14:50:51.881134+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 33943,
+      "count_or_words": 16,
+      "request_hex": "f70384970010c98c",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 1,
+      "first_utc": "2026-11-05T14:50:52.015015+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 47479,
+      "count_or_words": 1,
+      "request_hex": "f703b977000105da",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 2,
+      "first_utc": "2026-11-05T14:52:30.120903+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 36004,
+      "count_or_words": 1,
+      "request_hex": "f7038ca40001fbef",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 2,
+      "first_utc": "2026-11-05T14:52:32.166832+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 50000,
+      "count_or_words": 1,
+      "request_hex": "f703c3500001acc9",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 1,
+      "first_utc": "2026-11-05T14:55:52.176086+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 45280,
+      "count_or_words": 1,
+      "request_hex": "f703b0e00001b7aa",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 1,
+      "first_utc": "2026-11-05T14:56:58.695676+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 6,
+      "address": 45254,
+      "values": [
+        1
+      ],
+      "request_hex": "f706b0c600019a61",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 2,
+      "first_utc": "2026-11-05T15:00:24.695642+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 6,
+      "address": 47745,
+      "values": [
+        0
+      ],
+      "request_hex": "f706ba810000e86c",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 1,
+      "first_utc": "2026-11-05T15:04:21.333713+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 6,
+      "address": 47747,
+      "values": [
+        1
+      ],
+      "request_hex": "f706ba830001886c",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 2,
+      "first_utc": "2026-11-05T15:14:02.743445+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 6,
+      "address": 47595,
+      "values": [
+        1
+      ],
+      "request_hex": "f706b9eb000109f4",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 2,
+      "first_utc": "2026-11-05T15:15:04.033041+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 6,
+      "address": 47595,
+      "values": [
+        2
+      ],
+      "request_hex": "f706b9eb000249f5",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 1,
+      "first_utc": "2026-11-05T15:20:02.605401+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 6,
+      "address": 47595,
+      "values": [
+        3
+      ],
+      "request_hex": "f706b9eb00038835",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 6,
+      "first_utc": "2026-11-05T15:41:40.700235+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 6,
+      "address": 45456,
+      "values": [
+        0
+      ],
+      "request_hex": "f706b1900000ba4d",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 6,
+      "first_utc": "2026-11-05T15:41:40.707861+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 6,
+      "address": 45433,
+      "values": [
+        0
+      ],
+      "request_hex": "f706b17900006bb9",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 6,
+      "first_utc": "2026-11-05T15:41:40.719683+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 6,
+      "address": 45483,
+      "values": [
+        0
+      ],
+      "request_hex": "f706b1ab0000cb80",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 6,
+      "first_utc": "2026-11-05T15:42:05.122190+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 6,
+      "address": 45482,
+      "values": [
+        100
+      ],
+      "request_hex": "f706b1aa00649bab",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 2,
+      "first_utc": "2026-11-05T15:49:00.026488+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 6,
+      "address": 45456,
+      "values": [
+        1
+      ],
+      "request_hex": "f706b19000017b8d",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 2,
+      "first_utc": "2026-11-05T15:55:42.100397+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 6,
+      "address": 45433,
+      "values": [
+        1
+      ],
+      "request_hex": "f706b1790001aa79",
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 4,
+      "first_utc": "2026-11-05T18:33:33.264465+00:00",
+      "wire": "5A5A",
+      "family": 2,
+      "function": 1,
+      "payload_length": 37,
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 2,
+      "first_utc": "2026-11-05T18:35:53.513676+00:00",
+      "wire": "5A5A",
+      "family": 1,
+      "function": 12,
+      "payload_length": 0,
+      "evidence": [
+        "filtered-live",
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 1,
+      "first_utc": "2026-11-06T01:44:32.907909+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 16,
+      "address": 45200,
+      "count_or_words": 3,
+      "values": [
+        6667,
+        1547,
+        11293
+      ],
+      "request_hex": "f710b0900003061a0b060b2c1df570",
+      "evidence": [
+        "filtered-live"
+      ]
+    },
+    {
+      "count": 1,
+      "first_utc": "2026-11-06T01:55:33.355973+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 6,
+      "address": 47743,
+      "values": [
+        1
+      ],
+      "request_hex": "f706ba7f0001485c",
+      "evidence": [
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 1,
+      "first_utc": "2026-11-06T01:55:33.529013+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 6,
+      "address": 47514,
+      "values": [
+        4
+      ],
+      "request_hex": "f706b99a000499ec",
+      "evidence": [
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 1,
+      "first_utc": "2026-11-06T01:55:33.570341+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 6,
+      "address": 45350,
+      "values": [
+        200
+      ],
+      "request_hex": "f706b12600c85a3d",
+      "evidence": [
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 1,
+      "first_utc": "2026-11-06T01:55:33.580259+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 16,
+      "address": 45352,
+      "count_or_words": 7,
+      "values": [
+        532,
+        1000,
+        450,
+        1000,
+        20,
+        450,
+        20
+      ],
+      "request_hex": "f710b12800070e021403e801c203e8001401c20014bfbe",
+      "evidence": [
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 1,
+      "first_utc": "2026-11-06T01:55:33.595511+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 16,
+      "address": 47531,
+      "count_or_words": 2,
+      "values": [
+        140,
+        190
+      ],
+      "request_hex": "f710b9ab000204008c00bebbe3",
+      "evidence": [
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 1,
+      "first_utc": "2026-11-06T01:55:33.604738+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 6,
+      "address": 47504,
+      "values": [
+        116
+      ],
+      "request_hex": "f706b9900074b80a",
+      "evidence": [
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 1,
+      "first_utc": "2026-11-06T01:55:33.625084+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 6,
+      "address": 47615,
+      "values": [
+        100
+      ],
+      "request_hex": "f706b9ff006489db",
+      "evidence": [
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 1,
+      "first_utc": "2026-11-06T01:59:20.379939+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 16,
+      "address": 47589,
+      "count_or_words": 5,
+      "values": [
+        279,
+        1080,
+        64639,
+        437,
+        23
+      ],
+      "request_hex": "f710b9e500050a01170438fc7f01b5001768da",
+      "evidence": [
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 1,
+      "first_utc": "2026-11-06T02:00:44.018376+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 39058,
+      "count_or_words": 16,
+      "request_hex": "f70398920010de1d",
+      "evidence": [
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 1,
+      "first_utc": "2026-11-06T11:11:30.065894+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 16,
+      "address": 45200,
+      "count_or_words": 3,
+      "values": [
+        6667,
+        1557,
+        2845
+      ],
+      "request_hex": "f710b0900003061a0b06150b1d8e86",
+      "evidence": [
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 1,
+      "first_utc": "2026-11-06T11:23:06.729213+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 6,
+      "address": 45482,
+      "values": [
+        7
+      ],
+      "request_hex": "f706b1aa0007db82",
+      "evidence": [
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 1,
+      "first_utc": "2026-11-06T11:23:28.787887+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 6,
+      "address": 45482,
+      "values": [
+        87
+      ],
+      "request_hex": "f706b1aa0057dbbe",
+      "evidence": [
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 1,
+      "first_utc": "2026-11-06T11:24:15.553767+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 6,
+      "address": 45483,
+      "values": [
+        65161
+      ],
+      "request_hex": "f706b1abfe894a46",
+      "evidence": [
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 1,
+      "first_utc": "2026-11-06T15:20:38.590538+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 16,
+      "address": 47547,
+      "count_or_words": 6,
+      "values": [
+        1,
+        3,
+        65024,
+        0,
+        0,
+        0
+      ],
+      "request_hex": "f710b9bb00060c00010003fe00000000000000feb8",
+      "evidence": [
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 1,
+      "first_utc": "2026-11-06T15:22:22.427923+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 6,
+      "address": 47509,
+      "values": [
+        0
+      ],
+      "request_hex": "f706b9950000a82c",
+      "evidence": [
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 1,
+      "first_utc": "2026-11-06T15:22:22.488382+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 16,
+      "address": 47547,
+      "count_or_words": 6,
+      "values": [
+        1,
+        3,
+        64768,
+        437,
+        17,
+        0
+      ],
+      "request_hex": "f710b9bb00060c00010003fd0001b50011000062a3",
+      "evidence": [
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 1,
+      "first_utc": "2026-11-06T15:42:25.323527+00:00",
+      "wire": "5A5A",
+      "family": 1,
+      "function": 11,
+      "payload_length": 4,
+      "evidence": [
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 1,
+      "first_utc": "2026-11-06T15:42:25.328670+00:00",
+      "wire": "5A5A",
+      "family": 1,
+      "function": 10,
+      "payload_length": 39,
+      "evidence": [
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 1,
+      "first_utc": "2026-11-06T17:51:28.918952+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 16,
+      "address": 45200,
+      "count_or_words": 3,
+      "values": [
+        6667,
+        1795,
+        13082
+      ],
+      "request_hex": "f710b0900003061a0b0703331a3cbc",
+      "evidence": [
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 1,
+      "first_utc": "2026-11-06T17:55:47.546041+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 55316,
+      "count_or_words": 1,
+      "request_hex": "f703d8140001ea38",
+      "evidence": [
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 1,
+      "first_utc": "2026-11-06T17:55:47.556125+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 6,
+      "address": 47016,
+      "values": [
+        0
+      ],
+      "request_hex": "f706b7a800003b08",
+      "evidence": [
+        "fully-offline"
+      ]
+    },
+    {
+      "count": 1,
+      "first_utc": "2026-11-06T17:55:47.570466+00:00",
+      "wire": "RTU",
+      "unit": 247,
+      "function": 3,
+      "address": 55252,
+      "count_or_words": 65,
+      "request_hex": "f703d7d40041e8e0",
+      "evidence": [
+        "fully-offline"
+      ]
+    }
+  ],
+  "request_count": 88150,
+  "distinct_requests": 150,
+  "forwarded_read_requests": 1023,
+  "fully_offline_requests": 87052,
+  "simulated_ack_events": 39,
+  "simulated_read_events": 18,
+  "privacy": "Private endpoints, serials, credential responses and packet capture are excluded. Longer write payloads are omitted. Native register writes were withheld except the pre-existing alarm-page selector filter. UI editor acknowledgements may be simulated. Rows marked fully-offline come from a loopback-only mutable fixture with no upstream connection; they establish app encoding only. Manual fixture setup/canary requests are excluded."
+}

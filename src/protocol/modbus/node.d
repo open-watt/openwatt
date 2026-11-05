@@ -134,6 +134,22 @@ nothrow @nogc:
         return true;
     }
 
+    void cancel_requests(ModbusResponseHandler handler)
+    {
+        for (size_t i; i < _pending.length; )
+            if (_pending[i].response_handler == handler)
+            {
+                PendingRequest cancelled = _pending[i].move;
+                _pending.remove(i);
+                version (TrackLateResponses)
+                    record_abandoned(cancelled);
+                if (cancelled.tag && _iface.get)
+                    _iface.abort(cancelled.tag);
+            }
+            else
+                ++i;
+    }
+
     void sendResponse(ubyte client_address, ushort sequence_number, ref const ModbusPDU response) nothrow @nogc
     {
         send_packet(client_address, sequence_number, response, ModbusFrameType.response);
@@ -193,12 +209,10 @@ protected:
         }
 
         // fail all pending requests
-        foreach (ref req; _pending)
-        {
+        Array!PendingRequest pending = _pending.move;
+        foreach (ref req; pending)
             if (req.error_handler)
                 req.error_handler(ModbusErrorType.Failed, req.request, req.request_time);
-        }
-        _pending.clear();
 
         return CompletionStatus.complete;
     }
@@ -245,9 +259,10 @@ protected:
                 }
                 else
                 {
-                    if (req.error_handler)
-                        req.error_handler(ModbusErrorType.Timeout, req.request, req.request_time);
+                    PendingRequest expired = (*req).move;
                     _pending.remove(i);
+                    if (expired.error_handler)
+                        expired.error_handler(ModbusErrorType.Timeout, expired.request, expired.request_time);
                     continue;
                 }
             }
@@ -328,9 +343,9 @@ private:
                     continue;
 
                 ModbusPDU response = ModbusPDU(cast(FunctionCode)pdu[0], pdu[1 .. $]);
-                req.response_handler(req.request, response, req.request_time, p.creation_time);
-
+                PendingRequest completed = req.move;
                 _pending.remove(i);
+                completed.response_handler(completed.request, response, completed.request_time, p.creation_time);
                 return;
             }
 
@@ -388,9 +403,10 @@ private:
 
             version (TrackLateResponses)
                 record_abandoned(req);
-            if (req.error_handler)
-                req.error_handler(ModbusErrorType.Failed, req.request, req.request_time);
+            PendingRequest failed = req.move;
             _pending.remove(i);
+            if (failed.error_handler)
+                failed.error_handler(ModbusErrorType.Failed, failed.request, failed.request_time);
             break;
         }
     }

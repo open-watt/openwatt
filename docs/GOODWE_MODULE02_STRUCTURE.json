@@ -1,0 +1,19 @@
+{
+  "request": "5a5a01020000f4d0",
+  "response_header": "5a5a01820025",
+  "crc_valid": true,
+  "layout": "three byte-length-prefixed ASCII fields",
+  "field_lengths": [
+    11,
+    12,
+    11
+  ],
+  "field_meanings": [
+    "candidate station SSID",
+    "candidate station password",
+    "security descriptor"
+  ],
+  "security_descriptor": "WPA2PSK,AES",
+  "credential_values": "redacted; raw probe retained privately on Pi",
+  "public_record_redaction": "Private LAN addresses, MACs and serial identifiers are pseudonymized. Encoded identity bytes may be substituted, so affected historical frames are not checksum-valid replay fixtures. Private captures and WLAN credentials are excluded."
+}

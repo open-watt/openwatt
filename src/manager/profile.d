@@ -11,6 +11,7 @@ import urt.meta.enuminfo;
 import urt.si.unit : ScaledUnit;
 import urt.string;
 import urt.string.format;
+import urt.variant;
 
 import manager.component;
 
@@ -18,8 +19,8 @@ import manager.sample.codec : Encoding;
 import manager.config;
 import manager.device;
 import manager.element;
-import manager.sample : find_enum_info, register_desc, register_enum_info, SampleDesc;
-import manager.series : DataFormat, ValueType;
+import manager.sample : find_enum_info, register_desc, register_enum_info, SampleDesc, desc_by_index, register_constraint;
+import manager.series : DataFormat, ValueType, Constraint, register_format, unbox_scalar;
 import manager.sample.spec : compile_spec, LayoutContext;
 
 nothrow @nogc:
@@ -190,6 +191,23 @@ nothrow @nogc:
         }
         desc_index = register_desc(desc);
         span = wire_span(desc, type);
+        return true;
+    }
+
+    bool constrain_value(ref ushort index, const(char)[] lower, const(char)[] upper)
+    {
+        auto desc = desc_by_index(index);
+        DataFormat format = cast(DataFormat)*desc.fmt;
+        Constraint limits;
+        limits.has = Constraint.Has.min | Constraint.Has.max;
+        Variant low = Variant(lower);
+        Variant high = Variant(upper);
+        if (!format.is_scalar || !unbox_scalar(low, format, limits.min) ||
+            !unbox_scalar(high, format, limits.max) || limits.check(limits.min, format))
+            return false;
+        format.constraint = register_constraint(limits);
+        desc.format = register_format(format);
+        index = register_desc(desc);
         return true;
     }
 
@@ -778,7 +796,7 @@ unittest
                 const(char)[] units = tail.split!','.unQuote;
                 size_t taken;
                 d.addr = cast(ubyte)addr.parse_uint_with_base(&taken);
-                return b.compile_value(type, units, stream_le_context, d.desc, d.length);
+                return b.compile_value(type, units, stream_le_context, d.desc, d.length) && d.addr != 255;
             }
         }
         static struct TRoot
@@ -803,7 +821,7 @@ unittest
                 const(char)[] tail = item.value;
                 root.first = b.add_string(tail.split!','.unQuote);
                 root.second = b.add_string(tail.split!','.unQuote);
-                return true;
+                return item.value != "reject,beta";
             }
         }
         uint tsec = register_profile_section("tsec", alloc!TestSections());
@@ -889,6 +907,8 @@ unittest
         ref const TRoot root = *cast(const(TRoot)*)root_data.ptr;
         assert(prof.get_section_string(root.first) == "alpha");
         assert(prof.get_section_string(root.second) == "beta");
+        assert(parse_profile("registers:\n\ttsec: 255, u16\tdesc: rejected\n", "bad-field") is null);
+        assert(parse_profile("troot: reject,beta\n", "bad-root") is null);
     }
 }
 
@@ -1305,7 +1325,12 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null)
             continue;
         root_parsed[][i] = true;
         ref Profile.RootBlock blk = root_block(profile, s.kind);
-        s.handler.parse_root(s.kind, root_item, blk.data, builder);
+        if (!s.handler.parse_root(s.kind, root_item, blk.data, builder))
+        {
+            writeWarning("Rejected profile root: ", root_item.name);
+            free(profile);
+            return null;
+        }
     }
 
     // parse the elements
@@ -1368,7 +1393,12 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null)
                     e._index = idx;
                     builder.element_id = id;
                     builder._element = &e;
-                    s.handler.parse_element(s.kind, reg_item, blk.data[idx*blk.esize .. (idx+1)*blk.esize], builder);
+                    if (!s.handler.parse_element(s.kind, reg_item, blk.data[idx*blk.esize .. (idx+1)*blk.esize], builder))
+                    {
+                        writeWarning("Rejected profile field: ", id, " (", reg_item.name, ")");
+                        free(profile);
+                        return null;
+                    }
                 }
                 else
                     writeWarning("Unknown element type: ", reg_item.name);
@@ -1965,6 +1995,7 @@ __gshared immutable KnownElements[] g_well_known_elements = [
     KnownElements("Vehicle", g_Vehicle_elements),
     KnownElements("WaterHeater", g_WaterHeater_elements),
     KnownElements("PowerControl", g_PowerControl_elements),
+    KnownElements("Watchdog", g_Watchdog_elements),
     KnownElements("Switch", g_Switch_elements),
     KnownElements("Light", g_Light_elements),
     KnownElements("Button", g_Button_elements),
@@ -2302,6 +2333,16 @@ __gshared immutable KnownElementTemplate[] g_PowerControl_elements = [
     make_element_template!("ramp_rate", null, "Ramp Rate", "Maximum rate of setpoint change in `unit`/s", Frequency.constant),
     make_element_template!("command_latency", "s", "Command Latency", "Typical command-to-effect lag (informational)", Frequency.constant),
     make_element_template!("autonomous_mode", null, "Autonomous Mode", "track_meter | schedule | weather | unknown (when kind=autonomous)", Frequency.constant),
+];
+
+__gshared immutable KnownElementTemplate[] g_Watchdog_elements = [
+    make_element_template!("feed", "Count", "Watchdog Feed", "Write a new counter to renew control ownership", Frequency.realtime),
+    make_element_template!("scope", null, "Watchdog Scope", "controller | device", Frequency.constant),
+    make_element_template!("timeout", "s", "Watchdog Timeout", "Maximum interval between ownership renewals", Frequency.constant),
+    make_element_template!("remaining", "s", "Watchdog Remaining", "Time remaining in the current ownership lease", Frequency.high),
+    make_element_template!("armed", "Boolean", "Watchdog Armed", "An external-control lease is active", Frequency.high),
+    make_element_template!("expiry_action", null, "Expiry Action", "Action performed by the declared watchdog scope", Frequency.constant),
+    make_element_template!("device_expiry_action", null, "Device Expiry Action", "Verified native response to communication loss, or unknown", Frequency.constant),
 ];
 
 __gshared immutable KnownElementTemplate[] g_WaterHeater_elements = [

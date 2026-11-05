@@ -146,7 +146,15 @@ bool sample_record(const(void)[] wire, ref const SampleDesc desc, void[] record)
     }
 
     if (fmt.count != 1)
-        return false; // TODO: vectors land with their first producer
+    {
+        if (fmt.type != ValueType.u8 || fmt.desc != DataFormat.Desc.none || fmt.count == 0 || desc.layout.bit_width != 8 ||
+            desc.layout.bit_offset != 0 || desc.layout.container_bytes != 1 ||
+            wire.length < fmt.count || record.length < fmt.count)
+            return false;
+        // Arrays retain element order; scalar endianness does not reverse the array.
+        record[0 .. fmt.count] = wire[0 .. fmt.count];
+        return true;
+    }
     if (wire.length < desc.layout.container_bytes || record.length < fmt.stride)
         return false;
 
@@ -229,7 +237,14 @@ bool emit_record(const(void)[] record, ref const SampleDesc desc, void[] wire)
     }
 
     if (fmt.count != 1)
-        return false;
+    {
+        if (fmt.type != ValueType.u8 || fmt.desc != DataFormat.Desc.none || fmt.count == 0 || desc.layout.bit_width != 8 ||
+            desc.layout.bit_offset != 0 || desc.layout.container_bytes != 1 ||
+            wire.length < fmt.count || record.length < fmt.count)
+            return false;
+        wire[0 .. fmt.count] = record[0 .. fmt.count];
+        return true;
+    }
     if (wire.length < desc.layout.container_bytes || record.length < fmt.stride)
         return false;
 
@@ -542,6 +557,23 @@ unittest
     char[8] namebuf;
     immutable char[6] namewire = "EHLL!O";
     assert(sample_text(namewire, name, namebuf) == "HELLO!");
+
+    DataFormat bytes = DataFormat(ValueType.u8, SeriesKind.held);
+    bytes.count = 4;
+    SampleDesc blob = SampleDesc(WireLayout(WK.unsigned_, 8, 0, WF.reverse), 1, register_format(bytes));
+    ubyte[5] packet = [1, 23, 145, 255, 77];
+    ubyte[4] sampled;
+    assert(sample_record(packet, blob, sampled));
+    assert(sampled == packet[0 .. 4]);
+    ubyte[5] emitted = [0, 0, 0, 0, 88];
+    assert(emit_record(sampled, blob, emitted));
+    assert(emitted[0 .. 4] == sampled && emitted[4] == 88);
+    assert(!sample_record(packet[0 .. 3], blob, sampled));
+    assert(!sample_record(packet, blob, sampled[0 .. 3]));
+    assert(sampled == packet[0 .. 4]);
+    assert(!emit_record(sampled[0 .. 3], blob, emitted));
+    assert(!emit_record(sampled, blob, emitted[0 .. 3]));
+    assert(emitted[0 .. 4] == sampled && emitted[4] == 88);
 }
 
 

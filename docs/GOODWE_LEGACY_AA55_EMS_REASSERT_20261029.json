@@ -1,0 +1,22 @@
+{
+  "target": "cabin_solar 192.0.2.28",
+  "operation": "Reassert verified existing mode1/power0 only; write aborted if baseline differs",
+  "results": [
+    {
+      "request": "f703056e0002b18c",
+      "response": "aa55f70304000100003dfc",
+      "timestamp_utc": "2026-10-28T16:24:38.774972+00:00"
+    },
+    {
+      "request": "aa55b07f033a03010000026f",
+      "response": "aa550db003ba01060280",
+      "timestamp_utc": "2026-10-28T16:24:42.002495+00:00"
+    },
+    {
+      "request": "f703056e0002b18c",
+      "response": "aa55f70304000100003dfc",
+      "timestamp_utc": "2026-10-28T16:24:45.219943+00:00"
+    }
+  ],
+  "public_record_redaction": "Private LAN addresses, MACs and serial identifiers are pseudonymized. Encoded identity bytes may be substituted, so affected historical frames are not checksum-valid replay fixtures. Private captures and WLAN credentials are excluded."
+}

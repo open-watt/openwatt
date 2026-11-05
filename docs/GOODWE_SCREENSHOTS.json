@@ -1,0 +1,265 @@
+{
+  "source": "20 screenshots attached by user, 2026-10-28; image numbers refer to attachment order",
+  "timezone": "Australia/Brisbane",
+  "clock_precision": "minute only; screenshot values do not prove successful live reads",
+  "credentials": "redacted from public record",
+  "screenshots": [
+    {
+      "image": 1,
+      "phone_time": "03:08",
+      "screen": "Home: upper",
+      "visible": {
+        "status": "Waiting",
+        "soc_percent": 19,
+        "pv_kw": 0,
+        "battery_kw": 0,
+        "home_kw": 0.4,
+        "grid_import_kw": 0.4,
+        "grid_code": "Australia-A",
+        "working_mode": "General Mode",
+        "battery_model": "PYLONTECH US2000B-TB*2",
+        "battery_status": "Battery communication failure",
+        "meter_ct": "Normal",
+        "backup": "ON"
+      }
+    },
+    {
+      "image": 2,
+      "phone_time": "03:08",
+      "screen": "Home: lower",
+      "visible": {
+        "soc_percent": 19,
+        "home_kw": 0.42,
+        "grid_import_kw": 0.42,
+        "software_power_limit": "ON",
+        "hardware_power_limit": "ON"
+      }
+    },
+    {
+      "image": 3,
+      "phone_time": "03:08",
+      "screen": "Parameters > Data: information/system",
+      "visible": {
+        "serial": "00000ESU99000008",
+        "device_information": "2323E",
+        "pv1": "0.0V 0.0A",
+        "pv2": "0.0V 0.0A",
+        "ac_output": "239.1V/0.3A/0.08kW",
+        "ac_frequency_hz": 50.0,
+        "backup_output": "239.1V/0.30kW",
+        "import_power_kw": 0.42,
+        "battery_brand": "PYLONTECH"
+      }
+    },
+    {
+      "image": 4,
+      "phone_time": "03:09",
+      "screen": "Parameters > Data: BAT System",
+      "visible": {
+        "battery_brand": "PYLONTECH",
+        "battery_model": "PYLONTECH US2000B-TB*2",
+        "battery_status": "Battery communication failure",
+        "soh_percent": 100.0,
+        "soc_percent": 19,
+        "battery_temperature_c": 23.9,
+        "charging_discharge_mode": "No Battery/Battery Disconnected",
+        "voltage_v": 0,
+        "current_a": 0,
+        "power_kw": 0,
+        "charge_current_limit_a": 0,
+        "discharge_current_limit_a": 0
+      }
+    },
+    {
+      "image": 5,
+      "phone_time": "03:09",
+      "screen": "Parameters > Alarm",
+      "visible": {
+        "visible_entries": 0,
+        "note": "Blank in this earlier screenshot; later 03:20 screenshot shows matching records 512/515/517"
+      }
+    },
+    {
+      "image": 6,
+      "phone_time": "03:09",
+      "screen": "Settings > Communications > WLAN/LAN",
+      "visible": {
+        "network_name": "Please Select to join WiFi",
+        "encryption": "empty",
+        "password": "empty placeholder; not transcribed",
+        "dhcp_toggle": "OFF",
+        "ip": "0.0.0.0",
+        "mask": "0.0.0.0",
+        "gateway": "0.0.0.0",
+        "dns": "0.0.0.0",
+        "toast": "Communication is unstable, please try again later"
+      }
+    },
+    {
+      "image": 7,
+      "phone_time": "03:09",
+      "screen": "Settings > Device Information",
+      "visible": {
+        "dsp": "23",
+        "arm": "14",
+        "bms": "01"
+      }
+    },
+    {
+      "image": 8,
+      "phone_time": "03:09",
+      "screen": "Device Information > Update Record",
+      "visible": {
+        "message": "No Data"
+      }
+    },
+    {
+      "image": 9,
+      "phone_time": "03:10",
+      "screen": "Installer login",
+      "visible": {
+        "credential": "redacted from public record",
+        "note": "Login form followed by Advanced Settings; no wire-authentication semantics inferred"
+      }
+    },
+    {
+      "image": 10,
+      "phone_time": "03:10",
+      "screen": "Advanced Settings: limits/shadow scan",
+      "visible": {
+        "dred_remote_shutdown_rcr": "ON",
+        "software_power_limit": "ON",
+        "power_limit_value": 5000,
+        "hardware_power_limit": "OFF",
+        "shadow_scan": "ON"
+      }
+    },
+    {
+      "image": 11,
+      "phone_time": "03:10",
+      "screen": "Advanced Settings: backup/power factor",
+      "visible": {
+        "backup": "ON",
+        "detection_mode": "UPS Mode - Full Wave Detection",
+        "battery_activated": "ON",
+        "power_factor": 0.9
+      }
+    },
+    {
+      "image": 12,
+      "phone_time": "03:11",
+      "screen": "Advanced Settings: remaining controls",
+      "visible": {
+        "clear_overload_history": "button visible",
+        "output_active_power": 0.1,
+        "output_active_power_range": "0..100%",
+        "safety_parameter_settings": "link",
+        "battery_function": "link"
+      }
+    },
+    {
+      "image": 13,
+      "phone_time": "03:11",
+      "screen": "Battery Function: upper",
+      "visible": {
+        "charging_voltage_v": 56.0,
+        "charging_current_a": 50.0,
+        "discharge_current": "partly obscured; next screenshot shows 50.0 A",
+        "soc_protection": "ON",
+        "on_grid_dod_percent": 80,
+        "toast": "Failed To Retrieve Data"
+      }
+    },
+    {
+      "image": 14,
+      "phone_time": "03:11",
+      "screen": "Battery Function: lower",
+      "visible": {
+        "discharge_current_a": 50.0,
+        "soc_protection": "ON",
+        "on_grid_dod_percent": 80,
+        "off_grid_dod": "empty",
+        "immediate_charging": "OFF"
+      }
+    },
+    {
+      "image": 15,
+      "phone_time": "03:11",
+      "screen": "Safety Parameter Settings > Protection: voltage",
+      "visible": {
+        "over_voltage_stage1_v": 100.3,
+        "over_voltage_stage1_trip_s": 20,
+        "under_voltage_stage1_v": 83.6,
+        "under_voltage_stage1_trip_s": 20,
+        "over_voltage_stage2_v": 80.5,
+        "over_voltage_stage2_trip_s": 10,
+        "under_voltage_stage2_v": 56.1,
+        "under_voltage_stage2_trip_s": 10,
+        "ten_minute_over_voltage_v": 100.0
+      }
+    },
+    {
+      "image": 16,
+      "phone_time": "03:11",
+      "screen": "Safety Parameter Settings > Protection: frequency",
+      "visible": {
+        "over_frequency_stage1_hz": 0.1,
+        "over_frequency_stage1_trip_s": 0,
+        "under_frequency_stage1_hz": 0.1,
+        "under_frequency_stage1_trip_s": 0,
+        "over_frequency_stage2_hz": 0.1,
+        "over_frequency_stage2_trip_s": 0,
+        "under_frequency_stage2_hz": 0.1,
+        "under_frequency_stage2_trip_s": 0
+      }
+    },
+    {
+      "image": 17,
+      "phone_time": "03:11",
+      "screen": "Safety Parameter Settings > Connection: upper",
+      "visible": {
+        "ramp_upper_voltage": 230.3,
+        "ramp_lower_voltage": 210.9,
+        "ramp_upper_frequency": 50.49,
+        "ramp_lower_frequency": 49.87,
+        "ramp_observation_time": 120,
+        "reconnection_upper_voltage": 230.3,
+        "reconnection_lower_voltage": 210.9,
+        "reconnection_upper_frequency": 50.49,
+        "reconnection_lower_frequency": 49.87
+      }
+    },
+    {
+      "image": 18,
+      "phone_time": "03:11",
+      "screen": "Safety Parameter Settings > Connection: lower",
+      "visible": {
+        "reconnection_observation_time": 120,
+        "enable_power_slope": "ON",
+        "on_grid_power_slope": 30,
+        "on_grid_power_slope_under_fault": 45
+      }
+    },
+    {
+      "image": 19,
+      "phone_time": "03:11",
+      "screen": "Safety Parameter Settings > Curve Settings",
+      "visible": {
+        "cos_phi_p": "OFF",
+        "q_u": "OFF",
+        "p_u": "OFF",
+        "f_p": "OFF"
+      }
+    },
+    {
+      "image": 20,
+      "phone_time": "03:11",
+      "screen": "Safety Parameter Settings > Other",
+      "visible": {
+        "lvrt_extended_functions": "OFF",
+        "hvrt_extended_functions": "OFF"
+      }
+    }
+  ],
+  "public_record_redaction": "Private LAN addresses, MACs and serial identifiers are pseudonymized. Encoded identity bytes may be substituted, so affected historical frames are not checksum-valid replay fixtures. Private captures and WLAN credentials are excluded."
+}

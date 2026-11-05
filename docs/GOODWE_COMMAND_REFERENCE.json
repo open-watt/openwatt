@@ -1,0 +1,249 @@
+{
+  "schema_version": 1,
+  "review_date_local": "2026-10-29",
+  "reference_revision": "66dfcdd9cd947bfd799f2bddb40b4e05ba9db6f6",
+  "reference_es_sha256": "e325aac49822f0062192db87a2672389e46345c8732276d9980d0c6f1f3f5b96",
+  "reference_url": "https://github.com/marcelblijleven/goodwe/blob/66dfcdd9cd947bfd799f2bddb40b4e05ba9db6f6/goodwe/es.py",
+  "purpose": "Extract explicit request/expected-response pairs and conditional workflows without executing any command. Wire/UI evidence remains in GOODWE_OBSERVATIONS.json and GOODWE_PROTOCOL.md.",
+  "commands": [
+    {
+      "reference_operation": "_READ_DEVICE_VERSION_INFO",
+      "request_body_expression": "'010200'",
+      "request_control_function": "0102",
+      "expected_response_control_function": "0182",
+      "source_line": 25,
+      "provenance": "reference implementation only; not a real-inverter write test",
+      "target_write_verified": false,
+      "request_control": 1,
+      "request_function": 2,
+      "response_function_is_request_or_80": true
+    },
+    {
+      "reference_operation": "_READ_DEVICE_RUNNING_DATA",
+      "request_body_expression": "'010600'",
+      "request_control_function": "0106",
+      "expected_response_control_function": "0186",
+      "source_line": 26,
+      "provenance": "reference implementation only; not a real-inverter write test",
+      "target_write_verified": false,
+      "request_control": 1,
+      "request_function": 6,
+      "response_function_is_request_or_80": true
+    },
+    {
+      "reference_operation": "_READ_DEVICE_SETTINGS_DATA",
+      "request_body_expression": "'010900'",
+      "request_control_function": "0109",
+      "expected_response_control_function": "0189",
+      "source_line": 27,
+      "provenance": "reference implementation only; not a real-inverter write test",
+      "target_write_verified": false,
+      "request_control": 1,
+      "request_function": 9,
+      "response_function_is_request_or_80": true
+    },
+    {
+      "reference_operation": "write_setting",
+      "request_body_expression": "'030206' + Timestamp('time', 0, '').encode_value(value).hex()",
+      "request_control_function": "",
+      "expected_response_control_function": "0382",
+      "source_line": 332,
+      "provenance": "reference implementation only; not a real-inverter write test",
+      "target_write_verified": false
+    },
+    {
+      "reference_operation": "set_grid_export_limit",
+      "request_body_expression": "f'033502{export_limit:04x}'",
+      "request_control_function": "0335",
+      "expected_response_control_function": "03B5",
+      "source_line": 388,
+      "provenance": "reference implementation only; not a real-inverter write test",
+      "target_write_verified": false,
+      "request_control": 3,
+      "request_function": 53,
+      "response_function_is_request_or_80": true
+    },
+    {
+      "reference_operation": "_reset_inverter",
+      "request_body_expression": "'031d00'",
+      "request_control_function": "031D",
+      "expected_response_control_function": "039D",
+      "source_line": 470,
+      "provenance": "reference implementation only; not a real-inverter write test",
+      "target_write_verified": false,
+      "request_control": 3,
+      "request_function": 29,
+      "response_function_is_request_or_80": true
+    },
+    {
+      "reference_operation": "_set_limit_power_for_charge",
+      "request_body_expression": "f'032c05{start_h:02x}{start_m:02x}{stop_h:02x}{stop_m:02x}{limit:02x}'",
+      "request_control_function": "032C",
+      "expected_response_control_function": "03AC",
+      "source_line": 529,
+      "provenance": "reference implementation only; not a real-inverter write test",
+      "target_write_verified": false,
+      "request_control": 3,
+      "request_function": 44,
+      "response_function_is_request_or_80": true
+    },
+    {
+      "reference_operation": "_set_limit_power_for_discharge",
+      "request_body_expression": "f'032d05{start_h:02x}{start_m:02x}{stop_h:02x}{stop_m:02x}{limit:02x}'",
+      "request_control_function": "032D",
+      "expected_response_control_function": "03AD",
+      "source_line": 541,
+      "provenance": "reference implementation only; not a real-inverter write test",
+      "target_write_verified": false,
+      "request_control": 3,
+      "request_function": 45,
+      "response_function_is_request_or_80": true
+    },
+    {
+      "reference_operation": "_set_offgrid_work_mode",
+      "request_body_expression": "f'033601{mode:02x}'",
+      "request_control_function": "0336",
+      "expected_response_control_function": "03B6",
+      "source_line": 548,
+      "provenance": "reference implementation only; not a real-inverter write test",
+      "target_write_verified": false,
+      "request_control": 3,
+      "request_function": 54,
+      "response_function_is_request_or_80": true
+    },
+    {
+      "reference_operation": "_set_relay_control",
+      "request_body_expression": "f'03270200{param:02x}'",
+      "request_control_function": "0327",
+      "expected_response_control_function": "03B7",
+      "source_line": 557,
+      "provenance": "reference implementation only; not a real-inverter write test",
+      "target_write_verified": false,
+      "request_control": 3,
+      "request_function": 39,
+      "response_function_is_request_or_80": false
+    },
+    {
+      "reference_operation": "_set_store_energy_mode",
+      "request_body_expression": "f'032601{param:02x}'",
+      "request_control_function": "0326",
+      "expected_response_control_function": "03B6",
+      "source_line": 570,
+      "provenance": "reference implementation only; not a real-inverter write test",
+      "target_write_verified": false,
+      "request_control": 3,
+      "request_function": 38,
+      "response_function_is_request_or_80": false
+    },
+    {
+      "reference_operation": "_set_work_mode",
+      "request_body_expression": "f'035901{mode:02x}'",
+      "request_control_function": "0359",
+      "expected_response_control_function": "03D9",
+      "source_line": 573,
+      "provenance": "reference implementation only; not a real-inverter write test",
+      "target_write_verified": false,
+      "request_control": 3,
+      "request_function": 89,
+      "response_function_is_request_or_80": true
+    }
+  ],
+  "register_wrappers": [
+    {
+      "class": "Aa55ReadCommand",
+      "source_line": 549,
+      "request_body_layout": "011A03{offset:u16be}{count:u8}",
+      "expected_response_control_function": "019A",
+      "status": "reference-only register operation; family/firmware/read-back still required"
+    },
+    {
+      "class": "Aa55WriteCommand",
+      "source_line": 563,
+      "request_body_layout": "023905{register:u16be}01{value:u16be}",
+      "expected_response_control_function": "02B9",
+      "status": "reference-only register operation; family/firmware/read-back still required"
+    },
+    {
+      "class": "Aa55WriteMultiCommand",
+      "source_line": 575,
+      "request_body_layout": "02390B{offset:u16be}{payload_bytes:u8}{values:raw}",
+      "expected_response_control_function": "02B9",
+      "status": "reference-only register operation; family/firmware/read-back still required"
+    }
+  ],
+  "conditional_workflows": [
+    {
+      "name": "set_operation_mode",
+      "source_line": 418,
+      "conditional": true,
+      "referenced_methods": [
+        "_read_setting",
+        "_set_backup_mode",
+        "_set_eco_mode",
+        "_set_general_mode",
+        "_set_offgrid_mode",
+        "write_setting"
+      ],
+      "note": "Reference index only. This is not an ordered execution plan; branch conditions and sequencing must be resolved from the pinned source."
+    },
+    {
+      "name": "_set_general_mode",
+      "source_line": 478,
+      "conditional": true,
+      "referenced_methods": [
+        "_clear_battery_mode_param",
+        "_set_limit_power_for_charge",
+        "_set_limit_power_for_discharge",
+        "_set_offgrid_work_mode",
+        "_set_work_mode",
+        "_supports_eco_mode_v2"
+      ],
+      "note": "Reference index only. This is not an ordered execution plan; branch conditions and sequencing must be resolved from the pinned source."
+    },
+    {
+      "name": "_set_offgrid_mode",
+      "source_line": 492,
+      "conditional": true,
+      "referenced_methods": [
+        "_clear_battery_mode_param",
+        "_set_limit_power_for_charge",
+        "_set_limit_power_for_discharge",
+        "_set_offgrid_work_mode",
+        "_set_relay_control",
+        "_set_store_energy_mode",
+        "_set_work_mode"
+      ],
+      "note": "Reference index only. This is not an ordered execution plan; branch conditions and sequencing must be resolved from the pinned source."
+    },
+    {
+      "name": "_set_backup_mode",
+      "source_line": 503,
+      "conditional": true,
+      "referenced_methods": [
+        "_clear_battery_mode_param",
+        "_set_limit_power_for_charge",
+        "_set_limit_power_for_discharge",
+        "_set_offgrid_work_mode",
+        "_set_work_mode",
+        "_supports_eco_mode_v2"
+      ],
+      "note": "Reference index only. This is not an ordered execution plan; branch conditions and sequencing must be resolved from the pinned source."
+    },
+    {
+      "name": "_set_eco_mode",
+      "source_line": 516,
+      "conditional": false,
+      "referenced_methods": [
+        "_set_offgrid_work_mode",
+        "_set_work_mode"
+      ],
+      "note": "Reference index only. This is not an ordered execution plan; branch conditions and sequencing must be resolved from the pinned source."
+    }
+  ],
+  "limits": [
+    "These are implementation-derived claims, not a vendor specification.",
+    "A response type does not define its success/error payload.",
+    "Do not run workflows or synthesize ACKs from this catalogue without target-specific validation."
+  ],
+  "public_record_redaction": "Private LAN addresses, MACs and serial identifiers are pseudonymized. Encoded identity bytes may be substituted, so affected historical frames are not checksum-valid replay fixtures. Private captures and WLAN credentials are excluded."
+}

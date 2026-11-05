@@ -2753,3 +2753,72 @@ report, tuya-datapoint, read-response and priming paths.
 - **`conf/profiles` is a submodule.** A profile change ships separately from the binary and
   has to be deployed to a target in its own right, so a binary that expects the new mapping
   can meet an old profile and vice versa.
+
+
+## GoodWe integrated protocol and profile follow-through
+
+- Complete the remaining model-specific transactions in
+  `docs/GOODWE_SPN_CONFIGURATION.md` and the ES coverage index: battery catalogue
+  selection outside the observed low745 path, remaining model-specific working-mode
+  activation outside the observed ESU/native paths, older module/HTTP workflows, cloud/BLE APN and other serial-generation branches, logical free-slot selection (the seven native TOU editors cover physical
+  slots; bank preflight enforces four TOU groups), firmware transfer
+  and hardware validation of native alarm paging. The208-entry ES survey and native screen inventory
+  describe different targets; neither proves complete runtime parity.
+- Verify all new scalar, schedule, sequence and action writers on target hardware
+  with changed-value, persistence and physical-effect evidence. Emulator ACK and
+  readback tests do not establish those properties. Native immediate charge now
+  has an ordered apply with abort-on-failure; Smart Charge parameters, paired
+  start time and the shared LVRT/HVRT bits have profile writers. The staged reserve
+  pair writes both minimum-SOC words together while preserving discharge voltage.
+  Native reactive selection now validates the four coupled settings and verifies
+  neutral values before activation; physical PF/Q direction and effect remain to
+  verify. Native Self-use/Peak activation now has ordered apply with per-step
+  verification, separate from the peak-period editor. Eight-slot load editors
+  enforce a combined four-group limit and intelligent export-limiter prelude.
+  ES First Cold Start has explicit ACK-only enable/cancel actions; physical
+  effect and backup continuity remain unverified. The unsupported twelve-slot
+  branch and logical allocation remain separate.
+  The observed GW6000ES20 low745 single-battery form now validates and applies
+  the captured seven-step catalogue transaction; busbar, dual/high-voltage and EOA
+  branches remain separate. Native module network/router and password forms now
+  have staged 5A5A commits/reload; target reconnect/readback remains to verify.
+  Trace catalogue reapplication as a possible reserve writer: its seven-word
+  battery-parameter commit includes both reserves; no causal reset is captured.
+- Validate the optional upstream proxy on target app workflows before deployment.
+  Correlated AA55/RTU/module-v1 reads and writes, error propagation, peer isolation,
+  queue bounds and dependency recreation now pass emulator tests. Identity/runtime/
+  meter/BMS/schedule snapshots serve full native blocks in Device mode. Module
+  families1/2 now preserve correlation; password ACK/reload is only simulated.
+  Device-backed reads now exclude staged/write-only forms and retain read-only
+  wire images. Finish Device freshness and
+  conditional-register applicability checks.
+- Device-backed GoodWe servers still reject register writes. Add model-backed
+  write transactions and completion/error propagation for standalone emulation;
+  explicit upstream wire forwarding is a different path.
+- Verify ES meter/CT test physical behavior and prerequisites. Explicit start/stop
+  request counters now send the app's AA55 register059C/count1 values1/0, with
+  independent059C/count2 status/result reads. Tests can affect power limiting
+  and need battery discharge/communications. Command ACK is not terminal result
+  or confirmed cancellation; no physical trial has run.
+- Resolve house SPN communication-loss failover and the later mode7 transition.
+  Native recovery passed its recorded soak/blackout; the later mode7 observation
+  coincided with voltage above the reconnect ceiling. Origin and persistence
+  remain unresolved. Measure backup continuity independently during any future
+  failover/restart trial. Startup must never enter EMS mode.
+- Characterize AC-boundary compensation and independent PV/battery dispatch
+  before presenting two independently usable hybrid control surfaces.
+- Reconcile older GoodWe notebooks with subsequent findings. The consolidated
+  reference and dated evidence supersede older register/marker hypotheses.
+  ES store-energy A6/B6 response disagreement needs a firmware-specific wire check.
+  Audit remaining private working records for additional findings and arrange
+  independent retention of private packet captures, original screenshots and APK
+  source artifacts. Their sanitized findings are in the PR, while raw artifacts
+  currently remain local and excluded from the public repository.
+- Windows full unit execution reaches the temporary-file assertion in
+  manager.console.command at get_temp_filename with an empty destination.
+  Resolve the pinned uRT Windows temporary-path contract before claiming a clean
+  full suite. Isolated codec and runtime integration checks are separate evidence.
+- Verify native alarm-history paging against hardware; SolarGo fixture traffic and display pass.
+  The APK-derived count/cursor/window transaction and eight raw record fields now
+  pass loopback tests. Resolve conditional fault labels from an explicitly supplied
+  wSolar catalogue; global-cursor interference remains possible with other readers.

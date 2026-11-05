@@ -1,0 +1,8 @@
+{
+  "timestamp_utc": "2026-10-28T00:49:18.688283+00:00",
+  "target": "192.0.2.28:8899",
+  "operation": "network configuration read",
+  "request": "5a5a01030000a510",
+  "response": "5a5a01830036444843502c3139322e302e322e32382c3235352e3235352e3235352e302c3139322e302e322e32332c3139322e302e322e32335099",
+  "public_record_redaction": "Private LAN addresses, MACs and serial identifiers are pseudonymized. Encoded identity bytes may be substituted, so affected historical frames are not checksum-valid replay fixtures. Private captures and WLAN credentials are excluded."
+}

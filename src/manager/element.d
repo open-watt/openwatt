@@ -1000,7 +1000,7 @@ private:
     {
         if (data_format.is_text)
         {
-            if (!v.isString)
+            if (!v.isString && !v.isNull)
                 return "incompatible value";
             store_sample(v.asString(), timestamp, who);
             return null;
@@ -1991,6 +1991,13 @@ unittest
     assert(empty_text.has_value && !empty_text.has_history);
     empty_text.ensure_history();
     assert(empty_text.record_count == 1 && empty_text.text_value == "" && empty_text.has_value);
+    Variant text = Variant("configured");
+    assert(!empty_text.try_set(text, from_unix_time_ns(2_000)).length);
+    Variant cleared = Variant("");
+    assert(!empty_text.try_set(cleared, from_unix_time_ns(3_000)).length);
+    assert(empty_text.has_value && empty_text.text_value == "");
+    Variant number = Variant(42);
+    assert(empty_text.try_set(number) == "incompatible value");
     empty_text.teardown();
 
     // held series: equal observations advance last_update but record nothing

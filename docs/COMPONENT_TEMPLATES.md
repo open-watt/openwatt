@@ -34,6 +34,7 @@ Quick reference for standard component templates and their expected elements.
 | `Configuration` | Device settings | varies |
 | **Capability primitive (energy app contract)** |||
 | `PowerControl` | Unified actuator surface | `kind`, `setpoint` |
+| `Watchdog` | Explicit control-ownership renewal | `feed`, `scope`, `timeout`, `expiry_action` |
 
 ---
 
@@ -1037,6 +1038,42 @@ durable, idempotent setting.
 
 ---
 
+## Watchdog
+
+Control-ownership renewal shared by protocol bindings and controllers. Place it
+under the applicable `PowerControl` component so multiple surfaces can own
+independent leases.
+
+### Required
+
+- `feed` is a writable unsigned counter. Write a new counter value to renew the
+  lease. An unchanged setpoint alone need not generate a native command.
+- `scope` identifies `controller` or `device`. A controller watchdog executes
+  within OpenWatt. A device watchdog executes inside the controlled equipment.
+- `timeout` gives the maximum renewal interval in seconds.
+- `expiry_action` identifies the action performed by that scope. Values include
+  `request_autonomous`, `stop`, `retain_last` and `unknown`. A request is distinct
+  from confirmation that the device entered the requested state.
+
+### Optional
+
+- `remaining` reports seconds left in the current lease.
+- `armed` reports whether an external-control lease is active.
+- `device_expiry_action` reports a verified native communication-loss response,
+  or `unknown` when no dependable contract is established.
+
+The controller chooses a renewal cadence shorter than `timeout`. The protocol
+binding owns command serialization, acknowledgement and readback. Read polling
+is a feed only where that device's protocol explicitly defines it as one.
+
+For the installed GoodWe targets the exposed watchdog has controller scope,
+a 30-second timeout and `request_autonomous` on expiry. During continuous control
+the binding refreshes the native mode/power command. Autonomous operation does
+not issue periodic EMS writes. Native communication-loss behaviour remains
+`unknown`. The legacy ES retained dispatch during a twelve-minute blackout.
+The house SPN needed a controller restart to clear a previously latched stop
+condition after its manufacturer/EMS raw code was restored.
+
 ## WaterHeater
 
 Hot water tank with thermostat-controlled heating element. Tracked as thermal
@@ -1302,6 +1339,25 @@ replace the `Port`; it only describes control.
 - `measured: alias` - Reference (`@path`) to the element carrying actual current
   consumption or production, typically a neighbouring `EnergyMeter`'s `power`.
   Lets the energy app close the loop without per-device knowledge.
+
+### Watchdog renewal
+
+A control that requires continued ownership can expose a `watchdog` child with
+the `Watchdog` template. The controller increments `watchdog.feed` whenever it
+renews a valid allocation, including when the setpoint is unchanged. The binding
+translates that renewal into the native protocol operation. This can be a
+reissued mode/setpoint command, a dedicated heartbeat or a register write.
+
+The portable renewal expression is `watchdog.feed = watchdog.feed + 1`.
+This expresses the data-model operation. The controller's expression or console
+syntax supplies its normal assignment mechanism. The energy allocator performs
+this update for each successfully driven control that exposes a writable feed.
+A released allocation stops feeding that watchdog.
+
+A writable `kind` is an enum containing the strategies supported by the device.
+Controllers can select `continuous` before dispatch and request `autonomous` on
+release. The binding rejects unsupported enum values. `enable` remains the
+independent physical enable/stop control.
 
 ### State-change constraints (optional)
 - `min_on_time: s` - Minimum duration the device must remain on after being turned on.

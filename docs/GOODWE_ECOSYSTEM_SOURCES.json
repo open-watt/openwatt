@@ -1,0 +1,166 @@
+{
+  "review_date_local": "2026-10-29",
+  "timezone": "Australia/Brisbane",
+  "target_app_version": "SolarGo 7.2.2, user-reported",
+  "sources": [
+    {
+      "id": "goodwe-python-__init__.py",
+      "authority": "primary implementation, not vendor specification",
+      "url": "https://github.com/marcelblijleven/goodwe/blob/66dfcdd9cd947bfd799f2bddb40b4e05ba9db6f6/goodwe/__init__.py",
+      "revision": "66dfcdd9cd947bfd799f2bddb40b4e05ba9db6f6",
+      "local_copy": ".tmp/goodwe-references/__init__.py",
+      "sha256": "368c6fd3036b45a7644913cc437e69a0cd7d850442d68a22b486d02616a04e2e"
+    },
+    {
+      "id": "goodwe-python-const.py",
+      "authority": "primary implementation, not vendor specification",
+      "url": "https://github.com/marcelblijleven/goodwe/blob/66dfcdd9cd947bfd799f2bddb40b4e05ba9db6f6/goodwe/const.py",
+      "revision": "66dfcdd9cd947bfd799f2bddb40b4e05ba9db6f6",
+      "local_copy": ".tmp/goodwe-references/const.py",
+      "sha256": "83c02d2b0aea7280b462842b06a5b341bef69ade09c5c9f83780ae5b2df3afd9"
+    },
+    {
+      "id": "goodwe-python-inverter.py",
+      "authority": "primary implementation, not vendor specification",
+      "url": "https://github.com/marcelblijleven/goodwe/blob/66dfcdd9cd947bfd799f2bddb40b4e05ba9db6f6/goodwe/inverter.py",
+      "revision": "66dfcdd9cd947bfd799f2bddb40b4e05ba9db6f6",
+      "local_copy": ".tmp/goodwe-references/inverter.py",
+      "sha256": "fc1463a959f3e9dc12d0e2db6ffdc8cb212657d1ae4094256ac360882a1ee023"
+    },
+    {
+      "id": "goodwe-python-protocol.py",
+      "authority": "primary implementation, not vendor specification",
+      "url": "https://github.com/marcelblijleven/goodwe/blob/66dfcdd9cd947bfd799f2bddb40b4e05ba9db6f6/goodwe/protocol.py",
+      "revision": "66dfcdd9cd947bfd799f2bddb40b4e05ba9db6f6",
+      "local_copy": ".tmp/goodwe-references/protocol.py",
+      "sha256": "4ddbe39da84eb87fbdad75949d674a4f8f5557bc6aebb146c3812f07d4872bd4"
+    },
+    {
+      "id": "goodwe-python-modbus.py",
+      "authority": "primary implementation, not vendor specification",
+      "url": "https://github.com/marcelblijleven/goodwe/blob/66dfcdd9cd947bfd799f2bddb40b4e05ba9db6f6/goodwe/modbus.py",
+      "revision": "66dfcdd9cd947bfd799f2bddb40b4e05ba9db6f6",
+      "local_copy": ".tmp/goodwe-references/modbus.py",
+      "sha256": "a96928c5f767087be4743d7976ddde9b3a533efda5890fe37d30eaad4ac131c5"
+    },
+    {
+      "id": "goodwe-python-model.py",
+      "authority": "primary implementation, not vendor specification",
+      "url": "https://github.com/marcelblijleven/goodwe/blob/66dfcdd9cd947bfd799f2bddb40b4e05ba9db6f6/goodwe/model.py",
+      "revision": "66dfcdd9cd947bfd799f2bddb40b4e05ba9db6f6",
+      "local_copy": ".tmp/goodwe-references/model.py",
+      "sha256": "550faac7b6e5f28b43d03cface8297dad632b542bc3b2667d3ae5c98416c21a5"
+    },
+    {
+      "id": "goodwe-python-es.py",
+      "authority": "primary implementation, not vendor specification",
+      "url": "https://github.com/marcelblijleven/goodwe/blob/66dfcdd9cd947bfd799f2bddb40b4e05ba9db6f6/goodwe/es.py",
+      "revision": "66dfcdd9cd947bfd799f2bddb40b4e05ba9db6f6",
+      "local_copy": ".tmp/goodwe-references/es.py",
+      "sha256": "e325aac49822f0062192db87a2672389e46345c8732276d9980d0c6f1f3f5b96"
+    },
+    {
+      "id": "goodwe-python-et.py",
+      "authority": "primary implementation, not vendor specification",
+      "url": "https://github.com/marcelblijleven/goodwe/blob/66dfcdd9cd947bfd799f2bddb40b4e05ba9db6f6/goodwe/et.py",
+      "revision": "66dfcdd9cd947bfd799f2bddb40b4e05ba9db6f6",
+      "local_copy": ".tmp/goodwe-references/et.py",
+      "sha256": "02d64f46e238b29559acb5978e02bb16e07c2b596e2e261969ad7b9d2047e2dc"
+    },
+    {
+      "id": "goodwe-python-dt.py",
+      "authority": "primary implementation, not vendor specification",
+      "url": "https://github.com/marcelblijleven/goodwe/blob/66dfcdd9cd947bfd799f2bddb40b4e05ba9db6f6/goodwe/dt.py",
+      "revision": "66dfcdd9cd947bfd799f2bddb40b4e05ba9db6f6",
+      "local_copy": ".tmp/goodwe-references/dt.py",
+      "sha256": "075eafd89fa67ca7edbc571eef52dda720b7076b6d948785a156fa801012ccfd"
+    },
+    {
+      "id": "goodwe-module-manual",
+      "authority": "manufacturer",
+      "title": "WiFi/LAN Kit Series and WiFi Kit Series User Manual",
+      "version": "V1.6 2026-09-30",
+      "url": "https://en.goodwe.com/Api/downloadFile?id=1982&mid=60&type=2",
+      "local_copy": ".tmp/goodwe-references/wifi-lan-kit-series.pdf",
+      "sha256": "5a6d243ab4bd044f1ce7d09e407912cc113819a0b7bf07a5290a5f437b42460d",
+      "reviewed_pdf_pages": [
+        10,
+        16,
+        18
+      ],
+      "note": "Summary only; original retained privately, not reproduced in repository."
+    },
+    {
+      "id": "goodwe-modbus-tcp-2023",
+      "authority": "manufacturer",
+      "url": "https://community.goodwe.com/static/images/2023-05-06322243.pdf",
+      "scope": "Hardware/firmware compatibility and configuration, not universal current compatibility."
+    },
+    {
+      "id": "goodwe-module-config-help",
+      "authority": "manufacturer",
+      "url": "https://help.goodwe.com/hc/en-au/articles/52845008771353-WiFi-LAN-2-0-WiFi-Configuration-via-SolarGo-App"
+    },
+    {
+      "id": "smlx-hk1000",
+      "authority": "primary first-hand reverse engineering",
+      "url": "https://smlx.dev/posts/goodwe-sems-protocol-teardown/",
+      "scope": "HK1000 device; do not generalize uploader or management services to all modules."
+    },
+    {
+      "id": "ems-official-v111",
+      "authority": "manufacturer-authored document; public mirror where applicable",
+      "url": "https://en.goodwe.com/Ftp/EN/Downloads/GW_Third-Party-EMS-Protocol_MODBUS-EN.pdf",
+      "sha256": "24efe8ff2f76fc6b2f1a53991885a36cf675866bac49bce87cb618b45fd8d28c",
+      "pages": 27,
+      "local_copy": ".tmp/goodwe-references/ems-official-v111.pdf"
+    },
+    {
+      "id": "aa55-ezfamily-legacy",
+      "authority": "manufacturer-authored document; public mirror where applicable",
+      "url": "https://yamasun.com.tw/upload/F_20170313191367UrC8jo.PDF",
+      "sha256": "5e4b83ee0cecadfc58b2ab2e82dc7263e431980a71b8c085f56a256bc8f12c94",
+      "pages": 9,
+      "local_copy": ".tmp/goodwe-references/aa55-ezfamily-legacy.pdf"
+    },
+    {
+      "id": "arm105-lv-v25-readonly",
+      "authority": "manufacturer-authored document; public mirror where applicable",
+      "url": "https://www.dth.net/solar/megarevo/monitoring/Goodwe_Modbus_Protocol_Hybrid__ARM105%20LV__v2.5_Read%20Only%2020200224.pdf",
+      "sha256": "48d276062e5f4fc51b2ff93e0b38ea7581f0735199e5a21240089eaf22918a44",
+      "pages": 20,
+      "transport_note": "Public mirror certificate expired; downloaded without TLS certificate validation. Manufacturer authorship is stated by document, not authenticated by this transport.",
+      "local_copy": ".tmp/goodwe-references/arm105-lv-v25-readonly.pdf"
+    },
+    {
+      "id": "arm745-v12-20240202",
+      "authority": "manufacturer-authored document; public mirror where applicable",
+      "url": "https://devicelib.my-gekko.com/download_docu.php?ext=pdf&fname=GoodWe_ARM_745_Modbus_protocol_Map_ET50._ET30__ESG2_V1.2_20240202_1_.pdf&id_pk=753",
+      "sha256": "5592b3d8a582a5fa25f357873ffc4ced42df0f0b23e9730bbeada4f304e4a311",
+      "pages": 178,
+      "transport_note": "Public mirror certificate expired; downloaded without TLS certificate validation. Manufacturer authorship is stated by document, not authenticated by this transport.",
+      "local_copy": ".tmp/goodwe-references/arm745-v12-20240202.pdf"
+    },
+    {
+      "id": "legacy-hybrid-em-v13",
+      "authority": "manufacturer-authored document at public mirror",
+      "url": "https://downloads.vodnici.net/uploads/wpforo/attachments/483/4349-1GoodweModbusPROTOCOLHybrid-ENV1-3EMseries.pdf",
+      "revision": "V1.3 / 2017-11-10",
+      "scope": "Legacy 056E/056F mode/power, table 8-16 with AA55 03/3A; not the newer 42000/47511 map",
+      "retrieval": "Read by web PDF reader; direct download returned HTTP403; no local PDF hash available"
+    },
+    {
+      "id": "goodwe-python-sensor.py",
+      "authority": "primary implementation, not vendor specification",
+      "url": "https://github.com/marcelblijleven/goodwe/blob/66dfcdd9cd947bfd799f2bddb40b4e05ba9db6f6/goodwe/sensor.py",
+      "revision": "66dfcdd9cd947bfd799f2bddb40b4e05ba9db6f6",
+      "local_copy": ".tmp/goodwe-references/sensor.py",
+      "sha256": "58f55a6872ac2d2bbcc49752ea5613542564ce846fa3cd1087d0b1c0e522779a"
+    }
+  ],
+  "limitations": [
+    "Large SolarGo and AU SBP-G2 manuals exceeded the web reader size limit; no new claims derive from unread sections.",
+    "External code is implementation evidence; device-specific behaviour requires wire/UI validation."
+  ],
+  "public_record_redaction": "Private LAN addresses, MACs and serial identifiers are pseudonymized. Encoded identity bytes may be substituted, so affected historical frames are not checksum-valid replay fixtures. Private captures and WLAN credentials are excluded."
+}
