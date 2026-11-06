@@ -73,6 +73,8 @@ struct TWCMessage
         TWCState state;
         ushort current;
         ushort current_in_use;
+        bool has_current;
+        bool has_current_in_use;
     }
     struct ChargeInfo
     {
@@ -154,10 +156,12 @@ bool parse_twc_message(const(ubyte)[] data, out TWCMessage msg)
                 case 0x09:
                 case 0x0A:
                     msg.heartbeat.current_in_use = params[3..5].bigEndianToNative!ushort;
+                    msg.heartbeat.has_current_in_use = true;
                     goto case;
                 case 0x00:
                 case 0x03:
                     msg.heartbeat.current = params[1..3].bigEndianToNative!ushort;
+                    msg.heartbeat.has_current = true;
                     break;
                 default:
                     break;

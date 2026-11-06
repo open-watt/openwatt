@@ -142,15 +142,8 @@ protected:
             return FormatId.invalid; // spelling didn't compile; the profile load already warned
 
         SampleDesc sd = desc_by_index(can.desc);
-        const(DataFormat)* fmt = sd.fmt;
         if (!e.format.valid)
             e.format = sd.format;
-        if (fmt.is_scalar && e.record_update() == SysTime())
-        {
-            Scalar z;
-            z.u = 0;
-            e.value = box_record(z.raw.ptr, *fmt);
-        }
 
         SampleElement* se = &elements.pushBack();
         se.element = e;
@@ -239,5 +232,31 @@ private:
 
         if (matched)
             note_activity();
+    }
+
+    unittest
+    {
+        import protocol.can : CANProtocolModule, can_section_kind;
+        import urt.mem : alloc, free;
+
+        if (!can_section_kind)
+            can_section_kind = register_profile_section("can", alloc!CANProtocolModule(null));
+        Profile* profile = parse_profile("elements:\n\tcan: 42, 0, u8\tdesc: level\n", "can-first-sample");
+        assert(profile);
+        scope(exit) free(profile);
+        CANBinding binding = alloc!CANBinding(CID(1));
+        scope(exit) free(binding);
+        binding._profile_data = profile;
+        binding._quiet_limit = Duration.zero;
+
+        Element level;
+        assert(binding.add_handler(null, &level, profile.element_desc(0), 0).valid);
+        assert(level.format.valid && level.record_update() == SysTime() && level.record_value().isNull);
+
+        ubyte[1] zero;
+        StackPacket frame;
+        frame.init!CANFrame(zero[]).id = 42;
+        binding.packet_handler(&frame.packet, null, PacketDirection.incoming, null);
+        assert(level.record_update() != SysTime() && level.record_value().asLong == 0);
     }
 }

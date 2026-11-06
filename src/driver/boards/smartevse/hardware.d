@@ -176,23 +176,14 @@ uint pilot_snapshot(ref SmartEVSEHardware hardware, ushort[] samples)
     return count;
 }
 
-uint pilot_sample_mv(ref const SmartEVSEHardware hardware, uint raw)
-{
-    uint millivolts;
-    return adc_raw_to_mv(hardware.pilot_input, raw, millivolts) ? millivolts : 0;
-}
+bool pilot_sample_mv(ref const SmartEVSEHardware hardware, uint raw, out uint millivolts)
+    => cast(bool)adc_raw_to_mv(hardware.pilot_input, raw, millivolts);
 
-uint proximity_mv(ref SmartEVSEHardware hardware)
-{
-    uint millivolts;
-    return adc_read_mv(hardware.adc, hardware.proximity_input, millivolts) ? millivolts : 0;
-}
+bool proximity_mv(ref SmartEVSEHardware hardware, out uint millivolts)
+    => cast(bool)adc_read_mv(hardware.adc, hardware.proximity_input, millivolts);
 
-uint temperature_mv(ref SmartEVSEHardware hardware)
-{
-    uint millivolts;
-    return adc_read_mv(hardware.adc, hardware.temperature_input, millivolts) ? millivolts : 0;
-}
+bool temperature_mv(ref SmartEVSEHardware hardware, out uint millivolts)
+    => cast(bool)adc_read_mv(hardware.adc, hardware.temperature_input, millivolts);
 
 AdcCalibrationSource adc_calibration_source(ref const SmartEVSEHardware hardware)
 {
