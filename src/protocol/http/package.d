@@ -304,10 +304,7 @@ nothrow @nogc:
         return true;
     }
 
-    uint root_size(uint, ref const ConfItem item)
-        => cast(uint)(ushort.sizeof + item.sub_items.length * HTTPRequestDesc.sizeof);
-
-    void count_root(uint, ref const ConfItem item, ref ProfileSize size)
+    uint size_root(uint, ref const ConfItem item, ref ProfileSize size)
     {
         foreach (ref request; item.sub_items)
         {
@@ -340,6 +337,7 @@ nothrow @nogc:
                 }
             }
         }
+        return cast(uint)(ushort.sizeof + item.sub_items.length * HTTPRequestDesc.sizeof);
     }
 
     bool parse_root(uint, ref const ConfItem item, void[] slot, ref ProfileBuilder b)

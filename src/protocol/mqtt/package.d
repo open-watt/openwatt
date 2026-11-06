@@ -132,21 +132,19 @@ nothrow @nogc:
         return true;
     }
 
-    uint root_size(uint, ref const ConfItem item)
+    uint size_root(uint, ref const ConfItem item, ref ProfileSize size)
     {
         uint count;
         const(char)[] tail = item.value;
         while (!tail.empty)
-            if (!tail.split!','.unQuote.empty)
-                ++count;
+        {
+            const(char)[] subscription = tail.split!','.unQuote;
+            if (subscription.empty)
+                continue;
+            size.add_string(subscription);
+            ++count;
+        }
         return cast(uint)((count + 1) * ushort.sizeof);
-    }
-
-    void count_root(uint, ref const ConfItem item, ref ProfileSize size)
-    {
-        const(char)[] tail = item.value;
-        while (!tail.empty)
-            size.add_string(tail.split!','.unQuote);
     }
 
     bool parse_root(uint, ref const ConfItem item, void[] slot, ref ProfileBuilder b)
@@ -331,7 +329,7 @@ unittest
 
     static immutable string conf =
         "parameters: device_id\n" ~
-        "mqtt-subscribe: \"#\"\n" ~
+        "mqtt-subscribe: \"#\",,second/topic\n" ~
         "elements:\n" ~
         "\tmqtt: {device_id}/state/get, bool, RW\tdesc: state\n" ~
         "\t\twrite: {device_id}/state/set\n" ~
@@ -359,10 +357,11 @@ unittest
     assert(desc_by_index(mqtt.desc).fmt.type == ValueType.bool_);
 
     const(void)[] root = profile.get_root_section(mqtt_subscribe_kind);
-    assert(root.length == ushort.sizeof * 2);
-    const(ushort)[] words = (cast(const(ushort)*)root.ptr)[0 .. 2];
-    assert(words[0] == 1);
+    assert(root.length == ushort.sizeof * 3);
+    const(ushort)[] words = (cast(const(ushort)*)root.ptr)[0 .. 3];
+    assert(words[0] == 2);
     assert(profile.get_section_string(words[1]) == "#");
+    assert(profile.get_section_string(words[2]) == "second/topic");
 }
 
 private:

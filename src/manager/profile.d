@@ -222,9 +222,8 @@ nothrow @nogc:
 interface ProfileRootSections
 {
 nothrow @nogc:
-    uint root_size(uint kind, ref const ConfItem item);
-    void count_root(uint kind, ref const ConfItem item, ref ProfileSize size);
-    // slot is root_size bytes and belongs to this parsed Profile
+    uint size_root(uint kind, ref const ConfItem item, ref ProfileSize size);
+    // slot has the byte count returned by size_root and belongs to this parsed Profile
     bool parse_root(uint kind, ref const ConfItem item, void[] slot, ref ProfileBuilder b);
 }
 
@@ -789,13 +788,12 @@ unittest
         static class TestRoots : ProfileRootSections
         {
         nothrow @nogc:
-            uint root_size(uint, ref const ConfItem)
-                => cast(uint)TRoot.sizeof;
-            void count_root(uint, ref const ConfItem item, ref ProfileSize size)
+            uint size_root(uint, ref const ConfItem item, ref ProfileSize size)
             {
                 const(char)[] tail = item.value;
                 size.add_string(tail.split!','.unQuote);
                 size.add_string(tail.split!','.unQuote);
+                return cast(uint)TRoot.sizeof;
             }
             bool parse_root(uint, ref const ConfItem item, void[] slot, ref ProfileBuilder b)
             {
@@ -1175,10 +1173,9 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null)
                     writeWarning("Duplicate ", root_item.name, " definition");
                 else
                 {
-                    uint bytes = s.handler.root_size(s.kind, root_item);
+                    uint bytes = s.handler.size_root(s.kind, root_item, section_size);
                     assert(bytes > 0, "profile root sections must allocate storage");
                     root_sizes[][i] = bytes;
-                    s.handler.count_root(s.kind, root_item, section_size);
                 }
             }
             else
