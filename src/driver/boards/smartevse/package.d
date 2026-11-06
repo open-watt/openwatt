@@ -202,6 +202,10 @@ struct SmartEVSEChange
     enum uint frame               = 1 << 24;
     enum uint rcm_monitor         = 1 << 25;
     enum uint all                 = (1 << 26) - 1;
+
+    enum uint pilot_measurements = pilot | pilot_min_mv | pilot_max_mv;
+    enum uint temperature_measurements = temperature | temperature_mv;
+    enum uint measurements = pilot_measurements | temperature_measurements | pp_max_current | pp_mv;
 }
 
 alias SmartEVSEChangeHandler = void delegate(SmartEVSE evse, uint changes) nothrow @nogc;
@@ -293,6 +297,9 @@ nothrow @nogc:
         _change_handlers.removeFirstSwapLast(handler);
     }
 
+    uint measurements() const pure
+        => _measurements;
+
     DeciAmps current() const pure
         => _current;
 
@@ -323,6 +330,9 @@ nothrow @nogc:
 
     DeciAmps pp_max_current() const pure
         => _pp_max_current;
+
+    DeciAmps current_limit() const pure
+        => _max_current.value < _pp_max_current.value ? _max_current : _pp_max_current;
 
     bool stopped() const pure
         => _stopped;
@@ -497,6 +507,7 @@ nothrow @nogc:
         if (sync_pp_max_current())
             changes |= SmartEVSEChange.pp_max_current;
         short next_temperature = TemperatureSensor();
+        changes |= observe_measurements(SmartEVSEChange.temperature_measurements, TemperatureSampleValid);
         if (_temperature != next_temperature)
         {
             _temperature = next_temperature;
@@ -535,6 +546,8 @@ protected:
         }
 
         _active_hardware_owner = this;
+        _measurements = 0;
+        PPSampleValid = false;
 
         apply_current();
         setContactor2Mode(cast(ubyte)_contactor2_mode);
@@ -593,6 +606,7 @@ protected:
             sync_status(changes);
         }
         _active_hardware_owner = null;
+        _measurements = 0;
         hardware_offline();
         if (!_rcm_fault)
             sync_status(changes);
@@ -621,6 +635,7 @@ private:
     uint _pilot_max_mv;
     uint _pp_mv;
     uint _temperature_mv;
+    uint _measurements;
     ubyte _activation_wait;
     ubyte _activation_pulse;
     SmartEVSEState _state = SmartEVSEState.a;
@@ -636,9 +651,8 @@ private:
 
     DeciAmps limited_current() const pure
     {
-        ushort limit = _max_current.value < _pp_max_current.value
-                     ? _max_current.value : _pp_max_current.value;
-        return DeciAmps(_current.value < limit ? _current.value : limit);
+        DeciAmps limit = current_limit();
+        return _current.value < limit.value ? _current : limit;
     }
 
     void apply_current()
@@ -651,9 +665,15 @@ private:
     bool sync_pp_max_current()
     {
         MaxCapacity = ProximityPin();
-        DeciAmps next = DeciAmps(cast(ushort)(MaxCapacity * 10));
+        return update_pp_max_current(MaxCapacity, PPSampleValid);
+    }
+
+    bool update_pp_max_current(ubyte capacity, bool valid)
+    {
+        bool observed = observe_measurements(SmartEVSEChange.pp_max_current, valid) != 0;
+        DeciAmps next = DeciAmps(cast(ushort)(capacity * 10));
         if (_pp_max_current == next)
-            return false;
+            return observed;
 
         _pp_max_current = next;
         mark_set!(typeof(this), "pp-max-current")();
@@ -768,6 +788,8 @@ private:
         }
 
         SmartEVSEPilot next_pilot = cast(SmartEVSEPilot)Pilot();
+        changes |= observe_measurements(SmartEVSEChange.pilot_measurements, PilotSampleValid);
+        changes |= observe_measurements(SmartEVSEChange.pp_mv, PPSampleValid);
         if (_pilot != next_pilot)
         {
             _pilot = next_pilot;
@@ -845,6 +867,16 @@ private:
         }
 
         notify_changes(changes);
+    }
+
+    uint observe_measurements(uint group, bool valid)
+    {
+        uint first = valid ? group & ~_measurements : 0;
+        if (valid)
+            _measurements |= group;
+        else
+            _measurements &= ~group;
+        return first;
     }
 
     void notify_changes(uint changes)
@@ -965,6 +997,49 @@ nothrow @nogc:
     }
 }
 
+
+unittest
+{
+    import urt.mem : alloc, free;
+
+    import manager.element : Element;
+    import manager.series : register_value_format;
+
+    SmartEVSE hardware = Collection!SmartEVSE().alloc("smartevse-pp-test");
+    Collection!SmartEVSE().add(hardware);
+    scope(exit)
+    {
+        hardware.destroy();
+        Collection!SmartEVSE().update_all();
+    }
+    enum group = SmartEVSEChange.pilot_measurements;
+    assert(hardware.measurements == 0);
+    assert(hardware.observe_measurements(group, false) == 0);
+    assert(hardware.measurements == 0);
+    assert(hardware.observe_measurements(group, true) == group);
+    assert(hardware.measurements == group);
+    assert(hardware.pilot_min_mv == 0 && hardware.pilot_max_mv == 0);
+    assert(hardware.observe_measurements(group, true) == 0);
+
+    immutable previous_current = ChargeCurrent;
+    scope(exit) ChargeCurrent = previous_current;
+    hardware._max_current = DeciAmps(320);
+    SmartEVSEBinding binding = alloc!SmartEVSEBinding(CID(1));
+    scope(exit) free(binding);
+    Element bound, cable;
+    bound.format = register_value_format!DeciAmps();
+    cable.format = bound.format;
+
+    assert(hardware.update_pp_max_current(32, true));
+    binding.publish_pp_for_test(hardware, &bound, &cable);
+    assert((cast(DeciAmps)bound.record_value().asQuantity()).value == 320);
+    assert((cast(DeciAmps)cable.record_value().asQuantity()).value == 320);
+    assert(hardware.update_pp_max_current(13, false));
+    binding.publish_pp_for_test(hardware, &bound, &cable);
+    assert((cast(DeciAmps)bound.record_value().asQuantity()).value == 130);
+    assert((cast(DeciAmps)cable.record_value().asQuantity()).value == 320);
+    assert(!(hardware.measurements & SmartEVSEChange.pp_max_current));
+}
 
 private:
 

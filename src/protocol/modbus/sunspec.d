@@ -1835,7 +1835,12 @@ unittest
 
     Element scaled_element;
     scaled_element.format = scaled_desc.format;
-    assert(write_sunspec_sample(&scaled_element, raw, scaled_desc, 0.1f, getSysTime()));
+    assert(!scaled_element.has_value && scaled_element.record_update == SysTime());
+    immutable ubyte[2] zero = [ 0, 0 ];
+    SysTime first = getSysTime();
+    assert(write_sunspec_sample(&scaled_element, zero, scaled_desc, 0.1f, first));
+    assert(scaled_element.has_value && scaled_element.record_update == first && scaled_element.normalised_value == 0);
+    assert(write_sunspec_sample(&scaled_element, raw, scaled_desc, 0.1f, first + msecs(1)));
     double mounted_value = scaled_element.value.asQuantity().value;
     assert(mounted_value > 123.39 && mounted_value < 123.41);
 

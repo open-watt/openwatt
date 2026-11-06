@@ -374,16 +374,8 @@ protected:
         if (mb.desc == ushort.max)
             return FormatId.invalid;
         SampleDesc sample_desc = desc_by_index(mb.desc);
-        const(DataFormat)* fmt = sample_desc.fmt;
-
         if (!e.format.valid)
             e.format = sample_desc.format;
-        if (_current_pass != Pass.serve && fmt.is_scalar && e.record_update() == SysTime())
-        {
-            manager.series.Scalar zero;
-            zero.u = 0;
-            e.value = box_record(zero.raw.ptr, *fmt);
-        }
 
         add_register_entry(e, desc, mb, sample_desc);
         return sample_desc.format;
@@ -1173,6 +1165,33 @@ private:
             if (ent.flags & 4)
                 _has_dirty = true;  // re-arm so next update() ticks the deferred dirty bits
         }
+    }
+    unittest
+    {
+        import urt.mem : alloc, free;
+
+        if (!modbus_reg_section_kind)
+            modbus_reg_section_kind = register_profile_section("reg", alloc!ModbusProtocolModule(null));
+        Profile* profile = parse_profile("elements:\n\treg: 40000, u16\tdesc: level\n", "modbus-first-sample");
+        assert(profile);
+        scope(exit) free(profile);
+        ModbusBinding binding = alloc!ModbusBinding(CID(1));
+        scope(exit) free(binding);
+        binding._profile_data = profile;
+        binding._quiet_limit = Duration.zero;
+        binding._slave_server = &binding._local_slave;
+
+        Element level;
+        assert(binding.add_handler(null, &level, profile.element_desc(0), 0).valid);
+        assert(!level.has_value && level.record_update() == SysTime());
+
+        ubyte[4] request_bytes = [0, 0, 0, 1];
+        ubyte[3] response_bytes = [2, 0, 0];
+        ModbusPDU request = ModbusPDU(FunctionCode.read_holding_registers, request_bytes[]);
+        ModbusPDU response = ModbusPDU(FunctionCode.read_holding_registers, response_bytes[]);
+        MonoTime now = getTime();
+        binding.response_handler(request, response, now, now);
+        assert(level.has_value && level.record_value().asLong == 0);
     }
 }
 

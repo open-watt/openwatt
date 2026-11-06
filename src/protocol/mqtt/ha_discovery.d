@@ -1320,7 +1320,8 @@ unittest
     assert(voltage && voltage.value.isQuantity && voltage.normalised_value > 231.19 && voltage.normalised_value < 231.21);
 
     Element* relay = device.find_element("ha.relay");
-    assert(relay && relay.access == Access.read_write);
+    assert(relay && relay.access == Access.read_write && !relay.has_value);
+    assert(relay.record_update == SysTime());
     discovery.handle_publish("meter/relay", cast(const(ubyte)[])"OFF", getTime());
     assert(relay.value.isBool && !relay.value.asBool);
     relay.value(true);

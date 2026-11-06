@@ -80,6 +80,15 @@ nothrow @nogc:
         return CompletionStatus.complete;
     }
 
+    version (unittest)
+    package void publish_pp_for_test(SmartEVSE hardware, Element* bound, Element* cable)
+    {
+        _evse = hardware;
+        _control_max = bound;
+        _pp_max_current = cable;
+        publish(SmartEVSEChange.pp_max_current);
+    }
+
     override CompletionStatus shutdown()
     {
         unsubscribe();
@@ -287,14 +296,14 @@ private:
             return;
 
         auto timestamp = getSysTime();
+        bool snapshot = changes == SmartEVSEChange.all;
+        uint measurements = hardware.measurements;
+        bool bound_changed = (changes & (SmartEVSEChange.max_current | SmartEVSEChange.pp_max_current)) != 0;
+        changes &= ~SmartEVSEChange.measurements | measurements;
         if (changes & SmartEVSEChange.current)
             _setpoint.value(hardware.current, timestamp, &element_changed);
-        if (changes & (SmartEVSEChange.max_current | SmartEVSEChange.pp_max_current))
-        {
-            DeciAmps maximum = hardware.max_current.value < hardware.pp_max_current.value
-                            ? hardware.max_current : hardware.pp_max_current;
-            _control_max.value(maximum, timestamp, &element_changed);
-        }
+        if (bound_changed)
+            _control_max.value(hardware.current_limit(), timestamp, &element_changed);
         if (changes & SmartEVSEChange.max_current)
             _max_current.value(hardware.max_current, timestamp, &element_changed);
         if (changes & SmartEVSEChange.pp_max_current)
@@ -302,15 +311,12 @@ private:
         if (changes & SmartEVSEChange.stopped)
             _enable.value(!hardware.stopped, timestamp, &element_changed);
         if (changes & SmartEVSEChange.state)
-        {
             _state.value(hardware.state, timestamp, &element_changed);
-            _connected.value(connected(hardware), timestamp, &element_changed);
-        }
         if (changes & SmartEVSEChange.pilot)
-        {
             _pilot.value(hardware.pilot, timestamp, &element_changed);
+        if ((changes & (SmartEVSEChange.state | SmartEVSEChange.pilot))
+            && (measurements & SmartEVSEChange.pilot))
             _connected.value(connected(hardware), timestamp, &element_changed);
-        }
         if (changes & SmartEVSEChange.pwm)
             _pwm.value(hardware.pwm, timestamp, &element_changed);
         if (changes & SmartEVSEChange.effective_current)
@@ -354,7 +360,7 @@ private:
             _backlight.value(hardware.backlight, timestamp, &element_changed);
         if (changes & SmartEVSEChange.frame)
             _frame.value(hardware.frame, timestamp, &element_changed);
-        if (changes == SmartEVSEChange.all)
+        if (snapshot)
             _adc_calibration.value(hardware.adc_calibration, timestamp, &element_changed);
     }
 

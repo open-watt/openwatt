@@ -1176,8 +1176,13 @@ unittest
     assert(compile_spec("f64:100mA", stream_le_context, ScaledUnit(), 1, null, null, amps));
     Element current;
     current.format = amps.format;
-    Variant raw_current = Variant(123);
-    assert(apply_value(&current, raw_current, amps, getSysTime()));
+    assert(!current.has_value && current.record_update == SysTime());
+    SysTime first = getSysTime();
+    Variant raw_current = parse_json("0");
+    assert(apply_value(&current, raw_current, amps, first));
+    assert(current.has_value && current.record_update == first && current.normalised_value == 0);
+    raw_current = Variant(123);
+    assert(apply_value(&current, raw_current, amps, first + msecs(1)));
     double current_amps = current.scaled_value(ScaledUnit(Ampere));
     assert(current_amps > 12.299 && current_amps < 12.301);
 
