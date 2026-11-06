@@ -735,9 +735,12 @@ Each step leaves the tree no worse than before it and deletes what it replaces.
 | E4b4 (#867, merged) | fieldbus and application protocols: Modbus `send_packet` builds in a pool page; the rest lend, including Ethernet's decapsulated inner packet | E4b1 | Modbus `send_packet`'s stack PDU; the last production stack `Packet` |
 | E4b5 (#868, merged) | the remaining tests; no page-less packet is left | E4b2 to E4b4 | `init!T(buffer)`, `mutable_flag`/`page_flag`, #692 (closed as superseded) |
 | E3 | interfaces state their framing room; producers ask their egress for it | E4b5 | the default headroom on paths that know their framing |
-| E4c (#873) | WPAN holds the frame the radio sends until the send completes; Modbus keeps the function code and count it checks, not the request | E4b5 | `wpan.d`'s free of a frame the radio may still read; the request page Modbus held until its response |
+| E4c (#873, #876) | WPAN holds the frame the radio sends until the send completes; Modbus keeps the function code and count it checks, not the request | E4b5 | `wpan.d`'s free of a frame the radio may still read; the request page Modbus held until its response |
 | E4v (deferred, last) | a kept view holds its parent: `init_view` records the source page in its header's `link`, and `packet_retain` of such a view allocates a header-only page referencing the parent instead of copying the bytes | E4b5 | the per-member copy when a flooded frame is queued; low value, since flooding is rare and the bridge usually knows the port |
-| E5 | mutators edit in place, each through the writable gate (same packet when unshared, a copy when shared): IP, VLAN, Modbus, ASH, Ethernet, CPC, TWC, WebSocket. The gate itself (`packet_mutable`) and its use at the existing metadata edits landed with E4m (#864) | E4c, E2 | `frame_and_send`'s copy, ASH's and CPC's `Message.buffer`, Ethernet's `medium_tx` copy, the const-cast writes in `stack.d`, the unchecked fixed-buffer copies |
+| E5a (#878) | Ethernet egress in place: `medium_tx` prepends the header into headroom (`packet_mutable` with headroom); `frame_and_send` reframes the IP datagram; `station_egress` builds the OW frame in a page | E4c | the 1522-byte `medium_tx` copy, `station_egress`'s 1518-byte buffer, `frame_and_send`'s view |
+| E5b | Modbus framing in place: RTU address and CRC, MBAP header, ASCII | E5a | `frame_and_send`'s copy |
+| E5c | ASH and CPC framing in place | E5a | ASH's and CPC's `Message.buffer` |
+| E5d | TWC SLIP and WebSocket headers in place; the IP stack's TTL and VLAN edits through `packet_mutable` | E5a | the remaining framing buffers, the const-cast writes in `stack.d` |
 
 E4 no longer waits for E2: a `StackPage!0` lends a ring or a local without a copy, so a borrowed
 ingress stays as cheap as it is today, and E2 then removes copies the packet path no longer
