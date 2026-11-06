@@ -1875,11 +1875,6 @@ this is what remains.
   destroys its client from the client's own `online` signal when the request fails to submit. Move
   it to the next pass, then assert on the online side too.
 
-- **The ZBDongle-E errors on its first data frame after most resets**: the first DATA frame after
-  RSTACK goes unacknowledged three times and the NCP answers ERROR 81; ASH resets and usually
-  connects, costing about ten seconds of Zigbee at every start. Capture the serial bytes around it
-  and find whether the host sends the first frame too soon after RSTACK or with stale ack numbers.
-
 - **Keep the ELF of every firmware deployed with core dumps**: a dump decodes only against the exact
   image it was taken under, and a rebuild never matches since IDF stamps the build time in. Archive
   `openwatt.elf` by its SHA prefix whenever a `COREDUMP=1` image is flashed or sent by OTA.

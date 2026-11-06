@@ -83,6 +83,7 @@ row alone. Sizes stay in bytes; round in the note if that reads better.
 | 2026-10-20 | #865 | ldc 1.43.0 | 5,806,984 | 534,976 | | held streams (#857) and seq-tagged reads (#865) on master 371d7dc2; deployed to the Pi (slot 193) |
 | 2026-11-04 | #869 | ldc 1.43.0 | 5,851,368 | 534,920 | | RDP sessions on #870; deployed to the Pi (slot 212), sync peered with F993 over `/interface/udp reliable=yes` |
 | 2026-11-05 | ow/zigbee-attach-assert | ldc 1.43.0 | 5,835,512 | 534,920 | | master 868ba79b9 (#870) with the coordinator dropping its node ID on shutdown; deployed to the Pi (slot 213), five restarts without the attach_node assert |
+| 2026-11-06 | ow/zbdongle-no-flow | ldc 1.43.0 | 5,831,112 | 534,920 | | urt #396 (DTR asserted with flow control `none`) on master b623e6fda; deployed to the Pi (slot 218) with the ZBDongle-E on `flow-control=none`, four restarts with no ASH error |
 
 ### Waveshare ESP32-S3-RS485-CAN, `make esp-idf-build BOARD=waveshare-esp32-s3-rs485-can CONFIG=release`
 
