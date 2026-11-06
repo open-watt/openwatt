@@ -678,7 +678,7 @@ in-flight entry keeps the tag and timing, not the bytes; `retire` frees only a f
 left. The same for `NeighbourEntry.pending` and
 BLE's `_emu_responses`. Only a path that needs the bytes after the push shares before it: the
 WPAN driver until DMA completion (`wpan.d` today frees an aborted frame the radio may still be
-reading), ASH until the ack. Modbus keeps the five bytes response validation reads (function
+reading), ASH until the ack. Modbus keeps the three bytes response validation reads (function
 code, register count) in its pending entry, so the request page is freed as the wire takes it.
 
 ### E.5 Mutators edit in place
