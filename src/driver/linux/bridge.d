@@ -33,7 +33,8 @@ import manager.plugin;
 
 import router.iface;
 import router.iface.bridge;
-import router.iface.ethernet : EthernetInterface, complete_frame_checksum, encode_ethernet_frame;
+import router.iface.checksum : complete_checksum;
+import router.iface.ethernet : EthernetInterface, encode_ethernet_header;
 
 import driver.linux.ethernet : LinuxRawEthernet;
 import driver.linux.netlink_write;
@@ -88,12 +89,14 @@ private:
                 return -1;
 
             ubyte[1522] buffer = void;
-            size_t frame_len = encode_ethernet_frame(packet, buffer[]);
-            if (frame_len == 0)
+            size_t header_len = encode_ethernet_header(packet, buffer[]);
+            if (packet.data.length > buffer.length - header_len)
                 return -1;
-            complete_frame_checksum(packet, buffer[0 .. frame_len]);
-
-            return cpu.send(buffer[0 .. frame_len]) ? 0 : -1;
+            ubyte[] frame = buffer[0 .. header_len + packet.data.length];
+            frame[header_len .. $] = cast(const(ubyte)[])packet.data[];
+            if (packet.checksum_pending)
+                complete_checksum(frame[header_len .. $], cast(EtherType)packet.eth.ether_type);
+            return cpu.send(frame) ? 0 : -1;
         }
     }
 
