@@ -866,7 +866,7 @@ protected:
             drop_tx(packet);
             return;
         }
-        packet = packet_mutable(packet, header_len, header_len);
+        packet = packet_mutable(packet, header_len, header_len, framing_site!__FUNCTION__);
         if (!packet)
             return add_tx_drop();
         scope (exit) packet_free(packet);
