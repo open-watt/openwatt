@@ -399,13 +399,9 @@ protected:
         BridgePort port = _members[src_port];
         ulong src_address;
 
-        // check for link-local frames (bridges must not forward link-local frames)
-        if (packet.eth.dst.is_link_local && packet.type == PacketType.ethernet)
-        {
-            // STP/LACP/EAPOL/LLDP... should we support these?
-            debug assert(false, "TODO?");
+        // Bridges must not forward reserved link-local Ethernet frames.
+        if (packet.type == PacketType.ethernet && packet.eth.dst.is_link_local)
             goto drop_packet;
-        }
 
         if (_vlan_filtering)
         {
@@ -1431,6 +1427,16 @@ unittest
     Collection!BaseInterface().update_all();
     Collection!BaseInterface().update_all();
     assert(master.running);
+
+    StackPacket link_local;
+    ref link_frame = link_local.init!Ethernet(null);
+    ulong dropped = master.rx_dropped;
+    foreach (dst; [MACAddress.stp_multicast, MACAddress.lldp_multicast])
+    {
+        link_frame.dst = dst;
+        member.receive(&link_local.packet);
+    }
+    assert(master.rx_dropped == dropped + 2);
 
     member.disabled = true;
     assert(master.running);
