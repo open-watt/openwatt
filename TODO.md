@@ -6,6 +6,162 @@
   2.114). Host CI builds DMD with `dmd-master` and excludes LDC x86, since LDC is still on the 2.113
   frontend. Restore the release DMD and the LDC x86 jobs once both releases carry the fix.
 
+## Overall design review (2026-11-07)
+
+See the [overall design review](docs/audits/2026-11-07/DESIGN_REVIEW.md) for
+findings, proposed deletions and acceptance cases. Existing transaction, stream,
+operator, profile, model-plane and lifecycle items remain their work records.
+
+**Code-level deletion pass.** The first section of the linked report gives
+call sites and preservation checks. These cuts can land independently:
+
+- Resolve property names once across apply/reset/echo, pass the incoming const
+  Variant through, and combine the eight remaining adjacent mark_set pairs using its existing
+  compile-time mask overload.
+- Remove the never-populated 16-name filter and per-row column selection from
+  collection print. Borrow property slices in both completion paths, share
+  candidate selection, and share slot advancement across collection key/value
+  ranges and counting.
+- Use one IPv4 pseudo-header checksum builder for DHCP, UDP and TCP. Delete
+  duplicate port mutators in TCPStream and ESPHomeClient using InetAddress.port
+  with the caller's family policy.
+- Route ordinary API responses through the existing two-slice HTTP writer and
+  share the JSON error/CORS body, retaining header, encoding and write semantics.
+- Share explicit profile/model property storage and methods across the seven
+  bindings that repeat them. Store one common SunSpec field tail per inverter
+  encoding and visit it after each model's phase-specific prefix.
+
+- **Typed reference rebinding (D01):** `ObjectRef!T.get` unchecked-casts the
+  current claimant of a root-collection CID, although a same-name replacement
+  may be a sibling subtype. Share the type-checked resolution contract already
+  used by element-backed reference properties; cover incompatible replacement,
+  compatible recreation and rename onto a reserved identity.
+- **Stable operator callback owners (D02):** `Device.computations` stores
+  callback-bearing structs in a growable Array; materialising another profile
+  into the same device can relocate already-subscribed delegates. Make address
+  stability and teardown prerequisites of the existing series-operator migration;
+  verify growth after binding rather than reserving a guessed capacity.
+- **Bound ephemeral identity retention (D03):** UDP/WS sync servers increment
+  connection names, while IdAllocator retains names/slots permanently and
+  collection updates scan the slot high-water mark. Separate session generations
+  from durable name-rebindable identity; verify repeated reconnects have bounded
+  retained memory and iteration work without rebinding old refs to unrelated peers.
+- **Separate kernel and product assembly (D04/D16):** common Application/module
+  registration currently roots recorder/graphs, profile/device services, both
+  sync encoders and all sync capability families in reduced builds. Establish
+  service dependencies and conditional composition; connect HEADLESS to actual
+  human-console exclusions (it currently has no consumer), retain config execution,
+  and derive advertised capabilities from the selected services. Move domain
+  intrinsics/catalogues to their owners. Complete the existing Modbus fabric/control
+  split by publishing protocol-neutral destination reachability to bridges.
+  Reconcile features.mk's stale Phase 2 paths and architecture guidance that still
+  describes CIDs as name hashes against the current allocator and module seams.
+- **Collection namespace capacity (D04):** CID has six type bits and all 64
+  concrete CollectionType values are occupied. Resolve and enforce the identity
+  capacity contract before adding the next collection; the current make_cid only
+  checks the slot bound. Current valid IDs fit; this is an expansion prerequisite.
+- **Cheap property projection (D05):** an object with any Elem declaration
+  allocates Element storage for every property position, including legacy slots.
+  Separate stable property/EID indices from physical storage before mass property
+  migration. Use one schema across lookup/write/sync/API, then delete legacy mirror
+  and schema machinery through the existing model-plane/client migration work.
+- **Move sync policy out of encoders (D06):** binary and JSON tick_dirty are
+  literally identical 45-line methods. Put authority selection, dirty/set/reset
+  traversal, burst refusal and bit retirement in one hub-owned implementation;
+  leave encoding operations in the serializers. Cover partial refusal and restart.
+- **Finish the sample observation boundary (D10):** CAN/BLE/GoodWe/Modbus repeat
+  scalar/text/user dispatch after SampleDesc decoding, with differing scratch
+  limits, timestamp and sender handling. Add bounded shared binary/text observation
+  adapters and remove the copies. Preserve protocol sentinel/batching/cadence policy;
+  Modbus realtime eligibility differs from HTTP/GoodWe. This refines the existing
+  value-path convergence item, rather than introducing another codec system.
+- **HTTP-owned response progress (D11):** API SchemaTx and fileserver Download
+  separately own header cursors, page production, stream hooks, deferred cleanup
+  and resume/close. Centralize transport lifetime/progress in the HTTP layer for
+  buffered and streaming responses. Keep file/schema generation distinct; if API
+  retirement lands first, delete its transport rather than preserving it in a new
+  framework. Coordinate with existing HTTP client transaction/stream repairs.
+- **Unify native IP admission/lifetime (D12/D13):** native event endpoints and
+  the socket compatibility backend independently create/retire PCBs and allocate
+  TCP ephemeral ports. Share engine admission/port ownership; retain adapters for
+  actual compatibility consumers without wrapping native I/O in managed Streams.
+  Consolidate DHCP client/server IPv4/UDP extraction through a checked view or an
+  interface-bound pre-address datagram contract. Preserve broadcast/relay/renewal
+  behavior. Share IPv4/IPv6 address/route management policy where it deletes bodies,
+  but keep their materially different pool allocators separate.
+- **Share transport telemetry (D14):** Stream and BaseInterface duplicate rate
+  baselines, elapsed-time arithmetic, maxima and link/reset behavior. Extract one
+  small rate engine with host-specific property mapping; retain byte/packet API
+  distinctions and verify first sample, reset, offline and long pauses.
+- **Complete the owning migrations (D07/D08/D09/D15):** existing transaction,
+  write-authority, stream/event, operator and durable-holder work must end in
+  deletion of competing owners: callback-before-retirement, post-store command
+  interception, eager construction ticks, device/module polling, and permanently
+  retained profile/tree borrows. Define removal and notification order before
+  freeing model trees. Element-backed properties already call teardown; reconcile
+  stale comments claiming it has no production callers when implementing this.
+- **Configuration operation results (D18):** command errors are often printed
+  while the execution state reports normal completion, so startup/API/automation
+  cannot reliably distinguish failure. Separate structured success/error/value/
+  continuation from presentation, and share construct/apply/validate/bind mechanics
+  across CLI, collection factories and sync. Define partial multi-set semantics;
+  do not imply rollback of hardware side effects.
+- **Declaration-owned defaults and fallible reset (D19):** legacy schema defaults
+  use the getter type's .init independently of constructor defaults. Reset ignores
+  setter failure and clears tracking anyway. HTTP's 64-KiB request limit resets
+  to unlimited; RA's 600-second interval reset supplies a rejected zero. Make fresh
+  construction, metadata, reset and sync agree through one declaration-owned
+  contract, coordinated with cheap property projection rather than a costly mass
+  migration to current Elem storage.
+- **Semantic format admission (D20):** OWS accepts enum formats but serializes
+  only their primitive representation, losing enum identity on reconstitution.
+  Preserve descriptors or explicitly refuse unsupported formats; share semantic
+  admission/projection policy across format boundaries while retaining disk/wire
+  framing. Reconcile older claims below that enums are already kept only in RAM.
+- **Bound cooperative execution (D21):** immediate script loops, due-timer draining
+  and cascading Element notifications have independent unbounded execution rules.
+  Reject zero repeating cron intervals and provide bounded progress/cancellation
+  across commands, timers and propagation. Preserve frame coherence and handle
+  nonconverging cycles explicitly; verify network/heartbeat progress under load.
+- **Subscription mutation/lifetime contract (D22):** Element delivery saves the
+  next node while unsubscribe frees it immediately; removing the next subscriber
+  can leave a dangling traversal pointer. State/component/packet lists implement
+  different mutation rules. Define one dispatch/removal contract with deferred
+  storage retirement and tested mechanics for each callback shape. Cover self,
+  next/previous removal, additions, nested dispatch and owner destruction; retain
+  bounded storage and explicit attachment bookkeeping where required.
+
+- **Basic timed control on Tiny (D04/D18):** select the existing Automation
+  language and time provider independently of OTA on switch and switch-ip.
+  Accept a headless, offline timer writing a bound light once, plus cancellation.
+  Run stored actions with command-local state and continuations without creating
+  a named managed console Session for every fire. Keep overlapping actions isolated.
+  Let the system own the committed OTA reboot deadline. Move HTTP binding grammar
+  and FileServerAccess registration to their feature owners and check shared
+  profiles with omitted protocol sections on SmartEVSE.
+- **Streaming request ownership (D23):** give the HTTP session responsibility
+  for finishing or aborting each accepted body exactly once, including handler
+  removal and disconnect. Release OTA partition and file resources through that
+  contract. Cover retry after an interrupted PUT and the zero-increment OTA
+  progress loop for accepted lengths below ten bytes.
+- **First observation (D24, [PR #879](https://github.com/open-watt/openwatt/pull/879)):** remove fabricated timestamped zero records during
+  CAN, BLE, GoodWe, OBD and Modbus binding attachment. Verify typed-but-unseen, first real
+  zero, rebind and consumers of command defaults.
+- **Outbound endpoint representation (D25):** share configured host/address and
+  effective port across IPClient, TLS and TCP setup. Remove text re-encoding and
+  NamedArgument branches while retaining SNI, scope, resolved address state and
+  reliable property readback for numeric TLS remotes.
+- **Profile compilation (D26):** [PR #880](https://github.com/open-watt/openwatt/pull/880)
+  consolidates root block and string sizing. Keep packed output and unify sizing/emission
+  grammar, propagate section failure and index across the whole profile. Cover
+  repeated blocks, alias fallback and mixed-protocol input, and measure peak RAM.
+- **Durable fleet changes (D27):** acknowledge persisted adoption and reset only
+  after the storage transition succeeds. Verify failed authority key publication,
+  member save and reset across reboot as part of the existing NVS work.
+- **Linux OTA slot handoff (D28):** check marker and state writes, order promotion
+  for recoverability, and evaluate watchdog failure before accepting elapsed soak.
+  Exercise failed staging and restart between promotion steps.
+
 ## URGENT: undo at the next compiler update
 
 These work around compiler bugs. Undo each as soon as the minimum DMD **and** LDC carry the fix;
