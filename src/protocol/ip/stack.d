@@ -811,22 +811,15 @@ private:
     //       (or by a virtual on BaseInterface) to choose the framing.
     void frame_and_send(Packet* pkt, BaseInterface out_iface, const(ubyte)[] link_addr)
     {
-        scope (exit) packet_free(pkt);
         EthernetStation station = dyn_cast!EthernetStation(out_iface);
         if (!station || link_addr.length != 6 || pkt.data.length < 1)
-            return;
-        MACAddress dst;
-        dst.b[] = link_addr[0 .. 6];
+            return packet_free(pkt);
         ubyte ver = (cast(const(ubyte)*)pkt.data.ptr)[0] >> 4;
-        StackPacket framed;
-        ref eth = framed.init!Ethernet(pkt.data, pkt.creation_time);
+        ref eth = pkt.reframe!Ethernet();
         eth.src = station.mac;
-        eth.dst = dst;
+        eth.dst.b[] = link_addr[0 .. 6];
         eth.ether_type = ver == 6 ? EtherType.ip6 : EtherType.ip4;
-        framed.checksum_pending = pkt.checksum_pending;
-        framed.pcp = pkt.pcp;
-        framed.dei = pkt.dei;
-        station.forward(&framed.packet);
+        station.forward(pkt);
     }
 
     void deliver_local(Packet* pkt, BaseInterface iface = null)

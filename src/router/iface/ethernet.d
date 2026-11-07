@@ -43,21 +43,6 @@ size_t encode_ethernet_header(const(Packet)* packet, ubyte[] buffer)
     return required;
 }
 
-size_t encode_ethernet_frame(const(Packet)* packet, ubyte[] buffer)
-{
-    size_t header_len = encode_ethernet_header(packet, buffer);
-    if (header_len == 0 || packet.data.length > buffer.length - header_len)
-        return 0;
-    buffer[header_len .. header_len + packet.data.length] = cast(const(ubyte)[])packet.data[];
-    return header_len + packet.data.length;
-}
-
-void complete_frame_checksum(const(Packet)* packet, ubyte[] frame)
-{
-    if (packet.checksum_pending)
-        complete_checksum(frame[$ - packet.data.length .. $], cast(EtherType)packet.eth.ether_type);
-}
-
 
 abstract class EthernetStation : BaseInterface
 {
@@ -301,19 +286,24 @@ protected:
         if (!is_network_multicast_address(src))
             _local_addresses[src] = getTime();
 
-        align(size_t.sizeof) ubyte[1518] buffer = void;
-        ptrdiff_t len = build_ow_payload(packet, *codec, buffer);
-        if (len <= 0 || len > actual_mtu)
+        Packet* wrapped = alloc_packet!Ethernet(min(size_t(actual_mtu), 5 + 255 + packet.data.length));
+        if (!wrapped)
             return false;
-
-        StackPacket wrapped;
-        ref eth = wrapped.init!Ethernet(buffer[0 .. len], packet.creation_time);
+        ptrdiff_t len = build_ow_payload(packet, *codec, cast(ubyte[])wrapped.payload);
+        if (len <= 0)
+        {
+            packet_free(wrapped);
+            return false;
+        }
+        wrapped.truncate(len);
+        wrapped.creation_time = packet.creation_time;
+        ref eth = wrapped.hdr!Ethernet();
         eth.src = mac;
         eth.dst = resolve(get_network_dst_address(packet));
         eth.ether_type = EtherType.ow;
         wrapped.vlan = packet.vlan;
         wrapped.vlan_tag = packet.vlan_tag;
-        medium_tx(&wrapped.packet);
+        medium_tx(wrapped);
         return true;
     }
 
@@ -867,26 +857,28 @@ protected:
     final override void medium_tx(Packet* packet)
     {
         debug assert(packet.type == PacketType.ethernet, "medium_tx expects an ethernet packet");
-        scope (exit) packet_free(packet);
-
-        ubyte[1522] buffer = void;
-
-        size_t packet_len = encode_ethernet_frame(packet, buffer[]);
-        if (packet_len == 0)
+        ubyte[18] header = void;
+        size_t header_len = encode_ethernet_header(packet, header[]);
+        if (header_len + packet.data.length > 1522)
         {
-            log.warning("egress frame does not fit: payload=", packet.data.length, " vlan=", packet.vlan, " etype=", packet.eth.ether_type);
-            add_tx_drop();
+            drop_tx(packet);
             return;
         }
-        ubyte[] frame = buffer[0 .. packet_len];
+        packet = packet_mutable(packet, header_len);
+        if (!packet)
+            return add_tx_drop();
+        scope (exit) packet_free(packet);
+        packet.alloc_prefix(header_len)[] = header[0 .. header_len];
+
+        ubyte[] frame = cast(ubyte[])packet.payload;
         bool offload = packet.checksum_pending && mac_completes_checksum(frame);
-        if (!offload)
-            complete_frame_checksum(packet, frame);
+        if (packet.checksum_pending && !offload)
+            complete_checksum(frame[header_len .. $], cast(EtherType)packet.eth.ether_type);
 
         if ((offload ? wire_send_checksum(frame) : wire_send(frame)) != 0)
             add_tx_drop();
         else
-            add_tx_frame(packet_len);
+            add_tx_frame(frame.length);
     }
 
     // Subclass hook: push a fully-framed ethernet frame onto the wire.
@@ -1026,6 +1018,7 @@ unittest
 
         ~this() {}
         ubyte[64] sent;
+        const(void)* sent_from;
         bool offload, mac_asked;
 
         this(CID id, ObjectFlags flags = ObjectFlags.none)
@@ -1038,12 +1031,13 @@ unittest
         override int wire_send(const(ubyte)[] frame)
         {
             sent[0 .. frame.length] = frame[];
+            sent_from = frame.ptr;
             mac_asked = false;
             return 0;
         }
         override int wire_send_checksum(const(ubyte)[] frame)
         {
-            sent[0 .. frame.length] = frame[];
+            wire_send(frame);
             mac_asked = true;
             return 0;
         }
@@ -1080,4 +1074,11 @@ unittest
     udp.checksum_pending = false;
     wire.medium_tx(&udp.packet);
     assert(!wire.mac_asked && wire.sent[40] == 0 && wire.sent[41] == 0);
+
+    // a frame in a page with headroom takes its header there and goes out without a copy
+    Packet* own = alloc_packet!Ethernet(datagram[]);
+    own.hdr!Ethernet().ether_type = EtherType.ip4;
+    const(void)* own_data = own.data.ptr;
+    wire.medium_tx(own);
+    assert(wire.sent_from is own_data - 14 && wire.sent[12] == 0x08);
 }

@@ -189,6 +189,16 @@ struct Packet
 nothrow @nogc:
     @disable this(this);
 
+    // a new frame of type T over the same bytes, for a packet its caller owns; priority and checksum state carry over
+    ref T reframe(T)()
+    {
+        static assert(T.sizeof <= embed.length);
+        type = T.Type;
+        vlan &= 0xF000;
+        _flags &= checksum_pending_flag | checksum_verified_flag;
+        return *cast(T*)embed.ptr;
+    }
+
     ref inout(T) hdr(T)() inout
     {
         static assert(T.sizeof <= embed.length);
@@ -209,13 +219,18 @@ nothrow @nogc:
         _length = cast(ushort)length;
     }
 
-    void[] alloc_prefix(size_t bytes)
+    // the bytes the packet may prepend in place: none unless it alone holds the page its bytes live in
+    size_t headroom() const
     {
         if (!page_unique(page))
-            return null;
+            return 0;
         size_t start = cast(size_t)(_ptr - cast(const(void)*)page);
-        size_t floor = packet_page_offset < start ? packet_page_offset + Packet.sizeof : Page.sizeof;
-        if (bytes > start || start - bytes < floor)
+        return start - (packet_page_offset < start ? packet_page_offset + Packet.sizeof : Page.sizeof);
+    }
+
+    void[] alloc_prefix(size_t bytes)
+    {
+        if (bytes > headroom)
             return null;
         _ptr -= bytes;
         _length += cast(ushort)bytes;
@@ -448,9 +463,10 @@ Packet* packet_retain(const(Packet)* packet)
 }
 
 // a packet the caller may edit: itself unless its page is shared, else a copy; null, having freed it, if the copy fails
-Packet* packet_mutable(Packet* packet)
+Packet* packet_mutable(Packet* packet, size_t headroom = 0)
 {
-    if (page_foreign(packet.page) || page_unique(packet.page))
+    debug assert(headroom <= packet_headroom);
+    if (page_unique(packet.page) ? packet.headroom >= headroom : page_foreign(packet.page) && !headroom)
         return packet;
     Packet* copy = packet_copy(packet);
     packet_free(packet);
