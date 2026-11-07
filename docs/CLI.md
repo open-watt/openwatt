@@ -17,6 +17,8 @@ For example, the command `/system/log-level level=debug` sets the log level of t
 - `log-level` is a command within the `system` group.
 - `level=debug` is an argument to the `log-level` command.
 
+In quoted values, `\n`, `\r`, and `\t` insert a newline, carriage return, and tab. Use `\\` for a literal backslash.
+
 ### Command Hierarchy
 
 The CLI is organized into a few top-level categories, each managing a different aspect of the system:

@@ -1486,18 +1486,9 @@ package void append_config_value(ref MutableString!0 buf, ref const Variant v)
         buf.append('"');
         foreach (c; v.asString)
         {
-            if (c == '\n')
-                buf.append("\\n");
-            else if (c == '\r')
-                buf.append("\\r");
-            else if (c == '\t')
-                buf.append("\\t");
-            else
-            {
-                if (c == '"' || c == '\\' || c == '$')
-                    buf.append('\\');
-                buf.append(c);
-            }
+            if (c == '"' || c == '\\' || c == '$')
+                buf.append('\\');
+            buf.append(c);
         }
         buf.append('"');
         return;
@@ -2236,7 +2227,7 @@ unittest
 
     table.free_pending();
 
-    import manager.expression : parse_primary_exp, free_expression, EvalContext;
+    import manager.expression : EvalContext, free_script_command, parse_commands;
 
     foreach (value; [ "source", "00123", "true", "null", "@missing", "$name", "a,b", "a b", "\"", "\\", "\\a\\b", "a\"b\"c", "line\nnext", "\\$name\"" ])
     {
@@ -2244,12 +2235,18 @@ unittest
         MutableString!0 encoded;
         append_config_value(encoded, original);
         assert(encoded[0] == '"' && encoded[$ - 1] == '"');
-        const(char)[] encoded_text = encoded[];
-        auto expression = parse_primary_exp(encoded_text);
-        assert(expression !is null && encoded_text.empty);
-        scope(exit) free_expression(expression);
+        if (value == "line\nnext")
+            assert(encoded[] == "\"line\nnext\"");
+
+        MutableString!0 source;
+        source.append("/test/set sample=", encoded[], '\n');
+        const(char)[] script = source[];
+        const(char)[] error;
+        auto commands = parse_commands(script, error);
+        assert(!error && commands.length == 1 && commands[0].named_args.length == 1);
+        scope (exit) free_script_command(commands[0]);
         EvalContext context;
-        Variant restored = expression.evaluate(context);
+        Variant restored = commands[0].named_args[0].value.evaluate(context);
         assert(restored.isString && restored.asString == value);
     }
 }

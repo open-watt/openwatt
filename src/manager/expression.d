@@ -1541,18 +1541,17 @@ unittest
     assert(parse_expression(text).as_num == VarQuantity(-3));
 
     {
-        import manager.base : append_config_value;
+        const(char)[] quoted = "\"a\\nb\\rc\\td\"";
+        Expression* literal = parse_primary_exp(quoted);
+        assert(literal && quoted.empty);
+        assert(literal.evaluate(ctx).asString == "a\nb\rc\td");
+        free_expression(literal);
 
-        Variant original = Variant("a\nb\rc\td \"q\" $x \\0");
-        MutableString!0 exported;
-        append_config_value(exported, original);
-        assert(exported[] == `"a\nb\rc\td \"q\" \$x \\0"`);
-        const(char)[] quoted = exported[];
-        Variant restored = parse_primary_exp(quoted).evaluate(ctx);
-        assert(restored.asString == original.asString && quoted.empty);
-
-        quoted = "\"\\0\\z\"";
-        assert(parse_primary_exp(quoted).evaluate(ctx).asString == "0z");
+        quoted = "\"\\\\n\\\\r\\\\t\\0\\z\"";
+        literal = parse_primary_exp(quoted);
+        assert(literal && quoted.empty);
+        assert(literal.evaluate(ctx).asString == "\\n\\r\\t0z");
+        free_expression(literal);
     }
 
     text = "{ /print hello }";
