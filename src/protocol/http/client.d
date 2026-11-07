@@ -413,7 +413,8 @@ unittest
         assert(client.requests.empty);
         Collection!HTTPClient().update_all();
         wire.fail_write = true;
-        assert(client.request(HTTPMethod.GET, "/failed", null) is null);
+        assert(client.request(HTTPMethod.GET, "/failed", null) !is null && client.running, "a failed line takes the client down after the send, not inside it");
+        wire.restart();
         Collection!HTTPClient().update_all();
         assert(!client.running && client.requests.empty);
         client.destroy();

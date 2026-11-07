@@ -467,6 +467,12 @@ nothrow @nogc:
 
     final override void offline()
     {
+        if (_line_failed)
+        {
+            _line_failed = false;
+            if (g_app)
+                g_app.cancel(&line_failed);
+        }
         page_unwait(&_tx_waiter);
         release_tx_queue();
         cancel_tx_continuation();
@@ -578,7 +584,7 @@ nothrow @nogc:
     size_t tx_request() const
     {
         size_t held = chain_held(_tx_queue);
-        return running && held < tx_queue_limit ? tx_queue_limit - held : 0;
+        return line_up && held < tx_queue_limit ? tx_queue_limit - held : 0;
     }
 
     // what waits here for the line: the fill page and the base queue
@@ -635,6 +641,17 @@ protected:
     void tx_handler_changed()
     {
         invite_tx();
+    }
+
+    // refuses writes at once and goes offline on the next pass, so a writer is never torn down inside its own write
+    final void fail_line()
+    {
+        release_tx_queue();
+        if (_line_failed)
+            return;
+        _line_failed = true;
+        if (g_app)
+            g_app.schedule(getTime(), &line_failed);
     }
 
     // a pull already running, or a continuation queued, takes the room itself
@@ -703,7 +720,7 @@ protected:
 
     void queue_tx_page(Page* page)
     {
-        if (!running)
+        if (!line_up)
             return free_tx_chain(page);
         append_tx_chain(_tx_queue, page);
         drain_tx();
@@ -759,12 +776,12 @@ protected:
             ptrdiff_t n = transmit(data);
             if (n > 0)
                 sent(data[0 .. n]);
-            if (n < 0 || !running)
+            if (n < 0 || !line_up)
             {
                 _tx_sent = 0;
                 page_free(page);
                 if (running)
-                    restart();
+                    fail_line();
                 return;
             }
             if (n < data.length)
@@ -862,6 +879,7 @@ private:
     bool _tx_retrying;
     bool _tx_continuing;
     bool _rx_polling;
+    bool _line_failed;
 
     void tx_retry(MonoTime)
     {
@@ -870,9 +888,12 @@ private:
             drain_tx();
     }
 
+    final bool line_up() const
+        => running && !_line_failed;
+
     // the line has room beyond what the fill page already holds for it
     final bool tx_admits() const
-        => running && tx_request() > chain_held(_fill);
+        => line_up && tx_request() > chain_held(_fill);
 
     final void release_tx_queue()
     {
@@ -905,6 +926,12 @@ private:
     {
         _tx_continuing = false;
         invite_tx();
+    }
+
+    void line_failed(MonoTime)
+    {
+        _line_failed = false;
+        restart();
     }
 
     final void cancel_tx_continuation()
@@ -1074,6 +1101,7 @@ unittest
 
         override ptrdiff_t transmit(const(void)[] data)
         {
+            ++transmits;
             if (broken)
                 return -1;
             size_t n = data.length < room ? data.length : room;
@@ -1095,6 +1123,7 @@ unittest
 
         Array!ubyte output;
         size_t room;
+        size_t transmits;
         bool broken;
 
     protected:
@@ -1305,7 +1334,62 @@ unittest
         assert(line.tx_queued() == 100);
         line.broken = true;
         line.open(10);
-        assert(!line.running && line.tx_queued() == 0, "a failed line restarts and drops what it held");
+        assert(line.running && !line.tx_admits && line.tx_queued() == 0, "a failed line drops what it held and refuses writes at once");
+        assert(!line.send_bytes(bytes[0 .. 10]));
+        TestTxProducer producer = TestTxProducer(5000);
+        producer.max_page = 1000;
+        line.tx_handler(&producer.produce);
+        assert(producer.calls == 0, "a failed line pulls nothing more from its producer");
+        line.line_failed(MonoTime());
+        assert(!line.running);
+    }
+
+    // a producer whose nested send fails the line has the page it returns dropped, not sent
+    {
+        static struct NestedFail
+        {
+        nothrow @nogc:
+            Page* produce(ref const TxRequest req, out TxStatus status)
+            {
+                line.broken = true;
+                line.send(page_alloc(4));
+                status = TxStatus.idle;
+                return page_alloc(4);
+            }
+            ShortStream line;
+        }
+        ShortStream line = Collection!ShortStream().alloc("stream-nested-fail");
+        Collection!ShortStream().add(line);
+        line.room = 1000;
+        NestedFail producer = NestedFail(line);
+        line.tx_handler(&producer.produce);
+        assert(line.transmits == 1 && line.tx_queued() == 0 && !line.tx_admits);
+        line.release_tx_handler(&producer.produce);
+        line.destroy();
+        Collection!Stream().update_all();
+    }
+
+    // a tap that destroys the stream it observes leaves the drain nothing to restart
+    {
+        static struct Destroyer
+        {
+        nothrow @nogc:
+            void tap(Stream s, bool, const(void)[], MonoTime)
+            {
+                if (!done)
+                    s.destroy();
+                done = true;
+            }
+            bool done;
+        }
+        ShortStream line = Collection!ShortStream().alloc("stream-tap-destroys");
+        Collection!ShortStream().add(line);
+        Destroyer destroyer;
+        line.add_tap(&destroyer.tap);
+        line.room = 1000;
+        assert(line.send_bytes("x"));
+        assert(!line.running && line.output[] == "x");
+        Collection!Stream().update_all();
     }
 
     // a queue dropped part way through a page leaves no position behind for the next frame

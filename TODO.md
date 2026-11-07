@@ -784,6 +784,12 @@ one primitive (most belong in urt) and its copies deleted:
 - **Expose scheduling validation metrics**: queue wait by PCP, deadline promotions and
   expiries, queue rejection and DEI eviction counts, reserved-slot dispatches,
   user-command submission-to-completion latency, and reactive receive-to-dispatch latency.
+- **ASH recycles a queued message under its own send** (2026-11-07, #917 review):
+  `send_queued_messages` keeps the `Message` linked across `ash_send`; a shutdown inside that call
+  recycles it, then `send_msg` relinks it into the in-flight list. #912 removed the failing-line
+  trigger; a reentrant tap (Infrastructure) still reaches it.
+- **ASH and CPC do not check `alloc!Message`** (2026-11-07, #917 review): an exhausted heap is a
+  null dereference in the send path instead of a counted drop.
 - **`ZigbeeInterface._ezsp_client` is a raw pointer**: destroying the EZSP client leaves the
   interface restarting against freed memory (`startup()` reads `_ezsp_client.running`). Make it
   an `ObjectRef!EZSPClient` per the dependency rules.
@@ -1504,13 +1510,16 @@ this is what remains.
   to bridge dmd#24027. Once DMD 2.115 and an LDC on its frontend are the minimum, drop `vtbl`
   unconditionally and delete the probe. Until then a Visual D build with a dmd master compiler needs
   `ClassInfoNoVtbl` added to the project's version identifiers.
-- **A producer's request can be retired during its own send** (2026-11-07, #881 review): Modbus
-  `send_queued_messages` reads its pending entry after `frame_and_send`, but the send can retire it
-  first. A Windows `WSASend` that fails synchronously takes the TCP stream offline inline, Modbus
-  restarts, and shutdown clears `_pending` before the send returns. Serial and TCP also run taps
-  before handing the frame to the line, so a tap can reenter a producer. Fix at the Stream boundary,
-  STREAMING.md row E4r on #805: commit to the line before observers run, and deliver abort and
-  terminal notification only through the queue's retirement callback. A tag re-lookup is not a fix.
+- **A tap can reenter a producer during its own send** (2026-11-07, #881 review): serial and TCP
+  run taps (`sent()`) before handing the frame to the line, so a tap that writes, restarts or
+  destroys reaches the producer still inside `frame_and_send`. Commit to the line before observers
+  run (STREAMING.md row E4r on #805). A failing line no longer does this (#912).
+- **Modbus frames could be 2-aligned by policy** (2026-11-08, #881 review): in place, the MBAP
+  header starts at `pdu - 7` and the RTU address at `pdu - 1`, both odd behind an 8-aligned payload,
+  so the header stores are byte-wise. A PDU placed at an odd address would 2-align the MBAP fields
+  and the PDU's leading address and count, so those stores could be typed; the CRC and a write's
+  register values keep the slice forms, since their parity varies. Needs an allocation alignment
+  phase stated by the egress interface (E3).
 
 - **Egress admission follow-ups** (2026-11-01): interfaces admit by `tx_floor()` and invite
   classless waiters a frame per turn; what that left open:
