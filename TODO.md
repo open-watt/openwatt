@@ -1557,7 +1557,6 @@ this is what remains.
 - **Push-receive review follow-ups** (2026-10-06, #814):
   - A connection paused by `recv_handler(null)` does not see the peer's FIN or a reset until it
     reads again; epoll drops read interest and IOCP holds the one receive it has.
-  - Telnet subnegotiation is not clamped, so a peer that never sends `IAC SE` grows the buffer.
   - A consumer that calls `restart()` from inside its delivery leaves the source's loop to finish
     the chunk against a stopping object; such consumers should call `restart_deferred()`, and the
     delivery loops want to stop on `!running`.
