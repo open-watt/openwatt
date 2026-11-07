@@ -33,6 +33,17 @@ through them and remove sections as they are absorbed.
   samples for a held element. Apply the last as the current value and hand all of them to anything
   that plots. openwatt-web's `ModelMirror` already does both; openwatt-droid is unchecked.
 
+## 2026-11-08: render absent values without a sample age
+
+`/api/get` omits `age` when an element has no sample timestamp. Render a null
+value without an age in that case, and preserve a numeric zero as a sample.
+
+An island total can be absent when a configured contributor is unresolved. Show it
+as unknown. A zero is a known total. Boundary cumulative counters retain their last
+value across a telemetry gap.
+Daily solar is unknown for islands with solar contributors while counter-source
+reconciliation is pending.
+
 ## 2026-10-18: page category names
 
 - A page category's name is now the data its pages carry, net of the page's own fields, so the

@@ -1,6 +1,7 @@
 module apps.energy.model;
 
 import urt.si.unit : ScaledUnit;
+import urt.time : getSysTime, SysTime;
 
 import manager.element;
 
@@ -31,6 +32,14 @@ float absf(float v) pure
 // NaN-equal comparison, for change detection on values that are legitimately NaN
 bool same_float(float a, float b) pure
     => a == b || (a != a && b != b);
+
+void publish_float(Element* e, float v, SysTime t = getSysTime())
+{
+    if (v == v)
+        e.value(v, t);
+    else if (e.has_value)
+        e.invalidate(t);
+}
 
 
 enum BusType : ubyte { unknown, dc, single_phase, split_phase, three_phase, delta }

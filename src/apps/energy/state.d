@@ -7,6 +7,7 @@ import urt.mem;
 import urt.mem.temp : tconcat;
 import urt.string;
 import urt.time : Duration, getTime, getSysTime, SysTime;
+import urt.traits : Unqual;
 
 import apps.energy.appliance;
 import apps.energy.attribution;
@@ -317,7 +318,7 @@ nothrow @nogc:
         float v = data.has(field) ? data.read_value(field) : float.nan;
         if (!seen[i] || prov != last_source[i] || !same_float(v, last_value[i]))
         {
-            value[i].value = v;
+            publish_float(value[i], v);
             if (!seen[i] || prov != last_source[i])
                 source[i].value = provenance_name(prov).make_string();
             last_value[i] = v;
@@ -407,7 +408,7 @@ nothrow @nogc:
     {
         if (!seen || !same_float(value, last))
         {
-            element.value = value;
+            publish_float(element, value);
             last = value;
             seen = true;
         }
@@ -825,7 +826,10 @@ nothrow @nogc:
 private Element* layout(T)(ref DeviceBuilder b, const(char)[] path, auto ref T value)
 {
     Element* e = b.element(path, register_value_format(value));
-    e.value(value);
+    static if (is(Unqual!T == float))
+        publish_float(e, value);
+    else
+        e.value(value);
     return e;
 }
 
@@ -981,3 +985,98 @@ __gshared const String[7] energy_component_ids = [
     StringLit!"control_path",
     StringLit!"config",
 ];
+
+unittest
+{
+    import urt.si.quantity : Quantity;
+    import urt.si.unit : KilowattHour;
+
+    Element reading;
+    reading.format = register_value_format!float();
+    FloatPublishCell cell;
+    cell.bind(&reading);
+    cell.publish(float.nan);
+    assert(!reading.has_value && reading.record_update == SysTime.init);
+    cell.publish(0);
+    assert(reading.has_value && reading.value.asFloat == 0);
+    cell.publish(float.nan);
+    assert(!reading.has_value);
+    cell.publish(0);
+    assert(reading.has_value && reading.value.asFloat == 0);
+
+    {
+        TopologyGraph graph;
+        scope(exit) graph.clear();
+        graph.ensure_bus("site");
+        graph.attribution.compute(graph);
+
+        DeviceTable devices;
+        auto builder = devices.create("circuit-rebuild");
+        Device energy = builder.device;
+        builder.commit();
+        scope(exit) free(energy);
+
+        TopologyPublisher publisher;
+        void rebuild()
+        {
+            auto edit = energy.edit();
+            publisher.bind(edit, graph);
+        }
+
+        rebuild();
+        static immutable string[] fields = [
+            "source_power", "local_source_power", "grid_source_power", "load_power", "local_fraction",
+        ];
+        foreach (field; fields)
+        {
+            Element* e = energy.find_element(tconcat("circuit.bus.site.", field));
+            assert(e && !e.has_value && e.value.isNull);
+            assert(e.last_update == SysTime.init && e.record_count == 0);
+        }
+
+        Element* source = energy.find_element("circuit.bus.site.source_power");
+        source.ensure_history();
+        graph.attribution.buses[0].source_power = 0;
+        rebuild();
+        assert(source.has_value && source.value.asFloat == 0 && source.record_count == 1);
+
+        graph.attribution.compute(graph);
+        rebuild();
+        assert(!source.has_value && source.value.isNull && source.record_count == 1);
+    }
+
+    TopologyGraph graph;
+    scope(exit) graph.clear();
+    Bus* site = graph.ensure_bus("site");
+    Port* port = graph.add_port(null, site, PortRole.grid, FlowDomain.bidirectional, null, 0);
+    DeviceTable devices;
+    auto builder = devices.create("boundary-publish");
+    port.meter = builder.component("meter", "EnergyMeter");
+    alias Energy = Quantity!(float, KilowattHour);
+    Element* counter = builder.element(port.meter, "export", register_value_format!Energy());
+    BoundaryPublishEntry entry;
+    entry.bind(builder, port);
+    Islands islands;
+    SysTime now = getSysTime();
+
+    port.meter_data = get_meter_data(port.meter);
+    entry.publish(port, graph, islands, now);
+    assert(!entry.energy_in.element.has_value && !entry.energy_out.element.has_value);
+
+    counter.value(Energy(12));
+    port.meter_data = get_meter_data(port.meter);
+    port.meter_data.write_value(MeterField.power, 0, -100);
+    port.meter_data.mark(MeterField.power, 0, Provenance.measured);
+    entry.publish(port, graph, islands, now);
+    assert(entry.energy_in.element.value.asFloat == 12);
+    assert(entry.power_in.element.value.asFloat == 100);
+    SysTime counter_time = entry.energy_in.element.record_update;
+
+    counter.invalidate();
+    port.meter_data = get_meter_data(port.meter);
+    entry.publish(port, graph, islands, now);
+    assert(entry.energy_in.element.value.asFloat == 12);
+    assert(entry.energy_in.element.record_update == counter_time);
+    assert(!entry.energy_out.element.has_value);
+    assert(!entry.power_in.element.has_value);
+}

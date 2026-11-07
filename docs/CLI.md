@@ -90,6 +90,10 @@ name a device by its bare name. That is the global device of that name if there 
 otherwise this node's own peer-local device, such as `system`. A binding whose `device=` names
 neither creates a global device.
 
+An element awaiting its first sample has a blank value in `/device/print`. Arithmetic
+and ordered comparisons with an absent value return `null`. Boolean operations return
+`null` when the missing operand could change the result. Use `== null` to test for absence.
+
 ### Common Commands
 
 Here are some of the common commands used in the `conf/startup.conf` file:

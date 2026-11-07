@@ -1507,15 +1507,11 @@ private:
             if (owner_name.length == 0)
                 continue;
 
-            Bus* b = boundary_bus(p);
             const(char)[] group = production_group(p);
             ProductionContribution member;
             member.owner = retain_production_string(owner_name);
             member.group = retain_production_string(group);
-            member.port = retain_production_string(p.path.length ? p.path[] : port_role_name(p.role));
-            member.circuit = retain_production_string(b ? b.id[] : "");
             member.kind = ProductionContributionKind.member;
-            member.component = p.component;
             member.meter = p.meter_data;
             if (member.meter.has(MeterField.power))
             {
@@ -1557,10 +1553,7 @@ private:
         ProductionContribution contribution;
         contribution.owner = retain_production_string(owner.name[]);
         contribution.group = retain_production_string(group);
-        contribution.port = retain_production_string(group);
-        contribution.circuit = "";
         contribution.kind = ProductionContributionKind.aggregate;
-        contribution.component = aggregate;
         contribution.meter = get_meter_data(meter);
         production_contributions ~= contribution;
     }
@@ -1668,7 +1661,6 @@ private:
             }
         }
 
-        b.accounted_power = signed_power;
         classify_bus_coverage(b, signed_power, flow_scale, dark_can_sink, dark_can_source);
     }
 
@@ -1682,6 +1674,7 @@ private:
             return;
         }
 
+        b.accounted_power = signed_power;
         b.residual_power = signed_power;
         b.unaccounted_source_power = signed_power > 0 ? signed_power : 0;
         b.unaccounted_load_power = signed_power < 0 ? -signed_power : 0;
@@ -1733,6 +1726,14 @@ unittest
     Port* dish_p = graph.add_port(null, house, PortRole.connection, FlowDomain.consume, null, 0);
     graph.add_to_group(dish, dish_p);
     assert(is_boundary(dish_p));
+
+    graph.aggregate_bus(house);
+    assert(house.coverage == Coverage.unknown);
+    assert(house.accounted_power != house.accounted_power);
+    dish_p.meter_data.write_value(MeterField.power, 0, 0);
+    dish_p.meter_data.mark(MeterField.power, 0, Provenance.measured);
+    graph.aggregate_bus(house);
+    assert(house.coverage == Coverage.measured && house.accounted_power == 0);
 
     // two-port sink group: connected upstream interior, dangling downstream boundary
     Port* up = graph.add_port(null, house, PortRole.connection, FlowDomain.consume, null, 0, MeterSign.normal, "connection", "gpo");

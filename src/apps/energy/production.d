@@ -5,8 +5,6 @@ import urt.array;
 import apps.energy.meter;
 import apps.energy.model : absf;
 
-import manager.component;
-
 nothrow @nogc:
 
 
@@ -29,10 +27,7 @@ struct ProductionContribution
 {
     const(char)[] owner;
     const(char)[] group;
-    const(char)[] port;
-    const(char)[] circuit;
     ProductionContributionKind kind;
-    Component component;
     MeterData meter;
 }
 
@@ -87,8 +82,6 @@ unittest
         ProductionContribution c;
         c.owner = "inverter";
         c.group = "solar";
-        c.port = kind == ProductionContributionKind.aggregate ? "solar" : "solar.mppt1";
-        c.circuit = kind == ProductionContributionKind.aggregate ? "" : "pv.east";
         c.kind = kind;
         c.meter = meter(power);
         return c;

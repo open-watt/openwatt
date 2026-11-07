@@ -592,7 +592,7 @@ void append_element(ref Array!char json, ref bool listed, const(char)[] path, El
     else
         append_json(json, v);
 
-    if (elem.sampling_mode != SamplingMode.constant)
+    if (elem.last_update && elem.sampling_mode != SamplingMode.constant)
     {
         ulong age = (getTime() - elem.last_update).as!"seconds";
         json.append(",\"age\":", age);
@@ -973,4 +973,16 @@ private:
                 return buffer[0 .. 6];
         }
     }
+}
+
+unittest
+{
+    import manager.series : register_value_format;
+
+    Element e;
+    e.format = register_value_format!int();
+    bool listed;
+    Array!char json;
+    append_element(json, listed, "power", &e);
+    assert(json[] == `"power":{"value":null}`);
 }
