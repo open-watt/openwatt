@@ -255,24 +255,18 @@ protected:
 
     override CompletionStatus startup()
     {
-        if (!_stream)
-        {
-            if (!open_stream())
-                return CompletionStatus.error;
-        }
+        Stream stream = _stream.get;
+        if (!stream)
+            stream = open_stream();
+        if (!stream)
+            return CompletionStatus.error;
 
-        if (!_stream.running)
+        if (!stream.running)
             return CompletionStatus.continue_;
-
-        if (!_subscribed)
-        {
-            _stream.subscribe(&stream_state_change);
-            _stream.rx_handler(&stream_rx);
-            _subscribed = true;
-        }
 
         if (_state == ClientState.disconnected)
         {
+            stream.rx_handler(&stream_rx);
             if (!send_connect())
                 return CompletionStatus.error;
             _state = ClientState.awaiting_connack;
@@ -298,7 +292,8 @@ protected:
 
     override CompletionStatus shutdown()
     {
-        if (_state == ClientState.active && _stream && _stream.running)
+        Stream stream = _stream.get;
+        if (_state == ClientState.active && stream && stream.running)
             send_disconnect_packet();
 
         release_stream();
@@ -309,7 +304,8 @@ protected:
 
     override void update()
     {
-        if (!_stream || !_stream.running)
+        Stream stream = _stream.get;
+        if (!stream || !stream.running)
         {
             restart();
             return;
@@ -365,8 +361,7 @@ private:
     ubyte _will_qos;
     bool _will_retain;
 
-    Stream _stream;
-    bool _subscribed;
+    ObjectRef!Stream _stream;
 
     ClientState _state;
     MonoTime _last_contact;
@@ -378,7 +373,7 @@ private:
 
     Array!ClientSubscription _subscriptions;
 
-    bool open_stream()
+    Stream open_stream()
     {
         const(char)[] sname = Collection!TCPStream().generate_name(tconcat(name[], "_tcp"));
         Stream s = Collection!TCPStream().create(sname, ObjectFlags.dynamic,
@@ -387,31 +382,43 @@ private:
         if (!s)
         {
             log.error("failed to create outbound TCP stream");
-            return false;
+            return null;
         }
-        _stream = s;
-        return true;
+        attach_stream(s);
+        return s;
+    }
+
+    void attach_stream(Stream stream)
+    {
+        _stream = stream;
+        stream.subscribe(&stream_state_change);
+    }
+
+    pragma(inline, false)
+    Stream detach_stream()
+    {
+        Stream stream = _stream.get;
+        _stream = null;
+        if (stream)
+        {
+            stream.unsubscribe(&stream_state_change);
+            stream.release_rx_handler(&stream_rx);
+            stream.release_tx_handler(&produce);
+        }
+        return stream;
     }
 
     void release_stream()
     {
         _tx.clear();
-        if (_subscribed && _stream)
-        {
-            _stream.release_rx_handler(&stream_rx);
-            _stream.release_tx_handler(&produce);
-            _stream.unsubscribe(&stream_state_change);
-            _subscribed = false;
-        }
-        if (_stream)
-        {
-            _stream.destroy();
-            _stream = null;
-        }
+        if (auto stream = detach_stream())
+            stream.destroy();
     }
 
-    void stream_state_change(ActiveObject obj, StateSignal signal)
+    void stream_state_change(ActiveObject, StateSignal signal)
     {
+        if (signal == StateSignal.destroyed)
+            detach_stream();
         if (signal == StateSignal.offline || signal == StateSignal.destroyed)
             restart_deferred();
     }
@@ -642,6 +649,9 @@ private:
     // a publish the queue cannot take is lost; anything else restarts the connection
     bool send_packet(size_t size, scope PacketEncoder encode, bool droppable = false)
     {
+        Stream stream = _stream.get;
+        if (!stream)
+            return false;
         if (!_tx.push(size, encode))
         {
             if (droppable)
@@ -650,7 +660,7 @@ private:
             restart_deferred();
             return false;
         }
-        _stream.tx_handler(&produce);
+        stream.tx_handler(&produce);
         _last_send = getTime();
         return true;
     }
@@ -668,4 +678,87 @@ private:
         _next_packet_id = (_next_packet_id == 0xFFFF) ? cast(ushort)1 : cast(ushort)(_next_packet_id + 1);
         return r;
     }
+}
+
+
+unittest
+{
+    import urt.mem.pagepool : page_pool_deinit, page_pool_init;
+
+    import router.stream.memory : MemoryMode, MemoryStream;
+
+    bool owns_pool = page_pool_init();
+    scope (exit) if (owns_pool) page_pool_deinit();
+
+    auto clients = Collection!MQTTClient();
+    auto streams = Collection!MemoryStream();
+    auto client = clients.alloc("mqtt-test-client");
+    client.host("broker.invalid".make_string());
+    clients.add(client);
+    scope (exit)
+    {
+        client.destroy();
+        clients.update_all();
+        Collection!Stream().update_all();
+    }
+
+    auto pending = streams.alloc("mqtt-test-transport");
+    streams.add(pending);
+    client.attach_stream(pending);
+    clients.update_all();
+    pending.destroy();
+    assert(client._stream.get is null);
+    clients.update_all();
+
+    MemoryStream connect()
+    {
+        auto stream = streams.alloc("mqtt-test-transport");
+        stream.tx_mode(MemoryMode.dynamic);
+        streams.add(stream);
+        Collection!Stream().update_all();
+        assert(stream.running);
+
+        client.attach_stream(stream);
+        clients.update_all();
+        assert(client._state == MQTTClient.ClientState.awaiting_connack);
+        static immutable ubyte[] connack = [0x20, 0x02, 0x00, 0x00];
+        stream.rx_handler()(stream, connack, getTime());
+        clients.update_all();
+        assert(client.running);
+        return stream;
+    }
+
+    static struct Observer
+    {
+        MQTTClient client;
+        MemoryStream transport;
+        bool detached;
+
+        void state_change(ActiveObject, StateSignal signal) nothrow @nogc
+        {
+            if (signal == StateSignal.destroyed)
+            {
+                assert(client._stream.get is null);
+                assert(transport.rx_handler() is null && transport.tx_handler() is null);
+                detached = true;
+            }
+        }
+    }
+
+    auto transport = connect();
+    auto id = transport.id;
+    auto observer = Observer(client, transport);
+    transport.subscribe(&observer.state_change);
+    transport.destroy();
+    assert(observer.detached && client._state == MQTTClient.ClientState.active);
+    client.publish("probe", null);
+    clients.update_all();
+    assert(client._state == MQTTClient.ClientState.disconnected);
+
+    auto replacement = connect();
+    assert(replacement.id == id);
+    replacement.restart_deferred();
+    assert(client._stream.get is replacement);
+    clients.update_all();
+    assert(get_item(id) is null && client._state == MQTTClient.ClientState.disconnected);
 }
