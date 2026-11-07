@@ -457,6 +457,11 @@ one primitive (most belong in urt) and its copies deleted:
   Add authenticated rekey transitions and retransmission tests without resetting
   receive counters when already installed key material is repeated.
 
+- **[Build reproducibility] Stabilize source enumeration**: OpenWatt Makefile and
+  uRT platforms.mk use unsorted `find` output. Different module orders moved
+  RP2350 release images by 64 B with identical sources. Sort the lists before
+  compilation so binary-size comparisons are reproducible.
+
 - **[Windows toolchain] Retire the default beta DMD and isolate LDC COMDAT failure**:
   PATH selects DMD 2.112.0-beta.1, whose unittest build fails copy-constructor
   detection at `urt.internal.traits:376`; installed stable DMD 2.113 passes the
@@ -1174,6 +1179,9 @@ role from a concrete deployment need before implementing or advertising it.
 
 ## Sync and peering
 
+- **[in passing, #928] The 64-bit Tiny unittest fails in `manager/sync/peer.d`**: an x86_64
+  `TINY=1` LDC build trips the windowed-fragment `rounds ==` assert, on master too. Tiny boards are
+  32-bit, so this is the unittest, not a shipping target.
 - **Move sync onto RDP sessions** (`rdp_open`, `src/router/iface/rdp.d`): a peer is an address and
   the session to it is the transport. Goes: the reliability sublayer in `src/manager/sync/peer.d`
   (control retransmission, reorder hold, the val/log refold queues and epochs, session-id echo,

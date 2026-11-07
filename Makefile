@@ -13,6 +13,7 @@
 
 URT_DIR    := third_party/urt
 URT_SRCDIR := $(URT_DIR)/src
+URT_CONFIG_DIR := src
 
 # Discover a board's standard board.mk before platform resolution. BOARD
 # describes fitted hardware; PLATFORM describes the SoC/toolchain. An explicit
