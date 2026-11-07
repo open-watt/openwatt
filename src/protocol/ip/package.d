@@ -1600,9 +1600,10 @@ nothrow @nogc:
         else version (Windows)
         {
             bool v6 = family == AddressFamily.ipv6;
-            IOCP_SOCKET socket = ws_socket(v6 ? WSA_AF_INET6 : WSA_AF_INET, WSA_SOCK_DGRAM, WSA_IPPROTO_UDP, null, 0, WSA_FLAG_OVERLAPPED);
-            if (socket == INVALID_SOCKET)
+            Socket datagram;
+            if (create_socket(family, SocketType.datagram, Protocol.udp, datagram).failed)
                 return false;
+            IOCP_SOCKET socket = datagram.handle;
             int yes = 1;
             bool configured = g_recv_msg !is null;
             if (v6)
@@ -3020,5 +3021,81 @@ version (UseInternalIPStack) {} else version (linux)
             c.tx_handler(&p.produce);
             assert(p.produced >= page_size && p.produced <= (tx_slice.as!"usecs" / 500 + 2) * page_size, "slow producer ran past its turn");
         }
+    }
+}
+else version (Windows)
+{
+    unittest
+    {
+        struct Reception
+        {
+            IoOp op;
+            bool complete, succeeded;
+            uint bytes;
+
+            void receive(IoOp*, bool ok, uint received, uint) nothrow @nogc
+            {
+                complete = true;
+                succeeded = ok;
+                bytes = received;
+            }
+        }
+
+        Reactor reactor;
+        assert(reactor.init());
+        scope (exit) reactor.destroy();
+
+        Socket receiver;
+        assert(create_socket(AddressFamily.ipv4, SocketType.datagram, Protocol.udp, receiver).succeeded);
+        scope (exit) receiver.close();
+        InetAddress loopback = InetAddress(IPAddr.loopback, 0);
+        assert(receiver.bind(loopback).succeeded);
+        InetAddress target;
+        assert(receiver.get_socket_name(target).succeeded);
+        assert(reactor.associate(cast(HANDLE)receiver.handle));
+
+        IOCP_GUID extension = WSAID_RECVMSG;
+        LPFN_RECVMSG recv_msg;
+        uint bytes;
+        assert(WSAIoctl(receiver.handle, SIO_GET_EXTENSION_FUNCTION_POINTER, &extension,
+                        cast(uint)extension.sizeof, &recv_msg, cast(uint)recv_msg.sizeof,
+                        &bytes, null, null) == 0 && recv_msg);
+
+        Socket peer;
+        assert(create_socket(AddressFamily.ipv4, SocketType.datagram, Protocol.udp, peer).succeeded);
+        assert(peer.bind(loopback).succeeded);
+        InetAddress unused;
+        assert(peer.get_socket_name(unused).succeeded);
+        assert(peer.close().succeeded);
+        assert(receiver.sendto("miss", MsgFlags.none, &unused).succeeded);
+
+        ubyte[4] data;
+        SockAddrBuf from;
+        WSABUF buffer = WSABUF(cast(uint)data.length, data.ptr);
+        WSAMSG message;
+        message.name = &from;
+        message.namelen = from.sizeof;
+        message.lpBuffers = &buffer;
+        message.dwBufferCount = 1;
+        Reception result;
+        result.op.on_complete = &result.receive;
+        assert(recv_msg(receiver.handle, &message, &bytes, &result.op.ov, null) != 0
+            && ws_lasterror() == WSA_IO_PENDING);
+        scope (exit)
+        {
+            if (!result.complete)
+            {
+                CancelIoEx(cast(HANDLE)receiver.handle, &result.op.ov);
+                reactor.wait(2.seconds);
+            }
+        }
+        assert(!reactor.wait(250.msecs));
+
+        assert(create_socket(AddressFamily.ipv4, SocketType.datagram, Protocol.udp, peer).succeeded);
+        scope (exit) peer.close();
+        assert(peer.sendto("live", MsgFlags.none, &target).succeeded);
+        assert(reactor.wait(2.seconds));
+        assert(result.complete && result.succeeded && result.bytes == data.length);
+        assert(cast(const(char)[])data[] == "live");
     }
 }
