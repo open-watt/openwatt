@@ -4,6 +4,9 @@ import urt.array;
 
 import apps.energy.meter;
 import apps.energy.model : absf;
+import apps.energy.topology : Port;
+
+import manager.element : Element;
 
 nothrow @nogc:
 
@@ -27,7 +30,9 @@ struct ProductionContribution
 {
     const(char)[] owner;
     const(char)[] group;
+    Port* port;
     ProductionContributionKind kind;
+    Element* import_counter;
     MeterData meter;
 }
 

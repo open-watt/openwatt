@@ -47,8 +47,9 @@ value without an age in that case, and preserve a numeric zero as a sample.
 An island total can be absent when a configured contributor is unresolved. Show it
 as unknown. A zero is a known total. Boundary cumulative counters retain their last
 value across a telemetry gap.
-Daily solar is unknown for islands with solar contributors while counter-source
-reconciliation is pending.
+Daily solar totals choose their counter source from direct counters declared by
+the configured topology. Missing direct readings leave the total unknown.
+A group-wide aggregate is available only if the whole group is in one island.
 
 ## 2026-10-18: page category names
 
