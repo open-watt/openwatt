@@ -1497,6 +1497,13 @@ this is what remains.
 
 ## Infrastructure
 
+- **A producer's request can be retired during its own send** (2026-11-07, #881 review): Modbus
+  `send_queued_messages` reads its pending entry after `frame_and_send`, but the send can retire it
+  first. A Windows `WSASend` that fails synchronously takes the TCP stream offline inline, Modbus
+  restarts, and shutdown clears `_pending` before the send returns. Serial and TCP also run taps
+  before handing the frame to the line, so a tap can reenter a producer. Fix at the Stream boundary,
+  STREAMING.md row E4r on #805: commit to the line before observers run, and deliver abort and
+  terminal notification only through the queue's retirement callback. A tag re-lookup is not a fix.
 - **Unpin DMD in CI** (2026-11-05): the `dmd-master` nightly published between 2026-11-01 and
   2026-11-03 segfaults compiling the unittest build (all four DMD jobs; LDC and the cross builds
   pass), so `ci.yml` pins DMD to 2.114.0-beta.1 (the 2.114.0 release has no binaries on downloads.dlang.org yet). Reduce the crash against a local nightly, report it

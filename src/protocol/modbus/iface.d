@@ -12,7 +12,6 @@ import urt.mem.pagepool : Page;
 import urt.meta.nullable;
 import urt.result;
 import urt.string;
-import urt.string.format;
 import urt.time;
 
 import manager;
@@ -34,6 +33,9 @@ import router.stream;
 
 alias modbus_crc = calculate_crc!(Algorithm.crc16_modbus);
 alias modbus_crc_2 = calculate_crc_2!(Algorithm.crc16_modbus);
+
+// the widest head a frame takes in front of its PDU: the MBAP header
+enum ubyte modbus_frame_headroom = 7;
 
 nothrow @nogc:
 
@@ -483,7 +485,7 @@ protected:
             }
 
             PendingModbus pending = { request_from_address: hdr.src_address, sequence_number: hdr.sequence_number, local_server_address: local_address, callback: callback };
-            int tag = _queue.enqueue(packet, &on_frame_complete);
+            int tag = _queue.enqueue(packet, &on_frame_complete, null, modbus_frame_headroom);
             if (tag < 0)
             {
                 log.debug_("tx-drop: queue full");
@@ -517,9 +519,7 @@ protected:
                 wire_address = map.iface is this ? map.local_address : map.universal_address;
             else
                 wire_address = hdr.src_address; // hosted-local node: universal == bus, no NAT
-            int result = frame_and_send(wire_address, cast(const(ubyte)[])packet.data, hdr.sequence_number);
-            packet_free(packet);
-            return result;
+            return frame_and_send(wire_address, packet, hdr.sequence_number);
         }
     }
 
@@ -715,43 +715,52 @@ private:
         }
     }
 
-    int frame_and_send(ubyte address, const(ubyte)[] pdu, ushort tx_id = 0)
+    int frame_and_send(ubyte address, Packet* packet, ushort tx_id = 0)
     {
         assert(protocol != ModbusProtocol.unknown, "Modbus protocol not specified");
-        static immutable size_t[3] framing = [ 1 + 2, 7, 3 + 4 ];
-        size_t length = framing[protocol] + (protocol == ModbusProtocol.ascii ? 2 : 1) * pdu.length;
-        Page* page = frame_page(length);
+        static immutable ubyte[3] head = [ 1, modbus_frame_headroom, 3 ];
+        static immutable ubyte[3] tail = [ 2, 0, 4 ];
+        size_t pdu_length = packet.data.length;
+        Page* page = packet_page(packet, head[protocol], tail[protocol] + (protocol == ModbusProtocol.ascii ? pdu_length : 0));
         if (!page)
+        {
+            add_tx_drop();
             return -1;
-        ubyte[] buffer = cast(ubyte[])page.data;
+        }
+        ubyte[] frame = cast(ubyte[])page.data;
 
         final switch (protocol)
         {
             case ModbusProtocol.unknown:
                 assert(false);
             case ModbusProtocol.rtu:
-                buffer[0] = address;
-                buffer[1 .. $ - 2] = pdu[];
-                buffer[$ - 2 .. $][0 .. 2] = buffer[0 .. $ - 2].modbus_crc().nativeToLittleEndian;
+                frame[0] = address;
+                frame[$ - 2 .. $][0 .. 2] = frame[0 .. $ - 2].modbus_crc().nativeToLittleEndian;
                 break;
             case ModbusProtocol.tcp:
-                buffer[0..2] = tx_id.nativeToBigEndian;
-                buffer[2..4] = 0; // protocol identifier
-                buffer[4..6] = nativeToBigEndian(cast(ushort)(1 + pdu.length));
-                buffer[6] = address;
-                buffer[7 .. $] = pdu[];
+                frame[0..2] = tx_id.nativeToBigEndian;
+                frame[2..4] = 0; // protocol identifier
+                frame[4..6] = nativeToBigEndian(cast(ushort)(frame.length - 6));
+                frame[6] = address;
                 break;
             case ModbusProtocol.ascii:
+                static void put_hex(char[] text, ubyte b)
+                {
+                    text[0] = hex_digits[b >> 4];
+                    text[1] = hex_digits[b & 0xF];
+                }
+                char[] text = cast(char[])frame;
                 ubyte lrc = address;
-                foreach (b; cast(ubyte[])pdu[])
-                    lrc += cast(ubyte)b;
-                lrc = cast(ubyte)-lrc;
-
-                buffer[0] = ':';
-                format_int(address, cast(char[])buffer[1..3], 16, 2, '0');
-                toHexString(pdu[], cast(char[])buffer[3 .. $ - 4]);
-                format_int(lrc, cast(char[])buffer[$ - 4 .. $ - 2], 16, 2, '0');
-                (cast(char[])buffer)[$ - 2 .. $] = "\r\n";
+                for (size_t i = pdu_length; i-- > 0; )
+                {
+                    ubyte b = frame[3 + i];
+                    lrc += b;
+                    put_hex(text[3 + 2 * i .. $], b);
+                }
+                text[0] = ':';
+                put_hex(text[1 .. $], address);
+                put_hex(text[$ - 4 .. $], cast(ubyte)-lrc);
+                text[$ - 2 .. $] = "\r\n";
         }
 
         return send_frame(active_stream(), page);
@@ -773,20 +782,20 @@ private:
                 continue;
             }
 
-            const(ubyte)[] pdu = cast(ubyte[])frame.packet.data;
-            if (frame_and_send(pm.local_server_address, pdu, tag) < 0)
-            {
-                log.debug_("dispatch: frame_and_send failed for addr ", pm.local_server_address);
-                _queue.complete(tag, MessageState.failed);
-                continue;
-            }
+            Packet* packet = frame.packet;
+            frame.packet = null;
+            const(ubyte)[] pdu = cast(const(ubyte)[])packet.data;
             if (pdu.length >= 5)
             {
                 pm.function_code = pdu[0];
                 pm.count = pdu[3 .. 5].bigEndianToNative!ushort;
             }
-            packet_free(frame.packet);
-            frame.packet = null;
+            if (frame_and_send(pm.local_server_address, packet, tag) < 0)
+            {
+                log.debug_("dispatch: frame_and_send failed for addr ", pm.local_server_address);
+                _queue.complete(tag, MessageState.failed);
+                continue;
+            }
 
             if (pm.callback)
                 pm.callback(tag, MessageState.in_flight);
@@ -1436,11 +1445,27 @@ bool valid_function_code(FunctionCode function_code)
 
 unittest
 {
-    import urt.mem.pagepool : page_pool_init, page_pool_deinit;
+    import urt.mem.pagepool : page_category, page_free, page_pool_deinit, page_pool_init;
     import router.stream.memory : MemoryMode, MemoryStream;
 
     bool owns_pool = page_pool_init();
     scope(exit) if (owns_pool) page_pool_deinit();
+
+    ubyte[253] bytes;
+    StackPacket lent;
+    lent.init!ModbusFrame(bytes[]);
+    static immutable ubyte[2][2] rtu_and_mbap = [ [1, 2], [modbus_frame_headroom, 0] ];
+    foreach (ref room; rtu_and_mbap)
+    {
+        Packet*[2] requests = [ alloc_packet!ModbusFrame(253, modbus_frame_headroom), packet_keep(&lent.packet, modbus_frame_headroom) ];
+        foreach (request; requests)
+        {
+            const(void)* pdu = request.data.ptr;
+            Page* frame = packet_page(request, room[0], room[1]);
+            assert(frame.data.ptr is pdu - room[0] && page_category(frame) == 0, "a maximum-size request, built or kept from a lent one, is framed in place in the smallest page class");
+            page_free(frame);
+        }
+    }
 
     static struct Probe
     {
