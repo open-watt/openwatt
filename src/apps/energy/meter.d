@@ -221,6 +221,17 @@ nothrow @nogc:
         freq = float.nan;
     }
 
+    void reset_except_voltage() pure
+    {
+        MeterVolts[4] v = voltage;
+        Provenance[4] p = provenance[MeterField.voltage];
+        reset_to_missing();
+        voltage = v;
+        provenance[MeterField.voltage] = p;
+        if (phases_present(MeterField.voltage))
+            fields |= FieldFlags.voltage;
+    }
+
     void mark(MeterField field, ubyte phase, Provenance prov) pure
     {
         provenance[field][phase] = prov;

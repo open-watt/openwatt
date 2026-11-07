@@ -1447,20 +1447,12 @@ private:
         if (dark is null)
             return false;
 
-        dark.meter_data.write_value(MeterField.power, 0, -sum);
-        dark.meter_data.mark(MeterField.power, 0, Provenance.inferred_subtraction);
-
         // A closed contact is one electrical node, so voltage carries across;
         // appliance ports may sit on different domains and never share it.
-        if (g.ports.length == 2 && g.kind != PortGroupKind.appliance && !dark.meter_data.has(MeterField.voltage))
-        {
-            Port* known = g.ports[0] is dark ? g.ports[1] : g.ports[0];
-            if (known.meter_data.has(MeterField.voltage))
-            {
-                dark.meter_data.voltage[0] = known.meter_data.voltage[0];
-                dark.meter_data.mark(MeterField.voltage, 0, Provenance.inferred_subtraction);
-            }
-        }
+        const(MeterData)* across;
+        if (g.ports.length == 2 && g.kind != PortGroupKind.appliance)
+            across = &(g.ports[0] is dark ? g.ports[1] : g.ports[0]).meter_data;
+        solve_dark_power(dark, -sum, across);
         return true;
     }
 
@@ -1610,14 +1602,33 @@ private:
         if (b.residual_power < 0 && dark.flow == FlowDomain.supply)
             return false;
 
-        dark.meter_data.write_value(MeterField.power, 0, -b.residual_power);
-        dark.meter_data.mark(MeterField.power, 0, Provenance.inferred_subtraction);
-        if (b.balance.has(MeterField.voltage) && !dark.meter_data.has(MeterField.voltage))
-        {
-            dark.meter_data.voltage[0] = b.balance.voltage[0];
-            dark.meter_data.mark(MeterField.voltage, 0, Provenance.inferred_subtraction);
-        }
+        solve_dark_power(dark, -b.residual_power, &b.balance);
         return true;
+    }
+
+    // A measured voltage survives; everything else the port held is replaced.
+    // When the port keeps its own voltage, the current protection reads is
+    // still the inferred power over the reference voltage, as if the
+    // reference had been copied in.
+    void solve_dark_power(Port* dark, float power, const(MeterData)* reference)
+    {
+        ref MeterData d = dark.meter_data;
+        d.reset_except_voltage();
+        d.write_value(MeterField.power, 0, power);
+        d.mark(MeterField.power, 0, Provenance.inferred_subtraction);
+        const bool have_reference = reference !is null && reference.has(MeterField.voltage);
+        if (!d.has(MeterField.voltage))
+        {
+            if (have_reference)
+            {
+                d.voltage[0] = reference.voltage[0];
+                d.mark(MeterField.voltage, 0, Provenance.inferred_subtraction);
+            }
+            return;
+        }
+        float volts = have_reference ? absf(reference.voltage[0].value) : 0;
+        d.write_value(MeterField.current, 0, volts > 0 ? power / volts : float.nan);
+        d.mark(MeterField.current, 0, Provenance.inferred_subtraction);
     }
 
     void aggregate_bus(Bus* b)
@@ -1658,7 +1669,7 @@ private:
                 b.balance.voltage[0] = p.meter_data.voltage[0];
                 b.balance.mark(MeterField.voltage, 0, Provenance.inferred_sum);
             }
-            if (p.meter_data.has(MeterField.current))
+            if (p.meter_data.has(MeterField.current) && !p.meter_data.is_inferred(MeterField.current))
             {
                 float c = b.balance.has(MeterField.current) ? b.balance.current[0].value : 0;
                 b.balance.current[0] = MeterAmps(p.meter_data.current[0].value + c);
@@ -1834,7 +1845,7 @@ unittest
         g2.clear();
     }
 
-    // inference solves a dark port's power without discarding what its meter measured
+    // inference keeps a dark port's measured voltage; protection still sees master's |P| / V_ref
     {
         import urt.si.quantity : Quantity;
         import urt.si.unit : KilowattHour, Volt, Watt;
@@ -1875,9 +1886,54 @@ unittest
         assert(d.source(MeterField.power) == Provenance.inferred_subtraction);
         assert(absf(d.active[0].value - 1000) <= 0.01f);
         assert(d.is_measured(MeterField.voltage) && absf(d.voltage[0].value - 236) <= 0.01f);
-        assert(d.is_measured(MeterField.current) && absf(d.current[0].value - 4.2f) <= 0.01f);
-        assert(d.is_measured(MeterField.total_import_active) && absf(d.total_import_active[0] - 12.5f) <= 0.01f);
-        assert(d.is_measured(MeterField.total_export_active) && absf(d.total_export_active[0] - 0.3f) <= 0.01f);
+        assert(d.is_inferred(MeterField.current) && absf(d.current[0].value - 1000.0f / 240) <= 0.01f);
+        assert(!d.has(MeterField.total_import_active) && !d.has(MeterField.total_export_active));
+        assert(site.balance.has(MeterField.voltage) && absf(site.balance.voltage[0].value - 240) <= 0.01f);
         g3.clear();
+
+        Component feed_meter, load_meter, lone_meter, power_meter;
+        {
+            DeviceBuilder b = devices.create("breaker-bench");
+            feed_meter = b.component("feed");
+            add(b, feed_meter, "voltage", 253, ScaledUnit(Volt));
+            add(b, feed_meter, "current", 1, ScaledUnit(Ampere));
+            load_meter = b.component("load");
+            add(b, load_meter, "power", 3450, ScaledUnit(Watt));
+            add(b, load_meter, "voltage", 230, ScaledUnit(Volt));
+            lone_meter = b.component("lone");
+            add(b, lone_meter, "voltage", 253, ScaledUnit(Volt));
+            power_meter = b.component("power-only");
+            add(b, power_meter, "power", -1000, ScaledUnit(Watt));
+        }
+
+        TopologyGraph g4;
+        Bus* upstream = g4.ensure_bus("upstream");
+        Bus* downstream = g4.ensure_bus("downstream");
+        Port* feed_p = g4.add_port(null, upstream, PortRole.parent, FlowDomain.bidirectional, feed_meter, 0, MeterSign.normal, "parent", "breaker");
+        Port* child_p = g4.add_port(null, downstream, PortRole.child, FlowDomain.bidirectional, null, 0, MeterSign.normal, "child", "breaker");
+        Link* breaker16 = g4.add_link(null, upstream, downstream, feed_p, child_p, 16, true, "breaker");
+        PortGroup* breaker_g = g4.add_group("breaker", PortGroupKind.switchgear, null, breaker16);
+        g4.add_to_group(breaker_g, feed_p);
+        g4.add_to_group(breaker_g, child_p);
+        Port* load_p = g4.add_port(null, downstream, PortRole.connection, FlowDomain.consume, load_meter, 0);
+        g4.add_to_group(g4.add_group("load", PortGroupKind.appliance), load_p);
+        g4.refresh();
+        assert(feed_p.meter_data.is_measured(MeterField.voltage) && absf(feed_p.meter_data.voltage[0].value - 253) <= 0.01f);
+        assert(absf(link_current_amps(breaker16) - 15) <= 0.01f);
+        assert(absf(link_headroom_amps(breaker16) - 1) <= 0.01f);
+        g4.clear();
+
+        TopologyGraph g5;
+        Bus* blind = g5.ensure_bus("blind");
+        Port* supply_p = g5.add_port(null, blind, PortRole.connection, FlowDomain.bidirectional, power_meter, 0);
+        g5.add_to_group(g5.add_group("supply", PortGroupKind.handover), supply_p);
+        Port* lone_p = g5.add_port(null, blind, PortRole.parent, FlowDomain.bidirectional, lone_meter, 0, MeterSign.normal, "parent", "feed");
+        Link* feed = g5.add_link(null, blind, null, lone_p, null, 16, true, "feed");
+        g5.add_to_group(g5.add_group("lone", PortGroupKind.appliance), lone_p);
+        g5.refresh();
+        assert(lone_p.meter_data.source(MeterField.power) == Provenance.inferred_subtraction);
+        assert(lone_p.meter_data.is_measured(MeterField.voltage));
+        assert(link_current_amps(feed) != link_current_amps(feed));
+        g5.clear();
     }
 }
