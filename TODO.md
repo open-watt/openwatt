@@ -1577,13 +1577,6 @@ this is what remains.
     window. Size it to the segment once session output is pulled (S4): the console stream then
     grants by window room and resumes on the ack, with a bounded buffer that splits on code points.
 
-- **A Windows UDP socket that sends to a closed port stops receiving** (2026-10-06): two instances
-  peering over `/interface/udp` on loopback, the one whose hello went out before the other bound
-  its port never hears the other again. The ICMP port-unreachable surfaces as `WSAECONNRESET` on
-  the next `recvfrom`; urt's `recvfrom` swallows it as success with 0 bytes, and the reception path
-  appears to stop draining there. Disable `SIO_UDP_CONNRESET` on UDP sockets, or keep reading past
-  the reset.
-
 - **Interface sizes the MTU work left open** (2026-10-06): `l2mtu` should be writable on Ethernet,
   where jumbo frames make it meaningful, and read-only elsewhere, with `max-l2mtu` (the largest
   jumbo the hardware takes) present only there; the property system cannot yet let a derived class
