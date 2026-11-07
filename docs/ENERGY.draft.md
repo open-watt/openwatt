@@ -36,6 +36,7 @@ Link properties:
 | `meter`, `meter-phase`, `meter-sign` | Dot-path to any EnergyMeter component, which phase to read, and polarity correction. |
 | `closed` | Whether the link conducts (contactors, transfer switches). |
 | `role` | Declares what lives on the child circuit when it isn't otherwise modelled: `role=pv` on a breaker feeding microinverters books its backfeed as solar. See Metering and Accounting. |
+| `voltage-reference` | The link's meter is the trusted supply-voltage source for its island (see Supply Voltage). |
 
 The meter can come from any protocol — a Modbus meter, an inverter's built-in CT, CT clamps on an ESPHome device, a Zigbee plug. The energy manager consumes Component trees and doesn't care who populated them.
 
@@ -69,6 +70,7 @@ Appliance properties:
 | `vin` | Vehicle identity; see Cars. |
 | `capacity` | Usable battery kWh; fallback for SOC/energy estimation when the device can't report it. |
 | `root` | Marks this appliance as an explicit source root for otherwise-unrooted islands (generators, off-grid inverters). |
+| `voltage-reference` | The appliance's AC meters are the trusted supply-voltage source for its island (see Supply Voltage). |
 
 Appliances with no device and no meter are valid: they are intent anchors. `cabin_hot_water` above has no control surface yet, but policies can already target it; `/apps/energy/why` reports "no control" until hardware arrives.
 
@@ -149,6 +151,14 @@ Each island's accounts are projections of one reduction over its solved boundary
 Battery and solar terminals are DC-side meters, so inverter conversion losses land in LOAD — in both directions. Charging books the AC drawn at full value while only the smaller DC-side charge power is subtracted; discharging books the DC supply while the AC side delivers less. LOAD is therefore "household consumption plus conversion overhead": it will read slightly above the sum of your AC circuit meters, with the difference being real energy your energy system consumed. Conversion loss is just another rogue load.
 
 Daily energy tallies (`today.charge`, `today.import`, ...) accumulate from the source meters' energy counters since local midnight.
+
+### Supply Voltage
+
+Each island derives one supply voltage from its fresh AC meters: the device is not offline and every measured voltage input behind the reading updated within the last 3 minutes and is dated no more than 5 s ahead of our clock (a skew allowance) (voltage derived from power and current never counts; DC and near-zero readings are excluded). A meter seen by several ports counts once, preferring a flagged port, then the lowest phase slot. The reference meters are used if any are fresh, otherwise the median of all of them. With an even count both middle meters must agree, so one biased meter cannot raise an excursion on its own.
+
+The supply is `over` after 10 s above the over threshold, `under` after 10 s below the under threshold. Entry logs a warning naming the source meter and whether the value is corroborated; a reminder with the peak repeats every 15 minutes while it persists; recovery (60 s with both middle meters inside the normal band, 2 V clear of both thresholds) logs a notice with the duration and peak; a disputed reading that straddles the band holds the state. A swing straight to the opposite excursion re-enters after its own 10 s without a recovery; missing data keeps the excursion and its reminders, but never recovers it. Thresholds are fixed at 253 V and 216 V (AS 60038, 230 V +10%/-6%).
+
+Published as `islands.<id>.voltage.value`, `.state` (`normal`, `over`, `under`), `.peak` (current or most recent excursion), `.since` (start of the current state) and `.source` (meter path).
 
 ## Policies: Declaring Intent
 

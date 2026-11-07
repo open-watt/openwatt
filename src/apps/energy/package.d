@@ -22,6 +22,7 @@ import apps.energy.planner;
 import apps.energy.policy;
 import apps.energy.session;
 import apps.energy.state;
+import apps.energy.supply;
 import apps.energy.topology;
 import apps.energy.vehicle;
 
@@ -188,6 +189,9 @@ nothrow @nogc:
         t = getTime();
         update_accounts(energy_device, manager.islands, manager.graph, daily);
         log_slow_phase("update_accounts", getTime() - t);
+        t = getTime();
+        update_supply(energy_device, manager.islands, manager.supply_candidates, getTime(), getSysTime());
+        log_slow_phase("update_supply", getTime() - t);
     }
 
     void log_slow_phase(const(char)[] phase, Duration d)

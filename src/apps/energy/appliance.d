@@ -37,7 +37,8 @@ final class Appliance : ActiveObject
                                  Prop!("device", device),
                                  Prop!("meter", meter),
                                  Prop!("meter-sign", meter_sign),
-                                 Prop!("state", state));
+                                 Prop!("state", state),
+                                 Prop!("voltage-reference", voltage_reference));
 nothrow @nogc:
 
     ~this() {}
@@ -181,6 +182,16 @@ nothrow @nogc:
         return null;
     }
 
+    bool voltage_reference() const pure { return _voltage_reference; }
+    void voltage_reference(bool value)
+    {
+        if (_voltage_reference == value)
+            return;
+        _voltage_reference = value;
+        mark_set!(typeof(this), "voltage-reference")();
+        restart();
+    }
+
     Component device_ref() pure { return _device; }
     Component meter_ref() pure { return _meter; }
     Component state_ref() pure { return _state; }
@@ -257,6 +268,7 @@ private:
     String _vin;
     float _capacity = float.nan;
     bool _root;
+    bool _voltage_reference;
     Array!PortCircuitBinding _port_bindings;
     String _device_path;
     Component _device;

@@ -28,7 +28,8 @@ final class EnergyLink : ActiveObject
                                  Prop!("closed", closed),
                                  Prop!("meter-phase", meter_phase),
                                  Prop!("meter-sign", meter_sign),
-                                 Prop!("meter", meter));
+                                 Prop!("meter", meter),
+                                 Prop!("voltage-reference", voltage_reference));
 nothrow @nogc:
 
     ~this() {}
@@ -161,6 +162,16 @@ nothrow @nogc:
         return null;
     }
 
+    bool voltage_reference() const pure { return _voltage_reference; }
+    void voltage_reference(bool value)
+    {
+        if (_voltage_reference == value)
+            return;
+        _voltage_reference = value;
+        mark_set!(typeof(this), "voltage-reference")();
+        restart();
+    }
+
     Component meter_ref()
     {
         if (_meter is null && _meter_path.length != 0)
@@ -197,6 +208,7 @@ private:
     String _role;
     float _capacity = 0;
     bool _closed;
+    bool _voltage_reference;
     ubyte _meter_phase;
     MeterSign _meter_sign;
     String _meter_path;

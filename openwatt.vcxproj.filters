@@ -945,6 +945,9 @@
     <DCompile Include="src\apps\energy\state.d">
       <Filter>src\apps\energy</Filter>
     </DCompile>
+    <DCompile Include="src\apps\energy\supply.d">
+      <Filter>src\apps\energy</Filter>
+    </DCompile>
     <DCompile Include="src\apps\energy\topology.d">
       <Filter>src\apps\energy</Filter>
     </DCompile>

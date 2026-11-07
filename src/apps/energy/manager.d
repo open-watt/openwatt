@@ -1,11 +1,13 @@
 module apps.energy.manager;
 
+import urt.array;
 import urt.map;
 import urt.mem;
 import urt.si.quantity;
 import urt.string;
 
 import apps.energy.meter;
+import apps.energy.supply : VoltageCandidate;
 import apps.energy.topology;
 
 import manager.component;
@@ -20,6 +22,8 @@ nothrow @nogc:
     // Connected bus components. The component containing `grid` is on-grid;
     // all others are off-grid.
     Islands islands;
+
+    Array!VoltageCandidate supply_candidates;
 
     inout(Bus)* find_bus(const(char)[] name) inout
     {

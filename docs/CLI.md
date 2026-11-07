@@ -1681,6 +1681,10 @@ children, including children received later over sync. Resolution occurs before
 the next topology rebuild. Device/subtree removal and recreation remain separate
 lifecycle work in `TODO.md`.
 
+`voltage-reference=true` (also on `/apps/energy/link`) makes this object's AC meters
+the trusted supply-voltage source for its island, in place of the median of all fresh
+meters.
+
 ### `/automation`
 
 A rule that runs a console script when a signal fires (see [AUTOMATION.md](AUTOMATION.md)).
