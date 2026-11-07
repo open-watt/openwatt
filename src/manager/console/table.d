@@ -853,6 +853,22 @@ unittest
         t.clear();
     }
 
+    {
+        import manager.element : Element;
+        import manager.series : register_value_format;
+
+        Element e;
+        e.format = register_value_format!int();
+        Table t;
+        t.add_column("value");
+        t.add_row();
+        t.cell(e.value);
+        e.write_sample(0);
+        t.add_row();
+        t.cell(e.value);
+        assert(t.get_cell_text(0, 0).length == 0 && t.get_cell_text(1, 0) == "0");
+    }
+
     // Test empty cells
     {
         Table t;

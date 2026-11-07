@@ -250,17 +250,20 @@ nothrow @nogc:
 
     double normalised_value() const
     {
+        debug assert(has_value);
         return value.asQuantity().normalise().value;
     }
 
     double scaled_value(ScaledUnit unit)() const
     {
         import urt.si.quantity : Quantity;
+        debug assert(has_value);
         return Quantity!(double, unit)(value.asQuantity()).value;
     }
 
     double scaled_value(ScaledUnit unit) const
     {
+        debug assert(has_value);
         return value.asQuantity().adjust_scale(unit).value;
     }
 
@@ -472,7 +475,7 @@ nothrow @nogc:
 
     void force_update(SysTime timestamp)
     {
-        if (timestamp <= last_update)
+        if (!has_value || timestamp <= last_update)
             return;
         SysTime previous_timestamp = last_update;
         last_update = timestamp;

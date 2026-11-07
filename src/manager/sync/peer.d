@@ -2018,6 +2018,24 @@ unittest
         return m;
     }
 
+    Element* unseen = make_meter("unseen");
+    EID unseen_node = unseen.ensure_eid();
+    peer.introduce(unseen_node);
+    SyncHandle unseen_handle = peer.handle_of(unseen_node);
+    peer.arm(unseen, unseen_node, SyncModule.live_start(unseen));
+    link.delivered = 0;
+    assert(SyncModule.send_register(peer, enc, unseen, unseen_handle));
+    ulong unseen_position;
+    bool unseen_gap;
+    assert(SyncModule.send_records(peer, enc, unseen, unseen_handle, unseen_position, unseen_gap, SysTime(ulong.max), 1, gen));
+    peer.flush_bundle();
+    assert(link.delivered == 0 && unseen_position == 0 && !unseen_gap);
+    unseen.write_sample(0.0f, from_unix_time_ns(1_000_000_000L));
+    assert(SyncModule.send_live(peer, enc, unseen, unseen_handle, gen));
+    peer.flush_bundle();
+    assert(link.delivered == 1 && unseen.value.asDouble == 0.0);
+    peer.disarm(unseen, unseen_node);
+
     // armed with no store: after its register was sent, an invalidation gives the element a store holding
     // that value as record 0, ended there, so the null follows it and the next value is record 1
     Element* flow = make_meter("pipe");

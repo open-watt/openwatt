@@ -98,6 +98,27 @@ nothrow @nogc:
     float pressure = float.nan;
 }
 
+private struct BatteryBudget
+{
+nothrow @nogc:
+    float capacity_kwh = 0;
+    float available_kwh = 0;
+    bool capacity_known = true;
+    bool available_known = true;
+
+    void add(float capacity, float available)
+    {
+        if (capacity >= 0)
+            capacity_kwh += capacity;
+        else
+            capacity_known = false;
+        if (available == available)
+            available_kwh += available;
+        else
+            available_known = false;
+    }
+}
+
 
 struct PolicyAnalysis
 {
@@ -118,7 +139,8 @@ IslandBudget compute_island_budget(Island* island, ControlRegistry registry, Sys
     if (island is null)
         return b;
 
-    if (graph is null || !sum_battery_stores(island, *graph, b))
+    BatteryBudget batteries;
+    if (graph is null || !sum_battery_stores(island, *graph, batteries))
     {
         Array!Appliance seen;
         foreach (bus; island.members[])
@@ -129,10 +151,13 @@ IslandBudget compute_island_budget(Island* island, ControlRegistry registry, Sys
                 if (owner is null || seen[].findFirst(owner) < seen.length)
                     continue;
                 seen ~= owner;
-                sum_batteries(owner.device_ref, b);
+                if (Component device = owner.device_ref)
+                    sum_batteries(device, batteries);
             }
         }
     }
+    b.battery_capacity_kwh = batteries.capacity_known ? batteries.capacity_kwh : float.nan;
+    b.battery_available_kwh = batteries.available_known ? batteries.available_kwh : float.nan;
 
     foreach (Policy p; Collection!Policy().values)
     {
@@ -156,7 +181,7 @@ IslandBudget compute_island_budget(Island* island, ControlRegistry registry, Sys
 
     b.reserve_kwh = (b.demand_floor_kwh + b.demand_essential_kwh) * safety_factor;
 
-    if (b.demand_opportunistic_kwh > 0)
+    if (b.demand_opportunistic_kwh > 0 && b.battery_available_kwh == b.battery_available_kwh)
         b.pressure = (b.battery_available_kwh - b.reserve_kwh) / b.demand_opportunistic_kwh;
     return b;
 }
@@ -234,31 +259,16 @@ PolicyAnalysis analyse_policy(Policy p, ControlRegistry registry, SysTime now, D
 
 private:
 
-void sum_batteries(Component target, ref IslandBudget b)
-{
-    if (target is null)
-        return;
-    sum_batteries_walk(target, b);
-}
-
-void sum_batteries_walk(Component c, ref IslandBudget b)
+void sum_batteries(Component c, ref BatteryBudget b)
 {
     if (c.template_[] == "Battery")
     {
         float cap = battery_capacity_kwh(c);
-        if (cap == cap && cap > 0)
-        {
-            b.battery_capacity_kwh += cap;
-            float soc = float.nan;
-            if (Element* soc_e = c.find_element("soc"))
-                if (soc_e.value.isNumber)
-                    soc = read_in_unit(soc_e, Percent);
-            if (soc == soc)
-                b.battery_available_kwh += cap * soc * 0.01f;
-        }
+        float soc = read_in_unit(c.find_element("soc"), Percent);
+        b.add(cap, cap >= 0 ? cap * soc * 0.01f : float.nan);
     }
     foreach (sub; c.components[])
-        sum_batteries_walk(sub, b);
+        sum_batteries(sub, b);
 }
 
 Island* find_policy_island(Policy p, Island* candidate)
@@ -307,6 +317,9 @@ void publish_island_budget(Device energy_device, Island* island, ref const Islan
     {
         if (val == val)
             island.budget[f].write(energy_device, tconcat(base, enum_key_from_value!BudgetField(f)), val, now);
+        else if (Element* e = island.budget[f].element)
+            if (e.has_value)
+                e.invalidate(now);
     }
 
     put(BudgetField.battery_available_kwh, b.battery_available_kwh);
@@ -333,17 +346,17 @@ void publish_analysis(Device energy_device, Policy p, ref const PolicyAnalysis a
     {
         if (val == val)
             p.analysis[f].write(energy_device, tconcat(base, enum_key_from_value!AnalysisField(f)), val, now);
+        else if (Element* e = p.analysis[f].element)
+            if (e.has_value)
+                e.invalidate(now);
     }
 
     put(AnalysisField.marginal_value, a.marginal_value);
     put(AnalysisField.required_kwh, a.required_kwh);
     put(AnalysisField.max_rate_kw, a.max_rate_kw);
-    if (a.slack_known)
-    {
-        put(AnalysisField.slack_hours, cast(float)a.slack.as!"seconds" / 3600.0f);
-        put(AnalysisField.time_to_deadline_hours, cast(float)a.time_to_deadline.as!"seconds" / 3600.0f);
-        put(AnalysisField.time_to_satisfy_hours, cast(float)a.time_to_satisfy.as!"seconds" / 3600.0f);
-    }
+    put(AnalysisField.slack_hours, a.slack_known ? cast(float)a.slack.as!"seconds" / 3600.0f : float.nan);
+    put(AnalysisField.time_to_deadline_hours, a.slack_known ? cast(float)a.time_to_deadline.as!"seconds" / 3600.0f : float.nan);
+    put(AnalysisField.time_to_satisfy_hours, a.slack_known ? cast(float)a.time_to_satisfy.as!"seconds" / 3600.0f : float.nan);
 }
 
 float required_energy_kwh(Policy p, const Control* ctl, TopologyGraph* graph = null)
@@ -355,7 +368,9 @@ float required_energy_kwh(Policy p, const Control* ctl, TopologyGraph* graph = n
         case soc:
             float current = current_value(p, ctl);
             float goal = p.parsed_goal.arg;
-            if (current != current || current >= goal)
+            if (current != current)
+                return float.nan;
+            if (current >= goal)
                 return 0;
             float capacity_kwh = appliance_battery_capacity_kwh(p.target_appliance, graph);
             if (capacity_kwh != capacity_kwh)
@@ -410,7 +425,7 @@ float appliance_battery_capacity_kwh(Appliance a, TopologyGraph* graph = null)
     return battery_capacity_kwh(c);
 }
 
-bool sum_battery_stores(Island* island, ref TopologyGraph graph, ref IslandBudget b)
+bool sum_battery_stores(Island* island, ref TopologyGraph graph, ref BatteryBudget b)
 {
     if (island is null)
         return false;
@@ -422,14 +437,9 @@ bool sum_battery_stores(Island* island, ref TopologyGraph graph, ref IslandBudge
             continue;
         float voltage = bus_voltage(bus);
         float cap = battery_store_capacity_kwh(store, voltage);
-        if (cap == cap && cap > 0)
-        {
-            b.battery_capacity_kwh += cap;
-            float available = battery_store_available_kwh(store, voltage, cap);
-            if (available == available)
-                b.battery_available_kwh += available;
-            found = true;
-        }
+        float available = battery_store_available_kwh(store, voltage, cap);
+        b.add(cap, available);
+        found = true;
     }
     return found;
 }
@@ -550,4 +560,49 @@ Duration compute_time_to_deadline(TimeOfDay deadline, SysTime now)
     if (delta.ticks < 0)
         delta = delta + dur!"hours"(24);
     return delta;
+}
+
+unittest
+{
+    import urt.si.quantity : Quantity;
+
+    Policy policy = alloc!Policy(CID(1));
+    scope(exit) free(policy);
+    assert(policy.goal("soc(50)") is null);
+    alias SOC = Quantity!(float, Percent);
+    Element soc;
+    soc.format = register_value_format!SOC();
+    Control control;
+    control.state_e = &soc;
+    float required = required_energy_kwh(policy, &control);
+    assert(required != required);
+    soc.value(SOC(50));
+    assert(required_energy_kwh(policy, &control) == 0);
+
+    TopologyGraph graph;
+    scope(exit) graph.clear();
+    Bus* site = graph.ensure_bus("site");
+    Island island;
+    island.members ~= site;
+    SysTime now = getSysTime();
+    IslandBudget budget = compute_island_budget(&island, null, now, Duration.zero, 1, &graph);
+    assert(budget.battery_capacity_kwh == 0 && budget.battery_available_kwh == 0);
+
+    BatteryStore store;
+    store.circuit = "site";
+    graph.battery_stores ~= store;
+    budget = compute_island_budget(&island, null, now, Duration.zero, 1, &graph);
+    assert(budget.battery_capacity_kwh != budget.battery_capacity_kwh);
+    assert(budget.battery_available_kwh != budget.battery_available_kwh);
+
+    site.balance.write_value(MeterField.voltage, 0, 50);
+    site.balance.mark(MeterField.voltage, 0, Provenance.measured);
+    graph.battery_stores[0].reading.full_capacity = 100;
+    budget = compute_island_budget(&island, null, now, Duration.zero, 1, &graph);
+    assert(absf(budget.battery_capacity_kwh - 5) < 0.001f);
+    assert(budget.battery_available_kwh != budget.battery_available_kwh);
+
+    graph.battery_stores[0].reading.soc = 0;
+    budget = compute_island_budget(&island, null, now, Duration.zero, 1, &graph);
+    assert(budget.battery_available_kwh == 0);
 }
