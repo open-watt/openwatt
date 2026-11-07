@@ -860,6 +860,10 @@ nothrow @nogc:
     final bool running() const pure
         => _state == State.running;
 
+    // from destroy() on, through an asynchronous shutdown, until the object is freed
+    final bool destroying() const pure
+        => (_state & _destroyed) != 0;
+
     final override ObjectFlags flags() const
     {
         return cast(ObjectFlags)(_flags |

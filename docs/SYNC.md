@@ -282,8 +282,10 @@ with a new peer.
 
 ## The link contract
 
-`SyncPeer.transport` is any interface delivering raw frames; the encoder calls `transmit_frame` and
-never sees the link. A link adapter provides:
+`SyncPeer.transport` is any interface delivering raw frames. The peer opens a UDP endpoint on it at
+the sync port, with a `link` address (the interface's scope and a port, no peer address), so sync
+always speaks to a UDP or RDP endpoint; the encoder calls `transmit_frame` and never sees the link.
+A link adapter provides:
 
 1. **Frame delimiting.** One protocol frame per packet. Datagrams get this free; byte streams need
    framing.
@@ -291,7 +293,10 @@ never sees the link. A link adapter provides:
 3. **Ordered, reliable delivery**, advertised as `reliable` and `ordered` in `InterfaceCaps`. Sync
    supplies none of its own; a link without it is reached through an RDP session (`remote=`).
 4. **MTU**: the transport's `actual-mtu`, from which `hello` derives `segment`.
-5. **Channels**, where a link carries more than sync: datagram links use distinct ports; point
+5. **Channels**, where a link carries more than sync: datagram links use distinct ports. A
+   point-to-point link's frame leads with its destination and source ports (4 bytes, so the payload
+   stays aligned), unless the link is `dedicated` to one service: a WebSocket's URI picked the
+   service, so its frames are the payload alone and browser clients see plain sync messages. Point
    streams will use CPC endpoints; RS485 will use an envelope channel byte.
 
 | link | framing | integrity | reliability | status |

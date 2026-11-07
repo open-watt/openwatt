@@ -29,9 +29,11 @@ import manager.sync.console : SyncConsoleStream;
 import manager.sync.discovery : PeerRole;
 import manager.sync.encoder;
 import manager.sync.peering : SyncPeeringModule;
+import manager.sync.udp_bind : default_sync_port;
 
 import router.iface;
-import router.iface.endpoint : UDPReceiveInfo;
+import router.iface.endpoint : udp_open, UDPEndpoint, UDPReceiveInfo;
+version (unittest) import router.iface.endpoint : link_state_change;
 import router.iface.packet;
 import router.stream : max_tx_page;
 
@@ -98,7 +100,7 @@ nothrow @nogc:
     // Properties
 
     final inout(BaseInterface) transport() inout pure
-        => uses_rdp ? null : _transport.get;
+        => _transport.get;
     final void transport(BaseInterface value)
     {
         if (!uses_rdp && _transport is value)
@@ -113,7 +115,7 @@ nothrow @nogc:
     }
 
     final InetAddress remote() const pure
-        => _remote;
+        => uses_rdp ? _remote : InetAddress();
     final const(char)[] remote(InetAddress value)
     {
         static if (!has_rdp)
@@ -185,6 +187,7 @@ nothrow @nogc:
             assert(endpoint);
             detach_transport();
             close_rdp();
+            _transport = null;
             _peer_flags |= PeerFlags.uses_rdp;
             _peer_flags &= ~PeerFlags.owns_rdp;
             _rdp = endpoint;
@@ -211,8 +214,7 @@ nothrow @nogc:
         static if (has_rdp)
             if (uses_rdp)
                 return _rdp ? _rdp.message_limit(_remote) : rdp_max_message;
-        BaseInterface transport = _transport;
-        return transport ? transport.actual_mtu : 0;
+        return _udp ? cast(uint)_udp.frame_room(_remote) : 0;
     }
 
     // what this side reassembles from fragments, never less than one segment
@@ -466,19 +468,23 @@ protected:
     override bool validate() const pure
         => uses_rdp || _transport !is null;
 
-    // Idempotent; WS-spawned peers call this at accept time, because the client's
-    // first frames can arrive before our first startup tick and unsubscribed
-    // packets are dropped. Held across session restarts, until the transport is
-    // destroyed or the peer stops.
-    final package void subscribe_transport()
+    // WS-spawned peers open at accept time, as the client's first frames can beat our first startup tick; the
+    // endpoint is held across session restarts, until the transport is destroyed or the peer stops
+    final package bool open_link()
     {
-        if (uses_rdp || (_peer_flags & PeerFlags.transport_subscribed) || !_transport)
-            return;
-        _transport.subscribe(&on_transport_state);
-        // unknown = all types; the handler takes raw and udp frames, so one peer object
-        // sits on connected pipes and datagram transports alike
-        _transport.subscribe(&on_transport_packet, PacketFilter(PacketType.unknown, PacketDirection.incoming));
-        _peer_flags |= PeerFlags.transport_subscribed;
+        if (uses_rdp || (_udp && _udp.attached))
+            return true;
+        detach_transport();
+        BaseInterface transport = _transport;
+        if (!transport)
+            return false;
+        InetAddress link = InetAddress.link(transport.scope_id, default_sync_port);
+        _udp = udp_open(&link, &link, &on_link_message);
+        if (!_udp)
+            return false;
+        _remote = link;
+        transport.subscribe(&on_transport_state);
+        return true;
     }
 
     override CompletionStatus startup()
@@ -486,7 +492,8 @@ protected:
         static if (has_rdp)
             if (owns_rdp && !_rdp && !open_rdp())
                 return CompletionStatus.error;
-        subscribe_transport();
+        if (!open_link())
+            return CompletionStatus.error;
         if (!transport_ready)
             return CompletionStatus.continue_;
 
@@ -494,6 +501,7 @@ protected:
         if (!uses_rdp && (_transport.caps & promised) != promised)
         {
             log.error("peer '", name[], "': transport '", _transport.name[], "' is not reliable and ordered; use remote= for a session over it");
+            detach_transport();
             return CompletionStatus.error;
         }
 
@@ -711,7 +719,7 @@ package:
         static if (has_rdp)
             if (uses_rdp)
                 return _rdp && _rdp.tx_ready(_remote, PCP.be);
-        return _transport.tx_ready;
+        return _udp.tx_ready(_remote);
     }
 
     // a pending fragmented message holds the control plane until its last fragment is submitted
@@ -821,7 +829,7 @@ package:
         if ((_peer_flags & PeerFlags.tx_producing) || !transport_ready)
             return;
         if (!uses_rdp)
-            _transport.wait_tx(_tx_waiter);
+            _udp.wait_tx(_remote, _tx_waiter);
         else if (control_room())
             _tx_waiter.handler(null);
     }
@@ -946,7 +954,6 @@ private:
     @bitfield enum PeerFlags : ubyte
     {
         none                 = 0,
-        transport_subscribed = 1 << 0,
         uses_rdp             = 1 << 1,
         owns_rdp             = 1 << 2,
         tx_producing         = 1 << 3,
@@ -955,9 +962,10 @@ private:
         bundle_closed        = 1 << 6,
     }
 
+    ObjectRef!BaseInterface _transport;
     union
     {
-        ObjectRef!BaseInterface _transport;
+        UDPEndpoint* _udp;
         static if (has_rdp)
             RDPEndpoint* _rdp;
     }
@@ -972,18 +980,19 @@ private:
 
     int raw_tx(const(ubyte)[] bytes, bool is_text, TxQueue queue)
     {
-        StackPacket p;
-        ref hdr = p.init!RawFrame(bytes);
+        PCP pcp = queue == TxQueue.log ? log_lane : model_lane;
         static if (has_rdp)
         {
             if (uses_rdp)
             {
-                p.pcp = queue == TxQueue.log ? log_lane : model_lane;
+                StackPacket p;
+                p.init!RawFrame(bytes);
+                p.pcp = pcp;
                 return _rdp.send(&p.packet, _remote) < 0 ? -1 : 0;
             }
         }
-        hdr.is_text = is_text;
-        return _transport.forward(&p.packet);
+        _udp.text(is_text);
+        return _udp.send(bytes, pcp) == bytes.length ? 0 : -1;
     }
 
     void clear_log_sink()
@@ -1068,18 +1077,13 @@ private:
     void detach_transport()
     {
         _tx_waiter.cancel();
-        // the endpoint shares the transport's storage
-        if (uses_rdp)
+        if (uses_rdp || !_udp)
             return;
-        BaseInterface transport = _transport;
-        if (!(_peer_flags & PeerFlags.transport_subscribed))
-            return;
-        if (transport)
-        {
-            transport.unsubscribe(&on_transport_state);
-            transport.unsubscribe(&on_transport_packet);
-        }
-        _peer_flags &= ~PeerFlags.transport_subscribed;
+        // the instance the endpoint is bound to, which a same-name successor is not
+        if (BaseInterface link = _udp.egress_iface(_remote))
+            link.unsubscribe(&on_transport_state);
+        _udp.close();
+        _udp = null;
     }
 
     bool transport_ready()
@@ -1087,7 +1091,7 @@ private:
         static if (has_rdp)
             if (uses_rdp)
                 return _rdp && _rdp.established(_remote);
-        return _transport && _transport.link_up;
+        return _udp && _transport && _transport.link_up;
     }
 
     static if (has_rdp)
@@ -1152,18 +1156,16 @@ private:
         _frag_tx_sent = 0;
     }
 
-    void on_transport_packet(const(Packet)* p, BaseInterface, PacketDirection, void*) nothrow @nogc
+    void on_link_message(UDPEndpoint*, const(void)[] message, ref UDPReceiveInfo)
     {
-        if (p.type != PacketType.raw && p.type != PacketType.udp)
-            return;
-        deliver_frame(cast(const(ubyte)[])p.data);
+        deliver_frame(cast(const(ubyte)[])message);
     }
 
-    // a recreated transport is a new object, so a destroyed one takes the subscriptions with it
+    // the endpoint detaches from a destroyed transport by itself, and the next session opens a new one
     void on_transport_state(ActiveObject, StateSignal sig) nothrow @nogc
     {
         if (sig == StateSignal.destroyed)
-            _peer_flags &= ~PeerFlags.transport_subscribed;
+            _tx_waiter.cancel();
         else if ((sig == StateSignal.offline || sig == StateSignal.link_down) && running)
             restart();
     }
@@ -1397,7 +1399,7 @@ unittest
         this(CID id, ObjectFlags flags = ObjectFlags.none)
         {
             super(collection_type_info!Narrow, id, flags);
-            _caps = cast(InterfaceCaps)(InterfaceCaps.reliable | InterfaceCaps.ordered);
+            _caps = cast(InterfaceCaps)(InterfaceCaps.reliable | InterfaceCaps.ordered | InterfaceCaps.dedicated);
             _mtu = ushort.max;
             _state = State.running;
             set_link(true);
@@ -1472,6 +1474,29 @@ unittest
         Collection!Narrow().table.free_pending();
     }
     peer._transport = link;
+    assert(peer.open_link());
+
+    // a destroyed transport's endpoint stays detached; its same-name successor gets a fresh one
+    {
+        Narrow doomed = Collection!Narrow().create("sync-test-doomed");
+        SyncPeer orphan = alloc!SyncPeer(CID(10));
+        orphan._transport = doomed;
+        assert(orphan.open_link());
+        UDPEndpoint* stale = orphan._udp;
+        static immutable ubyte[3] probe = [1, 2, 3];
+        doomed.destroy();
+        link_state_change(doomed, StateSignal.destroyed);   // the router module relays this; no module runs here
+        Collection!Narrow().table.free_pending();
+        assert(!stale.attached && stale.send(probe[]) == 0 && stale.egress_iface(orphan._remote) is null);
+
+        Narrow successor = Collection!Narrow().create("sync-test-doomed");
+        assert(orphan.transport is successor);
+        assert(orphan.open_link() && orphan._udp !is stale && orphan._udp.attached);
+        assert(orphan.raw_tx(probe[], false, TxQueue.control) == 0 && successor.frames == 1);
+        free(orphan);
+        successor.destroy();
+        Collection!Narrow().table.free_pending();
+    }
 
     DeviceTable devices;
     Element* power;
@@ -1746,7 +1771,7 @@ unittest
         }
         void reliable(bool on)
         {
-            _caps = on ? cast(InterfaceCaps)(InterfaceCaps.reliable | InterfaceCaps.ordered) : InterfaceCaps.none;
+            _caps = on ? cast(InterfaceCaps)(InterfaceCaps.reliable | InterfaceCaps.ordered | InterfaceCaps.dedicated) : InterfaceCaps.dedicated;
         }
         override ubyte tx_floor() const
             => frames.length < room ? 0 : tx_full;
@@ -1804,6 +1829,7 @@ unittest
     peer._transport = link;
     peer._tx_waiter.handler = &peer.hold;
     link.reliable(true);
+    assert(peer.open_link());
     assert(link.mtu(200) is null && peer.send_limit == 200);
 
     ubyte[1000] message;
@@ -1930,6 +1956,7 @@ unittest
     remote._transport = link_b;
     remote._tx_waiter.handler = &remote.hold;
     link_b.reliable(true);
+    assert(remote.open_link());
     peer._remote_segment = 0;
     assert(link_b.mtu(200) is null && peer.send_limit == 200 && remote.send_limit == 200);
     peer.live(true);

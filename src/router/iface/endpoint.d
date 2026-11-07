@@ -123,6 +123,33 @@ void ether_transport_input(Packet* packet, BaseInterface iface)
     }
 }
 
+// a frame a point-to-point link dispatched locally; a reliable UDP interface hands up udp frames
+void link_input(Packet* packet, BaseInterface link)
+{
+    scope (exit) packet_free(packet);
+    immutable bool dedicated = UDPEndpoint.LinkUDPState.dedicated(link);
+    const(ubyte)[] frame = cast(const(ubyte)[])packet.data;
+    if (!dedicated && frame.length < UDPEndpoint.LinkUDPState.link_header_size)
+        return;
+    ushort port = dedicated ? 0 : frame[0 .. 2].bigEndianToNative!ushort;
+    foreach (ep; _udp_eps[])
+    {
+        if (ep._family == AddressFamily.link && !ep._closing && ep._link._iface is link && (dedicated || ep._link._port == port))
+            return ep._link.deliver(ep, packet, link);
+    }
+}
+
+void link_state_change(ActiveObject object, StateSignal signal)
+{
+    if (signal != StateSignal.destroyed)
+        return;
+    foreach (ep; _udp_eps[])
+    {
+        if (ep._family == AddressFamily.link && ep._link._iface is object)
+            ep._link._iface = null;
+    }
+}
+
 EthernetStation find_ether_station(MACAddress mac)
 {
     foreach (i; Collection!BaseInterface().values)
@@ -199,12 +226,23 @@ UDPEndpoint* udp_open(const(InetAddress)* local, const(InetAddress)* remote, UDP
     }
 
     UDPEndpoint* ep = alloc!UDPEndpoint();
+    if (!ep)
+        return null;
     ep._family = family;
     ep._remote = remote ? *remote : InetAddress();
     ep._connected = remote !is null;
     ep._on_recv = on_recv;
 
-    if (family == AddressFamily.ether)
+    if (family == AddressFamily.link)
+    {
+        ep._link = UDPEndpoint.LinkUDPState.init;
+        if (!ep._link.open(ep, local, remote))
+        {
+            free(ep);
+            return null;
+        }
+    }
+    else if (family == AddressFamily.ether)
     {
         if (!ep._ether.open(ep, local, remote, iface))
         {
@@ -241,8 +279,21 @@ nothrow @nogc:
     inout(EthernetStation) iface() inout pure
         => _family == AddressFamily.ether ? _ether._iface.get : null;
 
+    // a link endpoint outlives its interface detached, sending and receiving nothing
+    bool attached() const pure
+        => _family != AddressFamily.link || _link._iface !is null;
+
+    // a link datagram goes as a text frame, for carriers that tell text from binary
+    void text(bool value)
+    {
+        if (_family == AddressFamily.link)
+            _link._text = value;
+    }
+
     InetAddress local()
     {
+        if (_family == AddressFamily.link)
+            return InetAddress.link(_link._iface ? _link._iface.scope_id : 0, _link._port);
         if (_family == AddressFamily.ether)
             return _ether.local_address();
         static if (has_ip)
@@ -257,6 +308,8 @@ nothrow @nogc:
     // a server's unconnected endpoint serves many destinations, so the caller names one
     BaseInterface egress_iface(InetAddress destination)
     {
+        if (_family == AddressFamily.link)
+            return _link.egress_iface(destination);
         if (_family == AddressFamily.ether)
             return _ether.egress_iface(destination);
         static if (has_ip)
@@ -280,7 +333,7 @@ nothrow @nogc:
     bool join(IPAddr group, IPAddr interface_ = IPAddr.any)
     {
         static if (has_ip)
-            return _family != AddressFamily.ether && _ip.join(group, interface_);
+            return is_ip && _ip.join(group, interface_);
         else
             return false;
     }
@@ -288,7 +341,7 @@ nothrow @nogc:
     bool outbound_interface(IPAddr interface_)
     {
         static if (has_ip)
-            return _family != AddressFamily.ether && _ip.outbound_interface(interface_);
+            return is_ip && _ip.outbound_interface(interface_);
         else
             return false;
     }
@@ -308,7 +361,7 @@ nothrow @nogc:
         if (_family == AddressFamily.ether)
             return _ether.enable_broadcast();
         static if (has_ip)
-            return _ip.enable_broadcast();
+            return is_ip && _ip.enable_broadcast();
         else
             return false;
     }
@@ -342,6 +395,8 @@ nothrow @nogc:
 
     size_t frame_room(InetAddress dst)
     {
+        if (_family == AddressFamily.link)
+            return _link.frame_room(dst);
         BaseInterface egress = egress_iface(dst);
         size_t mtu = egress ? egress.actual_mtu : default_frame;
         if (mtu > default_frame)
@@ -359,7 +414,10 @@ nothrow @nogc:
         if (_family == AddressFamily.ether)
             _ether.close();
         else static if (has_ip)
-            _ip.close();
+        {
+            if (is_ip)
+                _ip.close();
+        }
     }
 
 private:
@@ -558,8 +616,100 @@ nothrow @nogc:
         bool _wildcard;
     }
 
+    // a dedicated link's frame is the payload alone; any other carries its ports ahead of it
+    struct LinkUDPState
+    {
+nothrow @nogc:
+
+        bool open(UDPEndpoint* owner, const(InetAddress)* local_address, const(InetAddress)* remote_address)
+        {
+            const(InetAddress.Link)* local = local_address ? local_address.as_link : null;
+            const(InetAddress.Link)* remote = remote_address ? remote_address.as_link : null;
+            if (!local || local.port == 0 || (remote_address && !remote))
+                return false;
+            if (remote && (remote.scope_id != local.scope_id || remote.port == 0))
+                return false;
+            BaseInterface link = interface_for_scope(local.scope_id);
+            if (!link || link.destroying || !link_bind_available(link, local.port))
+                return false;
+            // a dedicated link carries one port, so a connected remote can only be on it
+            if (remote && dedicated(link) && remote.port != local.port)
+                return false;
+            _iface = link;
+            _port = local.port;
+            return true;
+        }
+
+        BaseInterface egress_iface(InetAddress dst)
+        {
+            const(InetAddress.Link)* address = dst.as_link;
+            return address && _iface && address.scope_id == _iface.scope_id ? _iface : null;
+        }
+
+        size_t frame_room(InetAddress dst)
+        {
+            BaseInterface link = egress_iface(dst);
+            if (!link)
+                return 0;
+            size_t header = dedicated(link) ? 0 : link_header_size;
+            return link.actual_mtu > header ? link.actual_mtu - header : 0;
+        }
+
+        ptrdiff_t sendto(scope const(void)[] data, InetAddress dst, PCP pcp)
+        {
+            BaseInterface link = egress_iface(dst);
+            if (!link || !link.running || dst.port == 0 || (dedicated(link) && dst.port != _port))
+                return 0;
+            StackPacket lent;
+            Packet* packet = &lent.packet;
+            if (dedicated(link))
+                lent.init!RawFrame(data);
+            else
+            {
+                packet = alloc_packet!RawFrame(data, link_header_size);
+                if (!packet)
+                    return 0;
+                ubyte[] header = cast(ubyte[])packet.alloc_prefix(link_header_size);
+                header[0 .. 2] = dst.port.nativeToBigEndian;
+                header[2 .. 4] = _port.nativeToBigEndian;
+            }
+            packet.hdr!RawFrame().is_text = _text;
+            packet.pcp = pcp;
+            return link.forward(packet) >= 0 ? data.length : 0;
+        }
+
+        // the demux checked the frame and picked this endpoint for it
+        void deliver(UDPEndpoint* owner, const(Packet)* packet, BaseInterface link)
+        {
+            const(ubyte)[] frame = cast(const(ubyte)[])packet.data;
+            ushort dst_port = _port, src_port = _port;
+            if (!dedicated(link))
+            {
+                src_port = frame[2 .. 4].bigEndianToNative!ushort;
+                frame = frame[link_header_size .. $];
+            }
+            UDPReceiveInfo info;
+            info.source = InetAddress.link(link.scope_id, src_port);
+            info.destination = InetAddress.link(link.scope_id, dst_port);
+            info.rx_time = packet.creation_time;
+            info.ingress = link;
+            udp_deliver(owner, frame, info);
+        }
+
+        enum size_t link_header_size = 4;
+
+        static bool dedicated(const BaseInterface link) pure
+            => (link.caps & InterfaceCaps.dedicated) != 0;
+
+        BaseInterface _iface;   // the instance bound, never a same-name successor
+        ushort _port;
+        bool _text;
+    }
+
     bool reclaimable() const
     {
+        if (_family == AddressFamily.link)
+            return true;
         if (_family == AddressFamily.ether)
             return _ether.reclaimable();
         static if (has_ip)
@@ -573,13 +723,21 @@ nothrow @nogc:
         if (_family == AddressFamily.ether)
             _ether.release();
         else static if (has_ip)
-            _ip.release();
+        {
+            if (is_ip)
+                _ip.release();
+        }
     }
+
+    bool is_ip() const pure
+        => _family == AddressFamily.ipv4 || _family == AddressFamily.ipv6;
 
     enum size_t default_frame = 1500;
 
     ptrdiff_t sendto_backend(scope const(void)[] data, InetAddress dst, PCP pcp)
     {
+        if (_family == AddressFamily.link)
+            return _link.sendto(data, dst, pcp);
         if (_family == AddressFamily.ether)
             return _ether.sendto(data, dst, pcp);
         static if (has_ip)
@@ -596,6 +754,7 @@ nothrow @nogc:
     union
     {
         EtherUDPState _ether;
+        LinkUDPState _link;
         static if (has_ip)
             IPUDPState _ip;
     }
@@ -662,7 +821,6 @@ __gshared Map!(ulong, EtherNeighbour) _neighbours;
 __gshared MonoTime _last_neighbour_sweep;
 __gshared EtherTcpInput g_ether_tcp_input;
 __gshared ushort _next_ephemeral = 49_152;
-
 bool ether_bind_available(EthernetStation iface, MACAddress local, ushort port)
 {
     foreach (ep; _udp_eps[])
@@ -679,6 +837,17 @@ bool ether_bind_available(EthernetStation iface, MACAddress local, ushort port)
         MACAddress existing = bound_iface ? bound_iface.mac : ep._ether._local;
         MACAddress requested = iface ? iface.mac : local;
         if (ether_addresses_overlap(existing, requested))
+            return false;
+    }
+    return true;
+}
+
+// a dedicated link serves one endpoint; any other, one per port
+bool link_bind_available(BaseInterface link, ushort port)
+{
+    foreach (ep; _udp_eps[])
+    {
+        if (ep._family == AddressFamily.link && !ep._closing && ep._link._iface is link && (ep._link._port == port || UDPEndpoint.LinkUDPState.dedicated(link)))
             return false;
     }
     return true;
@@ -881,4 +1050,166 @@ nothrow @nogc:
     ephemeral.close();
     wildcard.close();
     update_udp_endpoints();
+
+    // a point-to-point link: ports ride ahead of the payload, unless one service owns the link
+    static final class TestLink : BaseInterface
+    {
+        enum type_name = "udp-test-link";
+    nothrow @nogc:
+
+        ~this() {}
+        this(CID id, ObjectFlags flags = ObjectFlags.none)
+        {
+            super(collection_type_info!TestLink, id, flags);
+            _mtu = 256;
+            _state = State.running;
+            set_link(true);
+        }
+        void dedicate()
+        {
+            _caps = InterfaceCaps.dedicated;
+        }
+        void stop_test()
+        {
+            _state = State.destroyed;
+        }
+        void retiring(bool on)
+        {
+            _state = on ? State.destroying : State.running;
+        }
+        override int transmit(Packet* packet, MessageCallback, const(QueuePolicy)*)
+        {
+            scope (exit) packet_free(packet);
+            sent.clear();
+            sent ~= cast(const(ubyte)[])packet.data;
+            text = packet.hdr!RawFrame().is_text;
+            return 0;
+        }
+        void receive(const(ubyte)[] frame)
+        {
+            StackPacket p;
+            p.init!RawFrame(frame);
+            incoming_packet(&p.packet);
+        }
+        Array!ubyte sent;
+        bool text;
+    }
+
+    static struct LinkSink
+    {
+        Array!ubyte got;
+        InetAddress source;
+        size_t received;
+        void recv(UDPEndpoint*, const(void)[] data, ref UDPReceiveInfo info) nothrow @nogc
+        {
+            ++received;
+            got.clear();
+            got ~= cast(const(ubyte)[])data;
+            source = info.source;
+        }
+        void input(Packet* packet, BaseInterface link) nothrow @nogc
+        {
+            link_input(packet, link);
+        }
+    }
+
+    TestLink link = Collection!TestLink().create("udp-test-link");
+    LinkSink link_sink;
+    assert(register_frame_handler(PacketType.raw, &link_sink.input));
+    scope (exit) unregister_frame_handler(PacketType.raw);
+    InetAddress at = InetAddress.link(link.scope_id, 4827);
+    InetAddress far = InetAddress.link(link.scope_id, 4828);
+    UDPEndpoint* ported = udp_open(&at, null, &link_sink.recv);
+    assert(ported && ported.local == at && ported.egress_iface(far) is link);
+    assert(!udp_open(&at, null, &link_sink.recv), "one endpoint per port");
+    InetAddress no_port = InetAddress.link(link.scope_id, 0);
+    InetAddress no_link = InetAddress.link(0, 4827);
+    assert(!udp_open(&no_port, null, &link_sink.recv) && !udp_open(&no_link, null, &link_sink.recv));
+    assert(ported.frame_room(far) == 256 - 4);
+    assert(ported.sendto(datagram[], far) == datagram.length);
+    assert(link.sent[] == [0x12, 0xDC, 0x12, 0xDB, 5, 6, 7, 8]);
+
+    static immutable ubyte[6] to_us = [0x12, 0xDB, 0x12, 0xDC, 9, 10];
+    static immutable ubyte[6] to_other = [0x12, 0xDD, 0x12, 0xDC, 9, 10];
+    link.receive(to_us[]);
+    assert(link_sink.received == 1 && link_sink.got[] == [9, 10] && link_sink.source == far);
+    link.receive(to_other[]);
+    link.receive(to_us[0 .. 3]);
+    assert(link_sink.received == 1, "another port's datagram and a runt are not ours");
+    ported.close();
+    update_udp_endpoints();
+
+    // a handler that closes and rebinds its port mid-receive does not get the same datagram again
+    static struct Rebinder
+    {
+        InetAddress at;
+        UDPEndpoint* replacement;
+        size_t calls;
+        void recv(UDPEndpoint* ep, const(void)[], ref UDPReceiveInfo) nothrow @nogc
+        {
+            ++calls;
+            if (replacement)
+                return;
+            ep.close();
+            replacement = udp_open(&at, null, &recv);
+        }
+    }
+    Rebinder rebinder = Rebinder(at);
+    UDPEndpoint* first = udp_open(&at, null, &rebinder.recv);
+    UDPEndpoint* neighbour = udp_open(&far, null, &link_sink.recv);
+    assert(first && neighbour);
+    link.receive(to_us[]);
+    assert(rebinder.calls == 1 && rebinder.replacement, "one delivery, to the endpoint chosen before the call");
+    link.receive(to_us[]);
+    assert(rebinder.calls == 2 && link_sink.received == 1);
+    rebinder.replacement.close();
+    neighbour.close();
+    update_udp_endpoints();
+
+    // destroy() has signalled, but an asynchronous shutdown keeps the link registered
+    link.retiring(true);
+    assert(interface_for_scope(link.scope_id) is link && !udp_open(&at, null, &link_sink.recv), "a retiring link takes no bind");
+    link.retiring(false);
+
+    // a master cannot switch a link datagram, so a slaved link still terminates it
+    TestEtherStation bridge = Collection!TestEtherStation().create("udp-test-link-master");
+    bridge.start_test();
+    UDPEndpoint* enslaved = udp_open(&at, null, &link_sink.recv);
+    assert(enslaved);
+    link.set_master(ObjectRef!BaseInterface(bridge), 0);
+    assert(link.flags & ObjectFlags.slave);
+    size_t heard = link_sink.received;
+    link.receive(to_us[]);
+    assert(link_sink.received == heard + 1, "a slaved link delivers its datagrams locally");
+    assert(enslaved.sendto(datagram[], far) == datagram.length);
+    link.set_master(ObjectRef!BaseInterface.init, 0);
+    enslaved.close();
+    update_udp_endpoints();
+    bridge.stop_test();
+    Collection!TestEtherStation().remove(bridge);
+    free(bridge);
+
+    link.dedicate();
+    assert(!udp_open(&at, &far, &link_sink.recv), "a dedicated link's one port is both ends'");
+    UDPEndpoint* owner = udp_open(&at, &at, &link_sink.recv);
+    assert(owner && !udp_open(&far, null, &link_sink.recv), "a dedicated link serves one endpoint");
+    assert(owner.frame_room(at) == 256);
+    owner.text(true);
+    assert(owner.send(datagram[]) == datagram.length && link.sent[] == datagram[] && link.text);
+    size_t before = link_sink.received;
+    link.receive(to_us[]);
+    assert(link_sink.received == before + 1 && link_sink.got[] == to_us[] && link_sink.source == at);
+    owner.close();
+    update_udp_endpoints();
+
+    UDPEndpoint* loose = udp_open(&at, null, &link_sink.recv);
+    assert(loose);
+    link.sent.clear();
+    assert(loose.sendto(datagram[], far) == 0 && link.sent.length == 0, "a dedicated link sends on its one port only");
+    assert(loose.sendto(datagram[], at) == datagram.length && link.sent[] == datagram[]);
+    loose.close();
+    update_udp_endpoints();
+    link.stop_test();
+    Collection!TestLink().remove(link);
+    free(link);
 }
