@@ -31,6 +31,7 @@ version (HasRDP)   enum has_rdp    = true; else enum has_rdp = false;
 version (MbedTLS)       enum has_aes_gcm = true;
 else version (Windows) enum has_aes_gcm = true;
 else                  enum has_aes_gcm = false;
+enum has_tesla_vehicle = has_aes_gcm;
 
 version (UseSpiffs)        enum has_file_io = true;
 else version (UseLittleFS) enum has_file_io = true;

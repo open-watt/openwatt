@@ -4,6 +4,10 @@ import urt.string;
 import urt.time;
 import urt.util : min;
 
+import manager.features : has_tesla_vehicle;
+
+static assert(has_tesla_vehicle, "Tesla vehicle BLE requires an AES-GCM/ECDH P-256 crypto backend");
+
 nothrow @nogc:
 
 enum VehicleCommandKind : ubyte

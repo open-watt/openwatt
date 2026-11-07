@@ -10,6 +10,7 @@ import manager;
 import manager.base;
 import manager.collection;
 import manager.device;
+import manager.features : has_tesla_vehicle;
 import manager.secret;
 
 import protocol.ble;
@@ -25,6 +26,8 @@ import router.iface.mac;
 import router.iface.packet;
 
 //version = DebugTeslaScanner;
+
+static assert(has_tesla_vehicle, "Tesla vehicle BLE requires an AES-GCM/ECDH P-256 crypto backend");
 
 nothrow @nogc:
 
@@ -443,6 +446,9 @@ unittest
 
     TeslaVehicleScanner scanner = alloc!TeslaVehicleScanner(CID(100));
     scope(exit) free(scanner);
+    assert(scanner.startup() == CompletionStatus.continue_);
+    assert(!scanner._subscribed);
+
     TeslaVehicleSession first = alloc!TeslaVehicleSession(CID(101));
     scope(exit) free(first);
     scanner._vins ~= TeslaVehicleScanner.VinEntry(first.name);

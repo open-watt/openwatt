@@ -1,24 +1,28 @@
 module protocol.tesla;
 
-import urt.meta.nullable;
-import urt.time;
-
 import manager;
 import manager.collection;
-import manager.console.command;
-import manager.console.session;
+import manager.features : has_tesla_vehicle;
 import manager.plugin;
 
 import protocol.tesla.iface;
 import protocol.tesla.master;
 import protocol.tesla.binding;
 import protocol.tesla.twc;
-import protocol.tesla.vehicle_codec;
-import protocol.tesla.vehicle_crypto;
-import protocol.tesla.vehicle_scanner;
-import protocol.tesla.vehicle_session;
 
 import router.iface;
+
+static if (has_tesla_vehicle)
+{
+    import urt.meta.nullable;
+    import urt.time;
+
+    import manager.console.session;
+
+    import protocol.tesla.vehicle_codec;
+    import protocol.tesla.vehicle_scanner;
+    import protocol.tesla.vehicle_session;
+}
 
 nothrow @nogc:
 
@@ -33,38 +37,46 @@ nothrow @nogc:
         register_packet_codec!TWCFrame();
         g_app.register_enum!(TeslaTWCMaster.ChargerState)();
         g_app.register_enum!TWCState();
-        g_app.register_enum!TeslaSteeringWheelHeatLevel();
 
         g_app.console.register_collection!TeslaInterface();
         g_app.console.register_collection!TeslaTWCMaster();
         g_app.console.register_collection!TeslaTWCBinding();
-        g_app.console.register_collection!TeslaVehicleScanner();
-        g_app.console.register_collection!TeslaVehicleSession();
 
-        version (Tiny) {}
-        else
+        static if (has_tesla_vehicle)
         {
-            g_app.console.register_command!(vehicle_get_charge, "get-charge")("/protocol/tesla/session", this);
-            g_app.console.register_command!(vehicle_get_climate, "get-climate")("/protocol/tesla/session", this);
-            g_app.console.register_command!(vehicle_charge_start, "charge-start")("/protocol/tesla/session", this);
-            g_app.console.register_command!(vehicle_charge_stop, "charge-stop")("/protocol/tesla/session", this);
-            g_app.console.register_command!(vehicle_set_amps, "set-amps")("/protocol/tesla/session", this);
-            g_app.console.register_command!(vehicle_climate, "climate")("/protocol/tesla/session", this);
-            g_app.console.register_command!(vehicle_set_temperature, "set-temperature")("/protocol/tesla/session", this);
+            g_app.register_enum!TeslaSteeringWheelHeatLevel();
+            g_app.console.register_collection!TeslaVehicleScanner();
+            g_app.console.register_collection!TeslaVehicleSession();
+
+            version (Tiny) {}
+            else
+            {
+                g_app.console.register_command!(vehicle_get_charge, "get-charge")("/protocol/tesla/session", this);
+                g_app.console.register_command!(vehicle_get_climate, "get-climate")("/protocol/tesla/session", this);
+                g_app.console.register_command!(vehicle_charge_start, "charge-start")("/protocol/tesla/session", this);
+                g_app.console.register_command!(vehicle_charge_stop, "charge-stop")("/protocol/tesla/session", this);
+                g_app.console.register_command!(vehicle_set_amps, "set-amps")("/protocol/tesla/session", this);
+                g_app.console.register_command!(vehicle_climate, "climate")("/protocol/tesla/session", this);
+                g_app.console.register_command!(vehicle_set_temperature, "set-temperature")("/protocol/tesla/session", this);
+            }
+            g_app.console.register_command!(vehicle_schedule_charging, "schedule-charging")("/protocol/tesla/session", this);
+            g_app.console.register_command!(vehicle_backoff, "backoff")("/protocol/tesla/vehicle-scanner", this);
+            g_app.console.register_command!(vehicle_reset_backoff, "reset-backoff")("/protocol/tesla/vehicle-scanner", this);
         }
-        g_app.console.register_command!(vehicle_schedule_charging, "schedule-charging")("/protocol/tesla/session", this);
-        g_app.console.register_command!(vehicle_backoff, "backoff")("/protocol/tesla/vehicle-scanner", this);
-        g_app.console.register_command!(vehicle_reset_backoff, "reset-backoff")("/protocol/tesla/vehicle-scanner", this);
     }
 
     override void update()
     {
         Collection!TeslaTWCMaster().update_all();
 
-        Collection!TeslaVehicleScanner().update_all();
-        Collection!TeslaVehicleSession().update_all();
+        static if (has_tesla_vehicle)
+        {
+            Collection!TeslaVehicleScanner().update_all();
+            Collection!TeslaVehicleSession().update_all();
+        }
     }
 
+    static if (has_tesla_vehicle):
     void vehicle_backoff(Session session, TeslaVehicleScanner scanner, const(char)[] vin)
     {
         const(VehicleRetryState)* retry = scanner.retry_state(vin);
