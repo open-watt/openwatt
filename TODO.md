@@ -1221,19 +1221,6 @@ role from a concrete deployment need before implementing or advertising it.
 
 ## Sync and peering
 
-- **Move sync onto RDP sessions** (`rdp_open`, `src/router/iface/rdp.d`): a peer is an address and
-  the session to it is the transport. Goes: the reliability sublayer in `src/manager/sync/peer.d`
-  (control retransmission, reorder hold, the val/log refold queues and epochs, session-id echo,
-  fragmentation), the three `TxQueue`s (control, val and log become lanes by PCP; val uncoalesced,
-  dropping and re-marking dirty on would-block), the dual transport (`_transport` interface path
-  beside `_udp_endpoint`, `sublayer_armed`, `uses_udp_endpoint`), and `udp_server.d`'s per-source
-  spawn (the endpoint's session table demuxes peers). Session events replace the transport state
-  subscription; `writable` replaces the backlog limit. `peering.d` sends to addresses instead of
-  adopting endpoints. Open decision: dropping the interface path means sync reaches only media with an
-  address family, so sync over RS485 and 802.15.4 waits for those families. Frontend-visible where
-  `/sync/peer` properties change (CLI.md, UX_TODO.md). Target: net negative against the sublayer.
-  Design record: the memory note `rdp_interface_design`.
-
 - **RDP allocation-failure coverage**: session, frame and held-frame allocations fail soft (a send is
   refused, a frame cut retries on the session timer, an early frame is dropped for retransmission), but no test injects a
   failure; add it once the fixture can fail an allocation on demand.
@@ -1486,7 +1473,7 @@ this is what remains.
 
 - **Log sync residue**: render origin hostname and producer timestamp in the text sink, and cap the
   severity a remote can raise on ingress (both left from `#582`). Parked with owners elsewhere: a
-  module-level sync test harness (the reliable sublayer and decoder are unit-testable in isolation),
+  module-level sync test harness (the decoder is unit-testable in isolation),
   an allocation-flag placement API for `Array`/`MutableString`, and pool-backed packet buffers
   (`#518`).
 
@@ -1570,20 +1557,17 @@ this is what remains.
     first left behind, and crashes; so unit tests cannot drive `g_app.schedule`.
 
 - **Sync producer sizing follow-ups** (2026-10-06, review of #813):
-  - An event series with no val room stays pending and retries from the tick; the ack's `arm_tx`
-    never reaches `flush_pending_vals`. Drive it from the room event.
+  - An event series parked on a full transport stays pending and retries from the tick; the room
+    event's `arm_tx` never reaches `flush_pending_vals`. Drive it from the room event.
   - A partial val frame re-reads a 256-record block after `seek`, about 25 times the reads on a
     200-byte segment. Advance within the block already read.
-  - An eviction that moves the backlog head without changing the last id that fits sends nothing,
-    so the new epoch waits for the 300 ms flush. Send when the head or epoch changed.
   - A bounded backfill whose range holds no record no longer commits the live cursor to the first
     block; decide whether records between `to` and arm time should stream.
-  - The parked-on-`val_room` path is not exercised over an armed sublayer, and no test decodes a
-    two-byte val count or the JSON paths.
+  - No test decodes a two-byte val count or the JSON paths.
   - The console relay still cuts output at 8 KB and sends each part at once, so output past one
-    fragmented message is refused while the first is pending, and a burst can overrun the control
-    window. Size it to the segment once session output is pulled (S4): the console stream then
-    grants by window room and resumes on the ack, with a bounded buffer that splits on code points.
+    fragmented message is refused while the first is pending, and a burst can fill the session's
+    queue. Size it to the segment once session output is pulled (S4): the console stream then
+    grants by room and resumes on the room event, with a bounded buffer that splits on code points.
 
 - **Interface sizes the MTU work left open** (2026-10-06): `l2mtu` should be writable on Ethernet,
   where jumbo frames make it meaningful, and read-only elsewhere, with `max-l2mtu` (the largest

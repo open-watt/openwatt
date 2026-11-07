@@ -207,8 +207,7 @@ Other samples in the same run place the send under the scheduler:
 
 which points at **a due timer that re-arms with no delay**, firing continuously and emitting one
 frame per iteration, rather than at anything in the send path itself. Candidates worth reading
-first: the claim retry deadline in `peering.d`, the reliable sublayer's retransmit timer
-(250ms doubling x8), and the peer session's hello timing. A scheduled event whose next-due time is
+first: the claim retry deadline in `peering.d` and the peer session's hello timing. A scheduled event whose next-due time is
 computed as already-past would produce exactly this signature.
 
 Reproduced twice on `c2085d35`, once with an old-firmware member and once with both ends updated,
