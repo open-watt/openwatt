@@ -197,6 +197,8 @@ Limit is the linker script's `FLASH` region, not the board: the Y23A-RP2350B car
 | 2026-10-08 | #822 | ldc 1.43.0 | 1,663,276 | 46,780 | 4,194,304 | GPIO capture properties and state only with a sampler: -896 flash, -68 per binding |
 | 2026-11-08 | c6e93df0 | ldc 1.43.0 | 1,609,292 | 46,412 | 4,194,304 | master, control for #931 |
 | 2026-11-08 | #931 | ldc 1.43.0 | 1,609,548 | 46,412 | 4,194,304 | EZSP requests queue in pool packets; a non-reentrant drain keeps wire order: +256 flash |
+| 2026-11-08 | c6e93df0 | ldc 1.43.0 | 1,609,292 | 46,412 | 4,194,304 | master, control for #924 |
+| 2026-11-08 | #924 | ldc 1.43.0 | 1,609,292 | 46,412 | 4,194,304 | headroom-shortfall warnings, debug builds only: no release bytes |
 
 ### MT7621 hEX S, `make BOARD=rb760igs CONFIG=release`
 

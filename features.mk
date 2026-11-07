@@ -178,6 +178,10 @@ ifeq ($(FEATURES),switch-https)
 endif
 # minimal (deferred) would additionally emit -version=NoSwitch.
 
+ifeq ($(FRAMING_DIAGNOSTICS),1)
+    FEATURE_DFLAGS += $(VERSION_FLAG)FramingDiagnostics
+endif
+
 ifeq ($(HEADLESS),1)
     FEATURE_DFLAGS += $(VERSION_FLAG)Headless
 endif
