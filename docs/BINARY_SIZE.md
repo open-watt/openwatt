@@ -226,6 +226,8 @@ a netbooted image is bounded by RAM instead.
 | 2026-10-08 | ow/console-prints | ldc 1.43.0 | 2,647,864 | 186,266 | 4,190,208 | M0 packing D0 (1,009,089 flash, 88,144 ram); console tables and `/system/fs/read` print through the stream's pull |
 | 2026-10-10 | ow/http-respond | ldc 1.43.0 | 2,639,768 | 186,258 | 4,190,208 | M0 packing D0 (1,008,331 flash, 88,144 ram); console output and HTTP responses are producers the stream pulls |
 | 2026-11-01 | ow/tx-floor | ldc 1.43.0 | 2,652,920 | 186,266 | 4,190,208 | M0 packing D0 (1,013,283 flash, 88,168 ram); interfaces admit by class and invite waiting producers in turn |
+| 2026-11-08 | 605940284 | ldc 1.43.0 | 2,658,952 | 186,242 | 4,190,208 | #915 head, control for ow/sync-link-udp; D0 1,015,925 flash, 88,128 ram |
+| 2026-11-08 | ow/sync-link-udp | ldc 1.43.0 | 2,661,960 | 186,242 | 4,190,208 | D0 1,017,717 flash, 88,128 ram; link UDP endpoints carry sync over xram: +3,008 M0, +1,792 D0, no ram |
 
 ### BL618, `make PLATFORM=bl618 CONFIG=release`
 
