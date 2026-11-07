@@ -128,7 +128,10 @@ ptrdiff_t proto_deserialise(T)(const(ubyte)[] buffer, out T msg) nothrow @nogc
     while (offset < buffer.length)
     {
         ulong tag;
-        offset += buffer[offset..$].get_varint(tag);
+        ptrdiff_t tag_len = buffer[offset .. $].get_varint(tag);
+        if (tag_len <= 0)
+            return -1;
+        offset += tag_len;
         ulong field_id = tag >> 3;
         if (field_id == 0 || field_id > max_field_id)
             return -1;
@@ -154,24 +157,10 @@ ptrdiff_t proto_deserialise(T)(const(ubyte)[] buffer, out T msg) nothrow @nogc
                     break member;
             }}
             default:
-                switch (tag & 7)
-                {
-                    case WireType.varint:
-                        while (buffer[offset++] >= 0x80) {}
-                        break;
-                    case WireType.fixed64:
-                        offset += 8;
-                        break;
-                    case WireType.length_delimited:
-                        ulong len;
-                        offset += buffer[offset..$].get_varint(len) + len;
-                        break;
-                    case WireType.fixed32:
-                        offset += 4;
-                        break;
-                    default:
-                        return -1;
-                }
+                ptrdiff_t taken = skip_wire_value(buffer[offset .. $], cast(WireType)(tag & 7));
+                if (taken <= 0)
+                    return -1;
+                offset += taken;
                 break;
         }
     }
@@ -368,15 +357,23 @@ size_t encode_value(bool pack, ubyte ty, T)(ubyte[] buffer, auto ref const T val
 ptrdiff_t decode_value(bool pack, ubyte ty, T)(const(ubyte)[] buffer, ref T value) nothrow @nogc
 {
     import urt.endian;
-    static if ((ty & 7) == WireType.varint || ty == WireType.length_delimited)
+    static if (ty == WireType.fixed32 || ty == WireType.fixed64)
+        if (buffer.length < (ty == WireType.fixed32 ? 4 : 8))
+            return -1;
+
+    static if ((ty & 7) == WireType.varint)
     {
         ulong val;
-        size_t offset = get_varint(buffer, val);
-        static if (ty == WireType.length_delimited)
-        {
-            const(ubyte)[] block = buffer[offset .. offset + cast(size_t)val];
-            offset += val;
-        }
+        ptrdiff_t offset = get_varint(buffer, val);
+        if (offset <= 0)
+            return -1;
+    }
+    else static if (ty == WireType.length_delimited)
+    {
+        const(ubyte)[] block;
+        ptrdiff_t offset = get_length_delimited(buffer, block);
+        if (offset <= 0)
+            return -1;
     }
     else static if (is(T == float))
     {
@@ -451,8 +448,8 @@ ptrdiff_t decode_value(bool pack, ubyte ty, T)(const(ubyte)[] buffer, ref T valu
     }
     else static if (is(T == struct))
     {
-        size_t sub_len = block.proto_deserialise(value);
-        debug assert(sub_len == val);
+        if (block.proto_deserialise(value) != block.length)
+            return -1;
     }
     else static if (!is(T == float) && !is(T == double))
         static assert(false, "Unsupported type: " ~ T.stringof);
@@ -483,20 +480,55 @@ size_t put_varint(ubyte[] buffer, ulong value) pure nothrow @nogc
     return len;
 }
 
-size_t get_varint(const(ubyte)[] buffer, out ulong i) pure nothrow @nogc
+// Bytes consumed, 0 for incomplete input, or -1 for an overflowing value.
+pragma(inline, false)
+ptrdiff_t get_varint(const(ubyte)[] buffer, out ulong value, uint bits = 64) pure nothrow @nogc
 {
-    i = buffer[0];
-    if ((i & 0x80) == 0)
-        return 1;
-    i &= 0x7F;
-    size_t offset = 1;
-    uint shift = 7;
-    while (true)
+    debug assert(bits == 32 || bits == 64);
+    value = 0;
+    uint shift;
+    foreach (offset, b; buffer)
     {
-        i |= ulong(buffer[offset] & 0x7F) << shift;
-        if ((buffer[offset++] & 0x80) == 0)
-            return offset;
+        uint remaining = bits - shift;
+        if (remaining <= 7 && b >= (1u << remaining))
+            return -1;
+        value |= ulong(b & 0x7F) << shift;
+        if (b < 0x80)
+            return offset + 1;
         shift += 7;
+    }
+    return 0;
+}
+
+pragma(inline, false)
+private ptrdiff_t get_length_delimited(const(ubyte)[] buffer, out const(ubyte)[] block) pure nothrow @nogc
+{
+    ulong length;
+    ptrdiff_t prefix = get_varint(buffer, length);
+    if (prefix <= 0 || length > buffer.length - cast(size_t)prefix)
+        return -1;
+    size_t end = cast(size_t)prefix + cast(size_t)length;
+    block = buffer[prefix .. end];
+    return end;
+}
+
+pragma(inline, false)
+private ptrdiff_t skip_wire_value(const(ubyte)[] buffer, WireType wire) pure nothrow @nogc
+{
+    switch (wire)
+    {
+        case WireType.varint:
+            ulong ignored;
+            return get_varint(buffer, ignored);
+        case WireType.fixed64:
+            return buffer.length >= 8 ? 8 : -1;
+        case WireType.length_delimited:
+            const(ubyte)[] block;
+            return get_length_delimited(buffer, block);
+        case WireType.fixed32:
+            return buffer.length >= 4 ? 4 : -1;
+        default:
+            return -1;
     }
 }
 
@@ -560,6 +592,9 @@ version (unittest)
 
 unittest
 {
+    ubyte[3] truncated_nested_wire = [0x22, 0x01, 0x08];
+    OptionalMessage invalid_nested;
+    assert(proto_deserialise(truncated_nested_wire[], invalid_nested) == -1);
     LargeTagMessage large_tag;
     large_tag.value = 150;
     ubyte[4] large_tag_wire;

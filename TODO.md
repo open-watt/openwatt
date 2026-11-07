@@ -1718,9 +1718,7 @@ this is what remains.
   six months or so; re-check when the next esp-clang lands.
 
 - **Harden bindings against malformed remote input**: the `ow/dm` review found protocol
-  bindings that abort or deref on data an attacker controls, and these survive. ESPHome still
-  carries `assert(false, "what here?")` on `proto_deserialise` length mismatch
-  (`src/protocol/esphome/client.d`), which is a remote abort on a malformed frame. MQTT's
+  bindings that abort or deref on data an attacker controls, and these survive. MQTT's
   `desc_by_index(mqtt.desc)` (`src/protocol/mqtt/binding.d:216`) has no `desc == ushort.max`
   check. `ows.load` still reads `first_index`/`last_index`/`stride` off disk unvalidated
   (`src/manager/ows.d:59`), so a corrupt or hostile container is trusted. External state

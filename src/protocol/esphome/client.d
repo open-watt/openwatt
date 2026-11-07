@@ -281,7 +281,7 @@ private:
         return false;
     }
 
-    void stream_rx(Stream, const(void)[] data, MonoTime)
+    void stream_rx(Stream wire, const(void)[] data, MonoTime)
     {
         const(ubyte)[] input = cast(const(ubyte)[])data;
         ubyte[1024] buffer = void;
@@ -292,9 +292,7 @@ private:
         {
             if (length == buffer.length)
             {
-                // a message longer than the buffer cannot be framed, and the stream has lost its place
-                _tail.clear();
-                restart();
+                reject_input(wire);
                 return;
             }
             size_t take = input.length < buffer.length - length ? input.length : buffer.length - length;
@@ -305,32 +303,36 @@ private:
             ubyte[] frame = buffer[0 .. length];
             while (!frame.empty)
             {
-                size_t offset = 1;
-
-                if (frame[0] == 0)
+                if (frame[0] != 0)
                 {
-                    uint payload_len, msg_type;
-                    ptrdiff_t taken = frame[offset..$].take_var_int(payload_len);
-                    if (taken <= 0)
-                        break;
-                    offset += taken;
-                    taken = frame[offset..$].take_var_int(msg_type);
-                    if (taken <= 0)
-                        break;
-                    offset += taken;
-
-                    if (payload_len > frame.length - offset)
-                        break;
-                    incoming_frame(msg_type, frame[offset .. offset + payload_len]);
-                    offset += payload_len;
-                }
-                else
-                {
-                    // noise frame
-                    assert(false, "TODO");
+                    reject_input(wire);
+                    return;
                 }
 
-                frame = frame[offset .. $];
+                ulong payload_len, msg_type;
+                ptrdiff_t len_size = get_varint(frame[1 .. $], payload_len, 32);
+                ptrdiff_t id_size;
+                if (len_size > 0)
+                    id_size = get_varint(frame[1 + len_size .. $], msg_type, 32);
+                if (len_size < 0 || id_size < 0)
+                {
+                    reject_input(wire);
+                    return;
+                }
+                if (!len_size || !id_size)
+                    break;
+
+                size_t offset = 1 + len_size + id_size;
+                if (payload_len > frame.length - offset)
+                    break;
+                size_t end = offset + cast(size_t)payload_len;
+                if (!incoming_frame(cast(uint)msg_type, frame[offset .. end]))
+                {
+                    reject_input(wire);
+                    return;
+                }
+
+                frame = frame[end .. $];
             }
 
             length = frame.length;
@@ -340,7 +342,14 @@ private:
         _tail = buffer[0 .. length];
     }
 
-    void incoming_frame(uint msg_type, const(ubyte)[] frame)
+    void reject_input(Stream wire)
+    {
+        _tail.clear();
+        wire.release_rx_handler(&stream_rx);
+        restart_deferred();
+    }
+
+    bool incoming_frame(uint msg_type, const(ubyte)[] frame)
     {
         last_contact_time = getTime();
 
@@ -353,7 +362,7 @@ private:
             case HelloResponse.id:
                 HelloResponse res;
                 if (proto_deserialise(frame, res) != frame.length)
-                    assert(false, "what here?");
+                    return false;
 
                 _major = res.api_version_major;
                 _minor = res.api_version_minor;
@@ -404,6 +413,7 @@ private:
                     sub(msg_type, frame);
                 break;
         }
+        return true;
     }
 
     void stream_state_handler(ActiveObject object, StateSignal signal)
@@ -437,23 +447,41 @@ private:
 }
 
 
-private:
 
-ptrdiff_t take_var_int(const(ubyte)[] data, out uint value)
+unittest
 {
-    value = 0;
-    uint shift = 0;
-    uint i = 0;
-    while (i < data.length)
-    {
-        ubyte b = data[i++];
-        value |= (uint(b & 0x7F) << shift);
-        if ((b & 0x80) == 0)
-            return i;
-        shift += 7;
-        if (shift >= 32)
-            break; // varint too long
-    }
-    return -1;
-}
+    static immutable ubyte[][] malformed = [
+        [1],
+        [0, 1, HelloResponse.id, 0],
+        [0, 2, HelloResponse.id, 0x08, 0x80],
+        [0, 2, HelloResponse.id, 0x1a, 0x7f],
+        [0, 2, HelloResponse.id, 0x78, 0x80],
+        [0, 0x80, 0x80, 0x80, 0x80, 0x10, HelloResponse.id],
+        [0, 0, 0x80, 0x80, 0x80, 0x80, 0x10],
+    ];
+    ESPHomeClient client = Collection!ESPHomeClient().create("esphome-malformed-test");
+    client._host = StringLit!"test.invalid";
 
+    foreach (frame; malformed)
+    {
+        TCPStream wire = Collection!TCPStream().create("esphome-malformed-wire", ObjectFlags.disabled);
+        client._stream = wire;
+        wire.subscribe(&client.stream_state_handler);
+        wire.rx_handler(&client.stream_rx);
+        Collection!ESPHomeClient().update_all();
+        assert(client.status_message() == "Starting");
+        client._state = 1;
+
+        wire.rx_handler()(wire, frame, MonoTime.init);
+        assert(client.status_message() == "Restarting");
+        assert(!wire.rx_handler);
+        immutable ubyte[3] hello = [0, 0, HelloResponse.id];
+        if (auto rx = wire.rx_handler())
+            rx(wire, hello[], MonoTime.init);
+        assert(client._state == 1 && client._tail.empty);
+        Collection!ESPHomeClient().update_all();
+        Collection!Stream().update_all();
+    }
+    client.destroy();
+    Collection!ESPHomeClient().update_all();
+}
