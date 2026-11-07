@@ -737,8 +737,8 @@ Each step leaves the tree no worse than before it and deletes what it replaces.
 | E3 | interfaces state their framing room; producers ask their egress for it | E4b5 | the default headroom on paths that know their framing |
 | E4c (#873, #876) | WPAN holds the frame the radio sends until the send completes; Modbus keeps the function code and count it checks, not the request | E4b5 | `wpan.d`'s free of a frame the radio may still read; the request page Modbus held until its response |
 | E4v (deferred, last) | a kept view holds its parent: `init_view` records the source page in its header's `link`, and `packet_retain` of such a view allocates a header-only page referencing the parent instead of copying the bytes | E4b5 | the per-member copy when a flooded frame is queued; low value, since flooding is rare and the bridge usually knows the port |
-| E5a (#878) | Ethernet egress in place: `medium_tx` prepends the header into headroom (`packet_mutable` with headroom); `frame_and_send` reframes the IP datagram; `station_egress` builds the OW frame in a page | E4c | the 1522-byte `medium_tx` copy, `station_egress`'s 1518-byte buffer, `frame_and_send`'s view |
-| E5b | Modbus framing in place: RTU address and CRC, MBAP header, ASCII | E5a | `frame_and_send`'s copy |
+| E5a (#878, merged) | Ethernet egress in place: `medium_tx` prepends the header into headroom (`packet_mutable` with headroom); `frame_and_send` reframes the IP datagram; `station_egress` builds the OW frame in a page | E4c | the 1522-byte `medium_tx` copy, `station_egress`'s 1518-byte buffer, `frame_and_send`'s view |
+| E5b (#881) | Modbus framing in place: RTU address and CRC, MBAP header, ASCII; `packet_page` hands a packet's page to a stream with room around its bytes | E5a | `frame_and_send`'s copy |
 | E5c | ASH and CPC framing in place | E5a | ASH's and CPC's `Message.buffer` |
 | E5d | TWC SLIP and WebSocket headers in place; the IP stack's TTL and VLAN edits through `packet_mutable` | E5a | the remaining framing buffers, the const-cast writes in `stack.d` |
 
