@@ -1262,7 +1262,8 @@ private Expression* parse_primary_exp(ref Parser parser, bool allow_slash = fals
         size_t len = 0;
         while (len < parser.text.length && parser.text[len] != '"')
         {
-            if (parser.text[len] == '\\')
+            char c = parser.text[len];
+            if (c == '\\')
             {
                 if (!escaped)
                 {
@@ -1271,11 +1272,18 @@ private Expression* parse_primary_exp(ref Parser parser, bool allow_slash = fals
                 }
                 if (++len == parser.text.length)
                     return parser.fail("Expected '\"'");
+                c = parser.text[len];
+                if (c == 'n')
+                    c = '\n';
+                else if (c == 'r')
+                    c = '\r';
+                else if (c == 't')
+                    c = '\t';
             }
-            else if (parser.text[len] == '$')
+            else if (c == '$')
                 interpolated = true;
             if (escaped)
-                copy ~= parser.text[len];
+                copy ~= c;
             len++;
         }
         if (len == parser.text.length)
@@ -1531,6 +1539,21 @@ unittest
     assert(parse_expression(text).as_bool == true);
     text = "-3";
     assert(parse_expression(text).as_num == VarQuantity(-3));
+
+    {
+        import manager.base : append_config_value;
+
+        Variant original = Variant("a\nb\rc\td \"q\" $x \\0");
+        MutableString!0 exported;
+        append_config_value(exported, original);
+        assert(exported[] == `"a\nb\rc\td \"q\" \$x \\0"`);
+        const(char)[] quoted = exported[];
+        Variant restored = parse_primary_exp(quoted).evaluate(ctx);
+        assert(restored.asString == original.asString && quoted.empty);
+
+        quoted = "\"\\0\\z\"";
+        assert(parse_primary_exp(quoted).evaluate(ctx).asString == "0z");
+    }
 
     text = "{ /print hello }";
     e = parse_primary_exp(text);
