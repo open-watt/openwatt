@@ -223,13 +223,32 @@ struct BoundaryFlow
     float power_out_of_graph = 0;
 }
 
-// Corrected cumulative counters for one boundary, with the Element keys that
-// accounts use for reset-safe daily deltas. Counter direction follows
-// boundary shape: a dangling port's import counts into the graph.
+// One meter register as the port read it: the phase slot and the raw
+// import/export direction, before any meter-sign swap.
+struct CounterKey
+{
+nothrow @nogc:
+    Component meter;
+    ubyte phase;
+    bool export_;
+
+    int opCmp(ref const CounterKey o) const pure
+    {
+        if (meter !is o.meter)
+            return cast(const(void)*)meter < cast(const(void)*)o.meter ? -1 : 1;
+        if (phase != o.phase)
+            return phase < o.phase ? -1 : 1;
+        return export_ - o.export_;
+    }
+}
+
+// Corrected cumulative counters for one boundary, with the keys that accounts
+// use for reset-safe daily deltas. Counter direction follows boundary shape:
+// a dangling port's import counts into the graph.
 struct BoundaryEnergy
 {
-    Element* into_key;
-    Element* out_key;
+    CounterKey into_key;
+    CounterKey out_key;
     double into_total = double.nan;
     double out_total = double.nan;
 }
@@ -239,22 +258,12 @@ BoundaryEnergy boundary_energy(Port* p)
     BoundaryEnergy e;
     if (p is null || p.meter is null)
         return e;
-    Element* import_e = p.meter.find_element("import");
-    Element* export_e = p.meter.find_element("export");
-    if (external_boundary(p))
-    {
-        e.into_key = import_e;
-        e.out_key = export_e;
-        e.into_total = p.meter_data.total_import_active[0];
-        e.out_total = p.meter_data.total_export_active[0];
-    }
-    else
-    {
-        e.into_key = export_e;
-        e.out_key = import_e;
-        e.into_total = p.meter_data.total_export_active[0];
-        e.out_total = p.meter_data.total_import_active[0];
-    }
+    const bool external = external_boundary(p);
+    const bool inverted = p.meter_sign == MeterSign.inverted;
+    e.into_key = CounterKey(p.meter, p.meter_phase, external == inverted);
+    e.out_key = CounterKey(p.meter, p.meter_phase, external != inverted);
+    e.into_total = external ? p.meter_data.total_import_active[0] : p.meter_data.total_export_active[0];
+    e.out_total = external ? p.meter_data.total_export_active[0] : p.meter_data.total_import_active[0];
     return e;
 }
 
@@ -291,17 +300,22 @@ Bus* boundary_bus(Port* p)
     return null;
 }
 
+// Protection takes the larger of the current reading and |P|/V: a stale or
+// conflicting current must never claim more headroom than the power implies.
 float meter_current_amps(ref const MeterData data) pure
 {
-    if (data.has(MeterField.current))
-        return absf(data.current[0].value);
+    float amps = data.has(MeterField.current) ? absf(data.current[0].value) : float.nan;
     if (data.has(MeterField.power) && data.has(MeterField.voltage))
     {
         float volts = absf(data.voltage[0].value);
         if (volts > 0)
-            return absf(data.active[0].value / volts);
+        {
+            float from_power = absf(data.active[0].value / volts);
+            if (!(amps >= from_power))
+                amps = from_power;
+        }
     }
-    return float.nan;
+    return amps;
 }
 
 // A shared hub meter is an appliance aggregate, not a reading for one link.
@@ -1879,5 +1893,35 @@ unittest
         assert(d.is_measured(MeterField.total_import_active) && absf(d.total_import_active[0] - 12.5f) <= 0.01f);
         assert(d.is_measured(MeterField.total_export_active) && absf(d.total_export_active[0] - 0.3f) <= 0.01f);
         g3.clear();
+
+        // a retained 1 A reading must not claim headroom the inferred 3450 W rules out
+        Component feed_meter, load_meter;
+        {
+            DeviceBuilder b = devices.create("breaker-bench");
+            feed_meter = b.component("feed");
+            add(b, feed_meter, "voltage", 230, ScaledUnit(Volt));
+            add(b, feed_meter, "current", 1, ScaledUnit(Ampere));
+            load_meter = b.component("load");
+            add(b, load_meter, "power", 3450, ScaledUnit(Watt));
+            add(b, load_meter, "voltage", 230, ScaledUnit(Volt));
+        }
+        TopologyGraph g4;
+        Bus* upstream = g4.ensure_bus("upstream");
+        Bus* downstream = g4.ensure_bus("downstream");
+        Port* feed_p = g4.add_port(null, upstream, PortRole.parent, FlowDomain.bidirectional, feed_meter, 0, MeterSign.normal, "parent", "breaker");
+        Port* child_p = g4.add_port(null, downstream, PortRole.child, FlowDomain.bidirectional, null, 0, MeterSign.normal, "child", "breaker");
+        Link* breaker16 = g4.add_link(null, upstream, downstream, feed_p, child_p, 16, true, "breaker");
+        PortGroup* breaker_g = g4.add_group("breaker", PortGroupKind.switchgear, null, breaker16);
+        g4.add_to_group(breaker_g, feed_p);
+        g4.add_to_group(breaker_g, child_p);
+        Port* load_p = g4.add_port(null, downstream, PortRole.connection, FlowDomain.consume, load_meter, 0);
+        g4.add_to_group(g4.add_group("load", PortGroupKind.appliance), load_p);
+        g4.refresh();
+
+        assert(feed_p.meter_data.source(MeterField.power) == Provenance.inferred_subtraction);
+        assert(feed_p.meter_data.is_measured(MeterField.current) && absf(feed_p.meter_data.current[0].value - 1) <= 0.01f);
+        assert(absf(link_current_amps(breaker16) - 15) <= 0.01f);
+        assert(absf(link_headroom_amps(breaker16) - 1) <= 0.01f);
+        g4.clear();
     }
 }
