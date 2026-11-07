@@ -462,13 +462,13 @@ Packet* packet_retain(const(Packet)* packet)
     return cast(Packet*)packet;
 }
 
-// a packet the caller may edit: itself unless its page is shared, else a copy; null, having freed it, if the copy fails
-Packet* packet_mutable(Packet* packet, size_t headroom = 0)
+// a packet the caller may edit: itself unless its page is shared, else a copy reserving `reserve` in front; null, having freed it, if the copy fails
+Packet* packet_mutable(Packet* packet, size_t headroom = 0, size_t reserve = packet_headroom)
 {
-    debug assert(headroom <= packet_headroom);
+    debug assert(headroom <= reserve && reserve <= packet_headroom);
     if (page_unique(packet.page) ? packet.headroom >= headroom : page_foreign(packet.page) && !headroom)
         return packet;
-    Packet* copy = packet_copy(packet);
+    Packet* copy = packet_copy(packet, reserve);
     packet_free(packet);
     return copy;
 }
@@ -477,10 +477,10 @@ Packet* packet_mutable(Packet* packet, size_t headroom = 0)
 Packet* packet_keep(Packet* packet)
     => page_foreign(packet.page) ? packet_copy(packet) : packet;
 
-Packet* packet_copy(const(Packet)* packet)
+Packet* packet_copy(const(Packet)* packet, size_t headroom = packet_headroom)
 {
     const(void)[] source = packet.data;
-    Page* p = page_alloc(source.length, size_t.sizeof, packet_prefix_size + packet_headroom);
+    Page* p = page_alloc(source.length, size_t.sizeof, packet_prefix_size + headroom);
     if (!p)
         return null;
     Packet* r = attach_packet(p);
@@ -737,6 +737,13 @@ unittest
     packet_free(kept);
     packet_free(&lent.packet);
     assert(cast(const(ubyte)[])lent.data == lent_bytes[], "freeing a lent packet leaves its bytes alone");
+
+    ubyte[1500] mtu_bytes;
+    StackPacket mtu;
+    mtu.init!Ethernet(mtu_bytes[]);
+    Packet* framable = packet_mutable(&mtu.packet, 18, 18);
+    assert(framable && framable.headroom >= 18 && page_category(framable.page) < page_pool_num_categories(), "a full-size lent frame is copied with the room it asks for into a pool page");
+    packet_free(framable);
 
     ubyte[8] payload = [0x00, 0x03, 0x08, 0x00, 1, 2, 3, 4];
     StackPacket packet;

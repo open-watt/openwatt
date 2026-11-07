@@ -20,6 +20,7 @@ import router.iface.checksum;
 
 nothrow @nogc:
 
+enum ubyte ethernet_header_room = 18;
 
 size_t encode_ethernet_header(const(Packet)* packet, ubyte[] buffer)
 {
@@ -30,16 +31,14 @@ size_t encode_ethernet_header(const(Packet)* packet, ubyte[] buffer)
     if (packet.type != PacketType.ethernet || buffer.length < required)
         return 0;
 
-    Ethernet* eth = cast(Ethernet*)buffer.ptr;
-    eth.dst = packet.eth.dst;
-    eth.src = packet.eth.src;
-    ushort* ether_type = &eth.ether_type;
+    buffer[0 .. 6] = packet.eth.dst.b[];
+    buffer[6 .. 12] = packet.eth.src.b[];
     if (tag != VlanTag.none)
     {
-        storeBigEndian(ether_type++, vlan_tpid(tag));
-        storeBigEndian(ether_type++, packet.vlan);
+        buffer[12 .. 14] = nativeToBigEndian(vlan_tpid(tag));
+        buffer[14 .. 16] = nativeToBigEndian(packet.vlan);
     }
-    storeBigEndian(ether_type, packet.eth.ether_type);
+    buffer[required - 2 .. required] = nativeToBigEndian(packet.eth.ether_type);
     return required;
 }
 
@@ -286,7 +285,7 @@ protected:
         if (!is_network_multicast_address(src))
             _local_addresses[src] = getTime();
 
-        Packet* wrapped = alloc_packet!Ethernet(min(size_t(actual_mtu), 5 + 255 + packet.data.length));
+        Packet* wrapped = alloc_packet!Ethernet(min(size_t(actual_mtu), 5 + 255 + packet.data.length), ethernet_header_room);
         if (!wrapped)
             return false;
         ptrdiff_t len = build_ow_payload(packet, *codec, cast(ubyte[])wrapped.payload);
@@ -857,14 +856,14 @@ protected:
     final override void medium_tx(Packet* packet)
     {
         debug assert(packet.type == PacketType.ethernet, "medium_tx expects an ethernet packet");
-        ubyte[18] header = void;
+        ubyte[ethernet_header_room] header = void;
         size_t header_len = encode_ethernet_header(packet, header[]);
         if (header_len + packet.data.length > 1522)
         {
             drop_tx(packet);
             return;
         }
-        packet = packet_mutable(packet, header_len);
+        packet = packet_mutable(packet, header_len, header_len);
         if (!packet)
             return add_tx_drop();
         scope (exit) packet_free(packet);
