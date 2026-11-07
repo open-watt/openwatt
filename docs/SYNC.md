@@ -220,7 +220,12 @@ with zero segments.
   hiding it, the difference between a mirror that is wrong and one that knows where. There is no
   staleness field: staleness is the absence of frames, and `t` plus a disciplined clock lets the
   receiver compute age itself. A null `v` says the value stopped being known at `t`: the mirror
-  invalidates rather than stores, and judges it newer-wins like any sample.
+  invalidates rather than stores, and judges it newer-wins like any sample. A device's
+  `status.online` is the exception: it is the vote of the session that bound it on the mirror's
+  liveness, as a local binding's is, so the mirror is online while some live session says so and
+  drops offline when the last such session ends. Only the live feed votes (a read's `val`s do
+  not); a timed null withdraws the vote and an untimed one or a non-bool leaves it. Its other
+  values keep their last known value and time.
 - **`model_set {seq, h|path, value}` or `{seq, h|path, reset:true}`** writes an element. The path
   form serves one-shot writers with no binding. `reset` carries no value, because null is a
   legitimate value here, and the receiver never infers the post-reset value: `res {seq, value}`

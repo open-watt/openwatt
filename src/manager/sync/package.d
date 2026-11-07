@@ -56,7 +56,7 @@ import manager;
 import manager.base;
 import manager.collection;
 import manager.component : Component;
-import manager.device : Device, DeviceBuilder, DeviceLifecycleEvent, register_device_lifecycle_handler;
+import manager.device : Device, DeviceBuilder, DeviceLifecycleEvent, DeviceTable, register_device_lifecycle_handler;
 import manager.element : Access, Cursor, Element, ElementLifecycleEvent, register_element_lifecycle_handler,
                          sample_from_double, SampleUpdate, Subscriber, sweep_dirty;
 import manager.id : EID;
@@ -1789,7 +1789,7 @@ nothrow @nogc:
         const(char)[] rest = a.subject;
         const(char)[] dev_id = rest.split!'.';
 
-        Device dev = find_or_create_device(dev_id, peer_id);
+        Device dev = find_or_create_device(g_app.devices, dev_id, peer_id);
         if (!dev)
             return EID.invalid;
 
@@ -1926,7 +1926,7 @@ nothrow @nogc:
     }
 
     // a handle that doesn't resolve is dead: its node failed to materialise or is gone
-    void inbound_val(SyncPeer from, SyncHandle handle, ref Variant value, ulong t_ms)
+    void inbound_val(SyncPeer from, SyncHandle handle, ref Variant value, ulong t_ms, bool live)
     {
         EID node = from.node_of(handle);
         Element* e = resolve_element(node);
@@ -1935,6 +1935,8 @@ nothrow @nogc:
             log.debug_("val for dead handle ", handle);
             return;
         }
+        if (from.cast_vote(e, value, t_ms, live))
+            return;
         merge_remote_value(e, value, t_ms, &on_mirror_write);
     }
 
@@ -2855,11 +2857,11 @@ nothrow @nogc:
         encoder_for(writer._encoder).encode_model_set(writer, seq, h, update.value);
     }
 
-    Device find_or_create_device(const(char)[] id, ulong peer_id)
+    static Device find_or_create_device(ref DeviceTable devices, const(char)[] id, ulong peer_id)
     {
-        if (Device device = g_app.devices.find(id, peer_id))
+        if (Device device = devices.find(id, peer_id))
             return device;
-        DeviceBuilder builder = g_app.devices.create(id, peer_id);
+        DeviceBuilder builder = devices.create(id, peer_id);
         return builder.device;
     }
 
@@ -2939,7 +2941,7 @@ package void collect_superseded(SyncPeer[] peers, SyncPeer from, ulong node_id, 
 
 private:
 
-enum max_model_time_ms = ulong.max / 1_000_000;
+package enum max_model_time_ms = ulong.max / 1_000_000;
 
 enum max_template_chain = 256;
 
