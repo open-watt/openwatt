@@ -133,6 +133,8 @@ struct MeterData
 nothrow @nogc:
 
     BusType type;
+    ubyte import_sources;               // slots read directly from import/export elements, before synthesis or sign swap
+    ubyte export_sources;
     FieldFlags fields;
 
     // Provenance is authoritative; fields is only a cheap summary.
@@ -192,6 +194,8 @@ nothrow @nogc:
     void reset_to_missing() pure
     {
         fields = FieldFlags.none;
+        import_sources = 0;
+        export_sources = 0;
         foreach (i; 0..num_fields)
             provenance[i][] = Provenance.missing;
         foreach (j; 0..4)
@@ -314,6 +318,8 @@ MeterData extract_phase(ref const MeterData raw, BusType type, ubyte meter_phase
     MeterData r;
     r.reset_to_missing();
     r.type = type;
+    r.import_sources = raw.import_sources;
+    r.export_sources = raw.export_sources;
 
     // Slot 0 of the result is the phase being extracted (or the same slot if meter_phase==0)
     r.voltage[0] = raw.voltage[meter_phase];
@@ -543,6 +549,10 @@ static MeterData get_meter_data(Component meter, FieldFlags fields = FieldFlags.
             continue;
 
         present[i] = values_present;
+        if (i == MeterField.total_import_active)
+            r.import_sources = values_present;
+        else if (i == MeterField.total_export_active)
+            r.export_sources = values_present;
 
         if (r.type == BusType.split_phase)
         {

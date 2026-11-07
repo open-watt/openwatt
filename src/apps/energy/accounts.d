@@ -79,7 +79,7 @@ void check_day_rollover(ref DailySnapshot daily, SysTime now)
 // or discard energy accumulated before the reset.
 double today_delta_value(ref DailySnapshot daily, CounterKey key, double current)
 {
-    if (key.meter is null || current != current)
+    if (!key || current != current)
         return 0;
 
     DailyCounter* c = key in daily.values;
@@ -383,7 +383,7 @@ void add_production_today(ref IslandTotals t, ref TopologyGraph graph, Island* i
             Element* import_e = meter.find_element("import");
             if (import_e is null)
                 continue;
-            t.solar_today_kwh += today_delta_value(daily, CounterKey(meter), contribution.meter.total_import_active[0]);
+            t.solar_today_kwh += today_delta_value(daily, counter_key(meter, contribution.meter, 0, false), contribution.meter.total_import_active[0]);
             used_aggregate = true;
         }
         if (used_aggregate)
@@ -398,7 +398,7 @@ void add_production_today(ref IslandTotals t, ref TopologyGraph graph, Island* i
             if (contribution.component)
                 if (Component meter = contribution.component.get_first_component_by_template("EnergyMeter"))
                     if (meter.find_element("import"))
-                        t.solar_today_kwh += today_delta_value(daily, CounterKey(meter), contribution.meter.total_import_active[0]);
+                        t.solar_today_kwh += today_delta_value(daily, counter_key(meter, contribution.meter, 0, false), contribution.meter.total_import_active[0]);
         }
     }
 }
@@ -465,4 +465,27 @@ unittest
     static bool near(double a, double b) => a - b < 0.001 && b - a < 0.001;
     assert(near(today[0], 1) && near(today[1], 2) && near(today[2], 1));
     assert(boundary_energy(&ports[0]).into_key != boundary_energy(&ports[1]).into_key);
+
+    Port late;
+    late.meter = b.component("late");
+    counter(b, late.meter, "import1", 10);
+    double read_today()
+    {
+        late.meter_data = get_port_meter_data(late.meter, 0, MeterSign.normal);
+        BoundaryEnergy e = boundary_energy(&late);
+        return today_delta_value(daily, e.into_key, e.into_total);
+    }
+    assert(near(read_today(), 0));
+    Element* aggregate = counter(b, late.meter, "import", 100);
+    assert(near(read_today(), 0));
+    aggregate.value(Variant(Quantity!double(101, KilowattHour)), getSysTime());
+    assert(near(read_today(), 1));
+
+    late.meter = b.component("grow");
+    counter(b, late.meter, "import1", 10);
+    assert(near(read_today(), 0));
+    Element* second = counter(b, late.meter, "import2", 20);
+    assert(near(read_today(), 0));
+    second.value(Variant(Quantity!double(21, KilowattHour)), getSysTime());
+    assert(near(read_today(), 1));
 }
