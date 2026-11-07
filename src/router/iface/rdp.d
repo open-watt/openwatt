@@ -99,6 +99,10 @@ nothrow @nogc:
     bool tx_ready(ref const InetAddress peer, PCP pcp = PCP.be) const
         => pcp_priority_map[pcp] >= tx_floor(peer);
 
+    // a session heard from by nothing for this long, with nothing in flight, sends an empty frame its peer must
+    // ack; zero never probes, and a dead or rebooted peer otherwise goes unnoticed while the session is idle
+    Duration idle_probe = 15.seconds;
+
     // takes the message; its PCP is the lane
     int send(Packet* message, InetAddress dst, MessageCallback callback = null)
     {
@@ -532,6 +536,7 @@ nothrow @nogc:
     MonoTime _timer_when;
     MonoTime _ack_deadline;
     MonoTime _active;
+    MonoTime _quiet_since;
     MonoTime _open_deadline;
     uint _srtt_us;
     uint _rttvar_us;
@@ -754,11 +759,11 @@ nothrow @nogc:
         return size_t.max;
     }
 
-    bool cut_frame(MonoTime now)
+    bool cut_frame(MonoTime now, bool probe = false)
     {
-        if (_phase != Phase.established || !window_open())
+        if (_phase != Phase.established || !(probe || window_open()))
             return false;
-        if (!_ep.egress_ready(_peer, cast(PCP)top_lane()))
+        if (!_ep.egress_ready(_peer, probe ? PCP.nc : cast(PCP)top_lane()))
         {
             if (!_turning)
                 _ep.wait_egress(_peer, _waiter);
@@ -814,15 +819,16 @@ nothrow @nogc:
             }
         }
 
-        if (pos == start)
+        if (pos == start && !probe)
         {
             packet_free(frame);
             return false;
         }
 
-        if (window_open(1))
+        if (!probe && window_open(1))
             buf[1] |= flag_more;
         frame.truncate(pos + 1);
+        f.pcp = PCP.nc;
         foreach (lane; scheduling_order)
         {
             if (f.chunks[lane])
@@ -1063,6 +1069,8 @@ nothrow @nogc:
         }
         if (_starved && (next == MonoTime.init || now + ack_delay < next))
             next = now + ack_delay;
+        if (probe_armed && (next == MonoTime.init || _quiet_since + _ep.idle_probe < next))
+            next = _quiet_since + _ep.idle_probe;
         if (next == MonoTime.init)
             return disarm();
         if (_timer_armed && next == _timer_when)
@@ -1124,8 +1132,17 @@ nothrow @nogc:
             _starved = false;
             pump(now);
         }
+        if (probe_armed && now - _quiet_since >= _ep.idle_probe)
+        {
+            _quiet_since = now;
+            cut_frame(now, true);
+        }
         rearm(now);
     }
+
+    // nothing in flight and nothing waiting to go, so the probe frame stays empty
+    bool probe_armed() const
+        => _phase == Phase.established && !in_flight && _queue.empty && !_abort_lanes && _ep.idle_probe > Duration.zero;
 
     void on_frame(const(ubyte)[] frame, MonoTime now)
     {
@@ -1168,6 +1185,7 @@ nothrow @nogc:
         ushort seq = type == type_data ? expand(_rx_next, body[0] & 31, window_max - 1) : 0;
         if (frame[$ - 1] != check(body, _peer_nonce, _nonce, seq, ack))
             return;
+        _quiet_since = now;
         process_ack(ack, sack, now);
         if (type == type_data && _phase == Phase.established)
             on_data(seq, body, now);
@@ -1211,6 +1229,7 @@ nothrow @nogc:
         acked_out();
         _limit = peer_max < rdp_max_message ? peer_max : rdp_max_message;
         _phase = Phase.established;
+        _quiet_since = now;
         _ep.event(_peer, RDPEvent.established);
         pump(now);
     }
@@ -1442,10 +1461,13 @@ unittest
         Array!Datagram to_b;
         uint seed = 7;
         uint dropped;
+        uint probes;
         ubyte loss_percent;
 
         void carry(RDPEndpoint*, const(ubyte)[] frame, ref const InetAddress peer)
         {
+            if (frame[0] >> 5 == type_data && frame.length == RDPSession.items_at(frame) + 1)
+                ++probes;
             seed = seed * 1103515245 + 12345;
             if (loss_percent && (seed >> 16) % 100 < loss_percent)
             {
@@ -1844,6 +1866,73 @@ unittest
     assert(sink.count == interrupted + 2 && sink.bad == 0 && sb._rx_msg == (Packet*[lanes]).init);
     assert(sink.order[interrupted] == (PCP.vo << 8 | (seqs[PCP.vo] - 1)) && sink.order[interrupted + 1] == (PCP.bk << 8 | (seqs[PCP.bk] - 1)));
     assert(done.complete == completed + 2 && done.other == 2);
+
+    // an idle session probes its peer: a busy one never does, a vanished peer fails it, and a rebooted one resets it
+    {
+        Wire w;
+        w.addr_a = wire.addr_a;
+        w.addr_b = wire.addr_b;
+        Sink sk, unused;
+        Events ex, ey;
+        w.b = make_endpoint(w, sk, ey, null);
+        w.a = make_endpoint(w, unused, ex, &w.addr_b);
+        w.a.idle_probe = 1.seconds;
+        w.b.idle_probe = Duration.zero;
+        w.pump();
+        assert(w.a.established(w.addr_b));
+
+        ubyte n;
+        foreach (_; 0 .. 20)
+        {
+            assert(w.a.send(make_message(n++, 20, PCP.be), w.addr_b) > 0);
+            w.tick(2, 200.msecs);
+        }
+        assert(w.probes == 0 && sk.count == 20, "a session in use never probes");
+
+        w.tick(16, 250.msecs);
+        assert(w.probes != 0 && w.a.established(w.addr_b) && ex.closed == 0, "an idle one probes, and the ack keeps it");
+
+        Sink sk2;
+        Events ey2;
+        w.b.close();
+        w.clear();
+        w.b = make_endpoint(w, sk2, ey2, null);
+        w.b.idle_probe = Duration.zero;
+        w.tick(8, 250.msecs);
+        assert(ex.closed == 1, "a rebooted peer answers the probe with a reset");
+        w.tick(8, 250.msecs);
+        assert(w.a.established(w.addr_b), "and the held session reopens to it");
+
+        RDPSession* probing = w.a.find(w.addr_b);
+        w.a._test_blocked = true;
+        assert(w.a.send(make_message(n++, 20, PCP.be), w.addr_b) > 0);
+        assert(!probing.probe_armed, "a queued message is not swept into a probe");
+        w.a._test_blocked = false;
+        probing.pump(g_test_time);
+        w.tick(8, 250.msecs);
+        assert(probing._queue.empty);
+
+        uint probes = w.probes;
+        UDPReceiveInfo forged;
+        forged.source = w.addr_b;
+        foreach (_; 0 .. 12)
+        {
+            // a well-formed ack for the live session, its check flipped
+            ushort acked = cast(ushort)(probing._tx_una - 1);
+            ubyte[3] junk = [type_ack << 5, cast(ubyte)(acked & 31), 0];
+            junk[2] = cast(ubyte)(check(junk[0 .. 2], probing._peer_nonce, probing._nonce, 0, acked) ^ 1);
+            forged.rx_time = g_test_time;
+            w.a.on_datagram(null, junk[], forged);
+            w.tick(1, 250.msecs);
+        }
+        assert(w.probes > probes, "frames that fail the session's check do not count as hearing the peer");
+
+        w.loss_percent = 100;
+        w.tick(200, 250.msecs);
+        assert(ex.closed == 2, "a vanished peer fails the session once the probe's retries run out");
+        w.a.close();
+        w.b.close();
+    }
 
     // a malformed open from a stranger cannot claim a full listener's slot
     {
