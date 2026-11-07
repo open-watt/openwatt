@@ -416,6 +416,9 @@ void apply_meter_sign(ref MeterData data, MeterSign sign) pure
 
 unittest
 {
+    import manager.device : DeviceTable;
+    import manager.element : Element, register_value_format;
+
     MeterData data;
     data.reset_to_missing();
     data.write_value(MeterField.power, 0, 123.0f);
@@ -434,6 +437,27 @@ unittest
     assert(data.total_export_active[0] == 10.0f);
     assert(!(data.fields & FieldFlags.total_import_active));
     assert(data.fields & FieldFlags.total_export_active);
+
+    DeviceTable devices;
+    auto builder = devices.create("unseen-meter");
+    Component meter = builder.component("meter", "EnergyMeter");
+    Element* power = builder.element(meter, "power", register_value_format!MeterWatts());
+    builder.element(meter, "frequency", register_value_format!(Quantity!(float, Hertz))());
+    builder.element(meter, "import", register_value_format!(Quantity!(float, KilowattHour))());
+    static immutable string[4] quadrants = ["q1", "q2", "q3", "q4"];
+    foreach (name; quadrants)
+        builder.element(meter, name, register_value_format!float());
+
+    data = get_meter_data(meter);
+    assert(!data.has(MeterField.power));
+    assert(!data.has(MeterField.frequency));
+    assert(!data.has(MeterField.total_import_active));
+    assert(!data.has(MeterField.total_reactive));
+
+    power.value(MeterWatts(0));
+    data = get_meter_data(meter);
+    assert(data.source(MeterField.power) == Provenance.measured);
+    assert(data.active[0].value == 0);
 }
 
 static MeterData get_meter_data(Component meter, FieldFlags fields = FieldFlags.all)
@@ -510,7 +534,8 @@ static MeterData get_meter_data(Component meter, FieldFlags fields = FieldFlags.
 
         if (i == MeterField.frequency)
         {
-            if (Element* e = meter.find_element(field_names[i]))
+            Element* e = meter.find_element(field_names[i]);
+            if (e && e.has_value)
             {
                 double v = e.scaled_value!Hertz();
                 if (v == v)
@@ -526,7 +551,8 @@ static MeterData get_meter_data(Component meter, FieldFlags fields = FieldFlags.
         ubyte values_present = 0;
         for (size_t j = 0; j < 4; ++j)
         {
-            if (Element* e = meter.find_element(j == 0 ? field_names[i] : tconcat(field_names[i], j)))
+            Element* e = meter.find_element(j == 0 ? field_names[i] : tconcat(field_names[i], j));
+            if (e && e.has_value)
             {
                 double v = is_active_energy_field(cast(MeterField)i)
                          ? e.scaled_value!KilowattHour()
@@ -594,7 +620,8 @@ static MeterData get_meter_data(Component meter, FieldFlags fields = FieldFlags.
         static immutable string[4] q_names = ["q1", "q2", "q3", "q4"];
         foreach (n; 0..4)
         {
-            if (Element* e = meter.find_element(q_names[n]))
+            Element* e = meter.find_element(q_names[n]);
+            if (e && e.has_value)
             {
                 double v = e.normalised_value();
                 if (v == v)

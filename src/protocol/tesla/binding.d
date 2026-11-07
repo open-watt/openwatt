@@ -92,9 +92,9 @@ nothrow @nogc:
             _fail_reason = "charger already has a binding";
             return CompletionStatus.error;
         }
-        if (_target_current.record_update() != SysTime())
+        if (_target_current.has_value)
             m.set_target_current(_slave_id, (cast(CentiAmps)_target_current.record_value().asQuantity()).value);
-        if (_current_cap.record_update() != SysTime())
+        if (_current_cap.has_value)
             m.set_cap(_slave_id, (cast(CentiAmps)_current_cap.record_value().asQuantity()).value);
         _master.subscribe(&master_state_change);
         _subscribed = true;
@@ -527,9 +527,15 @@ unittest
     assert(Collection!TeslaTWCBinding().get("twc-binding-live") is live);
     foreach (provider; lifecycle_device.bindings)
         assert(provider !is live);
+    lifecycle_device.find_element("setpoint").invalidate();
+    lifecycle_device.find_element("cap").invalidate();
+    master.set_target_current(123, 2800);
+    master.set_cap(123, 2000);
     master.start();
     live.step();
     assert(live.running && live._subscribed && live._elem_subscribed);
+    assert(master.find_charger(123).target_current == 2800);
+    assert(master.find_charger(123).specified_max_current == 2000);
     master.destroy();
     assert(Collection!TeslaTWCBinding().get("twc-binding-live") is null);
     assert(!live._subscribed && !live._elem_subscribed);

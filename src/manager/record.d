@@ -375,15 +375,18 @@ unittest
     Element en;
     en.format = register_format(qfmt);
     en.ensure_history();
+    Array!Sample result;
+    query_local(&en, 0, 6_000_000, 0, QueryMode.raw, result);
+    query_local(&en, 0, 6_000_000, 4, QueryMode.graph, result);
+    assert(result.empty && en.record_count == 0);
     foreach (i; 0 .. 6)
         en.write_sample(i * 10.0, from_unix_time_ns((i + 1) * 1_000_000UL));
 
-    Array!Sample result;
     query_local(&en, 4_000_000, 5_000_000, 0, QueryMode.raw, result);
     assert(result.length == 2 && result[0].time == 4_000_000 && result[0].value == 30);
     result.clear();
     query_local(&en, 0, 6_000_000, 0, QueryMode.raw, result);
-    assert(result.length == 6 && result[0].time == 1_000_000); // partial coverage answers partial
+    assert(result.length == 6 && result[0].time == 1_000_000 && result[0].value == 0);
     result.clear();
     query_local(&en, 3_500_000, 6_000_000, 0, QueryMode.graph, result);
     assert(result[0].time == 3_500_000 && result[0].value == 20);

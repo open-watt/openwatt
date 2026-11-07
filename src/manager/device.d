@@ -371,6 +371,8 @@ nothrow @nogc:
 
         if (sum_type != SumType.sum)
         {
+            if (!previous_value.isNumber)
+                return;
             enum Seconds = ScaledUnit(Second);
             Duration t = timestamp - previous_timestamp;
             ulong ns = t.as!"nsecs";
@@ -382,8 +384,6 @@ nothrow @nogc:
                 sample = sample * dt;
             else
             {
-                if (!previous_value.isNumber)
-                    return;
                 VarQuantity previous = previous_value.asQuantity;
 
                 if (sum_type == SumType.negative_trapezoid)
@@ -1196,6 +1196,25 @@ unittest
     assert(target.value.asDouble == 6.0);
     source.unsubscribe(&sum.element_updated);
     source.teardown();
+
+    Element power, integral;
+    power.format = register_value_format!double();
+    Computation right;
+    right.kind = ComputationKind.accumulator;
+    right.sum_type = SumType.right;
+    right.source = &power;
+    right.target = &integral;
+    integral.format = right.infer_accumulator_format(&power);
+    power.subscribe(&right.element_updated);
+    power.force_update(from_unix_time_ns(1_000_000_000));
+    assert(!power.has_value && power.last_update == SysTime());
+    power.write_sample(3.0, from_unix_time_ns(2_000_000_000));
+    assert(!integral.has_value);
+    power.write_sample(2.0, from_unix_time_ns(3_000_000_000));
+    assert(integral.value.asQuantity().value == 2.0);
+    power.unsubscribe(&right.element_updated);
+    power.teardown();
+    integral.teardown();
 
     DeviceTable devices;
     DeviceBuilder lb = devices.create("liveness-test");

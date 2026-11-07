@@ -218,10 +218,13 @@ private:
 
         foreach (i, b; graph.bus_list[])
         {
+            float load = terminal_load(b);
+            if (load != load && local[i] == 0 && grid[i] == 0)
+                continue;
             buses[i].local_source_power = local[i];
             buses[i].grid_source_power = grid[i];
             buses[i].source_power = local[i] + grid[i];
-            buses[i].load_power = terminal_load(b);
+            buses[i].load_power = load;
             buses[i].local_fraction = bus_local_fraction(local[i], grid[i], b.contains_grid);
         }
 
@@ -312,14 +315,19 @@ private:
 
     float terminal_load(Bus* bus)
     {
-        float load = 0;
+        float load = float.nan;
         foreach (p; bus.ports[])
         {
             if (!p.meter_data.has(MeterField.power))
                 continue;
             float power = p.meter_data.active[0].value;
-            if (power == power && power > 0)
-                load += power;
+            if (power == power)
+            {
+                if (load != load)
+                    load = 0;
+                if (power > 0)
+                    load += power;
+            }
         }
         return load;
     }
@@ -384,6 +392,17 @@ unittest
     Bus* house = g.ensure_bus("house");
 
     Port* gp = g.add_port(null, gridb, PortRole.parent, FlowDomain.bidirectional, null, 0, MeterSign.normal, "parent", "main");
+    g.attribution.compute(g);
+    size_t gi = g.bus_list[].findFirst(gridb);
+    assert(g.attribution.buses[gi].source_power != g.attribution.buses[gi].source_power);
+    assert(g.attribution.buses[gi].load_power != g.attribution.buses[gi].load_power);
+    assert(g.attribution.buses[gi].local_fraction != g.attribution.buses[gi].local_fraction);
+    gp.meter_data.write_value(MeterField.power, 0, 0);
+    gp.meter_data.mark(MeterField.power, 0, Provenance.measured);
+    g.attribution.compute(g);
+    assert(g.attribution.buses[gi].source_power == 0);
+    assert(g.attribution.buses[gi].load_power == 0);
+
     gp.meter_data.write_value(MeterField.power, 0, 1000);
     gp.meter_data.mark(MeterField.power, 0, Provenance.measured);
     Port* hp = g.add_port(null, house, PortRole.child, FlowDomain.bidirectional, null, 0, MeterSign.normal, "child", "main");
@@ -408,7 +427,6 @@ unittest
     g.reduce_boundary_flows();
     g.attribution.compute(g);
 
-    size_t gi = g.bus_list[].findFirst(gridb);
     size_t hi = g.bus_list[].findFirst(house);
     assert(g.attribution.buses[gi].local_fraction == 0);
     assert(absf(g.attribution.buses[hi].local_source_power - 500) <= 0.01f);
