@@ -248,23 +248,29 @@ protected:
 
     override int transmit(Packet* packet, MessageCallback, const(QueuePolicy)*)
     {
-        scope (exit) packet_free(packet);
         if (packet.type != PacketType.raw)
+        {
+            packet_free(packet);
             return -1;
-        const(ubyte)[] message = cast(ubyte[])packet.data();
+        }
 
         // bound the tx queue; unbounded growth during a link stall just delays failure detection
         if (_tx_queue_len >= max_tx_queue)
         {
             log.warning("tx queue full (", max_tx_queue, "); rejecting frame");
             add_tx_drop();
+            packet_free(packet);
             return -1;
         }
 
+        Packet* kept = packet_keep(packet, 0);
+        if (kept !is packet)
+            packet_free(packet);
+        if (!kept)
+            return -1;
         Message* msg = alloc_message();
         msg.queue_time = getTime();
-        msg.length = cast(ubyte)message.length;
-        msg.buffer[0 .. message.length] = message[];
+        msg.packet = kept;
         if (tx_ahead() >= _max_in_flight || !send_msg(msg))
         {
             if (!_tx_queue)
@@ -280,7 +286,7 @@ protected:
             ++_tx_queue_len;
         }
 
-        add_tx_frame(message.length);
+        add_tx_frame(kept.length);
         return 0;
     }
 
@@ -321,13 +327,12 @@ private:
         Message* next;
         MonoTime queue_time;
         MonoTime send_time;
+        Packet* packet;
         ubyte seq;
-        ubyte length;
         ubyte retries;
-        ubyte[ASH_MAX_MSG_LENGTH] buffer;
 
-        ubyte[] payload() pure nothrow @nogc
-            => buffer[0 .. length];
+        const(ubyte)[] payload() const nothrow @nogc
+            => cast(const(ubyte)[])packet.data;
     }
 
     ObjectRef!Stream _stream;
@@ -687,6 +692,8 @@ private:
 
     void free_message(Message* message)
     {
+        packet_free(message.packet);
+        message.packet = null;
         message.next = _free_list;
         _free_list = message;
     }
