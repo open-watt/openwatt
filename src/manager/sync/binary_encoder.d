@@ -935,7 +935,7 @@ nothrow @nogc:
             case Verb.val:
                 do
                 {
-                    r.varint();   // seq: the read a group answers; its samples merge like any others
+                    immutable bool live = r.varint() == 0;   // a read's answer carries its seq; a live feed none
                     SyncHandle h = r.varint();
                     r.varint();   // lost - informational, mirror ignores it (same as JSON)
                     size_t count = cast(size_t)r.varint();
@@ -947,7 +947,7 @@ nothrow @nogc:
                         Variant v = r.variant();
                         if (r.fail)
                             break;
-                        sync.inbound_val(peer, h, v, t_ms);
+                        sync.inbound_val(peer, h, v, t_ms, live);
                     }
                 }
                 while (r.remaining && !r.fail);

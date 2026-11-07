@@ -224,6 +224,7 @@ a netbooted image is bounded by RAM instead.
 | 2026-10-08 | ow/console-prints | ldc 1.43.0 | 2,647,864 | 186,266 | 4,190,208 | M0 packing D0 (1,009,089 flash, 88,144 ram); console tables and `/system/fs/read` print through the stream's pull |
 | 2026-10-10 | ow/http-respond | ldc 1.43.0 | 2,639,768 | 186,258 | 4,190,208 | M0 packing D0 (1,008,331 flash, 88,144 ram); console output and HTTP responses are producers the stream pulls |
 | 2026-11-01 | ow/tx-floor | ldc 1.43.0 | 2,652,920 | 186,266 | 4,190,208 | M0 packing D0 (1,013,283 flash, 88,168 ram); interfaces admit by class and invite waiting producers in turn |
+| 2026-11-08 | ow/sync-mirror-offline | ldc 1.43.0 | 2,659,848 | 186,242 | 4,190,208 | D0 1,016,257 flash, 88,128 ram; a mirror's status.online is its binding session's live vote: +896 M0, +332 D0 against #915 (605940284), no ram |
 
 ### BL618, `make PLATFORM=bl618 CONFIG=release`
 
