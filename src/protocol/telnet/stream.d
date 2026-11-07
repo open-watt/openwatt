@@ -215,6 +215,7 @@ protected:
         _client_state = 0;
         _client_state_req = 0;
         _tail.clear();
+        _skip_subnegotiation = false;
         return CompletionStatus.complete;
     }
 
@@ -252,11 +253,13 @@ private:
     Array!ubyte _tail;          // input not yet parsed: an incomplete sequence, or what arrived with no consumer
     bool _subscribed;
     bool _terminal_aware;
+    bool _skip_subnegotiation;
 
     // strips IAC sequences; commands update the TerminalChannel and set pending events
     void inner_rx(Stream, const(void)[] data, MonoTime rx_time)
     {
         enum RawBufLen = 512;
+        enum max_subnegotiation = 64;
         const(ubyte)[] input = cast(const(ubyte)[])data;
         while (input.length)
         {
@@ -286,7 +289,14 @@ private:
             size_t i = 0;
             parse_loop: for (; i < raw_len; ++i)
             {
-                if (rawbuf[i] == NVT.IAC)
+                if (_skip_subnegotiation)
+                {
+                    if (!find_subnegotiation_end(rawbuf[0 .. raw_len], i))
+                        break;
+                    _skip_subnegotiation = false;
+                    ++i;
+                }
+                else if (rawbuf[i] == NVT.IAC)
                 {
                     size_t iac_start = i;
 
@@ -328,21 +338,19 @@ private:
                             break;
 
                         case NVT.SB:
-                            size_t sub_start = i + 1;
-                            while (sub_start < raw_len - 1 && !(rawbuf[sub_start] == NVT.IAC && rawbuf[sub_start + 1] == NVT.SE))
-                                ++sub_start;
-                            if (sub_start >= raw_len - 1)
+                            size_t sub_start = ++i;
+                            if (!find_subnegotiation_end(rawbuf[0 .. raw_len], i))
                             {
-                                // Incomplete subnegotiation - save from IAC start
-                                i = iac_start;
+                                if (i - sub_start <= max_subnegotiation)
+                                    i = iac_start;
+                                else
+                                    _skip_subnegotiation = true;
                                 break parse_loop;
                             }
 
-                            const(ubyte)[] sub = rawbuf[i + 1 .. sub_start];
-                            i = sub_start + 1; // skip past IAC SE
-
-                            if (sub.length > 0)
-                                handle_subnegotiation(sub);
+                            if (i > sub_start && i - sub_start <= max_subnegotiation)
+                                handle_subnegotiation(rawbuf[sub_start .. i]);
+                            ++i;
                             break;
 
                         case NVT.WILL:
@@ -454,6 +462,22 @@ private:
             _inner = null;
         }
         restart_deferred();
+    }
+
+    // Leave i on the terminator's IAC or on a trailing IAC that needs its next byte.
+    static bool find_subnegotiation_end(const(ubyte)[] data, ref size_t i)
+    {
+        for (; i < data.length; ++i)
+        {
+            if (data[i] != NVT.IAC)
+                continue;
+            if (i + 1 == data.length)
+                return false;
+            if (data[i + 1] == NVT.SE)
+                return true;
+            ++i;
+        }
+        return false;
     }
 
     void handle_subnegotiation(const(ubyte)[] sub)
@@ -840,6 +864,29 @@ unittest
 
         transport.feed("more");
         assert(consumer.text[] == "hello worldmore");
+        consumer.text.clear();
+
+        transport.feed("\xFF\xFA\x1F\x00\x64");
+        transport.feed("\x00\x1E\xFF\xF0!");
+        assert(filter._terminal.width == 100 && filter._terminal.height == 30);
+        assert(consumer.text[] == "!");
+
+        char[3 + 100] unfinished = 'x';
+        unfinished[0 .. 3] = "\xFF\xFA\x1F";
+        transport.feed(unfinished[0 .. 40]);
+        assert(filter._tail.length == 40);
+        transport.feed(unfinished[40 .. $]);
+        assert(filter._tail.empty);
+        transport.feed("junk\xFF\xFF\xF0junk\xFF");
+        assert(filter._tail[] == cast(const(ubyte)[])"\xFF" && consumer.text[] == "!");
+        transport.feed("\xF0after");
+        assert(filter._tail.empty && consumer.text[] == "!after");
+
+        char[4 + 70 + 3] complete = 'x';
+        complete[0 .. 4] = "\xFF\xFA\x18\x00";
+        complete[$ - 3 .. $] = "\xFF\xF0?";
+        transport.feed(complete[]);
+        assert(filter._terminal.terminal_type.empty && consumer.text[] == "!after?");
         filter.release_rx_handler(&consumer.recv);
         transport.feed("later");
         assert(transport.rx_handler is null && filter._tail[] == cast(const(ubyte)[])"later");
