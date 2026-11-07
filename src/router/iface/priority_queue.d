@@ -108,7 +108,7 @@ nothrow @nogc:
         return null;
     }
 
-    int enqueue(Packet* packet, MessageCallback callback = null, const(QueuePolicy)* policy = null)
+    int enqueue(Packet* packet, MessageCallback callback = null, const(QueuePolicy)* policy = null, size_t headroom = packet_headroom)
     {
         PCP pcp = packet.pcp;
         bool dei = packet.dei;
@@ -120,7 +120,7 @@ nothrow @nogc:
             return -1;
         }
 
-        Packet* kept = packet_keep(packet);
+        Packet* kept = packet_keep(packet, headroom);
         if (!kept)
             return -1;
         QueuedFrame* frame = _pool.alloc();
