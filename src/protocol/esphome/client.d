@@ -292,9 +292,7 @@ private:
         {
             if (length == buffer.length)
             {
-                // a message longer than the buffer cannot be framed, and the stream has lost its place
-                _tail.clear();
-                restart();
+                reject_input();
                 return;
             }
             size_t take = input.length < buffer.length - length ? input.length : buffer.length - length;
@@ -321,13 +319,17 @@ private:
 
                     if (payload_len > frame.length - offset)
                         break;
-                    incoming_frame(msg_type, frame[offset .. offset + payload_len]);
+                    if (!incoming_frame(msg_type, frame[offset .. offset + payload_len]))
+                    {
+                        reject_input();
+                        return;
+                    }
                     offset += payload_len;
                 }
                 else
                 {
-                    // noise frame
-                    assert(false, "TODO");
+                    reject_input();
+                    return;
                 }
 
                 frame = frame[offset .. $];
@@ -340,7 +342,13 @@ private:
         _tail = buffer[0 .. length];
     }
 
-    void incoming_frame(uint msg_type, const(ubyte)[] frame)
+    void reject_input()
+    {
+        _tail.clear();
+        restart_deferred();
+    }
+
+    bool incoming_frame(uint msg_type, const(ubyte)[] frame)
     {
         last_contact_time = getTime();
 
@@ -353,7 +361,7 @@ private:
             case HelloResponse.id:
                 HelloResponse res;
                 if (proto_deserialise(frame, res) != frame.length)
-                    assert(false, "what here?");
+                    return false;
 
                 _major = res.api_version_major;
                 _minor = res.api_version_minor;
@@ -404,6 +412,7 @@ private:
                     sub(msg_type, frame);
                 break;
         }
+        return true;
     }
 
     void stream_state_handler(ActiveObject object, StateSignal signal)
@@ -457,3 +466,31 @@ ptrdiff_t take_var_int(const(ubyte)[] data, out uint value)
     return -1;
 }
 
+
+unittest
+{
+    static immutable ubyte[][] malformed = [
+        [1],
+        [0, 1, HelloResponse.id, 0],
+        [0, 2, HelloResponse.id, 0x08, 0x80],
+        [0, 2, HelloResponse.id, 0x1a, 0x7f],
+    ];
+    ESPHomeClient client = Collection!ESPHomeClient().create("esphome-malformed-test");
+    client._host = StringLit!"test.invalid";
+
+    foreach (frame; malformed)
+    {
+        client._stream = Collection!TCPStream().create("esphome-malformed-wire", ObjectFlags.disabled);
+        client._stream.subscribe(&client.stream_state_handler);
+        Collection!ESPHomeClient().update_all();
+        assert(client.status_message() == "Starting");
+        client._state = 1;
+        client.stream_rx(null, frame, MonoTime.init);
+        assert(client.status_message() == "Restarting");
+        assert(client._state == 1 && client._tail.empty);
+        Collection!ESPHomeClient().update_all();
+        Collection!Stream().update_all();
+    }
+    client.destroy();
+    Collection!ESPHomeClient().update_all();
+}

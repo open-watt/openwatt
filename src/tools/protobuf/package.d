@@ -128,7 +128,10 @@ ptrdiff_t proto_deserialise(T)(const(ubyte)[] buffer, out T msg) nothrow @nogc
     while (offset < buffer.length)
     {
         ulong tag;
-        offset += buffer[offset..$].get_varint(tag);
+        size_t tag_len = buffer[offset .. $].get_varint(tag);
+        if (!tag_len)
+            return -1;
+        offset += tag_len;
         ulong field_id = tag >> 3;
         if (field_id == 0 || field_id > max_field_id)
             return -1;
@@ -154,24 +157,33 @@ ptrdiff_t proto_deserialise(T)(const(ubyte)[] buffer, out T msg) nothrow @nogc
                     break member;
             }}
             default:
+                ulong len;
                 switch (tag & 7)
                 {
                     case WireType.varint:
-                        while (buffer[offset++] >= 0x80) {}
+                        ulong ignored;
+                        len = buffer[offset .. $].get_varint(ignored);
+                        if (!len)
+                            return -1;
                         break;
                     case WireType.fixed64:
-                        offset += 8;
+                        len = 8;
                         break;
                     case WireType.length_delimited:
-                        ulong len;
-                        offset += buffer[offset..$].get_varint(len) + len;
+                        size_t len_size = buffer[offset .. $].get_varint(len);
+                        if (!len_size)
+                            return -1;
+                        offset += len_size;
                         break;
                     case WireType.fixed32:
-                        offset += 4;
+                        len = 4;
                         break;
                     default:
                         return -1;
                 }
+                if (len > buffer.length - offset)
+                    return -1;
+                offset += cast(size_t)len;
                 break;
         }
     }
@@ -368,14 +380,22 @@ size_t encode_value(bool pack, ubyte ty, T)(ubyte[] buffer, auto ref const T val
 ptrdiff_t decode_value(bool pack, ubyte ty, T)(const(ubyte)[] buffer, ref T value) nothrow @nogc
 {
     import urt.endian;
+    static if (ty == WireType.fixed32 || ty == WireType.fixed64)
+        if (buffer.length < (ty == WireType.fixed32 ? 4 : 8))
+            return -1;
+
     static if ((ty & 7) == WireType.varint || ty == WireType.length_delimited)
     {
         ulong val;
         size_t offset = get_varint(buffer, val);
+        if (!offset)
+            return -1;
         static if (ty == WireType.length_delimited)
         {
+            if (val > buffer.length - offset)
+                return -1;
             const(ubyte)[] block = buffer[offset .. offset + cast(size_t)val];
-            offset += val;
+            offset += cast(size_t)val;
         }
     }
     else static if (is(T == float))
@@ -451,8 +471,8 @@ ptrdiff_t decode_value(bool pack, ubyte ty, T)(const(ubyte)[] buffer, ref T valu
     }
     else static if (is(T == struct))
     {
-        size_t sub_len = block.proto_deserialise(value);
-        debug assert(sub_len == val);
+        if (block.proto_deserialise(value) != block.length)
+            return -1;
     }
     else static if (!is(T == float) && !is(T == double))
         static assert(false, "Unsupported type: " ~ T.stringof);
@@ -485,19 +505,16 @@ size_t put_varint(ubyte[] buffer, ulong value) pure nothrow @nogc
 
 size_t get_varint(const(ubyte)[] buffer, out ulong i) pure nothrow @nogc
 {
-    i = buffer[0];
-    if ((i & 0x80) == 0)
-        return 1;
-    i &= 0x7F;
-    size_t offset = 1;
-    uint shift = 7;
-    while (true)
+    i = 0;
+    foreach (offset, b; buffer)
     {
-        i |= ulong(buffer[offset] & 0x7F) << shift;
-        if ((buffer[offset++] & 0x80) == 0)
-            return offset;
-        shift += 7;
+        if (offset == 9 && b > 1)
+            return 0;
+        i |= ulong(b & 0x7F) << (offset * 7);
+        if ((b & 0x80) == 0)
+            return offset + 1;
     }
+    return 0;
 }
 
 version (unittest)
