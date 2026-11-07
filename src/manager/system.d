@@ -22,6 +22,10 @@ import manager.console.session;
 import manager.console.function_command : TabComplete;
 import manager.log;
 
+import router.iface.packet : has_framing_diagnostics;
+static if (has_framing_diagnostics)
+    import router.iface.packet : packet_room_copies;
+
 nothrow @nogc:
 
 
@@ -201,6 +205,11 @@ void sysinfo(Session session, const(Variant)[] args)
                 session.write_line(i ? "          " : "Pages:    ", category == page_category_heap ? "heap" : tconcat(page_payload_size(category), "B"),
                                    ": ", s.pages_in_use, " (peak ", s.high_water, ", failed ", s.fail_count, ')');
             }
+        }
+        static if (has_framing_diagnostics)
+        {
+            if (uint copies = packet_room_copies())
+                session.write_line("Reframed: ", copies, " frames copied for want of head or tail room");
         }
         if (info.stack_size > 0)
             session.write_line("Stack:    ", info.stack_peak.format_bytes(), " / ", info.stack_size.format_bytes());

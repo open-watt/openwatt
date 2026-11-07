@@ -1,8 +1,10 @@
 module router.iface.packet;
 
 import urt.endian;
+import urt.log;
 import urt.mem;
 import urt.mem.pagepool;
+import urt.meta : AliasSeq;
 import urt.time;
 import urt.util : align_down;
 
@@ -453,6 +455,36 @@ static assert(StackPacket.packet.offsetof == Page.sizeof);
 
 enum ubyte packet_headroom = 128;
 
+debug enum bool has_framing_diagnostics = true;
+else enum bool has_framing_diagnostics = false;
+
+// release builds carry no site argument: FramingSiteArg and framing_site!name expand to nothing
+static if (has_framing_diagnostics)
+{
+    // a site that frames packets in place, and the frames it copied because their page lacked the room
+    struct FramingSite
+    {
+        string name;
+        uint copies;
+    }
+
+    alias FramingSiteArg = FramingSite*;
+
+    FramingSite* framing_site(string name)()
+    {
+        __gshared FramingSite site = FramingSite(name);
+        return &site;
+    }
+
+    uint packet_room_copies()
+        => _room_copies;
+}
+else
+{
+    alias FramingSiteArg = AliasSeq!();
+    alias framing_site(string name) = AliasSeq!();
+}
+
 // a reference of the caller's own to a packet it borrowed: a pool page is shared, a lent packet is copied
 Packet* packet_retain(const(Packet)* packet)
 {
@@ -463,32 +495,57 @@ Packet* packet_retain(const(Packet)* packet)
 }
 
 // a packet the caller may edit: itself unless its page is shared, else a copy reserving `reserve` in front; null, having freed it, if the copy fails
-Packet* packet_mutable(Packet* packet, size_t headroom = 0, size_t reserve = packet_headroom)
+Packet* packet_mutable(Packet* packet, size_t headroom = 0, size_t reserve = packet_headroom, FramingSiteArg site = null)
 {
     debug assert(headroom <= reserve && reserve <= packet_headroom);
-    if (page_unique(packet.page) ? packet.headroom >= headroom : page_foreign(packet.page) && !headroom)
+    bool unique = page_unique(packet.page);
+    size_t had;
+    if (unique)
+    {
+        had = packet.headroom;
+        if (had >= headroom)
+            return packet;
+    }
+    else if (page_foreign(packet.page) && !headroom)
         return packet;
     Packet* copy = packet_copy(packet, reserve);
     packet_free(packet);
+    static if (has_framing_diagnostics)
+    {
+        if (copy && unique && site)
+            room_copied(site, headroom, had, 0, 0);
+    }
     return copy;
 }
 
 // the packet's bytes as a page with head and tail bytes of room around them for a frame; consumes the packet, null if a copy fails
-Page* packet_page(Packet* packet, size_t head, size_t tail)
+Page* packet_page(Packet* packet, size_t head, size_t tail, FramingSiteArg site = null)
 {
     Page* page = packet.page;
     size_t start = packet._ptr - cast(void*)page;
     size_t length = head + packet._length + tail;
-    if (page_unique(page) && packet.headroom >= head && page.capacity >= start + packet._length + tail)
+    bool unique = page_unique(page);
+    size_t had_head, had_tail;
+    if (unique)
     {
-        page.offset = cast(ushort)(start - head);
-        page.length = cast(ushort)length;
-        return page;
+        had_head = packet.headroom;
+        had_tail = page.capacity - start - packet._length;
+        if (had_head >= head && had_tail >= tail)
+        {
+            page.offset = cast(ushort)(start - head);
+            page.length = cast(ushort)length;
+            return page;
+        }
     }
     Page* copy = page_alloc(length);
     if (copy)
         copy.data[head .. head + packet._length] = packet.data[];
     packet_free(packet);
+    static if (has_framing_diagnostics)
+    {
+        if (copy && unique && site)
+            room_copied(site, head, had_head, tail, had_tail);
+    }
     return copy;
 }
 
@@ -711,6 +768,20 @@ ref const(PacketCodec) packet_codec(PacketType type) pure
     return (cast(FP)&impl)(type);
 }
 
+static if (has_framing_diagnostics)
+{
+    __gshared uint _room_copies;
+
+    // warns on a site's 1st, 2nd, 4th, 8th... copy
+    void room_copied(FramingSite* site, size_t head, size_t had_head, size_t tail, size_t had_tail)
+    {
+        ++_room_copies;
+        uint n = ++site.copies;
+        if ((n & (n - 1)) == 0)
+            log_warning("packet", site.name, " copied a frame for want of room: head ", had_head, " of ", head, ", tail ", had_tail, " of ", tail, " (", n, n == 1 ? " copy)" : " copies)");
+    }
+}
+
 
 unittest
 {
@@ -775,11 +846,22 @@ unittest
     Packet* framed = alloc_packet!RawFrame(lent_bytes[]);
     Page* own_page = framed.page;
     const(void)* own_bytes = framed.data.ptr;
-    Page* in_place = packet_page(framed, 1, 2);
+    Page* in_place = packet_page(framed, 1, 2, framing_site!"packet-test");
     assert(in_place is own_page && in_place.data.ptr is own_bytes - 1 && in_place.length == 7, "a unique page frames in place");
     framed = alloc_packet!RawFrame(lent_bytes[]);
-    Page* copied = packet_page(packet_retain(framed), 1, 2);
+    Page* copied = packet_page(packet_retain(framed), 1, 2, framing_site!"packet-test");
     assert(copied !is framed.page && page_unique(framed.page) && (cast(ubyte[])copied.data)[1 .. 5] == lent_bytes[], "a shared page is copied");
+    static if (has_framing_diagnostics)
+    {
+        assert(framing_site!"packet-test".copies == 0, "copying a shared page is not a want of room");
+        uint total = packet_room_copies();
+    }
+    Packet* bare = alloc_packet!RawFrame(lent_bytes[], 0);
+    Page* reframed = packet_page(bare, 7, 0, framing_site!"packet-test");
+    assert(reframed && reframed.length == 11, "a head miss copies despite spare tail");
+    static if (has_framing_diagnostics)
+        assert(framing_site!"packet-test".copies == 1 && packet_room_copies() == total + 1);
+    page_free(reframed);
     page_free(in_place);
     page_free(copied);
     packet_free(framed);
