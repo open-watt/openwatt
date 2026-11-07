@@ -103,6 +103,22 @@ nothrow @nogc:
     // ack; zero never probes, and a dead or rebooted peer otherwise goes unnoticed while the session is idle
     Duration idle_probe = 15.seconds;
 
+    // the handler sees closed; without notify the peer hears nothing and its handshake backoff paces it
+    void close_session(ref const InetAddress peer, bool notify = true)
+    {
+        enter();
+        if (RDPSession* s = find(peer))
+            if (s._phase != RDPSession.Phase.closed)
+                s.fail_session(now_time(), notify);
+        leave();
+    }
+
+    ushort message_limit(ref const InetAddress peer) const
+    {
+        const(RDPSession)* s = find(peer);
+        return s ? s.limit : rdp_max_message;
+    }
+
     // takes the message; its PCP is the lane
     int send(Packet* message, InetAddress dst, MessageCallback callback = null)
     {
@@ -125,7 +141,7 @@ nothrow @nogc:
         ubyte floor = s.queue_floor();
         if (floor > s._floor)
             s._floor = floor;
-        s.pump(now_time());
+        s.pump(now_time(), false, true);
         return tag;
     }
 
@@ -165,6 +181,23 @@ nothrow @nogc:
         leave();
     }
 
+    version (unittest)
+    {
+        void delegate(RDPEndpoint*, const(ubyte)[], ref const InetAddress) nothrow @nogc _test_wire;
+        bool _test_blocked;
+
+        void test_deliver(const(void)[] data, ref UDPReceiveInfo info)
+            => on_datagram(null, data, info);
+
+        // the next pass, for tests without an Application
+        void test_next_pass()
+        {
+            foreach (s; _sessions[])
+                if (s._writable_due)
+                    s.announce_writable(MonoTime());
+        }
+    }
+
 private:
     UDPEndpoint* _udp;
     RDPRecvHandler _on_recv;
@@ -181,9 +214,7 @@ private:
 
     version (unittest)
     {
-        void delegate(RDPEndpoint*, const(ubyte)[], ref const InetAddress) nothrow @nogc _test_wire;
         ushort _test_room;
-        bool _test_blocked;
         PCP _test_pcp;
     }
 
@@ -564,10 +595,13 @@ nothrow @nogc:
     ubyte _floor;       // the highest floor not yet announced as fallen
     bool _starved;
     bool _turning;
+    bool _writable_due;
+    bool _receiving;
 
     ~this()
     {
         disarm();
+        cancel_writable();
         _waiter.cancel();
     }
 
@@ -604,6 +638,7 @@ nothrow @nogc:
     void teardown(MessageState reason)
     {
         disarm();
+        cancel_writable();
         _waiter.cancel();
         _starved = false;
         acked_out();
@@ -612,7 +647,8 @@ nothrow @nogc:
             packet_free(f.packet);
             f = Frame.init;
         }
-        release_held();
+        if (!_receiving)
+            release_held();
         _rx_mask = 0;
         _floor = 0;
         Array!TxItem queue = _queue.move;
@@ -690,7 +726,8 @@ nothrow @nogc:
         }
     }
 
-    bool pump(MonoTime now, bool once = false)
+    // a writer's own send never hears writable inside it; the fall is announced on the next pass
+    bool pump(MonoTime now, bool once = false, bool sending = false)
     {
         bool outer = !_pumping;
         _pumping = true;
@@ -705,9 +742,41 @@ nothrow @nogc:
         if (floor < _floor)
         {
             _floor = floor;
-            _ep.event(_peer, RDPEvent.writable);
+            if (sending)
+            {
+                if (!_writable_due)
+                {
+                    _writable_due = true;
+                    if (g_app)
+                        g_app.schedule(getTime(), &announce_writable);
+                }
+            }
+            else
+            {
+                cancel_writable();
+                _ep.event(_peer, RDPEvent.writable);
+            }
         }
         return cut;
+    }
+
+    void announce_writable(MonoTime)
+    {
+        _writable_due = false;
+        if (_phase != Phase.established)
+            return;
+        _ep.enter();
+        _ep.event(_peer, RDPEvent.writable);
+        _ep.leave();
+    }
+
+    void cancel_writable()
+    {
+        if (!_writable_due)
+            return;
+        _writable_due = false;
+        if (g_app)
+            g_app.cancel(&announce_writable);
     }
 
     // the egress's turn: one frame, or the ack it is owed when there is none to carry it
@@ -1214,7 +1283,8 @@ nothrow @nogc:
             begin();
         }
         establish(isn, nonce, peer_max, now);
-        if (!is_ack)
+        // the established handler may have refused the session
+        if (!is_ack && _phase == Phase.established && !_ep._closing)
             send_control(type_open_ack, now);
     }
 
@@ -1231,7 +1301,8 @@ nothrow @nogc:
         _phase = Phase.established;
         _quiet_since = now;
         _ep.event(_peer, RDPEvent.established);
-        pump(now);
+        if (_phase == Phase.established)
+            pump(now);
     }
 
     // a held endpoint reopens at once; any other session is swept when the endpoint's handlers return
@@ -1246,7 +1317,18 @@ nothrow @nogc:
             start_open(now);
     }
 
+    // a handler may retire the session mid-delivery: what it reads stays until delivery unwinds, and the
+    // retirement is the end, not a framing error
     void on_data(ushort seq, const(ubyte)[] body, MonoTime now)
+    {
+        _receiving = true;
+        receive(seq, body, now);
+        _receiving = false;
+        if (_phase != Phase.established)
+            release_held();
+    }
+
+    void receive(ushort seq, const(ubyte)[] body, MonoTime now)
     {
         uint d = cast(ushort)(seq - _rx_next);
         if (d >= window_max || (_rx_mask & (1 << d)))
@@ -1256,7 +1338,9 @@ nothrow @nogc:
         {
             // every earlier frame is consumed, so everything in this one is ready
             scan(body, now);
-            if (_phase != Phase.established || !drained(body))
+            if (_phase != Phase.established)
+                return;
+            if (!drained(body))
                 return cast(void)protocol_error(now);
             _rx_mask >>= 1;
             ++_rx_next;
@@ -1444,6 +1528,8 @@ nothrow @nogc:
 
 unittest
 {
+    import urt.mem.page : page_free_generation;
+
     struct Wire
     {
     nothrow @nogc:
@@ -1535,8 +1621,11 @@ unittest
         uint bad;
         ubyte[lanes] next;
         Array!ushort order;
+        bool close_on_message;
+        bool held_kept;
+        uint freed_at_close;
 
-        void on_message(RDPEndpoint*, const(void)[] message, PCP lane, ref UDPReceiveInfo) nothrow @nogc
+        void on_message(RDPEndpoint* ep, const(void)[] message, PCP lane, ref UDPReceiveInfo info) nothrow @nogc
         {
             const(ubyte)[] bytes = cast(const(ubyte)[])message;
             ++count;
@@ -1546,6 +1635,13 @@ unittest
                 if (b != cast(ubyte)(bytes[0] * 7 + i))
                     ++bad;
             order ~= cast(ushort)(lane << 8 | bytes[0]);
+            if (!close_on_message)
+                return;
+            ep.close_session(info.source);
+            if (RDPSession* s = ep.find(info.source))
+                foreach (h; s._held)
+                    held_kept |= h !is null;
+            freed_at_close = page_free_generation();
         }
     }
 
@@ -1555,8 +1651,9 @@ unittest
         uint closed;
         uint writable;
         bool close_on_writable;
+        bool refuse;
 
-        void on_event(RDPEndpoint* ep, ref const InetAddress, RDPEvent e) nothrow @nogc
+        void on_event(RDPEndpoint* ep, ref const InetAddress peer, RDPEvent e) nothrow @nogc
         {
             final switch (e)
             {
@@ -1566,6 +1663,8 @@ unittest
             }
             if (e == RDPEvent.writable && close_on_writable)
                 ep.close();
+            if (e == RDPEvent.established && refuse)
+                ep.close_session(peer, false);
         }
     }
 
@@ -1752,7 +1851,8 @@ unittest
         assert(a.send(make_message(seqs[PCP.ca]++, 20, PCP.ca), wire.addr_b) > 0);
     assert(sa._queue.length == max_queue);
     a.abort(head);
-    assert(sa._queue.length == max_queue - 1 && ev_a.writable == writable + 4, "the room the chain left is announced");
+    a.test_next_pass();
+    assert(sa._queue.length == max_queue - 1 && ev_a.writable > writable && !sa._writable_due, "the room the chain left is announced");
     a._test_blocked = false;
     sa.pump(g_test_time);
     wire.tick(8);
@@ -1930,6 +2030,61 @@ unittest
         w.loss_percent = 100;
         w.tick(200, 250.msecs);
         assert(ex.closed == 2, "a vanished peer fails the session once the probe's retries run out");
+        w.a.close();
+        w.b.close();
+    }
+
+    // a listener that refuses a session in its established handler sends no ack and no reset; the opener retries
+    {
+        Wire w;
+        w.addr_a = wire.addr_a;
+        w.addr_b = wire.addr_b;
+        Sink sk, unused;
+        Events ex, ey;
+        ey.refuse = true;
+        w.b = make_endpoint(w, sk, ey, null);
+        w.a = make_endpoint(w, unused, ex, &w.addr_b);
+        w.flush(w.b);
+        assert(ey.established == 1 && ey.closed == 1 && w.to_a.empty, "refused without a word");
+        assert(!w.a.established(w.addr_b) && ex.closed == 0);
+        ey.refuse = false;
+        w.tick(40, 100.msecs);
+        assert(w.a.established(w.addr_b) && w.b.established(w.addr_a), "the opener's retry is taken once accepted");
+        w.a.close();
+        w.b.close();
+    }
+
+    // a handler that retires the session while a message is delivered, in order or from a held frame, ends it once
+    foreach (held; 0 .. 2)
+    {
+        Wire w;
+        w.addr_a = wire.addr_a;
+        w.addr_b = wire.addr_b;
+        Sink sk, unused;
+        Events ex, ey;
+        w.b = make_endpoint(w, sk, ey, null);
+        w.a = make_endpoint(w, unused, ex, &w.addr_b);
+        w.pump();
+        assert(w.a.established(w.addr_b) && w.b.established(w.addr_a));
+        sk.close_on_message = true;
+        w.a._test_room = min_frame + 20;
+        // be goes out at once; vo follows in the second datagram, and its own lane makes it ready while the first is missing
+        assert(w.a.send(make_message(0, 20, PCP.be), w.addr_b) > 0);
+        assert(w.a.send(make_message(0, 20, PCP.vo), w.addr_b) > 0);
+        assert(w.to_b.length >= 2);
+        w.to_a.clear();
+        Wire.Datagram first = w.to_b[0].move;
+        Wire.Datagram second = w.to_b[1].move;
+        w.to_b.clear();
+        w.deliver(held ? second : first, w.b);
+        assert(sk.count == 1 && sk.bad == 0 && ey.closed == 1 && !w.b.established(w.addr_a), "retired once, the rest dropped");
+        size_t resets;
+        foreach (ref d; w.to_a[])
+            if (d.bytes.length && d.bytes[0] >> 5 == type_reset)
+                ++resets;
+        assert(resets == 1, "the delivery that retired the session raised one reset, no framing error after it");
+        if (held)
+            assert(sk.held_kept && page_free_generation() != sk.freed_at_close, "the held page outlives the callback, and goes when delivery unwinds");
         w.a.close();
         w.b.close();
     }

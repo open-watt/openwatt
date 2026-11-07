@@ -25,24 +25,29 @@ command named here.
 ## Peers and transports
 
 A session is a `/sync/peer`. It binds to a link one of two ways, the last set winning:
-`transport=<interface>` takes any interface delivering raw frames (a WebSocket, a UDP interface);
-`remote=<address>:<port>` (`ip:port`, `[ipv6]:port` or `[mac]:port`, port required) opens a
-connected UDP endpoint the peer owns. `encoder=json|binary` selects the wire encoding, and
+`transport=<interface>` takes an interface that delivers raw frames reliably and in order (a
+WebSocket, `/interface/xram`, a `reliable=yes` UDP interface), and a peer on any other interface
+fails to start; `remote=<address>:<port>` (`ip:port`, `[ipv6]:port` or `[mac]:port`, port required)
+opens an RDP session the peer owns. `encoder=json|binary` selects the wire encoding, and
 `time-authority=yes` designates the remote as this node's clock source by hand.
 
 A session runs while its transport's link is up: a link that drops restarts it, and the next
 session opens when the link returns. Frames that arrive between sessions wait for the next one's
 `hello`, so a remote that speaks first loses nothing.
 
-Listeners spawn peers. `/sync/udp-server` owns one UDP endpoint per selected local endpoint and
-spawns a dynamic peer for the first datagram from each unknown `(local endpoint, remote endpoint)`
-pair; each spawned peer replies through the endpoint that received it, several peers share one
-socket, and a source that goes quiet is swept after `timeout=` (default 5m) since datagrams carry
-no death signal. `/sync/ws-server` binds a `uri=` on an HTTP server and spawns one peer per accepted
-WebSocket, destroyed when the socket closes. Every discovery domain owns a dynamic, temporary UDP
-server as its exclusive child, fed the session frames the domain demultiplexes from its own
-sockets, so discovery and inbound sync share the exact endpoints. Spawned peers are `dynamic`
-instances of `/sync/peer`, named after the remote node once its `hello` identifies it.
+Listeners spawn peers. `/sync/udp-server` owns one listening RDP endpoint per selected local
+endpoint and spawns a dynamic peer for each session a remote opens; the peer is destroyed when its
+session closes, which an idle session's probe detects when the remote vanishes. `/sync/ws-server` binds a
+`uri=` on an HTTP server and spawns one peer per accepted WebSocket, destroyed when the socket
+closes. Every discovery domain owns a dynamic, temporary UDP server as its exclusive child, which
+listens on the domain's `sync-port` (default 4827) at its addresses and interfaces only while this
+node is an authority; announcements keep their own socket on the discovery port (4826) and carry
+the sync port while the listener is open, so a member dials the beacon's address on the port it
+announced, and a beacon without one is not dialable. A refused session hears nothing, and the
+opener's handshake backoff paces its retries. Spawned peers are
+`dynamic` instances of `/sync/peer`, named after the remote node once its `hello` identifies it.
+Builds without RDP (`RDP=0`) have no `remote=`, no UDP server and no dialling
+member; they sync over WebSocket and shared memory.
 
 Two encoders share one verb space. JSON is the browser-facing form (`ws-server` defaults to it);
 binary is the compact form (`/sync/peer` and `udp-server` default to it), packing many handles per
@@ -64,8 +69,8 @@ segment, whichever is smaller, and closes before any other frame, so a value nev
 frame that introduced or unbound its handle. A bundle the transport refuses is kept and sent first
 once there is room.
 `max_frame` is the largest message the sender takes and `segment` the largest frame it takes in one
-packet: its transport's `actual-mtu` less the carrier (a UDP endpoint uses the datagram that fits a
-1500-byte link without IP fragmentation) and less the sublayer header where the sublayer is armed.
+message: its transport's `actual-mtu`, or over an RDP session the session's message limit (at most
+1200 bytes).
 `max_frame` is the receiver's reassembly budget, 64 KiB (8 KiB on tiny targets) and never less than
 its `segment`. Each side sends no frame larger than the smaller of its own segment and the remote's
 `segment`. A hello
@@ -126,8 +131,8 @@ descendants) arms it, and `unsub` disarms it.
 | `enum_req` / `enum` | a property's enum dictionary, on request |
 
 A `bind` introduces the object it cites, so a client can never bind something it was not told
-about. Objects are announced in ascending handle order over the in-order control plane, which the
-reliability sublayer relies on (below). Peer-contributed objects are served to peers other than
+about. Objects are announced in ascending handle order over the in-order control plane.
+Peer-contributed objects are served to peers other than
 their contributor, so a hub fans out; the topology this defends is a star, not an arbitrary graph.
 
 ## The model plane
@@ -263,51 +268,17 @@ timestamp the subordinate collects until the next push. The authority is either 
 | `logs` | `log_sub`, `log` |
 | `time` | `time_req`, `time_resp`, `time_push` |
 
-## The reliability sublayer
+## Sessions over RDP
 
-A session on a link that does not advertise both `reliable` and `ordered` (`InterfaceCaps`) arms a
-sublayer on the peer. Both ends decide from their own link, so arming is symmetric by
-construction; WebSocket, CPC and shared memory skip it, UDP always arms it. Reliability state is
-per remote, which is why it lives on the peer and not the transport: on a shared multi-drop link
-only the peer knows its remote.
-
-Armed, every frame carries `[src_session:4][dst_session:4][kind:1]`. Two planes ride it:
-
-- **Control** (registry, bind, create/destroy, set/reset, cmd/result, subscriptions, type/add,
-  res/err, claim, time_push) adds `[seq][ack]`, is retransmitted on timeout (250ms doubling, 8
-  tries, then the session restarts) until the piggybacked cumulative ack covers it, and delivers
-  strictly in order through a small reorder hold. The window is 64 frames, with 16 held back from
-  bulk walks so the session's other control frames always find room.
-- **Data** (`val`, `log`) is reliable but lazy: no retransmit timer and no urgency, but nothing is
-  willingly lost. Each queue has its own id space and a backlog (32 frames, and 1 KiB or two
-  segments, whichever is larger); every data frame refolds the oldest unacked records one segment
-  holds, and the receiver's per-queue watermark dedups replays while keeping application in order.
-  A newly queued record goes out at once when it fits behind the backlog's head, and otherwise
-  when an ack frees the segment. Bulk producers (a feed catching up) wait for room for one more
-  segment rather than evict. A record the receiver cannot apply yet, a `val` racing its
-  `add` through the control plane, is left unacked so the refold resupplies it until the `add`
-  lands; because handles are announced ascending over the in-order control plane, a `val` citing
-  a handle below the announced high-water mark that still does not resolve is dead and skipped as
-  declared loss rather than stalling the queue. A bare ack carrying every watermark goes out on the
-  next tick when no reverse traffic piggybacks it (300ms flush).
-
-Bounded retention means eviction is possible, and eviction breaks the catch-up promise, so it is
-declared, not silent: the queue's epoch bumps once per repair cycle, acks are epoch-qualified, and
-the receiver re-bases its watermark under a newer epoch's refold. A bump is durable, announced by
-an empty frame until acked, so however long a partition lasts the epoch stays within one of the
-receiver. Once the cycle closes the gap is repaired above the sublayer: a `val` bump rewinds every
-armed held node to its latest record, so the mirror converges and only history stays lost, and a
-`log` bump emits a lost-lines marker.
-
-Session ids echo rather than "new id wins": a frame is honoured only when its `dst` matches the
-receiver's live session, so stragglers from a dead session can neither deliver nor ack. Adopting a
-genuinely new `src` restarts the peer, since the remote rebooted and the whole session space must
-rebuild, and the freshly restarted side re-adopts from zero without restarting again, so mutual
-restart cannot ping-pong. A member that re-dials is recognised by node-id at `hello`, and the older
-dynamic peer is disabled rather than accumulating a session per source address.
-
-Control transmit is accepted-means-enqueued: a control frame is only lost if the peer is genuinely
-dead, at which point the session restarts and resyncs from `hello`.
+A `remote=` peer, a UDP server's peers and a dialling member each hold an RDP session
+([router/iface/rdp.d](../src/router/iface/rdp.d)): messages up to the session's limit, delivered
+whole and in order per lane, repaired by RDP. Control and values share one lane (PCP `ca`), so a
+`val` never overtakes the `add` that introduced its handle; logs take a bulk lane (PCP `bk`) of
+their own. A producer sends while the session admits bulk, which stops at half its queue, so control
+frames always find room above it; the session's room re-invites the producer. A refused control
+frame restarts the session, and a refused value or log is backpressure its producer keeps. A session
+that closes restarts its peer, and a remote that reboots opens a new session, which a server answers
+with a new peer.
 
 ## The link contract
 
@@ -317,18 +288,15 @@ never sees the link. A link adapter provides:
 1. **Frame delimiting.** One protocol frame per packet. Datagrams get this free; byte streams need
    framing.
 2. **Integrity.** Corrupt frames are dropped at the link, never delivered.
-3. **Ordered, reliable delivery for the control plane**, or an honest `InterfaceCaps` so the peer
-   supplies it.
-4. **Best effort is acceptable for the data plane.** Lost values self-heal: latest-value elements
-   on the next update, history by backfill from the series cursor. Retransmitting stale telemetry
-   is worse than re-reading it.
-5. **MTU**: the transport's `actual-mtu`, from which `hello` derives `segment`.
-6. **Channels**, where a link carries more than sync: datagram links use distinct ports; point
+3. **Ordered, reliable delivery**, advertised as `reliable` and `ordered` in `InterfaceCaps`. Sync
+   supplies none of its own; a link without it is reached through an RDP session (`remote=`).
+4. **MTU**: the transport's `actual-mtu`, from which `hello` derives `segment`.
+5. **Channels**, where a link carries more than sync: datagram links use distinct ports; point
    streams will use CPC endpoints; RS485 will use an envelope channel byte.
 
 | link | framing | integrity | reliability | status |
 | --- | --- | --- | --- | --- |
-| UDP unicast (IP or bare MAC) | datagram | UDP checksum | sublayer above | built |
+| UDP unicast (IP or bare MAC) | datagram | UDP checksum | RDP session | built |
 | WebSocket | message | TCP | inherent | built |
 | shared-memory ring (BL808 M0/D0) | frame per mailbox announcement (`/interface/xram`) | memory | inherent | built |
 | UART / RS232 / SPI point link | CPC | CPC CRC | CPC retransmit | designed |
@@ -370,8 +338,7 @@ Settled design that is not built, tracked in [TODO.md](../TODO.md) under *Sync a
   as the websocket re-invites as its queue drains. Admission is the transport's answer about its own
   queue, framing included, so the producer keeps no byte account that could drift from it. The
   unit of suspension is one frame: a feed or a read parks between frames and resumes at the
-  record it stopped on, and template refreshes ride the same feed. Where the reliability
-  sublayer is armed the retransmit window is the brake and an ack re-arms the walk.
+  record it stopped on, and template refreshes ride the same feed.
 - **The designed transports** in the table above, and `stream=` on `/sync/peer` materialising the
   CPC stack over a byte stream. RS485 is settled: the envelope is a valid Modbus RTU frame with a
   user-space function code so coexistence with foreign slaves is by construction, the master's poll

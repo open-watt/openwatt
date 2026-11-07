@@ -1033,8 +1033,8 @@ A WLAN interface is one station association bound to a WiFi radio.
 A raw-frame link to the other core of a BL808, over a pair of frame rings in the cores' shared XRAM
 announced through the inter-core mailbox. Each core adds one per channel. The link is up while both
 ends are, and goes down and back up when the other end restarts. A frame the ring cannot take is
-refused, and one it takes is delivered in order and never lost, so sync runs over it without its
-reliability sublayer; sync paces its bulk traffic so the ring keeps room for its other frames. A
+refused, and one it takes is delivered in order and never lost, so sync runs over it directly;
+sync paces its bulk traffic so the ring keeps room for its other frames. A
 frame is at most a quarter of a ring, so three are in flight even across its wrap: 1856 bytes with
 one channel, reported as its `l2mtu`.
 
@@ -1838,25 +1838,25 @@ Stopping a charger requires the vehicle-side control path.
 
 ### `/sync/udp-server`
 
-A datagram sync listener owns one UDP endpoint per selected local endpoint. It
-spawns a dynamic `/sync/peer` for the first datagram from each unknown
-`(local endpoint, remote endpoint)` pair, and each peer replies through the
-endpoint that received it. Datagram links carry no death signal, so a peer whose
-source goes quiet is swept after the idle timeout and a reappearing source
-simply spawns afresh.
+A sync listener owns one RDP endpoint per selected local endpoint. It spawns a
+dynamic `/sync/peer` for each RDP session a remote opens, and destroys it when
+the session closes; an idle session probes its peer, so one that vanishes closes
+it. A remote that
+restarts opens a new session and gets a new peer. Builds without RDP (`RDP=0`)
+have no UDP server.
 
 Every UDP discovery domain creates one dynamic, temporary server as its
-exclusive child. That child uses the discovery domain's endpoints directly
-and has no independent endpoint configuration. Instances added explicitly
-serve hand-wired datagram sync and always own their sockets.
+exclusive child. That child listens on the domain's `sync-port` at its `bind`
+addresses and `interface`s only while this node is an authority, and has no
+independent configuration. Instances added explicitly serve hand-wired sync
+and own their sockets.
 
 | Property | Values | Default | Description |
 | --- | --- | --- | --- |
 | `bind` | endpoint list | empty | Exact local endpoints; an omitted port uses `port`. |
 | `interface` | interface list | empty | Bind AF_ETHERNET and every configured IP endpoint on these interfaces. |
-| `port` | `1` to `65535` | `4826` | Port used by named interfaces and bind entries that omit one. |
+| `port` | `1` to `65535` | `4827` | Port used by named interfaces and bind entries that omit one. |
 | `encoder` | `json`, `binary` | `binary` | Encoding for spawned peers. |
-| `timeout` | duration | `5min` | Idle time after which a silent peer is swept. |
 
 At least one of `bind` or `interface` is required for an explicit server. The
 server is Running while at least one local endpoint is open; other configured
@@ -1864,14 +1864,15 @@ endpoints can appear or disappear independently.
 
 ### `/sync/peer`
 
-`transport` binds a peer to an existing interface. Alternatively, `remote`
-opens a connected UDP endpoint owned by the peer. The last of `transport` and
+`transport` binds a peer to an existing interface that delivers frames reliably
+and in order; a peer on any other interface fails to start. Alternatively,
+`remote` opens an RDP session owned by the peer. The last of `transport` and
 `remote` set wins.
 
 | Property | Values | Default | Description |
 | --- | --- | --- | --- |
-| `transport` | interface | none | An interface delivering raw frames (a WebSocket, a UDP interface). |
-| `remote` | `address:port`, `[ipv6]:port`, `[mac]:port` | none | Remote UDP peer. The address and port are both required. |
+| `transport` | interface | none | A reliable, ordered interface delivering raw frames (a WebSocket, `/interface/xram`, a `reliable=yes` UDP interface). |
+| `remote` | `address:port`, `[ipv6]:port`, `[mac]:port` | none | Remote RDP peer, port 4827 for another node's server. The address and port are both required. Needs RDP in the build. |
 | `encoder` | `json`, `binary` | `binary` | Wire encoding for this session. |
 | `time-authority` | `yes`/`no` | `no` | Take this peer as the local clock source. A peering claim sets it on the member for its first claimant. |
 | `claim` | `yes`/`no` | `no` | Claim the remote over this session as the authority of a statically wired pair, whatever this node's own peering role. The remote must be a peering `member`. |
@@ -1904,9 +1905,10 @@ See [SYNC.md](SYNC.md) for the channel these ride.
 
 A discovery domain beacons this node's peering identity (node-id, name, role,
 cluster, claim state) from each address it binds, feeds received beacons into
-the neighbour table, and creates one dynamic sync server over the same
-endpoints. Domains are the opt-in: no domain configured, no beacons or inbound
-sync accepted on that segment.
+the neighbour table, and creates one dynamic sync server on `sync-port` at the
+same addresses and interfaces. Beacons carry that port while the server takes
+sessions, and members dial it. Domains are the opt-in: no domain configured, no
+beacons or inbound sync accepted on that segment.
 
 ESP provisioning defaults create a discovery domain on the setup AP and set
 `/sync/peering/set role=member`. Loading a `startup.conf` replaces those defaults;
@@ -1929,7 +1931,8 @@ disappear independently.
 | --- | --- | --- | --- |
 | `bind` | endpoint list | empty | Exact local endpoints; an omitted port uses `port`. |
 | `interface` | interface list | empty | Bind AF_ETHERNET and every configured IPv4 endpoint on these interfaces. |
-| `port` | `1` to `65535` | `4826` | Peer service port used by named interfaces and bind entries that omit one. Discovery and inbound sync share this socket. |
+| `port` | `1` to `65535` | `4826` | Discovery port used by named interfaces and bind entries that omit one. |
+| `sync-port` | `1` to `65535` | `4827` | Port the domain's sync server listens on and beacons announce. Must differ from `port` and from every explicit `bind` port. Needs RDP in the build. |
 | `multicast` | `true` or `false` | `true` | Use `239.255.79.87` for IPv4 discovery. False uses directed or limited broadcast. |
 | `interval` | duration | `30s` | Beacon cadence. |
 

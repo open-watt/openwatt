@@ -82,7 +82,6 @@ HTTP_FILESERVER ?= 1
 IPV6 ?= 1
 ifeq ($(TINY),1)
   GATEWAY ?= 0
-  RDP ?= 0
 endif
 GATEWAY ?= 1
 ifneq ($(filter windows linux,$(OS))$(filter unittest,$(CONFIG)),)
@@ -135,7 +134,7 @@ endif
 ifeq ($(RDP),1)
     FEATURE_DFLAGS += $(VERSION_FLAG)HasRDP
 else
-    FEATURE_EXCLUDES += router/iface/rdp.d
+    FEATURE_EXCLUDES += router/iface/rdp.d manager/sync/udp_server.d
 endif
 ifeq ($(SFP),1)
     FEATURE_DFLAGS += $(VERSION_FLAG)HasSFP
