@@ -480,8 +480,21 @@ private:
         return false;
     }
 
-    void handle_subnegotiation(const(ubyte)[] sub)
+    void handle_subnegotiation(ubyte[] sub)
     {
+        size_t i = 1;
+        while (i < sub.length && sub[i] != NVT.IAC)
+            ++i;
+        size_t length = i;
+        for (; i < sub.length; ++i)
+        {
+            ubyte b = sub[i];
+            if (b == NVT.IAC && (++i == sub.length || sub[i] != NVT.IAC))
+                return;
+            sub[length++] = b;
+        }
+        sub = sub[0 .. length];
+
         switch (sub[0])
         {
             case TelnetOptions.TERMINAL_TYPE:
@@ -906,7 +919,13 @@ unittest
             }
             override size_t tx_request() const
                 => room;
+            override ptrdiff_t transmit(const(void)[] data)
+            {
+                output ~= cast(const(ubyte)[])data;
+                return data.length;
+            }
             size_t room;
+            Array!ubyte output;
         }
 
         Line line = Collection!Line().create("telnet-test-line");
@@ -935,5 +954,32 @@ unittest
             page_free(page);
         assert(filter.tx_queued == 0 && filter.tx_request == 1000);
         line.release_tx_handler(&filter.provide_tx_page);
+
+        line.output.clear();
+        filter._terminal.width = 255;
+        filter._terminal.height = 24;
+        filter.emit_naws();
+        assert(line.output[] == cast(const(ubyte)[])"\xFF\xFA\x1F\x00\xFF\xFF\x00\x18\xFF\xF0");
+
+        static struct Consumer
+        {
+            void recv(Stream, const(void)[] data, MonoTime) nothrow @nogc
+            {
+                assert(data.length == 0);
+            }
+        }
+        Consumer consumer;
+        telnet.rx_handler(&consumer.recv);
+        scope (exit) telnet.release_rx_handler(&consumer.recv);
+        telnet.inner_rx(line, line.output[0 .. 5], MonoTime());
+        telnet.inner_rx(line, line.output[5 .. $], MonoTime());
+        assert(telnet._terminal.width == 255 && telnet._terminal.height == 24);
+        assert(telnet._terminal.pending_events & TerminalEvents.resized);
+
+        line.output.clear();
+        filter._terminal.height = 0xF018;
+        filter.emit_naws();
+        telnet.inner_rx(line, line.output[], MonoTime());
+        assert(telnet._terminal.width == 255 && telnet._terminal.height == 0xF018);
     }
 }
