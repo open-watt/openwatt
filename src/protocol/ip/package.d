@@ -1600,7 +1600,7 @@ nothrow @nogc:
         else version (Windows)
         {
             bool v6 = family == AddressFamily.ipv6;
-            IOCP_SOCKET socket = ws_socket(v6 ? WSA_AF_INET6 : WSA_AF_INET, WSA_SOCK_DGRAM, WSA_IPPROTO_UDP, null, 0, WSA_FLAG_OVERLAPPED);
+            IOCP_SOCKET socket = open_iocp_udp_socket(v6);
             if (socket == INVALID_SOCKET)
                 return false;
             int yes = 1;
@@ -2873,6 +2873,20 @@ else version (Windows)
         return c;
     }
 
+    IOCP_SOCKET open_iocp_udp_socket(bool v6)
+    {
+        import urt.internal.sys.windows.winsock2 : SIO_UDP_CONNRESET;
+
+        IOCP_SOCKET socket = ws_socket(v6 ? WSA_AF_INET6 : WSA_AF_INET, WSA_SOCK_DGRAM, WSA_IPPROTO_UDP, null, 0, WSA_FLAG_OVERLAPPED);
+        if (socket != INVALID_SOCKET)
+        {
+            uint disabled, returned;
+            // A port-unreachable can make the next receive fail before it is posted.
+            WSAIoctl(socket, SIO_UDP_CONNRESET, &disabled, disabled.sizeof, null, 0, &returned, null, null);
+        }
+        return socket;
+    }
+
     void load_socket_extensions()
     {
         IOCP_SOCKET s = ws_socket(WSA_AF_INET, WSA_SOCK_STREAM, WSA_IPPROTO_TCP, null, 0, WSA_FLAG_OVERLAPPED);
@@ -3020,5 +3034,40 @@ version (UseInternalIPStack) {} else version (linux)
             c.tx_handler(&p.produce);
             assert(p.produced >= page_size && p.produced <= (tx_slice.as!"usecs" / 500 + 2) * page_size, "slow producer ran past its turn");
         }
+    }
+}
+else version (Windows)
+{
+    unittest
+    {
+        import urt.internal.sys.windows.winsock2 : SO_RCVTIMEO, WSAETIMEDOUT;
+
+        Socket receiver = Socket(open_iocp_udp_socket(false));
+        assert(receiver);
+        scope (exit) receiver.close();
+        InetAddress loopback = InetAddress(IPAddr.loopback, 0);
+        assert(receiver.bind(loopback).succeeded);
+        InetAddress target;
+        assert(receiver.get_socket_name(target).succeeded);
+        uint timeout_ms = 250;
+        assert(ws_setsockopt(receiver.handle, SOL_SOCKET_, SO_RCVTIMEO, &timeout_ms, timeout_ms.sizeof) == 0);
+
+        Socket peer;
+        assert(create_socket(AddressFamily.ipv4, SocketType.datagram, Protocol.udp, peer).succeeded);
+        assert(peer.bind(loopback).succeeded);
+        InetAddress unused;
+        assert(peer.get_socket_name(unused).succeeded);
+        assert(peer.close().succeeded);
+        assert(receiver.sendto("miss", MsgFlags.none, &unused).succeeded);
+
+        ubyte[4] data;
+        size_t received;
+        assert(receiver.recv(data[], MsgFlags.none, &received).system_code == WSAETIMEDOUT);
+
+        assert(create_socket(AddressFamily.ipv4, SocketType.datagram, Protocol.udp, peer).succeeded);
+        scope (exit) peer.close();
+        assert(peer.sendto("live", MsgFlags.none, &target).succeeded);
+        assert(receiver.recv(data[], MsgFlags.none, &received).succeeded);
+        assert(received == data.length && cast(const(char)[])data[] == "live");
     }
 }
