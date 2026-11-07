@@ -1262,7 +1262,8 @@ private Expression* parse_primary_exp(ref Parser parser, bool allow_slash = fals
         size_t len = 0;
         while (len < parser.text.length && parser.text[len] != '"')
         {
-            if (parser.text[len] == '\\')
+            char c = parser.text[len];
+            if (c == '\\')
             {
                 if (!escaped)
                 {
@@ -1271,11 +1272,18 @@ private Expression* parse_primary_exp(ref Parser parser, bool allow_slash = fals
                 }
                 if (++len == parser.text.length)
                     return parser.fail("Expected '\"'");
+                c = parser.text[len];
+                if (c == 'n')
+                    c = '\n';
+                else if (c == 'r')
+                    c = '\r';
+                else if (c == 't')
+                    c = '\t';
             }
-            else if (parser.text[len] == '$')
+            else if (c == '$')
                 interpolated = true;
             if (escaped)
-                copy ~= parser.text[len];
+                copy ~= c;
             len++;
         }
         if (len == parser.text.length)
@@ -1531,6 +1539,20 @@ unittest
     assert(parse_expression(text).as_bool == true);
     text = "-3";
     assert(parse_expression(text).as_num == VarQuantity(-3));
+
+    {
+        const(char)[] quoted = "\"a\\nb\\rc\\td\"";
+        Expression* literal = parse_primary_exp(quoted);
+        assert(literal && quoted.empty);
+        assert(literal.evaluate(ctx).asString == "a\nb\rc\td");
+        free_expression(literal);
+
+        quoted = "\"\\\\n\\\\r\\\\t\\0\\z\"";
+        literal = parse_primary_exp(quoted);
+        assert(literal && quoted.empty);
+        assert(literal.evaluate(ctx).asString == "\\n\\r\\t0z");
+        free_expression(literal);
+    }
 
     text = "{ /print hello }";
     e = parse_primary_exp(text);
