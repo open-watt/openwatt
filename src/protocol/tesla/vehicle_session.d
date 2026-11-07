@@ -18,6 +18,7 @@ import manager.collection;
 import manager.component;
 import manager.device;
 import manager.element;
+import manager.features : has_tesla_vehicle;
 import manager.secret;
 
 import protocol.ble;
@@ -36,7 +37,7 @@ import router.iface.packet;
 
 import tools.protobuf;
 
-import manager.features : has_aes_gcm;
+static assert(has_tesla_vehicle, "Tesla vehicle BLE requires an AES-GCM/ECDH P-256 crypto backend");
 
 nothrow @nogc:
 
@@ -1741,59 +1742,56 @@ unittest
         deliver();
     assert(receiver._auth_failures == 1 && receiver._phase == receiver.Phase.ready && pending.active);
 
-    static if (has_aes_gcm)
+    response.protobuf_message_as_bytes.value.clear();
+    ubyte[12] nonce = 0x55;
+    ref signature = response.signature_data.ensure().aes_gcm_response.ensure();
+    signature.nonce.ensure().extend(12)[] = nonce[];
+    signature.counter.set(1);
+    signature.tag.ensure().extend(16)[] = 0;
+    Array!ubyte metadata = build_response_metadata(TeslaDomain.infotainment, receiver.name[], 1, 0, tag[], 0);
+    SHA256Context digest;
+    sha_init(digest);
+    sha_update(digest, metadata[]);
+    ubyte[32] aad = sha_finalise(digest);
+    ubyte[16] response_tag;
+    assert(aes_gcm_encrypt(receiver._aes_key[], nonce[], aad[], null, null, response_tag[]).succeeded);
+    signature.tag.value[] = response_tag[];
+    signature.tag.value[0] ^= 1;
+    deliver();
+    assert(receiver._auth_failures == 1 && pending.active);
+    signature.tag.value[0] ^= 1;
+    deliver();
+    assert(!pending.active && receiver._auth_failures == 0 && receiver._fault is null);
+    assert(receiver._last_authenticated_rx_time != MonoTime.init);
+    MonoTime authenticated = receiver._last_authenticated_rx_time;
+    deliver();
+    assert(receiver._last_authenticated_rx_time == authenticated);
+
+    pending = receiver.reserve_pending_command(uuid[], tag[], VehicleCommandKind.get_charge_state);
+    response.signed_message_status.value.signed_message_fault.set(15);
+    deliver();
+    assert(pending.active && receiver._phase == receiver.Phase.ready && receiver._auth_failures == 1);
+    metadata = build_response_metadata(TeslaDomain.infotainment, receiver.name[], 1, 0, tag[], 15);
+    sha_init(digest);
+    sha_update(digest, metadata[]);
+    aad = sha_finalise(digest);
+    assert(aes_gcm_encrypt(receiver._aes_key[], nonce[], aad[], null, null, response_tag[]).succeeded);
+    signature.tag.value[] = response_tag[];
+    deliver();
+    assert(!pending.active && receiver._phase == receiver.Phase.failed && receiver._auth_failures == 0);
+
+    receiver._phase = receiver.Phase.ready;
+    response.signed_message_status.value.signed_message_fault.set(0);
+    signature.tag.value[0] ^= 1;
+    foreach (i; 0 .. receiver.auth_failure_limit)
     {
-        response.protobuf_message_as_bytes.value.clear();
-        ubyte[12] nonce = 0x55;
-        ref signature = response.signature_data.ensure().aes_gcm_response.ensure();
-        signature.nonce.ensure().extend(12)[] = nonce[];
-        signature.counter.set(1);
-        signature.tag.ensure().extend(16)[] = 0;
-        Array!ubyte metadata = build_response_metadata(TeslaDomain.infotainment, receiver.name[], 1, 0, tag[], 0);
-        SHA256Context digest;
-        sha_init(digest);
-        sha_update(digest, metadata[]);
-        ubyte[32] aad = sha_finalise(digest);
-        ubyte[16] response_tag;
-        assert(aes_gcm_encrypt(receiver._aes_key[], nonce[], aad[], null, null, response_tag[]).succeeded);
-        signature.tag.value[] = response_tag[];
-        signature.tag.value[0] ^= 1;
-        deliver();
-        assert(receiver._auth_failures == 1 && pending.active);
-        signature.tag.value[0] ^= 1;
-        deliver();
-        assert(!pending.active && receiver._auth_failures == 0 && receiver._fault is null);
-        assert(receiver._last_authenticated_rx_time != MonoTime.init);
-        MonoTime authenticated = receiver._last_authenticated_rx_time;
-        deliver();
-        assert(receiver._last_authenticated_rx_time == authenticated);
-
+        uuid[0] = cast(ubyte)i;
+        response.request_uuid.value[] = uuid[];
         pending = receiver.reserve_pending_command(uuid[], tag[], VehicleCommandKind.get_charge_state);
-        response.signed_message_status.value.signed_message_fault.set(15);
         deliver();
-        assert(pending.active && receiver._phase == receiver.Phase.ready && receiver._auth_failures == 1);
-        metadata = build_response_metadata(TeslaDomain.infotainment, receiver.name[], 1, 0, tag[], 15);
-        sha_init(digest);
-        sha_update(digest, metadata[]);
-        aad = sha_finalise(digest);
-        assert(aes_gcm_encrypt(receiver._aes_key[], nonce[], aad[], null, null, response_tag[]).succeeded);
-        signature.tag.value[] = response_tag[];
-        deliver();
-        assert(!pending.active && receiver._phase == receiver.Phase.failed && receiver._auth_failures == 0);
-
-        receiver._phase = receiver.Phase.ready;
-        response.signed_message_status.value.signed_message_fault.set(0);
-        signature.tag.value[0] ^= 1;
-        foreach (i; 0 .. receiver.auth_failure_limit)
-        {
-            uuid[0] = cast(ubyte)i;
-            response.request_uuid.value[] = uuid[];
-            pending = receiver.reserve_pending_command(uuid[], tag[], VehicleCommandKind.get_charge_state);
-            deliver();
-            assert(pending.auth_failure_reported);
-        }
-        assert(receiver._phase == receiver.Phase.failed);
+        assert(pending.auth_failure_reported);
     }
+    assert(receiver._phase == receiver.Phase.failed);
 
     receiver._phase = receiver.Phase.ready;
     receiver._last_authenticated_rx_time = now;

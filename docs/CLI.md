@@ -1628,6 +1628,7 @@ preflights and normal responses use the effective policy.
 
 ### `/protocol/tesla/session`
 
+Tesla vehicle BLE commands exist only with an AES-GCM/ECDH P-256 backend (Windows CNG or mbedTLS). Omit scanner and session configuration on other builds.
 Vehicle sessions report command rejection separately from session failure.
 Session counter, signature, epoch, and clock faults trigger a fresh authenticated
 handshake and timed back-off for the affected operation. A successful handshake

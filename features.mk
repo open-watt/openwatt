@@ -143,6 +143,11 @@ else
     FEATURE_EXCLUDES += router/iface/sfp.d router/iface/sff8472.d driver/sfp.d driver/baremetal/sfp.d
 endif
 
+# Explicit source roots must match manager.features.has_tesla_vehicle.
+ifeq ($(filter windows,$(OS))$(filter 1,$(USE_MBEDTLS)),)
+    FEATURE_EXCLUDES += protocol/tesla/vehicle_%.d
+endif
+
 # -- D version flags per preset ------------------------------------------
 # Defaults are "everything on" so builds that don't run features.mk
 # (Visual Studio, fresh checkouts, ad-hoc tools) get a full standalone
