@@ -1503,11 +1503,11 @@ this is what remains.
 
 ## Infrastructure
 
-- **Unpin DMD in CI** (2026-11-05): the `dmd-master` nightly published between 2026-11-01 and
-  2026-11-03 segfaults compiling the unittest build (all four DMD jobs; LDC and the cross builds
-  pass), so `ci.yml` pins DMD to 2.114.0-beta.1 (the 2.114.0 release has no binaries on downloads.dlang.org yet). Reduce the crash against a local nightly, report it
-  upstream, and go back to `dmd-master` (the virtual-destructor work needs dmd#23946, which is only
-  in master until 2.115) once a nightly builds again.
+- **Delete the ClassInfo layout probe ASAP**: urt's `platforms.mk` probes the compiler's druntime
+  and sets `ClassInfoNoVtbl`, which drops `vtbl` from `object.d`'s `TypeInfo_Class` and `Interface`
+  to bridge dmd#24027. Once DMD 2.115 and an LDC on its frontend are the minimum, drop `vtbl`
+  unconditionally and delete the probe. Until then a Visual D build with a dmd master compiler needs
+  `ClassInfoNoVtbl` added to the project's version identifiers.
 
 - **Egress admission follow-ups** (2026-11-01): interfaces admit by `tx_floor()` and invite
   classless waiters a frame per turn; what that left open:
