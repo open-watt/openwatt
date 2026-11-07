@@ -1447,13 +1447,12 @@ private:
         if (dark is null)
             return false;
 
-        dark.meter_data.reset_to_missing();
         dark.meter_data.write_value(MeterField.power, 0, -sum);
         dark.meter_data.mark(MeterField.power, 0, Provenance.inferred_subtraction);
 
         // A closed contact is one electrical node, so voltage carries across;
         // appliance ports may sit on different domains and never share it.
-        if (g.ports.length == 2 && g.kind != PortGroupKind.appliance)
+        if (g.ports.length == 2 && g.kind != PortGroupKind.appliance && !dark.meter_data.has(MeterField.voltage))
         {
             Port* known = g.ports[0] is dark ? g.ports[1] : g.ports[0];
             if (known.meter_data.has(MeterField.voltage))
@@ -1611,10 +1610,9 @@ private:
         if (b.residual_power < 0 && dark.flow == FlowDomain.supply)
             return false;
 
-        dark.meter_data.reset_to_missing();
         dark.meter_data.write_value(MeterField.power, 0, -b.residual_power);
         dark.meter_data.mark(MeterField.power, 0, Provenance.inferred_subtraction);
-        if (b.balance.has(MeterField.voltage))
+        if (b.balance.has(MeterField.voltage) && !dark.meter_data.has(MeterField.voltage))
         {
             dark.meter_data.voltage[0] = b.balance.voltage[0];
             dark.meter_data.mark(MeterField.voltage, 0, Provenance.inferred_subtraction);
@@ -1834,5 +1832,52 @@ unittest
         }
         assert(absf(into - out_of) <= 0.01f);
         g2.clear();
+    }
+
+    // inference solves a dark port's power without discarding what its meter measured
+    {
+        import urt.si.quantity : Quantity;
+        import urt.si.unit : KilowattHour, Volt, Watt;
+        import urt.time : getSysTime;
+        import urt.variant : Variant;
+        import manager.device : DeviceBuilder, DeviceTable;
+        import manager.series : DataFormat, SeriesKind, ValueType, register_format;
+
+        static void add(ref DeviceBuilder b, Component c, const(char)[] id, double value, ScaledUnit unit)
+        {
+            Element* e = b.element(c, id, register_format(DataFormat(ValueType.f64, SeriesKind.held, unit)));
+            e.value(Variant(Quantity!double(value, unit)), getSysTime());
+        }
+
+        DeviceTable devices;
+        Component main_meter, sub_meter;
+        {
+            DeviceBuilder b = devices.create("bench");
+            main_meter = b.component("main");
+            add(b, main_meter, "power", -1000, ScaledUnit(Watt));
+            add(b, main_meter, "voltage", 240, ScaledUnit(Volt));
+            sub_meter = b.component("sub");
+            add(b, sub_meter, "voltage", 236, ScaledUnit(Volt));
+            add(b, sub_meter, "current", 4.2, ScaledUnit(Ampere));
+            add(b, sub_meter, "import", 12.5, KilowattHour);
+            add(b, sub_meter, "export", 0.3, KilowattHour);
+        }
+
+        TopologyGraph g3;
+        Bus* site = g3.ensure_bus("site");
+        Port* main_p = g3.add_port(null, site, PortRole.connection, FlowDomain.bidirectional, main_meter, 0);
+        g3.add_to_group(g3.add_group("main", PortGroupKind.handover), main_p);
+        Port* sub_p = g3.add_port(null, site, PortRole.connection, FlowDomain.bidirectional, sub_meter, 0);
+        g3.add_to_group(g3.add_group("sub", PortGroupKind.appliance), sub_p);
+        g3.refresh();
+
+        ref const MeterData d = sub_p.meter_data;
+        assert(d.source(MeterField.power) == Provenance.inferred_subtraction);
+        assert(absf(d.active[0].value - 1000) <= 0.01f);
+        assert(d.is_measured(MeterField.voltage) && absf(d.voltage[0].value - 236) <= 0.01f);
+        assert(d.is_measured(MeterField.current) && absf(d.current[0].value - 4.2f) <= 0.01f);
+        assert(d.is_measured(MeterField.total_import_active) && absf(d.total_import_active[0] - 12.5f) <= 0.01f);
+        assert(d.is_measured(MeterField.total_export_active) && absf(d.total_export_active[0] - 0.3f) <= 0.01f);
+        g3.clear();
     }
 }
