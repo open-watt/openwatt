@@ -87,7 +87,8 @@ nothrow @nogc:
         if (!materialise())
             return CompletionStatus.error;
 
-        if (!m.adopt(_slave_id, this))
+        TeslaTWCMaster.Charger* charger = m.adopt(_slave_id, this);
+        if (!charger)
         {
             _fail_reason = "charger already has a binding";
             return CompletionStatus.error;
@@ -105,6 +106,8 @@ nothrow @nogc:
             _current_cap.subscribe(&on_cap_change);
         _elem_subscribed = true;
 
+        if (charger.link_ready_at != SysTime())
+            push_samples(*charger, Push.link_ready);
         return CompletionStatus.complete;
     }
 
@@ -139,18 +142,20 @@ package:
     // the elements a wire event can move; a push covers only the groups the master says changed
     enum Push : ubyte
     {
-        heartbeat = 1,      // slave heartbeat, or our own offer to it
+        heartbeat = 1,
         charge_info = 2,
         link_ready = 4,
         serial = 8,
-        vehicle = 16,       // the VIN once fully collected, or dropped when the car leaves
-        all = 31,
+        vehicle = 16,
+        offer = 32,
+        accepted = 64,
+        current = 128,
     }
 
     void heard()
         => note_activity();
 
-    final void push_samples(ref TeslaTWCMaster.Charger charger, Push groups = Push.all)
+    final void push_samples(ref TeslaTWCMaster.Charger charger, Push groups)
     {
         SysTime timestamp = getSysTime();
         CommitScope commit = open_commit();
@@ -162,32 +167,33 @@ package:
             final switch (e.kind)
             {
                 case SampleKind.setpoint:
-                    if (e.element.record_update() == SysTime() && charger.device_max_current)
-                        write_sample(e, charger.target_current, timestamp, &on_target_current_change);
-                    break;
-                case SampleKind.cap:
                     if (e.element.record_update() == SysTime())
-                        write_sample(e, charger.specified_max_current, timestamp, &on_cap_change);
+                        write_sample(e, charger.target_current, charger.link_ready_at, &on_target_current_change);
                     break;
-                case SampleKind.allocated:       write_sample(e, charger.offered_current, timestamp);                               break;
-                case SampleKind.accepted:        write_sample(e, charger.charge_current_target, timestamp);                         break;
-                case SampleKind.state:           write_sample(e, cast(ubyte)charger.charger_state, timestamp);                      break;
-                case SampleKind.twc_state:       write_sample(e, cast(ubyte)charger.state, timestamp);                              break;
-                case SampleKind.max:             write_sample(e, charger.device_max_current, timestamp);                            break;
-                case SampleKind.current:         write_sample(e, (charger.flags & 2) ? charger.current : ushort(0), timestamp);     break;
-                case SampleKind.voltage1:        write_sample(e, (charger.flags & 2) ? charger.voltage1 : ushort(0), timestamp);    break;
-                case SampleKind.voltage2:        write_sample(e, (charger.flags & 2) ? charger.voltage2 : ushort(0), timestamp);    break;
-                case SampleKind.voltage3:        write_sample(e, (charger.flags & 2) ? charger.voltage3 : ushort(0), timestamp);    break;
-                case SampleKind.power:           write_sample(e, (charger.flags & 2) ? charger.total_power : ushort(0), timestamp); break;
-                case SampleKind.power1:          write_sample(e, (charger.flags & 2) ? charger.power1 : ushort(0), timestamp);      break;
-                case SampleKind.power2:          write_sample(e, (charger.flags & 2) ? charger.power2 : ushort(0), timestamp);      break;
-                case SampleKind.power3:          write_sample(e, (charger.flags & 2) ? charger.power3 : ushort(0), timestamp);      break;
+                case SampleKind.allocated:       write_sample(e, charger.offered_current, timestamp); break;
+                case SampleKind.accepted:        write_sample(e, charger.charge_current_target, timestamp); break;
+                case SampleKind.state:           write_sample(e, cast(ubyte)charger.charger_state, timestamp); break;
+                case SampleKind.twc_state:       write_sample(e, cast(ubyte)charger.state, timestamp); break;
+                case SampleKind.max:             write_sample(e, charger.device_max_current, charger.link_ready_at); break;
+                case SampleKind.current:         write_sample(e, charger.current, timestamp); break;
+                case SampleKind.voltage1:        write_sample(e, charger.voltage1, timestamp); break;
+                case SampleKind.voltage2:        write_sample(e, charger.voltage2, timestamp); break;
+                case SampleKind.voltage3:        write_sample(e, charger.voltage3, timestamp); break;
+                case SampleKind.power:           write_sample(e, charger.total_power, timestamp); break;
+                case SampleKind.power1:          write_sample(e, charger.power1, timestamp); break;
+                case SampleKind.power2:          write_sample(e, charger.power2, timestamp); break;
+                case SampleKind.power3:          write_sample(e, charger.power3, timestamp); break;
                 case SampleKind.import_:
                 case SampleKind.lifetime_energy:
-                    write_sample(e, (charger.flags & 2) ? ulong(charger.lifetime_energy) * 1000 : ulong(0), timestamp);
+                    write_sample(e, ulong(charger.lifetime_energy) * 1000, timestamp);
                     break;
-                case SampleKind.serial_number:   write_sample(e, (charger.flags & 4) ? charger.serial_number[] : "", timestamp);    break;
-                case SampleKind.vin:             write_sample(e, (charger.flags & 0xF0) == 0xF0 ? charger.vin[] : "", timestamp);   break;
+                case SampleKind.serial_number:   write_sample(e, charger.serial_number[], timestamp); break;
+                case SampleKind.vin:
+                    if ((charger.flags & 0xF0) == 0xF0)
+                        write_sample(e, charger.vin[], timestamp);
+                    else if (e.element.has_value)
+                        write_sample(e, "", timestamp);
+                    break;
             }
         }
     }
@@ -233,7 +239,7 @@ protected:
         builder.constant(control, "min", CentiAmps(500));
         builder.constant(control, "can_disable", false);
         _target_current = add_sample(builder, control, "setpoint", SampleKind.setpoint, centiamps_format());
-        _current_cap = add_sample(builder, control, "cap", SampleKind.cap, current_limit_format());
+        _current_cap = bind_element(builder, control, "cap", current_limit_format(), Access.read);
         add_sample(builder, control, "max", SampleKind.max, centiamps_format());
         add_sample(builder, control, "allocated", SampleKind.allocated, centiamps_format());
         add_sample(builder, control, "accepted", SampleKind.accepted, centiamps_format());
@@ -262,7 +268,6 @@ private:
     enum SampleKind : ubyte
     {
         setpoint,
-        cap,
         allocated,
         accepted,
         state,
@@ -303,8 +308,8 @@ private:
 
     // indexed by SampleKind
     __gshared immutable Push[SampleKind.vin + 1] push_groups = [
-        Push.heartbeat, Push.heartbeat, Push.heartbeat, Push.heartbeat, Push.heartbeat, Push.heartbeat, Push.link_ready,
-        Push.heartbeat, Push.charge_info, Push.charge_info, Push.charge_info, Push.charge_info, Push.charge_info,
+        Push.link_ready, Push.offer, Push.accepted, Push.heartbeat, Push.heartbeat, Push.link_ready,
+        Push.current, Push.charge_info, Push.charge_info, Push.charge_info, Push.charge_info, Push.charge_info,
         Push.charge_info, Push.charge_info, Push.charge_info, Push.charge_info, Push.serial, Push.vehicle,
     ];
 
@@ -425,7 +430,14 @@ private:
 
 unittest
 {
+    import urt.endian;
     import urt.mem : free;
+
+    import manager.system : node_id;
+
+    import protocol.tesla.iface : TWCFrame;
+    import router.iface : BaseInterface, MessageCallback;
+    import router.iface.packet : Packet, QueuePolicy, StackPacket, packet_free;
 
     static class TestBinding : TeslaTWCBinding
     {
@@ -440,8 +452,10 @@ unittest
         {
             DeviceBuilder builder = fixtures.open(_device[]);
             _bound_device = builder.device;
-            _target_current = bind_element(builder, builder.device, "setpoint", centiamps_format());
+            _target_current = add_sample(builder, builder.device, "setpoint", SampleKind.setpoint, centiamps_format());
             _current_cap = bind_element(builder, builder.device, "cap", current_limit_format());
+            add_sample(builder, builder.device, "max", SampleKind.max, centiamps_format());
+            add_sample(builder, builder.device, "accepted", SampleKind.accepted, centiamps_format());
             _built = true;
             return true;
         }
@@ -457,27 +471,43 @@ unittest
     Scalar below_floor = Scalar.of(ushort(300));
     assert(format.constraint.check(below_floor, *format).length);
 
-    Element[5] elements;
-    foreach (i, kind; [TeslaTWCBinding.SampleKind.setpoint, TeslaTWCBinding.SampleKind.cap,
-                      TeslaTWCBinding.SampleKind.max, TeslaTWCBinding.SampleKind.allocated, TeslaTWCBinding.SampleKind.accepted])
+    alias Push = TeslaTWCBinding.Push;
+    alias SampleKind = TeslaTWCBinding.SampleKind;
+    Element[6] elements;
+    foreach (i, kind; [SampleKind.setpoint, SampleKind.max, SampleKind.allocated,
+                       SampleKind.accepted, SampleKind.current, SampleKind.vin])
     {
-        elements[i].format = kind == TeslaTWCBinding.SampleKind.cap ? binding.current_limit_format() : binding.centiamps_format();
+        elements[i].format = kind == SampleKind.vin ? binding.text_format() : binding.centiamps_format();
         binding._elements ~= TeslaTWCBinding.SampleElement(&elements[i], elements[i].format, kind);
     }
     TeslaTWCMaster.Charger charger;
+    binding.push_samples(charger, cast(Push)(Push.heartbeat | Push.vehicle));
+    foreach (ref element; elements)
+        assert(!element.has_value && element.record_update() == SysTime());
+
+    charger.link_ready_at = from_unix_time_ns(1_000_000);
     charger.device_max_current = 3200;
     charger.target_current = 2800;
-    charger.specified_max_current = 2000;
-    charger.offered_current = 1000;
-    charger.charge_current_target = 1600;
-    binding.push_samples(charger);
-    foreach (i, expected; [2800, 2000, 3200, 1000, 1600])
-        assert((cast(CentiAmps)elements[i].record_value().asQuantity()).value == expected);
+    binding.push_samples(charger, Push.link_ready);
+    assert((cast(CentiAmps)elements[0].record_value().asQuantity()).value == 2800);
+    assert((cast(CentiAmps)elements[1].record_value().asQuantity()).value == 3200);
+    foreach (ref element; elements[2 .. $])
+        assert(!element.has_value);
+
+    binding.push_samples(charger, cast(Push)(Push.accepted | Push.current));
+    assert(elements[3].has_value && (cast(CentiAmps)elements[3].record_value().asQuantity()).value == 0);
+    assert(elements[4].has_value && (cast(CentiAmps)elements[4].record_value().asQuantity()).value == 0);
     charger.offered_current = 500;
-    charger.charge_current_target = 1000;
-    binding.push_samples(charger);
-    foreach (i, expected; [2800, 2000, 3200, 500, 1000])
-        assert((cast(CentiAmps)elements[i].record_value().asQuantity()).value == expected);
+    binding.push_samples(charger, Push.offer);
+    assert((cast(CentiAmps)elements[2].record_value().asQuantity()).value == 500);
+
+    charger.flags = 0xF0;
+    charger.vin[] = "5YJ3E1EA7KF000001"[];
+    binding.push_samples(charger, Push.vehicle);
+    assert(elements[5].record_value().asString == charger.vin[]);
+    charger.flags = 0;
+    binding.push_samples(charger, Push.vehicle);
+    assert(elements[5].has_value && elements[5].text_value.empty);
 
     DeviceTable table;
     DeviceBuilder access_builder = table.create("twc-access-device");
@@ -497,18 +527,41 @@ unittest
         assert(binding._current_cap.access == binding._target_current.access);
     }
 
+    static final class TestInterface : BaseInterface
+    {
+        enum type_name = "twc-replay-test-interface";
+    nothrow @nogc:
+
+        ~this() {}
+        this(CID id, ObjectFlags flags = ObjectFlags.none) { super(collection_type_info!TestInterface, id, flags); }
+        void start() { set_state(State.running); }
+        void receive(const(Packet)* packet) { fire_subscribers(packet); }
+        override CompletionStatus startup() => CompletionStatus.complete;
+        override int transmit(Packet* packet, MessageCallback callback = null, const(QueuePolicy)* queue_policy = null)
+        {
+            packet_free(packet);
+            return 0;
+        }
+    }
+
     static final class TestMaster : TeslaTWCMaster
     {
     nothrow @nogc:
 
         ~this() {}
         this(CID id) { super(id); }
+        CompletionStatus listen() => super.startup();
         void start() { set_state(State.running); }
         void stop() { set_state_deferred(State.stopping); }
         override CompletionStatus shutdown() => CompletionStatus.complete;
     }
     TestMaster master = alloc!TestMaster(Collection!TeslaTWCMaster().allocate_id("twc-binding-lifecycle"));
     Collection!TeslaTWCMaster().add(master);
+    TestInterface iface = Collection!TestInterface().alloc("twc-binding-interface");
+    Collection!TestInterface().add(iface);
+    iface.start();
+    master.iface = iface;
+    assert(master.listen() == CompletionStatus.continue_);
     TestBinding live = alloc!TestBinding(Collection!TeslaTWCBinding().allocate_id("twc-binding-live"), ObjectFlags.dynamic);
     Collection!TeslaTWCBinding().add(live);
     Device lifecycle_device = table.create("twc-binding-device").device;
@@ -518,10 +571,50 @@ unittest
     live.slave_id = 123;
     live.device = "twc-binding-device".make_string();
     master.start();
+
+    ubyte[15] message;
+    message[0 .. 2] = ushort(0xFDE2).nativeToBigEndian;
+    message[2 .. 4] = ushort(123).nativeToBigEndian;
+    StackPacket packet;
+    MonoTime announced_at = getTime() - 1.seconds;
+    ref TWCFrame announced = packet.init!TWCFrame(message[], announced_at);
+    announced.src = 123;
+    announced.dst = TWCFrame.broadcast;
+    iface.receive(&packet.packet);
+    TeslaTWCMaster.Charger* discovered = master.find_charger(123);
+    assert(!live.running && discovered && !discovered.binding);
+
     live.step();
     assert(live.running && live._subscribed && live._elem_subscribed);
+    Element* maximum = lifecycle_device.find_element("max");
+    Element* accepted = lifecycle_device.find_element("accepted");
+    assert(maximum && maximum.has_value && (cast(CentiAmps)maximum.record_value().asQuantity()).value == 0);
+    assert(maximum.record_update() == cast(SysTime)announced_at);
+    assert(live._target_current.has_value && live._target_current.record_update() == maximum.record_update());
+    assert((cast(CentiAmps)live._target_current.record_value().asQuantity()).value == 0);
+    assert(accepted && !accepted.has_value);
+
+    ushort master_address = cast(ushort)node_id();
+    if (master_address == 0 || master_address == TWCFrame.broadcast)
+        master_address = 0x7777;
+    message[0 .. 2] = ushort(0xFDE0).nativeToBigEndian;
+    message[4 .. 6] = master_address.nativeToBigEndian;
+    message[6] = TWCState.Charging;
+    message[7 .. 9] = ushort(1200).nativeToBigEndian;
+    ref TWCFrame heartbeat = packet.init!TWCFrame(message[]);
+    heartbeat.src = 123;
+    heartbeat.dst = master_address;
+    iface.receive(&packet.packet);
+    assert(accepted.has_value && (cast(CentiAmps)accepted.record_value().asQuantity()).value == 1200);
+    assert(maximum.record_update() == cast(SysTime)announced_at);
+
+    assert(!live._current_cap.has_value);
+    live._current_cap.value(CentiAmps(0));
+    assert(live._current_cap.has_value);
     lifecycle_device.set_online(cast(void*)live, true);
     master.stop();
+    iface.destroy();
+    Collection!BaseInterface().update_all();
     assert(!live.running && !live._subscribed && !live._elem_subscribed);
     assert(lifecycle_device.online_status == OnlineStatus.offline);
     assert(Collection!TeslaTWCBinding().get("twc-binding-live") is live);

@@ -478,14 +478,14 @@ private:
             e.element.value(box_record(record.ptr, *fmt), timestamp, &on_samples);
     }
 
-    void apply_zone_status(EUI64 eui, ubyte endpoint, ushort cluster, ushort zone_status)
+    void apply_zone_status(EUI64 eui, ubyte endpoint, ushort cluster, ushort zone_status, SysTime timestamp)
     {
         static immutable ushort[7] bit_attrs = [ 0xFC00, 0xFC01, 0xFC02, 0xFC03, 0xFC06, 0xFC07, 0xFC09 ];
         static immutable ushort[7] bit_masks = [ 1, 2, 4, 8, 0x40, 0x80, 0x200 ];
         foreach (i; 0 .. bit_attrs.length)
         {
             if (SampleElement* e = find_sample_element(eui, endpoint, cluster, bit_attrs[i]))
-                e.element.value = (zone_status & bit_masks[i]) != 0;
+                e.element.value((zone_status & bit_masks[i]) != 0, timestamp, &on_samples);
         }
     }
 
@@ -498,16 +498,16 @@ private:
                 if (c.cluster_id == 0x0500)
                 {
                     NodeMap.Attribute* zone_status = 2 in c.attributes;
-                    if (zone_status && zone_status.last_updated != SysTime())
-                        apply_zone_status(node.eui, ep.endpoint, c.cluster_id, zone_status.value.as!ushort);
+                    if (zone_status && zone_status.last_updated != SysTime() && !zone_status.value.isNull)
+                        apply_zone_status(node.eui, ep.endpoint, c.cluster_id, zone_status.value.as!ushort, zone_status.last_updated);
                 }
 
                 foreach (ref NodeMap.Attribute a; c.attributes.values)
                 {
-                    if (a.last_updated == SysTime())
+                    if (a.last_updated == SysTime() || a.value.isNull)
                         continue;
                     if (SampleElement* e = find_sample_element(node.eui, ep.endpoint, c.cluster_id, a.attribute_id))
-                        e.element.value = a.value;
+                        e.element.value(a.value, a.last_updated, &on_samples);
                 }
             }
         }
@@ -862,7 +862,7 @@ private:
                             attr_delay.value = delay;
                             attr_delay.last_updated = now;
 
-                            apply_zone_status(nm.eui, aps.src_endpoint, aps.cluster_id, zone_status);
+                            apply_zone_status(nm.eui, aps.src_endpoint, aps.cluster_id, zone_status, now);
                             if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC10))
                                 e.element.value = zone_id;
                             if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC20))
@@ -1078,44 +1078,6 @@ private:
                     add_sample_element(e, node.eui, desc, zb, endpoint);
                     attach_model_element(e, cast(manager.element.Access)desc.access);
 
-                    if (zb.cluster_id == 0x0000) // basic cluster
-                    {
-                        switch (zb.attribute_id)
-                        {
-                            case 0: // zcl version
-                                e.value = node.basic_info.zcl_ver;
-                                break;
-                            case 1: // application version
-                                e.value = node.basic_info.app_ver;
-                                break;
-                            case 2: // stack version
-                                e.value = node.basic_info.stack_ver;
-                                break;
-                            case 3: // hw version
-                                e.value = node.basic_info.hw_ver;
-                                break;
-                            case 4: // manufacturer name
-                                e.value = node.basic_info.mfg_name[];
-                                break;
-                            case 5: // model identifier
-                                e.value = node.basic_info.model_name[];
-                                break;
-                            case 7: // power source
-                                e.value = node.basic_info.power_source;
-                                break;
-                            case 10: // product code
-                                e.value = node.basic_info.product_code[];
-                                break;
-                            case 11: // product url
-                                e.value = node.basic_info.product_url[];
-                                break;
-                            case 0x4000: // sw-build-id
-                                e.value = node.basic_info.sw_build_id[];
-                                break;
-                            default:
-                                break;
-                        }
-                    }
                     return sample_desc.format;
                 });
 
@@ -1131,8 +1093,8 @@ private:
                 builder.constant("status.network.mode", StringLit!"zigbee");
                 builder.constant("status.network.zigbee.eui", node.eui);
                 builder.element("status.network.zigbee.address", register_value_format(node.id)).value = node.id;
-                builder.element("status.network.zigbee.rssi", register_value_format(node.rssi)).value = node.rssi;
-                builder.element("status.network.zigbee.lqi", register_value_format(node.lqi)).value = node.lqi;
+                builder.element("status.network.zigbee.rssi", register_value_format!byte());
+                builder.element("status.network.zigbee.lqi", register_value_format!ubyte());
 
                 // set component templates for components we ma have created
                 Component c = device.find_component("status");
@@ -1142,6 +1104,8 @@ private:
                 c = device.find_component("status.network.zigbee");
                 c.template_ = StringLit!"Zigbee";
 
+                builder.commit();
+                replay_known_attributes(node);
                 return;
             }
         }
@@ -1297,16 +1261,17 @@ private:
             return;
 
         ushort zone_status = loadLittleEndian(cast(const ushort*)(msg.ptr + 4));
+        SysTime now = getSysTime();
         if (NodeMap.Endpoint* ep = endpoint in node.endpoints)
         {
             if (NodeMap.Cluster* cluster = 0x0500 in ep.clusters)
             {
                 ref NodeMap.Attribute a = cluster.get_attribute(2);
                 a.value = zone_status;
-                a.last_updated = getSysTime();
+                a.last_updated = now;
             }
         }
-        apply_zone_status(node.eui, endpoint, 0x0500, zone_status);
+        apply_zone_status(node.eui, endpoint, 0x0500, zone_status, now);
     }
 
     bool element_needs_prime_read(ref SampleElement e, ref NodeMap node)
@@ -1440,7 +1405,6 @@ private:
                     {
                         node.device_created = true;
                         create_device(*node);
-                        replay_known_attributes(*node);
                     }
                     enroll_ias(node);
                     prime_elements(node);
@@ -1808,6 +1772,74 @@ unittest
     assert(buffer[1] == TuyaDataType.string);
     assert(buffer[2] == 0 && buffer[3] == 2);
     assert(buffer[4] == 'o' && buffer[5] == 'n');
+
+    ZigbeeController controller = alloc!ZigbeeController(CID(1));
+    scope(exit) free(controller);
+    NodeMap node;
+    Element version_element;
+    version_element.format = register_value_format!ubyte();
+    ElementDesc element_desc;
+    ElementDesc_Zigbee version_map = ElementDesc_Zigbee(cluster_id: 0, attribute_id: 0);
+    controller.add_sample_element(&version_element, node.eui, element_desc, version_map, 1);
+    ref NodeMap.Attribute attribute = node.get_attribute(1, 0, 0);
+    controller.replay_known_attributes(node);
+    assert(!version_element.has_value && version_element.record_update() == SysTime());
+
+    ubyte zero;
+    attribute.value = Variant(zero);
+    attribute.last_updated = from_unix_time_ns(1_000_000);
+    assert(controller.find_sample_element(node.eui, 1, 0, 0));
+    assert(node.get_attribute(1, 0, 0).value.isNumber);
+    controller.replay_known_attributes(node);
+    assert(version_element.has_value);
+    assert(version_element.record_value().asLong == 0);
+    assert(version_element.record_update() == attribute.last_updated);
+
+    struct ReplayObserver
+    {
+        Subscriber origin;
+        SysTime timestamp;
+        uint updates;
+
+        void observe(ref const SampleUpdate update) nothrow @nogc
+        {
+            assert(update.who == origin);
+            assert(update.timestamp == timestamp);
+            ++updates;
+        }
+    }
+
+    Element switch_state, zone_alarm;
+    switch_state.format = register_value_format!bool();
+    zone_alarm.format = switch_state.format;
+    element_desc.access = manager.profile.Access.read_write;
+    ElementDesc_Zigbee switch_map = ElementDesc_Zigbee(cluster_id: 0x0006, attribute_id: 0);
+    controller.add_sample_element(&switch_state, node.eui, element_desc, switch_map, 1);
+    switch_state.subscribe(&controller.on_samples);
+    scope(exit) switch_state.unsubscribe(&controller.on_samples);
+    ref NodeMap.Attribute cached_switch = node.get_attribute(1, 0x0006, 0);
+    cached_switch.value = Variant(false);
+    cached_switch.last_updated = from_unix_time_ns(2_000_000);
+
+    ElementDesc_Zigbee zone_map = ElementDesc_Zigbee(cluster_id: 0x0500, attribute_id: 0xFC00);
+    controller.add_sample_element(&zone_alarm, node.eui, element_desc, zone_map, 1);
+    ref NodeMap.Attribute cached_zone = node.get_attribute(1, 0x0500, 2);
+    ushort zone_bits = 1;
+    cached_zone.value = Variant(zone_bits);
+    cached_zone.last_updated = from_unix_time_ns(3_000_000);
+
+    ReplayObserver switch_observer = ReplayObserver(&controller.on_samples, cached_switch.last_updated);
+    ReplayObserver zone_observer = ReplayObserver(&controller.on_samples, cached_zone.last_updated);
+    switch_state.subscribe(&switch_observer.observe);
+    zone_alarm.subscribe(&zone_observer.observe);
+    scope(exit)
+    {
+        switch_state.unsubscribe(&switch_observer.observe);
+        zone_alarm.unsubscribe(&zone_observer.observe);
+    }
+    controller.replay_known_attributes(node);
+    assert(switch_observer.updates == 1 && switch_state.record_value().isFalse);
+    assert(zone_observer.updates == 1 && zone_alarm.record_value().isTrue);
 }
 
 private:

@@ -594,7 +594,37 @@ private:
 
 unittest
 {
+    import urt.mem : alloc, free;
     import urt.si.unit : Ampere, ScaledUnit, Volt;
+    import manager.device : DeviceTable;
+
+    DeviceTable table;
+    DeviceBuilder builder = table.create("esphome-first-sample");
+    Device device = builder.device;
+    builder.commit();
+    scope(exit) free(device);
+    ESPHomeBinding binding = alloc!ESPHomeBinding(CID(1));
+    scope(exit) free(binding);
+    binding._dev = device;
+
+    ListEntitiesSensorResponse discovery;
+    discovery.name = "voltage".make_string;
+    discovery.key = 1;
+    discovery.unit_of_measurement = "V".make_string;
+    ubyte[64] wire;
+    binding.message_handler(discovery.id, wire[0 .. proto_serialise(wire[], discovery)]);
+    Element* discovered = device.find_element("sensors.voltage");
+    assert(discovered && !discovered.has_value && discovered.record_update() == SysTime());
+
+    SensorStateResponse state;
+    state.key = discovery.key;
+    state.missing_state = true;
+    binding.message_handler(state.id, wire[0 .. proto_serialise(wire[], state)]);
+    assert(!discovered.has_value && discovered.record_update() == SysTime());
+    state.missing_state = false;
+    state.state = 0;
+    binding.message_handler(state.id, wire[0 .. proto_serialise(wire[], state)]);
+    assert(discovered.has_value && discovered.scaled_value(ScaledUnit(Volt)) == 0);
 
     float pre_scale;
     bool known_unit;

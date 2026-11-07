@@ -141,15 +141,8 @@ protected:
             return FormatId.invalid;
 
         SampleDesc sd = desc_by_index(ble.desc);
-        const(DataFormat)* fmt = sd.fmt;
         if (!e.format.valid)
             e.format = sd.format;
-        if (fmt.is_scalar && e.record_update() == SysTime())
-        {
-            Scalar z;
-            z.u = 0;
-            e.value = box_record(z.raw.ptr, *fmt);
-        }
 
         SampleElement* se = &elements.pushBack();
         se.element = e;
@@ -292,5 +285,29 @@ private:
                     el.value(box_record(record.ptr, *fmt));
             }
         }
+    }
+    unittest
+    {
+        import urt.mem : alloc, free;
+        import protocol.ble : BLEModule, ble_section_kind;
+
+        if (!ble_section_kind)
+            ble_section_kind = register_profile_section("ble", alloc!BLEModule(null));
+        Profile* profile = parse_profile("elements:\n\tble: 180F, 2A19, u8\tdesc: level\n", "ble-first-sample");
+        assert(profile);
+        scope(exit) free(profile);
+        BLEClientBinding binding = alloc!BLEClientBinding(CID(1));
+        scope(exit) free(binding);
+        binding._profile_data = profile;
+        binding._quiet_limit = Duration.zero;
+
+        Element level;
+        assert(binding.add_handler(null, &level, profile.element_desc(0), 0).valid);
+        assert(!level.has_value && level.record_update() == SysTime());
+
+        binding.elements[0].handle = 1;
+        ubyte[1] zero;
+        binding.on_value(1, zero[]);
+        assert(level.has_value && level.record_value().asLong == 0);
     }
 }

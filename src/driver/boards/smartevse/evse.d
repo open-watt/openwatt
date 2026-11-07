@@ -296,7 +296,9 @@ int8_t TemperatureSensor() {
     int8_t Temperature;
     __gshared static int8_t Old_Temperature = -128;
 
-    voltage = temperature_mv(Hardware);
+    TemperatureSampleValid = temperature_mv(Hardware, voltage);
+    if (!TemperatureSampleValid)
+        voltage = 0;
     TemperatureVoltageMV = voltage;
 
 
@@ -315,7 +317,9 @@ uint8_t ProximityPin() {
     uint32_t voltage;
     uint8_t MaxCap;
 
-    voltage = proximity_mv(Hardware);
+    PPSampleValid = proximity_mv(Hardware, voltage);
+    if (!PPSampleValid)
+        voltage = 0;
     PPVoltageMV = voltage;
 
     MaxCap = 13;                                                   // No resistor, Max cable current = 13A
@@ -507,6 +511,9 @@ __gshared uint32_t PilotMinMV;
 __gshared uint32_t PilotMaxMV;
 __gshared uint32_t PPVoltageMV;
 __gshared uint32_t TemperatureVoltageMV;
+__gshared bool PilotSampleValid;
+__gshared bool PPSampleValid;
+__gshared bool TemperatureSampleValid;
 
 
 uint16_t GetCurrent() {
@@ -650,8 +657,8 @@ uint8_t Pilot() {
     uint32_t voltage;
     uint8_t n;
 
-    if (pilot_snapshot(Hardware, ADC_CP[])
-        < NUM_ADC_SAMPLES) {
+    PilotSampleValid = pilot_snapshot(Hardware, ADC_CP[]) >= NUM_ADC_SAMPLES;
+    if (!PilotSampleValid) {
         PilotMinMV = 0;
         PilotMaxMV = 0;
         return PILOT_NOK;
@@ -660,7 +667,11 @@ uint8_t Pilot() {
     // calculate Min/Max of last 25 CP measurements
     for (n=0 ; n<NUM_ADC_SAMPLES ;n++) {
         sample = ADC_CP[n];
-        voltage = pilot_sample_mv(Hardware, sample);
+        if (!pilot_sample_mv(Hardware, sample, voltage))
+        {
+            PilotSampleValid = false;
+            voltage = 0;
+        }
         if (voltage < Min) Min = voltage;                                   // store lowest value
         if (voltage > Max) Max = voltage;                                   // store highest value
     }

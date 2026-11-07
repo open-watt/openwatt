@@ -57,6 +57,7 @@ nothrow @nogc:
     nothrow @nogc:
         String name;
         ObjectRef!TeslaTWCBinding binding;
+        SysTime link_ready_at;
         uint lifetime_energy;
 
         ushort id;
@@ -89,6 +90,7 @@ nothrow @nogc:
         char[17] vin;
 
         enum ushort min_current = 500;
+        enum ubyte measured_current_flag = 8;
 
         ushort demand() const pure
         {
@@ -235,7 +237,7 @@ protected:
             set_role(BusRole.listening);
             _listen_deadline = now + listen_window;
             foreach (ref c; _chargers)
-                c.flags &= ~1;
+                c.flags &= ~(1 | Charger.measured_current_flag);
         }
 
         if (_collision)
@@ -636,7 +638,8 @@ private:
 
         ushort previous_offer = c.offered_current;
         ushort previous_reservation = c.reserved_current;
-        if (message[6] && (c.req_seq & 1))
+        bool offered = message[6] && (c.req_seq & 1);
+        if (offered)
         {
             c.offered_current = message[7..9].bigEndianToNative!ushort;
             c.reserved_current = max(c.reserved_current, c.offered_current);
@@ -646,8 +649,11 @@ private:
             c.offered_current = previous_offer;
             c.reserved_current = previous_reservation;
         }
-        if (TeslaTWCBinding binding = c.binding.get)
-            binding.push_samples(*c, TeslaTWCBinding.Push.heartbeat);
+        else if (offered)
+        {
+            if (TeslaTWCBinding binding = c.binding.get)
+                binding.push_samples(*c, TeslaTWCBinding.Push.offer);
+        }
     }
 
     int send_twc_message(ushort dst, const(void)[] message)
@@ -706,7 +712,7 @@ private:
                     c.offered_current = msg.heartbeat.current;
                     c.reserved_current = max(c.reserved_current, c.offered_current);
                     if (TeslaTWCBinding binding = c.binding.get)
-                        binding.push_samples(*c, TeslaTWCBinding.Push.heartbeat);
+                        binding.push_samples(*c, TeslaTWCBinding.Push.offer);
                 }
             return;
         }
@@ -723,7 +729,6 @@ private:
         if (TeslaTWCBinding binding = slave.binding.get)
             binding.heard();
         ubyte flags_before = slave.flags;
-        ushort offered_before = slave.offered_current;
         TeslaTWCBinding.Push changed;
 
         if (twc.dst == TWCFrame.broadcast)
@@ -733,21 +738,28 @@ private:
                 case TWCMessageType.SlaveLinkReady:
                     // always refresh: with optimistic adoption this may arrive while we're
                     // already heartbeating (slave rebooted, or first contact after our boot)
+                    slave.link_ready_at = cast(SysTime)p.creation_time;
                     slave.device_max_current = msg.link_ready.amps;
                     if (slave.target_current == ushort.max)
                         slave.target_current = slave.device_max_current;
-                    changed |= TeslaTWCBinding.Push.link_ready | TeslaTWCBinding.Push.heartbeat;
+                    changed |= TeslaTWCBinding.Push.link_ready;
                     break;
                 case TWCMessageType.ChargeInfo:
                     slave.lifetime_energy = msg.charge_info.lifetime_energy;
                     slave.voltage1 = msg.charge_info.voltage1;
                     slave.voltage2 = msg.charge_info.voltage2;
                     slave.voltage3 = msg.charge_info.voltage3;
-                    // the current in this message is more closely temporally aligned, but it's only 500mA precision
-                    // the current we recorded is half a second old, but it's 10mA precision
-                    slave.power1 = cast(ushort)(msg.charge_info.voltage1 * slave.current / 100);
-                    slave.power2 = cast(ushort)(msg.charge_info.voltage2 * slave.current / 100);
-                    slave.power3 = cast(ushort)(msg.charge_info.voltage3 * slave.current / 100);
+                    // ChargeInfo supplies a 500mA-resolution reading even before a heartbeat measures current.
+                    ushort current = slave.current;
+                    if (!(slave.flags & Charger.measured_current_flag))
+                    {
+                        current = cast(ushort)(msg.charge_info.current * 50);
+                        slave.current = current;
+                        changed |= TeslaTWCBinding.Push.current;
+                    }
+                    slave.power1 = cast(ushort)(slave.voltage1 * current / 100);
+                    slave.power2 = cast(ushort)(slave.voltage2 * current / 100);
+                    slave.power3 = cast(ushort)(slave.voltage3 * current / 100);
                     slave.total_power = cast(ushort)(slave.power1 + slave.power2 + slave.power3);
                     slave.flags |= 0x2;
                     changed |= TeslaTWCBinding.Push.charge_info;
@@ -828,6 +840,15 @@ private:
             if (_role != BusRole.active && !slave.offered_current)
                 slave.offered_current = msg.heartbeat.current;
             slave.acknowledge(msg.heartbeat.current, msg.heartbeat.current_in_use);
+            if (msg.heartbeat.has_current)
+                changed |= TeslaTWCBinding.Push.accepted;
+            if (msg.heartbeat.has_current_in_use)
+            {
+                slave.flags |= Charger.measured_current_flag;
+                changed |= TeslaTWCBinding.Push.current;
+            }
+            else
+                slave.flags &= ~Charger.measured_current_flag;
 
             slave.flags |= 0x1;
 
@@ -872,11 +893,10 @@ private:
         }
 
         rebalance();
-        if (slave.offered_current != offered_before)
-            changed |= TeslaTWCBinding.Push.heartbeat;
+
         // the VIN and circuit follow the collected and connected bits, the charger state the rest
         if ((flags_before ^ slave.flags) & 0xF0)
-            changed |= TeslaTWCBinding.Push.vehicle | TeslaTWCBinding.Push.heartbeat;
+            changed |= TeslaTWCBinding.Push.vehicle;
         if (changed)
             if (TeslaTWCBinding binding = slave.binding.get)
                 binding.push_samples(*slave, changed);

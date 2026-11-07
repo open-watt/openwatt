@@ -716,6 +716,13 @@ unittest
     binding._tx_power = &tx_power;
     binding._rx_power = &rx_power;
 
+    Element*[5] diagnostics = [&temperature, &supply, &tx_bias, &tx_power, &rx_power];
+    binding.changed(cage, SFPChange.identity | SFPChange.diagnostics);
+    foreach (e; identity)
+        assert(!e.has_value);
+    foreach (e; diagnostics)
+        assert(!e.has_value);
+
     // A module that reports diagnostics, then its replacement with none: no reading of the first survives.
     cage._id.vendor[] = ' ';
     cage._id.part[] = ' ';
@@ -731,7 +738,6 @@ unittest
     assert(temperature.value.isQuantity && rx_power.value.isQuantity);
     cage._diag_valid = false;
     binding.changed(cage, SFPChange.diagnostics);
-    Element*[5] diagnostics = [&temperature, &supply, &tx_bias, &tx_power, &rx_power];
     foreach (e; diagnostics)
         assert(e.value.isNull);
 

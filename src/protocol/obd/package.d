@@ -267,15 +267,8 @@ protected:
             return FormatId.invalid;
 
         SampleDesc sd = desc_by_index(obd.desc);
-        const(DataFormat)* fmt = sd.fmt;
         if (!e.format.valid)
             e.format = sd.format;
-        if (fmt.is_scalar && e.record_update() == SysTime())
-        {
-            Scalar z;
-            z.u = 0;
-            e.value = box_record(z.raw.ptr, *fmt);
-        }
 
         SampleElement* se = &elements.pushBack();
         se.element = e;
@@ -918,6 +911,12 @@ unittest
             super(CID(1));      // dummy id for the mock; never registered in a table
         }
 
+        void use_profile(Profile* profile)
+        {
+            _profile_data = profile;
+            _quiet_limit = Duration.zero;
+        }
+
         override int submit(uint ecu, bool extended, const(ubyte)[] request)
         {
             if (fail_submit)
@@ -938,6 +937,25 @@ unittest
         override void arm_poll(MonoTime) { ++polls_armed; }
         override void disarm_poll() {}
     }
+
+    if (!obd_section_kind)
+        obd_section_kind = register_profile_section("obd", alloc!OBDProtocolModule(null));
+    Profile* profile = parse_profile("elements:\n\tobd: 1, 0x0C, 0, u16\tdesc: speed\n", "obd-first-sample");
+    assert(profile);
+    scope(exit) free(profile);
+    TestBinding sampled = alloc!TestBinding();
+    scope(exit) free(sampled);
+    sampled.use_profile(profile);
+
+    Element speed;
+    assert(sampled.add_handler(null, &speed, profile.element_desc(0), 0).valid);
+    assert(!speed.has_value && speed.record_update() == SysTime());
+    sampled.issue_requests();
+    static immutable ubyte[4] zero_speed = [0x41, 0x0C, 0, 0];
+    StackPacket zero_frame;
+    zero_frame.init!OBDFrame(zero_speed[]).src_id = 0x7E8;
+    sampled.packet_handler(&zero_frame.packet, null, PacketDirection.incoming, null);
+    assert(speed.has_value && speed.record_value().asLong == 0);
 
     TestBinding early = alloc!TestBinding();
     scope (exit) free(early);

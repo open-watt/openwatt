@@ -427,4 +427,28 @@ private:
             return;
         }
     }
+
+    unittest
+    {
+        import urt.mem : alloc, free;
+        import protocol.mqtt : MQTTModule;
+
+        if (!mqtt_section_kind)
+            mqtt_section_kind = register_profile_section("mqtt", alloc!MQTTModule(null));
+        Profile* profile = parse_profile("elements:\n\tmqtt: sample/level, u8\tdesc: level\n", "mqtt-first-sample");
+        assert(profile);
+        scope(exit) free(profile);
+        MQTTBinding binding = alloc!MQTTBinding(CID(1));
+        scope(exit) free(binding);
+        binding._profile_data = profile;
+        binding._quiet_limit = Duration.zero;
+
+        Element level;
+        level.format = binding.add_handler(null, &level, profile.element_desc(0), 0);
+        assert(level.format.valid);
+        assert(!level.has_value && level.record_update() == SysTime());
+
+        binding.on_publish(null, "sample/level", cast(const(ubyte)[])"0", getTime(), false);
+        assert(level.has_value && level.record_value().asLong == 0);
+    }
 }
