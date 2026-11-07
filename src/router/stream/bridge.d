@@ -241,9 +241,11 @@ unittest
     assert(bridge.send_bytes("w") && a.output[] == "w" && b.output[] == "x" && b.tx_queued == 0);
     b.full = false;
 
-    // a member whose line fails restarts the bridge while it relays
+    // a member whose line fails refuses writes at once, and restarts the bridge on the next pass, not while it relays
     b.fail = true;
-    assert(bridge.send_bytes("v") && a.output[] == "wv" && !b.running && !bridge.running);
+    assert(bridge.send_bytes("v") && a.output[] == "wv" && !b.tx_request && bridge.running);
+    b.restart();
+    assert(!bridge.running);
     b.fail = false;
     settle();
     assert(bridge.running && b.running);

@@ -292,7 +292,10 @@ private:
         }
         log.debug_(event == IPEvent.closed ? "closed by peer" : "connection error");
         // a failed connect retries after startup's backoff; the connection is closed outside its own callback
-        restart_deferred();
+        if (running)
+            fail_line();
+        else
+            restart_deferred();
     }
 
     void close_conn()
