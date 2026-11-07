@@ -862,6 +862,10 @@ unittest
             output ~= cast(const(ubyte)[])data;
             return data.length;
         }
+        void push(const(void)[] data)
+        {
+            incoming(data, getTime());
+        }
         Array!ubyte output;
     }
 
@@ -897,5 +901,219 @@ unittest
                 assert(wire[1 .. 3] == wire[0 .. 1].ezsp_crc().nativeToBigEndian);
             }
         }
+    }
+
+    // an EZSP command goes through the client's queue and ASH's framing to the line, and its response back to the caller
+    {
+        import manager.expression : NamedArgument;
+        import protocol.ezsp.client : EZSPClient;
+        import protocol.ezsp.commands : EZSP_GetConfigurationValue, EzspConfigId, EzspStatus;
+
+        static void ncp_frame(Line wire, ubyte control, const(ubyte)[] data)
+        {
+            ubyte[ASHInterface.ASH_MAX_LENGTH] raw = void;
+            raw[0] = control;
+            if (control & 0x80)
+                raw[1 .. 1 + data.length] = data[];
+            else
+                ASHInterface.randomise(data, raw[1 .. $]);
+            size_t n = 1 + data.length;
+            raw[n .. n + 2] = raw[0 .. n].ezsp_crc().nativeToBigEndian;
+            ubyte[ASHInterface.ASH_MAX_ENCODED_LENGTH] stuffed = void;
+            size_t m = ASHInterface.stuff_bytes(raw[0 .. n + 2], stuffed[]);
+            stuffed[m++] = ASHInterface.ASH_FLAG_BYTE;
+            wire.push(stuffed[0 .. m]);
+        }
+
+        static size_t host_data(Line wire, ref ubyte control, ubyte[] payload, size_t nth = size_t.max, bool clear = true)
+        {
+            size_t found, start, k;
+            ubyte[ASHInterface.ASH_MAX_ENCODED_LENGTH] frame = void;
+            foreach (i, b; wire.output[])
+            {
+                if (b == ASHInterface.ASH_CANCEL_BYTE)
+                    start = i + 1;
+                if (b != ASHInterface.ASH_FLAG_BYTE)
+                    continue;
+                size_t n = i - start;
+                frame[0 .. n] = wire.output[start .. i];
+                start = i + 1;
+                n = ASHInterface.unstuff_bytes(frame[], 0, n);
+                if (n < 3 || (frame[0] & 0x80) || frame[n - 2 .. n] != frame[0 .. n - 2].ezsp_crc().nativeToBigEndian)
+                    continue;
+                if (nth != size_t.max && k++ != nth)
+                    continue;
+                control = frame[0];
+                found = n - 3;
+                ASHInterface.randomise(frame[1 .. n - 2], payload);
+            }
+            if (clear)
+                wire.output.clear();
+            return found;
+        }
+
+        static struct Caller
+        {
+        nothrow @nogc:
+            void read(EzspStatus status, ushort value)
+            {
+                ++calls;
+                got_status = status;
+                got = value;
+            }
+            void read_for(void*, EzspStatus status, ushort value)
+            {
+                read(status, value);
+            }
+            uint calls;
+            ushort got;
+            EzspStatus got_status = EzspStatus.SPI_ERR_FATAL;
+        }
+        static immutable ubyte[2] rstack = [ 0x02, 0x0B ];
+        static immutable ubyte[7] version_reply = [ 0, 0x80, 0x00, 13, 2, 0x00, 0x74 ];
+        static immutable ubyte[6] request = [ 1, 0x00, 0x01, 0x52, 0x00, EzspConfigId.NEIGHBOR_TABLE_SIZE ];
+        static immutable ubyte[8] response = [ 1, 0x80, 0x01, 0x52, 0x00, EzspStatus.SUCCESS, 0x10, 0x00 ];
+
+        Line wire = Collection!Line().create("ash-loop-line");
+        foreach (_; 0 .. 2)
+            Collection!Stream().update_all();
+        ASHInterface link = Collection!ASHInterface().create("ash-loop", ObjectFlags.none, NamedArgument("stream", wire));
+        Collection!BaseInterface().update_all();
+        ncp_frame(wire, 0xC1, rstack[]);
+        Collection!BaseInterface().update_all();
+        assert(link.running);
+
+        EZSPClient client = Collection!EZSPClient().create("ezsp-loop", ObjectFlags.none, NamedArgument("ash-interface", link));
+        scope (exit)
+        {
+            client.destroy();
+            link.destroy();
+            wire.destroy();
+            foreach (_; 0 .. 4)
+            {
+                Collection!EZSPClient().update_all();
+                Collection!BaseInterface().update_all();
+                Collection!Stream().update_all();
+            }
+        }
+        Collection!EZSPClient().update_all();
+        ubyte control;
+        ubyte[ASHInterface.ASH_MAX_LENGTH] payload;
+        assert(host_data(wire, control, payload[]) == 4 && control == 0x00 && payload[0 .. 4] == [ 0, 0x00, 0x00, 13 ]);
+        ncp_frame(wire, 0x01, version_reply[]);
+        Collection!EZSPClient().update_all();
+        assert(client.running);
+
+        wire.output.clear();
+        Caller caller;
+        assert(client.send_command!EZSP_GetConfigurationValue(&caller.read, EzspConfigId.NEIGHBOR_TABLE_SIZE));
+        assert(host_data(wire, control, payload[]) == request.length && control == 0x11);
+        assert(payload[0 .. request.length] == request[], "the header sits in front of the serialised parameters");
+        ncp_frame(wire, 0x12, response[]);
+        assert(caller.calls == 1 && caller.got_status == EzspStatus.SUCCESS && caller.got == 16);
+        assert(client.queued_count == 0);
+
+        // an observer of the outgoing frame submits or cancels while the request is on its way down
+        static struct Observer
+        {
+        nothrow @nogc:
+            void sent(const(Packet)*, BaseInterface, PacketDirection, void*)
+            {
+                if (!armed)
+                    return;
+                armed = false;
+                if (cancel)
+                    client.cancel_request(sending);
+                else
+                    assert(client.send_command!EZSP_GetConfigurationValue(&nested.read, EzspConfigId.NEIGHBOR_TABLE_SIZE));
+            }
+            EZSPClient client;
+            void* sending;
+            Caller nested;
+            bool armed, cancel;
+        }
+        static void exchange(Line wire, ubyte frame, ubyte seq)
+        {
+            ubyte control;
+            ubyte[ASHInterface.ASH_MAX_LENGTH] payload;
+            ubyte[request.length] expect = request;
+            expect[0] = seq;
+            assert(host_data(wire, control, payload[]) == request.length && control == (frame << 4 | frame));
+            assert(payload[0 .. request.length] == expect[]);
+            ubyte[response.length] reply = response;
+            reply[0] = seq;
+            ncp_frame(wire, cast(ubyte)(frame << 4 | (frame + 1)), reply[]);
+        }
+        Observer observer = Observer(client);
+        PacketFilter outgoing;
+        outgoing.type = PacketType.raw;
+        outgoing.direction = PacketDirection.outgoing;
+        link.subscribe(&observer.sent, outgoing);
+        scope (exit) link.unsubscribe(&observer.sent);
+
+        Caller first;
+        observer.armed = true;
+        assert(client.send_command!EZSP_GetConfigurationValue(&first.read, EzspConfigId.NEIGHBOR_TABLE_SIZE));
+        assert(client.queued_count == 2, "a request submitted under a send waits behind it");
+        exchange(wire, 2, 2);
+        assert(first.calls == 1 && first.got_status == EzspStatus.SUCCESS && observer.nested.calls == 0);
+        exchange(wire, 3, 3);
+        assert(observer.nested.calls == 1 && observer.nested.got_status == EzspStatus.SUCCESS && client.queued_count == 0);
+
+        Caller cancelled;
+        observer.armed = observer.cancel = true;
+        observer.sending = &cancelled;
+        assert(client.send_command!EZSP_GetConfigurationValue(&cancelled.read_for, EzspConfigId.NEIGHBOR_TABLE_SIZE, &cancelled));
+        assert(cancelled.calls == 1 && cancelled.got_status != EzspStatus.SUCCESS, "a request cancelled under its own send fails once");
+        exchange(wire, 4, 4);
+        assert(cancelled.calls == 1 && client.queued_count == 0, "its response is consumed in order and reaches no one");
+
+        // with two outstanding, a request submitted under a send still reaches the line behind it, and both replies resolve in order
+        assert(client.concurrency(2));
+        Caller ahead;
+        observer.armed = true;
+        observer.cancel = false;
+        observer.nested = Caller();
+        assert(client.send_command!EZSP_GetConfigurationValue(&ahead.read, EzspConfigId.NEIGHBOR_TABLE_SIZE));
+        ubyte[request.length] expect = request;
+        expect[0] = 5;
+        assert(host_data(wire, control, payload[], 0, false) == request.length && control == 0x55 && payload[0 .. request.length] == expect[]);
+        expect[0] = 6;
+        assert(host_data(wire, control, payload[], 1) == request.length && control == 0x65 && payload[0 .. request.length] == expect[]);
+        ubyte[response.length] reply = response;
+        reply[0] = 5;
+        ncp_frame(wire, 0x57, reply[]);
+        reply[0] = 6;
+        ncp_frame(wire, 0x67, reply[]);
+        assert(ahead.calls == 1 && ahead.got_status == EzspStatus.SUCCESS && observer.nested.calls == 1 && observer.nested.got_status == EzspStatus.SUCCESS);
+        assert(client.queued_count == 0);
+        assert(client.concurrency(1));
+
+        // a full queue admits a request in place of a queued DEI request, which fails once
+        Caller flood;
+        foreach (_; 0 .. 32)
+            assert(client.send_command!EZSP_GetConfigurationValue(&flood.read, EzspConfigId.NEIGHBOR_TABLE_SIZE, null, 0, true));
+        Caller urgent;
+        assert(client.send_command!EZSP_GetConfigurationValue(&urgent.read, EzspConfigId.NEIGHBOR_TABLE_SIZE));
+        assert(flood.calls == 1 && flood.got_status != EzspStatus.SUCCESS && urgent.calls == 0);
+        assert(client.queued_count == 32);
+
+        // a request failed by shutdown may cancel itself or another from its callback
+        static struct Canceller
+        {
+        nothrow @nogc:
+            void read_for(void* user_data, EzspStatus, ushort)
+            {
+                ++calls;
+                client.cancel_request(user_data);
+            }
+            EZSPClient client;
+            uint calls;
+        }
+        Canceller sent = Canceller(client), waiting = Canceller(client);
+        assert(client.send_command!EZSP_GetConfigurationValue(&sent.read_for, EzspConfigId.NEIGHBOR_TABLE_SIZE, &waiting));
+        assert(client.send_command!EZSP_GetConfigurationValue(&waiting.read_for, EzspConfigId.NEIGHBOR_TABLE_SIZE, &waiting));
+        client.restart();
+        assert(sent.calls == 1 && waiting.calls == 1 && client.queued_count == 0);
     }
 }
