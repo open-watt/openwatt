@@ -957,7 +957,9 @@ path, tunnels included, while small packets share datagrams and links with small
 frames carry a packet across several. A unicast `remote-host` holds one session to that peer
 open, with `link-status` up while it is established; without a remote, sessions
 open to any peer that sends one, up to 16, and close when they fail; at the limit
-the longest-idle session closes to admit a new peer. A packet's
+the longest-idle session closes to admit a new peer. A session that hears nothing for
+15 seconds probes its peer, so one that reboots or disappears closes it within a few
+retransmits. A packet's
 PCP selects its lane: packets are delivered in order within a lane, a lost
 datagram holds up only the lanes it carried, and a higher-priority packet rides
 ahead of a long one in progress, interrupting it if it is long itself. A transmit handle may be aborted
