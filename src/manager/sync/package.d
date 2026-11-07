@@ -78,7 +78,8 @@ import manager.sync.encoder;
 import manager.sync.json_encoder;
 import manager.sync.peering : SyncPeeringModule;
 import manager.sync.peer;
-import manager.sync.udp_server;
+static if (has_rdp)
+    import manager.sync.udp_server;
 static if (has_http)
     import manager.sync.ws_server;
 
@@ -164,7 +165,8 @@ nothrow @nogc:
         g_encoders[SyncEncoderKind.binary] = g_binary_encoder;
 
         g_app.console.register_collection!SyncPeer();
-        g_app.console.register_collection!UDPSyncServer();
+        static if (has_rdp)
+            g_app.console.register_collection!UDPSyncServer();
         static if (has_http)
             g_app.console.register_collection!WebSocketSyncServer();
 
@@ -188,7 +190,8 @@ nothrow @nogc:
 
     override void update()
     {
-        Collection!UDPSyncServer().update_all();
+        static if (has_rdp)
+            Collection!UDPSyncServer().update_all();
         static if (has_http)
             Collection!WebSocketSyncServer().update_all();
         Collection!SyncPeer().update_all();
@@ -208,29 +211,6 @@ nothrow @nogc:
         }
         if (feeds)
         {
-            // a val-queue eviction lost records whose positions had already advanced; rewind every
-            // held node to its latest record so the mirror converges and only history stays lost
-            foreach (p; peers[])
-            {
-                if (!p.take_val_repush())
-                    continue;
-                foreach (raw; p._live_nodes.keys)
-                {
-                    EID node;
-                    node.raw = raw;
-                    Element* e = resolve_element(node);
-                    if (!e)
-                        continue;
-                    SyncPeer.LiveNode* live = raw in p._live_nodes;
-                    if (e.data_format.kind != SeriesKind.point && live.position > live_start(e))
-                    {
-                        live.position = live_start(e);
-                        live.told_gap = false;
-                    }
-                    mark_pending_val(p, node);
-                }
-            }
-
             sweep_dirty((ref Element e) {
                 EID node = e.ensure_eid();
                 if (!node)
@@ -381,7 +361,7 @@ nothrow @nogc:
         scope (exit) e.close_series_cursor(c);
         for (;;)
         {
-            if (p.tx_blocked() || (!seq && !p.val_room()))
+            if (p.tx_blocked())
                 return false;
             RecordBlock blk = c.next(256);
             // a gap sits at a bucket boundary, and blocks never span one; at head it is an ended tail
@@ -513,7 +493,54 @@ nothrow @nogc:
             if (p._introducing)
                 return false;
         }
+        if (p._binding || p._unbind_cursor)
+        {
+            if (pump_binds(p))
+                return true;
+            if (p._binding || p._unbind_cursor)
+                return false;
+        }
         return pump_model_intro(p);
+    }
+
+    bool pump_binds(SyncPeer p)
+    {
+        uint gen = p.begin_burst();
+        while (!p.tx_blocked())
+        {
+            if (p._unbind_cursor > p._bound.length)
+                p._unbind_cursor = cast(uint)p._bound.length;
+            if (p._unbind_cursor)
+            {
+                BaseObject obj = p._bound[--p._unbind_cursor];
+                if (!subscribed(p, obj))
+                {
+                    unbind_from_peer(p, obj);
+                    if (!p.send_ok(gen))
+                        return false;
+                }
+                continue;
+            }
+            if (!p._binding)
+                return false;
+            BaseObject obj = next_object(p._bind_table, p._bind_slot);
+            if (!obj)
+            {
+                p._binding = false;
+                return false;
+            }
+            if (obj._typeInfo.syncable && !obj._is_remote && subscribed(p, obj) && (!bind_to_peer(p, obj) || !p.send_ok(gen)))
+                return false;
+        }
+        return p.tx_full();
+    }
+
+    static bool subscribed(SyncPeer p, BaseObject obj)
+    {
+        foreach (ref pattern; p._subscriptions[])
+            if (pattern_matches(pattern[], obj))
+                return true;
+        return false;
     }
 
     bool pump_introductions(SyncPeer p)
@@ -687,7 +714,7 @@ nothrow @nogc:
         p._remote_segment = 0;
         p._remote_node_id = 0;
         p._remote_role = PeerRole.none;
-        p.reset_sublayer();           // seq spaces are session state
+        p.clear_fragments();
         p._remote_nonce_set = false;
         p._local_nonce_set = false;   // a reconnect is a new session; fresh nonce
         p._ft_sent.clear();
@@ -1373,21 +1400,10 @@ nothrow @nogc:
             if (p[] == pattern[])
                 return;   // dedup
         from._subscriptions ~= pattern.move;
-        const(char)[] pat = from._subscriptions[$ - 1][];
-
-        // Walk local authoritative syncable objects; bind any that match.
-        SyncPeer peer = from;
-        bool dead = false;
-        foreach_object((BaseObject obj) nothrow @nogc {
-            if (dead || !obj._typeInfo.syncable)
-                return;
-            if (obj._is_remote)
-                return;
-            if (!pattern_matches(pat, obj))
-                return;
-            if (!bind_to_peer(peer, obj))
-                dead = true;
-        });
+        from._bind_table = 0;
+        from._bind_slot = 1;
+        from._binding = true;
+        from.arm_tx();
     }
 
     void inbound_unsub(SyncPeer from, const(char)[] pattern)
@@ -1404,23 +1420,8 @@ nothrow @nogc:
         }
         if (!removed)
             return;
-
-        // Any bound object that no longer matches any pattern → unbind.
-        for (ptrdiff_t i = cast(ptrdiff_t)from._bound.length - 1; i >= 0; --i)
-        {
-            BaseObject obj = from._bound[i];
-            bool still_matches = false;
-            foreach (ref p; from._subscriptions[])
-            {
-                if (pattern_matches(p[], obj))
-                {
-                    still_matches = true;
-                    break;
-                }
-            }
-            if (!still_matches)
-                unbind_from_peer(from, obj);
-        }
+        from._unbind_cursor = cast(uint)from._bound.length;
+        from.arm_tx();
     }
 
     // Inbound: model plane
@@ -1924,24 +1925,17 @@ nothrow @nogc:
         enc.encode_res(from, seq, applied);
     }
 
-    // false = the handle's add is still in flight on the ordered control plane; the
-    // sublayer withholds the ack so the sender's catch-up retries it. An announced
-    // handle that doesn't resolve is dead (its node failed to materialise or is
-    // gone) - those samples are skipped, never held, so a poison val can't stall
-    // the queue behind it.
-    bool inbound_val(SyncPeer from, SyncHandle handle, ref Variant value, ulong t_ms)
+    // a handle that doesn't resolve is dead: its node failed to materialise or is gone
+    void inbound_val(SyncPeer from, SyncHandle handle, ref Variant value, ulong t_ms)
     {
         EID node = from.node_of(handle);
         Element* e = resolve_element(node);
         if (!e)
         {
-            if (!from.handle_announced(handle))
-                return false;
             log.debug_("val for dead handle ", handle);
-            return true;
+            return;
         }
         merge_remote_value(e, value, t_ms, &on_mirror_write);
-        return true;
     }
 
     void inbound_res(SyncPeer from, uint seq, Variant* value)
