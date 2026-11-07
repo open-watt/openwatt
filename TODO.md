@@ -1229,6 +1229,9 @@ role from a concrete deployment need before implementing or advertising it.
 
 ## Sync and peering
 
+- **[in passing, #928] The 64-bit Tiny unittest fails in `manager/sync/peer.d`**: an x86_64
+  `TINY=1` LDC build trips the windowed-fragment `rounds ==` assert, on master too. Tiny boards are
+  32-bit, so this is the unittest, not a shipping target.
 - **Move sync onto RDP sessions** (`rdp_open`, `src/router/iface/rdp.d`): a peer is an address and
   the session to it is the transport. Goes: the reliability sublayer in `src/manager/sync/peer.d`
   (control retransmission, reorder hold, the val/log refold queues and epochs, session-id echo,

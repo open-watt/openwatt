@@ -199,6 +199,7 @@ Limit is the linker script's `FLASH` region, not the board: the Y23A-RP2350B car
 | 2026-11-08 | #931 | ldc 1.43.0 | 1,609,548 | 46,412 | 4,194,304 | EZSP requests queue in pool packets; a non-reentrant drain keeps wire order: +256 flash |
 | 2026-11-08 | c6e93df0 | ldc 1.43.0 | 1,609,292 | 46,412 | 4,194,304 | master, control for #924 |
 | 2026-11-08 | #924 | ldc 1.43.0 | 1,609,292 | 46,412 | 4,194,304 | headroom-shortfall warnings, debug builds only: no release bytes |
+| 2026-11-09 | #928 | ldc 1.43.0 | 1,608,692 | 46,412 | 4,194,304 | 80 B headroom; the page classes, their count included, come from src/urt_config.d: identical to the fixed two-class revision |
 
 ### MT7621 hEX S, `make BOARD=rb760igs CONFIG=release`
 
