@@ -131,8 +131,6 @@ protected:
         }
         _queue.abort_all();
         _in_flight = -1;
-        packet_free(_on_air);
-        _on_air = null;
         return CompletionStatus.complete;
     }
 
@@ -168,7 +166,6 @@ protected:
 
 private:
     PriorityPacketQueue _queue;
-    Packet* _on_air;    // the radio's reference to the frame it is sending; aborting the frame must not free it
     int _in_flight = -1;
     Wpan _wpan;
     bool _cca = true;
@@ -202,7 +199,6 @@ private:
             if (wpan_tx(_wpan, cast(const(ubyte)[])frame.packet.data, _cca).succeeded)
             {
                 _in_flight = frame.tag;
-                _on_air = packet_retain(frame.packet);
                 return;
             }
             add_tx_drop();
@@ -228,8 +224,6 @@ private:
                 _queue.complete(cast(ubyte)tag, error == WpanTxError.no_ack || error == WpanTxError.invalid_ack ? MessageState.delivery_failed : MessageState.failed);
             }
         }
-        packet_free(_on_air);
-        _on_air = null;
         send_next();
     }
 
