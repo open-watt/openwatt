@@ -1504,6 +1504,13 @@ this is what remains.
   to bridge dmd#24027. Once DMD 2.115 and an LDC on its frontend are the minimum, drop `vtbl`
   unconditionally and delete the probe. Until then a Visual D build with a dmd master compiler needs
   `ClassInfoNoVtbl` added to the project's version identifiers.
+- **A producer's request can be retired during its own send** (2026-11-07, #881 review): Modbus
+  `send_queued_messages` reads its pending entry after `frame_and_send`, but the send can retire it
+  first. A Windows `WSASend` that fails synchronously takes the TCP stream offline inline, Modbus
+  restarts, and shutdown clears `_pending` before the send returns. Serial and TCP also run taps
+  before handing the frame to the line, so a tap can reenter a producer. Fix at the Stream boundary,
+  STREAMING.md row E4r on #805: commit to the line before observers run, and deliver abort and
+  terminal notification only through the queue's retirement callback. A tag re-lookup is not a fix.
 
 - **Egress admission follow-ups** (2026-11-01): interfaces admit by `tx_floor()` and invite
   classless waiters a frame per turn; what that left open:

@@ -11,7 +11,7 @@ import manager.base;
 import manager.collection;
 
 import protocol.modbus;
-import protocol.modbus.iface : ModbusFrame, ModbusFrameType;
+import protocol.modbus.iface : ModbusFrame, ModbusFrameType, modbus_frame_headroom;
 import protocol.modbus.message;
 
 import router.iface;
@@ -397,7 +397,7 @@ private:
 
     int send_packet(ubyte dst_address, ushort sequence_number, ref const ModbusPDU message, ModbusFrameType type, PCP pcp = PCP.be, bool dei = false) nothrow @nogc
     {
-        Packet* p = alloc_packet!ModbusFrame(1 + message.data.length);
+        Packet* p = alloc_packet!ModbusFrame(1 + message.data.length, modbus_frame_headroom);
         if (!p)
             return -1;
         ubyte[] buffer = cast(ubyte[])p.payload;

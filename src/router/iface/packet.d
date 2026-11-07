@@ -473,9 +473,28 @@ Packet* packet_mutable(Packet* packet, size_t headroom = 0, size_t reserve = pac
     return copy;
 }
 
+// the packet's bytes as a page with head and tail bytes of room around them for a frame; consumes the packet, null if a copy fails
+Page* packet_page(Packet* packet, size_t head, size_t tail)
+{
+    Page* page = packet.page;
+    size_t start = packet._ptr - cast(void*)page;
+    size_t length = head + packet._length + tail;
+    if (page_unique(page) && packet.headroom >= head && page.capacity >= start + packet._length + tail)
+    {
+        page.offset = cast(ushort)(start - head);
+        page.length = cast(ushort)length;
+        return page;
+    }
+    Page* copy = page_alloc(length);
+    if (copy)
+        copy.data[head .. head + packet._length] = packet.data[];
+    packet_free(packet);
+    return copy;
+}
+
 // makes a reference the caller owns storable: a pool packet as it is, a lent one copied
-Packet* packet_keep(Packet* packet)
-    => page_foreign(packet.page) ? packet_copy(packet) : packet;
+Packet* packet_keep(Packet* packet, size_t headroom = packet_headroom)
+    => page_foreign(packet.page) ? packet_copy(packet, headroom) : packet;
 
 Packet* packet_copy(const(Packet)* packet, size_t headroom = packet_headroom)
 {
@@ -718,7 +737,15 @@ unittest
     assert(attached && attached.packet_page_offset > raw.offset + raw.length);
     assert(raw.capacity == attached.packet_page_offset - ushort.sizeof);
     assert(raw.capacity < old_capacity && attached.data.length == 16);
-    packet_free(attached);
+    size_t slack = raw.tailroom;
+    assert(packet_page(attached, 0, slack) is raw && raw.length == 16 + slack, "a tail packet's trimmed capacity is room to the byte");
+    page_free(raw);
+    raw = page_alloc(16);
+    attached = attach_packet(raw);
+    size_t over = raw.tailroom + 1;
+    Page* spilled = packet_page(attached, 0, over);
+    assert(spilled && spilled !is raw && spilled.length == 16 + over, "one byte past the trimmed capacity is copied");
+    page_free(spilled);
 
     ubyte[4] lent_bytes = [1, 2, 3, 4];
     StackPacket lent;
@@ -744,6 +771,18 @@ unittest
     Packet* framable = packet_mutable(&mtu.packet, 18, 18);
     assert(framable && framable.headroom >= 18 && page_category(framable.page) < page_pool_num_categories(), "a full-size lent frame is copied with the room it asks for into a pool page");
     packet_free(framable);
+
+    Packet* framed = alloc_packet!RawFrame(lent_bytes[]);
+    Page* own_page = framed.page;
+    const(void)* own_bytes = framed.data.ptr;
+    Page* in_place = packet_page(framed, 1, 2);
+    assert(in_place is own_page && in_place.data.ptr is own_bytes - 1 && in_place.length == 7, "a unique page frames in place");
+    framed = alloc_packet!RawFrame(lent_bytes[]);
+    Page* copied = packet_page(packet_retain(framed), 1, 2);
+    assert(copied !is framed.page && page_unique(framed.page) && (cast(ubyte[])copied.data)[1 .. 5] == lent_bytes[], "a shared page is copied");
+    page_free(in_place);
+    page_free(copied);
+    packet_free(framed);
 
     ubyte[8] payload = [0x00, 0x03, 0x08, 0x00, 1, 2, 3, 4];
     StackPacket packet;
