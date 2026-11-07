@@ -664,13 +664,11 @@ package:
     const(char)[] get_address() const
     {
         import urt.mem.temp : tstring;
-        if (_host)
-            return _host[];
-        else if (_remote.family == AddressFamily.ipv4)
+        if (_remote.family == AddressFamily.ipv4)
             return _remote._a.ipv4.addr.tstring;
-        else if (_remote.family == AddressFamily.ipv6)
+        if (_remote.family == AddressFamily.ipv6)
             return _remote._a.ipv6.addr.tstring;
-        return null;
+        return _host[];
     }
 
 
@@ -811,3 +809,16 @@ private:
 
 inout(char)[] strlen_trim(inout(char)[] str)
     => str[0..str.strlen_s].trimBack;
+
+unittest
+{
+    import urt.mem : alloc, free;
+
+    AA55Client client = alloc!AA55Client(CID(1));
+    scope(exit) free(client);
+    client._host = StringLit!"test.invalid";
+    assert(client.get_address() == "test.invalid");
+
+    client._remote = InetAddress(IPAddr(192, 0, 2, 1), 8899);
+    assert(client.get_address() == "192.0.2.1");
+}
