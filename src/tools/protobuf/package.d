@@ -481,6 +481,7 @@ size_t put_varint(ubyte[] buffer, ulong value) pure nothrow @nogc
 }
 
 // Bytes consumed, 0 for incomplete input, or -1 for an overflowing value.
+pragma(inline, false)
 ptrdiff_t get_varint(const(ubyte)[] buffer, out ulong value, uint bits = 64) pure nothrow @nogc
 {
     debug assert(bits == 32 || bits == 64);
@@ -499,6 +500,7 @@ ptrdiff_t get_varint(const(ubyte)[] buffer, out ulong value, uint bits = 64) pur
     return 0;
 }
 
+pragma(inline, false)
 private ptrdiff_t get_length_delimited(const(ubyte)[] buffer, out const(ubyte)[] block) pure nothrow @nogc
 {
     ulong length;
@@ -510,6 +512,7 @@ private ptrdiff_t get_length_delimited(const(ubyte)[] buffer, out const(ubyte)[]
     return end;
 }
 
+pragma(inline, false)
 private ptrdiff_t skip_wire_value(const(ubyte)[] buffer, WireType wire) pure nothrow @nogc
 {
     switch (wire)
