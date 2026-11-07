@@ -1248,6 +1248,12 @@ role from a concrete deployment need before implementing or advertising it.
   current one: its messages fail and a held session reopens, nothing is corrupted. Bind it when
   sessions are authenticated.
 
+- **RDP handshakes are not bound to an attempt**: a repeated open is a retransmit when its nonce
+  and ISN match, so a restarted peer that redraws both (13 random bits) is answered as a duplicate
+  and stalls until retransmits fail, and a delayed open or open-ack from an earlier attempt cannot
+  be told from a fresh one. A wider nonce alone narrows the first and fixes neither; a protocol
+  revision should bind the response to the attempt it answers, likely with authenticated sessions.
+
 - **RDP packs only behind a full window**: on an egress that never refuses (a kernel socket, Ethernet)
   every message is cut into its own datagram as it is sent, so a chatty producer pays a header, a
   check byte and an ack per message (sync's session start to the Pi went out as 16-42 byte frames).
