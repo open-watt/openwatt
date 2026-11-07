@@ -11,11 +11,13 @@ import urt.meta : AliasSeq;
 import urt.meta.enuminfo : bitfield, VoidEnumInfo;
 import urt.string;
 import urt.time;
+import urt.variant : Variant;
 
 import manager;
 import manager.base;
 import manager.collection;
 import manager.console.session : Session;
+import manager.component : Component;
 import manager.device : Device, DeviceBuilder, DeviceTable;
 import manager.element : Access, Element;
 import manager.features : has_rdp, is_tiny;
@@ -515,6 +517,7 @@ protected:
         }
         get_module!SyncModule.attach_peer(this);
         _peer_flags |= PeerFlags.in_session;
+        _peer_flags &= ~PeerFlags.votes_closed;
         encoder_for(_encoder).encode_identity(this);
 
         // frames that arrived before the session existed join it now, in arrival order
@@ -542,6 +545,7 @@ protected:
 
     override CompletionStatus shutdown()
     {
+        retire_votes();
         _bundle.clear();
         _peer_flags &= ~PeerFlags.bundle_closed;
         // the module's drain reaps the cancelled commands once they finish
@@ -655,14 +659,38 @@ package:
             }
     }
 
+    // A device's status.online is the authority's liveness, carried as this session's vote through the binding of
+    // the element, never as a sample: only the binding peer votes, only from the live feed. True if it was one.
+    final bool cast_vote(Element* e, ref const Variant value, ulong t_ms, bool live)
+    {
+        Component status = e.parent;
+        if (e.id[] != "online" || !status || status.id[] != "status" || !status.parent || status.parent.parent)
+            return false;
+        PeerBinding binding;
+        foreach (b; _model_bindings)
+            if (b.device.cid == e.ensure_eid().container)
+                binding = b;
+        if (!binding || binding.access(e) == Access.none || !live || t_ms > max_model_time_ms || (_peer_flags & PeerFlags.votes_closed))
+            return true;
+        if (value.isBool)
+        {
+            if (binding.admit(t_ms))
+                binding.vote(value.asBool);
+        }
+        else if (value.isNull && t_ms && binding.admit(t_ms))
+            binding.withdraw();
+        return true;
+    }
+
+    // a withdrawal publishes, and its subscribers may tear this peer down again, so each binding leaves the list first
     final void detach_model_bindings()
     {
-        foreach (binding; _model_bindings)
+        while (!_model_bindings.empty)
         {
+            PeerBinding binding = _model_bindings.popBack();
             binding.detach();
             free(binding);
         }
-        _model_bindings.clear();
     }
 
     final void grant_claim_time_authority()
@@ -917,6 +945,17 @@ package:
     Array!(InboundCmd*) _commands;
 
 private:
+    // the session's liveness votes end with it, before the teardown drains its commands
+    final void retire_votes()
+    {
+        if (_peer_flags & PeerFlags.votes_closed)
+            return;
+        _peer_flags |= PeerFlags.votes_closed;
+        // a nested teardown from a withdrawal's subscribers empties the list, and the walk ends with it
+        for (size_t i = 0; i < _model_bindings.length; ++i)
+            _model_bindings[i].withdraw();
+    }
+
     PeerBinding model_binding(Device device)
     {
         foreach (binding; _model_bindings)
@@ -953,6 +992,7 @@ private:
         claims               = 1 << 4,
         in_session           = 1 << 5,
         bundle_closed        = 1 << 6,
+        votes_closed         = 1 << 7,
     }
 
     union
@@ -1221,8 +1261,33 @@ nothrow @nogc:
         return Access.none;
     }
 
+    // a session's votes in their own time order: a re-armed feed replaying older records changes nothing
+    bool admit(ulong t_ms)
+    {
+        if (t_ms < _vote_ms)
+            return false;
+        _vote_ms = t_ms;
+        return true;
+    }
+
+    void vote(bool online)
+    {
+        _voted = true;
+        _device.set_online(cast(void*)this, online);
+    }
+
+    // the vote leaves the binding before the device publishes, and the binding is not touched after
+    void withdraw()
+    {
+        if (!_voted)
+            return;
+        _voted = false;
+        _device.remove_online_source(cast(void*)this);
+    }
+
     void detach()
     {
+        withdraw();
         _device.detach_binding(_peer);
         _binding_index = ubyte.max;
     }
@@ -1230,7 +1295,9 @@ nothrow @nogc:
 private:
     SyncPeer _peer;
     Device _device;
+    ulong _vote_ms;
     ubyte _binding_index = ubyte.max;
+    bool _voted;
 }
 
 
@@ -2152,4 +2219,127 @@ unittest
         near.on_rdp_event(wire.a, wire.addr_b, RDPEvent.closed);
         assert(!near.running);
     }
+}
+
+unittest
+{
+    import manager.component : ComponentEvent;
+    import manager.device : OnlineStatus;
+    import manager.series : register_value_format;
+
+    // status.online is the binding peer's live vote, never a sample; values stay, and the vote ends with the session
+    DeviceTable devices;
+    enum ulong node_id = 0x7098_8998_8161_F993;
+    Device mirror = SyncModule.find_or_create_device(devices, "meter", node_id);
+    Element* power;
+    {
+        DeviceBuilder builder = mirror.edit();
+        power = builder.element(builder.component("meter"), "power", register_value_format!float());
+        builder.commit();
+    }
+    power.value(1.5f);
+    Element* online = mirror.find_element("status.online");
+
+    SyncPeer first = alloc!SyncPeer(CID(21));
+    SyncPeer second = alloc!SyncPeer(CID(22));
+    SyncPeer stranger = alloc!SyncPeer(CID(23));
+    scope (exit)
+    {
+        free(first);
+        free(second);
+        free(stranger);
+    }
+    Variant yes = Variant(true), no = Variant(false), none, junk = Variant(7);
+
+    assert(!first.cast_vote(power, yes, 1000, true), "only status.online votes");
+    assert(stranger.cast_vote(online, yes, 1000, true) && mirror.online_status != OnlineStatus.online, "a peer that never bound it has no vote");
+
+    first.attach_model_element(mirror, online, Access.read);
+    second.attach_model_element(mirror, online, Access.read);
+    assert(first.cast_vote(online, yes, 1000, true) && mirror.online_status == OnlineStatus.online);
+    assert(first.cast_vote(online, no, 2000, true) && mirror.online_status == OnlineStatus.offline);
+    assert(first.cast_vote(online, yes, 1000, false) && mirror.online_status == OnlineStatus.offline, "a read's old sample is not a vote");
+    first.cast_vote(online, junk, 3000, true);
+    first.cast_vote(online, none, 0, true);
+    first.cast_vote(online, yes, ulong.max, true);
+    first.cast_vote(online, none, ulong.max, true);
+    assert(mirror.online_status == OnlineStatus.offline, "an untimed null, a non-bool and an out-of-range stamp leave the vote alone");
+    first.cast_vote(online, yes, 1000, true);
+    assert(mirror.online_status == OnlineStatus.offline, "a re-armed feed replaying an older record does not reverse the vote");
+    first.cast_vote(online, yes, 2500, true);
+    assert(mirror.online_status == OnlineStatus.online);
+
+    // a pending command holds the teardown open, but the session's vote is gone at its start
+    InboundCmd* pending = alloc!InboundCmd(1, null, null);
+    first._commands ~= pending;
+    assert(first.shutdown() == CompletionStatus.continue_);
+    assert(mirror.online_status == OnlineStatus.offline, "the vote leaves when the session does");
+    assert(first.cast_vote(online, yes, 4000, true) && mirror.online_status == OnlineStatus.offline, "a closing session no longer votes");
+    first._commands.clear();
+    free(pending);
+
+    // any live session carrying the device keeps it online
+    stranger.attach_model_element(mirror, online, Access.read);
+    second.cast_vote(online, yes, 1000, true);
+    stranger.cast_vote(online, yes, 1000, true);
+    assert(second.cast_vote(online, none, 5000, true) && mirror.online_status == OnlineStatus.online, "another live session still carries it");
+    stranger.detach_model_bindings();
+    assert(mirror.online_status == OnlineStatus.offline && !online.value.asBool);
+    assert(power.value.asDouble == 1.5, "an offline mirror keeps its last known values");
+
+    // the node returns on a new session: the same device, whose first old-stamped snapshot counts again
+    second.detach_model_bindings();
+    assert(SyncModule.find_or_create_device(devices, "meter", node_id) is mirror);
+    second.attach_model_element(mirror, online, Access.read);
+    second.cast_vote(online, yes, 1000, true);
+    assert(mirror.online_status == OnlineStatus.online, "a new session's snapshot counts whatever its stamp");
+    assert(second.cast_vote(online, none, 6000, true) && mirror.online_status == OnlineStatus.offline, "a timed null withdraws the vote");
+    assert(second.cast_vote(online, yes, 5000, true) && mirror.online_status == OnlineStatus.offline, "and an older record does not undo it");
+    first.detach_model_bindings();
+    second.detach_model_bindings();
+
+    // an offline subscriber that tears the peer down mid-retirement leaves no vote behind on either device
+    Device other = SyncModule.find_or_create_device(devices, "inverter", node_id);
+    Element* other_online = other.find_element("status.online");
+    SyncPeer host = alloc!SyncPeer(CID(24));
+    scope (exit)
+        free(host);
+    host.attach_model_element(mirror, online, Access.read);
+    host.attach_model_element(other, other_online, Access.read);
+    host.cast_vote(online, yes, 1, true);
+    host.cast_vote(other_online, yes, 1, true);
+    static struct Teardown
+    {
+        SyncPeer peer;
+        uint offline;
+        void on_event(Component, ComponentEvent event) nothrow @nogc
+        {
+            if (event != ComponentEvent.offline)
+                return;
+            if (offline++ == 0)
+                peer.detach_model_bindings();
+        }
+    }
+    Teardown teardown = Teardown(host);
+    mirror.subscribe(&teardown.on_event);
+    other.subscribe(&teardown.on_event);
+    scope (exit)
+    {
+        mirror.unsubscribe(&teardown.on_event);
+        other.unsubscribe(&teardown.on_event);
+    }
+    host.retire_votes();
+    assert(teardown.offline == 2 && host._model_bindings.empty);
+    assert(mirror.online_status == OnlineStatus.offline && other.online_status == OnlineStatus.offline);
+
+    // and a withdrawal published by the detach itself may re-enter it
+    host._peer_flags &= ~SyncPeer.PeerFlags.votes_closed;
+    host.attach_model_element(mirror, online, Access.read);
+    host.attach_model_element(other, other_online, Access.read);
+    host.cast_vote(online, yes, 1, true);
+    host.cast_vote(other_online, yes, 1, true);
+    teardown.offline = 0;
+    host.detach_model_bindings();
+    assert(teardown.offline == 2 && host._model_bindings.empty);
+    assert(mirror.online_status == OnlineStatus.offline && other.online_status == OnlineStatus.offline);
 }
