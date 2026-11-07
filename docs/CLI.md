@@ -17,6 +17,10 @@ For example, the command `/system/log-level level=debug` sets the log level of t
 - `log-level` is a command within the `system` group.
 - `level=debug` is an argument to the `log-level` command.
 
+A quoted value takes the escapes `\"`, `\\`, `\$` (a literal `$`, not interpolation), `\n`, `\r`,
+`\t` and `\0`; anything else after a backslash stands for itself. Commands on one line can be
+separated with `;`.
+
 ### Command Hierarchy
 
 The CLI is organized into a few top-level categories, each managing a different aspect of the system:
