@@ -807,6 +807,29 @@ private:
         }
     }
 
+    PendingModbus* find_request(ref const ModbusFrameInfo frame_info, out ubyte tag)
+    {
+        if (frame_info.has_sequence_number)
+        {
+            if (frame_info.sequence_number > ubyte.max)
+                return null;
+            tag = cast(ubyte)frame_info.sequence_number;
+            if (!_queue.find_in_flight(tag))
+                return null;
+            return tag in _pending;
+        }
+        // RTU and ASCII carry no transaction id; at most one request is in flight
+        foreach (kvp; _pending[])
+        {
+            if (_queue.find_in_flight(kvp.key))
+            {
+                tag = kvp.key;
+                return &kvp.value();
+            }
+        }
+        return null;
+    }
+
     static bool validate_response_length(ref const PendingModbus pm, const(void)[] response_message)
     {
         const(ubyte)[] response_pdu = cast(const(ubyte)[])response_message;
@@ -991,19 +1014,8 @@ private:
         {
             if (!_support_simultaneous_requests)
             {
-                // find the single in-flight entry (RTU: max_in_flight=1)
-                ubyte matched_tag = 0;
-                PendingModbus* pm = null;
-                foreach (kvp; _pending[])
-                {
-                    if (_queue.find_in_flight(kvp.key))
-                    {
-                        matched_tag = kvp.key;
-                        pm = &kvp.value();
-                        break;
-                    }
-                }
-
+                ubyte matched_tag;
+                PendingModbus* pm = find_request(frame_info, matched_tag);
                 if (pm is null)
                 {
                     log.debug_("rx-drop: response but no in-flight request");
@@ -1015,7 +1027,6 @@ private:
                 {
                     log.debug_("rx-drop: address mismatch (got ", frame_info.address, " expected ", pm.local_server_address, ")");
                     add_rx_drop();
-                    _queue.complete(matched_tag, MessageState.failed);
                 }
                 else if (!validate_response_length(*pm, message))
                 {
@@ -1038,8 +1049,8 @@ private:
                 if (!frame_info.has_sequence_number)
                     assert(false);
 
-                ubyte tag = cast(ubyte)frame_info.sequence_number;
-                PendingModbus* pm = tag in _pending;
+                ubyte tag;
+                PendingModbus* pm = find_request(frame_info, tag);
 
                 if (pm !is null && pm.local_server_address == frame_info.address)
                 {
@@ -1420,5 +1431,100 @@ bool valid_function_code(FunctionCode function_code)
         if (function_code >= 25) // highest bit in valid_codes is 24; codes above are only MEI
             return function_code == FunctionCode.mei;
         return ((1u << function_code) & valid_codes) != 0;
+    }
+}
+
+unittest
+{
+    import urt.mem.pagepool : page_pool_init, page_pool_deinit;
+    import router.stream.memory : MemoryMode, MemoryStream;
+
+    bool owns_pool = page_pool_init();
+    scope(exit) if (owns_pool) page_pool_deinit();
+
+    static struct Probe
+    {
+        uint delivered;
+        MessageState[256] state;
+    nothrow @nogc:
+        void packet(const(Packet)*, BaseInterface, PacketDirection, void*)
+        {
+            ++delivered;
+        }
+        void status(int tag, MessageState s)
+        {
+            state[cast(ubyte)tag] = s;
+        }
+    }
+
+    foreach (simultaneous; [false, true])
+    {
+        MemoryStream wire = Collection!MemoryStream().alloc("modbus-correlation-wire");
+        Collection!MemoryStream().add(wire);
+        wire.tx_mode = MemoryMode.dynamic;
+        ModbusInterface iface = Collection!ModbusInterface().alloc("modbus-correlation");
+        Collection!ModbusInterface().add(iface);
+        iface.master = true;
+        if (simultaneous)
+            iface.protocol = ModbusProtocol.tcp;
+        else
+            iface._protocol = ModbusProtocol.tcp;
+        iface.stream = wire;
+        Collection!Stream().update_all();
+        Collection!BaseInterface().update_all();
+        assert(iface.running && iface._support_simultaneous_requests == simultaneous);
+
+        Probe probe;
+        PacketFilter filter = PacketFilter(type: PacketType.modbus);
+        iface.subscribe(&probe.packet, filter);
+
+        ubyte submit(ubyte unit)
+        {
+            immutable ubyte[5] read = [ FunctionCode.read_holding_registers, 0x9C, 0x40, 0x00, 0x02 ];
+            StackPacket request;
+            request.init!ModbusFrame(read[]);
+            int tag = iface._queue.enqueue(&request.packet, &iface.on_frame_complete);
+            assert(tag > 0);
+            iface._pending[cast(ubyte)tag] = ModbusInterface.PendingModbus(local_server_address: unit, callback: &probe.status);
+            return cast(ubyte)tag;
+        }
+
+        void reply(ushort id, ubyte unit)
+        {
+            ubyte[13] frame = [ 0, 0, 0, 0, 0, 7, unit, FunctionCode.read_holding_registers, 4, 0x53, 0x75, 0x6E, 0x53 ];
+            frame[0 .. 2] = id.nativeToBigEndian;
+            iface.incoming_bytes(wire, frame[], getTime());
+        }
+
+        ubyte live = submit(0);
+        iface.send_queued_messages();
+        assert(iface._queue.find_in_flight(live));
+
+        reply(0x0100 | live, 0);
+        assert(probe.delivered == 0 && live in iface._pending);
+
+        ubyte queued = submit(0);
+        reply(queued, 0);
+        assert(probe.delivered == 0 && probe.state[queued] != MessageState.complete && queued in iface._pending);
+
+        reply(live, 0);
+        assert(probe.delivered == 1 && probe.state[live] == MessageState.complete && live !in iface._pending);
+        assert(iface._queue.find_in_flight(queued));
+        reply(queued, 0);
+        assert(probe.delivered == 2 && probe.state[queued] == MessageState.complete);
+
+        // a reply naming a mapped unit needs the protocol module, which unittests run without; unit 0 skips that lookup
+        ubyte other = submit(5);
+        iface.send_queued_messages();
+        reply(other, 0);
+        assert(probe.delivered == 2 && probe.state[other] == MessageState.in_flight);
+        assert(iface._queue.find_in_flight(other) && other in iface._pending);
+        iface._queue.complete(other);
+        assert(probe.state[other] == MessageState.complete && iface._pending.empty);
+
+        iface.destroy();
+        wire.destroy();
+        Collection!BaseInterface().update_all();
+        Collection!Stream().update_all();
     }
 }
