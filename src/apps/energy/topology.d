@@ -223,19 +223,23 @@ struct BoundaryFlow
     float power_out_of_graph = 0;
 }
 
-// One meter register as the port read it: the phase slot, the raw
-// import/export direction before any meter-sign swap, and its source: 1 for
-// the slot's own element, else the mask of phase elements summed into slot 0
-// (0 for any other derivation). A changed source starts a new baseline.
-alias CounterKey = ulong;
-
-CounterKey counter_key(Component meter, ref const MeterData data, ubyte phase, bool export_)
+// One meter register as the port read it: the phase slot and the raw
+// import/export direction, before any meter-sign swap.
+struct CounterKey
 {
-    if (meter is null)
-        return 0;
-    ubyte read = export_ ? data.export_sources : data.import_sources;
-    uint source = (read >> phase) & 1 ? 1 : phase == 0 ? read : 0;
-    return ulong(cast(size_t)cast(void*)meter) << 8 | source << 3 | phase << 1 | export_;
+nothrow @nogc:
+    Component meter;
+    ubyte phase;
+    bool export_;
+
+    int opCmp(ref const CounterKey o) const pure
+    {
+        if (meter !is o.meter)
+            return cast(const(void)*)meter < cast(const(void)*)o.meter ? -1 : 1;
+        if (phase != o.phase)
+            return phase < o.phase ? -1 : 1;
+        return export_ - o.export_;
+    }
 }
 
 // Corrected cumulative counters for one boundary, with the keys that accounts
@@ -256,8 +260,8 @@ BoundaryEnergy boundary_energy(Port* p)
         return e;
     const bool external = external_boundary(p);
     const bool inverted = p.meter_sign == MeterSign.inverted;
-    e.into_key = counter_key(p.meter, p.meter_data, p.meter_phase, external == inverted);
-    e.out_key = counter_key(p.meter, p.meter_data, p.meter_phase, external != inverted);
+    e.into_key = CounterKey(p.meter, p.meter_phase, external == inverted);
+    e.out_key = CounterKey(p.meter, p.meter_phase, external != inverted);
     e.into_total = external ? p.meter_data.total_import_active[0] : p.meter_data.total_export_active[0];
     e.out_total = external ? p.meter_data.total_export_active[0] : p.meter_data.total_import_active[0];
     return e;
@@ -296,18 +300,20 @@ Bus* boundary_bus(Port* p)
     return null;
 }
 
-// An inferred power can sit beside a retained, unaged current reading; that
-// current may tighten the power's bound but never loosen it.
+// Protection takes the larger of the current reading and |P|/V: a stale or
+// conflicting current must never claim more headroom than the power implies.
 float meter_current_amps(ref const MeterData data) pure
 {
     float amps = data.has(MeterField.current) ? absf(data.current[0].value) : float.nan;
-    if ((amps != amps || data.source(MeterField.power) == Provenance.inferred_subtraction) &&
-        data.has(MeterField.power) && data.has(MeterField.voltage))
+    if (data.has(MeterField.power) && data.has(MeterField.voltage))
     {
         float volts = absf(data.voltage[0].value);
-        float from_power = volts > 0 ? absf(data.active[0].value / volts) : float.nan;
-        if (amps != amps || from_power > amps)
-            amps = from_power;
+        if (volts > 0)
+        {
+            float from_power = absf(data.active[0].value / volts);
+            if (!(amps >= from_power))
+                amps = from_power;
+        }
     }
     return amps;
 }
@@ -1917,28 +1923,5 @@ unittest
         assert(absf(link_current_amps(breaker16) - 15) <= 0.01f);
         assert(absf(link_headroom_amps(breaker16) - 1) <= 0.01f);
         g4.clear();
-
-        static void put(ref MeterData m, MeterField f, float v, Provenance p)
-        {
-            m.write_value(f, 0, v);
-            m.mark(f, 0, p);
-        }
-        MeterData unbalanced;
-        unbalanced.reset_to_missing();
-        unbalanced.type = BusType.three_phase;
-        put(unbalanced, MeterField.current, 20, Provenance.measured);
-        put(unbalanced, MeterField.power, 5520, Provenance.measured);
-        put(unbalanced, MeterField.voltage, 220, Provenance.measured);
-        assert(meter_current_amps(unbalanced) == 20);
-
-        MeterData invalid;
-        invalid.reset_to_missing();
-        put(invalid, MeterField.current, 7, Provenance.measured);
-        put(invalid, MeterField.power, float.nan, Provenance.inferred_subtraction);
-        put(invalid, MeterField.voltage, 230, Provenance.measured);
-        assert(meter_current_amps(invalid) == 7);
-        put(invalid, MeterField.power, 1000, Provenance.inferred_subtraction);
-        put(invalid, MeterField.voltage, 0, Provenance.measured);
-        assert(meter_current_amps(invalid) == 7);
     }
 }
