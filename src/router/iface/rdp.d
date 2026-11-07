@@ -548,6 +548,7 @@ nothrow @nogc:
     ubyte _isn;
     ubyte _nonce;
     ubyte _peer_nonce;
+    ubyte _peer_isn;
     ubyte _abort_lanes;
     ubyte _backoff;
     ubyte _open_tries;
@@ -1176,7 +1177,7 @@ nothrow @nogc:
     {
         if (_phase == Phase.established)
         {
-            if (nonce == _peer_nonce)
+            if (nonce == _peer_nonce && isn == _peer_isn)
             {
                 if (!is_ack)
                     send_control(type_open_ack, now);
@@ -1202,6 +1203,7 @@ nothrow @nogc:
     void establish(ubyte isn, ubyte nonce, ushort peer_max, MonoTime now)
     {
         _peer_nonce = nonce;
+        _peer_isn = isn;
         _rx_next = cast(ushort)(isn + 1);
         _rx_mask = 0;
         _rx_lane[] = 0;
@@ -1983,18 +1985,30 @@ unittest
         assert(sink.bad == 0 && a.established(wire.addr_b));
     }
 
-    // a peer that comes back with a new session nonce replaces the old session
-    uint closed = ev_a.closed;
-    wire.b.close();
-    wire.clear();
-    Sink sink_b2;
-    Events ev_b2;
-    wire.b = make_endpoint(wire, sink_b2, ev_b2, &wire.addr_a);
-    wire.pump();
-    assert(ev_a.closed == closed + 1 && a.established(wire.addr_b) && wire.b.established(wire.addr_a));
-    assert(a.send(make_message(0, 30, PCP.ca), wire.addr_b) > 0);
-    wire.tick();
-    assert(sink_b2.count == 1 && sink_b2.bad == 0);
+    // a peer that comes back replaces the old session, whether its nonce or only its initial sequence is new
+    Sink[2] sink_reborn;
+    Events[2] ev_reborn;
+    foreach (i; 0 .. 2)
+    {
+        uint closed = ev_a.closed;
+        const(RDPSession)* old_b = wire.b.find(wire.addr_a);
+        ubyte old_nonce = old_b._nonce;
+        ubyte old_isn = old_b._isn;
+        wire.b.close();
+        wire.clear();
+        wire.b = make_endpoint(wire, sink_reborn[i], ev_reborn[i], &wire.addr_a);
+        wire.clear();
+        RDPSession* reborn = wire.b.find(wire.addr_a);
+        reborn._nonce = cast(ubyte)(i ? old_nonce : old_nonce + 1);
+        reborn._isn = i ? (old_isn + 1) & 31 : old_isn;
+        reborn._tx_una = reborn._tx_next = cast(ushort)(reborn._isn + 1);
+        reborn.send_open(g_test_time);
+        wire.pump();
+        assert(ev_a.closed == closed + 1 && a.established(wire.addr_b) && wire.b.established(wire.addr_a));
+        assert(a.send(make_message(0, 30, PCP.ca), wire.addr_b) > 0);
+        wire.tick();
+        assert(sink_reborn[i].count == 1 && sink_reborn[i].bad == 0);
+    }
 
     // through real stations, endpoints and interface rounds: an egress queue that admits by class
     egress_scenarios(false);
