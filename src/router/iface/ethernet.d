@@ -20,6 +20,7 @@ import router.iface.checksum;
 
 nothrow @nogc:
 
+enum ubyte ethernet_header_room = 18;
 
 size_t encode_ethernet_header(const(Packet)* packet, ubyte[] buffer)
 {
@@ -29,6 +30,7 @@ size_t encode_ethernet_header(const(Packet)* packet, ubyte[] buffer)
     size_t required = 14 + (tag != VlanTag.none ? 4 : 0);
     if (packet.type != PacketType.ethernet || buffer.length < required)
         return 0;
+    debug assert((cast(size_t)buffer.ptr & 1) == 0, "an ethernet header is built in an align(2) buffer");
 
     Ethernet* eth = cast(Ethernet*)buffer.ptr;
     eth.dst = packet.eth.dst;
@@ -286,7 +288,7 @@ protected:
         if (!is_network_multicast_address(src))
             _local_addresses[src] = getTime();
 
-        Packet* wrapped = alloc_packet!Ethernet(min(size_t(actual_mtu), 5 + 255 + packet.data.length));
+        Packet* wrapped = alloc_packet!Ethernet(min(size_t(actual_mtu), 5 + 255 + packet.data.length), ethernet_header_room);
         if (!wrapped)
             return false;
         ptrdiff_t len = build_ow_payload(packet, *codec, cast(ubyte[])wrapped.payload);
@@ -384,7 +386,7 @@ protected:
     {
         if (packet.type == PacketType.ethernet)
         {
-            ubyte[18] header = void;
+            align(2) ubyte[18] header = void;
             size_t header_len = encode_ethernet_header(packet, header[]);
             if (header_len == 0)
                 return;
@@ -401,7 +403,7 @@ protected:
         bool outgoing = dir == PacketDirection.outgoing;
         MACAddress remote = station_of(outgoing ? get_network_dst_address(packet) : get_network_src_address(packet));
 
-        ubyte[18] hdr = void;
+        align(2) ubyte[18] hdr = void;
         StackPacket wrapped;
         ref eth = wrapped.init!Ethernet(null, packet.creation_time);
         eth.dst = outgoing ? remote : mac;
@@ -857,14 +859,14 @@ protected:
     final override void medium_tx(Packet* packet)
     {
         debug assert(packet.type == PacketType.ethernet, "medium_tx expects an ethernet packet");
-        ubyte[18] header = void;
+        align(2) ubyte[ethernet_header_room] header = void;
         size_t header_len = encode_ethernet_header(packet, header[]);
         if (header_len + packet.data.length > 1522)
         {
             drop_tx(packet);
             return;
         }
-        packet = packet_mutable(packet, header_len);
+        packet = packet_mutable(packet, header_len, header_len);
         if (!packet)
             return add_tx_drop();
         scope (exit) packet_free(packet);
@@ -928,7 +930,7 @@ unittest
     eth.ether_type = EtherType.ip4;
     tagged.vlan = 0xA003;
     tagged.vlan_tag = VlanTag._88a8;
-    ubyte[18] header = void;
+    align(2) ubyte[18] header = void;
     assert(encode_ethernet_header(&tagged.packet, header[]) == 18);
     assert(header[12 .. 18] == [0x88, 0xA8, 0xA0, 0x03, 0x08, 0x00]);
 

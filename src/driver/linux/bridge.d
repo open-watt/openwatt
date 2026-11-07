@@ -88,7 +88,7 @@ private:
             if (packet.type != PacketType.ethernet)
                 return -1;
 
-            ubyte[1522] buffer = void;
+            align(2) ubyte[1522] buffer = void;
             size_t header_len = encode_ethernet_header(packet, buffer[]);
             if (packet.data.length > buffer.length - header_len)
                 return -1;
