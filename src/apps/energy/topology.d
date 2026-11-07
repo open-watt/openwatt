@@ -8,12 +8,13 @@ import urt.mem;
 import urt.mem.temp : tconcat;
 import urt.si.unit : ScaledUnit, Ampere;
 import urt.string;
-import urt.time : SysTime;
+import urt.time : SysTime, getSysTime;
 import urt.variant : Variant;
 
 import apps.energy.appliance;
 import apps.energy.planner : BudgetField;
 import apps.energy.state : PublishSlot;
+import apps.energy.supply : IslandSupply, supply_sample, supply_voltage_window;
 import apps.energy.attribution;
 import apps.energy.battery_store;
 import apps.energy.link;
@@ -69,13 +70,15 @@ nothrow @nogc:
     PortGroup* group;
     PortRole role;
     FlowDomain flow;
+    bool voltage_reference;
     Component component;
     Component meter;
     ubyte meter_phase;
     MeterSign meter_sign;
-    MeterData meter_data;
     bool root;
     bool implicit;
+    MeterData meter_data;
+    float supply_volts = 0;     // fresh measured voltage as read, before inference; 0 when none
 }
 
 enum PortGroupKind : ubyte
@@ -430,6 +433,7 @@ nothrow @nogc:
     Array!(Bus*) members;
     IslandMode mode;
     PublishSlot[BudgetField.max + 1] budget;
+    IslandSupply supply;
 }
 
 alias Islands = Array!(Island*);
@@ -548,6 +552,7 @@ private bool component_contains_grid(Bus* root)
 
 private void destroy_island(Island* island)
 {
+    island.supply.retire();
     free(island);
 }
 
@@ -989,11 +994,13 @@ private:
 
     void refresh_meters()
     {
+        VoltageWindow window = supply_voltage_window(getSysTime());
         foreach (p; ports[])
         {
             p.meter_data.reset_to_missing();
             if (p.meter)
-                p.meter_data = get_port_meter_data(p.meter, p.meter_phase, p.meter_sign);
+                p.meter_data = get_port_meter_data(p.meter, p.meter_phase, p.meter_sign, &window);
+            p.supply_volts = supply_sample(p.meter_data);
         }
 
         foreach (a; Collection!Appliance().values)
@@ -1077,6 +1084,7 @@ private:
                     log.warning("link '", link.name[], "': role '", link.role, "' is not a downstream contents declaration; expected pv or battery");
             }
             Port* pa = add_port(null, ba, PortRole.parent, FlowDomain.bidirectional, meter, link.meter_phase, link.meter_sign, "parent", link.name[]);
+            pa.voltage_reference = link.voltage_reference;
             Port* pb = add_port(null, bb, child_role, FlowDomain.bidirectional, null, 0, MeterSign.normal, "child", link.name[]);
             Link* l = add_link(null, ba, bb, pa, pb, link.capacity.value, link.closed, link.name[], link.kind);
             PortGroup* g = add_group(link.name[], PortGroupKind.switchgear, null, l);
@@ -1090,6 +1098,7 @@ private:
             // (capacity, contact state, meter), so it publishes like one.
             Bus* b = ensure_bus(left.length ? left : "unassigned");
             Port* pa = add_port(null, b, PortRole.connection, flow_for(link.kind), meter, link.meter_phase, link.meter_sign, "connection", link.name[]);
+            pa.voltage_reference = link.voltage_reference;
             PortRole dangling_role = link.role.length ? port_role_from_name(link.role) : PortRole.child;
             Port* pb = add_port(null, null, dangling_role, flow_for_role(dangling_role), null, 0, MeterSign.normal, "child", link.name[]);
             Link* l = add_link(null, b, null, pa, pb, link.capacity.value, link.closed, link.name[], link.kind);
@@ -1122,6 +1131,7 @@ private:
         {
             Bus* b = spec.circuit.length ? ensure_bus(spec.circuit) : null;
             Port* p = add_port(a, b, spec.role, spec.flow, spec.meter, spec.phase, spec.sign, spec.path[], null, spec.component);
+            p.voltage_reference = a.voltage_reference;
             add_to_group(group, p);
             if (b is null)
                 continue;

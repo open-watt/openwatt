@@ -3,6 +3,18 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-11-07: island supply voltage on the `energy` device
+
+- New per-island elements `islands.<id>.voltage.*`: `value` (V, NaN while no fresh AC
+  meter reads), `state` (`normal`, `over`, `under`), `peak` (V, the current or most recent
+  excursion's extreme; NaN until the first one), `since` (time the current state began) and
+  `source` (path of the meter behind `value`, `-` when none).
+- `state` changes only after 10 s past a threshold (253 V / 216 V) and returns to `normal`
+  after 60 s inside the normal band, 2 V clear of both thresholds; missing or disputed data
+  never ends an excursion.
+- When an island is removed or merged its `voltage.*` elements become unset. A recreated
+  island with the same id writes them again.
+
 ## 2026-10-20: reads answer with seq-tagged `val`s (sync protocol version 3)
 
 - `history_req` and `history` are gone, and `hello` no longer lists a `history` capability. A

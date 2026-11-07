@@ -1,6 +1,7 @@
 module apps.energy.meter;
 
 import urt.si;
+import urt.time : SysTime;
 import urt.util : log2;
 
 import apps.energy.model : BusType, MeterSign, is_multi_phase;
@@ -128,11 +129,23 @@ alias MeterVolts = Quantity!(float, ScaledUnit(Volt));
 alias MeterAmps = Quantity!(float, ScaledUnit(Ampere));
 alias MeterWatts = Quantity!(float, ScaledUnit(Watt));
 
+struct VoltageWindow
+{
+nothrow @nogc:
+    SysTime from;
+    SysTime to;
+
+    pragma(inline, false)
+    bool contains(SysTime t) const pure
+        => t >= from && t <= to;
+}
+
 struct MeterData
 {
 nothrow @nogc:
 
     BusType type;
+    ubyte voltage_fresh;                // bit per slot: every measured voltage input fell inside the read's window
     FieldFlags fields;
 
     // Provenance is authoritative; fields is only a cheap summary.
@@ -194,6 +207,7 @@ nothrow @nogc:
         fields = FieldFlags.none;
         foreach (i; 0..num_fields)
             provenance[i][] = Provenance.missing;
+        voltage_fresh = 0;
         foreach (j; 0..4)
         {
             voltage[j] = MeterVolts.nan;
@@ -317,6 +331,7 @@ MeterData extract_phase(ref const MeterData raw, BusType type, ubyte meter_phase
 
     // Slot 0 of the result is the phase being extracted (or the same slot if meter_phase==0)
     r.voltage[0] = raw.voltage[meter_phase];
+    r.voltage_fresh = (raw.voltage_fresh >> meter_phase) & 1;
     r.cross_phase_voltage[0] = raw.cross_phase_voltage[meter_phase];
     r.current[0] = raw.current[meter_phase];
     r.active[0] = raw.active[meter_phase];
@@ -352,6 +367,7 @@ MeterData extract_phase(ref const MeterData raw, BusType type, ubyte meter_phase
     if (is_multi_phase(r.type))
     {
         r.voltage[1..4] = raw.voltage[1..4];
+        r.voltage_fresh |= raw.voltage_fresh & 0xE;
         r.cross_phase_voltage[1..4] = raw.cross_phase_voltage[1..4];
         r.current[1..4] = raw.current[1..4];
         r.active[1..4] = raw.active[1..4];
@@ -387,9 +403,9 @@ MeterData extract_phase(ref const MeterData raw, BusType type, ubyte meter_phase
     return r;
 }
 
-MeterData get_port_meter_data(Component meter, ubyte meter_phase, MeterSign sign, FieldFlags fields = FieldFlags.all)
+MeterData get_port_meter_data(Component meter, ubyte meter_phase, MeterSign sign, const(VoltageWindow)* window = null, FieldFlags fields = FieldFlags.all)
 {
-    MeterData raw = get_meter_data(meter, fields);
+    MeterData raw = get_meter_data(meter, fields, window);
     BusType type = meter_phase != 0 ? BusType.single_phase : raw.type;
     MeterData data = extract_phase(raw, type, meter_phase);
     apply_meter_sign(data, sign);
@@ -436,7 +452,7 @@ unittest
     assert(data.fields & FieldFlags.total_export_active);
 }
 
-static MeterData get_meter_data(Component meter, FieldFlags fields = FieldFlags.all)
+static MeterData get_meter_data(Component meter, FieldFlags fields = FieldFlags.all, const(VoltageWindow)* window = null)
 {
     import manager.element;
     import urt.string.format;
@@ -536,6 +552,8 @@ static MeterData get_meter_data(Component meter, FieldFlags fields = FieldFlags.
                     f[i][j] = v;
                     values_present |= 1 << j;
                     r.mark(cast(MeterField)i, cast(ubyte)j, Provenance.measured);
+                    if (i == MeterField.voltage && window && window.contains(e.last_update))
+                        r.voltage_fresh |= 1 << j;
                 }
             }
         }
@@ -574,6 +592,8 @@ static MeterData get_meter_data(Component meter, FieldFlags fields = FieldFlags.
                     f[i][0] = sum;
                 present[i] |= 1;
                 r.mark(cast(MeterField)i, 0, Provenance.synthesized);
+                if (i == MeterField.voltage && (r.voltage_fresh & values_present) == values_present)
+                    r.voltage_fresh |= 1;
             }
         }
 
@@ -581,6 +601,8 @@ static MeterData get_meter_data(Component meter, FieldFlags fields = FieldFlags.
         if ((values_present & 3) == 1 && r.type == BusType.single_phase)
         {
             f[i][1] = f[i][0];
+            if (i == MeterField.voltage)
+                r.voltage_fresh |= (r.voltage_fresh & 1) << 1;
             present[i] |= 2;
             r.mark(cast(MeterField)i, 1, Provenance.synthesized);
         }
@@ -980,15 +1002,8 @@ static MeterData get_meter_data(Component meter, FieldFlags fields = FieldFlags.
         }
     }
 
-    if (r.type != BusType.dc)
-    {
-        import urt.log;
-        const float v = r.voltage[0].value;
-        if (v > 260)
-            writeWarning("High voltage detected on meter ", meter.id, ": ", r.voltage[0]);
-        else if (v > 40 && v < 80)  // >40 floor: 0V means the meter is offline, not a brownout
-            writeWarning("Low voltage detected on meter ", meter.id, ": ", r.voltage[0]);
-    }
+    if (r.type == BusType.dc)
+        r.voltage_fresh = 0;
 
     return r;
 }

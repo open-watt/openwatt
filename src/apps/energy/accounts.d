@@ -61,6 +61,61 @@ void update_accounts(Device energy_device, ref Islands islands, ref TopologyGrap
 }
 
 
+struct AccountFloatCell
+{
+nothrow @nogc:
+    Element* element;
+    float last = 0;
+    bool seen;
+
+    void bind(Element* e)
+    {
+        element = e;
+        seen = false;
+    }
+
+    void publish(float value, SysTime ts)
+    {
+        if (!seen || !same_float(value, last))
+        {
+            element.value(value, ts);
+            last = value;
+            seen = true;
+        }
+    }
+}
+
+struct AccountStringCell
+{
+nothrow @nogc:
+    Element* element;
+    String last;
+    bool seen;
+
+    void bind(Element* e)
+    {
+        element = e;
+        last = null;
+        seen = false;
+    }
+
+    void publish(const(char)[] value, SysTime ts)
+    {
+        if (!seen || last != value)
+        {
+            String s = value.make_string();
+            element.value(s, ts);
+            last = s;
+            seen = true;
+        }
+    }
+}
+
+Element* account_element(T)(ref DeviceBuilder builder, const(char)[] island_id, const(char)[] path)
+{
+    return builder.element(tconcat("islands.", island_id, ".", path), register_value_format!T());
+}
+
 private:
 
 void check_day_rollover(ref DailySnapshot daily, SysTime now)
@@ -158,62 +213,6 @@ nothrow @nogc:
         bound = true;
     }
 }
-
-struct AccountFloatCell
-{
-nothrow @nogc:
-    Element* element;
-    float last;
-    bool seen;
-
-    void bind(Element* e)
-    {
-        element = e;
-        seen = false;
-    }
-
-    void publish(float value, SysTime ts)
-    {
-        if (!seen || !same_float(value, last))
-        {
-            element.value(value, ts);
-            last = value;
-            seen = true;
-        }
-    }
-}
-
-struct AccountStringCell
-{
-nothrow @nogc:
-    Element* element;
-    String last;
-    bool seen;
-
-    void bind(Element* e)
-    {
-        element = e;
-        last = null;
-        seen = false;
-    }
-
-    void publish(const(char)[] value, SysTime ts)
-    {
-        if (!seen || last != value)
-        {
-            String s = value.make_string();
-            element.value(s, ts);
-            last = s;
-            seen = true;
-        }
-    }
-}
-
-Element* account_element(T)(ref DeviceBuilder builder, const(char)[] island_id, const(char)[] path)
-{
-    return builder.element(tconcat("islands.", island_id, ".", path), register_value_format!T());
-}
-
 
 void update_island_accounts(ref IslandAccountPublisher publisher, Island* island, ref TopologyGraph graph, ref DailySnapshot daily, SysTime ts)
 {
